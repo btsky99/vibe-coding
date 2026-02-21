@@ -1,0 +1,86 @@
+# AI 작업 통합 모니터 (ai-monitor) — 웹 대시보드 전면 리뉴얼 기획서
+
+> 버전: v3.0 (모던 웹 UI 개편안) / 작성: 2026-02-21
+> 목적: 기존 TUI(텍스트 터미널)의 한계를 벗어나, 다중 AI 에이전트(Claude, Gemini 등) 작업 및 상태를 모던 웹 기술 기반의 시각적으로 수려한 대시보드 환경에서 통합 모니터링한다.
+
+---
+
+## 1. 전면 UI 개편 배경 및 목표
+- **기존 한계**: 콘솔 기반 텍스트(Textual) UI의 투박함, 디테일한 디자인 트렌드(글래스모피즘, 부드러운 애니메이션 등) 적용 불가.
+- **개편 목표**: Next.js 풀스택 기반으로 시각적 쾌감을 극대화한 **"트렌디 다크모드 대시보드"** 창출.
+- **핵심 가치**: 
+  - 시선을 사로잡는 아름다운 UI/UX 디자인 (Neon 엑센트, 반투명 효과).
+  - 마우스 클릭과 드래그앤드랍이 매우 부드러운 직관적 상호작용.
+  - 파이썬 백엔드(Logger 프로세스)와의 안정적이고 즉각적인 데이터(WebSocket/SSE) 실시간 연동.
+
+---
+
+## 2. 신규 프로젝트(웹 뷰어) 네이밍 제안
+
+새롭고 엣지있는 UI에 걸맞은 모니터링 대시보드 이름 후보군:
+1. **Nexus View (넥서스 뷰)**: 여러 AI들의 작업 지점(Terminal)들이 하나로 뭉쳐 연결되는 모니터 중심점이라는 의미.
+2. **Omni Dash (옴니 대시)**: 모든 것(Omni)을 한눈에 통찰하는 전지적 시점의 대시보드.
+3. **Aegis Monitor (이지스 모니터)**: 시스템을 안전하게 감시하고 보호하는 방패 같은 뷰어.
+4. **Prism UI (프리즘 UI)**: 파편화된 로그 빛구슬들을 하나의 아름다운 스펙트럼 화면으로 투영해 보여주는 앱.
+
+---
+
+## 3. 새로운 시스템 아키텍처 개요
+
+```mermaid
+graph TD
+    subgraph AI Agents [여러 터미널의 AI 에이전트 작업]
+        C1[Claude Code]
+        G1[Gemini CLI]
+        S1[Other Scripts]
+    end
+
+    subgraph Python Backend [기존 로거 시스템 유지]
+        PY[logger.py] --> |파일 I/O & IPC| JSONL[(sessions.jsonl)]
+    end
+
+    subgraph Next.js Frontend [신규! 모던 웹 대시보드]
+        API[Next.js API Routes / SSE]
+        UI[React + Tailwind CSS + Framer Motion]
+    end
+
+    C1 -->|logger.bat 호출| PY
+    G1 -->|logger.bat 호출| PY
+    S1 -->|logger.bat 호출| PY
+
+    JSONL -->|실시간 파일 감지 (Tail/Watch)| API
+    API -->|서버 전송 이벤트(SSE)| UI
+```
+
+---
+
+## 4. UI/UX 디자인 코어 컨셉
+
+- **테마 (Theme)**: `Deep Space Dark` (완전 블랙이 아닌 심도 있는 네이비 다크 톤 배경)
+- **엑센트 컬러 (Accent)**: 사이버펑크 틱한 **네온 블루 & 퍼플** 그라데이션 라인.
+- **레이아웃 구조**:
+  - **헤더**: 글로벌 프로젝트 선택기 (`Select` 드롭다운) 및 현재 시스템 자원(시간, 총 활성 에이전트 수) 상태 컴포넌트.
+  - **사이드바**: 축소/확장 가능한 폴더 디렉토리 브라우저 (부드러운 슬라이딩 패널로 구현, 마우스 스내핑 허용).
+  - **메인 캔버스**: 
+    - 2x2 반응형 격자 뷰 기본, 필요시 1x4, 3x3 동적 전환.
+    - 블러(Blur) 처리된 글래스모피즘(Glassmorphism) 터미널 카드형 슬롯 뷰.
+- **인터랙션 (Micro-animations)**:
+  - 로그가 추가될 때 서서히 나타나며 위로 밀려 올라가는 스크롤 애니메이션 (`Framer Motion` 활용).
+  - 상태 아이콘(🔄 ✅ ❌) 회전 및 펄스 글로우(Glow) 이펙트 적용.
+
+---
+
+## 5. 단계별 마이그레이션(구축) 플랜
+
+| 단계 | 주요 작업 (Task) | 설명 |
+|------|-----------------|------|
+| **Phase 1: 기획 및 Next.js 초기화** | - `npx create-next-app` 세팅 | `D:\clim\.ai_monitor\web-dashboard` 에 최신 스택 구성 (Tailwind, TypeScript 등) |
+| **Phase 2: API & 데이터 브릿지** | - 파이썬 로컬 로그(`sessions.jsonl`) 읽기 API 구축 | Next.js API Route 내 파일 Watcher 적용, 클라이언트로 SSE(Server-Sent Events) 스트리밍 파이프 연결. |
+| **Phase 3: 디자인 시스템 & 컴포넌트** | - UI 뼈대 및 디자인 토큰 확립 | 다크/글래스모피즘 컴포넌트(Header, Sidebar, Terminal Card) UI 제작. 마우스 드래그 크기 조절 기능 포함. |
+| **Phase 4: 상태 관리 및 뷰 바인딩** | - `Zustand` 또는 Context API 상태 도입 | SSE로 넘어오는 실시간 로그 배열을 터미널 ID(`Terminal Slot`) 별로 파싱하여 뿌려주기 로직 결합. |
+| **Phase 5: 데스크탑 앱 래핑 (선택)** | - `Electron` 혹은 웹 브라우저 숏컷화 | 현재처럼 크롬 브라우저를 백엔드 없이 앱 화면처럼 띄우거나 `Tauri`로 패키징. |
+
+---
+
+## 6. 결론
+파이썬 콘솔 뷰어(`view.py`)의 개발은 여기서 종료(Archive)하고, 앞으로의 모든 역량은 **Next.js 기반 모던 대시보드** 구축에 집중하여 압도적으로 수려하고 아름다운 개발 모니터링 인터페이스를 제공한다.

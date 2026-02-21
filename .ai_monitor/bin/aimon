@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+# ~/.ai_monitor/bin/aimon
+# AI 터미널 뷰어를 실행하는 래퍼 CLI
+
+AI_MONITOR_DIR="$HOME/.ai_monitor"
+PYTHON_BIN="$AI_MONITOR_DIR/venv/Scripts/python" # Windows 기준 (Linux: bin/python)
+
+if [ ! -f "$PYTHON_BIN" ]; then
+    echo "Error: Virtual environment not found at $PYTHON_BIN"
+    exit 1
+fi
+
+# Textual 뷰어 앱 실행
+& "$PYTHON_BIN" "$AI_MONITOR_DIR/src/view.py"

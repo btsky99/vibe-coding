@@ -1,0 +1,10 @@
+{
+  "max_log_mb": 10,
+  "retention_days": 30,
+  "auto_refresh_sec": 3,
+  "display_count": 50,
+  "projects": {
+    "vibe-coding": "D:/vibe-coding",
+    "shop": "D:/shop"
+  }
+}

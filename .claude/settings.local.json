@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(gemini:*)",
+      "Bash(cd D:/clim/.ai_monitor/nexus-view && npm run build 2>&1)",
+      "Bash(tasklist:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(rm -rf D:/clim/.ai_monitor/nexus-view/dist && cd D:/clim/.ai_monitor/nexus-view && npm run build 2>&1)",
+      "Bash(sleep 3:*)",
+      "Bash(gh auth:*)",
+      "Bash(cd:*)"
+    ]
+  }
+}

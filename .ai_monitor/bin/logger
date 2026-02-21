@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+# ~/.ai_monitor/bin/logger
+# AI 스킬이나 CLI 환경에서 logger.py를 안전하게(Base64 페이로드 변환) 호출하는 래퍼 스크립트입니다.
+
+AI_MONITOR_DIR="$HOME/.ai_monitor"
+PYTHON_BIN="$AI_MONITOR_DIR/venv/Scripts/python" # Windows 기준 (Linux: bin/python)
+
+if [ ! -f "$PYTHON_BIN" ]; then
+    echo "Error: Virtual environment not found at $PYTHON_BIN"
+    exit 1
+fi
+
+COMMAND=$1
+shift
+
+if [ -z "$COMMAND" ]; then
+    echo "Usage: logger <command> [args...]"
+    exit 1
+fi
+
+PAYLOAD=""
+
+# JSON 페이로드 생성 후 Base64 인코딩하여 안전하게 전달
+if [ "$COMMAND" = "start" ]; then
+    # args: project project_path agent skill trigger
+    JSON_STR="{\"command\":\"start\",\"terminal_id\":\"$TMUX_PANE\",\"project\":\"$1\",\"project_path\":\"$2\",\"agent\":\"$3\",\"skill\":\"$4\",\"trigger\":\"$5\"}"
+    PAYLOAD=$(echo -n "$JSON_STR" | base64 -w 0 2>/dev/null || echo -n "$JSON_STR" | base64)
+
+elif [ "$COMMAND" = "phase" ]; then
+    # args: session_id phase_name status detail
+    JSON_STR="{\"command\":\"phase\",\"session_id\":\"$1\",\"phase_name\":\"$2\",\"status\":\"$3\",\"detail\":\"$4\"}"
+     PAYLOAD=$(echo -n "$JSON_STR" | base64 -w 0 2>/dev/null || echo -n "$JSON_STR" | base64)
+
+elif [ "$COMMAND" = "end" ]; then
+    # args: session_id status commit file1,file2...
+    FILES="[]"
+    if [ -n "$4" ]; then
+        # 간단히 쉼표로 분리하여 JSON 배열 형태로 (임시 처리)
+        FILES=$(echo "\"$4\"" | sed 's/,/","/g')
+        FILES="[$FILES]"
+    fi
+    JSON_STR="{\"command\":\"end\",\"session_id\":\"$1\",\"status\":\"$2\",\"commit\":\"$3\",\"files_changed\":$FILES}"
+    PAYLOAD=$(echo -n "$JSON_STR" | base64 -w 0 2>/dev/null || echo -n "$JSON_STR" | base64)
+
+else
+    echo "Unknown logger command: $COMMAND"
+    exit 1
+fi
+
+# 보안된 payload 방식으로 Python 로거 호출
+& "$PYTHON_BIN" "$AI_MONITOR_DIR/src/logger.py" payload "$PAYLOAD"
