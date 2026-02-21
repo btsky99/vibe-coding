@@ -1,0 +1,78 @@
+; Inno Setup Script for Vibe Coding
+; CI에서 자동 빌드됨
+
+#define MyAppName "Vibe Coding"
+#define MyAppExeName "vibe-coding.exe"
+#define MyAppPublisher "btksy"
+#define MyAppURL "https://github.com/btksy/vibe-coding"
+#ifndef MyAppVersion
+  #define MyAppVersion "dev"
+#endif
+
+[Setup]
+AppId={{B7E3A1D0-5F4C-4E8A-9D2B-1A3C5F7E9D0B}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+OutputBaseFilename=vibe-coding-setup
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=lowest
+OutputDir=dist
+
+[Languages]
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "startup"; Description: "Windows 시작 시 자동 실행"; GroupDescription: "추가 옵션:"
+
+[Files]
+Source: "dist\vibe-coding.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\vibe-coding_console.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+[Dirs]
+Name: "{app}\data"
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startup
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+var
+  TokenPage: TInputQueryWizardPage;
+
+procedure InitializeWizard;
+begin
+  TokenPage := CreateInputQueryPage(wpSelectTasks,
+    'GitHub Token 설정',
+    '자동 업데이트를 위해 GitHub Personal Access Token이 필요합니다.',
+    '비공개 저장소 접근용 토큰을 입력하세요. (나중에 data\github_token.txt에서 수정 가능)');
+  TokenPage.Add('GitHub Token (선택사항):', False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Token: String;
+  TokenFile: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    Token := Trim(TokenPage.Values[0]);
+    if Token <> '' then
+    begin
+      TokenFile := ExpandConstant('{app}\data\github_token.txt');
+      SaveStringToFile(TokenFile, Token, False);
+    end;
+  end;
+end;

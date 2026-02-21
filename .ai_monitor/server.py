@@ -9,13 +9,21 @@ from pathlib import Path
 
 import sys
 
+from _version import __version__
+
 if sys.stdout is None:
     sys.stdout = open(os.devnull, 'w')
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+if getattr(sys, 'frozen', False):
+    # PyInstaller 패키징 상태 (내장된 데이터 폴더 sys._MEIPASS를 BASE_DIR로 설정)
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    # 일반 스크립트 실행 상태
+    BASE_DIR = Path(__file__).resolve().parent
+
+DATA_DIR = Path(sys.executable).resolve().parent / "data" if getattr(sys, 'frozen', False) else BASE_DIR / "data"
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 STATIC_DIR = BASE_DIR / "nexus-view" / "dist"
 
@@ -282,6 +290,18 @@ def start_ws_server():
         print(f"WebSockets Server Error: {e}")
 
 if __name__ == '__main__':
+    print(f"Vibe Coding {__version__}")
+
+    # --- Auto-update check (non-blocking) ---
+    if getattr(sys, 'frozen', False):
+        from updater import check_and_update
+        update_thread = threading.Thread(
+            target=check_and_update,
+            args=(DATA_DIR,),
+            daemon=True,
+        )
+        update_thread.start()
+
     threading.Thread(target=start_ws_server, daemon=True).start()
     port = 8000
     try:

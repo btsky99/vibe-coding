@@ -34,6 +34,23 @@ jobs:
           npm ci
           npm run build
 
+      - name: Generate version tag
+        id: version
+        run: |
+          $date = Get-Date -Format "yyyy.MM.dd"
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          $tag = "v$date-$shortSha"
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "Version: $tag"
+        shell: pwsh
+
+      - name: Embed version in source
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          Set-Content -Path ".ai_monitor/_version.py" -Value "__version__ = `"$tag`""
+          Write-Output "Embedded version: $tag"
+        shell: pwsh
+
       - name: Build exe
         run: |
           cd .ai_monitor
@@ -54,15 +71,14 @@ jobs:
             bin/aimon_wrapper.py
         shell: cmd
 
-      - name: Generate version tag
-        id: version
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+        shell: cmd
+
+      - name: Build installer
         run: |
-          $date = Get-Date -Format "yyyy.MM.dd"
-          $shortSha = "${{ github.sha }}".Substring(0, 7)
-          $tag = "v$date-$shortSha"
-          echo "tag=$tag" >> $env:GITHUB_OUTPUT
-          echo "Version: $tag"
-        shell: pwsh
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" ".ai_monitor/installer.iss" /DMyAppVersion="${{ steps.version.outputs.tag }}"
+        shell: cmd
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -76,3 +92,4 @@ jobs:
           files: |
             .ai_monitor/dist/vibe-coding.exe
             .ai_monitor/dist/vibe-coding_console.exe
+            .ai_monitor/dist/vibe-coding-setup.exe
