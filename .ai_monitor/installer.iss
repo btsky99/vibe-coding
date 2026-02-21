@@ -24,8 +24,7 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 OutputDir=dist
 CloseApplications=force
-CloseApplicationsFilter=*.exe
-AppMutex=VibeCodingMutex
+CloseApplicationsFilter=vibe-coding.exe,vibe-coding_console.exe
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
