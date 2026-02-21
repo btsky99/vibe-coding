@@ -69,7 +69,9 @@ jobs:
           pyinstaller --onefile --console ^
             --name vibe-coding_console ^
             --icon bin/app_icon.ico ^
-            bin/aimon_wrapper.py
+            --hidden-import textual ^
+            --hidden-import rich ^
+            src/view.py
         shell: cmd
 
       - name: Install Inno Setup
