@@ -23,6 +23,9 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 OutputDir=dist
+CloseApplications=force
+CloseApplicationsFilter=*.exe
+AppMutex=VibeCodingMutex
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
