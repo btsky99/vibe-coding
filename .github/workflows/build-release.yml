@@ -34,22 +34,22 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build exe (aimon)
+      - name: Build exe
         run: |
           cd .ai_monitor
           pyinstaller --onefile --noconsole ^
-            --name aimon ^
+            --name vibe-coding ^
             --icon bin/app_icon.ico ^
             --hidden-import websockets ^
             --hidden-import winpty ^
             server.py
         shell: cmd
 
-      - name: Build exe (aimon_console)
+      - name: Build exe (console)
         run: |
           cd .ai_monitor
           pyinstaller --onefile --console ^
-            --name aimon_console ^
+            --name vibe-coding_console ^
             --icon bin/app_icon.ico ^
             bin/aimon_wrapper.py
         shell: cmd
@@ -68,11 +68,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "AI Monitor ${{ steps.version.outputs.tag }}"
+          name: "Vibe Coding ${{ steps.version.outputs.tag }}"
           body: |
             자동 빌드 릴리스
             - Commit: ${{ github.sha }}
             - 빌드 시간: ${{ github.event.head_commit.timestamp }}
           files: |
-            .ai_monitor/dist/aimon.exe
-            .ai_monitor/dist/aimon_console.exe
+            .ai_monitor/dist/vibe-coding.exe
+            .ai_monitor/dist/vibe-coding_console.exe
