@@ -57,6 +57,7 @@ jobs:
           pyinstaller --onefile --noconsole ^
             --name vibe-coding ^
             --icon bin/app_icon.ico ^
+            --add-data "nexus-view\dist;nexus-view/dist" ^
             --hidden-import websockets ^
             --hidden-import winpty ^
             server.py
