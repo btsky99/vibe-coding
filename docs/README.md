@@ -12,6 +12,7 @@
 | **프론트엔드 (React)** | `.ai_monitor/nexus-view/src/App.tsx` | 대시보드의 메인 UI 컴포넌트. 파일 탐색기, 터미널 분할 뷰, 다중 윈도우 퀵 뷰 등을 총괄 렌더링. | [👉 App.tsx 상세 문서 읽기](./App.tsx.md) |
 | **백엔드 (Python)** | `.ai_monitor/server.py` | 로컬 웹 서버 및 웹소켓(PTY) 서버. 프론트엔드로 파일 내용, 터미널 스트리밍 데이터를 공급하고 관리. | [👉 server.py 상세 문서 읽기](./server.py.md) |
 | **백엔드 (Python)** | `.ai_monitor/src/logger.py` | 하이브 마인드 에이전트들의 작업 로그를 중앙 파일(`sessions.jsonl`)에 안전하게 저장하고 상태를 동기화하는 모듈. | 문서 작성 대기 중... |
+| **백엔드 (Python)** | `scripts/megaphone.py` | (Phase 6) 다중 터미널 간 통신용 CLI 툴. 특정 터미널 창에 다이렉트로 메시지를 쏴주는 메가폰 역할. | [👉 megaphone.py 상세 문서 읽기](./megaphone.py.md) |
 
 > **💡 개발자(Agent) 규칙:**
 > 앞으로 프로젝트의 코드를 수정하거나 새로운 파일을 만들 때마다 이 **문서 인덱스**에 해당 파일의 정보를 반드시 갱신하고, `docs/` 폴더 내에 1:1 매칭되는 상세 설명 마크다운 파일(`.md`)을 함께 생성(또는 수정)해야 합니다.

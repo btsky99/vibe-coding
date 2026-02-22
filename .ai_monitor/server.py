@@ -381,6 +381,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/send-command':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                
+                target_slot = str(data.get('target'))
+                command = data.get('command', '')
+                
+                if target_slot in pty_sessions:
+                    pty = pty_sessions[target_slot]
+                    pty.write(command + '\r\n')
+                    self.wfile.write(json.dumps({"status": "success", "message": f"Command sent to Terminal {target_slot}"}).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({"status": "error", "message": f"Terminal {target_slot} is not running."}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
@@ -419,7 +440,14 @@ async def pty_handler(websocket):
         elif agent == 'gemini':
             pty.write('gemini\r\n')
 
-        session_id = str(id(websocket))
+        import re
+        match = re.search(r'/pty/slot(\d+)', path)
+        if match:
+            # UI의 Terminal 1, Terminal 2 와 맞추기 위해 slot + 1 을 ID로 사용
+            session_id = str(int(match.group(1)) + 1)
+        else:
+            session_id = str(id(websocket))
+            
         pty_sessions[session_id] = pty
 
     except Exception as e:
