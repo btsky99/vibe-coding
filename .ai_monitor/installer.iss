@@ -33,10 +33,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "startup"; Description: "Windows 시작 시 자동 실행"; GroupDescription: "추가 옵션:"
+Name: "hivemind"; Description: "AI 멀티 에이전트 하이브 마인드 시스템 설치 (Gemini & Claude 협업)"; GroupDescription: "추가 옵션:"
 
 [Files]
 Source: "dist\vibe-coding.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\vibe-coding_console.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Hive Mind AI Collaboration System
+Source: "..\.gemini\*"; DestDir: "{app}\.gemini"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: hivemind
+Source: "..\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: hivemind
+Source: "..\GEMINI.md"; DestDir: "{app}"; Flags: ignoreversion; Tasks: hivemind
 
 [Dirs]
 Name: "{app}\data"
