@@ -450,8 +450,8 @@ if __name__ == '__main__':
     try:
         server = ThreadedHTTPServer(('0.0.0.0', port), SSEHandler)
         print(f"Nexus View SSE Log Server started on port {port}")
-        # 로컬 웹 대시보드 브라우저 앱 실행 (블로킹 방지)
-        threading.Thread(target=lambda: webbrowser.open(f"http://localhost:{port}"), daemon=True).start()
+        # 로컬 웹 대시보드 앱 모드로 실행 (주소창 없이 GUI처럼)
+        threading.Thread(target=lambda: open_app_window(f"http://localhost:{port}"), daemon=True).start()
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -459,5 +459,5 @@ if __name__ == '__main__':
         server.server_close()
     except OSError:
         # 이미 8000번 포트가 사용 중인 경우
-        print("Server is already running. Opening browser...")
-        threading.Thread(target=lambda: webbrowser.open(f"http://localhost:{port}"), daemon=True).start()
+        print("Server is already running. Opening app window...")
+        threading.Thread(target=lambda: open_app_window(f"http://localhost:{port}"), daemon=True).start()
