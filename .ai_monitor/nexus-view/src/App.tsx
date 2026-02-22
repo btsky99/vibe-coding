@@ -504,6 +504,12 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   });
   const [showShortcutEditor, setShowShortcutEditor] = useState(false);
 
+  // Active File Viewer State
+  const [showActiveFile, setShowActiveFile] = useState(false);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [activeFileContent, setActiveFileContent] = useState<string>('');
+  const [isActiveFileLoading, setIsActiveFileLoading] = useState(false);
+
   const saveShortcuts = (newShortcuts: Shortcut[]) => {
     setShortcuts(newShortcuts);
     localStorage.setItem('hive_shortcuts', JSON.stringify(newShortcuts));
@@ -529,14 +535,53 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
       const ws = new WebSocket(`ws://${window.location.hostname}:8001/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
       ws.onopen = () => term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
-      ws.onmessage = async (e) => term.write(e.data instanceof Blob ? await e.data.text() : e.data);
+      ws.onmessage = async (e) => {
+        const data = e.data instanceof Blob ? await e.data.text() : e.data;
+        term.write(data);
+
+        // 정규식으로 터미널 출력에서 파일 경로 추출 (ANSI 코드 제거 후)
+        const ansiRegex = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+        const cleanData = data.replace(ansiRegex, '');
+        const pathRegex = /(?:[a-zA-Z]:[\\/][\w\.\-\/\\]+|[\w\.\-\/]+\/[\w\.\-\/]+)\.(?:js|jsx|ts|tsx|py|css|html|htm|md|json|sh|bat)/g;
+        const matches = cleanData.match(pathRegex);
+        if (matches && matches.length > 0) {
+          const matchedPath = matches[matches.length - 1];
+          setActiveFilePath(matchedPath);
+        }
+      };
       term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
       window.addEventListener('resize', () => fitAddon.fit());
     }, 50);
   };
 
+  // 주기적으로 활성 파일 내용 갱신 (뷰어가 열려있을 때만)
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (showActiveFile && activeFilePath) {
+      const fetchFile = () => {
+        setIsActiveFileLoading(true);
+        // 상대 경로일 경우 CWD 기준으로 요청
+        const targetPath = activeFilePath.includes(':') || activeFilePath.startsWith('/') 
+          ? activeFilePath 
+          : `${currentPath}/${activeFilePath}`;
+          
+        fetch(`http://${window.location.hostname}:${window.location.port}/api/read-file?path=${encodeURIComponent(targetPath)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (!data.error) setActiveFileContent(data.content);
+          })
+          .catch(() => {})
+          .finally(() => setIsActiveFileLoading(false));
+      };
+      fetchFile();
+      interval = setInterval(fetchFile, 3000); // 3초마다 갱신
+    }
+    return () => clearInterval(interval);
+  }, [showActiveFile, activeFilePath, currentPath]);
+
   const closeTerminal = () => {
     setIsTerminalMode(false);
+    setShowActiveFile(false);
     if (wsRef.current) wsRef.current.close();
     if (termRef.current) termRef.current.dispose();
   };
@@ -571,11 +616,41 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
             <button onClick={() => launchAgent('gemini')} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-primary/40 rounded text-[9px] border border-white/5 transition-all font-bold">GEMINI</button>
           </div>
         ) : (
-          <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+          <div className="flex gap-2 items-center">
+            <button 
+              onClick={() => setShowActiveFile(!showActiveFile)} 
+              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+              title="현재 에이전트가 수정중인 파일 보기"
+            >
+              👀 파일 뷰어
+            </button>
+            <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+          </div>
         )}
       </div>
       {isTerminalMode ? (
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
+          {showActiveFile && (
+            <div 
+              className="h-1/3 min-h-[100px] border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 relative"
+              style={{ resize: 'vertical', overflow: 'hidden' }}
+            >
+              <div className="h-6 bg-[#2d2d2d] px-2 flex items-center justify-between text-[10px] text-[#cccccc] shrink-0 border-b border-white/5 cursor-row-resize pointer-events-none">
+                <span className="truncate flex items-center gap-1 opacity-80 pointer-events-auto">
+                  {getFileIcon(activeFilePath || '')} 
+                  {activeFilePath ? activeFilePath : "감지된 파일 없음..."}
+                </span>
+                {isActiveFileLoading && <span className="text-[#3794ef] animate-pulse pointer-events-auto">●</span>}
+              </div>
+              <div className="flex-1 overflow-auto p-2 custom-scrollbar">
+                <div className="min-w-max">
+                  <pre className="font-mono text-[11px] text-[#cccccc] whitespace-pre leading-relaxed">
+                    {activeFileContent || "에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중..."}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex-1 relative min-h-0"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
           
           {/* 터미널 한글 입력 및 단축어 바 */}
