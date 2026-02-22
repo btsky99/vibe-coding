@@ -236,6 +236,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if gemini_md_src.exists():
                         shutil.copy(gemini_md_src, Path(target_path) / "GEMINI.md")
                         
+                    # CLAUDE.md 복사
+                    claude_md_src = source_base / "CLAUDE.md"
+                    if claude_md_src.exists():
+                        shutil.copy(claude_md_src, Path(target_path) / "CLAUDE.md")
+                        
                     result = {"status": "success", "message": f"Skills installed to {target_path}"}
                 except Exception as e:
                     result = {"status": "error", "message": str(e)}
