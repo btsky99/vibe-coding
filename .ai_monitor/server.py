@@ -50,19 +50,30 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
-sys.path.append(str(BASE_DIR / 'src'))
-from db import init_db
-from db_helper import insert_log, get_recent_logs, send_message, get_messages
-
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w')
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w')
-
-# 데이터 디렉토리 생성 보장 및 DB 초기화
+# 데이터 디렉토리 설정 (BASE_DIR 설정 이후로 이동)
 DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
 if not DATA_DIR.exists():
     os.makedirs(DATA_DIR, exist_ok=True)
+
+# 배포 버전에서 크래시 발생 시 에러 로그 기록 (os.devnull 대신 파일 사용)
+if getattr(sys, 'frozen', False) and sys.stdout is None:
+    error_log = open(DATA_DIR / "server_error.log", "a", encoding="utf-8")
+    sys.stdout = error_log
+    sys.stderr = error_log
+    print(f"\n--- Server Started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+
+sys.path.append(str(BASE_DIR / 'src'))
+try:
+    from db import init_db
+    from db_helper import insert_log, get_recent_logs, send_message, get_messages
+except ImportError as e:
+    print(f"Critical Import Error: {e}")
+    # src 폴더가 없는 경우 대비하여 한 번 더 경로 확인
+    sys.path.append(str(BASE_DIR))
+    from src.db import init_db
+    from src.db_helper import insert_log, get_recent_logs, send_message, get_messages
+
+# 데이터 디렉토리 생성 보장 및 DB 초기화 (중복 제거 및 위치 조정)
 init_db()
 
 # 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
@@ -138,8 +149,9 @@ def monitor_heartbeat():
     global last_heartbeat_time, client_connected_once
     while True:
         time.sleep(2)
-        # 5초 이상 하트비트가 끊기면 자폭 (즉각 종료)
-        if client_connected_once and (time.time() - last_heartbeat_time > 5):
+        # 30초 이상 하트비트가 끊기면 자폭 (즉각 종료)
+        # 5초는 너무 짧아 네트워크 지연 시 위험하므로 30초로 완화
+        if client_connected_once and (time.time() - last_heartbeat_time > 30):
             print("브라우저 창이 닫혀 하트비트가 끊어졌습니다. 서버를 자동 종료합니다...")
             os._exit(0)
 
@@ -351,6 +363,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "Help topic not found"}).encode('utf-8'))
             return
 
+        elif parsed_path.path == '/api/image-file':
+            query = parse_qs(parsed_path.query)
+            target_path = query.get('path', [''])[0]
+            IMAGE_MIME = {
+                'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                'gif': 'image/gif', 'webp': 'image/webp', 'svg': 'image/svg+xml',
+                'bmp': 'image/bmp', 'ico': 'image/x-icon',
+            }
+            ext = target_path.rsplit('.', 1)[-1].lower() if '.' in target_path else ''
+            mime = IMAGE_MIME.get(ext, 'application/octet-stream')
+            if not target_path or not os.path.exists(target_path) or not os.path.isfile(target_path):
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', mime)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            with open(target_path, 'rb') as f:
+                self.wfile.write(f.read())
+
         elif parsed_path.path == '/api/read-file':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -372,17 +405,44 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "Binary file cannot be displayed."}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/locks':
+        elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            if LOCKS_FILE.exists():
-                with open(LOCKS_FILE, 'r', encoding='utf-8') as f:
-                    locks = json.load(f)
-                self.wfile.write(json.dumps(locks).encode('utf-8'))
-            else:
-                self.wfile.write(json.dumps({}).encode('utf-8'))
+            query = parse_qs(parsed_path.query)
+            target_path = query.get('path', [''])[0]
+            try:
+                # Windows 클립보드에 경로 복사
+                if os.name == 'nt':
+                    subprocess.run(['powershell', '-Command', f'Set-Clipboard -Value "{target_path}"'], check=True)
+                self.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        
+        elif parsed_path.path == '/api/file-op':
+            # 파일 복사/이동/삭제 등 운영체제 수준 작업
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            import shutil
+            try:
+                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
+                op = data.get('op')
+                src = data.get('src')
+                dest = data.get('dest')
+                
+                if op == 'copy':
+                    if os.path.isdir(src): shutil.copytree(src, dest, dirs_exist_ok=True)
+                    else: shutil.copy2(src, dest)
+                elif op == 'delete':
+                    if os.path.isdir(src): shutil.rmtree(src)
+                    else: os.remove(src)
+                
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/messages':
             # 에이전트 간 메시지 채널 목록 반환 (최신 100개, SQLite 연동)
             self.send_response(200)
@@ -1143,14 +1203,41 @@ if __name__ == '__main__':
     threading.Thread(target=monitor_heartbeat, daemon=True).start()
     try:
         server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
-        print(f"Nexus View SSE Log Server started on port {HTTP_PORT}")
+        print(f"바이브 코딩 SSE Log Server started on port {HTTP_PORT}")
         threading.Thread(target=server.serve_forever, daemon=True).start()
         
-        import webview
-        webview.create_window('Nexus View', f"http://localhost:{HTTP_PORT}", width=1400, height=900)
-        webview.start()
+        try:
+            import webview
+            # 아이콘 경로 후보군 (PNG 우선 지원)
+            icon_candidates = [
+                r"D:\vibe-coding\assets\vibe_coding_icon.png",
+                str(BASE_DIR / 'nexus-view' / 'public' / 'vibe_icon.png'),
+                str(BASE_DIR / 'bin' / 'app_icon.ico'),
+            ]
+            
+            icon_path = None
+            for cand in icon_candidates:
+                if os.path.exists(cand):
+                    icon_path = cand
+                    break
+            
+            print(f"Starting GUI window with icon: {icon_path}")
+            webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", 
+                                  width=1400, height=900, icon=icon_path)
+            webview.start()
+        except ImportError:
+            print("pywebview not found. Opening in default browser instead.")
+            open_app_window(f"http://localhost:{HTTP_PORT}")
+            # 서버 유지를 위해 무한 루프
+            while True:
+                time.sleep(10)
     except OSError:
-        import webview
-        webview.create_window('Nexus View', f"http://localhost:{HTTP_PORT}", width=1400, height=900)
-        webview.start()
+        try:
+            import webview
+            webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", width=1400, height=900)
+            webview.start()
+        except ImportError:
+            open_app_window(f"http://localhost:{HTTP_PORT}")
+            while True:
+                time.sleep(10)
         sys.exit(0)

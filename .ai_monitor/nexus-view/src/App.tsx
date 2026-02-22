@@ -3,7 +3,7 @@
  * 📄 파일명: App.tsx
  * 📂 메인 문서 링크: docs/README.md
  * 🔗 개별 상세 문서: docs/App.tsx.md
- * 📝 설명: 하이브 마인드의 넥서스 뷰(Nexus View) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
+ * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
  * ------------------------------------------------------------------------
  */
@@ -23,7 +23,7 @@ import {
   SiGit, SiCss3, SiHtml5 
 } from 'react-icons/si';
 import { FaWindows } from 'react-icons/fa';
-import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder } from 'react-icons/vsc';
+import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder, VscFolderOpened } from 'react-icons/vsc';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -107,6 +107,7 @@ function App() {
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, string>>({});
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   // 파일 락(Lock) 상태 폴링
   useEffect(() => {
@@ -425,9 +426,13 @@ function App() {
   const [drives, setDrives] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
   const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
+  const [treeMode, setTreeMode] = useState(true);
+  const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({});
+  const [treeChildren, setTreeChildren] = useState<Record<string, { name: string; path: string; isDir: boolean }[]>>({});
 
-  // currentPath 변경 시 Git 감시 경로도 동기화
+  // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화
   useEffect(() => { setGitPath(currentPath); }, [currentPath]);
+  useEffect(() => { setTreeExpanded({}); setTreeChildren({}); }, [currentPath]);
 
   // 드라이브 목록 가져오기
   useEffect(() => {
@@ -446,7 +451,22 @@ function App() {
       .catch(() => { });
   };
 
+  const handleTreeToggle = (path: string) => {
+    if (treeExpanded[path]) {
+      setTreeExpanded(prev => ({ ...prev, [path]: false }));
+    } else {
+      setTreeExpanded(prev => ({ ...prev, [path]: true }));
+      if (!treeChildren[path]) {
+        fetch(`${API_BASE}/api/files?path=${encodeURIComponent(path)}`)
+          .then(res => res.json())
+          .then(data => { if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [path]: data })); })
+          .catch(() => {});
+      }
+    }
+  };
+
   const handleFileClick = (item: {name: string, path: string, isDir: boolean}) => {
+    setSelectedPath(item.path);
     if (item.isDir) {
       setCurrentPath(item.path);
     } else {
@@ -460,31 +480,34 @@ function App() {
       const newZIndex = maxZIndex + 1;
       setMaxZIndex(newZIndex);
       
+      const isImg = /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(item.name);
       setOpenFiles(prev => [...prev, {
         id: newId,
         name: item.name,
         path: item.path,
-        content: 'Loading...',
-        isLoading: true,
+        content: isImg ? '' : 'Loading...',
+        isLoading: !isImg,
         zIndex: newZIndex
       }]);
 
-      fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(item.path)}`)
-        .then(res => res.json())
-        .then(data => {
-          setOpenFiles(prev => prev.map(f => f.id === newId ? {
-            ...f,
-            content: data.error ? `Error: ${data.error}` : data.content,
-            isLoading: false
-          } : f));
-        })
-        .catch(err => {
-          setOpenFiles(prev => prev.map(f => f.id === newId ? {
-            ...f,
-            content: `Failed to load file: ${err}`,
-            isLoading: false
-          } : f));
-        });
+      if (!isImg) {
+        fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(item.path)}`)
+          .then(res => res.json())
+          .then(data => {
+            setOpenFiles(prev => prev.map(f => f.id === newId ? {
+              ...f,
+              content: data.error ? `Error: ${data.error}` : data.content,
+              isLoading: false
+            } : f));
+          })
+          .catch(err => {
+            setOpenFiles(prev => prev.map(f => f.id === newId ? {
+              ...f,
+              content: `Failed to load file: ${err}`,
+              isLoading: false
+            } : f));
+          });
+      }
     }
   };
 
@@ -1233,31 +1256,78 @@ function App() {
                 )}
               </div>
             ) : (
-              /* ── 파일 탐색기 (기존) ── */
+              /* ── 파일 탐색기 ── */
               <>
-                <select
-                  value={drives.find(d => currentPath.startsWith(d)) || currentPath}
-                  onChange={(e) => setCurrentPath(e.target.value)}
-                  className="w-full bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer mb-4"
-                >
-                  <option value="D:/vibe-coding">vibe-coding</option>
-                  {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
-                </select>
+                {/* 드라이브 선택 + 트리/플랫 토글 */}
+                <div className="flex items-center gap-1 mb-2">
+                  <select
+                    value={drives.find(d => currentPath.startsWith(d)) || currentPath}
+                    onChange={(e) => setCurrentPath(e.target.value)}
+                    className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer"
+                  >
+                    <option value="D:/vibe-coding">vibe-coding</option>
+                    {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
+                  </select>
+                  <button
+                    onClick={() => setTreeMode(v => !v)}
+                    className={`p-1.5 rounded border text-[10px] font-bold transition-all shrink-0 ${treeMode ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-[#3c3c3c] border-white/10 text-[#858585] hover:text-white'}`}
+                    title={treeMode ? '플랫 뷰로 전환' : '트리 뷰로 전환'}
+                  >
+                    {treeMode ? '≡' : '⊞'}
+                  </button>
+                </div>
 
                 <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
                   <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
                     <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
                   </button>
-                  {items.map(item => (
-                    <button
-                      key={item.path}
-                      onClick={() => handleFileClick(item)}
-                      className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] hover:bg-primary/20'}`}
-                    >
-                      {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
-                      <span className="truncate">{item.name}</span>
-                    </button>
-                  ))}
+
+                  {treeMode ? (
+                    /* 트리 뷰 */
+                    items.map(item => (
+                      <FileTreeNode
+                        key={item.path}
+                        item={item}
+                        depth={0}
+                        expanded={treeExpanded}
+                        treeChildren={treeChildren}
+                        onToggle={handleTreeToggle}
+                        onFileOpen={handleFileClick}
+                      />
+                    ))
+                  ) : (
+                    /* 플랫 뷰 (기존) */
+                    items.map(item => (
+                      <div key={item.path} className={`group flex items-center gap-0 px-2 py-0.5 rounded text-xs transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}>
+                        <button
+                          onClick={() => handleFileClick(item)}
+                          className={`flex-1 flex items-center gap-2 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
+                        >
+                          {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
+                          <span className="truncate">{item.name}</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
+                              .then(res => res.json())
+                              .then(data => {
+                                if (data.status === 'success') {
+                                  const btn = e.currentTarget;
+                                  const originalHtml = btn.innerHTML;
+                                  btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
+                                  setTimeout(() => btn.innerHTML = originalHtml, 1500);
+                                }
+                              });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all ml-auto shrink-0"
+                          title="경로 복사"
+                        >
+                          <ClipboardList className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </>
             )}
@@ -1349,6 +1419,56 @@ function CodeWithLineNumbers({ content, fontSize = '12px' }: { content: string; 
   );
 }
 
+type TreeItem = { name: string; path: string; isDir: boolean };
+function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen }: {
+  item: TreeItem; depth: number;
+  expanded: Record<string, boolean>;
+  treeChildren: Record<string, TreeItem[]>;
+  onToggle: (path: string) => void;
+  onFileOpen: (item: TreeItem) => void;
+}) {
+  const isOpen = expanded[item.path] || false;
+  const kids = treeChildren[item.path] || [];
+  const indent = depth * 12;
+  if (item.isDir) {
+    return (
+      <div>
+        <button
+          onClick={() => onToggle(item.path)}
+          style={{ paddingLeft: `${indent + 4}px` }}
+          className="w-full flex items-center gap-1 py-0.5 pr-2 hover:bg-[#2a2d2e] rounded text-xs transition-colors text-[#cccccc]"
+        >
+          {isOpen
+            ? <ChevronDown className="w-3 h-3 shrink-0 text-[#858585]" />
+            : <ChevronRight className="w-3 h-3 shrink-0 text-[#858585]" />}
+          {isOpen
+            ? <VscFolderOpened className="w-4 h-4 text-[#dcb67a] shrink-0" />
+            : <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" />}
+          <span className="truncate">{item.name}</span>
+        </button>
+        {isOpen && kids.length === 0 && (
+          <div style={{ paddingLeft: `${indent + 28}px` }} className="py-0.5 text-[10px] text-[#858585] italic">비어 있음</div>
+        )}
+        {isOpen && kids.map(child => (
+          <FileTreeNode key={child.path} item={child} depth={depth + 1}
+            expanded={expanded} treeChildren={treeChildren}
+            onToggle={onToggle} onFileOpen={onFileOpen} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={() => onFileOpen(item)}
+      style={{ paddingLeft: `${indent + 20}px` }}
+      className="w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
+    >
+      {getFileIcon(item.name)}
+      <span className="truncate">{item.name}</span>
+    </button>
+  );
+}
+
 function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile, idx: number, bringToFront: (id: string) => void, closeFile: (id: string) => void }) {
   const [position, setPosition] = useState({ x: 100 + (idx * 30), y: 100 + (idx * 30) });
   const [isDragging, setIsDragging] = useState(false);
@@ -1412,6 +1532,14 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
       >
         {file.isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center text-[#858585] animate-pulse">Loading content...</div>
+        ) : /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(file.name) ? (
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <img
+              src={`${API_BASE}/api/image-file?path=${encodeURIComponent(file.path)}`}
+              alt={file.name}
+              className="max-w-full max-h-full object-contain"
+            />
+          </div>
         ) : (
           // VS코드 스타일 줄 번호 포함 파일 내용 표시
           <div className="p-2">
@@ -1534,10 +1662,11 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     }, 50);
   };
 
-  // 주기적으로 활성 파일 내용 갱신 (뷰어가 열려있을 때만)
+  // 주기적으로 활성 파일 내용 갱신 (뷰어가 열려있을 때만, 이미지 파일 제외)
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (showActiveFile && activeFilePath) {
+    const isImage = activeFilePath ? /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath) : false;
+    if (showActiveFile && activeFilePath && !isImage) {
       const fetchFile = () => {
         setIsActiveFileLoading(true);
         // 상대 경로일 경우 CWD 기준으로 요청
@@ -1663,11 +1792,18 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 </span>
                 {isActiveFileLoading && <span className="text-[#3794ef] animate-pulse pointer-events-auto">●</span>}
               </div>
-              <div className="flex-1 overflow-auto p-2 custom-scrollbar">
-                {/* VS코드 스타일 줄 번호 포함 활성 파일 뷰어 */}
-                {activeFileContent
-                  ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
-                  : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
+              <div className="flex-1 overflow-auto p-2 custom-scrollbar flex items-center justify-center">
+                {/* 이미지 파일이면 img 태그로, 아니면 코드 뷰어로 */}
+                {activeFilePath && /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath)
+                  ? <img
+                      src={`${API_BASE}/api/image-file?path=${encodeURIComponent(activeFilePath.includes(':') || activeFilePath.startsWith('/') ? activeFilePath : `${currentPath}/${activeFilePath}`)}`}
+                      alt={activeFilePath}
+                      className="max-w-full max-h-full object-contain"
+                      style={{ imageRendering: 'auto' }}
+                    />
+                  : activeFileContent
+                    ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
+                    : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
                 }
               </div>
             </div>
