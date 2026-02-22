@@ -405,6 +405,90 @@ class SSEHandler(BaseHTTPRequestHandler):
                 with open(TASKS_FILE, 'r', encoding='utf-8') as f:
                     tasks = json.load(f)
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/orchestrator/status':
+            # 오케스트레이터 현황 — 에이전트 활동 상태, 태스크 분배, 최근 액션 로그 반환
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                from datetime import datetime as _dt
+                KNOWN_AGENTS = ['claude', 'gemini']
+                IDLE_SEC = 300  # 5분
+
+                # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
+                agent_last_seen: dict = {a: None for a in KNOWN_AGENTS}
+                try:
+                    conn_h = sqlite3.connect(str(DATA_DIR / 'hive_mind.db'), timeout=5, check_same_thread=False)
+                    conn_h.row_factory = sqlite3.Row
+                    for row in conn_h.execute(
+                        "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
+                        "WHERE agent IN ('claude','gemini') GROUP BY agent"
+                    ).fetchall():
+                        agent_last_seen[row['agent']] = row['last_seen']
+                    conn_h.close()
+                except Exception:
+                    pass
+
+                # 에이전트 상태 (active / idle / unknown)
+                now_dt = _dt.now()
+                agent_status = {}
+                for agent, seen in agent_last_seen.items():
+                    if seen is None:
+                        agent_status[agent] = {'state': 'unknown', 'last_seen': None, 'idle_sec': None}
+                    else:
+                        try:
+                            seen_dt = _dt.fromisoformat(seen.replace('Z', ''))
+                            idle = int((now_dt - seen_dt).total_seconds())
+                            agent_status[agent] = {
+                                'state': 'idle' if idle > IDLE_SEC else 'active',
+                                'last_seen': seen, 'idle_sec': idle
+                            }
+                        except Exception:
+                            agent_status[agent] = {'state': 'unknown', 'last_seen': seen, 'idle_sec': None}
+
+                # 태스크 분배 현황
+                tasks_list: list = []
+                if TASKS_FILE.exists():
+                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                        tasks_list = json.load(f)
+                task_dist: dict = {a: {'pending': 0, 'in_progress': 0, 'done': 0} for a in KNOWN_AGENTS + ['all']}
+                for t in tasks_list:
+                    key = t.get('assigned_to', 'all') if t.get('assigned_to') in task_dist else 'all'
+                    s = t.get('status', 'pending')
+                    if s in task_dist[key]:
+                        task_dist[key][s] += 1
+
+                # 오케스트레이터 최근 액션 로그
+                orch_log = DATA_DIR / 'orchestrator_log.jsonl'
+                recent_actions: list = []
+                if orch_log.exists():
+                    for line in reversed(orch_log.read_text(encoding='utf-8').strip().splitlines()[-20:]):
+                        try:
+                            recent_actions.append(json.loads(line))
+                        except Exception:
+                            pass
+
+                # 현재 경고
+                warnings: list = []
+                for agent, st in agent_status.items():
+                    if st['state'] == 'idle' and st.get('idle_sec'):
+                        warnings.append(f"{agent} {st['idle_sec'] // 60}분째 비활성")
+                for agent, dist in task_dist.items():
+                    if agent == 'all': continue
+                    active = dist['pending'] + dist['in_progress']
+                    if active >= 5:
+                        warnings.append(f"{agent} 태스크 {active}개 (과부하)")
+
+                self.wfile.write(json.dumps({
+                    'agent_status': agent_status,
+                    'task_distribution': task_dist,
+                    'recent_actions': recent_actions,
+                    'warnings': warnings,
+                    'timestamp': now_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/git/status':
             # Git 저장소 실시간 상태 조회 — ?path=경로 로 대상 디렉토리 지정
             self.send_response(200)
@@ -898,6 +982,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                 with _memory_conn() as conn:
                     conn.execute('DELETE FROM memory WHERE key=?', (key,))
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/orchestrator/run':
+            # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                import sys as _sys
+                # scripts/orchestrator.py를 subprocess로 실행
+                orch_script = str(BASE_DIR.parent / 'scripts' / 'orchestrator.py')
+                result = subprocess.run(
+                    [_sys.executable, orch_script],
+                    capture_output=True, text=True, timeout=15
+                )
+                output = (result.stdout + result.stderr).strip()
+                self.wfile.write(json.dumps({
+                    'status': 'success',
+                    'output': output or '이상 없음',
+                }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         else:

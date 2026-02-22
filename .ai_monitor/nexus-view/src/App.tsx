@@ -15,7 +15,8 @@ import {
   ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
-  GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown
+  GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
+  Bot, Play, CircleDot
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -26,7 +27,7 @@ import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder } from 'react-ico
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit } from './types';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -327,6 +328,42 @@ function App() {
   // 충돌 파일 수 (Activity Bar 배지용)
   const conflictCount = gitStatus?.conflicts?.length ?? 0;
 
+  // ─── 오케스트레이터 상태 ──────────────────────────────────────────────
+  const [orchStatus, setOrchStatus] = useState<OrchestratorStatus | null>(null);
+  const [orchRunning, setOrchRunning] = useState(false);
+  const [orchLastRun, setOrchLastRun] = useState<string | null>(null);
+
+  // 오케스트레이터 상태 폴링 (10초 간격)
+  useEffect(() => {
+    const fetchOrch = () => {
+      fetch(`${API_BASE}/api/orchestrator/status`)
+        .then(res => res.json())
+        .then((data: OrchestratorStatus) => setOrchStatus(data))
+        .catch(() => {});
+    };
+    fetchOrch();
+    const interval = setInterval(fetchOrch, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 오케스트레이터 수동 실행
+  const runOrchestrator = () => {
+    setOrchRunning(true);
+    fetch(`${API_BASE}/api/orchestrator/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(res => res.json())
+      .then(() => {
+        setOrchLastRun(new Date().toLocaleTimeString());
+        return fetch(`${API_BASE}/api/orchestrator/status`);
+      })
+      .then(res => res.json())
+      .then((data: OrchestratorStatus) => setOrchStatus(data))
+      .catch(() => {})
+      .finally(() => setOrchRunning(false));
+  };
+
+  // 오케스트레이터 경고 수 (Hive 탭 배지용)
+  const orchWarningCount = orchStatus?.warnings?.length ?? 0;
+
   // 메시지 전송
   const sendMessage = () => {
     if (!msgContent.trim()) return;
@@ -618,8 +655,14 @@ function App() {
           <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Search className="w-6 h-6" />
           </button>
-          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          {/* 하이브 오케스트레이터 탭 — 경고 수 배지 */}
+          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Zap className="w-6 h-6" />
+            {orchWarningCount > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-orange-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
+                {orchWarningCount > 9 ? '9+' : orchWarningCount}
+              </span>
+            )}
           </button>
           {/* 메시지 채널 탭 — 읽지 않은 메시지 수 배지 표시 */}
           <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
@@ -980,6 +1023,103 @@ function App() {
                   <button onClick={() => setShowMemForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-cyan-500/40 hover:bg-cyan-500/5 rounded text-[10px] text-[#858585] hover:text-cyan-400 transition-colors flex items-center justify-center gap-1.5">
                     <Plus className="w-3 h-3" /> 새 메모리 항목 추가
                   </button>
+                )}
+              </div>
+            ) : activeTab === 'hive' ? (
+              /* ── 오케스트레이터 대시보드 패널 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 헤더: 실행 버튼 + 마지막 실행 시각 */}
+                <div className="flex items-center justify-between shrink-0">
+                  <div className="text-[9px] text-[#858585] font-mono">
+                    {orchLastRun ? `마지막 실행: ${orchLastRun}` : '자동 조율 엔진'}
+                  </div>
+                  <button
+                    onClick={runOrchestrator}
+                    disabled={orchRunning}
+                    className="flex items-center gap-1 px-2 py-1 bg-primary/20 hover:bg-primary/40 disabled:opacity-40 text-primary rounded text-[9px] font-bold transition-colors"
+                  >
+                    <Play className="w-3 h-3" />
+                    {orchRunning ? '실행 중...' : '지금 실행'}
+                  </button>
+                </div>
+
+                {!orchStatus ? (
+                  <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                    <Bot className="w-7 h-7 opacity-20" />
+                    오케스트레이터 연결 중...
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
+
+                    {/* 경고 배너 */}
+                    {orchStatus.warnings && orchStatus.warnings.length > 0 && (
+                      <div className="p-2 rounded border border-red-500/40 bg-red-500/5">
+                        <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-red-400">
+                          <AlertTriangle className="w-3.5 h-3.5" /> 경고 ({orchStatus.warnings.length})
+                        </div>
+                        {orchStatus.warnings.map((w, i) => (
+                          <div key={i} className="text-[9px] text-red-300 pl-3 py-0.5">⚠ {w}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 에이전트 상태 카드 */}
+                    <div className="p-2 rounded border border-white/10">
+                      <div className="text-[9px] font-bold text-[#969696] mb-1.5 flex items-center gap-1">
+                        <Bot className="w-3 h-3" /> 에이전트 상태
+                      </div>
+                      {Object.entries(orchStatus.agent_status ?? {}).map(([agent, st]) => {
+                        const dotColor = st.state === 'active' ? 'text-green-400' : st.state === 'idle' ? 'text-yellow-400' : 'text-[#858585]';
+                        const stateLabel = st.state === 'active' ? '활성' : st.state === 'idle' ? `유휴 ${st.idle_sec ? Math.floor(st.idle_sec / 60) + '분' : ''}` : '미확인';
+                        const taskDist = orchStatus.task_distribution?.[agent] ?? { pending: 0, in_progress: 0, done: 0 };
+                        return (
+                          <div key={agent} className="flex items-center gap-2 py-1 border-b border-white/5 last:border-0">
+                            <CircleDot className={`w-3 h-3 shrink-0 ${dotColor}`} />
+                            <span className={`font-mono font-bold text-[10px] w-12 shrink-0 ${agent === 'claude' ? 'text-green-400' : 'text-blue-400'}`}>{agent}</span>
+                            <span className={`text-[9px] ${dotColor}`}>{stateLabel}</span>
+                            <div className="ml-auto flex gap-1.5 text-[8px] font-mono">
+                              <span className="text-[#858585]">P:{taskDist.pending}</span>
+                              <span className="text-primary">W:{taskDist.in_progress}</span>
+                              <span className="text-green-400">D:{taskDist.done}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 태스크 분배 전체 요약 */}
+                    {orchStatus.task_distribution?.all && (
+                      <div className="p-2 rounded border border-white/10">
+                        <div className="text-[9px] font-bold text-[#969696] mb-1">미할당 태스크 (all)</div>
+                        <div className="flex gap-3 text-[9px] font-mono">
+                          <span className="text-[#858585]">대기: {orchStatus.task_distribution.all.pending}</span>
+                          <span className="text-primary">진행: {orchStatus.task_distribution.all.in_progress}</span>
+                          <span className="text-green-400">완료: {orchStatus.task_distribution.all.done}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 최근 오케스트레이터 액션 로그 */}
+                    {orchStatus.recent_actions && orchStatus.recent_actions.length > 0 ? (
+                      <div className="p-2 rounded border border-white/10">
+                        <div className="text-[9px] font-bold text-[#969696] mb-1.5">최근 자동 액션</div>
+                        {orchStatus.recent_actions.slice(0, 8).map((act, i) => {
+                          const actionColor = act.action === 'auto_assign' ? 'text-green-400' : act.action === 'idle_agent' ? 'text-yellow-400' : act.action.includes('overload') ? 'text-red-400' : 'text-[#858585]';
+                          return (
+                            <div key={i} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1">
+                              <span className={`text-[8px] font-mono shrink-0 mt-0.5 ${actionColor}`}>{act.action}</span>
+                              <span className="text-[9px] text-[#cccccc] flex-1 break-words leading-tight">{act.detail}</span>
+                              <span className="text-[8px] text-[#858585] shrink-0 font-mono">{act.timestamp?.slice(11, 16)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-2 rounded border border-white/5 text-center text-[9px] text-[#858585] italic">
+                        자동 액션 기록 없음 — "지금 실행"으로 첫 조율을 시작하세요
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             ) : activeTab === 'git' ? (

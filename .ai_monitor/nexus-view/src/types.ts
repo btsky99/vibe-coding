@@ -30,6 +30,28 @@ export interface GitCommit {
     date: string;     // 상대적 날짜 (예: 2 hours ago)
 }
 
+// 오케스트레이터 에이전트 상태
+export interface AgentStatusEntry {
+    state: 'active' | 'idle' | 'unknown'; // 활성/유휴/미확인
+    last_seen: string | null;              // 마지막 활동 시각 (ISO 문자열)
+    idle_sec: number | null;               // 유휴 시간 (초)
+}
+
+export interface OrchestratorAction {
+    timestamp: string;   // 액션 발생 시각
+    action: string;      // 액션 유형 (auto_assign / idle_agent / ...)
+    detail: string;      // 액션 상세 내용
+}
+
+export interface OrchestratorStatus {
+    agent_status: Record<string, AgentStatusEntry>;          // 에이전트별 상태
+    task_distribution: Record<string, Record<string, number>>; // 에이전트별 태스크 분배
+    recent_actions: OrchestratorAction[];                    // 최근 오케스트레이터 액션
+    warnings: string[];                                       // 현재 경고 목록
+    timestamp: string;                                        // 조회 시각
+    error?: string;
+}
+
 // 에이전트 간 공유 메모리 — 지식 베이스 항목
 export interface MemoryEntry {
     id: string;          // 고유 ID
