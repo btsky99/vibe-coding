@@ -51,19 +51,23 @@ def log_task(agent_name, task_summary):
     with open(log_file, "w", encoding="utf-8") as f:
         f.writelines(lines)
     
-    # sessions.jsonl 에도 연동하여 웹 대시보드(Nexus View) SSE 스트림에 실시간으로 표시되도록 추가
-    sessions_file = os.path.join(log_dir, "sessions.jsonl")
-    session_entry = {
-        "session_id": f"hive_{datetime.now().strftime('%H%M%S')}",
-        "terminal_id": "HIVE_BRIDGE",
-        "project": "hive",
-        "agent": agent_name,
-        "trigger": safe_summary,
-        "status": "success",
-        "ts_start": datetime.now().isoformat()
-    }
-    with open(sessions_file, "a", encoding="utf-8") as sf:
-        sf.write(json.dumps(session_entry, ensure_ascii=False) + "\n")
+    # SQLite DB (session_logs) 에도 연동하여 웹 대시보드(Nexus View) SSE 스트림에 실시간으로 표시
+    try:
+        aimon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.ai_monitor'))
+        sys.path.append(aimon_path)
+        from src.db_helper import insert_log
+        insert_log(
+            session_id=f"hive_{datetime.now().strftime('%H%M%S')}",
+            terminal_id="HIVE_BRIDGE",
+            agent=agent_name,
+            trigger_msg=safe_summary,
+            project="hive",
+            status="success"
+        )
+    except ImportError as e:
+        print(f"Warning: Failed to import db_helper for SQLite logging: {e}")
+    except Exception as e:
+        print(f"Warning: Failed to insert log to SQLite DB: {e}")
     
     print(f"[OK] [{agent_name}] Task logged to Hive: {safe_summary}")
 
