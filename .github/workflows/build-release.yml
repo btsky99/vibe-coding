@@ -54,9 +54,8 @@ jobs:
       - name: Find winpty binaries path
         id: winpty
         run: |
-          import site, os
-          sp = site.getsitepackages()[0]
-          wp = os.path.join(sp, "winpty")
+          import winpty, os
+          wp = os.path.dirname(winpty.__file__)
           print(f"path={wp}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"path={wp}\n")
@@ -65,14 +64,15 @@ jobs:
       - name: Build exe
         run: |
           cd .ai_monitor
+          set WINPTY=${{ steps.winpty.outputs.path }}
           pyinstaller --onefile --noconsole ^
             --name vibe-coding ^
             --icon bin/app_icon.ico ^
             --add-data "nexus-view\dist;nexus-view/dist" ^
-            --add-binary "${{ steps.winpty.outputs.path }}\winpty.dll;winpty" ^
-            --add-binary "${{ steps.winpty.outputs.path }}\winpty-agent.exe;winpty" ^
-            --add-binary "${{ steps.winpty.outputs.path }}\conpty.dll;winpty" ^
-            --add-binary "${{ steps.winpty.outputs.path }}\OpenConsole.exe;winpty" ^
+            --add-binary "%WINPTY%\winpty.dll;winpty" ^
+            --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
+            --add-binary "%WINPTY%\conpty.dll;winpty" ^
+            --add-binary "%WINPTY%\OpenConsole.exe;winpty" ^
             --hidden-import websockets ^
             --hidden-import winpty ^
             server.py
