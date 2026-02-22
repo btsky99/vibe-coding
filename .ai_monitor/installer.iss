@@ -4,7 +4,7 @@
 #define MyAppName "Vibe Coding"
 #define MyAppExeName "vibe-coding.exe"
 #define MyAppPublisher "btksy"
-#define MyAppURL "https://github.com/btksy/vibe-coding"
+#define MyAppURL "https://github.com/btsky99/vibe-coding"
 #ifndef MyAppVersion
   #define MyAppVersion "dev"
 #endif

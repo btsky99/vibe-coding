@@ -14,7 +14,7 @@ from urllib.error import URLError, HTTPError
 
 from _version import __version__ as APP_VERSION
 
-REPO = "btksy/vibe-coding"
+REPO = "btsky99/vibe-coding"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 ASSET_NAME = "vibe-coding.exe"
 
