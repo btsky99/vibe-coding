@@ -13,6 +13,7 @@ import mimetypes
 import webbrowser
 import shutil
 import subprocess
+import sqlite3
 
 
 def open_app_window(url):
@@ -42,30 +43,38 @@ from socketserver import ThreadingMixIn
 from pathlib import Path
 
 import sys
-
 from _version import __version__
-
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w')
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w')
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
+sys.path.append(str(BASE_DIR / 'src'))
+from db import init_db
+from db_helper import insert_log, get_recent_logs, send_message, get_messages
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+
+# 데이터 디렉토리 생성 보장 및 DB 초기화
+DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
+if not DATA_DIR.exists():
+    os.makedirs(DATA_DIR, exist_ok=True)
+init_db()
+
 # 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
 STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
-DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 LOCKS_FILE = DATA_DIR / "locks.json"
 # 에이전트 간 메시지 채널 파일
 MESSAGES_FILE = DATA_DIR / "messages.jsonl"
 # 에이전트 간 공유 작업 큐 파일 (JSON 배열 — 업데이트/삭제 지원)
 TASKS_FILE = DATA_DIR / "tasks.json"
-# 에이전트 간 공유 메모리/지식 베이스 (key → entry 딕셔너리)
-MEMORY_FILE = DATA_DIR / "shared_memory.json"
+# 에이전트 간 공유 메모리/지식 베이스 (SQLite — 동시성·검색 안정성 확보)
+MEMORY_DB = DATA_DIR / "shared_memory.db"
 
 # 데이터 디렉토리 생성 보장
 if not DATA_DIR.exists():
@@ -84,6 +93,34 @@ if not MESSAGES_FILE.exists():
 if not TASKS_FILE.exists():
     with open(TASKS_FILE, 'w', encoding='utf-8') as f:
         json.dump([], f)
+
+# ── 공유 메모리 SQLite 초기화 ────────────────────────────────────────────────
+def _memory_conn() -> sqlite3.Connection:
+    """요청마다 새 커넥션 생성 (스레드 안전 — ThreadedHTTPServer 대응)"""
+    conn = sqlite3.connect(str(MEMORY_DB), timeout=5, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _init_memory_db() -> None:
+    """shared_memory.db 스키마 초기화 (서버 시작 시 1회 실행)"""
+    with _memory_conn() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS memory (
+                key        TEXT PRIMARY KEY,
+                id         TEXT NOT NULL,
+                title      TEXT NOT NULL DEFAULT '',
+                content    TEXT NOT NULL,
+                tags       TEXT NOT NULL DEFAULT '[]',
+                author     TEXT NOT NULL DEFAULT 'unknown',
+                timestamp  TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_author ON memory(author)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at)')
+
+_init_memory_db()
+# ─────────────────────────────────────────────────────────────────────────────
 
 print("Static files directory:", STATIC_DIR)
 if not STATIC_DIR.exists():
@@ -120,37 +157,46 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
             
-            # SSE 스트리밍 루프
-            last_size = 0
-            if SESSIONS_FILE.exists():
-                last_size = SESSIONS_FILE.stat().st_size
-                # 초기 진입 시 최신 50개 전송
-                with open(SESSIONS_FILE, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    lines = lines[-50:]
-                    for line in lines:
-                        if line.strip():
-                            self.wfile.write(f"data: {line.strip()}\n\n".encode('utf-8'))
-                            self.wfile.flush()
+            # SSE 스트리밍 루프 (SQLite 기반)
+            last_id = 0
+            
+            # 초기 진입 시 최신 50개 전송
+            try:
+                recent_logs = get_recent_logs(50)
+                if recent_logs:
+                    last_id = recent_logs[-1]['id'] # 가장 최신 id 저장
+                    for log in recent_logs:
+                        self.wfile.write(f"data: {json.dumps(log, ensure_ascii=False)}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+            except Exception as e:
+                print(f"Initial DB Read error: {e}")
             
             while True:
                 try:
-                    if SESSIONS_FILE.exists():
-                        current_size = SESSIONS_FILE.stat().st_size
-                        if current_size > last_size:
-                            with open(SESSIONS_FILE, 'r', encoding='utf-8') as f:
-                                f.seek(last_size)
-                                new_lines = f.readlines()
-                                for line in new_lines:
-                                    if line.strip():
-                                        self.wfile.write(f"data: {line.strip()}\n\n".encode('utf-8'))
-                                        self.wfile.flush()
-                            last_size = current_size
+                    # 새로운 로그가 있는지 확인 (last_id 보다 큰 id 조회)
+                    import sqlite3
+                    conn = sqlite3.connect(str(DATA_DIR / "hive_mind.db"), timeout=5.0)
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.execute("SELECT * FROM session_logs WHERE id > ? ORDER BY id ASC", (last_id,))
+                    new_rows = [dict(row) for row in cursor.fetchall()]
+                    conn.close()
+                    
+                    if new_rows:
+                        for row in new_rows:
+                            # 프론트엔드가 기대하는 포맷으로 키 이름 매핑
+                            out_row = dict(row)
+                            if 'trigger_msg' in out_row:
+                                out_row['trigger'] = out_row.pop('trigger_msg')
+                            
+                            self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
+                            self.wfile.flush()
+                        last_id = new_rows[-1]['id']
+                    
                     time.sleep(0.5) # 감시 주기
                 except (BrokenPipeError, ConnectionResetError):
                     break
                 except Exception as e:
-                    print(f"Server error: {e}")
+                    print(f"SSE DB Stream error: {e}")
                     time.sleep(1)
         elif parsed_path.path == '/api/heartbeat':
             global last_heartbeat_time, client_connected_once
@@ -338,22 +384,16 @@ class SSEHandler(BaseHTTPRequestHandler):
             else:
                 self.wfile.write(json.dumps({}).encode('utf-8'))
         elif parsed_path.path == '/api/messages':
-            # 에이전트 간 메시지 채널 목록 반환 (최신 100개)
+            # 에이전트 간 메시지 채널 목록 반환 (최신 100개, SQLite 연동)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            messages = []
-            if MESSAGES_FILE.exists():
-                with open(MESSAGES_FILE, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if line.strip():
-                            try:
-                                messages.append(json.loads(line.strip()))
-                            except Exception:
-                                pass
-            # 최신 100개만 반환 (오래된 메시지 토큰 낭비 방지)
-            self.wfile.write(json.dumps(messages[-100:], ensure_ascii=False).encode('utf-8'))
+            try:
+                msgs = get_messages(100)
+                self.wfile.write(json.dumps(msgs, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/tasks':
             # 공유 작업 큐 전체 목록 반환
             self.send_response(200)
@@ -365,6 +405,122 @@ class SSEHandler(BaseHTTPRequestHandler):
                 with open(TASKS_FILE, 'r', encoding='utf-8') as f:
                     tasks = json.load(f)
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/git/status':
+            # Git 저장소 실시간 상태 조회 — ?path=경로 로 대상 디렉토리 지정
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            git_path = query.get('path', [''])[0].strip() or str(BASE_DIR.parent)
+            try:
+                # git status --porcelain=v1 -b : 머신 파싱용 간결 포맷
+                result = subprocess.run(
+                    ['git', 'status', '--porcelain=v1', '-b'],
+                    cwd=git_path, capture_output=True, text=True, timeout=5
+                )
+                if result.returncode != 0:
+                    self.wfile.write(json.dumps({'is_git_repo': False, 'error': result.stderr.strip()}).encode('utf-8'))
+                    return
+                lines = result.stdout.splitlines()
+                # 첫 줄: ## branch...origin/branch [ahead N] [behind N]
+                branch_line = lines[0] if lines else ''
+                branch = 'unknown'
+                ahead = 0
+                behind = 0
+                if branch_line.startswith('## '):
+                    branch_info = branch_line[3:]
+                    import re
+                    # "No commits yet on main" 처리
+                    if branch_info.startswith('No commits yet on '):
+                        branch = branch_info.split(' ')[-1]
+                    else:
+                        branch = branch_info.split('...')[0].split(' ')[0]
+                        ahead_m = re.search(r'\[ahead (\d+)', branch_info)
+                        behind_m = re.search(r'behind (\d+)', branch_info)
+                        if ahead_m: ahead = int(ahead_m.group(1))
+                        if behind_m: behind = int(behind_m.group(1))
+                staged, unstaged, untracked, conflicts = [], [], [], []
+                for line in lines[1:]:
+                    if len(line) < 2:
+                        continue
+                    xy = line[:2]
+                    fname = line[3:]
+                    # 충돌 (양쪽 수정: UU, AA, DD 등)
+                    if xy in ('UU', 'AA', 'DD', 'AU', 'UA', 'DU', 'UD'):
+                        conflicts.append(fname)
+                    elif xy[0] != ' ' and xy[0] != '?':
+                        staged.append(fname)      # 인덱스(스테이징) 변경
+                    if xy[1] == 'M' or xy[1] == 'D':
+                        unstaged.append(fname)    # 워킹트리 변경
+                    elif xy == '??':
+                        untracked.append(fname)   # 미추적 파일
+                status_data = {
+                    'is_git_repo': True,
+                    'branch': branch,
+                    'ahead': ahead,
+                    'behind': behind,
+                    'staged': staged,
+                    'unstaged': unstaged,
+                    'untracked': untracked,
+                    'conflicts': conflicts,
+                }
+                self.wfile.write(json.dumps(status_data, ensure_ascii=False).encode('utf-8'))
+            except subprocess.TimeoutExpired:
+                self.wfile.write(json.dumps({'is_git_repo': False, 'error': 'git timeout'}).encode('utf-8'))
+            except FileNotFoundError:
+                self.wfile.write(json.dumps({'is_git_repo': False, 'error': 'git not found'}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'is_git_repo': False, 'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/git/log':
+            # 최근 커밋 로그 — ?path=경로&n=개수
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            git_path = query.get('path', [''])[0].strip() or str(BASE_DIR.parent)
+            n = min(int(query.get('n', ['10'])[0]), 50)  # 최대 50개
+            try:
+                result = subprocess.run(
+                    ['git', 'log', f'--format=%h\x1f%s\x1f%an\x1f%ar', f'-n{n}'],
+                    cwd=git_path, capture_output=True, text=True, timeout=5
+                )
+                commits = []
+                for line in result.stdout.strip().splitlines():
+                    parts = line.split('\x1f')
+                    if len(parts) == 4:
+                        commits.append({'hash': parts[0], 'message': parts[1], 'author': parts[2], 'date': parts[3]})
+                self.wfile.write(json.dumps(commits, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps([]).encode('utf-8'))
+        elif parsed_path.path == '/api/memory':
+            # 공유 메모리 조회 — ?q=검색어 파라미터로 전문 검색 지원 (SQLite LIKE)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            q = query.get('q', [''])[0].strip()
+            try:
+                with _memory_conn() as conn:
+                    if q:
+                        # 키·제목·내용·태그 전문 검색
+                        pattern = f'%{q}%'
+                        rows = conn.execute(
+                            'SELECT * FROM memory WHERE key LIKE ? OR title LIKE ? OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC',
+                            (pattern, pattern, pattern, pattern)
+                        ).fetchall()
+                    else:
+                        rows = conn.execute('SELECT * FROM memory ORDER BY updated_at DESC').fetchall()
+                entries = []
+                for row in rows:
+                    entry = dict(row)
+                    entry['tags'] = json.loads(entry.get('tags', '[]'))
+                    entries.append(entry)
+                self.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         else:
             # 정적 파일 서비스 로직 (Vite 빌드 결과물)
             # 요청 경로를 정리
@@ -509,30 +665,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # 하이브 로그에 기록
                 if log_msg:
                     try:
-                        sys.path.append(str(BASE_DIR / 'src'))
-                        from secure import mask_sensitive_data
+                        sys.path.append(str(BASE_DIR))
+                        from src.secure import mask_sensitive_data
+                        from src.db_helper import insert_log
                         safe_msg = mask_sensitive_data(log_msg)
                         
-                        log_entry = {
-                            "session_id": f"lock_{int(time.time())}_{agent}",
-                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                            "agent": agent,
-                            "terminal_id": "LOCK_API",
-                            "project": "hive",
-                            "status": "success",
-                            "trigger": safe_msg,
-                            "ts_start": time.strftime("%Y-%m-%dT%H:%M:%S")
-                        }
-                        with open(SESSIONS_FILE, 'a', encoding='utf-8') as lf:
-                            lf.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                        insert_log(
+                            session_id=f"lock_{int(time.time())}_{agent}",
+                            terminal_id="LOCK_API",
+                            agent=agent,
+                            trigger_msg=safe_msg,
+                            project="hive",
+                            status="success"
+                        )
                     except Exception as e:
-                        print(f"Error logging lock to sessions: {e}")
+                        print(f"Error logging lock to session_logs: {e}")
                 
                 self.wfile.write(json.dumps({"status": "success", "locks": locks}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/message':
-            # 에이전트 간 메시지 전송 — messages.jsonl에 추가 후 SSE 로그에도 기록
+            # 에이전트 간 메시지 전송 (SQLite 기반)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -553,31 +706,26 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'read': False,
                 }
 
-                # messages.jsonl에 추가 (append-only)
-                with open(MESSAGES_FILE, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(msg, ensure_ascii=False) + '\n')
+                # SQLite 에 삽입
+                send_message(msg['id'], msg['from'], msg['to'], msg['type'], msg['content'])
 
-                # SSE 스트림(sessions.jsonl)에도 알림 기록하여 로그 뷰에 반영
+                # SSE 스트림 (session_logs 테이블) 에도 알림 기록하여 로그 뷰에 반영
                 try:
-                    # secure_masking을 위해 import
-                    sys.path.append(str(BASE_DIR / 'src'))
-                    from secure import mask_sensitive_data
+                    sys.path.append(str(BASE_DIR))
+                    from src.secure import mask_sensitive_data
+                    from src.db_helper import insert_log
                     safe_content = mask_sensitive_data(msg['content'])
                     
-                    log_entry = {
-                        "session_id": f"msg_{int(time.time())}",
-                        "timestamp": msg['timestamp'],
-                        "agent": msg['from'],
-                        "terminal_id": 'MSG_CHANNEL',
-                        "project": "hive",
-                        "status": "success",
-                        "trigger": f"[메시지→{msg['to']}] {safe_content[:100]}",
-                        "ts_start": msg['timestamp']
-                    }
-                    with open(SESSIONS_FILE, 'a', encoding='utf-8') as lf:
-                        lf.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+                    insert_log(
+                        session_id=f"msg_{int(time.time())}",
+                        terminal_id="MSG_CHANNEL",
+                        agent=msg['from'],
+                        trigger_msg=f"[메시지→{msg['to']}] {safe_content[:100]}",
+                        project="hive",
+                        status="success"
+                    )
                 except Exception as e:
-                    print(f"Error logging message to sessions: {e}")
+                    print(f"Error logging message to session_logs: {e}")
 
                 self.wfile.write(json.dumps({'status': 'success', 'msg': msg}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -689,6 +837,66 @@ class SSEHandler(BaseHTTPRequestHandler):
                 with open(TASKS_FILE, 'w', encoding='utf-8') as f:
                     json.dump(tasks, f, ensure_ascii=False, indent=2)
 
+                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/memory/set':
+            # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (SQLite INSERT OR REPLACE)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+
+                key     = str(data.get('key', '')).strip()[:200]
+                content = str(data.get('content', '')).strip()
+                if not key or not content:
+                    self.wfile.write(json.dumps({'status': 'error', 'message': 'key와 content는 필수입니다'}).encode('utf-8'))
+                    return
+
+                now   = time.strftime('%Y-%m-%dT%H:%M:%S')
+                entry = {
+                    'key':        key,
+                    'id':         str(int(time.time() * 1000)),
+                    'title':      str(data.get('title', key)).strip()[:300],
+                    'content':    content,
+                    'tags':       json.dumps(data.get('tags', []), ensure_ascii=False),
+                    'author':     str(data.get('author', 'unknown')),
+                    'timestamp':  now,
+                    'updated_at': now,
+                }
+
+                with _memory_conn() as conn:
+                    # 기존 항목이면 timestamp(최초)는 유지, updated_at만 갱신
+                    existing = conn.execute('SELECT timestamp FROM memory WHERE key=?', (key,)).fetchone()
+                    if existing:
+                        entry['timestamp'] = existing['timestamp']
+                    conn.execute(
+                        'INSERT OR REPLACE INTO memory (key,id,title,content,tags,author,timestamp,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+                        (entry['key'], entry['id'], entry['title'], entry['content'],
+                         entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'])
+                    )
+
+                entry['tags'] = json.loads(entry['tags'])
+                self.wfile.write(json.dumps({'status': 'success', 'entry': entry}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/memory/delete':
+            # 공유 메모리 항목 삭제 (key 기준)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                key = str(data.get('key', '')).strip()
+                with _memory_conn() as conn:
+                    conn.execute('DELETE FROM memory WHERE key=?', (key,))
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))

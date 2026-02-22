@@ -9,6 +9,27 @@ export interface LogRecord {
     ts_start: string;
 }
 
+// Git 저장소 실시간 상태
+export interface GitStatus {
+    branch: string;        // 현재 브랜치명
+    ahead: number;         // 로컬이 리모트보다 앞선 커밋 수
+    behind: number;        // 리모트가 로컬보다 앞선 커밋 수
+    staged: string[];      // 스테이징된 파일
+    unstaged: string[];    // 수정됐지만 스테이징 안 된 파일
+    untracked: string[];   // git이 추적하지 않는 신규 파일
+    conflicts: string[];   // 머지 충돌 마커가 있는 파일
+    is_git_repo: boolean;
+    error?: string;
+}
+
+// Git 커밋 항목
+export interface GitCommit {
+    hash: string;     // 짧은 커밋 해시
+    message: string;  // 커밋 메시지
+    author: string;   // 작성자
+    date: string;     // 상대적 날짜 (예: 2 hours ago)
+}
+
 // 에이전트 간 공유 메모리 — 지식 베이스 항목
 export interface MemoryEntry {
     id: string;          // 고유 ID

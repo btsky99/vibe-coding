@@ -14,7 +14,8 @@ import {
   Activity, Menu, Terminal, RotateCw,
   ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
-  Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus
+  Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
+  GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -25,7 +26,7 @@ import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder } from 'react-ico
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord, AgentMessage, Task } from './types';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -227,6 +228,105 @@ function App() {
       .catch(() => {});
   };
 
+  // ─── 공유 메모리(SQLite) 상태 ────────────────────────────────────────────
+  const [memory, setMemory] = useState<MemoryEntry[]>([]);
+  const [memSearch, setMemSearch] = useState('');
+  const [showMemForm, setShowMemForm] = useState(false);
+  const [editingMemKey, setEditingMemKey] = useState<string | null>(null);
+  const [memKey, setMemKey] = useState('');
+  const [memTitle, setMemTitle] = useState('');
+  const [memContent, setMemContent] = useState('');
+  const [memTags, setMemTags] = useState('');
+  const [memAuthor, setMemAuthor] = useState('claude');
+
+  // 검색어가 있으면 서버 검색, 없으면 전체 목록 사용
+  const fetchMemory = (q = '') => {
+    const url = q ? `${API_BASE}/api/memory?q=${encodeURIComponent(q)}` : `${API_BASE}/api/memory`;
+    fetch(url)
+      .then(res => res.json())
+      .then(data => setMemory(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
+  // 공유 메모리 폴링 (5초 간격 — 자주 바뀌지 않으므로 느리게)
+  useEffect(() => {
+    fetchMemory();
+    const interval = setInterval(() => fetchMemory(memSearch), 5000);
+    return () => clearInterval(interval);
+  }, [memSearch]);
+
+  // 검색어 변경 시 즉시 검색
+  useEffect(() => { fetchMemory(memSearch); }, [memSearch]);
+
+  // 메모리 저장 (신규 또는 수정 — key 기준 UPSERT)
+  const saveMemory = () => {
+    if (!memKey.trim() || !memContent.trim()) return;
+    fetch(`${API_BASE}/api/memory/set`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key:     memKey.trim(),
+        title:   memTitle.trim() || memKey.trim(),
+        content: memContent.trim(),
+        tags:    memTags.split(',').map(t => t.trim()).filter(Boolean),
+        author:  memAuthor,
+      }),
+    })
+      .then(() => {
+        setMemKey(''); setMemTitle(''); setMemContent('');
+        setMemTags(''); setShowMemForm(false); setEditingMemKey(null);
+        fetchMemory(memSearch);
+      })
+      .catch(() => {});
+  };
+
+  // 메모리 항목 삭제
+  const deleteMemory = (key: string) => {
+    fetch(`${API_BASE}/api/memory/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    }).then(() => fetchMemory(memSearch)).catch(() => {});
+  };
+
+  // 수정 폼 열기 (기존 항목 데이터 주입)
+  const startEditMemory = (entry: MemoryEntry) => {
+    setMemKey(entry.key);
+    setMemTitle(entry.title);
+    setMemContent(entry.content);
+    setMemTags(entry.tags.join(', '));
+    setMemAuthor(entry.author);
+    setEditingMemKey(entry.key);
+    setShowMemForm(true);
+  };
+
+  // ─── Git 실시간 감시 상태 ─────────────────────────────────────────────
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  const [gitLog, setGitLog] = useState<GitCommit[]>([]);
+  // 초기값은 하드코딩 — currentPath 선언 이후 useEffect로 동기화
+  const [gitPath, setGitPath] = useState("D:/vibe-coding");
+
+  // Git 상태 폴링 (5초 간격)
+  useEffect(() => {
+    const fetchGit = () => {
+      const encodedPath = encodeURIComponent(gitPath);
+      fetch(`${API_BASE}/api/git/status?path=${encodedPath}`)
+        .then(res => res.json())
+        .then((data: GitStatus) => setGitStatus(data))
+        .catch(() => {});
+      fetch(`${API_BASE}/api/git/log?path=${encodedPath}&n=15`)
+        .then(res => res.json())
+        .then((data: GitCommit[]) => setGitLog(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    };
+    fetchGit();
+    const interval = setInterval(fetchGit, 5000);
+    return () => clearInterval(interval);
+  }, [gitPath]);
+
+  // 충돌 파일 수 (Activity Bar 배지용)
+  const conflictCount = gitStatus?.conflicts?.length ?? 0;
+
   // 메시지 전송
   const sendMessage = () => {
     if (!msgContent.trim()) return;
@@ -288,6 +388,9 @@ function App() {
   const [drives, setDrives] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
   const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
+
+  // currentPath 변경 시 Git 감시 경로도 동기화
+  useEffect(() => { setGitPath(currentPath); }, [currentPath]);
 
   // 드라이브 목록 가져오기
   useEffect(() => {
@@ -536,6 +639,24 @@ function App() {
               </span>
             )}
           </button>
+          {/* 공유 메모리 탭 */}
+          <button onClick={() => { setActiveTab('memory'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'memory' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <Brain className="w-6 h-6" />
+            {memory.length > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-cyan-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
+                {memory.length > 9 ? '9+' : memory.length}
+              </span>
+            )}
+          </button>
+          {/* Git 감시 탭 — 충돌 파일 수 배지 표시 */}
+          <button onClick={() => { setActiveTab('git'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'git' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <GitBranch className="w-6 h-6" />
+            {conflictCount > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none animate-pulse">
+                {conflictCount > 9 ? '9+' : conflictCount}
+              </span>
+            )}
+          </button>
           <div className="mt-auto flex flex-col gap-4">
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Info className="w-6 h-6" /></button>
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Settings className="w-6 h-6" /></button>
@@ -548,7 +669,7 @@ function App() {
           className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : 'Hive Mind'}</span>
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : 'Hive Mind'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
@@ -750,6 +871,225 @@ function App() {
                   <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded text-[10px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-1.5">
                     <Plus className="w-3 h-3" /> 새 작업 추가
                   </button>
+                )}
+              </div>
+            ) : activeTab === 'memory' ? (
+              /* ── 공유 메모리 패널 (SQLite 기반) ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 검색 입력 */}
+                <div className="relative shrink-0">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#858585]" />
+                  <input
+                    type="text"
+                    value={memSearch}
+                    onChange={e => setMemSearch(e.target.value)}
+                    placeholder="키 / 내용 / 태그 검색..."
+                    className="w-full bg-[#1e1e1e] border border-white/10 rounded pl-6 pr-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
+                  />
+                </div>
+                {/* 항목 수 요약 */}
+                <div className="text-[9px] text-[#858585] shrink-0 px-0.5">
+                  총 {memory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
+                </div>
+
+                {/* 메모리 항목 목록 */}
+                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
+                  {memory.length === 0 ? (
+                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                      <Brain className="w-7 h-7 opacity-20" />
+                      {memSearch ? '검색 결과 없음' : '저장된 메모리 없음'}
+                    </div>
+                  ) : (
+                    memory.map(entry => (
+                      <div key={entry.key} className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors group">
+                        {/* 키 + 액션 버튼 */}
+                        <div className="flex items-start justify-between gap-1 mb-1">
+                          <span className="font-mono font-bold text-cyan-400 text-[10px] break-all leading-tight">{entry.key}</span>
+                          <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => startEditMemory(entry)} className="px-1.5 py-0.5 bg-white/5 hover:bg-primary/20 rounded text-[9px] text-[#858585] hover:text-primary transition-colors">✏️</button>
+                            <button onClick={() => deleteMemory(entry.key)} className="px-1.5 py-0.5 bg-white/5 hover:bg-red-500/20 rounded text-[9px] text-[#858585] hover:text-red-400 transition-colors">🗑️</button>
+                          </div>
+                        </div>
+                        {/* 제목 (키와 다를 경우만) */}
+                        {entry.title && entry.title !== entry.key && (
+                          <p className="text-[#cccccc] font-semibold text-[10px] mb-0.5">{entry.title}</p>
+                        )}
+                        {/* 내용 미리보기 */}
+                        <p className="text-[#969696] text-[9px] leading-relaxed line-clamp-2 break-words">{entry.content}</p>
+                        {/* 태그 + 작성자 + 날짜 */}
+                        <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                          {entry.tags.map(tag => (
+                            <span key={tag} onClick={() => setMemSearch(tag)} className="px-1 py-0.5 bg-cyan-500/10 text-cyan-400 rounded text-[8px] font-mono cursor-pointer hover:bg-cyan-500/20 transition-colors">#{tag}</span>
+                          ))}
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ml-auto ${entry.author === 'claude' ? 'bg-green-500/15 text-green-400' : entry.author === 'gemini' ? 'bg-blue-500/15 text-blue-400' : 'bg-white/10 text-white/50'}`}>{entry.author}</span>
+                          <span className="text-[#858585] text-[8px] font-mono">{entry.updated_at.slice(5, 16).replace('T', ' ')}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* 저장 폼 또는 추가 버튼 */}
+                {showMemForm ? (
+                  <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
+                    <div className="text-[9px] text-[#858585] font-bold uppercase tracking-wider">
+                      {editingMemKey ? `✏️ 수정: ${editingMemKey}` : '+ 새 메모리 항목'}
+                    </div>
+                    <input
+                      type="text"
+                      value={memKey}
+                      onChange={e => setMemKey(e.target.value)}
+                      placeholder="키 (예: db_schema, auth_method)"
+                      disabled={!!editingMemKey}
+                      className="w-full bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+                    />
+                    <input
+                      type="text"
+                      value={memTitle}
+                      onChange={e => setMemTitle(e.target.value)}
+                      placeholder="제목 (선택, 비워두면 키 사용)"
+                      className="w-full bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors"
+                    />
+                    <textarea
+                      value={memContent}
+                      onChange={e => setMemContent(e.target.value)}
+                      placeholder="내용 (에이전트가 공유할 정보)"
+                      rows={4}
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors resize-none"
+                    />
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        value={memTags}
+                        onChange={e => setMemTags(e.target.value)}
+                        placeholder="태그 (쉼표 구분)"
+                        className="flex-1 bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors"
+                      />
+                      <select value={memAuthor} onChange={e => setMemAuthor(e.target.value)} className="bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
+                        <option value="claude">Claude</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="user">User</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={saveMemory} disabled={!memKey.trim() || !memContent.trim()} className="flex-1 py-1.5 bg-cyan-500/80 hover:bg-cyan-500 disabled:opacity-30 text-black rounded text-[10px] font-black transition-colors">저장</button>
+                      <button onClick={() => { setShowMemForm(false); setEditingMemKey(null); setMemKey(''); setMemTitle(''); setMemContent(''); setMemTags(''); }} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[10px] transition-colors">취소</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setShowMemForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-cyan-500/40 hover:bg-cyan-500/5 rounded text-[10px] text-[#858585] hover:text-cyan-400 transition-colors flex items-center justify-center gap-1.5">
+                    <Plus className="w-3 h-3" /> 새 메모리 항목 추가
+                  </button>
+                )}
+              </div>
+            ) : activeTab === 'git' ? (
+              /* ── Git 실시간 감시 패널 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 경로 입력 (모니터링 대상 변경) */}
+                <input
+                  type="text"
+                  value={gitPath}
+                  onChange={e => setGitPath(e.target.value)}
+                  onBlur={() => setGitPath(gitPath.trim() || currentPath)}
+                  placeholder="Git 저장소 경로..."
+                  className="w-full bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors font-mono shrink-0"
+                />
+
+                {!gitStatus || !gitStatus.is_git_repo ? (
+                  <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                    <GitBranch className="w-7 h-7 opacity-20" />
+                    {gitStatus?.error ? gitStatus.error : 'Git 저장소가 아닙니다'}
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
+                    {/* 브랜치 + ahead/behind */}
+                    <div className="p-2 rounded border border-white/10 bg-white/2">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <GitBranch className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="text-[11px] font-bold text-primary font-mono">{gitStatus.branch}</span>
+                        {gitStatus.ahead > 0 && (
+                          <span className="flex items-center gap-0.5 text-[9px] text-green-400 font-bold ml-auto">
+                            <ArrowUp className="w-3 h-3" />{gitStatus.ahead}
+                          </span>
+                        )}
+                        {gitStatus.behind > 0 && (
+                          <span className="flex items-center gap-0.5 text-[9px] text-orange-400 font-bold ml-auto">
+                            <ArrowDown className="w-3 h-3" />{gitStatus.behind}
+                          </span>
+                        )}
+                      </div>
+                      {/* 요약 통계 행 */}
+                      <div className="flex gap-2 text-[9px] font-mono">
+                        <span className="text-green-400">S:{gitStatus.staged.length}</span>
+                        <span className="text-yellow-400">M:{gitStatus.unstaged.length}</span>
+                        <span className="text-[#858585]">?:{gitStatus.untracked.length}</span>
+                        {gitStatus.conflicts.length > 0 && (
+                          <span className="text-red-400 font-black animate-pulse">⚠ C:{gitStatus.conflicts.length}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 충돌 파일 (최우선 경고) */}
+                    {gitStatus.conflicts.length > 0 && (
+                      <div className="p-2 rounded border border-red-500/40 bg-red-500/5">
+                        <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-red-400">
+                          <AlertTriangle className="w-3.5 h-3.5" /> 충돌 파일 ({gitStatus.conflicts.length})
+                        </div>
+                        {gitStatus.conflicts.map(f => (
+                          <div key={f} className="text-[9px] font-mono text-red-300 pl-4 py-0.5 truncate">{f}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 스테이징된 파일 */}
+                    {gitStatus.staged.length > 0 && (
+                      <div className="p-2 rounded border border-green-500/20 bg-green-500/3">
+                        <div className="text-[9px] font-bold text-green-400 mb-1">스테이징됨 ({gitStatus.staged.length})</div>
+                        {gitStatus.staged.slice(0, 8).map(f => (
+                          <div key={f} className="text-[9px] font-mono text-green-300/70 pl-2 py-0.5 truncate">+{f}</div>
+                        ))}
+                        {gitStatus.staged.length > 8 && <div className="text-[8px] text-green-400/50 pl-2">... +{gitStatus.staged.length - 8}개 더</div>}
+                      </div>
+                    )}
+
+                    {/* 수정됨 (unstaged) */}
+                    {gitStatus.unstaged.length > 0 && (
+                      <div className="p-2 rounded border border-yellow-500/20 bg-yellow-500/3">
+                        <div className="text-[9px] font-bold text-yellow-400 mb-1">수정됨 (unstaged) ({gitStatus.unstaged.length})</div>
+                        {gitStatus.unstaged.slice(0, 8).map(f => (
+                          <div key={f} className="text-[9px] font-mono text-yellow-300/70 pl-2 py-0.5 truncate">~{f}</div>
+                        ))}
+                        {gitStatus.unstaged.length > 8 && <div className="text-[8px] text-yellow-400/50 pl-2">... +{gitStatus.unstaged.length - 8}개 더</div>}
+                      </div>
+                    )}
+
+                    {/* 미추적 파일 */}
+                    {gitStatus.untracked.length > 0 && (
+                      <div className="p-2 rounded border border-white/10">
+                        <div className="text-[9px] font-bold text-[#858585] mb-1">미추적 ({gitStatus.untracked.length})</div>
+                        {gitStatus.untracked.slice(0, 5).map(f => (
+                          <div key={f} className="text-[9px] font-mono text-[#858585] pl-2 py-0.5 truncate">?{f}</div>
+                        ))}
+                        {gitStatus.untracked.length > 5 && <div className="text-[8px] text-[#858585]/50 pl-2">... +{gitStatus.untracked.length - 5}개 더</div>}
+                      </div>
+                    )}
+
+                    {/* 최근 커밋 로그 */}
+                    {gitLog.length > 0 && (
+                      <div className="p-2 rounded border border-white/10">
+                        <div className="flex items-center gap-1.5 mb-1.5 text-[9px] font-bold text-[#969696]">
+                          <GitCommitIcon className="w-3 h-3" /> 최근 커밋
+                        </div>
+                        {gitLog.slice(0, 8).map(commit => (
+                          <div key={commit.hash} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1 transition-colors">
+                            <span className="font-mono text-[8px] text-primary shrink-0 mt-0.5">{commit.hash}</span>
+                            <span className="text-[9px] text-[#cccccc] flex-1 truncate leading-tight">{commit.message}</span>
+                            <span className="text-[8px] text-[#858585] shrink-0 font-mono">{commit.date.replace(' ago', '')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             ) : (
