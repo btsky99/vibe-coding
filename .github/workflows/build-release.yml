@@ -108,5 +108,5 @@ jobs:
             - Commit: ${{ github.sha }}
             - 빌드 시간: ${{ github.event.head_commit.timestamp }}
           files: |
-            .ai_monitor/dist/vibe-coding-setup.exe
+            .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.tag }}.exe
             .ai_monitor/dist/vibe-coding.exe
