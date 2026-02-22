@@ -60,6 +60,12 @@ STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
 DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 LOCKS_FILE = DATA_DIR / "locks.json"
+# 에이전트 간 메시지 채널 파일
+MESSAGES_FILE = DATA_DIR / "messages.jsonl"
+# 에이전트 간 공유 작업 큐 파일 (JSON 배열 — 업데이트/삭제 지원)
+TASKS_FILE = DATA_DIR / "tasks.json"
+# 에이전트 간 공유 메모리/지식 베이스 (key → entry 딕셔너리)
+MEMORY_FILE = DATA_DIR / "shared_memory.json"
 
 # 데이터 디렉토리 생성 보장
 if not DATA_DIR.exists():
@@ -69,6 +75,15 @@ if not DATA_DIR.exists():
 if not LOCKS_FILE.exists():
     with open(LOCKS_FILE, 'w', encoding='utf-8') as f:
         json.dump({}, f)
+
+# 메시지 채널 파일 초기화 (없을 경우)
+if not MESSAGES_FILE.exists():
+    MESSAGES_FILE.touch()
+
+# 작업 큐 파일 초기화 (없을 경우)
+if not TASKS_FILE.exists():
+    with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+        json.dump([], f)
 
 print("Static files directory:", STATIC_DIR)
 if not STATIC_DIR.exists():
@@ -322,6 +337,34 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(locks).encode('utf-8'))
             else:
                 self.wfile.write(json.dumps({}).encode('utf-8'))
+        elif parsed_path.path == '/api/messages':
+            # 에이전트 간 메시지 채널 목록 반환 (최신 100개)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            messages = []
+            if MESSAGES_FILE.exists():
+                with open(MESSAGES_FILE, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            try:
+                                messages.append(json.loads(line.strip()))
+                            except Exception:
+                                pass
+            # 최신 100개만 반환 (오래된 메시지 토큰 낭비 방지)
+            self.wfile.write(json.dumps(messages[-100:], ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/tasks':
+            # 공유 작업 큐 전체 목록 반환
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            tasks = []
+            if TASKS_FILE.exists():
+                with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                    tasks = json.load(f)
+            self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
         else:
             # 정적 파일 서비스 로직 (Vite 빌드 결과물)
             # 요청 경로를 정리
@@ -466,21 +509,189 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # 하이브 로그에 기록
                 if log_msg:
                     try:
-                        LOG_FILE = DATA_DIR / "task_logs.jsonl"
+                        sys.path.append(str(BASE_DIR / 'src'))
+                        from secure import mask_sensitive_data
+                        safe_msg = mask_sensitive_data(log_msg)
+                        
                         log_entry = {
+                            "session_id": f"lock_{int(time.time())}_{agent}",
                             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                             "agent": agent,
-                            "terminal_id": f"TERM_API",
-                            "trigger": log_msg
+                            "terminal_id": "LOCK_API",
+                            "project": "hive",
+                            "status": "success",
+                            "trigger": safe_msg,
+                            "ts_start": time.strftime("%Y-%m-%dT%H:%M:%S")
                         }
-                        with open(LOG_FILE, 'a', encoding='utf-8') as lf:
+                        with open(SESSIONS_FILE, 'a', encoding='utf-8') as lf:
                             lf.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"Error logging lock to sessions: {e}")
                 
                 self.wfile.write(json.dumps({"status": "success", "locks": locks}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/message':
+            # 에이전트 간 메시지 전송 — messages.jsonl에 추가 후 SSE 로그에도 기록
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+
+                # 메시지 객체 생성 (ID: 밀리초 타임스탬프)
+                msg = {
+                    'id': str(int(time.time() * 1000)),
+                    'timestamp': time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    'from': str(data.get('from', 'unknown')),
+                    'to': str(data.get('to', 'all')),
+                    'type': str(data.get('type', 'info')),
+                    'content': str(data.get('content', '')),
+                    'read': False,
+                }
+
+                # messages.jsonl에 추가 (append-only)
+                with open(MESSAGES_FILE, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(msg, ensure_ascii=False) + '\n')
+
+                # SSE 스트림(sessions.jsonl)에도 알림 기록하여 로그 뷰에 반영
+                try:
+                    # secure_masking을 위해 import
+                    sys.path.append(str(BASE_DIR / 'src'))
+                    from secure import mask_sensitive_data
+                    safe_content = mask_sensitive_data(msg['content'])
+                    
+                    log_entry = {
+                        "session_id": f"msg_{int(time.time())}",
+                        "timestamp": msg['timestamp'],
+                        "agent": msg['from'],
+                        "terminal_id": 'MSG_CHANNEL',
+                        "project": "hive",
+                        "status": "success",
+                        "trigger": f"[메시지→{msg['to']}] {safe_content[:100]}",
+                        "ts_start": msg['timestamp']
+                    }
+                    with open(SESSIONS_FILE, 'a', encoding='utf-8') as lf:
+                        lf.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+                except Exception as e:
+                    print(f"Error logging message to sessions: {e}")
+
+                self.wfile.write(json.dumps({'status': 'success', 'msg': msg}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/tasks':
+            # 새 작업 생성 — tasks.json 배열에 추가
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+
+                now = time.strftime('%Y-%m-%dT%H:%M:%S')
+                task = {
+                    'id': str(int(time.time() * 1000)),
+                    'timestamp': now,
+                    'updated_at': now,
+                    'title': str(data.get('title', '제목 없음')),
+                    'description': str(data.get('description', '')),
+                    'status': 'pending',
+                    'assigned_to': str(data.get('assigned_to', 'all')),
+                    'priority': str(data.get('priority', 'medium')),
+                    'created_by': str(data.get('created_by', 'user')),
+                }
+
+                # 기존 작업 목록 읽기 후 새 항목 추가
+                tasks = []
+                if TASKS_FILE.exists():
+                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                        tasks = json.load(f)
+                tasks.append(task)
+                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+
+                # SSE 로그에도 반영 (태스크 보드 알림)
+                try:
+                    log_entry = {
+                        'timestamp': now,
+                        'agent': task['created_by'],
+                        'terminal_id': 'TASK_BOARD',
+                        'project': 'hive',
+                        'status': 'success',
+                        'trigger': f"[새 작업] {task['title']} → {task['assigned_to']}",
+                        'ts_start': now,
+                    }
+                    with open(SESSIONS_FILE, 'a', encoding='utf-8') as lf:
+                        lf.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+                except Exception:
+                    pass
+
+                self.wfile.write(json.dumps({'status': 'success', 'task': task}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/tasks/update':
+            # 기존 작업 상태/담당자 등 업데이트
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+
+                task_id = str(data.get('id', ''))
+                tasks = []
+                if TASKS_FILE.exists():
+                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                        tasks = json.load(f)
+
+                updated_task = None
+                for i, t in enumerate(tasks):
+                    if t['id'] == task_id:
+                        # 허용된 필드만 업데이트 (임의 키 주입 방지)
+                        for key in ('status', 'assigned_to', 'priority', 'title', 'description'):
+                            if key in data:
+                                tasks[i][key] = str(data[key])
+                        tasks[i]['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+                        updated_task = tasks[i]
+                        break
+
+                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+
+                self.wfile.write(json.dumps({'status': 'success', 'task': updated_task}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/tasks/delete':
+            # 작업 삭제 (id 기준 필터링)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+
+                task_id = str(data.get('id', ''))
+                tasks = []
+                if TASKS_FILE.exists():
+                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                        tasks = json.load(f)
+
+                tasks = [t for t in tasks if t['id'] != task_id]
+                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+
+                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
@@ -620,12 +831,13 @@ if __name__ == '__main__':
     try:
         server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
         print(f"Nexus View SSE Log Server started on port {HTTP_PORT}")
-        threading.Thread(target=lambda: open_app_window(f"http://localhost:{HTTP_PORT}"), daemon=True).start()
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        server.server_close()
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        
+        import webview
+        webview.create_window('Nexus View', f"http://localhost:{HTTP_PORT}", width=1400, height=900)
+        webview.start()
     except OSError:
-        open_app_window(f"http://localhost:{HTTP_PORT}")
+        import webview
+        webview.create_window('Nexus View', f"http://localhost:{HTTP_PORT}", width=1400, height=900)
+        webview.start()
         sys.exit(0)

@@ -1,6 +1,14 @@
 import sys
 import os
 from datetime import datetime
+import json
+
+# secure 모듈을 임포트하기 위해 .ai_monitor/src 경로를 sys.path에 추가
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '.ai_monitor', 'src'))
+try:
+    from secure import mask_sensitive_data
+except ImportError:
+    def mask_sensitive_data(text): return text
 
 def log_task(agent_name, task_summary):
     """
@@ -15,13 +23,15 @@ def log_task(agent_name, task_summary):
     archive_file = os.path.join(log_dir, "task_logs_archive.jsonl")
     MAX_LINES = 50  # 최신 로그 유지 갯수 (AI 토큰 최적화)
     
+    # 보안 마스킹 처리 적용 (API Key, 토큰 등 숨김)
+    safe_summary = mask_sensitive_data(task_summary)
+    
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "agent": agent_name,
-        "task": task_summary
+        "task": safe_summary
     }
     
-    import json
     new_line = json.dumps(log_entry, ensure_ascii=False) + "\n"
     
     lines = []
@@ -41,7 +51,21 @@ def log_task(agent_name, task_summary):
     with open(log_file, "w", encoding="utf-8") as f:
         f.writelines(lines)
     
-    print(f"[OK] [{agent_name}] Task logged to Hive: {task_summary}")
+    # sessions.jsonl 에도 연동하여 웹 대시보드(Nexus View) SSE 스트림에 실시간으로 표시되도록 추가
+    sessions_file = os.path.join(log_dir, "sessions.jsonl")
+    session_entry = {
+        "session_id": f"hive_{datetime.now().strftime('%H%M%S')}",
+        "terminal_id": "HIVE_BRIDGE",
+        "project": "hive",
+        "agent": agent_name,
+        "trigger": safe_summary,
+        "status": "success",
+        "ts_start": datetime.now().isoformat()
+    }
+    with open(sessions_file, "a", encoding="utf-8") as sf:
+        sf.write(json.dumps(session_entry, ensure_ascii=False) + "\n")
+    
+    print(f"[OK] [{agent_name}] Task logged to Hive: {safe_summary}")
 
 if __name__ == "__main__":
     if len(sys.argv) >= 3:

@@ -10,11 +10,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { 
-  Activity, Menu, Terminal, RotateCw, 
-  ChevronLeft, X, Zap, Search, Settings, 
+import {
+  Activity, Menu, Terminal, RotateCw,
+  ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
-  Trash2, LayoutDashboard
+  Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -25,7 +25,7 @@ import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder } from 'react-ico
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord } from './types';
+import { LogRecord, AgentMessage, Task } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -118,6 +118,132 @@ function App() {
     const interval = setInterval(fetchLocks, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // ─── 에이전트 간 메시지 채널 상태 ───────────────────────────────────
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [lastSeenMsgCount, setLastSeenMsgCount] = useState(0);
+  const [msgFrom, setMsgFrom] = useState('claude');
+  const [msgTo, setMsgTo] = useState('all');
+  const [msgType, setMsgType] = useState('info');
+  const [msgContent, setMsgContent] = useState('');
+
+  // 읽지 않은 메시지 수 — 메시지 탭을 열면 0으로 초기화
+  const unreadMsgCount = activeTab === 'messages' ? 0 : Math.max(0, messages.length - lastSeenMsgCount);
+
+  // 메시지 탭 진입 시 읽음 처리
+  useEffect(() => {
+    if (activeTab === 'messages') setLastSeenMsgCount(messages.length);
+  }, [activeTab, messages.length]);
+
+  // 메시지 채널 폴링 (3초 간격)
+  useEffect(() => {
+    const fetchMessages = () => {
+      fetch(`${API_BASE}/api/messages`)
+        .then(res => res.json())
+        .then(data => setMessages(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    };
+    fetchMessages();
+    const interval = setInterval(fetchMessages, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── 태스크 보드 상태 ─────────────────────────────────────────────
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'in_progress' | 'done'>('all');
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDesc, setNewTaskDesc] = useState('');
+  const [newTaskAssignee, setNewTaskAssignee] = useState('all');
+  const [newTaskPriority, setNewTaskPriority] = useState<'high' | 'medium' | 'low'>('medium');
+
+  // 활성 작업 수 배지 (pending + in_progress)
+  const activeTaskCount = tasks.filter(t => t.status !== 'done').length;
+
+  // 태스크 폴링 (4초 간격)
+  useEffect(() => {
+    const fetchTasks = () => {
+      fetch(`${API_BASE}/api/tasks`)
+        .then(res => res.json())
+        .then(data => setTasks(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    };
+    fetchTasks();
+    const interval = setInterval(fetchTasks, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 새 작업 생성
+  const createTask = () => {
+    if (!newTaskTitle.trim()) return;
+    fetch(`${API_BASE}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: newTaskTitle,
+        description: newTaskDesc,
+        assigned_to: newTaskAssignee,
+        priority: newTaskPriority,
+        created_by: 'user',
+      }),
+    })
+      .then(res => res.json())
+      .then(() => {
+        setNewTaskTitle('');
+        setNewTaskDesc('');
+        setShowTaskForm(false);
+        return fetch(`${API_BASE}/api/tasks`);
+      })
+      .then(res => res.json())
+      .then(data => setTasks(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
+  // 작업 상태/필드 업데이트
+  const updateTask = (id: string, fields: Partial<Task>) => {
+    fetch(`${API_BASE}/api/tasks/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...fields }),
+    })
+      .then(res => res.json())
+      .then(() => fetch(`${API_BASE}/api/tasks`))
+      .then(res => res.json())
+      .then(data => setTasks(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
+  // 작업 삭제
+  const deleteTask = (id: string) => {
+    fetch(`${API_BASE}/api/tasks/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+      .then(res => res.json())
+      .then(() => fetch(`${API_BASE}/api/tasks`))
+      .then(res => res.json())
+      .then(data => setTasks(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
+  // 메시지 전송
+  const sendMessage = () => {
+    if (!msgContent.trim()) return;
+    fetch(`${API_BASE}/api/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: msgFrom, to: msgTo, type: msgType, content: msgContent }),
+    })
+      .then(res => res.json())
+      .then(() => {
+        setMsgContent('');
+        return fetch(`${API_BASE}/api/messages`);
+      })
+      .then(res => res.json())
+      .then(data => setMessages(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
 
   // Quick View 팝업 상태 (다중 창 지원)
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
@@ -392,6 +518,24 @@ function App() {
           <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Zap className="w-6 h-6" />
           </button>
+          {/* 메시지 채널 탭 — 읽지 않은 메시지 수 배지 표시 */}
+          <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <MessageSquare className="w-6 h-6" />
+            {unreadMsgCount > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
+                {unreadMsgCount > 9 ? '9+' : unreadMsgCount}
+              </span>
+            )}
+          </button>
+          {/* 태스크 보드 탭 — 활성 작업 수 배지 표시 */}
+          <button onClick={() => { setActiveTab('tasks'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'tasks' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <ClipboardList className="w-6 h-6" />
+            {activeTaskCount > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-yellow-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
+                {activeTaskCount > 9 ? '9+' : activeTaskCount}
+              </span>
+            )}
+          </button>
           <div className="mt-auto flex flex-col gap-4">
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Info className="w-6 h-6" /></button>
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Settings className="w-6 h-6" /></button>
@@ -404,35 +548,239 @@ function App() {
           className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : 'Hive Mind'}</span>
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : 'Hive Mind'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
           <div className="p-3 flex-1 overflow-hidden flex flex-col">
-            <select
-              value={drives.find(d => currentPath.startsWith(d)) || currentPath}
-              onChange={(e) => setCurrentPath(e.target.value)}
-              className="w-full bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer mb-4"
-            >
-              <option value="D:/vibe-coding">vibe-coding</option>
-              {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
-            </select>
+            {activeTab === 'messages' ? (
+              /* ── 메시지 채널 패널 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 메시지 목록 (최신순 — 역순 표시) */}
+                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                  {messages.length === 0 ? (
+                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                      <MessageSquare className="w-7 h-7 opacity-20" />
+                      아직 메시지가 없습니다
+                    </div>
+                  ) : (
+                    [...messages].reverse().map(msg => (
+                      <div key={msg.id} className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors">
+                        {/* 발신자 → 수신자 + 타입 배지 */}
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1 font-mono font-bold">
+                            <span className="text-success">{msg.from}</span>
+                            <span className="text-white/30 font-normal">→</span>
+                            <span className="text-accent">{msg.to}</span>
+                          </div>
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                            msg.type === 'handoff'       ? 'bg-yellow-500/20 text-yellow-400' :
+                            msg.type === 'request'       ? 'bg-blue-500/20 text-blue-400' :
+                            msg.type === 'task_complete' ? 'bg-green-500/20 text-green-400' :
+                            msg.type === 'warning'       ? 'bg-red-500/20 text-red-400' :
+                            'bg-white/10 text-white/50'
+                          }`}>{msg.type}</span>
+                        </div>
+                        {/* 메시지 본문 */}
+                        <p className="text-[#cccccc] leading-relaxed break-words">{msg.content}</p>
+                        {/* 타임스탬프 */}
+                        <div className="text-[#858585] mt-1 text-[9px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
 
-            <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
-              <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
-                <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
-              </button>
-              {items.map(item => (
-                <button
-                  key={item.path}
-                  onClick={() => handleFileClick(item)}
-                  className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] hover:bg-primary/20'}`}
+                {/* 메시지 작성 폼 */}
+                <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
+                  {/* 발신자 → 수신자 선택 */}
+                  <div className="flex gap-1 items-center">
+                    <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                      <option value="claude">Claude</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="system">System</option>
+                    </select>
+                    <span className="text-white/30 text-[10px] px-0.5">→</span>
+                    <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                      <option value="all">All</option>
+                      <option value="claude">Claude</option>
+                      <option value="gemini">Gemini</option>
+                    </select>
+                  </div>
+                  {/* 메시지 유형 선택 */}
+                  <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                    <option value="info">ℹ️ 정보 공유</option>
+                    <option value="handoff">🤝 핸드오프 (작업 위임)</option>
+                    <option value="request">📋 작업 요청</option>
+                    <option value="task_complete">✅ 완료 알림</option>
+                    <option value="warning">⚠️ 경고</option>
+                  </select>
+                  {/* 메시지 본문 입력 */}
+                  <textarea
+                    value={msgContent}
+                    onChange={e => setMsgContent(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) sendMessage(); }}
+                    placeholder="메시지 입력... (Ctrl+Enter 전송)"
+                    rows={3}
+                    className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!msgContent.trim()}
+                    className="w-full py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded text-[10px] font-bold transition-colors"
+                  >
+                    전송 (Ctrl+Enter)
+                  </button>
+                </div>
+              </div>
+            ) : activeTab === 'tasks' ? (
+              /* ── 태스크 보드 패널 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 상태 필터 탭 */}
+                <div className="flex gap-1 shrink-0">
+                  {(['all', 'pending', 'in_progress', 'done'] as const).map(s => {
+                    const label = s === 'all' ? '전체' : s === 'pending' ? '할 일' : s === 'in_progress' ? '진행' : '완료';
+                    const count = s === 'all' ? tasks.length : tasks.filter(t => t.status === s).length;
+                    return (
+                      <button key={s} onClick={() => setTaskFilter(s)} className={`flex-1 py-1 rounded text-[9px] font-bold transition-colors ${taskFilter === s ? 'bg-primary text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}>
+                        {label}{count > 0 && ` (${count})`}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 작업 목록 */}
+                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
+                  {tasks.filter(t => taskFilter === 'all' || t.status === taskFilter).length === 0 ? (
+                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                      <ClipboardList className="w-7 h-7 opacity-20" />
+                      작업이 없습니다
+                    </div>
+                  ) : (
+                    tasks
+                      .filter(t => taskFilter === 'all' || t.status === taskFilter)
+                      .slice().reverse()
+                      .map(task => {
+                        const priorityDot =
+                          task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
+                        const statusLabel =
+                          task.status === 'pending' ? '할 일' : task.status === 'in_progress' ? '진행 중' : '완료';
+                        return (
+                          <div key={task.id} className={`p-2 rounded border text-[10px] transition-colors ${task.status === 'done' ? 'border-white/5 opacity-50' : 'border-white/10 hover:border-white/20'}`}>
+                            {/* 제목 + 우선순위 */}
+                            <div className="flex items-start gap-1.5 mb-1">
+                              <span className="text-[11px] shrink-0">{priorityDot}</span>
+                              <span className={`font-bold flex-1 break-words leading-tight ${task.status === 'done' ? 'line-through text-[#858585]' : 'text-[#cccccc]'}`}>{task.title}</span>
+                            </div>
+                            {/* 설명 (있을 경우) */}
+                            {task.description && (
+                              <p className="text-[#858585] text-[9px] mb-1.5 leading-relaxed pl-4">{task.description}</p>
+                            )}
+                            {/* 담당자 + 상태 */}
+                            <div className="flex items-center justify-between pl-4 mb-1.5">
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold font-mono ${
+                                task.assigned_to === 'claude'  ? 'bg-green-500/15 text-green-400' :
+                                task.assigned_to === 'gemini' ? 'bg-blue-500/15 text-blue-400' :
+                                'bg-white/10 text-white/50'
+                              }`}>{task.assigned_to}</span>
+                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
+                                task.status === 'pending'     ? 'bg-white/10 text-[#858585]' :
+                                task.status === 'in_progress' ? 'bg-primary/20 text-primary' :
+                                'bg-green-500/20 text-green-400'
+                              }`}>{statusLabel}</span>
+                            </div>
+                            {/* 액션 버튼 */}
+                            <div className="flex gap-1 pl-4">
+                              {task.status === 'pending' && (
+                                <button onClick={() => updateTask(task.id, { status: 'in_progress' })} className="flex-1 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[9px] font-bold transition-colors">▶ 시작</button>
+                              )}
+                              {task.status === 'in_progress' && (
+                                <>
+                                  <button onClick={() => updateTask(task.id, { status: 'done' })} className="flex-1 py-0.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 rounded text-[9px] font-bold transition-colors">✅ 완료</button>
+                                  <button onClick={() => updateTask(task.id, { status: 'pending' })} className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩</button>
+                                </>
+                              )}
+                              {task.status === 'done' && (
+                                <button onClick={() => updateTask(task.id, { status: 'pending' })} className="flex-1 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩ 다시</button>
+                              )}
+                              <button onClick={() => deleteTask(task.id)} className="px-1.5 py-0.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 rounded text-[9px] transition-colors" title="삭제">🗑️</button>
+                            </div>
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+
+                {/* 새 작업 추가 */}
+                {showTaskForm ? (
+                  <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
+                    <input
+                      type="text"
+                      value={newTaskTitle}
+                      onChange={e => setNewTaskTitle(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') createTask(); if (e.key === 'Escape') setShowTaskForm(false); }}
+                      placeholder="작업 제목 (필수)"
+                      autoFocus
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
+                    />
+                    <input
+                      type="text"
+                      value={newTaskDesc}
+                      onChange={e => setNewTaskDesc(e.target.value)}
+                      placeholder="상세 설명 (선택)"
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
+                    />
+                    <div className="flex gap-1">
+                      <select value={newTaskAssignee} onChange={e => setNewTaskAssignee(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
+                        <option value="all">All</option>
+                        <option value="claude">Claude</option>
+                        <option value="gemini">Gemini</option>
+                      </select>
+                      <select value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
+                        <option value="high">🔴 높음</option>
+                        <option value="medium">🟡 보통</option>
+                        <option value="low">🟢 낮음</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={createTask} disabled={!newTaskTitle.trim()} className="flex-1 py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 text-white rounded text-[10px] font-bold transition-colors">추가</button>
+                      <button onClick={() => setShowTaskForm(false)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[10px] transition-colors">취소</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded text-[10px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-1.5">
+                    <Plus className="w-3 h-3" /> 새 작업 추가
+                  </button>
+                )}
+              </div>
+            ) : (
+              /* ── 파일 탐색기 (기존) ── */
+              <>
+                <select
+                  value={drives.find(d => currentPath.startsWith(d)) || currentPath}
+                  onChange={(e) => setCurrentPath(e.target.value)}
+                  className="w-full bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer mb-4"
                 >
-                  {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
-                  <span className="truncate">{item.name}</span>
-                </button>
-              ))}
-            </div>
+                  <option value="D:/vibe-coding">vibe-coding</option>
+                  {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
+                </select>
+
+                <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
+                  <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
+                    <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
+                  </button>
+                  {items.map(item => (
+                    <button
+                      key={item.path}
+                      onClick={() => handleFileClick(item)}
+                      className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] hover:bg-primary/20'}`}
+                    >
+                      {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
+                      <span className="truncate">{item.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </motion.div>
 
@@ -482,7 +830,7 @@ function App() {
               'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} />
               ))}
             </div>
           </main>
@@ -595,7 +943,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string> }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -625,6 +973,18 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks }: { slo
 
   // 현재 에이전트가 잠근 파일 찾기
   const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
+
+  // 이 에이전트에게 할당된 진행 중 / 대기 작업 수
+  const myPendingTasks = isTerminalMode
+    ? tasks.filter(t => (t.assigned_to === activeAgent || t.assigned_to === 'all') && t.status !== 'done')
+    : [];
+
+  // 현재 에이전트에게 온 최근 메시지 (최근 10분 이내, 터미널 실행 중일 때만 표시)
+  const recentAgentMsgs = isTerminalMode ? messages.filter(m => {
+    const isForMe = m.to === activeAgent || m.to === 'all';
+    const isRecent = (Date.now() - new Date(m.timestamp).getTime()) < 10 * 60 * 1000;
+    return isForMe && isRecent;
+  }) : [];
 
   const saveShortcuts = (newShortcuts: Shortcut[]) => {
     setShortcuts(newShortcuts);
@@ -769,6 +1129,26 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks }: { slo
             <div className="flex items-center gap-1.5 ml-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] text-yellow-500 animate-pulse shrink-0">
               <Zap className="w-2.5 h-2.5" />
               <span className="font-mono">LOCK: {lockedFileByAgent.split(/[\\\/]/).pop()}</span>
+            </div>
+          )}
+          {/* 이 에이전트에게 할당된 작업 수 배지 */}
+          {myPendingTasks.length > 0 && (
+            <div
+              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] text-yellow-400 shrink-0"
+              title={myPendingTasks.map(t => t.title).join(', ')}
+            >
+              <ClipboardList className="w-2.5 h-2.5" />
+              <span>{myPendingTasks.length}개 작업</span>
+            </div>
+          )}
+          {/* 이 에이전트에게 온 최근 메시지 알림 배지 */}
+          {recentAgentMsgs.length > 0 && (
+            <div
+              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-primary/10 border border-primary/30 rounded text-[9px] text-primary shrink-0 animate-pulse"
+              title={recentAgentMsgs[recentAgentMsgs.length - 1].content}
+            >
+              <MessageSquare className="w-2.5 h-2.5" />
+              <span>{recentAgentMsgs.length}개 메시지</span>
             </div>
           )}
         </div>

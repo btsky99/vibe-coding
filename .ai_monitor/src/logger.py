@@ -40,31 +40,15 @@ def rotate_log_if_needed(max_mb: int):
         except Exception as e:
             print(f"Failed to rotate log: {e}", file=sys.stderr)
 
-def read_all_sessions() -> dict:
-    """sessions.jsonl의 모든 줄을 읽어 session_id를 키로 하는 dict 반환"""
-    sessions = {}
-    if not SESSIONS_FILE.exists():
-        return sessions
-    
-    with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-                sid = record.get("session_id")
-                if sid:
-                    sessions[sid] = record
-            except json.JSONDecodeError:
-                continue
-    return sessions
-
-def write_all_sessions(sessions: dict):
-    """dict 데이터를 sessions.jsonl에 덮어씁니다."""
-    with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
-        for sid, record in sessions.items():
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+def append_session_log(record: dict):
+    """dict 데이터를 sessions.jsonl에 추가(append)합니다."""
+    lock = FileLock(LOCK_FILE, timeout=5)
+    try:
+        with lock:
+            with open(SESSIONS_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"Error appending session log: {e}", file=sys.stderr)
 
 def log_start(terminal_id: str, project: str, project_path: str, agent: str, skill: str, trigger: str) -> str:
     """새로운 작업 세션을 시작하고 session_id를 반환합니다."""
@@ -78,79 +62,46 @@ def log_start(terminal_id: str, project: str, project_path: str, agent: str, ski
         "session_id": session_id,
         "terminal_id": terminal_id,
         "ts_start": now,
-        "ts_end": "",
         "project": project,
-        "project_path": project_path,
         "agent": agent,
-        "skill": skill,
         "trigger": mask_sensitive_data(trigger),
-        "status": "running",
-        "duration_sec": 0,
-        "commit": "",
-        "files_changed": [],
-        "phases": []
+        "status": "running"
     }
     
-    lock = FileLock(LOCK_FILE, timeout=5)
-    try:
-        with lock:
-            sessions = read_all_sessions()
-            sessions[session_id] = record
-            write_all_sessions(sessions)
-    except Exception as e:
-        print(f"Error in log_start: {e}", file=sys.stderr)
-        
+    append_session_log(record)
     return session_id
 
 def log_phase(session_id: str, phase_name: str, status: str, detail: str):
     """특정 세션의 단계를 업데이트합니다."""
-    lock = FileLock(LOCK_FILE, timeout=5)
-    try:
-        with lock:
-            sessions = read_all_sessions()
-            if session_id in sessions:
-                phase_record = {
-                    "name": phase_name,
-                    "status": status,
-                    "detail": mask_sensitive_data(detail),
-                    "ts": datetime.datetime.now().isoformat()
-                }
-                sessions[session_id]["phases"].append(phase_record)
-                write_all_sessions(sessions)
-            else:
-                print(f"Session {session_id} not found.", file=sys.stderr)
-    except Exception as e:
-        print(f"Error in log_phase: {e}", file=sys.stderr)
+    # Append-only 방식이므로, 해당 phase의 상태를 새 로그로 남깁니다.
+    record = {
+        "session_id": session_id,
+        "terminal_id": session_id.split("_")[-1] if "_" in session_id else "UNKNOWN",
+        "project": "phase",
+        "agent": "system",
+        "trigger": f"[{phase_name}] {mask_sensitive_data(detail)}",
+        "status": status,
+        "ts_start": datetime.datetime.now().isoformat()
+    }
+    append_session_log(record)
 
 def log_end(session_id: str, status: str, commit: str = "", files_changed: list = None):
     """작업 세션을 종료 처리합니다."""
     if files_changed is None:
         files_changed = []
-        
-    lock = FileLock(LOCK_FILE, timeout=5)
-    try:
-        with lock:
-            sessions = read_all_sessions()
-            if session_id in sessions:
-                record = sessions[session_id]
-                now = datetime.datetime.now()
-                try:
-                    start_time = datetime.datetime.fromisoformat(record["ts_start"])
-                    duration = int((now - start_time).total_seconds())
-                except ValueError:
-                    duration = 0
-                
-                record["ts_end"] = now.isoformat()
-                record["status"] = status
-                record["duration_sec"] = duration
-                record["commit"] = commit
-                record["files_changed"] = files_changed
-                
-                write_all_sessions(sessions)
-            else:
-                print(f"Session {session_id} not found.", file=sys.stderr)
-    except Exception as e:
-        print(f"Error in log_end: {e}", file=sys.stderr)
+    
+    record = {
+        "session_id": session_id,
+        "terminal_id": session_id.split("_")[-1] if "_" in session_id else "UNKNOWN",
+        "project": "end",
+        "agent": "system",
+        "trigger": f"Session completed. Files changed: {len(files_changed)}",
+        "status": status,
+        "commit": commit,
+        "files_changed": files_changed,
+        "ts_start": datetime.datetime.now().isoformat()
+    }
+    append_session_log(record)
 
 # CLI로 직접 실행 시 명령줄 대응 (안전성을 위해 Base64 페이로드 모드 지원)
 if __name__ == "__main__":
