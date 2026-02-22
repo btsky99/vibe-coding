@@ -3,6 +3,32 @@ import time
 import os
 import mimetypes
 import webbrowser
+import shutil
+import subprocess
+
+
+def open_app_window(url):
+    """Chrome/Edge 앱 모드로 열기 (주소창/탭 없이 GUI처럼 표시)"""
+    chrome = shutil.which("chrome") or shutil.which("google-chrome")
+    edge = shutil.which("msedge")
+    # Windows 기본 경로 확인
+    for path in [
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+    ]:
+        if os.path.isfile(path):
+            if not chrome and "chrome" in path.lower():
+                chrome = path
+            if not edge and "edge" in path.lower():
+                edge = path
+    browser = chrome or edge
+    if browser:
+        subprocess.Popen([browser, f"--app={url}"])
+    else:
+        webbrowser.open(url)
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -17,19 +43,34 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
 if getattr(sys, 'frozen', False):
-    # PyInstaller 패키징 상태 (내장된 데이터 폴더 sys._MEIPASS를 BASE_DIR로 설정)
     BASE_DIR = Path(sys._MEIPASS)
 else:
-    # 일반 스크립트 실행 상태
     BASE_DIR = Path(__file__).resolve().parent
 
-DATA_DIR = Path(sys.executable).resolve().parent / "data" if getattr(sys, 'frozen', False) else BASE_DIR / "data"
+# 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
+STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
+DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
-STATIC_DIR = BASE_DIR / "nexus-view" / "dist"
+
+print("Static files directory:", STATIC_DIR)
+if not STATIC_DIR.exists():
+    print("WARNING: Static directory not found!")
+
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """멀티 스레드 지원 HTTP 서버 (SSE 등 지속적 연결 동시 처리용)"""
     daemon_threads = True
+
+last_heartbeat_time = time.time()
+client_connected_once = False
+
+def monitor_heartbeat():
+    global last_heartbeat_time, client_connected_once
+    while True:
+        time.sleep(5)
+        if client_connected_once and (time.time() - last_heartbeat_time > 15):
+            print("브라우저 창이 닫혀 하트비트가 끊어졌습니다. 서버를 자동 종료합니다...")
+            os._exit(0)
 
 import string
 from urllib.parse import urlparse, parse_qs
@@ -77,6 +118,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     print(f"Server error: {e}")
                     time.sleep(1)
+        elif parsed_path.path == '/api/heartbeat':
+            global last_heartbeat_time, client_connected_once
+            last_heartbeat_time = time.time()
+            client_connected_once = True
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(b"OK")
         elif parsed_path.path == '/api/drives':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -91,6 +140,99 @@ class SSEHandler(BaseHTTPRequestHandler):
             else:
                 drives = ['/']
             self.wfile.write(json.dumps(drives).encode('utf-8'))
+        elif parsed_path.path == '/api/install-gemini-cli':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                import subprocess
+                # Gemini CLI 설치 (전역)
+                subprocess.Popen('cmd.exe /k "echo Installing Gemini CLI... && npm install -g @google/gemini-cli"', shell=True)
+                result = {"status": "success", "message": "Gemini CLI installation started in a new window."}
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            self.wfile.write(json.dumps(result).encode('utf-8'))
+        elif parsed_path.path == '/api/install-claude-code':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                import subprocess
+                # Claude Code 설치 (전역)
+                subprocess.Popen('cmd.exe /k "echo Installing Claude Code... && npm install -g @anthropic-ai/claude-code"', shell=True)
+                result = {"status": "success", "message": "Claude Code installation started in a new window."}
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            self.wfile.write(json.dumps(result).encode('utf-8'))
+        elif parsed_path.path == '/api/shutdown':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "message": "Server shutting down..."}).encode('utf-8'))
+            print("Shutdown requested via API. Exiting in 1 second...")
+            import threading
+            threading.Timer(1.0, lambda: os._exit(0)).start()
+        elif parsed_path.path == '/api/files':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            target_path = query.get('path', [''])[0]
+            items = []
+            if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
+                try:
+                    for entry in os.scandir(target_path):
+                        if not entry.name.startswith('.'):
+                            items.append({
+                                "name": entry.name, 
+                                "path": entry.path.replace('\\', '/'),
+                                "isDir": entry.is_dir()
+                            })
+                except Exception:
+                    pass
+            # 폴더가 먼저 오도록 정렬
+            items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
+            self.wfile.write(json.dumps(items).encode('utf-8'))
+        elif parsed_path.path == '/api/install-skills':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            target_path = query.get('path', [''])[0]
+            
+            result = {"status": "error", "message": "Invalid path"}
+            if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
+                try:
+                    import shutil
+                    # 소스 경로 (설치된 앱의 위치 기준)
+                    # .gemini, scripts, GEMINI.md 등을 복사
+                    source_base = BASE_DIR.parent # 프로젝트 루트로 가정
+                    
+                    # .gemini 복사
+                    gemini_src = source_base / ".gemini"
+                    if gemini_src.exists():
+                        shutil.copytree(gemini_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
+                    
+                    # scripts 복사
+                    scripts_src = source_base / "scripts"
+                    if scripts_src.exists():
+                        shutil.copytree(scripts_src, Path(target_path) / "scripts", dirs_exist_ok=True)
+                        
+                    # GEMINI.md 복사
+                    gemini_md_src = source_base / "GEMINI.md"
+                    if gemini_md_src.exists():
+                        shutil.copy(gemini_md_src, Path(target_path) / "GEMINI.md")
+                        
+                    result = {"status": "success", "message": f"Skills installed to {target_path}"}
+                except Exception as e:
+                    result = {"status": "error", "message": str(e)}
+            
+            self.wfile.write(json.dumps(result).encode('utf-8'))
         elif parsed_path.path == '/api/dirs':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -303,18 +445,19 @@ if __name__ == '__main__':
         update_thread.start()
 
     threading.Thread(target=start_ws_server, daemon=True).start()
+    threading.Thread(target=monitor_heartbeat, daemon=True).start()
     port = 8000
     try:
         server = ThreadedHTTPServer(('0.0.0.0', port), SSEHandler)
         print(f"Nexus View SSE Log Server started on port {port}")
-        # 로컬 웹 대시보드 브라우저 앱 실행
-        webbrowser.open(f"http://localhost:{port}")
+        # 로컬 웹 대시보드 브라우저 앱 실행 (블로킹 방지)
+        threading.Thread(target=lambda: webbrowser.open(f"http://localhost:{port}"), daemon=True).start()
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         server.server_close()
     except OSError:
-        # 이미 8000번 포트가 사용 중 (즉, 서버가 백그라운드에서 구동 중)인 경우
+        # 이미 8000번 포트가 사용 중인 경우
         print("Server is already running. Opening browser...")
-        webbrowser.open(f"http://localhost:{port}")
+        threading.Thread(target=lambda: webbrowser.open(f"http://localhost:{port}"), daemon=True).start()

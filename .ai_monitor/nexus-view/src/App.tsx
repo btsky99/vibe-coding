@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Activity, Menu, Terminal, CheckCircle2, RotateCw, XCircle, FolderTree, Folder, ChevronLeft, X } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { 
+  Activity, Menu, Terminal, RotateCw, 
+  Folder, ChevronLeft, X, Zap, Search, Settings, 
+  Files, Cpu, Info, ChevronRight, ChevronDown,
+  Trash2, LayoutDashboard, FileText
+} from 'lucide-react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -8,13 +13,24 @@ import { LogRecord } from './types';
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [terminalCount, setTerminalCount] = useState(2);
+  const [activeTab, setActiveTab] = useState('explorer');
+  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4-col' | '2x2'>('2');
+  const terminalCount = layoutMode === '1' ? 1 : layoutMode === '2' ? 2 : layoutMode === '3' ? 3 : 4;
   const [logs, setLogs] = useState<LogRecord[]>([]);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+  // 좀비 서버 방지용 하트비트 (창 닫히면 서버 15초 뒤 자동 종료)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch('http://localhost:8000/api/heartbeat').catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // 파일 시스템 탐색 상태
   const [drives, setDrives] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
-  const [directories, setDirectories] = useState<{ name: string, path: string }[]>([]);
+  const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
 
   // 드라이브 목록 가져오기
   useEffect(() => {
@@ -24,155 +40,269 @@ function App() {
       .catch(() => { });
   }, []);
 
-  // 현재 경로의 하위 폴더 가져오기
-  useEffect(() => {
+  // 현재 경로의 항목(폴더/파일) 가져오기
+  const refreshItems = () => {
     if (!currentPath) return;
-    fetch(`http://localhost:8000/api/dirs?path=${encodeURIComponent(currentPath)}`)
+    fetch(`http://localhost:8000/api/files?path=${encodeURIComponent(currentPath)}`)
       .then(res => res.json())
-      .then(data => setDirectories(data))
+      .then(data => setItems(data))
       .catch(() => { });
+  };
+
+  useEffect(() => {
+    refreshItems();
   }, [currentPath]);
 
-  // 상위 폴더로 이동 로직
+  // 스킬 및 도구 설치 로직
+  const installSkills = () => {
+    if (!currentPath) return;
+    if (confirm(`현재 프로젝트(${currentPath})에 하이브 마인드 베이스 스킬을 설치하시겠습니까?`)) {
+      fetch(`http://localhost:8000/api/install-skills?path=${encodeURIComponent(currentPath)}`)
+        .then(res => res.json())
+        .then(data => { alert(data.message); refreshItems(); })
+        .catch(err => alert("설치 실패: " + err));
+    }
+    setActiveMenu(null);
+  };
+
+  const installTool = (tool: string) => {
+    const url = tool === 'gemini' ? 'http://localhost:8000/api/install-gemini-cli' : 'http://localhost:8000/api/install-claude-code';
+    fetch(url).then(res => res.json()).then(data => alert(data.message)).catch(err => alert(err));
+    setActiveMenu(null);
+  };
+
   const goUp = () => {
     const parts = currentPath.replace(/\\/g, '/').split('/').filter(Boolean);
     if (parts.length > 1) {
-      // 일반 폴더 상위 이동
       parts.pop();
       let parentPath = parts.join('/');
-      if (parts.length === 1 && parts[0].includes(':')) {
-        parentPath += '/'; // 루트 드라이브 (예: D:/)
-      }
+      if (parts.length === 1 && parts[0].includes(':')) parentPath += '/';
       setCurrentPath(parentPath);
     }
   };
 
-  // SSE 연동 (추후 파이썬 서버가 띄워질 `http://localhost:8000/stream` 주소)
   useEffect(() => {
     const sse = new EventSource('http://localhost:8000/stream');
     sse.onmessage = (e) => {
       try {
         const data: LogRecord = JSON.parse(e.data);
-        setLogs(prev => [...prev.slice(-199), data]); // 최대 200개 유지
+        setLogs(prev => [...prev.slice(-199), data]);
       } catch (err) { }
     };
     return () => sse.close();
   }, []);
 
-  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
-
-  // 터미널 슬롯 (선택된 개수만큼)
   const slots = Array.from({ length: terminalCount }, (_, i) => i);
 
   return (
-    <div className="flex h-screen w-full bg-background text-textMain overflow-hidden select-none">
+    <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden select-none font-sans flex-col" onClick={() => setActiveMenu(null)}>
+      
+      {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
+      <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
+        <Activity className="w-3.5 h-3.5 text-primary mx-2" />
+        {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
+          <div key={menu} className="relative">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === menu ? null : menu); }}
+              onMouseEnter={() => activeMenu && setActiveMenu(menu)}
+              className={`px-2 py-0.5 rounded transition-colors ${activeMenu === menu ? 'bg-[#444444] text-white' : 'hover:bg-white/10'}`}
+            >
+              {menu}
+            </button>
+            
+            {/* 파일 메뉴 (종료 기능 포함) */}
+            {activeMenu === menu && menu === '파일' && (
+              <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <button 
+                  onClick={() => {
+                    if (confirm("시스템을 완전히 종료하시겠습니까? (백그라운드 서버도 종료됩니다)")) {
+                      fetch('http://localhost:8000/api/shutdown')
+                        .then(() => { alert("서버가 종료되었습니다. 창을 닫아주세요."); window.close(); })
+                        .catch(() => { alert("서버 종료 신호 전송 실패"); });
+                    }
+                    setActiveMenu(null);
+                  }} 
+                  className="w-full text-left px-4 py-1.5 hover:bg-red-500/20 text-red-400 flex items-center gap-2"
+                >
+                  <X className="w-3.5 h-3.5" /> 시스템 완전 종료
+                </button>
+              </div>
+            )}
 
-      {/* Sidebar */}
-      <motion.div
-        initial={{ width: 0, opacity: 0 }}
-        animate={{
-          width: isSidebarOpen ? 260 : 0,
-          opacity: isSidebarOpen ? 1 : 0
-        }}
-        transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-        className="h-full border-r border-white/20 bg-surface/50 backdrop-blur-md flex flex-col shrink-0 overflow-hidden"
-      >
-        <div className="h-14 border-b border-white/20 flex items-center px-4 shrink-0">
-          <Activity className="w-5 h-5 text-accent mr-2" />
-          <span className="font-semibold text-lg tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">바이브 코딩</span>
+            {/* 편집 메뉴 */}
+            {activeMenu === menu && menu === '편집' && (
+              <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <button onClick={() => { setLogs([]); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                  <Trash2 className="w-3.5 h-3.5 text-[#e8a87c]" /> 로그 비우기
+                </button>
+              </div>
+            )}
+
+            {/* 보기 메뉴 */}
+            {activeMenu === menu && menu === '보기' && (
+              <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <button onClick={() => { setIsSidebarOpen(!isSidebarOpen); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                  <Menu className="w-3.5 h-3.5 text-[#3794ef]" /> 사이드바 {isSidebarOpen ? '숨기기' : '보이기'}
+                </button>
+                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">터미널 레이아웃</div>
+                {(['1', '2', '3', '4-col', '2x2'] as const).map(mode => (
+                  <button key={mode} onClick={() => { setLayoutMode(mode); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                    <LayoutDashboard className="w-3.5 h-3.5 text-[#cccccc]" /> 
+                    {mode === '4-col' ? '4 분할 (세로 열)' : mode === '2x2' ? '4 분할 (격자 2x2)' : `${mode} 분할 뷰`}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* AI 도구 메뉴 */}
+            {activeMenu === menu && menu === 'AI 도구' && (
+              <div className="absolute top-full left-0 w-64 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">하이브 마인드 코어</div>
+                <button onClick={installSkills} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-3.5 h-3.5 text-primary" /> 
+                    <span>하이브 스킬 설치 (현재 프로젝트)</span>
+                  </div>
+                  <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">Recommended</span>
+                </button>
+                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">글로벌 CLI 도구</div>
+                <button onClick={() => installTool('gemini')} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2">
+                  <Terminal className="w-3.5 h-3.5 text-accent" /> 
+                  <span>Gemini CLI 설치 (npm -g)</span>
+                </button>
+                <button onClick={() => installTool('claude')} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2">
+                  <Cpu className="w-3.5 h-3.5 text-success" /> 
+                  <span>Claude Code 설치 (npm -g)</span>
+                </button>
+                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                <button onClick={() => window.location.reload()} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2">
+                  <RotateCw className="w-3.5 h-3.5 text-[#3794ef]" /> 
+                  <span>대시보드 새로고침</span>
+                </button>
+              </div>
+            )}
+
+            {/* 도움말 메뉴 */}
+            {activeMenu === menu && menu === '도움말' && (
+              <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <button onClick={() => { alert("Nexus View v1.0.0\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                  <Info className="w-3.5 h-3.5 text-[#3794ef]" /> 버전 정보
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="ml-auto flex items-center gap-3 text-[11px] text-[#969696] px-4 font-mono overflow-hidden">
+           <span className="truncate opacity-50">{currentPath}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Activity Bar (VS Code Style) */}
+        <div className="w-12 h-full bg-[#333333] border-r border-black/40 flex flex-col items-center py-4 gap-4 shrink-0">
+          <button onClick={() => { setActiveTab('explorer'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'explorer' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <Files className="w-6 h-6" />
+          </button>
+          <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <Search className="w-6 h-6" />
+          </button>
+          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <Zap className="w-6 h-6" />
+          </button>
+          <div className="mt-auto flex flex-col gap-4">
+            <button className="p-2 text-[#858585] hover:text-white transition-colors"><Info className="w-6 h-6" /></button>
+            <button className="p-2 text-[#858585] hover:text-white transition-colors"><Settings className="w-6 h-6" /></button>
+          </div>
         </div>
 
-        <div className="p-4 flex-1 flex flex-col overflow-hidden">
-          <div className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-3">Drives / Workspace</div>
-          <select
-            value={drives.find(d => currentPath.startsWith(d)) || currentPath}
-            onChange={(e) => setCurrentPath(e.target.value)}
-            className="w-full bg-[#1a1a26] border border-white/10 rounded-md py-1.5 px-3 text-sm focus:outline-none focus:border-primary transition-colors cursor-pointer mb-4 shrink-0"
-          >
-            <option value="D:/vibe-coding">vibe-coding (D:/vibe-coding)</option>
-            {drives.map(drive => (
-              <option key={drive} value={drive}>{drive}</option>
-            ))}
-          </select>
-
-          <div className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-3 flex items-center shrink-0">
-            <FolderTree className="w-3.5 h-3.5 mr-1" /> Explorer ({currentPath})
+        {/* Sidebar (Explorer) */}
+        <motion.div
+          animate={{ width: isSidebarOpen ? 260 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
+        >
+          <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : 'Hive Mind'}</span>
+            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
-          <div className="flex-1 overflow-y-auto pr-1">
-            <div className="space-y-1">
-              <button
-                onClick={goUp}
-                className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-white/5 rounded text-sm text-textMuted hover:text-white transition-colors text-left"
-              >
-                <ChevronLeft className="w-4 h-4 text-primary" /> ..
+
+          <div className="p-3 flex-1 overflow-hidden flex flex-col">
+            <select
+              value={drives.find(d => currentPath.startsWith(d)) || currentPath}
+              onChange={(e) => setCurrentPath(e.target.value)}
+              className="w-full bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer mb-4"
+            >
+              <option value="D:/vibe-coding">vibe-coding</option>
+              {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
+            </select>
+
+            <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
+              <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
+                <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
               </button>
-              {directories.map(dir => (
+              {items.map(item => (
                 <button
-                  key={dir.path}
-                  onClick={() => setCurrentPath(dir.path)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-white/5 rounded text-sm text-textMuted hover:text-white transition-colors text-left"
+                  key={item.path}
+                  onClick={() => item.isDir ? setCurrentPath(item.path) : null}
+                  className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] cursor-default'}`}
                 >
-                  <Folder className="w-4 h-4 text-accent" />
-                  <span className="truncate">{dir.name}</span>
+                  {item.isDir ? <Folder className="w-4 h-4 text-[#e8a87c]" /> : <FileText className="w-4 h-4 text-[#a0a0a0]" />}
+                  <span className="truncate">{item.name}</span>
                 </button>
               ))}
-              {directories.length === 0 && (
-                <div className="px-2 py-2 text-xs text-white/30 italic">No subdirectories</div>
-              )}
             </div>
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-
-        {/* Header */}
-        <header className="h-14 border-b border-white/20 bg-surface/30 backdrop-blur-sm flex items-center justify-between px-4 shrink-0">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={toggleSidebar}
-              className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-textMuted hover:text-white"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <div className="h-5 w-px bg-white/10"></div>
-            <div className="text-sm text-textMuted flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-              System Active
+        {/* Main Area */}
+        <div className="flex-1 flex flex-col min-w-0">
+          
+          {/* Header Bar (Breadcrumbs & Controls) */}
+          <header className="h-9 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-4 shrink-0">
+            <div className="flex items-center gap-2 overflow-hidden mr-4">
+              {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="p-1 hover:bg-white/10 rounded"><Menu className="w-4 h-4" /></button>}
+              <div className="text-[11px] text-[#969696] truncate font-mono flex items-center">
+                {currentPath.split('/').filter(Boolean).map((p, i) => (
+                  <span key={i} className="flex items-center"><ChevronRight className="w-3 h-3 mx-1 text-white/20" />{p}</span>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4].map(n => (
-              <button
-                key={n}
-                onClick={() => setTerminalCount(n)}
-                className={`w-7 h-7 rounded-md text-xs font-bold transition-colors ${
-                  terminalCount === n
-                    ? 'bg-primary text-white'
-                    : 'bg-white/5 text-textMuted hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                {n}
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={refreshItems} className="p-1.5 hover:bg-white/10 rounded text-primary hover:text-white transition-all hover:rotate-180 duration-500" title="Refresh Files">
+                <RotateCw className="w-4 h-4" />
               </button>
-            ))}
-          </div>
-        </header>
+              <div className="flex items-center gap-1 bg-black/30 rounded-md p-0.5 ml-1 border border-white/5">
+                {(['1', '2', '3', '4-col', '2x2'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setLayoutMode(mode)}
+                    className={`px-1.5 h-5 rounded text-[10px] font-bold transition-all ${layoutMode === mode ? 'bg-primary text-white' : 'hover:bg-white/5 text-[#858585]'}`}
+                    title={mode === '4-col' ? '4 Split (Columns)' : mode === '2x2' ? '4 Split (Grid)' : `${mode} Split`}
+                  >
+                    {mode === '4-col' ? '4||' : mode === '2x2' ? '4::' : mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </header>
 
-        {/* Terminals Area */}
-        <main className="flex-1 p-4 overflow-hidden">
-          <div className={`h-full w-full gap-4 grid ${
-            terminalCount === 1 ? 'grid-cols-1' :
-            terminalCount === 2 ? 'grid-cols-2' :
-            terminalCount === 3 ? 'grid-cols-3' :
-            'grid-cols-2 grid-rows-2'
-          }`}>
-            {slots.map(slotId => (
-              <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} />
-            ))}
-          </div>
-        </main>
+          {/* Terminals Area */}
+          <main className="flex-1 p-2 overflow-hidden bg-[#1e1e1e]">
+            <div className={`h-full w-full gap-2 grid ${
+              layoutMode === '1' ? 'grid-cols-1' :
+              layoutMode === '2' ? 'grid-cols-2' :
+              layoutMode === '3' ? 'grid-cols-3' :
+              layoutMode === '4-col' ? 'grid-cols-4' :
+              'grid-cols-2 grid-rows-2'
+            }`}>
+              {slots.map(slotId => (
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} />
+              ))}
+            </div>
+          </main>
+        </div>
       </div>
     </div>
   )
@@ -189,81 +319,35 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   const launchAgent = (agent: string) => {
     setIsTerminalMode(true);
     setActiveAgent(agent);
-
-    if (wsRef.current) wsRef.current.close();
-    if (termRef.current) {
-      termRef.current.dispose();
-      termRef.current = null;
-    }
-
     setTimeout(() => {
       if (!xtermRef.current) return;
       const term = new XTerm({
-        theme: { background: '#0a0a0f', foreground: '#e2e8f0', cursor: '#8b5cf6' },
+        theme: { background: '#1e1e1e', foreground: '#cccccc', cursor: '#3794ef', selectionBackground: '#3794ef55' },
         fontFamily: "'Fira Code', 'Consolas', monospace",
-        fontSize: 12
+        fontSize: 12,
+        cursorBlink: true
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.open(xtermRef.current);
       fitAddon.fit();
       termRef.current = term;
-
-      const wsParams = new URLSearchParams({
-        agent,
-        cwd: currentPath,
-        cols: (term.cols || 80).toString(),
-        rows: (term.rows || 24).toString()
-      });
-
+      const wsParams = new URLSearchParams({ agent, cwd: currentPath, cols: term.cols.toString(), rows: term.rows.toString() });
       const ws = new WebSocket(`ws://localhost:8001/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
-
-      ws.onopen = () => {
-        term.write(`\x1b[38;5;135m[바이브 코딩] Connected to ${agent} PTY\x1b[0m\r\n`);
-      };
-
-      ws.onmessage = async (e) => {
-        if (e.data instanceof Blob) {
-          const text = await e.data.text();
-          term.write(text);
-        } else {
-          term.write(e.data);
-        }
-      };
-
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
-
-      ws.onclose = () => {
-        term.write('\x1b[31m\r\n[바이브 코딩] Connection Closed\x1b[0m\r\n');
-      };
-
-      const handleResize = () => {
-        try { fitAddon.fit(); } catch { }
-      };
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      ws.onopen = () => term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+      ws.onmessage = async (e) => term.write(e.data instanceof Blob ? await e.data.text() : e.data);
+      term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
+      window.addEventListener('resize', () => fitAddon.fit());
     }, 50);
   };
 
   const closeTerminal = () => {
     setIsTerminalMode(false);
-    setActiveAgent('');
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (termRef.current) {
-      termRef.current.dispose();
-      termRef.current = null;
-    }
+    if (wsRef.current) wsRef.current.close();
+    if (termRef.current) termRef.current.dispose();
   };
 
-  // Hash 기반으로 로그를 슬롯에 분배
   const slotLogs = logs.filter(l => {
     let hash = 0;
     for (let i = 0; i < l.terminal_id.length; i++) hash = ((hash << 5) - hash) + l.terminal_id.charCodeAt(i);
@@ -271,78 +355,39 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   });
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [slotLogs.length]);
 
   return (
-    <div className="glass-panel rounded-xl flex flex-col overflow-hidden flex-1 min-h-0">
-      <div className="h-9 bg-black/40 border-b border-white/20 flex items-center justify-between px-3 shrink-0">
-        <div className="flex items-center">
-          <Terminal className="w-4 h-4 text-textMuted mr-2" />
-          <span className="text-xs font-mono font-bold text-textMuted text-white/90">
-            {isTerminalMode ? `${activeAgent.toUpperCase()} 터미널 ${slotId + 1}` : `터미널 ${slotId + 1}`}
-          </span>
+    <div className="bg-[#252526] border border-black/40 rounded-md flex flex-col overflow-hidden shadow-inner">
+      <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
+        <div className="flex items-center gap-2">
+          <Terminal className="w-3 h-3 text-accent" />
+          <span className="text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider">{isTerminalMode ? `Terminal ${slotId + 1} - ${activeAgent}` : `Terminal ${slotId + 1}`}</span>
         </div>
-        <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" style={{ opacity: 1 }}>
-          {!isTerminalMode ? (
-            <>
-              <button onClick={() => launchAgent('claude')} className="px-2 py-0.5 rounded bg-[#1a1a26] hover:bg-[#2a2a36] border border-white/10 hover:border-[#8b5cf6] text-[10px] text-white/80 transition-colors font-medium cursor-pointer">
-                Claude Code
-              </button>
-              <button onClick={() => launchAgent('gemini')} className="px-2 py-0.5 rounded bg-[#1a1a26] hover:bg-[#2a2a36] border border-white/10 hover:border-[#3b82f6] text-[10px] text-white/80 transition-colors font-medium cursor-pointer">
-                Gemini CLI
-              </button>
-            </>
-          ) : (
-            <button onClick={closeTerminal} className="px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-[10px] text-red-200 transition-colors font-medium flex items-center gap-1 cursor-pointer">
-              <X className="w-3 h-3" /> 닫기
-            </button>
-          )}
-        </div>
+        {!isTerminalMode ? (
+          <div className="flex gap-1">
+            <button onClick={() => launchAgent('claude')} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-primary/40 rounded text-[9px] border border-white/5 transition-all font-bold">CLAUDE</button>
+            <button onClick={() => launchAgent('gemini')} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-primary/40 rounded text-[9px] border border-white/5 transition-all font-bold">GEMINI</button>
+          </div>
+        ) : (
+          <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+        )}
       </div>
-
       {isTerminalMode ? (
-        <div className="flex-1 p-2 bg-[#0a0a0f] overflow-hidden relative">
-          <div ref={xtermRef} className="absolute inset-0 p-2" />
-        </div>
+        <div className="flex-1 bg-[#1e1e1e] relative"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
       ) : (
-        <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-2">
-          <AnimatePresence initial={false}>
-            {slotLogs.map((log, idx) => (
-              <motion.div
-                key={`${log.session_id}-${idx}`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-2"
-              >
-                <div className="shrink-0 mt-0.5">
-                  {log.status === 'running' && <RotateCw className="w-3.5 h-3.5 text-primary animate-spin" />}
-                  {log.status === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-success" />}
-                  {log.status === 'failed' && <XCircle className="w-3.5 h-3.5 text-error" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[#a78bfa] font-bold">[{log.agent}]</span>
-                    <span className="text-textMuted">@ {log.project}</span>
-                    <span className="text-xs text-white/60 ml-auto font-medium">{log.ts_start?.split('T')[1]?.substring(0, 8) || ''}</span>
-                  </div>
-                  <div className="text-[#cbd5e1] break-words">
-                    {`> ${log.trigger}`}
-                  </div>
-                  {log.commit && (
-                    <div className="text-[10px] text-primary/70 mt-1">
-                      Commit: {log.commit}
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            ))}
-            {slotLogs.length === 0 && (
-              <div className="h-full flex items-center justify-center text-white/20">Waiting for logs...</div>
-            )}
-          </AnimatePresence>
+        <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1.5 custom-scrollbar bg-[#1a1a1a]">
+          {slotLogs.map((log, idx) => (
+            <div key={idx} className="flex items-start gap-2 border-l-2 border-primary/30 pl-2 py-0.5 bg-white/2 rounded-r">
+              <span className="text-primary font-bold whitespace-nowrap opacity-80">[{log.agent}]</span>
+              <span className="flex-1 text-[#cccccc] break-all leading-relaxed">{log.trigger}</span>
+            </div>
+          ))}
+          {slotLogs.length === 0 && <div className="h-full flex flex-col items-center justify-center text-white/10 italic">
+            <Cpu className="w-8 h-8 mb-2 opacity-10" />
+            Waiting for neural activity...
+          </div>}
         </div>
       )}
     </div>
