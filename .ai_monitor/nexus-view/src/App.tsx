@@ -11,6 +11,15 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { LogRecord } from './types';
 
+export interface Shortcut { label: string; cmd: string; }
+const defaultShortcuts: Shortcut[] = [
+  { label: '마스터 호출', cmd: 'gemini --skill master' },
+  { label: '🧹 화면 지우기', cmd: '/clear' },
+  { label: '깃 커밋', cmd: 'git add . && git commit -m "update"' },
+  { label: '깃 푸시', cmd: 'git push' },
+  { label: '문서 업데이트', cmd: 'gemini "현재까지 진행 상황 문서 업데이트"' },
+];
+
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
@@ -315,6 +324,19 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   const wsRef = useRef<WebSocket | null>(null);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
+  const [inputValue, setInputValue] = useState('');
+  const [shortcuts, setShortcuts] = useState<Shortcut[]>(() => {
+    try {
+      const saved = localStorage.getItem('hive_shortcuts');
+      return saved ? JSON.parse(saved) : defaultShortcuts;
+    } catch { return defaultShortcuts; }
+  });
+  const [showShortcutEditor, setShowShortcutEditor] = useState(false);
+
+  const saveShortcuts = (newShortcuts: Shortcut[]) => {
+    setShortcuts(newShortcuts);
+    localStorage.setItem('hive_shortcuts', JSON.stringify(newShortcuts));
+  };
 
   const launchAgent = (agent: string) => {
     setIsTerminalMode(true);
@@ -348,6 +370,13 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
     if (termRef.current) termRef.current.dispose();
   };
 
+  const handleSend = (text: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(text + '\r');
+    setInputValue('');
+    termRef.current?.focus();
+  };
+
   const slotLogs = logs.filter(l => {
     let hash = 0;
     for (let i = 0; i < l.terminal_id.length; i++) hash = ((hash << 5) - hash) + l.terminal_id.charCodeAt(i);
@@ -359,7 +388,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   }, [slotLogs.length]);
 
   return (
-    <div className="bg-[#252526] border border-black/40 rounded-md flex flex-col overflow-hidden shadow-inner">
+    <div className="bg-[#252526] border border-black/40 rounded-md flex flex-col overflow-hidden shadow-inner relative">
       <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
         <div className="flex items-center gap-2">
           <Terminal className="w-3 h-3 text-accent" />
@@ -375,7 +404,37 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
         )}
       </div>
       {isTerminalMode ? (
-        <div className="flex-1 bg-[#1e1e1e] relative"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
+        <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
+          <div className="flex-1 relative min-h-0"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
+          
+          {/* 터미널 한글 입력 및 단축어 바 */}
+          <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
+            <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 opacity-80 hover:opacity-100 transition-opacity items-center">
+               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
+               {shortcuts.map((sc, i) => (
+                 <button key={i} onClick={() => handleSend(sc.cmd)} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-white/10 rounded text-[10px] whitespace-nowrap border border-white/5 transition-colors" title={sc.cmd}>
+                   {sc.label}
+                 </button>
+               ))}
+            </div>
+            <div className="flex gap-2 items-center">
+              <input 
+                type="text" 
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSend(inputValue); }}
+                placeholder="터미널 명령어 전송 (한글 완벽 지원)..."
+                className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-colors"
+              />
+              <button 
+                onClick={() => handleSend(inputValue)}
+                className="px-4 py-2 bg-primary/80 hover:bg-primary text-white rounded text-xs font-bold transition-colors shadow-sm"
+              >
+                전송
+              </button>
+            </div>
+          </div>
+        </div>
       ) : (
         <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1.5 custom-scrollbar bg-[#1a1a1a]">
           {slotLogs.map((log, idx) => (
@@ -388,6 +447,34 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
             <Cpu className="w-8 h-8 mb-2 opacity-10" />
             Waiting for neural activity...
           </div>}
+        </div>
+      )}
+      
+      {/* 단축어 편집 모달 팝업 */}
+      {showShortcutEditor && (
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-2">
+          <div className="bg-[#252526] border border-black/40 shadow-2xl rounded-md flex flex-col w-full max-w-md max-h-full">
+            <div className="h-8 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
+              <span className="text-xs font-bold text-[#cccccc]">단축어 편집 (개인화)</span>
+              <button onClick={() => setShowShortcutEditor(false)} className="p-1 hover:bg-white/10 rounded text-[#cccccc]"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+              {shortcuts.map((sc, i) => (
+                <div key={i} className="flex gap-2 items-center">
+                  <input value={sc.label} onChange={e => { const n = [...shortcuts]; n[i].label = e.target.value; saveShortcuts(n); }} placeholder="버튼 이름" className="w-1/3 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-xs text-white focus:border-primary focus:outline-none transition-colors" />
+                  <input value={sc.cmd} onChange={e => { const n = [...shortcuts]; n[i].cmd = e.target.value; saveShortcuts(n); }} placeholder="실행할 명령어" className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-xs text-white font-mono focus:border-primary focus:outline-none transition-colors" />
+                  <button onClick={() => { const n = shortcuts.filter((_, idx) => idx !== i); saveShortcuts(n); }} className="p-1.5 text-red-400 hover:bg-red-400/20 rounded transition-colors"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              ))}
+              <button onClick={() => saveShortcuts([...shortcuts, {label: '새 단축어', cmd: ''}])} className="w-full py-2 mt-2 border border-dashed border-white/20 hover:border-white/40 hover:bg-white/5 rounded text-xs text-[#cccccc] transition-colors">
+                + 새 단축어 추가
+              </button>
+            </div>
+            <div className="p-3 border-t border-black/40 flex justify-end gap-2 shrink-0">
+              <button onClick={() => { if(confirm('모든 단축어를 기본값으로 초기화하시겠습니까?')) saveShortcuts(defaultShortcuts); }} className="px-3 py-1.5 hover:bg-white/5 text-xs text-[#cccccc] rounded transition-colors">기본값 복원</button>
+              <button onClick={() => setShowShortcutEditor(false)} className="px-4 py-1.5 bg-primary hover:bg-primary/80 text-white rounded text-xs font-bold transition-colors">닫기</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
