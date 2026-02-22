@@ -46,7 +46,8 @@
       "WebFetch(domain:google-gemini.github.io)",
       "Bash(wmic process where \"name='python.exe' and processid=25560\" get commandline 2>/dev/null || tasklist /v /fi \"pid eq 25560\" 2>/dev/null)",
       "Bash(cmd:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(cd /d/vibe-coding/.ai_monitor/nexus-view && npm run build 2>&1)"
     ]
   }
 }

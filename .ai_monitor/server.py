@@ -59,6 +59,16 @@ else:
 STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
 DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
+LOCKS_FILE = DATA_DIR / "locks.json"
+
+# 데이터 디렉토리 생성 보장
+if not DATA_DIR.exists():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+# 락 파일 초기화 (없을 경우)
+if not LOCKS_FILE.exists():
+    with open(LOCKS_FILE, 'w', encoding='utf-8') as f:
+        json.dump({}, f)
 
 print("Static files directory:", STATIC_DIR)
 if not STATIC_DIR.exists():
@@ -75,8 +85,9 @@ client_connected_once = False
 def monitor_heartbeat():
     global last_heartbeat_time, client_connected_once
     while True:
-        time.sleep(5)
-        if client_connected_once and (time.time() - last_heartbeat_time > 15):
+        time.sleep(2)
+        # 5초 이상 하트비트가 끊기면 자폭 (즉각 종료)
+        if client_connected_once and (time.time() - last_heartbeat_time > 5):
             print("브라우저 창이 닫혀 하트비트가 끊어졌습니다. 서버를 자동 종료합니다...")
             os._exit(0)
 
@@ -300,6 +311,17 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "Binary file cannot be displayed."}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/locks':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            if LOCKS_FILE.exists():
+                with open(LOCKS_FILE, 'r', encoding='utf-8') as f:
+                    locks = json.load(f)
+                self.wfile.write(json.dumps(locks).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({}).encode('utf-8'))
         else:
             # 정적 파일 서비스 로직 (Vite 빌드 결과물)
             # 요청 경로를 정리
@@ -360,12 +382,16 @@ class SSEHandler(BaseHTTPRequestHandler):
                 
                 agent = data.get('agent')
                 target_dir = data.get('path', 'C:\\')
+                is_yolo = data.get('yolo', False)
                 
                 import subprocess
+                
                 if agent == 'claude':
-                    cmd = f'start "Claude Code" cmd.exe /k "cd /d {target_dir} && title [Claude Code] && echo Launching Claude Code... && claude"'
+                    yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
+                    cmd = f'start "Claude Code" cmd.exe /k "cd /d {target_dir} && title [Claude Code] && echo Launching Claude Code... && claude{yolo_flag}"'
                 elif agent == 'gemini':
-                    cmd = f'start "Gemini CLI" cmd.exe /k "cd /d {target_dir} && title [Gemini CLI] && echo Launching Gemini CLI... && gemini"'
+                    yolo_flag = " --yolo" if is_yolo else ""
+                    cmd = f'start "Gemini CLI" cmd.exe /k "cd /d {target_dir} && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
                 else:
                     cmd = f'start "Terminal" cmd.exe /k "cd /d {target_dir}"'
                 
@@ -396,10 +422,63 @@ class SSEHandler(BaseHTTPRequestHandler):
                 
                 if target_slot in pty_sessions:
                     pty = pty_sessions[target_slot]
-                    pty.write(command + '\r\n')
+                    # 명령어 끝에 개행 문자가 없으면 추가하여 즉시 실행 유도
+                    final_cmd = command if command.endswith('\n') or command.endswith('\r') else command + '\r\n'
+                    pty.write(final_cmd)
                     self.wfile.write(json.dumps({"status": "success", "message": f"Command sent to Terminal {target_slot}"}).encode('utf-8'))
                 else:
                     self.wfile.write(json.dumps({"status": "error", "message": f"Terminal {target_slot} is not running."}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/locks':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                
+                file_path = data.get('file')
+                agent = data.get('agent', 'Unknown')
+                action = data.get('action', 'lock') # 'lock' or 'unlock'
+                
+                with open(LOCKS_FILE, 'r', encoding='utf-8') as f:
+                    locks = json.load(f)
+                
+                if action == 'lock':
+                    if file_path in locks and locks[file_path] != agent:
+                        self.wfile.write(json.dumps({"status": "conflict", "owner": locks[file_path]}).encode('utf-8'))
+                        return
+                    locks[file_path] = agent
+                    log_msg = f"Locked file: {file_path}"
+                elif action == 'unlock':
+                    if file_path in locks:
+                        del locks[file_path]
+                        log_msg = f"Unlocked file: {file_path}"
+                    else:
+                        log_msg = None
+                
+                with open(LOCKS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(locks, f, ensure_ascii=False, indent=2)
+                
+                # 하이브 로그에 기록
+                if log_msg:
+                    try:
+                        LOG_FILE = DATA_DIR / "task_logs.jsonl"
+                        log_entry = {
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "agent": agent,
+                            "terminal_id": f"TERM_API",
+                            "trigger": log_msg
+                        }
+                        with open(LOG_FILE, 'a', encoding='utf-8') as lf:
+                            lf.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                    except:
+                        pass
+                
+                self.wfile.write(json.dumps({"status": "success", "locks": locks}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         else:
@@ -435,10 +514,16 @@ async def pty_handler(websocket):
 
         pty = PtyProcess.spawn('cmd.exe', cwd=cwd, dimensions=(rows, cols))
         
+        is_yolo = qs.get('yolo', ['false'])[0].lower() == 'true'
+
         if agent == 'claude':
-            pty.write('claude\r\n')
+            # 클로드는 --dangerously-skip-permissions 플래그 지원 (YOLO)
+            yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
+            pty.write(f'claude{yolo_flag}\r\n')
         elif agent == 'gemini':
-            pty.write('gemini\r\n')
+            # 제미나이는 -y 또는 --yolo 플래그 지원
+            yolo_flag = " -y" if is_yolo else ""
+            pty.write(f'gemini{yolo_flag}\r\n')
 
         import re
         match = re.search(r'/pty/slot(\d+)', path)

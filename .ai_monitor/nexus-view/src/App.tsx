@@ -29,6 +29,7 @@ import { LogRecord } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+const WS_PORT = parseInt(window.location.port) + 1;
 
 export interface Shortcut { label: string; cmd: string; }
 const defaultShortcuts: Shortcut[] = [
@@ -38,6 +39,33 @@ const defaultShortcuts: Shortcut[] = [
   { label: '깃 푸시', cmd: 'git push' },
   { label: '문서 업데이트', cmd: 'gemini "현재까지 진행 상황 문서 업데이트"' },
 ];
+
+// 에이전트별 슬래시 커맨드 목록 (한글 설명 포함)
+interface SlashCommand { cmd: string; desc: string; category: string; }
+const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
+  claude: [
+    { cmd: '/model',       desc: '모델 변경 (opus / sonnet / haiku)',    category: '설정' },
+    { cmd: '/clear',       desc: '대화 기록 초기화',                      category: '설정' },
+    { cmd: '/compact',     desc: '대화 압축 — 컨텍스트 절약',             category: '설정' },
+    { cmd: '/memory',      desc: '메모리(CLAUDE.md) 파일 편집',           category: '설정' },
+    { cmd: '/vim',         desc: 'Vim 키 바인딩 모드 토글',               category: '설정' },
+    { cmd: '/help',        desc: '전체 도움말 보기',                       category: '도움말' },
+    { cmd: '/doctor',      desc: '개발 환경 진단',                         category: '도움말' },
+    { cmd: '/status',      desc: '현재 상태 및 컨텍스트 확인',            category: '도움말' },
+    { cmd: '/bug',         desc: '버그 리포트 Anthropic에 전송',           category: '도움말' },
+    { cmd: '/review',      desc: '현재 코드 리뷰 요청',                   category: '작업' },
+    { cmd: '/commit',      desc: 'Git 커밋 메시지 자동 생성',             category: '작업' },
+    { cmd: '/init',        desc: 'CLAUDE.md 프로젝트 가이드 생성',        category: '작업' },
+    { cmd: '/pr_comments', desc: 'GitHub PR 댓글 가져오기',               category: '작업' },
+    { cmd: '/terminal',    desc: '터미널 명령 실행 모드',                  category: '작업' },
+  ],
+  gemini: [
+    { cmd: '/help',        desc: '전체 도움말 보기',                       category: '도움말' },
+    { cmd: '/clear',       desc: '대화 초기화',                            category: '설정' },
+    { cmd: '/chat',        desc: '대화형 채팅 모드 전환',                  category: '설정' },
+    { cmd: '/tools',       desc: '사용 가능한 툴 목록 보기',              category: '도움말' },
+  ],
+};
 
 export const getFileIcon = (fileName: string) => {
   const ext = fileName.split('.').pop()?.toLowerCase();
@@ -69,10 +97,27 @@ export interface OpenFile {
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
-  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4-col' | '2x2'>('2');
-  const terminalCount = layoutMode === '1' ? 1 : layoutMode === '2' ? 2 : layoutMode === '3' ? 3 : 4;
+  // 레이아웃 모드: 1, 2, 3, 4(가로4열), 2x2(2×2격자), 6(3×2격자), 8(4×2격자)
+  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('1');
+  // '2x2'는 parseInt 불가 → 직접 매핑
+  const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8 };
+  const terminalCount = terminalCountMap[layoutMode] ?? 2;
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [locks, setLocks] = useState<Record<string, string>>({});
+
+  // 파일 락(Lock) 상태 폴링
+  useEffect(() => {
+    const fetchLocks = () => {
+      fetch(`${API_BASE}/api/locks`)
+        .then(res => res.json())
+        .then(data => setLocks(data))
+        .catch(() => {});
+    };
+    fetchLocks();
+    const interval = setInterval(fetchLocks, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Quick View 팝업 상태 (다중 창 지원)
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
@@ -105,11 +150,11 @@ function App() {
     setActiveMenu(null);
   };
 
-  // 좀비 서버 방지용 하트비트 (창 닫히면 서버 15초 뒤 자동 종료)
+  // 좀비 서버 방지용 하트비트 (창 닫히면 서버 5초 뒤 자동 종료)
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetch(`${API_BASE}/api/heartbeat`).catch(() => {});
-    }, 5000);
+    const sendHeartbeat = () => fetch(`${API_BASE}/api/heartbeat`).catch(() => {});
+    sendHeartbeat(); // 즉시 전송
+    const interval = setInterval(sendHeartbeat, 2000); // 2초마다 전송
     return () => clearInterval(interval);
   }, []);
 
@@ -274,10 +319,10 @@ function App() {
                 </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
                 <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">터미널 레이아웃</div>
-                {(['1', '2', '3', '4-col', '2x2'] as const).map(mode => (
+                {(['1', '2', '3', '4', '2x2', '6', '8'] as const).map(mode => (
                   <button key={mode} onClick={() => { setLayoutMode(mode); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
-                    <LayoutDashboard className="w-3.5 h-3.5 text-[#cccccc]" /> 
-                    {mode === '4-col' ? '4 분할 (세로 열)' : mode === '2x2' ? '4 분할 (격자 2x2)' : `${mode} 분할 뷰`}
+                    <LayoutDashboard className="w-3.5 h-3.5 text-[#cccccc]" />
+                    {mode === '1' ? '1 분할 뷰' : mode === '2' ? '2 분할 뷰' : mode === '3' ? '3 분할 뷰' : mode === '4' ? '4 분할 (가로 4열)' : mode === '2x2' ? '4 분할 (2×2 격자)' : mode === '6' ? '6 분할 (3×2 격자)' : '8 분할 (4×2 격자)'}
                   </button>
                 ))}
               </div>
@@ -409,15 +454,15 @@ function App() {
               <button onClick={refreshItems} className="p-1.5 hover:bg-white/10 rounded text-primary hover:text-white transition-all hover:rotate-180 duration-500" title="Refresh Files">
                 <RotateCw className="w-4 h-4" />
               </button>
-              <div className="flex items-center gap-1 bg-black/30 rounded-md p-0.5 ml-1 border border-white/5">
-                {(['1', '2', '3', '4-col', '2x2'] as const).map(mode => (
+              <div className="flex items-center gap-1 bg-black/30 rounded-md p-0.5 ml-1 border border-white/5 flex-wrap">
+                {(['1', '2', '3', '4', '2x2', '6', '8'] as const).map(mode => (
                   <button
                     key={mode}
                     onClick={() => setLayoutMode(mode)}
                     className={`px-1.5 h-5 rounded text-[10px] font-bold transition-all ${layoutMode === mode ? 'bg-primary text-white' : 'hover:bg-white/5 text-[#858585]'}`}
-                    title={mode === '4-col' ? '4 Split (Columns)' : mode === '2x2' ? '4 Split (Grid)' : `${mode} Split`}
+                    title={mode === '4' ? '4 분할 (가로 4열)' : mode === '2x2' ? '4 분할 (2×2 격자)' : mode === '6' ? '6 분할 (3×2 격자)' : mode === '8' ? '8 분할 (4×2 격자)' : `${mode} 분할`}
                   >
-                    {mode === '4-col' ? '4||' : mode === '2x2' ? '4::' : mode}
+                    {mode}
                   </button>
                 ))}
               </div>
@@ -426,15 +471,18 @@ function App() {
 
           {/* Terminals Area */}
           <main className="flex-1 p-2 overflow-hidden bg-[#1e1e1e]">
+            {/* 터미널 그리드: 1→1열, 2→2열, 3→3열, 4→가로4열, 2x2→2×2격자, 6→3×2격자, 8→4×2격자 */}
             <div className={`h-full w-full gap-2 grid ${
               layoutMode === '1' ? 'grid-cols-1' :
               layoutMode === '2' ? 'grid-cols-2' :
               layoutMode === '3' ? 'grid-cols-3' :
-              layoutMode === '4-col' ? 'grid-cols-4' :
-              'grid-cols-2 grid-rows-2'
+              layoutMode === '4' ? 'grid-cols-4' :
+              layoutMode === '2x2' ? 'grid-cols-2 grid-rows-2' :
+              layoutMode === '6' ? 'grid-cols-3 grid-rows-2' :
+              'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} />
               ))}
             </div>
           </main>
@@ -447,6 +495,30 @@ function App() {
       ))}
     </div>
   )
+}
+
+// VS코드 스타일 줄 번호 뷰어 컴포넌트
+// - 우측 정렬 번호 + 세로 구분선 + 호버 시 행 하이라이트
+function CodeWithLineNumbers({ content, fontSize = '12px' }: { content: string; fontSize?: string }) {
+  const lines = content.split('\n');
+  const gutterWidth = String(lines.length).length;
+  return (
+    <div className="font-mono leading-relaxed" style={{ fontSize }}>
+      {lines.map((line, i) => (
+        <div key={i} className="flex hover:bg-white/5 group">
+          {/* 줄 번호 거터: 우측 정렬, 선택 불가, 구분선 포함 */}
+          <span
+            className="shrink-0 text-right pr-3 select-none text-[#858585] group-hover:text-[#aaaaaa] border-r border-white/10 mr-3 transition-colors"
+            style={{ minWidth: `${gutterWidth + 1}ch` }}
+          >
+            {i + 1}
+          </span>
+          {/* 코드 본문 */}
+          <span className="flex-1 whitespace-pre text-[#cccccc]">{line}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile, idx: number, bringToFront: (id: string) => void, closeFile: (id: string) => void }) {
@@ -513,10 +585,9 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
         {file.isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center text-[#858585] animate-pulse">Loading content...</div>
         ) : (
-          <div className="min-w-max p-4">
-            <pre className="font-mono text-[12px] text-[#cccccc] whitespace-pre leading-relaxed">
-              {file.content}
-            </pre>
+          // VS코드 스타일 줄 번호 포함 파일 내용 표시
+          <div className="p-2">
+            <CodeWithLineNumbers content={file.content} fontSize="12px" />
           </div>
         )}
       </div>
@@ -524,11 +595,15 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string> }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  // FitAddon 참조 보관 (파일 뷰어 토글 시 재조정용)
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
   const [inputValue, setInputValue] = useState('');
@@ -539,6 +614,8 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
     } catch { return defaultShortcuts; }
   });
   const [showShortcutEditor, setShowShortcutEditor] = useState(false);
+  // 슬래시 커맨드 팝업 표시 여부
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
 
   // Active File Viewer State
   const [showActiveFile, setShowActiveFile] = useState(false);
@@ -546,16 +623,19 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   const [activeFileContent, setActiveFileContent] = useState<string>('');
   const [isActiveFileLoading, setIsActiveFileLoading] = useState(false);
 
+  // 현재 에이전트가 잠근 파일 찾기
+  const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
+
   const saveShortcuts = (newShortcuts: Shortcut[]) => {
     setShortcuts(newShortcuts);
     localStorage.setItem('hive_shortcuts', JSON.stringify(newShortcuts));
   };
 
-  const launchAgent = (agent: string) => {
-    setIsTerminalMode(true);
-    setActiveAgent(agent);
-    setTimeout(() => {
-      if (!xtermRef.current) return;
+    const launchAgent = (agent: string, yolo: boolean = false) => {
+      setIsTerminalMode(true);
+      setActiveAgent(agent);
+  
+      setTimeout(() => {      if (!xtermRef.current) return;
       const term = new XTerm({
         theme: { background: '#1e1e1e', foreground: '#cccccc', cursor: '#3794ef', selectionBackground: '#3794ef55' },
         fontFamily: "'Fira Code', 'Consolas', monospace",
@@ -567,18 +647,39 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
       term.open(xtermRef.current);
       fitAddon.fit();
       termRef.current = term;
-      const wsParams = new URLSearchParams({ agent, cwd: currentPath, cols: term.cols.toString(), rows: term.rows.toString() });
-      const ws = new WebSocket(`ws://${window.location.hostname}:8001/pty/slot${slotId}?${wsParams.toString()}`);
+      // ref에 저장하여 파일 뷰어 토글 시에도 fit() 호출 가능하게
+      fitAddonRef.current = fitAddon;
+      // ResizeObserver: 터미널 컨테이너 크기 변화 감지 시 자동으로 xterm 재조정
+      // 파일 뷰어 열기/닫기로 컨테이너 높이가 바뀔 때마다 즉시 반응
+      const termContainer = xtermRef.current.parentElement;
+      if (termContainer) {
+        const ro = new ResizeObserver(() => fitAddon.fit());
+        ro.observe(termContainer);
+        resizeObserverRef.current = ro;
+      }
+      // WebSocket에 yolo 상태 전달
+      const wsParams = new URLSearchParams({ 
+        agent, 
+        cwd: currentPath, 
+        cols: term.cols.toString(), 
+        rows: term.rows.toString(),
+        yolo: yolo.toString()
+      });
+      const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
-      ws.onopen = () => term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+      ws.onopen = () => {
+        const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
+        term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+      };
       ws.onmessage = async (e) => {
         const data = e.data instanceof Blob ? await e.data.text() : e.data;
         term.write(data);
 
-        // 정규식으로 터미널 출력에서 파일 경로 추출 (ANSI 코드 제거 후)
-        const ansiRegex = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
-        const cleanData = data.replace(ansiRegex, '');
-        const pathRegex = /(?:[a-zA-Z]:[\\/][\w\.\-\/\\]+|[\w\.\-\/]+\/[\w\.\-\/]+)\.(?:js|jsx|ts|tsx|py|css|html|htm|md|json|sh|bat)/g;
+        // 정규식으로 터미널 출력에서 파일 경로 추출 (ANSI/OSC 코드 완전 제거 후)
+        // CSI 시퀀스(\x1b[...), OSC 시퀀스(\x1b]...\x07 또는 \x1b\\), DCS/기타 시퀀스 모두 처리
+        const ansiRegex = /\x1b\][\s\S]*?(?:\x1b\\|\x07)|\x1b[PX^_][\s\S]*?\x1b\\|[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g;
+        const cleanData = data.replace(ansiRegex, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+        const pathRegex = /(?:[a-zA-Z]:[\\\/](?:[\w.\-]+[\\\/])*[\w.\-]+|(?:[\w.\-]+[\\\/])+[\w.\-]+)\.(?:jsx?|tsx?|py|css|html?|md|json|ya?ml|toml|cfg|ini|sh|bat|ps1|vue|svelte)/g;
         const matches = cleanData.match(pathRegex);
         if (matches && matches.length > 0) {
           const matchedPath = matches[matches.length - 1];
@@ -586,7 +687,10 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
         }
       };
       term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
-      window.addEventListener('resize', () => fitAddon.fit());
+      // 창 크기 변경 시 터미널 재조정 (클린업 포함)
+      const handleResize = () => fitAddon.fit();
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
     }, 50);
   };
 
@@ -615,9 +719,22 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
     return () => clearInterval(interval);
   }, [showActiveFile, activeFilePath, currentPath]);
 
+  // 파일 뷰어 토글 시 xterm 터미널 크기 재조정
+  // ResizeObserver가 주 역할이며, 이 타이머는 폴백으로 이중 호출해 안정성 확보
+  useEffect(() => {
+    if (!fitAddonRef.current) return;
+    const t1 = setTimeout(() => fitAddonRef.current?.fit(), 100);
+    const t2 = setTimeout(() => fitAddonRef.current?.fit(), 350);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [showActiveFile]);
+
   const closeTerminal = () => {
     setIsTerminalMode(false);
     setShowActiveFile(false);
+    fitAddonRef.current = null;
+    // ResizeObserver 해제 (메모리 누수 방지)
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close();
     if (termRef.current) termRef.current.dispose();
   };
@@ -640,16 +757,24 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
   }, [slotLogs.length]);
 
   return (
-    <div className="bg-[#252526] border border-black/40 rounded-md flex flex-col overflow-hidden shadow-inner relative">
+    // h-full: 그리드 셀 높이를 명시적으로 채워야 flex 자식들이 올바른 높이를 전달받음
+    <div className="h-full bg-[#252526] border border-black/40 rounded-md flex flex-col overflow-hidden shadow-inner relative">
       <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-3 h-3 text-accent" />
-          <span className="text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider">{isTerminalMode ? `Terminal ${slotId + 1} - ${activeAgent}` : `Terminal ${slotId + 1}`}</span>
+        <div className="flex items-center gap-2 max-w-[60%] overflow-hidden">
+          <Terminal className="w-3 h-3 text-accent shrink-0" />
+          <span className="text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider truncate">
+            {isTerminalMode ? `터미널 ${slotId + 1} - ${activeAgent}` : `터미널 ${slotId + 1}`}
+          </span>
+          {lockedFileByAgent && (
+            <div className="flex items-center gap-1.5 ml-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] text-yellow-500 animate-pulse shrink-0">
+              <Zap className="w-2.5 h-2.5" />
+              <span className="font-mono">LOCK: {lockedFileByAgent.split(/[\\\/]/).pop()}</span>
+            </div>
+          )}
         </div>
         {!isTerminalMode ? (
-          <div className="flex gap-1">
-            <button onClick={() => launchAgent('claude')} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-primary/40 rounded text-[9px] border border-white/5 transition-all font-bold">CLAUDE</button>
-            <button onClick={() => launchAgent('gemini')} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-primary/40 rounded text-[9px] border border-white/5 transition-all font-bold">GEMINI</button>
+          <div className="flex gap-2 items-center">
+            <span className="text-[9px] text-[#858585] font-bold mr-1">에이전트 선택 대기 중...</span>
           </div>
         ) : (
           <div className="flex gap-2 items-center">
@@ -679,15 +804,16 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
                 {isActiveFileLoading && <span className="text-[#3794ef] animate-pulse pointer-events-auto">●</span>}
               </div>
               <div className="flex-1 overflow-auto p-2 custom-scrollbar">
-                <div className="min-w-max">
-                  <pre className="font-mono text-[11px] text-[#cccccc] whitespace-pre leading-relaxed">
-                    {activeFileContent || "에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중..."}
-                  </pre>
-                </div>
+                {/* VS코드 스타일 줄 번호 포함 활성 파일 뷰어 */}
+                {activeFileContent
+                  ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
+                  : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
+                }
               </div>
             </div>
           )}
-          <div className="flex-1 relative min-h-0"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
+          {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
+          <div className="flex-1 relative min-h-0 overflow-hidden"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
           
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
@@ -699,16 +825,60 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
                  </button>
                ))}
             </div>
-            <div className="flex gap-2 items-center">
-              <input 
-                type="text" 
+            <div className="flex gap-2 items-center relative">
+              <input
+                type="text"
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleSend(inputValue); }}
                 placeholder="터미널 명령어 전송 (한글 완벽 지원)..."
                 className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-colors"
               />
-              <button 
+              {/* 슬래시 커맨드 퀵 팝업 버튼 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowSlashMenu(v => !v)}
+                  className={`px-2.5 py-2 rounded text-xs font-bold border transition-all ${showSlashMenu ? 'bg-primary text-white border-primary' : 'bg-[#3c3c3c] text-[#cccccc] border-white/10 hover:bg-white/10'}`}
+                  title="슬래시 커맨드 목록"
+                >
+                  /
+                </button>
+                {/* 슬래시 커맨드 팝업 */}
+                {showSlashMenu && (
+                  <div className="absolute bottom-full right-0 mb-1 w-72 bg-[#252526] border border-white/15 rounded-md shadow-2xl z-50 overflow-hidden">
+                    <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center px-3 gap-1.5">
+                      <span className="text-primary font-bold text-[11px]">/</span>
+                      <span className="text-[11px] font-bold text-[#cccccc] uppercase tracking-wider">
+                        {activeAgent.toUpperCase()} 슬래시 커맨드
+                      </span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar py-1">
+                      {/* 카테고리별 그룹핑 */}
+                      {['설정', '작업', '도움말'].map(cat => {
+                        const cmds = (SLASH_COMMANDS[activeAgent] ?? SLASH_COMMANDS['claude'])
+                          .filter(c => c.category === cat);
+                        if (!cmds.length) return null;
+                        return (
+                          <div key={cat}>
+                            <div className="px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white/25">{cat}</div>
+                            {cmds.map(sc => (
+                              <button
+                                key={sc.cmd}
+                                onClick={() => { setInputValue(sc.cmd + ' '); setShowSlashMenu(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors"
+                              >
+                                <span className="text-primary font-mono text-[11px] font-bold w-24 shrink-0 group-hover:text-white transition-colors">{sc.cmd}</span>
+                                <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight">{sc.desc}</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button
                 onClick={() => handleSend(inputValue)}
                 className="px-4 py-2 bg-primary/80 hover:bg-primary text-white rounded text-xs font-bold transition-colors shadow-sm"
               >
@@ -718,17 +888,102 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
           </div>
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1.5 custom-scrollbar bg-[#1a1a1a]">
-          {slotLogs.map((log, idx) => (
-            <div key={idx} className="flex items-start gap-2 border-l-2 border-primary/30 pl-2 py-0.5 bg-white/2 rounded-r">
-              <span className="text-primary font-bold whitespace-nowrap opacity-80">[{log.agent}]</span>
-              <span className="flex-1 text-[#cccccc] break-all leading-relaxed">{log.trigger}</span>
+        <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
+          {/* 🔘 중앙 에이전트 선택 카드 UI */}
+          <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px]">
+            <div className="flex flex-col md:flex-row gap-6 max-w-4xl w-full">
+              
+              {/* Claude Card */}
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileHover={{ scale: 1.02, translateY: -5 }}
+                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-success/50 group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <Cpu className="w-12 h-12 text-success" />
+                </div>
+                <div className="w-16 h-16 rounded-2xl bg-success/10 flex items-center justify-center mb-2 group-hover:bg-success/20 transition-colors shadow-inner">
+                  <Cpu className="w-8 h-8 text-success" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">CLAUDE CODE</h3>
+                  <p className="text-[10px] text-success font-bold uppercase tracking-widest opacity-60">High Precision Agent</p>
+                </div>
+                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
+                  Anthropic의 최신 모델을 기반으로 한 정밀 코딩 도구.<br/>복잡한 리팩토링과 설계에 최적화되어 있습니다.
+                </p>
+                <div className="flex flex-col w-full gap-2 mt-4">
+                   <button 
+                     onClick={() => launchAgent('claude', false)} 
+                     className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
+                   >
+                     Claude 일반 모드
+                   </button>
+                   <button 
+                     onClick={() => launchAgent('claude', true)} 
+                     className="w-full py-2.5 bg-primary/20 hover:bg-primary/40 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2 shadow-lg shadow-primary/10"
+                   >
+                     <Zap className="w-3.5 h-3.5 fill-current" /> Claude 욜로(YOLO)
+                   </button>
+                </div>
+              </motion.div>
+
+              {/* Gemini Card */}
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                whileHover={{ scale: 1.02, translateY: -5 }}
+                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-accent/50 group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <Terminal className="w-12 h-12 text-accent" />
+                </div>
+                <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-2 group-hover:bg-accent/20 transition-colors shadow-inner">
+                  <Terminal className="w-8 h-8 text-accent" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">GEMINI CLI</h3>
+                  <p className="text-[10px] text-accent font-bold uppercase tracking-widest opacity-60">High Speed Reasoning</p>
+                </div>
+                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
+                  Google의 초거대 언어 모델 기반 고속 추론 도구.<br/>빠른 프로토타이핑과 넓은 컨텍스트를 제공합니다.
+                </p>
+                <div className="flex flex-col w-full gap-2 mt-4">
+                   <button 
+                     onClick={() => launchAgent('gemini', false)} 
+                     className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
+                   >
+                     Gemini 일반 모드
+                   </button>
+                   <button 
+                     onClick={() => launchAgent('gemini', true)} 
+                     className="w-full py-2.5 bg-primary/20 hover:bg-primary/40 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2 shadow-lg shadow-primary/10"
+                   >
+                     <Zap className="w-3.5 h-3.5 fill-current" /> Gemini 욜로(YOLO)
+                   </button>
+                </div>
+              </motion.div>
+
             </div>
-          ))}
-          {slotLogs.length === 0 && <div className="h-full flex flex-col items-center justify-center text-white/10 italic">
-            <Cpu className="w-8 h-8 mb-2 opacity-10" />
-            Waiting for neural activity...
-          </div>}
+          </div>
+
+          {/* 배경 로그 (블러 처리하여 생동감 부여) */}
+          <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1.5 custom-scrollbar blur-[4px] opacity-10 pointer-events-none scale-95 origin-center">
+            {slotLogs.map((log, idx) => (
+              <div key={idx} className="flex items-start gap-2 border-l-2 border-primary/30 pl-2 py-0.5 bg-white/2 rounded-r">
+                <span className="text-primary font-bold whitespace-nowrap opacity-80">[{log.agent}]</span>
+                <span className="flex-1 text-[#cccccc] break-all leading-relaxed">{log.trigger}</span>
+              </div>
+            ))}
+            {slotLogs.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center text-white/10 italic">
+                <Cpu className="w-8 h-8 mb-2 opacity-10" />
+                System ready...
+              </div>
+            )}
+          </div>
         </div>
       )}
       

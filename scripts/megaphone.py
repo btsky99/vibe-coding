@@ -7,21 +7,42 @@
 # ------------------------------------------------------------------------
 
 import sys
+import os
 import json
 import urllib.request
 import urllib.parse
 import argparse
+import subprocess
+from datetime import datetime
 
-def send_command_to_terminal(target_slot, command):
+def log_to_hive(agent_name, task_summary):
+    """hive_bridge.py를 호출하여 하이브에 로그를 남깁니다."""
+    try:
+        script_path = os.path.join(os.path.dirname(__file__), "hive_bridge.py")
+        subprocess.run([sys.executable, script_path, agent_name, task_summary], check=True)
+    except Exception as e:
+        print(f"[하이브 로깅 실패] {e}")
+
+def send_command_to_terminal(target_slot, command, agent_name=None, is_delegation=False):
     """지정된 터미널 슬롯으로 명령어를 전송합니다."""
     # 윈도우 한글 인코딩 깨짐 방지를 위해 CP949 터미널에서 실행될 것을 대비
     if isinstance(command, bytes):
         command = command.decode('utf-8', errors='replace')
         
+    # 위임(Delegation)인 경우 메시지 포맷팅
+    if is_delegation:
+        from_agent = agent_name or "Unknown Agent"
+        # 메시지 끝에 확실히 개행 문자를 추가하여 자동 입력되게 함
+        delegation_msg = f"\n[📢 DELEGATION FROM {from_agent}]\n>>> {command}\n\n(위 업무를 분석하고 수행해 주세요)\n"
+        final_msg = delegation_msg
+    else:
+        # 일반 명령어의 경우 끝에 \n을 붙여 자동 실행 유도
+        final_msg = command if command.endswith('\n') else command + '\n'
+
     url = "http://localhost:8000/api/send-command"
     payload = {
         "target": str(target_slot),
-        "command": command
+        "command": final_msg
     }
     
     data = json.dumps(payload).encode('utf-8')
@@ -33,6 +54,9 @@ def send_command_to_terminal(target_slot, command):
             res = json.loads(res_data)
             if res.get('status') == 'success':
                 print(f"[메가폰 전송 성공] ➡️ Terminal {target_slot}: {command}")
+                # 하이브에 활동 기록
+                status_msg = f"DELEGATE TO Terminal {target_slot}: {command}" if is_delegation else f"Sent message to Terminal {target_slot}: {command}"
+                log_to_hive(agent_name or "Gemini-1", status_msg)
             else:
                 print(f"[메가폰 전송 실패] ❌ {res.get('message', 'Unknown Error')}")
     except Exception as e:
@@ -42,8 +66,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="하이브 마인드 터미널 간 직접 통신 메가폰")
     parser.add_argument("--target", required=True, help="메시지를 보낼 타겟 터미널 번호 (예: 1, 2, 3)")
     parser.add_argument("--message", required=True, help="해당 터미널의 프롬프트에 자동으로 타이핑될 명령어/메시지")
+    parser.add_argument("--agent", default="Gemini-1", help="발신 에이전트 이름")
+    parser.add_argument("--delegate", action="store_true", help="업무 위임 모드로 전송 (안내 문구 포함)")
     
     args = parser.parse_args()
     
     # 메시지를 대상 터미널에 전송
-    send_command_to_terminal(args.target, args.message)
+    send_command_to_terminal(args.target, args.message, args.agent, args.delegate)

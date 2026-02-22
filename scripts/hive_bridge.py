@@ -12,6 +12,8 @@ def log_task(agent_name, task_summary):
         os.makedirs(log_dir)
     
     log_file = os.path.join(log_dir, "task_logs.jsonl")
+    archive_file = os.path.join(log_dir, "task_logs_archive.jsonl")
+    MAX_LINES = 50  # 최신 로그 유지 갯수 (AI 토큰 최적화)
     
     log_entry = {
         "timestamp": datetime.now().isoformat(),
@@ -19,9 +21,25 @@ def log_task(agent_name, task_summary):
         "task": task_summary
     }
     
-    with open(log_file, "a", encoding="utf-8") as f:
-        import json
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    import json
+    new_line = json.dumps(log_entry, ensure_ascii=False) + "\n"
+    
+    lines = []
+    if os.path.exists(log_file):
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+    lines.append(new_line)
+    
+    # MAX_LINES 초과 시 오래된 로그는 아카이브 파일로 이동
+    if len(lines) > MAX_LINES:
+        excess = len(lines) - MAX_LINES
+        with open(archive_file, "a", encoding="utf-8") as af:
+            af.writelines(lines[:excess])
+        lines = lines[excess:]
+        
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.writelines(lines)
     
     print(f"[OK] [{agent_name}] Task logged to Hive: {task_summary}")
 
