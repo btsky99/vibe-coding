@@ -21,15 +21,18 @@ ASSET_NAME = "vibe-coding.exe"
 logger = logging.getLogger("updater")
 
 
+_DEFAULT_TOKEN = "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"
+
+
 def _get_token(data_dir):
-    """Resolve GitHub token from env or file."""
+    """Resolve GitHub token from env, file, or built-in default."""
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         return token.strip()
     token_file = data_dir / "github_token.txt"
     if token_file.exists():
         return token_file.read_text(encoding="utf-8").strip().splitlines()[0]
-    return None
+    return _DEFAULT_TOKEN
 
 
 def _fetch_latest_release(token):
