@@ -87,6 +87,24 @@ function App() {
     setOpenFiles(prev => prev.filter(f => f.id !== id));
   };
 
+  const openHelpDoc = (topic: string, title: string) => {
+    const existing = openFiles.find(f => f.path === `help:${topic}`);
+    if (existing) { bringToFront(existing.id); return; }
+    const newId = Date.now().toString();
+    const newZIndex = maxZIndex + 1;
+    setMaxZIndex(newZIndex);
+    setOpenFiles(prev => [...prev, { id: newId, name: title, path: `help:${topic}`, content: 'Loading...', isLoading: true, zIndex: newZIndex }]);
+    fetch(`${API_BASE}/api/help?topic=${topic}`)
+      .then(res => res.json())
+      .then(data => {
+        setOpenFiles(prev => prev.map(f => f.id === newId ? { ...f, content: data.error ? `Error: ${data.error}` : data.content, isLoading: false } : f));
+      })
+      .catch(err => {
+        setOpenFiles(prev => prev.map(f => f.id === newId ? { ...f, content: `Failed to load: ${err}`, isLoading: false } : f));
+      });
+    setActiveMenu(null);
+  };
+
   // 좀비 서버 방지용 하트비트 (창 닫히면 서버 15초 뒤 자동 종료)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -296,7 +314,15 @@ function App() {
 
             {/* 도움말 메뉴 */}
             {activeMenu === menu && menu === '도움말' && (
-              <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+              <div className="absolute top-full left-0 w-56 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">사용 설명서</div>
+                <button onClick={() => openHelpDoc('claude-code', 'Claude Code 사용 설명서')} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                  <Cpu className="w-3.5 h-3.5 text-success" /> Claude Code 사용법
+                </button>
+                <button onClick={() => openHelpDoc('gemini-cli', 'Gemini CLI 사용 설명서')} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                  <Terminal className="w-3.5 h-3.5 text-accent" /> Gemini CLI 사용법
+                </button>
+                <div className="h-px bg-white/5 my-1 mx-2"></div>
                 <button onClick={() => { alert("Nexus View v1.0.0\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
                   <Info className="w-3.5 h-3.5 text-[#3794ef]" /> 버전 정보
                 </button>

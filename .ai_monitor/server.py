@@ -263,6 +263,22 @@ class SSEHandler(BaseHTTPRequestHandler):
                     pass
             dirs.sort(key=lambda x: x['name'].lower())
             self.wfile.write(json.dumps(dirs).encode('utf-8'))
+        elif parsed_path.path == '/api/help':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            topic = query.get('topic', [''])[0]
+            docs_dir = Path(__file__).parent / 'docs'
+            help_file = docs_dir / f'help-{topic}.md'
+            if help_file.exists():
+                content = help_file.read_text(encoding='utf-8')
+                self.wfile.write(json.dumps({"content": content}).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({"error": "Help topic not found"}).encode('utf-8'))
+            return
+
         elif parsed_path.path == '/api/read-file':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
