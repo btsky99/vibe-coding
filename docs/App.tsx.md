@@ -1,0 +1,29 @@
+# 📄 `App.tsx` 파일 상세 문서
+
+- **원본 파일 경로**: `.ai_monitor/nexus-view/src/App.tsx`
+- **파일 역할**: 하이브 마인드의 넥서스 뷰(Nexus View) 프론트엔드 React 프로젝트에서 전체 대시보드 화면을 담당하는 최상위(Main) 컴포넌트입니다.
+
+## 🛠️ 주요 기능 (Key Features)
+
+1. **파일 탐색기 (Sidebar Explorer)**
+   - `fetch('http://localhost:8000/api/files')` API를 통해 드라이브의 폴더와 파일을 불러옵니다.
+   - VS Code 스타일의 동적 파일 아이콘(`getFileIcon()`)을 렌더링합니다.
+   
+2. **다중 터미널 뷰 (Terminal Grid Layout)**
+   - `terminalCount`와 `layoutMode` 상태를 활용하여 1분할, 2분할, 3분할, 4분할(세로 열), 4분할(격자 2x2)의 유연한 화면 분할 모드를 제공합니다.
+   - 각 터미널 슬롯에서 `xterm.js`를 사용해 백엔드 파이썬 PTY 웹소켓 서버와 통신합니다.
+
+3. **터미널별 활성 파일 뷰어 (Active File Viewer)**
+   - 에이전트(Claude, Gemini 등)가 터미널에 남기는 출력 로그를 실시간 정규식 파싱하여, 현재 작업 중인 파일 경로를 자동 감지합니다.
+   - 파일 경로가 감지되면, 해당 터미널 상단 1/3을 할당해 파일 내용을 보여주며 3초 단위로 백그라운드에서 내용을 새로고침합니다. 상하 크기 조절이 가능합니다.
+
+4. **단축어 매크로 시스템 및 한글 채팅 입력창**
+   - 터미널 씹힘 현상을 막기 위해 한글 완벽 지원 텍스트 인풋 폼(`inputValue`)을 하단에 제공.
+   - 자주 쓰는 스크립트 명령(마스터 호출, /clear, git commit 등)을 바로 전송할 수 있으며, 팝업 창(`showShortcutEditor`)을 띄워 사용자 입맛에 맞게 단축어를 커스터마이징하고 `localStorage`에 영구 저장합니다.
+
+5. **다중 창 기반 코드 퀵 뷰 (Multi-Window Quick View)**
+   - 좌측 파일 탐색기에서 파일을 클릭하면, 자유롭게 드래그 앤 드롭이 가능하고 크기를 조정할 수 있는 `FloatingWindow` 컴포넌트가 화면에 생성됩니다.
+   - 창 클릭 시 가장 맨 앞으로 당겨오는(Z-index) 기능과 함께, 상하좌우 스크롤(`min-w-max`)이 지원되는 텍스트 공간을 제공합니다.
+
+6. **좀비 방지 하트비트 (Graceful Shutdown)**
+   - `setInterval`을 이용해 5초 간격으로 서버(`api/heartbeat`)에 앱이 살아있음을 알리는 핑(Ping)을 전송하여, 창이 닫히면 서버가 알아서 종료되도록 돕습니다.

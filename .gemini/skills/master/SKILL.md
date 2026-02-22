@@ -24,10 +24,15 @@ description: 중앙 컨트롤 타워 워크플로우. 사용자가 "마스터" �
 
 ## 🔄 3단계: 자동 후처리 및 공유 (Hive Update) [CRITICAL]
 
-1. **문서 자동 동기화 (auto-doc-gen)**: `ai_monitor_plan.md` 및 `CHANGELOG.md` 업데이트.
-2. **하이브 마인드 로깅 (Hive Logging)**: `scripts/hive_bridge.py`를 호출하여 작업 결과와 다음 단계를 공유합니다.
+1. **문서 자동 동기화 (auto-doc-gen)**: 
+   - `ai_monitor_plan.md` 및 `CHANGELOG.md` 업데이트.
+   - **[핵심] 파일 단위 문서화**: 파일을 수정하거나 생성한 경우, 반드시 `docs/` 폴더 내에 해당 파일과 1:1로 매칭되는 설명 문서(예: `docs/App.tsx.md`)를 생성 또는 업데이트합니다.
+   - **[핵심] 중앙 문서 연동**: `docs/README.md` (전체 파일 리스트 및 간단 설명) 파일에 방금 작업한 파일의 링크와 설명을 추가/갱신합니다.
+   - **[핵심] 코드 상단 주석 달기**: 수정한 소스 코드 파일의 맨 위 상단에 메인 문서(`docs/README.md`)와 해당 파일의 개별 문서(`docs/파일명.md`)로 가는 링크를 한글 주석으로 반드시 달아줍니다.
+2. **상세한 한글 주석 작성**: 코드 내의 모든 주석 및 하이브 마인드의 로그/설명은 반드시 **"한글로 아주 자세하게"** 작성해야 합니다.
+3. **하이브 마인드 로깅 (Hive Logging)**: `scripts/hive_bridge.py`를 호출하여 작업 결과와 다음 단계를 공유합니다.
    - 예: `python scripts/hive_bridge.py "Gemini-1" "Task completed: App.tsx refactoring. Ready for Claude-2 to style."`
-3. **최종 보고**: 사용자에게 작업 결과와 에이전트 간 협업 내역을 간결하게 보고합니다.
+4. **최종 보고**: 사용자에게 작업 결과와 에이전트 간 협업 내역을 간결하게 보고합니다.
 
 ## 🧬 4단계: 자가 학습 및 진화 (Meta-Learning & Evolution) [AUTONOMOUS]
 

@@ -40,7 +40,8 @@
       "Bash(cd D:/vibe-coding && python scripts/hive_bridge.py \"Claude Code\" \"fix\\(console\\): vibe-coding_console.exe를 view.py 직접 번들로 재빌드 - wrapper 방식 제거, 깨진 한글 수정\" 2>&1)",
       "Bash(cd D:/vibe-coding && python scripts/hive_bridge.py \"Claude Code\" \"fix\\(console\\): vibe-coding_console.exe를 view.py 직접 번들로 재빌드\" && python scripts/hive_bridge.py \"Claude Code\" \"fix\\(installer\\): CloseApplicationsFilter를 vibe-coding*.exe로 한정\" && python scripts/hive_bridge.py \"Claude Code\" \"chore\\(repo\\): btksy → btsky99 이전, 경로 업데이트\" && python scripts/hive_bridge.py \"Claude Code\" \"docs: CLAUDE.md 마스터 프로토콜 세팅 완료\" 2>&1)",
       "Bash(python:*)",
-      "Bash(cd D:/vibe-coding/.ai_monitor/nexus-view && npm run build 2>&1)"
+      "Bash(cd D:/vibe-coding/.ai_monitor/nexus-view && npm run build 2>&1)",
+      "WebFetch(domain:docs.anthropic.com)"
     ]
   }
 }
