@@ -19,8 +19,6 @@ import { LogRecord } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
-const WS_PORT = Number(window.location.port) + 1;
-const WS_BASE = `ws://${window.location.hostname}:${WS_PORT}`;
 
 export interface Shortcut { label: string; cmd: string; }
 const defaultShortcuts: Shortcut[] = [
@@ -528,7 +526,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
       fitAddon.fit();
       termRef.current = term;
       const wsParams = new URLSearchParams({ agent, cwd: currentPath, cols: term.cols.toString(), rows: term.rows.toString() });
-      const ws = new WebSocket(`${WS_BASE}/pty/slot${slotId}?${wsParams.toString()}`);
+      const ws = new WebSocket(`ws://${window.location.hostname}:8001/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
       ws.onopen = () => term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
       ws.onmessage = async (e) => term.write(e.data instanceof Blob ? await e.data.text() : e.data);
