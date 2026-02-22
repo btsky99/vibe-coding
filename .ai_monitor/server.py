@@ -250,6 +250,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                     pass
             dirs.sort(key=lambda x: x['name'].lower())
             self.wfile.write(json.dumps(dirs).encode('utf-8'))
+        elif parsed_path.path == '/api/read-file':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            target_path = query.get('path', [''])[0]
+            
+            if not target_path or not os.path.exists(target_path) or not os.path.isfile(target_path):
+                self.wfile.write(json.dumps({"error": "File not found or invalid path"}).encode('utf-8'))
+                return
+                
+            try:
+                # Try reading as UTF-8
+                with open(target_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.wfile.write(json.dumps({"content": content}).encode('utf-8'))
+            except UnicodeDecodeError:
+                self.wfile.write(json.dumps({"error": "Binary file cannot be displayed."}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
         else:
             # 정적 파일 서비스 로직 (Vite 빌드 결과물)
             # 요청 경로를 정리

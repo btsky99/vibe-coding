@@ -20,6 +20,15 @@ const defaultShortcuts: Shortcut[] = [
   { label: '문서 업데이트', cmd: 'gemini "현재까지 진행 상황 문서 업데이트"' },
 ];
 
+export interface OpenFile {
+  id: string;
+  name: string;
+  path: string;
+  content: string;
+  isLoading: boolean;
+  zIndex: number;
+}
+
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
@@ -27,6 +36,19 @@ function App() {
   const terminalCount = layoutMode === '1' ? 1 : layoutMode === '2' ? 2 : layoutMode === '3' ? 3 : 4;
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+  // Quick View 팝업 상태 (다중 창 지원)
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
+  const [maxZIndex, setMaxZIndex] = useState(100);
+
+  const bringToFront = (id: string) => {
+    setMaxZIndex(prev => prev + 1);
+    setOpenFiles(prev => prev.map(f => f.id === id ? { ...f, zIndex: maxZIndex + 1 } : f));
+  };
+
+  const closeFile = (id: string) => {
+    setOpenFiles(prev => prev.filter(f => f.id !== id));
+  };
 
   // 좀비 서버 방지용 하트비트 (창 닫히면 서버 15초 뒤 자동 종료)
   useEffect(() => {
@@ -56,6 +78,48 @@ function App() {
       .then(res => res.json())
       .then(data => setItems(data))
       .catch(() => { });
+  };
+
+  const handleFileClick = (item: {name: string, path: string, isDir: boolean}) => {
+    if (item.isDir) {
+      setCurrentPath(item.path);
+    } else {
+      const existing = openFiles.find(f => f.path === item.path);
+      if (existing) {
+        bringToFront(existing.id);
+        return;
+      }
+      
+      const newId = Date.now().toString();
+      const newZIndex = maxZIndex + 1;
+      setMaxZIndex(newZIndex);
+      
+      setOpenFiles(prev => [...prev, {
+        id: newId,
+        name: item.name,
+        path: item.path,
+        content: 'Loading...',
+        isLoading: true,
+        zIndex: newZIndex
+      }]);
+
+      fetch(`http://localhost:8000/api/read-file?path=${encodeURIComponent(item.path)}`)
+        .then(res => res.json())
+        .then(data => {
+          setOpenFiles(prev => prev.map(f => f.id === newId ? {
+            ...f,
+            content: data.error ? `Error: ${data.error}` : data.content,
+            isLoading: false
+          } : f));
+        })
+        .catch(err => {
+          setOpenFiles(prev => prev.map(f => f.id === newId ? {
+            ...f,
+            content: `Failed to load file: ${err}`,
+            isLoading: false
+          } : f));
+        });
+    }
   };
 
   useEffect(() => {
@@ -253,8 +317,8 @@ function App() {
               {items.map(item => (
                 <button
                   key={item.path}
-                  onClick={() => item.isDir ? setCurrentPath(item.path) : null}
-                  className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] cursor-default'}`}
+                  onClick={() => handleFileClick(item)}
+                  className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] hover:bg-primary/20'}`}
                 >
                   {item.isDir ? <Folder className="w-4 h-4 text-[#e8a87c]" /> : <FileText className="w-4 h-4 text-[#a0a0a0]" />}
                   <span className="truncate">{item.name}</span>
@@ -313,8 +377,88 @@ function App() {
           </main>
         </div>
       </div>
+
+      {/* Quick View Floating Panels */}
+      {openFiles.map((file, idx) => (
+        <FloatingWindow key={file.id} file={file} idx={idx} bringToFront={bringToFront} closeFile={closeFile} />
+      ))}
     </div>
   )
+}
+
+function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile, idx: number, bringToFront: (id: string) => void, closeFile: (id: string) => void }) {
+  const [position, setPosition] = useState({ x: 100 + (idx * 30), y: 100 + (idx * 30) });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    setIsDragging(true);
+    bringToFront(file.id);
+    dragStartPos.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (isDragging) {
+      setPosition({
+        x: e.clientX - dragStartPos.current.x,
+        y: e.clientY - dragStartPos.current.y
+      });
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    setIsDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  return (
+    <div 
+      onPointerDown={() => bringToFront(file.id)}
+      style={{ 
+        zIndex: file.zIndex, 
+        left: position.x, 
+        top: position.y,
+        resize: 'both', 
+        overflow: 'hidden' 
+      }}
+      className="absolute w-[550px] min-w-[300px] h-[500px] min-h-[200px] bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl rounded-xl flex flex-col"
+    >
+      <div 
+        className="h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 cursor-move select-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        <div className="flex items-center gap-2 text-[#cccccc] font-mono text-sm truncate pointer-events-none">
+          <FileText className="w-4 h-4 text-[#3794ef]" />
+          {file.name}
+        </div>
+        <button 
+          onClick={(e) => { e.stopPropagation(); closeFile(file.id); }} 
+          onPointerDownCapture={e => e.stopPropagation()}
+          className="p-1 hover:bg-white/10 rounded text-[#cccccc] transition-colors cursor-pointer"
+          title="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      <div 
+        className="flex-1 overflow-auto bg-transparent relative custom-scrollbar"
+        onPointerDownCapture={e => e.stopPropagation()}
+      >
+        {file.isLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center text-[#858585] animate-pulse">Loading content...</div>
+        ) : (
+          <div className="min-w-max p-4">
+            <pre className="font-mono text-[12px] text-[#cccccc] whitespace-pre leading-relaxed">
+              {file.content}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number }) {
