@@ -458,6 +458,6 @@ if __name__ == '__main__':
             pass
         server.server_close()
     except OSError:
-        # 이미 8000번 포트가 사용 중인 경우
-        print("Server is already running. Opening app window...")
-        threading.Thread(target=lambda: open_app_window(f"http://localhost:{port}"), daemon=True).start()
+        # 이미 8000번 포트가 사용 중 → 브라우저만 열고 즉시 종료
+        open_app_window(f"http://localhost:{port}")
+        sys.exit(0)
