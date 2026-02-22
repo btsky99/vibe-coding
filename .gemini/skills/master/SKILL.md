@@ -1,0 +1,38 @@
+---
+name: master
+description: 중앙 컨트롤 타워 워크플로우. 사용자가 "마스터" 또는 "/master"를 입력하거나 일반적인 개발/수정 요청을 할 때 가동. 요청 의도 분석, 적절한 하위 작업 라우팅, 작업 후 문서 동기화(auto-doc-gen) 및 검증(verify)을 자동 수행.
+---
+
+# 🌐 마스터 컨트롤 프로토콜
+
+이 워크플로우는 모든 복합 개발 요청을 처리하는 최상위 지침입니다. 요청의 의도를 분석하여 적절한 전문 워크플로우로 연결하고, 작업 완료 후 문서 동기화까지 책임집니다.
+
+## 🚀 1단계: 요청 의도 분석 및 하이브 동기화 (Sync)
+
+1. **상태 체크**: 작업을 시작하기 전, `.ai_monitor/data/task_logs.jsonl`을 읽어 다른 에이전트(Claude-1/2, Gemini-1/2)가 무엇을 하고 있는지 확인합니다.
+2. **충돌 방지**: 수정하려는 파일에 다른 에이전트의 작업 로그가 진행 중이라면, 해당 작업이 끝날 때까지 대기하거나 작업을 위임받습니다.
+3. **카테고리 분류**: 에러 수정, 새 기능, 문서화 중 요청 의도를 분석하여 적절한 워크플로우를 가동합니다.
+
+## 🧠 2단계: 최적 에이전트 선점 및 실행 (Execution)
+
+1. **컨텍스트 로드**: 판단된 카테고리에 따라 다음 전문 지식(`references/`)을 반드시 읽고(`read_file`) 따릅니다.
+   - 프론트엔드 작업: `react_best_practices.md` 참고
+   - 백엔드 작업: `modern_python.md` 참고
+   - 멀티 에이전트 협업: `agent_communication.md` 참고 (필수)
+2. **작업 할당 (Delegation)**: 복잡한 작업인 경우, 클로드(Claude)나 다른 제미나이(Gemini)에게 작업을 분할하여 위임(Handoff)할 수 있습니다.
+3. **TDD 기반 개발**: 모든 코드 수정은 테스트 계획 수립 후 진행합니다. (RED -> GREEN -> REFACTOR)
+
+## 🔄 3단계: 자동 후처리 및 공유 (Hive Update) [CRITICAL]
+
+1. **문서 자동 동기화 (auto-doc-gen)**: `ai_monitor_plan.md` 및 `CHANGELOG.md` 업데이트.
+2. **하이브 마인드 로깅 (Hive Logging)**: `scripts/hive_bridge.py`를 호출하여 작업 결과와 다음 단계를 공유합니다.
+   - 예: `python scripts/hive_bridge.py "Gemini-1" "Task completed: App.tsx refactoring. Ready for Claude-2 to style."`
+3. **최종 보고**: 사용자에게 작업 결과와 에이전트 간 협업 내역을 간결하게 보고합니다.
+
+## 🧬 4단계: 자가 학습 및 진화 (Meta-Learning & Evolution) [AUTONOMOUS]
+
+작업을 완료한 후, 에이전트는 스스로 방금 수행한 작업을 되돌아보고 다음 조치를 취해야 합니다.
+
+1. **패턴 감지**: 이번에 수행한 작업(예: 특정 라이브러리 세팅, 반복되는 버그 수정 패턴)이 앞으로도 자주 발생할 것 같은지 판단합니다.
+2. **지식 업데이트**: 프로젝트만의 고유한 규칙이 새롭게 생겼다면, `.gemini/skills/master/references/` 폴더 내의 관련 문서(예: `react_best_practices.md` 등)를 스스로 편집하여 지식을 업데이트합니다.
+3. **신규 스킬 창조**: 완전히 새로운 유형의 복잡한 워크플로우를 성공적으로 수행했다면, `activate_skill: skill-creator` 능력을 발동하여 **스스로 새로운 스킬 폴더와 SKILL.md를 생성**합니다. (이때 사용자에게 "새로운 최적화 패턴을 발견하여 스킬로 저장했습니다"라고 보고합니다.)
