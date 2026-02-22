@@ -438,13 +438,21 @@ async def pty_handler(websocket):
     if session_id in pty_sessions:
         del pty_sessions[session_id]
 
+# 포트 설정: 개발(8000/8001), 배포(8005/8006)
+if getattr(sys, 'frozen', False):
+    HTTP_PORT = 8005
+    WS_PORT = 8006
+else:
+    HTTP_PORT = 8000
+    WS_PORT = 8001
+
 async def run_ws_server():
     try:
-        async with websockets.serve(pty_handler, "0.0.0.0", 8001):
-            print("WebSocket PTY Server started on port 8001")
+        async with websockets.serve(pty_handler, "0.0.0.0", WS_PORT):
+            print(f"WebSocket PTY Server started on port {WS_PORT}")
             await asyncio.Future()
     except OSError:
-        print("WebSocket Server is already running on port 8001")
+        print(f"WebSocket Server is already running on port {WS_PORT}")
 
 def start_ws_server():
     try:
@@ -467,18 +475,15 @@ if __name__ == '__main__':
 
     threading.Thread(target=start_ws_server, daemon=True).start()
     threading.Thread(target=monitor_heartbeat, daemon=True).start()
-    port = 8000
     try:
-        server = ThreadedHTTPServer(('0.0.0.0', port), SSEHandler)
-        print(f"Nexus View SSE Log Server started on port {port}")
-        # 로컬 웹 대시보드 앱 모드로 실행 (주소창 없이 GUI처럼)
-        threading.Thread(target=lambda: open_app_window(f"http://localhost:{port}"), daemon=True).start()
+        server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
+        print(f"Nexus View SSE Log Server started on port {HTTP_PORT}")
+        threading.Thread(target=lambda: open_app_window(f"http://localhost:{HTTP_PORT}"), daemon=True).start()
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         server.server_close()
     except OSError:
-        # 이미 8000번 포트가 사용 중 → 브라우저만 열고 즉시 종료
-        open_app_window(f"http://localhost:{port}")
+        open_app_window(f"http://localhost:{HTTP_PORT}")
         sys.exit(0)

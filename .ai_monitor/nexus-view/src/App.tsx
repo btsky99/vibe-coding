@@ -2,14 +2,25 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Activity, Menu, Terminal, RotateCw, 
-  Folder, ChevronLeft, X, Zap, Search, Settings, 
+  ChevronLeft, X, Zap, Search, Settings, 
   Files, Cpu, Info, ChevronRight, ChevronDown,
-  Trash2, LayoutDashboard, FileText
+  Trash2, LayoutDashboard
 } from 'lucide-react';
+import { 
+  SiPython, SiJavascript, SiTypescript, SiMarkdown, 
+  SiGit, SiCss3, SiHtml5 
+} from 'react-icons/si';
+import { FaWindows } from 'react-icons/fa';
+import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder } from 'react-icons/vsc';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { LogRecord } from './types';
+
+// 현재 접속 포트 기반으로 API/WS 주소 자동 결정
+const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+const WS_PORT = Number(window.location.port) + 1;
+const WS_BASE = `ws://${window.location.hostname}:${WS_PORT}`;
 
 export interface Shortcut { label: string; cmd: string; }
 const defaultShortcuts: Shortcut[] = [
@@ -19,6 +30,24 @@ const defaultShortcuts: Shortcut[] = [
   { label: '깃 푸시', cmd: 'git push' },
   { label: '문서 업데이트', cmd: 'gemini "현재까지 진행 상황 문서 업데이트"' },
 ];
+
+export const getFileIcon = (fileName: string) => {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'py': return <SiPython className="w-4 h-4 text-[#3776ab] shrink-0" />;
+    case 'js': case 'jsx': case 'mjs': case 'cjs': return <SiJavascript className="w-4 h-4 text-[#F7DF1E] shrink-0" />;
+    case 'ts': case 'tsx': return <SiTypescript className="w-4 h-4 text-[#3178C6] shrink-0" />;
+    case 'json': return <VscJson className="w-4 h-4 text-[#cbcb41] shrink-0" />;
+    case 'md': return <SiMarkdown className="w-4 h-4 text-[#083fa1] shrink-0" />;
+    case 'html': case 'htm': return <SiHtml5 className="w-4 h-4 text-[#E34F26] shrink-0" />;
+    case 'css': case 'scss': case 'less': return <SiCss3 className="w-4 h-4 text-[#1572B6] shrink-0" />;
+    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'ico': return <VscFileMedia className="w-4 h-4 text-[#a074c4] shrink-0" />;
+    case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <VscArchive className="w-4 h-4 text-[#d19a66] shrink-0" />;
+    case 'bat': case 'cmd': case 'exe': return <FaWindows className="w-4 h-4 text-[#0078D4] shrink-0" />;
+    case 'gitignore': return <SiGit className="w-4 h-4 text-[#F05032] shrink-0" />;
+    default: return <VscFile className="w-4 h-4 text-[#cccccc] shrink-0" />;
+  }
+};
 
 export interface OpenFile {
   id: string;
@@ -53,7 +82,7 @@ function App() {
   // 좀비 서버 방지용 하트비트 (창 닫히면 서버 15초 뒤 자동 종료)
   useEffect(() => {
     const interval = setInterval(() => {
-      fetch('http://localhost:8000/api/heartbeat').catch(() => {});
+      fetch(`${API_BASE}/api/heartbeat`).catch(() => {});
     }, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -65,7 +94,7 @@ function App() {
 
   // 드라이브 목록 가져오기
   useEffect(() => {
-    fetch('http://localhost:8000/api/drives')
+    fetch(`${API_BASE}/api/drives`)
       .then(res => res.json())
       .then(data => setDrives(data))
       .catch(() => { });
@@ -74,7 +103,7 @@ function App() {
   // 현재 경로의 항목(폴더/파일) 가져오기
   const refreshItems = () => {
     if (!currentPath) return;
-    fetch(`http://localhost:8000/api/files?path=${encodeURIComponent(currentPath)}`)
+    fetch(`${API_BASE}/api/files?path=${encodeURIComponent(currentPath)}`)
       .then(res => res.json())
       .then(data => setItems(data))
       .catch(() => { });
@@ -103,7 +132,7 @@ function App() {
         zIndex: newZIndex
       }]);
 
-      fetch(`http://localhost:8000/api/read-file?path=${encodeURIComponent(item.path)}`)
+      fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(item.path)}`)
         .then(res => res.json())
         .then(data => {
           setOpenFiles(prev => prev.map(f => f.id === newId ? {
@@ -130,7 +159,7 @@ function App() {
   const installSkills = () => {
     if (!currentPath) return;
     if (confirm(`현재 프로젝트(${currentPath})에 하이브 마인드 베이스 스킬을 설치하시겠습니까?`)) {
-      fetch(`http://localhost:8000/api/install-skills?path=${encodeURIComponent(currentPath)}`)
+      fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
         .then(res => res.json())
         .then(data => { alert(data.message); refreshItems(); })
         .catch(err => alert("설치 실패: " + err));
@@ -139,7 +168,7 @@ function App() {
   };
 
   const installTool = (tool: string) => {
-    const url = tool === 'gemini' ? 'http://localhost:8000/api/install-gemini-cli' : 'http://localhost:8000/api/install-claude-code';
+    const url = tool === 'gemini' ? `${API_BASE}/api/install-gemini-cli` : `${API_BASE}/api/install-claude-code`;
     fetch(url).then(res => res.json()).then(data => alert(data.message)).catch(err => alert(err));
     setActiveMenu(null);
   };
@@ -155,7 +184,7 @@ function App() {
   };
 
   useEffect(() => {
-    const sse = new EventSource('http://localhost:8000/stream');
+    const sse = new EventSource(`${API_BASE}/stream`);
     sse.onmessage = (e) => {
       try {
         const data: LogRecord = JSON.parse(e.data);
@@ -189,7 +218,7 @@ function App() {
                 <button 
                   onClick={() => {
                     if (confirm("시스템을 완전히 종료하시겠습니까? (백그라운드 서버도 종료됩니다)")) {
-                      fetch('http://localhost:8000/api/shutdown')
+                      fetch(`${API_BASE}/api/shutdown`)
                         .then(() => { alert("서버가 종료되었습니다. 창을 닫아주세요."); window.close(); })
                         .catch(() => { alert("서버 종료 신호 전송 실패"); });
                     }
@@ -320,7 +349,7 @@ function App() {
                   onClick={() => handleFileClick(item)}
                   className={`w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] hover:bg-primary/20'}`}
                 >
-                  {item.isDir ? <Folder className="w-4 h-4 text-[#e8a87c]" /> : <FileText className="w-4 h-4 text-[#a0a0a0]" />}
+                  {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
                   <span className="truncate">{item.name}</span>
                 </button>
               ))}
@@ -431,7 +460,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
         onPointerUp={handlePointerUp}
       >
         <div className="flex items-center gap-2 text-[#cccccc] font-mono text-sm truncate pointer-events-none">
-          <FileText className="w-4 h-4 text-[#3794ef]" />
+          {getFileIcon(file.name)}
           {file.name}
         </div>
         <button 
@@ -499,7 +528,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount }: { slotId: nu
       fitAddon.fit();
       termRef.current = term;
       const wsParams = new URLSearchParams({ agent, cwd: currentPath, cols: term.cols.toString(), rows: term.rows.toString() });
-      const ws = new WebSocket(`ws://localhost:8001/pty/slot${slotId}?${wsParams.toString()}`);
+      const ws = new WebSocket(`${WS_BASE}/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
       ws.onopen = () => term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
       ws.onmessage = async (e) => term.write(e.data instanceof Blob ? await e.data.text() : e.data);
