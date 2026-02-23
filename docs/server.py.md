@@ -1,6 +1,6 @@
 # 📄 `server.py` 파일 상세 문서
 
-> **버전: v2.5.0 - [Claude] MemoryWatcher — 에이전트 메모리 자동 동기화 백그라운드 스레드 추가**
+> **버전: v2.6.0 - [Claude] 임베딩 기반 의미 검색 도입 (fastembed + 한국어 다국어 모델)**
 > **메인 문서:** [README.md](README.md)
 
 - **원본 파일 경로**: `.ai_monitor/server.py`
@@ -8,7 +8,15 @@
 
 ## 🛠️ 주요 기능 및 최근 개선 사항 (Key Features & Recent Improvements)
 
-1. **MemoryWatcher — 에이전트 메모리 자동 동기화 [v2.5.0]**
+1. **임베딩 기반 의미 검색 [v2.6.0]**
+   - `fastembed` + `paraphrase-multilingual-MiniLM-L12-v2` 모델 (한국어 포함 50개 언어, PyTorch 불필요)
+   - 메모리 저장 시(`/api/memory/set`, `MemoryWatcher._upsert`) 자동으로 float32 벡터 생성 → `embedding BLOB` 컬럼 저장
+   - 검색 시(`GET /api/memory?q=`) 코사인 유사도 기반 의미 검색 우선, 임베딩 없는 항목은 키워드 LIKE 폴백
+   - `?threshold=0.45` (유사도 최소값), `?top=20` (반환 개수) 파라미터 지원
+   - 결과에 `_score` 필드(유사도 0~1)를 포함하여 UI에서 신뢰도 표시 가능
+   - 기존 DB 자동 마이그레이션 (`ALTER TABLE memory ADD COLUMN embedding BLOB`)
+
+2. **MemoryWatcher — 에이전트 메모리 자동 동기화 [v2.5.0]**
    - `MemoryWatcher` 백그라운드 스레드가 서버 시작 시 자동으로 실행됩니다.
    - **감시 대상**
      - Claude Code: `~/.claude/projects/*/memory/*.md`

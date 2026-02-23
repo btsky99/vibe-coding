@@ -118,13 +118,63 @@ def _init_memory_db() -> None:
                 tags       TEXT NOT NULL DEFAULT '[]',
                 author     TEXT NOT NULL DEFAULT 'unknown',
                 timestamp  TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                embedding  BLOB         -- 의미 벡터 (fastembed, float32 bytes)
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_author ON memory(author)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at)')
+        # 기존 DB 마이그레이션 — embedding 컬럼이 없으면 추가
+        cols = [r[1] for r in conn.execute('PRAGMA table_info(memory)').fetchall()]
+        if 'embedding' not in cols:
+            conn.execute('ALTER TABLE memory ADD COLUMN embedding BLOB')
 
 _init_memory_db()
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 임베딩 헬퍼 (fastembed 기반, 한국어 포함 다국어 지원) ────────────────────
+_embedder = None
+_embedder_lock = threading.Lock()
+_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+def _get_embedder():
+    """fastembed 모델 lazy 초기화 — 첫 호출 시 한 번만 로드"""
+    global _embedder
+    if _embedder is None:
+        with _embedder_lock:
+            if _embedder is None:
+                try:
+                    from fastembed import TextEmbedding
+                    _embedder = TextEmbedding(model_name=_EMBED_MODEL)
+                    print(f"[Embedding] 모델 로드 완료: {_EMBED_MODEL}")
+                except Exception as e:
+                    print(f"[Embedding] 모델 로드 실패: {e}")
+                    _embedder = False  # 실패 표시 (재시도 방지)
+    return _embedder if _embedder else None
+
+def _embed(text: str) -> bytes | None:
+    """텍스트 → float32 벡터 bytes 변환. 실패 시 None 반환."""
+    try:
+        import numpy as np
+        embedder = _get_embedder()
+        if embedder is None:
+            return None
+        vec = list(embedder.embed([text[:512]]))[0]  # 512자 제한
+        return np.array(vec, dtype=np.float32).tobytes()
+    except Exception as e:
+        print(f"[Embedding] 변환 실패: {e}")
+        return None
+
+def _cosine_sim(a_bytes: bytes, b_bytes: bytes) -> float:
+    """두 float32 벡터 bytes 간 코사인 유사도 (0~1)"""
+    try:
+        import numpy as np
+        a = np.frombuffer(a_bytes, dtype=np.float32)
+        b = np.frombuffer(b_bytes, dtype=np.float32)
+        denom = np.linalg.norm(a) * np.linalg.norm(b)
+        return float(np.dot(a, b) / denom) if denom > 1e-10 else 0.0
+    except Exception:
+        return 0.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── 에이전트 메모리 워처 ──────────────────────────────────────────────────────
@@ -167,11 +217,12 @@ class MemoryWatcher(threading.Thread):
             self._next_terminal += 1
         return self._terminal_map[source_key]
 
-    # ── 내부: DB 저장 (HTTP 없이 직접 SQLite) ───────────────────────────────
+    # ── 내부: DB 저장 (HTTP 없이 직접 SQLite, 임베딩 포함) ──────────────────
     def _upsert(self, key: str, title: str, content: str,
                 author: str, tags: list) -> None:
         now = time.strftime('%Y-%m-%dT%H:%M:%S')
         tags_json = json.dumps(tags, ensure_ascii=False)
+        emb = _embed(f"{title}\n{content}")  # 제목+내용 합쳐서 벡터화
         with _memory_conn() as conn:
             existing = conn.execute(
                 'SELECT timestamp FROM memory WHERE key=?', (key,)
@@ -179,12 +230,12 @@ class MemoryWatcher(threading.Thread):
             orig_ts = existing['timestamp'] if existing else now
             conn.execute(
                 'INSERT OR REPLACE INTO memory '
-                '(key,id,title,content,tags,author,timestamp,updated_at) '
-                'VALUES (?,?,?,?,?,?,?,?)',
+                '(key,id,title,content,tags,author,timestamp,updated_at,embedding) '
+                'VALUES (?,?,?,?,?,?,?,?,?)',
                 (key, str(int(time.time() * 1000)), title,
-                 content, tags_json, author, orig_ts, now)
+                 content, tags_json, author, orig_ts, now, emb)
             )
-        print(f"[MemoryWatcher] 동기화 완료: {key}")
+        print(f"[MemoryWatcher] 동기화 완료: {key} (임베딩: {'✓' if emb else '✗'})")
 
     # ── 내부: 파일 변경 여부 확인 ───────────────────────────────────────────
     def _changed(self, path: Path) -> bool:
@@ -937,28 +988,62 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps([]).encode('utf-8'))
         elif parsed_path.path == '/api/memory':
-            # 공유 메모리 조회 — ?q=검색어 파라미터로 전문 검색 지원 (SQLite LIKE)
+            # 공유 메모리 조회 — 임베딩 의미 검색 우선, 폴백 키워드 LIKE
+            # ?q=검색어  ?top=N(기본20)  ?threshold=0.5(유사도 최소값)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             query = parse_qs(parsed_path.query)
-            q = query.get('q', [''])[0].strip()
+            q         = query.get('q',         [''])[0].strip()
+            top_k     = int(query.get('top',   ['20'])[0])
+            threshold = float(query.get('threshold', ['0.45'])[0])
             try:
                 with _memory_conn() as conn:
                     if q:
-                        # 키·제목·내용·태그 전문 검색
-                        pattern = f'%{q}%'
-                        rows = conn.execute(
-                            'SELECT * FROM memory WHERE key LIKE ? OR title LIKE ? OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC',
-                            (pattern, pattern, pattern, pattern)
-                        ).fetchall()
+                        q_emb = _embed(q)
+                        if q_emb:
+                            # ── 임베딩 의미 검색 ──────────────────────────
+                            all_rows = conn.execute(
+                                'SELECT * FROM memory ORDER BY updated_at DESC'
+                            ).fetchall()
+                            scored = []
+                            for row in all_rows:
+                                r_emb = row['embedding']
+                                if r_emb:
+                                    score = _cosine_sim(q_emb, r_emb)
+                                    if score >= threshold:
+                                        scored.append((dict(row), score))
+                                else:
+                                    # 임베딩 없는 항목은 키워드 폴백
+                                    pattern = f'%{q}%'
+                                    if any(q.lower() in str(row[f]).lower()
+                                           for f in ('key','title','content','tags')):
+                                        scored.append((dict(row), 0.0))
+                            scored.sort(key=lambda x: -x[1])
+                            rows_data = [r for r, _ in scored[:top_k]]
+                            # 유사도 점수를 결과에 포함
+                            for (r, s), rd in zip(scored[:top_k], rows_data):
+                                rd['_score'] = round(s, 4)
+                        else:
+                            # 임베딩 모델 미로드 → 키워드 폴백
+                            pattern = f'%{q}%'
+                            rows_raw = conn.execute(
+                                'SELECT * FROM memory WHERE key LIKE ? OR title LIKE ? '
+                                'OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?',
+                                (pattern, pattern, pattern, pattern, top_k)
+                            ).fetchall()
+                            rows_data = [dict(r) for r in rows_raw]
                     else:
-                        rows = conn.execute('SELECT * FROM memory ORDER BY updated_at DESC').fetchall()
+                        rows_raw = conn.execute(
+                            'SELECT * FROM memory ORDER BY updated_at DESC LIMIT ?', (top_k,)
+                        ).fetchall()
+                        rows_data = [dict(r) for r in rows_raw]
+
                 entries = []
-                for row in rows:
-                    entry = dict(row)
+                for entry in rows_data:
                     entry['tags'] = json.loads(entry.get('tags', '[]'))
+                    entry.pop('embedding', None)  # bytes는 JSON 직렬화 불가 — 제거
                     entries.append(entry)
                 self.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -1386,10 +1471,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                     return
 
                 now   = time.strftime('%Y-%m-%dT%H:%M:%S')
+                title = str(data.get('title', key)).strip()[:300]
                 entry = {
                     'key':        key,
                     'id':         str(int(time.time() * 1000)),
-                    'title':      str(data.get('title', key)).strip()[:300],
+                    'title':      title,
                     'content':    content,
                     'tags':       json.dumps(data.get('tags', []), ensure_ascii=False),
                     'author':     str(data.get('author', 'unknown')),
@@ -1397,15 +1483,21 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'updated_at': now,
                 }
 
+                # 임베딩 생성 (백그라운드 스레드에서 비동기로 수행해도 되지만
+                # 여기서는 단순화를 위해 동기 처리 — 보통 0.05초 이내)
+                emb = _embed(f"{title}\n{content}")
+
                 with _memory_conn() as conn:
                     # 기존 항목이면 timestamp(최초)는 유지, updated_at만 갱신
                     existing = conn.execute('SELECT timestamp FROM memory WHERE key=?', (key,)).fetchone()
                     if existing:
                         entry['timestamp'] = existing['timestamp']
                     conn.execute(
-                        'INSERT OR REPLACE INTO memory (key,id,title,content,tags,author,timestamp,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+                        'INSERT OR REPLACE INTO memory '
+                        '(key,id,title,content,tags,author,timestamp,updated_at,embedding) '
+                        'VALUES (?,?,?,?,?,?,?,?,?)',
                         (entry['key'], entry['id'], entry['title'], entry['content'],
-                         entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'])
+                         entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'], emb)
                     )
 
                 entry['tags'] = json.loads(entry['tags'])

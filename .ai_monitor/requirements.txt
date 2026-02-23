@@ -6,3 +6,5 @@ watchdog==6.0.0
 websockets==16.0
 pyinstaller
 pywebview==6.1
+fastembed
+numpy
