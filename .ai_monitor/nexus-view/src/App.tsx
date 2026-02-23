@@ -1909,7 +1909,8 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(text + '\r');
+    // 제미나이 등 일부 CLI 환경에서 \r 만으로는 즉시 실행되지 않는 문제를 해결하기 위해 \n 사용
+    wsRef.current.send(text + '\n');
     setInputValue('');
     termRef.current?.focus();
   };
@@ -2020,14 +2021,19 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                  </button>
                ))}
             </div>
-            <div className="flex gap-2 items-center relative">
-              <input
-                type="text"
+            <div className="flex gap-2 items-end relative">
+              <textarea
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleSend(inputValue); }}
-                placeholder="터미널 명령어 전송 (한글 완벽 지원)..."
-                className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-colors"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend(inputValue);
+                  }
+                }}
+                placeholder="터미널 명령어 전송 (한글 완벽 지원, 엔터:전송, 쉬프트+엔터:줄바꿈)..."
+                rows={Math.max(1, Math.min(8, inputValue.split('\n').length))}
+                className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-all resize-none custom-scrollbar leading-relaxed h-auto"
               />
               {/* 슬래시 커맨드 퀵 팝업 버튼 */}
               <div className="relative">

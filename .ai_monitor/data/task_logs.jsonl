@@ -23,3 +23,5 @@
 {"timestamp": "2026-02-23T01:56:07.911693", "agent": "Gemini-1", "task": "Frontend build updated to latest. Nexus View UI (Multi-window, icons) now active."}
 {"timestamp": "2026-02-23T02:00:08.008069", "agent": "Gemini-1", "task": "Renamed project from 'Nexus View' to 'Vibe Coding' in all docs and UI. Re-built successfully."}
 {"timestamp": "2026-02-23T20:35:57.889447", "agent": "Gemini-1", "task": "프로그램 실행 실패 오류 수정: pywebview API 호환성, import 구조 전역 통합으로 UnboundLocalError 해결, Windows 환경 UnicodeDecodeError 안정화 완료"}
+{"timestamp": "2026-02-23T23:24:25.052888", "agent": "Gemini-1", "task": "Investigating the issue where Gemini's input bar doesn't execute on Enter key. Checking frontend components in nexus-view."}
+{"timestamp": "2026-02-23T23:37:52.077696", "agent": "Gemini-1", "task": "Fixed Gemini's input issue in nexus-view by replacing input with textarea and updating handleSend to use \\n for immediate execution. Rebuilt frontend successfully."}

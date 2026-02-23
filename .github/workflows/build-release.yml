@@ -61,15 +61,22 @@ jobs:
               f.write(f"path={wp}\n")
         shell: python
 
+      - name: Sync icons and assets
+        run: |
+          copy assets\vibe_coding_icon.ico .ai_monitor\bin\app_icon.ico /y
+          copy assets\vibe_coding_icon.ico .ai_monitor\bin\vibe_final.ico /y
+        shell: cmd
+
       - name: Build exe
         run: |
           cd .ai_monitor
           set WINPTY=${{ steps.winpty.outputs.path }}
           pyinstaller --onefile --noconsole ^
             --name vibe-coding ^
-            --icon bin/app_icon.ico ^
+            --icon bin/vibe_final.ico ^
             --add-data "src;src" ^
-            --add-data "nexus-view\dist;nexus-view/dist" ^
+            --add-data "bin;bin" ^
+            --add-data "nexus-view\dist;dist" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^
@@ -85,9 +92,10 @@ jobs:
           set WINPTY=${{ steps.winpty.outputs.path }}
           pyinstaller --onefile --console ^
             --name vibe-coding_console ^
-            --icon bin/app_icon.ico ^
+            --icon bin/vibe_final.ico ^
             --add-data "src;src" ^
-            --add-data "nexus-view\dist;nexus-view/dist" ^
+            --add-data "bin;bin" ^
+            --add-data "nexus-view\dist;dist" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^

@@ -101,7 +101,7 @@ def _download_asset(url, dest, token):
         return False
 
 
-def _apply_update(new_exe):
+def apply_update_from_temp(new_exe):
     """
     Replace the running exe and restart.
 
@@ -203,5 +203,7 @@ def check_and_update(data_dir):
             tmp_path.unlink()
         return
 
-    logger.info("Download complete. Applying update...")
-    _apply_update(tmp_path)
+    logger.info("Download complete. Waiting for user to apply update...")
+    update_info = {"version": latest_tag, "ready": True, "exe_path": str(tmp_path)}
+    with open(data_dir / "update_ready.json", "w", encoding="utf-8") as f:
+        json.dump(update_info, f)

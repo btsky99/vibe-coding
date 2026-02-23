@@ -1,6 +1,6 @@
 # 📄 `server.py` 파일 상세 문서
 
-> **버전: v2.3.1 - [Gemini] pywebview API 호환성 수정, import 구조 최적화 및 Windows 인코딩 안정화**
+> **버전: v2.5.0 - [Claude] MemoryWatcher — 에이전트 메모리 자동 동기화 백그라운드 스레드 추가**
 > **메인 문서:** [README.md](README.md)
 
 - **원본 파일 경로**: `.ai_monitor/server.py`
@@ -8,7 +8,24 @@
 
 ## 🛠️ 주요 기능 및 최근 개선 사항 (Key Features & Recent Improvements)
 
-1. **실행 안정성 강화 및 버그 수정 [v2.3.1]**
+1. **MemoryWatcher — 에이전트 메모리 자동 동기화 [v2.5.0]**
+   - `MemoryWatcher` 백그라운드 스레드가 서버 시작 시 자동으로 실행됩니다.
+   - **감시 대상**
+     - Claude Code: `~/.claude/projects/*/memory/*.md`
+     - Gemini CLI: `~/.gemini/tmp/{프로젝트}/logs.json`, `chats/session-*.json`
+   - 15초마다 mtime 폴링 → 변경된 파일만 `shared_memory.db` 에 UPSERT
+   - 터미널 번호(T1, T2…)는 최초 감지 순서로 자동 부여 (`author: claude-code:terminal-1` 등)
+   - 에이전트 추가 토큰 소모 없이 자연스러운 메모리 저장 → 하이브 공유 메모리 자동 반영
+   - Nexus View UI의 메모리 패널에서 "1번 터미널: MCP UI 작업 중" 형태로 확인 가능
+
+2. **MCP 관리자 API 추가 [v2.4.0]**
+   - `GET /api/mcp/catalog` — 8개의 큐레이션된 MCP 서버 목록 반환 (context7, github, memory, fetch, playwright, sequential-thinking, sqlite, brave-search)
+   - `GET /api/mcp/installed?tool=claude|gemini&scope=global|project` — 지정한 설정 파일의 `mcpServers` 키 목록 반환
+   - `POST /api/mcp/install` — `mcpServers`에 엔트리 추가 (환경변수 필요 시 플레이스홀더 삽입)
+   - `POST /api/mcp/uninstall` — `mcpServers`에서 해당 키 삭제
+   - `_mcp_config_path(tool, scope)` 헬퍼로 Claude/Gemini × Global/Project 4가지 경로를 관리
+
+2. **실행 안정성 강화 및 버그 수정 [v2.3.1]**
    - **import 구조 전면 최적화**: 함수 내부에 흩어져 있던 지역 `import` 문들을 파일 상단으로 통합하여, 특정 API 호출 시 발생하던 `UnboundLocalError`를 근본적으로 해결했습니다.
    - **pywebview 6.1 API 준수**: `create_window()`에서 지원하지 않는 `icon` 인자를 제거하고 `webview.start(icon=...)` 단계로 이동시켜 실행 시 발생하는 `TypeError`를 해결했습니다.
    - **Windows 인코딩(CP949) 호환성 확보**: `subprocess.run` 호출 시 `encoding='utf-8'`을 명시하여, 한글 경로 또는 Git 로그 출력 시 발생하던 `UnicodeDecodeError`를 방지했습니다.

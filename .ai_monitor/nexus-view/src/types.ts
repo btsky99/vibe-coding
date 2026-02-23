@@ -77,6 +77,16 @@ export interface Task {
     created_by: string;                // 생성 주체
 }
 
+// MCP 카탈로그 항목 — 설치 가능한 MCP 서버 정보
+export interface McpEntry {
+    name: string;          // 식별 이름 (예: context7)
+    package: string;       // npm 패키지 경로 (예: @upstash/context7-mcp)
+    description: string;   // 기능 설명
+    category: string;      // 카테고리 (문서 / 개발 / 검색 / AI / 브라우저 / DB)
+    requiresEnv?: string[]; // 필수 환경변수 목록 (있으면 플레이스홀더로 설치)
+    args?: string[];        // npx 실행 시 추가 인수
+}
+
 // 에이전트 간 직접 메시지 채널 데이터 구조
 export interface AgentMessage {
     id: string;                    // 고유 ID (timestamp 기반)
