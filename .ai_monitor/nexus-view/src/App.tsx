@@ -1666,7 +1666,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   // 주기적으로 활성 파일 내용 갱신 (뷰어가 열려있을 때만, 이미지 파일 제외)
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     const isImage = activeFilePath ? /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath) : false;
     if (showActiveFile && activeFilePath && !isImage) {
       const fetchFile = () => {
