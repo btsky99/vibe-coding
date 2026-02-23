@@ -484,6 +484,32 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // ─── 업데이트 알림 상태 ───────────────────────────────────────────────────
+  const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
+  const [updateApplying, setUpdateApplying] = useState(false);
+
+  // 30초마다 업데이트 준비 여부 확인
+  useEffect(() => {
+    const check = () => {
+      fetch(`${API_BASE}/api/check-update-ready`)
+        .then(res => res.json())
+        .then(data => setUpdateReady(data?.ready ? { version: data.version } : null))
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const applyUpdate = () => {
+    setUpdateApplying(true);
+    fetch(`${API_BASE}/api/apply-update`, { method: 'POST' })
+      .then(res => res.json())
+      .then(() => setUpdateReady(null))
+      .catch(() => {})
+      .finally(() => setUpdateApplying(false));
+  };
+
   // 파일 시스템 탐색 상태
   const [drives, setDrives] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
@@ -621,6 +647,30 @@ function App() {
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden select-none font-sans flex-col" onClick={() => setActiveMenu(null)}>
       
+      {/* 업데이트 알림 배너 */}
+      {updateReady && (
+        <div className="flex items-center justify-between px-3 py-1 bg-primary/20 border-b border-primary/40 shrink-0 z-50">
+          <span className="text-[10px] text-primary font-bold">
+            새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={applyUpdate}
+              disabled={updateApplying}
+              className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-50 transition-colors"
+            >
+              {updateApplying ? '적용 중...' : '지금 업데이트'}
+            </button>
+            <button
+              onClick={() => setUpdateReady(null)}
+              className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
         <Activity className="w-3.5 h-3.5 text-primary mx-1" />
