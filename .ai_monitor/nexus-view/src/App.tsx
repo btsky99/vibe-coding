@@ -11,7 +11,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Activity, Menu, Terminal, RotateCw,
+  Menu, Terminal, RotateCw,
   ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
@@ -673,7 +673,7 @@ function App() {
 
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
-        <Activity className="w-3.5 h-3.5 text-primary mx-1" />
+        <img src="/vibe_icon.png" alt="vibe" className="w-4 h-4 mx-1 object-contain" />
         <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
         <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v2.3.0</span>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
