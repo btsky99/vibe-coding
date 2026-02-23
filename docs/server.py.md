@@ -1,19 +1,29 @@
 # 📄 `server.py` 파일 상세 문서
 
-> **버전: v2.2.0 - [Gemini] PyWebView 네이티브 데스크탑 앱 래핑 적용**
+> **버전: v2.3.1 - [Gemini] pywebview API 호환성 수정, import 구조 최적화 및 Windows 인코딩 안정화**
 > **메인 문서:** [README.md](README.md)
 
 - **원본 파일 경로**: `.ai_monitor/server.py`
 - **파일 역할**: 하이브 마인드의 파이썬 백엔드(Backend)로, 프론트엔드 React 클라이언트에 정적 파일, 파일 시스템 접근 API, 실시간 터미널 웹소켓 세션, SSE 로그 스트림 등을 제공합니다.
 
-## 🛠️ 주요 기능 (Key Features)
+## 🛠️ 주요 기능 및 최근 개선 사항 (Key Features & Recent Improvements)
 
-1. **에이전트 작업 충돌 방지 (Lock System) [NEW]**
-   - **`/api/locks` (GET/POST)**: 여러 에이전트(Gemini, Claude 등)가 동시에 같은 파일을 수정하여 발생하는 충돌을 방지합니다.
-   - 특정 파일에 대해 어떤 에이전트가 작업 중인지 기록하고, 다른 에이전트가 락을 시도할 경우 `conflict` 상태를 반환합니다.
+1. **실행 안정성 강화 및 버그 수정 [v2.3.1]**
+   - **import 구조 전면 최적화**: 함수 내부에 흩어져 있던 지역 `import` 문들을 파일 상단으로 통합하여, 특정 API 호출 시 발생하던 `UnboundLocalError`를 근본적으로 해결했습니다.
+   - **pywebview 6.1 API 준수**: `create_window()`에서 지원하지 않는 `icon` 인자를 제거하고 `webview.start(icon=...)` 단계로 이동시켜 실행 시 발생하는 `TypeError`를 해결했습니다.
+   - **Windows 인코딩(CP949) 호환성 확보**: `subprocess.run` 호출 시 `encoding='utf-8'`을 명시하여, 한글 경로 또는 Git 로그 출력 시 발생하던 `UnicodeDecodeError`를 방지했습니다.
+
+2. **에이전트 작업 충돌 방지 (Lock System)**
+...
    - 락 획득/해제 시 `task_logs.jsonl`에 자동으로 이벤트를 로깅하여 넥서스 뷰 대시보드에 실시간 표시합니다.
 
-2. **정적 파일 서비스 및 라우팅**
+2. **배포 버전(Frozen EXE) 안정성 및 디버깅 지원 [NEW]**
+   - **자가 진단 에러 로그**: `--noconsole` 모드에서 실행 시 에러가 발생하면 `data/server_error.log` 파일에 모든 트레이스백을 자동으로 기록하여 크래시 원인을 분석할 수 있게 합니다.
+   - **빌드 구조 개선**: PyInstaller 빌드 시 `src` 폴더를 명시적으로 포함하여 임포트 오류를 원천 차단했습니다.
+   - **콘솔 모드 제공**: `vibe-coding_console.exe`를 통해 서버의 모든 동작 로그를 실시간으로 확인하며 디버깅할 수 있는 환경을 별도로 제공합니다.
+
+3. **정적 파일 서비스 및 라우팅**
+...
    - PyInstaller로 빌드될 경우(frozen)와 스크립트로 직접 실행될 경우(dev) 모두에 대비해 `STATIC_DIR`을 동적으로 찾습니다.
    - Vite로 빌드된 프론트엔드 정적 파일(`nexus-view/dist/*`)을 서빙하며, 알 수 없는 경로는 `index.html`로 폴백(Fallback)시킵니다.
 

@@ -1,10 +1,10 @@
 # 📄 `App.tsx` 파일 상세 문서
 
-> **버전: v2.2.0 - [Claude] VS코드 스타일 줄 번호 뷰어 추가**
+> **버전: v2.3.0 - [Gemini-1] 최신 UI 빌드(Build) 갱신 및 배포 완료**
 > **메인 문서:** [README.md](README.md)
 
 - **원본 파일 경로**: `.ai_monitor/nexus-view/src/App.tsx`
-- **파일 역할**: 하이브 마인드의 넥서스 뷰(Nexus View) 프론트엔드 React 프로젝트에서 전체 대시보드 화면을 담당하는 최상위(Main) 컴포넌트입니다.
+- **파일 역할**: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 React 프로젝트에서 전체 대시보드 화면을 담당하는 최상위(Main) 컴포넌트입니다.
 
 ## 🛠️ 주요 기능 (Key Features)
 

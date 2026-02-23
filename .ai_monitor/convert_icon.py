@@ -21,8 +21,8 @@ def convert_to_ico(png_path: str, ico_path: str):
         return False
 
 if __name__ == "__main__":
-    base_dir = Path(r"D:\vibe-coding\.ai_monitor")
-    png_source = r"C:\Users\com\.gemini\antigravity\brain\92aa8f19-1924-4aa1-9708-704f46ef0c08\ai_monitor_app_icon_1771638065036.png"
-    ico_dest = base_dir / "bin" / "app_icon.ico"
+    base_dir = Path(r"D:\vibe-coding")
+    png_source = base_dir / "assets" / "vibe_coding_icon.png"
+    ico_dest = base_dir / ".ai_monitor" / "bin" / "app_icon.ico"
     
-    convert_to_ico(png_source, str(ico_dest))
+    convert_to_ico(str(png_source), str(ico_dest))

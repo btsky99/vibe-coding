@@ -561,7 +561,9 @@ function App() {
       
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
-        <Activity className="w-3.5 h-3.5 text-primary mx-2" />
+        <Activity className="w-3.5 h-3.5 text-primary mx-1" />
+        <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
+        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v2.3.0</span>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
@@ -657,7 +659,7 @@ function App() {
                   <Terminal className="w-3.5 h-3.5 text-accent" /> Gemini CLI 사용법
                 </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                <button onClick={() => { alert("Nexus View v1.0.0\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                <button onClick={() => { alert("바이브 코딩(Vibe Coding) v1.0.0\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
                   <Info className="w-3.5 h-3.5 text-[#3794ef]" /> 버전 정보
                 </button>
               </div>

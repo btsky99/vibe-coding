@@ -14,35 +14,29 @@ import webbrowser
 import shutil
 import subprocess
 import sqlite3
+import re
+import threading
+import sys
+import asyncio
+import string
+try:
+    import websockets
+except ImportError:
+    websockets = None
 
+if os.name == 'nt':
+    try:
+        from winpty import PtyProcess
+    except ImportError:
+        PtyProcess = None
+else:
+    PtyProcess = None
 
-def open_app_window(url):
-    """Chrome/Edge 앱 모드로 열기 (주소창/탭 없이 GUI처럼 표시)"""
-    chrome = shutil.which("chrome") or shutil.which("google-chrome")
-    edge = shutil.which("msedge")
-    # Windows 기본 경로 확인
-    for path in [
-        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
-        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
-    ]:
-        if os.path.isfile(path):
-            if not chrome and "chrome" in path.lower():
-                chrome = path
-            if not edge and "edge" in path.lower():
-                edge = path
-    browser = chrome or edge
-    if browser:
-        subprocess.Popen([browser, f"--app={url}"])
-    else:
-        webbrowser.open(url)
+from datetime import datetime
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
-from pathlib import Path
-
-import sys
+from urllib.parse import urlparse, parse_qs
 from _version import __version__
 
 if getattr(sys, 'frozen', False):
@@ -186,7 +180,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             while True:
                 try:
                     # 새로운 로그가 있는지 확인 (last_id 보다 큰 id 조회)
-                    import sqlite3
                     conn = sqlite3.connect(str(DATA_DIR / "hive_mind.db"), timeout=5.0)
                     conn.row_factory = sqlite3.Row
                     cursor = conn.execute("SELECT * FROM session_logs WHERE id > ? ORDER BY id ASC", (last_id,))
@@ -238,7 +231,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                import subprocess
                 # Gemini CLI 설치 (전역)
                 subprocess.Popen('cmd.exe /k "echo Installing Gemini CLI... && npm install -g @google/gemini-cli"', shell=True)
                 result = {"status": "success", "message": "Gemini CLI installation started in a new window."}
@@ -251,7 +243,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                import subprocess
                 # Claude Code 설치 (전역)
                 subprocess.Popen('cmd.exe /k "echo Installing Claude Code... && npm install -g @anthropic-ai/claude-code"', shell=True)
                 result = {"status": "success", "message": "Claude Code installation started in a new window."}
@@ -265,7 +256,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "success", "message": "Server shutting down..."}).encode('utf-8'))
             print("Shutdown requested via API. Exiting in 1 second...")
-            import threading
             threading.Timer(1.0, lambda: os._exit(0)).start()
         elif parsed_path.path == '/api/files':
             self.send_response(200)
@@ -300,7 +290,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             result = {"status": "error", "message": "Invalid path"}
             if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
                 try:
-                    import shutil
                     # 소스 경로 (설치된 앱의 위치 기준)
                     # .gemini, scripts, GEMINI.md 등을 복사
                     source_base = BASE_DIR.parent # 프로젝트 루트로 가정
@@ -415,7 +404,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 # Windows 클립보드에 경로 복사
                 if os.name == 'nt':
-                    subprocess.run(['powershell', '-Command', f'Set-Clipboard -Value "{target_path}"'], check=True)
+                    subprocess.run(['powershell', '-Command', f'Set-Clipboard -Value "{target_path}"'], check=True, encoding='utf-8')
                 self.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -426,7 +415,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            import shutil
             try:
                 data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
                 op = data.get('op')
@@ -472,7 +460,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                from datetime import datetime as _dt
                 KNOWN_AGENTS = ['claude', 'gemini']
                 IDLE_SEC = 300  # 5분
 
@@ -491,14 +478,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                     pass
 
                 # 에이전트 상태 (active / idle / unknown)
-                now_dt = _dt.now()
+                now_dt = datetime.now()
                 agent_status = {}
                 for agent, seen in agent_last_seen.items():
                     if seen is None:
                         agent_status[agent] = {'state': 'unknown', 'last_seen': None, 'idle_sec': None}
                     else:
                         try:
-                            seen_dt = _dt.fromisoformat(seen.replace('Z', ''))
+                            seen_dt = datetime.fromisoformat(seen.replace('Z', ''))
                             idle = int((now_dt - seen_dt).total_seconds())
                             agent_status[agent] = {
                                 'state': 'idle' if idle > IDLE_SEC else 'active',
@@ -561,7 +548,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # git status --porcelain=v1 -b : 머신 파싱용 간결 포맷
                 result = subprocess.run(
                     ['git', 'status', '--porcelain=v1', '-b'],
-                    cwd=git_path, capture_output=True, text=True, timeout=5
+                    cwd=git_path, capture_output=True, text=True, timeout=5, encoding='utf-8',
+                    creationflags=0x08000000
                 )
                 if result.returncode != 0:
                     self.wfile.write(json.dumps({'is_git_repo': False, 'error': result.stderr.strip()}).encode('utf-8'))
@@ -574,7 +562,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 behind = 0
                 if branch_line.startswith('## '):
                     branch_info = branch_line[3:]
-                    import re
                     # "No commits yet on main" 처리
                     if branch_info.startswith('No commits yet on '):
                         branch = branch_info.split(' ')[-1]
@@ -628,7 +615,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 result = subprocess.run(
                     ['git', 'log', f'--format=%h\x1f%s\x1f%an\x1f%ar', f'-n{n}'],
-                    cwd=git_path, capture_output=True, text=True, timeout=5
+                    cwd=git_path, capture_output=True, text=True, timeout=5, encoding='utf-8',
+                    creationflags=0x08000000
                 )
                 commits = []
                 for line in result.stdout.strip().splitlines():
@@ -726,8 +714,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 agent = data.get('agent')
                 target_dir = data.get('path', 'C:\\')
                 is_yolo = data.get('yolo', False)
-                
-                import subprocess
                 
                 if agent == 'claude':
                     yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
@@ -1051,12 +1037,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                import sys as _sys
                 # scripts/orchestrator.py를 subprocess로 실행
                 orch_script = str(BASE_DIR.parent / 'scripts' / 'orchestrator.py')
                 result = subprocess.run(
-                    [_sys.executable, orch_script],
-                    capture_output=True, text=True, timeout=15
+                    [sys.executable, orch_script],
+                    capture_output=True, text=True, timeout=15, encoding='utf-8',
+                    creationflags=0x08000000
                 )
                 output = (result.stdout + result.stderr).strip()
                 self.wfile.write(json.dumps({
@@ -1072,11 +1058,6 @@ class SSEHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # 불필요한 콘솔 로그 제거하여 터미널 깔끔하게 유지
         pass
-
-import asyncio
-import websockets
-import threading
-from winpty import PtyProcess
 
 pty_sessions = {}
 
@@ -1109,7 +1090,6 @@ async def pty_handler(websocket):
             yolo_flag = " -y" if is_yolo else ""
             pty.write(f'gemini{yolo_flag}\r\n')
 
-        import re
         match = re.search(r'/pty/slot(\d+)', path)
         if match:
             # UI의 Terminal 1, Terminal 2 와 맞추기 위해 slot + 1 을 ID로 사용
@@ -1189,6 +1169,15 @@ def start_ws_server():
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
+    # 윈도우 작업표시줄 아이콘을 파이썬 로고 대신 커스텀 아이콘으로 고정
+    if os.name == 'nt':
+        try:
+            import ctypes
+            myappid = f'com.vibe.coding.{__version__}' # 임의의 고유 ID
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception as e:
+            print(f"Failed to set AppUserModelID: {e}")
+
     # --- Auto-update check (non-blocking) ---
     if getattr(sys, 'frozen', False):
         from updater import check_and_update
@@ -1199,45 +1188,68 @@ if __name__ == '__main__':
         )
         update_thread.start()
 
+if __name__ == '__main__':
+    print(f"Vibe Coding {__version__}")
+
+    if os.name == 'nt':
+        try:
+            import ctypes
+            myappid = f'com.vibe.coding.{__version__}'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except: pass
+
+    # 1. 백그라운드 스레드 시작
     threading.Thread(target=start_ws_server, daemon=True).start()
     threading.Thread(target=monitor_heartbeat, daemon=True).start()
+    
+    # 2. HTTP 서버 시작
     try:
         server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
-        print(f"바이브 코딩 SSE Log Server started on port {HTTP_PORT}")
+        print(f"[*] Server running on port {HTTP_PORT}")
         threading.Thread(target=server.serve_forever, daemon=True).start()
+    except Exception as e:
+        print(f"[!] Server Start Error: {e}")
+
+    # 3. GUI 창 띄우기 (최우선 순위)
+    try:
+        import webview
+        official_icon = r"D:\vibe-coding\assets\vibe_coding_icon.ico"
         
-        try:
-            import webview
-            # 아이콘 경로 후보군 (PNG 우선 지원)
-            icon_candidates = [
-                r"D:\vibe-coding\assets\vibe_coding_icon.png",
-                str(BASE_DIR / 'nexus-view' / 'public' / 'vibe_icon.png'),
-                str(BASE_DIR / 'bin' / 'app_icon.ico'),
-            ]
-            
-            icon_path = None
-            for cand in icon_candidates:
-                if os.path.exists(cand):
-                    icon_path = cand
-                    break
-            
-            print(f"Starting GUI window with icon: {icon_path}")
-            webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", 
-                                  width=1400, height=900, icon=icon_path)
-            webview.start()
-        except ImportError:
-            print("pywebview not found. Opening in default browser instead.")
-            open_app_window(f"http://localhost:{HTTP_PORT}")
-            # 서버 유지를 위해 무한 루프
-            while True:
-                time.sleep(10)
-    except OSError:
-        try:
-            import webview
-            webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", width=1400, height=900)
-            webview.start()
-        except ImportError:
-            open_app_window(f"http://localhost:{HTTP_PORT}")
-            while True:
-                time.sleep(10)
-        sys.exit(0)
+        # 윈도우 하단바 아이콘 강제 교체 함수 (Win32 API)
+        def force_win32_icon():
+            if os.name == 'nt':
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    import time
+                    
+                    # 창이 생성될 때까지 잠시 대기
+                    time.sleep(2)
+                    
+                    # 바이브 코딩 창 핸들 찾기
+                    hwnd = ctypes.windll.user32.FindWindowW(None, "바이브 코딩")
+                    if hwnd:
+                        # 아이콘 파일 로드
+                        hicon = ctypes.windll.user32.LoadImageW(
+                            None, official_icon, 1, 0, 0, 0x00000010 | 0x00000040
+                        )
+                        # 큰 아이콘 (작업표시줄용)
+                        ctypes.windll.user32.SendMessageW(hwnd, 0x80, 1, hicon)
+                        # 작은 아이콘 (창 제목줄용)
+                        ctypes.windll.user32.SendMessageW(hwnd, 0x80, 0, hicon)
+                        print("[*] Win32 Taskbar Icon Forced Successfully.")
+                except Exception as e:
+                    print(f"[!] Win32 Icon Fix Error: {e}")
+
+        print(f"[*] Launching Desktop Window with Official Icon...")
+        webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", 
+                              width=1400, height=900)
+        
+        # 아이콘 교체 스레드 별도 실행
+        threading.Thread(target=force_win32_icon, daemon=True).start()
+        
+        webview.start()
+    except Exception as e:
+        print(f"[!] GUI Error: {e}")
+        open_app_window(f"http://localhost:{HTTP_PORT}")
+        while True: time.sleep(10)

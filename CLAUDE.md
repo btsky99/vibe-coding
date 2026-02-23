@@ -1,54 +1,47 @@
-# Vibe Coding - Claude Code 프로젝트 가이드
+# Vibe Coding - Claude Code ?�로?�트 가?�드
 
-## 프로젝트 구조
-- `.ai_monitor/` - 메인 프로젝트 (Python 백엔드 + Nexus View 프론트엔드)
-- `.ai_monitor/server.py` - SSE 로그 서버 + WebSocket PTY 서버
+## ?�로?�트 구조
+- `.ai_monitor/` - 메인 ?�로?�트 (Python 백엔??+ Vibe Coding ?�론?�엔??
+- `.ai_monitor/server.py` - SSE 로그 ?�버 + WebSocket PTY ?�버
 - `.ai_monitor/src/view.py` - Textual TUI 콘솔 뷰어
-- `.ai_monitor/updater.py` - 자동 업데이트 모듈
-- `.ai_monitor/nexus-view/` - React + Vite 프론트엔드
-- `.ai_monitor/venv/` - Python 가상환경
-- `.github/workflows/build-release.yml` - CI/CD 파이프라인
+- `.ai_monitor/updater.py` - ?�동 ?�데?�트 모듈
+- `.ai_monitor/nexus-view/` - React + Vite ?�론?�엔??- `.ai_monitor/venv/` - Python 가?�환�?- `.github/workflows/build-release.yml` - CI/CD ?�이?�라??
+## 마스??컨트�??�로?�콜
 
-## 마스터 컨트롤 프로토콜
+### 1?�계: ?�청 ?�도 분석
+?�청???�음 카테고리�?분류?�여 처리:
+- **?�러/버그 ?�정**: 로그 분석 ?�선, 근본 ?�인 ?�악 ???�정
+- **??기능 구현**: ?�계 검????구현, `ai_monitor_plan.md` 참조
+- **빌드/배포**: CI ?�크?�로??�?PyInstaller spec ?�일 ?�인
+- **문서/Git**: Conventional Commits ?�용, CHANGELOG 반영
 
-### 1단계: 요청 의도 분석
-요청을 다음 카테고리로 분류하여 처리:
-- **에러/버그 수정**: 로그 분석 우선, 근본 원인 파악 후 수정
-- **새 기능 구현**: 설계 검토 후 구현, `ai_monitor_plan.md` 참조
-- **빌드/배포**: CI 워크플로우 및 PyInstaller spec 파일 확인
-- **문서/Git**: Conventional Commits 사용, CHANGELOG 반영
-
-### 2단계: 개발 표준
+### 2?�계: 개발 ?��?
 
 #### Python
-- 가상환경: `.ai_monitor/venv/`
-- 린팅: `ruff` 사용
-- 타입 힌팅 적극 활용
-- 비동기 처리 시 이벤트 루프 블로킹 주의 (특히 GUI 연동)
-- 테스트: `pytest` 기반
+- 가?�환�? `.ai_monitor/venv/`
+- 린팅: `ruff` ?�용
+- ?�???�팅 ?�극 ?�용
+- 비동�?처리 ???�벤??루프 블로??주의 (?�히 GUI ?�동)
+- ?�스?? `pytest` 기반
 
-#### React / 프론트엔드 (nexus-view)
-- Server/Client 컴포넌트 분리
-- TailwindCSS 사용, 매직 넘버 지양
-- 로컬 상태 우선, 전역 상태는 최소화
-- Vite 빌드 최적화 유지
+#### React / ?�론?�엔??(nexus-view)
+- Server/Client 컴포?�트 분리
+- TailwindCSS ?�용, 매직 ?�버 지??- 로컬 ?�태 ?�선, ?�역 ?�태??최소??- Vite 빌드 최적???��?
 
 #### CI/CD
 - GitHub Actions: `.github/workflows/build-release.yml`
-- CI 실패 시 각 단계 로그 우선 분석
-- 시크릿은 GitHub Secrets로 관리
-- PyInstaller로 exe 빌드 (server.py → vibe-coding.exe, src/view.py → vibe-coding_console.exe)
-- Inno Setup으로 인스톨러 생성
+- CI ?�패 ??�??�계 로그 ?�선 분석
+- ?�크릿�? GitHub Secrets�?관�?- PyInstaller�?exe 빌드 (server.py ??vibe-coding.exe, src/view.py ??vibe-coding_console.exe)
+- Inno Setup?�로 ?�스?�러 ?�성
 
-#### 커밋 표준
-- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:` 접두사
-- 구체적 메시지: "fix(logger): handle empty log file error" 형태
-- `git log -n 5`로 기존 스타일 확인 후 일관성 유지
+#### 커밋 ?��?
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:` ?�두??- 구체??메시지: "fix(logger): handle empty log file error" ?�태
+- `git log -n 5`�?기존 ?��????�인 ???��????��?
 
-### 3단계: 하이브 마인드 공통 규칙 준수 (매우 중요)
-프로젝트에 참여하는 모든 에이전트(Claude 포함)의 핵심 행동, 보고 양식(사전 승인 및 사후 간략 보고), 문서화(Auto-Doc) 의무는 루트 폴더의 **`RULES.md`** 파일에 통일되어 있습니다.
-**어떤 작업을 수행하든 가장 먼저 `RULES.md` 파일을 읽고, 그 안의 모든 규칙을 절대적으로 준수해야 합니다.**
+### 3?�계: ?�이�?마인??공통 규칙 준??(매우 중요)
+?�로?�트??참여?�는 모든 ?�이?�트(Claude ?�함)???�심 ?�동, 보고 ?�식(?�전 ?�인 �??�후 간략 보고), 문서??Auto-Doc) ?�무??루트 ?�더??**`RULES.md`** ?�일???�일?�어 ?�습?�다.
+**?�떤 ?�업???�행?�든 가??먼�? `RULES.md` ?�일???�고, �??�의 모든 규칙???��??�으�?준?�해???�니??**
 
 ## GitHub
-- 저장소: `btsky99/vibe-coding` (private)
-- 자동 업데이트: `updater.py`에서 GitHub Releases API 사용
+- ?�?�소: `btsky99/vibe-coding` (private)
+- ?�동 ?�데?�트: `updater.py`?�서 GitHub Releases API ?�용

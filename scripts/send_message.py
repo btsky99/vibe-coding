@@ -1,24 +1,24 @@
 """
-에이전트 간 메시지 채널 헬퍼 스크립트
+?�이?�트 �?메시지 채널 ?�퍼 ?�크립트
 ---------------------------------------
-사용법:
+?�용�?
   python scripts/send_message.py <from> <to> <type> <content>
 
-예시:
-  python scripts/send_message.py claude gemini handoff "DB 스키마 분석 완료. API 구현 시작해도 됩니다."
-  python scripts/send_message.py gemini claude task_complete "UI 컴포넌트 모두 작성 완료."
-  python scripts/send_message.py claude all info "공통 유틸 함수 utils.py에 추가했습니다."
+?�시:
+  python scripts/send_message.py claude gemini handoff "DB ?�키�?분석 ?�료. API 구현 ?�작?�도 ?�니??"
+  python scripts/send_message.py gemini claude task_complete "UI 컴포?�트 모두 ?�성 ?�료."
+  python scripts/send_message.py claude all info "공통 ?�틸 ?�수 utils.py??추�??�습?�다."
 
 type 목록:
-  info          - 일반 정보 공유
-  handoff       - 다음 작업을 상대에게 위임
-  request       - 특정 작업 요청
-  task_complete - 작업 완료 알림
-  warning       - 경고 (충돌, 에러 등)
+  info          - ?�반 ?�보 공유
+  handoff       - ?�음 ?�업???��??�게 ?�임
+  request       - ?�정 ?�업 ?�청
+  task_complete - ?�업 ?�료 ?�림
+  warning       - 경고 (충돌, ?�러 ??
 
-서버 포트:
+?�버 ?�트:
   개발 모드: 8000 / 배포 모드: 8005
-  자동 감지하거나 --port 플래그로 지정 가능
+  ?�동 감�??�거??--port ?�래그로 지??가??
 """
 
 import sys
@@ -27,16 +27,16 @@ import urllib.request
 import urllib.error
 import os
 
-# 서버 포트 자동 감지 (개발: 8000, 배포: 8005)
+# ?�버 ?�트 ?�동 감�? (개발: 8000, 배포: 8005)
 DEFAULT_PORTS = [8005, 8000]
 
 
 def send_message(from_agent: str, to_agent: str, msg_type: str, content: str, port: int = None) -> bool:
     """
-    Nexus View 서버의 /api/message 엔드포인트에 메시지를 전송합니다.
-    서버가 실행 중이지 않으면 직접 파일에 기록합니다(폴백).
+    ���̺� �ڵ�(Vibe Coding) ?�버??/api/message ?�드?�인?�에 메시지�??�송?�니??
+    ?�버가 ?�행 중이지 ?�으�?직접 ?�일??기록?�니???�백).
     """
-    # 포트 목록 결정
+    # ?�트 목록 결정
     ports_to_try = [port] if port else DEFAULT_PORTS
 
     payload = json.dumps({
@@ -46,7 +46,7 @@ def send_message(from_agent: str, to_agent: str, msg_type: str, content: str, po
         'content': content,
     }).encode('utf-8')
 
-    # API 전송 시도
+    # API ?�송 ?�도
     for p in ports_to_try:
         try:
             req = urllib.request.Request(
@@ -58,20 +58,20 @@ def send_message(from_agent: str, to_agent: str, msg_type: str, content: str, po
             with urllib.request.urlopen(req, timeout=3) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
                 if result.get('status') == 'success':
-                    print(f"[OK] 메시지 전송 완료 (포트 {p}): {from_agent} → {to_agent} [{msg_type}]")
+                    print(f"[OK] 메시지 ?�송 ?�료 (?�트 {p}): {from_agent} ??{to_agent} [{msg_type}]")
                     return True
         except (urllib.error.URLError, Exception):
             continue
 
-    # 폴백: 서버가 꺼져있을 경우 직접 파일에 기록
+    # ?�백: ?�버가 꺼져?�을 경우 직접 ?�일??기록
     return _fallback_write(from_agent, to_agent, msg_type, content)
 
 
 def _fallback_write(from_agent: str, to_agent: str, msg_type: str, content: str) -> bool:
-    """서버 미실행 시 messages.jsonl에 직접 기록하는 폴백 함수"""
+    """?�버 미실????messages.jsonl??직접 기록?�는 ?�백 ?�수"""
     import time
 
-    # .ai_monitor/data/messages.jsonl 경로 탐색
+    # .ai_monitor/data/messages.jsonl 경로 ?�색
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     data_dir = os.path.join(project_root, '.ai_monitor', 'data')
@@ -92,19 +92,19 @@ def _fallback_write(from_agent: str, to_agent: str, msg_type: str, content: str)
     try:
         with open(messages_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(msg, ensure_ascii=False) + '\n')
-        print(f"[OK] 메시지 파일 직접 기록 완료: {from_agent} → {to_agent} [{msg_type}]")
+        print(f"[OK] 메시지 ?�일 직접 기록 ?�료: {from_agent} ??{to_agent} [{msg_type}]")
         return True
     except Exception as e:
-        print(f"[FAIL] 메시지 기록 실패: {e}", file=sys.stderr)
+        print(f"[FAIL] 메시지 기록 ?�패: {e}", file=sys.stderr)
         return False
 
 
 if __name__ == '__main__':
-    # 인자 파싱
+    # ?�자 ?�싱
     port_override = None
     args = sys.argv[1:]
 
-    # --port 플래그 처리
+    # --port ?�래�?처리
     if '--port' in args:
         idx = args.index('--port')
         try:

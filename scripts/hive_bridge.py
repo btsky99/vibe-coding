@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sys
 import os
 from datetime import datetime
@@ -12,7 +13,7 @@ except ImportError:
 
 def log_task(agent_name, task_summary):
     """
-    하이브 마인드 상황판에 수행된 작업 결과를 로그로 남깁니다.
+    하이브 마인드 상황판에 수행한 작업 결과를 로그로 남깁니다.
     이 파일은 프로젝트의 모든 에이전트(Gemini, Claude 등)가 공통으로 사용합니다.
     """
     log_dir = ".ai_monitor/data"
@@ -21,9 +22,9 @@ def log_task(agent_name, task_summary):
     
     log_file = os.path.join(log_dir, "task_logs.jsonl")
     archive_file = os.path.join(log_dir, "task_logs_archive.jsonl")
-    MAX_LINES = 50  # 최신 로그 유지 갯수 (AI 토큰 최적화)
+    MAX_LINES = 50  # 최신 로그 유지 개수 (AI 토큰 최적화)
     
-    # 보안 마스킹 처리 적용 (API Key, 토큰 등 숨김)
+    # 보안 마스킹 처리 적용 (API Key, 토큰 등 누출 방지)
     safe_summary = mask_sensitive_data(task_summary)
     
     log_entry = {
@@ -32,7 +33,7 @@ def log_task(agent_name, task_summary):
         "task": safe_summary
     }
     
-    new_line = json.dumps(log_entry, ensure_ascii=False) + "\n"
+    new_line = json.dumps(log_entry, ensure_ascii=False, indent=None) + "\n"
     
     lines = []
     if os.path.exists(log_file):
@@ -51,7 +52,7 @@ def log_task(agent_name, task_summary):
     with open(log_file, "w", encoding="utf-8") as f:
         f.writelines(lines)
     
-    # SQLite DB (session_logs) 에도 연동하여 웹 대시보드(Nexus View) SSE 스트림에 실시간으로 표시
+    # SQLite DB (hive_mind.db) 에도 연동하여 바이브 코딩(Vibe Coding) SSE 스트림에 실시간으로 표시
     try:
         aimon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.ai_monitor'))
         sys.path.append(aimon_path)

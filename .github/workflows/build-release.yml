@@ -68,6 +68,7 @@ jobs:
           pyinstaller --onefile --noconsole ^
             --name vibe-coding ^
             --icon bin/app_icon.ico ^
+            --add-data "src;src" ^
             --add-data "nexus-view\dist;nexus-view/dist" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
@@ -81,12 +82,19 @@ jobs:
       - name: Build exe (console)
         run: |
           cd .ai_monitor
+          set WINPTY=${{ steps.winpty.outputs.path }}
           pyinstaller --onefile --console ^
             --name vibe-coding_console ^
             --icon bin/app_icon.ico ^
-            --hidden-import textual ^
-            --hidden-import rich ^
-            src/view.py
+            --add-data "src;src" ^
+            --add-data "nexus-view\dist;nexus-view/dist" ^
+            --add-binary "%WINPTY%\winpty.dll;winpty" ^
+            --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
+            --add-binary "%WINPTY%\conpty.dll;winpty" ^
+            --add-binary "%WINPTY%\OpenConsole.exe;winpty" ^
+            --hidden-import websockets ^
+            --hidden-import winpty ^
+            server.py
         shell: cmd
 
       - name: Install Inno Setup
