@@ -369,6 +369,48 @@ function App() {
   // 오케스트레이터 경고 수 (Hive 탭 배지용)
   const orchWarningCount = orchStatus?.warnings?.length ?? 0;
 
+  // ─── Superpowers 관리자 상태 ─────────────────────────────────────────────
+  interface SpStatus { installed: boolean; version: string | null; skills: string[]; commands: string[]; repo: string; }
+  const [spStatus, setSpStatus] = useState<{ claude: SpStatus; gemini: SpStatus } | null>(null);
+  const [spLoading, setSpLoading] = useState<Record<string, boolean>>({});
+  const [spMsg, setSpMsg] = useState('');
+
+  const fetchSpStatus = () => {
+    fetch(`${API_BASE}/api/superpowers/status`)
+      .then(res => res.json())
+      .then(data => setSpStatus(data))
+      .catch(() => {});
+  };
+  useEffect(() => { fetchSpStatus(); }, []);
+
+  const spInstall = (tool: 'claude' | 'gemini') => {
+    setSpLoading(p => ({ ...p, [tool]: true }));
+    setSpMsg('');
+    fetch(`${API_BASE}/api/superpowers/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool }),
+    })
+      .then(res => res.json())
+      .then(data => { setSpMsg(data.message || '완료'); fetchSpStatus(); })
+      .catch(e => setSpMsg(String(e)))
+      .finally(() => setSpLoading(p => ({ ...p, [tool]: false })));
+  };
+
+  const spUninstall = (tool: 'claude' | 'gemini') => {
+    setSpLoading(p => ({ ...p, [tool]: true }));
+    setSpMsg('');
+    fetch(`${API_BASE}/api/superpowers/uninstall`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool }),
+    })
+      .then(res => res.json())
+      .then(data => { setSpMsg(data.message || '완료'); fetchSpStatus(); })
+      .catch(e => setSpMsg(String(e)))
+      .finally(() => setSpLoading(p => ({ ...p, [tool]: false })));
+  };
+
   // ─── MCP 관리자 상태 ─────────────────────────────────────────────────────
   const [mcpCatalog, setMcpCatalog] = useState<McpEntry[]>([]);
   const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
@@ -527,7 +569,11 @@ function App() {
   // 메시지 전송
   const sendMessage = () => {
     if (!msgContent.trim()) return;
-    const cleanContent = msgContent.replace(/[\r\n]+$/, '');
+    
+    // 명령어 모드('>')인 경우 엔터(\n)를 유지하여 터미널에서 즉시 실행되도록 합니다.
+    const isCommand = msgContent.trim().startsWith('>');
+    const cleanContent = isCommand ? msgContent : msgContent.replace(/[\r\n]+$/, '');
+    
     fetch(`${API_BASE}/api/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -983,6 +1029,17 @@ function App() {
               </span>
             )}
           </button>
+          {/* Superpowers 관리자 탭 — 설치 수 배지 */}
+          <button onClick={() => { setActiveTab('superpowers'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'superpowers' ? 'text-white border-l-2 border-yellow-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="Superpowers 관리자">
+            <Zap className="w-6 h-6" />
+            {spStatus && (
+              <span className={`absolute top-1 right-1 w-4 h-4 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none ${
+                (spStatus.claude.installed ? 1 : 0) + (spStatus.gemini.installed ? 1 : 0) > 0 ? 'bg-yellow-500' : 'bg-white/20'
+              }`}>
+                {(spStatus.claude.installed ? 1 : 0) + (spStatus.gemini.installed ? 1 : 0)}
+              </span>
+            )}
+          </button>
           <div className="mt-auto flex flex-col gap-4">
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Info className="w-6 h-6" /></button>
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Settings className="w-6 h-6" /></button>
@@ -995,7 +1052,7 @@ function App() {
           className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : 'Hive Mind'}</span>
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ Superpowers' : 'Hive Mind'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
@@ -1789,6 +1846,115 @@ function App() {
                   </div>
                 )}
               </div>
+            ) : activeTab === 'superpowers' ? (
+              /* ── Superpowers 관리자 패널 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 상단 설명 */}
+                <div className="shrink-0 flex items-center gap-2 px-1 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded text-[9px] text-yellow-300">
+                  <Zap className="w-3.5 h-3.5 shrink-0" />
+                  <span>AI 에이전트 스킬 프레임워크 — 체계적 개발 워크플로 주입</span>
+                </div>
+
+                {/* 메시지 */}
+                {spMsg && (
+                  <div className="text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 font-mono truncate shrink-0" title={spMsg}>
+                    {spMsg}
+                  </div>
+                )}
+
+                {/* Claude Code 카드 */}
+                {(['claude', 'gemini'] as const).map(tool => {
+                  const info = spStatus?.[tool];
+                  const isLoading = spLoading[tool] ?? false;
+                  const toolLabel = tool === 'claude' ? 'Claude Code' : 'Gemini CLI';
+                  const toolColor = tool === 'claude' ? 'border-[#3794ef]/30 bg-[#3794ef]/5' : 'border-blue-400/30 bg-blue-400/5';
+                  const toolBadge = tool === 'claude' ? 'bg-[#3794ef]/20 text-[#3794ef]' : 'bg-blue-400/20 text-blue-300';
+                  const repo = tool === 'claude' ? 'obra/superpowers' : 'barretstorck/gemini-superpowers';
+                  const commands = tool === 'claude'
+                    ? ['/superpowers:brainstorm', '/superpowers:write-plan', '/superpowers:execute-plan']
+                    : ['/brainstorm', '/write-plan', '/execute-plan'];
+                  return (
+                    <div key={tool} className={`rounded border p-2.5 flex flex-col gap-2 ${info?.installed ? (tool === 'claude' ? 'border-[#3794ef]/40 bg-[#3794ef]/8' : 'border-blue-400/40 bg-blue-400/8') : 'border-white/10 bg-white/2'}`}>
+                      {/* 헤더 */}
+                      <div className="flex items-center gap-2">
+                        {info?.installed
+                          ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                          : <Circle className="w-4 h-4 text-[#555] shrink-0" />}
+                        <span className="text-[12px] font-bold text-white flex-1">{toolLabel}</span>
+                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${toolBadge}`}>
+                          {info?.installed ? `v${info.version ?? 'latest'}` : '미설치'}
+                        </span>
+                      </div>
+                      {/* 리포 링크 */}
+                      <p className="text-[9px] text-[#666] pl-6 font-mono">{repo}</p>
+                      {/* 스킬 목록 */}
+                      {info?.installed && info.skills.length > 0 && (
+                        <div className="pl-6 flex flex-wrap gap-1">
+                          {info.skills.map(s => (
+                            <span key={s} className={`text-[7px] px-1 py-0.5 rounded font-mono ${toolColor}`}>{s}</span>
+                          ))}
+                        </div>
+                      )}
+                      {/* 커맨드 목록 */}
+                      {info?.installed && (
+                        <div className="pl-6 flex flex-col gap-0.5">
+                          {commands.map(c => (
+                            <span key={c} className="text-[8px] text-yellow-300/70 font-mono">{c}</span>
+                          ))}
+                        </div>
+                      )}
+                      {/* 설치 / 제거 버튼 */}
+                      <div className="flex gap-1.5 pt-1">
+                        {info?.installed ? (
+                          <button
+                            onClick={() => spUninstall(tool)}
+                            disabled={isLoading}
+                            className="flex-1 py-1 text-[10px] font-bold rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                          >
+                            {isLoading ? '처리 중…' : '제거'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => spInstall(tool)}
+                            disabled={isLoading}
+                            className="flex-1 py-1 text-[10px] font-bold rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors disabled:opacity-50"
+                          >
+                            {isLoading ? '설치 중…' : '설치'}
+                          </button>
+                        )}
+                        <button
+                          onClick={fetchSpStatus}
+                          className="px-2 py-1 text-[10px] rounded bg-white/5 text-[#858585] hover:text-white transition-colors"
+                          title="상태 새로고침"
+                        >
+                          <RotateCw className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* 스킬 설명 */}
+                <div className="shrink-0 mt-1">
+                  <p className="text-[9px] font-bold text-[#858585] uppercase tracking-wider mb-1.5">핵심 스킬</p>
+                  {[
+                    { name: 'brainstorm', desc: '요구사항 소크라테스식 정제' },
+                    { name: 'write-plan', desc: '마이크로태스크 단위 계획 작성' },
+                    { name: 'execute-plan', desc: '병렬 서브에이전트 실행' },
+                    { name: 'tdd', desc: 'RED → GREEN → REFACTOR 사이클' },
+                    { name: 'debug', desc: '4단계 근본원인 분석' },
+                    { name: 'code-review', desc: 'OWASP 보안 + 품질 자동 검증' },
+                  ].map(sk => (
+                    <div key={sk.name} className="flex items-start gap-1.5 py-0.5 border-b border-white/5">
+                      <Zap className="w-2.5 h-2.5 text-yellow-400/60 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="text-[9px] font-bold text-white/80 font-mono">{sk.name}</span>
+                        <span className="text-[8px] text-[#666] ml-1.5">{sk.desc}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
               /* ── 파일 탐색기 ── */
               <>
@@ -2303,13 +2469,21 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    // 전송할 텍스트 끝의 줄바꿈 문자를 제거하여 중복 입력을 방지합니다.
-    const cleanText = text.replace(/[\r\n]+$/, '');
+    
     // 윈도우 PTY(winpty) + cmd.exe 환경에서는 \r\n (CRLF)이 실제 Enter 키 입력과 동일합니다.
-    // 중간에 포함된 모든 \n도 \r\n으로 변환하여 여러 줄 입력 시 줄바꿈이 깨지지 않게 합니다.
+    // 사용자가 입력한 텍스트에 이미 엔터가 포함되어 있든 없든,
+    // 터미널 실행을 위해 마지막에 \r\n을 확실히 붙여서 보냅니다.
+    const cleanText = text.replace(/[\r\n]+$/, '');
+    if (!cleanText) return;
+
+    // 명령어 전송 (개행을 강제 포함하여 즉시 실행 유도)
     wsRef.current.send(cleanText.replace(/\n/g, '\r\n') + '\r\n');
+    
     setInputValue('');
-    termRef.current?.focus();
+    // 약간의 지연 후 포커스 복구 (IME 입력 중 전송 시 포커스 꼬임 방지)
+    setTimeout(() => {
+      termRef.current?.focus();
+    }, 10);
   };
 
   const slotLogs = logs.filter(l => {
@@ -2425,12 +2599,23 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 onCompositionStart={() => { isComposingRef.current = true; }}
                 onCompositionEnd={() => { isComposingRef.current = false; }}
                 onKeyDown={e => {
-                  // 한글 조합 중일 때는 엔터 키로 글자만 확정하고 전송은 막음 (isComposingRef 활용)
+                  // 한글 조합 중일 때 엔터를 치면 일단 글자 확정만 하도록 하고,
+                  // 확정된 후 (isComposingRef가 false인 상태에서 엔터가 들어올 때) 전송합니다.
                   if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey) {
-                    if (isComposingRef.current) return; // 조합 중이면 종료
+                    // 한글 조합 중 엔터는 브라우저가 글자를 확정(CompositionEnd 발생)시키므로
+                    // 아주 잠깐의 딜레이를 주어 확정된 텍스트가 inputValue에 반영된 후 전송하도록 합니다.
+                    if (isComposingRef.current) {
+                      // 조합 중 엔터는 handleSend를 직접 부르지 않고 브라우저 기본 동작에 맡기거나,
+                      // 필요하다면 수동으로 처리할 수 있으나 여기서는 엔터 키 한 번으로 
+                      // '확정 + 전송'까지 하고 싶으신 경우이므로 handleSend를 명시적으로 호출합니다.
+                      // 다만 IME 이벤트 순서상 setTimeout이 가장 안정적입니다.
+                      setTimeout(() => {
+                        if (inputValue.trim()) handleSend(inputValue);
+                      }, 50);
+                      return;
+                    }
                     
                     e.preventDefault();
-                    // 명령어를 즉시 전송합니다.
                     if (inputValue.trim()) {
                       handleSend(inputValue);
                     }

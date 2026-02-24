@@ -30,7 +30,7 @@ jobs:
 
       - name: Build frontend
         run: |
-          cd .ai_monitor/nexus-view
+          cd .ai_monitor/vibe-view
           npm ci
           npm run build
 
@@ -76,7 +76,7 @@ jobs:
             --icon bin/vibe_final.ico ^
             --add-data "src;src" ^
             --add-data "bin;bin" ^
-            --add-data "nexus-view\dist;dist" ^
+            --add-data "vibe-view\dist;dist" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^
@@ -95,7 +95,7 @@ jobs:
             --icon bin/vibe_final.ico ^
             --add-data "src;src" ^
             --add-data "bin;bin" ^
-            --add-data "nexus-view\dist;dist" ^
+            --add-data "vibe-view\dist;dist" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^

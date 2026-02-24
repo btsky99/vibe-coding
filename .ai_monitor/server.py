@@ -1247,6 +1247,46 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({'installed': [], 'error': str(e)}).encode('utf-8'))
 
+        elif parsed_path.path == '/api/superpowers/status':
+            # Superpowers 설치 상태 조회 — Claude Code + Gemini CLI 모두 확인
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            home = Path.home()
+            # Claude Code: ~/.claude/commands/superpowers-brainstorm.md 존재 여부
+            claude_cmd_dir = home / '.claude' / 'commands'
+            claude_installed = (claude_cmd_dir / 'superpowers-brainstorm.md').exists()
+            claude_version = 'latest' if claude_installed else None
+            claude_skills = []
+            if claude_installed:
+                claude_skills = [f.stem.replace('superpowers-', '') for f in claude_cmd_dir.glob('superpowers-*.md')]
+            # Gemini CLI: ~/.gemini/extensions/gemini-superpowers 존재 여부
+            gemini_ext_dir = home / '.gemini' / 'extensions' / 'gemini-superpowers'
+            gemini_installed = gemini_ext_dir.exists()
+            gemini_skills = []
+            if gemini_installed:
+                skills_dir = gemini_ext_dir / 'skills'
+                if skills_dir.exists():
+                    gemini_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
+            result = {
+                'claude': {
+                    'installed': claude_installed,
+                    'version': claude_version,
+                    'skills': claude_skills,
+                    'commands': ['/superpowers:brainstorm', '/superpowers:write-plan', '/superpowers:execute-plan'],
+                    'repo': 'obra/superpowers',
+                },
+                'gemini': {
+                    'installed': gemini_installed,
+                    'version': 'latest' if gemini_installed else None,
+                    'skills': gemini_skills,
+                    'commands': ['/brainstorm', '/write-plan', '/execute-plan'],
+                    'repo': 'barretstorck/gemini-superpowers',
+                },
+            }
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+
         else:
             # 정적 파일 서비스 로직 (Vite 빌드 결과물)
             # 요청 경로를 정리
@@ -1834,6 +1874,93 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
 
+        elif parsed_path.path == '/api/superpowers/install':
+            # Superpowers 설치 — tool: 'claude' | 'gemini'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                tool = str(body.get('tool', 'claude'))
+                home = Path.home()
+
+                if tool == 'claude':
+                    # superpowers repo 클론 후 commands 복사
+                    import tempfile, shutil
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        result = subprocess.run(
+                            ['git', 'clone', '--depth=1',
+                             'https://github.com/obra/superpowers.git', tmpdir + '/sp'],
+                            capture_output=True, text=True, timeout=60
+                        )
+                        if result.returncode != 0:
+                            raise Exception(f'git clone 실패: {result.stderr}')
+                        cmd_dir = home / '.claude' / 'commands'
+                        cmd_dir.mkdir(parents=True, exist_ok=True)
+                        sp_cmds = Path(tmpdir) / 'sp' / 'commands'
+                        for md in sp_cmds.glob('*.md'):
+                            shutil.copy(md, cmd_dir / f'superpowers-{md.name}')
+                        sp_skills = Path(tmpdir) / 'sp' / 'skills'
+                        if sp_skills.exists():
+                            dst_skills = home / '.claude' / 'plugins' / 'marketplaces' / 'obra-superpowers' / 'plugin' / 'skills'
+                            if dst_skills.exists():
+                                shutil.rmtree(dst_skills)
+                            shutil.copytree(sp_skills, dst_skills)
+                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Claude Code Superpowers 설치 완료'}, ensure_ascii=False).encode('utf-8'))
+
+                elif tool == 'gemini':
+                    # gemini extensions install 실행
+                    result = subprocess.run(
+                        ['gemini', 'extensions', 'install',
+                         'https://github.com/barretstorck/gemini-superpowers'],
+                        input='Y\n', capture_output=True, text=True, timeout=120
+                    )
+                    if 'installed successfully' in result.stdout or 'installed successfully' in result.stderr:
+                        self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini Superpowers 설치 완료'}, ensure_ascii=False).encode('utf-8'))
+                    else:
+                        out = (result.stdout + result.stderr).strip()
+                        self.wfile.write(json.dumps({'status': 'error', 'message': out or '설치 실패'}, ensure_ascii=False).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
+
+        elif parsed_path.path == '/api/superpowers/uninstall':
+            # Superpowers 제거 — tool: 'claude' | 'gemini'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                tool = str(body.get('tool', 'claude'))
+                home = Path.home()
+                import shutil
+
+                if tool == 'claude':
+                    cmd_dir = home / '.claude' / 'commands'
+                    removed = []
+                    for md in cmd_dir.glob('superpowers-*.md'):
+                        md.unlink()
+                        removed.append(md.name)
+                    msg = f"제거 완료: {', '.join(removed)}" if removed else '삭제할 파일 없음'
+                    self.wfile.write(json.dumps({'status': 'success', 'message': msg}, ensure_ascii=False).encode('utf-8'))
+
+                elif tool == 'gemini':
+                    ext_dir = home / '.gemini' / 'extensions' / 'gemini-superpowers'
+                    if ext_dir.exists():
+                        shutil.rmtree(ext_dir)
+                        self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini Superpowers 제거 완료'}, ensure_ascii=False).encode('utf-8'))
+                    else:
+                        self.wfile.write(json.dumps({'status': 'error', 'message': '설치된 항목 없음'}, ensure_ascii=False).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
+
         elif parsed_path.path == '/api/orchestrator/run':
             # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행
             self.send_response(200)
@@ -1927,12 +2054,19 @@ async def pty_handler(websocket):
     async def read_from_ws():
         async for message in websocket:
             try:
-                # 디버깅을 위해 수신된 메시지 출력 (제어 문자 포함)
-                print(f"[WS RECV] {repr(message)}")
-                if isinstance(message, str):
-                    pty.write(message)
-                else:
-                    pty.write(message.decode('utf-8'))
+                if isinstance(message, bytes):
+                    message = message.decode('utf-8')
+                
+                # 디버깅을 위해 수신된 메시지 출력
+                # print(f"[WS RECV] {repr(message)}")
+                
+                if message:
+                    # 윈도우 PTY(winpty)는 엔터 키값으로 \r\n을 선호합니다.
+                    # 일반적인 \n 입력을 \r\n으로 변환하여 즉시 실행을 유도합니다.
+                    # 만약 프론트엔드에서 엔터 없이 텍스트만 보냈다면 그대로 두되,
+                    # 개행 문자가 포함된 경우 확실하게 실행되도록 보정합니다.
+                    processed = message.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+                    pty.write(processed)
             except Exception as e:
                 print(f"[WS ERROR] {e}")
                 break
