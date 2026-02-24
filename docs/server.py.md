@@ -1,6 +1,6 @@
 # 📄 `server.py` 파일 상세 문서
 
-> **버전: v2.6.0 - [Claude] 임베딩 기반 의미 검색 도입 (fastembed + 한국어 다국어 모델)**
+> **버전: v2.9.0 - [Gemini CLI] 사이드바 명령어 실행 기능 및 디버그 로깅 추가**
 > **메인 문서:** [README.md](README.md)
 
 - **원본 파일 경로**: `.ai_monitor/server.py`
@@ -8,7 +8,19 @@
 
 ## 🛠️ 주요 기능 및 최근 개선 사항 (Key Features & Recent Improvements)
 
-1. **임베딩 기반 의미 검색 [v2.6.0]**
+1. **사이드바 명령어 실행 지원 [v2.9.0]**
+   - **`/api/message` 확장**: 사이드바 채팅창에서 전송된 메시지가 `>`로 시작할 경우, 이를 단순 텍스트 출력이 아닌 **터미널 명령어로 해석**하여 모든 활성 PTY 세션에 전송합니다.
+   - **사용자 경험 개선**: 사용자가 터미널 입력창뿐만 아니라 통합 메시지 채널에서도 에이전트들에게 직접 명령을 하달할 수 있게 되었습니다.
+
+2. **WebSocket 디버깅 강화 [v2.9.0]**
+   - **`read_from_ws` 디버그 로그**: WebSocket을 통해 수신되는 모든 데이터(명령어, 제어 문자 등)를 서버 콘솔에 `repr()` 형식으로 출력하여, 한글 IME 입력이나 특수 키 입력 시의 데이터 흐름을 정밀하게 추적할 수 있게 개선했습니다.
+
+3. **설정 패널 — API 키 관리 [v2.8.0]**
+   - **SyntaxError 해결**: 모듈 레벨에서 잘못 사용된 `global main_window` 선언을 제거하여 프로그램이 시작되지 않던 치명적 오류를 수정했습니다.
+   - **GUI 폴백 로직 추가**: `webview` 라이브러리 실행 실패 시(예: WebView2 미설치 환경) `open_app_window` 함수를 통해 시스템 기본 브라우저로 대시보드를 열 수 있도록 안정화했습니다.
+   - **Main 블록 정규화**: 중복된 `if __name__ == "__main__":` 블록을 하나로 통합하고, 자동 업데이트 체크 로직이 정상적으로 백그라운드에서 동작하도록 정리했습니다.
+
+2. **임베딩 기반 의미 검색 [v2.6.0]**
    - `fastembed` + `paraphrase-multilingual-MiniLM-L12-v2` 모델 (한국어 포함 50개 언어, PyTorch 불필요)
    - 메모리 저장 시(`/api/memory/set`, `MemoryWatcher._upsert`) 자동으로 float32 벡터 생성 → `embedding BLOB` 컬럼 저장
    - 검색 시(`GET /api/memory?q=`) 코사인 유사도 기반 의미 검색 우선, 임베딩 없는 항목은 키워드 LIKE 폴백
@@ -24,7 +36,7 @@
    - 15초마다 mtime 폴링 → 변경된 파일만 `shared_memory.db` 에 UPSERT
    - 터미널 번호(T1, T2…)는 최초 감지 순서로 자동 부여 (`author: claude-code:terminal-1` 등)
    - 에이전트 추가 토큰 소모 없이 자연스러운 메모리 저장 → 하이브 공유 메모리 자동 반영
-   - Nexus View UI의 메모리 패널에서 "1번 터미널: MCP UI 작업 중" 형태로 확인 가능
+   - Vibe View UI의 메모리 패널에서 "1번 터미널: MCP UI 작업 중" 형태로 확인 가능
 
 2. **MCP 관리자 API 추가 [v2.4.0]**
    - `GET /api/mcp/catalog` — 8개의 큐레이션된 MCP 서버 목록 반환 (context7, github, memory, fetch, playwright, sequential-thinking, sqlite, brave-search)
@@ -50,8 +62,7 @@
 3. **정적 파일 서비스 및 라우팅**
 ...
    - PyInstaller로 빌드될 경우(frozen)와 스크립트로 직접 실행될 경우(dev) 모두에 대비해 `STATIC_DIR`을 동적으로 찾습니다.
-   - Vite로 빌드된 프론트엔드 정적 파일(`nexus-view/dist/*`)을 서빙하며, 알 수 없는 경로는 `index.html`로 폴백(Fallback)시킵니다.
-
+       - Vite로 빌드된 프론트엔드 정적 파일(`vibe-view/dist/*`)을 서빙하며, 알 수 없는 경로는 `index.html`로 폴백(Fallback)시킵니다.
 3. **좀비 방지 하트비트 스레드 (Graceful Shutdown Monitor)**
    - 백그라운드 스레드 `monitor_heartbeat()`가 계속 돌면서, 클라이언트(브라우저 창)가 `/api/heartbeat` 호출을 15초 이상 멈췄을 때 즉시 `os._exit(0)`를 호출하여 서버를 깔끔하게 스스로 죽이는(자폭) 역할을 수행합니다.
 

@@ -25,3 +25,11 @@
 {"timestamp": "2026-02-23T20:35:57.889447", "agent": "Gemini-1", "task": "프로그램 실행 실패 오류 수정: pywebview API 호환성, import 구조 전역 통합으로 UnboundLocalError 해결, Windows 환경 UnicodeDecodeError 안정화 완료"}
 {"timestamp": "2026-02-23T23:24:25.052888", "agent": "Gemini-1", "task": "Investigating the issue where Gemini's input bar doesn't execute on Enter key. Checking frontend components in nexus-view."}
 {"timestamp": "2026-02-23T23:37:52.077696", "agent": "Gemini-1", "task": "Fixed Gemini's input issue in nexus-view by replacing input with textarea and updating handleSend to use \\n for immediate execution. Rebuilt frontend successfully."}
+{"timestamp": "2026-02-24T00:52:37.501156", "agent": "Gemini CLI", "task": "Completed migration to 'vibe-view', fixed Enter key issue, and implemented project folder memory & selection system."}
+{"timestamp": "2026-02-24T20:22:15.201849", "agent": "Gemini CLI", "task": "Fixed server.py SyntaxError and missing open_app_window. Rebuilt vibe-coding.exe and vibe-coding_console.exe with latest nexus-view frontend."}
+{"timestamp": "2026-02-24T21:39:56.758894", "agent": "Gemini CLI", "task": "한글 입력 엔터 키 즉시 실행 문제 해결 완료 (isComposing 제거, \\r\\n 표준화). 프론트엔드 v3.3.0 재빌드 완료. 사용자 새로고침 대기 중."}
+{"timestamp": "2026-02-24T21:43:10.591838", "agent": "Gemini", "task": "채팅 입력 시 콘솔 줄바꿈 문제 조사 및 수정 계획 수립"}
+{"timestamp": "2026-02-24T21:46:55.723307", "agent": "Gemini", "task": "채팅 및 터미널 입력 시 발생하는 중복 줄바꿈 버그 수정 완료 (isComposing 체크 복구 및 trailing newline 제거)"}
+{"timestamp": "2026-02-24T22:45:58.748440", "agent": "Gemini-1", "task": "Fixed Korean IME Enter key issue in both chat and terminal inputs. Rebuilt vibe-view and updated documentation."}
+{"timestamp": "2026-02-24T23:05:29.997796", "agent": "Gemini", "task": "통합 스킬 관리자(Skill Manager) 및 검색 기능 구현 시작"}
+{"timestamp": "2026-02-24T23:07:21.216345", "agent": "Gemini", "task": "통합 스킬 관리자 및 검색 기능 구현 완료 (v3.4.0)"}

@@ -9,13 +9,17 @@
 
 | 분류 (Category) | 파일명 (File) | 간단 설명 (Brief Description) | 상세 문서 링크 (Details) |
 | :--- | :--- | :--- | :--- |
-| **프론트엔드 (React)** | `.ai_monitor/nexus-view/src/App.tsx` | 대시보드의 메인 UI 컴포넌트. 파일 탐색기, 터미널 분할 뷰, 다중 윈도우 퀵 뷰 등을 총괄 렌더링. | [👉 App.tsx 상세 문서 읽기](./App.tsx.md) |
+| **프론트엔드 (React)** | `.ai_monitor/vibe-view/src/App.tsx` | 대시보드의 메인 UI 컴포넌트. 파일 탐색기, 터미널 분할 뷰, 다중 윈도우 퀵 뷰 등을 총괄 렌더링. | [👉 App.tsx 상세 문서 읽기](./App.tsx.md) |
 | **백엔드 (Python)** | `.ai_monitor/server.py` | 로컬 웹 서버 및 웹소켓(PTY) 서버. 프론트엔드로 파일 내용, 터미널 스트리밍 데이터를 공급하고 관리. | [👉 server.py 상세 문서 읽기](./server.py.md) |
 | **백엔드 (Python)** | `.ai_monitor/src/logger.py` | 하이브 마인드 에이전트들의 작업 로그를 중앙 파일(`sessions.jsonl`)에 안전하게 저장하고 상태를 동기화하는 모듈. | 문서 작성 대기 중... |
 | **백엔드 (Python)** | `scripts/megaphone.py` | (Phase 6) 다중 터미널 간 통신용 CLI 툴. 특정 터미널 창에 다이렉트로 메시지를 쏴주는 메가폰 역할. | [👉 megaphone.py 상세 문서 읽기](./megaphone.py.md) |
+| **백엔드 (Python)** | `scripts/skill_manager.py` | Gemini/Claude 통합 스킬 관리자. 스킬 목록 조회, 검색 및 외부 설치 기능을 총괄. | [👉 skill_manager.py 상세 문서 읽기](./skill_manager.py.md) |
 
 ---
 **최근 문서 업데이트 히스토리:**
+- **v3.4.0 (2026-02-24)**: [Gemini CLI] 통합 스킬 관리자(Skill Manager) 및 외부 스킬 검색/설치 기능 구현.
+- **v3.3.1 (2026-02-24)**: [Gemini CLI] 한글 IME(한글 입력) 엔터 키 즉시 전송 로직 최종 개선. (조합 중 엔터 한 번으로 전송, 불필요한 줄바꿈 제거)
+- **v3.3.0 (2026-02-24)**: [Gemini CLI] 한글 입력(IME) 엔터 키 즉시 전송 문제 해결 및 메시지 채널 UX 개선.
 - **v3.2.0 (2026-02-23)**: [Gemini-1] 터미널 입력창 `textarea` 교체 및 제미나이(Gemini) CLI 호환성 개선. (엔터 시 즉시 전송, 한글 IME 안정화)
 - **v3.1.0 (2026-02-23)**: [Gemini-1] 바이브 코딩(Vibe Coding) 프론트엔드 최신 빌드(`dist`) 갱신 및 배포 완료. (다중 윈도우, 동적 아이콘 반영)
 

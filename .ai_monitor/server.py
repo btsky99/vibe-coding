@@ -439,6 +439,9 @@ def _smithery_api_key() -> str:
         except Exception:
             pass
     return ''
+
+# ── .env 파일 읽기/쓰기 유틸 ─────────────────────────────────────────────────
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 정적 파일 경로 결정 (PyInstaller 배포 환경 대응 최적화)
@@ -1511,10 +1514,22 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 # 활성화된 모든 PTY 세션에 메시지 전송 (터미널 화면에 출력)
                 # 터미널은 \r\n (CRLF)을 필요로 하므로 변환하여 전송합니다.
-                terminal_msg = f"\r\n\x1b[38;5;39m[{msg['from']} → {msg['to']}] {msg['content'].replace('\n', '\r\n')}\x1b[0m\r\n"
+                content_to_send = msg['content']
+                terminal_msg = f"\r\n\x1b[38;5;39m[{msg['from']} → {msg['to']}] {content_to_send.replace('\n', '\r\n')}\x1b[0m\r\n"
+                
+                # [개선] 메시지가 '>'로 시작하면 명령어로 간주하여 즉시 실행 유도
+                is_manual_cmd = content_to_send.startswith('>')
+                if is_manual_cmd:
+                    cmd_to_exec = content_to_send[1:].strip() + '\r\n'
+                else:
+                    cmd_to_exec = None
+
                 for pty in pty_sessions.values():
                     try:
-                        pty.write(terminal_msg)
+                        if is_manual_cmd:
+                            pty.write(cmd_to_exec)
+                        else:
+                            pty.write(terminal_msg)
                     except:
                         pass
 
@@ -1912,11 +1927,14 @@ async def pty_handler(websocket):
     async def read_from_ws():
         async for message in websocket:
             try:
+                # 디버깅을 위해 수신된 메시지 출력 (제어 문자 포함)
+                print(f"[WS RECV] {repr(message)}")
                 if isinstance(message, str):
                     pty.write(message)
                 else:
                     pty.write(message.decode('utf-8'))
             except Exception as e:
+                print(f"[WS ERROR] {e}")
                 break
 
     task1 = asyncio.create_task(read_from_pty())

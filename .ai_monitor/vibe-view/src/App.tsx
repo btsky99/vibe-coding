@@ -131,6 +131,8 @@ function App() {
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
   const [msgContent, setMsgContent] = useState('');
+  // 메시지 채널용 한글 입력 상태 Ref
+  const isMsgComposingRef = useRef(false);
 
   // 읽지 않은 메시지 수 — 메시지 탭을 열면 0으로 초기화
   const unreadMsgCount = activeTab === 'messages' ? 0 : Math.max(0, messages.length - lastSeenMsgCount);
@@ -1063,8 +1065,12 @@ function App() {
                   <textarea
                     value={msgContent}
                     onChange={e => setMsgContent(e.target.value)}
+                    onCompositionStart={() => { isMsgComposingRef.current = true; }}
+                    onCompositionEnd={() => { isMsgComposingRef.current = false; }}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) {
+                        if (isMsgComposingRef.current) return;
+                        
                         // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
                         e.preventDefault();
 
@@ -1074,7 +1080,7 @@ function App() {
                         }
                       }
                     }}
-                    placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈)"
+                    placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈, >명령어: 터미널 실행)"
                     rows={3}
                     className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
                   />
@@ -2124,6 +2130,8 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
   const [inputValue, setInputValue] = useState('');
+  // 한글 입력(IME) 상태 추적용 Ref
+  const isComposingRef = useRef(false);
   const [shortcuts, setShortcuts] = useState<Shortcut[]>(() => {
     try {
       const saved = localStorage.getItem('hive_shortcuts');
@@ -2414,19 +2422,21 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
               <textarea
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
+                onCompositionStart={() => { isComposingRef.current = true; }}
+                onCompositionEnd={() => { isComposingRef.current = false; }}
                 onKeyDown={e => {
-                  // e.keyCode === 13은 한글 조합 중에도 엔터 키를 확실하게 포착합니다.
+                  // 한글 조합 중일 때는 엔터 키로 글자만 확정하고 전송은 막음 (isComposingRef 활용)
                   if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey) {
-                    // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
+                    if (isComposingRef.current) return; // 조합 중이면 종료
+                    
                     e.preventDefault();
-
-                    // 명령어를 즉시 전송합니다. (한글 입력 시에도 엔터 한 번으로 전송되도록 복원)
+                    // 명령어를 즉시 전송합니다.
                     if (inputValue.trim()) {
                       handleSend(inputValue);
                     }
                   }
                 }}
-                placeholder="터미널 명령어 전송 (한글 완벽 지원, 엔터:전송, 쉬프트+엔터:줄바꿈)..."
+                placeholder="터미널 명령어 전송 (엔터:전송, 쉬프트+엔터:줄바꿈)..."
                 rows={Math.max(1, Math.min(8, inputValue.split('\n').length))}
                 className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-all resize-none custom-scrollbar leading-relaxed h-auto"
               />

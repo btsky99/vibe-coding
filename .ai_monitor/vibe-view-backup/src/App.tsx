@@ -5,13 +5,14 @@
  * 🔗 개별 상세 문서: docs/App.tsx.md
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
+ *          (2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영)
  * ------------------------------------------------------------------------
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Menu, Terminal, RotateCw,
+  Activity, Menu, Terminal, RotateCw,
   ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
@@ -430,10 +431,11 @@ function App() {
   // 메시지 전송
   const sendMessage = () => {
     if (!msgContent.trim()) return;
+    const cleanContent = msgContent.replace(/[\r\n]+$/, '');
     fetch(`${API_BASE}/api/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: msgFrom, to: msgTo, type: msgType, content: msgContent }),
+      body: JSON.stringify({ from: msgFrom, to: msgTo, type: msgType, content: cleanContent }),
     })
       .then(res => res.json())
       .then(() => {
@@ -513,7 +515,44 @@ function App() {
   // 파일 시스템 탐색 상태
   const [drives, setDrives] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
+  const [initialConfigLoaded, setInitialConfigLoaded] = useState(false);
   const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
+
+  // 초기 설정 로드 (마지막 경로 기억)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/config`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.last_path) {
+          setCurrentPath(data.last_path);
+        }
+        setInitialConfigLoaded(true);
+      })
+      .catch(() => setInitialConfigLoaded(true));
+  }, []);
+
+  // 경로 변경 시 서버에 저장
+  useEffect(() => {
+    if (initialConfigLoaded && currentPath) {
+      fetch(`${API_BASE}/api/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ last_path: currentPath })
+      }).catch(() => {});
+    }
+  }, [currentPath, initialConfigLoaded]);
+
+  const openFolder = () => {
+    fetch(`${API_BASE}/api/select-folder`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success' && data.path) {
+          setCurrentPath(data.path);
+        }
+      })
+      .catch(err => alert("폴더 선택 오류: " + err));
+  };
+
   const [treeMode, setTreeMode] = useState(true);
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({});
   const [treeChildren, setTreeChildren] = useState<Record<string, { name: string; path: string; isDir: boolean }[]>>({});
@@ -673,9 +712,9 @@ function App() {
 
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
-        <img src="/vibe_icon.png" alt="vibe" className="w-4 h-4 mx-1 object-contain" />
+        <Activity className="w-3.5 h-3.5 text-primary mx-1" />
         <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
-        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v2.3.0</span>
+        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v3.3.0</span>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
@@ -689,6 +728,13 @@ function App() {
             {/* 파일 메뉴 (종료 기능 포함) */}
             {activeMenu === menu && menu === '파일' && (
               <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+                <button 
+                  onClick={() => { openFolder(); setActiveMenu(null); }} 
+                  className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
+                >
+                  <VscFolderOpened className="w-3.5 h-3.5 text-[#dcb67a]" /> 폴더 열기...
+                </button>
+                <div className="h-px bg-white/5 my-1 mx-2"></div>
                 <button 
                   onClick={() => {
                     if (confirm("시스템을 완전히 종료하시겠습니까? (백그라운드 서버도 종료됩니다)")) {
@@ -892,7 +938,7 @@ function App() {
                           }`}>{msg.type}</span>
                         </div>
                         {/* 메시지 본문 */}
-                        <p className="text-[#cccccc] leading-relaxed break-words">{msg.content}</p>
+                        <p className="text-[#cccccc] leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
                         {/* 타임스탬프 */}
                         <div className="text-[#858585] mt-1 text-[9px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
                       </div>
@@ -928,8 +974,20 @@ function App() {
                   <textarea
                     value={msgContent}
                     onChange={e => setMsgContent(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) sendMessage(); }}
-                    placeholder="메시지 입력... (Ctrl+Enter 전송)"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
+                        e.preventDefault();
+
+                        // 한글 조합 중이 아닐 때만 명령어를 전송합니다.
+                        if (!e.nativeEvent.isComposing && msgContent.trim()) {
+                          sendMessage();
+                          // 전송 후 입력창을 비울 때 레이스 컨디션 방지를 위해 지연 처리
+                          setTimeout(() => setMsgContent(''), 0);
+                        }
+                      }
+                    }}
+                    placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈)"
                     rows={3}
                     className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
                   />
@@ -938,7 +996,7 @@ function App() {
                     disabled={!msgContent.trim()}
                     className="w-full py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded text-[10px] font-bold transition-colors"
                   >
-                    전송 (Ctrl+Enter)
+                    전송 (Enter)
                   </button>
                 </div>
               </div>
@@ -1485,6 +1543,13 @@ function App() {
               <>
                 {/* 드라이브 선택 + 트리/플랫 토글 */}
                 <div className="flex items-center gap-1 mb-2">
+                  <button
+                    onClick={openFolder}
+                    className="p-1.5 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded text-[#dcb67a] transition-all shrink-0"
+                    title="프로젝트 폴더 열기"
+                  >
+                    <VscFolderOpened className="w-4 h-4" />
+                  </button>
                   <select
                     value={drives.find(d => currentPath.startsWith(d)) || currentPath}
                     onChange={(e) => setCurrentPath(e.target.value)}
@@ -1959,8 +2024,11 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    // 제미나이 등 일부 CLI 환경에서 \r 만으로는 즉시 실행되지 않는 문제를 해결하기 위해 \n 사용
-    wsRef.current.send(text + '\n');
+    // 전송할 텍스트 끝의 줄바꿈 문자를 제거하여 중복 입력을 방지합니다.
+    const cleanText = text.replace(/[\r\n]+$/, '');
+    // 윈도우 PTY(winpty) + cmd.exe 환경에서는 \r\n (CRLF)이 실제 Enter 키 입력과 동일합니다.
+    // 중간에 포함된 모든 \n도 \r\n으로 변환하여 여러 줄 입력 시 줄바꿈이 깨지지 않게 합니다.
+    wsRef.current.send(cleanText.replace(/\n/g, '\r\n') + '\r\n');
     setInputValue('');
     termRef.current?.focus();
   };
@@ -2077,8 +2145,15 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey) {
+                    // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
                     e.preventDefault();
-                    handleSend(inputValue);
+
+                    // 명령어를 즉시 전송합니다. (한글 입력 시에도 엔터 한 번으로 전송되도록 복원)
+                    if (inputValue.trim()) {
+                      handleSend(inputValue);
+                      // 전송 후 입력창을 확실히 비웁니다.
+                      setTimeout(() => setInputValue(''), 0);
+                    }
                   }
                 }}
                 placeholder="터미널 명령어 전송 (한글 완벽 지원, 엔터:전송, 쉬프트+엔터:줄바꿈)..."
@@ -2225,7 +2300,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
             {slotLogs.map((log, idx) => (
               <div key={idx} className="flex items-start gap-2 border-l-2 border-primary/30 pl-2 py-0.5 bg-white/2 rounded-r">
                 <span className="text-primary font-bold whitespace-nowrap opacity-80">[{log.agent}]</span>
-                <span className="flex-1 text-[#cccccc] break-all leading-relaxed">{log.trigger}</span>
+                <span className="flex-1 text-[#cccccc] break-all leading-relaxed whitespace-pre-wrap">{log.trigger}</span>
               </div>
             ))}
             {slotLogs.length === 0 && (
