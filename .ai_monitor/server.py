@@ -36,7 +36,8 @@ from datetime import datetime
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
+import urllib.request
 from _version import __version__
 
 if getattr(sys, 'frozen', False):
@@ -71,19 +72,27 @@ except ImportError as e:
 init_db()
 
 # 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
-STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
+STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 LOCKS_FILE = DATA_DIR / "locks.json"
+CONFIG_FILE = DATA_DIR / "config.json"
 # 에이전트 간 메시지 채널 파일
 MESSAGES_FILE = DATA_DIR / "messages.jsonl"
 # 에이전트 간 공유 작업 큐 파일 (JSON 배열 — 업데이트/삭제 지원)
 TASKS_FILE = DATA_DIR / "tasks.json"
 # 에이전트 간 공유 메모리/지식 베이스 (SQLite — 동시성·검색 안정성 확보)
 MEMORY_DB = DATA_DIR / "shared_memory.db"
+# 프로젝트 목록 파일 (최근 사용 프로젝트 저장)
+PROJECTS_FILE = DATA_DIR / "projects.json"
 
 # 데이터 디렉토리 생성 보장
 if not DATA_DIR.exists():
     os.makedirs(DATA_DIR, exist_ok=True)
+
+# 프로젝트 목록 초기화 (없을 경우 현재 폴더의 상위 폴더를 기본으로 추가)
+if not PROJECTS_FILE.exists():
+    with open(PROJECTS_FILE, 'w', encoding='utf-8') as f:
+        json.dump([str(Path(__file__).resolve().parent.parent).replace('\\', '/')], f)
 
 # 락 파일 초기화 (없을 경우)
 if not LOCKS_FILE.exists():
@@ -418,18 +427,29 @@ def _mcp_config_path(tool: str, scope: str) -> Path:
             return home / '.gemini' / 'settings.json'
         else:
             return project_root / '.gemini' / 'settings.json'
+
+# ── Smithery API 키 설정 파일 경로 ──────────────────────────────────────────
+_SMITHERY_CFG = DATA_DIR / 'smithery_config.json'
+
+def _smithery_api_key() -> str:
+    """저장된 Smithery API 키를 반환합니다. 없으면 빈 문자열."""
+    if _SMITHERY_CFG.exists():
+        try:
+            return json.loads(_SMITHERY_CFG.read_text(encoding='utf-8')).get('api_key', '')
+        except Exception:
+            pass
+    return ''
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 정적 파일 경로 결정 (PyInstaller 배포 환경 대응 최적화)
 if getattr(sys, 'frozen', False):
     # PyInstaller로 빌드된 경우, dist 폴더는 보통 _MEIPASS 직하에 위치하도록 패키징함
     STATIC_DIR = (BASE_DIR / "dist").resolve()
-    if not STATIC_DIR.exists():
-        # 혹시 구조가 다를 경우 대비하여 기존 경로도 확인
-        STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
 else:
-    # 개발 환경
-    STATIC_DIR = (BASE_DIR / "nexus-view" / "dist").resolve()
+    # 개발 환경: 최신 UI인 vibe-view를 우선 확인
+    STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
+    if not STATIC_DIR.exists():
+        STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
 
 print(f"[*] Static files directory: {STATIC_DIR}")
 if not STATIC_DIR.exists():
@@ -447,6 +467,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 last_heartbeat_time = time.time()
 client_connected_once = False
+main_window = None
 
 def monitor_heartbeat():
     global last_heartbeat_time, client_connected_once
@@ -520,6 +541,49 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(b"OK")
+        elif parsed_path.path == '/api/projects':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            projects = []
+            if PROJECTS_FILE.exists():
+                try:
+                    with open(PROJECTS_FILE, 'r', encoding='utf-8') as f:
+                        projects = json.load(f)
+                except: pass
+            
+            # GET 요청이면 목록 반환, POST 처리는 아래 do_POST에서 함
+            self.wfile.write(json.dumps(projects).encode('utf-8'))
+        elif parsed_path.path == '/api/browse-folder':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                # PowerShell을 사용하여 폴더 선택창 띄우기
+                ps_cmd = (
+                    "$app = New-Object -ComObject Shell.Application; "
+                    "$folder = $app.BrowseForFolder(0, '프로젝트 폴더를 선택하세요', 0, 0); "
+                    "if ($folder) { $folder.Self.Path } else { '' }"
+                )
+                res = subprocess.run(['powershell', '-Command', ps_cmd], capture_output=True, text=True, encoding='utf-8')
+                selected_path = res.stdout.strip().replace('\\', '/')
+                self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/config':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            config = {}
+            if CONFIG_FILE.exists():
+                try:
+                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                except: pass
+            self.wfile.write(json.dumps(config).encode('utf-8'))
         elif parsed_path.path == '/api/drives':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1116,6 +1180,50 @@ class SSEHandler(BaseHTTPRequestHandler):
             ]
             self.wfile.write(json.dumps(catalog, ensure_ascii=False).encode('utf-8'))
 
+        elif parsed_path.path == '/api/mcp/apikey':
+            # Smithery API 키 조회
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            key = _smithery_api_key()
+            # 키가 있으면 앞 6자리만 노출 (보안)
+            masked = (key[:6] + '…' + key[-4:]) if len(key) > 12 else ('*' * len(key) if key else '')
+            self.wfile.write(json.dumps({'has_key': bool(key), 'masked': masked}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/mcp/search':
+            # Smithery 레지스트리 검색 — ?q=...&page=1&pageSize=20
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query   = parse_qs(parsed_path.query)
+            q       = query.get('q',        [''])[0].strip()
+            page    = int(query.get('page',     ['1'])[0])
+            page_sz = int(query.get('pageSize', ['20'])[0])
+            api_key = _smithery_api_key()
+            if not api_key:
+                self.wfile.write(json.dumps({'error': 'NO_KEY', 'message': 'Smithery API 키가 설정되지 않았습니다'}).encode('utf-8'))
+                return
+            if not q:
+                self.wfile.write(json.dumps({'servers': [], 'pagination': {'currentPage': 1, 'totalPages': 0, 'totalCount': 0}}).encode('utf-8'))
+                return
+            try:
+                params = urlencode({'q': q, 'page': page, 'pageSize': page_sz})
+                req = urllib.request.Request(
+                    f'https://registry.smithery.ai/servers?{params}',
+                    headers={'Authorization': f'Bearer {api_key}', 'Accept': 'application/json'},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+            except urllib.error.HTTPError as e:
+                code = e.code
+                msg = 'API 키가 유효하지 않습니다' if code == 401 else f'Smithery API 오류 ({code})'
+                self.wfile.write(json.dumps({'error': f'HTTP_{code}', 'message': msg}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': 'NETWORK', 'message': str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/mcp/installed':
             # 설치 현황 조회 — ?tool=claude|gemini&scope=global|project
             self.send_response(200)
@@ -1188,7 +1296,85 @@ class SSEHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_path = urlparse(self.path)
-        if parsed_path.path == '/api/launch':
+        if parsed_path.path == '/api/projects':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
+                new_path = data.get('path', '').strip().replace('\\', '/')
+                if not new_path:
+                    self.wfile.write(json.dumps({"error": "Invalid path"}).encode('utf-8'))
+                    return
+                
+                projects = []
+                if PROJECTS_FILE.exists():
+                    with open(PROJECTS_FILE, 'r', encoding='utf-8') as f:
+                        projects = json.load(f)
+                
+                if new_path in projects:
+                    projects.remove(new_path)
+                projects.insert(0, new_path) # 최신 프로젝트를 위로
+                projects = projects[:20] # 최대 20개 저장
+                with open(PROJECTS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(projects, f, ensure_ascii=False, indent=2)
+                
+                self.wfile.write(json.dumps({"status": "success", "projects": projects}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/config/update':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                config = {}
+                if CONFIG_FILE.exists():
+                    try:
+                        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                    except: pass
+                config.update(data)
+                with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=2)
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/select-folder':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                import webview
+                # main_window가 활성화된 상태에서만 다이얼로그 가능
+                if main_window:
+                    selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
+                    if selected and len(selected) > 0:
+                        path = selected[0].replace('\\', '/')
+                        # 선택된 경로를 설정에도 즉시 저장
+                        config = {}
+                        if CONFIG_FILE.exists():
+                            try:
+                                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                                    config = json.load(f)
+                            except: pass
+                        config['last_path'] = path
+                        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(config, f, ensure_ascii=False, indent=2)
+                        self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
+                    else:
+                        self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({"status": "error", "message": "Window not ready"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/launch':
             try:
                 content_length = int(self.headers['Content-Length'])
                 post_data = self.rfile.read(content_length)
@@ -1234,8 +1420,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 
                 if target_slot in pty_sessions:
                     pty = pty_sessions[target_slot]
-                    # 명령어 끝에 개행 문자가 없으면 추가하여 즉시 실행 유도
-                    final_cmd = command if command.endswith('\n') or command.endswith('\r') else command + '\r\n'
+                    # 명령어 중간의 \n을 \r\n으로 치환하고 끝에 개행이 없으면 추가하여 즉시 실행 유도
+                    processed_cmd = command.replace('\n', '\r\n')
+                    final_cmd = processed_cmd if processed_cmd.endswith('\r\n') or processed_cmd.endswith('\r') else processed_cmd + '\r\n'
                     pty.write(final_cmd)
                     self.wfile.write(json.dumps({"status": "success", "message": f"Command sent to Terminal {target_slot}"}).encode('utf-8'))
                 else:
@@ -1321,6 +1508,15 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 # SQLite 에 삽입
                 send_message(msg['id'], msg['from'], msg['to'], msg['type'], msg['content'])
+
+                # 활성화된 모든 PTY 세션에 메시지 전송 (터미널 화면에 출력)
+                # 터미널은 \r\n (CRLF)을 필요로 하므로 변환하여 전송합니다.
+                terminal_msg = f"\r\n\x1b[38;5;39m[{msg['from']} → {msg['to']}] {msg['content'].replace('\n', '\r\n')}\x1b[0m\r\n"
+                for pty in pty_sessions.values():
+                    try:
+                        pty.write(terminal_msg)
+                    except:
+                        pass
 
                 # SSE 스트림 (session_logs 테이블) 에도 알림 기록하여 로그 뷰에 반영
                 try:
@@ -1520,6 +1716,24 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/mcp/apikey':
+            # Smithery API 키 저장
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                api_key = str(body.get('api_key', '')).strip()
+                _SMITHERY_CFG.write_text(
+                    json.dumps({'api_key': api_key}, ensure_ascii=False, indent=2),
+                    encoding='utf-8'
+                )
+                self.wfile.write(json.dumps({'status': 'success'}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/mcp/install':
             # MCP 설치 — config 파일의 mcpServers 키에 엔트리 추가
             self.send_response(200)
@@ -1741,27 +1955,11 @@ def start_ws_server():
     except Exception as e:
         print(f"WebSockets Server Error: {e}")
 
-if __name__ == '__main__':
-    print(f"Vibe Coding {__version__}")
-
-    # 윈도우 작업표시줄 아이콘을 파이썬 로고 대신 커스텀 아이콘으로 고정
-    if os.name == 'nt':
-        try:
-            import ctypes
-            myappid = f'com.vibe.coding.{__version__}' # 임의의 고유 ID
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-        except Exception as e:
-            print(f"Failed to set AppUserModelID: {e}")
-
-    # --- Auto-update check (non-blocking) ---
-    if getattr(sys, 'frozen', False):
-        from updater import check_and_update
-        update_thread = threading.Thread(
-            target=check_and_update,
-            args=(DATA_DIR,),
-            daemon=True,
-        )
-        update_thread.start()
+def open_app_window(url):
+    """GUI 실행 실패 시 기본 브라우저로 대시보드를 엽니다."""
+    import webbrowser
+    print(f"[*] GUI 창을 띄울 수 없어 브라우저로 연결합니다: {url}")
+    webbrowser.open(url)
 
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
@@ -1772,6 +1970,19 @@ if __name__ == '__main__':
             myappid = f'com.vibe.coding.{__version__}'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except: pass
+
+    # --- Auto-update check (non-blocking) ---
+    if getattr(sys, 'frozen', False):
+        try:
+            from updater import check_and_update
+            update_thread = threading.Thread(
+                target=check_and_update,
+                args=(DATA_DIR,),
+                daemon=True,
+            )
+            update_thread.start()
+        except ImportError:
+            print("[!] Updater module not found, skipping update check.")
 
     # 1. 백그라운드 스레드 시작
     threading.Thread(target=start_ws_server, daemon=True).start()
@@ -1829,13 +2040,14 @@ if __name__ == '__main__':
                     print(f"[!] Win32 Icon Fix Error: {e}")
 
         print(f"[*] Launching Desktop Window with Official Icon...")
-        webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", 
+        main_window = webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", 
                               width=1400, height=900)
         
         # 아이콘 교체 스레드 별도 실행
         threading.Thread(target=force_win32_icon, daemon=True).start()
         
         webview.start()
+        os._exit(0)  # 창 닫히면 즉시 프로세스 종료
     except Exception as e:
         print(f"[!] GUI Error: {e}")
         open_app_window(f"http://localhost:{HTTP_PORT}")
