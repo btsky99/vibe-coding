@@ -252,14 +252,84 @@ class MemoryWatcher(threading.Thread):
     # ── 공개 메서드 ─────────────────────────────────────────────────────────
     def run(self) -> None:
         print("[MemoryWatcher] 에이전트 메모리 감시 시작")
+        _sync_tick = 0  # 역방향 동기화 주기 카운터 (40 * 15초 = 10분)
         while True:
             try:
                 self._scan_claude_memories()
                 self._scan_gemini_logs()
                 self._scan_gemini_chats()
+                # 10분마다 shared_memory.db → MEMORY.md 역방향 동기화 실행
+                _sync_tick += 1
+                if _sync_tick >= 40:
+                    self._sync_to_claude_memory()
+                    _sync_tick = 0
             except Exception as e:
                 print(f"[MemoryWatcher] 스캔 오류: {e}")
             time.sleep(self.POLL_INTERVAL)
+
+    # ── 내부: 역방향 동기화 (shared_memory.db → MEMORY.md) ──────────────────
+    def _sync_to_claude_memory(self) -> None:
+        """
+        Gemini·외부 에이전트가 DB에 쓴 항목을 Claude Code auto-memory 파일에
+        역동기화한다. claude:T* 키(Claude가 직접 쓴 메모리)는 제외하여 순환 방지.
+        MEMORY.md 의 '## 하이브 공유 메모리' 섹션을 교체/추가한다.
+        """
+        memory_file = (
+            Path.home() / '.claude' / 'projects' / PROJECT_ID / 'memory' / 'MEMORY.md'
+        )
+        if not memory_file.exists():
+            return
+        try:
+            with _memory_conn() as conn:
+                rows = conn.execute(
+                    "SELECT key,title,content,author,tags,updated_at "
+                    "FROM memory "
+                    "WHERE key NOT LIKE 'claude:T%' "
+                    "ORDER BY updated_at DESC LIMIT 15"
+                ).fetchall()
+            if not rows:
+                return
+
+            entries = []
+            for r in rows:
+                e = dict(r)
+                e['tags'] = json.loads(e.get('tags', '[]'))
+                entries.append(e)
+
+            # 섹션 구성
+            HEADER = '## 하이브 공유 메모리 (자동 동기화)'
+            lines = [
+                HEADER,
+                f'_업데이트: {time.strftime("%Y-%m-%dT%H:%M:%S")} | {len(entries)}개 항목_\n',
+            ]
+            for e in entries:
+                tags_str = ' '.join(f'#{t}' for t in e.get('tags', []))
+                preview = e['content'][:90].replace('\n', ' ')
+                if len(e['content']) > 90:
+                    preview += '...'
+                lines.append(f"- **[{e['key']}]** `{e.get('author', '?')}` {tags_str}")
+                lines.append(f"  {preview}")
+
+            new_section = '\n'.join(lines) + '\n'
+            content = memory_file.read_text(encoding='utf-8', errors='replace')
+
+            if HEADER in content:
+                start = content.index(HEADER)
+                nxt = content.find('\n## ', start + len(HEADER))
+                if nxt == -1:
+                    content = content[:start].rstrip() + '\n\n' + new_section
+                else:
+                    content = (
+                        content[:start].rstrip() + '\n\n' + new_section
+                        + '\n' + content[nxt + 1:]
+                    )
+            else:
+                content = content.rstrip() + '\n\n' + new_section
+
+            memory_file.write_text(content, encoding='utf-8')
+            print(f"[MemoryWatcher] MEMORY.md 역동기화 완료: {len(entries)}개 항목")
+        except Exception as e:
+            print(f"[MemoryWatcher] MEMORY.md 역동기화 오류: {e}")
 
     # ── 내부: 터미널 번호 부여 ───────────────────────────────────────────────
     def _terminal_id(self, source_key: str) -> int:

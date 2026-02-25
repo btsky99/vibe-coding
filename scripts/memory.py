@@ -22,6 +22,7 @@ import json
 import argparse
 import urllib.request
 import urllib.error
+import urllib.parse
 import os
 import time
 import sqlite3
@@ -192,10 +193,110 @@ def _print_entry(e: dict) -> None:
     print(f"   내용:\n{e['content']}")
 
 
+# ─── 역방향 동기화: shared_memory.db → MEMORY.md ─────────────────────────────
+
+def _claude_memory_file():
+    """
+    현재 프로젝트의 Claude Code auto-memory MEMORY.md 경로 계산.
+    Claude Code 프로젝트 인코딩: D:\\vibe-coding → D--vibe-coding
+    """
+    from pathlib import Path
+    script_dir = Path(os.path.abspath(__file__)).parent
+    project_root = script_dir.parent
+    # 드라이브 + 경로 구분자를 '--' 로 변환 (Claude Code 동일 방식)
+    project_id = (
+        str(project_root)
+        .replace('\\', '/')
+        .replace(':', '')
+        .replace('/', '--')
+        .lstrip('-')
+    )
+    return Path.home() / '.claude' / 'projects' / project_id / 'memory' / 'MEMORY.md'
+
+
+def _write_hive_section(memory_file, entries: list) -> None:
+    """
+    MEMORY.md 내 '## 하이브 공유 메모리' 섹션을 entries 로 교체/추가한다.
+    기존 섹션이 있으면 덮어쓰고, 없으면 파일 끝에 추가한다.
+    """
+    HEADER = '## 하이브 공유 메모리 (자동 동기화)'
+    lines = [
+        HEADER,
+        f'_업데이트: {time.strftime("%Y-%m-%d %H:%M:%S")} | {len(entries)}개 항목_\n',
+    ]
+    for e in entries[:15]:
+        tags_str = ' '.join(f'#{t}' for t in e.get('tags', []))
+        preview = e['content'][:90].replace('\n', ' ')
+        if len(e['content']) > 90:
+            preview += '...'
+        lines.append(f"- **[{e['key']}]** `{e.get('author', '?')}` {tags_str}")
+        lines.append(f"  {preview}")
+
+    new_section = '\n'.join(lines) + '\n'
+    content = memory_file.read_text(encoding='utf-8', errors='replace')
+
+    if HEADER in content:
+        # 기존 섹션을 찾아 교체
+        start = content.index(HEADER)
+        nxt = content.find('\n## ', start + len(HEADER))
+        if nxt == -1:
+            content = content[:start].rstrip() + '\n\n' + new_section
+        else:
+            content = content[:start].rstrip() + '\n\n' + new_section + '\n' + content[nxt + 1:]
+    else:
+        content = content.rstrip() + '\n\n' + new_section
+
+    memory_file.write_text(content, encoding='utf-8')
+
+
+def cmd_sync(args: argparse.Namespace, port) -> None:
+    """
+    shared_memory.db → MEMORY.md 역방향 동기화.
+    Claude Code 자신의 메모리 파일에서 온 항목(claude:T*)은 제외하고,
+    Gemini·사용자·외부 에이전트 항목만 MEMORY.md 하이브 섹션에 기록한다.
+    """
+    # 1) 공유 메모리 읽기
+    entries = []
+    if port:
+        data = api_get('/api/memory', port)
+        if data:
+            # claude:T* 키는 Claude Code 메모리 파일이 DB로 들어온 것 — 역동기화 불필요
+            entries = [e for e in data if not e.get('key', '').startswith('claude:T')]
+
+    if not entries:
+        # 폴백: SQLite 직접 읽기
+        with _open_db() as conn:
+            rows = conn.execute(
+                "SELECT key,title,content,author,tags,updated_at "
+                "FROM memory "
+                "WHERE key NOT LIKE 'claude:T%' "
+                "ORDER BY updated_at DESC LIMIT 20"
+            ).fetchall()
+        for row in rows:
+            e = dict(row)
+            e['tags'] = json.loads(e.get('tags', '[]'))
+            entries.append(e)
+
+    memory_file = _claude_memory_file()
+    if not memory_file.exists():
+        print(f"[WARN] MEMORY.md 없음: {memory_file}")
+        return
+
+    if not entries:
+        print("[INFO] 동기화할 외부 에이전트 항목 없음")
+        return
+
+    _write_hive_section(memory_file, entries)
+    print(f"[OK] MEMORY.md 하이브 섹션 동기화 — {min(len(entries), 15)}개 항목 반영")
+
+
 # ─── 진입점 ──────────────────────────────────────────────────────────────────
 
 def main():
-    import urllib.parse  # cmd_get에서 사용
+    # Windows cp949 터미널에서 UTF-8 출력 보장
+    import io
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
     parser = argparse.ArgumentParser(description='공유 메모리 CLI 헬퍼 (SQLite)')
     sub = parser.add_subparsers(dest='command')
@@ -216,6 +317,8 @@ def main():
     p_del = sub.add_parser('delete', help='항목 삭제')
     p_del.add_argument('key')
 
+    sub.add_parser('sync', help='shared_memory.db → MEMORY.md 역방향 동기화')
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -228,12 +331,13 @@ def main():
     if args.command == 'set':
         cmd_set(args, port)
     elif args.command == 'get':
-        import urllib.parse
         cmd_get(args, port)
     elif args.command == 'list':
         cmd_list(args, port)
     elif args.command == 'delete':
         cmd_delete(args, port)
+    elif args.command == 'sync':
+        cmd_sync(args, port)
 
 
 if __name__ == '__main__':
