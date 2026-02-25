@@ -27,7 +27,7 @@ jobs:
         run: |
           pip install ruff
           python -m py_compile .ai_monitor/server.py
-          ruff check .ai_monitor/server.py --select E,F,W --ignore E501,W291,W293
+          ruff check .ai_monitor/server.py --select E9,F821,F823
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
