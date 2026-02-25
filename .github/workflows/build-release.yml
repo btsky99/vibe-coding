@@ -23,6 +23,12 @@ jobs:
         run: |
           pip install -r .ai_monitor/requirements.txt
 
+      - name: Lint & syntax check (Python)
+        run: |
+          pip install ruff
+          python -m py_compile .ai_monitor/server.py
+          ruff check .ai_monitor/server.py --select E,F,W --ignore E501,W291,W293
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
