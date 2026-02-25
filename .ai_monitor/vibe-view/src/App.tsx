@@ -886,13 +886,14 @@ function App() {
   // 스킬 및 도구 설치 로직
   const installSkills = () => {
     if (!currentPath) return;
-    if (confirm(`현재 프로젝트(${currentPath})에 하이브 마인드 베이스 스킬을 설치하시겠습니까?`)) {
-      fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
-        .then(res => res.json())
-        .then(data => { alert(data.message); refreshItems(); })
-        .catch(err => alert("설치 실패: " + err));
-    }
     setActiveMenu(null);
+    setActiveTab('superpowers');
+    setIsSidebarOpen(true);
+    setSpMsg('설치 중...');
+    fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
+      .then(res => res.json())
+      .then(data => { setSpMsg(data.message || '하이브 스킬 설치 완료 ✓'); fetchSpStatus(); refreshItems(); })
+      .catch(err => setSpMsg('설치 실패: ' + err));
   };
 
   const installTool = (tool: string) => {
@@ -2289,7 +2290,7 @@ function App() {
               'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} claudeSpInstalled={spStatus?.claude?.installed ?? false} geminiSpInstalled={spStatus?.gemini?.installed ?? false} />
               ))}
             </div>
           </main>
@@ -2498,7 +2499,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[] }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, claudeSpInstalled, geminiSpInstalled }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], claudeSpInstalled: boolean, geminiSpInstalled: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -2943,15 +2944,26 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
                         const handleCmdClick = (sc: SlashCommand) => {
                           if (sc.injectSkill) {
-                            // 스킬 알고리즘 직접 주입 — 현재 슬롯에만 전송 (slotId 기반)
+                            // superpowers 설치 여부에 따라 올바른 커맨드 선택
+                            // 설치됨 → claudeCmd / geminiCmd (실제 슬래시 커맨드)
+                            // 미설치  → algo (스킬 내용을 AI에게 텍스트로 주입)
                             const sk = VIBE_SKILLS.find(s => s.name === sc.injectSkill);
-                            // 스킬 알고리즘을 즉시 전송하지 않고 채팅 입력창에 넣어줌 → 사용자가 확인/수정 후 전송
                             if (sk) {
-                              setInputValue(sk.algo);
-                              setTimeout(() => inputTextareaRef.current?.focus(), 10);
+                              const claudeInstalled = claudeSpInstalled;
+                              const geminiInstalled = geminiSpInstalled;
+                              let injectText: string;
+                              if (activeAgent === 'claude' && claudeInstalled) {
+                                injectText = sk.claudeCmd;
+                              } else if (activeAgent === 'gemini' && geminiInstalled) {
+                                injectText = sk.geminiCmd;
+                              } else {
+                                injectText = sk.algo;
+                              }
+                              handleSend(injectText); // 터미널에 즉시 전송
                             }
                           } else {
-                            setInputValue(sc.cmd + ' ');
+                            // 일반 커맨드도 즉시 전송
+                            handleSend(sc.cmd);
                           }
                           setShowSlashMenu(false);
                         };
