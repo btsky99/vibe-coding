@@ -2251,12 +2251,24 @@ async def pty_handler(websocket):
         del pty_sessions[session_id]
 
 # 포트 설정: 개발(8000/8001), 배포(8005/8006)
+# 충돌 시 빈 포트를 자동으로 탐색 (최대 20개 시도)
+def _find_free_port(start: int, max_tries: int = 20) -> int:
+    import socket
+    for port in range(start, start + max_tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return port
+            except OSError:
+                continue
+    return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
+
 if getattr(sys, 'frozen', False):
-    HTTP_PORT = 8005
-    WS_PORT = 8006
+    HTTP_PORT = _find_free_port(8005)
+    WS_PORT = _find_free_port(8006)
 else:
-    HTTP_PORT = 8000
-    WS_PORT = 8001
+    HTTP_PORT = _find_free_port(8000)
+    WS_PORT = _find_free_port(8001)
 
 async def run_ws_server():
     try:
@@ -2306,13 +2318,14 @@ if __name__ == '__main__':
     threading.Thread(target=monitor_heartbeat, daemon=True).start()
     MemoryWatcher().start()  # 에이전트 메모리 파일 → shared_memory.db 자동 동기화
     
-    # 2. HTTP 서버 시작
+    # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:
         server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
-        print(f"[*] Server running on port {HTTP_PORT}")
+        print(f"[*] Server running on http://localhost:{HTTP_PORT}")
         threading.Thread(target=server.serve_forever, daemon=True).start()
     except Exception as e:
-        print(f"[!] Server Start Error: {e}")
+        print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
+        import sys as _sys; _sys.exit(1)
 
     # 3. GUI 창 띄우기 (최우선 순위)
     try:
