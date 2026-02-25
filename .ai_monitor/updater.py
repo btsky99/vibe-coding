@@ -194,6 +194,11 @@ def check_and_update(data_dir):
         logger.warning("Release %s has no %s asset.", latest_tag, ASSET_NAME)
         return
 
+    # 즉시 "다운로드 중" 상태로 알림 — 다운로드 완료 전에도 UI에 표시
+    update_info: dict = {"version": latest_tag, "ready": False, "downloading": True, "exe_path": ""}
+    with open(data_dir / "update_ready.json", "w", encoding="utf-8") as f:
+        json.dump(update_info, f)
+
     # Download to a temp file in the same directory (same filesystem for rename)
     exe_dir = Path(sys.executable).resolve().parent
     tmp_path = exe_dir / "vibe-coding.exe.new"
@@ -201,9 +206,14 @@ def check_and_update(data_dir):
     if not _download_asset(asset_url, tmp_path, token):
         if tmp_path.exists():
             tmp_path.unlink()
+        # 다운로드 실패 시 알림 파일 제거
+        try:
+            (data_dir / "update_ready.json").unlink()
+        except OSError:
+            pass
         return
 
     logger.info("Download complete. Waiting for user to apply update...")
-    update_info = {"version": latest_tag, "ready": True, "exe_path": str(tmp_path)}
+    update_info = {"version": latest_tag, "ready": True, "downloading": False, "exe_path": str(tmp_path)}
     with open(data_dir / "update_ready.json", "w", encoding="utf-8") as f:
         json.dump(update_info, f)

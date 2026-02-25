@@ -845,7 +845,22 @@ class SSEHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
             else:
-                self.wfile.write(json.dumps({"ready": False}).encode('utf-8'))
+                self.wfile.write(json.dumps({"ready": False, "downloading": False}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/trigger-update-check':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            if not getattr(sys, 'frozen', False):
+                self.wfile.write(json.dumps({"started": False, "reason": "dev build"}).encode('utf-8'))
+                return
+            try:
+                from updater import check_and_update
+                threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
+                self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/apply-update':
             self.send_response(200)

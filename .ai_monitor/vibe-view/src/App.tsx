@@ -733,21 +733,37 @@ function App() {
   }, []);
 
   // ─── 업데이트 알림 상태 ───────────────────────────────────────────────────
-  const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
+  const [updateReady, setUpdateReady] = useState<{ version: string; ready: boolean; downloading: boolean } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
 
-  // 30초마다 업데이트 준비 여부 확인
+  // 30초마다 업데이트 준비 여부 확인 (다운로드 중이면 5초마다)
   useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
     const check = () => {
       fetch(`${API_BASE}/api/check-update-ready`)
         .then(res => res.json())
-        .then(data => setUpdateReady(data?.ready ? { version: data.version } : null))
+        .then(data => {
+          if (data?.version) {
+            setUpdateReady({ version: data.version, ready: !!data.ready, downloading: !!data.downloading });
+          } else {
+            setUpdateReady(null);
+          }
+        })
         .catch(() => {});
     };
     check();
-    const interval = setInterval(check, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    // 다운로드 중이면 5초, 아니면 30초 폴링
+    const scheduleNext = () => {
+      const delay = updateReady?.downloading ? 5000 : 30000;
+      interval = setTimeout(() => { check(); scheduleNext(); }, delay);
+    };
+    scheduleNext();
+    return () => clearTimeout(interval);
+  }, [updateReady?.downloading]);
+
+  const triggerUpdateCheck = () => {
+    fetch(`${API_BASE}/api/trigger-update-check`, { method: 'POST' }).catch(() => {});
+  };
 
   const applyUpdate = () => {
     setUpdateApplying(true);
@@ -932,16 +948,24 @@ function App() {
       {updateReady && (
         <div className="flex items-center justify-between px-3 py-1 bg-primary/20 border-b border-primary/40 shrink-0 z-50">
           <span className="text-[10px] text-primary font-bold">
-            새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료
+            {updateReady.downloading
+              ? <>새 버전 <span className="font-mono">{updateReady.version}</span> 다운로드 중...</>
+              : <>새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료</>
+            }
           </span>
           <div className="flex items-center gap-2">
-            <button
-              onClick={applyUpdate}
-              disabled={updateApplying}
-              className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-50 transition-colors"
-            >
-              {updateApplying ? '적용 중...' : '지금 업데이트'}
-            </button>
+            {!updateReady.downloading && (
+              <button
+                onClick={applyUpdate}
+                disabled={updateApplying}
+                className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-50 transition-colors"
+              >
+                {updateApplying ? '적용 중...' : '지금 업데이트'}
+              </button>
+            )}
+            {updateReady.downloading && (
+              <span className="text-[9px] text-primary/60 animate-pulse">준비 중...</span>
+            )}
             <button
               onClick={() => setUpdateReady(null)}
               className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
@@ -956,7 +980,12 @@ function App() {
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
         <img src="/vibe_icon.png" alt="vibe" className="w-4 h-4 mx-1 object-contain" />
         <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
-        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v3.3.0</span>
+        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 font-mono">v3.3.0</span>
+        <button
+          onClick={triggerUpdateCheck}
+          title="업데이트 확인"
+          className="text-[9px] text-white/30 hover:text-white/70 transition-colors ml-1 mr-2"
+        >↑</button>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
