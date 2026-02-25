@@ -1,47 +1,43 @@
-# Vibe Coding - Claude Code ?�로?�트 가?�드
+# 📜 Vibe Coding - Claude Code 프로젝트 가이드
 
-## ?�로?�트 구조
-- `.ai_monitor/` - 메인 ?�로?�트 (Python 백엔??+ Vibe Coding ?�론?�엔??
-- `.ai_monitor/server.py` - SSE 로그 ?�버 + WebSocket PTY ?�버
-- `.ai_monitor/src/view.py` - Textual TUI 콘솔 뷰어
-- `.ai_monitor/updater.py` - ?�동 ?�데?�트 모듈
-- `.ai_monitor/nexus-view/` - React + Vite ?�론?�엔??- `.ai_monitor/venv/` - Python 가?�환�?- `.github/workflows/build-release.yml` - CI/CD ?�이?�라??
-## 마스??컨트�??�로?�콜
+이 파일은 Claude가 하이브 마인드(Hive Mind)의 일원으로 작업을 수행하기 위한 핵심 지침서입니다.
 
-### 1?�계: ?�청 ?�도 분석
-?�청???�음 카테고리�?분류?�여 처리:
-- **?�러/버그 ?�정**: 로그 분석 ?�선, 근본 ?�인 ?�악 ???�정
-- **??기능 구현**: ?�계 검????구현, `ai_monitor_plan.md` 참조
-- **빌드/배포**: CI ?�크?�로??�?PyInstaller spec ?�일 ?�인
-- **문서/Git**: Conventional Commits ?�용, CHANGELOG 반영
+## 🤖 최우선 준수 사항
+이 프로젝트의 모든 행동 원칙과 주석 규칙은 루트 폴더의 **`RULES.md`**에 정의되어 있습니다.
+**Claude는 어떤 작업을 시작하든 반드시 `RULES.md`를 먼저 읽고, 그 안의 모든 규칙을 절대적으로 준수해야 합니다.**
 
-### 2?�계: 개발 ?��?
+## 📂 프로젝트 핵심 구조
+- `.ai_monitor/` - 하이브 엔진 (Python 백엔드 + Vibe Coding 대시보드)
+- `scripts/` - 에이전트 브릿지, 공유 메모리, 오케스트레이터 유틸리티
+- `.gemini/skills/` - 하이브 마인드 공통 스킬 지침
+- `PROJECT_MAP.md` - 전체 파일 구조 및 역할 정의 (중앙 관리 문서)
+- `RULES.md` - AI 에이전트 공통 행동 헌법
 
-#### Python
-- 가?�환�? `.ai_monitor/venv/`
-- 린팅: `ruff` ?�용
-- ?�???�팅 ?�극 ?�용
-- 비동�?처리 ???�벤??루프 블로??주의 (?�히 GUI ?�동)
-- ?�스?? `pytest` 기반
+## 🛠️ 작업 수행 가이드
 
-#### React / ?�론?�엔??(nexus-view)
-- Server/Client 컴포?�트 분리
-- TailwindCSS ?�용, 매직 ?�버 지??- 로컬 ?�태 ?�선, ?�역 ?�태??최소??- Vite 빌드 최적???��?
+### 0단계: 하이브 컨텍스트 로드 (Sync)
+- 작업을 시작하기 전 반드시 `python scripts/memory.py list`를 실행하여 Gemini나 다른 에이전트가 남긴 최신 기술 결정 사항과 공유 메모리를 확인합니다.
+- `.ai_monitor/data/task_logs.jsonl` 최근 내역을 통해 현재 진행 중인 작업 맥락을 파악합니다.
 
-#### CI/CD
-- GitHub Actions: `.github/workflows/build-release.yml`
-- CI ?�패 ??�??�계 로그 ?�선 분석
-- ?�크릿�? GitHub Secrets�?관�?- PyInstaller�?exe 빌드 (server.py ??vibe-coding.exe, src/view.py ??vibe-coding_console.exe)
-- Inno Setup?�로 ?�스?�러 ?�성
+### 1단계: 요청 분석 및 계획 보고
+- 작업을 시작하기 전 `ai_monitor_plan.md`를 확인하여 현재 단계를 파악합니다.
+- 수정할 파일과 작업 계획을 사용자에게 간략히 보고하고 승인을 받습니다.
 
-#### 커밋 ?��?
-- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:` ?�두??- 구체??메시지: "fix(logger): handle empty log file error" ?�태
-- `git log -n 5`�?기존 ?��????�인 ???��????��?
+### 2단계: 코드 구현 및 주석 (Mandatory)
+- **한글 주석**: 모든 주석은 설계 의도를 포함하여 **한글로 아주 상세하게** 작성합니다.
+- **표준 헤더 적용**: 모든 파일 상단에 `RULES.md`에 명시된 **변경 이력(REVISION HISTORY)** 템플릿을 반드시 포함합니다.
+- **배포 코드 관리**: 배포 버전의 소스 코드와 빌드 스크립트에도 동일한 주석 규칙을 적용합니다.
 
-### 3?�계: ?�이�?마인??공통 규칙 준??(매우 중요)
-?�로?�트??참여?�는 모든 ?�이?�트(Claude ?�함)???�심 ?�동, 보고 ?�식(?�전 ?�인 �??�후 간략 보고), 문서??Auto-Doc) ?�무??루트 ?�더??**`RULES.md`** ?�일???�일?�어 ?�습?�다.
-**?�떤 ?�업???�행?�든 가??먼�? `RULES.md` ?�일???�고, �??�의 모든 규칙???��??�으�?준?�해???�니??**
+### 3단계: 하이브 동기화
+- 작업 완료 후 `scripts/hive_bridge.py`를 호출하여 로그를 남깁니다.
+- `PROJECT_MAP.md`에 변경 사항이 있다면 즉시 업데이트합니다.
+- 공유할 지식이 있다면 `scripts/memory.py`를 통해 하이브 메모리에 기록합니다.
 
-## GitHub
-- ?�?�소: `btsky99/vibe-coding` (private)
-- ?�동 ?�데?�트: `updater.py`?�서 GitHub Releases API ?�용
+## 📡 에이전트 협업
+- **Gemini**: 전체 설계 및 오케스트레이션 담당.
+- **Claude**: 정밀 로직 구현 및 프론트엔드 최적화 담당.
+- 서로의 작업 영역을 존중하며, `task_logs.jsonl`을 통해 현재 진행 상황을 공유합니다.
+
+---
+**작성일:** 2026-02-25
+**상태:** 하이브 마인드 v3.0 규격 적용 완료

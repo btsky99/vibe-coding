@@ -109,3 +109,25 @@ export interface AgentMessage {
     content: string;               // 메시지 본문
     read: boolean;                 // 읽음 여부
 }
+
+export interface HiveHealth {
+  constitution: {
+    rules_md: boolean;
+    gemini_md: boolean;
+    claude_md: boolean;
+    project_map: boolean;
+  };
+  skills: {
+    master: boolean;
+    brainstorm: boolean;
+    memory_script: boolean;
+  };
+  agents: {
+    claude_config: boolean;
+    gemini_config: boolean;
+  };
+  data: {
+    shared_memory: boolean;
+    hive_db: boolean;
+  };
+}

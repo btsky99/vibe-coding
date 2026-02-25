@@ -478,6 +478,14 @@ function App() {
   const [spStatus, setSpStatus] = useState<{ claude: SpStatus; gemini: SpStatus } | null>(null);
   const [spLoading, setSpLoading] = useState<Record<string, boolean>>({});
   const [spMsg, setSpMsg] = useState('');
+  const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
+
+  const fetchHiveHealth = () => {
+    fetch(`${API_BASE}/api/hive/health`)
+      .then(res => res.json())
+      .then(data => setHiveHealth(data))
+      .catch(() => {});
+  };
 
   const fetchSpStatus = () => {
     fetch(`${API_BASE}/api/superpowers/status`)
@@ -485,7 +493,7 @@ function App() {
       .then(data => setSpStatus(data))
       .catch(() => {});
   };
-  useEffect(() => { fetchSpStatus(); }, []);
+  useEffect(() => { fetchSpStatus(); fetchHiveHealth(); }, []);
 
   const spInstall = (tool: 'claude' | 'gemini') => {
     setSpLoading(p => ({ ...p, [tool]: true }));
@@ -2019,6 +2027,66 @@ function App() {
             ) : activeTab === 'superpowers' ? (
               /* ── Superpowers 관리자 패널 ── */
               <div className="flex-1 flex flex-col overflow-hidden gap-2">
+                {/* 하이브 시스템 진단 위젯 */}
+                <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[10px] font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
+                      <Cpu className="w-3.5 h-3.5" /> 하이브 시스템 진단
+                    </div>
+                    <button onClick={fetchHiveHealth} className="p-1 hover:bg-white/10 rounded transition-colors text-[#858585]">
+                      <RotateCw className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                  
+                  {!hiveHealth ? (
+                    <div className="text-[9px] text-[#555] italic">진단 데이터 로드 중...</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      {/* 코어 지침 */}
+                      <div className="flex flex-col gap-0.5">
+                        <div className="text-[8px] text-[#666] mb-0.5">📜 코어 지침</div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">RULES.md</span>
+                          {hiveHealth.constitution.rules_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                        </div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">CLAUDE.md</span>
+                          {hiveHealth.constitution.claude_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                        </div>
+                      </div>
+                      {/* 하이브 스킬 */}
+                      <div className="flex flex-col gap-0.5">
+                        <div className="text-[8px] text-[#666] mb-0.5">🧠 핵심 스킬</div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">Master Skill</span>
+                          {hiveHealth.skills.master ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                        </div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">Memory Script</span>
+                          {hiveHealth.skills.memory_script ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* 통합 복구 버튼 */}
+                  <button 
+                    onClick={() => {
+                      if(confirm("모든 누락된 하이브 지침과 스킬을 현재 프로젝트에 자동 복구하시겠습니까?")) {
+                        const projectRoot = currentProjectName ? `D:/${currentProjectName}` : gitPath;
+                        fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(projectRoot)}`)
+                          .then(res => res.json())
+                          .then(data => {
+                            setSpMsg(data.message);
+                            fetchHiveHealth();
+                          });
+                      }
+                    }}
+                    className="w-full py-1 bg-primary/10 hover:bg-primary/20 text-primary text-[9px] font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1"
+                  >
+                    <Zap className="w-2.5 h-2.5" /> 누락 항목 자동 복구
+                  </button>
+                </div>
+
                 {/* 상단 설명 */}
                 <div className="shrink-0 flex items-center gap-2 px-1 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded text-[9px] text-yellow-300">
                   <Zap className="w-3.5 h-3.5 shrink-0" />

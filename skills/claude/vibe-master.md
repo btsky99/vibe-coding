@@ -7,6 +7,7 @@ description: "Vibe Coding 중앙 컨트롤 타워. 모든 개발 요청을 분�
 # 🌐 마스터 컨트롤 프로토콜
 
 ## 1단계: 상태 확인 및 요청 분류
+- `python scripts/memory.py list`를 실행하여 공유 메모리에 저장된 기술적 결정 사항 로드 **(필수)**
 - `.ai_monitor/data/task_logs.jsonl` 최근 5줄을 읽어 다른 에이전트 작업 충돌 여부 확인
 - 요청을 분류: (A) 버그 수정 (B) 새 기능 (C) 리팩토링 (D) 문서화
 

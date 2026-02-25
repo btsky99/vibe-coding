@@ -34,3 +34,7 @@
 {"timestamp": "2026-02-24T23:05:29.997796", "agent": "Gemini", "task": "통합 스킬 관리자(Skill Manager) 및 검색 기능 구현 시작"}
 {"timestamp": "2026-02-24T23:07:21.216345", "agent": "Gemini", "task": "통합 스킬 관리자 및 검색 기능 구현 완료 (v3.4.0)"}
 {"timestamp": "2026-02-25T01:33:32.814393", "agent": "Gemini-1", "task": "Fixed MCP connection errors for 'fetch' and 'sqlite' by updating project-level settings.json to use uvx and official Python servers. Both are now 'Connected'."}
+{"timestamp": "2026-02-25T21:00:46.241959", "agent": "Gemini-1", "task": "Fixed DB migration crash in server.py (project column index error). Desktop app should now start correctly."}
+{"timestamp": "2026-02-25T23:27:20.899830", "agent": "Gemini-1", "task": "Updated RULES.md and master skill with mandatory standard header templates for better maintenance in production code."}
+{"timestamp": "2026-02-25T23:27:32.521047", "agent": "Gemini-1", "task": "Refined master skill instructions to strictly follow the new standard header template."}
+{"timestamp": "2026-02-25T23:51:12.172171", "agent": "Gemini-1", "task": "Updated RULES.md, CLAUDE.md, and vibe-master.md to enforce shared memory sync (scripts/memory.py) for all agents. This ensures Claude is properly synced with Gemini's context."}

@@ -1224,6 +1224,38 @@ class SSEHandler(BaseHTTPRequestHandler):
                 'project_name': PROJECT_ROOT.name,
                 'project_root': str(PROJECT_ROOT).replace('\\', '/'),
             }, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/hive/health':
+            # 하이브 시스템 건강 상태 진단
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            home = Path.home()
+            def check_exists(p): return Path(p).exists()
+            
+            health = {
+                "constitution": {
+                    "rules_md": check_exists(PROJECT_ROOT / "RULES.md"),
+                    "gemini_md": check_exists(PROJECT_ROOT / "GEMINI.md"),
+                    "claude_md": check_exists(PROJECT_ROOT / "CLAUDE.md"),
+                    "project_map": check_exists(PROJECT_ROOT / "PROJECT_MAP.md")
+                },
+                "skills": {
+                    "master": check_exists(PROJECT_ROOT / ".gemini/skills/master/SKILL.md"),
+                    "brainstorm": check_exists(PROJECT_ROOT / ".gemini/skills/brainstorming/SKILL.md"),
+                    "memory_script": check_exists(PROJECT_ROOT / "scripts/memory.py")
+                },
+                "agents": {
+                    "claude_config": check_exists(home / ".claude/commands/vibe-master.md"),
+                    "gemini_config": check_exists(PROJECT_ROOT / ".gemini/settings.json")
+                },
+                "data": {
+                    "shared_memory": check_exists(DATA_DIR / "shared_memory.db"),
+                    "hive_db": check_exists(DATA_DIR / "hive_mind.db")
+                }
+            }
+            self.wfile.write(json.dumps(health, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/mcp/catalog':
             # MCP 카탈로그 — 내장 큐레이션 목록 반환
             self.send_response(200)

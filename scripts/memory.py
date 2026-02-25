@@ -79,7 +79,8 @@ def _open_db() -> sqlite3.Connection:
             key TEXT PRIMARY KEY, id TEXT NOT NULL,
             title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
             tags TEXT NOT NULL DEFAULT '[]', author TEXT NOT NULL DEFAULT 'unknown',
-            timestamp TEXT NOT NULL, updated_at TEXT NOT NULL
+            timestamp TEXT NOT NULL, updated_at TEXT NOT NULL,
+            embedding BLOB, project TEXT NOT NULL DEFAULT ''
         )
     ''')
     conn.commit()
@@ -104,15 +105,21 @@ def cmd_set(args: argparse.Namespace, port) -> None:
 
     # 폴백: SQLite 직접 쓰기
     now = time.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    # 프로젝트 ID 생성 (server.py와 동일 로직)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    project_id = project_root.replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-') or 'default'
+
     with _open_db() as conn:
         existing = conn.execute('SELECT timestamp FROM memory WHERE key=?', (args.key,)).fetchone()
         ts = existing['timestamp'] if existing else now
         conn.execute(
-            'INSERT OR REPLACE INTO memory (key,id,title,content,tags,author,timestamp,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+            'INSERT OR REPLACE INTO memory (key,id,title,content,tags,author,timestamp,updated_at,project) VALUES (?,?,?,?,?,?,?,?,?)',
             (args.key, str(int(time.time() * 1000)), body['title'], body['content'],
-             json.dumps(body['tags'], ensure_ascii=False), body['author'], ts, now)
+             json.dumps(body['tags'], ensure_ascii=False), body['author'], ts, now, project_id)
         )
-    print(f"[OK] 메모리 직접 저장: [{args.key}]")
+    print(f"[OK] 메모리 직접 저장: [{args.key}] (Project: {project_id})")
 
 
 def cmd_get(args: argparse.Namespace, port) -> None:
