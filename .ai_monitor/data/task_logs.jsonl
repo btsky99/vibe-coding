@@ -33,3 +33,4 @@
 {"timestamp": "2026-02-24T22:45:58.748440", "agent": "Gemini-1", "task": "Fixed Korean IME Enter key issue in both chat and terminal inputs. Rebuilt vibe-view and updated documentation."}
 {"timestamp": "2026-02-24T23:05:29.997796", "agent": "Gemini", "task": "통합 스킬 관리자(Skill Manager) 및 검색 기능 구현 시작"}
 {"timestamp": "2026-02-24T23:07:21.216345", "agent": "Gemini", "task": "통합 스킬 관리자 및 검색 기능 구현 완료 (v3.4.0)"}
+{"timestamp": "2026-02-25T01:33:32.814393", "agent": "Gemini-1", "task": "Fixed MCP connection errors for 'fetch' and 'sqlite' by updating project-level settings.json to use uvx and official Python servers. Both are now 'Connected'."}

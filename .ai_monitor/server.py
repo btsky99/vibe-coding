@@ -1,9 +1,15 @@
 # ------------------------------------------------------------------------
 # 📄 파일명: server.py
-# 📂 메인 문서 링크: docs/README.md
-# 🔗 개별 상세 문서: docs/server.py.md
-# 📝 설명: 하이브 마인드의 백엔드를 담당하는 파이썬 서버 스크립트입니다. 
-#          로컬 파일 시스템 접근, 정적 파일 서빙, PTY 웹소켓 통신, SSE 로그 스트리밍을 수행합니다.
+# 🗺️ 메인 프로젝트 맵: PROJECT_MAP.md
+# 📝 설명: 하이브 마인드(Gemini & Claude)의 중앙 통제 서버.
+#          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
+#
+# 🕒 변경 이력 (History):
+# [2026-02-25] - Gemini (지능형 오케스트레이터 업그레이드)
+#   - 문서화 전략 변경에 따라 개별 파일 문서 링크 제거 및 내부 상세 주석 체제로 전환.
+#   - 에이전트 간 협업을 위한 실시간 상태 체크(Heartbeat) 및 에이전트 관리 API 추가 준비.
+# [2026-02-24] - Gemini (초기 구축)
+#   - FastAPI 기반 서버 구조 및 SQLite 연동 초기화.
 # ------------------------------------------------------------------------
 
 import json
@@ -49,6 +55,17 @@ else:
 DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
 if not DATA_DIR.exists():
     os.makedirs(DATA_DIR, exist_ok=True)
+
+# 현재 서버가 서비스하는 프로젝트 루트 + 식별자
+# frozen exe: sys.executable이 .ai_monitor/ 안에 있다고 가정
+PROJECT_ROOT: Path = (
+    Path(sys.executable).resolve().parent.parent
+    if getattr(sys, 'frozen', False)
+    else BASE_DIR.parent
+)
+# Claude Code 프로젝트 디렉터리 명명 규칙(: 제거, /·\ → --) 과 동일하게 인코딩
+_proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
+PROJECT_ID: str = _proj_raw.lstrip('-') or 'default'   # e.g. "D--vibe-coding"
 
 # 배포 버전에서 크래시 발생 시 에러 로그 기록 (os.devnull 대신 파일 사용)
 if getattr(sys, 'frozen', False) and sys.stdout is None:
@@ -115,6 +132,25 @@ def _memory_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
+def _migrate_project_column(conn: sqlite3.Connection) -> None:
+    """project 컬럼이 없는 기존 행을 마이그레이션: tags 패턴으로 출처 프로젝트 추론"""
+    rows = conn.execute("SELECT key, tags FROM memory WHERE project = ''").fetchall()
+    for row in rows:
+        try:
+            tags = json.loads(row['tags']) if row['tags'] else []
+            project = ''
+            if 'claude' in tags and len(tags) > 3:
+                project = tags[3]      # ['claude', 'terminal-N', stem, proj_dir_name]
+            elif 'gemini' in tags and len(tags) > 2:
+                project = tags[2]      # ['gemini', 'terminal-N', proj_name, type]
+            else:
+                project = PROJECT_ID   # 수동 추가 항목 → 현재 프로젝트 귀속
+            if project:
+                conn.execute("UPDATE memory SET project = ? WHERE key = ?", (project, row['key']))
+        except Exception:
+            pass
+
+
 def _init_memory_db() -> None:
     """shared_memory.db 스키마 초기화 (서버 시작 시 1회 실행)"""
     with _memory_conn() as conn:
@@ -128,15 +164,20 @@ def _init_memory_db() -> None:
                 author     TEXT NOT NULL DEFAULT 'unknown',
                 timestamp  TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
+                project    TEXT NOT NULL DEFAULT '',
                 embedding  BLOB         -- 의미 벡터 (fastembed, float32 bytes)
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_author ON memory(author)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at)')
-        # 기존 DB 마이그레이션 — embedding 컬럼이 없으면 추가
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project)')
+        # 기존 DB 마이그레이션 — 없는 컬럼 추가
         cols = [r[1] for r in conn.execute('PRAGMA table_info(memory)').fetchall()]
         if 'embedding' not in cols:
             conn.execute('ALTER TABLE memory ADD COLUMN embedding BLOB')
+        if 'project' not in cols:
+            conn.execute("ALTER TABLE memory ADD COLUMN project TEXT NOT NULL DEFAULT ''")
+            _migrate_project_column(conn)
 
 _init_memory_db()
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,10 +269,11 @@ class MemoryWatcher(threading.Thread):
 
     # ── 내부: DB 저장 (HTTP 없이 직접 SQLite, 임베딩 포함) ──────────────────
     def _upsert(self, key: str, title: str, content: str,
-                author: str, tags: list) -> None:
+                author: str, tags: list, project: str = '') -> None:
         now = time.strftime('%Y-%m-%dT%H:%M:%S')
         tags_json = json.dumps(tags, ensure_ascii=False)
         emb = _embed(f"{title}\n{content}")  # 제목+내용 합쳐서 벡터화
+        proj = project or PROJECT_ID
         with _memory_conn() as conn:
             existing = conn.execute(
                 'SELECT timestamp FROM memory WHERE key=?', (key,)
@@ -239,12 +281,12 @@ class MemoryWatcher(threading.Thread):
             orig_ts = existing['timestamp'] if existing else now
             conn.execute(
                 'INSERT OR REPLACE INTO memory '
-                '(key,id,title,content,tags,author,timestamp,updated_at,embedding) '
-                'VALUES (?,?,?,?,?,?,?,?,?)',
+                '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?)',
                 (key, str(int(time.time() * 1000)), title,
-                 content, tags_json, author, orig_ts, now, emb)
+                 content, tags_json, author, orig_ts, now, proj, emb)
             )
-        print(f"[MemoryWatcher] 동기화 완료: {key} (임베딩: {'✓' if emb else '✗'})")
+        print(f"[MemoryWatcher] 동기화 완료: {key} (프로젝트: {proj}, 임베딩: {'✓' if emb else '✗'})")
 
     # ── 내부: 파일 변경 여부 확인 ───────────────────────────────────────────
     def _changed(self, path: Path) -> bool:
@@ -285,6 +327,7 @@ class MemoryWatcher(threading.Thread):
                         content=content,
                         author=f"claude-code:terminal-{tid}",
                         tags=['claude', f'terminal-{tid}', stem, proj_dir.name],
+                        project=proj_dir.name,
                     )
                 except Exception as e:
                     print(f"[MemoryWatcher] Claude 파일 오류 {md_file}: {e}")
@@ -340,6 +383,7 @@ class MemoryWatcher(threading.Thread):
                     content='\n'.join(lines),
                     author=f"gemini:terminal-{tid}",
                     tags=['gemini', f'terminal-{tid}', proj_name, 'log'],
+                    project=proj_name,
                 )
             except Exception as e:
                 print(f"[MemoryWatcher] Gemini logs 오류 {logs_file}: {e}")
@@ -401,6 +445,7 @@ class MemoryWatcher(threading.Thread):
                     content=content,
                     author=f"gemini:terminal-{tid}",
                     tags=['gemini', f'terminal-{tid}', proj_name, 'chat'],
+                    project=proj_name,
                 )
             except Exception as e:
                 print(f"[MemoryWatcher] Gemini chat 오류 {latest}: {e}")
@@ -467,6 +512,12 @@ if not STATIC_DIR.exists():
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """멀티 스레드 지원 HTTP 서버 (SSE 등 지속적 연결 동시 처리용)"""
     daemon_threads = True
+
+# ── 에이전트 실시간 상태 관리 (오케스트레이션 핵심 데이터) ──────────────────
+# 구조: { "agent_name": { "status": "active|idle|error", "task": "task_id", "last_seen": timestamp } }
+AGENT_STATUS = {}
+AGENT_STATUS_LOCK = threading.Lock()
+# ─────────────────────────────────────────────────────────────────────────────
 
 last_heartbeat_time = time.time()
 client_connected_once = False
@@ -558,6 +609,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             
             # GET 요청이면 목록 반환, POST 처리는 아래 do_POST에서 함
             self.wfile.write(json.dumps(projects).encode('utf-8'))
+        elif parsed_path.path == '/api/agents':
+            # 실시간 에이전트 상태 목록 반환 (오케스트레이터용)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            with AGENT_STATUS_LOCK:
+                self.wfile.write(json.dumps(AGENT_STATUS, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/browse-folder':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1056,7 +1115,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps([]).encode('utf-8'))
         elif parsed_path.path == '/api/memory':
             # 공유 메모리 조회 — 임베딩 의미 검색 우선, 폴백 키워드 LIKE
-            # ?q=검색어  ?top=N(기본20)  ?threshold=0.5(유사도 최소값)
+            # ?q=검색어  ?top=N(기본20)  ?threshold=0.5  ?all=true(전체 프로젝트)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -1065,15 +1124,24 @@ class SSEHandler(BaseHTTPRequestHandler):
             q         = query.get('q',         [''])[0].strip()
             top_k     = int(query.get('top',   ['20'])[0])
             threshold = float(query.get('threshold', ['0.45'])[0])
+            show_all  = query.get('all', ['false'])[0].lower() == 'true'
+            # 프로젝트 필터: all=true가 아니면 현재 프로젝트만 표시
+            proj_filter = '' if show_all else PROJECT_ID
             try:
                 with _memory_conn() as conn:
                     if q:
                         q_emb = _embed(q)
                         if q_emb:
                             # ── 임베딩 의미 검색 ──────────────────────────
-                            all_rows = conn.execute(
-                                'SELECT * FROM memory ORDER BY updated_at DESC'
-                            ).fetchall()
+                            if proj_filter:
+                                all_rows = conn.execute(
+                                    'SELECT * FROM memory WHERE project=? ORDER BY updated_at DESC',
+                                    (proj_filter,)
+                                ).fetchall()
+                            else:
+                                all_rows = conn.execute(
+                                    'SELECT * FROM memory ORDER BY updated_at DESC'
+                                ).fetchall()
                             scored = []
                             for row in all_rows:
                                 r_emb = row['embedding']
@@ -1095,16 +1163,30 @@ class SSEHandler(BaseHTTPRequestHandler):
                         else:
                             # 임베딩 모델 미로드 → 키워드 폴백
                             pattern = f'%{q}%'
-                            rows_raw = conn.execute(
-                                'SELECT * FROM memory WHERE key LIKE ? OR title LIKE ? '
-                                'OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?',
-                                (pattern, pattern, pattern, pattern, top_k)
-                            ).fetchall()
+                            if proj_filter:
+                                rows_raw = conn.execute(
+                                    'SELECT * FROM memory WHERE project=? AND '
+                                    '(key LIKE ? OR title LIKE ? OR content LIKE ? OR tags LIKE ?) '
+                                    'ORDER BY updated_at DESC LIMIT ?',
+                                    (proj_filter, pattern, pattern, pattern, pattern, top_k)
+                                ).fetchall()
+                            else:
+                                rows_raw = conn.execute(
+                                    'SELECT * FROM memory WHERE key LIKE ? OR title LIKE ? '
+                                    'OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?',
+                                    (pattern, pattern, pattern, pattern, top_k)
+                                ).fetchall()
                             rows_data = [dict(r) for r in rows_raw]
                     else:
-                        rows_raw = conn.execute(
-                            'SELECT * FROM memory ORDER BY updated_at DESC LIMIT ?', (top_k,)
-                        ).fetchall()
+                        if proj_filter:
+                            rows_raw = conn.execute(
+                                'SELECT * FROM memory WHERE project=? ORDER BY updated_at DESC LIMIT ?',
+                                (proj_filter, top_k)
+                            ).fetchall()
+                        else:
+                            rows_raw = conn.execute(
+                                'SELECT * FROM memory ORDER BY updated_at DESC LIMIT ?', (top_k,)
+                            ).fetchall()
                         rows_data = [dict(r) for r in rows_raw]
 
                 entries = []
@@ -1115,6 +1197,17 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/project-info':
+            # 현재 서버가 서비스하는 프로젝트 정보 반환
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'project_id':   PROJECT_ID,
+                'project_name': PROJECT_ROOT.name,
+                'project_root': str(PROJECT_ROOT).replace('\\', '/'),
+            }, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/mcp/catalog':
             # MCP 카탈로그 — 내장 큐레이션 목록 반환
             self.send_response(200)
@@ -1339,7 +1432,78 @@ class SSEHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_path = urlparse(self.path)
-        if parsed_path.path == '/api/projects':
+        if parsed_path.path == '/api/agents/heartbeat':
+            # 에이전트 실시간 상태 보고 수신
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                agent_name = data.get('agent')
+                if not agent_name:
+                    self.wfile.write(json.dumps({"status": "error", "message": "Agent name is required"}).encode('utf-8'))
+                    return
+                
+                with AGENT_STATUS_LOCK:
+                    AGENT_STATUS[agent_name] = {
+                        "status": data.get("status", "active"),
+                        "task": data.get("task"),
+                        "last_seen": time.time()
+                    }
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/git/rollback':
+            # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                file_path = data.get('file')
+                git_dir = data.get('path', str(BASE_DIR.parent))
+                
+                if not file_path:
+                    self.wfile.write(json.dumps({"status": "error", "message": "File path required"}).encode('utf-8'))
+                    return
+                
+                # git checkout -- "파일명" 실행
+                result = subprocess.run(
+                    ['git', 'checkout', '--', file_path],
+                    cwd=git_dir, capture_output=True, text=True, timeout=10, encoding='utf-8',
+                    creationflags=0x08000000
+                )
+                
+                if result.returncode == 0:
+                    self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({"status": "error", "message": result.stderr.strip()}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/git/diff':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            target_file = query.get('path', [''])[0]
+            git_dir = query.get('git_path', [str(BASE_DIR.parent)])[0]
+            
+            try:
+                # git diff "파일명" 실행
+                result = subprocess.run(
+                    ['git', 'diff', '--', target_file],
+                    cwd=git_dir, capture_output=True, text=True, timeout=5, encoding='utf-8',
+                    creationflags=0x08000000
+                )
+                self.wfile.write(json.dumps({"diff": result.stdout}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/projects':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -1721,8 +1885,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({'status': 'error', 'message': 'key와 content는 필수입니다'}).encode('utf-8'))
                     return
 
-                now   = time.strftime('%Y-%m-%dT%H:%M:%S')
-                title = str(data.get('title', key)).strip()[:300]
+                now     = time.strftime('%Y-%m-%dT%H:%M:%S')
+                title   = str(data.get('title', key)).strip()[:300]
+                project = str(data.get('project', PROJECT_ID)).strip() or PROJECT_ID
                 entry = {
                     'key':        key,
                     'id':         str(int(time.time() * 1000)),
@@ -1732,6 +1897,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'author':     str(data.get('author', 'unknown')),
                     'timestamp':  now,
                     'updated_at': now,
+                    'project':    project,
                 }
 
                 # 임베딩 생성 (백그라운드 스레드에서 비동기로 수행해도 되지만
@@ -1745,10 +1911,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                         entry['timestamp'] = existing['timestamp']
                     conn.execute(
                         'INSERT OR REPLACE INTO memory '
-                        '(key,id,title,content,tags,author,timestamp,updated_at,embedding) '
-                        'VALUES (?,?,?,?,?,?,?,?,?)',
+                        '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,?)',
                         (entry['key'], entry['id'], entry['title'], entry['content'],
-                         entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'], emb)
+                         entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'],
+                         entry['project'], emb)
                     )
 
                 entry['tags'] = json.loads(entry['tags'])
@@ -2057,15 +2224,11 @@ async def pty_handler(websocket):
                 if isinstance(message, bytes):
                     message = message.decode('utf-8')
                 
-                # 디버깅을 위해 수신된 메시지 출력
-                # print(f"[WS RECV] {repr(message)}")
-                
                 if message:
-                    # 윈도우 PTY(winpty)는 엔터 키값으로 \r\n을 선호합니다.
-                    # 일반적인 \n 입력을 \r\n으로 변환하여 즉시 실행을 유도합니다.
-                    # 만약 프론트엔드에서 엔터 없이 텍스트만 보냈다면 그대로 두되,
-                    # 개행 문자가 포함된 경우 확실하게 실행되도록 보정합니다.
-                    processed = message.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+                    # xterm.js 키보드 Enter = \r 단독 메시지, handleSend Enter = \r 단독 메시지
+                    # (프론트엔드가 텍스트와 \r을 별도 메시지로 분리 전송)
+                    # \r\n 중복 방지: \r\n → \r 정규화 후 PTY write
+                    processed = message.replace('\r\n', '\r').replace('\n', '\r')
                     pty.write(processed)
             except Exception as e:
                 print(f"[WS ERROR] {e}")

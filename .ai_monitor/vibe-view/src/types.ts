@@ -62,6 +62,7 @@ export interface MemoryEntry {
     author: string;      // 작성 에이전트
     timestamp: string;   // 최초 생성 시각
     updated_at: string;  // 최종 수정 시각
+    project: string;     // 출처 프로젝트 (예: D--vibe-coding)
 }
 
 // 에이전트 간 작업 큐 — 태스크 보드 데이터 구조

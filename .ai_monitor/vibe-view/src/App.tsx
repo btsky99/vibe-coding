@@ -17,7 +17,7 @@ import {
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
-  Bot, Play, CircleDot, Package, CheckCircle2, Circle
+  Bot, Play, CircleDot, Package, CheckCircle2, Circle, Pin
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -45,9 +45,22 @@ const defaultShortcuts: Shortcut[] = [
 ];
 
 // 에이전트별 슬래시 커맨드 목록 (한글 설명 포함)
-interface SlashCommand { cmd: string; desc: string; category: string; }
+interface SlashCommand { cmd: string; desc: string; category: string; injectSkill?: string; }
+
+// 한글 스킬 커맨드 — 모든 에이전트 공통
+const SKILL_SLASH_CMDS: SlashCommand[] = [
+  { cmd: '/마스터',       desc: '중앙 컨트롤 타워 — 요청 분석 → 워크플로우 자동 라우팅', category: '스킬', injectSkill: 'master' },
+  { cmd: '/브레인스토밍', desc: '소크라테스식 요구사항 정제 → 알고리즘 주입', category: '스킬', injectSkill: 'brainstorm' },
+  { cmd: '/계획작성',     desc: '마이크로태스크 단위 계획 작성 → 알고리즘 주입', category: '스킬', injectSkill: 'write-plan' },
+  { cmd: '/계획실행',     desc: '병렬 서브에이전트 실행 → 알고리즘 주입',     category: '스킬', injectSkill: 'execute-plan' },
+  { cmd: '/TDD',          desc: 'RED→GREEN→REFACTOR 사이클 → 알고리즘 주입', category: '스킬', injectSkill: 'tdd' },
+  { cmd: '/디버그',       desc: '4단계 근본원인 분석 → 알고리즘 주입',        category: '스킬', injectSkill: 'debug' },
+  { cmd: '/코드리뷰',     desc: 'OWASP 보안 + 품질 자동 검증 → 알고리즘 주입', category: '스킬', injectSkill: 'code-review' },
+];
+
 const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
   claude: [
+    ...SKILL_SLASH_CMDS,
     { cmd: '/model',       desc: '모델 변경 (opus / sonnet / haiku)',    category: '설정' },
     { cmd: '/clear',       desc: '대화 기록 초기화',                      category: '설정' },
     { cmd: '/compact',     desc: '대화 압축 — 컨텍스트 절약',             category: '설정' },
@@ -64,6 +77,7 @@ const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
     { cmd: '/terminal',    desc: '터미널 명령 실행 모드',                  category: '작업' },
   ],
   gemini: [
+    ...SKILL_SLASH_CMDS,
     { cmd: '/help',        desc: '전체 도움말 보기',                       category: '도움말' },
     { cmd: '/clear',       desc: '대화 초기화',                            category: '설정' },
     { cmd: '/chat',        desc: '대화형 채팅 모드 전환',                  category: '설정' },
@@ -97,6 +111,67 @@ export interface OpenFile {
   isLoading: boolean;
   zIndex: number;
 }
+
+// ── Superpowers 스킬 알고리즘 (MCP 없이 직접 주입) ──────────────────────────
+export interface VibeSkill {
+  name: string;
+  desc: string;
+  claudeCmd: string;   // MCP 설치 시 사용할 슬래시 커맨드
+  geminiCmd: string;
+  algo: string;        // MCP 미설치 시 주입할 알고리즘 (단일 메시지)
+}
+
+export const VIBE_SKILLS: VibeSkill[] = [
+  {
+    name: 'master',
+    desc: '중앙 컨트롤 타워 — 요청 분석 → 하위 워크플로우 자동 라우팅',
+    claudeCmd: '/superpowers:master',
+    geminiCmd: '/master',
+    algo: '🌐 [마스터 컨트롤 프로토콜 가동] .gemini/skills/master/SKILL.md를 읽고 PROJECT_MAP.md를 기반으로 상황을 조율하세요. 어떤 작업을 도와드릴까요?',
+  },
+  {
+    name: 'brainstorm',
+    desc: '소크라테스식 요구사항 정제',
+    claudeCmd: '/superpowers:brainstorm',
+    geminiCmd: '/brainstorming',
+    algo: '🧠 [브레인스토밍 6단계 절차 가동] .gemini/skills/brainstorming/SKILL.md를 읽고 사용자 의도를 분석하여 승인된 계획을 수립하세요. 지금 무엇을 만들고 싶으신가요?',
+  },
+  {
+    name: 'write-plan',
+    desc: '마이크로태스크 단위 계획 작성',
+    claudeCmd: '/superpowers:write-plan',
+    geminiCmd: '/write-plan',
+    algo: '📝 [구현 계획 작성 모드] .gemini/skills/writing-plans/SKILL.md가 있다면 참고하여, TDD 기반의 상세 계획을 수립하세요. 어떤 기능의 계획을 짤까요?',
+  },
+  {
+    name: 'execute-plan',
+    desc: '병렬 서브에이전트 실행',
+    claudeCmd: '/superpowers:execute-plan',
+    geminiCmd: '/execute-plan',
+    algo: '🚀 [계획 실행 모드] .gemini/skills/executing-plans/SKILL.md가 있다면 참고하여, 승인된 계획대로 구현을 시작하세요. 어떤 계획 파일을 읽을까요?',
+  },
+  {
+    name: 'tdd',
+    desc: 'RED → GREEN → REFACTOR 사이클',
+    claudeCmd: '/superpowers:tdd',
+    geminiCmd: '/tdd',
+    algo: '🧪 [TDD 모드 가동] 실패하는 테스트부터 작성하는 RED-GREEN-REFACTOR 사이클을 시작합니다. 어떤 기능을 구현할까요?',
+  },
+  {
+    name: 'debug',
+    desc: '4단계 근본원인 분석',
+    claudeCmd: '/superpowers:debug',
+    geminiCmd: '/systematic-debugging',
+    algo: '🔍 [지능형 디버깅 가동] .gemini/skills/systematic-debugging/SKILL.md를 참고하여 원인 분석 후 수정을 시작하세요. 어떤 버그를 추적할까요?',
+  },
+  {
+    name: 'code-review',
+    desc: 'OWASP 보안 + 품질 자동 검증',
+    claudeCmd: '/superpowers:code-review',
+    geminiCmd: '/code-reviewer',
+    algo: '🧐 [코드 리뷰 모드] .gemini/skills/code-reviewer/SKILL.md를 참고하여 품질/보안을 검증하세요. 무엇을 리뷰할까요?',
+  },
+];
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -244,10 +319,23 @@ function App() {
   const [memContent, setMemContent] = useState('');
   const [memTags, setMemTags] = useState('');
   const [memAuthor, setMemAuthor] = useState('claude');
+  const [memShowAll, setMemShowAll] = useState(false);   // 전체 프로젝트 보기 토글
+  const [currentProjectName, setCurrentProjectName] = useState('');
+
+  // 현재 프로젝트 정보 조회 (1회)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/project-info`)
+      .then(res => res.json())
+      .then(data => setCurrentProjectName(data.project_name || ''))
+      .catch(() => {});
+  }, []);
 
   // 검색어가 있으면 서버 검색, 없으면 전체 목록 사용
-  const fetchMemory = (q = '') => {
-    const url = q ? `${API_BASE}/api/memory?q=${encodeURIComponent(q)}` : `${API_BASE}/api/memory`;
+  const fetchMemory = (q = '', showAll = memShowAll) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (showAll) params.set('all', 'true');
+    const url = `${API_BASE}/api/memory${params.toString() ? '?' + params.toString() : ''}`;
     fetch(url)
       .then(res => res.json())
       .then(data => setMemory(Array.isArray(data) ? data : []))
@@ -256,13 +344,13 @@ function App() {
 
   // 공유 메모리 폴링 (5초 간격 — 자주 바뀌지 않으므로 느리게)
   useEffect(() => {
-    fetchMemory();
-    const interval = setInterval(() => fetchMemory(memSearch), 5000);
+    fetchMemory(memSearch, memShowAll);
+    const interval = setInterval(() => fetchMemory(memSearch, memShowAll), 5000);
     return () => clearInterval(interval);
-  }, [memSearch]);
+  }, [memSearch, memShowAll]);
 
   // 검색어 변경 시 즉시 검색
-  useEffect(() => { fetchMemory(memSearch); }, [memSearch]);
+  useEffect(() => { fetchMemory(memSearch, memShowAll); }, [memSearch, memShowAll]);
 
   // 메모리 저장 (신규 또는 수정 — key 기준 UPSERT)
   const saveMemory = () => {
@@ -304,6 +392,22 @@ function App() {
     setMemAuthor(entry.author);
     setEditingMemKey(entry.key);
     setShowMemForm(true);
+  };
+
+  // Git 변경사항 롤백 (Undo)
+  const rollbackFile = (filePath: string) => {
+    if (!confirm(`[위험] '${filePath}'의 모든 변경사항을 취소하고 마지막 커밋 상태로 되돌리시겠습니까?`)) return;
+    fetch(`${API_BASE}/api/git/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: filePath, path: gitPath }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') refreshItems();
+        else alert(`롤백 실패: ${data.message}`);
+      })
+      .catch(err => alert(`에러 발생: ${err}`));
   };
 
   // ─── Git 실시간 감시 상태 ─────────────────────────────────────────────
@@ -962,7 +1066,18 @@ function App() {
           </div>
         ))}
         <div className="ml-auto flex items-center gap-3 text-[11px] text-[#969696] px-4 font-mono overflow-hidden">
-           <span className="truncate opacity-50">{currentPath}</span>
+           {/* 🟢 실시간 에이전트 모니터 (Real-time Agent HUD) */}
+           {orchStatus?.agent_status && Object.entries(orchStatus.agent_status).map(([agent, st]) => {
+             if (st.state !== 'active') return null;
+             return (
+               <div key={agent} className="flex items-center gap-1 bg-green-500/10 border border-green-500/30 px-1.5 py-0.5 rounded text-[9px] text-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.2)]" title="에이전트 작업 중">
+                 <Bot className="w-3 h-3" />
+                 <span className="font-bold uppercase tracking-wider">{agent}</span>
+                 <span className="opacity-80">ACTIVE</span>
+               </div>
+             );
+           })}
+           <span className="truncate opacity-50 border-l border-white/10 pl-3">{currentPath}</span>
         </div>
       </div>
 
@@ -1284,9 +1399,21 @@ function App() {
                     className="w-full bg-[#1e1e1e] border border-white/10 rounded pl-6 pr-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
                   />
                 </div>
-                {/* 항목 수 요약 */}
-                <div className="text-[9px] text-[#858585] shrink-0 px-0.5">
-                  총 {memory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
+                {/* 항목 수 요약 + 프로젝트 필터 토글 */}
+                <div className="flex items-center justify-between shrink-0 px-0.5">
+                  <span className="text-[9px] text-[#858585]">
+                    총 {memory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
+                    {currentProjectName && !memShowAll && (
+                      <span className="ml-1 text-cyan-600">— {currentProjectName}</span>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => setMemShowAll(v => !v)}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${memShowAll ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-[#858585] hover:text-white'}`}
+                    title={memShowAll ? '현재 프로젝트만 보기' : '전체 프로젝트 보기'}
+                  >
+                    {memShowAll ? '전체' : '현재'}
+                  </button>
                 </div>
 
                 {/* 메모리 항목 목록 */}
@@ -1307,6 +1434,10 @@ function App() {
                             <button onClick={() => deleteMemory(entry.key)} className="px-1.5 py-0.5 bg-white/5 hover:bg-red-500/20 rounded text-[9px] text-[#858585] hover:text-red-400 transition-colors">🗑️</button>
                           </div>
                         </div>
+                        {/* 전체 모드일 때 출처 프로젝트 배지 */}
+                        {memShowAll && entry.project && (
+                          <span className="inline-block px-1.5 py-0.5 bg-amber-500/10 text-amber-400 rounded text-[8px] font-mono mb-0.5">{entry.project}</span>
+                        )}
                         {/* 제목 (키와 다를 경우만) */}
                         {entry.title && entry.title !== entry.key && (
                           <p className="text-[#cccccc] font-semibold text-[10px] mb-0.5">{entry.title}</p>
@@ -1550,10 +1681,19 @@ function App() {
                     {gitStatus.unstaged.length > 0 && (
                       <div className="p-2 rounded border border-yellow-500/20 bg-yellow-500/3">
                         <div className="text-[9px] font-bold text-yellow-400 mb-1">수정됨 (unstaged) ({gitStatus.unstaged.length})</div>
-                        {gitStatus.unstaged.slice(0, 8).map(f => (
-                          <div key={f} className="text-[9px] font-mono text-yellow-300/70 pl-2 py-0.5 truncate">~{f}</div>
+                        {gitStatus.unstaged.slice(0, 15).map(f => (
+                          <div key={f} className="group flex items-center justify-between gap-1.5 py-0.5 hover:bg-white/5 rounded px-1 transition-colors">
+                            <span className="text-[9px] font-mono text-yellow-300/70 truncate flex-1" title={f}>~{f}</span>
+                            <button
+                              onClick={() => rollbackFile(f)}
+                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded text-red-400 transition-all shrink-0"
+                              title="변경사항 취소 (git checkout)"
+                            >
+                              <RotateCw className="w-3 h-3 rotate-180" />
+                            </button>
+                          </div>
                         ))}
-                        {gitStatus.unstaged.length > 8 && <div className="text-[8px] text-yellow-400/50 pl-2">... +{gitStatus.unstaged.length - 8}개 더</div>}
+                        {gitStatus.unstaged.length > 15 && <div className="text-[8px] text-yellow-400/50 pl-2">... +{gitStatus.unstaged.length - 15}개 더</div>}
                       </div>
                     )}
 
@@ -1934,25 +2074,49 @@ function App() {
                   );
                 })}
 
-                {/* 스킬 설명 */}
-                <div className="shrink-0 mt-1">
-                  <p className="text-[9px] font-bold text-[#858585] uppercase tracking-wider mb-1.5">핵심 스킬</p>
-                  {[
-                    { name: 'brainstorm', desc: '요구사항 소크라테스식 정제' },
-                    { name: 'write-plan', desc: '마이크로태스크 단위 계획 작성' },
-                    { name: 'execute-plan', desc: '병렬 서브에이전트 실행' },
-                    { name: 'tdd', desc: 'RED → GREEN → REFACTOR 사이클' },
-                    { name: 'debug', desc: '4단계 근본원인 분석' },
-                    { name: 'code-review', desc: 'OWASP 보안 + 품질 자동 검증' },
-                  ].map(sk => (
-                    <div key={sk.name} className="flex items-start gap-1.5 py-0.5 border-b border-white/5">
-                      <Zap className="w-2.5 h-2.5 text-yellow-400/60 mt-0.5 shrink-0" />
-                      <div>
-                        <span className="text-[9px] font-bold text-white/80 font-mono">{sk.name}</span>
-                        <span className="text-[8px] text-[#666] ml-1.5">{sk.desc}</span>
+                {/* 스킬 주입 패널 */}
+                <div className="shrink-0 mt-1 flex flex-col gap-0.5">
+                  <p className="text-[9px] font-bold text-[#858585] uppercase tracking-wider mb-1">핵심 스킬 — 클릭으로 터미널 주입</p>
+                  {VIBE_SKILLS.map(sk => {
+                    const claudeInstalled = spStatus?.claude?.installed ?? false;
+                    const geminiInstalled = spStatus?.gemini?.installed ?? false;
+                    const injectText = claudeInstalled
+                      ? sk.claudeCmd
+                      : geminiInstalled
+                      ? sk.geminiCmd
+                      : sk.algo;
+                    const isMcp = claudeInstalled || geminiInstalled;
+                    return (
+                      <div key={sk.name} className="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10 transition-all group">
+                        <Zap className="w-2.5 h-2.5 text-yellow-400/60 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[9px] font-bold text-white/80 font-mono">{sk.name}</span>
+                          <span className="text-[8px] text-[#555] ml-1.5">{sk.desc}</span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            // 🛑 안전장치 팝업 (Approval Gate)
+                            if (sk.name === 'master' || sk.name === 'brainstorm') {
+                              if (!confirm(`[안전장치 가동]\n\n강력한 스킬('${sk.name}')을 실행하려고 합니다.\n작업을 시작하기 전, 브레인스토밍 6단계 절차에 따라 계획을 먼저 수립하고 승인을 받겠습니다.\n\n진행할까요?`)) {
+                                return; // 사용자가 취소하면 스킬 주입 중단
+                              }
+                            }
+                            window.dispatchEvent(new CustomEvent('vibe:inject', { detail: { text: injectText } }));
+                          }}
+                          className="shrink-0 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold transition-all bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30"
+                          title={isMcp ? `MCP: ${injectText}` : '알고리즘 직접 주입'}
+                        >
+                          <Play className="w-2 h-2" />
+                          {isMcp ? 'MCP' : '주입'}
+                        </button>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                  <p className="text-[8px] text-[#444] mt-1 px-1">
+                    {(spStatus?.claude?.installed || spStatus?.gemini?.installed)
+                      ? '✓ MCP 연결됨 — 슬래시 커맨드로 실행'
+                      : '⚡ MCP 미설치 — 알고리즘 직접 주입'}
+                  </p>
                 </div>
               </div>
             ) : (
@@ -2039,6 +2203,18 @@ function App() {
                           {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
                           <span className="truncate">{item.name}</span>
                         </button>
+                        {!item.isDir && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.dispatchEvent(new CustomEvent('vibe:fillInput', { detail: { text: item.path } }));
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-primary transition-all shrink-0"
+                            title="터미널 입력창으로 경로 보내기"
+                          >
+                            <Pin className="w-3 h-3" />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2194,11 +2370,49 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
     <button
       onClick={() => onFileOpen(item)}
       style={{ paddingLeft: `${indent + 20}px` }}
-      className="w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
+      className="group w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
     >
       {getFileIcon(item.name)}
-      <span className="truncate">{item.name}</span>
+      <span className="truncate flex-1 text-left">{item.name}</span>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          window.dispatchEvent(new CustomEvent('vibe:fillInput', { detail: { text: item.path } }));
+        }}
+        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/20 rounded text-primary transition-all shrink-0"
+        title="터미널 입력창으로 경로 보내기"
+      >
+        <Pin className="w-3 h-3" />
+      </button>
     </button>
+  );
+}
+
+// Git Diff 시각화 컴포넌트
+function DiffViewer({ diff }: { diff: string }) {
+  const lines = diff.split('\n');
+  return (
+    <div className="font-mono text-[11px] leading-relaxed">
+      {lines.map((line, i) => {
+        let bgColor = '';
+        let textColor = 'text-[#cccccc]';
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          bgColor = 'bg-green-500/20';
+          textColor = 'text-green-400';
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+          bgColor = 'bg-red-500/20';
+          textColor = 'text-red-400';
+        } else if (line.startsWith('@@')) {
+          textColor = 'text-primary opacity-70';
+          bgColor = 'bg-primary/5';
+        }
+        return (
+          <div key={i} className={`${bgColor} ${textColor} px-2 whitespace-pre-wrap`}>
+            {line}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2289,6 +2503,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   // FitAddon 참조 보관 (파일 뷰어 토글 시 재조정용)
   const fitAddonRef = useRef<FitAddon | null>(null);
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
@@ -2313,6 +2528,8 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [activeFileContent, setActiveFileContent] = useState<string>('');
   const [isActiveFileLoading, setIsActiveFileLoading] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const [diffContent, setDiffContent] = useState<string>('');
 
   // 현재 에이전트가 잠근 파일 찾기
   const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
@@ -2421,31 +2638,40 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     }, 50);
   };
 
-  // 주기적으로 활성 파일 내용 갱신 (뷰어가 열려있을 때만, 이미지 파일 제외)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     const isImage = activeFilePath ? /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath) : false;
-    if (showActiveFile && activeFilePath && !isImage) {
-      const fetchFile = () => {
-        setIsActiveFileLoading(true);
-        // 상대 경로일 경우 CWD 기준으로 요청
+    
+    if (activeFilePath && !isImage) {
+      const fetchData = () => {
         const targetPath = activeFilePath.includes(':') || activeFilePath.startsWith('/') 
           ? activeFilePath 
           : `${currentPath}/${activeFilePath}`;
-          
-        fetch(`http://${window.location.hostname}:${window.location.port}/api/read-file?path=${encodeURIComponent(targetPath)}`)
-          .then(res => res.json())
-          .then(data => {
-            if (!data.error) setActiveFileContent(data.content);
-          })
-          .catch(() => {})
-          .finally(() => setIsActiveFileLoading(false));
+
+        if (showDiff) {
+          // Diff 데이터 가져오기
+          fetch(`${API_BASE}/api/git/diff?path=${encodeURIComponent(activeFilePath)}&git_path=${encodeURIComponent(currentPath)}`)
+            .then(res => res.json())
+            .then(data => { if (data.diff !== undefined) setDiffContent(data.diff); })
+            .catch(() => {});
+        }
+
+        if (showActiveFile) {
+          // 일반 파일 내용 가져오기
+          setIsActiveFileLoading(true);
+          fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(targetPath)}`)
+            .then(res => res.json())
+            .then(data => { if (!data.error) setActiveFileContent(data.content); })
+            .catch(() => {})
+            .finally(() => setIsActiveFileLoading(false));
+        }
       };
-      fetchFile();
-      interval = setInterval(fetchFile, 3000); // 3초마다 갱신
+      
+      fetchData();
+      interval = setInterval(fetchData, 3000);
     }
     return () => clearInterval(interval);
-  }, [showActiveFile, activeFilePath, currentPath]);
+  }, [showActiveFile, showDiff, activeFilePath, currentPath]);
 
   // 파일 뷰어 토글 시 xterm 터미널 크기 재조정
   // ResizeObserver가 주 역할이며, 이 타이머는 폴백으로 이중 호출해 안정성 확보
@@ -2469,22 +2695,67 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    
-    // 윈도우 PTY(winpty) + cmd.exe 환경에서는 \r\n (CRLF)이 실제 Enter 키 입력과 동일합니다.
-    // 사용자가 입력한 텍스트에 이미 엔터가 포함되어 있든 없든,
-    // 터미널 실행을 위해 마지막에 \r\n을 확실히 붙여서 보냅니다.
+
     const cleanText = text.replace(/[\r\n]+$/, '');
     if (!cleanText) return;
 
-    // 명령어 전송 (개행을 강제 포함하여 즉시 실행 유도)
-    wsRef.current.send(cleanText.replace(/\n/g, '\r\n') + '\r\n');
-    
+    // 텍스트와 Enter(\r)를 별도 WebSocket 메시지로 분리 전송.
+    // winpty는 멀티캐릭터 문자열 끝에 붙은 \r을 Enter로 처리하지 않는 경우가 있음.
+    // xterm.js 키보드 Enter가 \r 단독 메시지로 오는 것과 동일하게 맞춤.
+    wsRef.current.send(cleanText.replace(/\n/g, '\r'));
+    wsRef.current.send('\r');
+
     setInputValue('');
-    // 약간의 지연 후 포커스 복구 (IME 입력 중 전송 시 포커스 꼬임 방지)
-    setTimeout(() => {
-      termRef.current?.focus();
-    }, 10);
+    // 전송 후 xterm 터미널로 포커스 이동 — 실행 결과를 보며 바로 터미널 입력 가능
+    setTimeout(() => termRef.current?.focus(), 10);
   };
+
+  // Superpowers 스킬 주입 — 이 터미널을 전역 주입 대상으로 등록
+  // 마지막으로 포커스된 터미널(또는 유일한 터미널)이 주입을 처리함
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text } = (e as CustomEvent<{ text: string }>).detail;
+      handleSend(text);
+    };
+    // 터미널 포커스 시 이 슬롯을 주입 대상으로 등록
+    const markActive = () => window.dispatchEvent(new CustomEvent('vibe:activeSlot', { detail: { slotId } }));
+    xtermRef.current?.addEventListener('click', markActive);
+    // 단일 슬롯이면 자동 등록, 포커스 받으면 재등록
+    window.addEventListener(`vibe:inject:${slotId}`, handler);
+    // 📌 경로 주입(Fill Input) 이벤트 리스너 추가
+    const fillHandler = (e: Event) => {
+      const { text } = (e as CustomEvent<{ text: string }>).detail;
+      setInputValue(prev => prev ? `${prev} "${text}"` : text);
+      setTimeout(() => inputTextareaRef.current?.focus(), 10);
+    };
+    window.addEventListener(`vibe:fillInput:${slotId}`, fillHandler);
+
+    return () => {
+      window.removeEventListener(`vibe:inject:${slotId}`, handler);
+      window.removeEventListener(`vibe:fillInput:${slotId}`, fillHandler);
+      xtermRef.current?.removeEventListener('click', markActive);
+    };
+  }, [slotId]);
+
+  // vibe:inject / vibe:fillInput 글로벌 이벤트 → 슬롯 0 이 기본 대상
+  useEffect(() => {
+    if (slotId !== 0) return;
+    const handler = (e: Event) => {
+      const { text } = (e as CustomEvent<{ text: string }>).detail;
+      handleSend(text);
+    };
+    const fillHandler = (e: Event) => {
+      const { text } = (e as CustomEvent<{ text: string }>).detail;
+      setInputValue(prev => prev ? `${prev} "${text}"` : text);
+      setTimeout(() => inputTextareaRef.current?.focus(), 10);
+    };
+    window.addEventListener('vibe:inject', handler);
+    window.addEventListener('vibe:fillInput', fillHandler);
+    return () => {
+      window.removeEventListener('vibe:inject', handler);
+      window.removeEventListener('vibe:fillInput', fillHandler);
+    };
+  }, [slotId]);
 
   const slotLogs = logs.filter(l => {
     let hash = 0;
@@ -2539,6 +2810,16 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         ) : (
           <div className="flex gap-2 items-center">
             <button 
+              onClick={() => {
+                if (!showActiveFile) setShowActiveFile(true);
+                setShowDiff(!showDiff);
+              }} 
+              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showDiff ? 'bg-accent/40 border-accent text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+              title="Git 변경사항(Diff) 보기"
+            >
+              ± Diff
+            </button>
+            <button 
               onClick={() => setShowActiveFile(!showActiveFile)} 
               className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
               title="현재 에이전트가 수정중인 파일 보기"
@@ -2564,7 +2845,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 {isActiveFileLoading && <span className="text-[#3794ef] animate-pulse pointer-events-auto">●</span>}
               </div>
               <div className="flex-1 overflow-auto p-2 custom-scrollbar flex items-center justify-center">
-                {/* 이미지 파일이면 img 태그로, 아니면 코드 뷰어로 */}
+                {/* 이미지 파일이면 img 태그로, 아니면 코드 뷰어/Diff 뷰어로 */}
                 {activeFilePath && /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath)
                   ? <img
                       src={`${API_BASE}/api/image-file?path=${encodeURIComponent(activeFilePath.includes(':') || activeFilePath.startsWith('/') ? activeFilePath : `${currentPath}/${activeFilePath}`)}`}
@@ -2572,9 +2853,12 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                       className="max-w-full max-h-full object-contain"
                       style={{ imageRendering: 'auto' }}
                     />
-                  : activeFileContent
-                    ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
-                    : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
+                  : showDiff
+                    ? (diffContent ? <DiffViewer diff={diffContent} /> : <span className="text-[10px] text-[#858585] italic">변경된 내용이 없습니다 (Clean)</span>)
+                    : (activeFileContent
+                        ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
+                        : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
+                      )
                 }
               </div>
             </div>
@@ -2594,8 +2878,15 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
             </div>
             <div className="flex gap-2 items-end relative">
               <textarea
+                ref={inputTextareaRef}
                 value={inputValue}
-                onChange={e => setInputValue(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setInputValue(val);
+                  // '/'로 시작하면 슬래시 메뉴 자동 팝업
+                  if (val.startsWith('/') && val.length >= 1) setShowSlashMenu(true);
+                  else if (!val.startsWith('/')) setShowSlashMenu(false);
+                }}
                 onCompositionStart={() => { isComposingRef.current = true; }}
                 onCompositionEnd={() => { isComposingRef.current = false; }}
                 onKeyDown={e => {
@@ -2605,12 +2896,12 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                     // 한글 조합 중 엔터는 브라우저가 글자를 확정(CompositionEnd 발생)시키므로
                     // 아주 잠깐의 딜레이를 주어 확정된 텍스트가 inputValue에 반영된 후 전송하도록 합니다.
                     if (isComposingRef.current) {
-                      // 조합 중 엔터는 handleSend를 직접 부르지 않고 브라우저 기본 동작에 맡기거나,
-                      // 필요하다면 수동으로 처리할 수 있으나 여기서는 엔터 키 한 번으로 
-                      // '확정 + 전송'까지 하고 싶으신 경우이므로 handleSend를 명시적으로 호출합니다.
-                      // 다만 IME 이벤트 순서상 setTimeout이 가장 안정적입니다.
+                      // IME 조합 중 엔터: compositionEnd 이후 DOM 실제 값으로 전송.
+                      // inputValue(React state)는 조합 중 업데이트가 억제되어 stale 상태이므로
+                      // inputTextareaRef.current.value(DOM 실제값)를 사용해야 한다.
                       setTimeout(() => {
-                        if (inputValue.trim()) handleSend(inputValue);
+                        const domVal = inputTextareaRef.current?.value ?? inputValue;
+                        if (domVal.trim()) handleSend(domVal);
                       }, 50);
                       return;
                     }
@@ -2636,35 +2927,67 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 </button>
                 {/* 슬래시 커맨드 팝업 */}
                 {showSlashMenu && (
-                  <div className="absolute bottom-full right-0 mb-1 w-72 bg-[#252526] border border-white/15 rounded-md shadow-2xl z-50 overflow-hidden">
+                  <div className="absolute bottom-full right-0 mb-1 w-80 bg-[#252526] border border-white/15 rounded-md shadow-2xl z-50 overflow-hidden">
                     <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center px-3 gap-1.5">
                       <span className="text-primary font-bold text-[11px]">/</span>
                       <span className="text-[11px] font-bold text-[#cccccc] uppercase tracking-wider">
-                        {activeAgent.toUpperCase()} 슬래시 커맨드
+                        {inputValue.startsWith('/') && inputValue.length > 1 ? `"${inputValue}" 검색 중…` : `${activeAgent.toUpperCase()} 커맨드`}
                       </span>
                     </div>
-                    <div className="max-h-64 overflow-y-auto custom-scrollbar py-1">
-                      {/* 카테고리별 그룹핑 */}
-                      {['설정', '작업', '도움말'].map(cat => {
-                        const cmds = (SLASH_COMMANDS[activeAgent] ?? SLASH_COMMANDS['claude'])
-                          .filter(c => c.category === cat);
-                        if (!cmds.length) return null;
-                        return (
-                          <div key={cat}>
-                            <div className="px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white/25">{cat}</div>
-                            {cmds.map(sc => (
-                              <button
-                                key={sc.cmd}
-                                onClick={() => { setInputValue(sc.cmd + ' '); setShowSlashMenu(false); }}
-                                className="w-full flex items-center gap-3 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors"
-                              >
-                                <span className="text-primary font-mono text-[11px] font-bold w-24 shrink-0 group-hover:text-white transition-colors">{sc.cmd}</span>
-                                <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight">{sc.desc}</span>
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })}
+                    <div className="max-h-72 overflow-y-auto custom-scrollbar py-1">
+                      {(() => {
+                        const allCmds = SLASH_COMMANDS[activeAgent] ?? SLASH_COMMANDS['claude'];
+                        // 타이핑 중이면 필터링, 아니면 전체 카테고리별 표시
+                        const filter = inputValue.startsWith('/') && inputValue.length > 1 ? inputValue.toLowerCase() : '';
+                        const filtered = filter ? allCmds.filter(c => c.cmd.toLowerCase().includes(filter) || c.desc.includes(filter)) : null;
+
+                        const handleCmdClick = (sc: SlashCommand) => {
+                          if (sc.injectSkill) {
+                            // 스킬 알고리즘 직접 주입 — 현재 슬롯에만 전송 (slotId 기반)
+                            const sk = VIBE_SKILLS.find(s => s.name === sc.injectSkill);
+                            // 스킬 알고리즘을 즉시 전송하지 않고 채팅 입력창에 넣어줌 → 사용자가 확인/수정 후 전송
+                            if (sk) {
+                              setInputValue(sk.algo);
+                              setTimeout(() => inputTextareaRef.current?.focus(), 10);
+                            }
+                          } else {
+                            setInputValue(sc.cmd + ' ');
+                          }
+                          setShowSlashMenu(false);
+                        };
+
+                        if (filtered) {
+                          // 필터링 결과 평면 표시
+                          if (!filtered.length) return <p className="text-[10px] text-[#555] text-center py-4">일치하는 커맨드 없음</p>;
+                          return filtered.map(sc => (
+                            <button key={sc.cmd} onClick={() => handleCmdClick(sc)}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors">
+                              <span className={`font-mono text-[11px] font-bold w-28 shrink-0 transition-colors ${sc.injectSkill ? 'text-yellow-400 group-hover:text-yellow-200' : 'text-primary group-hover:text-white'}`}>{sc.cmd}</span>
+                              <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight flex-1">{sc.desc}</span>
+                              {sc.injectSkill && <span className="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded font-bold shrink-0">⚡주입</span>}
+                            </button>
+                          ));
+                        }
+
+                        // 카테고리별 전체 표시
+                        return ['스킬', '설정', '작업', '도움말'].map(cat => {
+                          const cmds = allCmds.filter(c => c.category === cat);
+                          if (!cmds.length) return null;
+                          return (
+                            <div key={cat}>
+                              <div className={`px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest ${cat === '스킬' ? 'text-yellow-400/60' : 'text-white/25'}`}>{cat}</div>
+                              {cmds.map(sc => (
+                                <button key={sc.cmd} onClick={() => handleCmdClick(sc)}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors">
+                                  <span className={`font-mono text-[11px] font-bold w-28 shrink-0 transition-colors ${sc.injectSkill ? 'text-yellow-400 group-hover:text-yellow-200' : 'text-primary group-hover:text-white'}`}>{sc.cmd}</span>
+                                  <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight flex-1">{sc.desc}</span>
+                                  {sc.injectSkill && <span className="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded font-bold shrink-0">⚡주입</span>}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 )}
