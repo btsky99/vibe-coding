@@ -3,6 +3,7 @@
 ## [2026-02-25] - 에이전트 지능형 오케스트레이션 및 UI 고도화
 
 ### 🚀 하이브 마인드 엔진 (Backend)
+- **[Bug Fix] DB 마이그레이션 오류 수정**: 서버 시작 시 `project` 컬럼 인덱스 생성 시점이 컬럼 추가보다 빨라 발생하는 `sqlite3.OperationalError` 해결.
 - **문서화 전략 개편**: `docs/` 폴더 내 개별 파일 문서화를 중단하고, "코드 내 상세 주석 + `PROJECT_MAP.md` 중앙 관리" 체제로 전환.
 - **에이전트 상태 관리**: `AGENT_STATUS` 전역 저장소 및 `/api/agents/heartbeat` API 추가. 에이전트 활동 실시간 모니터링 기반 마련.
 - **Git 원격 제어 API**: 클릭 한 번으로 수정을 취소하는 `rollback` API와 변경사항을 조회하는 `diff` API 구현.

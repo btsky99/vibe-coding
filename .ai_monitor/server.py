@@ -5,9 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-02-25] - Gemini (지능형 오케스트레이터 및 디버깅)
+#   - sqlite3.OperationalError (no such column: project) 버그 수정: DB 초기화 시 인덱스 생성 시점을 마이그레이션 이후로 조정.
 # [2026-02-25] - Gemini (지능형 오케스트레이터 업그레이드)
 #   - 문서화 전략 변경에 따라 개별 파일 문서 링크 제거 및 내부 상세 주석 체제로 전환.
-#   - 에이전트 간 협업을 위한 실시간 상태 체크(Heartbeat) 및 에이전트 관리 API 추가 준비.
 # [2026-02-24] - Gemini (초기 구축)
 #   - FastAPI 기반 서버 구조 및 SQLite 연동 초기화.
 # ------------------------------------------------------------------------
@@ -170,7 +171,6 @@ def _init_memory_db() -> None:
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_author ON memory(author)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project)')
         # 기존 DB 마이그레이션 — 없는 컬럼 추가
         cols = [r[1] for r in conn.execute('PRAGMA table_info(memory)').fetchall()]
         if 'embedding' not in cols:
@@ -178,6 +178,7 @@ def _init_memory_db() -> None:
         if 'project' not in cols:
             conn.execute("ALTER TABLE memory ADD COLUMN project TEXT NOT NULL DEFAULT ''")
             _migrate_project_column(conn)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project)')
 
 _init_memory_db()
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1719,7 +1720,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # 활성화된 모든 PTY 세션에 메시지 전송 (터미널 화면에 출력)
                 # 터미널은 \r\n (CRLF)을 필요로 하므로 변환하여 전송합니다.
                 content_to_send = msg['content']
-                terminal_msg = f"\r\n\x1b[38;5;39m[{msg['from']} → {msg['to']}] {content_to_send.replace('\n', '\r\n')}\x1b[0m\r\n"
+                content_display = content_to_send.replace('\n', '\r\n')
+                terminal_msg = f"\r\n\x1b[38;5;39m[{msg['from']} \u2192 {msg['to']}] {content_display}\x1b[0m\r\n"
                 
                 # [개선] 메시지가 '>'로 시작하면 명령어로 간주하여 즉시 실행 유도
                 is_manual_cmd = content_to_send.startswith('>')
