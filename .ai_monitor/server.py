@@ -2055,6 +2055,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 if tool == 'claude':
                     # 내장 스킬 소스 경로: exe 기준 BASE_DIR/../skills/claude/ 또는 개발 환경
+                    import shutil as _shutil
                     skills_src = BASE_DIR / 'skills' / 'claude'
                     if not skills_src.exists():
                         skills_src = PROJECT_ROOT / 'skills' / 'claude'
@@ -2064,7 +2065,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     cmd_dir.mkdir(parents=True, exist_ok=True)
                     installed = []
                     for md in skills_src.glob('vibe-*.md'):
-                        shutil.copy(md, cmd_dir / md.name)
+                        _shutil.copy(md, cmd_dir / md.name)
                         installed.append(md.name)
                     if not installed:
                         raise Exception('설치할 스킬 파일이 없습니다')
