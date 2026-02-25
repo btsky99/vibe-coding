@@ -73,6 +73,11 @@ jobs:
           copy assets\vibe_coding_icon.ico .ai_monitor\bin\vibe_final.ico /y
         shell: cmd
 
+      - name: Bundle skills into .ai_monitor
+        run: |
+          xcopy skills .ai_monitor\skills /E /I /Y
+        shell: cmd
+
       - name: Build exe
         run: |
           cd .ai_monitor
@@ -83,6 +88,7 @@ jobs:
             --add-data "src;src" ^
             --add-data "bin;bin" ^
             --add-data "vibe-view\dist;dist" ^
+            --add-data "skills;skills" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^
@@ -102,6 +108,7 @@ jobs:
             --add-data "src;src" ^
             --add-data "bin;bin" ^
             --add-data "vibe-view\dist;dist" ^
+            --add-data "skills;skills" ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^

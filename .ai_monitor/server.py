@@ -1342,41 +1342,37 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'installed': [], 'error': str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/superpowers/status':
-            # Superpowers 설치 상태 조회 — Claude Code + Gemini CLI 모두 확인
+            # Vibe Coding 자체 스킬 설치 상태 조회
+            # Claude: ~/.claude/commands/vibe-master.md 존재 여부
+            # Gemini: 현재 프로젝트 .gemini/skills/master/SKILL.md 존재 여부
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             home = Path.home()
-            # Claude Code: ~/.claude/commands/superpowers-brainstorm.md 존재 여부
+            VIBE_SKILL_NAMES = ['master', 'brainstorm', 'debug', 'write-plan', 'execute-plan', 'tdd', 'code-review']
+            # Claude: ~/.claude/commands/vibe-master.md 존재 여부로 판단
             claude_cmd_dir = home / '.claude' / 'commands'
-            claude_installed = (claude_cmd_dir / 'superpowers-brainstorm.md').exists()
-            claude_version = 'latest' if claude_installed else None
-            claude_skills = []
-            if claude_installed:
-                claude_skills = [f.stem.replace('superpowers-', '') for f in claude_cmd_dir.glob('superpowers-*.md')]
-            # Gemini CLI: ~/.gemini/extensions/gemini-superpowers 존재 여부
-            gemini_ext_dir = home / '.gemini' / 'extensions' / 'gemini-superpowers'
-            gemini_installed = gemini_ext_dir.exists()
-            gemini_skills = []
-            if gemini_installed:
-                skills_dir = gemini_ext_dir / 'skills'
-                if skills_dir.exists():
-                    gemini_skills = [d.name for d in skills_dir.iterdir() if d.is_dir()]
+            claude_installed = (claude_cmd_dir / 'vibe-master.md').exists()
+            claude_skills = [f.stem.replace('vibe-', '') for f in claude_cmd_dir.glob('vibe-*.md')] if claude_installed else []
+            # Gemini: 현재 프로젝트 .gemini/skills/master 존재 여부로 판단
+            gemini_skills_dir = PROJECT_ROOT / '.gemini' / 'skills'
+            gemini_installed = (gemini_skills_dir / 'master' / 'SKILL.md').exists()
+            gemini_skills = [d.name for d in gemini_skills_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()] if gemini_installed and gemini_skills_dir.exists() else []
             result = {
                 'claude': {
                     'installed': claude_installed,
-                    'version': claude_version,
+                    'version': 'vibe-skills' if claude_installed else None,
                     'skills': claude_skills,
-                    'commands': ['/superpowers:brainstorm', '/superpowers:write-plan', '/superpowers:execute-plan'],
-                    'repo': 'obra/superpowers',
+                    'commands': [f'/vibe:{s}' for s in VIBE_SKILL_NAMES],
+                    'repo': 'btsky99/vibe-coding (내장)',
                 },
                 'gemini': {
                     'installed': gemini_installed,
-                    'version': 'latest' if gemini_installed else None,
+                    'version': 'vibe-skills' if gemini_installed else None,
                     'skills': gemini_skills,
-                    'commands': ['/brainstorm', '/write-plan', '/execute-plan'],
-                    'repo': 'barretstorck/gemini-superpowers',
+                    'commands': [f'/{s}' for s in VIBE_SKILL_NAMES],
+                    'repo': 'btsky99/vibe-coding (내장)',
                 },
             }
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
@@ -2044,7 +2040,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/superpowers/install':
-            # Superpowers 설치 — tool: 'claude' | 'gemini'
+            # Vibe Coding 자체 스킬 설치 — 외부 GitHub 의존 없이 내장 파일 복사
+            # Claude: skills/claude/vibe-*.md → ~/.claude/commands/
+            # Gemini: .gemini/skills/ 는 이미 프로젝트 내에 존재 (별도 설치 불필요)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2056,41 +2054,36 @@ class SSEHandler(BaseHTTPRequestHandler):
                 home = Path.home()
 
                 if tool == 'claude':
-                    # superpowers repo 클론 후 commands 복사
-                    import tempfile, shutil
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        result = subprocess.run(
-                            ['git', 'clone', '--depth=1',
-                             'https://github.com/obra/superpowers.git', tmpdir + '/sp'],
-                            capture_output=True, text=True, timeout=60
-                        )
-                        if result.returncode != 0:
-                            raise Exception(f'git clone 실패: {result.stderr}')
-                        cmd_dir = home / '.claude' / 'commands'
-                        cmd_dir.mkdir(parents=True, exist_ok=True)
-                        sp_cmds = Path(tmpdir) / 'sp' / 'commands'
-                        for md in sp_cmds.glob('*.md'):
-                            shutil.copy(md, cmd_dir / f'superpowers-{md.name}')
-                        sp_skills = Path(tmpdir) / 'sp' / 'skills'
-                        if sp_skills.exists():
-                            dst_skills = home / '.claude' / 'plugins' / 'marketplaces' / 'obra-superpowers' / 'plugin' / 'skills'
-                            if dst_skills.exists():
-                                shutil.rmtree(dst_skills)
-                            shutil.copytree(sp_skills, dst_skills)
-                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Claude Code Superpowers 설치 완료'}, ensure_ascii=False).encode('utf-8'))
+                    # 내장 스킬 소스 경로: exe 기준 BASE_DIR/../skills/claude/ 또는 개발 환경
+                    skills_src = BASE_DIR / 'skills' / 'claude'
+                    if not skills_src.exists():
+                        skills_src = PROJECT_ROOT / 'skills' / 'claude'
+                    if not skills_src.exists():
+                        raise Exception('내장 스킬 파일을 찾을 수 없습니다 (skills/claude/)')
+                    cmd_dir = home / '.claude' / 'commands'
+                    cmd_dir.mkdir(parents=True, exist_ok=True)
+                    installed = []
+                    for md in skills_src.glob('vibe-*.md'):
+                        shutil.copy(md, cmd_dir / md.name)
+                        installed.append(md.name)
+                    if not installed:
+                        raise Exception('설치할 스킬 파일이 없습니다')
+                    self.wfile.write(json.dumps({
+                        'status': 'success',
+                        'message': f'Claude 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
+                    }, ensure_ascii=False).encode('utf-8'))
 
                 elif tool == 'gemini':
-                    # gemini extensions install 실행
-                    result = subprocess.run(
-                        ['gemini', 'extensions', 'install',
-                         'https://github.com/barretstorck/gemini-superpowers'],
-                        input='Y\n', capture_output=True, text=True, timeout=120
-                    )
-                    if 'installed successfully' in result.stdout or 'installed successfully' in result.stderr:
-                        self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini Superpowers 설치 완료'}, ensure_ascii=False).encode('utf-8'))
-                    else:
-                        out = (result.stdout + result.stderr).strip()
-                        self.wfile.write(json.dumps({'status': 'error', 'message': out or '설치 실패'}, ensure_ascii=False).encode('utf-8'))
+                    # Gemini 스킬은 프로젝트 내 .gemini/skills/ 에 이미 존재
+                    # 글로벌 ~/.gemini/skills/ 에도 복사 (옵션)
+                    gemini_skills_src = PROJECT_ROOT / '.gemini' / 'skills'
+                    if not gemini_skills_src.exists():
+                        raise Exception('.gemini/skills/ 폴더를 찾을 수 없습니다')
+                    installed = [d.name for d in gemini_skills_src.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
+                    self.wfile.write(json.dumps({
+                        'status': 'success',
+                        'message': f'Gemini 스킬 확인 완료 ({len(installed)}개): {", ".join(installed)} — 프로젝트 내 .gemini/skills/ 사용 중'
+                    }, ensure_ascii=False).encode('utf-8'))
                 else:
                     self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -2112,19 +2105,15 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if tool == 'claude':
                     cmd_dir = home / '.claude' / 'commands'
                     removed = []
-                    for md in cmd_dir.glob('superpowers-*.md'):
+                    for md in cmd_dir.glob('vibe-*.md'):
                         md.unlink()
                         removed.append(md.name)
                     msg = f"제거 완료: {', '.join(removed)}" if removed else '삭제할 파일 없음'
                     self.wfile.write(json.dumps({'status': 'success', 'message': msg}, ensure_ascii=False).encode('utf-8'))
 
                 elif tool == 'gemini':
-                    ext_dir = home / '.gemini' / 'extensions' / 'gemini-superpowers'
-                    if ext_dir.exists():
-                        shutil.rmtree(ext_dir)
-                        self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini Superpowers 제거 완료'}, ensure_ascii=False).encode('utf-8'))
-                    else:
-                        self.wfile.write(json.dumps({'status': 'error', 'message': '설치된 항목 없음'}, ensure_ascii=False).encode('utf-8'))
+                    # Gemini 스킬은 프로젝트 내에 있어 실제 삭제하지 않고 상태만 반환
+                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini 스킬은 프로젝트 내장형입니다 (삭제 불필요)'}, ensure_ascii=False).encode('utf-8'))
                 else:
                     self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
