@@ -796,8 +796,36 @@ function App() {
     return () => clearTimeout(interval);
   }, [updateReady?.downloading]);
 
+  // 토스트 알림 상태 — 업데이트 확인 결과, 설치 완료 등 간단한 피드백용
+  const [toast, setToast] = useState<{ msg: string; type: 'info' | 'ok' | 'warn' } | null>(null);
+  const showToast = (msg: string, type: 'info' | 'ok' | 'warn' = 'info', ms = 3500) => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), ms);
+  };
+
+  const [updateChecking, setUpdateChecking] = useState(false);
   const triggerUpdateCheck = () => {
-    fetch(`${API_BASE}/api/trigger-update-check`, { method: 'POST' }).catch(() => {});
+    if (updateChecking) return;
+    setUpdateChecking(true);
+    showToast('업데이트 확인 중...', 'info', 8000);
+    fetch(`${API_BASE}/api/trigger-update-check`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.started) {
+          showToast('업데이트 확인 불가 (개발 빌드)', 'warn');
+        } else {
+          // 10초 뒤 update_ready 상태 체크 — 새 버전 없으면 "최신 버전" 메시지
+          setTimeout(() => {
+            fetch(`${API_BASE}/api/check-update-ready`)
+              .then(r => r.json())
+              .then(d => {
+                if (!d.ready && !d.downloading) showToast('✓ 최신 버전입니다', 'ok');
+              });
+          }, 10000);
+        }
+      })
+      .catch(() => showToast('서버 연결 오류', 'warn'))
+      .finally(() => setUpdateChecking(false));
   };
 
   const applyUpdate = () => {
@@ -1077,6 +1105,15 @@ function App() {
         </div>
       )}
 
+      {/* 토스트 알림 — 우측 상단 고정 */}
+      {toast && (
+        <div className={`fixed top-3 right-4 z-[9999] px-3 py-2 rounded shadow-lg text-[11px] font-bold flex items-center gap-2 transition-all pointer-events-none
+          ${toast.type === 'ok' ? 'bg-green-600/90 text-white' : toast.type === 'warn' ? 'bg-yellow-500/90 text-black' : 'bg-[#007acc]/90 text-white'}`}>
+          {toast.type === 'info' && <span className="animate-spin inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full" />}
+          {toast.msg}
+        </div>
+      )}
+
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
         <img src="/vibe_icon.png" alt="vibe" className="w-4 h-4 mx-1 object-contain" />
@@ -1085,8 +1122,9 @@ function App() {
         <button
           onClick={triggerUpdateCheck}
           title="업데이트 확인"
-          className="text-[9px] text-white/30 hover:text-white/70 transition-colors ml-1 mr-2"
-        >↑</button>
+          disabled={updateChecking}
+          className="text-[9px] text-white/30 hover:text-white/70 transition-colors ml-1 mr-2 disabled:opacity-50"
+        >{updateChecking ? '⟳' : '↑'}</button>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
