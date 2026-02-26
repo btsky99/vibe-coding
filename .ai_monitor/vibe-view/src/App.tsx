@@ -35,6 +35,18 @@ import { ThoughtTrace } from './components/ThoughtTrace';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+
+// Claude Code 세션별 컨텍스트 창 사용량 데이터 구조
+interface ContextSession {
+  session_id: string;
+  slug: string;       // 세션 닉네임 (예: peppy-crafting-owl)
+  model: string;      // 모델명 (예: claude-sonnet-4-6)
+  input_tokens: number;   // 현재 컨텍스트 창 입력 토큰 수
+  output_tokens: number;  // 누적 출력 토큰 수
+  cache_read: number;     // 캐시에서 읽은 토큰 수
+  last_ts: string;    // 마지막 활동 ISO 타임스탬프
+  cwd: string;        // 작업 디렉터리
+}
 const WS_PORT = parseInt(window.location.port) + 1;
 
 export interface Shortcut { label: string; cmd: string; }
@@ -773,6 +785,22 @@ function App() {
   const [updateReady, setUpdateReady] = useState<{ version: string; ready: boolean; downloading: boolean } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
 
+  // Claude Code 세션별 컨텍스트 사용량 — TerminalSlot에 slotId 순서대로 전달
+  const [contextSessions, setContextSessions] = useState<ContextSession[]>([]);
+
+  // 30초마다 컨텍스트 사용량 갱신 (명령어 없이 JSONL 파일 파싱)
+  useEffect(() => {
+    const doFetch = () => {
+      fetch(`${API_BASE}/api/context-usage`)
+        .then(res => res.json())
+        .then(data => setContextSessions(data.sessions || []))
+        .catch(() => {});
+    };
+    doFetch();
+    const iv = setInterval(doFetch, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
   // 30초마다 업데이트 준비 여부 확인 (다운로드 중이면 5초마다)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -1039,7 +1067,16 @@ function App() {
       } catch (err) { }
     };
 
-    // 2) 사고 과정 스트림 (v5.0)
+    // 2) 파일 시스템 이벤트 → 탐색기 갱신
+    const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
+    fsSse.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'fs_change') refreshItems();
+      } catch (err) { }
+    };
+
+    // 3) 사고 과정 스트림 (v5.0)
     const thoughtSse = new EventSource(`${API_BASE}/api/events/thoughts`);
     thoughtSse.onmessage = (e) => {
       try {
@@ -1050,6 +1087,7 @@ function App() {
 
     return () => {
       sse.close();
+      fsSse.close();
       thoughtSse.close();
     };
   }, []);
@@ -1288,7 +1326,7 @@ function App() {
                  : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30'
                }`}
            >
-             <span className="font-mono">v3.3.0</span>
+             <span className="font-mono">v3.4.0</span>
              {updateChecking
                ? <span className="animate-spin inline-block w-3 h-3 border-2 border-current/30 border-t-current rounded-full" />
                : updateReady && !updateReady.downloading
@@ -2650,7 +2688,7 @@ function App() {
               'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} claudeSpInstalled={spStatus?.claude?.installed ?? false} geminiSpInstalled={spStatus?.gemini?.installed ?? false} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} claudeSpInstalled={spStatus?.claude?.installed ?? false} geminiSpInstalled={spStatus?.gemini?.installed ?? false} contextSessions={contextSessions} />
               ))}
             </div>
           </main>
@@ -2862,7 +2900,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, claudeSpInstalled, geminiSpInstalled }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], claudeSpInstalled: boolean, geminiSpInstalled: boolean }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, claudeSpInstalled, geminiSpInstalled, contextSessions }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], claudeSpInstalled: boolean, geminiSpInstalled: boolean, contextSessions: ContextSession[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -2926,6 +2964,42 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const [showDiff, setShowDiff] = useState(false);
   const [diffContent, setDiffContent] = useState<string>('');
 
+  // 컨텍스트 사용량 패널 — 기본 숨김, 클릭 시 토글
+  const [showContextPanel, setShowContextPanel] = useState(false);
+  // 이 슬롯에 대응하는 세션 (최근 활동 순 배열에서 slotId 번째)
+  const ctxSession = contextSessions[slotId] ?? null;
+  // 컨텍스트 창 최대 토큰 (현재 Claude 전 모델 공통 200k)
+  const CTX_MAX = 200000;
+  const ctxPct = ctxSession ? Math.round((ctxSession.input_tokens / CTX_MAX) * 100) : 0;
+  // 헤더 버튼 표시용 간결한 토큰 수 (예: "57k")
+  const ctxLabel = ctxSession
+    ? `${Math.round(ctxSession.input_tokens / 1000)}k/${Math.round(CTX_MAX / 1000)}k`
+    : '—';
+  // ISO 타임스탬프 → 상대 시간 문자열 (예: "3분 전")
+  const ctxRelTime = (() => {
+    if (!ctxSession?.last_ts) return '';
+    const diff = Math.floor((Date.now() - new Date(ctxSession.last_ts).getTime()) / 1000);
+    if (diff < 60) return `${diff}초 전`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+    return `${Math.floor(diff / 86400)}일 전`;
+  })();
+
+  // ─── 파일 시스템 이벤트 → 오른쪽 뷰어 자동 표시 ───
+  useEffect(() => {
+    const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
+    fsSse.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'fs_change') {
+          setActiveFilePath(data.path);
+          setShowActiveFile(true);
+        }
+      } catch (err) { }
+    };
+    return () => fsSse.close();
+  }, []);
+
   // 현재 에이전트가 잠근 파일 찾기
   const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
 
@@ -2988,6 +3062,14 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
       // ref에 저장하여 파일 뷰어 토글 시에도 fit() 호출 가능하게
       fitAddonRef.current = fitAddon;
+
+      // [추가] 터미널 크기 변경 시 백엔드 PTY에 알림 (글자 깨짐 및 중복 방지)
+      term.onResize(({ cols, rows }) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+
       // ResizeObserver: 터미널 컨테이너 크기 변화 감지 시 자동으로 xterm 재조정
       // 파일 뷰어 열기/닫기로 컨테이너 높이가 바뀔 때마다 즉시 반응
       const termContainer = xtermRef.current.parentElement;
@@ -3026,10 +3108,17 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         }
       };
       term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
-      // 창 크기 변경 시 터미널 재조정 (클린업 포함)
+      // 창 크기 변경 시 터미널 재조정
       const handleResize = () => fitAddon.fit();
       window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      
+      // cleanup을 위해 xtermRef에 이벤트 리스너 제거 함수 보관 (간이 방식)
+      (xtermRef.current as any)._handleResize = handleResize;
+
+      return () => {
+        // 이 리턴은 setTimeout 내부라 효과가 없지만, 명시적으로 둡니다.
+        window.removeEventListener('resize', handleResize);
+      };
     }, 50);
   };
 
@@ -3081,7 +3170,16 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     setIsTerminalMode(false);
     setShowActiveFile(false);
     fitAddonRef.current = null;
-    // ResizeObserver 해제 (메모리 누수 방지)
+
+    // ResizeObserver 및 리사이즈 이벤트 리스너 해제
+    if (xtermRef.current) {
+      const anyRef = xtermRef.current as any;
+      if (anyRef._handleResize) {
+        window.removeEventListener('resize', anyRef._handleResize);
+        delete anyRef._handleResize;
+      }
+    }
+
     resizeObserverRef.current?.disconnect();
     resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close();
@@ -3198,33 +3296,89 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
             </div>
           )}
         </div>
-        {!isTerminalMode ? (
-          <div className="flex gap-2 items-center">
+        <div className="flex items-center gap-1.5">
+          {/* 🧠 컨텍스트 사용량 버튼 — 항상 표시, 클릭 시 패널 토글 */}
+          <button
+            onClick={() => setShowContextPanel(p => !p)}
+            className={`px-2 py-0.5 rounded text-[9px] border transition-all font-mono ${
+              showContextPanel
+                ? 'bg-indigo-500/30 border-indigo-400/60 text-indigo-200'
+                : 'bg-[#3c3c3c] border-white/5 text-[#888] hover:bg-white/10 hover:text-[#ccc]'
+            }`}
+            title="컨텍스트 창 사용량 보기"
+          >
+            🧠 {ctxLabel}
+          </button>
+
+          {!isTerminalMode ? (
             <span className="text-[9px] text-[#858585] font-bold mr-1">에이전트 선택 대기 중...</span>
-          </div>
-        ) : (
-          <div className="flex gap-2 items-center">
-            <button 
-              onClick={() => {
-                if (!showActiveFile) setShowActiveFile(true);
-                setShowDiff(!showDiff);
-              }} 
-              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showDiff ? 'bg-accent/40 border-accent text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-              title="Git 변경사항(Diff) 보기"
-            >
-              ± Diff
-            </button>
-            <button 
-              onClick={() => setShowActiveFile(!showActiveFile)} 
-              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-              title="현재 에이전트가 수정중인 파일 보기"
-            >
-              👀 파일 뷰어
-            </button>
-            <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
-          </div>
-        )}
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  if (!showActiveFile) setShowActiveFile(true);
+                  setShowDiff(!showDiff);
+                }}
+                className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showDiff ? 'bg-accent/40 border-accent text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+                title="Git 변경사항(Diff) 보기"
+              >
+                ± Diff
+              </button>
+              <button
+                onClick={() => setShowActiveFile(!showActiveFile)}
+                className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+                title="현재 에이전트가 수정중인 파일 보기"
+              >
+                👀 파일 뷰어
+              </button>
+              <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* ── 컨텍스트 사용량 패널 — showContextPanel=true일 때만 표시 ── */}
+      {showContextPanel && (
+        <div className="shrink-0 bg-[#1a1a2e] border-b border-indigo-500/20 px-3 py-2">
+          {ctxSession ? (
+            <>
+              {/* 프로그레스 바 */}
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[9px] text-indigo-300 font-mono truncate" style={{ width: '130px' }}>
+                  {ctxSession.model}
+                </span>
+                <div className="flex-1 h-1.5 bg-[#333] rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      ctxPct >= 80 ? 'bg-red-500' :
+                      ctxPct >= 60 ? 'bg-yellow-500' :
+                      'bg-gradient-to-r from-indigo-500 to-purple-500'
+                    }`}
+                    style={{ width: `${Math.min(100, ctxPct)}%` }}
+                  />
+                </div>
+                <span className="text-[9px] font-mono text-[#aaa] text-right" style={{ width: '80px' }}>
+                  {ctxPct}% 사용
+                </span>
+              </div>
+              {/* 세부 정보 */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[8px] text-[#777]">
+                <span className="text-indigo-400/80">🏷 {ctxSession.slug}</span>
+                <span>📥 {(ctxSession.input_tokens / 1000).toFixed(1)}k</span>
+                <span>📤 {(ctxSession.output_tokens / 1000).toFixed(1)}k</span>
+                {ctxSession.cache_read > 0 && (
+                  <span>⚡ 캐시 {(ctxSession.cache_read / 1000).toFixed(1)}k</span>
+                )}
+                <span className="ml-auto text-[#555]">{ctxRelTime}</span>
+              </div>
+            </>
+          ) : (
+            <div className="text-[9px] text-[#555] italic text-center py-0.5">
+              세션 없음 — Claude Code를 실행하면 자동으로 감지됩니다
+            </div>
+          )}
+        </div>
+      )}
       {isTerminalMode ? (
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
           {showActiveFile && (

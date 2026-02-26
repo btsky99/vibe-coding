@@ -50,6 +50,53 @@ try:
 except ImportError:
     websockets = None
 
+# --- 신규: 파일 시스템 실시간 감시 (Watchdog) ---
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+except ImportError:
+    Observer = None
+    FileSystemEventHandler = object
+
+FS_CLIENTS = set() # SSE 클라이언트 연결 세트
+
+class FSChangeHandler(FileSystemEventHandler):
+    """파일 시스템 변경 이벤트를 감지하여 SSE 클라이언트들에게 알립니다."""
+    def on_any_event(self, event):
+        if event.is_directory: return
+        # 노이즈가 심한 파일/폴더는 제외
+        path = event.src_path.replace('\\', '/')
+        if any(x in path for x in ['.git', '.ai_monitor/data', '__pycache__', '.ruff_cache', '.ico', '.png', '.jpg', '.tmp']):
+            return
+        
+        # 브로드캐스트 메시지 생성
+        msg_obj = {'type': 'fs_change', 'path': path, 'event': event.event_type}
+        msg = f"data: {json.dumps(msg_obj, ensure_ascii=False)}\n\n"
+        
+        # 연결된 모든 클라이언트에게 전송
+        disconnected = []
+        for client in list(FS_CLIENTS):
+            try:
+                client.wfile.write(msg.encode('utf-8'))
+                client.wfile.flush()
+            except Exception:
+                disconnected.append(client)
+        
+        for d in disconnected:
+            FS_CLIENTS.discard(d)
+
+def start_fs_watcher(root_path):
+    if Observer is None:
+        print("[!] watchdog 라이브러리가 없어 실시간 파일 감시를 시작할 수 없습니다.")
+        return None
+    handler = FSChangeHandler()
+    observer = Observer()
+    observer.schedule(handler, str(root_path), recursive=True)
+    observer.start()
+    print(f"[*] File System Watcher started on {root_path}")
+    return observer
+# ----------------------------------------------
+
 if os.name == 'nt':
     try:
         from winpty import PtyProcess
@@ -575,6 +622,75 @@ def _smithery_api_key() -> str:
             pass
     return ''
 
+
+def _parse_session_tail(path: Path):
+    """Claude Code 세션 JSONL 파일 꼬리에서 마지막 토큰 usage 정보 추출.
+
+    대형 파일(수천 줄)의 불필요한 전체 읽기를 피하기 위해 파일 끝 8KB만 읽어
+    마지막 assistant 메시지의 usage 필드를 파싱합니다.
+    발견 못하면 None 반환.
+    """
+    try:
+        TAIL_BYTES = 8192  # 끝 8KB면 최근 메시지 수십 개 충분히 커버
+        with open(path, 'rb') as f:
+            f.seek(0, 2)                      # 파일 끝으로 이동
+            size = f.tell()
+            f.seek(max(0, size - TAIL_BYTES)) # 끝 8KB 위치로
+            raw = f.read().decode('utf-8', errors='ignore')
+
+        # 완전한 줄만 추출 (첫 줄은 잘릴 수 있으므로 제외)
+        lines = [l.strip() for l in raw.splitlines() if l.strip()]
+
+        session_id = slug = model = cwd = last_ts = ''
+        input_tokens = output_tokens = cache_read = 0
+
+        # 역순으로 탐색 → 가장 최신 데이터 우선
+        for line in reversed(lines):
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+
+            # 세션 메타 수집 (처음 발견 시만 기록)
+            if not session_id and obj.get('sessionId'):
+                session_id = obj['sessionId']
+            if not slug and obj.get('slug'):
+                slug = obj['slug']
+            if not cwd and obj.get('cwd'):
+                cwd = obj['cwd']
+            if not last_ts and obj.get('timestamp'):
+                last_ts = obj['timestamp']
+
+            # assistant 메시지에서 usage 추출
+            if obj.get('type') == 'assistant' and isinstance(obj.get('message'), dict):
+                usage = obj['message'].get('usage', {})
+                if usage.get('input_tokens'):
+                    if not model:
+                        model = obj['message'].get('model', '')
+                    input_tokens  = usage.get('input_tokens', 0)
+                    output_tokens = usage.get('output_tokens', 0)
+                    cache_read    = usage.get('cache_read_input_tokens', 0)
+                    if not last_ts:
+                        last_ts = obj.get('timestamp', '')
+                    break  # 가장 최신 usage 찾으면 즉시 종료
+
+        if not session_id:
+            return None  # 유효한 세션 파일 아님
+
+        return {
+            'session_id':   session_id,
+            'slug':         slug or path.stem[:12],   # slug 없으면 파일명 앞 12자
+            'model':        model or 'unknown',
+            'input_tokens': input_tokens,
+            'output_tokens': output_tokens,
+            'cache_read':   cache_read,
+            'last_ts':      last_ts,
+            'cwd':          str(cwd).replace('\\', '/'),
+        }
+    except Exception:
+        return None
+
+
 # ── .env 파일 읽기/쓰기 유틸 ─────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -641,6 +757,28 @@ class SSEHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                 except Exception:
                     break
+            return
+
+        # ─── 신규: 파일 시스템 변경 이벤트 스트리밍 ───
+        if path == '/api/events/fs':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            
+            FS_CLIENTS.add(self)
+            try:
+                # 연결 유지를 위한 하트비트 루프
+                while True:
+                    time.sleep(15)
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                FS_CLIENTS.discard(self)
             return
 
         if parsed_path.path == '/stream':
@@ -1371,6 +1509,35 @@ class SSEHandler(BaseHTTPRequestHandler):
                 'project_name': PROJECT_ROOT.name,
                 'project_root': str(PROJECT_ROOT).replace('\\', '/'),
             }, ensure_ascii=False).encode('utf-8'))
+
+        elif parsed_path.path == '/api/context-usage':
+            # Claude Code 세션별 컨텍스트 창 사용량 반환
+            # ~/.claude/projects/{PROJECT_ID}/*.jsonl 파일의 마지막 usage 필드를 파싱하여
+            # 각 터미널 슬롯의 토큰 사용량을 최근 활동 순으로 반환합니다.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                claude_proj_dir = Path.home() / '.claude' / 'projects' / PROJECT_ID
+                sessions = []
+                if claude_proj_dir.exists():
+                    for jsonl_file in claude_proj_dir.glob('*.jsonl'):
+                        try:
+                            info = _parse_session_tail(jsonl_file)
+                            if info:
+                                sessions.append(info)
+                        except Exception:
+                            continue
+                # 최근 활동(last_ts) 기준 내림차순 정렬 → 상위 8개 (최대 터미널 슬롯 수)
+                sessions.sort(key=lambda s: s.get('last_ts', ''), reverse=True)
+                self.wfile.write(json.dumps(
+                    {'sessions': sessions[:8]}, ensure_ascii=False
+                ).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps(
+                    {'sessions': [], 'error': str(e)}
+                ).encode('utf-8'))
         elif parsed_path.path == '/api/vector/list':
             # 벡터 DB 전체 항목 목록 반환
             # ChromaDB에 저장된 모든 메모리를 id, content, metadata와 함께 반환합니다.
@@ -1662,13 +1829,46 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 content_length = int(self.headers['Content-Length'])
                 data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                
+
                 # 데이터 유효성 검사 및 타임스탬프 추가
                 data['timestamp'] = datetime.now().isoformat()
                 THOUGHT_LOGS.append(data)
                 if len(THOUGHT_LOGS) > 100:
                     THOUGHT_LOGS.pop(0)
-                
+
+                # ── 벡터 DB에 영구 저장 ──────────────────────────────────
+                try:
+                    agent   = data.get('agent', 'unknown')
+                    thought = data.get('thought', '')
+                    level   = data.get('level', 'info')
+                    tool    = data.get('tool', '')
+                    step    = data.get('step', '')
+                    ts_ms   = str(int(time.time() * 1000))
+
+                    key     = f"thought:{agent}:{ts_ms}"
+                    title   = f"[{level}] {thought[:80]}"
+                    content = thought
+                    if tool:  content += f"\n🔧 tool: {tool}"
+                    if step:  content += f"\n📍 step: {step}"
+
+                    tags = ['thought', level, agent]
+                    emb  = _embed(f"{title}\n{content}")
+
+                    with _memory_conn() as conn:
+                        conn.execute(
+                            'INSERT OR REPLACE INTO memory '
+                            '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
+                            'VALUES (?,?,?,?,?,?,?,?,?,?)',
+                            (key, ts_ms, title, content,
+                             json.dumps(tags, ensure_ascii=False),
+                             agent, data['timestamp'], data['timestamp'],
+                             PROJECT_ID, emb)
+                        )
+                    print(f"🧠 [Thought→DB] {key} (임베딩: {'✓' if emb else '✗'})")
+                except Exception as db_err:
+                    print(f"[Thought→DB] 저장 실패 (무시): {db_err}")
+                # ─────────────────────────────────────────────────────────
+
                 print(f"🧠 [Thought Trace] New thought captured: {data.get('thought', '')[:50]}...")
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
@@ -1699,6 +1899,22 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/trigger-update-check':
+            # 업데이트 확인 트리거 — do_GET과 동일 로직 (프론트엔드가 POST로 호출)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            if not getattr(sys, 'frozen', False):
+                self.wfile.write(json.dumps({"started": False, "reason": "dev build"}).encode('utf-8'))
+            else:
+                try:
+                    from updater import check_and_update
+                    threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
+                    self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
+                except Exception as e:
+                    self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/git/rollback':
             # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
             self.send_response(200)
@@ -2552,6 +2768,18 @@ async def pty_handler(websocket):
                     message = message.decode('utf-8')
                 
                 if message:
+                    # [추가] 제어 메시지(JSON) 처리 — 리사이즈 등
+                    try:
+                        if message.startswith('{') and message.endswith('}'):
+                            data = json.loads(message)
+                            if isinstance(data, dict) and data.get('type') == 'resize':
+                                cols = int(data.get('cols', 80))
+                                rows = int(data.get('rows', 24))
+                                pty.setwinsize(rows, cols)
+                                continue
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        pass
+
                     # [수정] 윈도우 IME 및 xterm.js 호환성 개선
                     # \r\n 중복 방지 및 조합 중인 문자 처리 안정화
                     if message == "\r":
@@ -2639,6 +2867,9 @@ if __name__ == '__main__':
 
     # 1. 백그라운드 스레드 시작
     threading.Thread(target=start_ws_server, daemon=True).start()
+    
+    # 실시간 파일 감시 시작
+    start_fs_watcher(PROJECT_ROOT)
 
     MemoryWatcher().start()  # 에이전트 메모리 파일 → shared_memory.db 자동 동기화
     
