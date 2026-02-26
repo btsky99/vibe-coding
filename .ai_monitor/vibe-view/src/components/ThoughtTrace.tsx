@@ -3,9 +3,9 @@
  * 📝 설명: AI의 사고 과정(Chain of Thought)을 시각화하는 컴포넌트입니다.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Zap } from 'lucide-react';
+import { Brain, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ThoughtLog } from '../types';
 
 interface ThoughtTraceProps {
@@ -13,14 +13,36 @@ interface ThoughtTraceProps {
 }
 
 export const ThoughtTrace: React.FC<ThoughtTraceProps> = ({ thoughts }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e] border-l border-white/5 w-80 shrink-0 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-white/2">
-        <Brain className="w-4 h-4 text-primary" />
-        <span className="text-xs font-bold text-white/80">Thought Trace (v5.0)</span>
+    <motion.div 
+      initial={false}
+      animate={{ width: isOpen ? 320 : 36 }}
+      className="flex flex-col h-full bg-[#1e1e1e] border-l border-white/5 shrink-0 overflow-hidden relative shadow-2xl"
+    >
+      {/* 접기/펴기 핸들 버튼 (세로로 길게 배치) */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="absolute left-0 top-1/2 -translate-y-1/2 w-8 h-24 bg-primary/20 hover:bg-primary/40 border-y border-r border-white/10 rounded-r-md flex items-center justify-center transition-colors z-20 group"
+        title={isOpen ? "사고 과정 숨기기" : "사고 과정 보기"}
+      >
+        {isOpen ? <ChevronRight className="w-4 h-4 text-primary" /> : <ChevronLeft className="w-4 h-4 text-primary group-hover:scale-125 transition-transform" />}
+      </button>
+
+      {/* 헤더 */}
+      <div className={`flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-white/2 shrink-0 ${!isOpen && 'justify-center px-0'}`}>
+        <Brain className={`w-4 h-4 text-primary shrink-0 ${!isOpen && 'animate-pulse'}`} />
+        {isOpen && (
+          <>
+            <span className="text-xs font-bold text-white/80 flex-1 truncate">Thought Trace</span>
+            <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-mono">v5.0</span>
+          </>
+        )}
       </div>
       
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+      {/* 내용 영역 (열려있을 때만 표시) */}
+      <div className={`flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide ${!isOpen && 'opacity-0 pointer-events-none'}`}>
         <AnimatePresence initial={false}>
           {thoughts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full opacity-20 text-center">
@@ -69,12 +91,14 @@ export const ThoughtTrace: React.FC<ThoughtTraceProps> = ({ thoughts }) => {
       </div>
       
       {/* 하단 상태바 */}
-      <div className="px-4 py-2 bg-black/20 border-t border-white/5">
-        <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-          <span className="text-[9px] text-white/40">Real-time Insight Active</span>
+      {isOpen && (
+        <div className="px-4 py-2 bg-black/20 border-t border-white/5 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+            <span className="text-[9px] text-white/40">Real-time Insight Active</span>
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+    </motion.div>
   );
 };

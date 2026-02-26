@@ -177,6 +177,8 @@ export const VIBE_SKILLS: VibeSkill[] = [
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [activeTab, setActiveTab] = useState('explorer');
   // 레이아웃 모드: 1, 2, 3, 4(가로4열), 2x2(2×2격자), 6(3×2격자), 8(4×2격자)
   const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('1');
@@ -1054,6 +1056,31 @@ function App() {
 
   const slots = Array.from({ length: terminalCount }, (_, i) => i);
 
+  // ─── 사이드바 리사이징 로직 ─────────────────────────────────────────────
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSidebar) return;
+      // Activity Bar 너비(48px)를 제외한 위치 계산
+      const newWidth = e.clientX - 48;
+      if (newWidth > 150 && newWidth < 800) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => setIsResizingSidebar(false);
+
+    if (isResizingSidebar) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+    } else {
+      document.body.style.cursor = 'default';
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingSidebar]);
+
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden select-none font-sans flex-col" onClick={() => setActiveMenu(null)}>
       
@@ -1356,15 +1383,22 @@ function App() {
 
         {/* Sidebar (Explorer) */}
         <motion.div
-          animate={{ width: isSidebarOpen ? 450 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-x-auto overflow-y-hidden custom-scrollbar"
+          animate={{ width: isSidebarOpen ? sidebarWidth : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-x-auto overflow-y-hidden custom-scrollbar relative"
         >
-          <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[440px]">
+          {/* Sidebar Resize Handle */}
+          {isSidebarOpen && (
+            <div
+              onMouseDown={(e) => { e.stopPropagation(); setIsResizingSidebar(true); }}
+              className={`absolute right-0 top-0 w-1 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-50 ${isResizingSidebar ? 'bg-primary/50' : ''}`}
+            />
+          )}
+          <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[200px]">
             <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : 'Hive Mind'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1.5 rounded transition-colors"><X className="w-6 h-6" /></button>
           </div>
 
-          <div className="p-5 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[440px]">
+          <div className="p-5 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[200px]">
             {activeTab === 'messages' ? (
               /* ── 메시지 채널 패널 ── */
               <div className="flex-1 flex flex-col overflow-hidden gap-3">
@@ -2839,7 +2873,38 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
+  const [fileViewerHeight, setFileViewerHeight] = useState(33);
+  const [isResizingFileViewer, setIsResizingFileViewer] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
+
+  // ─── 터미널 파일 뷰어 리사이징 로직 ───────────────────────────────────────
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingFileViewer) return;
+      // 터미널 슬롯 컨테이너 찾기
+      const container = xtermRef.current?.closest('.h-full.bg-\\[\\#252526\\]');
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const newHeight = ((e.clientY - rect.top) / rect.height) * 100;
+        if (newHeight > 10 && newHeight < 85) {
+          setFileViewerHeight(newHeight);
+        }
+      }
+    };
+    const handleMouseUp = () => setIsResizingFileViewer(false);
+
+    if (isResizingFileViewer) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'row-resize';
+    } else {
+      document.body.style.cursor = 'default';
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingFileViewer]);
   const [inputValue, setInputValue] = useState('');
   // 한글 입력(IME) 상태 추적용 Ref
   const isComposingRef = useRef(false);
@@ -3010,7 +3075,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     const t1 = setTimeout(() => fitAddonRef.current?.fit(), 100);
     const t2 = setTimeout(() => fitAddonRef.current?.fit(), 350);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [showActiveFile]);
+  }, [showActiveFile, fileViewerHeight]);
 
   const closeTerminal = () => {
     setIsTerminalMode(false);
@@ -3164,10 +3229,10 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
           {showActiveFile && (
             <div 
-              className="h-1/3 min-h-[100px] border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 relative"
-              style={{ resize: 'vertical', overflow: 'hidden' }}
+              className="border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 relative"
+              style={{ height: `${fileViewerHeight}%`, minHeight: '100px', maxHeight: '85%', overflow: 'hidden' }}
             >
-              <div className="h-6 bg-[#2d2d2d] px-2 flex items-center justify-between text-[10px] text-[#cccccc] shrink-0 border-b border-white/5 cursor-row-resize pointer-events-none">
+              <div className="h-6 bg-[#2d2d2d] px-2 flex items-center justify-between text-[10px] text-[#cccccc] shrink-0 border-b border-white/5 pointer-events-none">
                 <span className="truncate flex items-center gap-1 opacity-80 pointer-events-auto">
                   {getFileIcon(activeFilePath || '')} 
                   {activeFilePath ? activeFilePath : "감지된 파일 없음..."}
@@ -3191,6 +3256,11 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                       )
                 }
               </div>
+              {/* Terminal Panel Resize Handle */}
+              <div
+                onMouseDown={(e) => { e.stopPropagation(); setIsResizingFileViewer(true); }}
+                className={`absolute bottom-0 left-0 w-full h-1 cursor-row-resize hover:bg-primary/50 transition-colors z-20 ${isResizingFileViewer ? 'bg-primary/50' : ''}`}
+              />
             </div>
           )}
           {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
