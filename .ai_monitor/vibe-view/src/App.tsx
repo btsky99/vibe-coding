@@ -779,7 +779,14 @@ function App() {
         .then(res => res.json())
         .then(data => {
           if (data?.version) {
-            setUpdateReady({ version: data.version, ready: !!data.ready, downloading: !!data.downloading });
+            const next = { version: data.version, ready: !!data.ready, downloading: !!data.downloading };
+            // 다운로드 완료 전환 감지 → 토스트 알림
+            setUpdateReady(prev => {
+              if (prev?.downloading && next.ready) {
+                showToast(`🎉 ${next.version} 다운로드 완료! 우측 상단 [업데이트] 버튼을 눌러주세요.`, 'ok', 6000);
+              }
+              return next;
+            });
           } else {
             setUpdateReady(null);
           }
@@ -1118,13 +1125,6 @@ function App() {
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
         <img src="/vibe_icon.png" alt="vibe" className="w-4 h-4 mx-1 object-contain" />
         <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
-        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 font-mono">v3.3.0</span>
-        <button
-          onClick={triggerUpdateCheck}
-          title="업데이트 확인"
-          disabled={updateChecking}
-          className="text-[9px] text-white/30 hover:text-white/70 transition-colors ml-1 mr-2 disabled:opacity-50"
-        >{updateChecking ? '⟳' : '↑'}</button>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
@@ -1247,6 +1247,30 @@ function App() {
              );
            })}
            <span className="truncate opacity-50 border-l border-white/10 pl-3">{currentPath}</span>
+
+           {/* 버전 + 업데이트 버튼 — 오른쪽 끝 고정 */}
+           <button
+             onClick={triggerUpdateCheck}
+             disabled={updateChecking}
+             title="업데이트 확인"
+             className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-bold shrink-0 transition-all disabled:opacity-60
+               ${updateReady && !updateReady.downloading
+                 ? 'bg-red-500/20 border-red-500/60 text-red-400 animate-pulse hover:bg-red-500/30'
+                 : updateReady?.downloading
+                 ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'
+                 : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30'
+               }`}
+           >
+             <span className="font-mono">v3.3.0</span>
+             {updateChecking
+               ? <span className="animate-spin inline-block w-3 h-3 border-2 border-current/30 border-t-current rounded-full" />
+               : updateReady && !updateReady.downloading
+               ? <span>🔴 업데이트</span>
+               : updateReady?.downloading
+               ? <span>⬇ 다운로드 중</span>
+               : <span className="opacity-60">↑ 업데이트 확인</span>
+             }
+           </button>
         </div>
       </div>
 
