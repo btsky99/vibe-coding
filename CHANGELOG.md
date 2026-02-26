@@ -1,20 +1,6 @@
 # 📜 변경 이력 (CHANGELOG)
 
-## [2026-02-26] - ThoughtTrace 벡터 메모리 검색 UI 추가
-
-### 신규 기능
-- **[Feature] ThoughtTrace 탭 구조 도입**: 오른쪽 패널에 [🧠 사고] / [🔍 메모리] 탭 전환 기능 추가
-- **[Feature] 벡터 메모리 시맨틱 검색 UI**: 검색창 + 유사도 결과 카드 (%, 색상 표시, expand/collapse)
-- **[Feature] `/api/vector/search` (POST)**: ChromaDB 시맨틱 검색 REST API
-- **[Feature] `/api/vector/list` (GET)**: 벡터 DB 전체 항목 조회 REST API
-
-### 변경 파일
-- `.ai_monitor/server.py` — 벡터 검색 API 2개 엔드포인트 추가
-- `.ai_monitor/vibe-view/src/components/ThoughtTrace.tsx` — 탭 + 벡터 검색 UI
-
----
-
-## [2026-02-26] - 하이브 에볼루션 v5.0 (UI/UX 고도화 및 리사이징 기능)
+## [2026-02-26] - v3.4.0 (UI/UX 고도화 및 패널 리사이징)
 
 ### 레이아웃 및 UX 개선
 - **[Feature] 패널 리사이징 시스템 도입**: 
@@ -22,6 +8,8 @@
     - 터미널 내 파일 뷰어 높이를 드래그로 조절 가능.
 - **사이드바 최적화**: 기본 너비를 300px로 축소하여 메인 작업 영역 확보.
 - **사고 과정 시각화(Thought Trace) 개선**: 우측 패널 접기/펴기 기능 추가 및 애니메이션 적용.
+
+## [2026-02-26] - ThoughtTrace 벡터 메모리 검색 UI 추가 (v3.3.0)
 
 ## [2026-02-26] - 하이브 에볼루션 v4.0 (자가 치유 및 지식 자동화)
 
