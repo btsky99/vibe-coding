@@ -8,9 +8,32 @@
 # [2026-02-26] - Gemini (하이브 에볼루션 v5.0)
 #   - 사고 과정 시각화(Thought Trace)를 위한 SSE 엔진 및 로그 캡처 로직 추가.
 #   - Vector DB 연동을 위한 API 엔드포인트 기초 설계.
+# [2026-02-27] - Claude (새 기능)
+#   - _parse_gemini_session(): Gemini 세션 JSON 파일 토큰 파서 추가
+#   - /api/gemini-context-usage 엔드포인트 추가
 # [2026-02-26] - Claude (버그 수정)
 ...
 # ... 기존 내용 유지 ...
+
+import json
+import time
+import os
+import mimetypes
+import webbrowser
+import shutil
+import subprocess
+import sqlite3
+import re
+import threading
+import sys
+import asyncio
+import string
+from pathlib import Path
+
+try:
+    import websockets
+except ImportError:
+    websockets = None
 
 # 전역 상태 관리
 THOUGHT_LOGS = [] # AI 사고 과정 로그 (최근 50개 유지)
@@ -43,40 +66,6 @@ def _load_task_logs_into_thoughts():
         print(f"[!] ThoughtTrace 사전 로드 실패: {e}")
 
 _load_task_logs_into_thoughts()
-
-class ThoughtBroadcaster:
-    """SSE를 통해 사고 로그를 클라이언트에게 전파합니다."""
-    @staticmethod
-    def broadcast(thought_data: dict):
-        THOUGHT_LOGS.append(thought_data)
-        if len(THOUGHT_LOGS) > 50:
-            THOUGHT_LOGS.pop(0)
-        # 실제 전송 로직은 핸들러에서 처리
-# [2026-02-25] - Gemini (지능형 오케스트레이터 및 디버깅)
-#   - sqlite3.OperationalError (no such column: project) 버그 수정: DB 초기화 시 인덱스 생성 시점을 마이그레이션 이후로 조정.
-# [2026-02-25] - Gemini (지능형 오케스트레이터 업그레이드)
-#   - 문서화 전략 변경에 따라 개별 파일 문서 링크 제거 및 내부 상세 주석 체제로 전환.
-# [2026-02-24] - Gemini (초기 구축)
-#   - FastAPI 기반 서버 구조 및 SQLite 연동 초기화.
-# ------------------------------------------------------------------------
-
-import json
-import time
-import os
-import mimetypes
-import webbrowser
-import shutil
-import subprocess
-import sqlite3
-import re
-import threading
-import sys
-import asyncio
-import string
-try:
-    import websockets
-except ImportError:
-    websockets = None
 
 # --- 신규: 파일 시스템 실시간 감시 (Watchdog) ---
 try:
@@ -125,10 +114,22 @@ def start_fs_watcher(root_path):
     return observer
 # ----------------------------------------------
 
+# 윈도우 배포 버전에서 winpty DLL 로딩 문제 해결
+if getattr(sys, 'frozen', False) and os.name == 'nt':
+    winpty_dll_path = BASE_DIR / 'winpty'
+    if winpty_dll_path.exists():
+        try:
+            os.add_dll_directory(str(winpty_dll_path))
+            print(f"[*] Added DLL directory: {winpty_dll_path}")
+        except AttributeError:
+            # Python < 3.8
+            os.environ['PATH'] = str(winpty_dll_path) + os.pathsep + os.environ['PATH']
+
 if os.name == 'nt':
     try:
         from winpty import PtyProcess
-    except ImportError:
+    except ImportError as e:
+        print(f"[!] winpty load failed: {e}")
         PtyProcess = None
 else:
     PtyProcess = None
@@ -147,17 +148,31 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
 
 # 데이터 디렉토리 설정 (BASE_DIR 설정 이후로 이동)
-DATA_DIR = (Path(sys.executable).resolve().parent / "data") if getattr(sys, 'frozen', False) else (BASE_DIR / "data")
+if getattr(sys, 'frozen', False):
+    # 윈도우 배포 버전: %APPDATA%\VibeCoding 폴더 사용 (권한 문제 해결)
+    if os.name == 'nt':
+        DATA_DIR = Path(os.getenv('APPDATA')) / "VibeCoding"
+    else:
+        DATA_DIR = Path.home() / ".vibe-coding"
+else:
+    DATA_DIR = BASE_DIR / "data"
+
 if not DATA_DIR.exists():
-    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except Exception as e:
+        # 마지막 보루: 현재 실행 위치 옆 (하지만 권한 에러 가능성 있음)
+        DATA_DIR = Path(sys.executable).resolve().parent / "data"
+        os.makedirs(DATA_DIR, exist_ok=True)
 
 # 현재 서버가 서비스하는 프로젝트 루트 + 식별자
-# frozen exe: sys.executable이 .ai_monitor/ 안에 있다고 가정
-PROJECT_ROOT: Path = (
-    Path(sys.executable).resolve().parent.parent
-    if getattr(sys, 'frozen', False)
-    else BASE_DIR.parent
-)
+if getattr(sys, 'frozen', False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+else:
+    PROJECT_ROOT = BASE_DIR.parent
+
+# [추가] 내부 스크립트 경로 결정 (개발 vs 배포)
+SCRIPTS_DIR = (BASE_DIR / 'scripts') if getattr(sys, 'frozen', False) else (PROJECT_ROOT / 'scripts')
 # Claude Code 프로젝트 디렉터리 명명 규칙(: 제거, /·\ → --) 과 동일하게 인코딩
 _proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
 PROJECT_ID: str = _proj_raw.lstrip('-') or 'default'   # e.g. "D--vibe-coding"
@@ -719,6 +734,53 @@ def _parse_session_tail(path: Path):
         return None
 
 
+def _parse_gemini_session(path: Path):
+    """Gemini CLI 세션 JSON 파일에서 최신 토큰 usage 정보 추출.
+
+    ~/.gemini/tmp/{project}/chats/session-*.json 파일을 읽어
+    가장 최근 gemini 타입 메시지의 tokens 필드를 파싱합니다.
+    tokens 구조: { input, output, cached, thoughts, tool, total }
+    [2026-02-27] Claude: Gemini 컨텍스트 사용량 표시 기능 추가
+    """
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        session_id = data.get('sessionId', '')
+        if not session_id:
+            return None  # 유효한 세션 파일 아님
+
+        last_updated = data.get('lastUpdated', '')
+        messages = data.get('messages', [])
+
+        input_tokens = output_tokens = cached_tokens = 0
+        model = ''
+
+        # 역순으로 gemini 타입 메시지 탐색 → 가장 최신 usage 우선
+        for msg in reversed(messages):
+            if msg.get('type') == 'gemini':
+                tokens = msg.get('tokens', {})
+                if tokens.get('input'):
+                    input_tokens  = tokens.get('input', 0)
+                    output_tokens = tokens.get('output', 0)
+                    cached_tokens = tokens.get('cached', 0)
+                    model = msg.get('model', 'gemini')
+                    break
+
+        return {
+            'session_id':   session_id,
+            'slug':         session_id[:8],        # 앞 8자리로 슬러그 대체
+            'model':        model or 'gemini',
+            'input_tokens': input_tokens,
+            'output_tokens': output_tokens,
+            'cache_read':   cached_tokens,
+            'last_ts':      last_updated,
+            'cwd':          '',
+        }
+    except Exception:
+        return None
+
+
 # ── .env 파일 읽기/쓰기 유틸 ─────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -993,9 +1055,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             result = {"status": "error", "message": "Invalid path"}
             if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
                 try:
-                    # 소스 경로 (설치된 앱의 위치 기준)
+                    # [수정] 배포 여부에 따라 소스 경로 결정
                     # .gemini, scripts, GEMINI.md 등을 복사
-                    source_base = BASE_DIR.parent # 프로젝트 루트로 가정
+                    source_base = BASE_DIR if getattr(sys, 'frozen', False) else BASE_DIR.parent
                     
                     # .gemini 복사
                     gemini_src = source_base / ".gemini"
@@ -1003,7 +1065,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         shutil.copytree(gemini_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
                     
                     # scripts 복사
-                    scripts_src = source_base / "scripts"
+                    scripts_src = SCRIPTS_DIR
                     if scripts_src.exists():
                         shutil.copytree(scripts_src, Path(target_path) / "scripts", dirs_exist_ok=True)
                         
@@ -1017,24 +1079,16 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if claude_md_src.exists():
                         shutil.copy(claude_md_src, Path(target_path) / "CLAUDE.md")
                         
+                    # RULES.md 복사 (누락 방지)
+                    rules_md_src = source_base / "RULES.md"
+                    if rules_md_src.exists():
+                        shutil.copy(rules_md_src, Path(target_path) / "RULES.md")
+                        
                     result = {"status": "success", "message": f"Skills installed to {target_path}"}
                 except Exception as e:
                     result = {"status": "error", "message": str(e)}
             
             self.wfile.write(json.dumps(result).encode('utf-8'))
-        elif parsed_path.path == '/api/hive/health':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            health_file = DATA_DIR / "hive_health.json"
-            health_data = {"status": "unknown"}
-            if health_file.exists():
-                try:
-                    with open(health_file, 'r', encoding='utf-8') as f:
-                        health_data = json.load(f)
-                except: pass
-            self.wfile.write(json.dumps(health_data, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/hive/skill-analysis':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1054,7 +1108,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                watchdog_script = PROJECT_ROOT / "scripts" / "hive_watchdog.py"
+                watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
                 result_proc = subprocess.run(
                     [sys.executable, str(watchdog_script), "--check"],
                     capture_output=True, text=True, encoding='utf-8'
@@ -1226,7 +1280,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         
         elif parsed_path.path == '/api/file-op':
-            # 파일 복사/이동/삭제 등 운영체제 수준 작업
+            # 파일 복사/이동/삭제/생성 등 운영체제 수준 작업
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -1236,17 +1290,54 @@ class SSEHandler(BaseHTTPRequestHandler):
                 op = data.get('op')
                 src = data.get('src')
                 dest = data.get('dest')
+                path = data.get('path')
                 
                 if op == 'copy':
                     if os.path.isdir(src): shutil.copytree(src, dest, dirs_exist_ok=True)
                     else: shutil.copy2(src, dest)
                 elif op == 'delete':
-                    if os.path.isdir(src): shutil.rmtree(src)
-                    else: os.remove(src)
+                    if os.path.isdir(src):
+                        shutil.rmtree(src)
+                    else:
+                        os.remove(src)
+                elif op == 'create_file':
+                    # 빈 파일 생성
+                    if not os.path.exists(path):
+                        with open(path, 'w', encoding='utf-8') as f:
+                            f.write("")
+                elif op == 'create_dir':
+                    # 폴더 생성
+                    os.makedirs(path, exist_ok=True)
                 
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/save-file':
+            # 파일 내용 저장
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
+                target_path = data.get('path')
+                content = data.get('content', '')
+                
+                if not target_path:
+                    self.wfile.write(json.dumps({"status": "error", "message": "Path is required"}).encode('utf-8'))
+                    return
+                
+                # 디렉토리가 없으면 생성
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                
+                with open(target_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/messages':
             # 에이전트 간 메시지 채널 목록 반환 (최신 100개, SQLite 연동)
             self.send_response(200)
@@ -1566,6 +1657,38 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(
                     {'sessions': [], 'error': str(e)}
                 ).encode('utf-8'))
+
+        elif parsed_path.path == '/api/gemini-context-usage':
+            # Gemini CLI 세션별 컨텍스트 창 사용량 반환
+            # ~/.gemini/tmp/{project_name}/chats/session-*.json 파일을 파싱하여
+            # 각 터미널 슬롯의 토큰 사용량을 최근 활동 순으로 반환합니다.
+            # [2026-02-27] Claude: 신규 추가
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                # Gemini CLI는 ~/.gemini/tmp/{프로젝트명}/chats/ 에 세션 저장
+                gemini_chat_dir = Path.home() / '.gemini' / 'tmp' / PROJECT_ROOT.name / 'chats'
+                sessions = []
+                if gemini_chat_dir.exists():
+                    for json_file in gemini_chat_dir.glob('session-*.json'):
+                        try:
+                            info = _parse_gemini_session(json_file)
+                            if info:
+                                sessions.append(info)
+                        except Exception:
+                            continue
+                # 최근 활동(last_ts) 기준 내림차순 정렬 → 상위 8개
+                sessions.sort(key=lambda s: s.get('last_ts', ''), reverse=True)
+                self.wfile.write(json.dumps(
+                    {'sessions': sessions[:8]}, ensure_ascii=False
+                ).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps(
+                    {'sessions': [], 'error': str(e)}
+                ).encode('utf-8'))
+
         elif parsed_path.path == '/api/vector/list':
             # 벡터 DB 전체 항목 목록 반환
             # ChromaDB에 저장된 모든 메모리를 id, content, metadata와 함께 반환합니다.
@@ -1575,7 +1698,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 # scripts/ 경로를 sys.path에 추가하여 vector_memory 모듈 로드
-                scripts_dir = str(PROJECT_ROOT / 'scripts')
+                scripts_dir = str(SCRIPTS_DIR)
                 if scripts_dir not in sys.path:
                     sys.path.insert(0, scripts_dir)
                 from vector_memory import VectorMemory
@@ -1597,15 +1720,26 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'items': [], 'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/hive/health':
             # 하이브 시스템 건강 상태 진단
+            # hive_health.json(워치독 엔진 상태) + 파일 존재 여부 실시간 검사를 병합하여 반환
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            
-            home = Path.home()
+
             def check_exists(p): return Path(p).exists()
-            
+
+            # hive_health.json에서 워치독 엔진 상태(DB, 에이전트, 복구 횟수) 로드
+            engine_data = {}
+            health_file = DATA_DIR / "hive_health.json"
+            if health_file.exists():
+                try:
+                    with open(health_file, 'r', encoding='utf-8') as f:
+                        engine_data = json.load(f)
+                except: pass
+
+            # 파일 존재 여부 실시간 검사 결과와 병합
             health = {
+                **engine_data,
                 "constitution": {
                     "rules_md": check_exists(PROJECT_ROOT / "RULES.md"),
                     "gemini_md": check_exists(PROJECT_ROOT / "GEMINI.md"),
@@ -1615,7 +1749,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 "skills": {
                     "master": check_exists(PROJECT_ROOT / ".gemini/skills/master/SKILL.md"),
                     "brainstorm": check_exists(PROJECT_ROOT / ".gemini/skills/brainstorming/SKILL.md"),
-                    "memory_script": check_exists(PROJECT_ROOT / "scripts/memory.py")
+                    "memory_script": check_exists(SCRIPTS_DIR / "memory.py")
                 },
                 "agents": {
                     "claude_config": check_exists(PROJECT_ROOT / ".claude/commands/vibe-master.md"),
@@ -2485,7 +2619,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({'results': [], 'error': '쿼리가 비어있습니다'}, ensure_ascii=False).encode('utf-8'))
                     return
                 # scripts/ 경로를 sys.path에 추가하여 vector_memory 모듈 로드
-                scripts_dir = str(PROJECT_ROOT / 'scripts')
+                scripts_dir = str(SCRIPTS_DIR)
                 if scripts_dir not in sys.path:
                     sys.path.insert(0, scripts_dir)
                 from vector_memory import VectorMemory
@@ -2698,7 +2832,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 # scripts/orchestrator.py를 subprocess로 실행
-                orch_script = str(BASE_DIR.parent / 'scripts' / 'orchestrator.py')
+                orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
                 result = subprocess.run(
                     [sys.executable, orch_script],
                     capture_output=True, text=True, timeout=15, encoding='utf-8',
@@ -2903,7 +3037,7 @@ if __name__ == '__main__':
     
     # 하이브 워치독(Watchdog) 엔진 실행
     def run_watchdog():
-        watchdog_script = PROJECT_ROOT / "scripts" / "hive_watchdog.py"
+        watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
             subprocess.Popen([sys.executable, str(watchdog_script)])
     threading.Thread(target=run_watchdog, daemon=True).start()

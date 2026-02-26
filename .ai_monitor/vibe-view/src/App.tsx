@@ -18,7 +18,8 @@ import {
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
-  Bot, Play, CircleDot, Package, CheckCircle2, Circle, Pin
+  Bot, Play, CircleDot, Package, CheckCircle2, Circle, Pin,
+  Maximize2, Minimize2, FilePlus, FolderPlus
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -125,6 +126,13 @@ export interface OpenFile {
   isLoading: boolean;
   zIndex: number;
 }
+
+// ── 활성 터미널 슬롯 추적 (전역) ──────────────────────────────────────────
+// 마지막으로 포커스된 터미널 슬롯 ID — vibe:activeSlot 이벤트로 업데이트
+let _vibeActiveSlot = 0;
+window.addEventListener('vibe:activeSlot', (e: Event) => {
+  _vibeActiveSlot = (e as CustomEvent<{ slotId: number }>).detail.slotId;
+});
 
 // ── 바이브 스킬 알고리즘 (MCP 없이 직접 주입) ──────────────────────────
 export interface VibeSkill {
@@ -787,13 +795,21 @@ function App() {
 
   // Claude Code 세션별 컨텍스트 사용량 — TerminalSlot에 slotId 순서대로 전달
   const [contextSessions, setContextSessions] = useState<ContextSession[]>([]);
+  // Gemini CLI 세션별 컨텍스트 사용량 — Claude와 동일한 ContextSession 인터페이스 재사용
+  // [2026-02-27] Claude: Gemini 컨텍스트 사용량 표시 기능 추가
+  const [geminiContextSessions, setGeminiContextSessions] = useState<ContextSession[]>([]);
 
-  // 30초마다 컨텍스트 사용량 갱신 (명령어 없이 JSONL 파일 파싱)
+  // 30초마다 Claude/Gemini 컨텍스트 사용량 동시 갱신
   useEffect(() => {
     const doFetch = () => {
       fetch(`${API_BASE}/api/context-usage`)
         .then(res => res.json())
         .then(data => setContextSessions(data.sessions || []))
+        .catch(() => {});
+      // Gemini 세션도 같은 주기로 갱신 (로컬 JSON 파일 읽기 — API 호출 아님)
+      fetch(`${API_BASE}/api/gemini-context-usage`)
+        .then(res => res.json())
+        .then(data => setGeminiContextSessions(data.sessions || []))
         .catch(() => {});
     };
     doFetch();
@@ -962,6 +978,37 @@ function App() {
       .then(res => res.json())
       .then(data => setItems(data))
       .catch(() => { });
+  };
+
+  const createFile = () => {
+    const name = prompt("새 파일 이름을 입력하세요:");
+    if (!name) return;
+    const path = `${currentPath}/${name}`;
+    fetch(`${API_BASE}/api/file-op`, {
+      method: 'POST',
+      body: JSON.stringify({ op: 'create_file', path })
+    }).then(() => refreshItems());
+  };
+
+  const createDir = () => {
+    const name = prompt("새 폴더 이름을 입력하세요:");
+    if (!name) return;
+    const path = `${currentPath}/${name}`;
+    fetch(`${API_BASE}/api/file-op`, {
+      method: 'POST',
+      body: JSON.stringify({ op: 'create_dir', path })
+    }).then(() => refreshItems());
+  };
+
+  const deleteItem = (itemPath: string, name: string) => {
+    if (!confirm(`'${name}'을(를) 삭제하시겠습니까?`)) return;
+    fetch(`${API_BASE}/api/file-op`, {
+      method: 'POST',
+      body: JSON.stringify({ op: 'delete', src: itemPath })
+    }).then(() => {
+      refreshItems();
+      setOpenFiles(prev => prev.filter(f => f.path !== itemPath));
+    });
   };
 
   const handleTreeToggle = (path: string) => {
@@ -2500,7 +2547,8 @@ function App() {
                                 return; // 사용자가 취소하면 스킬 주입 중단
                               }
                             }
-                            window.dispatchEvent(new CustomEvent('vibe:inject', { detail: { text: injectText } }));
+                            // 마지막으로 포커스된 터미널(_vibeActiveSlot)에만 주입
+                            window.dispatchEvent(new CustomEvent(`vibe:inject:${_vibeActiveSlot}`, { detail: { text: injectText } }));
                           }}
                           className="shrink-0 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold transition-all bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30"
                           title={isMcp ? `MCP: ${injectText}` : '알고리즘 직접 주입'}
@@ -2574,6 +2622,30 @@ function App() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar border-t border-white/5 pt-3">
+                  <div className="flex items-center gap-1 px-3 mb-2">
+                    <button 
+                      onClick={createFile}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[11px] text-[#cccccc] transition-colors"
+                      title="새 파일 생성"
+                    >
+                      <FilePlus className="w-3.5 h-3.5" /> 파일
+                    </button>
+                    <button 
+                      onClick={createDir}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[11px] text-[#cccccc] transition-colors"
+                      title="새 폴더 생성"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5" /> 폴더
+                    </button>
+                    <button 
+                      onClick={refreshItems}
+                      className="p-1.5 bg-white/5 hover:bg-white/10 rounded text-[#858585] hover:text-white transition-colors"
+                      title="새로고침"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
                   <button onClick={goUp} className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2a2d2e] rounded text-[13px] transition-colors group">
                     <ChevronLeft className="w-5 h-5 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
                   </button>
@@ -2589,6 +2661,7 @@ function App() {
                         treeChildren={treeChildren}
                         onToggle={handleTreeToggle}
                         onFileOpen={handleFileClick}
+                        onDelete={deleteItem}
                       />
                     ))
                   ) : (
@@ -2602,37 +2675,46 @@ function App() {
                           {item.isDir ? <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
                           <span className="truncate">{item.name}</span>
                         </button>
-                        {!item.isDir && (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                          {!item.isDir && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { detail: { text: item.path } }));
+                              }}
+                              className="p-1 hover:bg-white/10 rounded text-primary transition-all shrink-0"
+                              title="터미널 입력창으로 경로 보내기"
+                            >
+                              <Pin className="w-3 h-3" />
+                            </button>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              window.dispatchEvent(new CustomEvent('vibe:fillInput', { detail: { text: item.path } }));
+                              fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
+                                .then(res => res.json())
+                                .then(data => {
+                                  if (data.status === 'success') {
+                                    const btn = e.currentTarget;
+                                    const originalHtml = btn.innerHTML;
+                                    btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
+                                    setTimeout(() => btn.innerHTML = originalHtml, 1500);
+                                  }
+                                });
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-primary transition-all shrink-0"
-                            title="터미널 입력창으로 경로 보내기"
+                            className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all shrink-0"
+                            title="경로 복사"
                           >
-                            <Pin className="w-3 h-3" />
+                            <ClipboardList className="w-3 h-3" />
                           </button>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
-                              .then(res => res.json())
-                              .then(data => {
-                                if (data.status === 'success') {
-                                  const btn = e.currentTarget;
-                                  const originalHtml = btn.innerHTML;
-                                  btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
-                                  setTimeout(() => btn.innerHTML = originalHtml, 1500);
-                                }
-                              });
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all ml-auto shrink-0"
-                          title="경로 복사"
-                        >
-                          <ClipboardList className="w-3 h-3" />
-                        </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteItem(item.path, item.name); }}
+                            className="p-1 hover:bg-red-500/20 text-[#858585] hover:text-red-500 rounded transition-all shrink-0"
+                            title="삭제"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
@@ -2688,7 +2770,7 @@ function App() {
               'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} claudeSpInstalled={spStatus?.claude?.installed ?? false} geminiSpInstalled={spStatus?.gemini?.installed ?? false} contextSessions={contextSessions} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} claudeSpInstalled={spStatus?.claude?.installed ?? false} geminiSpInstalled={spStatus?.gemini?.installed ?? false} contextSessions={contextSessions} geminiContextSessions={geminiContextSessions} />
               ))}
             </div>
           </main>
@@ -2731,62 +2813,83 @@ function CodeWithLineNumbers({ content, fontSize = '12px' }: { content: string; 
 }
 
 type TreeItem = { name: string; path: string; isDir: boolean };
-function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen }: {
+function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onDelete }: {
   item: TreeItem; depth: number;
   expanded: Record<string, boolean>;
   treeChildren: Record<string, TreeItem[]>;
   onToggle: (path: string) => void;
   onFileOpen: (item: TreeItem) => void;
+  onDelete: (path: string, name: string) => void;
 }) {
   const isOpen = expanded[item.path] || false;
   const kids = treeChildren[item.path] || [];
   const indent = depth * 12;
   if (item.isDir) {
     return (
-      <div>
-        <button
-          onClick={() => onToggle(item.path)}
-          style={{ paddingLeft: `${indent + 6}px` }}
-          className="w-full flex items-center gap-1.5 py-1 pr-3 hover:bg-[#2a2d2e] rounded text-[13px] transition-colors text-[#cccccc]"
-        >
-          {isOpen
-            ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-[#858585]" />
-            : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#858585]" />}
-          {isOpen
-            ? <VscFolderOpened className="w-5 h-5 text-[#dcb67a] shrink-0" />
-            : <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" />}
-          <span className="truncate">{item.name}</span>
-        </button>
+      <div className="group/node">
+        <div className="flex items-center hover:bg-[#2a2d2e] rounded transition-colors pr-2">
+          <button
+            onClick={() => onToggle(item.path)}
+            style={{ paddingLeft: `${indent + 6}px` }}
+            className="flex-1 flex items-center gap-1.5 py-1 text-[13px] text-[#cccccc] overflow-hidden"
+          >
+            {isOpen
+              ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-[#858585]" />
+              : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#858585]" />}
+            {isOpen
+              ? <VscFolderOpened className="w-5 h-5 text-[#dcb67a] shrink-0" />
+              : <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" />}
+            <span className="truncate">{item.name}</span>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(item.path, item.name); }}
+            className="opacity-0 group-hover/node:opacity-100 p-1 hover:bg-red-500/20 text-[#858585] hover:text-red-500 rounded transition-all"
+            title="폴더 삭제"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
         {isOpen && kids.length === 0 && (
           <div style={{ paddingLeft: `${indent + 32}px` }} className="py-1 text-[11px] text-[#858585] italic">비어 있음</div>
         )}
         {isOpen && kids.map(child => (
           <FileTreeNode key={child.path} item={child} depth={depth + 1}
             expanded={expanded} treeChildren={treeChildren}
-            onToggle={onToggle} onFileOpen={onFileOpen} />
+            onToggle={onToggle} onFileOpen={onFileOpen} onDelete={onDelete} />
         ))}
       </div>
     );
   }
   return (
-    <button
-      onClick={() => onFileOpen(item)}
-      style={{ paddingLeft: `${indent + 24}px` }}
-      className="group w-full flex items-center gap-2.5 py-1 pr-3 hover:bg-primary/20 rounded text-[13px] transition-colors text-white"
-    >
-      {getFileIcon(item.name)}
-      <span className="truncate flex-1 text-left font-medium">{item.name}</span>
+    <div className="group/node flex items-center hover:bg-primary/20 rounded transition-colors pr-2">
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          window.dispatchEvent(new CustomEvent('vibe:fillInput', { detail: { text: item.path } }));
-        }}
-        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/20 rounded text-primary transition-all shrink-0"
-        title="터미널 입력창으로 경로 보내기"
+        onClick={() => onFileOpen(item)}
+        style={{ paddingLeft: `${indent + 24}px` }}
+        className="flex-1 flex items-center gap-2.5 py-1 text-[13px] text-white overflow-hidden"
       >
-        <Pin className="w-3.5 h-3.5" />
+        {getFileIcon(item.name)}
+        <span className="truncate font-medium text-left">{item.name}</span>
       </button>
-    </button>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover/node:opacity-100 transition-all">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { detail: { text: item.path } }));
+          }}
+          className="p-1 hover:bg-white/20 rounded text-primary transition-all shrink-0"
+          title="터미널 입력창으로 경로 보내기"
+        >
+          <Pin className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(item.path, item.name); }}
+          className="p-1 hover:bg-red-500/20 text-[#858585] hover:text-red-500 rounded transition-all shrink-0"
+          title="파일 삭제"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2820,10 +2923,12 @@ function DiffViewer({ diff }: { diff: string }) {
 
 function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile, idx: number, bringToFront: (id: string) => void, closeFile: (id: string) => void }) {
   const [position, setPosition] = useState({ x: 100 + (idx * 30), y: 100 + (idx * 30) });
+  const [isMaximized, setIsMaximized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (isMaximized) return; // 최대화 상태에서는 드래그 금지
     setIsDragging(true);
     bringToFront(file.id);
     dragStartPos.current = { x: e.clientX - position.x, y: e.clientY - position.y };
@@ -2831,7 +2936,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (isDragging) {
+    if (isDragging && !isMaximized) {
       setPosition({
         x: e.clientX - dragStartPos.current.x,
         y: e.clientY - dragStartPos.current.y
@@ -2844,20 +2949,30 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
+  const toggleMaximize = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsMaximized(!isMaximized);
+    bringToFront(file.id);
+  };
+
   return (
     <div 
       onPointerDown={() => bringToFront(file.id)}
       style={{ 
         zIndex: file.zIndex, 
-        left: position.x, 
-        top: position.y,
-        resize: 'both', 
-        overflow: 'hidden' 
+        left: isMaximized ? 0 : position.x, 
+        top: isMaximized ? 0 : position.y,
+        width: isMaximized ? '100%' : undefined,
+        height: isMaximized ? '100%' : undefined,
+        resize: isMaximized ? 'none' : 'both', 
+        overflow: 'hidden',
+        borderRadius: isMaximized ? 0 : '12px',
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
       }}
-      className="absolute w-[550px] min-w-[300px] h-[500px] min-h-[200px] bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl rounded-xl flex flex-col"
+      className={`absolute ${isMaximized ? 'w-full h-full' : 'w-[550px] h-[500px]'} min-w-[300px] min-h-[200px] bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col`}
     >
       <div 
-        className="h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 cursor-move select-none"
+        className={`h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 ${isMaximized ? 'cursor-default' : 'cursor-move'} select-none`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -2866,14 +2981,24 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
           {getFileIcon(file.name)}
           {file.name}
         </div>
-        <button 
-          onClick={(e) => { e.stopPropagation(); closeFile(file.id); }} 
-          onPointerDownCapture={e => e.stopPropagation()}
-          className="p-1 hover:bg-white/10 rounded text-[#cccccc] transition-colors cursor-pointer"
-          title="Close"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button 
+            onClick={toggleMaximize}
+            onPointerDownCapture={e => e.stopPropagation()}
+            className="p-1 hover:bg-white/10 rounded text-[#cccccc] transition-colors cursor-pointer"
+            title={isMaximized ? "Restore" : "Maximize"}
+          >
+            {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); closeFile(file.id); }} 
+            onPointerDownCapture={e => e.stopPropagation()}
+            className="p-1 hover:bg-white/10 rounded text-[#cccccc] transition-colors cursor-pointer"
+            title="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
       <div 
         className="flex-1 overflow-auto bg-transparent relative custom-scrollbar"
@@ -2900,7 +3025,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, claudeSpInstalled, geminiSpInstalled, contextSessions }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], claudeSpInstalled: boolean, geminiSpInstalled: boolean, contextSessions: ContextSession[] }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, claudeSpInstalled, geminiSpInstalled, contextSessions, geminiContextSessions }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], claudeSpInstalled: boolean, geminiSpInstalled: boolean, contextSessions: ContextSession[], geminiContextSessions: ContextSession[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -2966,12 +3091,16 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   // 컨텍스트 사용량 패널 — 기본 숨김, 클릭 시 토글
   const [showContextPanel, setShowContextPanel] = useState(false);
-  // 이 슬롯에 대응하는 세션 (최근 활동 순 배열에서 slotId 번째)
-  const ctxSession = contextSessions[slotId] ?? null;
-  // 컨텍스트 창 최대 토큰 (현재 Claude 전 모델 공통 200k)
-  const CTX_MAX = 200000;
+  // activeAgent에 따라 Claude/Gemini 세션 선택 — slotId 번째 세션 사용
+  // [2026-02-27] Claude: Gemini 컨텍스트 분기 추가
+  const isGeminiAgent = activeAgent === 'gemini';
+  const ctxSession = isGeminiAgent
+    ? (geminiContextSessions[slotId] ?? null)
+    : (contextSessions[slotId] ?? null);
+  // 컨텍스트 창 최대 토큰: Claude=200k, Gemini=1M
+  const CTX_MAX = isGeminiAgent ? 1000000 : 200000;
   const ctxPct = ctxSession ? Math.round((ctxSession.input_tokens / CTX_MAX) * 100) : 0;
-  // 헤더 버튼 표시용 간결한 토큰 수 (예: "57k")
+  // 헤더 버튼 표시용 간결한 토큰 수 (예: "57k/200k" 또는 "54k/1000k")
   const ctxLabel = ctxSession
     ? `${Math.round(ctxSession.input_tokens / 1000)}k/${Math.round(CTX_MAX / 1000)}k`
     : '—';
@@ -3230,25 +3359,6 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     };
   }, [slotId]);
 
-  // vibe:inject / vibe:fillInput 글로벌 이벤트 → 슬롯 0 이 기본 대상
-  useEffect(() => {
-    if (slotId !== 0) return;
-    const handler = (e: Event) => {
-      const { text } = (e as CustomEvent<{ text: string }>).detail;
-      handleSend(text);
-    };
-    const fillHandler = (e: Event) => {
-      const { text } = (e as CustomEvent<{ text: string }>).detail;
-      setInputValue(prev => prev ? `${prev} "${text}"` : text);
-      setTimeout(() => inputTextareaRef.current?.focus(), 10);
-    };
-    window.addEventListener('vibe:inject', handler);
-    window.addEventListener('vibe:fillInput', fillHandler);
-    return () => {
-      window.removeEventListener('vibe:inject', handler);
-      window.removeEventListener('vibe:fillInput', fillHandler);
-    };
-  }, [slotId]);
 
   const slotLogs = logs.filter(l => {
     let hash = 0;
@@ -3374,7 +3484,8 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
             </>
           ) : (
             <div className="text-[9px] text-[#555] italic text-center py-0.5">
-              세션 없음 — Claude Code를 실행하면 자동으로 감지됩니다
+              {/* activeAgent에 따라 안내 메시지 분기 */}
+              세션 없음 — {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'}를 실행하면 자동으로 감지됩니다
             </div>
           )}
         </div>
@@ -3423,12 +3534,12 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
             <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 opacity-80 hover:opacity-100 transition-opacity items-center">
-               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
                {shortcuts.map((sc, i) => (
                  <button key={i} onClick={() => handleSend(sc.cmd)} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-white/10 rounded text-[10px] whitespace-nowrap border border-white/5 transition-colors" title={sc.cmd}>
                    {sc.label}
                  </button>
                ))}
+               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
             </div>
             <div className="flex gap-2 items-end relative">
               <textarea

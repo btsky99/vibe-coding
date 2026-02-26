@@ -1,9 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+import winpty
+
+winpty_dir = os.path.dirname(winpty.__file__)
+winpty_binaries = [
+    (os.path.join(winpty_dir, 'winpty.dll'), 'winpty'),
+    (os.path.join(winpty_dir, 'winpty-agent.exe'), 'winpty'),
+    (os.path.join(winpty_dir, 'conpty.dll'), 'winpty'),
+    (os.path.join(winpty_dir, 'OpenConsole.exe'), 'winpty'),
+]
 
 a = Analysis(
     ['server.py'],
     pathex=[],
-    binaries=[('C:\\Users\\com\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\winpty/winpty.dll', 'winpty'), ('C:\\Users\\com\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\winpty/winpty-agent.exe', 'winpty'), ('C:\\Users\\com\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\winpty/conpty.dll', 'winpty'), ('C:\\Users\\com\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\winpty/OpenConsole.exe', 'winpty')],
+    binaries=winpty_binaries,
     datas=[
         ('src', 'src'),
         ('bin', 'bin'),
