@@ -59,3 +59,81 @@
 ---
 **작성일**: 2026-02-26
 **에이전트**: Gemini-1 (Master)
+
+---
+
+# 🔍 ThoughtTrace 벡터 메모리 검색 UI 추가 계획
+
+**목표**: 오른쪽 패널(ThoughtTrace)에 탭 구조 추가 — [🧠 사고] / [🔍 메모리] 전환
+**승인일**: 2026-02-26
+**담당**: Claude
+**상태**: 실행 대기 중
+
+## Task 1: server.py에 벡터 검색 API 엔드포인트 추가
+
+```
+[ ] Task 1: /api/vector/search (POST) 및 /api/vector/list (GET) 엔드포인트 구현
+    파일: .ai_monitor/server.py
+    방법:
+      - 파일 상단 sys.path에 scripts/ 디렉터리 추가 (이미 있으면 생략)
+      - do_GET: /api/vector/list → VectorMemory().collection.get() 전체 항목 반환
+        응답: { "items": [{ "id", "content", "metadata" }] }
+      - do_POST: /api/vector/search → body { "query": str, "n": int=5 } 받아
+        VectorMemory().search(query, n) 호출 후 결과 반환
+        응답: { "results": [{ "id", "content", "metadata", "distance" }] }
+      - 예외 처리: chromadb 미설치 시 503 + 안내 메시지 반환
+    검증: 서버 재시작 후 POST /api/vector/search {"query":"테스트"} 응답 200 확인
+```
+
+## Task 2: ThoughtTrace.tsx — 탭 UI + 벡터 검색 패널 구현
+
+```
+[ ] Task 2: ThoughtTrace 컴포넌트에 탭 전환 + 벡터 검색 UI 추가
+    파일: .ai_monitor/vibe-view/src/components/ThoughtTrace.tsx
+    의존성: Task 1 완료 후 시작
+    방법:
+      - import 추가: Search, Database, Loader2 (lucide-react)
+      - state 추가:
+          activeTab: 'thoughts' | 'vector'
+          vectorQuery: string
+          vectorResults: VectorResult[]
+          isSearching: boolean
+      - 헤더 영역에 탭 버튼 삽입 (isOpen일 때만 표시):
+          [🧠 사고] [🔍 메모리]
+          활성 탭: border-b-2 border-primary 강조
+      - 기존 thoughts 렌더링을 activeTab === 'thoughts' 조건으로 감싸기
+      - vector 탭 UI:
+          1) 검색 입력창 + Enter/버튼으로 POST /api/vector/search 호출
+          2) 로딩 중: Loader2 스피너
+          3) 결과 없음: Database 아이콘 + "저장된 기억 없음" 안내
+          4) 결과 카드:
+             - content 앞 100자 미리보기
+             - 유사도 배지: ((1 - distance) * 100).toFixed(0) + '%'
+             - 유사도 70%↑: 초록, 50~70: 노랑, 50↓: 회색
+             - 클릭 시 전체 내용 expand
+             - 메타데이터 태그 (type, agent 등)
+      - 서버 포트: App.tsx에서 사용하는 방식 동일하게 window.SERVER_PORT 또는 8765 기본값 사용
+    검증: 탭 클릭 → 검색창 표시 → 쿼리 입력 → 결과 카드 렌더링 확인
+```
+
+## Task 3: 프론트엔드 빌드 및 배포
+
+```
+[ ] Task 3: npm run build 실행 후 dist/ 반영 확인
+    파일: .ai_monitor/vibe-view/
+    의존성: Task 2 완료 후 시작
+    방법:
+      - cd .ai_monitor/vibe-view && npm run build
+      - 빌드 성공 여부 확인
+    검증: .ai_monitor/dist/index.html 수정 시각이 현재 시각 기준 최신인지 확인
+```
+
+## 완료 기준
+- [ ] 오른쪽 패널에서 [🧠 사고] / [🔍 메모리] 탭 전환 가능
+- [ ] 검색창 쿼리 입력 → 결과 카드 표시 (유사도 % 포함)
+- [ ] 빈 상태 UI 처리 완료
+- [ ] 빌드 성공, dist/ 최신화
+
+---
+**작성일**: 2026-02-26
+**담당 에이전트**: Claude

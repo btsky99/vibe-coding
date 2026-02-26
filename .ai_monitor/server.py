@@ -1371,6 +1371,35 @@ class SSEHandler(BaseHTTPRequestHandler):
                 'project_name': PROJECT_ROOT.name,
                 'project_root': str(PROJECT_ROOT).replace('\\', '/'),
             }, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/vector/list':
+            # 벡터 DB 전체 항목 목록 반환
+            # ChromaDB에 저장된 모든 메모리를 id, content, metadata와 함께 반환합니다.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                # scripts/ 경로를 sys.path에 추가하여 vector_memory 모듈 로드
+                scripts_dir = str(PROJECT_ROOT / 'scripts')
+                if scripts_dir not in sys.path:
+                    sys.path.insert(0, scripts_dir)
+                from vector_memory import VectorMemory
+                vm = VectorMemory()
+                raw = vm.collection.get()
+                items = []
+                for i, doc_id in enumerate(raw.get('ids', [])):
+                    items.append({
+                        'id': doc_id,
+                        'content': raw['documents'][i] if raw.get('documents') else '',
+                        'metadata': raw['metadatas'][i] if raw.get('metadatas') else {},
+                    })
+                self.wfile.write(json.dumps({'items': items}, ensure_ascii=False).encode('utf-8'))
+            except ImportError:
+                self.wfile.write(json.dumps({
+                    'items': [], 'error': 'chromadb 미설치 — pip install chromadb'
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'items': [], 'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/hive/health':
             # 하이브 시스템 건강 상태 진단
             self.send_response(200)
@@ -2196,6 +2225,35 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/vector/search':
+            # 벡터 DB 시맨틱 검색 — 쿼리 텍스트와 의미적으로 유사한 메모리를 찾아 반환합니다.
+            # body: { "query": "검색어", "n": 5 }
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                query = str(body.get('query', '')).strip()
+                n = int(body.get('n', 5))
+                if not query:
+                    self.wfile.write(json.dumps({'results': [], 'error': '쿼리가 비어있습니다'}, ensure_ascii=False).encode('utf-8'))
+                    return
+                # scripts/ 경로를 sys.path에 추가하여 vector_memory 모듈 로드
+                scripts_dir = str(PROJECT_ROOT / 'scripts')
+                if scripts_dir not in sys.path:
+                    sys.path.insert(0, scripts_dir)
+                from vector_memory import VectorMemory
+                vm = VectorMemory()
+                results = vm.search(query, n_results=n)
+                self.wfile.write(json.dumps({'results': results}, ensure_ascii=False).encode('utf-8'))
+            except ImportError:
+                self.wfile.write(json.dumps({
+                    'results': [], 'error': 'chromadb 미설치 — pip install chromadb'
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'results': [], 'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/mcp/apikey':
             # Smithery API 키 저장
             self.send_response(200)

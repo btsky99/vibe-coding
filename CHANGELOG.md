@@ -1,5 +1,19 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-02-26] - ThoughtTrace 벡터 메모리 검색 UI 추가
+
+### 신규 기능
+- **[Feature] ThoughtTrace 탭 구조 도입**: 오른쪽 패널에 [🧠 사고] / [🔍 메모리] 탭 전환 기능 추가
+- **[Feature] 벡터 메모리 시맨틱 검색 UI**: 검색창 + 유사도 결과 카드 (%, 색상 표시, expand/collapse)
+- **[Feature] `/api/vector/search` (POST)**: ChromaDB 시맨틱 검색 REST API
+- **[Feature] `/api/vector/list` (GET)**: 벡터 DB 전체 항목 조회 REST API
+
+### 변경 파일
+- `.ai_monitor/server.py` — 벡터 검색 API 2개 엔드포인트 추가
+- `.ai_monitor/vibe-view/src/components/ThoughtTrace.tsx` — 탭 + 벡터 검색 UI
+
+---
+
 ## [2026-02-26] - 하이브 에볼루션 v5.0 (UI/UX 고도화 및 리사이징 기능)
 
 ### 레이아웃 및 UX 개선
