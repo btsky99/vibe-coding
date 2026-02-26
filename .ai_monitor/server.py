@@ -5,6 +5,11 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-02-26] - Claude (버그 수정)
+#   - 다른 PC 설치 버전에서 Gemini 스킬 설치 실패 문제 수정
+#   - 원인: /api/superpowers/install Gemini 분기가 복사 없이 확인만 하고,
+#           PROJECT_ROOT에 .gemini/skills/가 없으면 즉시 오류 발생
+#   - 수정: BASE_DIR(빌드 내장 경로) → PROJECT_ROOT 실제 파일 복사로 변경
 # [2026-02-25] - Gemini (지능형 오케스트레이터 및 디버깅)
 #   - sqlite3.OperationalError (no such column: project) 버그 수정: DB 초기화 시 인덱스 생성 시점을 마이그레이션 이후로 조정.
 # [2026-02-25] - Gemini (지능형 오케스트레이터 업그레이드)
@@ -590,19 +595,7 @@ AGENT_STATUS = {}
 AGENT_STATUS_LOCK = threading.Lock()
 # ─────────────────────────────────────────────────────────────────────────────
 
-last_heartbeat_time = time.time()
-client_connected_once = False
 main_window = None
-
-def monitor_heartbeat():
-    global last_heartbeat_time, client_connected_once
-    while True:
-        time.sleep(2)
-        # 30초 이상 하트비트가 끊기면 자폭 (즉각 종료)
-        # 5초는 너무 짧아 네트워크 지연 시 위험하므로 30초로 완화
-        if client_connected_once and (time.time() - last_heartbeat_time > 30):
-            print("브라우저 창이 닫혀 하트비트가 끊어졌습니다. 서버를 자동 종료합니다...")
-            os._exit(0)
 
 import string
 from urllib.parse import urlparse, parse_qs
@@ -659,9 +652,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     print(f"SSE DB Stream error: {e}")
                     time.sleep(1)
         elif parsed_path.path == '/api/heartbeat':
-            global last_heartbeat_time, client_connected_once
-            last_heartbeat_time = time.time()
-            client_connected_once = True
+            # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
             self.send_response(200)
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
@@ -825,6 +816,52 @@ class SSEHandler(BaseHTTPRequestHandler):
                     result = {"status": "error", "message": str(e)}
             
             self.wfile.write(json.dumps(result).encode('utf-8'))
+        elif parsed_path.path == '/api/hive/health':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            health_file = DATA_DIR / "hive_health.json"
+            health_data = {"status": "unknown"}
+            if health_file.exists():
+                try:
+                    with open(health_file, 'r', encoding='utf-8') as f:
+                        health_data = json.load(f)
+                except: pass
+            self.wfile.write(json.dumps(health_data, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/hive/skill-analysis':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            analysis_file = DATA_DIR / "skill_analysis.json"
+            analysis_data = {"proposals": []}
+            if analysis_file.exists():
+                try:
+                    with open(analysis_file, 'r', encoding='utf-8') as f:
+                        analysis_data = json.load(f)
+                except: pass
+            self.wfile.write(json.dumps(analysis_data, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/hive/health/repair':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                watchdog_script = PROJECT_ROOT / "scripts" / "hive_watchdog.py"
+                result_proc = subprocess.run(
+                    [sys.executable, str(watchdog_script), "--check"],
+                    capture_output=True, text=True, encoding='utf-8'
+                )
+                output = result_proc.stdout
+                json_start = output.find('{')
+                if json_start != -1:
+                    result = json.loads(output[json_start:])
+                else:
+                    result = {"status": "error", "message": "Failed to parse watchdog output"}
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/dirs':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1317,7 +1354,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     "memory_script": check_exists(PROJECT_ROOT / "scripts/memory.py")
                 },
                 "agents": {
-                    "claude_config": check_exists(home / ".claude/commands/vibe-master.md"),
+                    "claude_config": check_exists(PROJECT_ROOT / ".claude/commands/vibe-master.md"),
                     "gemini_config": check_exists(PROJECT_ROOT / ".gemini/settings.json")
                 },
                 "data": {
@@ -1460,16 +1497,15 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         elif parsed_path.path == '/api/superpowers/status':
             # Vibe Coding 자체 스킬 설치 상태 조회
-            # Claude: ~/.claude/commands/vibe-master.md 존재 여부
-            # Gemini: 현재 프로젝트 .gemini/skills/master/SKILL.md 존재 여부
+            # Claude: PROJECT_ROOT/.claude/commands/vibe-master.md 존재 여부 (프로젝트별)
+            # Gemini: 현재 프로젝트 .gemini/skills/master/SKILL.md 존재 여부 (프로젝트별)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            home = Path.home()
             VIBE_SKILL_NAMES = ['master', 'brainstorm', 'debug', 'write-plan', 'execute-plan', 'tdd', 'code-review']
-            # Claude: ~/.claude/commands/vibe-master.md 존재 여부로 판단
-            claude_cmd_dir = home / '.claude' / 'commands'
+            # Claude: 프로젝트별 설치 — PROJECT_ROOT/.claude/commands/vibe-master.md 존재 여부로 판단
+            claude_cmd_dir = PROJECT_ROOT / '.claude' / 'commands'
             claude_installed = (claude_cmd_dir / 'vibe-master.md').exists()
             claude_skills = [f.stem.replace('vibe-', '') for f in claude_cmd_dir.glob('vibe-*.md')] if claude_installed else []
             # Gemini: 현재 프로젝트 .gemini/skills/master 존재 여부로 판단
@@ -1481,7 +1517,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'installed': claude_installed,
                     'version': 'vibe-skills' if claude_installed else None,
                     'skills': claude_skills,
-                    'commands': [f'/vibe:{s}' for s in VIBE_SKILL_NAMES],
+                    'commands': [f'/vibe-{s}' for s in VIBE_SKILL_NAMES],
                     'repo': 'btsky99/vibe-coding (내장)',
                 },
                 'gemini': {
@@ -1644,6 +1680,48 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "success", "projects": projects}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/hive/approve-skill':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                skill_name = data.get('skill_name')
+                keyword = data.get('keyword', skill_name)
+                
+                if not skill_name:
+                    self.wfile.write(json.dumps({"status": "error", "message": "Skill name is required"}).encode('utf-8'))
+                    return
+
+                skill_dir = PROJECT_ROOT / ".gemini" / "skills" / skill_name
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                
+                skill_file = skill_dir / "SKILL.md"
+                template = f"""# 🧠 스킬: {skill_name}
+
+이 스킬은 '{keyword}' 관련 작업을 최적화하기 위해 자동으로 제안된 스킬입니다.
+
+## 🏁 사용 시점
+- '{keyword}' 키워드가 포함된 작업 요청 시
+- 반복적인 {keyword} 관련 파일 수정이 필요할 때
+
+## 🛠️ 핵심 패턴
+1. 관련 파일 분석
+2. {keyword} 표준 가이드라인 적용
+3. 변경 사항 검증
+
+---
+**생성일**: {datetime.now().strftime("%Y-%m-%d")}
+**상태**: 초안 (Draft)
+"""
+                with open(skill_file, "w", encoding="utf-8") as f:
+                    f.write(template)
+                
+                self.wfile.write(json.dumps({"status": "success", "path": str(skill_file)}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/config/update':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2158,8 +2236,8 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         elif parsed_path.path == '/api/superpowers/install':
             # Vibe Coding 자체 스킬 설치 — 외부 GitHub 의존 없이 내장 파일 복사
-            # Claude: skills/claude/vibe-*.md → ~/.claude/commands/
-            # Gemini: .gemini/skills/ 는 이미 프로젝트 내에 존재 (별도 설치 불필요)
+            # Claude: skills/claude/vibe-*.md → PROJECT_ROOT/.claude/commands/ (프로젝트별)
+            # Gemini: BASE_DIR 내장 → PROJECT_ROOT/.gemini/skills/ (프로젝트별)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2178,7 +2256,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         skills_src = PROJECT_ROOT / 'skills' / 'claude'
                     if not skills_src.exists():
                         raise Exception('내장 스킬 파일을 찾을 수 없습니다 (skills/claude/)')
-                    cmd_dir = home / '.claude' / 'commands'
+                    cmd_dir = PROJECT_ROOT / '.claude' / 'commands'
                     cmd_dir.mkdir(parents=True, exist_ok=True)
                     installed = []
                     for md in skills_src.glob('vibe-*.md'):
@@ -2192,15 +2270,22 @@ class SSEHandler(BaseHTTPRequestHandler):
                     }, ensure_ascii=False).encode('utf-8'))
 
                 elif tool == 'gemini':
-                    # Gemini 스킬은 프로젝트 내 .gemini/skills/ 에 이미 존재
-                    # 글로벌 ~/.gemini/skills/ 에도 복사 (옵션)
-                    gemini_skills_src = PROJECT_ROOT / '.gemini' / 'skills'
+                    # 빌드 버전: BASE_DIR(sys._MEIPASS)에 내장된 스킬을 PROJECT_ROOT에 복사
+                    # 개발 버전: PROJECT_ROOT/.gemini/skills/ 가 이미 존재하므로 소스=대상
+                    import shutil as _shutil
+                    gemini_skills_src = BASE_DIR / '.gemini' / 'skills'
                     if not gemini_skills_src.exists():
-                        raise Exception('.gemini/skills/ 폴더를 찾을 수 없습니다')
-                    installed = [d.name for d in gemini_skills_src.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
+                        gemini_skills_src = PROJECT_ROOT / '.gemini' / 'skills'
+                    if not gemini_skills_src.exists():
+                        raise Exception('내장 Gemini 스킬을 찾을 수 없습니다 (.gemini/skills/)')
+                    target_dir = PROJECT_ROOT / '.gemini' / 'skills'
+                    # 소스와 대상이 다를 때만 복사 (설치 버전에서 실제 파일 배포)
+                    if gemini_skills_src.resolve() != target_dir.resolve():
+                        _shutil.copytree(str(gemini_skills_src), str(target_dir), dirs_exist_ok=True)
+                    installed = [d.name for d in target_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
                     self.wfile.write(json.dumps({
                         'status': 'success',
-                        'message': f'Gemini 스킬 확인 완료 ({len(installed)}개): {", ".join(installed)} — 프로젝트 내 .gemini/skills/ 사용 중'
+                        'message': f'Gemini 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
                     }, ensure_ascii=False).encode('utf-8'))
                 else:
                     self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
@@ -2221,7 +2306,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 import shutil
 
                 if tool == 'claude':
-                    cmd_dir = home / '.claude' / 'commands'
+                    # 프로젝트별 설치 경로에서 제거
+                    cmd_dir = PROJECT_ROOT / '.claude' / 'commands'
                     removed = []
                     for md in cmd_dir.glob('vibe-*.md'):
                         md.unlink()
@@ -2418,8 +2504,15 @@ if __name__ == '__main__':
 
     # 1. 백그라운드 스레드 시작
     threading.Thread(target=start_ws_server, daemon=True).start()
-    threading.Thread(target=monitor_heartbeat, daemon=True).start()
+
     MemoryWatcher().start()  # 에이전트 메모리 파일 → shared_memory.db 자동 동기화
+    
+    # 하이브 워치독(Watchdog) 엔진 실행
+    def run_watchdog():
+        watchdog_script = PROJECT_ROOT / "scripts" / "hive_watchdog.py"
+        if watchdog_script.exists():
+            subprocess.Popen([sys.executable, str(watchdog_script)])
+    threading.Thread(target=run_watchdog, daemon=True).start()
     
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:

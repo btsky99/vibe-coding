@@ -6,6 +6,7 @@
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
  *          (2026-02-24: 한글 IME 엔터 키 즉시 전송 로직 최종 개선 및 재빌드 완료)
+ * [2026-02-26] Claude: Superpowers 카드 repo·commands 하드코딩 → info?.repo / info?.commands 사용으로 수정
  * ------------------------------------------------------------------------
  */
 
@@ -125,49 +126,49 @@ export const VIBE_SKILLS: VibeSkill[] = [
   {
     name: 'master',
     desc: '중앙 컨트롤 타워 — 요청 분석 → 하위 워크플로우 자동 라우팅',
-    claudeCmd: '/vibe:master',
+    claudeCmd: '/vibe-master',
     geminiCmd: '/master',
     algo: '🌐 [마스터 컨트롤 프로토콜 가동] .gemini/skills/master/SKILL.md를 읽고 PROJECT_MAP.md를 기반으로 상황을 조율하세요. 어떤 작업을 도와드릴까요?',
   },
   {
     name: 'brainstorm',
     desc: '소크라테스식 요구사항 정제',
-    claudeCmd: '/vibe:brainstorm',
+    claudeCmd: '/vibe-brainstorm',
     geminiCmd: '/brainstorming',
     algo: '🧠 [브레인스토밍 6단계 절차 가동] .gemini/skills/brainstorming/SKILL.md를 읽고 사용자 의도를 분석하여 승인된 계획을 수립하세요. 지금 무엇을 만들고 싶으신가요?',
   },
   {
     name: 'write-plan',
     desc: '마이크로태스크 단위 계획 작성',
-    claudeCmd: '/vibe:write-plan',
+    claudeCmd: '/vibe-write-plan',
     geminiCmd: '/write-plan',
     algo: '📝 [구현 계획 작성 모드] .gemini/skills/write-plan/SKILL.md를 참고하여 TDD 기반의 상세 계획을 수립하세요. 어떤 기능의 계획을 짤까요?',
   },
   {
     name: 'execute-plan',
     desc: '계획 순서대로 실행',
-    claudeCmd: '/vibe:execute-plan',
+    claudeCmd: '/vibe-execute-plan',
     geminiCmd: '/execute-plan',
     algo: '🚀 [계획 실행 모드] .gemini/skills/execute-plan/SKILL.md를 참고하여 승인된 계획대로 구현을 시작하세요. 어떤 계획 파일을 읽을까요?',
   },
   {
     name: 'tdd',
     desc: 'RED → GREEN → REFACTOR 사이클',
-    claudeCmd: '/vibe:tdd',
+    claudeCmd: '/vibe-tdd',
     geminiCmd: '/tdd',
     algo: '🧪 [TDD 모드 가동] .gemini/skills/tdd/SKILL.md를 참고하여 실패하는 테스트부터 작성하는 RED-GREEN-REFACTOR 사이클을 시작합니다. 어떤 기능을 구현할까요?',
   },
   {
     name: 'debug',
     desc: '4단계 근본원인 분석',
-    claudeCmd: '/vibe:debug',
+    claudeCmd: '/vibe-debug',
     geminiCmd: '/systematic-debugging',
     algo: '🔍 [지능형 디버깅 가동] .gemini/skills/systematic-debugging/SKILL.md를 참고하여 원인 분석 후 수정을 시작하세요. 어떤 버그를 추적할까요?',
   },
   {
     name: 'code-review',
     desc: 'OWASP 보안 + 품질 자동 검증',
-    claudeCmd: '/vibe:code-review',
+    claudeCmd: '/vibe-code-review',
     geminiCmd: '/code-review',
     algo: '🧐 [코드 리뷰 모드] .gemini/skills/code-review/SKILL.md를 참고하여 품질/보안을 검증하세요. 무엇을 리뷰할까요?',
   },
@@ -479,6 +480,7 @@ function App() {
   const [spLoading, setSpLoading] = useState<Record<string, boolean>>({});
   const [spMsg, setSpMsg] = useState('');
   const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
+  const [skillProposals, setSkillProposals] = useState<{ keyword: string; count: number; suggested_skill_name: string; description: string }[]>([]);
 
   const fetchHiveHealth = () => {
     fetch(`${API_BASE}/api/hive/health`)
@@ -487,13 +489,36 @@ function App() {
       .catch(() => {});
   };
 
+  const fetchSkillAnalysis = () => {
+    fetch(`${API_BASE}/api/hive/skill-analysis`)
+      .then(res => res.json())
+      .then(data => setSkillProposals(data.proposals || []))
+      .catch(() => {});
+  };
+
+  const approveSkill = (proposal: { keyword: string; suggested_skill_name: string }) => {
+    fetch(`${API_BASE}/api/hive/approve-skill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill_name: proposal.suggested_skill_name, keyword: proposal.keyword })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === 'success') {
+        setSpMsg(`새로운 스킬 [${proposal.suggested_skill_name}]이(가) 등록되었습니다.`);
+        fetchSkillAnalysis();
+        fetchHiveHealth();
+      }
+    });
+  };
+
   const fetchSpStatus = () => {
     fetch(`${API_BASE}/api/superpowers/status`)
       .then(res => res.json())
       .then(data => setSpStatus(data))
       .catch(() => {});
   };
-  useEffect(() => { fetchSpStatus(); fetchHiveHealth(); }, []);
+  useEffect(() => { fetchSpStatus(); fetchHiveHealth(); fetchSkillAnalysis(); }, []);
 
   const spInstall = (tool: 'claude' | 'gemini') => {
     setSpLoading(p => ({ ...p, [tool]: true }));
@@ -1201,15 +1226,15 @@ function App() {
 
         {/* Sidebar (Explorer) */}
         <motion.div
-          animate={{ width: isSidebarOpen ? 260 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
+          animate={{ width: isSidebarOpen ? 400 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-x-auto overflow-y-hidden custom-scrollbar"
         >
-          <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ Superpowers' : 'Hive Mind'}</span>
-            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
+          <div className="h-10 px-4 flex items-center justify-between text-[14px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[390px]">
+            <span className="flex items-center gap-2"><ChevronDown className="w-4 h-4" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ Superpowers' : 'Hive Mind'}</span>
+            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1 rounded transition-colors"><X className="w-5 h-5" /></button>
           </div>
 
-          <div className="p-3 flex-1 overflow-hidden flex flex-col">
+          <div className="p-4 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[390px]">
             {activeTab === 'messages' ? (
               /* ── 메시지 채널 패널 ── */
               <div className="flex-1 flex flex-col overflow-hidden gap-2">
@@ -2041,51 +2066,126 @@ function App() {
                   {!hiveHealth ? (
                     <div className="text-[9px] text-[#555] italic">진단 데이터 로드 중...</div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                      {/* 코어 지침 */}
-                      <div className="flex flex-col gap-0.5">
-                        <div className="text-[8px] text-[#666] mb-0.5">📜 코어 지침</div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">RULES.md</span>
-                          {hiveHealth.constitution.rules_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                    <div className="flex flex-col gap-2">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        {/* 코어 지침 */}
+                        <div className="flex flex-col gap-0.5">
+                          <div className="text-[8px] text-[#666] mb-0.5">📜 코어 지침</div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">RULES.md</span>
+                            {hiveHealth.constitution?.rules_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">CLAUDE.md</span>
+                            {hiveHealth.constitution?.claude_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">CLAUDE.md</span>
-                          {hiveHealth.constitution.claude_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                        {/* 하이브 스킬 */}
+                        <div className="flex flex-col gap-0.5">
+                          <div className="text-[8px] text-[#666] mb-0.5">🧠 핵심 스킬</div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">Master Skill</span>
+                            {hiveHealth.skills?.master ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">Memory Script</span>
+                            {hiveHealth.skills?.memory_script ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
                         </div>
                       </div>
-                      {/* 하이브 스킬 */}
-                      <div className="flex flex-col gap-0.5">
-                        <div className="text-[8px] text-[#666] mb-0.5">🧠 핵심 스킬</div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">Master Skill</span>
-                          {hiveHealth.skills.master ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+
+                      {/* 자가 치유 엔진 상태 */}
+                      <div className="pt-1 border-t border-white/5 flex flex-col gap-1">
+                        <div className="text-[8px] text-[#666] flex items-center justify-between">
+                          <span>🛡️ 자가 치유 엔진</span>
+                          <span className="text-primary/50">v4.0</span>
                         </div>
                         <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">Memory Script</span>
-                          {hiveHealth.skills.memory_script ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          <span className="text-[#aaa]">DB 연결성</span>
+                          <span className={hiveHealth.db_ok ? "text-green-400" : "text-red-500"}>{hiveHealth.db_ok ? "정상" : "오류"}</span>
                         </div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">에이전트 활동</span>
+                          <span className={hiveHealth.agent_active ? "text-green-400" : "text-yellow-500"}>{hiveHealth.agent_active ? "활발" : "유휴"}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">누적 복구 횟수</span>
+                          <span className="text-primary">{hiveHealth.repair_count ?? 0}회</span>
+                        </div>
+                        {hiveHealth.last_check && (
+                          <div className="text-[7px] text-[#444] text-right italic">
+                            최근 점검: {new Date(hiveHealth.last_check).toLocaleTimeString()}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
                   {/* 통합 복구 버튼 */}
-                  <button 
-                    onClick={() => {
-                      if(confirm("모든 누락된 하이브 지침과 스킬을 현재 프로젝트에 자동 복구하시겠습니까?")) {
-                        const projectRoot = currentProjectName ? `D:/${currentProjectName}` : gitPath;
-                        fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(projectRoot)}`)
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => {
+                        if(confirm("모든 누락된 하이브 지침과 스킬을 현재 프로젝트에 자동 복구하시겠습니까?")) {
+                          const projectRoot = currentProjectName ? `D:/${currentProjectName}` : gitPath;
+                          fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(projectRoot)}`)
+                            .then(res => res.json())
+                            .then(data => {
+                              setSpMsg(data.message);
+                              fetchHiveHealth();
+                            });
+                        }
+                      }}
+                      className="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary text-[9px] font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1"
+                    >
+                      <Zap className="w-2.5 h-2.5" /> 스킬 복구
+                    </button>
+                    <button 
+                      onClick={() => {
+                        fetch(`${API_BASE}/api/hive/health/repair`)
                           .then(res => res.json())
-                          .then(data => {
-                            setSpMsg(data.message);
+                          .then(() => {
+                            setSpMsg("하이브 엔진 정밀 진단 및 자가 치유 완료");
                             fetchHiveHealth();
                           });
-                      }
-                    }}
-                    className="w-full py-1 bg-primary/10 hover:bg-primary/20 text-primary text-[9px] font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1"
-                  >
-                    <Zap className="w-2.5 h-2.5" /> 누락 항목 자동 복구
-                  </button>
+                      }}
+                      className="px-2 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[9px] font-bold rounded border border-green-500/20 transition-all flex items-center justify-center gap-1"
+                      title="하이브 엔진 정밀 점검"
+                    >
+                      <Cpu className="w-2.5 h-2.5" /> 자가 치유
+                    </button>
+                  </div>
                 </div>
+
+                {/* 지능형 스킬 제안 */}
+                {skillProposals.length > 0 && (
+                  <div className="shrink-0 p-2 rounded border border-primary/20 bg-primary/5 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-tighter">
+                        <Brain className="w-3.5 h-3.5" /> 지능형 스킬 제안
+                      </div>
+                      <button onClick={fetchSkillAnalysis} className="p-1 hover:bg-white/10 rounded transition-colors text-primary/60">
+                        <RotateCw className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                    
+                    <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                      {skillProposals.map((p, i) => (
+                        <div key={i} className="p-1.5 rounded bg-black/30 border border-white/5 flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-yellow-300">#{p.keyword}</span>
+                            <span className="text-[8px] text-[#666]">{p.count}회 감지</span>
+                          </div>
+                          <p className="text-[8px] text-[#aaa] leading-tight">{p.description}</p>
+                          <button 
+                            onClick={() => approveSkill(p)}
+                            className="mt-1 py-0.5 bg-primary/20 hover:bg-primary/30 text-primary text-[8px] font-bold rounded transition-all"
+                          >
+                            스킬 초안 생성
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* 상단 설명 */}
                 <div className="shrink-0 flex items-center gap-2 px-1 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded text-[9px] text-yellow-300">
@@ -2107,10 +2207,8 @@ function App() {
                   const toolLabel = tool === 'claude' ? 'Claude Code' : 'Gemini CLI';
                   const toolColor = tool === 'claude' ? 'border-[#3794ef]/30 bg-[#3794ef]/5' : 'border-blue-400/30 bg-blue-400/5';
                   const toolBadge = tool === 'claude' ? 'bg-[#3794ef]/20 text-[#3794ef]' : 'bg-blue-400/20 text-blue-300';
-                  const repo = tool === 'claude' ? 'obra/superpowers' : 'barretstorck/gemini-superpowers';
-                  const commands = tool === 'claude'
-                    ? ['/superpowers:brainstorm', '/superpowers:write-plan', '/superpowers:execute-plan']
-                    : ['/brainstorm', '/write-plan', '/execute-plan'];
+                  const repo = info?.repo ?? (tool === 'claude' ? 'btsky99/vibe-coding (내장)' : 'btsky99/vibe-coding (내장)');
+                  const commands = info?.commands ?? [];
                   return (
                     <div key={tool} className={`rounded border p-2.5 flex flex-col gap-2 ${info?.installed ? (tool === 'claude' ? 'border-[#3794ef]/40 bg-[#3794ef]/8' : 'border-blue-400/40 bg-blue-400/8') : 'border-white/10 bg-white/2'}`}>
                       {/* 헤더 */}
