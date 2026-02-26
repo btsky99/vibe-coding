@@ -30,6 +30,13 @@ import asyncio
 import string
 from pathlib import Path
 
+# BASE_DIR: 개발 모드에선 server.py 위치, 배포(frozen) 모드에선 PyInstaller 임시 압축 해제 폴더(sys._MEIPASS)
+# 이 상수는 winpty DLL 경로 등 초기화 코드보다 반드시 먼저 정의되어야 함
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+
 try:
     import websockets
 except ImportError:
@@ -141,11 +148,6 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
 from _version import __version__
-
-if getattr(sys, 'frozen', False):
-    BASE_DIR = Path(sys._MEIPASS)
-else:
-    BASE_DIR = Path(__file__).resolve().parent
 
 # 데이터 디렉토리 설정 (BASE_DIR 설정 이후로 이동)
 if getattr(sys, 'frozen', False):
