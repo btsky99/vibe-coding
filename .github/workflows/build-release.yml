@@ -76,6 +76,11 @@ jobs:
       - name: Bundle skills into .ai_monitor
         run: |
           xcopy skills .ai_monitor\skills /E /I /Y
+          xcopy .gemini\skills .ai_monitor\.gemini\skills /E /I /Y
+          xcopy scripts .ai_monitor\scripts /E /I /Y
+          copy GEMINI.md .ai_monitor\GEMINI.md /Y
+          copy CLAUDE.md .ai_monitor\CLAUDE.md /Y
+          copy RULES.md .ai_monitor\RULES.md /Y
         shell: cmd
 
       - name: Build exe
@@ -89,6 +94,11 @@ jobs:
             --add-data "bin;bin" ^
             --add-data "vibe-view\dist;dist" ^
             --add-data "skills;skills" ^
+            --add-data ".gemini\skills;.gemini/skills" ^
+            --add-data "scripts;scripts" ^
+            --add-data "GEMINI.md;." ^
+            --add-data "CLAUDE.md;." ^
+            --add-data "RULES.md;." ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^
@@ -109,6 +119,11 @@ jobs:
             --add-data "bin;bin" ^
             --add-data "vibe-view\dist;dist" ^
             --add-data "skills;skills" ^
+            --add-data ".gemini\skills;.gemini/skills" ^
+            --add-data "scripts;scripts" ^
+            --add-data "GEMINI.md;." ^
+            --add-data "CLAUDE.md;." ^
+            --add-data "RULES.md;." ^
             --add-binary "%WINPTY%\winpty.dll;winpty" ^
             --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
             --add-binary "%WINPTY%\conpty.dll;winpty" ^
