@@ -30,7 +30,8 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth } from './types';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth, ThoughtLog } from './types';
+import { ThoughtTrace } from './components/ThoughtTrace';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -480,6 +481,7 @@ function App() {
   const [spLoading, setSpLoading] = useState<Record<string, boolean>>({});
   const [spMsg, setSpMsg] = useState('');
   const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
+  const [thoughts, setThoughts] = useState<ThoughtLog[]>([]); // 신규: AI 사고 과정 로그
   const [skillProposals, setSkillProposals] = useState<{ keyword: string; count: number; suggested_skill_name: string; description: string }[]>([]);
 
   const fetchHiveHealth = () => {
@@ -800,11 +802,35 @@ function App() {
 
   const applyUpdate = () => {
     setUpdateApplying(true);
+    // 업데이트 적용 후 재시작되므로, 재시작 시 스킬 재설치 안내를 띄우기 위해 플래그 저장
+    localStorage.setItem('hive_needs_skill_reinstall', 'true');
     fetch(`${API_BASE}/api/apply-update`, { method: 'POST' })
       .then(res => res.json())
       .then(() => setUpdateReady(null))
       .catch(() => {})
       .finally(() => setUpdateApplying(false));
+  };
+
+  // 업데이트 후 재시작 감지 — localStorage 플래그로 스킬 재설치 안내 표시
+  const [needsSkillReinstall, setNeedsSkillReinstall] = useState<boolean>(
+    () => localStorage.getItem('hive_needs_skill_reinstall') === 'true'
+  );
+
+  const doReinstallSkills = () => {
+    // Claude + Gemini 스킬 순차 재설치
+    Promise.all(['claude', 'gemini'].map(tool =>
+      fetch(`${API_BASE}/api/superpowers/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool }),
+      }).then(r => r.json())
+    ))
+      .then(() => {
+        localStorage.removeItem('hive_needs_skill_reinstall');
+        setNeedsSkillReinstall(false);
+        fetchSpStatus();
+      })
+      .catch(() => {});
   };
 
   // 파일 시스템 탐색 상태
@@ -967,6 +993,7 @@ function App() {
   };
 
   useEffect(() => {
+    // 1) 메인 로그 스트림
     const sse = new EventSource(`${API_BASE}/stream`);
     sse.onmessage = (e) => {
       try {
@@ -974,7 +1001,20 @@ function App() {
         setLogs(prev => [...prev.slice(-199), data]);
       } catch (err) { }
     };
-    return () => sse.close();
+
+    // 2) 사고 과정 스트림 (v5.0)
+    const thoughtSse = new EventSource(`${API_BASE}/api/events/thoughts`);
+    thoughtSse.onmessage = (e) => {
+      try {
+        const data: ThoughtLog = JSON.parse(e.data);
+        setThoughts(prev => [...prev.slice(-49), data]); // 최근 50개 유지
+      } catch (err) { }
+    };
+
+    return () => {
+      sse.close();
+      thoughtSse.close();
+    };
   }, []);
 
   const slots = Array.from({ length: terminalCount }, (_, i) => i);
@@ -1006,6 +1046,29 @@ function App() {
             )}
             <button
               onClick={() => setUpdateReady(null)}
+              className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 업데이트 후 스킬 재설치 안내 배너 */}
+      {needsSkillReinstall && (
+        <div className="flex items-center justify-between px-3 py-1 bg-yellow-500/20 border-b border-yellow-500/40 shrink-0 z-50">
+          <span className="text-[10px] text-yellow-300 font-bold">
+            ⚡ 업데이트 완료! 스킬을 다시 설치해 주세요.
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={doReinstallSkills}
+              className="text-[9px] font-bold px-2 py-0.5 rounded bg-yellow-500 text-black hover:bg-yellow-400 transition-colors"
+            >
+              스킬 재설치
+            </button>
+            <button
+              onClick={() => { localStorage.removeItem('hive_needs_skill_reinstall'); setNeedsSkillReinstall(false); }}
               className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
             >
               ✕
@@ -2496,6 +2559,9 @@ function App() {
             </div>
           </main>
         </div>
+
+        {/* 신규: 사고 과정 시각화 패널 (v5.0) */}
+        <ThoughtTrace thoughts={thoughts} />
       </div>
 
       {/* Quick View Floating Panels */}
