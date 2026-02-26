@@ -196,7 +196,7 @@ export const ThoughtTrace: React.FC<ThoughtTraceProps> = ({ thoughts }) => {
           {isOpen && (
             <>
               <span className="text-xs font-bold text-white/80 flex-1 truncate">
-                {activeTab === 'thoughts' ? 'Thought Trace' : 'Vector Memory'}
+                {activeTab === 'thoughts' ? '사고 추적' : '벡터 메모리'}
               </span>
               <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-mono">v5.0</span>
             </>
@@ -369,7 +369,7 @@ export const ThoughtTrace: React.FC<ThoughtTraceProps> = ({ thoughts }) => {
           <div className="flex items-center gap-2">
             <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeTab === 'thoughts' ? 'bg-success' : 'bg-cyan-400'}`} />
             <span className="text-[9px] text-white/40">
-              {activeTab === 'thoughts' ? 'Real-time Insight Active' : `Vector DB · ${vectorResults.length > 0 ? vectorResults.length + '개 결과' : '준비 완료'}`}
+              {activeTab === 'thoughts' ? '실시간 사고 스트림 활성' : `벡터 DB · ${vectorResults.length > 0 ? vectorResults.length + '개 결과' : '준비 완료'}`}
             </span>
           </div>
         </div>

@@ -16,6 +16,34 @@
 THOUGHT_LOGS = [] # AI 사고 과정 로그 (최근 50개 유지)
 THOUGHT_CLIENTS = set() # SSE 클라이언트 연결 리스트
 
+def _load_task_logs_into_thoughts():
+    """서버 시작 시 task_logs.jsonl의 최근 20개 항목을 THOUGHT_LOGS에 미리 로드합니다.
+    이렇게 해야 클라이언트 접속 즉시 과거 작업 내역이 사고 패널에 표시됩니다.
+    """
+    log_path = Path(__file__).parent / 'data' / 'task_logs.jsonl'
+    if not log_path.exists():
+        return
+    try:
+        lines = [l.strip() for l in log_path.read_text(encoding='utf-8').splitlines() if l.strip()]
+        recent = lines[-20:] # 최근 20개만 로드
+        for line in recent:
+            try:
+                obj = json.loads(line)
+                THOUGHT_LOGS.append({
+                    'agent':     obj.get('agent', 'System'),
+                    'thought':   obj.get('task', ''),
+                    'tool':      None,
+                    'timestamp': obj.get('timestamp', ''),
+                    'level':     'info',
+                })
+            except Exception:
+                pass
+        print(f"[*] ThoughtTrace: {len(recent)}개 task_logs 항목 사전 로드 완료")
+    except Exception as e:
+        print(f"[!] ThoughtTrace 사전 로드 실패: {e}")
+
+_load_task_logs_into_thoughts()
+
 class ThoughtBroadcaster:
     """SSE를 통해 사고 로그를 클라이언트에게 전파합니다."""
     @staticmethod
