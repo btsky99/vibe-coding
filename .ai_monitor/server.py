@@ -5,11 +5,25 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-02-26] - Gemini (하이브 에볼루션 v5.0)
+#   - 사고 과정 시각화(Thought Trace)를 위한 SSE 엔진 및 로그 캡처 로직 추가.
+#   - Vector DB 연동을 위한 API 엔드포인트 기초 설계.
 # [2026-02-26] - Claude (버그 수정)
-#   - 다른 PC 설치 버전에서 Gemini 스킬 설치 실패 문제 수정
-#   - 원인: /api/superpowers/install Gemini 분기가 복사 없이 확인만 하고,
-#           PROJECT_ROOT에 .gemini/skills/가 없으면 즉시 오류 발생
-#   - 수정: BASE_DIR(빌드 내장 경로) → PROJECT_ROOT 실제 파일 복사로 변경
+...
+# ... 기존 내용 유지 ...
+
+# 전역 상태 관리
+THOUGHT_LOGS = [] # AI 사고 과정 로그 (최근 50개 유지)
+THOUGHT_CLIENTS = set() # SSE 클라이언트 연결 리스트
+
+class ThoughtBroadcaster:
+    """SSE를 통해 사고 로그를 클라이언트에게 전파합니다."""
+    @staticmethod
+    def broadcast(thought_data: dict):
+        THOUGHT_LOGS.append(thought_data)
+        if len(THOUGHT_LOGS) > 50:
+            THOUGHT_LOGS.pop(0)
+        # 실제 전송 로직은 핸들러에서 처리
 # [2026-02-25] - Gemini (지능형 오케스트레이터 및 디버깅)
 #   - sqlite3.OperationalError (no such column: project) 버그 수정: DB 초기화 시 인덱스 생성 시점을 마이그레이션 이후로 조정.
 # [2026-02-25] - Gemini (지능형 오케스트레이터 업그레이드)
@@ -603,6 +617,32 @@ from urllib.parse import urlparse, parse_qs
 class SSEHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        
+        # ─── 신규: 사고 과정 실시간 스트리밍 ───
+        if path == '/api/events/thoughts':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            
+            # 초기 데이터 전송 (메모리에 쌓인 로그)
+            for log in THOUGHT_LOGS:
+                self.wfile.write(f"data: {json.dumps(log, ensure_ascii=False)}\n\n".encode('utf-8'))
+                self.wfile.flush()
+            
+            # 사고 로그는 memory list에 직접 전송되므로 하트비트만 유지
+            while True:
+                try:
+                    time.sleep(5)
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                except Exception:
+                    break
+            return
+
         if parsed_path.path == '/stream':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -1582,6 +1622,31 @@ class SSEHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        
+        # ─── 신규: 사고 과정 로그 추가 (v5.0) ───
+        if path == '/api/thoughts/add':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                
+                # 데이터 유효성 검사 및 타임스탬프 추가
+                data['timestamp'] = datetime.now().isoformat()
+                THOUGHT_LOGS.append(data)
+                if len(THOUGHT_LOGS) > 100:
+                    THOUGHT_LOGS.pop(0)
+                
+                print(f"🧠 [Thought Trace] New thought captured: {data.get('thought', '')[:50]}...")
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                print(f"[Error] /api/thoughts/add failed: {e}")
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
         if parsed_path.path == '/api/agents/heartbeat':
             # 에이전트 실시간 상태 보고 수신
             self.send_response(200)

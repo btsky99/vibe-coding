@@ -26,6 +26,14 @@ import urllib.parse
 import os
 import time
 import sqlite3
+import os
+
+# VectorMemory 연동 시도
+try:
+    from vector_memory import VectorMemory
+    VECTOR_AVAILABLE = True
+except ImportError:
+    VECTOR_AVAILABLE = False
 
 DEFAULT_PORTS = [8005, 8000]
 
@@ -98,6 +106,16 @@ def cmd_set(args: argparse.Namespace, port) -> None:
         'tags':    [t.strip() for t in (getattr(args, 'tags', '') or '').split(',') if t.strip()],
         'author':  getattr(args, 'by', 'agent') or 'agent',
     }
+    
+    # ─── Vector DB 저장 (신규) ───
+    if VECTOR_AVAILABLE:
+        try:
+            vm = VectorMemory()
+            vm.add_memory(body['key'], body['content'], body)
+            print(f"[VECTOR] 시맨틱 임베딩 저장 완료: [{args.key}]")
+        except Exception as e:
+            print(f"[VECTOR-WARN] 벡터 저장 실패: {e}")
+
     if port:
         result = api_post('/api/memory/set', body, port)
         if result and result.get('status') == 'success':
