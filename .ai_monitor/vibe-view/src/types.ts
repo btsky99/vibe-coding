@@ -137,3 +137,13 @@ export interface HiveHealth {
     hive_db: boolean;
   };
 }
+
+// AI 사고 과정 로그 (Chain of Thought)
+export interface ThoughtLog {
+  timestamp: string;
+  agent: string;
+  thought: string;
+  tool?: string;
+  level?: 'info' | 'plan' | 'action' | 'verification';
+  step?: number;
+}
