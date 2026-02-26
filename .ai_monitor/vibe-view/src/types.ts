@@ -111,22 +111,28 @@ export interface AgentMessage {
 }
 
 export interface HiveHealth {
-  constitution: {
+  last_check?: string;
+  db_ok?: boolean;
+  memory_sync_ok?: boolean;
+  agent_active?: boolean;
+  repair_count?: number;
+  logs?: string[];
+  constitution?: {
     rules_md: boolean;
     gemini_md: boolean;
     claude_md: boolean;
     project_map: boolean;
   };
-  skills: {
+  skills?: {
     master: boolean;
     brainstorm: boolean;
     memory_script: boolean;
   };
-  agents: {
+  agents?: {
     claude_config: boolean;
     gemini_config: boolean;
   };
-  data: {
+  data?: {
     shared_memory: boolean;
     hive_db: boolean;
   };

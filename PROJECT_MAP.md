@@ -11,12 +11,11 @@
 
 ## ⚙️ 코어 엔진 (`.ai_monitor/`)
 - `server.py`: 에이전트 간 메시지 중계 및 데이터 관리를 담당하는 FastAPI 서버.
-  - **기능 추가**: 에이전트 실시간 상태 관리(Heartbeat), Git 원격 제어(Rollback, Diff) API.
+  - **기능 추가**: 자가 치유(Self-Healing) 엔진 통합, 건강 상태 체크 및 스킬 생성 API.
 - `config.json`: 시스템 설정 및 환경 변수 관리.
-- `PLAN.md`: 코어 엔진 및 백엔드 상세 구현 계획.
 - **`data/`**: 데이터베이스 및 로그 저장소.
-  - `hive_mind.db`: 에이전트 활동 및 세션 정보 DB.
-  - `task_logs.jsonl`: 실시간 작업 로그 기록.
+  - `hive_health.json`: (NEW) 시스템 건강 상태 실시간 진단 데이터.
+  - `skill_analysis.json`: (NEW) 작업 로그 기반 스킬 추출 데이터.
 
 ## 🌐 대시보드 프론트엔드 (`.ai_monitor/vibe-view/`)
 - `src/App.tsx`: 대시보드 메인 컴포넌트 및 레이아웃.
@@ -25,11 +24,12 @@
 
 ## 🛠️ 통합 및 브릿지 스크립트 (`scripts/`)
 - `hive_bridge.py`: 에이전트의 작업 로그를 서버로 전송하는 통신 브릿지.
-- `orchestrator.py`: 여러 에이전트 간의 작업 순서와 의존성을 조율.
+- `hive_watchdog.py`: (NEW) 24/7 자가 치유 엔진. DB 및 메모리 자동 복구.
+- `skill_analyzer.py`: (NEW) 작업 패턴 분석 및 스킬 자동 생성기.
 
 ## 📂 하이브 스킬 시스템 (`.gemini/skills/`)
 - `master/`: 중앙 컨트롤 타워 및 지능형 오케스트레이션 지침 (TDD/디버깅 연동).
 - `brainstorming/`: (NEW) 6단계 브레인스토밍 절차 및 승인 워크플로우.
 
 ---
-**마지막 업데이트:** 2026-02-25 - [Gemini] 에이전트 협업 엔진 및 사용성 고도화 완료
+**마지막 업데이트:** 2026-02-26 - [Gemini-1] 하이브 에볼루션 v4.0 (자가 치유 및 지식 자동화) 적용

@@ -2370,7 +2370,16 @@ async def pty_handler(websocket):
         except ValueError:
             rows = 24
 
-        pty = PtyProcess.spawn('cmd.exe', cwd=cwd, dimensions=(rows, cols))
+        # [개선] 윈도우 터미널 한글 지원을 위해 환경 변수 및 인코딩 설정 강제
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["LANG"] = "ko_KR.UTF-8"
+        
+        pty = PtyProcess.spawn('cmd.exe', cwd=cwd, dimensions=(rows, cols), env=env)
+        
+        # [추가] 터미널 시작 직후 UTF-8로 코드페이지 변경
+        pty.write("chcp 65001\r\n")
+        pty.write("cls\r\n")
         
         is_yolo = qs.get('yolo', ['false'])[0].lower() == 'true'
 
@@ -2420,11 +2429,14 @@ async def pty_handler(websocket):
                     message = message.decode('utf-8')
                 
                 if message:
-                    # xterm.js 키보드 Enter = \r 단독 메시지, handleSend Enter = \r 단독 메시지
-                    # (프론트엔드가 텍스트와 \r을 별도 메시지로 분리 전송)
-                    # \r\n 중복 방지: \r\n → \r 정규화 후 PTY write
-                    processed = message.replace('\r\n', '\r').replace('\n', '\r')
-                    pty.write(processed)
+                    # [수정] 윈도우 IME 및 xterm.js 호환성 개선
+                    # \r\n 중복 방지 및 조합 중인 문자 처리 안정화
+                    if message == "\r":
+                        pty.write("\r")
+                    else:
+                        # 일반 텍스트 입력의 경우 개행 문자를 \r로 통일하여 전송
+                        processed = message.replace('\r\n', '\r').replace('\n', '\r')
+                        pty.write(processed)
             except Exception as e:
                 print(f"[WS ERROR] {e}")
                 break

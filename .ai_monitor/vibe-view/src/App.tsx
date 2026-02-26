@@ -113,7 +113,7 @@ export interface OpenFile {
   zIndex: number;
 }
 
-// ── Superpowers 스킬 알고리즘 (MCP 없이 직접 주입) ──────────────────────────
+// ── 바이브 스킬 알고리즘 (MCP 없이 직접 주입) ──────────────────────────
 export interface VibeSkill {
   name: string;
   desc: string;
@@ -810,7 +810,10 @@ function App() {
   // 파일 시스템 탐색 상태
   const [drives, setDrives] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
-  const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
+  // 마지막 선택 경로를 localStorage에서 복원 — 앱 재시작 시 이전 프로젝트 유지
+  const [currentPath, setCurrentPath] = useState<string>(
+    () => localStorage.getItem('hive_last_path') || "D:/vibe-coding"
+  );
 
   // 최근 프로젝트 목록 가져오기
   const fetchProjects = () => {
@@ -847,9 +850,11 @@ function App() {
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({});
   const [treeChildren, setTreeChildren] = useState<Record<string, { name: string; path: string; isDir: boolean }[]>>({});
 
-  // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화
+  // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화 + localStorage 저장
   useEffect(() => { setGitPath(currentPath); }, [currentPath]);
   useEffect(() => { setTreeExpanded({}); setTreeChildren({}); }, [currentPath]);
+  // 경로가 바뀔 때마다 localStorage에 저장 — 다음 세션에서 복원용
+  useEffect(() => { localStorage.setItem('hive_last_path', currentPath); }, [currentPath]);
 
   // 드라이브 목록 가져오기
   useEffect(() => {
@@ -1207,8 +1212,8 @@ function App() {
               </span>
             )}
           </button>
-          {/* Superpowers 관리자 탭 — 설치 수 배지 */}
-          <button onClick={() => { setActiveTab('superpowers'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'superpowers' ? 'text-white border-l-2 border-yellow-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="Superpowers 관리자">
+          {/* 바이브 스킬 관리자 탭 — 설치 수 배지 */}
+          <button onClick={() => { setActiveTab('superpowers'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'superpowers' ? 'text-white border-l-2 border-yellow-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="바이브 스킬 관리자">
             <Zap className="w-6 h-6" />
             {spStatus && (
               <span className={`absolute top-1 right-1 w-4 h-4 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none ${
@@ -1226,36 +1231,36 @@ function App() {
 
         {/* Sidebar (Explorer) */}
         <motion.div
-          animate={{ width: isSidebarOpen ? 400 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          animate={{ width: isSidebarOpen ? 450 : 0, opacity: isSidebarOpen ? 1 : 0 }}
           className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-x-auto overflow-y-hidden custom-scrollbar"
         >
-          <div className="h-10 px-4 flex items-center justify-between text-[14px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[390px]">
-            <span className="flex items-center gap-2"><ChevronDown className="w-4 h-4" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ Superpowers' : 'Hive Mind'}</span>
-            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1 rounded transition-colors"><X className="w-5 h-5" /></button>
+          <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[440px]">
+            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : 'Hive Mind'}</span>
+            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1.5 rounded transition-colors"><X className="w-6 h-6" /></button>
           </div>
 
-          <div className="p-4 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[390px]">
+          <div className="p-5 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[440px]">
             {activeTab === 'messages' ? (
               /* ── 메시지 채널 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+              <div className="flex-1 flex flex-col overflow-hidden gap-3">
                 {/* 메시지 목록 (최신순 — 역순 표시) */}
-                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
                   {messages.length === 0 ? (
-                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                      <MessageSquare className="w-7 h-7 opacity-20" />
+                    <div className="text-center text-[#858585] text-sm py-12 flex flex-col items-center gap-3 italic">
+                      <MessageSquare className="w-9 h-9 opacity-20" />
                       아직 메시지가 없습니다
                     </div>
                   ) : (
                     [...messages].reverse().map(msg => (
-                      <div key={msg.id} className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors">
+                      <div key={msg.id} className="p-3 rounded-lg border border-white/10 bg-white/2 text-[12px] hover:border-white/20 transition-colors">
                         {/* 발신자 → 수신자 + 타입 배지 */}
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-1 font-mono font-bold">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-1.5 font-mono font-bold">
                             <span className="text-success">{msg.from}</span>
                             <span className="text-white/30 font-normal">→</span>
                             <span className="text-accent">{msg.to}</span>
                           </div>
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                             msg.type === 'handoff'       ? 'bg-yellow-500/20 text-yellow-400' :
                             msg.type === 'request'       ? 'bg-blue-500/20 text-blue-400' :
                             msg.type === 'task_complete' ? 'bg-green-500/20 text-green-400' :
@@ -1264,32 +1269,32 @@ function App() {
                           }`}>{msg.type}</span>
                         </div>
                         {/* 메시지 본문 */}
-                        <p className="text-[#cccccc] leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
+                        <p className="text-[#cccccc] leading-relaxed break-words whitespace-pre-wrap text-[12.5px]">{msg.content}</p>
                         {/* 타임스탬프 */}
-                        <div className="text-[#858585] mt-1 text-[9px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
+                        <div className="text-[#858585] mt-2 text-[10px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
                       </div>
                     ))
                   )}
                 </div>
 
                 {/* 메시지 작성 폼 */}
-                <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
+                <div className="border-t border-white/5 pt-3 flex flex-col gap-2 shrink-0">
                   {/* 발신자 → 수신자 선택 */}
-                  <div className="flex gap-1 items-center">
-                    <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                  <div className="flex gap-2 items-center">
+                    <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
                       <option value="claude">Claude</option>
                       <option value="gemini">Gemini</option>
                       <option value="system">System</option>
                     </select>
-                    <span className="text-white/30 text-[10px] px-0.5">→</span>
-                    <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                    <span className="text-white/30 text-[12px] px-1">→</span>
+                    <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
                       <option value="all">All</option>
                       <option value="claude">Claude</option>
                       <option value="gemini">Gemini</option>
                     </select>
                   </div>
                   {/* 메시지 유형 선택 */}
-                  <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                  <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
                     <option value="info">ℹ️ 정보 공유</option>
                     <option value="handoff">🤝 핸드오프 (작업 위임)</option>
                     <option value="request">📋 작업 요청</option>
@@ -1304,25 +1309,25 @@ function App() {
                     onCompositionEnd={() => { isMsgComposingRef.current = false; }}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) {
-                        if (isMsgComposingRef.current) return;
-                        
-                        // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
+                        // 엔터 키 입력 시 기본 줄바꿈 동작을 즉시 차단합니다.
                         e.preventDefault();
 
-                        // 한글 조합 중에도 엔터 한 번으로 전송되도록 개선
+                        // 한글 조합 중(isComposing)에 엔터가 눌린 경우, 
+                        // 브라우저에 따라 KeyDown이 두 번 발생할 수 있으므로 
+                        // 이미 메시지가 비워졌다면(전송 완료) 추가 전송을 방지합니다.
                         if (msgContent.trim()) {
                           sendMessage();
                         }
                       }
                     }}
                     placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈, >명령어: 터미널 실행)"
-                    rows={3}
-                    className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
+                    rows={4}
+                    className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-[13px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
                   />
                   <button
                     onClick={sendMessage}
                     disabled={!msgContent.trim()}
-                    className="w-full py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded text-[10px] font-bold transition-colors"
+                    className="w-full py-2.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-[13px] font-bold transition-colors shadow-lg"
                   >
                     전송 (Enter)
                   </button>
@@ -1330,14 +1335,14 @@ function App() {
               </div>
             ) : activeTab === 'tasks' ? (
               /* ── 태스크 보드 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+              <div className="flex-1 flex flex-col overflow-hidden gap-3">
                 {/* 상태 필터 탭 */}
-                <div className="flex gap-1 shrink-0">
+                <div className="flex gap-1.5 shrink-0">
                   {(['all', 'pending', 'in_progress', 'done'] as const).map(s => {
                     const label = s === 'all' ? '전체' : s === 'pending' ? '할 일' : s === 'in_progress' ? '진행' : '완료';
                     const count = s === 'all' ? tasks.length : tasks.filter(t => t.status === s).length;
                     return (
-                      <button key={s} onClick={() => setTaskFilter(s)} className={`flex-1 py-1 rounded text-[9px] font-bold transition-colors ${taskFilter === s ? 'bg-primary text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}>
+                      <button key={s} onClick={() => setTaskFilter(s)} className={`flex-1 py-2 rounded-lg text-[11px] font-bold transition-all ${taskFilter === s ? 'bg-primary text-white shadow-md' : 'bg-white/5 text-[#858585] hover:text-white'}`}>
                         {label}{count > 0 && ` (${count})`}
                       </button>
                     );
@@ -1345,10 +1350,10 @@ function App() {
                 </div>
 
                 {/* 작업 목록 */}
-                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto space-y-2.5 custom-scrollbar">
                   {tasks.filter(t => taskFilter === 'all' || t.status === taskFilter).length === 0 ? (
-                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                      <ClipboardList className="w-7 h-7 opacity-20" />
+                    <div className="text-center text-[#858585] text-sm py-12 flex flex-col items-center gap-3 italic">
+                      <ClipboardList className="w-9 h-9 opacity-20" />
                       작업이 없습니다
                     </div>
                   ) : (
@@ -1361,44 +1366,44 @@ function App() {
                         const statusLabel =
                           task.status === 'pending' ? '할 일' : task.status === 'in_progress' ? '진행 중' : '완료';
                         return (
-                          <div key={task.id} className={`p-2 rounded border text-[10px] transition-colors ${task.status === 'done' ? 'border-white/5 opacity-50' : 'border-white/10 hover:border-white/20'}`}>
+                          <div key={task.id} className={`p-3 rounded-lg border text-[12px] transition-all shadow-sm ${task.status === 'done' ? 'border-white/5 opacity-50 bg-black/10' : 'border-white/10 bg-white/2 hover:border-white/20'}`}>
                             {/* 제목 + 우선순위 */}
-                            <div className="flex items-start gap-1.5 mb-1">
-                              <span className="text-[11px] shrink-0">{priorityDot}</span>
-                              <span className={`font-bold flex-1 break-words leading-tight ${task.status === 'done' ? 'line-through text-[#858585]' : 'text-[#cccccc]'}`}>{task.title}</span>
+                            <div className="flex items-start gap-2 mb-2">
+                              <span className="text-[13px] shrink-0">{priorityDot}</span>
+                              <span className={`font-bold flex-1 break-words leading-snug text-[13px] ${task.status === 'done' ? 'line-through text-[#858585]' : 'text-[#cccccc]'}`}>{task.title}</span>
                             </div>
                             {/* 설명 (있을 경우) */}
                             {task.description && (
-                              <p className="text-[#858585] text-[9px] mb-1.5 leading-relaxed pl-4">{task.description}</p>
+                              <p className="text-[#858585] text-[11px] mb-2.5 leading-relaxed pl-5">{task.description}</p>
                             )}
                             {/* 담당자 + 상태 */}
-                            <div className="flex items-center justify-between pl-4 mb-1.5">
-                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold font-mono ${
+                            <div className="flex items-center justify-between pl-5 mb-2.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
                                 task.assigned_to === 'claude'  ? 'bg-green-500/15 text-green-400' :
                                 task.assigned_to === 'gemini' ? 'bg-blue-500/15 text-blue-400' :
                                 'bg-white/10 text-white/50'
                               }`}>{task.assigned_to}</span>
-                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                                 task.status === 'pending'     ? 'bg-white/10 text-[#858585]' :
                                 task.status === 'in_progress' ? 'bg-primary/20 text-primary' :
                                 'bg-green-500/20 text-green-400'
                               }`}>{statusLabel}</span>
                             </div>
                             {/* 액션 버튼 */}
-                            <div className="flex gap-1 pl-4">
+                            <div className="flex gap-1.5 pl-5">
                               {task.status === 'pending' && (
-                                <button onClick={() => updateTask(task.id, { status: 'in_progress' })} className="flex-1 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[9px] font-bold transition-colors">▶ 시작</button>
+                                <button onClick={() => updateTask(task.id, { status: 'in_progress' })} className="flex-1 py-1.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[11px] font-bold transition-colors">▶ 시작</button>
                               )}
                               {task.status === 'in_progress' && (
                                 <>
-                                  <button onClick={() => updateTask(task.id, { status: 'done' })} className="flex-1 py-0.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 rounded text-[9px] font-bold transition-colors">✅ 완료</button>
-                                  <button onClick={() => updateTask(task.id, { status: 'pending' })} className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩</button>
+                                  <button onClick={() => updateTask(task.id, { status: 'done' })} className="flex-1 py-1.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 rounded text-[11px] font-bold transition-colors">✅ 완료</button>
+                                  <button onClick={() => updateTask(task.id, { status: 'pending' })} className="px-2 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[11px] transition-colors">↩</button>
                                 </>
                               )}
                               {task.status === 'done' && (
-                                <button onClick={() => updateTask(task.id, { status: 'pending' })} className="flex-1 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩ 다시</button>
+                                <button onClick={() => updateTask(task.id, { status: 'pending' })} className="flex-1 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[11px] transition-colors">↩ 다시</button>
                               )}
-                              <button onClick={() => deleteTask(task.id)} className="px-1.5 py-0.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 rounded text-[9px] transition-colors" title="삭제">🗑️</button>
+                              <button onClick={() => deleteTask(task.id)} className="px-2 py-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 rounded text-[11px] transition-colors" title="삭제">🗑️</button>
                             </div>
                           </div>
                         );
@@ -1408,7 +1413,8 @@ function App() {
 
                 {/* 새 작업 추가 */}
                 {showTaskForm ? (
-                  <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
+                  <div className="border-t border-white/5 pt-3 flex flex-col gap-2 shrink-0">
+                    <div className="text-[11px] text-[#858585] font-bold uppercase tracking-wider">새 작업 작성</div>
                     <input
                       type="text"
                       value={newTaskTitle}
@@ -1416,35 +1422,35 @@ function App() {
                       onKeyDown={e => { if (e.key === 'Enter') createTask(); if (e.key === 'Escape') setShowTaskForm(false); }}
                       placeholder="작업 제목 (필수)"
                       autoFocus
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-[12px] focus:outline-none focus:border-primary text-white transition-colors"
                     />
                     <input
                       type="text"
                       value={newTaskDesc}
                       onChange={e => setNewTaskDesc(e.target.value)}
                       placeholder="상세 설명 (선택)"
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-[12px] focus:outline-none focus:border-primary text-white transition-colors"
                     />
-                    <div className="flex gap-1">
-                      <select value={newTaskAssignee} onChange={e => setNewTaskAssignee(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
+                    <div className="flex gap-2">
+                      <select value={newTaskAssignee} onChange={e => setNewTaskAssignee(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer">
                         <option value="all">All</option>
                         <option value="claude">Claude</option>
                         <option value="gemini">Gemini</option>
                       </select>
-                      <select value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
+                      <select value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer">
                         <option value="high">🔴 높음</option>
                         <option value="medium">🟡 보통</option>
                         <option value="low">🟢 낮음</option>
                       </select>
                     </div>
-                    <div className="flex gap-1">
-                      <button onClick={createTask} disabled={!newTaskTitle.trim()} className="flex-1 py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 text-white rounded text-[10px] font-bold transition-colors">추가</button>
-                      <button onClick={() => setShowTaskForm(false)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[10px] transition-colors">취소</button>
+                    <div className="flex gap-2">
+                      <button onClick={createTask} disabled={!newTaskTitle.trim()} className="flex-1 py-2 bg-primary/80 hover:bg-primary disabled:opacity-30 text-white rounded-lg text-[13px] font-bold transition-colors">추가</button>
+                      <button onClick={() => setShowTaskForm(false)} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[#858585] rounded-lg text-[13px] transition-colors">취소</button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded text-[10px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-1.5">
-                    <Plus className="w-3 h-3" /> 새 작업 추가
+                  <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-2.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded-lg text-[12px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-2">
+                    <Plus className="w-4 h-4" /> 새 작업 추가
                   </button>
                 )}
               </div>
@@ -2050,7 +2056,7 @@ function App() {
                 )}
               </div>
             ) : activeTab === 'superpowers' ? (
-              /* ── Superpowers 관리자 패널 ── */
+              /* ── 바이브 스킬 관리자 패널 ── */
               <div className="flex-1 flex flex-col overflow-hidden gap-2">
                 {/* 하이브 시스템 진단 위젯 */}
                 <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-2">
@@ -2319,19 +2325,19 @@ function App() {
               /* ── 파일 탐색기 ── */
               <>
                 {/* 프로젝트 및 드라이브 선택기 */}
-                <div className="flex flex-col gap-1.5 mb-3 shrink-0">
-                  <div className="flex items-center justify-between px-0.5 mb-1">
-                    <span className="text-[10px] font-bold text-[#858585] uppercase tracking-widest">Workspace</span>
+                <div className="flex flex-col gap-2.5 mb-4 shrink-0">
+                  <div className="flex items-center justify-between px-1 mb-1.5">
+                    <span className="text-[12px] font-bold text-[#858585] uppercase tracking-widest">Workspace</span>
                     <button 
                       onClick={openProjectFolder}
-                      className="p-1 hover:bg-white/10 rounded text-primary transition-colors"
+                      className="p-1.5 hover:bg-white/10 rounded text-primary transition-colors"
                       title="새 폴더 열기"
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Plus className="w-5 h-5" />
                     </button>
                   </div>
                   
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
                     <select
                       value={projects.includes(currentPath) ? currentPath : ""}
                       onChange={(e) => {
@@ -2341,7 +2347,7 @@ function App() {
                           setCurrentPath(e.target.value);
                         }
                       }}
-                      className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-[11px] focus:outline-none transition-all cursor-pointer text-white font-medium"
+                      className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-3 py-2 text-[13px] focus:outline-none transition-all cursor-pointer text-white font-medium shadow-sm"
                     >
                       <option value="" disabled>프로젝트 선택...</option>
                       {projects.map(p => (
@@ -2352,7 +2358,7 @@ function App() {
                     </select>
                     <button
                       onClick={() => setTreeMode(v => !v)}
-                      className={`p-1.5 rounded border text-[10px] font-bold transition-all shrink-0 ${treeMode ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-[#3c3c3c] border-white/10 text-[#858585] hover:text-white'}`}
+                      className={`p-2 rounded-lg border text-[12px] font-bold transition-all shrink-0 ${treeMode ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-[#3c3c3c] border-white/10 text-[#858585] hover:text-white'}`}
                       title={treeMode ? '플랫 뷰로 전환' : '트리 뷰로 전환'}
                     >
                       {treeMode ? '≡' : '⊞'}
@@ -2363,16 +2369,16 @@ function App() {
                   <select
                     value={drives.find(d => currentPath.startsWith(d)) || ""}
                     onChange={(e) => setCurrentPath(e.target.value)}
-                    className="w-full bg-white/5 border border-transparent hover:border-white/10 rounded px-2 py-1 text-[10px] focus:outline-none transition-all cursor-pointer text-[#858585]"
+                    className="w-full bg-white/5 border border-transparent hover:border-white/10 rounded px-2.5 py-1.5 text-[11px] focus:outline-none transition-all cursor-pointer text-[#858585]"
                   >
                     <option value="" disabled>드라이브 이동...</option>
                     {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
                   </select>
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
-                  <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
-                    <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
+                <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar border-t border-white/5 pt-3">
+                  <button onClick={goUp} className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2a2d2e] rounded text-[13px] transition-colors group">
+                    <ChevronLeft className="w-5 h-5 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
                   </button>
 
                   {treeMode ? (
@@ -2391,12 +2397,12 @@ function App() {
                   ) : (
                     /* 플랫 뷰 (기존) */
                     items.map(item => (
-                      <div key={item.path} className={`group flex items-center gap-0 px-2 py-0.5 rounded text-xs transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}>
+                      <div key={item.path} className={`group flex items-center gap-0 px-3 py-1 rounded text-[13px] transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}>
                         <button
                           onClick={() => handleFileClick(item)}
-                          className={`flex-1 flex items-center gap-2 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
+                          className={`flex-1 flex items-center gap-2.5 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
                         >
-                          {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
+                          {item.isDir ? <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
                           <span className="truncate">{item.name}</span>
                         </button>
                         {!item.isDir && (
@@ -2540,19 +2546,19 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
       <div>
         <button
           onClick={() => onToggle(item.path)}
-          style={{ paddingLeft: `${indent + 4}px` }}
-          className="w-full flex items-center gap-1 py-0.5 pr-2 hover:bg-[#2a2d2e] rounded text-xs transition-colors text-[#cccccc]"
+          style={{ paddingLeft: `${indent + 6}px` }}
+          className="w-full flex items-center gap-1.5 py-1 pr-3 hover:bg-[#2a2d2e] rounded text-[13px] transition-colors text-[#cccccc]"
         >
           {isOpen
-            ? <ChevronDown className="w-3 h-3 shrink-0 text-[#858585]" />
-            : <ChevronRight className="w-3 h-3 shrink-0 text-[#858585]" />}
+            ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-[#858585]" />
+            : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#858585]" />}
           {isOpen
-            ? <VscFolderOpened className="w-4 h-4 text-[#dcb67a] shrink-0" />
-            : <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" />}
+            ? <VscFolderOpened className="w-5 h-5 text-[#dcb67a] shrink-0" />
+            : <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" />}
           <span className="truncate">{item.name}</span>
         </button>
         {isOpen && kids.length === 0 && (
-          <div style={{ paddingLeft: `${indent + 28}px` }} className="py-0.5 text-[10px] text-[#858585] italic">비어 있음</div>
+          <div style={{ paddingLeft: `${indent + 32}px` }} className="py-1 text-[11px] text-[#858585] italic">비어 있음</div>
         )}
         {isOpen && kids.map(child => (
           <FileTreeNode key={child.path} item={child} depth={depth + 1}
@@ -2565,11 +2571,11 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
   return (
     <button
       onClick={() => onFileOpen(item)}
-      style={{ paddingLeft: `${indent + 20}px` }}
-      className="group w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
+      style={{ paddingLeft: `${indent + 24}px` }}
+      className="group w-full flex items-center gap-2.5 py-1 pr-3 hover:bg-primary/20 rounded text-[13px] transition-colors text-white"
     >
       {getFileIcon(item.name)}
-      <span className="truncate flex-1 text-left">{item.name}</span>
+      <span className="truncate flex-1 text-left font-medium">{item.name}</span>
       <button
         onClick={(e) => {
           e.stopPropagation();
@@ -2578,7 +2584,7 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/20 rounded text-primary transition-all shrink-0"
         title="터미널 입력창으로 경로 보내기"
       >
-        <Pin className="w-3 h-3" />
+        <Pin className="w-3.5 h-3.5" />
       </button>
     </button>
   );
@@ -3086,23 +3092,13 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 onCompositionStart={() => { isComposingRef.current = true; }}
                 onCompositionEnd={() => { isComposingRef.current = false; }}
                 onKeyDown={e => {
-                  // 한글 조합 중일 때 엔터를 치면 일단 글자 확정만 하도록 하고,
-                  // 확정된 후 (isComposingRef가 false인 상태에서 엔터가 들어올 때) 전송합니다.
                   if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey) {
-                    // 한글 조합 중 엔터는 브라우저가 글자를 확정(CompositionEnd 발생)시키므로
-                    // 아주 잠깐의 딜레이를 주어 확정된 텍스트가 inputValue에 반영된 후 전송하도록 합니다.
-                    if (isComposingRef.current) {
-                      // IME 조합 중 엔터: compositionEnd 이후 DOM 실제 값으로 전송.
-                      // inputValue(React state)는 조합 중 업데이트가 억제되어 stale 상태이므로
-                      // inputTextareaRef.current.value(DOM 실제값)를 사용해야 한다.
-                      setTimeout(() => {
-                        const domVal = inputTextareaRef.current?.value ?? inputValue;
-                        if (domVal.trim()) handleSend(domVal);
-                      }, 50);
-                      return;
-                    }
-                    
+                    // 엔터 키 입력 시 기본 동작(줄바꿈) 차단
                     e.preventDefault();
+
+                    // 한글 조합 중(isComposing)에 엔터가 눌린 경우, 
+                    // 브라우저에 따라 KeyDown이 두 번 발생할 수 있으므로 
+                    // 이미 입력값이 비워졌다면(전송 완료) 추가 전송을 방지합니다.
                     if (inputValue.trim()) {
                       handleSend(inputValue);
                     }
@@ -3139,7 +3135,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
                         const handleCmdClick = (sc: SlashCommand) => {
                           if (sc.injectSkill) {
-                            // superpowers 설치 여부에 따라 올바른 커맨드 선택
+                            // 바이브 스킬 설치 여부에 따라 올바른 커맨드 선택
                             // 설치됨 → claudeCmd / geminiCmd (실제 슬래시 커맨드)
                             // 미설치  → algo (스킬 내용을 AI에게 텍스트로 주입)
                             const sk = VIBE_SKILLS.find(s => s.name === sc.injectSkill);
