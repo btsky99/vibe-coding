@@ -25,7 +25,7 @@ a = Analysis(
         ('../RULES.md', '.'),
         ('../scripts', 'scripts'),
     ],
-    hiddenimports=['websockets', 'winpty'],
+    hiddenimports=['websockets', 'winpty', 'chromadb', 'pysqlite3'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

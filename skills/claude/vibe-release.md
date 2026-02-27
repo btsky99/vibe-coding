@@ -6,63 +6,40 @@ REVISION HISTORY:
 - 2026-02-27 Claude: 배포 반복 에러 방지를 위한 릴리즈 스킬 신규 생성
 -->
 
-# 🚀 vibe-release 스킬
+# 🚀 vibe-release (Auto-Pilot)
 
-**호출 방법**: `/vibe-release` 또는 "릴리즈", "빌드 배포" 요청 시 자동 실행
+**호출 방법**: `/vibe-release` 또는 "빌드해서 배포해줘", "푸시하고 업데이트 띄워줘"
 
-이 스킬은 Vibe Coding 릴리즈 파이프라인을 안전하게 실행합니다.
-빌드 순서를 지키고, 각 단계 완료를 검증한 후 다음 단계로 진행합니다.
+이 스킬은 **버전 자동 증가 -> 커밋 -> 푸시 -> GitHub 자동 빌드**로 이어지는 전체 배포 과정을 수행합니다.
 
 ---
 
-## ⚡ 실행 절차
+## ⚡ 자동 실행 절차 (Agent 가이드)
 
-### Step 0: 사전 점검
+### Step 1: 버전 자동 증가 및 점검
 ```bash
-# 현재 버전 확인
-python -c "from _version import __version__; print('현재 버전:', __version__)" 2>/dev/null || cd .ai_monitor && python -c "from _version import __version__; print(__version__)"
+# 1. 현재 버전 자동 증가 (scripts/auto_version.py 사용)
+python scripts/auto_version.py
 
-# git 상태 확인 (clean 여야 함)
-git status --short
+# 2. 결과 확인
+NEW_VER=$(python -c "exec(open('.ai_monitor/_version.py').read()); print(__version__)")
+echo "새로운 버전: $NEW_VER"
 ```
 
-사용자에게 물어볼 것:
-1. 새 버전 번호는? (현재 버전 + 1 제안)
-2. 릴리즈 노트 요약은?
-
-### Step 1: 버전 번호 업데이트
-```python
-# .ai_monitor/_version.py 수정
-__version__ = "{NEW_VERSION}"
-```
-
-### Step 2: 프론트엔드 빌드
+### Step 2: Git 커밋 및 푸시 (자동 업데이트 트리거)
 ```bash
-cd .ai_monitor/vibe-view && npm run build
+git add .
+git commit -m "chore(release): v$NEW_VER 자동 릴리즈"
+git push origin main
 ```
-- 성공 기준: `✓ built in` 메시지 출력
-- 실패 시: TypeScript 에러 먼저 수정
+- **중요**: 푸시가 완료되면 GitHub Actions가 감지하여 약 5분 내로 다른 PC에 '업데이트 알림'을 보냅니다.
 
-### Step 3: PyInstaller 빌드
-```bash
-cd .ai_monitor && python -m PyInstaller vibe-coding.spec --noconfirm
-```
-- 성공 기준: `Build complete!` + `dist/vibe-coding.exe` 존재
-- WARNING은 무시 (ext-ms-win-uiacore DLL 경고는 정상)
+---
 
-### Step 4: Inno Setup 인스톨러 빌드
-```bash
-VERSION=$(cd .ai_monitor && python -c "from _version import __version__; print(__version__)")
-"C:/Program Files (x86)/Inno Setup 6/ISCC.exe" .ai_monitor/installer.iss /DMyAppVersion=$VERSION
-```
-- 성공 기준: `dist/vibe-coding-setup-{VERSION}.exe` 생성
+## ⚠️ 에러 발생 시 즉시 확인할 것
 
-### Step 5: Git 커밋 & 태그
-```bash
-git add .ai_monitor/_version.py
-git commit -m "chore(release): v{NEW_VERSION}"
-git tag -a "v{NEW_VERSION}" -m "Release v{NEW_VERSION}"
-```
+1. **GitHub 토큰**: `.ai_monitor/data/github_token.txt` 확인.
+2. **빌드 실패**: GitHub Actions 탭 모니터링.
 
 ---
 

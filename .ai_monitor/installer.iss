@@ -2,7 +2,9 @@
 ; CI에서 자동 빌드됨
 
 #define MyAppName "Vibe Coding"
-#define MyAppExeName "vibe-coding.exe"
+#ifndef MyAppExeName
+  #define MyAppExeName "vibe-coding.exe"
+#endif
 #define MyAppPublisher "btsky99"
 #define MyAppURL "https://github.com/btsky99/vibe-coding"
 #ifndef MyAppVersion
@@ -37,7 +39,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startup"; Description: "Windows 시작 시 자동 실행"; GroupDescription: "추가 옵션:"
 
 [Files]
-Source: "dist\vibe-coding.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\vibe-coding_console.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 

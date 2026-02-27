@@ -8,3 +8,4 @@ pyinstaller
 pywebview==6.1
 fastembed
 numpy
+chromadb

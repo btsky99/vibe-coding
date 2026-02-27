@@ -14,9 +14,18 @@ import chromadb
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-# 프로젝트 루트 경로 설정
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, ".ai_monitor", "data", "vector_db")
+# 프로젝트 루트 및 데이터 경로 설정
+if getattr(sys, 'frozen', False):
+    # PyInstaller 배포 버전(frozen) 체크
+    if os.name == 'nt':
+        DATA_DIR = os.path.join(os.getenv('APPDATA'), "VibeCoding")
+    else:
+        DATA_DIR = os.path.join(os.path.expanduser("~"), ".vibe-coding")
+    DB_PATH = os.path.join(DATA_DIR, "vector_db")
+else:
+    # 개발 모드
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DB_PATH = os.path.join(BASE_DIR, ".ai_monitor", "data", "vector_db")
 
 class VectorMemory:
     def __init__(self, collection_name: str = "hive_local_memory"):

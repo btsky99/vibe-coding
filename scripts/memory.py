@@ -73,6 +73,15 @@ def find_port():
 # ─── SQLite 직접 접근 (폴백) ─────────────────────────────────────────────────
 
 def _db_path() -> str:
+    # PyInstaller 배포 버전(frozen) 체크
+    if getattr(sys, 'frozen', False):
+        if os.name == 'nt':
+            data_dir = os.path.join(os.getenv('APPDATA'), "VibeCoding")
+        else:
+            data_dir = os.path.join(os.path.expanduser("~"), ".vibe-coding")
+        return os.path.join(data_dir, "shared_memory.db")
+    
+    # 개발 모드
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     return os.path.join(project_root, '.ai_monitor', 'data', 'shared_memory.db')

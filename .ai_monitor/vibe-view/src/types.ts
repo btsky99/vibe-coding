@@ -138,6 +138,21 @@ export interface HiveHealth {
   };
 }
 
+// 하이브 통합 로그 (session_logs 테이블 구조)
+export interface HiveLog {
+  id: number;
+  session_id: string;
+  terminal_id: string;
+  project: string;
+  agent: string;
+  trigger_msg: string;
+  status: string;
+  commit_hash: string;
+  files_changed: string;
+  ts_start: string;
+  ts_end: string;
+}
+
 // AI 사고 과정 로그 (Chain of Thought)
 export interface ThoughtLog {
   timestamp: string;
