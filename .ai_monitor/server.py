@@ -88,19 +88,21 @@ class FSChangeHandler(FileSystemEventHandler):
     """파일 시스템 변경 이벤트를 감지하여 SSE 클라이언트들에게 알립니다."""
     def on_any_event(self, event):
         if event.is_directory: return
-        # 노이즈가 심한 파일/폴더는 제외
+        # 노이즈가 심한 파일/폴더는 제외 (시스템 레벨 필터링이 안 될 경우 대비)
         path = event.src_path.replace('\\', '/')
-        if any(x in path for x in ['.git', '.ai_monitor/data', '__pycache__', '.ruff_cache', '.ico', '.png', '.jpg', '.tmp']):
+        if any(x in path for x in ['.git', '.ai_monitor/data', '__pycache__', '.ruff_cache', '.ico', '.png', '.jpg', '.tmp', 'node_modules', 'dist', 'build']):
             return
         
         # 브로드캐스트 메시지 생성
         msg_obj = {'type': 'fs_change', 'path': path, 'event': event.event_type}
         msg = f"data: {json.dumps(msg_obj, ensure_ascii=False)}\n\n"
         
-        # 연결된 모든 클라이언트에게 전송
+        # 연결된 모든 클라이언트에게 전송 (비정상 연결 조기 제거)
         disconnected = []
         for client in list(FS_CLIENTS):
             try:
+                # 소켓 타임아웃 설정 (1초 내에 전송 못하면 실패 처리)
+                client.connection.settimeout(1.0)
                 client.wfile.write(msg.encode('utf-8'))
                 client.wfile.flush()
             except Exception:
@@ -352,7 +354,7 @@ class MemoryWatcher(threading.Thread):
     터미널 번호(T1, T2 …)는 최초 감지된 순서로 자동 부여된다.
     """
 
-    POLL_INTERVAL = 15  # 초 단위 폴링 간격
+    POLL_INTERVAL = 30  # 초 단위 폴링 간격 (리소스 아끼기 위해 30초로 완화)
 
     def __init__(self) -> None:
         super().__init__(daemon=True, name='MemoryWatcher')
@@ -477,6 +479,10 @@ class MemoryWatcher(threading.Thread):
         except OSError:
             return False
         key = str(path)
+        # 메모리 누수 방지: 감시 대상 파일 정보가 너무 많아지면 비우기
+        if len(self._mtimes) > 5000:
+            self._mtimes.clear()
+            
         if self._mtimes.get(key) == mtime:
             return False
         self._mtimes[key] = mtime
@@ -582,14 +588,15 @@ class MemoryWatcher(threading.Thread):
             if not chats_dir.exists():
                 continue
             # 가장 최근 세션 파일 하나만 처리 (mtime 기준)
-            session_files = sorted(
-                chats_dir.glob('session-*.json'),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
-            if not session_files:
+            # 수천 개의 세션 파일이 있을 경우 sorted()는 비효율적이므로 max() 사용
+            try:
+                session_files = list(chats_dir.glob('session-*.json'))
+                if not session_files:
+                    continue
+                latest = max(session_files, key=lambda p: p.stat().st_mtime)
+            except (ValueError, OSError):
                 continue
-            latest = session_files[0]
+                
             if not self._changed(latest):
                 continue
             try:
@@ -911,16 +918,19 @@ class SSEHandler(BaseHTTPRequestHandler):
                             if 'trigger_msg' in out_row:
                                 out_row['trigger'] = out_row.pop('trigger_msg')
                             
+                            # 연결 상태 확인하며 전송
+                            self.connection.settimeout(1.0)
                             self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
                             self.wfile.flush()
                         last_id = new_rows[-1]['id']
                     
-                    time.sleep(0.5) # 감시 주기
-                except (BrokenPipeError, ConnectionResetError):
+                    time.sleep(1.0) # 감시 주기를 0.5s에서 1.0s로 늘려 리소스 절약
+                except (BrokenPipeError, ConnectionResetError, TimeoutError):
                     break
                 except Exception as e:
+                    # 에러가 반복되면 루프 중단 (서버 먹통 방지)
                     print(f"SSE DB Stream error: {e}")
-                    time.sleep(1)
+                    time.sleep(2)
         elif parsed_path.path == '/api/heartbeat':
             # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
             self.send_response(200)
@@ -3012,6 +3022,23 @@ if __name__ == '__main__':
     if os.name == 'nt':
         try:
             import ctypes
+            import ctypes.wintypes
+
+            # ── 단일 인스턴스 강제 (Named Mutex) ──────────────────────────
+            # 이미 실행 중인 인스턴스가 있으면 해당 창을 앞으로 가져오고 종료.
+            # ERROR_ALREADY_EXISTS(183) 코드로 중복 실행 여부를 판단한다.
+            _MUTEX_NAME = "Global\\VibeCodingAppMutex_v1"
+            _mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+            if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                # 기존 창을 최상단으로 올리기
+                _hwnd = ctypes.windll.user32.FindWindowW(None, "바이브 코딩")
+                if _hwnd:
+                    ctypes.windll.user32.ShowWindow(_hwnd, 9)   # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(_hwnd)
+                print("[!] 이미 실행 중인 Vibe Coding 인스턴스가 있습니다. 종료합니다.")
+                os._exit(0)
+            # ──────────────────────────────────────────────────────────────
+
             myappid = f'com.vibe.coding.{__version__}'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except: pass
