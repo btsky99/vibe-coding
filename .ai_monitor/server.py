@@ -83,6 +83,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 FS_CLIENTS = set() # SSE 클라이언트 연결 세트
+THOUGHT_CLIENTS = set() # 사고 과정 SSE 클라이언트 연결 세트
 
 class FSChangeHandler(FileSystemEventHandler):
     """파일 시스템 변경 이벤트를 감지하여 SSE 클라이언트들에게 알립니다."""
@@ -293,7 +294,45 @@ def _init_memory_db() -> None:
             _migrate_project_column(conn)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project)')
 
+def migrate_sqlite_to_vector():
+    """기존 SQLite의 공유 메모리 항목 중 벡터 DB에 누락된 데이터를 마이그레이션합니다."""
+    print("[Migration] SQLite -> Vector DB 초기 동기화 시작...")
+    try:
+        scripts_dir = str(SCRIPTS_DIR)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from vector_memory import VectorMemory
+        vm = VectorMemory()
+        
+        # 벡터 DB에 이미 있는 ID 목록 가져오기 (중복 마이그레이션 방지)
+        existing_vecs = vm.collection.get()
+        existing_ids = set(existing_vecs.get('ids', []))
+        
+        with _memory_conn() as conn:
+            rows = conn.execute('SELECT * FROM memory').fetchall()
+            count = 0
+            for row in rows:
+                if row['key'] not in existing_ids:
+                    vm.add_memory(
+                        key=row['key'],
+                        content=f"{row['title']}\n{row['content']}",
+                        metadata={
+                            "author": row['author'],
+                            "project": row['project'],
+                            "tags": row['tags'],
+                            "updated_at": row['updated_at']
+                        }
+                    )
+                    count += 1
+            if count > 0:
+                print(f"[Migration] {count}개의 항목이 벡터 DB로 성공적으로 복사되었습니다.")
+            else:
+                print("[Migration] 이미 모든 데이터가 동기화되어 있습니다.")
+    except Exception as e:
+        print(f"[Migration] 오류 발생: {e}")
+
 _init_memory_db()
+migrate_sqlite_to_vector()
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── 임베딩 헬퍼 (fastembed 기반, 한국어 포함 다국어 지원) ────────────────────
@@ -470,6 +509,27 @@ class MemoryWatcher(threading.Thread):
                 (key, str(int(time.time() * 1000)), title,
                  content, tags_json, author, orig_ts, now, proj, emb)
             )
+        
+        # ── Vector DB (ChromaDB) 동기화 추가 ──────────────────────────────
+        try:
+            scripts_dir = str(SCRIPTS_DIR)
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from vector_memory import VectorMemory
+            vm = VectorMemory()
+            vm.add_memory(
+                key=key,
+                content=f"{title}\n{content}",
+                metadata={
+                    "author": author,
+                    "project": proj,
+                    "tags": ",".join(tags),
+                    "updated_at": now
+                }
+            )
+        except Exception as ve:
+            print(f"[MemoryWatcher] Vector DB 동기화 실패: {ve}")
+
         print(f"[MemoryWatcher] 동기화 완료: {key} (프로젝트: {proj}, 임베딩: {'✓' if emb else '✗'})")
 
     # ── 내부: 파일 변경 여부 확인 ───────────────────────────────────────────
@@ -694,7 +754,7 @@ def _parse_session_tail(path: Path):
         lines = [l.strip() for l in raw.splitlines() if l.strip()]
 
         session_id = slug = model = cwd = last_ts = ''
-        input_tokens = output_tokens = cache_read = 0
+        input_tokens = output_tokens = cache_read = cache_write = 0
 
         # 역순으로 탐색 → 가장 최신 데이터 우선
         for line in reversed(lines):
@@ -722,6 +782,7 @@ def _parse_session_tail(path: Path):
                     input_tokens  = usage.get('input_tokens', 0)
                     output_tokens = usage.get('output_tokens', 0)
                     cache_read    = usage.get('cache_read_input_tokens', 0)
+                    cache_write   = usage.get('cache_creation_input_tokens', 0)
                     if not last_ts:
                         last_ts = obj.get('timestamp', '')
                     break  # 가장 최신 usage 찾으면 즉시 종료
@@ -736,6 +797,7 @@ def _parse_session_tail(path: Path):
             'input_tokens': input_tokens,
             'output_tokens': output_tokens,
             'cache_read':   cache_read,
+            'cache_write':  cache_write,
             'last_ts':      last_ts,
             'cwd':          str(cwd).replace('\\', '/'),
         }
@@ -848,14 +910,17 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(f"data: {json.dumps(log, ensure_ascii=False)}\n\n".encode('utf-8'))
                 self.wfile.flush()
             
-            # 사고 로그는 memory list에 직접 전송되므로 하트비트만 유지
-            while True:
-                try:
-                    time.sleep(5)
+            # 실시간 업데이트를 위해 클라이언트 등록
+            THOUGHT_CLIENTS.add(self)
+            try:
+                while True:
+                    time.sleep(15)
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
-                except Exception:
-                    break
+            except Exception:
+                pass
+            finally:
+                THOUGHT_CLIENTS.discard(self)
             return
 
         # ─── 신규: 파일 시스템 변경 이벤트 스트리밍 ───
@@ -2011,6 +2076,19 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if len(THOUGHT_LOGS) > 100:
                     THOUGHT_LOGS.pop(0)
 
+                # ── 실시간 SSE 브로드캐스트 ──────────────────────────────
+                msg = f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                disconnected = []
+                for client in list(THOUGHT_CLIENTS):
+                    try:
+                        client.connection.settimeout(1.0)
+                        client.wfile.write(msg.encode('utf-8'))
+                        client.wfile.flush()
+                    except Exception:
+                        disconnected.append(client)
+                for client in disconnected:
+                    THOUGHT_CLIENTS.discard(client)
+
                 # ── 벡터 DB에 영구 저장 ──────────────────────────────────
                 try:
                     agent   = data.get('agent', 'unknown')
@@ -2039,6 +2117,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                              agent, data['timestamp'], data['timestamp'],
                              PROJECT_ID, emb)
                         )
+                    
+                    # Vector DB (ChromaDB) 동기화
+                    try:
+                        scripts_dir = str(SCRIPTS_DIR)
+                        if scripts_dir not in sys.path:
+                            sys.path.insert(0, scripts_dir)
+                        from vector_memory import VectorMemory
+                        vm = VectorMemory()
+                        vm.add_memory(
+                            key=key,
+                            content=f"{title}\n{content}",
+                            metadata={
+                                "author": agent,
+                                "project": PROJECT_ID,
+                                "tags": ",".join(tags),
+                                "updated_at": data['timestamp']
+                            }
+                        )
+                    except Exception as ve:
+                        print(f"🧠 [Thought→Vector] 저장 실패: {ve}")
+
                     print(f"🧠 [Thought→DB] {key} (임베딩: {'✓' if emb else '✗'})")
                 except Exception as db_err:
                     print(f"[Thought→DB] 저장 실패 (무시): {db_err}")
@@ -2596,6 +2695,26 @@ class SSEHandler(BaseHTTPRequestHandler):
                          entry['project'], emb)
                     )
 
+                # ── Vector DB (ChromaDB) 동기화 추가 ──────────────────────────────
+                try:
+                    scripts_dir = str(SCRIPTS_DIR)
+                    if scripts_dir not in sys.path:
+                        sys.path.insert(0, scripts_dir)
+                    from vector_memory import VectorMemory
+                    vm = VectorMemory()
+                    vm.add_memory(
+                        key=key,
+                        content=f"{title}\n{content}",
+                        metadata={
+                            "author": entry['author'],
+                            "project": project,
+                            "tags": ",".join(data.get('tags', [])),
+                            "updated_at": now
+                        }
+                    )
+                except Exception as ve:
+                    print(f"[API] Vector DB 동기화 실패: {ve}")
+
                 entry['tags'] = json.loads(entry['tags'])
                 self.wfile.write(json.dumps({'status': 'success', 'entry': entry}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -2613,6 +2732,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                 key = str(data.get('key', '')).strip()
                 with _memory_conn() as conn:
                     conn.execute('DELETE FROM memory WHERE key=?', (key,))
+                
+                # ── Vector DB (ChromaDB) 삭제 추가 ───────────────────────────────
+                try:
+                    scripts_dir = str(SCRIPTS_DIR)
+                    if scripts_dir not in sys.path:
+                        sys.path.insert(0, scripts_dir)
+                    from vector_memory import VectorMemory
+                    vm = VectorMemory()
+                    vm.delete_memory(key)
+                except Exception as ve:
+                    print(f"[API] Vector DB 삭제 실패: {ve}")
+
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))

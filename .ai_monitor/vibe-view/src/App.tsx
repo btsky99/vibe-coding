@@ -40,13 +40,14 @@ const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
 // Claude Code 세션별 컨텍스트 창 사용량 데이터 구조
 interface ContextSession {
   session_id: string;
-  slug: string;       // 세션 닉네임 (예: peppy-crafting-owl)
-  model: string;      // 모델명 (예: claude-sonnet-4-6)
-  input_tokens: number;   // 현재 컨텍스트 창 입력 토큰 수
-  output_tokens: number;  // 누적 출력 토큰 수
-  cache_read: number;     // 캐시에서 읽은 토큰 수
-  last_ts: string;    // 마지막 활동 ISO 타임스탬프
-  cwd: string;        // 작업 디렉터리
+  slug: string;         // 세션 닉네임 (예: peppy-crafting-owl)
+  model: string;        // 모델명 (예: claude-sonnet-4-6)
+  input_tokens: number; // 현재 컨텍스트 창 입력 토큰 수
+  output_tokens: number;// 누적 출력 토큰 수
+  cache_read: number;   // 캐시 읽기 (Cache~)
+  cache_write: number;  // 캐시 쓰기/생성 (Cache+)
+  last_ts: string;      // 마지막 활동 ISO 타임스탬프
+  cwd: string;          // 작업 디렉터리
 }
 const WS_PORT = parseInt(window.location.port) + 1;
 
@@ -3101,8 +3102,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const [showDiff, setShowDiff] = useState(false);
   const [diffContent, setDiffContent] = useState<string>('');
 
-  // 컨텍스트 사용량 패널 — 기본 숨김, 클릭 시 토글
-  const [showContextPanel, setShowContextPanel] = useState(false);
+  // showContextPanel 제거됨 — 항상 표시 방식으로 변경 (2026-02-27)
   // activeAgent에 따라 Claude/Gemini 세션 선택 — slotId 번째 세션 사용
   // [2026-02-27] Claude: Gemini 컨텍스트 분기 추가
   const isGeminiAgent = activeAgent === 'gemini';
@@ -3112,10 +3112,6 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   // 컨텍스트 창 최대 토큰: Claude=200k, Gemini=1M
   const CTX_MAX = isGeminiAgent ? 1000000 : 200000;
   const ctxPct = ctxSession ? Math.round((ctxSession.input_tokens / CTX_MAX) * 100) : 0;
-  // 헤더 버튼 표시용 간결한 토큰 수 (예: "57k/200k" 또는 "54k/1000k")
-  const ctxLabel = ctxSession
-    ? `${Math.round(ctxSession.input_tokens / 1000)}k/${Math.round(CTX_MAX / 1000)}k`
-    : '—';
   // ISO 타임스탬프 → 상대 시간 문자열 (예: "3분 전")
   const ctxRelTime = (() => {
     if (!ctxSession?.last_ts) return '';
@@ -3419,19 +3415,6 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {/* 🧠 컨텍스트 사용량 버튼 — 항상 표시, 클릭 시 패널 토글 */}
-          <button
-            onClick={() => setShowContextPanel(p => !p)}
-            className={`px-2 py-0.5 rounded text-[9px] border transition-all font-mono ${
-              showContextPanel
-                ? 'bg-indigo-500/30 border-indigo-400/60 text-indigo-200'
-                : 'bg-[#3c3c3c] border-white/5 text-[#888] hover:bg-white/10 hover:text-[#ccc]'
-            }`}
-            title="컨텍스트 창 사용량 보기"
-          >
-            🧠 {ctxLabel}
-          </button>
-
           {!isTerminalMode ? (
             <span className="text-[9px] text-[#858585] font-bold mr-1">에이전트 선택 대기 중...</span>
           ) : (
@@ -3459,49 +3442,66 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         </div>
       </div>
 
-      {/* ── 컨텍스트 사용량 패널 — showContextPanel=true일 때만 표시 ── */}
-      {showContextPanel && (
-        <div className="shrink-0 bg-[#1a1a2e] border-b border-indigo-500/20 px-3 py-2">
-          {ctxSession ? (
-            <>
-              {/* 프로그레스 바 */}
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-[9px] text-indigo-300 font-mono truncate" style={{ width: '130px' }}>
-                  {ctxSession.model}
-                </span>
-                <div className="flex-1 h-1.5 bg-[#333] rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${
-                      ctxPct >= 80 ? 'bg-red-500' :
-                      ctxPct >= 60 ? 'bg-yellow-500' :
-                      'bg-gradient-to-r from-indigo-500 to-purple-500'
-                    }`}
-                    style={{ width: `${Math.min(100, ctxPct)}%` }}
-                  />
-                </div>
-                <span className="text-[9px] font-mono text-[#aaa] text-right" style={{ width: '80px' }}>
-                  {ctxPct}% 사용
-                </span>
-              </div>
-              {/* 세부 정보 */}
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[8px] text-[#777]">
-                <span className="text-indigo-400/80">🏷 {ctxSession.slug}</span>
-                <span>📥 {(ctxSession.input_tokens / 1000).toFixed(1)}k</span>
-                <span>📤 {(ctxSession.output_tokens / 1000).toFixed(1)}k</span>
-                {ctxSession.cache_read > 0 && (
-                  <span>⚡ 캐시 {(ctxSession.cache_read / 1000).toFixed(1)}k</span>
-                )}
-                <span className="ml-auto text-[#555]">{ctxRelTime}</span>
-              </div>
-            </>
-          ) : (
-            <div className="text-[9px] text-[#555] italic text-center py-0.5">
-              {/* activeAgent에 따라 안내 메시지 분기 */}
-              세션 없음 — {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'}를 실행하면 자동으로 감지됩니다
+      {/* ── 컨텍스트 사용량 상태 바 — 항상 표시 (스크린샷 스타일) ── */}
+      <div className={`shrink-0 border-b px-3 flex items-center gap-0 h-[18px] font-mono text-[10px] overflow-hidden ${
+        ctxSession
+          ? ctxPct >= 80 ? 'bg-red-950/40 border-red-500/20'
+          : ctxPct >= 60 ? 'bg-yellow-950/40 border-yellow-500/20'
+          : 'bg-[#12121f] border-indigo-500/15'
+          : 'bg-[#161616] border-white/5'
+      }`}>
+        {ctxSession ? (
+          <>
+            {/* 진행 바 (얇은 세로선) */}
+            <div className="w-1 self-stretch mr-2 shrink-0">
+              <div
+                className={`w-full h-full rounded-sm ${ctxPct >= 80 ? 'bg-red-500' : ctxPct >= 60 ? 'bg-yellow-400' : 'bg-indigo-500'}`}
+                style={{ height: `${Math.min(100, ctxPct)}%`, marginTop: 'auto' }}
+              />
             </div>
-          )}
-        </div>
-      )}
+            {/* 모델명 (짧게) */}
+            <span className={`mr-2 shrink-0 ${ctxPct >= 80 ? 'text-red-300' : ctxPct >= 60 ? 'text-yellow-300' : 'text-indigo-300'}`}>
+              {ctxSession.model.replace('claude-', '').replace('-latest', '').replace(/-\d{8}$/, '')}
+            </span>
+            <span className="text-[#555] mr-2">•</span>
+            {/* 토큰 수/최대 (%) */}
+            <span className="text-[#ccc] mr-2">
+              {Math.round(ctxSession.input_tokens / 1000)}k/{Math.round(CTX_MAX / 1000)}k
+            </span>
+            <span className={`mr-2 shrink-0 ${ctxPct >= 80 ? 'text-red-400' : ctxPct >= 60 ? 'text-yellow-400' : 'text-[#777]'}`}>
+              ({ctxPct}%)
+            </span>
+            <span className="text-[#555] mr-2">•</span>
+            {/* In / Out */}
+            <span className="text-[#888] mr-1">In:</span>
+            <span className="text-[#bbb] mr-2">{(ctxSession.input_tokens / 1000).toFixed(1)}k</span>
+            <span className="text-[#555] mr-2">•</span>
+            <span className="text-[#888] mr-1">Out:</span>
+            <span className="text-[#bbb] mr-2">{(ctxSession.output_tokens / 1000).toFixed(1)}k</span>
+            {/* Cache+ (쓰기) */}
+            {(ctxSession.cache_write ?? 0) > 0 && (
+              <>
+                <span className="text-[#555] mr-2">•</span>
+                <span className="text-[#888] mr-1">Cache+:</span>
+                <span className="text-emerald-400/80 mr-2">{((ctxSession.cache_write ?? 0) / 1000).toFixed(1)}k</span>
+              </>
+            )}
+            {/* Cache~ (읽기) */}
+            {ctxSession.cache_read > 0 && (
+              <>
+                <span className="text-[#555] mr-2">•</span>
+                <span className="text-[#888] mr-1">Cache~:</span>
+                <span className="text-sky-400/80 mr-2">{(ctxSession.cache_read / 1000).toFixed(1)}k</span>
+              </>
+            )}
+            <span className="ml-auto text-[#444] shrink-0">{ctxRelTime}</span>
+          </>
+        ) : (
+          <span className="text-[#3a3a3a] italic">
+            {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...
+          </span>
+        )}
+      </div>
       {isTerminalMode ? (
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
           {showActiveFile && (
