@@ -3066,7 +3066,7 @@ if __name__ == '__main__':
                             check_and_update(DATA_DIR)
                     except Exception as e:
                         print(f"[!] Update check error: {e}")
-                    time.sleep(3600)  # 1시간 간격
+                    time.sleep(600)  # 10분 간격
 
             threading.Thread(target=_update_loop, daemon=True).start()
         except ImportError:
