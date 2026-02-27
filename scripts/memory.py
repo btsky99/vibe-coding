@@ -28,13 +28,6 @@ import time
 import sqlite3
 import os
 
-# VectorMemory 연동 시도
-try:
-    from vector_memory import VectorMemory
-    VECTOR_AVAILABLE = True
-except ImportError:
-    VECTOR_AVAILABLE = False
-
 DEFAULT_PORTS = [8005, 8000]
 
 

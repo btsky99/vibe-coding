@@ -19,7 +19,7 @@ import {
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
   Bot, Play, CircleDot, Package, CheckCircle2, Circle, Pin,
-  Maximize2, Minimize2, FilePlus, FolderPlus, Edit2, Trash, Copy, ExternalLink
+  Maximize2, Minimize2, FilePlus, FolderPlus, Edit2, Copy, ExternalLink
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -229,8 +229,13 @@ function App() {
   const [lastSeenMsgCount, setLastSeenMsgCount] = useState(0);
   const [msgFrom, setMsgFrom] = useState('claude');
 
-  // ─── 파일 탐색기 컨텍스트 메뉴 상태 ──────────────────────────────────────────
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string, isDir: boolean } | null>(null);
+  // 🔮 컨텍스트 메뉴 상태 (파일/폴더 및 작업 항목 지원)
+  const [contextMenu, setContextMenu] = useState<{ 
+    x: number, y: number, 
+    type: 'file' | 'task', 
+    path?: string, isDir?: boolean,
+    taskId?: string, taskTitle?: string
+  } | null>(null);
   const [isRenaming, setIsRenaming] = useState<string | null>(null); // 이름 변경 중인 파일 경로
   const [newNameDraft, setNewNameDraft] = useState(''); // 새 이름 입력값
   const [msgTo, setMsgTo] = useState('all');
@@ -940,7 +945,12 @@ function App() {
   // ─── 컨텍스트 메뉴 핸들러 ───────────────────────────────────────────────────
   const handleContextMenu = (e: React.MouseEvent, path: string, isDir: boolean) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, path, isDir });
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'file', path, isDir });
+  };
+
+  const handleTaskContextMenu = (e: React.MouseEvent, taskId: string, taskTitle: string) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'task', taskId, taskTitle });
   };
 
   const closeContextMenu = () => setContextMenu(null);
@@ -1365,64 +1375,93 @@ function App() {
         </div>
       )}
 
-      {/* 🔮 파일 탐색기 컨텍스트 메뉴 (다크 네온 스타일) */}
+      {/* 🔮 파일 탐색기 및 작업 항목 컨텍스트 메뉴 (다크 네온 스타일) */}
       {contextMenu && (
         <div 
-          className="fixed z-[9999] min-w-[160px] bg-[#252526]/95 backdrop-blur-md border border-white/10 rounded shadow-2xl py-1 overflow-hidden"
+          className="fixed z-[9999] min-w-[170px] bg-[#252526]/95 backdrop-blur-md border border-white/10 rounded shadow-2xl py-1 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
           style={{ 
-            left: Math.min(contextMenu.x, window.innerWidth - 170), 
-            top: Math.min(contextMenu.y, window.innerHeight - 250) 
+            left: Math.min(contextMenu.x, window.innerWidth - 180), 
+            top: Math.min(contextMenu.y, window.innerHeight - (contextMenu.type === 'file' ? 240 : 150)) 
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* 메뉴 항목: 이름 변경 */}
-          <button 
-            onClick={() => { setIsRenaming(contextMenu.path); setNewNameDraft(contextMenu.path.split('/').pop() || ''); closeContextMenu(); }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-primary/20 hover:text-white transition-colors"
-          >
-            <Edit2 className="w-3.5 h-3.5" /> 이름 변경
-          </button>
+          {contextMenu.type === 'file' && contextMenu.path && (
+            <>
+              {/* 메뉴 항목: 이름 변경 */}
+              <button 
+                onClick={() => { setIsRenaming(contextMenu.path!); setNewNameDraft(contextMenu.path!.split('/').pop() || ''); closeContextMenu(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-primary/20 hover:text-white transition-colors"
+              >
+                <Edit2 className="w-3.5 h-3.5" /> 이름 변경
+              </button>
 
-          {/* 메뉴 항목: 삭제 */}
-          <button 
-            onClick={() => handleFileDelete(contextMenu.path, contextMenu.isDir)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-red-500/20 hover:text-red-400 transition-colors"
-          >
-            <Trash className="w-3.5 h-3.5" /> 삭제
-          </button>
+              {/* 메뉴 항목: 삭제 (아이콘 Trash2로 통일) */}
+              <button 
+                onClick={() => handleFileDelete(contextMenu.path!, !!contextMenu.isDir)}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-red-500/20 hover:text-red-400 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> 삭제
+              </button>
 
-          <div className="h-px bg-white/5 my-1" />
+              <div className="h-px bg-white/5 my-1" />
 
-          {/* 메뉴 항목: 경로 복사 */}
-          <button 
-            onClick={() => copyToClipboard(contextMenu.path)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5" /> 경로 복사
-          </button>
+              {/* 메뉴 항목: 경로 복사 */}
+              <button 
+                onClick={() => copyToClipboard(contextMenu.path!)}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" /> 경로 복사
+              </button>
 
-          {/* 메뉴 항목: 탐색기에서 보기 */}
-          <button 
-            onClick={() => revealInExplorer(contextMenu.path)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
-          >
-            <ExternalLink className="w-3.5 h-3.5" /> 탐색기에서 보기
-          </button>
+              {/* 메뉴 항목: 탐색기에서 보기 */}
+              <button 
+                onClick={() => revealInExplorer(contextMenu.path!)}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> 탐색기에서 보기
+              </button>
 
-          <div className="h-px bg-white/5 my-1" />
+              <div className="h-px bg-white/5 my-1" />
 
-          {/* 하이브 마인드 특화 기능 */}
-          <button 
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { 
-                detail: { text: `[파일 분석 요청] ${contextMenu.path} 이 파일의 역할과 내용을 설명해줘.` } 
-              }));
-              closeContextMenu();
-            }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-primary hover:bg-primary/10 transition-colors font-bold"
-          >
-            <Brain className="w-3.5 h-3.5" /> 에이전트에게 분석 요청
-          </button>
+              {/* 하이브 마인드 특화 기능 */}
+              <button 
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { 
+                    detail: { text: `[파일 분석 요청] ${contextMenu.path} 이 파일의 역할과 내용을 설명해줘.` } 
+                  }));
+                  closeContextMenu();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-primary hover:bg-primary/10 transition-colors font-bold"
+              >
+                <Brain className="w-3.5 h-3.5" /> 에이전트에게 분석 요청
+              </button>
+            </>
+          )}
+
+          {contextMenu.type === 'task' && contextMenu.taskId && (
+            <>
+              <div className="px-3 py-1 text-[9px] text-textMuted font-bold uppercase tracking-wider opacity-60">작업 관리</div>
+              <button 
+                onClick={() => { updateTask(contextMenu.taskId!, { status: 'in_progress' }); closeContextMenu(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-primary/20 hover:text-white transition-colors"
+              >
+                <Play className="w-3.5 h-3.5" /> 작업 시작
+              </button>
+              <button 
+                onClick={() => { updateTask(contextMenu.taskId!, { status: 'done' }); closeContextMenu(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-green-500/20 hover:text-green-400 transition-colors"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> 완료 처리
+              </button>
+              <div className="h-px bg-white/5 my-1" />
+              <button 
+                onClick={() => { deleteTask(contextMenu.taskId!); closeContextMenu(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-red-400 hover:bg-red-500/20 transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> 작업 삭제
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -1870,7 +1909,11 @@ function App() {
                         const statusLabel =
                           task.status === 'pending' ? '할 일' : task.status === 'in_progress' ? '진행 중' : '완료';
                         return (
-                          <div key={task.id} className={`p-3 rounded-lg border text-[12px] transition-all shadow-sm ${task.status === 'done' ? 'border-white/5 opacity-50 bg-black/10' : 'border-white/10 bg-white/2 hover:border-white/20'}`}>
+                          <div 
+                            key={task.id} 
+                            onContextMenu={(e) => handleTaskContextMenu(e, task.id, task.title)}
+                            className={`p-3 rounded-lg border text-[12px] transition-all shadow-sm ${task.status === 'done' ? 'border-white/5 opacity-50 bg-black/10' : 'border-white/10 bg-white/2 hover:border-white/20'}`}
+                          >
                             {/* 제목 + 우선순위 */}
                             <div className="flex items-start gap-2 mb-2">
                               <span className="text-[13px] shrink-0">{priorityDot}</span>
@@ -2882,7 +2925,10 @@ function App() {
                   </select>
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar border-t border-white/5 pt-3">
+                <div 
+                  className="flex-1 overflow-y-auto space-y-1 custom-scrollbar border-t border-white/5 pt-3"
+                  onContextMenu={(e) => e.preventDefault()} // 브라우저 기본 메뉴 방지
+                >
                   <div className="flex items-center gap-1 px-3 mb-2">
                     <button 
                       onClick={createFile}
@@ -3121,18 +3167,25 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
   if (item.isDir) {
     return (
       <div className="group/node">
-        <div 
+        <div
           className="flex items-center hover:bg-[#2a2d2e] rounded transition-colors pr-2"
           onContextMenu={(e) => onContextMenu(e, item.path, true)}
         >
+          {/* 화살표: 펼치기/접기 전용 (2026-02-27) */}
           <button
-            onClick={() => onToggle(item.path)}
+            onClick={(e) => { e.stopPropagation(); onToggle(item.path); }}
             style={{ paddingLeft: `${indent + 6}px` }}
-            className="flex-1 flex items-center gap-1.5 py-1 text-[13px] text-[#cccccc] overflow-hidden"
+            className="flex items-center py-1 px-1 text-[#858585] hover:text-white shrink-0"
           >
             {isOpen
-              ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-[#858585]" />
-              : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[#858585]" />}
+              ? <ChevronDown className="w-3.5 h-3.5" />
+              : <ChevronRight className="w-3.5 h-3.5" />}
+          </button>
+          {/* 폴더 아이콘 + 이름: 클릭 시 해당 폴더로 이동 (2026-02-27) */}
+          <button
+            onClick={() => onFileOpen(item)}
+            className="flex-1 flex items-center gap-1.5 py-1 text-[13px] text-[#cccccc] overflow-hidden"
+          >
             {isOpen
               ? <VscFolderOpened className="w-5 h-5 text-[#dcb67a] shrink-0" />
               : <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" />}
@@ -3834,34 +3887,23 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         const maxLabel = CTX_MAX >= 1_000_000 ? `${CTX_MAX/1_000_000}M` : `${CTX_MAX/1000}k`;
         const usedLabel = `${Math.round(inputTok / 1000)}k`;
 
-        // 블록 색상 결정 함수 — 각 블록(5%)이 어떤 토큰 타입인지 판별
-        const blockColor = (idx: number): string => {
-          const pct = (idx + 1) * 5;
-          if (pct <= cacheReadPct)                         return '#22d3ee'; // cyan  — Cache~
-          if (pct <= cacheReadPct + cacheWritePct)         return '#4ade80'; // green — Cache+
-          if (pct <= cacheReadPct + cacheWritePct + inputOnlyPct) return '#fbbf24'; // amber — Input
-          return '#1e2028'; // 빈 블록
-        };
-
         return (
           <div
             className={`shrink-0 border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
             onClick={() => setShowCtxDetail(p => !p)}
             title="클릭하여 상세 정보 토글"
           >
-            {/* 컬러 블록 그리드: 2행 × 10열 = 20블록, 각 5% */}
-            <div className="flex flex-col gap-[2px] shrink-0">
-              {[0, 1].map(row => (
-                <div key={row} className="flex gap-[1px]">
-                  {Array.from({ length: 10 }, (_, col) => (
-                    <div
-                      key={col}
-                      className="rounded-[1px]"
-                      style={{ width: 5, height: 5, backgroundColor: blockColor(row * 10 + col) }}
-                    />
-                  ))}
-                </div>
-              ))}
+            {/* 컬러 블록 바: 단일 행 █ 문자 방식 — Claude Code CLI 스타일 (2026-02-27) */}
+            {/* 20개 문자 × 5% = 100%, 색상: cyan(Cache~) / green(Cache+) / amber(Input) / dark(빈공간) */}
+            <div className="flex shrink-0 leading-none">
+              {Array.from({ length: 20 }, (_, idx) => {
+                const pct = (idx + 1) * 5;
+                const color = pct <= cacheReadPct                              ? '#22d3ee'  // cyan  — Cache~
+                            : pct <= cacheReadPct + cacheWritePct              ? '#4ade80'  // green — Cache+
+                            : pct <= cacheReadPct + cacheWritePct + inputOnlyPct ? '#fbbf24' // amber — Input
+                            : '#2a2d3a'; // 빈 블록
+                return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
+              })}
             </div>
 
             {/* 텍스트 영역 */}

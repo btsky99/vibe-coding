@@ -313,45 +313,7 @@ def _init_memory_db() -> None:
             _migrate_project_column(conn)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project)')
 
-def migrate_sqlite_to_vector():
-    """기존 SQLite의 공유 메모리 항목 중 벡터 DB에 누락된 데이터를 마이그레이션합니다."""
-    print("[Migration] SQLite -> Vector DB 초기 동기화 시작...")
-    try:
-        scripts_dir = str(SCRIPTS_DIR)
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        from vector_memory import VectorMemory
-        vm = VectorMemory()
-        
-        # 벡터 DB에 이미 있는 ID 목록 가져오기 (중복 마이그레이션 방지)
-        existing_vecs = vm.collection.get()
-        existing_ids = set(existing_vecs.get('ids', []))
-        
-        with _memory_conn() as conn:
-            rows = conn.execute('SELECT * FROM memory').fetchall()
-            count = 0
-            for row in rows:
-                if row['key'] not in existing_ids:
-                    vm.add_memory(
-                        key=row['key'],
-                        content=f"{row['title']}\n{row['content']}",
-                        metadata={
-                            "author": row['author'],
-                            "project": row['project'],
-                            "tags": row['tags'],
-                            "updated_at": row['updated_at']
-                        }
-                    )
-                    count += 1
-            if count > 0:
-                print(f"[Migration] {count}개의 항목이 벡터 DB로 성공적으로 복사되었습니다.")
-            else:
-                print("[Migration] 이미 모든 데이터가 동기화되어 있습니다.")
-    except Exception as e:
-        print(f"[Migration] 오류 발생: {e}")
-
 _init_memory_db()
-migrate_sqlite_to_vector()
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── 임베딩 헬퍼 (fastembed 기반, 한국어 포함 다국어 지원) ────────────────────
@@ -529,26 +491,6 @@ class MemoryWatcher(threading.Thread):
                  content, tags_json, author, orig_ts, now, proj, emb)
             )
         
-        # ── Vector DB (ChromaDB) 동기화 추가 ──────────────────────────────
-        try:
-            scripts_dir = str(SCRIPTS_DIR)
-            if scripts_dir not in sys.path:
-                sys.path.insert(0, scripts_dir)
-            from vector_memory import VectorMemory
-            vm = VectorMemory()
-            vm.add_memory(
-                key=key,
-                content=f"{title}\n{content}",
-                metadata={
-                    "author": author,
-                    "project": proj,
-                    "tags": ",".join(tags),
-                    "updated_at": now
-                }
-            )
-        except Exception as ve:
-            print(f"[MemoryWatcher] Vector DB 동기화 실패: {ve}")
-
         print(f"[MemoryWatcher] 동기화 완료: {key} (프로젝트: {proj}, 임베딩: {'✓' if emb else '✗'})")
 
     # ── 내부: 파일 변경 여부 확인 ───────────────────────────────────────────
@@ -1080,7 +1022,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             drives = []
             if os.name == 'nt':
                 for letter in string.ascii_uppercase:
-                    drive = f"{letter}:\\"
+                    drive = f"{letter}:/"  # 경로 일관성: 항상 포워드 슬래시 사용 (2026-02-27)
                     if os.path.exists(drive):
                         drives.append(drive)
             else:
@@ -1804,35 +1746,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                     {'sessions': [], 'error': str(e)}
                 ).encode('utf-8'))
 
-        elif parsed_path.path == '/api/vector/list':
-            # 벡터 DB 전체 항목 목록 반환
-            # ChromaDB에 저장된 모든 메모리를 id, content, metadata와 함께 반환합니다.
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            try:
-                # scripts/ 경로를 sys.path에 추가하여 vector_memory 모듈 로드
-                scripts_dir = str(SCRIPTS_DIR)
-                if scripts_dir not in sys.path:
-                    sys.path.insert(0, scripts_dir)
-                from vector_memory import VectorMemory
-                vm = VectorMemory()
-                raw = vm.collection.get()
-                items = []
-                for i, doc_id in enumerate(raw.get('ids', [])):
-                    items.append({
-                        'id': doc_id,
-                        'content': raw['documents'][i] if raw.get('documents') else '',
-                        'metadata': raw['metadatas'][i] if raw.get('metadatas') else {},
-                    })
-                self.wfile.write(json.dumps({'items': items}, ensure_ascii=False).encode('utf-8'))
-            except ImportError:
-                self.wfile.write(json.dumps({
-                    'items': [], 'error': 'chromadb 미설치 — pip install chromadb'
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'items': [], 'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/hive/logs':
             # 하이브 통합 로그 조회 (SQLite session_logs)
             self.send_response(200)
@@ -2173,25 +2086,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                              PROJECT_ID, emb)
                         )
                     
-                    # Vector DB (ChromaDB) 동기화
-                    try:
-                        scripts_dir = str(SCRIPTS_DIR)
-                        if scripts_dir not in sys.path:
-                            sys.path.insert(0, scripts_dir)
-                        from vector_memory import VectorMemory
-                        vm = VectorMemory()
-                        vm.add_memory(
-                            key=key,
-                            content=f"{title}\n{content}",
-                            metadata={
-                                "author": agent,
-                                "project": PROJECT_ID,
-                                "tags": ",".join(tags),
-                                "updated_at": data['timestamp']
-                            }
-                        )
-                    except Exception as ve:
-                        print(f"🧠 [Thought→Vector] 저장 실패: {ve}")
 
                     print(f"🧠 [Thought→DB] {key} (임베딩: {'✓' if emb else '✗'})")
                 except Exception as db_err:
@@ -2750,26 +2644,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                          entry['project'], emb)
                     )
 
-                # ── Vector DB (ChromaDB) 동기화 추가 ──────────────────────────────
-                try:
-                    scripts_dir = str(SCRIPTS_DIR)
-                    if scripts_dir not in sys.path:
-                        sys.path.insert(0, scripts_dir)
-                    from vector_memory import VectorMemory
-                    vm = VectorMemory()
-                    vm.add_memory(
-                        key=key,
-                        content=f"{title}\n{content}",
-                        metadata={
-                            "author": entry['author'],
-                            "project": project,
-                            "tags": ",".join(data.get('tags', [])),
-                            "updated_at": now
-                        }
-                    )
-                except Exception as ve:
-                    print(f"[API] Vector DB 동기화 실패: {ve}")
-
                 entry['tags'] = json.loads(entry['tags'])
                 self.wfile.write(json.dumps({'status': 'success', 'entry': entry}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -2788,49 +2662,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 with _memory_conn() as conn:
                     conn.execute('DELETE FROM memory WHERE key=?', (key,))
                 
-                # ── Vector DB (ChromaDB) 삭제 추가 ───────────────────────────────
-                try:
-                    scripts_dir = str(SCRIPTS_DIR)
-                    if scripts_dir not in sys.path:
-                        sys.path.insert(0, scripts_dir)
-                    from vector_memory import VectorMemory
-                    vm = VectorMemory()
-                    vm.delete_memory(key)
-                except Exception as ve:
-                    print(f"[API] Vector DB 삭제 실패: {ve}")
-
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/vector/search':
-            # 벡터 DB 시맨틱 검색 — 쿼리 텍스트와 의미적으로 유사한 메모리를 찾아 반환합니다.
-            # body: { "query": "검색어", "n": 5 }
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                query = str(body.get('query', '')).strip()
-                n = int(body.get('n', 5))
-                if not query:
-                    self.wfile.write(json.dumps({'results': [], 'error': '쿼리가 비어있습니다'}, ensure_ascii=False).encode('utf-8'))
-                    return
-                # scripts/ 경로를 sys.path에 추가하여 vector_memory 모듈 로드
-                scripts_dir = str(SCRIPTS_DIR)
-                if scripts_dir not in sys.path:
-                    sys.path.insert(0, scripts_dir)
-                from vector_memory import VectorMemory
-                vm = VectorMemory()
-                results = vm.search(query, n_results=n)
-                self.wfile.write(json.dumps({'results': results}, ensure_ascii=False).encode('utf-8'))
-            except ImportError:
-                self.wfile.write(json.dumps({
-                    'results': [], 'error': 'chromadb 미설치 — pip install chromadb'
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'results': [], 'error': str(e)}, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/mcp/apikey':
             # Smithery API 키 저장
             self.send_response(200)
