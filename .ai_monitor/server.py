@@ -3048,12 +3048,27 @@ if __name__ == '__main__':
     if getattr(sys, 'frozen', False):
         try:
             from updater import check_and_update
-            update_thread = threading.Thread(
-                target=check_and_update,
-                args=(DATA_DIR,),
-                daemon=True,
-            )
-            update_thread.start()
+            # 시작 즉시 1회 체크 + 이후 1시간마다 반복
+            # → 앱 사용 중에도 새 버전 배포되면 배너로 알림
+            def _update_loop():
+                while True:
+                    try:
+                        # 이미 다운로드 완료 상태면 재다운로드 건너뜀
+                        ready_file = DATA_DIR / "update_ready.json"
+                        already_ready = False
+                        if ready_file.exists():
+                            try:
+                                info = json.loads(ready_file.read_text(encoding="utf-8"))
+                                already_ready = info.get("ready", False)
+                            except Exception:
+                                pass
+                        if not already_ready:
+                            check_and_update(DATA_DIR)
+                    except Exception as e:
+                        print(f"[!] Update check error: {e}")
+                    time.sleep(3600)  # 1시간 간격
+
+            threading.Thread(target=_update_loop, daemon=True).start()
         except ImportError:
             print("[!] Updater module not found, skipping update check.")
 
