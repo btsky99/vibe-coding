@@ -1360,6 +1360,24 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
 
+        elif parsed_path.path == '/api/file-rename':
+            # 파일 또는 폴더 이름 변경 (이동 포함)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
+                src = data.get('src')
+                dest = data.get('dest')
+                if not src or not dest:
+                    self.wfile.write(json.dumps({"status": "error", "message": "src and dest are required"}).encode('utf-8'))
+                    return
+                os.rename(src, dest)
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')

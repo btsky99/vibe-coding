@@ -19,7 +19,7 @@ import {
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
   Bot, Play, CircleDot, Package, CheckCircle2, Circle, Pin,
-  Maximize2, Minimize2, FilePlus, FolderPlus
+  Maximize2, Minimize2, FilePlus, FolderPlus, Edit2, Trash, Copy, ExternalLink
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -228,6 +228,11 @@ function App() {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [lastSeenMsgCount, setLastSeenMsgCount] = useState(0);
   const [msgFrom, setMsgFrom] = useState('claude');
+
+  // ─── 파일 탐색기 컨텍스트 메뉴 상태 ──────────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string, isDir: boolean } | null>(null);
+  const [isRenaming, setIsRenaming] = useState<string | null>(null); // 이름 변경 중인 파일 경로
+  const [newNameDraft, setNewNameDraft] = useState(''); // 새 이름 입력값
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
   const [msgContent, setMsgContent] = useState('');
@@ -932,6 +937,85 @@ function App() {
     () => localStorage.getItem('hive_needs_skill_reinstall') === 'true'
   );
 
+  // ─── 컨텍스트 메뉴 핸들러 ───────────────────────────────────────────────────
+  const handleContextMenu = (e: React.MouseEvent, path: string, isDir: boolean) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, path, isDir });
+  };
+
+  const closeContextMenu = () => setContextMenu(null);
+
+  const handleFileRename = (oldPath: string, newName: string) => {
+    const parent = oldPath.substring(0, oldPath.lastIndexOf('/'));
+    const newPath = `${parent}/${newName}`;
+    fetch(`${API_BASE}/api/file-rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src: oldPath, dest: newPath }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showToast('이름 변경 완료', 'ok');
+          refreshItems(); // 파일 목록 새로고침
+          // 트리 모드 대응을 위해 부모 폴더도 갱신 필요할 수 있음
+          if (treeExpanded[parent]) {
+            fetch(`${API_BASE}/api/files?path=${encodeURIComponent(parent)}`)
+              .then(res => res.json())
+              .then(data => { if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [parent]: data })); });
+          }
+        } else {
+          showToast(`오류: ${data.message}`, 'warn');
+        }
+      })
+      .finally(() => { setIsRenaming(null); closeContextMenu(); });
+  };
+
+  const handleFileDelete = (path: string, isDir: boolean) => {
+    if (!confirm(`${isDir ? '폴더' : '파일'}을(를) 정말 삭제하시겠습니까?\n${path}`)) return;
+    fetch(`${API_BASE}/api/file-op`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'delete', src: path }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          showToast('삭제 완료', 'ok');
+          refreshItems();
+          const parent = path.substring(0, path.lastIndexOf('/'));
+          if (treeExpanded[parent]) {
+            fetch(`${API_BASE}/api/files?path=${encodeURIComponent(parent)}`)
+              .then(res => res.json())
+              .then(data => { if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [parent]: data })); });
+          }
+        } else {
+          showToast(`오류: ${data.message}`, 'warn');
+        }
+      })
+      .finally(() => closeContextMenu());
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    showToast('클립보드에 복사됨', 'ok');
+    closeContextMenu();
+  };
+
+  const revealInExplorer = (path: string) => {
+    // 서버측 API 호출 필요 (이미 구현된 /api/file-op 확장 또는 신규)
+    // 여기서는 간단히 경로 복사로 대체하거나 신규 엔드포인트 제안
+    fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(path)}`)
+      .then(() => showToast('경로 복사 및 탐색기 준비', 'info'))
+      .finally(() => closeContextMenu());
+  };
+
+  useEffect(() => {
+    const handleClick = () => closeContextMenu();
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
+
   const doReinstallSkills = () => {
     // Claude + Gemini 스킬 순차 재설치
     Promise.all(['claude', 'gemini'].map(tool =>
@@ -1278,6 +1362,67 @@ function App() {
           ${toast.type === 'ok' ? 'bg-green-600/90 text-white' : toast.type === 'warn' ? 'bg-yellow-500/90 text-black' : 'bg-[#007acc]/90 text-white'}`}>
           {toast.type === 'info' && <span className="animate-spin inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full" />}
           {toast.msg}
+        </div>
+      )}
+
+      {/* 🔮 파일 탐색기 컨텍스트 메뉴 (다크 네온 스타일) */}
+      {contextMenu && (
+        <div 
+          className="fixed z-[9999] min-w-[160px] bg-[#252526]/95 backdrop-blur-md border border-white/10 rounded shadow-2xl py-1 overflow-hidden"
+          style={{ 
+            left: Math.min(contextMenu.x, window.innerWidth - 170), 
+            top: Math.min(contextMenu.y, window.innerHeight - 250) 
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* 메뉴 항목: 이름 변경 */}
+          <button 
+            onClick={() => { setIsRenaming(contextMenu.path); setNewNameDraft(contextMenu.path.split('/').pop() || ''); closeContextMenu(); }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-primary/20 hover:text-white transition-colors"
+          >
+            <Edit2 className="w-3.5 h-3.5" /> 이름 변경
+          </button>
+
+          {/* 메뉴 항목: 삭제 */}
+          <button 
+            onClick={() => handleFileDelete(contextMenu.path, contextMenu.isDir)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-red-500/20 hover:text-red-400 transition-colors"
+          >
+            <Trash className="w-3.5 h-3.5" /> 삭제
+          </button>
+
+          <div className="h-px bg-white/5 my-1" />
+
+          {/* 메뉴 항목: 경로 복사 */}
+          <button 
+            onClick={() => copyToClipboard(contextMenu.path)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5" /> 경로 복사
+          </button>
+
+          {/* 메뉴 항목: 탐색기에서 보기 */}
+          <button 
+            onClick={() => revealInExplorer(contextMenu.path)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" /> 탐색기에서 보기
+          </button>
+
+          <div className="h-px bg-white/5 my-1" />
+
+          {/* 하이브 마인드 특화 기능 */}
+          <button 
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { 
+                detail: { text: `[파일 분석 요청] ${contextMenu.path} 이 파일의 역할과 내용을 설명해줘.` } 
+              }));
+              closeContextMenu();
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-primary hover:bg-primary/10 transition-colors font-bold"
+          >
+            <Brain className="w-3.5 h-3.5" /> 에이전트에게 분석 요청
+          </button>
         </div>
       )}
 
@@ -2778,18 +2923,43 @@ function App() {
                         onToggle={handleTreeToggle}
                         onFileOpen={handleFileClick}
                         onDelete={deleteItem}
+                        onContextMenu={handleContextMenu}
+                        isRenaming={isRenaming}
+                        newNameDraft={newNameDraft}
+                        setNewNameDraft={setNewNameDraft}
+                        onRenameSubmit={handleFileRename}
+                        setIsRenaming={setIsRenaming}
                       />
                     ))
                   ) : (
                     /* 플랫 뷰 (기존) */
                     items.map(item => (
-                      <div key={item.path} className={`group flex items-center gap-0 px-3 py-1 rounded text-[13px] transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}>
+                      <div 
+                        key={item.path} 
+                        className={`group flex items-center gap-0 px-3 py-1 rounded text-[13px] transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}
+                        onContextMenu={(e) => handleContextMenu(e, item.path, item.isDir)}
+                      >
                         <button
                           onClick={() => handleFileClick(item)}
                           className={`flex-1 flex items-center gap-2.5 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
                         >
                           {item.isDir ? <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
-                          <span className="truncate">{item.name}</span>
+                          {isRenaming === item.path ? (
+                            <input
+                              autoFocus
+                              value={newNameDraft}
+                              onChange={e => setNewNameDraft(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleFileRename(item.path, newNameDraft);
+                                if (e.key === 'Escape') setIsRenaming(null);
+                              }}
+                              onBlur={() => setIsRenaming(null)}
+                              className="bg-[#1e1e1e] border border-primary rounded px-1 py-0.5 text-xs text-white outline-none w-full"
+                              onClick={e => e.stopPropagation()}
+                            />
+                          ) : (
+                            <span className="truncate">{item.name}</span>
+                          )}
                         </button>
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
                           {!item.isDir && (
@@ -2929,21 +3099,32 @@ function CodeWithLineNumbers({ content, fontSize = '12px' }: { content: string; 
 }
 
 type TreeItem = { name: string; path: string; isDir: boolean };
-function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onDelete }: {
+function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onDelete, onContextMenu, isRenaming, newNameDraft, setNewNameDraft, onRenameSubmit, setIsRenaming }: {
   item: TreeItem; depth: number;
   expanded: Record<string, boolean>;
   treeChildren: Record<string, TreeItem[]>;
   onToggle: (path: string) => void;
   onFileOpen: (item: TreeItem) => void;
   onDelete: (path: string, name: string) => void;
+  onContextMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
+  isRenaming: string | null;
+  newNameDraft: string;
+  setNewNameDraft: (val: string) => void;
+  onRenameSubmit: (oldPath: string, newName: string) => void;
+  setIsRenaming: (val: string | null) => void;
 }) {
   const isOpen = expanded[item.path] || false;
   const kids = treeChildren[item.path] || [];
   const indent = depth * 12;
+  const isTargetRenaming = isRenaming === item.path;
+
   if (item.isDir) {
     return (
       <div className="group/node">
-        <div className="flex items-center hover:bg-[#2a2d2e] rounded transition-colors pr-2">
+        <div 
+          className="flex items-center hover:bg-[#2a2d2e] rounded transition-colors pr-2"
+          onContextMenu={(e) => onContextMenu(e, item.path, true)}
+        >
           <button
             onClick={() => onToggle(item.path)}
             style={{ paddingLeft: `${indent + 6}px` }}
@@ -2955,7 +3136,22 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
             {isOpen
               ? <VscFolderOpened className="w-5 h-5 text-[#dcb67a] shrink-0" />
               : <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" />}
-            <span className="truncate">{item.name}</span>
+            {isTargetRenaming ? (
+              <input
+                autoFocus
+                value={newNameDraft}
+                onChange={e => setNewNameDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') onRenameSubmit(item.path, newNameDraft);
+                  if (e.key === 'Escape') setIsRenaming(null);
+                }}
+                onBlur={() => setIsRenaming(null)}
+                className="bg-[#1e1e1e] border border-primary rounded px-1 py-0.5 text-xs text-white outline-none w-full"
+                onClick={e => e.stopPropagation()}
+              />
+            ) : (
+              <span className="truncate">{item.name}</span>
+            )}
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(item.path, item.name); }}
@@ -2971,20 +3167,40 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
         {isOpen && kids.map(child => (
           <FileTreeNode key={child.path} item={child} depth={depth + 1}
             expanded={expanded} treeChildren={treeChildren}
-            onToggle={onToggle} onFileOpen={onFileOpen} onDelete={onDelete} />
+            onToggle={onToggle} onFileOpen={onFileOpen} onDelete={onDelete} 
+            onContextMenu={onContextMenu} isRenaming={isRenaming} newNameDraft={newNameDraft} 
+            setNewNameDraft={setNewNameDraft} onRenameSubmit={onRenameSubmit} setIsRenaming={setIsRenaming} />
         ))}
       </div>
     );
   }
   return (
-    <div className="group/node flex items-center hover:bg-primary/20 rounded transition-colors pr-2">
+    <div 
+      className="group/node flex items-center hover:bg-primary/20 rounded transition-colors pr-2"
+      onContextMenu={(e) => onContextMenu(e, item.path, false)}
+    >
       <button
         onClick={() => onFileOpen(item)}
         style={{ paddingLeft: `${indent + 24}px` }}
         className="flex-1 flex items-center gap-2.5 py-1 text-[13px] text-white overflow-hidden"
       >
         {getFileIcon(item.name)}
-        <span className="truncate font-medium text-left">{item.name}</span>
+        {isTargetRenaming ? (
+          <input
+            autoFocus
+            value={newNameDraft}
+            onChange={e => setNewNameDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') onRenameSubmit(item.path, newNameDraft);
+              if (e.key === 'Escape') setIsRenaming(null);
+            }}
+            onBlur={() => setIsRenaming(null)}
+            className="bg-[#1e1e1e] border border-primary rounded px-1 py-0.5 text-xs text-white outline-none w-full"
+            onClick={e => e.stopPropagation()}
+          />
+        ) : (
+          <span className="truncate font-medium text-left">{item.name}</span>
+        )}
       </button>
       <div className="flex items-center gap-0.5 opacity-0 group-hover/node:opacity-100 transition-all">
         <button
