@@ -5,10 +5,24 @@
     <link rel="icon" type="image/png" href="/vibe_icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>바이브 코딩</title>
-    <script type="module" crossorigin src="/assets/index-BLgdoG0C.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BR5xuM4E.css">
+    <script type="module" crossorigin src="/assets/index-DAkHv1oY.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-l3FTpRiL.css">
   </head>
   <body>
-    <div id="root" class="h-screen w-screen"></div>
+    <div id="root" class="h-screen w-screen flex flex-col items-center justify-center bg-[#1e1e1e] text-[#cccccc] font-sans">
+      <style>
+        @keyframes pulse-neon {
+          0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 5px #00f3ff); }
+          50% { opacity: 1; filter: drop-shadow(0 0 15px #00f3ff); }
+        }
+        .vibe-loader { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+        .vibe-logo { width: 64px; height: 64px; animation: pulse-neon 2s infinite ease-in-out; }
+        .vibe-text { font-size: 14px; font-weight: bold; letter-spacing: 2px; color: #00f3ff; text-transform: uppercase; }
+      </style>
+      <div class="vibe-loader">
+        <img src="/vibe_icon.png" class="vibe-logo" alt="Vibe Logo" onerror="this.style.display='none'">
+        <div class="vibe-text">Initializing Vibe Engine...</div>
+      </div>
+    </div>
   </body>
 </html>

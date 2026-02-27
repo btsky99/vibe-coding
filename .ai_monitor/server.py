@@ -1071,7 +1071,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
                 try:
                     for entry in os.scandir(target_path):
-                        if not entry.name.startswith('.'):
+                        # .으로 시작하는 숨김 항목 중 주요 설정 폴더/파일은 허용
+                        if not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github', '.gitignore', '.env'):
                             items.append({
                                 "name": entry.name, 
                                 "path": entry.path.replace('\\', '/'),
@@ -1171,7 +1172,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
                 try:
                     for entry in os.scandir(target_path):
-                        if entry.is_dir() and not entry.name.startswith('.'):
+                        # .으로 시작하는 숨김 폴더 중 주요 설정 폴더는 허용
+                        if entry.is_dir() and (not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github')):
                             dirs.append({"name": entry.name, "path": entry.path.replace('\\', '/')})
                 except Exception:
                     pass

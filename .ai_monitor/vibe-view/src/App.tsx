@@ -197,6 +197,7 @@ export const VIBE_SKILLS: VibeSkill[] = [
 ];
 
 function App() {
+  const [isInitializing, setIsInitializing] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
@@ -375,7 +376,8 @@ function App() {
         }
         if (data.version) setAppVersion(data.version);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setIsInitializing(false));
   }, []);
 
   // 검색어가 있으면 서버 검색, 없으면 전체 목록 사용
@@ -1165,7 +1167,11 @@ function App() {
   const handleFileClick = (item: {name: string, path: string, isDir: boolean}) => {
     setSelectedPath(item.path);
     if (item.isDir) {
-      setCurrentPath(item.path);
+      if (treeMode) {
+        handleTreeToggle(item.path);
+      } else {
+        setCurrentPath(item.path);
+      }
     } else {
       const existing = openFiles.find(f => f.path === item.path);
       if (existing) {
@@ -1303,6 +1309,8 @@ function App() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizingSidebar]);
+
+  if (isInitializing) return null;
 
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden select-none font-sans flex-col" onClick={() => setActiveMenu(null)}>
@@ -3181,7 +3189,7 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
               ? <ChevronDown className="w-3.5 h-3.5" />
               : <ChevronRight className="w-3.5 h-3.5" />}
           </button>
-          {/* 폴더 아이콘 + 이름: 클릭 시 해당 폴더로 이동 (2026-02-27) */}
+          {/* 폴더 아이콘 + 이름: 클릭 시 트리 토글 및 선택 (2026-02-28 개선) */}
           <button
             onClick={() => onFileOpen(item)}
             className="flex-1 flex items-center gap-1.5 py-1 text-[13px] text-[#cccccc] overflow-hidden"
