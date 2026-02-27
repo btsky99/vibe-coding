@@ -3856,18 +3856,19 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         </div>
       </div>
 
-      {/* ── 컨텍스트 컬러 블록 바 — 클릭 시 상세 토글 (2026-02-27) ── */}
+      {/* ── 컨텍스트 컬러 블록 바 — 클릭 시 /context 스타일 상세 팝업 (2026-02-27) ── */}
       {(() => {
         const cacheRead  = ctxSession?.cache_read  ?? 0;
         const cacheWrite = ctxSession?.cache_write ?? 0;
         const inputTok   = ctxSession?.input_tokens ?? 0;
         const outputTok  = ctxSession?.output_tokens ?? 0;
+        const freeTok    = Math.max(0, CTX_MAX - inputTok);
 
-        // 각 토큰 타입의 %
+        // 각 토큰 타입의 컨텍스트 점유 % (입력 기준)
         const cacheReadPct  = Math.min(100, (cacheRead  / CTX_MAX) * 100);
         const cacheWritePct = Math.min(100, (cacheWrite / CTX_MAX) * 100);
-        // input_pct: 전체 사용량 (ctxPct 기준)
         const inputOnlyPct  = Math.max(0, ctxPct - cacheReadPct - cacheWritePct);
+        const freePct       = Math.max(0, 100 - ctxPct);
 
         // 배경 & 경고 색
         const dangerBg   = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
@@ -3884,67 +3885,100 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
           : (isGeminiAgent ? 'Gemini' : 'Claude');
 
         // 토큰 표시 레이블
-        const maxLabel = CTX_MAX >= 1_000_000 ? `${CTX_MAX/1_000_000}M` : `${CTX_MAX/1000}k`;
+        const maxLabel  = CTX_MAX >= 1_000_000 ? `${CTX_MAX/1_000_000}M` : `${CTX_MAX/1000}k`;
         const usedLabel = `${Math.round(inputTok / 1000)}k`;
 
-        return (
-          <div
-            className={`shrink-0 border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
-            onClick={() => setShowCtxDetail(p => !p)}
-            title="클릭하여 상세 정보 토글"
-          >
-            {/* 컬러 블록 바: 단일 행 █ 문자 방식 — Claude Code CLI 스타일 (2026-02-27) */}
-            {/* 20개 문자 × 5% = 100%, 색상: cyan(Cache~) / green(Cache+) / amber(Input) / dark(빈공간) */}
-            <div className="flex shrink-0 leading-none">
-              {Array.from({ length: 20 }, (_, idx) => {
-                const pct = (idx + 1) * 5;
-                const color = pct <= cacheReadPct                              ? '#22d3ee'  // cyan  — Cache~
-                            : pct <= cacheReadPct + cacheWritePct              ? '#4ade80'  // green — Cache+
-                            : pct <= cacheReadPct + cacheWritePct + inputOnlyPct ? '#fbbf24' // amber — Input
-                            : '#2a2d3a'; // 빈 블록
-                return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
-              })}
-            </div>
+        // 블록 그리드 색상 결정 (100개 블록, 각 1%)
+        const getBlockColor = (idx: number) => {
+          const p = idx + 1;
+          if (p <= cacheReadPct)                         return '#22d3ee'; // cyan  — 캐시 읽기
+          if (p <= cacheReadPct + cacheWritePct)         return '#4ade80'; // green — 캐시 쓰기
+          if (p <= cacheReadPct + cacheWritePct + inputOnlyPct) return '#fbbf24'; // amber — 순수 입력
+          return '#1e2130'; // 빈 공간
+        };
 
-            {/* 텍스트 영역 */}
-            <div className="flex flex-col gap-0 min-w-0 flex-1">
-              {/* 1행: 모델명 · N k/200k (%) */}
-              <div className="flex items-center gap-0 whitespace-nowrap">
+        // 카테고리 목록 (레이블, 토큰 수, %, 색상)
+        const pureInput = Math.max(0, inputTok - cacheRead - cacheWrite);
+        const categories = [
+          { label: '입력 토큰', tok: pureInput,   pct: inputOnlyPct,  color: '#fbbf24' },
+          ...(cacheWrite > 0 ? [{ label: '캐시 쓰기', tok: cacheWrite, pct: cacheWritePct, color: '#4ade80' }] : []),
+          ...(cacheRead  > 0 ? [{ label: '캐시 읽기', tok: cacheRead,  pct: cacheReadPct,  color: '#22d3ee' }] : []),
+          { label: '출력 누적', tok: outputTok,   pct: Math.round((outputTok / CTX_MAX) * 100), color: '#888' },
+          { label: '여유 공간', tok: freeTok,     pct: freePct,       color: '#2a2d3a', dim: true },
+        ];
+
+        const fmtTok = (t: number) => t >= 1000 ? `${(t/1000).toFixed(1)}k` : `${t}`;
+
+        return (
+          <div className="relative shrink-0">
+            {/* ── 단일 행 바 (항상 표시) ── */}
+            <div
+              className={`border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
+              onClick={() => setShowCtxDetail(p => !p)}
+              title="클릭하여 컨텍스트 상세 보기"
+            >
+              {/* 컬러 블록 바: 20개 █, 각 5% */}
+              <div className="flex shrink-0 leading-none">
+                {Array.from({ length: 20 }, (_, idx) => {
+                  const p = (idx + 1) * 5;
+                  const color = p <= cacheReadPct                              ? '#22d3ee'
+                              : p <= cacheReadPct + cacheWritePct              ? '#4ade80'
+                              : p <= ctxPct                                    ? '#fbbf24'
+                              : '#2a2d3a';
+                  return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
+                })}
+              </div>
+              {/* 텍스트: 모델명 · 사용량 */}
+              <div className="flex items-center gap-0 whitespace-nowrap flex-1 min-w-0">
                 <span className="font-semibold" style={{ color: modelColor }}>{modelShort}</span>
                 <span className="text-[#444] mx-1.5">·</span>
-                <span className="text-[#ccc]">{usedLabel}/{maxLabel} tokens ({ctxPct}%)</span>
+                <span className="text-[#ccc]">{usedLabel}/{maxLabel} 토큰 ({ctxPct}%)</span>
                 {ctxSession && ctxRelTime && (
                   <span className="text-[#333] ml-2 text-[9px]">{ctxRelTime}</span>
                 )}
                 <span className="ml-auto text-[#333] text-[8px]">{showCtxDetail ? '▲' : '▼'}</span>
               </div>
-              {/* 2행: 상세 (클릭 토글) */}
-              {showCtxDetail && (
-                <div className="flex items-center gap-0 whitespace-nowrap text-[9px] mt-[1px]">
-                  <span className="text-[#666] mr-1">In:</span>
-                  <span className="text-[#fbbf24] mr-2">{(inputTok/1000).toFixed(1)}k</span>
-                  <span className="text-[#555] mr-2">·</span>
-                  <span className="text-[#666] mr-1">Out:</span>
-                  <span className="text-[#bbb] mr-2">{(outputTok/1000).toFixed(1)}k</span>
-                  {cacheWrite > 0 && <>
-                    <span className="text-[#555] mr-2">·</span>
-                    <span className="text-[#666] mr-1">Cache+:</span>
-                    <span className="text-[#4ade80] mr-2">{(cacheWrite/1000).toFixed(1)}k</span>
-                  </>}
-                  {cacheRead > 0 && <>
-                    <span className="text-[#555] mr-2">·</span>
-                    <span className="text-[#666] mr-1">Cache~:</span>
-                    <span className="text-[#22d3ee]">{(cacheRead/1000).toFixed(1)}k</span>
-                  </>}
-                </div>
-              )}
-              {/* 세션 없을 때 안내 */}
+              {/* 세션 없을 때 */}
               {!ctxSession && (
-                <div className="text-[9px] text-[#333] italic">
+                <span className="text-[9px] text-[#333] italic">
                   {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...
-                </div>
+                </span>
               )}
             </div>
+
+            {/* ── 상세 팝업: /context 스타일 블록 그리드 + 카테고리 (클릭 토글) ── */}
+            {showCtxDetail && ctxSession && (
+              <div className="absolute top-full left-0 right-0 z-50 bg-[#0d1117] border-b border-x border-white/10 shadow-2xl font-mono text-[10px] px-3 pt-2 pb-3 space-y-2">
+                {/* 제목 */}
+                <div className="text-[#ccc] font-bold text-[11px]">컨텍스트 사용량</div>
+
+                {/* 블록 그리드 10×10 (100블록, 각 1%) */}
+                <div className="flex flex-col gap-[2px]">
+                  {Array.from({ length: 10 }, (_, row) => (
+                    <div key={row} className="flex gap-[2px]">
+                      {Array.from({ length: 10 }, (_, col) => (
+                        <span key={col} style={{ color: getBlockColor(row * 10 + col), fontSize: 11, lineHeight: 1 }}>█</span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                {/* 카테고리별 사용량 */}
+                <div className="pt-1 space-y-[3px]">
+                  <div className="text-[#444] text-[9px] mb-1">카테고리별 사용량</div>
+                  {categories.map(cat => (
+                    <div key={cat.label} className="flex items-center gap-1">
+                      <span style={{ color: cat.color }}>■</span>
+                      <span style={{ color: cat.dim ? '#444' : '#666' }}>{cat.label}:</span>
+                      <span style={{ color: cat.dim ? '#333' : '#bbb' }} className="ml-auto">
+                        {fmtTok(cat.tok)}
+                      </span>
+                      <span className="text-[#444] w-9 text-right">({Math.round(cat.pct)}%)</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
