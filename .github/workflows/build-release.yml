@@ -40,21 +40,14 @@ jobs:
           npm ci
           npm run build
 
-      - name: Generate version tag
+      - name: Read version from source
         id: version
         run: |
-          $date = Get-Date -Format "yyyy.MM.dd"
-          $shortSha = "${{ github.sha }}".Substring(0, 7)
-          $tag = "v$date-$shortSha"
+          $ver = python -c "exec(open('.ai_monitor/_version.py').read()); print(__version__)"
+          $tag = "v$ver"
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "ver=$ver" >> $env:GITHUB_OUTPUT
           echo "Version: $tag"
-        shell: pwsh
-
-      - name: Embed version in source
-        run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-          Set-Content -Path ".ai_monitor/_version.py" -Value "__version__ = `"$tag`""
-          Write-Output "Embedded version: $tag"
         shell: pwsh
 
       - name: Find winpty binaries path
@@ -139,7 +132,7 @@ jobs:
 
       - name: Build installer
         run: |
-          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" ".ai_monitor/installer.iss" /DMyAppVersion="${{ steps.version.outputs.tag }}"
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" ".ai_monitor/installer.iss" /DMyAppVersion="${{ steps.version.outputs.ver }}"
         shell: cmd
 
       - name: Create Release
@@ -152,5 +145,5 @@ jobs:
             - Commit: ${{ github.sha }}
             - 빌드 시간: ${{ github.event.head_commit.timestamp }}
           files: |
-            .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.tag }}.exe
+            .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.ver }}.exe
             .ai_monitor/dist/vibe-coding.exe

@@ -53,23 +53,32 @@ def _fetch_latest_release(token):
 
 def _is_newer(latest_tag, current):
     """
-    Compare version tags.  Format: v{YYYY.MM.DD}-{sha7}
-    A tag is newer if its date portion is lexicographically greater,
-    or if dates are equal and SHA differs (meaning a new build on
-    the same day).  'dev' is always considered outdated.
+    세마버(Semantic Versioning) 기준으로 버전을 비교합니다.
+    형식: v3.4.1 또는 3.4.1 (v 접두사 무시)
+    'dev' 빌드는 항상 업데이트 대상에서 제외합니다.
     """
     if current == "dev":
-        return False  # Never auto-update a dev build
-    if latest_tag == current:
-        return False
-    # Extract date parts: "v2026.02.22-a1b2c3d" -> "2026.02.22"
+        return False  # 개발 빌드는 자동 업데이트 안 함
+
+    def _parse(tag: str):
+        """'v3.4.1' → (3, 4, 1) 형태의 정수 튜플로 변환"""
+        clean = tag.lstrip("v").strip()
+        parts = clean.split(".")
+        result = []
+        for p in parts:
+            try:
+                result.append(int(p))
+            except ValueError:
+                result.append(0)
+        # 최소 3자리 보장
+        while len(result) < 3:
+            result.append(0)
+        return tuple(result)
+
     try:
-        latest_date = latest_tag.lstrip("v").split("-")[0]
-        current_date = current.lstrip("v").split("-")[0]
-    except (IndexError, AttributeError):
+        return _parse(latest_tag) > _parse(current)
+    except Exception:
         return False
-    # Lexicographic comparison works because dates are zero-padded
-    return latest_date >= current_date  # >= covers same-day rebuilds
 
 
 def _find_asset_url(release):
