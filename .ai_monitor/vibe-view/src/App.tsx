@@ -3205,6 +3205,10 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const [showDiff, setShowDiff] = useState(false);
   const [diffContent, setDiffContent] = useState<string>('');
 
+  // 최근 변경 파일 목록 — FS 이벤트에서 누적 (최대 8개)
+  interface FileChange { path: string; eventType: string; ts: number; added: number; removed: number; hunks: string[] }
+  const [recentChanges, setRecentChanges] = useState<FileChange[]>([]);
+
   // showContextPanel 제거됨 — 항상 표시 방식으로 변경 (2026-02-27)
   // activeAgent에 따라 Claude/Gemini 세션 선택 — slotId 번째 세션 사용
   // [2026-02-27] Claude: Gemini 컨텍스트 분기 추가
@@ -3225,22 +3229,56 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     return `${Math.floor(diff / 86400)}일 전`;
   })();
 
-  // ─── 파일 시스템 이벤트 → 오른쪽 뷰어 자동 표시 ───
-  // slotId === 0 인 터미널만 FS 이벤트에 반응 — 나머지 슬롯은 본인 터미널 출력에서만 감지
+  // ─── 파일 시스템 이벤트 → 변경 파일 목록 추적 + slot0 자동 뷰어 ───
   useEffect(() => {
-    if (slotId !== 0) return; // 터미널 1(slot0) 만 FS 이벤트 자동 표시
     const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
     fsSse.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'fs_change') {
-          setActiveFilePath(data.path);
+        if (data.type !== 'fs_change') return;
+        const filePath: string = data.path;
+        const evType: string = data.event || 'modified';
+
+        // 모든 슬롯: 최근 변경 파일 목록 누적 (동일 파일은 덮어씀, 최대 8개)
+        setRecentChanges(prev => {
+          const filtered = prev.filter(c => c.path !== filePath);
+          const entry: FileChange = { path: filePath, eventType: evType, ts: Date.now(), added: 0, removed: 0, hunks: [] };
+          return [entry, ...filtered].slice(0, 8);
+        });
+
+        // 백그라운드: git diff로 +N/-N 줄 수 및 hunk 헤더 파싱
+        if (evType !== 'deleted') {
+          fetch(`${API_BASE}/api/git/diff?path=${encodeURIComponent(filePath)}&git_path=${encodeURIComponent(currentPath)}`)
+            .then(r => r.json())
+            .then(d => {
+              if (!d.diff) return;
+              let added = 0, removed = 0;
+              const hunks: string[] = [];
+              d.diff.split('\n').forEach((line: string) => {
+                if (line.startsWith('+') && !line.startsWith('+++')) added++;
+                else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+                else if (line.startsWith('@@')) {
+                  // "@@ -84,5 +84,8 @@" 에서 줄 번호 추출
+                  const m = line.match(/@@ [+-]\d+(?:,\d+)? [+-](\d+)/);
+                  if (m) hunks.push(`L${m[1]}`);
+                }
+              });
+              setRecentChanges(prev => prev.map(c =>
+                c.path === filePath ? { ...c, added, removed, hunks } : c
+              ));
+            })
+            .catch(() => {});
+        }
+
+        // slot0 만 파일 뷰어 자동 열기
+        if (slotId === 0) {
+          setActiveFilePath(filePath);
           setShowActiveFile(true);
         }
       } catch (err) { }
     };
     return () => fsSse.close();
-  }, [slotId]);
+  }, [slotId, currentPath]);
 
   // 현재 에이전트가 잠근 파일 찾기
   const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
@@ -3629,6 +3667,60 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
       })()}
       {isTerminalMode ? (
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
+
+          {/* ── 최근 변경 파일 목록 패널 (2026-02-27) ── */}
+          {recentChanges.length > 0 && (
+            <div className="shrink-0 border-b border-white/5 bg-[#161616] px-2 py-1 flex flex-col gap-[2px] max-h-[130px] overflow-y-auto custom-scrollbar">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[8px] text-[#444] uppercase tracking-widest font-bold">변경 파일</span>
+                <button
+                  onClick={() => setRecentChanges([])}
+                  className="text-[8px] text-[#333] hover:text-[#666] transition-colors"
+                  title="목록 초기화"
+                >✕</button>
+              </div>
+              {recentChanges.map(ch => {
+                // 파일명만 추출 (경로 마지막 부분)
+                const fname = ch.path.split('/').pop() || ch.path;
+                // 변경 타입 아이콘 + 색상
+                const typeLabel = ch.eventType === 'created' ? '+' : ch.eventType === 'deleted' ? 'D' : 'M';
+                const typeColor = ch.eventType === 'created' ? 'text-emerald-400' : ch.eventType === 'deleted' ? 'text-red-400' : 'text-yellow-400';
+                // 상대 시간
+                const sec = Math.floor((Date.now() - ch.ts) / 1000);
+                const relT = sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec/60)}m` : `${Math.floor(sec/3600)}h`;
+                return (
+                  <button
+                    key={ch.path}
+                    onClick={() => { setActiveFilePath(ch.path); setShowActiveFile(true); setShowDiff(ch.eventType !== 'created'); }}
+                    className="flex items-center gap-1.5 text-left hover:bg-white/5 rounded px-1 py-[1px] group transition-colors w-full min-w-0"
+                    title={ch.path}
+                  >
+                    {/* 타입 배지 */}
+                    <span className={`text-[9px] font-bold w-3 shrink-0 ${typeColor}`}>{typeLabel}</span>
+                    {/* 파일명 */}
+                    <span className="text-[10px] text-[#ccc] font-mono truncate flex-1 group-hover:text-white">{fname}</span>
+                    {/* hunk 줄 번호 (최대 2개) */}
+                    {ch.hunks.length > 0 && (
+                      <span className="text-[8px] text-[#555] shrink-0 font-mono">
+                        {ch.hunks.slice(0, 2).join(' ')}
+                        {ch.hunks.length > 2 ? ` +${ch.hunks.length - 2}` : ''}
+                      </span>
+                    )}
+                    {/* +N -N */}
+                    {(ch.added > 0 || ch.removed > 0) && (
+                      <span className="text-[8px] shrink-0 font-mono">
+                        {ch.added > 0 && <span className="text-emerald-500">+{ch.added}</span>}
+                        {ch.removed > 0 && <span className="text-red-500 ml-0.5">-{ch.removed}</span>}
+                      </span>
+                    )}
+                    {/* 시간 */}
+                    <span className="text-[8px] text-[#333] shrink-0">{relT}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {showActiveFile && (
             <div 
               className="border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 relative"
