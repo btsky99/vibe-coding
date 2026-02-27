@@ -171,8 +171,21 @@ if not DATA_DIR.exists():
         os.makedirs(DATA_DIR, exist_ok=True)
 
 # 현재 서버가 서비스하는 프로젝트 루트 + 식별자
+def _find_project_root(start: Path) -> Path:
+    """배포 모드에서 실제 프로젝트 루트를 탐색합니다.
+
+    실행 파일 위치에서 위로 올라가며 .git / CLAUDE.md / GEMINI.md 중
+    하나라도 존재하는 디렉터리를 프로젝트 루트로 판단합니다.
+    exe 가 dist/ 또는 .ai_monitor/dist/ 서브폴더에 있어도 올바른 루트를 반환합니다.
+    """
+    markers = ['.git', 'CLAUDE.md', 'GEMINI.md']
+    for p in [start, *start.parents]:
+        if any((p / m).exists() for m in markers):
+            return p
+    return start  # 마커를 찾지 못하면 exe 위치 그대로 사용
+
 if getattr(sys, 'frozen', False):
-    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    PROJECT_ROOT = _find_project_root(Path(sys.executable).resolve().parent)
 else:
     PROJECT_ROOT = BASE_DIR.parent
 
@@ -1796,6 +1809,24 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'items': [], 'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/hive/logs':
+            # 하이브 통합 로그 조회 (SQLite session_logs)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                conn_h = sqlite3.connect(str(DATA_DIR / 'hive_mind.db'), timeout=5, check_same_thread=False)
+                conn_h.row_factory = sqlite3.Row
+                # 최근 200개 로그 조회
+                logs = conn_h.execute(
+                    "SELECT * FROM session_logs ORDER BY ts_start DESC LIMIT 200"
+                ).fetchall()
+                conn_h.close()
+                self.wfile.write(json.dumps([dict(r) for r in logs], ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/hive/health':
             # 하이브 시스템 건강 상태 진단
             # hive_health.json(워치독 엔진 상태) + 파일 존재 여부 실시간 검사를 병합하여 반환
