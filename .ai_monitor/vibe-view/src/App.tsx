@@ -3226,7 +3226,9 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   })();
 
   // ─── 파일 시스템 이벤트 → 오른쪽 뷰어 자동 표시 ───
+  // slotId === 0 인 터미널만 FS 이벤트에 반응 — 나머지 슬롯은 본인 터미널 출력에서만 감지
   useEffect(() => {
+    if (slotId !== 0) return; // 터미널 1(slot0) 만 FS 이벤트 자동 표시
     const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
     fsSse.onmessage = (e) => {
       try {
@@ -3238,7 +3240,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
       } catch (err) { }
     };
     return () => fsSse.close();
-  }, []);
+  }, [slotId]);
 
   // 현재 에이전트가 잠근 파일 찾기
   const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
