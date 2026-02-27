@@ -3459,10 +3459,20 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
               .replace(/-\d{8}$/, '')
               .replace(/\b\w/g, c => c.toUpperCase())
           : (isGeminiAgent ? 'Gemini' : 'Claude');
+        // 최대 토큰 표시 레이블: 1M 이상은 "1M", 아니면 "200k" 형식
+        const maxLabel = CTX_MAX >= 1_000_000
+          ? `${Math.round(CTX_MAX / 1_000_000)}M`
+          : `${Math.round(CTX_MAX / 1000)}k`;
+        const inLabel = ctxSession
+          ? CTX_MAX >= 1_000_000
+            ? `${(ctxSession.input_tokens / 1000).toFixed(0)}k`  // Gemini: "50k"
+            : `${Math.round(ctxSession.input_tokens / 1000)}k`   // Claude: "50k"
+          : '0k';
         // 두 번째 줄: 캐시 정보 또는 안내 메시지
         const cacheWrite = ctxSession?.cache_write ?? 0;
         const cacheRead  = ctxSession?.cache_read  ?? 0;
         const hasCache   = cacheWrite > 0 || cacheRead > 0;
+        // Gemini는 cache_write 없음 → Cache~ (cached) 만 표시
         const line2 = ctxSession
           ? hasCache
             ? [
@@ -3500,9 +3510,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 <span className={`font-semibold ${modelColor}`}>{modelShort}</span>
                 <span className="text-[#444] mx-1">·</span>
                 <span className="text-[#ccc]">
-                  {ctxSession
-                    ? `${Math.round(ctxSession.input_tokens/1000)}/${Math.round(CTX_MAX/1000)}k tokens (${ctxPct}%)`
-                    : `0/${Math.round(CTX_MAX/1000)}k tokens (0%)`}
+                  {`${inLabel}/${maxLabel} tokens (${ctxPct}%)`}
                 </span>
                 {ctxSession && ctxRelTime && (
                   <span className="text-[#333] ml-2">{ctxRelTime}</span>
