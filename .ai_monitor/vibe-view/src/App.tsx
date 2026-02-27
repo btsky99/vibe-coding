@@ -3209,6 +3209,8 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   interface FileChange { path: string; eventType: string; ts: number; added: number; removed: number; hunks: string[] }
   const [recentChanges, setRecentChanges] = useState<FileChange[]>([]);
 
+  // 컨텍스트 상세 정보 토글 (클릭 시 In/Out/Cache 2행 표시)
+  const [showCtxDetail, setShowCtxDetail] = useState(false);
   // showContextPanel 제거됨 — 항상 표시 방식으로 변경 (2026-02-27)
   // activeAgent에 따라 Claude/Gemini 세션 선택 — slotId 번째 세션 사용
   // [2026-02-27] Claude: Gemini 컨텍스트 분기 추가
@@ -3585,82 +3587,105 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         </div>
       </div>
 
-      {/* ── 컨텍스트 도트 바 — Claude Code 네이티브 스타일 (2026-02-27) ── */}
+      {/* ── 컨텍스트 컬러 블록 바 — 클릭 시 상세 토글 (2026-02-27) ── */}
       {(() => {
-        // 도트 색상: 80%↑ 빨강, 60%↑ 노랑, 정상 초록
-        const dotColor   = ctxPct >= 80 ? 'text-red-400'     : ctxPct >= 60 ? 'text-yellow-400'  : 'text-emerald-400';
-        const modelColor = ctxPct >= 80 ? 'text-red-300'     : ctxPct >= 60 ? 'text-yellow-300'  : 'text-emerald-300';
-        const bgClass    = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
+        const cacheRead  = ctxSession?.cache_read  ?? 0;
+        const cacheWrite = ctxSession?.cache_write ?? 0;
+        const inputTok   = ctxSession?.input_tokens ?? 0;
+        const outputTok  = ctxSession?.output_tokens ?? 0;
+
+        // 각 토큰 타입의 %
+        const cacheReadPct  = Math.min(100, (cacheRead  / CTX_MAX) * 100);
+        const cacheWritePct = Math.min(100, (cacheWrite / CTX_MAX) * 100);
+        // input_pct: 전체 사용량 (ctxPct 기준)
+        const inputOnlyPct  = Math.max(0, ctxPct - cacheReadPct - cacheWritePct);
+
+        // 배경 & 경고 색
+        const dangerBg   = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
                          : ctxPct >= 60 ? 'bg-yellow-950/30 border-yellow-500/15'
                          : 'bg-[#0d1117] border-white/5';
-        // 모델명 단축 (claude-sonnet-4-6 → Sonnet 4.6)
+        const modelColor = ctxPct >= 80 ? '#f87171' : ctxPct >= 60 ? '#facc15' : '#a3e635';
+
+        // 모델명 단축
         const modelShort = ctxSession
           ? ctxSession.model
-              .replace(/^claude-/, '')
-              .replace(/-(\d)/, ' $1')
-              .replace(/-latest$/, '')
-              .replace(/-\d{8}$/, '')
+              .replace(/^claude-/, '').replace(/^gemini-/, 'Gemini ')
+              .replace(/-(\d)/, ' $1').replace(/-latest$/, '').replace(/-\d{8}$/, '')
               .replace(/\b\w/g, c => c.toUpperCase())
           : (isGeminiAgent ? 'Gemini' : 'Claude');
-        // 최대 토큰 표시 레이블: 1M 이상은 "1M", 아니면 "200k" 형식
-        const maxLabel = CTX_MAX >= 1_000_000
-          ? `${Math.round(CTX_MAX / 1_000_000)}M`
-          : `${Math.round(CTX_MAX / 1000)}k`;
-        const inLabel = ctxSession
-          ? CTX_MAX >= 1_000_000
-            ? `${(ctxSession.input_tokens / 1000).toFixed(0)}k`  // Gemini: "50k"
-            : `${Math.round(ctxSession.input_tokens / 1000)}k`   // Claude: "50k"
-          : '0k';
-        // 두 번째 줄: 캐시 정보 또는 안내 메시지
-        const cacheWrite = ctxSession?.cache_write ?? 0;
-        const cacheRead  = ctxSession?.cache_read  ?? 0;
-        const hasCache   = cacheWrite > 0 || cacheRead > 0;
-        // Gemini는 cache_write 없음 → Cache~ (cached) 만 표시
-        const line2 = ctxSession
-          ? hasCache
-            ? [
-                cacheWrite > 0 ? `Cache+: ${(cacheWrite/1000).toFixed(1)}k` : '',
-                cacheRead  > 0 ? `Cache~: ${(cacheRead /1000).toFixed(1)}k` : '',
-              ].filter(Boolean).join('  ·  ')
-            : 'No usage data yet'
-          : `${isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...`;
+
+        // 토큰 표시 레이블
+        const maxLabel = CTX_MAX >= 1_000_000 ? `${CTX_MAX/1_000_000}M` : `${CTX_MAX/1000}k`;
+        const usedLabel = `${Math.round(inputTok / 1000)}k`;
+
+        // 블록 색상 결정 함수 — 각 블록(5%)이 어떤 토큰 타입인지 판별
+        const blockColor = (idx: number): string => {
+          const pct = (idx + 1) * 5;
+          if (pct <= cacheReadPct)                         return '#22d3ee'; // cyan  — Cache~
+          if (pct <= cacheReadPct + cacheWritePct)         return '#4ade80'; // green — Cache+
+          if (pct <= cacheReadPct + cacheWritePct + inputOnlyPct) return '#fbbf24'; // amber — Input
+          return '#1e2028'; // 빈 블록
+        };
 
         return (
-          <div className={`shrink-0 border-b px-3 py-1 flex items-center gap-2.5 font-mono text-[10px] overflow-hidden ${bgClass}`}>
-            {/* 도트 그리드: 2행 × 10열 = 20개, 각 도트 = 5% */}
+          <div
+            className={`shrink-0 border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
+            onClick={() => setShowCtxDetail(p => !p)}
+            title="클릭하여 상세 정보 토글"
+          >
+            {/* 컬러 블록 그리드: 2행 × 10열 = 20블록, 각 5% */}
             <div className="flex flex-col gap-[2px] shrink-0">
               {[0, 1].map(row => (
-                <div key={row} className="flex gap-[2px]">
-                  {Array.from({ length: 10 }, (_, col) => {
-                    const threshold = (row * 10 + col + 1) * 5; // 5 ~ 100%
-                    const filled = ctxPct >= threshold;
-                    return (
-                      <span
-                        key={col}
-                        className={`text-[8px] leading-none ${filled ? dotColor : 'text-[#2a2a2a]'}`}
-                      >
-                        {filled ? '●' : '○'}
-                      </span>
-                    );
-                  })}
+                <div key={row} className="flex gap-[1px]">
+                  {Array.from({ length: 10 }, (_, col) => (
+                    <div
+                      key={col}
+                      className="rounded-[1px]"
+                      style={{ width: 5, height: 5, backgroundColor: blockColor(row * 10 + col) }}
+                    />
+                  ))}
                 </div>
               ))}
             </div>
+
             {/* 텍스트 영역 */}
-            <div className="flex flex-col gap-[1px] min-w-0">
-              {/* 1행: 모델명 · 토큰/최대 (%) */}
+            <div className="flex flex-col gap-0 min-w-0 flex-1">
+              {/* 1행: 모델명 · N k/200k (%) */}
               <div className="flex items-center gap-0 whitespace-nowrap">
-                <span className={`font-semibold ${modelColor}`}>{modelShort}</span>
-                <span className="text-[#444] mx-1">·</span>
-                <span className="text-[#ccc]">
-                  {`${inLabel}/${maxLabel} tokens (${ctxPct}%)`}
-                </span>
+                <span className="font-semibold" style={{ color: modelColor }}>{modelShort}</span>
+                <span className="text-[#444] mx-1.5">·</span>
+                <span className="text-[#ccc]">{usedLabel}/{maxLabel} tokens ({ctxPct}%)</span>
                 {ctxSession && ctxRelTime && (
-                  <span className="text-[#333] ml-2">{ctxRelTime}</span>
+                  <span className="text-[#333] ml-2 text-[9px]">{ctxRelTime}</span>
                 )}
+                <span className="ml-auto text-[#333] text-[8px]">{showCtxDetail ? '▲' : '▼'}</span>
               </div>
-              {/* 2행: 캐시 정보 or 안내 */}
-              <div className="text-[9px] text-[#444]">{line2}</div>
+              {/* 2행: 상세 (클릭 토글) */}
+              {showCtxDetail && (
+                <div className="flex items-center gap-0 whitespace-nowrap text-[9px] mt-[1px]">
+                  <span className="text-[#666] mr-1">In:</span>
+                  <span className="text-[#fbbf24] mr-2">{(inputTok/1000).toFixed(1)}k</span>
+                  <span className="text-[#555] mr-2">·</span>
+                  <span className="text-[#666] mr-1">Out:</span>
+                  <span className="text-[#bbb] mr-2">{(outputTok/1000).toFixed(1)}k</span>
+                  {cacheWrite > 0 && <>
+                    <span className="text-[#555] mr-2">·</span>
+                    <span className="text-[#666] mr-1">Cache+:</span>
+                    <span className="text-[#4ade80] mr-2">{(cacheWrite/1000).toFixed(1)}k</span>
+                  </>}
+                  {cacheRead > 0 && <>
+                    <span className="text-[#555] mr-2">·</span>
+                    <span className="text-[#666] mr-1">Cache~:</span>
+                    <span className="text-[#22d3ee]">{(cacheRead/1000).toFixed(1)}k</span>
+                  </>}
+                </div>
+              )}
+              {/* 세션 없을 때 안내 */}
+              {!ctxSession && (
+                <div className="text-[9px] text-[#333] italic">
+                  {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...
+                </div>
+              )}
             </div>
           </div>
         );
