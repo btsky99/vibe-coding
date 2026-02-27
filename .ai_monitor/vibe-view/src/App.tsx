@@ -346,14 +346,23 @@ function App() {
   const [memAuthor, setMemAuthor] = useState('claude');
   const [memShowAll, setMemShowAll] = useState(false);   // 전체 프로젝트 보기 토글
   const [currentProjectName, setCurrentProjectName] = useState('');
+  const [currentProjectRoot, setCurrentProjectRoot] = useState(''); // 서버 PROJECT_ROOT 전체 경로
   const [appVersion, setAppVersion] = useState('');
 
   // 현재 프로젝트 정보 + 서버 버전 조회 (1회)
+  // localStorage에 경로가 없으면 서버 PROJECT_ROOT를 currentPath 초기값으로 사용
   useEffect(() => {
     fetch(`${API_BASE}/api/project-info`)
       .then(res => res.json())
       .then(data => {
         setCurrentProjectName(data.project_name || '');
+        const root = (data.project_root || '').replace(/\\/g, '/');
+        setCurrentProjectRoot(root);
+        // 최초 실행(localStorage 없음)이면 서버 PROJECT_ROOT를 현재 경로로 사용
+        if (!localStorage.getItem('hive_last_path') && root) {
+          setCurrentPath(root);
+          setGitPath(root);
+        }
         if (data.version) setAppVersion(data.version);
       })
       .catch(() => {});
@@ -442,8 +451,8 @@ function App() {
   // ─── Git 실시간 감시 상태 ─────────────────────────────────────────────
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitLog, setGitLog] = useState<GitCommit[]>([]);
-  // 초기값은 하드코딩 — currentPath 선언 이후 useEffect로 동기화
-  const [gitPath, setGitPath] = useState("D:/vibe-coding");
+  // 초기값은 빈 문자열 — project-info useEffect에서 서버 PROJECT_ROOT로 동기화
+  const [gitPath, setGitPath] = useState(localStorage.getItem('hive_last_path') || '');
 
   // Git 상태 폴링 (5초 간격)
   useEffect(() => {
@@ -939,8 +948,9 @@ function App() {
   const [drives, setDrives] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   // 마지막 선택 경로를 localStorage에서 복원 — 앱 재시작 시 이전 프로젝트 유지
+  // 최초 실행 시 빈 문자열 → 서버의 PROJECT_ROOT 로 초기화됨 (useEffect에서 동기화)
   const [currentPath, setCurrentPath] = useState<string>(
-    () => localStorage.getItem('hive_last_path') || "D:/vibe-coding"
+    () => localStorage.getItem('hive_last_path') || ''
   );
 
   // 최근 프로젝트 목록 가져오기
@@ -2471,7 +2481,8 @@ function App() {
                     <button 
                       onClick={() => {
                         if(confirm("모든 누락된 하이브 지침과 스킬을 현재 프로젝트에 자동 복구하시겠습니까?")) {
-                          const projectRoot = currentProjectName ? `D:/${currentProjectName}` : gitPath;
+                          // 우선순위: 서버 PROJECT_ROOT → 현재 선택된 경로 → git 경로
+                          const projectRoot = currentProjectRoot || currentPath || gitPath;
                           fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(projectRoot)}`)
                             .then(res => res.json())
                             .then(data => {
