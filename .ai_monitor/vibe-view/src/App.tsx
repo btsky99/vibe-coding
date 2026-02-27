@@ -31,8 +31,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth, ThoughtLog, HiveLog } from './types';
-import { ThoughtTrace } from './components/ThoughtTrace';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth, HiveLog } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -531,7 +530,6 @@ function App() {
   const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
   const [hiveLogs, setHiveLogs] = useState<HiveLog[]>([]); // 하이브 통합 로그
   const [logFilter, setLogFilter] = useState(''); // 로그 검색어
-  const [thoughts, setThoughts] = useState<ThoughtLog[]>([]); // 신규: AI 사고 과정 로그
   const [skillProposals, setSkillProposals] = useState<{ keyword: string; count: number; suggested_skill_name: string; description: string }[]>([]);
 
   const fetchHiveHealth = () => {
@@ -1267,19 +1265,9 @@ function App() {
       } catch (err) { }
     };
 
-    // 3) 사고 과정 스트림 (v5.0)
-    const thoughtSse = new EventSource(`${API_BASE}/api/events/thoughts`);
-    thoughtSse.onmessage = (e) => {
-      try {
-        const data: ThoughtLog = JSON.parse(e.data);
-        setThoughts(prev => [...prev.slice(-49), data]); // 최근 50개 유지
-      } catch (err) { }
-    };
-
     return () => {
       sse.close();
       fsSse.close();
-      thoughtSse.close();
     };
   }, []);
 
@@ -3116,8 +3104,6 @@ function App() {
           </main>
         </div>
 
-        {/* 신규: 사고 과정 시각화 패널 (v5.0) */}
-        <ThoughtTrace thoughts={thoughts} />
       </div>
 
       {/* Quick View Floating Panels */}

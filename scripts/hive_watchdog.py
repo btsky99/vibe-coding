@@ -3,6 +3,7 @@ FILE: scripts/hive_watchdog.py
 DESCRIPTION: 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing) 및 모니터링 엔진.
              DB 무결성, 파일 동기화 상태, 에이전트 활동 주기를 주기적으로 체크하고 복구를 시도합니다.
 REVISION HISTORY:
+- 2026-02-28 Claude: --data-dir 인자 추가 — 설치 버전에서 DATA_DIR 하드코딩 오류 수정.
 - 2026-02-26 Gemini-1: 초기 생성. DB 체크, 메모리 동기화(memory.py) 연동 기능 구현.
 - 2026-02-26 Claude: 오탐 개선 — 에이전트 비활성 임계값 1h→8h, memory_sync_ok 갱신 버그 수정.
 """
@@ -21,8 +22,16 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # 프로젝트 루트 및 데이터 경로 설정
+# --data-dir 인자가 있으면 해당 경로 사용 (설치 버전에서 server.py가 실제 DATA_DIR 전달)
+# 없으면 __file__ 기준 상대 경로 (개발 모드)
+def _resolve_data_dir() -> Path:
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == "--data-dir" and i < len(sys.argv):
+            return Path(sys.argv[i + 1])
+    return Path(__file__).resolve().parent.parent / ".ai_monitor" / "data"
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / ".ai_monitor" / "data"
+DATA_DIR = _resolve_data_dir()
 LOG_FILE = DATA_DIR / "task_logs.jsonl"
 DB_FILE = DATA_DIR / "hive_mind.db"
 MEMORY_DB = DATA_DIR / "shared_memory.db"

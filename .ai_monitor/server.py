@@ -1122,7 +1122,23 @@ class SSEHandler(BaseHTTPRequestHandler):
                     rules_md_src = source_base / "RULES.md"
                     if rules_md_src.exists():
                         shutil.copy(rules_md_src, Path(target_path) / "RULES.md")
-                        
+
+                    # 대상 프로젝트의 .ai_monitor/data 폴더와 DB 초기화
+                    # — 스킬 설치 후 하이브 워치독이 정상 동작하려면 DB가 있어야 함
+                    target_data = Path(target_path) / ".ai_monitor" / "data"
+                    target_data.mkdir(parents=True, exist_ok=True)
+                    for db_name in ("shared_memory.db", "hive_mind.db"):
+                        db_path = target_data / db_name
+                        if not db_path.exists():
+                            conn = sqlite3.connect(str(db_path))
+                            if db_name == "shared_memory.db":
+                                conn.execute("""CREATE TABLE IF NOT EXISTS memory (
+                                    key TEXT PRIMARY KEY, title TEXT, content TEXT,
+                                    tags TEXT, author TEXT, project TEXT,
+                                    created_at TEXT, updated_at TEXT)""")
+                            conn.commit()
+                            conn.close()
+
                     result = {"status": "success", "message": f"Skills installed to {target_path}"}
                 except Exception as e:
                     result = {"status": "error", "message": str(e)}
@@ -1248,7 +1264,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 try:
                     with open(update_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    self.wfile.write(json.dumps(data).encode('utf-8'))
+                    # 이미 현재 버전과 같으면 업데이트 파일 삭제 후 ready:false 반환
+                    file_ver = data.get("version", "").lstrip("v").strip()
+                    cur_ver  = __version__.lstrip("v").strip()
+                    if file_ver == cur_ver:
+                        update_file.unlink(missing_ok=True)
+                        self.wfile.write(json.dumps({"ready": False, "downloading": False}).encode('utf-8'))
+                    else:
+                        self.wfile.write(json.dumps(data).encode('utf-8'))
                 except Exception as e:
                     self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
             else:
@@ -1777,6 +1800,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             def check_exists(p): return Path(p).exists()
 
             # hive_health.json에서 워치독 엔진 상태(DB, 에이전트, 복구 횟수) 로드
+            # 파일이 없으면 실제 DB 파일 존재 여부로 기본값 생성
             engine_data = {}
             health_file = DATA_DIR / "hive_health.json"
             if health_file.exists():
@@ -1784,6 +1808,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                     with open(health_file, 'r', encoding='utf-8') as f:
                         engine_data = json.load(f)
                 except: pass
+            if 'db_ok' not in engine_data:
+                # watchdog 미실행 상태 — 실제 DB 파일 존재 여부로 대체 판단
+                engine_data['db_ok'] = (DATA_DIR / 'shared_memory.db').exists() and (DATA_DIR / 'hive_mind.db').exists()
+                engine_data.setdefault('agent_active', False)
+                engine_data.setdefault('repair_count', 0)
 
             # 파일 존재 여부 실시간 검사 결과와 병합
             health = {
@@ -3103,10 +3132,11 @@ if __name__ == '__main__':
     MemoryWatcher().start()  # 에이전트 메모리 파일 → shared_memory.db 자동 동기화
     
     # 하이브 워치독(Watchdog) 엔진 실행
+    # --data-dir 인자로 실제 DATA_DIR 전달 — 설치 버전에서 경로 오탐 방지
     def run_watchdog():
         watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
-            subprocess.Popen([sys.executable, str(watchdog_script)])
+            subprocess.Popen([sys.executable, str(watchdog_script), "--data-dir", str(DATA_DIR)])
     threading.Thread(target=run_watchdog, daemon=True).start()
     
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
