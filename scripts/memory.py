@@ -28,6 +28,22 @@ import time
 import sqlite3
 import os
 
+# Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+# 벡터 메모리 모듈 선택적 임포트 (없으면 SQLite 폴백 사용)
+try:
+    from vector_memory import VectorMemory
+    VECTOR_AVAILABLE = True
+except ImportError:
+    VECTOR_AVAILABLE = False
+
 DEFAULT_PORTS = [8005, 8000]
 
 
@@ -313,11 +329,6 @@ def cmd_sync(args: argparse.Namespace, port) -> None:
 # ─── 진입점 ──────────────────────────────────────────────────────────────────
 
 def main():
-    # Windows cp949 터미널에서 UTF-8 출력 보장
-    import io
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-
     parser = argparse.ArgumentParser(description='공유 메모리 CLI 헬퍼 (SQLite)')
     sub = parser.add_subparsers(dest='command')
 

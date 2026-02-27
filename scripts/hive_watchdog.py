@@ -14,12 +14,19 @@ import time
 import json
 import sqlite3
 import subprocess
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Windows CP949 환경에서 이모지/한글 출력 시 UnicodeEncodeError 방지
+# Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # 프로젝트 루트 및 데이터 경로 설정
 # --data-dir 인자가 있으면 해당 경로 사용 (설치 버전에서 server.py가 실제 DATA_DIR 전달)
@@ -36,6 +43,9 @@ LOG_FILE = DATA_DIR / "task_logs.jsonl"
 DB_FILE = DATA_DIR / "hive_mind.db"
 MEMORY_DB = DATA_DIR / "shared_memory.db"
 
+# 기본 HTTP 포트 (server.py와 동일하게 9571 선호)
+HTTP_PORT = 9571
+
 class HiveWatchdog:
     def __init__(self, interval=60):
         self.interval = interval
@@ -43,6 +53,7 @@ class HiveWatchdog:
         self.status = {
             "last_check": None,
             "db_ok": False,
+            "server_ok": False,
             "memory_sync_ok": False,
             "agent_active": False,
             "repair_count": 0,
@@ -56,6 +67,32 @@ class HiveWatchdog:
         self.status["logs"].append(log_entry)
         if len(self.status["logs"]) > 20:
             self.status["logs"].pop(0)
+
+    def check_server(self):
+        """중앙 제어 서버(server.py)가 살아있는지 HTTP 하트비트 체크"""
+        try:
+            url = f"http://localhost:{HTTP_PORT}/api/heartbeat"
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                if resp.status == 200:
+                    self.status["server_ok"] = True
+                    return True
+        except Exception:
+            pass
+        
+        # 포트 9571이 안되면 8005나 8000 등 다른 포트 시도 (서버가 포트 충돌로 밀려났을 경우 대비)
+        for p in [8005, 8000]:
+            try:
+                url = f"http://localhost:{p}/api/heartbeat"
+                with urllib.request.urlopen(url, timeout=2) as resp:
+                    if resp.status == 200:
+                        self.status["server_ok"] = True
+                        return True
+            except Exception:
+                continue
+
+        self._add_log("⚠️ 중앙 제어 서버(server.py) 응답 없음")
+        self.status["server_ok"] = False
+        return False
 
     def check_db(self):
         """DB 파일 존재 여부 및 연결성 체크"""
@@ -132,20 +169,24 @@ class HiveWatchdog:
         """전체 점검 및 자동 복구 실행.
 
         복구 조건:
+        - 서버가 정상이 아닐 경우 로그에 기록
         - DB가 정상인데 에이전트 활동이 8시간 이상 없는 경우에만 메모리 동기화 복구 실행
         - DB 자체가 정상이면 기본적으로 memory_sync_ok = True로 간주
         """
         self.status["last_check"] = datetime.now().isoformat()
 
+        server_ok = self.check_server()
         db_ok = self.check_db()
         activity_ok = self.check_agent_activity()
 
-        # DB가 정상이면 기본 동기화 상태를 OK로 간주
-        if db_ok:
+        # 서버가 죽어있으면 메모리 동기화도 안 되므로 상태 반영
+        if not server_ok:
+            self.status["memory_sync_ok"] = False
+        elif db_ok:
             self.status["memory_sync_ok"] = True
 
-        # 복구 로직: DB는 OK인데 에이전트가 오랫동안 비활성 상태일 때만 동기화 재시도
-        if db_ok and not activity_ok:
+        # 복구 로직: 서버/DB는 OK인데 에이전트가 오랫동안 비활성 상태일 때만 동기화 재시도
+        if server_ok and db_ok and not activity_ok:
             self.repair_memory_sync()
         
         # 점검 결과를 파일로 저장 (서버/UI에서 읽기 위함)

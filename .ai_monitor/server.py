@@ -5,9 +5,13 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
-# [2026-02-26] - Gemini (하이브 에볼루션 v5.0)
-#   - 사고 과정 시각화(Thought Trace)를 위한 SSE 엔진 및 로그 캡처 로직 추가.
-#   - Vector DB 연동을 위한 API 엔드포인트 기초 설계.
+# [2026-02-28] - Claude (배포 버전 경로 버그 수정)
+#   - _load_task_logs_into_thoughts(): DATA_DIR 미정의 시점에 frozen 모드 APPDATA 경로 사용
+#   - 기존 Path(__file__).parent/'data' → frozen 여부 판별 후 올바른 데이터 디렉토리 참조
+# [2026-02-28] - Gemini-1 (서버 안정성 및 자가 치유 패치)
+#   - 터미널 인코딩 오류(UnicodeEncodeError) 방지를 위해 stdout/stderr UTF-8 강제 설정.
+#   - 좀비 스레드 누수 방지를 위한 전역 소켓 타임아웃(60s) 및 SSE 개별 타임아웃 적용.
+#   - SSE /stream, /api/events/thoughts, /api/events/fs 루프의 연결 해제 감지 로직 강화.
 # [2026-02-27] - Claude (새 기능)
 #   - _parse_gemini_session(): Gemini 세션 JSON 파일 토큰 파서 추가
 #   - /api/gemini-context-usage 엔드포인트 추가
@@ -28,7 +32,20 @@ import threading
 import sys
 import asyncio
 import string
+import socket
 from pathlib import Path
+
+# Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+# 전역 소켓 타임아웃 설정 (좀비 스레드 방지)
+socket.setdefaulttimeout(60)
 
 # BASE_DIR: 개발 모드에선 server.py 위치, 배포(frozen) 모드에선 PyInstaller 임시 압축 해제 폴더(sys._MEIPASS)
 # 이 상수는 winpty DLL 경로 등 초기화 코드보다 반드시 먼저 정의되어야 함
@@ -49,8 +66,22 @@ THOUGHT_CLIENTS = set() # SSE 클라이언트 연결 리스트
 def _load_task_logs_into_thoughts():
     """서버 시작 시 task_logs.jsonl의 최근 20개 항목을 THOUGHT_LOGS에 미리 로드합니다.
     이렇게 해야 클라이언트 접속 즉시 과거 작업 내역이 사고 패널에 표시됩니다.
+
+    [경로 주의] DATA_DIR는 이 함수가 호출되는 시점(서버 코드 상단)에 아직 정의되지 않으므로,
+    frozen(배포) 모드와 개발 모드를 직접 판별하여 올바른 데이터 디렉토리를 사용합니다.
+    - frozen 모드: %APPDATA%\\VibeCoding (Windows) / ~/.vibe-coding (기타)
+    - 개발 모드 : server.py 위치 기준 ./data/
     """
-    log_path = Path(__file__).parent / 'data' / 'task_logs.jsonl'
+    _self = Path(__file__).resolve()
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 배포 버전: __file__ = sys._MEIPASS/server.py → 데이터는 APPDATA에 있음
+        if os.name == 'nt':
+            _early_data_dir = Path(os.getenv('APPDATA', '')) / "VibeCoding"
+        else:
+            _early_data_dir = Path.home() / ".vibe-coding"
+    else:
+        _early_data_dir = _self.parent / 'data'
+    log_path = _early_data_dir / 'task_logs.jsonl'
     if not log_path.exists():
         return
     try:
@@ -874,6 +905,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 실시간 업데이트를 위해 클라이언트 등록
             THOUGHT_CLIENTS.add(self)
             try:
+                self.connection.settimeout(30.0)
                 while True:
                     time.sleep(15)
                     self.wfile.write(b": heartbeat\n\n")
@@ -895,6 +927,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             
             FS_CLIENTS.add(self)
             try:
+                self.connection.settimeout(30.0)
                 # 연결 유지를 위한 하트비트 루프
                 while True:
                     time.sleep(15)
@@ -944,14 +977,20 @@ class SSEHandler(BaseHTTPRequestHandler):
                             if 'trigger_msg' in out_row:
                                 out_row['trigger'] = out_row.pop('trigger_msg')
                             
-                            # 연결 상태 확인하며 전송
-                            self.connection.settimeout(1.0)
+                            # 연결 상태 확인하며 전송 (1초 내에 못 보내면 끊긴 것으로 간주)
+                            self.connection.settimeout(2.0)
                             self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
                             self.wfile.flush()
                         last_id = new_rows[-1]['id']
                     
+                    # 연결 유지를 위한 하트비트 시도 (DB 변경이 없을 때)
+                    else:
+                        self.connection.settimeout(2.0)
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+                    
                     time.sleep(1.0) # 감시 주기를 0.5s에서 1.0s로 늘려 리소스 절약
-                except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                except (BrokenPipeError, ConnectionResetError, TimeoutError, socket.timeout):
                     break
                 except Exception as e:
                     # 에러가 반복되면 루프 중단 (서버 먹통 방지)
