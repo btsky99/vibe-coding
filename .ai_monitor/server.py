@@ -1639,6 +1639,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 'project_id':   PROJECT_ID,
                 'project_name': PROJECT_ROOT.name,
                 'project_root': str(PROJECT_ROOT).replace('\\', '/'),
+                'version':      __version__,
             }, ensure_ascii=False).encode('utf-8'))
 
         elif parsed_path.path == '/api/context-usage':

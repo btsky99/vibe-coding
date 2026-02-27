@@ -345,12 +345,16 @@ function App() {
   const [memAuthor, setMemAuthor] = useState('claude');
   const [memShowAll, setMemShowAll] = useState(false);   // 전체 프로젝트 보기 토글
   const [currentProjectName, setCurrentProjectName] = useState('');
+  const [appVersion, setAppVersion] = useState('');
 
-  // 현재 프로젝트 정보 조회 (1회)
+  // 현재 프로젝트 정보 + 서버 버전 조회 (1회)
   useEffect(() => {
     fetch(`${API_BASE}/api/project-info`)
       .then(res => res.json())
-      .then(data => setCurrentProjectName(data.project_name || ''))
+      .then(data => {
+        setCurrentProjectName(data.project_name || '');
+        if (data.version) setAppVersion(data.version);
+      })
       .catch(() => {});
   }, []);
 
@@ -979,6 +983,13 @@ function App() {
       .then(data => setItems(data))
       .catch(() => { });
   };
+  // SSE 핸들러 내 stale closure 방지용 ref
+  // (fsSse는 마운트 1회만 생성 → ref로 항상 최신 함수 참조)
+  const refreshItemsRef = useRef(refreshItems);
+  useEffect(() => { refreshItemsRef.current = refreshItems; });
+
+  // currentPath 변경 시 파일 목록 자동 갱신
+  useEffect(() => { refreshItems(); }, [currentPath]);
 
   const createFile = () => {
     const name = prompt("새 파일 이름을 입력하세요:");
@@ -1115,11 +1126,12 @@ function App() {
     };
 
     // 2) 파일 시스템 이벤트 → 탐색기 갱신
+    // ref를 통해 호출 → stale closure 방지 (currentPath 최신값 항상 반영)
     const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
     fsSse.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'fs_change') refreshItems();
+        if (data.type === 'fs_change') refreshItemsRef.current();
       } catch (err) { }
     };
 
@@ -1373,7 +1385,7 @@ function App() {
                  : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30'
                }`}
            >
-             <span className="font-mono">v3.4.0</span>
+             <span className="font-mono">{appVersion ? `v${appVersion}` : 'v3.4.1'}</span>
              {updateChecking
                ? <span className="animate-spin inline-block w-3 h-3 border-2 border-current/30 border-t-current rounded-full" />
                : updateReady && !updateReady.downloading
