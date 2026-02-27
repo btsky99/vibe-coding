@@ -820,7 +820,7 @@ function App() {
   }, []);
 
   // ─── 업데이트 알림 상태 ───────────────────────────────────────────────────
-  const [updateReady, setUpdateReady] = useState<{ version: string; ready: boolean; downloading: boolean } | null>(null);
+  const [updateReady, setUpdateReady] = useState<{ version?: string; ready: boolean; downloading: boolean; checking?: boolean } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
 
   // Claude Code 세션별 컨텍스트 사용량 — TerminalSlot에 slotId 순서대로 전달
@@ -847,15 +847,20 @@ function App() {
     return () => clearInterval(iv);
   }, []);
 
-  // 30초마다 업데이트 준비 여부 확인 (다운로드 중이면 5초마다)
+  // 30초마다 업데이트 준비 여부 확인 (다운로드/확인 중이면 5초마다)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     const check = () => {
       fetch(`${API_BASE}/api/check-update-ready`)
         .then(res => res.json())
         .then(data => {
-          if (data?.version) {
-            const next = { version: data.version, ready: !!data.ready, downloading: !!data.downloading };
+          if (data?.version || data?.checking) {
+            const next = { 
+              version: data.version, 
+              ready: !!data.ready, 
+              downloading: !!data.downloading,
+              checking: !!data.checking
+            };
             // 다운로드 완료 전환 감지 → 토스트 알림
             setUpdateReady(prev => {
               if (prev?.downloading && next.ready) {
@@ -870,14 +875,14 @@ function App() {
         .catch(() => {});
     };
     check();
-    // 다운로드 중이면 5초, 아니면 30초 폴링
+    // 다운로드 중이거나 확인 중이면 5초, 아니면 30초 폴링
     const scheduleNext = () => {
-      const delay = updateReady?.downloading ? 5000 : 30000;
+      const delay = (updateReady?.downloading || updateReady?.checking) ? 5000 : 30000;
       interval = setTimeout(() => { check(); scheduleNext(); }, delay);
     };
     scheduleNext();
     return () => clearTimeout(interval);
-  }, [updateReady?.downloading]);
+  }, [updateReady?.downloading, updateReady?.checking]);
 
   // 토스트 알림 상태 — 업데이트 확인 결과, 설치 완료 등 간단한 피드백용
   const [toast, setToast] = useState<{ msg: string; type: 'info' | 'ok' | 'warn' } | null>(null);
@@ -1212,13 +1217,15 @@ function App() {
       {updateReady && (
         <div className="flex items-center justify-between px-3 py-1 bg-primary/20 border-b border-primary/40 shrink-0 z-50">
           <span className="text-[10px] text-primary font-bold">
-            {updateReady.downloading
-              ? <>새 버전 <span className="font-mono">{updateReady.version}</span> 다운로드 중...</>
-              : <>새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료</>
+            {updateReady.checking
+              ? <>GitHub에서 새로운 버전을 찾는 중...</>
+              : updateReady.downloading
+                ? <>새 버전 <span className="font-mono">{updateReady.version}</span> 다운로드 중...</>
+                : <>새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료</>
             }
           </span>
           <div className="flex items-center gap-2">
-            {!updateReady.downloading && (
+            {!updateReady.downloading && !updateReady.checking && (
               <button
                 onClick={applyUpdate}
                 disabled={updateApplying}
@@ -1227,8 +1234,10 @@ function App() {
                 {updateApplying ? '적용 중...' : '지금 업데이트'}
               </button>
             )}
-            {updateReady.downloading && (
-              <span className="text-[9px] text-primary/60 animate-pulse">준비 중...</span>
+            {(updateReady.downloading || updateReady.checking) && (
+              <span className="text-[9px] text-primary/60 animate-pulse">
+                {updateReady.checking ? '조회 중...' : '준비 중...'}
+              </span>
             )}
             <button
               onClick={() => setUpdateReady(null)}

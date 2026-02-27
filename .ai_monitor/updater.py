@@ -174,8 +174,14 @@ def check_and_update(data_dir):
     Main entry point. Called from a background thread.
     Checks for updates, downloads if available, and applies.
     """
+    # 체크 시작 상태 기록
+    with open(data_dir / "update_ready.json", "w", encoding="utf-8") as f:
+        json.dump({"ready": False, "downloading": False, "checking": True}, f)
+
     if APP_VERSION == "dev":
         logger.info("Dev build detected, skipping update check.")
+        try: (data_dir / "update_ready.json").unlink()
+        except: pass
         return
 
     if not getattr(sys, "frozen", False):
@@ -189,11 +195,15 @@ def check_and_update(data_dir):
 
     release = _fetch_latest_release(token)
     if release is None:
+        try: (data_dir / "update_ready.json").unlink()
+        except: pass
         return
 
     latest_tag = release.get("tag_name", "")
     if not _is_newer(latest_tag, APP_VERSION):
         logger.info("Already up to date (%s).", APP_VERSION)
+        try: (data_dir / "update_ready.json").unlink()
+        except: pass
         return
 
     logger.info("New version available: %s (current: %s)", latest_tag, APP_VERSION)
