@@ -3442,66 +3442,78 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         </div>
       </div>
 
-      {/* ── 컨텍스트 사용량 상태 바 — 항상 표시 (스크린샷 스타일) ── */}
-      <div className={`shrink-0 border-b px-3 flex items-center gap-0 h-[18px] font-mono text-[10px] overflow-hidden ${
-        ctxSession
-          ? ctxPct >= 80 ? 'bg-red-950/40 border-red-500/20'
-          : ctxPct >= 60 ? 'bg-yellow-950/40 border-yellow-500/20'
-          : 'bg-[#12121f] border-indigo-500/15'
-          : 'bg-[#161616] border-white/5'
-      }`}>
-        {ctxSession ? (
-          <>
-            {/* 진행 바 (얇은 세로선) */}
-            <div className="w-1 self-stretch mr-2 shrink-0">
-              <div
-                className={`w-full h-full rounded-sm ${ctxPct >= 80 ? 'bg-red-500' : ctxPct >= 60 ? 'bg-yellow-400' : 'bg-indigo-500'}`}
-                style={{ height: `${Math.min(100, ctxPct)}%`, marginTop: 'auto' }}
-              />
+      {/* ── 컨텍스트 도트 바 — Claude Code 네이티브 스타일 (2026-02-27) ── */}
+      {(() => {
+        // 도트 색상: 80%↑ 빨강, 60%↑ 노랑, 정상 초록
+        const dotColor   = ctxPct >= 80 ? 'text-red-400'     : ctxPct >= 60 ? 'text-yellow-400'  : 'text-emerald-400';
+        const modelColor = ctxPct >= 80 ? 'text-red-300'     : ctxPct >= 60 ? 'text-yellow-300'  : 'text-emerald-300';
+        const bgClass    = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
+                         : ctxPct >= 60 ? 'bg-yellow-950/30 border-yellow-500/15'
+                         : 'bg-[#0d1117] border-white/5';
+        // 모델명 단축 (claude-sonnet-4-6 → Sonnet 4.6)
+        const modelShort = ctxSession
+          ? ctxSession.model
+              .replace(/^claude-/, '')
+              .replace(/-(\d)/, ' $1')
+              .replace(/-latest$/, '')
+              .replace(/-\d{8}$/, '')
+              .replace(/\b\w/g, c => c.toUpperCase())
+          : (isGeminiAgent ? 'Gemini' : 'Claude');
+        // 두 번째 줄: 캐시 정보 또는 안내 메시지
+        const cacheWrite = ctxSession?.cache_write ?? 0;
+        const cacheRead  = ctxSession?.cache_read  ?? 0;
+        const hasCache   = cacheWrite > 0 || cacheRead > 0;
+        const line2 = ctxSession
+          ? hasCache
+            ? [
+                cacheWrite > 0 ? `Cache+: ${(cacheWrite/1000).toFixed(1)}k` : '',
+                cacheRead  > 0 ? `Cache~: ${(cacheRead /1000).toFixed(1)}k` : '',
+              ].filter(Boolean).join('  ·  ')
+            : 'No usage data yet'
+          : `${isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...`;
+
+        return (
+          <div className={`shrink-0 border-b px-3 py-1 flex items-center gap-2.5 font-mono text-[10px] overflow-hidden ${bgClass}`}>
+            {/* 도트 그리드: 2행 × 10열 = 20개, 각 도트 = 5% */}
+            <div className="flex flex-col gap-[2px] shrink-0">
+              {[0, 1].map(row => (
+                <div key={row} className="flex gap-[2px]">
+                  {Array.from({ length: 10 }, (_, col) => {
+                    const threshold = (row * 10 + col + 1) * 5; // 5 ~ 100%
+                    const filled = ctxPct >= threshold;
+                    return (
+                      <span
+                        key={col}
+                        className={`text-[8px] leading-none ${filled ? dotColor : 'text-[#2a2a2a]'}`}
+                      >
+                        {filled ? '●' : '○'}
+                      </span>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
-            {/* 모델명 (짧게) */}
-            <span className={`mr-2 shrink-0 ${ctxPct >= 80 ? 'text-red-300' : ctxPct >= 60 ? 'text-yellow-300' : 'text-indigo-300'}`}>
-              {ctxSession.model.replace('claude-', '').replace('-latest', '').replace(/-\d{8}$/, '')}
-            </span>
-            <span className="text-[#555] mr-2">•</span>
-            {/* 토큰 수/최대 (%) */}
-            <span className="text-[#ccc] mr-2">
-              {Math.round(ctxSession.input_tokens / 1000)}k/{Math.round(CTX_MAX / 1000)}k
-            </span>
-            <span className={`mr-2 shrink-0 ${ctxPct >= 80 ? 'text-red-400' : ctxPct >= 60 ? 'text-yellow-400' : 'text-[#777]'}`}>
-              ({ctxPct}%)
-            </span>
-            <span className="text-[#555] mr-2">•</span>
-            {/* In / Out */}
-            <span className="text-[#888] mr-1">In:</span>
-            <span className="text-[#bbb] mr-2">{(ctxSession.input_tokens / 1000).toFixed(1)}k</span>
-            <span className="text-[#555] mr-2">•</span>
-            <span className="text-[#888] mr-1">Out:</span>
-            <span className="text-[#bbb] mr-2">{(ctxSession.output_tokens / 1000).toFixed(1)}k</span>
-            {/* Cache+ (쓰기) */}
-            {(ctxSession.cache_write ?? 0) > 0 && (
-              <>
-                <span className="text-[#555] mr-2">•</span>
-                <span className="text-[#888] mr-1">Cache+:</span>
-                <span className="text-emerald-400/80 mr-2">{((ctxSession.cache_write ?? 0) / 1000).toFixed(1)}k</span>
-              </>
-            )}
-            {/* Cache~ (읽기) */}
-            {ctxSession.cache_read > 0 && (
-              <>
-                <span className="text-[#555] mr-2">•</span>
-                <span className="text-[#888] mr-1">Cache~:</span>
-                <span className="text-sky-400/80 mr-2">{(ctxSession.cache_read / 1000).toFixed(1)}k</span>
-              </>
-            )}
-            <span className="ml-auto text-[#444] shrink-0">{ctxRelTime}</span>
-          </>
-        ) : (
-          <span className="text-[#3a3a3a] italic">
-            {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...
-          </span>
-        )}
-      </div>
+            {/* 텍스트 영역 */}
+            <div className="flex flex-col gap-[1px] min-w-0">
+              {/* 1행: 모델명 · 토큰/최대 (%) */}
+              <div className="flex items-center gap-0 whitespace-nowrap">
+                <span className={`font-semibold ${modelColor}`}>{modelShort}</span>
+                <span className="text-[#444] mx-1">·</span>
+                <span className="text-[#ccc]">
+                  {ctxSession
+                    ? `${Math.round(ctxSession.input_tokens/1000)}/${Math.round(CTX_MAX/1000)}k tokens (${ctxPct}%)`
+                    : `0/${Math.round(CTX_MAX/1000)}k tokens (0%)`}
+                </span>
+                {ctxSession && ctxRelTime && (
+                  <span className="text-[#333] ml-2">{ctxRelTime}</span>
+                )}
+              </div>
+              {/* 2행: 캐시 정보 or 안내 */}
+              <div className="text-[9px] text-[#444]">{line2}</div>
+            </div>
+          </div>
+        );
+      })()}
       {isTerminalMode ? (
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
           {showActiveFile && (
