@@ -14,7 +14,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Menu, Terminal, RotateCw,
-  ChevronLeft, X, Zap, Search, Settings,
+  ChevronLeft, X, Zap, Search, Settings, ScrollText,
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
@@ -31,7 +31,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth, ThoughtLog } from './types';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth, ThoughtLog, HiveLog } from './types';
 import { ThoughtTrace } from './components/ThoughtTrace';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
@@ -202,7 +202,7 @@ function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [activeTab, setActiveTab] = useState('explorer');
   // 레이아웃 모드: 1, 2, 3, 4(가로4열), 2x2(2×2격자), 6(3×2격자), 8(4×2격자)
-  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('1');
+  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('2');
   // '2x2'는 parseInt 불가 → 직접 매핑
   const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8 };
   const terminalCount = terminalCountMap[layoutMode] ?? 2;
@@ -508,6 +508,8 @@ function App() {
   const [spLoading, setSpLoading] = useState<Record<string, boolean>>({});
   const [spMsg, setSpMsg] = useState('');
   const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
+  const [hiveLogs, setHiveLogs] = useState<HiveLog[]>([]); // 하이브 통합 로그
+  const [logFilter, setLogFilter] = useState(''); // 로그 검색어
   const [thoughts, setThoughts] = useState<ThoughtLog[]>([]); // 신규: AI 사고 과정 로그
   const [skillProposals, setSkillProposals] = useState<{ keyword: string; count: number; suggested_skill_name: string; description: string }[]>([]);
 
@@ -547,7 +549,21 @@ function App() {
       .then(data => setSpStatus(data))
       .catch(() => {});
   };
-  useEffect(() => { fetchSpStatus(); fetchHiveHealth(); fetchSkillAnalysis(); }, []);
+  const fetchHiveLogs = () => {
+    fetch(`${API_BASE}/api/hive/logs`)
+      .then(res => res.json())
+      .then(data => setHiveLogs(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
+  useEffect(() => { 
+    fetchSpStatus(); 
+    fetchHiveHealth(); 
+    fetchSkillAnalysis(); 
+    fetchHiveLogs();
+    const interval = setInterval(fetchHiveLogs, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const spInstall = (tool: 'claude' | 'gemini') => {
     setSpLoading(p => ({ ...p, [tool]: true }));
@@ -1417,6 +1433,15 @@ function App() {
               </span>
             )}
           </button>
+          {/* 하이브 로그 익스플로러 탭 */}
+          <button onClick={() => { setActiveTab('logs'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'logs' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="하이브 통합 로그">
+            <ScrollText className="w-6 h-6" />
+            {hiveLogs.length > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-blue-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
+                {hiveLogs.length > 99 ? '99+' : hiveLogs.length}
+              </span>
+            )}
+          </button>
           {/* 메시지 채널 탭 — 읽지 않은 메시지 수 배지 표시 */}
           <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <MessageSquare className="w-6 h-6" />
@@ -1492,12 +1517,70 @@ function App() {
             />
           )}
           <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[200px]">
-            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : 'Hive Mind'}</span>
+            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : activeTab === 'logs' ? '하이브 로그' : 'Hive Mind'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1.5 rounded transition-colors"><X className="w-6 h-6" /></button>
           </div>
 
           <div className="p-5 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[200px]">
-            {activeTab === 'messages' ? (
+            {activeTab === 'logs' ? (
+              /* ── 하이브 통합 로그 패널 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-3">
+                <div className="relative shrink-0">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#858585]" />
+                  <input
+                    type="text"
+                    value={logFilter}
+                    onChange={e => setLogFilter(e.target.value)}
+                    placeholder="로그 내용 / 에이전트 검색..."
+                    className="w-full bg-[#1e1e1e] border border-white/10 rounded pl-6 pr-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
+                  />
+                </div>
+                
+                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                  {hiveLogs
+                    .filter(l => !logFilter || l.agent.toLowerCase().includes(logFilter.toLowerCase()) || (l.trigger_msg && l.trigger_msg.toLowerCase().includes(logFilter.toLowerCase())) || (l.project && l.project.toLowerCase().includes(logFilter.toLowerCase())))
+                    .map(log => (
+                    <div key={log.id} className="p-2.5 rounded-lg border border-white/10 bg-white/2 text-[11px] hover:border-white/20 transition-colors shadow-sm">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            log.agent.toLowerCase().includes('claude') ? 'bg-green-500/20 text-green-400' :
+                            log.agent.toLowerCase().includes('gemini') ? 'bg-blue-500/20 text-blue-400' :
+                            'bg-white/10 text-white/50'
+                          }`}>{log.agent}</span>
+                          <span className="text-[9px] text-white/30 font-mono">{log.terminal_id}</span>
+                        </div>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                          log.status === 'success' ? 'bg-green-500/10 text-green-500' :
+                          log.status === 'failed' ? 'bg-red-500/10 text-red-500' :
+                          'bg-yellow-500/10 text-yellow-500'
+                        }`}>{log.status}</span>
+                      </div>
+                      
+                      <p className="text-[#cccccc] leading-snug mb-1.5 break-words font-medium">{log.trigger_msg}</p>
+                      
+                      {log.files_changed && (
+                        <div className="flex items-center gap-1 text-[9px] text-[#858585] mb-1.5 bg-black/20 p-1 rounded overflow-hidden">
+                          <Files className="w-2.5 h-2.5 shrink-0" />
+                          <span className="truncate">{log.files_changed}</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center justify-between text-[9px] font-mono text-[#666666]">
+                        <span>{log.project}</span>
+                        <span>{log.ts_start.replace('T', ' ').slice(5, 16)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {hiveLogs.length === 0 && (
+                    <div className="text-center text-[#858585] text-xs py-10 italic flex flex-col items-center gap-2">
+                      <ScrollText className="w-8 h-8 opacity-20" />
+                      기록된 로그가 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : activeTab === 'messages' ? (
               /* ── 메시지 채널 패널 ── */
               <div className="flex-1 flex flex-col overflow-hidden gap-3">
                 {/* 메시지 목록 (최신순 — 역순 표시) */}
