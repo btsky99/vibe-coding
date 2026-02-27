@@ -1,0 +1,6 @@
+{"timestamp": "2026-02-22T09:37:32.625517", "agent": "Claude Code", "task": "fix(console): vibe-coding_console.exe를 view.py 직접 번들로 재빌드 - wrapper 방식 제거, 깨진 한글 수정"}
+{"timestamp": "2026-02-22T09:39:22.668339", "agent": "Claude Code", "task": "fix(console): vibe-coding_console.exe를 view.py 직접 번들로 재빌드"}
+{"timestamp": "2026-02-22T09:39:22.723566", "agent": "Claude Code", "task": "fix(installer): CloseApplicationsFilter를 vibe-coding*.exe로 한정"}
+{"timestamp": "2026-02-22T09:39:22.777262", "agent": "Claude Code", "task": "chore(repo): btksy → btsky99 이전, 경로 업데이트"}
+{"timestamp": "2026-02-22T09:39:22.831622", "agent": "Claude Code", "task": "docs: CLAUDE.md 마스터 프로토콜 세팅 완료"}
+{"timestamp": "2026-02-22T21:39:01.634205", "agent": "Gemini CLI", "task": "Update project constitution (GEMINI.md) to enforce concise auto-reporting rule."}

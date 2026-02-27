@@ -14,5 +14,10 @@
         ".ai_monitor/data/hive_mind.db"
       ]
     }
+  },
+  "ui": {
+    "footer": {
+      "hideContextPercentage": false
+    }
   }
 }

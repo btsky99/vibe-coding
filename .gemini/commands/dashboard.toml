@@ -1,0 +1,5 @@
+description = "제미나이 CLI의 실시간 토큰 사용량 및 컨텍스트 상태를 클로드 스타일의 대시보드로 보여줍니다."
+prompt = """
+다음 파이썬 스크립트를 실행하여 실시간 대시보드를 표시해 주세요:
+`python .ai_monitor/bin/dashboard.py`
+"""

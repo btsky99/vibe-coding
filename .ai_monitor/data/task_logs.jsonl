@@ -1,9 +1,3 @@
-{"timestamp": "2026-02-22T09:37:32.625517", "agent": "Claude Code", "task": "fix(console): vibe-coding_console.exe를 view.py 직접 번들로 재빌드 - wrapper 방식 제거, 깨진 한글 수정"}
-{"timestamp": "2026-02-22T09:39:22.668339", "agent": "Claude Code", "task": "fix(console): vibe-coding_console.exe를 view.py 직접 번들로 재빌드"}
-{"timestamp": "2026-02-22T09:39:22.723566", "agent": "Claude Code", "task": "fix(installer): CloseApplicationsFilter를 vibe-coding*.exe로 한정"}
-{"timestamp": "2026-02-22T09:39:22.777262", "agent": "Claude Code", "task": "chore(repo): btksy → btsky99 이전, 경로 업데이트"}
-{"timestamp": "2026-02-22T09:39:22.831622", "agent": "Claude Code", "task": "docs: CLAUDE.md 마스터 프로토콜 세팅 완료"}
-{"timestamp": "2026-02-22T21:39:01.634205", "agent": "Gemini CLI", "task": "Update project constitution (GEMINI.md) to enforce concise auto-reporting rule."}
 {"timestamp": "2026-02-22T21:42:09.202142", "agent": "Gemini CLI", "task": "Update GEMINI.md: Enforce pre-task report and confirmation."}
 {"timestamp": "2026-02-22T21:44:52.923201", "agent": "Gemini CLI", "task": "Refactor project rules into a central RULES.md for both Claude and Gemini."}
 {"timestamp": "2026-02-22T21:48:10.725987", "agent": "Gemini CLI", "task": "Implement log rotation in hive_bridge.py to keep task_logs.jsonl under 50 lines and archive the rest to save tokens."}
@@ -42,3 +36,15 @@
 {"timestamp": "2026-02-26T20:54:13.692773", "agent": "Gemini-1", "task": "Task completed: Fixed Korean IME input and Enter key issue in vibe-view. Frontend rebuilt and deployed."}
 {"timestamp": "2026-02-26T22:41:55.686965", "agent": "Claude", "task": "ThoughtTrace 벡터 메모리 검색 UI 추가: 탭 구조(사고/메모리), /api/vector/search, /api/vector/list 구현"}
 {"timestamp": "2026-02-26T22:59:11.199455", "agent": "Gemini-1", "task": "Task completed: Entire project re-analyzed. Comprehensive guide created in docs/VIBE_PROJECT_GUIDE.md. PROJECT_MAP.md updated and ai_monitor_plan.md deleted."}
+{"timestamp": "2026-02-27T00:42:09.290620", "agent": "Gemini-1", "task": "Fixed NameError (Path) in server.py. Application is now starting correctly."}
+{"timestamp": "2026-02-27T01:11:57.678098", "agent": "log", "task": "Claude"}
+{"timestamp": "2026-02-27T08:40:37.406128", "agent": "Claude", "task": "fix(deploy): BASE_DIR NameError 수정 - server.py line 33으로 이동. vibe-release 스킬 생성 (.gemini/skills/release/, skills/claude/vibe-release.md)"}
+{"timestamp": "2026-02-27T20:06:46.568322", "agent": "Gemini-1", "task": "하이브 마인드 복구 가동: 사고 추적 및 벡터 DB 배포 버전 오류 분석 재개"}
+{"timestamp": "2026-02-27T20:07:34.721115", "agent": "Gemini-1", "task": "하이브 마인드 복구 및 배포 버전 오류 분석 계획 수립 완료"}
+{"timestamp": "2026-02-27T20:14:44.725345", "agent": "Gemini-1", "task": "Task completed: v3.5.0 배포 버전 안정화 및 전체 시스템 재빌드 완료. 설치 버전 경로 문제 해결."}
+{"timestamp": "2026-02-27T20:40:49.767893", "agent": "Gemini-1", "task": "vibe-release 스킬 업데이트 완료: 빌드 시 버전 번호 기록 및 파일명 명시 규칙 강제 적용"}
+{"timestamp": "2026-02-27T21:05:34.843851", "agent": "Gemini-1", "task": "하이브 마인드 자동화 검증 완료: 다른 PC에서도 세션 시작 시 에이전트가 공유 메모리를 자율적으로 조회하도록 마스터 스킬 확립."}
+{"timestamp": "2026-02-27T21:34:47.459280", "agent": "Gemini-1", "task": "자동 업데이트 테스트 가동: v3.5.3 버전 업그레이드 및 GitHub 푸시 시작"}
+{"timestamp": "2026-02-27T21:44:32.144105", "agent": "Gemini-1", "task": "업데이트 UI 개선 완료: v3.5.4 푸시 및 자동 업데이트 트리거"}
+{"timestamp": "2026-02-27T22:03:43.825378", "agent": "Gemini-1", "task": "새로운 기능 구현 시작: 파일 탐색기 다크 네온 컨텍스트 메뉴(이름 변경, 삭제, 경로 복사 등) 작업 착수"}
+{"timestamp": "2026-02-27T22:22:02.054021", "agent": "Gemini-1", "task": "기능 구현 완료: 파일 탐색기 다크 네온 컨텍스트 메뉴 및 이름 변경 기능 추가 v3.5.5"}

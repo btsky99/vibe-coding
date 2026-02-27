@@ -3541,10 +3541,10 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
             .catch(() => {});
         }
 
-        // slot0 만 파일 뷰어 자동 열기
+        // slot0 만 파일 뷰어 자동 열기 (사용자 요청으로 자동 열기 제거)
         if (slotId === 0) {
           setActiveFilePath(filePath);
-          setShowActiveFile(true);
+          // setShowActiveFile(true); // 자동 열기 방지
         }
       } catch (err) { }
     };
@@ -3987,7 +3987,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
           {/* ── 최근 변경 파일 목록 패널 (2026-02-27) ── */}
           {recentChanges.length > 0 && (
-            <div className="shrink-0 border-b border-white/5 bg-[#161616] px-2 py-1 flex flex-col gap-[2px] max-h-[130px] overflow-y-auto custom-scrollbar">
+            <div className="shrink-0 border-b border-white/5 bg-[#161616] px-2 py-1 flex flex-col gap-[2px] max-h-[75px] overflow-y-auto custom-scrollbar">
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[8px] text-[#444] uppercase tracking-widest font-bold">변경 파일</span>
                 <button
