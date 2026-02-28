@@ -847,7 +847,7 @@ function App() {
                   <Terminal className="w-3.5 h-3.5 text-accent" /> Gemini CLI 사용법
                 </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                <button onClick={() => { alert("바이브 코딩(Vibe Coding) v1.0.0\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
+                <button onClick={() => { alert("바이브 코딩(Vibe Coding) v3.6.3\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }} className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2">
                   <Info className="w-3.5 h-3.5 text-[#3794ef]" /> 버전 정보
                 </button>
               </div>
@@ -869,7 +869,7 @@ function App() {
             </button>
           )}
           {/* 버전 배지 — 항상 오른쪽 끝에 표시 */}
-          <span className="shrink-0 text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30 font-mono">v3.3.0</span>
+          <span className="shrink-0 text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30 font-mono">v3.6.3</span>
         </div>
       </div>
 
