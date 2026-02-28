@@ -5,7 +5,9 @@
  * 🔗 개별 상세 문서: docs/App.tsx.md
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
- *          (2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영)
+ * REVISION HISTORY:
+ * - 2026-03-01 Gemini-2: 터미널 초기 레이아웃 2분할로 변경 및 뷰어 창 수동 리사이즈 핸들 도입
+ * - 2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영
  * ------------------------------------------------------------------------
  */
 
@@ -17,7 +19,8 @@ import {
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
-  Bot, Play, CircleDot, Package, CheckCircle2, Circle
+  Bot, Play, CircleDot, Package, CheckCircle2, Circle,
+  Maximize2, Minimize2, Minus
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -103,7 +106,7 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
   // 레이아웃 모드: 1, 2, 3, 4(가로4열), 2x2(2×2격자), 6(3×2격자), 8(4×2격자)
-  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('1');
+  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('2');
   // '2x2'는 parseInt 불가 → 직접 매핑
   const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8 };
   const terminalCount = terminalCountMap[layoutMode] ?? 2;
@@ -742,7 +745,6 @@ function App() {
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
         <Activity className="w-3.5 h-3.5 text-primary mx-1" />
         <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
-        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v3.3.0</span>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
@@ -852,8 +854,22 @@ function App() {
             )}
           </div>
         ))}
-        <div className="ml-auto flex items-center gap-3 text-[11px] text-[#969696] px-4 font-mono overflow-hidden">
-           <span className="truncate opacity-50">{currentPath}</span>
+        <div className="ml-auto flex items-center gap-2 text-[11px] text-[#969696] px-2 font-mono overflow-hidden">
+          {/* 현재 경로 표시 */}
+          <span className="truncate opacity-50 max-w-[200px]">{currentPath}</span>
+          {/* 업데이트 버튼 — updateReady 상태일 때 표시 */}
+          {updateReady && (
+            <button
+              onClick={applyUpdate}
+              disabled={updateApplying}
+              className="shrink-0 text-[9px] font-bold px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-50 transition-colors animate-pulse"
+              title={`새 버전 ${updateReady.version} 업데이트 준비 완료`}
+            >
+              {updateApplying ? '적용 중...' : `↑ ${updateReady.version}`}
+            </button>
+          )}
+          {/* 버전 배지 — 항상 오른쪽 끝에 표시 */}
+          <span className="shrink-0 text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30 font-mono">v3.3.0</span>
         </div>
       </div>
 
@@ -932,7 +948,7 @@ function App() {
           className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : 'Hive Mind'}</span>
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : '하이브 마인드'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
@@ -1772,13 +1788,31 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
   handleSaveFile: (path: string, content: string) => void
 }) {
   const [position, setPosition] = useState({ x: 100 + (idx * 30), y: 100 + (idx * 30) });
+  const [size, setSize] = useState({ width: 700, height: 600 });
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  
+  // 최대화 전 원래 상태 기억용
+  const preMaxState = useRef({ x: 100, y: 100, w: 700, h: 600 });
   const dragStartPos = useRef({ x: 0, y: 0 });
+  const resizeStartPos = useRef({ x: 0, y: 0, w: 0, h: 0 });
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (isMaximized) return; // 최대화 모드에서는 드래그 불가
     setIsDragging(true);
     bringToFront(file.id);
     dragStartPos.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleResizePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (isMaximized || isMinimized) return; // 최대화/최소화 시 리사이즈 불가
+    setIsResizing(true);
+    bringToFront(file.id);
+    resizeStartPos.current = { x: e.clientX, y: e.clientY, w: size.width, h: size.height };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
@@ -1788,12 +1822,43 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
         x: e.clientX - dragStartPos.current.x,
         y: e.clientY - dragStartPos.current.y
       });
+    } else if (isResizing) {
+      const dw = e.clientX - resizeStartPos.current.x;
+      const dh = e.clientY - resizeStartPos.current.y;
+      setSize({
+        width: Math.max(300, resizeStartPos.current.w + dw),
+        height: Math.max(200, resizeStartPos.current.h + dh)
+      });
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     setIsDragging(false);
+    setIsResizing(false);
     e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  const toggleMaximize = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isMaximized) {
+      // 현재 상태 저장 후 최대화
+      preMaxState.current = { x: position.x, y: position.y, w: size.width, h: size.height };
+      setPosition({ x: 0, y: 0 });
+      setSize({ width: window.innerWidth, height: window.innerHeight });
+      setIsMaximized(true);
+      setIsMinimized(false); // 최소화 해제
+    } else {
+      // 이전 상태로 복구
+      const { x, y, w, h } = preMaxState.current;
+      setPosition({ x, y });
+      setSize({ width: w, height: h });
+      setIsMaximized(false);
+    }
+  };
+
+  const toggleMinimize = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsMinimized(!isMinimized);
   };
 
   return (
@@ -1801,15 +1866,18 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
       onPointerDown={() => bringToFront(file.id)}
       style={{ 
         zIndex: file.zIndex, 
-        left: position.x, 
-        top: position.y,
-        resize: 'both', 
-        overflow: 'hidden' 
+        left: isMaximized ? 0 : position.x, 
+        top: isMaximized ? 0 : position.y,
+        width: isMaximized ? '100vw' : size.width,
+        height: isMinimized ? 40 : (isMaximized ? '100vh' : size.height),
+        borderRadius: isMaximized ? 0 : 12,
+        transition: isResizing || isDragging ? 'none' : 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
-      className="absolute w-[700px] min-w-[300px] h-[600px] min-h-[200px] bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl rounded-xl flex flex-col overflow-hidden"
+      className={`absolute bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col overflow-hidden ${isMaximized ? 'z-[999]' : ''}`}
     >
+      {/* Header */}
       <div 
-        className="h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 cursor-move select-none"
+        className={`h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 select-none ${isMaximized ? 'cursor-default' : 'cursor-move'}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1817,9 +1885,26 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
         <div className="flex items-center gap-2 text-[#cccccc] font-mono text-sm truncate pointer-events-none">
           {getFileIcon(file.name)}
           <span className="truncate">{file.name}</span>
-          <span className="text-[10px] opacity-40 ml-2 truncate max-w-[200px]">{file.path}</span>
+          {!isMinimized && <span className="text-[10px] opacity-40 ml-2 truncate max-w-[200px]">{file.path}</span>}
         </div>
         <div className="flex items-center gap-1">
+          {/* 최소화(접기) 버튼 */}
+          <button 
+            onClick={toggleMinimize}
+            className="p-1.5 hover:bg-white/10 rounded text-[#cccccc] hover:text-white transition-all"
+            title={isMinimized ? '확장' : '최소화'}
+          >
+            {isMinimized ? <Plus className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
+          </button>
+          {/* 최대화 토글 버튼 */}
+          <button 
+            onClick={toggleMaximize}
+            className="p-1.5 hover:bg-white/10 rounded text-[#cccccc] hover:text-primary transition-all"
+            title={isMaximized ? '이전 크기로' : '최대화'}
+          >
+            {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+          <div className="w-[1px] h-4 bg-white/10 mx-1" />
           <button 
             onClick={(e) => { e.stopPropagation(); handleSaveFile(file.path, file.content); }}
             onPointerDownCapture={e => e.stopPropagation()}
@@ -1828,7 +1913,6 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
           >
             <Save className="w-4.5 h-4.5 group-active:scale-90 transition-transform" />
           </button>
-          <div className="w-[1px] h-4 bg-white/10 mx-1" />
           <button 
             onClick={(e) => { e.stopPropagation(); closeFile(file.id); }} 
             onPointerDownCapture={e => e.stopPropagation()}
@@ -1839,28 +1923,44 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
           </button>
         </div>
       </div>
-      <div 
-        className="flex-1 overflow-hidden bg-transparent relative"
-        onPointerDownCapture={e => e.stopPropagation()}
-      >
-        {file.isLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center text-[#858585] animate-pulse">Loading content...</div>
-        ) : /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(file.name) ? (
-          <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto custom-scrollbar">
-            <img
-              src={`${API_BASE}/api/image-file?path=${encodeURIComponent(file.path)}`}
-              alt={file.name}
-              className="max-w-full max-h-full object-contain shadow-2xl rounded-sm"
+
+      {/* Content Area */}
+      {!isMinimized && (
+        <div 
+          className="flex-1 overflow-hidden bg-transparent relative"
+          onPointerDownCapture={e => e.stopPropagation()}
+        >
+          {file.isLoading ? (
+            <div className="absolute inset-0 flex items-center justify-center text-[#858585] animate-pulse">Loading content...</div>
+          ) : /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(file.name) ? (
+            <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto custom-scrollbar">
+              <img
+                src={`${API_BASE}/api/image-file?path=${encodeURIComponent(file.path)}`}
+                alt={file.name}
+                className="max-w-full max-h-full object-contain shadow-2xl rounded-sm"
+              />
+            </div>
+          ) : (
+            <VibeEditor 
+              path={file.path} 
+              content={file.content} 
+              onChange={(val) => updateFileContent(file.id, val)}
             />
-          </div>
-        ) : (
-          <VibeEditor 
-            path={file.path} 
-            content={file.content} 
-            onChange={(val) => updateFileContent(file.id, val)}
-          />
-        )}
-      </div>
+          )}
+        </div>
+      )}
+      
+      {/* 🛠️ 리사이즈 핸들 (최대화/최소화가 아닐 때만 노출) */}
+      {!isMaximized && !isMinimized && (
+        <div 
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-[100] group"
+        >
+          <div className="absolute bottom-1 right-1 w-2 h-2 border-r-2 border-b-2 border-white/20 group-hover:border-primary transition-colors rounded-br-[1px]" />
+        </div>
+      )}
     </div>
   );
 }

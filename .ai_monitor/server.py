@@ -1622,6 +1622,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         task_dist[key][s] += 1
 
                 # 오케스트레이터 최근 액션 로그
+                # orchestrator_log.jsonl 없으면 task_logs.jsonl 폴백으로 표시
                 orch_log = DATA_DIR / 'orchestrator_log.jsonl'
                 recent_actions: list = []
                 if orch_log.exists():
@@ -1630,6 +1631,21 @@ class SSEHandler(BaseHTTPRequestHandler):
                             recent_actions.append(json.loads(line))
                         except Exception:
                             pass
+                if not recent_actions:
+                    # task_logs.jsonl에서 최근 20개 폴백 — 에이전트 활동 이력으로 표시
+                    task_log_file = DATA_DIR / 'task_logs.jsonl'
+                    if task_log_file.exists():
+                        lines = task_log_file.read_text(encoding='utf-8').strip().splitlines()
+                        for line in reversed(lines[-20:]):
+                            try:
+                                entry = json.loads(line)
+                                recent_actions.append({
+                                    'action': entry.get('agent', 'agent'),
+                                    'detail': entry.get('task', ''),
+                                    'timestamp': entry.get('timestamp', ''),
+                                })
+                            except Exception:
+                                pass
 
                 # 현재 경고
                 warnings: list = []
