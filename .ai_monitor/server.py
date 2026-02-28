@@ -1898,6 +1898,69 @@ class SSEHandler(BaseHTTPRequestHandler):
                     {'sessions': [], 'error': str(e)}
                 ).encode('utf-8'))
 
+        elif parsed_path.path == '/api/local-models':
+            # [2026-03-01] Claude: 로컬/클라우드 AI 모델 호환성 위젯용 엔드포인트
+            # 하드웨어(RAM, GPU) 감지 + Ollama 로컬 모델 목록 + 클라우드 모델 상태 반환
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            import urllib.request as _urllib
+            result = {"hardware": {"ram_gb": 0, "gpus": []}, "models": [], "ollama_available": False, "error": None}
+            # 1) RAM 감지 (Windows wmic)
+            try:
+                mem = subprocess.run(
+                    ['wmic', 'OS', 'get', 'TotalVisibleMemorySize', '/value'],
+                    capture_output=True, text=True, encoding='utf-8', timeout=5
+                )
+                for line in mem.stdout.split('\n'):
+                    if 'TotalVisibleMemorySize=' in line:
+                        kb = int(line.split('=')[1].strip())
+                        result["hardware"]["ram_gb"] = round(kb / 1024 / 1024, 1)
+            except Exception:
+                pass
+            # 2) GPU 감지 (nvidia-smi — 없으면 빈 배열)
+            try:
+                gpu = subprocess.run(
+                    ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
+                    capture_output=True, text=True, encoding='utf-8', timeout=5
+                )
+                if gpu.returncode == 0:
+                    for line in gpu.stdout.strip().split('\n'):
+                        parts = line.split(',')
+                        if len(parts) >= 2:
+                            result["hardware"]["gpus"].append({
+                                "name": parts[0].strip(),
+                                "vram_gb": round(int(parts[1].strip()) / 1024, 1)
+                            })
+            except Exception:
+                pass
+            # 3) Ollama 로컬 모델 목록 (localhost:11434)
+            try:
+                with _urllib.urlopen('http://localhost:11434/api/tags', timeout=3) as resp:
+                    ollama_data = json.loads(resp.read().decode('utf-8'))
+                    result["ollama_available"] = True
+                    ram_gb = result["hardware"]["ram_gb"]
+                    for m in ollama_data.get('models', []):
+                        size_gb = round(m.get('size', 0) / 1024 / 1024 / 1024, 1)
+                        # VRAM이 있으면 VRAM 기준, 없으면 RAM 기준으로 호환 여부 판정
+                        gpus = result["hardware"]["gpus"]
+                        if gpus:
+                            fits = size_gb < gpus[0]["vram_gb"] * 0.9
+                        elif ram_gb > 0:
+                            fits = size_gb < ram_gb * 0.7
+                        else:
+                            fits = None
+                        result["models"].append({
+                            "name": m.get("name", ""),
+                            "size_gb": size_gb,
+                            "source": "ollama",
+                            "fits": fits
+                        })
+            except Exception as e:
+                result["ollama_error"] = str(e)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+
         elif parsed_path.path == '/api/hive/logs':
             # 하이브 통합 로그 조회 (SQLite session_logs)
             self.send_response(200)

@@ -244,6 +244,29 @@ function App() {
   // 메시지 채널용 한글 입력 상태 Ref
   const isMsgComposingRef = useRef(false);
 
+  // ─── 로컬 모델 매니저 상태 ────────────────────────────────────────────
+  const [localModels, setLocalModels] = useState<{
+    hardware: { ram_gb: number; gpus: { name: string; vram_gb: number }[] };
+    models: { name: string; size_gb: number; source: string; fits: boolean | null }[];
+    ollama_available: boolean;
+    ollama_error?: string;
+    error?: string;
+  } | null>(null);
+  const [localModelsLoading, setLocalModelsLoading] = useState(false);
+
+  const fetchLocalModels = () => {
+    setLocalModelsLoading(true);
+    fetch(`${API_BASE}/api/local-models`)
+      .then(res => res.json())
+      .then(data => { setLocalModels(data); setLocalModelsLoading(false); })
+      .catch(() => setLocalModelsLoading(false));
+  };
+
+  // 모델 탭 진입 시 자동 조회
+  useEffect(() => {
+    if (activeTab === 'models') fetchLocalModels();
+  }, [activeTab]);
+
   // 읽지 않은 메시지 수 — 메시지 탭을 열면 0으로 초기화
   const unreadMsgCount = activeTab === 'messages' ? 0 : Math.max(0, messages.length - lastSeenMsgCount);
 
@@ -1682,6 +1705,10 @@ function App() {
             )}
           </button>
           {/* 바이브 스킬 관리자 탭 — 설치 수 배지 */}
+          {/* 로컬 모델 매니저 탭 */}
+          <button onClick={() => { setActiveTab('models'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'models' ? 'text-white border-l-2 border-blue-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="로컬 모델 매니저">
+            <Cpu className="w-6 h-6" />
+          </button>
           <button onClick={() => { setActiveTab('superpowers'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'superpowers' ? 'text-white border-l-2 border-yellow-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="바이브 스킬 관리자">
             <Zap className="w-6 h-6" />
             {spStatus && (
@@ -1711,7 +1738,7 @@ function App() {
             />
           )}
           <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[200px]">
-            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? '파일 탐색기' : activeTab === 'search' ? '검색' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : activeTab === 'logs' ? '하이브 로그' : '하이브 마인드'}</span>
+            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? '파일 탐색기' : activeTab === 'search' ? '검색' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : activeTab === 'models' ? '🤖 모델 매니저' : activeTab === 'logs' ? '하이브 로그' : '하이브 마인드'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1.5 rounded transition-colors"><X className="w-6 h-6" /></button>
           </div>
 
@@ -2873,6 +2900,92 @@ function App() {
                       : '⚡ MCP 미설치 — 알고리즘 직접 주입'}
                   </p>
                 </div>
+              </div>
+            ) : activeTab === 'models' ? (
+              /* ── 로컬 모델 매니저 (LMFit 스타일) ── */
+              <div className="flex-1 flex flex-col gap-3 overflow-hidden">
+                {/* 새로고침 버튼 */}
+                <div className="flex items-center justify-between shrink-0">
+                  <span className="text-[10px] text-[#858585] uppercase tracking-widest">하드웨어 & 모델 호환성</span>
+                  <button onClick={fetchLocalModels} className="p-1 hover:bg-white/10 rounded transition-colors text-primary/60 hover:text-primary" title="새로고침">
+                    <RotateCw className={`w-3 h-3 ${localModelsLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+
+                {/* 하드웨어 스펙 */}
+                {localModels && (
+                  <div className="shrink-0 p-2 rounded border border-blue-500/20 bg-blue-500/5 flex flex-col gap-1.5">
+                    <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">Hardware</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] text-[#858585]">RAM</span>
+                      <span className="text-[10px] font-bold text-white">{localModels.hardware.ram_gb} GB</span>
+                    </div>
+                    {localModels.hardware.gpus.length > 0 ? (
+                      localModels.hardware.gpus.map((g, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="text-[9px] text-[#858585]">GPU</span>
+                          <span className="text-[10px] font-bold text-white truncate">{g.name}</span>
+                          <span className="text-[9px] text-blue-300 shrink-0">{g.vram_gb} GB</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] text-[#858585]">GPU</span>
+                        <span className="text-[9px] text-[#555]">감지 안됨 (CPU 추론)</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Ollama 로컬 모델 목록 */}
+                <div className="flex-1 flex flex-col gap-1.5 overflow-y-auto custom-scrollbar">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[9px] font-bold text-[#858585] uppercase tracking-widest">Ollama 로컬 모델</span>
+                    {localModels?.ollama_available ? (
+                      <span className="text-[8px] text-green-400">● 연결됨</span>
+                    ) : (
+                      <span className="text-[8px] text-red-400">● 미실행</span>
+                    )}
+                  </div>
+
+                  {!localModels && !localModelsLoading && (
+                    <div className="text-[9px] text-[#555] px-1">탭 진입 시 자동 조회됩니다.</div>
+                  )}
+                  {localModelsLoading && (
+                    <div className="text-[9px] text-[#858585] px-1">스캔 중...</div>
+                  )}
+                  {localModels?.ollama_error && (
+                    <div className="text-[9px] text-[#555] px-1">Ollama 미실행 — 로컬 모델 없음</div>
+                  )}
+                  {localModels?.models.length === 0 && localModels?.ollama_available && (
+                    <div className="text-[9px] text-[#555] px-1">설치된 모델 없음</div>
+                  )}
+
+                  {localModels?.models.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-white/5 hover:border-white/10 transition-all">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${
+                        m.fits === true ? 'bg-green-400' : m.fits === false ? 'bg-red-400' : 'bg-yellow-400'
+                      }`} title={m.fits === true ? '실행 가능' : m.fits === false ? '메모리 부족' : '확인 불가'} />
+                      <span className="flex-1 text-[10px] text-white truncate font-mono">{m.name}</span>
+                      <span className="text-[9px] text-[#858585] shrink-0">{m.size_gb} GB</span>
+                    </div>
+                  ))}
+
+                  {/* 범례 */}
+                  {localModels && (
+                    <div className="flex items-center gap-3 mt-1 px-1">
+                      <span className="flex items-center gap-1 text-[8px] text-[#555]"><span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block"/>실행 가능</span>
+                      <span className="flex items-center gap-1 text-[8px] text-[#555]"><span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"/>메모리 부족</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ollama 설치 안내 */}
+                {localModels && !localModels.ollama_available && (
+                  <div className="shrink-0 p-2 rounded border border-white/5 bg-white/2 text-[9px] text-[#555]">
+                    로컬 모델 사용: <span className="font-mono text-primary">ollama serve</span> 실행 후 새로고침
+                  </div>
+                )}
               </div>
             ) : (
               /* ── 파일 탐색기 ── */
