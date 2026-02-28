@@ -20,20 +20,20 @@ import {
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
   Bot, Play, CircleDot, Package, CheckCircle2, Circle,
-  Maximize2, Minimize2, Minus
+  Maximize2, Minimize2, Minus, Send
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
   SiGit, SiCss3, SiHtml5 
 } from 'react-icons/si';
 import { FaWindows } from 'react-icons/fa';
-import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder, VscFolderOpened } from 'react-icons/vsc';
+import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder, VscFolderOpened, VscTrash } from 'react-icons/vsc';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import VibeEditor from './components/VibeEditor';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry } from './types';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, HiveHealth } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -371,6 +371,25 @@ function App() {
   // 오케스트레이터 경고 수 (Hive 탭 배지용)
   const orchWarningCount = orchStatus?.warnings?.length ?? 0;
 
+  // ─── 하이브 시스템 진단 상태 ──────────────────────────────────────────────
+  const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
+  const [spMsg, setSpMsg] = useState('');
+
+  // 하이브 헬스 API 호출
+  const fetchHiveHealth = () => {
+    fetch(`${API_BASE}/api/hive/health`)
+      .then(res => res.json())
+      .then(data => setHiveHealth(data))
+      .catch(() => {});
+  };
+
+  // 컴포넌트 마운트 시 1회 + 30초 간격으로 자동 갱신
+  useEffect(() => {
+    fetchHiveHealth();
+    const interval = setInterval(fetchHiveHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ─── MCP 관리자 상태 ─────────────────────────────────────────────────────
   const [mcpCatalog, setMcpCatalog] = useState<McpEntry[]>([]);
   const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
@@ -588,9 +607,58 @@ function App() {
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({});
   const [treeChildren, setTreeChildren] = useState<Record<string, { name: string; path: string; isDir: boolean }[]>>({});
 
+  // ─── 컨텍스트 메뉴 상태 ──────────────────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string, isDir: boolean } | null>(null);
+
   // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화
   useEffect(() => { setGitPath(currentPath); }, [currentPath]);
   useEffect(() => { setTreeExpanded({}); setTreeChildren({}); }, [currentPath]);
+
+  // 트리 데이터 갱신
+  const refreshTree = (parentPath: string) => {
+    fetch(`${API_BASE}/api/files?path=${encodeURIComponent(parentPath)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setTreeChildren(prev => ({ ...prev, [parentPath]: data }));
+        }
+      })
+      .catch(() => {});
+  };
+
+  // 파일/폴더 생성 및 삭제 API
+  const createFile = (parentPath: string) => {
+    const name = prompt("새 파일 이름:");
+    if (!name) return;
+    fetch(`${API_BASE}/api/files/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: `${parentPath}/${name}`, is_dir: false })
+    }).then(() => refreshTree(parentPath));
+  };
+
+  const createFolder = (parentPath: string) => {
+    const name = prompt("새 폴더 이름:");
+    if (!name) return;
+    fetch(`${API_BASE}/api/files/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: `${parentPath}/${name}`, is_dir: true })
+    }).then(() => refreshTree(parentPath));
+  };
+
+  const deleteFile = (path: string, isDir: boolean) => {
+    if (!confirm(`${isDir ? '폴더' : '파일'}을(를) 삭제하시겠습니까?\n${path}`)) return;
+    const parentPath = path.split(/[\\\/]/).slice(0, -1).join('/');
+    fetch(`${API_BASE}/api/files/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    }).then(() => {
+      if (parentPath) refreshTree(parentPath);
+      else refreshItems();
+    });
+  };
 
   // 드라이브 목록 가져오기
   useEffect(() => {
@@ -1369,6 +1437,100 @@ function App() {
                     )}
                   </div>
                 )}
+
+                {/* 하이브 시스템 진단 위젯 — 오케스트레이터 탭 하단 고정 배치 */}
+                <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[10px] font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
+                      <Cpu className="w-3.5 h-3.5" /> 하이브 시스템 진단
+                    </div>
+                    <button onClick={fetchHiveHealth} className="p-1 hover:bg-white/10 rounded transition-colors text-[#858585]" title="새로고침">
+                      <RotateCw className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+
+                  {!hiveHealth ? (
+                    <div className="text-[9px] text-[#555] italic">진단 데이터 로드 중...</div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        {/* 코어 지침 */}
+                        <div className="flex flex-col gap-0.5">
+                          <div className="text-[8px] text-[#666] mb-0.5">📜 코어 지침</div>
+                          {([['RULES.md', hiveHealth.constitution?.rules_md], ['CLAUDE.md', hiveHealth.constitution?.claude_md], ['GEMINI.md', hiveHealth.constitution?.gemini_md], ['PROJECT_MAP', hiveHealth.constitution?.project_map]] as [string, boolean | undefined][]).map(([label, ok]) => (
+                            <div key={label} className="flex items-center justify-between text-[9px]">
+                              <span className="text-[#aaa]">{label}</span>
+                              {ok ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                            </div>
+                          ))}
+                        </div>
+                        {/* 핵심 스킬 */}
+                        <div className="flex flex-col gap-0.5">
+                          <div className="text-[8px] text-[#666] mb-0.5">🧠 핵심 스킬</div>
+                          {([['Master Skill', hiveHealth.skills?.master], ['Brainstorm', hiveHealth.skills?.brainstorm], ['Memory Script', hiveHealth.skills?.memory_script]] as [string, boolean | undefined][]).map(([label, ok]) => (
+                            <div key={label} className="flex items-center justify-between text-[9px]">
+                              <span className="text-[#aaa]">{label}</span>
+                              {ok ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 자가 치유 엔진 상태 */}
+                      <div className="pt-1 border-t border-white/5 flex flex-col gap-1">
+                        <div className="text-[8px] text-[#666] flex items-center justify-between">
+                          <span>🛡️ 자가 치유 엔진</span>
+                          <span className="text-primary/50">v4.0</span>
+                        </div>
+                        {([['DB 연결성', hiveHealth.db_ok ? '정상' : '오류', hiveHealth.db_ok], ['에이전트 활동', hiveHealth.agent_active ? '활발' : '유휴', hiveHealth.agent_active]] as [string, string, boolean][]).map(([label, val, ok]) => (
+                          <div key={label} className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">{label}</span>
+                            <span className={ok ? 'text-green-400' : 'text-yellow-500'}>{val}</span>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">누적 복구 횟수</span>
+                          <span className="text-primary">{hiveHealth.repair_count ?? 0}회</span>
+                        </div>
+                        {hiveHealth.last_check && (
+                          <div className="text-[7px] text-[#444] text-right italic">
+                            최근 점검: {new Date(hiveHealth.last_check).toLocaleTimeString()}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 메시지 표시 */}
+                  {spMsg && <div className="text-[9px] text-green-400 font-mono truncate">{spMsg}</div>}
+
+                  {/* 복구 버튼 */}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        if (confirm(`현재 프로젝트(${currentPath})에 누락된 하이브 지침과 스킬을 자동 복구하시겠습니까?`)) {
+                          fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
+                            .then(res => res.json())
+                            .then(data => { setSpMsg(data.message); fetchHiveHealth(); });
+                        }
+                      }}
+                      className="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary text-[9px] font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1"
+                    >
+                      <Zap className="w-2.5 h-2.5" /> 스킬 복구
+                    </button>
+                    <button
+                      onClick={() => {
+                        fetch(`${API_BASE}/api/hive/health/repair`)
+                          .then(res => res.json())
+                          .then(() => { setSpMsg('하이브 엔진 정밀 진단 및 자가 치유 완료'); fetchHiveHealth(); });
+                      }}
+                      className="px-2 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[9px] font-bold rounded border border-green-500/20 transition-all flex items-center justify-center gap-1"
+                      title="하이브 엔진 정밀 점검"
+                    >
+                      <Cpu className="w-2.5 h-2.5" /> 자가 치유
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : activeTab === 'git' ? (
               /* ── Git 실시간 감시 패널 ── */
@@ -1627,6 +1789,14 @@ function App() {
                         treeChildren={treeChildren}
                         onToggle={handleTreeToggle}
                         onFileOpen={handleFileClick}
+                        onContextMenu={(e, it) => {
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            path: it.path,
+                            isDir: it.isDir
+                          });
+                        }}
                       />
                     ))
                   ) : (
@@ -1635,6 +1805,10 @@ function App() {
                       <div key={item.path} className={`group flex items-center gap-0 px-2 py-0.5 rounded text-xs transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}>
                         <button
                           onClick={() => handleFileClick(item)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setContextMenu({ x: e.clientX, y: e.clientY, path: item.path, isDir: item.isDir });
+                          }}
                           className={`flex-1 flex items-center gap-2 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
                         >
                           {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
@@ -1665,11 +1839,88 @@ function App() {
                 </div>
               </>
             )}
+
+            {/* ── 사이드바 하단 메시지 입력창 (상시 고정) ── */}
+            <div className="mt-auto pt-3 border-t border-white/5 flex flex-col gap-2 shrink-0">
+              <div className="flex gap-1">
+                <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors text-white">
+                  <option value="user">User</option>
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="system">System</option>
+                </select>
+                <span className="text-white/30 text-[10px] px-0.5 leading-7">→</span>
+                <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors text-white">
+                  <option value="all">All</option>
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+              <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors text-white">
+                <option value="info">ℹ️ 정보 공유</option>
+                <option value="handoff">🤝 핸드오프 (작업 위임)</option>
+                <option value="request">📋 작업 요청</option>
+                <option value="task_complete">✅ 완료 알림</option>
+                <option value="warning">⚠️ 경고</option>
+              </select>
+              <div className="relative">
+                <textarea
+                  value={msgContent}
+                  onChange={e => setMsgContent(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!e.nativeEvent.isComposing && msgContent.trim()) {
+                        sendMessage();
+                        setTimeout(() => setMsgContent(''), 0);
+                      }
+                    }
+                  }}
+                  placeholder="메시지 입력... (Enter: 전송)"
+                  rows={2}
+                  className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none pr-8"
+                />
+                <button
+                  onClick={sendMessage}
+                  disabled={!msgContent.trim()}
+                  className="absolute right-1.5 bottom-1.5 p-1 bg-primary hover:bg-primary/80 disabled:opacity-30 text-white rounded transition-colors"
+                  title="전송 (Enter)"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         </motion.div>
 
+        {/* 컨텍스트 메뉴 UI */}
+        {contextMenu && (
+          <div 
+            className="fixed z-[9999] bg-[#252526] border border-white/10 rounded shadow-2xl py-1 min-w-[150px] animate-in fade-in zoom-in duration-100"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            {contextMenu.isDir && (
+              <>
+                <button onClick={() => { createFile(contextMenu.path); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-primary hover:text-white transition-colors flex items-center gap-2">
+                  <VscFile className="w-3.5 h-3.5" /> 새 파일...
+                </button>
+                <button onClick={() => { createFolder(contextMenu.path); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-primary hover:text-white transition-colors flex items-center gap-2">
+                  <VscFolder className="w-3.5 h-3.5" /> 새 폴더...
+                </button>
+                <div className="h-[1px] bg-white/5 my-1" />
+              </>
+            )}
+            <button onClick={() => { deleteFile(contextMenu.path, contextMenu.isDir); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2">
+              <VscTrash className="w-3.5 h-3.5" /> 삭제
+            </button>
+            <button onClick={() => setContextMenu(null)} className="w-full text-left px-3 py-1.5 text-xs text-[#858585] hover:bg-white/5 transition-colors">
+              취소
+            </button>
+          </div>
+        )}
+
         {/* Main Area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0" onClick={() => setContextMenu(null)}>
           
           {/* Header Bar (Breadcrumbs & Controls) */}
           <header className="h-9 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-4 shrink-0">
@@ -1730,21 +1981,30 @@ function App() {
 }
 
 type TreeItem = { name: string; path: string; isDir: boolean };
-function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen }: {
+function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onContextMenu }: {
   item: TreeItem; depth: number;
   expanded: Record<string, boolean>;
   treeChildren: Record<string, TreeItem[]>;
   onToggle: (path: string) => void;
   onFileOpen: (item: TreeItem) => void;
+  onContextMenu: (e: React.MouseEvent, item: TreeItem) => void;
 }) {
   const isOpen = expanded[item.path] || false;
   const kids = treeChildren[item.path] || [];
   const indent = depth * 12;
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu(e, item);
+  };
+
   if (item.isDir) {
     return (
       <div>
         <button
           onClick={() => onToggle(item.path)}
+          onContextMenu={handleContextMenu}
           style={{ paddingLeft: `${indent + 4}px` }}
           className="w-full flex items-center gap-1 py-0.5 pr-2 hover:bg-[#2a2d2e] rounded text-xs transition-colors text-[#cccccc]"
         >
@@ -1762,7 +2022,7 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
         {isOpen && kids.map(child => (
           <FileTreeNode key={child.path} item={child} depth={depth + 1}
             expanded={expanded} treeChildren={treeChildren}
-            onToggle={onToggle} onFileOpen={onFileOpen} />
+            onToggle={onToggle} onFileOpen={onFileOpen} onContextMenu={onContextMenu} />
         ))}
       </div>
     );
@@ -1770,6 +2030,7 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
   return (
     <button
       onClick={() => onFileOpen(item)}
+      onContextMenu={handleContextMenu}
       style={{ paddingLeft: `${indent + 20}px` }}
       className="w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
     >
