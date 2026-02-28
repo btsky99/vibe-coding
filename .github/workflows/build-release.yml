@@ -74,6 +74,7 @@ jobs:
           echo "tag=v$ver" >> $env:GITHUB_OUTPUT
           echo "ver=$ver" >> $env:GITHUB_OUTPUT
           Write-Host "Final version: v$ver"
+          exit 0  # gh release view가 non-zero 반환해도 스텝 성공 처리
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
