@@ -6,6 +6,7 @@
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
  * REVISION HISTORY:
+ * - 2026-03-01 Gemini CLI: 사이드바 VS Code 스타일 UI 복원 (인라인 편집, 호버 버튼 그룹)
  * - 2026-03-01 Gemini-2: 터미널 초기 레이아웃 2분할로 변경 및 뷰어 창 수동 리사이즈 핸들 도입
  * - 2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영
  * ------------------------------------------------------------------------
@@ -20,14 +21,14 @@ import {
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
   Bot, Play, CircleDot, Package, CheckCircle2, Circle,
-  Maximize2, Minimize2, Minus, Send
+  Maximize2, Minimize2, Minus, Send, Edit3
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
   SiGit, SiCss3, SiHtml5 
 } from 'react-icons/si';
 import { FaWindows } from 'react-icons/fa';
-import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder, VscFolderOpened, VscTrash } from 'react-icons/vsc';
+import { VscJson, VscFileMedia, VscArchive, VscFile, VscFolder, VscFolderOpened, VscTrash, VscNewFolder } from 'react-icons/vsc';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -114,6 +115,8 @@ function App() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, string>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   // 파일 락(Lock) 상태 폴링
   useEffect(() => {
@@ -334,6 +337,7 @@ function App() {
 
   // 충돌 파일 수 (Activity Bar 배지용)
   const conflictCount = gitStatus?.conflicts?.length ?? 0;
+  const totalGitChanges = (gitStatus?.staged?.length ?? 0) + (gitStatus?.unstaged?.length ?? 0) + (gitStatus?.untracked?.length ?? 0);
 
   // ─── 오케스트레이터 상태 ──────────────────────────────────────────────
   const [orchStatus, setOrchStatus] = useState<OrchestratorStatus | null>(null);
@@ -394,6 +398,20 @@ function App() {
   const [mcpCatalog, setMcpCatalog] = useState<McpEntry[]>([]);
   const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
   const [mcpTool, setMcpTool] = useState<'claude' | 'gemini'>('claude');
+  const [geminiUsage, setGeminiUsage] = useState<{ total_tokens: number, context_window: number, percentage: number } | null>(null);
+
+  // ─── Gemini 컨텍스트 사용량 폴링 ──────────────────────────────────────────
+  useEffect(() => {
+    const fetchUsage = () => {
+      fetch(`${API_BASE}/api/gemini-context-usage`)
+        .then(res => res.json())
+        .then(data => { if (!data.error) setGeminiUsage(data); })
+        .catch(() => {});
+    };
+    fetchUsage();
+    const interval = setInterval(fetchUsage, 10000);
+    return () => clearInterval(interval);
+  }, []);
   const [mcpScope, setMcpScope] = useState<'global' | 'project'>('global');
   const [mcpLoading, setMcpLoading] = useState<Record<string, boolean>>({}); // 이름 → 로딩 여부
   const [mcpMsg, setMcpMsg] = useState(''); // 마지막 작업 결과 메시지
@@ -490,7 +508,11 @@ function App() {
 
   // 파일 저장 API 호출
   const handleSaveFile = (path: string, content: string) => {
-    const targetPath = path.includes(':') || path.startsWith('/') ? path : `${currentPath}/${path}`;
+    // 이미 절대경로라면 그대로 쓰고, 아니면 currentPath와 병합
+    const targetPath = path.includes(':') || path.startsWith('/') || path.startsWith('\\') 
+      ? path 
+      : `${currentPath}/${path}`.replace(/\/+/g, '/');
+
     fetch(`${API_BASE}/api/save-file`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -499,14 +521,17 @@ function App() {
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
-          console.log('File saved:', targetPath);
+          console.log('💾 File saved:', data.path);
+          // 저장 성공 알림 (시스템 알림 대신 간단한 콘솔/상태 표시가 좋으나 현재 구조상 alert 활용)
+          alert(`✅ 저장 완료: ${path.split(/[\\/]/).pop()}`);
         } else {
-          alert('저장 실패: ' + (data.message || '알 수 없는 오류'));
+          console.error('❌ Save failed:', data.message);
+          alert('❌ 저장 실패: ' + (data.message || '알 수 없는 오류'));
         }
       })
       .catch(err => {
-        console.error('Save error:', err);
-        alert('저장 중 오류가 발생했습니다.');
+        console.error('🚨 Save error:', err);
+        alert('🚨 저장 중 네트워크 오류가 발생했습니다.');
       });
   };
 
@@ -688,6 +713,30 @@ function App() {
       if (parentPath) refreshTree(parentPath);
       else refreshItems();
     });
+  };
+
+  const renameFile = (src: string, dest: string) => {
+    return fetch(`${API_BASE}/api/file-rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src, dest })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          const parentPath = src.split(/[\\\/]/).slice(0, -1).join('/');
+          if (parentPath) refreshTree(parentPath);
+          else refreshItems();
+          return true;
+        } else {
+          alert("이름 변경 오류: " + data.message);
+          return false;
+        }
+      })
+      .catch(err => {
+        alert("이름 변경 오류: " + err);
+        return false;
+      });
   };
 
   // 드라이브 목록 가져오기
@@ -1017,16 +1066,20 @@ function App() {
             <Brain className="w-6 h-6" />
             {memory.length > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-cyan-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
-                {memory.length > 9 ? '9+' : memory.length}
+                {memory.length > 99 ? '99+' : memory.length}
               </span>
             )}
           </button>
-          {/* Git 감시 탭 — 충돌 파일 수 배지 표시 */}
+          {/* Git 감시 탭 — 충돌 또는 커밋할 항목 배지 표시 */}
           <button onClick={() => { setActiveTab('git'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'git' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <GitBranch className="w-6 h-6" />
-            {conflictCount > 0 && (
+            {conflictCount > 0 ? (
               <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none animate-pulse">
                 {conflictCount > 9 ? '9+' : conflictCount}
+              </span>
+            ) : totalGitChanges > 0 && (
+              <span className="absolute top-1 right-1 w-4 h-4 bg-cyan-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
+                {totalGitChanges > 99 ? '99+' : totalGitChanges}
               </span>
             )}
           </button>
@@ -1792,7 +1845,13 @@ function App() {
                     <VscFolderOpened className="w-4 h-4" />
                   </button>
                   <select
-                    value={drives.find(d => currentPath.startsWith(d)) || currentPath}
+                    value={
+                      // vibe-coding 하위 경로는 먼저 체크 (드라이브 prefix 매칭보다 우선)
+                      // 버그 수정: "D:/vibe-coding".startsWith("D:/")가 true라 드라이브로 잘못 매핑되던 문제
+                      currentPath.startsWith("D:/vibe-coding")
+                        ? "D:/vibe-coding"
+                        : (drives.find(d => currentPath.startsWith(d)) || currentPath)
+                    }
                     onChange={(e) => setCurrentPath(e.target.value)}
                     className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer"
                   >
@@ -1832,6 +1891,14 @@ function App() {
                             isDir: it.isDir
                           });
                         }}
+                        onRename={renameFile}
+                        onDelete={deleteFile}
+                        onCreateFile={createFile}
+                        onCreateFolder={createFolder}
+                        editingPath={editingPath}
+                        setEditingPath={setEditingPath}
+                        editValue={editValue}
+                        setEditValue={setEditValue}
                       />
                     ))
                   ) : (
@@ -1847,27 +1914,81 @@ function App() {
                           className={`flex-1 flex items-center gap-2 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
                         >
                           {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
-                          <span className="truncate">{item.name}</span>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
-                              .then(res => res.json())
-                              .then(data => {
-                                if (data.status === 'success') {
-                                  const btn = e.currentTarget;
-                                  const originalHtml = btn.innerHTML;
-                                  btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
-                                  setTimeout(() => btn.innerHTML = originalHtml, 1500);
+                          {editingPath === item.path ? (
+                            <input
+                              autoFocus
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onKeyDown={async e => {
+                                if (e.key === 'Enter') {
+                                  if (editValue && editValue !== item.name) {
+                                    const parentPath = item.path.split(/[\\\/]/).slice(0, -1).join('/');
+                                    const dest = parentPath ? `${parentPath}/${editValue}` : editValue;
+                                    await renameFile(item.path, dest);
+                                  }
+                                  setEditingPath(null);
                                 }
-                              });
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all ml-auto shrink-0"
-                          title="경로 복사"
-                        >
-                          <ClipboardList className="w-3 h-3" />
+                                if (e.key === 'Escape') setEditingPath(null);
+                              }}
+                              onBlur={async () => {
+                                if (editValue && editValue !== item.name) {
+                                  const parentPath = item.path.split(/[\\\/]/).slice(0, -1).join('/');
+                                  const dest = parentPath ? `${parentPath}/${editValue}` : editValue;
+                                  await renameFile(item.path, dest);
+                                }
+                                setEditingPath(null);
+                              }}
+                              onClick={e => e.stopPropagation()}
+                              className="flex-1 bg-[#1e1e1e] border border-primary outline-none px-1 text-xs text-white rounded"
+                            />
+                          ) : (
+                            <span className="truncate">{item.name}</span>
+                          )}
                         </button>
+                        
+                        {editingPath !== item.path && (
+                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 ml-auto shrink-0 pr-1 transition-all">
+                            {item.isDir && (
+                              <>
+                                <button onClick={(e) => { e.stopPropagation(); createFile(item.path); }} className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-white" title="새 파일"><Plus className="w-3 h-3" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); createFolder(item.path); }} className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-white" title="새 폴더"><VscNewFolder className="w-3 h-3" /></button>
+                              </>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
+                                  .then(res => res.json())
+                                  .then(data => {
+                                    if (data.status === 'success') {
+                                      const btn = e.currentTarget;
+                                      const originalHtml = btn.innerHTML;
+                                      btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
+                                      setTimeout(() => btn.innerHTML = originalHtml, 1500);
+                                    }
+                                  });
+                              }}
+                              className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all"
+                              title="경로 복사"
+                            >
+                              <ClipboardList className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingPath(item.path); setEditValue(item.name); }}
+                              className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all"
+                              title="이름 변경"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteFile(item.path, item.isDir); }}
+                              className="p-1 hover:bg-red-500/20 rounded text-[#858585] hover:text-red-400 transition-all"
+                              title="삭제"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -1945,9 +2066,30 @@ function App() {
                 <div className="h-[1px] bg-white/5 my-1" />
               </>
             )}
+            <button 
+              onClick={() => { 
+                fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(contextMenu.path)}`);
+                setContextMenu(null); 
+              }} 
+              className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-primary hover:text-white transition-colors flex items-center gap-2"
+            >
+              <ClipboardList className="w-3.5 h-3.5" /> 경로 복사
+            </button>
+            <button 
+              onClick={() => { 
+                setEditingPath(contextMenu.path); 
+                setEditValue(contextMenu.path.split(/[\\\/]/).pop() || "");
+                setContextMenu(null); 
+              }} 
+              className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-primary hover:text-white transition-colors flex items-center gap-2"
+            >
+              <Edit3 className="w-3.5 h-3.5" /> 이름 변경...
+            </button>
+            <div className="h-[1px] bg-white/5 my-1" />
             <button onClick={() => { deleteFile(contextMenu.path, contextMenu.isDir); setContextMenu(null); }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2">
               <VscTrash className="w-3.5 h-3.5" /> 삭제
             </button>
+
             <button onClick={() => setContextMenu(null)} className="w-full text-left px-3 py-1.5 text-xs text-[#858585] hover:bg-white/5 transition-colors">
               취소
             </button>
@@ -2000,9 +2142,8 @@ function App() {
               'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} />
-              ))}
-            </div>
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} geminiUsage={geminiUsage} />
+              ))}            </div>
           </main>
         </div>
       </div>
@@ -2016,17 +2157,27 @@ function App() {
 }
 
 type TreeItem = { name: string; path: string; isDir: boolean };
-function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onContextMenu }: {
+function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onContextMenu, 
+  onRename, onDelete, onCreateFile, onCreateFolder, editingPath, setEditingPath, editValue, setEditValue }: {
   item: TreeItem; depth: number;
   expanded: Record<string, boolean>;
   treeChildren: Record<string, TreeItem[]>;
   onToggle: (path: string) => void;
   onFileOpen: (item: TreeItem) => void;
   onContextMenu: (e: React.MouseEvent, item: TreeItem) => void;
+  onRename: (src: string, dest: string) => Promise<boolean>;
+  onDelete: (path: string, isDir: boolean) => void;
+  onCreateFile: (parent: string) => void;
+  onCreateFolder: (parent: string) => void;
+  editingPath: string | null;
+  setEditingPath: (path: string | null) => void;
+  editValue: string;
+  setEditValue: (val: string) => void;
 }) {
   const isOpen = expanded[item.path] || false;
   const kids = treeChildren[item.path] || [];
   const indent = depth * 12;
+  const isEditing = editingPath === item.path;
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -2034,44 +2185,112 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
     onContextMenu(e, item);
   };
 
-  if (item.isDir) {
-    return (
-      <div>
-        <button
-          onClick={() => onToggle(item.path)}
-          onContextMenu={handleContextMenu}
-          style={{ paddingLeft: `${indent + 4}px` }}
-          className="w-full flex items-center gap-1 py-0.5 pr-2 hover:bg-[#2a2d2e] rounded text-xs transition-colors text-[#cccccc]"
-        >
-          {isOpen
-            ? <ChevronDown className="w-3 h-3 shrink-0 text-[#858585]" />
-            : <ChevronRight className="w-3 h-3 shrink-0 text-[#858585]" />}
-          {isOpen
-            ? <VscFolderOpened className="w-4 h-4 text-[#dcb67a] shrink-0" />
-            : <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" />}
+  const handleCopyPath = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          const btn = e.currentTarget;
+          const originalHtml = btn.innerHTML;
+          btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
+          setTimeout(() => btn.innerHTML = originalHtml, 1500);
+        }
+      });
+  };
+
+  const submitRename = async () => {
+    if (!editValue || editValue === item.name) {
+      setEditingPath(null);
+      return;
+    }
+    const parentPath = item.path.split(/[\\\/]/).slice(0, -1).join('/');
+    const dest = parentPath ? `${parentPath}/${editValue}` : editValue;
+    const success = await onRename(item.path, dest);
+    if (success) setEditingPath(null);
+  };
+
+  const renderContent = () => (
+    <div className="group flex items-center gap-0 pr-1 hover:bg-[#2a2d2e] rounded transition-colors relative">
+      <button
+        onClick={item.isDir ? () => onToggle(item.path) : () => onFileOpen(item)}
+        onContextMenu={handleContextMenu}
+        style={{ paddingLeft: `${indent + (item.isDir ? 4 : 20)}px` }}
+        className={`flex-1 flex items-center gap-1.5 py-0.5 overflow-hidden transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
+      >
+        {item.isDir ? (
+          <>
+            {isOpen ? <ChevronDown className="w-3 h-3 shrink-0 text-[#858585]" /> : <ChevronRight className="w-3 h-3 shrink-0 text-[#858585]" />}
+            {isOpen ? <VscFolderOpened className="w-4 h-4 text-[#dcb67a] shrink-0" /> : <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" />}
+          </>
+        ) : getFileIcon(item.name)}
+        
+        {isEditing ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') submitRename();
+              if (e.key === 'Escape') setEditingPath(null);
+            }}
+            onBlur={submitRename}
+            onClick={e => e.stopPropagation()}
+            className="flex-1 bg-[#1e1e1e] border border-primary outline-none px-1 text-xs text-white rounded"
+          />
+        ) : (
           <span className="truncate">{item.name}</span>
-        </button>
-        {isOpen && kids.length === 0 && (
-          <div style={{ paddingLeft: `${indent + 28}px` }} className="py-0.5 text-[10px] text-[#858585] italic">비어 있음</div>
         )}
-        {isOpen && kids.map(child => (
-          <FileTreeNode key={child.path} item={child} depth={depth + 1}
-            expanded={expanded} treeChildren={treeChildren}
-            onToggle={onToggle} onFileOpen={onFileOpen} onContextMenu={onContextMenu} />
-        ))}
-      </div>
-    );
-  }
+      </button>
+
+      {/* Hover Actions */}
+      {!isEditing && (
+        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 ml-auto shrink-0 pr-1 transition-all">
+          {item.isDir && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); onCreateFile(item.path); }} className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-white" title="새 파일"><Plus className="w-3 h-3" /></button>
+              <button onClick={(e) => { e.stopPropagation(); onCreateFolder(item.path); }} className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-white" title="새 폴더"><VscNewFolder className="w-3 h-3" /></button>
+            </>
+          )}
+          <button onClick={handleCopyPath} className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary" title="경로 복사"><ClipboardList className="w-3 h-3" /></button>
+          <button onClick={(e) => { e.stopPropagation(); setEditingPath(item.path); setEditValue(item.name); }} className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary" title="이름 변경"><Edit3 className="w-3 h-3" /></button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(item.path, item.isDir); }} className="p-1 hover:bg-red-500/20 rounded text-[#858585] hover:text-red-400" title="삭제"><Trash2 className="w-3 h-3" /></button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <button
-      onClick={() => onFileOpen(item)}
-      onContextMenu={handleContextMenu}
-      style={{ paddingLeft: `${indent + 20}px` }}
-      className="w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
-    >
-      {getFileIcon(item.name)}
-      <span className="truncate">{item.name}</span>
-    </button>
+    <div>
+      {renderContent()}
+      {item.isDir && isOpen && (
+        <>
+          {kids.length === 0 && (
+            <div style={{ paddingLeft: `${indent + 28}px` }} className="py-0.5 text-[10px] text-[#858585] italic">비어 있음</div>
+          )}
+          {kids.map(child => (
+            <FileTreeNode 
+              key={child.path} 
+              item={child} 
+              depth={depth + 1}
+              expanded={expanded} 
+              treeChildren={treeChildren}
+              onToggle={onToggle} 
+              onFileOpen={onFileOpen} 
+              onContextMenu={onContextMenu}
+              onRename={onRename}
+              onDelete={onDelete}
+              onCreateFile={onCreateFile}
+              onCreateFolder={onCreateFolder}
+              editingPath={editingPath}
+              setEditingPath={setEditingPath}
+              editValue={editValue}
+              setEditValue={setEditValue}
+            />
+          ))}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -2161,58 +2380,57 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
     <div 
       onPointerDown={() => bringToFront(file.id)}
       style={{ 
-        zIndex: file.zIndex, 
+        zIndex: isMaximized ? 9999 : file.zIndex, 
+        position: isMaximized ? 'fixed' : 'absolute',
         left: isMaximized ? 0 : position.x, 
         top: isMaximized ? 0 : position.y,
         width: isMaximized ? '100vw' : size.width,
         height: isMinimized ? 40 : (isMaximized ? '100vh' : size.height),
         borderRadius: isMaximized ? 0 : 12,
-        transition: isResizing || isDragging ? 'none' : 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        transition: isResizing || isDragging ? 'none' : 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
-      className={`absolute bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col overflow-hidden ${isMaximized ? 'z-[999]' : ''}`}
+      className={`bg-[#1e1e1e]/95 backdrop-blur-2xl border border-white/20 shadow-2xl flex flex-col overflow-hidden ${isMaximized ? 'inset-0' : ''}`}
     >
       {/* Header */}
       <div 
-        className={`h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 select-none ${isMaximized ? 'cursor-default' : 'cursor-move'}`}
+        className={`h-10 bg-[#2d2d2d]/95 border-b border-white/10 flex items-center justify-between px-4 shrink-0 select-none ${isMaximized ? 'cursor-default' : 'cursor-move'}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        <div className="flex items-center gap-2 text-[#cccccc] font-mono text-sm truncate pointer-events-none">
+        <div className="flex items-center gap-2 text-[#cccccc] font-mono text-sm truncate pointer-events-none flex-1">
           {getFileIcon(file.name)}
-          <span className="truncate">{file.name}</span>
-          {!isMinimized && <span className="text-[10px] opacity-40 ml-2 truncate max-w-[200px]">{file.path}</span>}
+          <span className="truncate font-bold">{file.name}</span>
+          {!isMinimized && <span className="text-[10px] opacity-40 ml-2 truncate max-w-[300px] hidden md:inline">{file.path}</span>}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 ml-4" onPointerDown={e => e.stopPropagation()}>
           {/* 최소화(접기) 버튼 */}
           <button 
             onClick={toggleMinimize}
-            className="p-1.5 hover:bg-white/10 rounded text-[#cccccc] hover:text-white transition-all"
+            className="p-1.5 hover:bg-white/10 rounded-md text-[#cccccc] hover:text-white transition-all active:scale-90"
             title={isMinimized ? '확장' : '최소화'}
           >
-            {isMinimized ? <Plus className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
+            {isMinimized ? <Plus className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
           </button>
           {/* 최대화 토글 버튼 */}
           <button 
             onClick={toggleMaximize}
-            className="p-1.5 hover:bg-white/10 rounded text-[#cccccc] hover:text-primary transition-all"
-            title={isMaximized ? '이전 크기로' : '최대화'}
+            className="p-1.5 hover:bg-white/10 rounded-md text-[#cccccc] hover:text-primary transition-all active:scale-90"
+            title={isMaximized ? '이0전 크기로' : '최대화'}
           >
-            {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
           <div className="w-[1px] h-4 bg-white/10 mx-1" />
           <button 
             onClick={(e) => { e.stopPropagation(); handleSaveFile(file.path, file.content); }}
-            onPointerDownCapture={e => e.stopPropagation()}
-            className="p-1.5 hover:bg-primary/20 rounded text-[#cccccc] hover:text-primary transition-all cursor-pointer group"
+            className="p-1.5 hover:bg-primary/20 rounded-md text-[#cccccc] hover:text-primary transition-all cursor-pointer group active:scale-90"
             title="저장 (Ctrl+S)"
           >
-            <Save className="w-4.5 h-4.5 group-active:scale-90 transition-transform" />
+            <Save className="w-4.5 h-4.5 group-active:scale-95 transition-transform" />
           </button>
           <button 
             onClick={(e) => { e.stopPropagation(); closeFile(file.id); }} 
-            onPointerDownCapture={e => e.stopPropagation()}
-            className="p-1.5 hover:bg-red-500/20 rounded text-[#cccccc] hover:text-red-400 transition-all cursor-pointer"
+            className="p-1.5 hover:bg-red-500/20 rounded-md text-[#cccccc] hover:text-red-400 transition-all cursor-pointer active:scale-90"
             title="Close"
           >
             <X className="w-5 h-5" />
@@ -2261,7 +2479,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[] }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], geminiUsage: any }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -2505,6 +2723,23 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
           </div>
         ) : (
           <div className="flex gap-2 items-center">
+            {/* 💎 Gemini 컨텍스트 사용량 표시 (에이전트가 gemini일 때만) */}
+            {activeAgent.toLowerCase().includes('gemini') && geminiUsage && (
+              <div className="flex items-center gap-2 mr-2 px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[9px] text-accent animate-in fade-in duration-500">
+                <div className="flex flex-col items-end leading-none gap-0.5">
+                  <span className="font-bold opacity-80 uppercase text-[8px]">Context</span>
+                  <span className="font-black">{(geminiUsage.total_tokens / 1000).toFixed(1)}K / {(geminiUsage.context_window / 1000).toFixed(1)}K</span>
+                </div>
+                <div className="w-12 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
+                  <div 
+                    className={`h-full transition-all duration-1000 ${geminiUsage.percentage > 80 ? 'bg-red-500' : geminiUsage.percentage > 50 ? 'bg-yellow-500' : 'bg-accent'}`}
+                    style={{ width: `${Math.min(100, geminiUsage.percentage)}%` }}
+                  />
+                </div>
+                <span className="font-bold w-6 text-right">{Math.round(geminiUsage.percentage)}%</span>
+              </div>
+            )}
+
             <button 
               onClick={() => setShowActiveFile(!showActiveFile)} 
               className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}

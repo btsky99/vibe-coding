@@ -1,4 +1,29 @@
 {
+  "hooks": {
+    "AfterTool": [
+      {
+        "matcher": "write_file|create_file|overwrite_file|replace|edit_file|str_replace|run_shell_command|shell|bash|execute_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/vibe-coding/scripts/gemini_hook.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/vibe-coding/scripts/gemini_hook.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  },
   "mcpServers": {
     "fetch": {
       "command": "uvx",

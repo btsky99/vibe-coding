@@ -1391,59 +1391,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
 
-        elif parsed_path.path == '/api/apply-update':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            
-            update_file = DATA_DIR / "update_ready.json"
-            if not update_file.exists():
-                self.wfile.write(json.dumps({"success": False, "error": "No update ready"}).encode('utf-8'))
-                return
-                
-            try:
-                with open(update_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                
-                exe_path = data.get("exe_path")
-                if not exe_path or not os.path.exists(exe_path):
-                    self.wfile.write(json.dumps({"success": False, "error": "New executable not found"}).encode('utf-8'))
-                    return
-                
-                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
-                
-                # Delete update_ready.json so it won't prompt again
-                try:
-                    update_file.unlink()
-                except OSError:
-                    pass
-                
-                # Import updater and apply update in background to not block response
-                from updater import apply_update_from_temp
-                threading.Thread(target=apply_update_from_temp, args=(Path(exe_path),), daemon=True).start()
-                
-            except Exception as e:
-                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/file-rename':
-            # 파일 또는 폴더 이름 변경 (이동 포함)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            try:
-                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-                src = data.get('src')
-                dest = data.get('dest')
-                if not src or not dest:
-                    self.wfile.write(json.dumps({"status": "error", "message": "src and dest are required"}).encode('utf-8'))
-                    return
-                os.rename(src, dest)
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1456,65 +1403,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if os.name == 'nt':
                     subprocess.run(['powershell', '-Command', f'Set-Clipboard -Value "{target_path}"'], check=True, encoding='utf-8')
                 self.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-        
-        elif parsed_path.path == '/api/file-op':
-            # 파일 복사/이동/삭제/생성 등 운영체제 수준 작업
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            try:
-                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-                op = data.get('op')
-                src = data.get('src')
-                dest = data.get('dest')
-                path = data.get('path')
-                
-                if op == 'copy':
-                    if os.path.isdir(src): shutil.copytree(src, dest, dirs_exist_ok=True)
-                    else: shutil.copy2(src, dest)
-                elif op == 'delete':
-                    if os.path.isdir(src):
-                        shutil.rmtree(src)
-                    else:
-                        os.remove(src)
-                elif op == 'create_file':
-                    # 빈 파일 생성
-                    if not os.path.exists(path):
-                        with open(path, 'w', encoding='utf-8') as f:
-                            f.write("")
-                elif op == 'create_dir':
-                    # 폴더 생성
-                    os.makedirs(path, exist_ok=True)
-                
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/save-file':
-            # 파일 내용 저장
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            try:
-                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-                target_path = data.get('path')
-                content = data.get('content', '')
-                
-                if not target_path:
-                    self.wfile.write(json.dumps({"status": "error", "message": "Path is required"}).encode('utf-8'))
-                    return
-                
-                # 디렉토리가 없으면 생성
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                
-                with open(target_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
@@ -2336,7 +2224,138 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
-        if parsed_path.path == '/api/agents/heartbeat':
+        if parsed_path.path == '/api/save-file':
+            # [파일 저장] 프론트엔드 VibeEditor/App.tsx 에서 POST로 호출
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                raw_path = data.get('path')
+                content = data.get('content', '')
+                
+                if not raw_path:
+                    self.wfile.write(json.dumps({"status": "error", "message": "Path is required"}).encode('utf-8'))
+                    return
+                
+                target_path = Path(raw_path).resolve()
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                with open(target_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                print(f"💾 [File Saved] {target_path}")
+                self.wfile.write(json.dumps({"status": "success", "path": str(target_path)}).encode('utf-8'))
+            except Exception as e:
+                print(f"❌ [Save Error] {e}")
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/file-rename':
+            # [이름 변경] src -> dest
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                src = data.get('src')
+                dest = data.get('dest')
+                if not src or not dest:
+                    self.wfile.write(json.dumps({"status": "error", "message": "src and dest are required"}).encode('utf-8'))
+                    return
+                # 경로 정규화 및 이름 변경
+                os.rename(Path(src), Path(dest))
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/files/create':
+            # [생성] path, is_dir
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                target_path = data.get('path')
+                is_dir = data.get('is_dir', False)
+                
+                if not target_path:
+                    self.wfile.write(json.dumps({"status": "error", "message": "Path is required"}).encode('utf-8'))
+                    return
+                
+                p = Path(target_path)
+                if is_dir:
+                    p.mkdir(parents=True, exist_ok=True)
+                else:
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    if not p.exists():
+                        p.write_text("", encoding="utf-8")
+                
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/files/delete':
+            # [삭제] path
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                target_path = data.get('path')
+                
+                if not target_path or not os.path.exists(target_path):
+                    self.wfile.write(json.dumps({"status": "error", "message": "Path not found"}).encode('utf-8'))
+                    return
+                
+                if os.path.isdir(target_path):
+                    shutil.rmtree(target_path)
+                else:
+                    os.remove(target_path)
+                
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/apply-update':
+            # [업데이트 적용] GET에서 이동됨
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            update_file = DATA_DIR / "update_ready.json"
+            if not update_file.exists():
+                self.wfile.write(json.dumps({"success": False, "error": "No update ready"}).encode('utf-8'))
+                return
+                
+            try:
+                with open(update_file, "r", encoding="utf-8") as f:
+                    update_data = json.load(f)
+                
+                exe_path = update_data.get("exe_path")
+                if not exe_path or not os.path.exists(exe_path):
+                    self.wfile.write(json.dumps({"success": False, "error": "New executable not found"}).encode('utf-8'))
+                    return
+                
+                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+                try:
+                    update_file.unlink()
+                except OSError: pass
+                
+                from updater import apply_update_from_temp
+                threading.Thread(target=apply_update_from_temp, args=(Path(exe_path),), daemon=True).start()
+            except Exception as e:
+                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/agents/heartbeat':
             # 에이전트 실시간 상태 보고 수신
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
