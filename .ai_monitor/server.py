@@ -222,7 +222,24 @@ def _find_project_root(start: Path) -> Path:
     return start  # 마커를 찾지 못하면 exe 위치 그대로 사용
 
 if getattr(sys, 'frozen', False):
-    PROJECT_ROOT = _find_project_root(Path(sys.executable).resolve().parent)
+    _exe_parent = Path(sys.executable).resolve().parent
+    _root_candidate = _find_project_root(_exe_parent)
+    # _find_project_root가 마커(.git 등)를 못 찾아 exe 위치 자체를 반환했으면
+    # → DATA_DIR/projects.json에서 마지막 사용 프로젝트 경로를 PROJECT_ROOT로 사용
+    # [버그 수정] 설치 경로(C:\...\Programs\)에서 실행 시 PROJECT_ID가 틀려
+    #             공유 메모리 현재 프로젝트 필터가 빈 결과를 반환하는 문제 해결
+    _no_marker = not any((_root_candidate / m).exists() for m in ['.git', 'CLAUDE.md', 'GEMINI.md'])
+    if _no_marker:
+        _projs_file = DATA_DIR / 'projects.json'
+        try:
+            _saved_projs = json.loads(_projs_file.read_text(encoding='utf-8'))
+            if _saved_projs and isinstance(_saved_projs, list):
+                _first = Path(str(_saved_projs[0]).replace('/', os.sep))
+                if _first.exists():
+                    _root_candidate = _first
+        except Exception:
+            pass
+    PROJECT_ROOT = _root_candidate
 else:
     PROJECT_ROOT = BASE_DIR.parent
 

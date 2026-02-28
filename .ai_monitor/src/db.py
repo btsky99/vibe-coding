@@ -15,7 +15,12 @@ from datetime import datetime
 import time
 
 if getattr(sys, 'frozen', False):
-    DATA_DIR = Path(sys.executable).resolve().parent / "data"
+    # 배포 버전: server.py와 동일한 APPDATA 경로 사용 (hive_mind.db 위치 일치 필수)
+    # [버그 수정] exe옆/data 대신 %APPDATA%\VibeCoding 사용 — server.py의 DATA_DIR와 동일하게 맞춤
+    if os.name == 'nt':
+        DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
+    else:
+        DATA_DIR = Path.home() / ".vibe-coding"
 else:
     DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
