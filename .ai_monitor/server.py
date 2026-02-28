@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-01] - Claude (Gemini 세션 감지 기능)
+#   - pty_handler: Gemini/Claude 세션 시작 시 session_logs에 즉시 기록 ("세션 시작 ───")
+#   - pty_handler: 세션 종료 시 원인 구분 (PTY 프로세스 종료 vs WebSocket 연결 끊김)
+#   - 강제 종료(SessionEnd 미실행) 시 "프로세스 종료 감지" 로그 자동 생성
 # [2026-02-28] - Claude (배포 버전 경로 버그 수정)
 #   - _load_task_logs_into_thoughts(): DATA_DIR 미정의 시점에 frozen 모드 APPDATA 경로 사용
 #   - 기존 Path(__file__).parent/'data' → frozen 여부 판별 후 올바른 데이터 디렉토리 참조
@@ -63,8 +67,10 @@ if sys.stdout is None or sys.stderr is None:
 # 이 상수는 winpty DLL 경로 등 초기화 코드보다 반드시 먼저 정의되어야 함
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
 else:
     BASE_DIR = Path(__file__).resolve().parent
+    PROJECT_ROOT = BASE_DIR.parent
 
 try:
     import websockets
@@ -3188,8 +3194,27 @@ async def pty_handler(websocket):
             session_id = str(int(match.group(1)) + 1)
         else:
             session_id = str(id(websocket))
-            
+
         pty_sessions[session_id] = pty
+
+        # ── [세션 시작 로그] ──────────────────────────────────────────────
+        # PTY 터미널에서 에이전트가 시작될 때 즉시 session_logs에 기록.
+        # 이를 통해 대시보드가 Gemini/Claude 작업 시작 시점을 즉각 인지 가능.
+        # 강제 종료 감지를 위한 기준점 역할도 수행.
+        if agent:
+            try:
+                from src.db_helper import insert_log as _db_insert_log
+                mode_tag = "[YOLO]" if is_yolo else "[일반]"
+                _db_insert_log(
+                    session_id=f"pty_start_{session_id}_{datetime.now().strftime('%H%M%S')}",
+                    terminal_id="PTY_TERMINAL",
+                    agent=agent.capitalize(),
+                    trigger_msg=f"─── {agent.upper()} 세션 시작 {mode_tag} ───",
+                    project="hive",
+                    status="running"
+                )
+            except Exception as _e:
+                print(f"[PTY] 세션 시작 로그 실패: {_e}")
 
     except Exception as e:
         print(f"PTY Init Error: {e}")
@@ -3249,7 +3274,32 @@ async def pty_handler(websocket):
     done, pending = await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
-    
+
+    # ── [세션 종료/강제종료 감지] ──────────────────────────────────────────
+    # task1(PTY read) 이 먼저 완료 → 프로세스 자체가 종료됨 (정상 or 강제)
+    #   → gemini_hook.py SessionEnd 훅이 실행됐으면 정상 종료
+    #   → SessionEnd가 없으면 강제 종료(Ctrl+C, 프로세스 킬 등) 가능성
+    # task2(WS read) 이 먼저 완료 → 브라우저/WebSocket이 먼저 닫힘
+    if agent:
+        try:
+            from src.db_helper import insert_log as _db_insert_log
+            if task1 in done:
+                # PTY 프로세스 종료 — SessionEnd 훅이 없었다면 강제 종료
+                exit_msg = f"─── {agent.upper()} 프로세스 종료 감지 (SessionEnd 훅 미실행 시 강제종료) ───"
+            else:
+                # WebSocket이 먼저 닫힘 — 브라우저 새로고침 or 탭 닫기
+                exit_msg = f"─── {agent.upper()} 연결 종료 (WebSocket 닫힘) ───"
+            _db_insert_log(
+                session_id=f"pty_end_{session_id}_{datetime.now().strftime('%H%M%S')}",
+                terminal_id="PTY_TERMINAL",
+                agent=agent.capitalize(),
+                trigger_msg=exit_msg,
+                project="hive",
+                status="success"
+            )
+        except Exception as _e:
+            print(f"[PTY] 세션 종료 로그 실패: {_e}")
+
     try:
         pty.terminate(force=True)
     except:
