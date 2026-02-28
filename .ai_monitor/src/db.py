@@ -14,15 +14,44 @@ from pathlib import Path
 from datetime import datetime
 import time
 
+def _find_project_root() -> Path:
+    """현재 실행 위치에서 위로 올라가며 프로젝트 루트를 탐색합니다."""
+    # 1. 환경 변수 확인 (가장 확실함)
+    if os.getenv('VIBE_PROJECT_ROOT'):
+        return Path(os.getenv('VIBE_PROJECT_ROOT'))
+    
+    # 2. 실행 위치 또는 소스 파일 위치 기준 탐색
+    start_path = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent.parent
+    markers = ['.git', 'CLAUDE.md', 'GEMINI.md']
+    for p in [start_path, *start_path.parents]:
+        if any((p / m).exists() for m in markers):
+            return p
+    return start_path
+
+PROJECT_ROOT = _find_project_root()
+
+# 데이터 디렉토리 설정 (server.py와 로직 동기화)
 if getattr(sys, 'frozen', False):
-    # 배포 버전: server.py와 동일한 APPDATA 경로 사용 (hive_mind.db 위치 일치 필수)
-    # [버그 수정] exe옆/data 대신 %APPDATA%\VibeCoding 사용 — server.py의 DATA_DIR와 동일하게 맞춤
-    if os.name == 'nt':
+    # [수정] 배포 버전에서도 프로젝트 로컬 데이터를 우선 사용
+    _local_data = PROJECT_ROOT / ".ai_monitor" / "data"
+    if _local_data.exists():
+        DATA_DIR = _local_data
+    elif os.name == 'nt':
         DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
     else:
         DATA_DIR = Path.home() / ".vibe-coding"
 else:
+    # 개발 모드: 소스 폴더 내의 data 사용
     DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+if not DATA_DIR.exists():
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except:
+        # 권한 문제 시 APPDATA로 폴백
+        if os.name == 'nt':
+            DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
+            os.makedirs(DATA_DIR, exist_ok=True)
 
 DB_FILE = DATA_DIR / "hive_mind.db"
 

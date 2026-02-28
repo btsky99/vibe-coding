@@ -1612,14 +1612,14 @@ function App() {
       <div className="flex flex-1 overflow-hidden">
         {/* Activity Bar (VS Code Style) */}
         <div className="w-12 h-full bg-[#333333] border-r border-black/40 flex flex-col items-center py-4 gap-4 shrink-0">
-          <button onClick={() => { setActiveTab('explorer'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'explorer' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('explorer'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'explorer' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="파일 탐색기">
             <Files className="w-6 h-6" />
           </button>
-          <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="검색">
             <Search className="w-6 h-6" />
           </button>
           {/* 하이브 오케스트레이터 탭 — 경고 수 배지 */}
-          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="하이브 마인드">
             <Zap className="w-6 h-6" />
             {orchWarningCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-orange-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1637,7 +1637,7 @@ function App() {
             )}
           </button>
           {/* 메시지 채널 탭 — 읽지 않은 메시지 수 배지 표시 */}
-          <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="메시지 채널">
             <MessageSquare className="w-6 h-6" />
             {unreadMsgCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1646,7 +1646,7 @@ function App() {
             )}
           </button>
           {/* 태스크 보드 탭 — 활성 작업 수 배지 표시 */}
-          <button onClick={() => { setActiveTab('tasks'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'tasks' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('tasks'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'tasks' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="태스크 보드">
             <ClipboardList className="w-6 h-6" />
             {activeTaskCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-yellow-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1655,7 +1655,7 @@ function App() {
             )}
           </button>
           {/* 공유 메모리 탭 */}
-          <button onClick={() => { setActiveTab('memory'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'memory' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('memory'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'memory' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="공유 메모리">
             <Brain className="w-6 h-6" />
             {memory.length > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-cyan-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1664,7 +1664,7 @@ function App() {
             )}
           </button>
           {/* Git 감시 탭 — 충돌 파일 수 배지 표시 */}
-          <button onClick={() => { setActiveTab('git'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'git' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('git'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'git' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="Git 감시">
             <GitBranch className="w-6 h-6" />
             {conflictCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none animate-pulse">
@@ -1673,7 +1673,7 @@ function App() {
             )}
           </button>
           {/* MCP 관리자 탭 — 설치된 MCP 수 배지 */}
-          <button onClick={() => { setActiveTab('mcp'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'mcp' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('mcp'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'mcp' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="MCP 관리자">
             <Package className="w-6 h-6" />
             {mcpInstalled.length > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-purple-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1711,7 +1711,7 @@ function App() {
             />
           )}
           <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[200px]">
-            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : activeTab === 'logs' ? '하이브 로그' : 'Hive Mind'}</span>
+            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? '파일 탐색기' : activeTab === 'search' ? '검색' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : activeTab === 'logs' ? '하이브 로그' : '하이브 마인드'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1.5 rounded transition-colors"><X className="w-6 h-6" /></button>
           </div>
 
@@ -2170,9 +2170,9 @@ function App() {
                             <span className={`font-mono font-bold text-[10px] w-12 shrink-0 ${agent === 'claude' ? 'text-green-400' : 'text-blue-400'}`}>{agent}</span>
                             <span className={`text-[9px] ${dotColor}`}>{stateLabel}</span>
                             <div className="ml-auto flex gap-1.5 text-[8px] font-mono">
-                              <span className="text-[#858585]">P:{taskDist.pending}</span>
-                              <span className="text-primary">W:{taskDist.in_progress}</span>
-                              <span className="text-green-400">D:{taskDist.done}</span>
+                              <span className="text-[#858585]">대:{taskDist.pending}</span>
+                              <span className="text-primary">진:{taskDist.in_progress}</span>
+                              <span className="text-green-400">완:{taskDist.done}</span>
                             </div>
                           </div>
                         );
@@ -2357,11 +2357,11 @@ function App() {
                       </div>
                       {/* 요약 통계 행 */}
                       <div className="flex gap-2 text-[9px] font-mono">
-                        <span className="text-green-400">S:{gitStatus.staged.length}</span>
-                        <span className="text-yellow-400">M:{gitStatus.unstaged.length}</span>
+                        <span className="text-green-400">스:{gitStatus.staged.length}</span>
+                        <span className="text-yellow-400">수:{gitStatus.unstaged.length}</span>
                         <span className="text-[#858585]">?:{gitStatus.untracked.length}</span>
                         {gitStatus.conflicts.length > 0 && (
-                          <span className="text-red-400 font-black animate-pulse">⚠ C:{gitStatus.conflicts.length}</span>
+                          <span className="text-red-400 font-black animate-pulse">⚠ 충:{gitStatus.conflicts.length}</span>
                         )}
                       </div>
                     </div>
@@ -3063,7 +3063,7 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <button onClick={refreshItems} className="p-1.5 hover:bg-white/10 rounded text-primary hover:text-white transition-all hover:rotate-180 duration-500" title="Refresh Files">
+              <button onClick={refreshItems} className="p-1.5 hover:bg-white/10 rounded text-primary hover:text-white transition-all hover:rotate-180 duration-500" title="파일 새로고침">
                 <RotateCw className="w-4 h-4" />
               </button>
               <div className="flex items-center gap-1 bg-black/30 rounded-md p-0.5 ml-1 border border-white/5 flex-wrap">

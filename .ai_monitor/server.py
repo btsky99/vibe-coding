@@ -203,8 +203,12 @@ from _version import __version__
 
 # 데이터 디렉토리 설정 (BASE_DIR 설정 이후로 이동)
 if getattr(sys, 'frozen', False):
-    # 윈도우 배포 버전: %APPDATA%\VibeCoding 폴더 사용 (권한 문제 해결)
-    if os.name == 'nt':
+    # [수정] 현재 프로젝트 폴더 내의 .ai_monitor/data 가 있으면 이를 우선적으로 사용 (CLI와 데이터 공유 강제)
+    _local_data = PROJECT_ROOT / ".ai_monitor" / "data"
+    if _local_data.exists():
+        DATA_DIR = _local_data
+        print(f"[*] Local project data found: {DATA_DIR}")
+    elif os.name == 'nt':
         DATA_DIR = Path(os.getenv('APPDATA')) / "VibeCoding"
     else:
         DATA_DIR = Path.home() / ".vibe-coding"
@@ -538,7 +542,24 @@ class MemoryWatcher(threading.Thread):
         tags_json = json.dumps(tags, ensure_ascii=False)
         emb = _embed(f"{title}\n{content}")  # 제목+내용 합쳐서 벡터화
         proj = project or PROJECT_ID
-        with _memory_conn() as conn:
+        
+        # [수정] 전역 DATA_DIR 내의 shared_memory.db 경로를 사용하도록 강제
+        db_path = DATA_DIR / "shared_memory.db"
+        
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=10)
+            conn.row_factory = sqlite3.Row
+            # 테이블 자동 생성 보장 (없을 경우 대비)
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS memory (
+                    key TEXT PRIMARY KEY, id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
+                    tags TEXT NOT NULL DEFAULT '[]', author TEXT NOT NULL DEFAULT 'unknown',
+                    timestamp TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    embedding BLOB, project TEXT NOT NULL DEFAULT ''
+                )
+            ''')
+            
             existing = conn.execute(
                 'SELECT timestamp FROM memory WHERE key=?', (key,)
             ).fetchone()
@@ -550,8 +571,11 @@ class MemoryWatcher(threading.Thread):
                 (key, str(int(time.time() * 1000)), title,
                  content, tags_json, author, orig_ts, now, proj, emb)
             )
-        
-        print(f"[MemoryWatcher] 동기화 완료: {key} (프로젝트: {proj}, 임베딩: {'✓' if emb else '✗'})")
+            conn.commit()
+            conn.close()
+            print(f"[MemoryWatcher] 동기화 완료: {key} (경로: {db_path})")
+        except Exception as e:
+            print(f"[MemoryWatcher] DB 쓰기 오류: {e}")
 
     # ── 내부: 파일 변경 여부 확인 ───────────────────────────────────────────
     def _changed(self, path: Path) -> bool:
