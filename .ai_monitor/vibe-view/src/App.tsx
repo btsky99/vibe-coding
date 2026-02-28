@@ -2243,6 +2243,14 @@ function App() {
                             <span className="text-[#aaa]">CLAUDE.md</span>
                             {hiveHealth.constitution?.claude_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
                           </div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">GEMINI.md</span>
+                            {hiveHealth.constitution?.gemini_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">PROJECT_MAP</span>
+                            {hiveHealth.constitution?.project_map ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
                         </div>
                         {/* 하이브 스킬 */}
                         <div className="flex flex-col gap-0.5">
@@ -2250,6 +2258,10 @@ function App() {
                           <div className="flex items-center justify-between text-[9px]">
                             <span className="text-[#aaa]">Master Skill</span>
                             {hiveHealth.skills?.master ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                          </div>
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-[#aaa]">Brainstorm</span>
+                            {hiveHealth.skills?.brainstorm ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
                           </div>
                           <div className="flex items-center justify-between text-[9px]">
                             <span className="text-[#aaa]">Memory Script</span>
@@ -3479,7 +3491,10 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     : (contextSessions[slotId] ?? null);
   // 컨텍스트 창 최대 토큰: Claude=200k, Gemini=1M
   const CTX_MAX = isGeminiAgent ? 1000000 : 200000;
-  const ctxPct = ctxSession ? Math.round((ctxSession.input_tokens / CTX_MAX) * 100) : 0;
+  // 전체 컨텍스트 점유 = 순수입력 + 캐시읽기 + 캐시쓰기 (input_tokens는 캐시 제외값)
+  const ctxPct = ctxSession
+    ? Math.round(((ctxSession.input_tokens + ctxSession.cache_read + ctxSession.cache_write) / CTX_MAX) * 100)
+    : 0;
   // ISO 타임스탬프 → 상대 시간 문자열 (예: "3분 전")
   const ctxRelTime = (() => {
     if (!ctxSession?.last_ts) return '';

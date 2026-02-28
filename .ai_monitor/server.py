@@ -924,6 +924,8 @@ if not STATIC_DIR.exists():
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """멀티 스레드 지원 HTTP 서버 (SSE 등 지속적 연결 동시 처리용)"""
     daemon_threads = True
+    # 서버 종료 후 포트 TIME_WAIT 상태 무시 — 재부팅 없이 즉시 재실행 가능
+    allow_reuse_address = True
 
 # ── 에이전트 실시간 상태 관리 (오케스트레이션 핵심 데이터) ──────────────────
 # 구조: { "agent_name": { "status": "active|idle|error", "task": "task_id", "last_seen": timestamp } }
@@ -3331,9 +3333,17 @@ if __name__ == '__main__':
         threading.Thread(target=force_win32_icon, daemon=True).start()
         
         webview.start()
-        # 24시간 가동을 위해 창이 닫혀도 프로세스를 종료하지 않고 유지합니다.
-        print("[*] GUI 창이 닫혔습니다. 서버는 백그라운드에서 계속 실행됩니다...")
-        while True: time.sleep(60)
+        # 창 닫힘 = 서버 소켓 정상 종료 후 프로세스 종료
+        # os._exit()는 소켓을 강제 종료 → 포트 TIME_WAIT 잔류 원인
+        # server.shutdown() + server_close()로 포트를 먼저 해제한 뒤 종료
+        print("[*] GUI 창이 닫혔습니다. 서버 소켓 종료 중...")
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            pass
+        print("[*] 프로세스를 종료합니다.")
+        os._exit(0)
     except Exception as e:
         print(f"[!] GUI Error: {e}")
         open_app_window(f"http://localhost:{HTTP_PORT}")
