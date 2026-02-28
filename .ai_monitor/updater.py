@@ -21,19 +21,17 @@ ASSET_NAME = "vibe-coding.exe"
 logger = logging.getLogger("updater")
 
 
-_ENCODED_TOKEN = "Z2l0aHViX3BhdF8xMUJPUEZDQ1kwZ2ZhRndJTHFab0wwX0pUdjc4aUhPYzN1RGFHS2hkbmlweEl4ZWhTSkNKSXBFNFQ3bm9Rc3N2UlRJNVhPT1k2TUpGcGxGRUw5"
-_DEFAULT_TOKEN = __import__("base64").b64decode(_ENCODED_TOKEN).decode()
-
-
 def _get_token(data_dir):
-    """Resolve GitHub token from env, file, or built-in default."""
+    """GitHub 토큰 조회 — Public 리포이므로 토큰 없이도 동작.
+    환경변수 또는 파일에 토큰이 있으면 사용 (rate limit 완화용).
+    """
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         return token.strip()
     token_file = data_dir / "github_token.txt"
     if token_file.exists():
         return token_file.read_text(encoding="utf-8").strip().splitlines()[0]
-    return _DEFAULT_TOKEN
+    return None  # Public 리포 → 토큰 없이 API 호출 가능
 
 
 def _fetch_latest_release(token):
@@ -188,10 +186,8 @@ def check_and_update(data_dir):
         logger.info("Not running as frozen exe, skipping update check.")
         return
 
+    # Public 리포이므로 토큰 없이도 동작 (token=None 이어도 계속 진행)
     token = _get_token(data_dir)
-    if token is None:
-        logger.info("No GitHub token found, skipping update check.")
-        return
 
     release = _fetch_latest_release(token)
     if release is None:
