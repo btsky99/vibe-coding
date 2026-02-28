@@ -1,5 +1,20 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-03-01] - v3.6.5 (하이브 시스템 통합 및 대시보드 UI 최종 정리)
+
+### 📊 하이브 시스템 및 대시보드 고도화
+- **[Feature] 업데이트 확인 버튼 복원 및 API 연동**:
+    - 대시보드 헤더에 '업데이트 확인' 버튼 상시 노출.
+    - `/api/trigger-update-check` API 호출 및 5초 간격 폴링 로직 구현.
+- **[UI/UX] 헤더 UI 정리**:
+    - 중복 표시되던 폴더 경로(`currentPath`) 및 불필요한 아이콘 제거로 깔끔한 레이아웃 확보.
+- **[Build] v3.6.3 정식 빌드 완료**:
+    - 최신 프론트엔드 빌드(`dist`) 포함.
+    - PyInstaller를 이용한 `vibe-coding.exe` 단일 실행 파일 생성.
+- **[Documentation] 하이브 지침 동기화**:
+    - `PROJECT_MAP.md`, `CLAUDE.md`, `GEMINI.md` 등 핵심 가이드 문서 최신화.
+    - `ai_monitor_plan.md`를 통한 통합 작업 로드맵 관리 시작.
+
 ## [2026-03-01] - v3.6.0 (VS Code 스타일 사이드바 UI 완벽 복원)
 
 ### 📂 사이드바 UI/UX 혁신
