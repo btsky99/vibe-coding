@@ -16,6 +16,13 @@ DESCRIPTION: Gemini CLI 전용 자동 액션 트레이스 훅 핸들러.
              - SessionEnd : 세션 종료 시 → "─── 세션 종료 ───" 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: 파일 수정 내용 상세 기록 강화
+  - BeforeTool(수정): 변경 전/후 내용 스니펫 포함 (Claude PreToolUse와 동일 수준)
+  - BeforeTool(생성): 파일 내용 미리보기 포함
+  - AfterTool(수정): 수정 완료 + 결과 요약 포함
+  - AfterTool(실행): 명령 완료 + 실행 결과 스니펫 포함
+  - → 다른 CLI(Claude 등)가 Gemini 작업 의도·결과를 완전히 파악 가능
+- 2026-03-01 Claude: BeforeTool 이벤트 추가 — 도구 실행 직전 대시보드 표시로 공백 최소화
 - 2026-03-01 Claude: 최초 구현 — Gemini CLI AfterTool/SessionEnd 자동 로깅 시스템 구축
 """
 
@@ -61,6 +68,15 @@ def _short_cmd(cmd: str, max_len: int = 80) -> str:
     return cmd.strip().replace("\n", " ")[:max_len]
 
 
+def _snippet(text: str, max_len: int = 60) -> str:
+    """긴 텍스트를 짧게 줄여 한 줄 스니펫으로 반환합니다.
+    줄바꿈은 ↵로 치환하여 로그가 한 줄에 표시되도록 처리합니다."""
+    if not text:
+        return ""
+    s = text.strip().replace("\n", "↵ ")
+    return s[:max_len] + "…" if len(s) > max_len else s
+
+
 def _get_path(tool_input: dict) -> str:
     """Gemini 버전에 따라 경로 필드명이 다를 수 있으므로 여러 키를 시도합니다."""
     return (
@@ -100,33 +116,89 @@ def main():
 
     # ── 이벤트별 처리 ──────────────────────────────────────────────────
 
-    if event == "AfterTool":
-        # Gemini CLI 도구 사용 완료 — "무엇을 했는지" 기록
-        # tool_name 필드 (버전별로 "tool", "tool_name" 등 다를 수 있음)
+    if event == "BeforeTool":
+        # ── 도구 실행 직전: "어떤 파일을, 무슨 내용으로 바꿀지" 기록 ──────
+        # Claude의 PreToolUse와 동일한 수준의 정보를 사전 공유.
+        # 다른 CLI(Claude 등)가 Gemini의 작업 의도를 즉시 인지 가능.
         tool_name = (
-            data.get("tool_name")
-            or data.get("tool")
-            or data.get("name", "")
+            data.get("tool_name") or data.get("tool") or data.get("name", "")
         )
         tool_input = (
-            data.get("tool_input")
-            or data.get("input")
-            or data.get("args", {})
+            data.get("tool_input") or data.get("input") or data.get("args", {})
         )
 
         if tool_name in ("write_file", "create_file", "overwrite_file"):
+            # 파일 생성 — 파일명 + 첫 몇 줄 미리보기
             fp = _get_path(tool_input)
-            log_task("Gemini", f"[생성] {_short_path(fp)}")
+            content = tool_input.get("content") or tool_input.get("text") or ""
+            preview = _snippet(content, 60) if content else "(내용 없음)"
+            log_task("Gemini", f"[생성 시작] {_short_path(fp)}\n  내용 미리보기: {preview}")
 
         elif tool_name in ("replace", "edit_file", "str_replace"):
+            # 파일 수정 — 파일명 + 변경 전/후 스니펫 (Claude PreToolUse와 동일 형식)
             fp = _get_path(tool_input)
-            log_task("Gemini", f"[수정] {_short_path(fp)}")
+            old = _snippet(
+                tool_input.get("old_str") or tool_input.get("old_string")
+                or tool_input.get("old") or "", 50
+            )
+            new = _snippet(
+                tool_input.get("new_str") or tool_input.get("new_string")
+                or tool_input.get("new") or tool_input.get("content") or "", 50
+            )
+            msg = f"[수정 시작] {_short_path(fp)}"
+            if old:
+                msg += f"\n  변경 전: {old}"
+            if new:
+                msg += f"\n  변경 후: {new}"
+            log_task("Gemini", msg)
 
         elif tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
             cmd = (
-                tool_input.get("command")
-                or tool_input.get("cmd")
-                or tool_input.get("code", "")
+                tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")
+            ).strip()
+            if not any(cmd.startswith(p) for p in _SKIP_SHELL_PREFIXES):
+                log_task("Gemini", f"[실행 준비] {_short_cmd(cmd)}")
+
+    elif event == "AfterTool":
+        # ── 도구 실행 완료: "실제로 무엇이 바뀌었는지" 결과 기록 ──────────
+        # tool_result 필드에서 성공/실패 및 변경 결과 추출.
+        # 다른 CLI가 Gemini의 작업 완료 여부와 결과를 파악 가능.
+        tool_name = (
+            data.get("tool_name") or data.get("tool") or data.get("name", "")
+        )
+        tool_input = (
+            data.get("tool_input") or data.get("input") or data.get("args", {})
+        )
+        # tool_result: Gemini CLI가 도구 실행 결과를 담는 필드 (버전별 다를 수 있음)
+        tool_result = (
+            data.get("tool_result") or data.get("result")
+            or data.get("output") or data.get("response") or {}
+        )
+        result_text = ""
+        if isinstance(tool_result, str):
+            result_text = _snippet(tool_result, 60)
+        elif isinstance(tool_result, dict):
+            result_text = _snippet(
+                tool_result.get("output") or tool_result.get("content")
+                or tool_result.get("message") or str(tool_result), 60
+            )
+
+        if tool_name in ("write_file", "create_file", "overwrite_file"):
+            fp = _get_path(tool_input)
+            content = tool_input.get("content") or tool_input.get("text") or ""
+            lines = len(content.splitlines()) if content else 0
+            suffix = f" ({lines}줄 작성)" if lines else ""
+            log_task("Gemini", f"[생성 완료] {_short_path(fp)}{suffix} ✓")
+
+        elif tool_name in ("replace", "edit_file", "str_replace"):
+            fp = _get_path(tool_input)
+            # 수정 결과 — 성공 여부 + 결과 요약
+            result_suffix = f" → {result_text}" if result_text else " ✓"
+            log_task("Gemini", f"[수정 완료] {_short_path(fp)}{result_suffix}")
+
+        elif tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
+            cmd = (
+                tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")
             ).strip()
 
             # 조회·노이즈 명령어 스킵
@@ -135,7 +207,8 @@ def main():
             elif "git commit" in cmd:
                 log_task("Gemini", f"[커밋] {_short_cmd(cmd)}")
             else:
-                log_task("Gemini", f"[실행] {_short_cmd(cmd)}")
+                result_suffix = f" → {result_text}" if result_text else " ✓"
+                log_task("Gemini", f"[실행 완료] {_short_cmd(cmd, 50)}{result_suffix}")
 
         # read_file / glob / grep 등 조회 도구는 스킵
 

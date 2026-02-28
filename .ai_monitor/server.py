@@ -5,6 +5,19 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-01] - Claude (배포 버전 경로 버그 수정 — 스킬/MCP 인식 안 됨)
+#   - _current_project_root() 헬퍼 추가: config.json last_path 우선 참조
+#     → 배포 버전에서 PROJECT_ROOT가 exe 폴더/임시폴더로 잘못 설정되던 문제 해소
+#   - _mcp_config_path(): BASE_DIR.parent(임시폴더) → _current_project_root() 교체
+#   - /api/hive/health: PROJECT_ROOT → _current_project_root() 교체
+#   - /api/superpowers/status: PROJECT_ROOT → _current_project_root() 교체
+#   - /api/superpowers/install|uninstall: PROJECT_ROOT → _current_project_root() 교체
+#   - /api/config/update: last_path 변경 시 projects.json 동기화 (다음 시작 시 정확한 PROJECT_ROOT)
+# [2026-03-01] - Claude (콘솔 창 깜빡임 전면 수정)
+#   - /api/copy-path: 클립보드 복사 시 PowerShell 콘솔 창 방지 (CREATE_NO_WINDOW + -WindowStyle Hidden)
+#   - /api/hive/health/repair: watchdog --check subprocess 콘솔 창 방지
+#   - /api/ollama/status: wmic(RAM), nvidia-smi(GPU) subprocess 콘솔 창 방지
+#   - run_watchdog(): 워치독 데몬 Popen 콘솔 창 방지
 # [2026-03-01] - Claude (Gemini 세션 감지 기능)
 #   - pty_handler: Gemini/Claude 세션 시작 시 session_logs에 즉시 기록 ("세션 시작 ───")
 #   - pty_handler: 세션 종료 시 원인 구분 (PTY 프로세스 종료 vs WebSocket 연결 끊김)
@@ -751,17 +764,39 @@ class MemoryWatcher(threading.Thread):
                 print(f"[MemoryWatcher] Gemini chat 오류 {latest}: {e}")
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── 현재 활성 프로젝트 루트 동적 조회 ────────────────────────────────────────
+def _current_project_root() -> Path:
+    """현재 활성 프로젝트 루트를 반환합니다.
+
+    [개발 vs 배포 버전 차이 해소]
+    배포(frozen) 버전에서 PROJECT_ROOT가 exe 폴더나 임시 폴더로 잘못 설정되는 문제 방지.
+    config.json의 last_path(UI에서 사용자가 선택한 경로)를 최우선으로 사용합니다.
+    config.json이 없거나 경로가 없으면 시작 시 결정된 PROJECT_ROOT를 사용합니다.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+            lp = cfg.get('last_path', '')
+            if lp and Path(lp).is_dir():
+                return Path(lp)
+    except Exception:
+        pass
+    return PROJECT_ROOT
+
 # ── MCP 설정 파일 경로 헬퍼 ──────────────────────────────────────────────────
 def _mcp_config_path(tool: str, scope: str) -> Path:
     """
     도구(tool)와 범위(scope)에 따른 MCP 설정 파일 경로를 반환합니다.
     - claude / global  → ~/.claude/settings.json
-    - claude / project → {프로젝트루트}/.claude/settings.local.json
+    - claude / project → {현재프로젝트루트}/.claude/settings.local.json
     - gemini / global  → ~/.gemini/settings.json
-    - gemini / project → {프로젝트루트}/.gemini/settings.json
+    - gemini / project → {현재프로젝트루트}/.gemini/settings.json
+
+    [수정] BASE_DIR.parent 대신 _current_project_root() 사용.
+    배포 버전에서 BASE_DIR = sys._MEIPASS(임시 폴더)라서 project_root가 잘못 지정되던 버그 수정.
     """
     home = Path.home()
-    project_root = BASE_DIR.parent  # .ai_monitor의 부모 = 프로젝트 루트
+    project_root = _current_project_root()  # config.json last_path 우선 참조
     if tool == 'claude':
         if scope == 'global':
             return home / '.claude' / 'settings.json'
@@ -1104,7 +1139,13 @@ class SSEHandler(BaseHTTPRequestHandler):
                     "$folder = $app.BrowseForFolder(0, '프로젝트 폴더를 선택하세요', 0, 0); "
                     "if ($folder) { $folder.Self.Path } else { '' }"
                 )
-                res = subprocess.run(['powershell', '-Command', ps_cmd], capture_output=True, text=True, encoding='utf-8')
+                # CREATE_NO_WINDOW: PowerShell 콘솔 창이 화면에 잠깐 뜨는 문제 방지
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                res = subprocess.run(
+                    ['powershell', '-WindowStyle', 'Hidden', '-Command', ps_cmd],
+                    capture_output=True, text=True, encoding='utf-8',
+                    creationflags=_no_window
+                )
                 selected_path = res.stdout.strip().replace('\\', '/')
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
@@ -1269,9 +1310,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
+                # CREATE_NO_WINDOW: Python 서브프로세스 콘솔 창 방지
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
                 result_proc = subprocess.run(
                     [sys.executable, str(watchdog_script), "--check"],
-                    capture_output=True, text=True, encoding='utf-8'
+                    capture_output=True, text=True, encoding='utf-8',
+                    creationflags=_no_window
                 )
                 output = result_proc.stdout
                 json_start = output.find('{')
@@ -1406,8 +1450,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             target_path = query.get('path', [''])[0]
             try:
                 # Windows 클립보드에 경로 복사
+                # CREATE_NO_WINDOW: PowerShell 콘솔 창이 순간 깜빡이는 문제 방지
                 if os.name == 'nt':
-                    subprocess.run(['powershell', '-Command', f'Set-Clipboard -Value "{target_path}"'], check=True, encoding='utf-8')
+                    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                    subprocess.run(
+                        ['powershell', '-WindowStyle', 'Hidden', '-Command', f'Set-Clipboard -Value "{target_path}"'],
+                        check=True, encoding='utf-8', creationflags=_no_window
+                    )
                 self.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -1818,10 +1867,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             import urllib.request as _urllib
             result = {"hardware": {"ram_gb": 0, "gpus": []}, "models": [], "ollama_available": False, "error": None}
             # 1) RAM 감지 (Windows wmic)
+            # CREATE_NO_WINDOW: wmic 실행 시 콘솔 창이 순간 뜨는 문제 방지
+            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             try:
                 mem = subprocess.run(
                     ['wmic', 'OS', 'get', 'TotalVisibleMemorySize', '/value'],
-                    capture_output=True, text=True, encoding='utf-8', timeout=5
+                    capture_output=True, text=True, encoding='utf-8', timeout=5,
+                    creationflags=_no_window
                 )
                 for line in mem.stdout.split('\n'):
                     if 'TotalVisibleMemorySize=' in line:
@@ -1833,7 +1885,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 gpu = subprocess.run(
                     ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
-                    capture_output=True, text=True, encoding='utf-8', timeout=5
+                    capture_output=True, text=True, encoding='utf-8', timeout=5,
+                    creationflags=_no_window
                 )
                 if gpu.returncode == 0:
                     for line in gpu.stdout.strip().split('\n'):
@@ -1914,23 +1967,27 @@ class SSEHandler(BaseHTTPRequestHandler):
                 engine_data.setdefault('agent_active', False)
                 engine_data.setdefault('repair_count', 0)
 
+            # 현재 활성 프로젝트 경로 동적 조회 (UI에서 변경한 경로 즉시 반영)
+            # 배포 버전에서 PROJECT_ROOT가 exe 폴더로 잘못 설정될 때도 정확한 경로 사용
+            _proj = _current_project_root()
+
             # 파일 존재 여부 실시간 검사 결과와 병합
             health = {
                 **engine_data,
                 "constitution": {
-                    "rules_md": check_exists(PROJECT_ROOT / "RULES.md"),
-                    "gemini_md": check_exists(PROJECT_ROOT / "GEMINI.md"),
-                    "claude_md": check_exists(PROJECT_ROOT / "CLAUDE.md"),
-                    "project_map": check_exists(PROJECT_ROOT / "PROJECT_MAP.md")
+                    "rules_md": check_exists(_proj / "RULES.md"),
+                    "gemini_md": check_exists(_proj / "GEMINI.md"),
+                    "claude_md": check_exists(_proj / "CLAUDE.md"),
+                    "project_map": check_exists(_proj / "PROJECT_MAP.md")
                 },
                 "skills": {
-                    "master": check_exists(PROJECT_ROOT / ".gemini/skills/master/SKILL.md"),
-                    "brainstorm": check_exists(PROJECT_ROOT / ".gemini/skills/brainstorming/SKILL.md"),
+                    "master": check_exists(_proj / ".gemini/skills/master/SKILL.md"),
+                    "brainstorm": check_exists(_proj / ".gemini/skills/brainstorming/SKILL.md"),
                     "memory_script": check_exists(SCRIPTS_DIR / "memory.py")
                 },
                 "agents": {
-                    "claude_config": check_exists(PROJECT_ROOT / ".claude/commands/vibe-master.md"),
-                    "gemini_config": check_exists(PROJECT_ROOT / ".gemini/settings.json")
+                    "claude_config": check_exists(_proj / ".claude/commands/vibe-master.md"),
+                    "gemini_config": check_exists(_proj / ".gemini/settings.json")
                 },
                 "data": {
                     "shared_memory": check_exists(DATA_DIR / "shared_memory.db"),
@@ -2079,12 +2136,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             VIBE_SKILL_NAMES = ['master', 'brainstorm', 'debug', 'write-plan', 'execute-plan', 'tdd', 'code-review']
-            # Claude: 프로젝트별 설치 — PROJECT_ROOT/.claude/commands/vibe-master.md 존재 여부로 판단
-            claude_cmd_dir = PROJECT_ROOT / '.claude' / 'commands'
+            # 현재 활성 프로젝트 경로 동적 조회 (배포 버전 호환)
+            _proj = _current_project_root()
+            # Claude: 프로젝트별 설치 — {현재프로젝트}/.claude/commands/vibe-master.md 존재 여부로 판단
+            claude_cmd_dir = _proj / '.claude' / 'commands'
             claude_installed = (claude_cmd_dir / 'vibe-master.md').exists()
             claude_skills = [f.stem.replace('vibe-', '') for f in claude_cmd_dir.glob('vibe-*.md')] if claude_installed else []
             # Gemini: 현재 프로젝트 .gemini/skills/master 존재 여부로 판단
-            gemini_skills_dir = PROJECT_ROOT / '.gemini' / 'skills'
+            gemini_skills_dir = _proj / '.gemini' / 'skills'
             gemini_installed = (gemini_skills_dir / 'master' / 'SKILL.md').exists()
             gemini_skills = [d.name for d in gemini_skills_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()] if gemini_installed and gemini_skills_dir.exists() else []
             result = {
@@ -2534,6 +2593,25 @@ class SSEHandler(BaseHTTPRequestHandler):
                 config.update(data)
                 with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                     json.dump(config, f, ensure_ascii=False, indent=2)
+
+                # last_path 변경 시 projects.json에도 동기화 → 다음 서버 시작 시 PROJECT_ROOT 정확히 설정
+                # 배포 버전에서 프로젝트 전환 후 재시작해도 올바른 PROJECT_ROOT를 사용하기 위함
+                if 'last_path' in data and data['last_path']:
+                    try:
+                        _lp = str(data['last_path']).replace('\\', '/')
+                        _projs = []
+                        if PROJECTS_FILE.exists():
+                            _projs = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
+                        if _lp in _projs:
+                            _projs.remove(_lp)
+                        _projs.insert(0, _lp)  # 가장 최근 경로를 0번으로
+                        PROJECTS_FILE.write_text(
+                            json.dumps(_projs[:20], ensure_ascii=False, indent=2),
+                            encoding='utf-8'
+                        )
+                    except Exception:
+                        pass
+
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -3044,15 +3122,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                 tool = str(body.get('tool', 'claude'))
                 home = Path.home()
 
+                # 현재 활성 프로젝트 경로 동적 조회 (배포 버전 호환)
+                _proj = _current_project_root()
+
                 if tool == 'claude':
                     # 내장 스킬 소스 경로: exe 기준 BASE_DIR/../skills/claude/ 또는 개발 환경
                     import shutil as _shutil
                     skills_src = BASE_DIR / 'skills' / 'claude'
                     if not skills_src.exists():
-                        skills_src = PROJECT_ROOT / 'skills' / 'claude'
+                        skills_src = _proj / 'skills' / 'claude'
                     if not skills_src.exists():
                         raise Exception('내장 스킬 파일을 찾을 수 없습니다 (skills/claude/)')
-                    cmd_dir = PROJECT_ROOT / '.claude' / 'commands'
+                    cmd_dir = _proj / '.claude' / 'commands'
                     cmd_dir.mkdir(parents=True, exist_ok=True)
                     installed = []
                     for md in skills_src.glob('vibe-*.md'):
@@ -3066,15 +3147,15 @@ class SSEHandler(BaseHTTPRequestHandler):
                     }, ensure_ascii=False).encode('utf-8'))
 
                 elif tool == 'gemini':
-                    # 빌드 버전: BASE_DIR(sys._MEIPASS)에 내장된 스킬을 PROJECT_ROOT에 복사
-                    # 개발 버전: PROJECT_ROOT/.gemini/skills/ 가 이미 존재하므로 소스=대상
+                    # 빌드 버전: BASE_DIR(sys._MEIPASS)에 내장된 스킬을 현재 프로젝트에 복사
+                    # 개발 버전: _proj/.gemini/skills/ 가 이미 존재하므로 소스=대상
                     import shutil as _shutil
                     gemini_skills_src = BASE_DIR / '.gemini' / 'skills'
                     if not gemini_skills_src.exists():
-                        gemini_skills_src = PROJECT_ROOT / '.gemini' / 'skills'
+                        gemini_skills_src = _proj / '.gemini' / 'skills'
                     if not gemini_skills_src.exists():
                         raise Exception('내장 Gemini 스킬을 찾을 수 없습니다 (.gemini/skills/)')
-                    target_dir = PROJECT_ROOT / '.gemini' / 'skills'
+                    target_dir = _proj / '.gemini' / 'skills'
                     # 소스와 대상이 다를 때만 복사 (설치 버전에서 실제 파일 배포)
                     if gemini_skills_src.resolve() != target_dir.resolve():
                         _shutil.copytree(str(gemini_skills_src), str(target_dir), dirs_exist_ok=True)
@@ -3101,9 +3182,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                 home = Path.home()
                 import shutil
 
+                _proj = _current_project_root()  # 현재 활성 프로젝트 경로
                 if tool == 'claude':
-                    # 프로젝트별 설치 경로에서 제거
-                    cmd_dir = PROJECT_ROOT / '.claude' / 'commands'
+                    # 프로젝트별 설치 경로에서 제거 (배포 버전 호환)
+                    cmd_dir = _proj / '.claude' / 'commands'
                     removed = []
                     for md in cmd_dir.glob('vibe-*.md'):
                         md.unlink()
@@ -3412,13 +3494,15 @@ if __name__ == '__main__':
         watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
             # 윈도우 환경에서 CP949 인코딩 에러 방지를 위해 encoding 및 errors 설정 추가
+            # CREATE_NO_WINDOW: 워치독 데몬 시작 시 콘솔 창 표시 방지
             subprocess.Popen(
                 [sys.executable, str(watchdog_script), "--data-dir", str(DATA_DIR)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             )
     threading.Thread(target=run_watchdog, daemon=True).start()
     
