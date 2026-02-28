@@ -19,7 +19,6 @@ import {
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
   Bot, Play, CircleDot, Package, CheckCircle2, Circle
 } from 'lucide-react';
-import Editor from '@monaco-editor/react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
   SiGit, SiCss3, SiHtml5 
@@ -1859,7 +1858,6 @@ function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent,
             path={file.path} 
             content={file.content} 
             onChange={(val) => updateFileContent(file.id, val)}
-            onSave={() => handleSaveFile(file.path, file.content)}
           />
         )}
       </div>
