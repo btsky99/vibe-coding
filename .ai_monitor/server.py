@@ -44,8 +44,20 @@ if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() not in ("u
     except Exception:
         pass
 
-# 전역 소켓 타임아웃 설정 (좀비 스레드 방지)
-socket.setdefaulttimeout(60)
+# [수정] pythonw.exe로 실행 시(터미널 없음) 에러 로그를 파일로 기록하도록 개선
+if sys.stdout is None or sys.stderr is None:
+    try:
+        # DATA_DIR 정의 전이므로 임시 경로 사용 후 아래에서 재지정 가능성 검토
+        _log_p = Path(__file__).resolve().parent / "server.log"
+        _f = open(_log_p, "a", encoding="utf-8")
+        sys.stdout = _f
+        sys.stderr = _f
+        print(f"\n--- Server Started (Log Redirected) at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+    except Exception:
+        pass
+
+# 전역 소켓 타임아웃 제거 (SSE 등 장기 연결 방해 요소)
+# socket.setdefaulttimeout(60)  <-- 제거됨
 
 # BASE_DIR: 개발 모드에선 server.py 위치, 배포(frozen) 모드에선 PyInstaller 임시 압축 해제 폴더(sys._MEIPASS)
 # 이 상수는 winpty DLL 경로 등 초기화 코드보다 반드시 먼저 정의되어야 함
@@ -922,9 +934,10 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 실시간 업데이트를 위해 클라이언트 등록
             THOUGHT_CLIENTS.add(self)
             try:
-                self.connection.settimeout(30.0)
+                # SSE 연결 타임아웃 완화 (60초)
+                self.connection.settimeout(60.0)
                 while True:
-                    time.sleep(15)
+                    time.sleep(30) # 하트비트 주기를 30초로 완화
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
             except Exception:
@@ -944,10 +957,11 @@ class SSEHandler(BaseHTTPRequestHandler):
             
             FS_CLIENTS.add(self)
             try:
-                self.connection.settimeout(30.0)
+                # SSE 연결 타임아웃 완화 (60초)
+                self.connection.settimeout(60.0)
                 # 연결 유지를 위한 하트비트 루프
                 while True:
-                    time.sleep(15)
+                    time.sleep(30) # 하트비트 주기를 30초로 완화
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
             except Exception:
@@ -978,10 +992,15 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"Initial DB Read error: {e}")
             
+            # SSE 연결 타임아웃 완화 (60초)
+            self.connection.settimeout(60.0)
+            heartbeat_tick = 0
+
             while True:
                 try:
                     # 새로운 로그가 있는지 확인 (last_id 보다 큰 id 조회)
-                    conn = sqlite3.connect(str(DATA_DIR / "hive_mind.db"), timeout=5.0)
+                    # DB 락 대응을 위해 timeout=20.0으로 설정
+                    conn = sqlite3.connect(str(DATA_DIR / "hive_mind.db"), timeout=20.0)
                     conn.row_factory = sqlite3.Row
                     cursor = conn.execute("SELECT * FROM session_logs WHERE id > ? ORDER BY id ASC", (last_id,))
                     new_rows = [dict(row) for row in cursor.fetchall()]
@@ -994,19 +1013,19 @@ class SSEHandler(BaseHTTPRequestHandler):
                             if 'trigger_msg' in out_row:
                                 out_row['trigger'] = out_row.pop('trigger_msg')
                             
-                            # 연결 상태 확인하며 전송 (1초 내에 못 보내면 끊긴 것으로 간주)
-                            self.connection.settimeout(2.0)
                             self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
                             self.wfile.flush()
                         last_id = new_rows[-1]['id']
-                    
-                    # 연결 유지를 위한 하트비트 시도 (DB 변경이 없을 때)
+                        heartbeat_tick = 0
                     else:
-                        self.connection.settimeout(2.0)
-                        self.wfile.write(b": heartbeat\n\n")
-                        self.wfile.flush()
+                        heartbeat_tick += 1
+                        # 30초마다 하트비트 전송
+                        if heartbeat_tick >= 30:
+                            self.wfile.write(b": heartbeat\n\n")
+                            self.wfile.flush()
+                            heartbeat_tick = 0
                     
-                    time.sleep(1.0) # 감시 주기를 0.5s에서 1.0s로 늘려 리소스 절약
+                    time.sleep(1.0) # 감시 주기를 1.0s로 유지
                 except (BrokenPipeError, ConnectionResetError, TimeoutError, socket.timeout):
                     break
                 except Exception as e:
@@ -1108,14 +1127,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
             self.wfile.write(json.dumps(result).encode('utf-8'))
-        elif parsed_path.path == '/api/shutdown':
-            self.send_response(200)
+        elif parsed_path.path == '/api/shutdown-disabled':
+            # 24시간 가동을 위해 셧다운 기능 비활성화
+            self.send_response(403)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "success", "message": "Server shutting down..."}).encode('utf-8'))
-            print("Shutdown requested via API. Exiting in 1 second...")
-            threading.Timer(1.0, lambda: os._exit(0)).start()
+            self.wfile.write(json.dumps({"status": "error", "message": "Shutdown is disabled for 24/7 operation."}).encode('utf-8'))
         elif parsed_path.path == '/api/files':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1510,14 +1527,42 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
                 agent_last_seen: dict = {a: None for a in KNOWN_AGENTS}
                 try:
+                    # hive_mind.db session_logs에서 에이전트 활동 시각 조회
+                    # 실제 agent 값이 'Claude', 'Gemini CLI', 'Gemini-1' 등 대소문자 혼합이므로 LOWER/LIKE 사용
                     conn_h = sqlite3.connect(str(DATA_DIR / 'hive_mind.db'), timeout=5, check_same_thread=False)
                     conn_h.row_factory = sqlite3.Row
                     for row in conn_h.execute(
                         "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
-                        "WHERE agent IN ('claude','gemini') GROUP BY agent"
+                        "WHERE LOWER(agent) LIKE '%claude%' OR LOWER(agent) LIKE '%gemini%' "
+                        "GROUP BY LOWER(agent) ORDER BY last_seen DESC"
                     ).fetchall():
-                        agent_last_seen[row['agent']] = row['last_seen']
+                        agent_lower = row['agent'].lower()
+                        if 'claude' in agent_lower and agent_last_seen.get('claude') is None:
+                            agent_last_seen['claude'] = row['last_seen']
+                        elif 'gemini' in agent_lower and agent_last_seen.get('gemini') is None:
+                            agent_last_seen['gemini'] = row['last_seen']
                     conn_h.close()
+                except Exception:
+                    pass
+
+                # shared_memory.db author 필드로 보완 — 더 최신 활동 기록 포함
+                try:
+                    conn_sm = sqlite3.connect(str(DATA_DIR / 'shared_memory.db'), timeout=5, check_same_thread=False)
+                    conn_sm.row_factory = sqlite3.Row
+                    for row in conn_sm.execute(
+                        "SELECT author, MAX(updated_at) as last_seen FROM memory "
+                        "WHERE LOWER(author) LIKE '%claude%' OR LOWER(author) LIKE '%gemini%' "
+                        "GROUP BY LOWER(author) ORDER BY last_seen DESC"
+                    ).fetchall():
+                        author_lower = row['author'].lower()
+                        last = row['last_seen']
+                        if 'claude' in author_lower:
+                            if agent_last_seen.get('claude') is None or (last and last > (agent_last_seen['claude'] or '')):
+                                agent_last_seen['claude'] = last
+                        elif 'gemini' in author_lower:
+                            if agent_last_seen.get('gemini') is None or (last and last > (agent_last_seen['gemini'] or '')):
+                                agent_last_seen['gemini'] = last
+                    conn_sm.close()
                 except Exception:
                     pass
 
@@ -3262,7 +3307,9 @@ if __name__ == '__main__':
         threading.Thread(target=force_win32_icon, daemon=True).start()
         
         webview.start()
-        os._exit(0)  # 창 닫히면 즉시 프로세스 종료
+        # 24시간 가동을 위해 창이 닫혀도 프로세스를 종료하지 않고 유지합니다.
+        print("[*] GUI 창이 닫혔습니다. 서버는 백그라운드에서 계속 실행됩니다...")
+        while True: time.sleep(60)
     except Exception as e:
         print(f"[!] GUI Error: {e}")
         open_app_window(f"http://localhost:{HTTP_PORT}")
