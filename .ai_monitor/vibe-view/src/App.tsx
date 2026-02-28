@@ -5,22 +5,21 @@
  * 🔗 개별 상세 문서: docs/App.tsx.md
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
- *          (2026-02-24: 한글 IME 엔터 키 즉시 전송 로직 최종 개선 및 재빌드 완료)
- * [2026-02-26] Claude: Superpowers 카드 repo·commands 하드코딩 → info?.repo / info?.commands 사용으로 수정
+ *          (2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영)
  * ------------------------------------------------------------------------
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Menu, Terminal, RotateCw,
-  ChevronLeft, X, Zap, Search, Settings, ScrollText,
+  Activity, Menu, Terminal, RotateCw,
+  ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
-  Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain,
+  Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
-  Bot, Play, CircleDot, Package, CheckCircle2, Circle, Pin,
-  Maximize2, Minimize2, FilePlus, FolderPlus, Edit2, Copy, ExternalLink
+  Bot, Play, CircleDot, Package, CheckCircle2, Circle
 } from 'lucide-react';
+import Editor from '@monaco-editor/react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
   SiGit, SiCss3, SiHtml5 
@@ -31,23 +30,11 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, SmitheryServer, HiveHealth, HiveLog } from './types';
+import VibeEditor from './components/VibeEditor';
+import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
-
-// Claude Code 세션별 컨텍스트 창 사용량 데이터 구조
-interface ContextSession {
-  session_id: string;
-  slug: string;         // 세션 닉네임 (예: peppy-crafting-owl)
-  model: string;        // 모델명 (예: claude-sonnet-4-6)
-  input_tokens: number; // 현재 컨텍스트 창 입력 토큰 수
-  output_tokens: number;// 누적 출력 토큰 수
-  cache_read: number;   // 캐시 읽기 (Cache~)
-  cache_write: number;  // 캐시 쓰기/생성 (Cache+)
-  last_ts: string;      // 마지막 활동 ISO 타임스탬프
-  cwd: string;          // 작업 디렉터리
-}
 const WS_PORT = parseInt(window.location.port) + 1;
 
 export interface Shortcut { label: string; cmd: string; }
@@ -60,22 +47,9 @@ const defaultShortcuts: Shortcut[] = [
 ];
 
 // 에이전트별 슬래시 커맨드 목록 (한글 설명 포함)
-interface SlashCommand { cmd: string; desc: string; category: string; injectSkill?: string; }
-
-// 한글 스킬 커맨드 — 모든 에이전트 공통
-const SKILL_SLASH_CMDS: SlashCommand[] = [
-  { cmd: '/마스터',       desc: '중앙 컨트롤 타워 — 요청 분석 → 워크플로우 자동 라우팅', category: '스킬', injectSkill: 'master' },
-  { cmd: '/브레인스토밍', desc: '소크라테스식 요구사항 정제 → 알고리즘 주입', category: '스킬', injectSkill: 'brainstorm' },
-  { cmd: '/계획작성',     desc: '마이크로태스크 단위 계획 작성 → 알고리즘 주입', category: '스킬', injectSkill: 'write-plan' },
-  { cmd: '/계획실행',     desc: '병렬 서브에이전트 실행 → 알고리즘 주입',     category: '스킬', injectSkill: 'execute-plan' },
-  { cmd: '/TDD',          desc: 'RED→GREEN→REFACTOR 사이클 → 알고리즘 주입', category: '스킬', injectSkill: 'tdd' },
-  { cmd: '/디버그',       desc: '4단계 근본원인 분석 → 알고리즘 주입',        category: '스킬', injectSkill: 'debug' },
-  { cmd: '/코드리뷰',     desc: 'OWASP 보안 + 품질 자동 검증 → 알고리즘 주입', category: '스킬', injectSkill: 'code-review' },
-];
-
+interface SlashCommand { cmd: string; desc: string; category: string; }
 const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
   claude: [
-    ...SKILL_SLASH_CMDS,
     { cmd: '/model',       desc: '모델 변경 (opus / sonnet / haiku)',    category: '설정' },
     { cmd: '/clear',       desc: '대화 기록 초기화',                      category: '설정' },
     { cmd: '/compact',     desc: '대화 압축 — 컨텍스트 절약',             category: '설정' },
@@ -92,7 +66,6 @@ const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
     { cmd: '/terminal',    desc: '터미널 명령 실행 모드',                  category: '작업' },
   ],
   gemini: [
-    ...SKILL_SLASH_CMDS,
     { cmd: '/help',        desc: '전체 도움말 보기',                       category: '도움말' },
     { cmd: '/clear',       desc: '대화 초기화',                            category: '설정' },
     { cmd: '/chat',        desc: '대화형 채팅 모드 전환',                  category: '설정' },
@@ -127,82 +100,11 @@ export interface OpenFile {
   zIndex: number;
 }
 
-// ── 활성 터미널 슬롯 추적 (전역) ──────────────────────────────────────────
-// 마지막으로 포커스된 터미널 슬롯 ID — vibe:activeSlot 이벤트로 업데이트
-let _vibeActiveSlot = 0;
-window.addEventListener('vibe:activeSlot', (e: Event) => {
-  _vibeActiveSlot = (e as CustomEvent<{ slotId: number }>).detail.slotId;
-});
-
-// ── 바이브 스킬 알고리즘 (MCP 없이 직접 주입) ──────────────────────────
-export interface VibeSkill {
-  name: string;
-  desc: string;
-  claudeCmd: string;   // MCP 설치 시 사용할 슬래시 커맨드
-  geminiCmd: string;
-  algo: string;        // MCP 미설치 시 주입할 알고리즘 (단일 메시지)
-}
-
-export const VIBE_SKILLS: VibeSkill[] = [
-  {
-    name: 'master',
-    desc: '중앙 컨트롤 타워 — 요청 분석 → 하위 워크플로우 자동 라우팅',
-    claudeCmd: '/vibe-master',
-    geminiCmd: '/master',
-    algo: '🌐 [마스터 컨트롤 프로토콜 가동] .gemini/skills/master/SKILL.md를 읽고 PROJECT_MAP.md를 기반으로 상황을 조율하세요. 어떤 작업을 도와드릴까요?',
-  },
-  {
-    name: 'brainstorm',
-    desc: '소크라테스식 요구사항 정제',
-    claudeCmd: '/vibe-brainstorm',
-    geminiCmd: '/brainstorming',
-    algo: '🧠 [브레인스토밍 6단계 절차 가동] .gemini/skills/brainstorming/SKILL.md를 읽고 사용자 의도를 분석하여 승인된 계획을 수립하세요. 지금 무엇을 만들고 싶으신가요?',
-  },
-  {
-    name: 'write-plan',
-    desc: '마이크로태스크 단위 계획 작성',
-    claudeCmd: '/vibe-write-plan',
-    geminiCmd: '/write-plan',
-    algo: '📝 [구현 계획 작성 모드] .gemini/skills/write-plan/SKILL.md를 참고하여 TDD 기반의 상세 계획을 수립하세요. 어떤 기능의 계획을 짤까요?',
-  },
-  {
-    name: 'execute-plan',
-    desc: '계획 순서대로 실행',
-    claudeCmd: '/vibe-execute-plan',
-    geminiCmd: '/execute-plan',
-    algo: '🚀 [계획 실행 모드] .gemini/skills/execute-plan/SKILL.md를 참고하여 승인된 계획대로 구현을 시작하세요. 어떤 계획 파일을 읽을까요?',
-  },
-  {
-    name: 'tdd',
-    desc: 'RED → GREEN → REFACTOR 사이클',
-    claudeCmd: '/vibe-tdd',
-    geminiCmd: '/tdd',
-    algo: '🧪 [TDD 모드 가동] .gemini/skills/tdd/SKILL.md를 참고하여 실패하는 테스트부터 작성하는 RED-GREEN-REFACTOR 사이클을 시작합니다. 어떤 기능을 구현할까요?',
-  },
-  {
-    name: 'debug',
-    desc: '4단계 근본원인 분석',
-    claudeCmd: '/vibe-debug',
-    geminiCmd: '/systematic-debugging',
-    algo: '🔍 [지능형 디버깅 가동] .gemini/skills/systematic-debugging/SKILL.md를 참고하여 원인 분석 후 수정을 시작하세요. 어떤 버그를 추적할까요?',
-  },
-  {
-    name: 'code-review',
-    desc: 'OWASP 보안 + 품질 자동 검증',
-    claudeCmd: '/vibe-code-review',
-    geminiCmd: '/code-review',
-    algo: '🧐 [코드 리뷰 모드] .gemini/skills/code-review/SKILL.md를 참고하여 품질/보안을 검증하세요. 무엇을 리뷰할까요?',
-  },
-];
-
 function App() {
-  const [isInitializing, setIsInitializing] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(300);
-  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [activeTab, setActiveTab] = useState('explorer');
   // 레이아웃 모드: 1, 2, 3, 4(가로4열), 2x2(2×2격자), 6(3×2격자), 8(4×2격자)
-  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('2');
+  const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('1');
   // '2x2'는 parseInt 불가 → 직접 매핑
   const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8 };
   const terminalCount = terminalCountMap[layoutMode] ?? 2;
@@ -228,44 +130,9 @@ function App() {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [lastSeenMsgCount, setLastSeenMsgCount] = useState(0);
   const [msgFrom, setMsgFrom] = useState('claude');
-
-  // 🔮 컨텍스트 메뉴 상태 (파일/폴더 및 작업 항목 지원)
-  const [contextMenu, setContextMenu] = useState<{ 
-    x: number, y: number, 
-    type: 'file' | 'task', 
-    path?: string, isDir?: boolean,
-    taskId?: string, taskTitle?: string
-  } | null>(null);
-  const [isRenaming, setIsRenaming] = useState<string | null>(null); // 이름 변경 중인 파일 경로
-  const [newNameDraft, setNewNameDraft] = useState(''); // 새 이름 입력값
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
   const [msgContent, setMsgContent] = useState('');
-  // 메시지 채널용 한글 입력 상태 Ref
-  const isMsgComposingRef = useRef(false);
-
-  // ─── 로컬 모델 매니저 상태 ────────────────────────────────────────────
-  const [localModels, setLocalModels] = useState<{
-    hardware: { ram_gb: number; gpus: { name: string; vram_gb: number }[] };
-    models: { name: string; size_gb: number; source: string; fits: boolean | null }[];
-    ollama_available: boolean;
-    ollama_error?: string;
-    error?: string;
-  } | null>(null);
-  const [localModelsLoading, setLocalModelsLoading] = useState(false);
-
-  const fetchLocalModels = () => {
-    setLocalModelsLoading(true);
-    fetch(`${API_BASE}/api/local-models`)
-      .then(res => res.json())
-      .then(data => { setLocalModels(data); setLocalModelsLoading(false); })
-      .catch(() => setLocalModelsLoading(false));
-  };
-
-  // 모델 탭 진입 시 자동 조회
-  useEffect(() => {
-    if (activeTab === 'models') fetchLocalModels();
-  }, [activeTab]);
 
   // 읽지 않은 메시지 수 — 메시지 탭을 열면 0으로 초기화
   const unreadMsgCount = activeTab === 'messages' ? 0 : Math.max(0, messages.length - lastSeenMsgCount);
@@ -377,37 +244,10 @@ function App() {
   const [memContent, setMemContent] = useState('');
   const [memTags, setMemTags] = useState('');
   const [memAuthor, setMemAuthor] = useState('claude');
-  const [memShowAll, setMemShowAll] = useState(false);   // 전체 프로젝트 보기 토글
-  const [currentProjectName, setCurrentProjectName] = useState('');
-  const [currentProjectRoot, setCurrentProjectRoot] = useState(''); // 서버 PROJECT_ROOT 전체 경로
-  const [appVersion, setAppVersion] = useState('');
-
-  // 현재 프로젝트 정보 + 서버 버전 조회 (1회)
-  // localStorage에 경로가 없으면 서버 PROJECT_ROOT를 currentPath 초기값으로 사용
-  useEffect(() => {
-    fetch(`${API_BASE}/api/project-info`)
-      .then(res => res.json())
-      .then(data => {
-        setCurrentProjectName(data.project_name || '');
-        const root = (data.project_root || '').replace(/\\/g, '/');
-        setCurrentProjectRoot(root);
-        // 최초 실행(localStorage 없음)이면 서버 PROJECT_ROOT를 현재 경로로 사용
-        if (!localStorage.getItem('hive_last_path') && root) {
-          setCurrentPath(root);
-          setGitPath(root);
-        }
-        if (data.version) setAppVersion(data.version);
-      })
-      .catch(() => {})
-      .finally(() => setIsInitializing(false));
-  }, []);
 
   // 검색어가 있으면 서버 검색, 없으면 전체 목록 사용
-  const fetchMemory = (q = '', showAll = memShowAll) => {
-    const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (showAll) params.set('all', 'true');
-    const url = `${API_BASE}/api/memory${params.toString() ? '?' + params.toString() : ''}`;
+  const fetchMemory = (q = '') => {
+    const url = q ? `${API_BASE}/api/memory?q=${encodeURIComponent(q)}` : `${API_BASE}/api/memory`;
     fetch(url)
       .then(res => res.json())
       .then(data => setMemory(Array.isArray(data) ? data : []))
@@ -416,13 +256,13 @@ function App() {
 
   // 공유 메모리 폴링 (5초 간격 — 자주 바뀌지 않으므로 느리게)
   useEffect(() => {
-    fetchMemory(memSearch, memShowAll);
-    const interval = setInterval(() => fetchMemory(memSearch, memShowAll), 5000);
+    fetchMemory();
+    const interval = setInterval(() => fetchMemory(memSearch), 5000);
     return () => clearInterval(interval);
-  }, [memSearch, memShowAll]);
+  }, [memSearch]);
 
   // 검색어 변경 시 즉시 검색
-  useEffect(() => { fetchMemory(memSearch, memShowAll); }, [memSearch, memShowAll]);
+  useEffect(() => { fetchMemory(memSearch); }, [memSearch]);
 
   // 메모리 저장 (신규 또는 수정 — key 기준 UPSERT)
   const saveMemory = () => {
@@ -466,27 +306,11 @@ function App() {
     setShowMemForm(true);
   };
 
-  // Git 변경사항 롤백 (Undo)
-  const rollbackFile = (filePath: string) => {
-    if (!confirm(`[위험] '${filePath}'의 모든 변경사항을 취소하고 마지막 커밋 상태로 되돌리시겠습니까?`)) return;
-    fetch(`${API_BASE}/api/git/rollback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file: filePath, path: gitPath }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'success') refreshItems();
-        else alert(`롤백 실패: ${data.message}`);
-      })
-      .catch(err => alert(`에러 발생: ${err}`));
-  };
-
   // ─── Git 실시간 감시 상태 ─────────────────────────────────────────────
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitLog, setGitLog] = useState<GitCommit[]>([]);
-  // 초기값은 빈 문자열 — project-info useEffect에서 서버 PROJECT_ROOT로 동기화
-  const [gitPath, setGitPath] = useState(localStorage.getItem('hive_last_path') || '');
+  // 초기값은 하드코딩 — currentPath 선언 이후 useEffect로 동기화
+  const [gitPath, setGitPath] = useState("D:/vibe-coding");
 
   // Git 상태 폴링 (5초 간격)
   useEffect(() => {
@@ -545,96 +369,6 @@ function App() {
   // 오케스트레이터 경고 수 (Hive 탭 배지용)
   const orchWarningCount = orchStatus?.warnings?.length ?? 0;
 
-  // ─── Superpowers 관리자 상태 ─────────────────────────────────────────────
-  interface SpStatus { installed: boolean; version: string | null; skills: string[]; commands: string[]; repo: string; }
-  const [spStatus, setSpStatus] = useState<{ claude: SpStatus; gemini: SpStatus } | null>(null);
-  const [spLoading, setSpLoading] = useState<Record<string, boolean>>({});
-  const [spMsg, setSpMsg] = useState('');
-  const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
-  const [hiveLogs, setHiveLogs] = useState<HiveLog[]>([]); // 하이브 통합 로그
-  const [logFilter, setLogFilter] = useState(''); // 로그 검색어
-  const [skillProposals, setSkillProposals] = useState<{ keyword: string; count: number; suggested_skill_name: string; description: string }[]>([]);
-
-  const fetchHiveHealth = () => {
-    fetch(`${API_BASE}/api/hive/health`)
-      .then(res => res.json())
-      .then(data => setHiveHealth(data))
-      .catch(() => {});
-  };
-
-  const fetchSkillAnalysis = () => {
-    fetch(`${API_BASE}/api/hive/skill-analysis`)
-      .then(res => res.json())
-      .then(data => setSkillProposals(data.proposals || []))
-      .catch(() => {});
-  };
-
-  const approveSkill = (proposal: { keyword: string; suggested_skill_name: string }) => {
-    fetch(`${API_BASE}/api/hive/approve-skill`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skill_name: proposal.suggested_skill_name, keyword: proposal.keyword })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.status === 'success') {
-        setSpMsg(`새로운 스킬 [${proposal.suggested_skill_name}]이(가) 등록되었습니다.`);
-        fetchSkillAnalysis();
-        fetchHiveHealth();
-      }
-    });
-  };
-
-  const fetchSpStatus = () => {
-    fetch(`${API_BASE}/api/superpowers/status`)
-      .then(res => res.json())
-      .then(data => setSpStatus(data))
-      .catch(() => {});
-  };
-  const fetchHiveLogs = () => {
-    fetch(`${API_BASE}/api/hive/logs`)
-      .then(res => res.json())
-      .then(data => setHiveLogs(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  };
-
-  useEffect(() => { 
-    fetchSpStatus(); 
-    fetchHiveHealth(); 
-    fetchSkillAnalysis(); 
-    fetchHiveLogs();
-    const interval = setInterval(fetchHiveLogs, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const spInstall = (tool: 'claude' | 'gemini') => {
-    setSpLoading(p => ({ ...p, [tool]: true }));
-    setSpMsg('');
-    fetch(`${API_BASE}/api/superpowers/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool }),
-    })
-      .then(res => res.json())
-      .then(data => { setSpMsg(data.message || '완료'); fetchSpStatus(); })
-      .catch(e => setSpMsg(String(e)))
-      .finally(() => setSpLoading(p => ({ ...p, [tool]: false })));
-  };
-
-  const spUninstall = (tool: 'claude' | 'gemini') => {
-    setSpLoading(p => ({ ...p, [tool]: true }));
-    setSpMsg('');
-    fetch(`${API_BASE}/api/superpowers/uninstall`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool }),
-    })
-      .then(res => res.json())
-      .then(data => { setSpMsg(data.message || '완료'); fetchSpStatus(); })
-      .catch(e => setSpMsg(String(e)))
-      .finally(() => setSpLoading(p => ({ ...p, [tool]: false })));
-  };
-
   // ─── MCP 관리자 상태 ─────────────────────────────────────────────────────
   const [mcpCatalog, setMcpCatalog] = useState<McpEntry[]>([]);
   const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
@@ -642,21 +376,6 @@ function App() {
   const [mcpScope, setMcpScope] = useState<'global' | 'project'>('global');
   const [mcpLoading, setMcpLoading] = useState<Record<string, boolean>>({}); // 이름 → 로딩 여부
   const [mcpMsg, setMcpMsg] = useState(''); // 마지막 작업 결과 메시지
-  const [mcpNeedsRestart, setMcpNeedsRestart] = useState(false); // 재시작 안내 플래그
-  // Smithery 검색
-  const [mcpView, setMcpView] = useState<'catalog' | 'search'>('catalog');
-  const [mcpSearchQuery, setMcpSearchQuery] = useState('');
-  const [mcpSearchResults, setMcpSearchResults] = useState<SmitheryServer[]>([]);
-  const [mcpSearchLoading, setMcpSearchLoading] = useState(false);
-  const [mcpSearchPage, setMcpSearchPage] = useState(1);
-  const [mcpSearchTotal, setMcpSearchTotal] = useState(0);
-  const [mcpSearchTotalPages, setMcpSearchTotalPages] = useState(0);
-  const [mcpSearchError, setMcpSearchError] = useState('');
-  const [mcpHasKey, setMcpHasKey] = useState(false);
-  const [mcpKeyMasked, setMcpKeyMasked] = useState('');
-  const [mcpKeyDraft, setMcpKeyDraft] = useState('');
-  const [mcpKeySaving, setMcpKeySaving] = useState(false);
-  const [mcpShowKeyInput, setMcpShowKeyInput] = useState(false);
 
   // 카탈로그는 최초 1회만 불러옴
   useEffect(() => {
@@ -664,78 +383,7 @@ function App() {
       .then(res => res.json())
       .then((data: McpEntry[]) => setMcpCatalog(Array.isArray(data) ? data : []))
       .catch(() => {});
-    // Smithery API 키 상태 조회
-    fetch(`${API_BASE}/api/mcp/apikey`)
-      .then(res => res.json())
-      .then(data => { setMcpHasKey(data.has_key ?? false); setMcpKeyMasked(data.masked ?? ''); })
-      .catch(() => {});
   }, []);
-
-  // Smithery API 키 저장
-  const saveMcpApiKey = () => {
-    if (!mcpKeyDraft.trim()) return;
-    setMcpKeySaving(true);
-    fetch(`${API_BASE}/api/mcp/apikey`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_key: mcpKeyDraft.trim() }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'success') {
-          setMcpHasKey(true);
-          setMcpKeyMasked(mcpKeyDraft.slice(0, 6) + '…');
-          setMcpKeyDraft('');
-          setMcpShowKeyInput(false);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setMcpKeySaving(false));
-  };
-
-  // Smithery 검색 실행
-  const searchSmithery = (page = 1) => {
-    if (!mcpSearchQuery.trim()) return;
-    setMcpSearchLoading(true);
-    setMcpSearchError('');
-    fetch(`${API_BASE}/api/mcp/search?q=${encodeURIComponent(mcpSearchQuery)}&page=${page}&pageSize=10`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.error) {
-          setMcpSearchError(data.message ?? data.error);
-          setMcpSearchResults([]);
-        } else {
-          setMcpSearchResults(data.servers ?? []);
-          setMcpSearchPage(data.pagination?.currentPage ?? page);
-          setMcpSearchTotal(data.pagination?.totalCount ?? 0);
-          setMcpSearchTotalPages(data.pagination?.totalPages ?? 0);
-        }
-      })
-      .catch(() => setMcpSearchError('네트워크 오류'))
-      .finally(() => setMcpSearchLoading(false));
-  };
-
-  // Smithery 검색 결과에서 설치 (qualifiedName을 package로 사용)
-  const installFromSearch = (server: SmitheryServer) => {
-    const slug = server.qualifiedName.split('/').pop() ?? server.qualifiedName;
-    setMcpLoading(prev => ({ ...prev, [server.qualifiedName]: true }));
-    fetch(`${API_BASE}/api/mcp/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tool: mcpTool, scope: mcpScope,
-        name: slug, package: server.qualifiedName,
-        requiresEnv: [],
-      }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        setMcpMsg(data.message ?? '');
-        if (data.status === 'success') { setMcpNeedsRestart(true); fetchMcpInstalled(); }
-      })
-      .catch(() => {})
-      .finally(() => setMcpLoading(prev => ({ ...prev, [server.qualifiedName]: false })));
-  };
 
   // 설치 현황 폴링 (5초 간격 — 도구·범위 변경 시 즉시 재조회)
   const fetchMcpInstalled = () => {
@@ -763,11 +411,7 @@ function App() {
       }),
     })
       .then(res => res.json())
-      .then(data => {
-        setMcpMsg(data.message ?? '');
-        if (data.status === 'success') setMcpNeedsRestart(true);
-        fetchMcpInstalled();
-      })
+      .then(data => { setMcpMsg(data.message ?? ''); fetchMcpInstalled(); })
       .catch(() => {})
       .finally(() => setMcpLoading(prev => ({ ...prev, [entry.name]: false })));
   };
@@ -781,11 +425,7 @@ function App() {
       body: JSON.stringify({ tool: mcpTool, scope: mcpScope, name }),
     })
       .then(res => res.json())
-      .then(data => {
-        setMcpMsg(data.message ?? '');
-        if (data.status === 'success') setMcpNeedsRestart(true);
-        fetchMcpInstalled();
-      })
+      .then(data => { setMcpMsg(data.message ?? ''); fetchMcpInstalled(); })
       .catch(() => {})
       .finally(() => setMcpLoading(prev => ({ ...prev, [name]: false })));
   };
@@ -793,11 +433,7 @@ function App() {
   // 메시지 전송
   const sendMessage = () => {
     if (!msgContent.trim()) return;
-    
-    // 명령어 모드('>')인 경우 엔터(\n)를 유지하여 터미널에서 즉시 실행되도록 합니다.
-    const isCommand = msgContent.trim().startsWith('>');
-    const cleanContent = isCommand ? msgContent : msgContent.replace(/[\r\n]+$/, '');
-    
+    const cleanContent = msgContent.replace(/[\r\n]+$/, '');
     fetch(`${API_BASE}/api/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -853,106 +489,24 @@ function App() {
   }, []);
 
   // ─── 업데이트 알림 상태 ───────────────────────────────────────────────────
-  const [updateReady, setUpdateReady] = useState<{ version?: string; ready: boolean; downloading: boolean; checking?: boolean } | null>(null);
+  const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
 
-  // Claude Code 세션별 컨텍스트 사용량 — TerminalSlot에 slotId 순서대로 전달
-  const [contextSessions, setContextSessions] = useState<ContextSession[]>([]);
-  // Gemini CLI 세션별 컨텍스트 사용량 — Claude와 동일한 ContextSession 인터페이스 재사용
-  // [2026-02-27] Claude: Gemini 컨텍스트 사용량 표시 기능 추가
-  const [geminiContextSessions, setGeminiContextSessions] = useState<ContextSession[]>([]);
-
-  // 30초마다 Claude/Gemini 컨텍스트 사용량 동시 갱신
+  // 30초마다 업데이트 준비 여부 확인
   useEffect(() => {
-    const doFetch = () => {
-      fetch(`${API_BASE}/api/context-usage`)
-        .then(res => res.json())
-        .then(data => setContextSessions(data.sessions || []))
-        .catch(() => {});
-      // Gemini 세션도 같은 주기로 갱신 (로컬 JSON 파일 읽기 — API 호출 아님)
-      fetch(`${API_BASE}/api/gemini-context-usage`)
-        .then(res => res.json())
-        .then(data => setGeminiContextSessions(data.sessions || []))
-        .catch(() => {});
-    };
-    doFetch();
-    const iv = setInterval(doFetch, 30000);
-    return () => clearInterval(iv);
-  }, []);
-
-  // 30초마다 업데이트 준비 여부 확인 (다운로드/확인 중이면 5초마다)
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
     const check = () => {
       fetch(`${API_BASE}/api/check-update-ready`)
         .then(res => res.json())
-        .then(data => {
-          if (data?.version || data?.checking) {
-            const next = { 
-              version: data.version, 
-              ready: !!data.ready, 
-              downloading: !!data.downloading,
-              checking: !!data.checking
-            };
-            // 다운로드 완료 전환 감지 → 토스트 알림
-            setUpdateReady(prev => {
-              if (prev?.downloading && next.ready) {
-                showToast(`🎉 ${next.version} 다운로드 완료! 우측 상단 [업데이트] 버튼을 눌러주세요.`, 'ok', 6000);
-              }
-              return next;
-            });
-          } else {
-            setUpdateReady(null);
-          }
-        })
+        .then(data => setUpdateReady(data?.ready ? { version: data.version } : null))
         .catch(() => {});
     };
     check();
-    // 다운로드 중이거나 확인 중이면 5초, 아니면 30초 폴링
-    const scheduleNext = () => {
-      const delay = (updateReady?.downloading || updateReady?.checking) ? 5000 : 30000;
-      interval = setTimeout(() => { check(); scheduleNext(); }, delay);
-    };
-    scheduleNext();
-    return () => clearTimeout(interval);
-  }, [updateReady?.downloading, updateReady?.checking]);
-
-  // 토스트 알림 상태 — 업데이트 확인 결과, 설치 완료 등 간단한 피드백용
-  const [toast, setToast] = useState<{ msg: string; type: 'info' | 'ok' | 'warn' } | null>(null);
-  const showToast = (msg: string, type: 'info' | 'ok' | 'warn' = 'info', ms = 3500) => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), ms);
-  };
-
-  const [updateChecking, setUpdateChecking] = useState(false);
-  const triggerUpdateCheck = () => {
-    if (updateChecking) return;
-    setUpdateChecking(true);
-    showToast('업데이트 확인 중...', 'info', 8000);
-    fetch(`${API_BASE}/api/trigger-update-check`, { method: 'POST' })
-      .then(r => r.json())
-      .then(data => {
-        if (!data.started) {
-          showToast('업데이트 확인 불가 (개발 빌드)', 'warn');
-        } else {
-          // 10초 뒤 update_ready 상태 체크 — 새 버전 없으면 "최신 버전" 메시지
-          setTimeout(() => {
-            fetch(`${API_BASE}/api/check-update-ready`)
-              .then(r => r.json())
-              .then(d => {
-                if (!d.ready && !d.downloading) showToast('✓ 최신 버전입니다', 'ok');
-              });
-          }, 10000);
-        }
-      })
-      .catch(() => showToast('서버 연결 오류', 'warn'))
-      .finally(() => setUpdateChecking(false));
-  };
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const applyUpdate = () => {
     setUpdateApplying(true);
-    // 업데이트 적용 후 재시작되므로, 재시작 시 스킬 재설치 안내를 띄우기 위해 플래그 저장
-    localStorage.setItem('hive_needs_skill_reinstall', 'true');
     fetch(`${API_BASE}/api/apply-update`, { method: 'POST' })
       .then(res => res.json())
       .then(() => setUpdateReady(null))
@@ -960,161 +514,54 @@ function App() {
       .finally(() => setUpdateApplying(false));
   };
 
-  // 업데이트 후 재시작 감지 — localStorage 플래그로 스킬 재설치 안내 표시
-  const [needsSkillReinstall, setNeedsSkillReinstall] = useState<boolean>(
-    () => localStorage.getItem('hive_needs_skill_reinstall') === 'true'
-  );
-
-  // ─── 컨텍스트 메뉴 핸들러 ───────────────────────────────────────────────────
-  const handleContextMenu = (e: React.MouseEvent, path: string, isDir: boolean) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, type: 'file', path, isDir });
-  };
-
-  const handleTaskContextMenu = (e: React.MouseEvent, taskId: string, taskTitle: string) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, type: 'task', taskId, taskTitle });
-  };
-
-  const closeContextMenu = () => setContextMenu(null);
-
-  const handleFileRename = (oldPath: string, newName: string) => {
-    const parent = oldPath.substring(0, oldPath.lastIndexOf('/'));
-    const newPath = `${parent}/${newName}`;
-    fetch(`${API_BASE}/api/file-rename`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ src: oldPath, dest: newPath }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'success') {
-          showToast('이름 변경 완료', 'ok');
-          refreshItems(); // 파일 목록 새로고침
-          // 트리 모드 대응을 위해 부모 폴더도 갱신 필요할 수 있음
-          if (treeExpanded[parent]) {
-            fetch(`${API_BASE}/api/files?path=${encodeURIComponent(parent)}`)
-              .then(res => res.json())
-              .then(data => { if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [parent]: data })); });
-          }
-        } else {
-          showToast(`오류: ${data.message}`, 'warn');
-        }
-      })
-      .finally(() => { setIsRenaming(null); closeContextMenu(); });
-  };
-
-  const handleFileDelete = (path: string, isDir: boolean) => {
-    if (!confirm(`${isDir ? '폴더' : '파일'}을(를) 정말 삭제하시겠습니까?\n${path}`)) return;
-    fetch(`${API_BASE}/api/file-op`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op: 'delete', src: path }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'success') {
-          showToast('삭제 완료', 'ok');
-          refreshItems();
-          const parent = path.substring(0, path.lastIndexOf('/'));
-          if (treeExpanded[parent]) {
-            fetch(`${API_BASE}/api/files?path=${encodeURIComponent(parent)}`)
-              .then(res => res.json())
-              .then(data => { if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [parent]: data })); });
-          }
-        } else {
-          showToast(`오류: ${data.message}`, 'warn');
-        }
-      })
-      .finally(() => closeContextMenu());
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    showToast('클립보드에 복사됨', 'ok');
-    closeContextMenu();
-  };
-
-  const revealInExplorer = (path: string) => {
-    // 서버측 API 호출 필요 (이미 구현된 /api/file-op 확장 또는 신규)
-    // 여기서는 간단히 경로 복사로 대체하거나 신규 엔드포인트 제안
-    fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(path)}`)
-      .then(() => showToast('경로 복사 및 탐색기 준비', 'info'))
-      .finally(() => closeContextMenu());
-  };
-
-  useEffect(() => {
-    const handleClick = () => closeContextMenu();
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
-  }, []);
-
-  const doReinstallSkills = () => {
-    // Claude + Gemini 스킬 순차 재설치
-    Promise.all(['claude', 'gemini'].map(tool =>
-      fetch(`${API_BASE}/api/superpowers/install`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool }),
-      }).then(r => r.json())
-    ))
-      .then(() => {
-        localStorage.removeItem('hive_needs_skill_reinstall');
-        setNeedsSkillReinstall(false);
-        fetchSpStatus();
-      })
-      .catch(() => {});
-  };
-
   // 파일 시스템 탐색 상태
   const [drives, setDrives] = useState<string[]>([]);
-  const [projects, setProjects] = useState<string[]>([]);
-  // 마지막 선택 경로를 localStorage에서 복원 — 앱 재시작 시 이전 프로젝트 유지
-  // 최초 실행 시 빈 문자열 → 서버의 PROJECT_ROOT 로 초기화됨 (useEffect에서 동기화)
-  const [currentPath, setCurrentPath] = useState<string>(
-    () => localStorage.getItem('hive_last_path') || ''
-  );
+  const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
+  const [initialConfigLoaded, setInitialConfigLoaded] = useState(false);
+  const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
 
-  // 최근 프로젝트 목록 가져오기
-  const fetchProjects = () => {
-    fetch(`${API_BASE}/api/projects`)
-      .then(res => res.json())
-      .then(data => setProjects(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  };
-
-  // 새 프로젝트 폴더 열기 (브라우저 다이얼로그 호출)
-  const openProjectFolder = () => {
-    fetch(`${API_BASE}/api/browse-folder`)
+  // 초기 설정 로드 (마지막 경로 기억)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/config`)
       .then(res => res.json())
       .then(data => {
-        if (data.path) {
+        if (data.last_path) {
+          setCurrentPath(data.last_path);
+        }
+        setInitialConfigLoaded(true);
+      })
+      .catch(() => setInitialConfigLoaded(true));
+  }, []);
+
+  // 경로 변경 시 서버에 저장
+  useEffect(() => {
+    if (initialConfigLoaded && currentPath) {
+      fetch(`${API_BASE}/api/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ last_path: currentPath })
+      }).catch(() => {});
+    }
+  }, [currentPath, initialConfigLoaded]);
+
+  const openFolder = () => {
+    fetch(`${API_BASE}/api/select-folder`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success' && data.path) {
           setCurrentPath(data.path);
-          // 서버 목록에도 추가
-          fetch(`${API_BASE}/api/projects`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: data.path })
-          }).then(() => fetchProjects());
         }
       })
       .catch(err => alert("폴더 선택 오류: " + err));
-    setActiveMenu(null);
   };
 
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-  const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
   const [treeMode, setTreeMode] = useState(true);
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({});
   const [treeChildren, setTreeChildren] = useState<Record<string, { name: string; path: string; isDir: boolean }[]>>({});
 
-  // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화 + localStorage 저장
+  // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화
   useEffect(() => { setGitPath(currentPath); }, [currentPath]);
   useEffect(() => { setTreeExpanded({}); setTreeChildren({}); }, [currentPath]);
-  // 경로가 바뀔 때마다 localStorage에 저장 — 다음 세션에서 복원용
-  useEffect(() => { localStorage.setItem('hive_last_path', currentPath); }, [currentPath]);
 
   // 드라이브 목록 가져오기
   useEffect(() => {
@@ -1131,44 +578,6 @@ function App() {
       .then(res => res.json())
       .then(data => setItems(data))
       .catch(() => { });
-  };
-  // SSE 핸들러 내 stale closure 방지용 ref
-  // (fsSse는 마운트 1회만 생성 → ref로 항상 최신 함수 참조)
-  const refreshItemsRef = useRef(refreshItems);
-  useEffect(() => { refreshItemsRef.current = refreshItems; });
-
-  // currentPath 변경 시 파일 목록 자동 갱신
-  useEffect(() => { refreshItems(); }, [currentPath]);
-
-  const createFile = () => {
-    const name = prompt("새 파일 이름을 입력하세요:");
-    if (!name) return;
-    const path = `${currentPath}/${name}`;
-    fetch(`${API_BASE}/api/file-op`, {
-      method: 'POST',
-      body: JSON.stringify({ op: 'create_file', path })
-    }).then(() => refreshItems());
-  };
-
-  const createDir = () => {
-    const name = prompt("새 폴더 이름을 입력하세요:");
-    if (!name) return;
-    const path = `${currentPath}/${name}`;
-    fetch(`${API_BASE}/api/file-op`, {
-      method: 'POST',
-      body: JSON.stringify({ op: 'create_dir', path })
-    }).then(() => refreshItems());
-  };
-
-  const deleteItem = (itemPath: string, name: string) => {
-    if (!confirm(`'${name}'을(를) 삭제하시겠습니까?`)) return;
-    fetch(`${API_BASE}/api/file-op`, {
-      method: 'POST',
-      body: JSON.stringify({ op: 'delete', src: itemPath })
-    }).then(() => {
-      refreshItems();
-      setOpenFiles(prev => prev.filter(f => f.path !== itemPath));
-    });
   };
 
   const handleTreeToggle = (path: string) => {
@@ -1188,11 +597,7 @@ function App() {
   const handleFileClick = (item: {name: string, path: string, isDir: boolean}) => {
     setSelectedPath(item.path);
     if (item.isDir) {
-      if (treeMode) {
-        handleTreeToggle(item.path);
-      } else {
-        setCurrentPath(item.path);
-      }
+      setCurrentPath(item.path);
     } else {
       const existing = openFiles.find(f => f.path === item.path);
       if (existing) {
@@ -1242,14 +647,13 @@ function App() {
   // 스킬 및 도구 설치 로직
   const installSkills = () => {
     if (!currentPath) return;
+    if (confirm(`현재 프로젝트(${currentPath})에 하이브 마인드 베이스 스킬을 설치하시겠습니까?`)) {
+      fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
+        .then(res => res.json())
+        .then(data => { alert(data.message); refreshItems(); })
+        .catch(err => alert("설치 실패: " + err));
+    }
     setActiveMenu(null);
-    setActiveTab('superpowers');
-    setIsSidebarOpen(true);
-    setSpMsg('설치 중...');
-    fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
-      .then(res => res.json())
-      .then(data => { setSpMsg(data.message || '하이브 스킬 설치 완료 ✓'); fetchSpStatus(); refreshItems(); })
-      .catch(err => setSpMsg('설치 실패: ' + err));
   };
 
   const installTool = (tool: string) => {
@@ -1269,7 +673,6 @@ function App() {
   };
 
   useEffect(() => {
-    // 1) 메인 로그 스트림
     const sse = new EventSource(`${API_BASE}/stream`);
     sse.onmessage = (e) => {
       try {
@@ -1277,51 +680,10 @@ function App() {
         setLogs(prev => [...prev.slice(-199), data]);
       } catch (err) { }
     };
-
-    // 2) 파일 시스템 이벤트 → 탐색기 갱신
-    // ref를 통해 호출 → stale closure 방지 (currentPath 최신값 항상 반영)
-    const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
-    fsSse.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'fs_change') refreshItemsRef.current();
-      } catch (err) { }
-    };
-
-    return () => {
-      sse.close();
-      fsSse.close();
-    };
+    return () => sse.close();
   }, []);
 
   const slots = Array.from({ length: terminalCount }, (_, i) => i);
-
-  // ─── 사이드바 리사이징 로직 ─────────────────────────────────────────────
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizingSidebar) return;
-      // Activity Bar 너비(48px)를 제외한 위치 계산
-      const newWidth = e.clientX - 48;
-      if (newWidth > 150 && newWidth < 800) {
-        setSidebarWidth(newWidth);
-      }
-    };
-    const handleMouseUp = () => setIsResizingSidebar(false);
-
-    if (isResizingSidebar) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'col-resize';
-    } else {
-      document.body.style.cursor = 'default';
-    }
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizingSidebar]);
-
-  if (isInitializing) return null;
 
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden select-none font-sans flex-col" onClick={() => setActiveMenu(null)}>
@@ -1330,28 +692,16 @@ function App() {
       {updateReady && (
         <div className="flex items-center justify-between px-3 py-1 bg-primary/20 border-b border-primary/40 shrink-0 z-50">
           <span className="text-[10px] text-primary font-bold">
-            {updateReady.checking
-              ? <>GitHub에서 새로운 버전을 찾는 중...</>
-              : updateReady.downloading
-                ? <>새 버전 <span className="font-mono">{updateReady.version}</span> 다운로드 중...</>
-                : <>새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료</>
-            }
+            새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료
           </span>
           <div className="flex items-center gap-2">
-            {!updateReady.downloading && !updateReady.checking && (
-              <button
-                onClick={applyUpdate}
-                disabled={updateApplying}
-                className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-50 transition-colors"
-              >
-                {updateApplying ? '적용 중...' : '지금 업데이트'}
-              </button>
-            )}
-            {(updateReady.downloading || updateReady.checking) && (
-              <span className="text-[9px] text-primary/60 animate-pulse">
-                {updateReady.checking ? '조회 중...' : '준비 중...'}
-              </span>
-            )}
+            <button
+              onClick={applyUpdate}
+              disabled={updateApplying}
+              className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-50 transition-colors"
+            >
+              {updateApplying ? '적용 중...' : '지금 업데이트'}
+            </button>
             <button
               onClick={() => setUpdateReady(null)}
               className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
@@ -1362,132 +712,11 @@ function App() {
         </div>
       )}
 
-      {/* 업데이트 후 스킬 재설치 안내 배너 */}
-      {needsSkillReinstall && (
-        <div className="flex items-center justify-between px-3 py-1 bg-yellow-500/20 border-b border-yellow-500/40 shrink-0 z-50">
-          <span className="text-[10px] text-yellow-300 font-bold">
-            ⚡ 업데이트 완료! 스킬을 다시 설치해 주세요.
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={doReinstallSkills}
-              className="text-[9px] font-bold px-2 py-0.5 rounded bg-yellow-500 text-black hover:bg-yellow-400 transition-colors"
-            >
-              스킬 재설치
-            </button>
-            <button
-              onClick={() => { localStorage.removeItem('hive_needs_skill_reinstall'); setNeedsSkillReinstall(false); }}
-              className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 토스트 알림 — 우측 상단 고정 */}
-      {toast && (
-        <div className={`fixed top-3 right-4 z-[9999] px-3 py-2 rounded shadow-lg text-[11px] font-bold flex items-center gap-2 transition-all pointer-events-none
-          ${toast.type === 'ok' ? 'bg-green-600/90 text-white' : toast.type === 'warn' ? 'bg-yellow-500/90 text-black' : 'bg-[#007acc]/90 text-white'}`}>
-          {toast.type === 'info' && <span className="animate-spin inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full" />}
-          {toast.msg}
-        </div>
-      )}
-
-      {/* 🔮 파일 탐색기 및 작업 항목 컨텍스트 메뉴 (다크 네온 스타일) */}
-      {contextMenu && (
-        <div 
-          className="fixed z-[9999] min-w-[170px] bg-[#252526]/95 backdrop-blur-md border border-white/10 rounded shadow-2xl py-1 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
-          style={{ 
-            left: Math.min(contextMenu.x, window.innerWidth - 180), 
-            top: Math.min(contextMenu.y, window.innerHeight - (contextMenu.type === 'file' ? 240 : 150)) 
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {contextMenu.type === 'file' && contextMenu.path && (
-            <>
-              {/* 메뉴 항목: 이름 변경 */}
-              <button 
-                onClick={() => { setIsRenaming(contextMenu.path!); setNewNameDraft(contextMenu.path!.split('/').pop() || ''); closeContextMenu(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-primary/20 hover:text-white transition-colors"
-              >
-                <Edit2 className="w-3.5 h-3.5" /> 이름 변경
-              </button>
-
-              {/* 메뉴 항목: 삭제 (아이콘 Trash2로 통일) */}
-              <button 
-                onClick={() => handleFileDelete(contextMenu.path!, !!contextMenu.isDir)}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-red-500/20 hover:text-red-400 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> 삭제
-              </button>
-
-              <div className="h-px bg-white/5 my-1" />
-
-              {/* 메뉴 항목: 경로 복사 */}
-              <button 
-                onClick={() => copyToClipboard(contextMenu.path!)}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
-              >
-                <Copy className="w-3.5 h-3.5" /> 경로 복사
-              </button>
-
-              {/* 메뉴 항목: 탐색기에서 보기 */}
-              <button 
-                onClick={() => revealInExplorer(contextMenu.path!)}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-white/5 hover:text-white transition-colors"
-              >
-                <ExternalLink className="w-3.5 h-3.5" /> 탐색기에서 보기
-              </button>
-
-              <div className="h-px bg-white/5 my-1" />
-
-              {/* 하이브 마인드 특화 기능 */}
-              <button 
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { 
-                    detail: { text: `[파일 분석 요청] ${contextMenu.path} 이 파일의 역할과 내용을 설명해줘.` } 
-                  }));
-                  closeContextMenu();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-primary hover:bg-primary/10 transition-colors font-bold"
-              >
-                <Brain className="w-3.5 h-3.5" /> 에이전트에게 분석 요청
-              </button>
-            </>
-          )}
-
-          {contextMenu.type === 'task' && contextMenu.taskId && (
-            <>
-              <div className="px-3 py-1 text-[9px] text-textMuted font-bold uppercase tracking-wider opacity-60">작업 관리</div>
-              <button 
-                onClick={() => { updateTask(contextMenu.taskId!, { status: 'in_progress' }); closeContextMenu(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-primary/20 hover:text-white transition-colors"
-              >
-                <Play className="w-3.5 h-3.5" /> 작업 시작
-              </button>
-              <button 
-                onClick={() => { updateTask(contextMenu.taskId!, { status: 'done' }); closeContextMenu(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-[#cccccc] hover:bg-green-500/20 hover:text-green-400 transition-colors"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" /> 완료 처리
-              </button>
-              <div className="h-px bg-white/5 my-1" />
-              <button 
-                onClick={() => { deleteTask(contextMenu.taskId!); closeContextMenu(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[11px] text-red-400 hover:bg-red-500/20 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> 작업 삭제
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
-        <img src="/vibe_icon.png" alt="vibe" className="w-4 h-4 mx-1 object-contain" />
+        <Activity className="w-3.5 h-3.5 text-primary mx-1" />
         <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
+        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0 rounded border border-primary/30 mr-2 font-mono">v3.3.0</span>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
@@ -1502,21 +731,26 @@ function App() {
             {activeMenu === menu && menu === '파일' && (
               <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
                 <button 
-                  onClick={openProjectFolder}
+                  onClick={() => { openFolder(); setActiveMenu(null); }} 
                   className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
                 >
                   <VscFolderOpened className="w-3.5 h-3.5 text-[#dcb67a]" /> 폴더 열기...
                 </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                <button
+                <button 
                   onClick={() => {
-                    alert("이 시스템은 24시간 상시 가동 모드로 설정되어 있습니다.\n시스템을 종료하려면 관리자에게 문의하거나 프로세스를 수동으로 중단해야 합니다.");
+                    if (confirm("시스템을 완전히 종료하시겠습니까? (백그라운드 서버도 종료됩니다)")) {
+                      fetch(`${API_BASE}/api/shutdown`)
+                        .then(() => { alert("서버가 종료되었습니다. 창을 닫아주세요."); window.close(); })
+                        .catch(() => { alert("서버 종료 신호 전송 실패"); });
+                    }
                     setActiveMenu(null);
-                  }}
-                  className="w-full text-left px-4 py-1.5 hover:bg-white/5 text-gray-500 flex items-center gap-2 cursor-not-allowed"
+                  }} 
+                  className="w-full text-left px-4 py-1.5 hover:bg-red-500/20 text-red-400 flex items-center gap-2"
                 >
-                  <X className="w-3.5 h-3.5" /> 시스템 종료 (상시 가동 중)
-                </button>              </div>
+                  <X className="w-3.5 h-3.5" /> 시스템 완전 종료
+                </button>
+              </div>
             )}
 
             {/* 편집 메뉴 */}
@@ -1593,56 +827,21 @@ function App() {
           </div>
         ))}
         <div className="ml-auto flex items-center gap-3 text-[11px] text-[#969696] px-4 font-mono overflow-hidden">
-           {/* 🟢 실시간 에이전트 모니터 (Real-time Agent HUD) */}
-           {orchStatus?.agent_status && Object.entries(orchStatus.agent_status).map(([agent, st]) => {
-             if (st.state !== 'active') return null;
-             return (
-               <div key={agent} className="flex items-center gap-1 bg-green-500/10 border border-green-500/30 px-1.5 py-0.5 rounded text-[9px] text-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.2)]" title="에이전트 작업 중">
-                 <Bot className="w-3 h-3" />
-                 <span className="font-bold uppercase tracking-wider">{agent}</span>
-                 <span className="opacity-80">활성</span>
-               </div>
-             );
-           })}
-           <span className="truncate opacity-50 border-l border-white/10 pl-3">{currentPath}</span>
-
-           {/* 버전 + 업데이트 버튼 — 오른쪽 끝 고정 */}
-           <button
-             onClick={triggerUpdateCheck}
-             disabled={updateChecking}
-             title="업데이트 확인"
-             className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-bold shrink-0 transition-all disabled:opacity-60
-               ${updateReady && !updateReady.downloading
-                 ? 'bg-red-500/20 border-red-500/60 text-red-400 animate-pulse hover:bg-red-500/30'
-                 : updateReady?.downloading
-                 ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'
-                 : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30'
-               }`}
-           >
-             <span className="font-mono">{appVersion ? `v${appVersion}` : 'v3.4.1'}</span>
-             {updateChecking
-               ? <span className="animate-spin inline-block w-3 h-3 border-2 border-current/30 border-t-current rounded-full" />
-               : updateReady && !updateReady.downloading
-               ? <span>🔴 업데이트</span>
-               : updateReady?.downloading
-               ? <span>⬇ 다운로드 중</span>
-               : <span className="opacity-60">↑ 업데이트 확인</span>
-             }
-           </button>
+           <span className="truncate opacity-50">{currentPath}</span>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Activity Bar (VS Code Style) */}
         <div className="w-12 h-full bg-[#333333] border-r border-black/40 flex flex-col items-center py-4 gap-4 shrink-0">
-          <button onClick={() => { setActiveTab('explorer'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'explorer' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="파일 탐색기">
+          <button onClick={() => { setActiveTab('explorer'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'explorer' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Files className="w-6 h-6" />
           </button>
-          <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="검색">
+          <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Search className="w-6 h-6" />
           </button>
           {/* 하이브 오케스트레이터 탭 — 경고 수 배지 */}
-          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="하이브 마인드">
+          <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Zap className="w-6 h-6" />
             {orchWarningCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-orange-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1650,17 +849,8 @@ function App() {
               </span>
             )}
           </button>
-          {/* 하이브 로그 익스플로러 탭 */}
-          <button onClick={() => { setActiveTab('logs'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'logs' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="하이브 통합 로그">
-            <ScrollText className="w-6 h-6" />
-            {hiveLogs.length > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-blue-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
-                {hiveLogs.length > 99 ? '99+' : hiveLogs.length}
-              </span>
-            )}
-          </button>
           {/* 메시지 채널 탭 — 읽지 않은 메시지 수 배지 표시 */}
-          <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="메시지 채널">
+          <button onClick={() => { setActiveTab('messages'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'messages' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <MessageSquare className="w-6 h-6" />
             {unreadMsgCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1669,7 +859,7 @@ function App() {
             )}
           </button>
           {/* 태스크 보드 탭 — 활성 작업 수 배지 표시 */}
-          <button onClick={() => { setActiveTab('tasks'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'tasks' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="태스크 보드">
+          <button onClick={() => { setActiveTab('tasks'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'tasks' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <ClipboardList className="w-6 h-6" />
             {activeTaskCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-yellow-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1678,7 +868,7 @@ function App() {
             )}
           </button>
           {/* 공유 메모리 탭 */}
-          <button onClick={() => { setActiveTab('memory'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'memory' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="공유 메모리">
+          <button onClick={() => { setActiveTab('memory'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'memory' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Brain className="w-6 h-6" />
             {memory.length > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-cyan-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
@@ -1687,7 +877,7 @@ function App() {
             )}
           </button>
           {/* Git 감시 탭 — 충돌 파일 수 배지 표시 */}
-          <button onClick={() => { setActiveTab('git'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'git' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="Git 감시">
+          <button onClick={() => { setActiveTab('git'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'git' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <GitBranch className="w-6 h-6" />
             {conflictCount > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none animate-pulse">
@@ -1696,26 +886,11 @@ function App() {
             )}
           </button>
           {/* MCP 관리자 탭 — 설치된 MCP 수 배지 */}
-          <button onClick={() => { setActiveTab('mcp'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'mcp' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="MCP 관리자">
+          <button onClick={() => { setActiveTab('mcp'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'mcp' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Package className="w-6 h-6" />
             {mcpInstalled.length > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-purple-500 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none">
                 {mcpInstalled.length > 9 ? '9+' : mcpInstalled.length}
-              </span>
-            )}
-          </button>
-          {/* 바이브 스킬 관리자 탭 — 설치 수 배지 */}
-          {/* 로컬 모델 매니저 탭 */}
-          <button onClick={() => { setActiveTab('models'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'models' ? 'text-white border-l-2 border-blue-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="로컬 모델 매니저">
-            <Cpu className="w-6 h-6" />
-          </button>
-          <button onClick={() => { setActiveTab('superpowers'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'superpowers' ? 'text-white border-l-2 border-yellow-400 bg-white/5' : 'text-[#858585] hover:text-white'}`} title="바이브 스킬 관리자">
-            <Zap className="w-6 h-6" />
-            {spStatus && (
-              <span className={`absolute top-1 right-1 w-4 h-4 text-white text-[8px] font-black rounded-full flex items-center justify-center leading-none ${
-                (spStatus.claude.installed ? 1 : 0) + (spStatus.gemini.installed ? 1 : 0) > 0 ? 'bg-yellow-500' : 'bg-white/20'
-              }`}>
-                {(spStatus.claude.installed ? 1 : 0) + (spStatus.gemini.installed ? 1 : 0)}
               </span>
             )}
           </button>
@@ -1727,101 +902,36 @@ function App() {
 
         {/* Sidebar (Explorer) */}
         <motion.div
-          animate={{ width: isSidebarOpen ? sidebarWidth : 0, opacity: isSidebarOpen ? 1 : 0 }}
-          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-x-auto overflow-y-hidden custom-scrollbar relative"
+          animate={{ width: isSidebarOpen ? 260 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
         >
-          {/* Sidebar Resize Handle */}
-          {isSidebarOpen && (
-            <div
-              onMouseDown={(e) => { e.stopPropagation(); setIsResizingSidebar(true); }}
-              className={`absolute right-0 top-0 w-1 h-full cursor-col-resize hover:bg-primary/50 transition-colors z-50 ${isResizingSidebar ? 'bg-primary/50' : ''}`}
-            />
-          )}
-          <div className="h-12 px-5 flex items-center justify-between text-[16px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10 min-w-[200px]">
-            <span className="flex items-center gap-2.5"><ChevronDown className="w-5 h-5" />{activeTab === 'explorer' ? '파일 탐색기' : activeTab === 'search' ? '검색' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'superpowers' ? '⚡ 바이브 스킬' : activeTab === 'models' ? '🤖 모델 매니저' : activeTab === 'logs' ? '하이브 로그' : '하이브 마인드'}</span>
-            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-1.5 rounded transition-colors"><X className="w-6 h-6" /></button>
+          <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : 'Hive Mind'}</span>
+            <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
-          <div className="p-5 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col min-w-[200px]">
-            {activeTab === 'logs' ? (
-              /* ── 하이브 통합 로그 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-3">
-                <div className="relative shrink-0">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#858585]" />
-                  <input
-                    type="text"
-                    value={logFilter}
-                    onChange={e => setLogFilter(e.target.value)}
-                    placeholder="로그 내용 / 에이전트 검색..."
-                    className="w-full bg-[#1e1e1e] border border-white/10 rounded pl-6 pr-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
-                  />
-                </div>
-                
-                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
-                  {hiveLogs
-                    .filter(l => !logFilter || l.agent.toLowerCase().includes(logFilter.toLowerCase()) || (l.trigger_msg && l.trigger_msg.toLowerCase().includes(logFilter.toLowerCase())) || (l.project && l.project.toLowerCase().includes(logFilter.toLowerCase())))
-                    .map(log => (
-                    <div key={log.id} className="p-2.5 rounded-lg border border-white/10 bg-white/2 text-[11px] hover:border-white/20 transition-colors shadow-sm">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                            log.agent.toLowerCase().includes('claude') ? 'bg-green-500/20 text-green-400' :
-                            log.agent.toLowerCase().includes('gemini') ? 'bg-blue-500/20 text-blue-400' :
-                            'bg-white/10 text-white/50'
-                          }`}>{log.agent}</span>
-                          <span className="text-[9px] text-white/30 font-mono">{log.terminal_id}</span>
-                        </div>
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                          log.status === 'success' ? 'bg-green-500/10 text-green-500' :
-                          log.status === 'failed' ? 'bg-red-500/10 text-red-500' :
-                          'bg-yellow-500/10 text-yellow-500'
-                        }`}>{log.status}</span>
-                      </div>
-                      
-                      <p className="text-[#cccccc] leading-snug mb-1.5 break-words font-medium">{log.trigger_msg}</p>
-                      
-                      {log.files_changed && (
-                        <div className="flex items-center gap-1 text-[9px] text-[#858585] mb-1.5 bg-black/20 p-1 rounded overflow-hidden">
-                          <Files className="w-2.5 h-2.5 shrink-0" />
-                          <span className="truncate">{log.files_changed}</span>
-                        </div>
-                      )}
-                      
-                      <div className="flex items-center justify-between text-[9px] font-mono text-[#666666]">
-                        <span>{log.project}</span>
-                        <span>{log.ts_start.replace('T', ' ').slice(5, 16)}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {hiveLogs.length === 0 && (
-                    <div className="text-center text-[#858585] text-xs py-10 italic flex flex-col items-center gap-2">
-                      <ScrollText className="w-8 h-8 opacity-20" />
-                      기록된 로그가 없습니다.
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : activeTab === 'messages' ? (
+          <div className="p-3 flex-1 overflow-hidden flex flex-col">
+            {activeTab === 'messages' ? (
               /* ── 메시지 채널 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-3">
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
                 {/* 메시지 목록 (최신순 — 역순 표시) */}
-                <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
                   {messages.length === 0 ? (
-                    <div className="text-center text-[#858585] text-sm py-12 flex flex-col items-center gap-3 italic">
-                      <MessageSquare className="w-9 h-9 opacity-20" />
+                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                      <MessageSquare className="w-7 h-7 opacity-20" />
                       아직 메시지가 없습니다
                     </div>
                   ) : (
                     [...messages].reverse().map(msg => (
-                      <div key={msg.id} className="p-3 rounded-lg border border-white/10 bg-white/2 text-[12px] hover:border-white/20 transition-colors">
+                      <div key={msg.id} className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors">
                         {/* 발신자 → 수신자 + 타입 배지 */}
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-1.5 font-mono font-bold">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1 font-mono font-bold">
                             <span className="text-success">{msg.from}</span>
                             <span className="text-white/30 font-normal">→</span>
                             <span className="text-accent">{msg.to}</span>
                           </div>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
                             msg.type === 'handoff'       ? 'bg-yellow-500/20 text-yellow-400' :
                             msg.type === 'request'       ? 'bg-blue-500/20 text-blue-400' :
                             msg.type === 'task_complete' ? 'bg-green-500/20 text-green-400' :
@@ -1830,32 +940,32 @@ function App() {
                           }`}>{msg.type}</span>
                         </div>
                         {/* 메시지 본문 */}
-                        <p className="text-[#cccccc] leading-relaxed break-words whitespace-pre-wrap text-[12.5px]">{msg.content}</p>
+                        <p className="text-[#cccccc] leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
                         {/* 타임스탬프 */}
-                        <div className="text-[#858585] mt-2 text-[10px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
+                        <div className="text-[#858585] mt-1 text-[9px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
                       </div>
                     ))
                   )}
                 </div>
 
                 {/* 메시지 작성 폼 */}
-                <div className="border-t border-white/5 pt-3 flex flex-col gap-2 shrink-0">
+                <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
                   {/* 발신자 → 수신자 선택 */}
-                  <div className="flex gap-2 items-center">
-                    <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                  <div className="flex gap-1 items-center">
+                    <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
                       <option value="claude">Claude</option>
                       <option value="gemini">Gemini</option>
                       <option value="system">System</option>
                     </select>
-                    <span className="text-white/30 text-[12px] px-1">→</span>
-                    <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                    <span className="text-white/30 text-[10px] px-0.5">→</span>
+                    <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
                       <option value="all">All</option>
                       <option value="claude">Claude</option>
                       <option value="gemini">Gemini</option>
                     </select>
                   </div>
                   {/* 메시지 유형 선택 */}
-                  <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
+                  <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
                     <option value="info">ℹ️ 정보 공유</option>
                     <option value="handoff">🤝 핸드오프 (작업 위임)</option>
                     <option value="request">📋 작업 요청</option>
@@ -1866,29 +976,27 @@ function App() {
                   <textarea
                     value={msgContent}
                     onChange={e => setMsgContent(e.target.value)}
-                    onCompositionStart={() => { isMsgComposingRef.current = true; }}
-                    onCompositionEnd={() => { isMsgComposingRef.current = false; }}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) {
-                        // 엔터 키 입력 시 기본 줄바꿈 동작을 즉시 차단합니다.
+                        // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
                         e.preventDefault();
 
-                        // 한글 조합 중(isComposing)에 엔터가 눌린 경우, 
-                        // 브라우저에 따라 KeyDown이 두 번 발생할 수 있으므로 
-                        // 이미 메시지가 비워졌다면(전송 완료) 추가 전송을 방지합니다.
-                        if (msgContent.trim()) {
+                        // 한글 조합 중이 아닐 때만 명령어를 전송합니다.
+                        if (!e.nativeEvent.isComposing && msgContent.trim()) {
                           sendMessage();
+                          // 전송 후 입력창을 비울 때 레이스 컨디션 방지를 위해 지연 처리
+                          setTimeout(() => setMsgContent(''), 0);
                         }
                       }
                     }}
-                    placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈, >명령어: 터미널 실행)"
-                    rows={4}
-                    className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-[13px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
+                    placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈)"
+                    rows={3}
+                    className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
                   />
                   <button
                     onClick={sendMessage}
                     disabled={!msgContent.trim()}
-                    className="w-full py-2.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-[13px] font-bold transition-colors shadow-lg"
+                    className="w-full py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded text-[10px] font-bold transition-colors"
                   >
                     전송 (Enter)
                   </button>
@@ -1896,14 +1004,14 @@ function App() {
               </div>
             ) : activeTab === 'tasks' ? (
               /* ── 태스크 보드 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-3">
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
                 {/* 상태 필터 탭 */}
-                <div className="flex gap-1.5 shrink-0">
+                <div className="flex gap-1 shrink-0">
                   {(['all', 'pending', 'in_progress', 'done'] as const).map(s => {
                     const label = s === 'all' ? '전체' : s === 'pending' ? '할 일' : s === 'in_progress' ? '진행' : '완료';
                     const count = s === 'all' ? tasks.length : tasks.filter(t => t.status === s).length;
                     return (
-                      <button key={s} onClick={() => setTaskFilter(s)} className={`flex-1 py-2 rounded-lg text-[11px] font-bold transition-all ${taskFilter === s ? 'bg-primary text-white shadow-md' : 'bg-white/5 text-[#858585] hover:text-white'}`}>
+                      <button key={s} onClick={() => setTaskFilter(s)} className={`flex-1 py-1 rounded text-[9px] font-bold transition-colors ${taskFilter === s ? 'bg-primary text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}>
                         {label}{count > 0 && ` (${count})`}
                       </button>
                     );
@@ -1911,10 +1019,10 @@ function App() {
                 </div>
 
                 {/* 작업 목록 */}
-                <div className="flex-1 overflow-y-auto space-y-2.5 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
                   {tasks.filter(t => taskFilter === 'all' || t.status === taskFilter).length === 0 ? (
-                    <div className="text-center text-[#858585] text-sm py-12 flex flex-col items-center gap-3 italic">
-                      <ClipboardList className="w-9 h-9 opacity-20" />
+                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                      <ClipboardList className="w-7 h-7 opacity-20" />
                       작업이 없습니다
                     </div>
                   ) : (
@@ -1927,48 +1035,44 @@ function App() {
                         const statusLabel =
                           task.status === 'pending' ? '할 일' : task.status === 'in_progress' ? '진행 중' : '완료';
                         return (
-                          <div 
-                            key={task.id} 
-                            onContextMenu={(e) => handleTaskContextMenu(e, task.id, task.title)}
-                            className={`p-3 rounded-lg border text-[12px] transition-all shadow-sm ${task.status === 'done' ? 'border-white/5 opacity-50 bg-black/10' : 'border-white/10 bg-white/2 hover:border-white/20'}`}
-                          >
+                          <div key={task.id} className={`p-2 rounded border text-[10px] transition-colors ${task.status === 'done' ? 'border-white/5 opacity-50' : 'border-white/10 hover:border-white/20'}`}>
                             {/* 제목 + 우선순위 */}
-                            <div className="flex items-start gap-2 mb-2">
-                              <span className="text-[13px] shrink-0">{priorityDot}</span>
-                              <span className={`font-bold flex-1 break-words leading-snug text-[13px] ${task.status === 'done' ? 'line-through text-[#858585]' : 'text-[#cccccc]'}`}>{task.title}</span>
+                            <div className="flex items-start gap-1.5 mb-1">
+                              <span className="text-[11px] shrink-0">{priorityDot}</span>
+                              <span className={`font-bold flex-1 break-words leading-tight ${task.status === 'done' ? 'line-through text-[#858585]' : 'text-[#cccccc]'}`}>{task.title}</span>
                             </div>
                             {/* 설명 (있을 경우) */}
                             {task.description && (
-                              <p className="text-[#858585] text-[11px] mb-2.5 leading-relaxed pl-5">{task.description}</p>
+                              <p className="text-[#858585] text-[9px] mb-1.5 leading-relaxed pl-4">{task.description}</p>
                             )}
                             {/* 담당자 + 상태 */}
-                            <div className="flex items-center justify-between pl-5 mb-2.5">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                            <div className="flex items-center justify-between pl-4 mb-1.5">
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold font-mono ${
                                 task.assigned_to === 'claude'  ? 'bg-green-500/15 text-green-400' :
                                 task.assigned_to === 'gemini' ? 'bg-blue-500/15 text-blue-400' :
                                 'bg-white/10 text-white/50'
                               }`}>{task.assigned_to}</span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
                                 task.status === 'pending'     ? 'bg-white/10 text-[#858585]' :
                                 task.status === 'in_progress' ? 'bg-primary/20 text-primary' :
                                 'bg-green-500/20 text-green-400'
                               }`}>{statusLabel}</span>
                             </div>
                             {/* 액션 버튼 */}
-                            <div className="flex gap-1.5 pl-5">
+                            <div className="flex gap-1 pl-4">
                               {task.status === 'pending' && (
-                                <button onClick={() => updateTask(task.id, { status: 'in_progress' })} className="flex-1 py-1.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[11px] font-bold transition-colors">▶ 시작</button>
+                                <button onClick={() => updateTask(task.id, { status: 'in_progress' })} className="flex-1 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[9px] font-bold transition-colors">▶ 시작</button>
                               )}
                               {task.status === 'in_progress' && (
                                 <>
-                                  <button onClick={() => updateTask(task.id, { status: 'done' })} className="flex-1 py-1.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 rounded text-[11px] font-bold transition-colors">✅ 완료</button>
-                                  <button onClick={() => updateTask(task.id, { status: 'pending' })} className="px-2 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[11px] transition-colors">↩</button>
+                                  <button onClick={() => updateTask(task.id, { status: 'done' })} className="flex-1 py-0.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 rounded text-[9px] font-bold transition-colors">✅ 완료</button>
+                                  <button onClick={() => updateTask(task.id, { status: 'pending' })} className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩</button>
                                 </>
                               )}
                               {task.status === 'done' && (
-                                <button onClick={() => updateTask(task.id, { status: 'pending' })} className="flex-1 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[11px] transition-colors">↩ 다시</button>
+                                <button onClick={() => updateTask(task.id, { status: 'pending' })} className="flex-1 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩ 다시</button>
                               )}
-                              <button onClick={() => deleteTask(task.id)} className="px-2 py-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 rounded text-[11px] transition-colors" title="삭제">🗑️</button>
+                              <button onClick={() => deleteTask(task.id)} className="px-1.5 py-0.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 rounded text-[9px] transition-colors" title="삭제">🗑️</button>
                             </div>
                           </div>
                         );
@@ -1978,8 +1082,7 @@ function App() {
 
                 {/* 새 작업 추가 */}
                 {showTaskForm ? (
-                  <div className="border-t border-white/5 pt-3 flex flex-col gap-2 shrink-0">
-                    <div className="text-[11px] text-[#858585] font-bold uppercase tracking-wider">새 작업 작성</div>
+                  <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
                     <input
                       type="text"
                       value={newTaskTitle}
@@ -1987,35 +1090,35 @@ function App() {
                       onKeyDown={e => { if (e.key === 'Enter') createTask(); if (e.key === 'Escape') setShowTaskForm(false); }}
                       placeholder="작업 제목 (필수)"
                       autoFocus
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-[12px] focus:outline-none focus:border-primary text-white transition-colors"
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
                     />
                     <input
                       type="text"
                       value={newTaskDesc}
                       onChange={e => setNewTaskDesc(e.target.value)}
                       placeholder="상세 설명 (선택)"
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-[12px] focus:outline-none focus:border-primary text-white transition-colors"
+                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
                     />
-                    <div className="flex gap-2">
-                      <select value={newTaskAssignee} onChange={e => setNewTaskAssignee(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer">
+                    <div className="flex gap-1">
+                      <select value={newTaskAssignee} onChange={e => setNewTaskAssignee(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
                         <option value="all">All</option>
                         <option value="claude">Claude</option>
                         <option value="gemini">Gemini</option>
                       </select>
-                      <select value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-2 py-2 text-[12px] focus:outline-none cursor-pointer">
+                      <select value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
                         <option value="high">🔴 높음</option>
                         <option value="medium">🟡 보통</option>
                         <option value="low">🟢 낮음</option>
                       </select>
                     </div>
-                    <div className="flex gap-2">
-                      <button onClick={createTask} disabled={!newTaskTitle.trim()} className="flex-1 py-2 bg-primary/80 hover:bg-primary disabled:opacity-30 text-white rounded-lg text-[13px] font-bold transition-colors">추가</button>
-                      <button onClick={() => setShowTaskForm(false)} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-[#858585] rounded-lg text-[13px] transition-colors">취소</button>
+                    <div className="flex gap-1">
+                      <button onClick={createTask} disabled={!newTaskTitle.trim()} className="flex-1 py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 text-white rounded text-[10px] font-bold transition-colors">추가</button>
+                      <button onClick={() => setShowTaskForm(false)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[10px] transition-colors">취소</button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-2.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded-lg text-[12px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-2">
-                    <Plus className="w-4 h-4" /> 새 작업 추가
+                  <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded text-[10px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-1.5">
+                    <Plus className="w-3 h-3" /> 새 작업 추가
                   </button>
                 )}
               </div>
@@ -2033,21 +1136,9 @@ function App() {
                     className="w-full bg-[#1e1e1e] border border-white/10 rounded pl-6 pr-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
                   />
                 </div>
-                {/* 항목 수 요약 + 프로젝트 필터 토글 */}
-                <div className="flex items-center justify-between shrink-0 px-0.5">
-                  <span className="text-[9px] text-[#858585]">
-                    총 {memory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
-                    {currentProjectName && !memShowAll && (
-                      <span className="ml-1 text-cyan-600">— {currentProjectName}</span>
-                    )}
-                  </span>
-                  <button
-                    onClick={() => setMemShowAll(v => !v)}
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-colors ${memShowAll ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-[#858585] hover:text-white'}`}
-                    title={memShowAll ? '현재 프로젝트만 보기' : '전체 프로젝트 보기'}
-                  >
-                    {memShowAll ? '전체' : '현재'}
-                  </button>
+                {/* 항목 수 요약 */}
+                <div className="text-[9px] text-[#858585] shrink-0 px-0.5">
+                  총 {memory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
                 </div>
 
                 {/* 메모리 항목 목록 */}
@@ -2068,10 +1159,6 @@ function App() {
                             <button onClick={() => deleteMemory(entry.key)} className="px-1.5 py-0.5 bg-white/5 hover:bg-red-500/20 rounded text-[9px] text-[#858585] hover:text-red-400 transition-colors">🗑️</button>
                           </div>
                         </div>
-                        {/* 전체 모드일 때 출처 프로젝트 배지 */}
-                        {memShowAll && entry.project && (
-                          <span className="inline-block px-1.5 py-0.5 bg-amber-500/10 text-amber-400 rounded text-[8px] font-mono mb-0.5">{entry.project}</span>
-                        )}
                         {/* 제목 (키와 다를 경우만) */}
                         {entry.title && entry.title !== entry.key && (
                           <p className="text-[#cccccc] font-semibold text-[10px] mb-0.5">{entry.title}</p>
@@ -2197,9 +1284,9 @@ function App() {
                             <span className={`font-mono font-bold text-[10px] w-12 shrink-0 ${agent === 'claude' ? 'text-green-400' : 'text-blue-400'}`}>{agent}</span>
                             <span className={`text-[9px] ${dotColor}`}>{stateLabel}</span>
                             <div className="ml-auto flex gap-1.5 text-[8px] font-mono">
-                              <span className="text-[#858585]">대:{taskDist.pending}</span>
-                              <span className="text-primary">진:{taskDist.in_progress}</span>
-                              <span className="text-green-400">완:{taskDist.done}</span>
+                              <span className="text-[#858585]">P:{taskDist.pending}</span>
+                              <span className="text-primary">W:{taskDist.in_progress}</span>
+                              <span className="text-green-400">D:{taskDist.done}</span>
                             </div>
                           </div>
                         );
@@ -2240,123 +1327,6 @@ function App() {
                     )}
                   </div>
                 )}
-
-                {/* 하이브 시스템 진단 위젯 — 오케스트레이터 대시보드 하단 배치
-                    변경 이력: 2026-02-28 Claude — superpowers 탭에서 hive 탭으로 이동
-                    이유: 하이브 헬스 진단은 오케스트레이터(Hive Mind) 탭과 의미적으로 일치함 */}
-                <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-[10px] font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
-                      <Cpu className="w-3.5 h-3.5" /> 하이브 시스템 진단
-                    </div>
-                    <button onClick={fetchHiveHealth} className="p-1 hover:bg-white/10 rounded transition-colors text-[#858585]">
-                      <RotateCw className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-
-                  {!hiveHealth ? (
-                    <div className="text-[9px] text-[#555] italic">진단 데이터 로드 중...</div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                        {/* 코어 지침 */}
-                        <div className="flex flex-col gap-0.5">
-                          <div className="text-[8px] text-[#666] mb-0.5">📜 코어 지침</div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">RULES.md</span>
-                            {hiveHealth.constitution?.rules_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">CLAUDE.md</span>
-                            {hiveHealth.constitution?.claude_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">GEMINI.md</span>
-                            {hiveHealth.constitution?.gemini_md ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">PROJECT_MAP</span>
-                            {hiveHealth.constitution?.project_map ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                        </div>
-                        {/* 하이브 스킬 */}
-                        <div className="flex flex-col gap-0.5">
-                          <div className="text-[8px] text-[#666] mb-0.5">🧠 핵심 스킬</div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">Master Skill</span>
-                            {hiveHealth.skills?.master ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">Brainstorm</span>
-                            {hiveHealth.skills?.brainstorm ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                          <div className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">Memory Script</span>
-                            {hiveHealth.skills?.memory_script ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 자가 치유 엔진 상태 */}
-                      <div className="pt-1 border-t border-white/5 flex flex-col gap-1">
-                        <div className="text-[8px] text-[#666] flex items-center justify-between">
-                          <span>🛡️ 자가 치유 엔진</span>
-                          <span className="text-primary/50">v4.0</span>
-                        </div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">DB 연결성</span>
-                          <span className={hiveHealth.db_ok ? "text-green-400" : "text-red-500"}>{hiveHealth.db_ok ? "정상" : "오류"}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">에이전트 활동</span>
-                          <span className={hiveHealth.agent_active ? "text-green-400" : "text-yellow-500"}>{hiveHealth.agent_active ? "활발" : "유휴"}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">누적 복구 횟수</span>
-                          <span className="text-primary">{hiveHealth.repair_count ?? 0}회</span>
-                        </div>
-                        {hiveHealth.last_check && (
-                          <div className="text-[7px] text-[#444] text-right italic">
-                            최근 점검: {new Date(hiveHealth.last_check).toLocaleTimeString()}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {/* 통합 복구 버튼 */}
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => {
-                        if(confirm("모든 누락된 하이브 지침과 스킬을 현재 프로젝트에 자동 복구하시겠습니까?")) {
-                          const projectRoot = currentProjectRoot || currentPath || gitPath;
-                          fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(projectRoot)}`)
-                            .then(res => res.json())
-                            .then(data => {
-                              setSpMsg(data.message);
-                              fetchHiveHealth();
-                            });
-                        }
-                      }}
-                      className="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary text-[9px] font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1"
-                    >
-                      <Zap className="w-2.5 h-2.5" /> 스킬 복구
-                    </button>
-                    <button
-                      onClick={() => {
-                        fetch(`${API_BASE}/api/hive/health/repair`)
-                          .then(res => res.json())
-                          .then(() => {
-                            setSpMsg("하이브 엔진 정밀 진단 및 자가 치유 완료");
-                            fetchHiveHealth();
-                          });
-                      }}
-                      className="px-2 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[9px] font-bold rounded border border-green-500/20 transition-all flex items-center justify-center gap-1"
-                      title="하이브 엔진 정밀 점검"
-                    >
-                      <Cpu className="w-2.5 h-2.5" /> 자가 치유
-                    </button>
-                  </div>
-                </div>
               </div>
             ) : activeTab === 'git' ? (
               /* ── Git 실시간 감시 패널 ── */
@@ -2396,11 +1366,11 @@ function App() {
                       </div>
                       {/* 요약 통계 행 */}
                       <div className="flex gap-2 text-[9px] font-mono">
-                        <span className="text-green-400">스:{gitStatus.staged.length}</span>
-                        <span className="text-yellow-400">수:{gitStatus.unstaged.length}</span>
+                        <span className="text-green-400">S:{gitStatus.staged.length}</span>
+                        <span className="text-yellow-400">M:{gitStatus.unstaged.length}</span>
                         <span className="text-[#858585]">?:{gitStatus.untracked.length}</span>
                         {gitStatus.conflicts.length > 0 && (
-                          <span className="text-red-400 font-black animate-pulse">⚠ 충:{gitStatus.conflicts.length}</span>
+                          <span className="text-red-400 font-black animate-pulse">⚠ C:{gitStatus.conflicts.length}</span>
                         )}
                       </div>
                     </div>
@@ -2432,19 +1402,10 @@ function App() {
                     {gitStatus.unstaged.length > 0 && (
                       <div className="p-2 rounded border border-yellow-500/20 bg-yellow-500/3">
                         <div className="text-[9px] font-bold text-yellow-400 mb-1">수정됨 (unstaged) ({gitStatus.unstaged.length})</div>
-                        {gitStatus.unstaged.slice(0, 15).map(f => (
-                          <div key={f} className="group flex items-center justify-between gap-1.5 py-0.5 hover:bg-white/5 rounded px-1 transition-colors">
-                            <span className="text-[9px] font-mono text-yellow-300/70 truncate flex-1" title={f}>~{f}</span>
-                            <button
-                              onClick={() => rollbackFile(f)}
-                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded text-red-400 transition-all shrink-0"
-                              title="변경사항 취소 (git checkout)"
-                            >
-                              <RotateCw className="w-3 h-3 rotate-180" />
-                            </button>
-                          </div>
+                        {gitStatus.unstaged.slice(0, 8).map(f => (
+                          <div key={f} className="text-[9px] font-mono text-yellow-300/70 pl-2 py-0.5 truncate">~{f}</div>
                         ))}
-                        {gitStatus.unstaged.length > 15 && <div className="text-[8px] text-yellow-400/50 pl-2">... +{gitStatus.unstaged.length - 15}개 더</div>}
+                        {gitStatus.unstaged.length > 8 && <div className="text-[8px] text-yellow-400/50 pl-2">... +{gitStatus.unstaged.length - 8}개 더</div>}
                       </div>
                     )}
 
@@ -2505,33 +1466,6 @@ function App() {
                   ))}
                 </div>
 
-                {/* 카탈로그 / 검색 뷰 전환 */}
-                <div className="flex gap-1 shrink-0 border border-white/10 rounded p-0.5">
-                  <button
-                    onClick={() => setMcpView('catalog')}
-                    className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${mcpView === 'catalog' ? 'bg-white/15 text-white' : 'text-[#858585] hover:text-white'}`}
-                  >내장 카탈로그</button>
-                  <button
-                    onClick={() => setMcpView('search')}
-                    className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors flex items-center justify-center gap-1 ${mcpView === 'search' ? 'bg-purple-500/30 text-purple-300' : 'text-[#858585] hover:text-white'}`}
-                  >
-                    <Search className="w-3 h-3" />Smithery 검색
-                  </button>
-                </div>
-
-                {/* 재시작 필요 안내 배너 */}
-                {mcpNeedsRestart && (
-                  <div className="flex items-center gap-2 text-[9px] text-yellow-300 bg-yellow-500/10 border border-yellow-500/30 rounded px-2 py-1 shrink-0">
-                    <span>⚠️</span>
-                    <span className="flex-1 font-bold">Claude Code · Gemini 재시작해야 MCP가 적용됩니다</span>
-                    <button
-                      onClick={() => setMcpNeedsRestart(false)}
-                      className="text-yellow-400 hover:text-yellow-200 font-bold leading-none"
-                      title="닫기"
-                    >✕</button>
-                  </div>
-                )}
-
                 {/* 마지막 작업 결과 메시지 */}
                 {mcpMsg && (
                   <div className="text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 font-mono truncate shrink-0" title={mcpMsg}>
@@ -2539,539 +1473,105 @@ function App() {
                   </div>
                 )}
 
-                {mcpView === 'catalog' ? (
-                  /* ── 내장 카탈로그 목록 ── */
-                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5">
-                    {mcpCatalog.length === 0 ? (
-                      <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                        <Package className="w-7 h-7 opacity-20" />
-                        카탈로그 로딩 중...
-                      </div>
-                    ) : (
-                      mcpCatalog.map(entry => {
-                        const isInstalled = mcpInstalled.includes(entry.name);
-                        const isLoading = mcpLoading[entry.name] ?? false;
-                        const catColor: Record<string, string> = {
-                          '문서': 'bg-blue-500/20 text-blue-300',
-                          '개발': 'bg-orange-500/20 text-orange-300',
-                          '검색': 'bg-yellow-500/20 text-yellow-300',
-                          'AI':   'bg-purple-500/20 text-purple-300',
-                          '브라우저': 'bg-green-500/20 text-green-300',
-                          'DB':   'bg-red-500/20 text-red-300',
-                        };
-                        return (
-                          <div key={entry.name} className={`p-2 rounded border transition-colors ${isInstalled ? 'border-green-500/30 bg-green-500/5' : 'border-white/10 bg-white/2 hover:border-white/20'}`}>
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              {isInstalled
-                                ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                                : <Circle className="w-3.5 h-3.5 text-[#555] shrink-0" />
-                              }
-                              <span className="text-[11px] font-bold text-white flex-1 truncate">{entry.name}</span>
-                              <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${catColor[entry.category] ?? 'bg-white/10 text-white/50'}`}>
-                                {entry.category}
-                              </span>
-                            </div>
-                            <p className="text-[9px] text-[#858585] pl-5 mb-1.5 leading-tight">{entry.description}</p>
-                            {entry.requiresEnv && entry.requiresEnv.length > 0 && (
-                              <p className="text-[8px] text-yellow-400/70 pl-5 mb-1.5 font-mono">
-                                ENV: {entry.requiresEnv.join(', ')}
-                              </p>
-                            )}
-                            <div className="pl-5">
-                              {isInstalled ? (
-                                <button onClick={() => uninstallMcp(entry.name)} disabled={isLoading}
-                                  className="text-[9px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 transition-colors">
-                                  {isLoading ? '처리 중...' : '제거'}
-                                </button>
-                              ) : (
-                                <button onClick={() => installMcp(entry)} disabled={isLoading}
-                                  className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50 transition-colors">
-                                  {isLoading ? '처리 중...' : '설치'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                ) : (
-                  /* ── Smithery 검색 패널 ── */
-                  <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                    {/* API 키 설정 영역 */}
-                    <div className="shrink-0">
-                      {mcpHasKey && !mcpShowKeyInput ? (
-                        <div className="flex items-center gap-1.5 text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-2 py-1">
-                          <CheckCircle2 className="w-3 h-3 shrink-0" />
-                          <span className="flex-1 font-mono truncate">API Key: {mcpKeyMasked}</span>
-                          <button onClick={() => setMcpShowKeyInput(true)}
-                            className="text-[#858585] hover:text-white font-bold text-[9px] transition-colors">변경</button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          <p className="text-[9px] text-[#858585]">
-                            Smithery API 키 필요 →{' '}
-                            <a href="https://smithery.ai/account/api-keys" target="_blank" rel="noreferrer"
-                              className="text-purple-400 hover:text-purple-300 underline">smithery.ai/account/api-keys</a>
-                          </p>
-                          <div className="flex gap-1">
-                            <input
-                              type="password"
-                              value={mcpKeyDraft}
-                              onChange={e => setMcpKeyDraft(e.target.value)}
-                              onKeyDown={e => e.key === 'Enter' && saveMcpApiKey()}
-                              placeholder="sk-..."
-                              className="flex-1 bg-white/5 border border-white/15 rounded px-2 py-1 text-[10px] text-white placeholder-[#555] focus:outline-none focus:border-purple-500/50"
-                            />
-                            <button onClick={saveMcpApiKey} disabled={mcpKeySaving || !mcpKeyDraft.trim()}
-                              className="text-[9px] font-bold px-2 py-1 rounded bg-purple-500/30 text-purple-300 hover:bg-purple-500/50 disabled:opacity-40 transition-colors shrink-0">
-                              {mcpKeySaving ? '저장 중' : '저장'}
-                            </button>
-                            {mcpHasKey && (
-                              <button onClick={() => { setMcpShowKeyInput(false); setMcpKeyDraft(''); }}
-                                className="text-[9px] px-1.5 py-1 rounded bg-white/5 text-[#858585] hover:text-white transition-colors shrink-0">✕</button>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                {/* MCP 카드 목록 */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5">
+                  {mcpCatalog.length === 0 ? (
+                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
+                      <Package className="w-7 h-7 opacity-20" />
+                      카탈로그 로딩 중...
                     </div>
-
-                    {/* 검색 입력 */}
-                    <div className="flex gap-1 shrink-0">
-                      <input
-                        type="text"
-                        value={mcpSearchQuery}
-                        onChange={e => setMcpSearchQuery(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && searchSmithery(1)}
-                        placeholder="검색어 입력 (예: database, browser...)"
-                        disabled={!mcpHasKey}
-                        className="flex-1 bg-white/5 border border-white/15 rounded px-2 py-1 text-[10px] text-white placeholder-[#555] focus:outline-none focus:border-purple-500/50 disabled:opacity-40"
-                      />
-                      <button
-                        onClick={() => searchSmithery(1)}
-                        disabled={!mcpHasKey || mcpSearchLoading || !mcpSearchQuery.trim()}
-                        className="text-[9px] font-bold px-2 py-1 rounded bg-purple-500/30 text-purple-300 hover:bg-purple-500/50 disabled:opacity-40 transition-colors shrink-0 flex items-center gap-1"
-                      >
-                        {mcpSearchLoading ? <RotateCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
-                      </button>
-                    </div>
-
-                    {/* 오류 메시지 */}
-                    {mcpSearchError && (
-                      <div className="text-[9px] text-red-400 bg-red-500/10 border border-red-500/20 rounded px-2 py-1 shrink-0">
-                        {mcpSearchError}
-                      </div>
-                    )}
-
-                    {/* 검색 결과 */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5">
-                      {mcpSearchLoading ? (
-                        <div className="text-center text-[#858585] text-xs py-8 flex flex-col items-center gap-2">
-                          <RotateCw className="w-5 h-5 animate-spin opacity-40" />
-                          검색 중...
-                        </div>
-                      ) : mcpSearchResults.length === 0 && !mcpSearchError ? (
-                        <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                          <Search className="w-7 h-7 opacity-20" />
-                          {mcpHasKey ? '검색어를 입력하세요' : 'API 키를 먼저 설정하세요'}
-                        </div>
-                      ) : (
-                        mcpSearchResults.map(server => {
-                          const slug = server.qualifiedName.split('/').pop() ?? server.qualifiedName;
-                          const isInstalled = mcpInstalled.includes(slug);
-                          const isLoading = mcpLoading[server.qualifiedName] ?? false;
-                          return (
-                            <div key={server.qualifiedName} className={`p-2 rounded border transition-colors ${isInstalled ? 'border-green-500/30 bg-green-500/5' : 'border-white/10 bg-white/2 hover:border-white/20'}`}>
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                {isInstalled
-                                  ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                                  : <Circle className="w-3.5 h-3.5 text-[#555] shrink-0" />
-                                }
-                                <span className="text-[11px] font-bold text-white flex-1 truncate">{server.displayName}</span>
-                                {server.verified && (
-                                  <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-blue-500/20 text-blue-300">✓ 인증</span>
-                                )}
-                              </div>
-                              <p className="text-[9px] text-[#858585] pl-5 mb-1 leading-tight line-clamp-2">{server.description}</p>
-                              <div className="flex items-center gap-1.5 pl-5">
-                                <span className="text-[8px] text-[#555] font-mono truncate flex-1">{server.qualifiedName}</span>
-                                {server.useCount > 0 && (
-                                  <span className="text-[8px] text-[#555]">{server.useCount.toLocaleString()} 사용</span>
-                                )}
-                                {isInstalled ? (
-                                  <button onClick={() => uninstallMcp(slug)} disabled={isLoading}
-                                    className="text-[9px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 transition-colors shrink-0">
-                                    {isLoading ? '처리 중...' : '제거'}
-                                  </button>
-                                ) : (
-                                  <button onClick={() => installFromSearch(server)} disabled={isLoading}
-                                    className="text-[9px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 disabled:opacity-50 transition-colors shrink-0">
-                                    {isLoading ? '처리 중...' : '설치'}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    {/* 페이지네이션 */}
-                    {mcpSearchTotalPages > 1 && (
-                      <div className="flex items-center justify-between shrink-0 pt-1 border-t border-white/10">
-                        <button
-                          onClick={() => searchSmithery(mcpSearchPage - 1)}
-                          disabled={mcpSearchPage <= 1 || mcpSearchLoading}
-                          className="text-[9px] font-bold px-2 py-1 rounded bg-white/5 text-[#858585] hover:text-white disabled:opacity-30 transition-colors"
-                        >← 이전</button>
-                        <span className="text-[9px] text-[#858585]">
-                          {mcpSearchPage} / {mcpSearchTotalPages} ({mcpSearchTotal.toLocaleString()}개)
-                        </span>
-                        <button
-                          onClick={() => searchSmithery(mcpSearchPage + 1)}
-                          disabled={mcpSearchPage >= mcpSearchTotalPages || mcpSearchLoading}
-                          className="text-[9px] font-bold px-2 py-1 rounded bg-white/5 text-[#858585] hover:text-white disabled:opacity-30 transition-colors"
-                        >다음 →</button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : activeTab === 'superpowers' ? (
-              /* ── 바이브 스킬 관리자 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 지능형 스킬 제안 */}
-                {skillProposals.length > 0 && (
-                  <div className="shrink-0 p-2 rounded border border-primary/20 bg-primary/5 flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[10px] font-bold text-primary flex items-center gap-1.5 uppercase tracking-tighter">
-                        <Brain className="w-3.5 h-3.5" /> 지능형 스킬 제안
-                      </div>
-                      <button onClick={fetchSkillAnalysis} className="p-1 hover:bg-white/10 rounded transition-colors text-primary/60">
-                        <RotateCw className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                    
-                    <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
-                      {skillProposals.map((p, i) => (
-                        <div key={i} className="p-1.5 rounded bg-black/30 border border-white/5 flex flex-col gap-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-yellow-300">#{p.keyword}</span>
-                            <span className="text-[8px] text-[#666]">{p.count}회 감지</span>
-                          </div>
-                          <p className="text-[8px] text-[#aaa] leading-tight">{p.description}</p>
-                          <button 
-                            onClick={() => approveSkill(p)}
-                            className="mt-1 py-0.5 bg-primary/20 hover:bg-primary/30 text-primary text-[8px] font-bold rounded transition-all"
-                          >
-                            스킬 초안 생성
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 상단 설명 */}
-                <div className="shrink-0 flex items-center gap-2 px-1 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded text-[9px] text-yellow-300">
-                  <Zap className="w-3.5 h-3.5 shrink-0" />
-                  <span>AI 에이전트 스킬 프레임워크 — 체계적 개발 워크플로 주입</span>
-                </div>
-
-                {/* 메시지 */}
-                {spMsg && (
-                  <div className="text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 font-mono truncate shrink-0" title={spMsg}>
-                    {spMsg}
-                  </div>
-                )}
-
-                {/* Claude Code 카드 */}
-                {(['claude', 'gemini'] as const).map(tool => {
-                  const info = spStatus?.[tool];
-                  const isLoading = spLoading[tool] ?? false;
-                  const toolLabel = tool === 'claude' ? 'Claude Code' : 'Gemini CLI';
-                  const toolColor = tool === 'claude' ? 'border-[#3794ef]/30 bg-[#3794ef]/5' : 'border-blue-400/30 bg-blue-400/5';
-                  const toolBadge = tool === 'claude' ? 'bg-[#3794ef]/20 text-[#3794ef]' : 'bg-blue-400/20 text-blue-300';
-                  const repo = info?.repo ?? (tool === 'claude' ? 'btsky99/vibe-coding (내장)' : 'btsky99/vibe-coding (내장)');
-                  const commands = info?.commands ?? [];
-                  return (
-                    <div key={tool} className={`rounded border p-2.5 flex flex-col gap-2 ${info?.installed ? (tool === 'claude' ? 'border-[#3794ef]/40 bg-[#3794ef]/8' : 'border-blue-400/40 bg-blue-400/8') : 'border-white/10 bg-white/2'}`}>
-                      {/* 헤더 */}
-                      <div className="flex items-center gap-2">
-                        {info?.installed
-                          ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                          : <Circle className="w-4 h-4 text-[#555] shrink-0" />}
-                        <span className="text-[12px] font-bold text-white flex-1">{toolLabel}</span>
-                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${toolBadge}`}>
-                          {info?.installed ? `v${info.version ?? 'latest'}` : '미설치'}
-                        </span>
-                      </div>
-                      {/* 리포 링크 */}
-                      <p className="text-[9px] text-[#666] pl-6 font-mono">{repo}</p>
-                      {/* 스킬 목록 */}
-                      {info?.installed && info.skills.length > 0 && (
-                        <div className="pl-6 flex flex-wrap gap-1">
-                          {info.skills.map(s => (
-                            <span key={s} className={`text-[7px] px-1 py-0.5 rounded font-mono ${toolColor}`}>{s}</span>
-                          ))}
-                        </div>
-                      )}
-                      {/* 커맨드 목록 */}
-                      {info?.installed && (
-                        <div className="pl-6 flex flex-col gap-0.5">
-                          {commands.map(c => (
-                            <span key={c} className="text-[8px] text-yellow-300/70 font-mono">{c}</span>
-                          ))}
-                        </div>
-                      )}
-                      {/* 설치 / 제거 버튼 */}
-                      <div className="flex gap-1.5 pt-1">
-                        {info?.installed ? (
-                          <button
-                            onClick={() => spUninstall(tool)}
-                            disabled={isLoading}
-                            className="flex-1 py-1 text-[10px] font-bold rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50"
-                          >
-                            {isLoading ? '처리 중…' : '제거'}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => spInstall(tool)}
-                            disabled={isLoading}
-                            className="flex-1 py-1 text-[10px] font-bold rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors disabled:opacity-50"
-                          >
-                            {isLoading ? '설치 중…' : '설치'}
-                          </button>
-                        )}
-                        <button
-                          onClick={fetchSpStatus}
-                          className="px-2 py-1 text-[10px] rounded bg-white/5 text-[#858585] hover:text-white transition-colors"
-                          title="상태 새로고침"
-                        >
-                          <RotateCw className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* 스킬 주입 패널 */}
-                <div className="shrink-0 mt-1 flex flex-col gap-0.5">
-                  <p className="text-[9px] font-bold text-[#858585] uppercase tracking-wider mb-1">핵심 스킬 — 클릭으로 터미널 주입</p>
-                  {VIBE_SKILLS.map(sk => {
-                    const claudeInstalled = spStatus?.claude?.installed ?? false;
-                    const geminiInstalled = spStatus?.gemini?.installed ?? false;
-                    const injectText = claudeInstalled
-                      ? sk.claudeCmd
-                      : geminiInstalled
-                      ? sk.geminiCmd
-                      : sk.algo;
-                    const isMcp = claudeInstalled || geminiInstalled;
-                    return (
-                      <div key={sk.name} className="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-white/5 border border-transparent hover:border-white/10 transition-all group">
-                        <Zap className="w-2.5 h-2.5 text-yellow-400/60 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <span className="text-[9px] font-bold text-white/80 font-mono">{sk.name}</span>
-                          <span className="text-[8px] text-[#555] ml-1.5">{sk.desc}</span>
-                        </div>
-                        <button
-                          onClick={() => {
-                            // 🛑 안전장치 팝업 (Approval Gate)
-                            if (sk.name === 'master' || sk.name === 'brainstorm') {
-                              if (!confirm(`[안전장치 가동]\n\n강력한 스킬('${sk.name}')을 실행하려고 합니다.\n작업을 시작하기 전, 브레인스토밍 6단계 절차에 따라 계획을 먼저 수립하고 승인을 받겠습니다.\n\n진행할까요?`)) {
-                                return; // 사용자가 취소하면 스킬 주입 중단
-                              }
+                  ) : (
+                    mcpCatalog.map(entry => {
+                      const isInstalled = mcpInstalled.includes(entry.name);
+                      const isLoading = mcpLoading[entry.name] ?? false;
+                      // 카테고리별 색상
+                      const catColor: Record<string, string> = {
+                        '문서': 'bg-blue-500/20 text-blue-300',
+                        '개발': 'bg-orange-500/20 text-orange-300',
+                        '검색': 'bg-yellow-500/20 text-yellow-300',
+                        'AI':   'bg-purple-500/20 text-purple-300',
+                        '브라우저': 'bg-green-500/20 text-green-300',
+                        'DB':   'bg-red-500/20 text-red-300',
+                      };
+                      return (
+                        <div key={entry.name} className={`p-2 rounded border transition-colors ${isInstalled ? 'border-green-500/30 bg-green-500/5' : 'border-white/10 bg-white/2 hover:border-white/20'}`}>
+                          {/* 이름 + 카테고리 배지 + 설치 아이콘 */}
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            {isInstalled
+                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                              : <Circle className="w-3.5 h-3.5 text-[#555] shrink-0" />
                             }
-                            // 마지막으로 포커스된 터미널(_vibeActiveSlot)에만 주입
-                            window.dispatchEvent(new CustomEvent(`vibe:inject:${_vibeActiveSlot}`, { detail: { text: injectText } }));
-                          }}
-                          className="shrink-0 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold transition-all bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30"
-                          title={isMcp ? `MCP: ${injectText}` : '알고리즘 직접 주입'}
-                        >
-                          <Play className="w-2 h-2" />
-                          {isMcp ? 'MCP' : '주입'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                  <p className="text-[8px] text-[#444] mt-1 px-1">
-                    {(spStatus?.claude?.installed || spStatus?.gemini?.installed)
-                      ? '✓ MCP 연결됨 — 슬래시 커맨드로 실행'
-                      : '⚡ MCP 미설치 — 알고리즘 직접 주입'}
-                  </p>
-                </div>
-              </div>
-            ) : activeTab === 'models' ? (
-              /* ── 로컬 모델 매니저 (LMFit 스타일) ── */
-              <div className="flex-1 flex flex-col gap-3 overflow-hidden">
-                {/* 새로고침 버튼 */}
-                <div className="flex items-center justify-between shrink-0">
-                  <span className="text-[10px] text-[#858585] uppercase tracking-widest">하드웨어 & 모델 호환성</span>
-                  <button onClick={fetchLocalModels} className="p-1 hover:bg-white/10 rounded transition-colors text-primary/60 hover:text-primary" title="새로고침">
-                    <RotateCw className={`w-3 h-3 ${localModelsLoading ? 'animate-spin' : ''}`} />
-                  </button>
-                </div>
-
-                {/* 하드웨어 스펙 */}
-                {localModels && (
-                  <div className="shrink-0 p-2 rounded border border-blue-500/20 bg-blue-500/5 flex flex-col gap-1.5">
-                    <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">Hardware</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] text-[#858585]">RAM</span>
-                      <span className="text-[10px] font-bold text-white">{localModels.hardware.ram_gb} GB</span>
-                    </div>
-                    {localModels.hardware.gpus.length > 0 ? (
-                      localModels.hardware.gpus.map((g, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span className="text-[9px] text-[#858585]">GPU</span>
-                          <span className="text-[10px] font-bold text-white truncate">{g.name}</span>
-                          <span className="text-[9px] text-blue-300 shrink-0">{g.vram_gb} GB</span>
+                            <span className="text-[11px] font-bold text-white flex-1 truncate">{entry.name}</span>
+                            <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${catColor[entry.category] ?? 'bg-white/10 text-white/50'}`}>
+                              {entry.category}
+                            </span>
+                          </div>
+                          {/* 설명 */}
+                          <p className="text-[9px] text-[#858585] pl-5 mb-1.5 leading-tight">{entry.description}</p>
+                          {/* 환경변수 안내 */}
+                          {entry.requiresEnv && entry.requiresEnv.length > 0 && (
+                            <p className="text-[8px] text-yellow-400/70 pl-5 mb-1.5 font-mono">
+                              ENV: {entry.requiresEnv.join(', ')}
+                            </p>
+                          )}
+                          {/* 설치 / 제거 버튼 */}
+                          <div className="pl-5">
+                            {isInstalled ? (
+                              <button
+                                onClick={() => uninstallMcp(entry.name)}
+                                disabled={isLoading}
+                                className="text-[9px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 transition-colors"
+                              >
+                                {isLoading ? '처리 중...' : '제거'}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => installMcp(entry)}
+                                disabled={isLoading}
+                                className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50 transition-colors"
+                              >
+                                {isLoading ? '처리 중...' : '설치'}
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] text-[#858585]">GPU</span>
-                        <span className="text-[9px] text-[#555]">감지 안됨 (CPU 추론)</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Ollama 로컬 모델 목록 */}
-                <div className="flex-1 flex flex-col gap-1.5 overflow-y-auto custom-scrollbar">
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[9px] font-bold text-[#858585] uppercase tracking-widest">Ollama 로컬 모델</span>
-                    {localModels?.ollama_available ? (
-                      <span className="text-[8px] text-green-400">● 연결됨</span>
-                    ) : (
-                      <span className="text-[8px] text-red-400">● 미실행</span>
-                    )}
-                  </div>
-
-                  {!localModels && !localModelsLoading && (
-                    <div className="text-[9px] text-[#555] px-1">탭 진입 시 자동 조회됩니다.</div>
-                  )}
-                  {localModelsLoading && (
-                    <div className="text-[9px] text-[#858585] px-1">스캔 중...</div>
-                  )}
-                  {localModels?.ollama_error && (
-                    <div className="text-[9px] text-[#555] px-1">Ollama 미실행 — 로컬 모델 없음</div>
-                  )}
-                  {localModels?.models.length === 0 && localModels?.ollama_available && (
-                    <div className="text-[9px] text-[#555] px-1">설치된 모델 없음</div>
-                  )}
-
-                  {localModels?.models.map((m, i) => (
-                    <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-white/5 hover:border-white/10 transition-all">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${
-                        m.fits === true ? 'bg-green-400' : m.fits === false ? 'bg-red-400' : 'bg-yellow-400'
-                      }`} title={m.fits === true ? '실행 가능' : m.fits === false ? '메모리 부족' : '확인 불가'} />
-                      <span className="flex-1 text-[10px] text-white truncate font-mono">{m.name}</span>
-                      <span className="text-[9px] text-[#858585] shrink-0">{m.size_gb} GB</span>
-                    </div>
-                  ))}
-
-                  {/* 범례 */}
-                  {localModels && (
-                    <div className="flex items-center gap-3 mt-1 px-1">
-                      <span className="flex items-center gap-1 text-[8px] text-[#555]"><span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block"/>실행 가능</span>
-                      <span className="flex items-center gap-1 text-[8px] text-[#555]"><span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"/>메모리 부족</span>
-                    </div>
+                      );
+                    })
                   )}
                 </div>
-
-                {/* Ollama 설치 안내 */}
-                {localModels && !localModels.ollama_available && (
-                  <div className="shrink-0 p-2 rounded border border-white/5 bg-white/2 text-[9px] text-[#555]">
-                    로컬 모델 사용: <span className="font-mono text-primary">ollama serve</span> 실행 후 새로고침
-                  </div>
-                )}
               </div>
             ) : (
               /* ── 파일 탐색기 ── */
               <>
-                {/* 프로젝트 및 드라이브 선택기 */}
-                <div className="flex flex-col gap-2.5 mb-4 shrink-0">
-                  <div className="flex items-center justify-between px-1 mb-1.5">
-                    <span className="text-[12px] font-bold text-[#858585] uppercase tracking-widest">Workspace</span>
-                    <button 
-                      onClick={openProjectFolder}
-                      className="p-1.5 hover:bg-white/10 rounded text-primary transition-colors"
-                      title="새 폴더 열기"
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={projects.includes(currentPath) ? currentPath : ""}
-                      onChange={(e) => {
-                        if (e.target.value === "browse") {
-                          openProjectFolder();
-                        } else if (e.target.value) {
-                          setCurrentPath(e.target.value);
-                        }
-                      }}
-                      className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-3 py-2 text-[13px] focus:outline-none transition-all cursor-pointer text-white font-medium shadow-sm"
-                    >
-                      <option value="" disabled>프로젝트 선택...</option>
-                      {projects.map(p => (
-                        <option key={p} value={p}>{p.split('/').pop() || p}</option>
-                      ))}
-                      <option value="divider" disabled>──────────</option>
-                      <option value="browse">📂 폴더 찾아보기...</option>
-                    </select>
-                    <button
-                      onClick={() => setTreeMode(v => !v)}
-                      className={`p-2 rounded-lg border text-[12px] font-bold transition-all shrink-0 ${treeMode ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-[#3c3c3c] border-white/10 text-[#858585] hover:text-white'}`}
-                      title={treeMode ? '플랫 뷰로 전환' : '트리 뷰로 전환'}
-                    >
-                      {treeMode ? '≡' : '⊞'}
-                    </button>
-                  </div>
-
-                  {/* 드라이브 선택 (보조) */}
-                  <select
-                    value={drives.find(d => currentPath.startsWith(d)) || ""}
-                    onChange={(e) => setCurrentPath(e.target.value)}
-                    className="w-full bg-white/5 border border-transparent hover:border-white/10 rounded px-2.5 py-1.5 text-[11px] focus:outline-none transition-all cursor-pointer text-[#858585]"
+                {/* 드라이브 선택 + 트리/플랫 토글 */}
+                <div className="flex items-center gap-1 mb-2">
+                  <button
+                    onClick={openFolder}
+                    className="p-1.5 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded text-[#dcb67a] transition-all shrink-0"
+                    title="프로젝트 폴더 열기"
                   >
-                    <option value="" disabled>드라이브 이동...</option>
+                    <VscFolderOpened className="w-4 h-4" />
+                  </button>
+                  <select
+                    value={drives.find(d => currentPath.startsWith(d)) || currentPath}
+                    onChange={(e) => setCurrentPath(e.target.value)}
+                    className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer"
+                  >
+                    <option value="D:/vibe-coding">vibe-coding</option>
                     {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
                   </select>
+                  <button
+                    onClick={() => setTreeMode(v => !v)}
+                    className={`p-1.5 rounded border text-[10px] font-bold transition-all shrink-0 ${treeMode ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-[#3c3c3c] border-white/10 text-[#858585] hover:text-white'}`}
+                    title={treeMode ? '플랫 뷰로 전환' : '트리 뷰로 전환'}
+                  >
+                    {treeMode ? '≡' : '⊞'}
+                  </button>
                 </div>
 
-                <div 
-                  className="flex-1 overflow-y-auto space-y-1 custom-scrollbar border-t border-white/5 pt-3"
-                  onContextMenu={(e) => e.preventDefault()} // 브라우저 기본 메뉴 방지
-                >
-                  <div className="flex items-center gap-1 px-3 mb-2">
-                    <button 
-                      onClick={createFile}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[11px] text-[#cccccc] transition-colors"
-                      title="새 파일 생성"
-                    >
-                      <FilePlus className="w-3.5 h-3.5" /> 파일
-                    </button>
-                    <button 
-                      onClick={createDir}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[11px] text-[#cccccc] transition-colors"
-                      title="새 폴더 생성"
-                    >
-                      <FolderPlus className="w-3.5 h-3.5" /> 폴더
-                    </button>
-                    <button 
-                      onClick={refreshItems}
-                      className="p-1.5 bg-white/5 hover:bg-white/10 rounded text-[#858585] hover:text-white transition-colors"
-                      title="새로고침"
-                    >
-                      <RotateCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <button onClick={goUp} className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2a2d2e] rounded text-[13px] transition-colors group">
-                    <ChevronLeft className="w-5 h-5 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
+                <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
+                  <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
+                    <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
                   </button>
 
                   {treeMode ? (
@@ -3085,85 +1585,38 @@ function App() {
                         treeChildren={treeChildren}
                         onToggle={handleTreeToggle}
                         onFileOpen={handleFileClick}
-                        onDelete={deleteItem}
-                        onContextMenu={handleContextMenu}
-                        isRenaming={isRenaming}
-                        newNameDraft={newNameDraft}
-                        setNewNameDraft={setNewNameDraft}
-                        onRenameSubmit={handleFileRename}
-                        setIsRenaming={setIsRenaming}
                       />
                     ))
                   ) : (
                     /* 플랫 뷰 (기존) */
                     items.map(item => (
-                      <div 
-                        key={item.path} 
-                        className={`group flex items-center gap-0 px-3 py-1 rounded text-[13px] transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}
-                        onContextMenu={(e) => handleContextMenu(e, item.path, item.isDir)}
-                      >
+                      <div key={item.path} className={`group flex items-center gap-0 px-2 py-0.5 rounded text-xs transition-colors relative ${selectedPath === item.path ? 'bg-primary/20 border-l-2 border-primary' : 'hover:bg-[#2a2d2e]'}`}>
                         <button
                           onClick={() => handleFileClick(item)}
-                          className={`flex-1 flex items-center gap-2.5 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
+                          className={`flex-1 flex items-center gap-2 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
                         >
-                          {item.isDir ? <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
-                          {isRenaming === item.path ? (
-                            <input
-                              autoFocus
-                              value={newNameDraft}
-                              onChange={e => setNewNameDraft(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') handleFileRename(item.path, newNameDraft);
-                                if (e.key === 'Escape') setIsRenaming(null);
-                              }}
-                              onBlur={() => setIsRenaming(null)}
-                              className="bg-[#1e1e1e] border border-primary rounded px-1 py-0.5 text-xs text-white outline-none w-full"
-                              onClick={e => e.stopPropagation()}
-                            />
-                          ) : (
-                            <span className="truncate">{item.name}</span>
-                          )}
+                          {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
+                          <span className="truncate">{item.name}</span>
                         </button>
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
-                          {!item.isDir && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { detail: { text: item.path } }));
-                              }}
-                              className="p-1 hover:bg-white/10 rounded text-primary transition-all shrink-0"
-                              title="터미널 입력창으로 경로 보내기"
-                            >
-                              <Pin className="w-3 h-3" />
-                            </button>
-                          )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
-                                .then(res => res.json())
-                                .then(data => {
-                                  if (data.status === 'success') {
-                                    const btn = e.currentTarget;
-                                    const originalHtml = btn.innerHTML;
-                                    btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
-                                    setTimeout(() => btn.innerHTML = originalHtml, 1500);
-                                  }
-                                });
-                            }}
-                            className="p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all shrink-0"
-                            title="경로 복사"
-                          >
-                            <ClipboardList className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteItem(item.path, item.name); }}
-                            className="p-1 hover:bg-red-500/20 text-[#858585] hover:text-red-500 rounded transition-all shrink-0"
-                            title="삭제"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fetch(`${API_BASE}/api/copy-path?path=${encodeURIComponent(item.path)}`)
+                              .then(res => res.json())
+                              .then(data => {
+                                if (data.status === 'success') {
+                                  const btn = e.currentTarget;
+                                  const originalHtml = btn.innerHTML;
+                                  btn.innerHTML = '<span class="text-[8px] text-green-400">Copied!</span>';
+                                  setTimeout(() => btn.innerHTML = originalHtml, 1500);
+                                }
+                              });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded text-[#858585] hover:text-primary transition-all ml-auto shrink-0"
+                          title="경로 복사"
+                        >
+                          <ClipboardList className="w-3 h-3" />
+                        </button>
                       </div>
                     ))
                   )}
@@ -3188,7 +1641,7 @@ function App() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <button onClick={refreshItems} className="p-1.5 hover:bg-white/10 rounded text-primary hover:text-white transition-all hover:rotate-180 duration-500" title="파일 새로고침">
+              <button onClick={refreshItems} className="p-1.5 hover:bg-white/10 rounded text-primary hover:text-white transition-all hover:rotate-180 duration-500" title="Refresh Files">
                 <RotateCw className="w-4 h-4" />
               </button>
               <div className="flex items-center gap-1 bg-black/30 rounded-md p-0.5 ml-1 border border-white/5 flex-wrap">
@@ -3219,12 +1672,11 @@ function App() {
               'grid-cols-4 grid-rows-2'
             }`}>
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} claudeSpInstalled={spStatus?.claude?.installed ?? false} geminiSpInstalled={spStatus?.gemini?.installed ?? false} contextSessions={contextSessions} geminiContextSessions={geminiContextSessions} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} />
               ))}
             </div>
           </main>
         </div>
-
       </div>
 
       {/* Quick View Floating Panels */}
@@ -3235,200 +1687,151 @@ function App() {
   )
 }
 
-// VS코드 스타일 줄 번호 뷰어 컴포넌트
-// - 우측 정렬 번호 + 세로 구분선 + 호버 시 행 하이라이트
-function CodeWithLineNumbers({ content, fontSize = '12px' }: { content: string; fontSize?: string }) {
-  const lines = content.split('\n');
-  const gutterWidth = String(lines.length).length;
+/**
+ * 🎨 VibeEditor: Monaco Editor 기반의 코드 편집기 컴포넌트
+ * - VS Code 스타일의 코드 하이라이팅 및 주석 색상 강화 테마 적용
+ * - 자동 언어 감지 및 편집 내용 실시간 반영 지원
+ */
+const VibeEditor = ({ path, content, onChange, onSave, isReadOnly = false }: { 
+  path: string; 
+  content: string; 
+  onChange: (val: string) => void; 
+  onSave?: () => void;
+  isReadOnly?: boolean;
+}) => {
+  const extension = path.split('.').pop()?.toLowerCase() || '';
+  const languageMap: Record<string, string> = {
+    'py': 'python', 'js': 'javascript', 'jsx': 'javascript', 'ts': 'typescript', 'tsx': 'typescript',
+    'json': 'json', 'md': 'markdown', 'html': 'html', 'css': 'css', 'yml': 'yaml', 'yaml': 'yaml',
+    'sh': 'shell', 'bat': 'bat', 'powershell': 'powershell', 'sql': 'sql'
+  };
+  const language = languageMap[extension] || 'plaintext';
+
+  const handleEditorDidMount = (editor: any, monaco: any) => {
+    // 하이브 마인드 전용 다크 테마 정의
+    monaco.editor.defineTheme('vibe-dark-pro', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '6A9955', fontStyle: 'italic' }, // 주석: 밝은 초록색 (VS Code 표준)
+        { token: 'keyword', foreground: '569CD6', fontStyle: 'bold' },   // 키워드: 하늘색 + 굵게
+        { token: 'string', foreground: 'CE9178' },                      // 문자열: 연한 주황색
+        { token: 'number', foreground: 'B5CEA8' },                      // 숫자: 연두색
+        { token: 'type', foreground: '4EC9B0' },                        // 타입: 에메랄드색
+        { token: 'function', foreground: 'DCDCAA' },                    // 함수명: 연한 노란색
+      ],
+      colors: {
+        'editor.background': '#1e1e1e', // 배경색
+        'editorLineNumber.foreground': '#858585',
+        'editorLineNumber.activeForeground': '#cccccc',
+        'editor.selectionBackground': '#264F78',
+        'editor.inactiveSelectionBackground': '#3A3D41',
+      }
+    });
+    monaco.editor.setTheme('vibe-dark-pro');
+
+    // Ctrl+S / Cmd+S 저장 단축키 바인딩
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      if (onSave) onSave();
+    });
+  };
+
   return (
-    <div className="font-mono leading-relaxed" style={{ fontSize }}>
-      {lines.map((line, i) => (
-        <div key={i} className="flex hover:bg-white/5 group">
-          {/* 줄 번호 거터: 우측 정렬, 선택 불가, 구분선 포함 */}
-          <span
-            className="shrink-0 text-right pr-3 select-none text-[#858585] group-hover:text-[#aaaaaa] border-r border-white/10 mr-3 transition-colors"
-            style={{ minWidth: `${gutterWidth + 1}ch` }}
-          >
-            {i + 1}
-          </span>
-          {/* 코드 본문 */}
-          <span className="flex-1 whitespace-pre text-[#cccccc]">{line}</span>
+    <div className="w-full h-full relative group">
+      <Editor
+        height="100%"
+        language={language}
+        value={content}
+        theme="vibe-dark-pro"
+        onChange={(val) => onChange(val || '')}
+        onMount={handleEditorDidMount}
+        options={{
+          readOnly: isReadOnly,
+          fontSize: 13,
+          fontFamily: "'Fira Code', 'Consolas', monospace",
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          wordWrap: 'on',
+          automaticLayout: true,
+          lineNumbers: 'on',
+          renderLineHighlight: 'all',
+          padding: { top: 12, bottom: 12 },
+          tabSize: 4,
+          insertSpaces: true,
+        }}
+      />
+      {isReadOnly && (
+        <div className="absolute top-2 right-4 px-2 py-0.5 bg-black/50 text-[10px] text-white/50 rounded pointer-events-none border border-white/10 backdrop-blur-sm">
+          READ-ONLY
         </div>
-      ))}
+      )}
     </div>
   );
-}
+};
 
 type TreeItem = { name: string; path: string; isDir: boolean };
-function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen, onDelete, onContextMenu, isRenaming, newNameDraft, setNewNameDraft, onRenameSubmit, setIsRenaming }: {
+function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen }: {
   item: TreeItem; depth: number;
   expanded: Record<string, boolean>;
   treeChildren: Record<string, TreeItem[]>;
   onToggle: (path: string) => void;
   onFileOpen: (item: TreeItem) => void;
-  onDelete: (path: string, name: string) => void;
-  onContextMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
-  isRenaming: string | null;
-  newNameDraft: string;
-  setNewNameDraft: (val: string) => void;
-  onRenameSubmit: (oldPath: string, newName: string) => void;
-  setIsRenaming: (val: string | null) => void;
 }) {
   const isOpen = expanded[item.path] || false;
   const kids = treeChildren[item.path] || [];
   const indent = depth * 12;
-  const isTargetRenaming = isRenaming === item.path;
-
   if (item.isDir) {
     return (
-      <div className="group/node">
-        <div
-          className="flex items-center hover:bg-[#2a2d2e] rounded transition-colors pr-2"
-          onContextMenu={(e) => onContextMenu(e, item.path, true)}
+      <div>
+        <button
+          onClick={() => onToggle(item.path)}
+          style={{ paddingLeft: `${indent + 4}px` }}
+          className="w-full flex items-center gap-1 py-0.5 pr-2 hover:bg-[#2a2d2e] rounded text-xs transition-colors text-[#cccccc]"
         >
-          {/* 화살표: 펼치기/접기 전용 (2026-02-27) */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggle(item.path); }}
-            style={{ paddingLeft: `${indent + 6}px` }}
-            className="flex items-center py-1 px-1 text-[#858585] hover:text-white shrink-0"
-          >
-            {isOpen
-              ? <ChevronDown className="w-3.5 h-3.5" />
-              : <ChevronRight className="w-3.5 h-3.5" />}
-          </button>
-          {/* 폴더 아이콘 + 이름: 클릭 시 트리 토글 및 선택 (2026-02-28 개선) */}
-          <button
-            onClick={() => onFileOpen(item)}
-            className="flex-1 flex items-center gap-1.5 py-1 text-[13px] text-[#cccccc] overflow-hidden"
-          >
-            {isOpen
-              ? <VscFolderOpened className="w-5 h-5 text-[#dcb67a] shrink-0" />
-              : <VscFolder className="w-5 h-5 text-[#dcb67a] shrink-0" />}
-            {isTargetRenaming ? (
-              <input
-                autoFocus
-                value={newNameDraft}
-                onChange={e => setNewNameDraft(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') onRenameSubmit(item.path, newNameDraft);
-                  if (e.key === 'Escape') setIsRenaming(null);
-                }}
-                onBlur={() => setIsRenaming(null)}
-                className="bg-[#1e1e1e] border border-primary rounded px-1 py-0.5 text-xs text-white outline-none w-full"
-                onClick={e => e.stopPropagation()}
-              />
-            ) : (
-              <span className="truncate">{item.name}</span>
-            )}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(item.path, item.name); }}
-            className="opacity-0 group-hover/node:opacity-100 p-1 hover:bg-red-500/20 text-[#858585] hover:text-red-500 rounded transition-all"
-            title="폴더 삭제"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+          {isOpen
+            ? <ChevronDown className="w-3 h-3 shrink-0 text-[#858585]" />
+            : <ChevronRight className="w-3 h-3 shrink-0 text-[#858585]" />}
+          {isOpen
+            ? <VscFolderOpened className="w-4 h-4 text-[#dcb67a] shrink-0" />
+            : <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" />}
+          <span className="truncate">{item.name}</span>
+        </button>
         {isOpen && kids.length === 0 && (
-          <div style={{ paddingLeft: `${indent + 32}px` }} className="py-1 text-[11px] text-[#858585] italic">비어 있음</div>
+          <div style={{ paddingLeft: `${indent + 28}px` }} className="py-0.5 text-[10px] text-[#858585] italic">비어 있음</div>
         )}
         {isOpen && kids.map(child => (
           <FileTreeNode key={child.path} item={child} depth={depth + 1}
             expanded={expanded} treeChildren={treeChildren}
-            onToggle={onToggle} onFileOpen={onFileOpen} onDelete={onDelete} 
-            onContextMenu={onContextMenu} isRenaming={isRenaming} newNameDraft={newNameDraft} 
-            setNewNameDraft={setNewNameDraft} onRenameSubmit={onRenameSubmit} setIsRenaming={setIsRenaming} />
+            onToggle={onToggle} onFileOpen={onFileOpen} />
         ))}
       </div>
     );
   }
   return (
-    <div 
-      className="group/node flex items-center hover:bg-primary/20 rounded transition-colors pr-2"
-      onContextMenu={(e) => onContextMenu(e, item.path, false)}
+    <button
+      onClick={() => onFileOpen(item)}
+      style={{ paddingLeft: `${indent + 20}px` }}
+      className="w-full flex items-center gap-2 py-0.5 pr-2 hover:bg-primary/20 rounded text-xs transition-colors text-white"
     >
-      <button
-        onClick={() => onFileOpen(item)}
-        style={{ paddingLeft: `${indent + 24}px` }}
-        className="flex-1 flex items-center gap-2.5 py-1 text-[13px] text-white overflow-hidden"
-      >
-        {getFileIcon(item.name)}
-        {isTargetRenaming ? (
-          <input
-            autoFocus
-            value={newNameDraft}
-            onChange={e => setNewNameDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') onRenameSubmit(item.path, newNameDraft);
-              if (e.key === 'Escape') setIsRenaming(null);
-            }}
-            onBlur={() => setIsRenaming(null)}
-            className="bg-[#1e1e1e] border border-primary rounded px-1 py-0.5 text-xs text-white outline-none w-full"
-            onClick={e => e.stopPropagation()}
-          />
-        ) : (
-          <span className="truncate font-medium text-left">{item.name}</span>
-        )}
-      </button>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover/node:opacity-100 transition-all">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            window.dispatchEvent(new CustomEvent(`vibe:fillInput:${_vibeActiveSlot}`, { detail: { text: item.path } }));
-          }}
-          className="p-1 hover:bg-white/20 rounded text-primary transition-all shrink-0"
-          title="터미널 입력창으로 경로 보내기"
-        >
-          <Pin className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(item.path, item.name); }}
-          className="p-1 hover:bg-red-500/20 text-[#858585] hover:text-red-500 rounded transition-all shrink-0"
-          title="파일 삭제"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
+      {getFileIcon(item.name)}
+      <span className="truncate">{item.name}</span>
+    </button>
   );
 }
 
-// Git Diff 시각화 컴포넌트
-function DiffViewer({ diff }: { diff: string }) {
-  const lines = diff.split('\n');
-  return (
-    <div className="font-mono text-[11px] leading-relaxed">
-      {lines.map((line, i) => {
-        let bgColor = '';
-        let textColor = 'text-[#cccccc]';
-        if (line.startsWith('+') && !line.startsWith('+++')) {
-          bgColor = 'bg-green-500/20';
-          textColor = 'text-green-400';
-        } else if (line.startsWith('-') && !line.startsWith('---')) {
-          bgColor = 'bg-red-500/20';
-          textColor = 'text-red-400';
-        } else if (line.startsWith('@@')) {
-          textColor = 'text-primary opacity-70';
-          bgColor = 'bg-primary/5';
-        }
-        return (
-          <div key={i} className={`${bgColor} ${textColor} px-2 whitespace-pre-wrap`}>
-            {line}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile, idx: number, bringToFront: (id: string) => void, closeFile: (id: string) => void }) {
+function FloatingWindow({ file, idx, bringToFront, closeFile, updateFileContent, handleSaveFile }: { 
+  file: OpenFile, 
+  idx: number, 
+  bringToFront: (id: string) => void, 
+  closeFile: (id: string) => void,
+  updateFileContent: (id: string, content: string) => void,
+  handleSaveFile: (path: string, content: string) => void
+}) {
   const [position, setPosition] = useState({ x: 100 + (idx * 30), y: 100 + (idx * 30) });
-  const [isMaximized, setIsMaximized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (isMaximized) return; // 최대화 상태에서는 드래그 금지
     setIsDragging(true);
     bringToFront(file.id);
     dragStartPos.current = { x: e.clientX - position.x, y: e.clientY - position.y };
@@ -3436,7 +1839,7 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (isDragging && !isMaximized) {
+    if (isDragging) {
       setPosition({
         x: e.clientX - dragStartPos.current.x,
         y: e.clientY - dragStartPos.current.y
@@ -3449,51 +1852,43 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
-  const toggleMaximize = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsMaximized(!isMaximized);
-    bringToFront(file.id);
-  };
-
   return (
     <div 
       onPointerDown={() => bringToFront(file.id)}
       style={{ 
         zIndex: file.zIndex, 
-        left: isMaximized ? 0 : position.x, 
-        top: isMaximized ? 0 : position.y,
-        width: isMaximized ? '100%' : undefined,
-        height: isMaximized ? '100%' : undefined,
-        resize: isMaximized ? 'none' : 'both', 
-        overflow: 'hidden',
-        borderRadius: isMaximized ? 0 : '12px',
-        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+        left: position.x, 
+        top: position.y,
+        resize: 'both', 
+        overflow: 'hidden' 
       }}
-      className={`absolute ${isMaximized ? 'w-full h-full' : 'w-[550px] h-[500px]'} min-w-[300px] min-h-[200px] bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col`}
+      className="absolute w-[700px] min-w-[300px] h-[600px] min-h-[200px] bg-[#1e1e1e]/95 backdrop-blur-xl border border-white/20 shadow-2xl rounded-xl flex flex-col overflow-hidden"
     >
       <div 
-        className={`h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 ${isMaximized ? 'cursor-default' : 'cursor-move'} select-none`}
+        className="h-10 bg-[#2d2d2d]/90 border-b border-white/10 flex items-center justify-between px-4 shrink-0 cursor-move select-none"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
         <div className="flex items-center gap-2 text-[#cccccc] font-mono text-sm truncate pointer-events-none">
           {getFileIcon(file.name)}
-          {file.name}
+          <span className="truncate">{file.name}</span>
+          <span className="text-[10px] opacity-40 ml-2 truncate max-w-[200px]">{file.path}</span>
         </div>
         <div className="flex items-center gap-1">
           <button 
-            onClick={toggleMaximize}
+            onClick={(e) => { e.stopPropagation(); handleSaveFile(file.path, file.content); }}
             onPointerDownCapture={e => e.stopPropagation()}
-            className="p-1 hover:bg-white/10 rounded text-[#cccccc] transition-colors cursor-pointer"
-            title={isMaximized ? "Restore" : "Maximize"}
+            className="p-1.5 hover:bg-primary/20 rounded text-[#cccccc] hover:text-primary transition-all cursor-pointer group"
+            title="저장 (Ctrl+S)"
           >
-            {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            <Save className="w-4.5 h-4.5 group-active:scale-90 transition-transform" />
           </button>
+          <div className="w-[1px] h-4 bg-white/10 mx-1" />
           <button 
             onClick={(e) => { e.stopPropagation(); closeFile(file.id); }} 
             onPointerDownCapture={e => e.stopPropagation()}
-            className="p-1 hover:bg-white/10 rounded text-[#cccccc] transition-colors cursor-pointer"
+            className="p-1.5 hover:bg-red-500/20 rounded text-[#cccccc] hover:text-red-400 transition-all cursor-pointer"
             title="Close"
           >
             <X className="w-5 h-5" />
@@ -3501,76 +1896,44 @@ function FloatingWindow({ file, idx, bringToFront, closeFile }: { file: OpenFile
         </div>
       </div>
       <div 
-        className="flex-1 overflow-auto bg-transparent relative custom-scrollbar"
+        className="flex-1 overflow-hidden bg-transparent relative"
         onPointerDownCapture={e => e.stopPropagation()}
       >
         {file.isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center text-[#858585] animate-pulse">Loading content...</div>
         ) : /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(file.name) ? (
-          <div className="absolute inset-0 flex items-center justify-center p-4">
+          <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto custom-scrollbar">
             <img
               src={`${API_BASE}/api/image-file?path=${encodeURIComponent(file.path)}`}
               alt={file.name}
-              className="max-w-full max-h-full object-contain"
+              className="max-w-full max-h-full object-contain shadow-2xl rounded-sm"
             />
           </div>
         ) : (
-          // VS코드 스타일 줄 번호 포함 파일 내용 표시
-          <div className="p-2">
-            <CodeWithLineNumbers content={file.content} fontSize="12px" />
-          </div>
+          <VibeEditor 
+            path={file.path} 
+            content={file.content} 
+            onChange={(val) => updateFileContent(file.id, val)}
+            onSave={() => handleSaveFile(file.path, file.content)}
+          />
         )}
       </div>
     </div>
   );
 }
 
-function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks, claudeSpInstalled, geminiSpInstalled, contextSessions, geminiContextSessions }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[], claudeSpInstalled: boolean, geminiSpInstalled: boolean, contextSessions: ContextSession[], geminiContextSessions: ContextSession[] }) {
+function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, messages, tasks }: { slotId: number, logs: LogRecord[], currentPath: string, terminalCount: number, locks: Record<string, string>, messages: AgentMessage[], tasks: Task[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   // FitAddon 참조 보관 (파일 뷰어 토글 시 재조정용)
   const fitAddonRef = useRef<FitAddon | null>(null);
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
-  const [fileViewerHeight, setFileViewerHeight] = useState(33);
-  const [isResizingFileViewer, setIsResizingFileViewer] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
-
-  // ─── 터미널 파일 뷰어 리사이징 로직 ───────────────────────────────────────
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizingFileViewer) return;
-      // 터미널 슬롯 컨테이너 찾기
-      const container = xtermRef.current?.closest('.h-full.bg-\\[\\#252526\\]');
-      if (container) {
-        const rect = container.getBoundingClientRect();
-        const newHeight = ((e.clientY - rect.top) / rect.height) * 100;
-        if (newHeight > 10 && newHeight < 85) {
-          setFileViewerHeight(newHeight);
-        }
-      }
-    };
-    const handleMouseUp = () => setIsResizingFileViewer(false);
-
-    if (isResizingFileViewer) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'row-resize';
-    } else {
-      document.body.style.cursor = 'default';
-    }
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizingFileViewer]);
   const [inputValue, setInputValue] = useState('');
-  // 한글 입력(IME) 상태 추적용 Ref
-  const isComposingRef = useRef(false);
   const [shortcuts, setShortcuts] = useState<Shortcut[]>(() => {
     try {
       const saved = localStorage.getItem('hive_shortcuts');
@@ -3586,88 +1949,6 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [activeFileContent, setActiveFileContent] = useState<string>('');
   const [isActiveFileLoading, setIsActiveFileLoading] = useState(false);
-  const [showDiff, setShowDiff] = useState(false);
-  const [diffContent, setDiffContent] = useState<string>('');
-
-  // 최근 변경 파일 목록 — FS 이벤트에서 누적 (최대 8개)
-  interface FileChange { path: string; eventType: string; ts: number; added: number; removed: number; hunks: string[] }
-  const [recentChanges, setRecentChanges] = useState<FileChange[]>([]);
-
-  // 컨텍스트 상세 정보 토글 (클릭 시 In/Out/Cache 2행 표시)
-  const [showCtxDetail, setShowCtxDetail] = useState(false);
-  // showContextPanel 제거됨 — 항상 표시 방식으로 변경 (2026-02-27)
-  // activeAgent에 따라 Claude/Gemini 세션 선택 — slotId 번째 세션 사용
-  // [2026-02-27] Claude: Gemini 컨텍스트 분기 추가
-  const isGeminiAgent = activeAgent === 'gemini';
-  const ctxSession = isGeminiAgent
-    ? (geminiContextSessions[slotId] ?? null)
-    : (contextSessions[slotId] ?? null);
-  // 컨텍스트 창 최대 토큰: Claude=200k, Gemini=1M
-  const CTX_MAX = isGeminiAgent ? 1000000 : 200000;
-  // 전체 컨텍스트 점유 = 순수입력 + 캐시읽기 + 캐시쓰기 (input_tokens는 캐시 제외값)
-  const ctxPct = ctxSession
-    ? Math.round(((ctxSession.input_tokens + ctxSession.cache_read + ctxSession.cache_write) / CTX_MAX) * 100)
-    : 0;
-  // ISO 타임스탬프 → 상대 시간 문자열 (예: "3분 전")
-  const ctxRelTime = (() => {
-    if (!ctxSession?.last_ts) return '';
-    const diff = Math.floor((Date.now() - new Date(ctxSession.last_ts).getTime()) / 1000);
-    if (diff < 60) return `${diff}초 전`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
-    return `${Math.floor(diff / 86400)}일 전`;
-  })();
-
-  // ─── 파일 시스템 이벤트 → 변경 파일 목록 추적 + slot0 자동 뷰어 ───
-  useEffect(() => {
-    const fsSse = new EventSource(`${API_BASE}/api/events/fs`);
-    fsSse.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type !== 'fs_change') return;
-        const filePath: string = data.path;
-        const evType: string = data.event || 'modified';
-
-        // 모든 슬롯: 최근 변경 파일 목록 누적 (동일 파일은 덮어씀, 최대 8개)
-        setRecentChanges(prev => {
-          const filtered = prev.filter(c => c.path !== filePath);
-          const entry: FileChange = { path: filePath, eventType: evType, ts: Date.now(), added: 0, removed: 0, hunks: [] };
-          return [entry, ...filtered].slice(0, 8);
-        });
-
-        // 백그라운드: git diff로 +N/-N 줄 수 및 hunk 헤더 파싱
-        if (evType !== 'deleted') {
-          fetch(`${API_BASE}/api/git/diff?path=${encodeURIComponent(filePath)}&git_path=${encodeURIComponent(currentPath)}`)
-            .then(r => r.json())
-            .then(d => {
-              if (!d.diff) return;
-              let added = 0, removed = 0;
-              const hunks: string[] = [];
-              d.diff.split('\n').forEach((line: string) => {
-                if (line.startsWith('+') && !line.startsWith('+++')) added++;
-                else if (line.startsWith('-') && !line.startsWith('---')) removed++;
-                else if (line.startsWith('@@')) {
-                  // "@@ -84,5 +84,8 @@" 에서 줄 번호 추출
-                  const m = line.match(/@@ [+-]\d+(?:,\d+)? [+-](\d+)/);
-                  if (m) hunks.push(`L${m[1]}`);
-                }
-              });
-              setRecentChanges(prev => prev.map(c =>
-                c.path === filePath ? { ...c, added, removed, hunks } : c
-              ));
-            })
-            .catch(() => {});
-        }
-
-        // slot0 만 파일 뷰어 자동 열기 (사용자 요청으로 자동 열기 제거)
-        if (slotId === 0) {
-          setActiveFilePath(filePath);
-          // setShowActiveFile(true); // 자동 열기 방지
-        }
-      } catch (err) { }
-    };
-    return () => fsSse.close();
-  }, [slotId, currentPath]);
 
   // 현재 에이전트가 잠근 파일 찾기
   const lockedFileByAgent = Object.entries(locks).find(([_, owner]) => owner === activeAgent)?.[0];
@@ -3731,14 +2012,6 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
       // ref에 저장하여 파일 뷰어 토글 시에도 fit() 호출 가능하게
       fitAddonRef.current = fitAddon;
-
-      // [추가] 터미널 크기 변경 시 백엔드 PTY에 알림 (글자 깨짐 및 중복 방지)
-      term.onResize(({ cols, rows }) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-      });
-
       // ResizeObserver: 터미널 컨테이너 크기 변화 감지 시 자동으로 xterm 재조정
       // 파일 뷰어 열기/닫기로 컨테이너 높이가 바뀔 때마다 즉시 반응
       const termContainer = xtermRef.current.parentElement;
@@ -3777,54 +2050,38 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
         }
       };
       term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
-      // 창 크기 변경 시 터미널 재조정
+      // 창 크기 변경 시 터미널 재조정 (클린업 포함)
       const handleResize = () => fitAddon.fit();
       window.addEventListener('resize', handleResize);
-      
-      // cleanup을 위해 xtermRef에 이벤트 리스너 제거 함수 보관 (간이 방식)
-      (xtermRef.current as any)._handleResize = handleResize;
-
-      return () => {
-        // 이 리턴은 setTimeout 내부라 효과가 없지만, 명시적으로 둡니다.
-        window.removeEventListener('resize', handleResize);
-      };
+      return () => window.removeEventListener('resize', handleResize);
     }, 50);
   };
 
+  // 주기적으로 활성 파일 내용 갱신 (뷰어가 열려있을 때만, 이미지 파일 제외)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     const isImage = activeFilePath ? /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath) : false;
-    
-    if (activeFilePath && !isImage) {
-      const fetchData = () => {
+    if (showActiveFile && activeFilePath && !isImage) {
+      const fetchFile = () => {
+        setIsActiveFileLoading(true);
+        // 상대 경로일 경우 CWD 기준으로 요청
         const targetPath = activeFilePath.includes(':') || activeFilePath.startsWith('/') 
           ? activeFilePath 
           : `${currentPath}/${activeFilePath}`;
-
-        if (showDiff) {
-          // Diff 데이터 가져오기
-          fetch(`${API_BASE}/api/git/diff?path=${encodeURIComponent(activeFilePath)}&git_path=${encodeURIComponent(currentPath)}`)
-            .then(res => res.json())
-            .then(data => { if (data.diff !== undefined) setDiffContent(data.diff); })
-            .catch(() => {});
-        }
-
-        if (showActiveFile) {
-          // 일반 파일 내용 가져오기
-          setIsActiveFileLoading(true);
-          fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(targetPath)}`)
-            .then(res => res.json())
-            .then(data => { if (!data.error) setActiveFileContent(data.content); })
-            .catch(() => {})
-            .finally(() => setIsActiveFileLoading(false));
-        }
+          
+        fetch(`http://${window.location.hostname}:${window.location.port}/api/read-file?path=${encodeURIComponent(targetPath)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (!data.error) setActiveFileContent(data.content);
+          })
+          .catch(() => {})
+          .finally(() => setIsActiveFileLoading(false));
       };
-      
-      fetchData();
-      interval = setInterval(fetchData, 3000);
+      fetchFile();
+      interval = setInterval(fetchFile, 3000); // 3초마다 갱신
     }
     return () => clearInterval(interval);
-  }, [showActiveFile, showDiff, activeFilePath, currentPath]);
+  }, [showActiveFile, activeFilePath, currentPath]);
 
   // 파일 뷰어 토글 시 xterm 터미널 크기 재조정
   // ResizeObserver가 주 역할이며, 이 타이머는 폴백으로 이중 호출해 안정성 확보
@@ -3833,22 +2090,13 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
     const t1 = setTimeout(() => fitAddonRef.current?.fit(), 100);
     const t2 = setTimeout(() => fitAddonRef.current?.fit(), 350);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [showActiveFile, fileViewerHeight]);
+  }, [showActiveFile]);
 
   const closeTerminal = () => {
     setIsTerminalMode(false);
     setShowActiveFile(false);
     fitAddonRef.current = null;
-
-    // ResizeObserver 및 리사이즈 이벤트 리스너 해제
-    if (xtermRef.current) {
-      const anyRef = xtermRef.current as any;
-      if (anyRef._handleResize) {
-        window.removeEventListener('resize', anyRef._handleResize);
-        delete anyRef._handleResize;
-      }
-    }
-
+    // ResizeObserver 해제 (메모리 누수 방지)
     resizeObserverRef.current?.disconnect();
     resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close();
@@ -3857,48 +2105,14 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
 
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
+    // 전송할 텍스트 끝의 줄바꿈 문자를 제거하여 중복 입력을 방지합니다.
     const cleanText = text.replace(/[\r\n]+$/, '');
-    if (!cleanText) return;
-
-    // 텍스트와 Enter(\r)를 별도 WebSocket 메시지로 분리 전송.
-    // winpty는 멀티캐릭터 문자열 끝에 붙은 \r을 Enter로 처리하지 않는 경우가 있음.
-    // xterm.js 키보드 Enter가 \r 단독 메시지로 오는 것과 동일하게 맞춤.
-    wsRef.current.send(cleanText.replace(/\n/g, '\r'));
-    wsRef.current.send('\r');
-
+    // 윈도우 PTY(winpty) + cmd.exe 환경에서는 \r\n (CRLF)이 실제 Enter 키 입력과 동일합니다.
+    // 중간에 포함된 모든 \n도 \r\n으로 변환하여 여러 줄 입력 시 줄바꿈이 깨지지 않게 합니다.
+    wsRef.current.send(cleanText.replace(/\n/g, '\r\n') + '\r\n');
     setInputValue('');
-    // 전송 후 xterm 터미널로 포커스 이동 — 실행 결과를 보며 바로 터미널 입력 가능
-    setTimeout(() => termRef.current?.focus(), 10);
+    termRef.current?.focus();
   };
-
-  // Superpowers 스킬 주입 — 이 터미널을 전역 주입 대상으로 등록
-  // 마지막으로 포커스된 터미널(또는 유일한 터미널)이 주입을 처리함
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { text } = (e as CustomEvent<{ text: string }>).detail;
-      handleSend(text);
-    };
-    // 터미널 포커스 시 이 슬롯을 주입 대상으로 등록
-    const markActive = () => window.dispatchEvent(new CustomEvent('vibe:activeSlot', { detail: { slotId } }));
-    xtermRef.current?.addEventListener('click', markActive);
-    // 단일 슬롯이면 자동 등록, 포커스 받으면 재등록
-    window.addEventListener(`vibe:inject:${slotId}`, handler);
-    // 📌 경로 주입(Fill Input) 이벤트 리스너 추가
-    const fillHandler = (e: Event) => {
-      const { text } = (e as CustomEvent<{ text: string }>).detail;
-      setInputValue(prev => prev ? `${prev} "${text}"` : text);
-      setTimeout(() => inputTextareaRef.current?.focus(), 10);
-    };
-    window.addEventListener(`vibe:fillInput:${slotId}`, fillHandler);
-
-    return () => {
-      window.removeEventListener(`vibe:inject:${slotId}`, handler);
-      window.removeEventListener(`vibe:fillInput:${slotId}`, fillHandler);
-      xtermRef.current?.removeEventListener('click', markActive);
-    };
-  }, [slotId]);
-
 
   const slotLogs = logs.filter(l => {
     let hash = 0;
@@ -3946,222 +2160,31 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
-          {!isTerminalMode ? (
+        {!isTerminalMode ? (
+          <div className="flex gap-2 items-center">
             <span className="text-[9px] text-[#858585] font-bold mr-1">에이전트 선택 대기 중...</span>
-          ) : (
-            <>
-              <button
-                onClick={() => {
-                  if (!showActiveFile) setShowActiveFile(true);
-                  setShowDiff(!showDiff);
-                }}
-                className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showDiff ? 'bg-accent/40 border-accent text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-                title="Git 변경사항(Diff) 보기"
-              >
-                ± Diff
-              </button>
-              <button
-                onClick={() => setShowActiveFile(!showActiveFile)}
-                className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-                title="현재 에이전트가 수정중인 파일 보기"
-              >
-                👀 파일 뷰어
-              </button>
-              <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ── 컨텍스트 컬러 블록 바 — 클릭 시 /context 스타일 상세 팝업 (2026-02-27) ── */}
-      {(() => {
-        const cacheRead  = ctxSession?.cache_read  ?? 0;
-        const cacheWrite = ctxSession?.cache_write ?? 0;
-        const inputTok   = ctxSession?.input_tokens ?? 0;
-        const outputTok  = ctxSession?.output_tokens ?? 0;
-        const freeTok    = Math.max(0, CTX_MAX - inputTok);
-
-        // 각 토큰 타입의 컨텍스트 점유 % (입력 기준)
-        const cacheReadPct  = Math.min(100, (cacheRead  / CTX_MAX) * 100);
-        const cacheWritePct = Math.min(100, (cacheWrite / CTX_MAX) * 100);
-        const inputOnlyPct  = Math.max(0, ctxPct - cacheReadPct - cacheWritePct);
-        const freePct       = Math.max(0, 100 - ctxPct);
-
-        // 배경 & 경고 색
-        const dangerBg   = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
-                         : ctxPct >= 60 ? 'bg-yellow-950/30 border-yellow-500/15'
-                         : 'bg-[#0d1117] border-white/5';
-        const modelColor = ctxPct >= 80 ? '#f87171' : ctxPct >= 60 ? '#facc15' : '#a3e635';
-
-        // 모델명 단축
-        const modelShort = ctxSession
-          ? ctxSession.model
-              .replace(/^claude-/, '').replace(/^gemini-/, 'Gemini ')
-              .replace(/-(\d)/, ' $1').replace(/-latest$/, '').replace(/-\d{8}$/, '')
-              .replace(/\b\w/g, c => c.toUpperCase())
-          : (isGeminiAgent ? 'Gemini' : 'Claude');
-
-        // 토큰 표시 레이블
-        const maxLabel  = CTX_MAX >= 1_000_000 ? `${CTX_MAX/1_000_000}M` : `${CTX_MAX/1000}k`;
-        const usedLabel = `${Math.round(inputTok / 1000)}k`;
-
-        // 블록 그리드 색상 결정 (100개 블록, 각 1%)
-        const getBlockColor = (idx: number) => {
-          const p = idx + 1;
-          if (p <= cacheReadPct)                         return '#22d3ee'; // cyan  — 캐시 읽기
-          if (p <= cacheReadPct + cacheWritePct)         return '#4ade80'; // green — 캐시 쓰기
-          if (p <= cacheReadPct + cacheWritePct + inputOnlyPct) return '#fbbf24'; // amber — 순수 입력
-          return '#1e2130'; // 빈 공간
-        };
-
-        // 카테고리 목록 (레이블, 토큰 수, %, 색상)
-        const pureInput = Math.max(0, inputTok - cacheRead - cacheWrite);
-        const categories = [
-          { label: '입력 토큰', tok: pureInput,   pct: inputOnlyPct,  color: '#fbbf24' },
-          ...(cacheWrite > 0 ? [{ label: '캐시 쓰기', tok: cacheWrite, pct: cacheWritePct, color: '#4ade80' }] : []),
-          ...(cacheRead  > 0 ? [{ label: '캐시 읽기', tok: cacheRead,  pct: cacheReadPct,  color: '#22d3ee' }] : []),
-          { label: '출력 누적', tok: outputTok,   pct: Math.round((outputTok / CTX_MAX) * 100), color: '#888' },
-          { label: '여유 공간', tok: freeTok,     pct: freePct,       color: '#2a2d3a', dim: true },
-        ];
-
-        const fmtTok = (t: number) => t >= 1000 ? `${(t/1000).toFixed(1)}k` : `${t}`;
-
-        return (
-          <div className="relative shrink-0">
-            {/* ── 단일 행 바 (항상 표시) ── */}
-            <div
-              className={`border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
-              onClick={() => setShowCtxDetail(p => !p)}
-              title="클릭하여 컨텍스트 상세 보기"
-            >
-              {/* 컬러 블록 바: 20개 █, 각 5% */}
-              <div className="flex shrink-0 leading-none">
-                {Array.from({ length: 20 }, (_, idx) => {
-                  const p = (idx + 1) * 5;
-                  const color = p <= cacheReadPct                              ? '#22d3ee'
-                              : p <= cacheReadPct + cacheWritePct              ? '#4ade80'
-                              : p <= ctxPct                                    ? '#fbbf24'
-                              : '#2a2d3a';
-                  return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
-                })}
-              </div>
-              {/* 텍스트: 모델명 · 사용량 */}
-              <div className="flex items-center gap-0 whitespace-nowrap flex-1 min-w-0">
-                <span className="font-semibold" style={{ color: modelColor }}>{modelShort}</span>
-                <span className="text-[#444] mx-1.5">·</span>
-                <span className="text-[#ccc]">{usedLabel}/{maxLabel} 토큰 ({ctxPct}%)</span>
-                {ctxSession && ctxRelTime && (
-                  <span className="text-[#333] ml-2 text-[9px]">{ctxRelTime}</span>
-                )}
-                <span className="ml-auto text-[#333] text-[8px]">{showCtxDetail ? '▲' : '▼'}</span>
-              </div>
-              {/* 세션 없을 때 */}
-              {!ctxSession && (
-                <span className="text-[9px] text-[#333] italic">
-                  {isGeminiAgent ? 'Gemini CLI' : 'Claude Code'} 세션 대기 중...
-                </span>
-              )}
-            </div>
-
-            {/* ── 상세 팝업: /context 스타일 블록 그리드 + 카테고리 (클릭 토글) ── */}
-            {showCtxDetail && ctxSession && (
-              <div className="absolute top-full left-0 right-0 z-50 bg-[#0d1117] border-b border-x border-white/10 shadow-2xl font-mono text-[10px] px-3 pt-2 pb-3 space-y-2">
-                {/* 제목 */}
-                <div className="text-[#ccc] font-bold text-[11px]">컨텍스트 사용량</div>
-
-                {/* 블록 그리드 10×10 (100블록, 각 1%) */}
-                <div className="flex flex-col gap-[2px]">
-                  {Array.from({ length: 10 }, (_, row) => (
-                    <div key={row} className="flex gap-[2px]">
-                      {Array.from({ length: 10 }, (_, col) => (
-                        <span key={col} style={{ color: getBlockColor(row * 10 + col), fontSize: 11, lineHeight: 1 }}>█</span>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-
-                {/* 카테고리별 사용량 */}
-                <div className="pt-1 space-y-[3px]">
-                  <div className="text-[#444] text-[9px] mb-1">카테고리별 사용량</div>
-                  {categories.map(cat => (
-                    <div key={cat.label} className="flex items-center gap-1">
-                      <span style={{ color: cat.color }}>■</span>
-                      <span style={{ color: cat.dim ? '#444' : '#666' }}>{cat.label}:</span>
-                      <span style={{ color: cat.dim ? '#333' : '#bbb' }} className="ml-auto">
-                        {fmtTok(cat.tok)}
-                      </span>
-                      <span className="text-[#444] w-9 text-right">({Math.round(cat.pct)}%)</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
-        );
-      })()}
+        ) : (
+          <div className="flex gap-2 items-center">
+            <button 
+              onClick={() => setShowActiveFile(!showActiveFile)} 
+              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold ${showActiveFile ? 'bg-primary/40 border-primary text-white' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+              title="현재 에이전트가 수정중인 파일 보기"
+            >
+              👀 파일 뷰어
+            </button>
+            <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        )}
+      </div>
       {isTerminalMode ? (
         <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
-
-          {/* ── 최근 변경 파일 목록 패널 (2026-02-27) ── */}
-          {recentChanges.length > 0 && (
-            <div className="shrink-0 border-b border-white/5 bg-[#161616] px-2 py-1 flex flex-col gap-[2px] max-h-[75px] overflow-y-auto custom-scrollbar">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[8px] text-[#444] uppercase tracking-widest font-bold">변경 파일</span>
-                <button
-                  onClick={() => setRecentChanges([])}
-                  className="text-[8px] text-[#333] hover:text-[#666] transition-colors"
-                  title="목록 초기화"
-                >✕</button>
-              </div>
-              {recentChanges.map(ch => {
-                // 파일명만 추출 (경로 마지막 부분)
-                const fname = ch.path.split('/').pop() || ch.path;
-                // 변경 타입 아이콘 + 색상
-                const typeLabel = ch.eventType === 'created' ? '+' : ch.eventType === 'deleted' ? 'D' : 'M';
-                const typeColor = ch.eventType === 'created' ? 'text-emerald-400' : ch.eventType === 'deleted' ? 'text-red-400' : 'text-yellow-400';
-                // 상대 시간
-                const sec = Math.floor((Date.now() - ch.ts) / 1000);
-                const relT = sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec/60)}m` : `${Math.floor(sec/3600)}h`;
-                return (
-                  <button
-                    key={ch.path}
-                    onClick={() => { setActiveFilePath(ch.path); setShowActiveFile(true); setShowDiff(ch.eventType !== 'created'); }}
-                    className="flex items-center gap-1.5 text-left hover:bg-white/5 rounded px-1 py-[1px] group transition-colors w-full min-w-0"
-                    title={ch.path}
-                  >
-                    {/* 타입 배지 */}
-                    <span className={`text-[9px] font-bold w-3 shrink-0 ${typeColor}`}>{typeLabel}</span>
-                    {/* 파일명 */}
-                    <span className="text-[10px] text-[#ccc] font-mono truncate flex-1 group-hover:text-white">{fname}</span>
-                    {/* hunk 줄 번호 (최대 2개) */}
-                    {ch.hunks.length > 0 && (
-                      <span className="text-[8px] text-[#555] shrink-0 font-mono">
-                        {ch.hunks.slice(0, 2).join(' ')}
-                        {ch.hunks.length > 2 ? ` +${ch.hunks.length - 2}` : ''}
-                      </span>
-                    )}
-                    {/* +N -N */}
-                    {(ch.added > 0 || ch.removed > 0) && (
-                      <span className="text-[8px] shrink-0 font-mono">
-                        {ch.added > 0 && <span className="text-emerald-500">+{ch.added}</span>}
-                        {ch.removed > 0 && <span className="text-red-500 ml-0.5">-{ch.removed}</span>}
-                      </span>
-                    )}
-                    {/* 시간 */}
-                    <span className="text-[8px] text-[#333] shrink-0">{relT}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {showActiveFile && (
             <div 
-              className="border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 relative"
-              style={{ height: `${fileViewerHeight}%`, minHeight: '100px', maxHeight: '85%', overflow: 'hidden' }}
+              className="h-1/3 min-h-[100px] border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 relative"
+              style={{ resize: 'vertical', overflow: 'hidden' }}
             >
-              <div className="h-6 bg-[#2d2d2d] px-2 flex items-center justify-between text-[10px] text-[#cccccc] shrink-0 border-b border-white/5 pointer-events-none">
+              <div className="h-6 bg-[#2d2d2d] px-2 flex items-center justify-between text-[10px] text-[#cccccc] shrink-0 border-b border-white/5 cursor-row-resize pointer-events-none">
                 <span className="truncate flex items-center gap-1 opacity-80 pointer-events-auto">
                   {getFileIcon(activeFilePath || '')} 
                   {activeFilePath ? activeFilePath : "감지된 파일 없음..."}
@@ -4169,7 +2192,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 {isActiveFileLoading && <span className="text-[#3794ef] animate-pulse pointer-events-auto">●</span>}
               </div>
               <div className="flex-1 overflow-auto p-2 custom-scrollbar flex items-center justify-center">
-                {/* 이미지 파일이면 img 태그로, 아니면 코드 뷰어/Diff 뷰어로 */}
+                {/* 이미지 파일이면 img 태그로, 아니면 코드 뷰어로 */}
                 {activeFilePath && /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(activeFilePath)
                   ? <img
                       src={`${API_BASE}/api/image-file?path=${encodeURIComponent(activeFilePath.includes(':') || activeFilePath.startsWith('/') ? activeFilePath : `${currentPath}/${activeFilePath}`)}`}
@@ -4177,19 +2200,11 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                       className="max-w-full max-h-full object-contain"
                       style={{ imageRendering: 'auto' }}
                     />
-                  : showDiff
-                    ? (diffContent ? <DiffViewer diff={diffContent} /> : <span className="text-[10px] text-[#858585] italic">변경된 내용이 없습니다 (Clean)</span>)
-                    : (activeFileContent
-                        ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
-                        : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
-                      )
+                  : activeFileContent
+                    ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
+                    : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
                 }
               </div>
-              {/* Terminal Panel Resize Handle */}
-              <div
-                onMouseDown={(e) => { e.stopPropagation(); setIsResizingFileViewer(true); }}
-                className={`absolute bottom-0 left-0 w-full h-1 cursor-row-resize hover:bg-primary/50 transition-colors z-20 ${isResizingFileViewer ? 'bg-primary/50' : ''}`}
-              />
             </div>
           )}
           {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
@@ -4198,40 +2213,31 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
             <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 opacity-80 hover:opacity-100 transition-opacity items-center">
+               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
                {shortcuts.map((sc, i) => (
                  <button key={i} onClick={() => handleSend(sc.cmd)} className="px-2 py-0.5 bg-[#3c3c3c] hover:bg-white/10 rounded text-[10px] whitespace-nowrap border border-white/5 transition-colors" title={sc.cmd}>
                    {sc.label}
                  </button>
                ))}
-               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
             </div>
             <div className="flex gap-2 items-end relative">
               <textarea
-                ref={inputTextareaRef}
                 value={inputValue}
-                onChange={e => {
-                  const val = e.target.value;
-                  setInputValue(val);
-                  // '/'로 시작하면 슬래시 메뉴 자동 팝업
-                  if (val.startsWith('/') && val.length >= 1) setShowSlashMenu(true);
-                  else if (!val.startsWith('/')) setShowSlashMenu(false);
-                }}
-                onCompositionStart={() => { isComposingRef.current = true; }}
-                onCompositionEnd={() => { isComposingRef.current = false; }}
+                onChange={e => setInputValue(e.target.value)}
                 onKeyDown={e => {
-                  if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey) {
-                    // 엔터 키 입력 시 기본 동작(줄바꿈) 차단
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
                     e.preventDefault();
 
-                    // 한글 조합 중(isComposing)에 엔터가 눌린 경우, 
-                    // 브라우저에 따라 KeyDown이 두 번 발생할 수 있으므로 
-                    // 이미 입력값이 비워졌다면(전송 완료) 추가 전송을 방지합니다.
+                    // 명령어를 즉시 전송합니다. (한글 입력 시에도 엔터 한 번으로 전송되도록 복원)
                     if (inputValue.trim()) {
                       handleSend(inputValue);
+                      // 전송 후 입력창을 확실히 비웁니다.
+                      setTimeout(() => setInputValue(''), 0);
                     }
                   }
                 }}
-                placeholder="터미널 명령어 전송 (엔터:전송, 쉬프트+엔터:줄바꿈)..."
+                placeholder="터미널 명령어 전송 (한글 완벽 지원, 엔터:전송, 쉬프트+엔터:줄바꿈)..."
                 rows={Math.max(1, Math.min(8, inputValue.split('\n').length))}
                 className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-all resize-none custom-scrollbar leading-relaxed h-auto"
               />
@@ -4246,78 +2252,35 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                 </button>
                 {/* 슬래시 커맨드 팝업 */}
                 {showSlashMenu && (
-                  <div className="absolute bottom-full right-0 mb-1 w-80 bg-[#252526] border border-white/15 rounded-md shadow-2xl z-50 overflow-hidden">
+                  <div className="absolute bottom-full right-0 mb-1 w-72 bg-[#252526] border border-white/15 rounded-md shadow-2xl z-50 overflow-hidden">
                     <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center px-3 gap-1.5">
                       <span className="text-primary font-bold text-[11px]">/</span>
                       <span className="text-[11px] font-bold text-[#cccccc] uppercase tracking-wider">
-                        {inputValue.startsWith('/') && inputValue.length > 1 ? `"${inputValue}" 검색 중…` : `${activeAgent.toUpperCase()} 커맨드`}
+                        {activeAgent.toUpperCase()} 슬래시 커맨드
                       </span>
                     </div>
-                    <div className="max-h-72 overflow-y-auto custom-scrollbar py-1">
-                      {(() => {
-                        const allCmds = SLASH_COMMANDS[activeAgent] ?? SLASH_COMMANDS['claude'];
-                        // 타이핑 중이면 필터링, 아니면 전체 카테고리별 표시
-                        const filter = inputValue.startsWith('/') && inputValue.length > 1 ? inputValue.toLowerCase() : '';
-                        const filtered = filter ? allCmds.filter(c => c.cmd.toLowerCase().includes(filter) || c.desc.includes(filter)) : null;
-
-                        const handleCmdClick = (sc: SlashCommand) => {
-                          if (sc.injectSkill) {
-                            // 바이브 스킬 설치 여부에 따라 올바른 커맨드 선택
-                            // 설치됨 → claudeCmd / geminiCmd (실제 슬래시 커맨드)
-                            // 미설치  → algo (스킬 내용을 AI에게 텍스트로 주입)
-                            const sk = VIBE_SKILLS.find(s => s.name === sc.injectSkill);
-                            if (sk) {
-                              const claudeInstalled = claudeSpInstalled;
-                              const geminiInstalled = geminiSpInstalled;
-                              let injectText: string;
-                              if (activeAgent === 'claude' && claudeInstalled) {
-                                injectText = sk.claudeCmd;
-                              } else if (activeAgent === 'gemini' && geminiInstalled) {
-                                injectText = sk.geminiCmd;
-                              } else {
-                                injectText = sk.algo;
-                              }
-                              handleSend(injectText); // 터미널에 즉시 전송
-                            }
-                          } else {
-                            // 일반 커맨드도 즉시 전송
-                            handleSend(sc.cmd);
-                          }
-                          setShowSlashMenu(false);
-                        };
-
-                        if (filtered) {
-                          // 필터링 결과 평면 표시
-                          if (!filtered.length) return <p className="text-[10px] text-[#555] text-center py-4">일치하는 커맨드 없음</p>;
-                          return filtered.map(sc => (
-                            <button key={sc.cmd} onClick={() => handleCmdClick(sc)}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors">
-                              <span className={`font-mono text-[11px] font-bold w-28 shrink-0 transition-colors ${sc.injectSkill ? 'text-yellow-400 group-hover:text-yellow-200' : 'text-primary group-hover:text-white'}`}>{sc.cmd}</span>
-                              <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight flex-1">{sc.desc}</span>
-                              {sc.injectSkill && <span className="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded font-bold shrink-0">⚡주입</span>}
-                            </button>
-                          ));
-                        }
-
-                        // 카테고리별 전체 표시
-                        return ['스킬', '설정', '작업', '도움말'].map(cat => {
-                          const cmds = allCmds.filter(c => c.category === cat);
-                          if (!cmds.length) return null;
-                          return (
-                            <div key={cat}>
-                              <div className={`px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest ${cat === '스킬' ? 'text-yellow-400/60' : 'text-white/25'}`}>{cat}</div>
-                              {cmds.map(sc => (
-                                <button key={sc.cmd} onClick={() => handleCmdClick(sc)}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors">
-                                  <span className={`font-mono text-[11px] font-bold w-28 shrink-0 transition-colors ${sc.injectSkill ? 'text-yellow-400 group-hover:text-yellow-200' : 'text-primary group-hover:text-white'}`}>{sc.cmd}</span>
-                                  <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight flex-1">{sc.desc}</span>
-                                  {sc.injectSkill && <span className="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded font-bold shrink-0">⚡주입</span>}
-                                </button>
-                              ))}
-                            </div>
-                          );
-                        });
-                      })()}
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar py-1">
+                      {/* 카테고리별 그룹핑 */}
+                      {['설정', '작업', '도움말'].map(cat => {
+                        const cmds = (SLASH_COMMANDS[activeAgent] ?? SLASH_COMMANDS['claude'])
+                          .filter(c => c.category === cat);
+                        if (!cmds.length) return null;
+                        return (
+                          <div key={cat}>
+                            <div className="px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white/25">{cat}</div>
+                            {cmds.map(sc => (
+                              <button
+                                key={sc.cmd}
+                                onClick={() => { setInputValue(sc.cmd + ' '); setShowSlashMenu(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors"
+                              >
+                                <span className="text-primary font-mono text-[11px] font-bold w-24 shrink-0 group-hover:text-white transition-colors">{sc.cmd}</span>
+                                <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight">{sc.desc}</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
