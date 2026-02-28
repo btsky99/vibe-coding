@@ -40,15 +40,42 @@ jobs:
           npm ci
           npm run build
 
-      - name: Read version from source
+      - name: Resolve version (auto-bump patch if tag already exists)
         id: version
         run: |
-          $ver = python -c "exec(open('.ai_monitor/_version.py').read()); print(__version__)"
-          $tag = "v$ver"
-          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          # _version.py에서 기준 버전 읽기
+          $base = python -c "exec(open('.ai_monitor/_version.py').read()); print(__version__)"
+          $parts = $base -split "\."
+          $major = $parts[0]; $minor = $parts[1]; $patch = [int]$parts[2]
+
+          # 동일 태그가 이미 GitHub에 존재하면 패치 버전을 자동 증가
+          # (버전 미변경 커밋이 push 됐을 때 릴리스 중복 방지)
+          $ver = $base
+          while ($true) {
+            $checkTag = "v$ver"
+            gh release view $checkTag > $null 2>&1
+            if ($LASTEXITCODE -ne 0) { break }   # 이 태그가 없으면 사용 확정
+            $patch++
+            $ver = "$major.$minor.$patch"
+          }
+
+          # 버전이 변경된 경우 → _version.py 업데이트 후 main에 커밋 (무한 루프 방지: [skip ci])
+          if ($ver -ne $base) {
+            Set-Content -Path ".ai_monitor/_version.py" -Value "__version__ = `"$ver`""
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git add .ai_monitor/_version.py
+            git commit -m "chore(release): auto-bump version to v$ver [skip ci]"
+            git push
+            Write-Host "Auto-bumped: $base -> $ver"
+          }
+
+          echo "tag=v$ver" >> $env:GITHUB_OUTPUT
           echo "ver=$ver" >> $env:GITHUB_OUTPUT
-          echo "Version: $tag"
+          Write-Host "Final version: v$ver"
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Find winpty binaries path
         id: winpty
