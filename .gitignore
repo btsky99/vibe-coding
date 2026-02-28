@@ -6,3 +6,7 @@ __pycache__/
 .env
 *.spec
 ~/*
+*.log
+_debug_*.py
+_run_debug.bat
+dbg.log

@@ -36,7 +36,7 @@ import socket
 from pathlib import Path
 
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
-if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     try:
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -3175,7 +3175,15 @@ if __name__ == '__main__':
     def run_watchdog():
         watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
-            subprocess.Popen([sys.executable, str(watchdog_script), "--data-dir", str(DATA_DIR)])
+            # 윈도우 환경에서 CP949 인코딩 에러 방지를 위해 encoding 및 errors 설정 추가
+            subprocess.Popen(
+                [sys.executable, str(watchdog_script), "--data-dir", str(DATA_DIR)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
     threading.Thread(target=run_watchdog, daemon=True).start()
     
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
