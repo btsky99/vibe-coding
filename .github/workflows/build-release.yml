@@ -3,6 +3,7 @@ name: Build & Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:  # 수동 트리거 허용 (긴급 빌드 또는 테스트용)
 
 permissions:
   contents: write
