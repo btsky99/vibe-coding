@@ -14,7 +14,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Activity, Menu, Terminal, RotateCw,
+  Menu, Terminal, RotateCw,
   ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
@@ -539,6 +539,8 @@ function App() {
   // ─── 업데이트 알림 상태 ───────────────────────────────────────────────────
   const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
+  // 업데이트 확인 중 상태 (수동 버튼 클릭 시)
+  const [updateChecking, setUpdateChecking] = useState(false);
 
   // 30초마다 업데이트 준비 여부 확인
   useEffect(() => {
@@ -552,6 +554,34 @@ function App() {
     const interval = setInterval(check, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // 수동 업데이트 확인 — 백그라운드 다운로드 트리거 후 30초 내 결과 폴링
+  const triggerUpdateCheck = () => {
+    setUpdateChecking(true);
+    fetch(`${API_BASE}/api/trigger-update-check`)
+      .then(res => res.json())
+      .then(() => {
+        // 트리거 후 5초 뒤부터 최대 6회(30초) 폴링
+        let tries = 0;
+        const poll = setInterval(() => {
+          tries++;
+          fetch(`${API_BASE}/api/check-update-ready`)
+            .then(res => res.json())
+            .then(data => {
+              if (data?.ready) {
+                setUpdateReady({ version: data.version });
+                clearInterval(poll);
+                setUpdateChecking(false);
+              } else if (tries >= 6) {
+                clearInterval(poll);
+                setUpdateChecking(false);
+              }
+            })
+            .catch(() => { clearInterval(poll); setUpdateChecking(false); });
+        }, 5000);
+      })
+      .catch(() => setUpdateChecking(false));
+  };
 
   const applyUpdate = () => {
     setUpdateApplying(true);
@@ -811,8 +841,6 @@ function App() {
 
       {/* 🟢 Top Menu Bar (IDE Style - 최상단 고정) */}
       <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
-        <Activity className="w-3.5 h-3.5 text-primary mx-1" />
-        <span className="text-[10px] font-bold text-white/90 mr-1 tracking-tight">바이브 코딩</span>
         {['파일', '편집', '보기', 'AI 도구', '도움말'].map(menu => (
           <div key={menu} className="relative">
             <button 
@@ -923,9 +951,7 @@ function App() {
           </div>
         ))}
         <div className="ml-auto flex items-center gap-2 text-[11px] text-[#969696] px-2 font-mono overflow-hidden">
-          {/* 현재 경로 표시 */}
-          <span className="truncate opacity-50 max-w-[200px]">{currentPath}</span>
-          {/* 업데이트 버튼 — updateReady 상태일 때 표시 */}
+          {/* 업데이트 적용 버튼 — updateReady 상태일 때만 표시 */}
           {updateReady && (
             <button
               onClick={applyUpdate}
@@ -936,6 +962,15 @@ function App() {
               {updateApplying ? '적용 중...' : `↑ ${updateReady.version}`}
             </button>
           )}
+          {/* 업데이트 확인 버튼 — 항상 표시 (배포 버전에서만 실제 동작) */}
+          <button
+            onClick={triggerUpdateCheck}
+            disabled={updateChecking || !!updateReady}
+            className="shrink-0 text-[9px] px-1.5 py-0.5 rounded border border-white/10 text-white/40 hover:text-white/70 hover:border-white/30 disabled:opacity-30 transition-colors"
+            title="업데이트 확인"
+          >
+            {updateChecking ? '확인 중...' : '업데이트 확인'}
+          </button>
           {/* 버전 배지 — 항상 오른쪽 끝에 표시 */}
           <span className="shrink-0 text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30 font-mono">v3.6.3</span>
         </div>
