@@ -462,6 +462,33 @@ function App() {
     setOpenFiles(prev => prev.filter(f => f.id !== id));
   };
 
+  // 파일 내용 실시간 업데이트 (에디터용)
+  const updateFileContent = (id: string, newContent: string) => {
+    setOpenFiles(prev => prev.map(f => f.id === id ? { ...f, content: newContent } : f));
+  };
+
+  // 파일 저장 API 호출
+  const handleSaveFile = (path: string, content: string) => {
+    const targetPath = path.includes(':') || path.startsWith('/') ? path : `${currentPath}/${path}`;
+    fetch(`${API_BASE}/api/save-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: targetPath, content })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          console.log('File saved:', targetPath);
+        } else {
+          alert('저장 실패: ' + (data.message || '알 수 없는 오류'));
+        }
+      })
+      .catch(err => {
+        console.error('Save error:', err);
+        alert('저장 중 오류가 발생했습니다.');
+      });
+  };
+
   const openHelpDoc = (topic: string, title: string) => {
     const existing = openFiles.find(f => f.path === `help:${topic}`);
     if (existing) { bringToFront(existing.id); return; }
@@ -1681,93 +1708,11 @@ function App() {
 
       {/* Quick View Floating Panels */}
       {openFiles.map((file, idx) => (
-        <FloatingWindow key={file.id} file={file} idx={idx} bringToFront={bringToFront} closeFile={closeFile} />
+        <FloatingWindow key={file.id} file={file} idx={idx} bringToFront={bringToFront} closeFile={closeFile} updateFileContent={updateFileContent} handleSaveFile={handleSaveFile} />
       ))}
     </div>
   )
 }
-
-/**
- * 🎨 VibeEditor: Monaco Editor 기반의 코드 편집기 컴포넌트
- * - VS Code 스타일의 코드 하이라이팅 및 주석 색상 강화 테마 적용
- * - 자동 언어 감지 및 편집 내용 실시간 반영 지원
- */
-const VibeEditor = ({ path, content, onChange, onSave, isReadOnly = false }: { 
-  path: string; 
-  content: string; 
-  onChange: (val: string) => void; 
-  onSave?: () => void;
-  isReadOnly?: boolean;
-}) => {
-  const extension = path.split('.').pop()?.toLowerCase() || '';
-  const languageMap: Record<string, string> = {
-    'py': 'python', 'js': 'javascript', 'jsx': 'javascript', 'ts': 'typescript', 'tsx': 'typescript',
-    'json': 'json', 'md': 'markdown', 'html': 'html', 'css': 'css', 'yml': 'yaml', 'yaml': 'yaml',
-    'sh': 'shell', 'bat': 'bat', 'powershell': 'powershell', 'sql': 'sql'
-  };
-  const language = languageMap[extension] || 'plaintext';
-
-  const handleEditorDidMount = (editor: any, monaco: any) => {
-    // 하이브 마인드 전용 다크 테마 정의
-    monaco.editor.defineTheme('vibe-dark-pro', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '6A9955', fontStyle: 'italic' }, // 주석: 밝은 초록색 (VS Code 표준)
-        { token: 'keyword', foreground: '569CD6', fontStyle: 'bold' },   // 키워드: 하늘색 + 굵게
-        { token: 'string', foreground: 'CE9178' },                      // 문자열: 연한 주황색
-        { token: 'number', foreground: 'B5CEA8' },                      // 숫자: 연두색
-        { token: 'type', foreground: '4EC9B0' },                        // 타입: 에메랄드색
-        { token: 'function', foreground: 'DCDCAA' },                    // 함수명: 연한 노란색
-      ],
-      colors: {
-        'editor.background': '#1e1e1e', // 배경색
-        'editorLineNumber.foreground': '#858585',
-        'editorLineNumber.activeForeground': '#cccccc',
-        'editor.selectionBackground': '#264F78',
-        'editor.inactiveSelectionBackground': '#3A3D41',
-      }
-    });
-    monaco.editor.setTheme('vibe-dark-pro');
-
-    // Ctrl+S / Cmd+S 저장 단축키 바인딩
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      if (onSave) onSave();
-    });
-  };
-
-  return (
-    <div className="w-full h-full relative group">
-      <Editor
-        height="100%"
-        language={language}
-        value={content}
-        theme="vibe-dark-pro"
-        onChange={(val) => onChange(val || '')}
-        onMount={handleEditorDidMount}
-        options={{
-          readOnly: isReadOnly,
-          fontSize: 13,
-          fontFamily: "'Fira Code', 'Consolas', monospace",
-          minimap: { enabled: false },
-          scrollBeyondLastLine: false,
-          wordWrap: 'on',
-          automaticLayout: true,
-          lineNumbers: 'on',
-          renderLineHighlight: 'all',
-          padding: { top: 12, bottom: 12 },
-          tabSize: 4,
-          insertSpaces: true,
-        }}
-      />
-      {isReadOnly && (
-        <div className="absolute top-2 right-4 px-2 py-0.5 bg-black/50 text-[10px] text-white/50 rounded pointer-events-none border border-white/10 backdrop-blur-sm">
-          READ-ONLY
-        </div>
-      )}
-    </div>
-  );
-};
 
 type TreeItem = { name: string; path: string; isDir: boolean };
 function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpen }: {
@@ -2201,7 +2146,7 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                       style={{ imageRendering: 'auto' }}
                     />
                   : activeFileContent
-                    ? <CodeWithLineNumbers content={activeFileContent} fontSize="11px" />
+                    ? <VibeEditor path={activeFilePath || ''} content={activeFileContent} isReadOnly={true} />
                     : <span className="font-mono text-[11px] text-[#cccccc] italic opacity-40">에이전트가 파일을 수정하거나 경로를 출력할 때까지 대기 중...</span>
                 }
               </div>
