@@ -111,6 +111,7 @@ function App() {
   // '2x2'는 parseInt 불가 → 직접 매핑
   const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8 };
   const terminalCount = terminalCountMap[layoutMode] ?? 2;
+  const [appVersion, setAppVersion] = useState<string>('...');
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [locks, setLocks] = useState<Record<string, string>>({});
@@ -623,8 +624,14 @@ function App() {
   const [initialConfigLoaded, setInitialConfigLoaded] = useState(false);
   const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
 
-  // 초기 설정 로드 (마지막 경로 기억)
+  // 초기 설정 로드 (마지막 경로 기억) + 서버 버전 동적 로드
   useEffect(() => {
+    // 서버에서 실제 버전 정보 가져오기 (하드코딩 방지)
+    fetch(`${API_BASE}/api/project-info`)
+      .then(res => res.json())
+      .then(data => { if (data.version) setAppVersion(data.version); })
+      .catch(() => {});
+
     fetch(`${API_BASE}/api/config`)
       .then(res => res.json())
       .then(data => {
@@ -1020,8 +1027,8 @@ function App() {
           >
             {updateChecking ? '확인 중...' : '업데이트 확인'}
           </button>
-          {/* 버전 배지 — 항상 오른쪽 끝에 표시 */}
-          <span className="shrink-0 text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30 font-mono">v3.6.3</span>
+          {/* 버전 배지 — 서버 _version.py에서 동적 로드 (하드코딩 금지) */}
+          <span className="shrink-0 text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30 font-mono">v{appVersion}</span>
         </div>
       </div>
 
