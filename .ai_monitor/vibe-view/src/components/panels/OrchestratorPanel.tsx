@@ -1,70 +1,97 @@
 /**
  * FILE: OrchestratorPanel.tsx
- * DESCRIPTION: AI 오케스트레이터 패널 — 스킬 체인 실행 흐름 모니터링 및 수동 실행 UI.
- *              App.tsx에서 분리된 독립 컴포넌트로, 오케스트레이터 상태와 스킬 체인을
+ * DESCRIPTION: AI 오케스트레이터 패널 — 스킬 레지스트리(①~⑦) + 터미널별(T1~T8)
+ *              스킬 체인 실행 흐름을 N-M 표기로 모니터링합니다.
+ *              App.tsx에서 분리된 독립 컴포넌트로, skill_chain.db 기반 API를
  *              자체 폴링하여 렌더링합니다.
  * REVISION HISTORY:
+ * - 2026-03-01 Claude: [리팩터링] skill_chain.json → skill_chain.db 전환에 맞춰 UI 전면 개편
+ *                      - 상단 스킬 레지스트리 위젯: ①debug ~ ⑦release 배지 표시
+ *                      - 터미널별 체인 섹션: N-M 표기 (T1이 debug→tdd 쓰면 1-1→1-2)
+ *                      - 기존 단일 체인 위젯 제거 (DB 전환으로 불필요)
+ * - 2026-03-01 Claude: [버그수정] terminal_agents 미렌더링 수정 — 터미널별 에이전트 현황 그리드 추가
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화
- * - 2026-03-01 Claude: [버그수정] terminal_agents / agent_status 미렌더링 버그 수정
- *                      — 터미널별 에이전트 현황 그리드 추가 (T1~T8 슬롯 시각화)
- *                      — 근본원인: orchStatus 수신 후 recent_actions만 표시하고
- *                        terminal_agents / agent_status 렌더링 코드가 누락되어 있었음
  */
 
 import { useState, useEffect } from 'react';
 import { Play, Network } from 'lucide-react';
 import { OrchestratorStatus } from '../../types';
 
-// 현재 접속 포트 기반으로 API 주소 자동 결정 (App.tsx와 동일한 패턴)
+// 현재 접속 포트 기반으로 API 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
 
-// ── OrchestratorPanel Props ─────────────────────────────────────────────────
-// onWarningCount: 부모(App.tsx)에 경고 수를 전달하여 Hive 탭 배지 업데이트에 사용
-interface OrchestratorPanelProps {
-  onWarningCount: (count: number) => void;
+// 원형 숫자 유니코드 ①②③… (1~7)
+const CIRCLE_NUMS = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦'];
+
+// ── 스킬 레지스트리 타입 ──────────────────────────────────────────────────────
+interface SkillRegistry {
+  num: number;    // 전역 번호 (1~7)
+  name: string;   // vibe-debug 등
+  short: string;  // debug 등 약칭
 }
 
-// ── 스킬 체인 상태 타입 ──────────────────────────────────────────────────────
-// vibe-orchestrate 스킬이 기록하는 skill_chain.json 구조에 대응
-interface SkillChainState {
-  status: string;
-  request?: string;
-  plan?: string[];
-  current_step?: number;
-  results?: { skill: string; status: string; summary: string }[];
-  started_at?: string;
-  updated_at?: string;
+// ── 터미널 체인 스텝 타입 ─────────────────────────────────────────────────────
+interface TerminalStep {
+  label: string;      // "1-3" (터미널1, 스킬③)
+  skill_num: number;
+  skill_name: string;
+  step_order: number;
+  status: string;     // pending | running | done | failed | skipped
+  summary: string;
+}
+
+// ── 터미널 체인 타입 ──────────────────────────────────────────────────────────
+interface TerminalChain {
+  session_id: string;
+  request: string;
+  status: string;   // running | done
+  updated_at: string;
+  steps: TerminalStep[];
+}
+
+// ── API 응답 전체 타입 ────────────────────────────────────────────────────────
+interface SkillChainResponse {
+  skill_registry: SkillRegistry[];
+  terminals: Record<string, TerminalChain>;
+}
+
+// ── OrchestratorPanel Props ───────────────────────────────────────────────────
+interface OrchestratorPanelProps {
+  onWarningCount: (count: number) => void;
 }
 
 /**
  * OrchestratorPanel
  *
- * 역할: AI 오케스트레이터 상태를 실시간으로 폴링하고,
- *       스킬 체인 실행 흐름을 시각화하는 패널 컴포넌트.
+ * 역할: skill_chain.db 기반 API를 폴링하여
+ *       1) 스킬 레지스트리 (①~⑦ 번호 목록)
+ *       2) 터미널별 스킬 체인 실행 현황 (N-M 표기)
+ *       을 실시간 시각화하는 패널 컴포넌트.
  *
  * 폴링 주기:
  *   - /api/orchestrator/status    : 3초 (에이전트 상태 + 경고 + 최근 액션)
- *   - /api/orchestrator/skill-chain: 3초 (실행 중인 스킬 체인 현황)
+ *   - /api/orchestrator/skill-chain: 3초 (스킬 레지스트리 + 터미널별 체인)
  */
 export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelProps) {
   // 오케스트레이터 전체 상태 (에이전트별 상태, 태스크 분배, 경고 등)
   const [orchStatus, setOrchStatus] = useState<OrchestratorStatus | null>(null);
-  // 수동 실행 중 여부 — 버튼 비활성화 및 레이블 변경에 사용
+  // 수동 실행 중 여부
   const [orchRunning, setOrchRunning] = useState(false);
-  // 마지막 수동 실행 시각 — 헤더 영역에 표시
+  // 마지막 수동 실행 시각
   const [orchLastRun, setOrchLastRun] = useState<string | null>(null);
-  // 스킬 체인 실행 상태 (idle / running / done / failed)
-  const [skillChain, setSkillChain] = useState<SkillChainState>({ status: 'idle' });
+  // 스킬 레지스트리 + 터미널별 체인 데이터
+  const [chainData, setChainData] = useState<SkillChainResponse>({
+    skill_registry: [],
+    terminals: {},
+  });
 
   // ── 오케스트레이터 상태 폴링 (3초 간격) ──────────────────────────────────
-  // 터미널 에이전트 실시간 감지 + 경고 수 부모 전달
   useEffect(() => {
     const fetchOrch = () => {
       fetch(`${API_BASE}/api/orchestrator/status`)
         .then(res => res.json())
         .then((data: OrchestratorStatus) => {
           setOrchStatus(data);
-          // 경고 수를 부모 컴포넌트로 전달 (Hive 탭 배지용)
           onWarningCount(data.warnings?.length ?? 0);
         })
         .catch(() => {});
@@ -74,13 +101,17 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
     return () => clearInterval(interval);
   }, [onWarningCount]);
 
-  // ── 스킬 체인 폴링 (3초 간격) ────────────────────────────────────────────
-  // vibe-orchestrate 스킬이 저장한 skill_chain.json을 주기적으로 조회
+  // ── 스킬 체인 폴링 (3초 간격) — DB 기반 응답 ────────────────────────────
   useEffect(() => {
     const fetchChain = () => {
       fetch(`${API_BASE}/api/orchestrator/skill-chain`)
         .then(res => res.json())
-        .then(data => setSkillChain(data))
+        .then((data: SkillChainResponse) => {
+          // 새 응답 구조(skill_registry + terminals) 처리
+          if (data.skill_registry !== undefined) {
+            setChainData(data);
+          }
+        })
         .catch(() => {});
     };
     fetchChain();
@@ -89,7 +120,6 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
   }, []);
 
   // ── 오케스트레이터 수동 실행 핸들러 ──────────────────────────────────────
-  // 실행 후 상태를 즉시 갱신하여 UI에 반영
   const runOrchestrator = () => {
     setOrchRunning(true);
     fetch(`${API_BASE}/api/orchestrator/run`, {
@@ -111,9 +141,28 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
       .finally(() => setOrchRunning(false));
   };
 
+  // ── 활성 터미널 목록 (steps가 있는 터미널만) ───────────────────────────
+  const activeTerminals = Object.entries(chainData.terminals ?? {})
+    .filter(([, chain]) => chain.steps && chain.steps.length > 0)
+    .sort(([a], [b]) => Number(a) - Number(b));
+
+  // ── 스텝 상태별 아이콘/색상 ────────────────────────────────────────────
+  const stepIcon = (status: string) =>
+    status === 'done'    ? '✅' :
+    status === 'running' ? '🔄' :
+    status === 'failed'  ? '❌' :
+    status === 'skipped' ? '⏭️' : '⏳';
+
+  const stepColor = (status: string) =>
+    status === 'done'    ? 'border-green-500/40 bg-green-500/10 text-green-400' :
+    status === 'running' ? 'border-primary/50 bg-primary/10 text-primary animate-pulse' :
+    status === 'failed'  ? 'border-red-500/40 bg-red-500/10 text-red-400' :
+    status === 'skipped' ? 'border-white/10 bg-white/5 text-[#555]' :
+                           'border-white/10 bg-white/5 text-[#666]';
+
   return (
-    /* ── AI 오케스트레이터 패널 — 스킬 체인 실행/모니터링 ── */
     <div className="flex-1 flex flex-col overflow-hidden gap-2">
+
       {/* 헤더: 실행 버튼 + 마지막 실행 시각 */}
       <div className="flex items-center justify-between shrink-0">
         <div className="text-[9px] text-[#858585] font-mono">
@@ -129,108 +178,139 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
         </button>
       </div>
 
-      {/* ── 스킬 체인 실행 흐름 위젯 (AI 오케스트레이터) ── */}
-      {skillChain.status !== 'idle' && skillChain.plan && skillChain.plan.length > 0 && (
-        <div className={`p-2 rounded border shrink-0 ${
-          skillChain.status === 'running'
-            ? 'border-primary/40 bg-primary/5 animate-pulse-subtle'
-            : skillChain.status === 'done'
-              ? 'border-green-500/30 bg-green-500/5'
-              : 'border-red-500/30 bg-red-500/5'
-        }`}>
-          {/* 스킬 체인 상태 헤더 */}
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] font-bold text-[#bbbbbb] uppercase tracking-wider">
-                🎯 AI 오케스트레이터
-              </span>
-              <span className={`px-1.5 py-0.5 rounded text-[7px] font-bold ${
-                skillChain.status === 'running' ? 'bg-primary/20 text-primary' :
-                skillChain.status === 'done'    ? 'bg-green-500/20 text-green-400' :
-                                                  'bg-red-500/20 text-red-400'
-              }`}>
-                {skillChain.status === 'running' ? '실행 중' :
-                 skillChain.status === 'done'    ? '완료' : '실패'}
-              </span>
-            </div>
-            {skillChain.updated_at && (
-              <span className="text-[7px] text-[#666] font-mono">
-                {new Date(skillChain.updated_at).toLocaleTimeString()}
-              </span>
-            )}
+      {/* ── ① 스킬 레지스트리 위젯 ──────────────────────────────────────── */}
+      {/* 전역 스킬 번호 ①~⑦을 배지로 표시. 각 터미널 체인의 N-M 표기 기준표 역할 */}
+      {chainData.skill_registry.length > 0 && (
+        <div className="shrink-0 p-2 rounded border border-white/10">
+          <div className="text-[9px] font-bold text-[#969696] mb-1.5 uppercase tracking-wider">
+            스킬 레지스트리
           </div>
+          <div className="flex flex-wrap gap-1">
+            {chainData.skill_registry.map(sk => (
+              <div
+                key={sk.num}
+                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-white/10 bg-white/3 text-[8px] font-mono"
+                title={sk.name}
+              >
+                <span className="text-primary font-bold">{CIRCLE_NUMS[sk.num] ?? sk.num}</span>
+                <span className="text-[#888]">{sk.short}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-          {/* 요청 내용 요약 */}
-          {skillChain.request && (
-            <div className="text-[8px] text-[#aaa] mb-2 truncate" title={skillChain.request}>
-              📋 {skillChain.request}
-            </div>
-          )}
-
-          {/* 스킬 체인 흐름 시각화: [skill1 ✅] → [skill2 🔄] → [skill3 ⏳] */}
-          <div className="flex items-center gap-1 flex-wrap">
-            {(skillChain.results ?? []).map((r, i) => {
-              // 각 스킬 실행 결과에 따른 아이콘 결정
-              const icon = r.status === 'done'    ? '✅' :
-                           r.status === 'running' ? '🔄' :
-                           r.status === 'failed'  ? '❌' :
-                           r.status === 'skipped' ? '⏭️' : '⏳';
-              // 상태별 색상 클래스 결정
-              const color = r.status === 'done'    ? 'border-green-500/40 bg-green-500/10 text-green-400' :
-                            r.status === 'running' ? 'border-primary/50 bg-primary/10 text-primary animate-pulse' :
-                            r.status === 'failed'  ? 'border-red-500/40 bg-red-500/10 text-red-400' :
-                                                     'border-white/10 bg-white/5 text-[#666]';
-              // 스킬명 단축 표시 (vibe- 접두사 제거)
-              const skillShort = r.skill.replace('vibe-', '');
-              return (
-                <div key={i} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-[#444] text-[8px]">→</span>}
-                  <div
-                    className={`px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold ${color}`}
-                    title={r.summary || r.skill}
-                  >
-                    {icon} {skillShort}
+      {/* ── ② 터미널별 스킬 체인 현황 ───────────────────────────────────── */}
+      {/* 활성 터미널만 표시. 각 스텝은 "T번호-스킬번호" 형태로 레이블 표시 */}
+      {activeTerminals.length > 0 ? (
+        <div className="shrink-0 flex flex-col gap-1.5">
+          <div className="text-[9px] font-bold text-[#969696] uppercase tracking-wider px-1">
+            터미널별 실행 현황
+          </div>
+          {activeTerminals.map(([termId, chain]) => {
+            // 터미널에 실제로 실행 중인 에이전트 이름 (PTY 기반)
+            const agentName = (orchStatus?.terminal_agents ?? {})[termId] || '';
+            // 체인 전체 상태 색상
+            const chainBorder =
+              chain.status === 'running' ? 'border-primary/30 bg-primary/5' :
+              chain.status === 'done'    ? 'border-green-500/20 bg-green-500/5' :
+                                          'border-white/10';
+            return (
+              <div key={termId} className={`p-2 rounded border ${chainBorder}`}>
+                {/* 터미널 헤더: T번호 + 에이전트명 + 요청 내용 + 시각 */}
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-bold text-[#bbbbbb] font-mono">
+                      T{termId}
+                    </span>
+                    {agentName && (
+                      <span className={`px-1 py-0.5 rounded text-[7px] font-bold ${
+                        agentName === 'claude' ? 'bg-green-500/20 text-green-400' :
+                        agentName === 'gemini' ? 'bg-blue-500/20 text-blue-400' :
+                                                  'bg-yellow-500/20 text-yellow-400'
+                      }`}>
+                        {agentName}
+                      </span>
+                    )}
+                    {chain.request && (
+                      <span
+                        className="text-[7px] text-[#777] truncate max-w-[80px]"
+                        title={chain.request}
+                      >
+                        {chain.request}
+                      </span>
+                    )}
                   </div>
+                  {chain.updated_at && (
+                    <span className="text-[7px] text-[#555] font-mono shrink-0">
+                      {new Date(chain.updated_at).toLocaleTimeString()}
+                    </span>
+                  )}
                 </div>
-              );
-            })}
-          </div>
 
-          {/* 현재 실행 중인 스킬 요약 메시지 */}
-          {skillChain.status === 'running' && skillChain.results && (
-            <div className="mt-1.5 text-[7px] text-[#888] truncate">
-              {(() => {
-                const running = skillChain.results.find(r => r.status === 'running');
-                const done = skillChain.results.filter(r => r.status === 'done');
-                if (running) return `⚡ ${running.skill} 실행 중...`;
-                if (done.length > 0) return `✅ ${done[done.length-1].skill}: ${done[done.length-1].summary}`;
-                return '준비 중...';
-              })()}
-            </div>
-          )}
+                {/* 스킬 체인 흐름: 1-① → 1-③ → 1-⑤ */}
+                <div className="flex items-center gap-1 flex-wrap">
+                  {chain.steps.map((step, i) => {
+                    // N-M 레이블에서 M이 스킬 번호 → 원형 숫자로 변환
+                    const circleNum = CIRCLE_NUMS[step.skill_num] ?? step.skill_num;
+                    return (
+                      <div key={i} className="flex items-center gap-1">
+                        {i > 0 && <span className="text-[#444] text-[8px]">→</span>}
+                        <div
+                          className={`px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold ${stepColor(step.status)}`}
+                          title={step.summary || step.skill_name}
+                        >
+                          {stepIcon(step.status)}{' '}
+                          {/* 표기: T번호-스킬원형번호 (예: 1-③) */}
+                          <span className="opacity-60">{termId}-</span>{circleNum}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 현재 실행 중인 스킬 요약 */}
+                {chain.status === 'running' && (() => {
+                  const running = chain.steps.find(s => s.status === 'running');
+                  const lastDone = [...chain.steps].reverse().find(s => s.status === 'done');
+                  if (running) return (
+                    <div className="mt-1 text-[7px] text-[#888] truncate">
+                      ⚡ {running.skill_name} 실행 중...
+                    </div>
+                  );
+                  if (lastDone?.summary) return (
+                    <div className="mt-1 text-[7px] text-[#777] truncate">
+                      ✅ {lastDone.summary}
+                    </div>
+                  );
+                  return null;
+                })()}
+              </div>
+            );
+          })}
         </div>
-      )}
-
-      {/* 스킬 체인 대기 상태 — 활성 체인 없을 때 안내 메시지 */}
-      {skillChain.status === 'idle' && (
-        <div className="text-center text-[#858585] text-xs py-8 flex flex-col items-center gap-2 italic">
+      ) : (
+        /* 활성 체인 없을 때 안내 */
+        <div className="text-center text-[#858585] text-xs py-6 flex flex-col items-center gap-2 italic shrink-0">
           <Network className="w-7 h-7 opacity-20" />
-          <span>스킬 체인 대기 중</span>
-          <span className="text-[9px]">/vibe-orchestrate 스킬로 체인 실행</span>
+          <span>실행 중인 스킬 체인 없음</span>
+          <span className="text-[9px]">
+            /vibe-orchestrate --terminal N 으로 실행
+          </span>
         </div>
       )}
 
-      {/* ── 터미널별 에이전트 현황 그리드 ── */}
-      {/* terminal_agents 데이터가 있을 때만 표시 — 슬롯별로 어떤 에이전트가 동작 중인지 시각화 */}
+      {/* ── ③ 터미널별 에이전트 현황 그리드 (T1~T8) ──────────────────────── */}
       {orchStatus && Object.keys(orchStatus.terminal_agents ?? {}).length > 0 && (
         <div className="shrink-0 p-2 rounded border border-white/10">
-          <div className="text-[9px] font-bold text-[#969696] mb-1.5 uppercase tracking-wider">터미널별 에이전트</div>
+          <div className="text-[9px] font-bold text-[#969696] mb-1.5 uppercase tracking-wider">
+            터미널별 에이전트
+          </div>
           <div className="grid grid-cols-4 gap-1">
             {Array.from({ length: 8 }, (_, i) => {
               const slot = String(i + 1);
               const agent = (orchStatus.terminal_agents ?? {})[slot] || '';
               const st = agent ? (orchStatus.agent_status ?? {})[agent] : null;
-              // 에이전트별 색상: claude=초록, gemini=파랑, shell=노랑, 비어있음=회색
               const color = !agent
                 ? 'border-white/5 bg-white/3 text-[#555]'
                 : agent === 'claude'
@@ -238,7 +318,6 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
                   : agent === 'gemini'
                     ? 'border-blue-500/40 bg-blue-500/10 text-blue-400'
                     : 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400';
-              // 활성 상태 표시용 점
               const dotColor = !st ? '' : st.state === 'active' ? 'bg-green-400' : st.state === 'idle' ? 'bg-yellow-400' : 'bg-gray-500';
               return (
                 <div key={slot} className={`flex flex-col items-center gap-0.5 p-1 rounded border text-[8px] font-mono ${color}`}>
@@ -258,18 +337,17 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
         </div>
       )}
 
-      {/* 최근 오케스트레이터 자동 액션 로그 */}
+      {/* ── ④ 최근 오케스트레이터 자동 액션 로그 ───────────────────────────── */}
       {orchStatus?.recent_actions && orchStatus.recent_actions.length > 0 ? (
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           <div className="p-2 rounded border border-white/10">
             <div className="text-[9px] font-bold text-[#969696] mb-1.5">최근 자동 액션</div>
             {orchStatus.recent_actions.slice(0, 8).map((act, i) => {
-              // 액션 유형별 색상 구분 (자동 할당 / 유휴 감지 / 과부하 / 기타)
               const actionColor =
-                act.action === 'auto_assign'         ? 'text-green-400' :
-                act.action === 'idle_agent'           ? 'text-yellow-400' :
-                act.action.includes('overload')       ? 'text-red-400' :
-                                                        'text-[#858585]';
+                act.action === 'auto_assign'   ? 'text-green-400' :
+                act.action === 'idle_agent'     ? 'text-yellow-400' :
+                act.action.includes('overload') ? 'text-red-400' :
+                                                  'text-[#858585]';
               return (
                 <div key={i} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1">
                   <span className={`text-[8px] font-mono shrink-0 mt-0.5 ${actionColor}`}>{act.action}</span>

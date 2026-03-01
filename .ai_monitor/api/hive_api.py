@@ -208,20 +208,28 @@ def handle_get(handler, path: str, params: dict,
         return True
 
     # ── /api/orchestrator/skill-chain ────────────────────────────────────
+    # skill_chain.db(SQLite)에서 스킬 레지스트리 + 터미널별 최신 세션 조회.
+    # UI는 skill_registry(①~⑦ 번호 목록)와 terminals(T1~T8 실행 현황) 맵을 수신.
     elif path == '/api/orchestrator/skill-chain':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
-        chain_file = DATA_DIR / 'skill_chain.json'
-        if chain_file.exists():
-            try:
-                with open(chain_file, 'r', encoding='utf-8') as f:
-                    handler.wfile.write(f.read().encode('utf-8'))
-            except Exception:
-                handler.wfile.write(json.dumps({"status": "idle"}).encode('utf-8'))
-        else:
-            handler.wfile.write(json.dumps({"status": "idle"}).encode('utf-8'))
+        try:
+            import sys as _sys
+            _orch_dir = str(DATA_DIR.parent.parent / 'scripts')
+            if _orch_dir not in _sys.path:
+                _sys.path.insert(0, _orch_dir)
+            from skill_orchestrator import _build_response, SKILL_REGISTRY
+            result = _build_response()
+            handler.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            # fallback: 빈 응답
+            handler.wfile.write(json.dumps({
+                "skill_registry": [],
+                "terminals": {},
+                "error": str(e)
+            }, ensure_ascii=False).encode('utf-8'))
         return True
 
     # ── /api/orchestrator/status ─────────────────────────────────────────
@@ -594,22 +602,24 @@ def handle_post(handler, path: str, data: dict,
         return True
 
     # ── /api/orchestrator/skill-chain/update ─────────────────────────────
+    # POST body: {"step": 0, "status": "done", "summary": "...", "terminal_id": 1}
+    # skill_orchestrator.cmd_update()를 직접 호출하여 DB 갱신
     elif path == '/api/orchestrator/skill-chain/update':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         try:
-            chain_file = DATA_DIR / 'skill_chain.json'
-            chain = {}
-            if chain_file.exists():
-                with open(chain_file, 'r', encoding='utf-8') as f:
-                    chain = json.load(f)
-            # 요청 데이터로 병합 업데이트
-            chain.update(data)
-            chain['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-            with open(chain_file, 'w', encoding='utf-8') as f:
-                json.dump(chain, f, ensure_ascii=False, indent=2)
+            import sys as _sys
+            _orch_dir = str(DATA_DIR.parent.parent / 'scripts')
+            if _orch_dir not in _sys.path:
+                _sys.path.insert(0, _orch_dir)
+            from skill_orchestrator import cmd_update as _orch_update
+            step = int(data.get('step', 0))
+            status = str(data.get('status', 'done'))
+            summary = str(data.get('summary', ''))
+            terminal_id = int(data.get('terminal_id', 0))
+            _orch_update(terminal_id, step, status, summary)
             handler.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
