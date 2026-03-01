@@ -2,7 +2,17 @@
 FILE: scripts/hive_watchdog.py
 DESCRIPTION: 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing) 및 모니터링 엔진.
              DB 무결성, 파일 동기화 상태, 에이전트 활동 주기를 주기적으로 체크하고 복구를 시도합니다.
+
+             [자기치유 3계층]
+             계층 1 — 인프라 치유: DB/서버/메모리 60초 루프 (기존)
+             계층 2 — 스킬 치유: skill_analyzer 10분마다 실행, 반복 패턴 → 스킬 자동 업데이트 (신규)
+             계층 3 — 지식 치유: (미래) LLM 응답 분석 → 스킬 파일 갱신
+
 REVISION HISTORY:
+- 2026-03-01 Claude: [자기치유 계층 2 완성] skill_analyzer 연동
+  - check_skill_gaps(): skill_analyzer로 패턴 감지 → vibe-master.md 자동 업데이트
+  - start_loop(): _loop_count 추적, 10루프(10분)마다 check_skill_gaps() 호출
+  - status에 skill_heal_count 추가
 - 2026-02-28 Claude: --data-dir 인자 추가 — 설치 버전에서 DATA_DIR 하드코딩 오류 수정.
 - 2026-02-26 Gemini-1: 초기 생성. DB 체크, 메모리 동기화(memory.py) 연동 기능 구현.
 - 2026-02-26 Claude: 오탐 개선 — 에이전트 비활성 임계값 1h→8h, memory_sync_ok 갱신 버그 수정.
@@ -50,6 +60,7 @@ class HiveWatchdog:
     def __init__(self, interval=60):
         self.interval = interval
         self.is_running = False
+        self._loop_count = 0  # 루프 횟수 추적 (10회마다 스킬 갭 분석)
         self.status = {
             "last_check": None,
             "db_ok": False,
@@ -57,6 +68,7 @@ class HiveWatchdog:
             "memory_sync_ok": False,
             "agent_active": False,
             "repair_count": 0,
+            "skill_heal_count": 0,  # 스킬 자기치유 성공 횟수
             "logs": []
         }
 
@@ -142,6 +154,57 @@ class HiveWatchdog:
             self._add_log(f"⚠️ 로그 분석 실패: {e}")
             return False
 
+    def check_skill_gaps(self):
+        """skill_analyzer.py를 사용하여 반복 패턴 감지 및 스킬 자동 업데이트 (계층 2 자기치유).
+
+        [동작 순서]
+        1. SkillAnalyzer로 task_logs.jsonl의 사용자 [지시] 로그 분석
+        2. 3회 이상 반복 패턴 감지
+        3. apply_knowledge_to_skill()로 vibe-master.md 자동 업데이트
+        4. 성공 시 skill_heal_count 증가 + 로그 기록
+
+        [호출 시점]
+        start_loop()에서 10루프(=약 10분)마다 자동 호출.
+        --check 모드에서는 run_check()와 별도로 수동 호출 가능.
+        """
+        self._add_log("🧠 스킬 갭 분석 중...")
+        try:
+            # scripts/ 디렉토리를 sys.path에 추가하여 skill_analyzer 임포트
+            scripts_dir = str(PROJECT_ROOT / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+
+            from skill_analyzer import SkillAnalyzer
+
+            # project_root를 주입하여 경로 오류 방지 (배포 버전 대응)
+            analyzer = SkillAnalyzer(project_root=PROJECT_ROOT)
+            report = analyzer.analyze_patterns()
+            proposals = report.get("proposals", []) if isinstance(report, dict) else []
+
+            # 분석 결과를 JSON 파일로도 저장 (UI 참조용)
+            analyzer.save_analysis(report)
+
+            if proposals:
+                applied = analyzer.apply_knowledge_to_skill(proposals)
+                if applied:
+                    count = len(proposals)
+                    self._add_log(f"✅ 자기치유 완료: {count}개 패턴 스킬에 반영")
+                    self.status["skill_heal_count"] = self.status.get("skill_heal_count", 0) + 1
+                    self.status["repair_count"] += 1
+                    return True
+                else:
+                    self._add_log("⚠️ 스킬 파일 업데이트 실패 (파일 없거나 경로 오류)")
+            else:
+                self._add_log("ℹ️ 신규 반복 패턴 없음 — 스킬 최신 상태")
+            return False
+
+        except ImportError:
+            self._add_log("⚠️ skill_analyzer.py 로드 실패 — scripts/ 경로 확인 필요")
+            return False
+        except Exception as e:
+            self._add_log(f"❌ 스킬 갭 분석 오류: {e}")
+            return False
+
     def repair_memory_sync(self):
         """memory.py를 호출하여 에이전트 간 메모리 강제 동기화.
 
@@ -195,11 +258,28 @@ class HiveWatchdog:
             json.dump(self.status, f, indent=2, ensure_ascii=False)
 
     def start_loop(self):
+        """워치독 메인 루프.
+
+        [루프 주기]
+        - 매 60초: run_check() — DB/서버/메모리 인프라 점검 (계층 1 치유)
+        - 매 10루프(=10분): check_skill_gaps() — 스킬 갭 분석·자동 업데이트 (계층 2 치유)
+
+        스킬 분석을 매 루프 실행하지 않는 이유:
+        - 로그 파일 읽기 + 파일 쓰기가 빈번하면 I/O 부하 발생
+        - 10분 간격이면 세션 중 패턴 변화를 충분히 반영 가능
+        """
         self.is_running = True
-        self._add_log("🚀 하이브 워치독 엔진 가동 시작")
+        self._loop_count = 0
+        self._add_log("🚀 하이브 워치독 엔진 가동 시작 (계층 1 인프라 + 계층 2 스킬 치유)")
         while self.is_running:
             try:
                 self.run_check()
+                self._loop_count += 1
+
+                # 10루프(약 10분)마다 스킬 갭 분석 실행
+                if self._loop_count % 10 == 0:
+                    self.check_skill_gaps()
+
             except Exception as e:
                 self._add_log(f"❌ 루프 실행 에러: {e}")
             time.sleep(self.interval)
