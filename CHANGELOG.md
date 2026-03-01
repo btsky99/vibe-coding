@@ -1,5 +1,22 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-03-01] - v3.6.6 (AI 오케스트레이터 통합)
+
+### 🎯 AI 오케스트레이터 A안 + B안 통합 구현
+- **[Feature] vibe-orchestrate 마스터 스킬**:
+    - 요청 분석 → 최적 스킬 체인 자동 수립 → 순서대로 실행.
+    - 카테고리별 체인 매핑: 버그→(debug→tdd), 기능→(brainstorm→write-plan→execute), 배포→(release).
+    - `skill_orchestrator.py`와 연동하여 실행 상태 JSON 영속화.
+- **[Feature] skill_orchestrator.py 신규 생성**:
+    - `plan / update / done / reset` CLI 커맨드로 스킬 체인 상태 추적.
+    - `DATA_DIR/skill_chain.json`에 세션 단위로 저장.
+- **[Feature] 스킬 체인 대시보드 위젯**:
+    - 3초 폴링으로 `[vibe-debug ✅] → [vibe-tdd 🔄] → [vibe-release ⏳]` 형식 실시간 표시.
+    - `GET /api/orchestrator/skill-chain`, `POST /api/orchestrator/skill-chain/update` 엔드포인트 추가.
+- **[Update] hive_hook.py 복합 요청 자동 감지**:
+    - 2개 이상 인텐트 동시 매칭 시 `orchestrate` 인텐트로 자동 전환.
+    - orchestrate 키워드: 자동으로, 전부, 전체, 다 해줘, 알아서, 하고, 그리고, 등.
+
 ## [2026-03-01] - v3.6.5 (하이브 시스템 통합 및 대시보드 UI 최종 정리)
 
 ### 📊 하이브 시스템 및 대시보드 고도화
