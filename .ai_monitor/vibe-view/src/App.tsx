@@ -315,11 +315,13 @@ function App() {
   // ─── Git 실시간 감시 상태 ─────────────────────────────────────────────
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitLog, setGitLog] = useState<GitCommit[]>([]);
-  // 초기값은 하드코딩 — currentPath 선언 이후 useEffect로 동기화
-  const [gitPath, setGitPath] = useState("D:/vibe-coding");
+  // 초기값 빈 문자열 — currentPath와 동기화되므로 하드코딩 불필요
+  const [gitPath, setGitPath] = useState("");
 
   // Git 상태 폴링 (5초 간격)
   useEffect(() => {
+    // gitPath가 비어있으면 API 호출 생략 (경로 미설정 상태)
+    if (!gitPath) return;
     const fetchGit = () => {
       const encodedPath = encodeURIComponent(gitPath);
       fetch(`${API_BASE}/api/git/status?path=${encodedPath}`)
@@ -620,11 +622,14 @@ function App() {
 
   // 파일 시스템 탐색 상태
   const [drives, setDrives] = useState<string[]>([]);
-  const [currentPath, setCurrentPath] = useState("D:/vibe-coding");
+  // 초기값 빈 문자열 — api/config의 last_path 또는 api/projects 첫 항목으로 채워짐 (하드코딩 제거)
+  const [currentPath, setCurrentPath] = useState("");
   const [initialConfigLoaded, setInitialConfigLoaded] = useState(false);
   const [items, setItems] = useState<{ name: string, path: string, isDir: boolean }[]>([]);
+  // 최근 방문 프로젝트 목록 — api/projects에서 로드, 드롭다운에 표시
+  const [recentProjects, setRecentProjects] = useState<string[]>([]);
 
-  // 초기 설정 로드 (마지막 경로 기억) + 서버 버전 동적 로드
+  // 초기 설정 로드 (마지막 경로 기억) + 서버 버전 + 최근 프로젝트 목록 동적 로드
   useEffect(() => {
     // 서버에서 실제 버전 정보 가져오기 (하드코딩 방지)
     fetch(`${API_BASE}/api/project-info`)
@@ -632,25 +637,48 @@ function App() {
       .then(data => { if (data.version) setAppVersion(data.version); })
       .catch(() => {});
 
+    // 최근 프로젝트 목록 로드 — 드롭다운에 표시
+    fetch(`${API_BASE}/api/projects`)
+      .then(res => res.json())
+      .then(data => { if (Array.isArray(data)) setRecentProjects(data); })
+      .catch(() => {});
+
+    // 마지막 경로 로드 — 없으면 최근 프로젝트 첫 항목으로 폴백
     fetch(`${API_BASE}/api/config`)
       .then(res => res.json())
       .then(data => {
         if (data.last_path) {
           setCurrentPath(data.last_path);
         }
+        // last_path 없어도 initialConfigLoaded=true로 설정 (드라이브 탐색 가능하도록)
         setInitialConfigLoaded(true);
       })
       .catch(() => setInitialConfigLoaded(true));
   }, []);
 
-  // 경로 변경 시 서버에 저장
+  // 경로 변경 시 config 저장 + 최근 프로젝트 목록 갱신
   useEffect(() => {
-    if (initialConfigLoaded && currentPath) {
-      fetch(`${API_BASE}/api/config/update`, {
+    if (!initialConfigLoaded || !currentPath) return;
+
+    // 1) 마지막 경로 config에 저장
+    fetch(`${API_BASE}/api/config/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ last_path: currentPath })
+    }).catch(() => {});
+
+    // 2) 드라이브 루트(예: "D:/")가 아닌 실제 프로젝트 경로만 최근 목록에 저장
+    // 드라이브 루트는 탐색 중간 경로라 프로젝트로 간주하지 않음
+    const isDriveRoot = /^[A-Za-z]:\/+$/.test(currentPath);
+    if (!isDriveRoot) {
+      fetch(`${API_BASE}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ last_path: currentPath })
-      }).catch(() => {});
+        body: JSON.stringify({ path: currentPath })
+      })
+        .then(res => res.json())
+        .then(data => { if (Array.isArray(data.projects)) setRecentProjects(data.projects); })
+        .catch(() => {});
     }
   }, [currentPath, initialConfigLoaded]);
 
@@ -1877,17 +1905,29 @@ function App() {
                   </button>
                   <select
                     value={
-                      // vibe-coding 하위 경로는 먼저 체크 (드라이브 prefix 매칭보다 우선)
-                      // 버그 수정: "D:/vibe-coding".startsWith("D:/")가 true라 드라이브로 잘못 매핑되던 문제
-                      currentPath.startsWith("D:/vibe-coding")
-                        ? "D:/vibe-coding"
-                        : (drives.find(d => currentPath.startsWith(d)) || currentPath)
+                      // 현재 경로와 일치하는 최근 프로젝트를 우선 매칭 (정확히 같거나 하위 경로)
+                      // 그 다음 드라이브 루트 매칭 (예: D:/) — 하드코딩 제거
+                      recentProjects.find(p => currentPath === p || currentPath.startsWith(p + '/') || currentPath.startsWith(p + '\\'))
+                        || drives.find(d => currentPath.startsWith(d))
+                        || currentPath
                     }
                     onChange={(e) => setCurrentPath(e.target.value)}
                     className="flex-1 bg-[#3c3c3c] border border-white/5 hover:border-white/20 rounded px-2 py-1.5 text-xs focus:outline-none transition-all cursor-pointer"
                   >
-                    <option value="D:/vibe-coding">vibe-coding</option>
-                    {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
+                    {/* 최근 프로젝트 — 선택 시 해당 프로젝트 루트로 즉시 이동 */}
+                    {recentProjects.length > 0 && (
+                      <optgroup label="📁 최근 프로젝트">
+                        {recentProjects.map(p => (
+                          <option key={p} value={p}>
+                            {p.split(/[\\\/]/).filter(Boolean).pop() || p} — {p}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {/* 드라이브 루트 — 탐색 시작점 */}
+                    <optgroup label="💾 드라이브">
+                      {drives.map(drive => <option key={drive} value={drive}>{drive}</option>)}
+                    </optgroup>
                   </select>
                   <button
                     onClick={() => setTreeMode(v => !v)}
