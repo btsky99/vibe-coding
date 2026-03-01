@@ -350,7 +350,7 @@ def _memory_conn() -> sqlite3.Connection:
     """요청마다 새 커넥션 생성 (스레드 안전 — ThreadedHTTPServer 대응)
 
     [배포 버전 DATA_DIR 불일치 해소]
-    배포(frozen) 버전에서 DATA_DIR = APPDATA\VibeCoding로 설정되더라도,
+    배포(frozen) 버전에서 DATA_DIR = APPDATA/VibeCoding로 설정되더라도,
     현재 활성 프로젝트(config.json last_path)의 로컬 DB가 있으면 우선 사용합니다.
     이를 통해 CLI(개발 버전)가 저장한 공유 메모리를 배포 대시보드에서도 표시합니다.
     """

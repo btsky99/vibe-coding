@@ -11,6 +11,8 @@
 #   - 이전 버전과 동시에 보관 가능 / 다운로드 시 버전 식별 용이
 # [2026-03-01] Claude — datas 보강: scripts/, src/, skills/claude/, .gemini/skills/
 #   - 배포 버전에서 스킬 설치/인식 실패 버그 수정
+# [2026-03-01] Claude — datas 보강: 루트 지침 파일(GEMINI.md, CLAUDE.md, RULES.md, PROJECT_MAP.md)
+#   - 스킬 복구 시 이 파일들을 타겟 프로젝트에 복사할 수 있도록 번들에 포함
 # ────────────────────────────────────────────────────────────────────────────
 
 import re as _re
@@ -42,6 +44,14 @@ a = Analysis(
         # Gemini 스킬 템플릿 파일 (SKILL.md 디렉터리 구조 유지)
         # → /api/superpowers/install 시 현재 프로젝트 .gemini/skills/ 에 복사
         ('.gemini/skills', '.gemini/skills'),
+        # 루트 지침 파일 — 스킬 복구(/api/install-skills) 시 타겟 프로젝트에 복사
+        # 배포 버전에서 이 파일들이 없으면 하이브 진단 빨간불 발생하므로 번들에 포함
+        ('GEMINI.md', '.'),
+        ('CLAUDE.md', '.'),
+        ('RULES.md', '.'),
+        ('PROJECT_MAP.md', '.'),
+        # API 모듈 (hive_api, git_api 등)
+        ('.ai_monitor/api', 'api'),
     ],
     hiddenimports=['websockets', 'winpty'],
     hookspath=[],
