@@ -1540,6 +1540,16 @@ class SSEHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+                # in-memory AGENT_STATUS 로 보완 (가장 실시간 하트비트)
+                with AGENT_STATUS_LOCK:
+                    for a_name, st in AGENT_STATUS.items():
+                        a_key = 'claude' if 'claude' in a_name.lower() else 'gemini' if 'gemini' in a_name.lower() else None
+                        if a_key and st.get('last_seen'):
+                            hb_dt = datetime.fromtimestamp(st['last_seen'])
+                            hb_iso = hb_dt.isoformat()
+                            if agent_last_seen.get(a_key) is None or hb_iso > agent_last_seen[a_key]:
+                                agent_last_seen[a_key] = hb_iso
+
                 # 에이전트 상태 (active / idle / unknown)
                 now_dt = datetime.now()
                 agent_status = {}
