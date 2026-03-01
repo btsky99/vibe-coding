@@ -543,8 +543,8 @@ function App() {
               />
             )}
 
-            {/* 에이전트 간 메시지 작성 — 모든 탭 공통 하단 고정 */}
-            <MessageComposer />
+            {/* 에이전트 간 메시지 작성 — messages 탭은 MessagesPanel 내부 폼 사용, 나머지 탭 공통 */}
+            {activeTab !== 'messages' && <MessageComposer />}
           </div>
         </motion.div>
 

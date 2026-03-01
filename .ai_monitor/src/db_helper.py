@@ -93,3 +93,18 @@ def get_messages(limit=50):
     except Exception as e:
         print(f"[DB-ERR] get_messages 실패: {e}")
         return []
+
+def clear_messages():
+    """messages 테이블의 모든 레코드를 삭제합니다 (대시보드 UI 초기화용)."""
+    try:
+        _ensure_tables()
+        conn = get_connection()
+        try:
+            conn.execute('DELETE FROM messages')
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[DB-ERR] clear_messages 실패: {e}")
+        return False

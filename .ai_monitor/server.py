@@ -56,6 +56,15 @@ import string
 import socket
 from pathlib import Path
 
+# [수정] 오케스트레이터 스킬 체인 모듈 전역 임포트 (scripts 폴더)
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+try:
+    import skill_orchestrator
+except ImportError:
+    skill_orchestrator = None
+
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
 if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     try:
@@ -301,13 +310,13 @@ sys.path.append(str(BASE_DIR / 'src'))
 sys.path.insert(0, str(BASE_DIR))
 try:
     from db import init_db
-    from db_helper import insert_log, get_recent_logs, send_message, get_messages
+    from db_helper import insert_log, get_recent_logs, send_message, get_messages, clear_messages
 except ImportError as e:
     print(f"Critical Import Error: {e}")
     # src 폴더가 없는 경우 대비하여 한 번 더 경로 확인
     sys.path.append(str(BASE_DIR))
     from src.db import init_db
-    from src.db_helper import insert_log, get_recent_logs, send_message, get_messages
+    from src.db_helper import insert_log, get_recent_logs, send_message, get_messages, clear_messages
 
 # 데이터 디렉토리 생성 보장 및 DB 초기화 (중복 제거 및 위치 조정)
 init_db()
@@ -3237,6 +3246,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success', 'msg': msg}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/messages/clear':
+            # 메시지 채널 전체 삭제 (대시보드 UI 초기화용)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            ok = clear_messages()
+            self.wfile.write(json.dumps({'status': 'ok' if ok else 'error'}).encode('utf-8'))
         elif parsed_path.path == '/api/tasks':
             # 새 작업 생성 — tasks.json 배열에 추가
             self.send_response(200)
