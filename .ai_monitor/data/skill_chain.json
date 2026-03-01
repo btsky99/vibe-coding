@@ -1,0 +1,30 @@
+{
+  "session_id": "20260301_155339",
+  "request": "커밋하고 푸시하고 릴리즈",
+  "plan": [
+    "git-commit",
+    "git-push",
+    "vibe-release"
+  ],
+  "current_step": 1,
+  "results": [
+    {
+      "skill": "git-commit",
+      "status": "pending",
+      "summary": ""
+    },
+    {
+      "skill": "git-push",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "skill": "vibe-release",
+      "status": "pending",
+      "summary": ""
+    }
+  ],
+  "status": "running",
+  "started_at": "2026-03-01T15:53:39",
+  "updated_at": "2026-03-01T15:54:21"
+}

@@ -6,6 +6,10 @@
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
  * REVISION HISTORY:
+ * - 2026-03-01 Claude: 파일 탐색기 가로 스크롤 추가 (overflow-auto + min-w-max 래퍼),
+ *                      파일명 truncate→whitespace-nowrap 변경, 버튼 overflow-hidden 제거
+ * - 2026-03-01 Claude: 사이드바 좌우 드래그 리사이즈 핸들 추가 (sidebarWidth 동적 상태, 150~600px),
+ *                      오른쪽 터미널 영역 overflow-y-auto 스크롤 적용, 그리드 min-h-full로 변경
  * - 2026-03-01 Gemini CLI: 사이드바 VS Code 스타일 UI 복원 (인라인 편집, 호버 버튼 그룹)
  * - 2026-03-01 Gemini-2: 터미널 초기 레이아웃 2분할로 변경 및 뷰어 창 수동 리사이즈 핸들 도입
  * - 2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영
@@ -106,6 +110,11 @@ export interface OpenFile {
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
+  // 사이드바 너비 — 드래그 리사이즈로 동적 조절 (최소 150px, 최대 600px)
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const isResizingSidebar = useRef(false);
+  const sidebarResizeStartX = useRef(0);
+  const sidebarResizeStartWidth = useRef(260);
   // 레이아웃 모드: 1, 2, 3, 4(가로4열), 2x2(2×2격자), 6(3×2격자), 8(4×2격자)
   const [layoutMode, setLayoutMode] = useState<'1' | '2' | '3' | '4' | '2x2' | '6' | '8'>('2');
   // '2x2'는 parseInt 불가 → 직접 매핑
@@ -131,6 +140,39 @@ function App() {
     const interval = setInterval(fetchLocks, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // 사이드바 좌우 드래그 리사이즈 — document 전역 이벤트로 처리
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSidebar.current) return;
+      const dx = e.clientX - sidebarResizeStartX.current;
+      const newWidth = Math.min(600, Math.max(150, sidebarResizeStartWidth.current + dx));
+      setSidebarWidth(newWidth);
+    };
+    const handleMouseUp = () => {
+      if (isResizingSidebar.current) {
+        isResizingSidebar.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
+  // 사이드바 리사이즈 핸들 마우스다운 처리 함수
+  const handleSidebarResizeMouseDown = (e: React.MouseEvent) => {
+    isResizingSidebar.current = true;
+    sidebarResizeStartX.current = e.clientX;
+    sidebarResizeStartWidth.current = sidebarWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  };
 
   // ─── 에이전트 간 메시지 채널 상태 ───────────────────────────────────
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -347,7 +389,7 @@ function App() {
   const [orchRunning, setOrchRunning] = useState(false);
   const [orchLastRun, setOrchLastRun] = useState<string | null>(null);
 
-  // 오케스트레이터 상태 폴링 (10초 간격)
+  // 오케스트레이터 상태 폴링 (3초 간격 — 터미널 에이전트 실시간 감지)
   useEffect(() => {
     const fetchOrch = () => {
       fetch(`${API_BASE}/api/orchestrator/status`)
@@ -356,7 +398,7 @@ function App() {
         .catch(() => {});
     };
     fetchOrch();
-    const interval = setInterval(fetchOrch, 10000);
+    const interval = setInterval(fetchOrch, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1158,10 +1200,11 @@ function App() {
           </div>
         </div>
 
-        {/* Sidebar (Explorer) */}
+        {/* Sidebar (Explorer) — 너비는 sidebarWidth 상태로 동적 조절 */}
         <motion.div
-          animate={{ width: isSidebarOpen ? 260 : 0, opacity: isSidebarOpen ? 1 : 0 }}
+          animate={{ width: isSidebarOpen ? sidebarWidth : 0, opacity: isSidebarOpen ? 1 : 0 }}
           className="h-full bg-[#252526] border-r border-black/40 flex flex-col overflow-hidden"
+          style={{ minWidth: isSidebarOpen ? 150 : 0 }}
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
             <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : '하이브 마인드'}</span>
@@ -1615,11 +1658,21 @@ function App() {
                         const dotColor = st.state === 'active' ? 'text-green-400' : st.state === 'idle' ? 'text-yellow-400' : 'text-[#858585]';
                         const stateLabel = st.state === 'active' ? '활성' : st.state === 'idle' ? `유휴 ${st.idle_sec ? Math.floor(st.idle_sec / 60) + '분' : ''}` : '미확인';
                         const taskDist = orchStatus.task_distribution?.[agent] ?? { pending: 0, in_progress: 0, done: 0 };
+                        // 이 에이전트가 사용 중인 슬롯 번호 목록 (실시간 PTY 기반)
+                        const activeSlots = Object.entries(orchStatus.terminal_agents ?? {})
+                          .filter(([, a]) => a === agent)
+                          .map(([slot]) => `T${slot}`);
                         return (
                           <div key={agent} className="flex items-center gap-2 py-1 border-b border-white/5 last:border-0">
                             <CircleDot className={`w-3 h-3 shrink-0 ${dotColor}`} />
                             <span className={`font-mono font-bold text-[10px] w-12 shrink-0 ${agent === 'claude' ? 'text-green-400' : 'text-blue-400'}`}>{agent}</span>
                             <span className={`text-[9px] ${dotColor}`}>{stateLabel}</span>
+                            {/* 실제 실행 중인 터미널 슬롯 번호 표시 */}
+                            {activeSlots.length > 0 && (
+                              <span className="text-[8px] font-mono text-primary/70 bg-primary/10 px-1 rounded">
+                                {activeSlots.join(' ')}
+                              </span>
+                            )}
                             <div className="ml-auto flex gap-1.5 text-[8px] font-mono">
                               <span className="text-[#858585]">P:{taskDist.pending}</span>
                               <span className="text-primary">W:{taskDist.in_progress}</span>
@@ -1628,6 +1681,24 @@ function App() {
                           </div>
                         );
                       })}
+                      {/* 터미널 슬롯 전체 현황 (8개) */}
+                      <div className="mt-2 pt-2 border-t border-white/5">
+                        <div className="text-[8px] text-[#555] mb-1">터미널 슬롯 현황</div>
+                        <div className="grid grid-cols-8 gap-0.5">
+                          {Array.from({ length: 8 }, (_, i) => {
+                            const slot = String(i + 1);
+                            const a = (orchStatus.terminal_agents ?? {})[slot] || '';
+                            const color = a === 'claude' ? 'bg-green-500/60' : a === 'gemini' ? 'bg-blue-500/60' : a ? 'bg-yellow-500/60' : 'bg-white/10';
+                            const label = a === 'claude' ? 'C' : a === 'gemini' ? 'G' : a ? a[0].toUpperCase() : '';
+                            return (
+                              <div key={slot} title={a ? `T${slot}: ${a}` : `T${slot}: 비어있음`}
+                                className={`h-4 rounded text-[7px] font-bold flex items-center justify-center ${color} text-white/80`}>
+                                {label || slot}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
 
                     {/* 태스크 분배 전체 요약 */}
@@ -2042,7 +2113,10 @@ function App() {
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-0.5 custom-scrollbar border-t border-white/5 pt-2">
+                {/* 파일 목록 컨테이너 — overflow-auto로 상하/좌우 스크롤 모두 허용 */}
+                <div className="flex-1 overflow-auto custom-scrollbar border-t border-white/5 pt-2">
+                  {/* min-w-max 래퍼: 파일명이 긴 경우 가로로 확장되어 스크롤 가능하게 함 */}
+                  <div className="min-w-max space-y-0.5">
                   <button onClick={goUp} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-[#2a2d2e] rounded text-xs transition-colors group">
                     <ChevronLeft className="w-4 h-4 text-[#3794ef] group-hover:-translate-x-1 transition-transform" /> ..
                   </button>
@@ -2086,7 +2160,7 @@ function App() {
                             e.preventDefault();
                             setContextMenu({ x: e.clientX, y: e.clientY, path: item.path, isDir: item.isDir });
                           }}
-                          className={`flex-1 flex items-center gap-2 py-1 overflow-hidden ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
+                          className={`flex items-center gap-2 py-1 ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
                         >
                           {item.isDir ? <VscFolder className="w-4 h-4 text-[#dcb67a] shrink-0" /> : getFileIcon(item.name)}
                           {editingPath === item.path ? (
@@ -2117,7 +2191,7 @@ function App() {
                               className="flex-1 bg-[#1e1e1e] border border-primary outline-none px-1 text-xs text-white rounded"
                             />
                           ) : (
-                            <span className="truncate">{item.name}</span>
+                            <span className="whitespace-nowrap">{item.name}</span>
                           )}
                         </button>
                         
@@ -2167,6 +2241,7 @@ function App() {
                       </div>
                     ))
                   )}
+                  </div>{/* end min-w-max wrapper */}
                 </div>
               </>
             )}
@@ -2223,6 +2298,18 @@ function App() {
             </div>
           </div>
         </motion.div>
+
+        {/* 사이드바 좌우 드래그 리사이즈 핸들 — 이 선을 좌우로 드래그하여 너비 조절 */}
+        {isSidebarOpen && (
+          <div
+            onMouseDown={handleSidebarResizeMouseDown}
+            className="w-1 h-full cursor-col-resize shrink-0 hover:bg-primary/60 transition-colors bg-black/20 z-20 group"
+            title="드래그하여 탐색기 너비 조절"
+          >
+            {/* 시각적 드래그 인디케이터 (호버 시 강조) */}
+            <div className="w-full h-full group-hover:bg-primary/40 transition-colors" />
+          </div>
+        )}
 
         {/* 컨텍스트 메뉴 UI */}
         {contextMenu && (
@@ -2304,10 +2391,10 @@ function App() {
             </div>
           </header>
 
-          {/* Terminals Area */}
-          <main className="flex-1 p-2 overflow-hidden bg-[#1e1e1e]">
+          {/* Terminals Area — overflow-y-auto로 세로 스크롤 허용 */}
+          <main className="flex-1 p-2 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
             {/* 터미널 그리드: 1→1열, 2→2열, 3→3열, 4→가로4열, 2x2→2×2격자, 6→3×2격자, 8→4×2격자 */}
-            <div className={`h-full w-full gap-2 grid ${
+            <div className={`min-h-full w-full gap-2 grid ${
               layoutMode === '1' ? 'grid-cols-1' :
               layoutMode === '2' ? 'grid-cols-2' :
               layoutMode === '3' ? 'grid-cols-3' :
@@ -2391,7 +2478,7 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
         onClick={item.isDir ? () => onToggle(item.path) : () => onFileOpen(item)}
         onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${indent + (item.isDir ? 4 : 20)}px` }}
-        className={`flex-1 flex items-center gap-1.5 py-0.5 overflow-hidden transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
+        className={`flex items-center gap-1.5 py-0.5 transition-colors ${item.isDir ? 'text-[#cccccc]' : 'text-[#ffffff] font-medium'}`}
       >
         {item.isDir ? (
           <>
@@ -2414,7 +2501,7 @@ function FileTreeNode({ item, depth, expanded, treeChildren, onToggle, onFileOpe
             className="flex-1 bg-[#1e1e1e] border border-primary outline-none px-1 text-xs text-white rounded"
           />
         ) : (
-          <span className="truncate">{item.name}</span>
+          <span className="whitespace-nowrap">{item.name}</span>
         )}
       </button>
 

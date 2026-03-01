@@ -48,6 +48,7 @@ export interface OrchestratorStatus {
     task_distribution: Record<string, Record<string, number>>; // 에이전트별 태스크 분배
     recent_actions: OrchestratorAction[];                    // 최근 오케스트레이터 액션
     warnings: string[];                                       // 현재 경고 목록
+    terminal_agents: Record<string, string>;                  // 슬롯별 실시간 에이전트 (1~8, 빈 문자열=미사용)
     timestamp: string;                                        // 조회 시각
     error?: string;
 }

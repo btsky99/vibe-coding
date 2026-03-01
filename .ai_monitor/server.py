@@ -1567,11 +1567,29 @@ class SSEHandler(BaseHTTPRequestHandler):
                             if agent_last_seen.get(a_key) is None or hb_iso > agent_last_seen[a_key]:
                                 agent_last_seen[a_key] = hb_iso
 
-                # 에이전트 상태 (active / idle / unknown)
+                # ── 터미널별 실시간 에이전트 현황 (PTY 세션 기반) ────────────────
+                # pty_sessions에 저장된 실제 실행 중인 에이전트를 슬롯 1~8 기준으로 반환.
+                # 슬롯이 비어 있으면 빈 문자열, 에이전트 이름이 없으면 'shell'로 표시.
+                terminal_agents: dict = {}
+                pty_active_agents: set = set()  # 현재 PTY에 살아 있는 에이전트 집합
+                for slot_num in range(1, 9):
+                    info = pty_sessions.get(str(slot_num))
+                    if info:
+                        a = info.get('agent', '') or 'shell'
+                        terminal_agents[str(slot_num)] = a
+                        if a in KNOWN_AGENTS:
+                            pty_active_agents.add(a)
+                    else:
+                        terminal_agents[str(slot_num)] = ''
+
+                # 에이전트 상태 — PTY 실행 중이면 무조건 active, 아니면 DB 타임스탬프 fallback
                 now_dt = datetime.now()
                 agent_status = {}
                 for agent, seen in agent_last_seen.items():
-                    if seen is None:
+                    if agent in pty_active_agents:
+                        # 현재 PTY 터미널에서 실행 중 → 즉시 active
+                        agent_status[agent] = {'state': 'active', 'last_seen': now_dt.isoformat(), 'idle_sec': 0}
+                    elif seen is None:
                         agent_status[agent] = {'state': 'unknown', 'last_seen': None, 'idle_sec': None}
                     else:
                         try:
@@ -1638,6 +1656,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'task_distribution': task_dist,
                     'recent_actions': recent_actions,
                     'warnings': warnings,
+                    'terminal_agents': terminal_agents,  # 슬롯별 실시간 에이전트
                     'timestamp': now_dt.strftime('%Y-%m-%dT%H:%M:%S'),
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -2751,7 +2770,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 command = data.get('command', '')
                 
                 if target_slot in pty_sessions:
-                    pty = pty_sessions[target_slot]
+                    pty = pty_sessions[target_slot]['pty']
                     # 명령어 중간의 \n을 \r\n으로 치환하고 끝에 개행이 없으면 추가하여 즉시 실행 유도
                     processed_cmd = command.replace('\n', '\r\n')
                     final_cmd = processed_cmd if processed_cmd.endswith('\r\n') or processed_cmd.endswith('\r') else processed_cmd + '\r\n'
@@ -2854,8 +2873,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 else:
                     cmd_to_exec = None
 
-                for pty in pty_sessions.values():
+                for info in pty_sessions.values():
                     try:
+                        pty = info['pty']
                         if is_manual_cmd:
                             pty.write(cmd_to_exec)
                         else:
@@ -3364,7 +3384,8 @@ async def pty_handler(websocket):
         else:
             session_id = str(id(websocket))
 
-        pty_sessions[session_id] = pty
+        # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo 정보도 함께 저장
+        pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat()}
 
         # ── [세션 시작 로그] ──────────────────────────────────────────────
         # PTY 터미널에서 에이전트가 시작될 때 즉시 session_logs에 기록.

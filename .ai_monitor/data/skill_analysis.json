@@ -1,108 +1,68 @@
 {
-  "timestamp": "2026-02-26T01:31:42.750232",
-  "analyzed_count": 40,
+  "timestamp": "2026-03-01T15:50:27.859392",
+  "analyzed_count": 50,
+  "instruction_count": 4,
   "top_keywords": [
     [
-      "view",
-      10
+      "왼쪽",
+      2
     ],
     [
-      "md",
-      10
+      "탐색기",
+      1
     ],
     [
-      "vibe",
-      9
+      "내용을",
+      1
     ],
     [
-      "완료",
-      9
+      "보개",
+      1
     ],
     [
-      "py",
-      7
+      "오른쪽을",
+      1
     ],
     [
-      "gemini",
-      7
+      "스크롤을",
+      1
     ],
     [
-      "sqlite",
-      7
+      "만들어주고",
+      1
     ],
     [
-      "project",
-      6
+      "창을",
+      1
     ],
     [
-      "rules",
-      6
+      "자우로",
+      1
     ],
     [
-      "db",
-      6
+      "마우스르",
+      1
+    ],
+    [
+      "드래그해서",
+      1
+    ],
+    [
+      "늘리고",
+      1
+    ],
+    [
+      "주리고",
+      1
+    ],
+    [
+      "할수",
+      1
+    ],
+    [
+      "있ㄱ게",
+      1
     ]
   ],
-  "proposals": [
-    {
-      "keyword": "view",
-      "count": 10,
-      "suggested_skill_name": "pattern-view",
-      "description": "'view' 관련 작업이 10회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "md",
-      "count": 10,
-      "suggested_skill_name": "pattern-md",
-      "description": "'md' 관련 작업이 10회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "vibe",
-      "count": 9,
-      "suggested_skill_name": "pattern-vibe",
-      "description": "'vibe' 관련 작업이 9회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "완료",
-      "count": 9,
-      "suggested_skill_name": "pattern-완료",
-      "description": "'완료' 관련 작업이 9회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "py",
-      "count": 7,
-      "suggested_skill_name": "pattern-py",
-      "description": "'py' 관련 작업이 7회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "gemini",
-      "count": 7,
-      "suggested_skill_name": "pattern-gemini",
-      "description": "'gemini' 관련 작업이 7회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "sqlite",
-      "count": 7,
-      "suggested_skill_name": "pattern-sqlite",
-      "description": "'sqlite' 관련 작업이 7회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "project",
-      "count": 6,
-      "suggested_skill_name": "pattern-project",
-      "description": "'project' 관련 작업이 6회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "rules",
-      "count": 6,
-      "suggested_skill_name": "pattern-rules",
-      "description": "'rules' 관련 작업이 6회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    },
-    {
-      "keyword": "db",
-      "count": 6,
-      "suggested_skill_name": "pattern-db",
-      "description": "'db' 관련 작업이 6회 반복되었습니다. 이 작업을 위한 표준 스킬 생성을 제안합니다."
-    }
-  ]
+  "proposals": []
 }
