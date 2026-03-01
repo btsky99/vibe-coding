@@ -347,7 +347,27 @@ if not TASKS_FILE.exists():
 
 # ── 공유 메모리 SQLite 초기화 ────────────────────────────────────────────────
 def _memory_conn() -> sqlite3.Connection:
-    """요청마다 새 커넥션 생성 (스레드 안전 — ThreadedHTTPServer 대응)"""
+    """요청마다 새 커넥션 생성 (스레드 안전 — ThreadedHTTPServer 대응)
+
+    [배포 버전 DATA_DIR 불일치 해소]
+    배포(frozen) 버전에서 DATA_DIR = APPDATA\VibeCoding로 설정되더라도,
+    현재 활성 프로젝트(config.json last_path)의 로컬 DB가 있으면 우선 사용합니다.
+    이를 통해 CLI(개발 버전)가 저장한 공유 메모리를 배포 대시보드에서도 표시합니다.
+    """
+    # 현재 활성 프로젝트 로컬 DB 우선 확인 (config.json last_path 참조)
+    try:
+        if CONFIG_FILE.exists():
+            cfg_data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+            last_path = cfg_data.get('last_path', '')
+            if last_path:
+                local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
+                if local_db.exists():
+                    conn = sqlite3.connect(str(local_db), timeout=5, check_same_thread=False)
+                    conn.row_factory = sqlite3.Row
+                    return conn
+    except Exception:
+        pass
+    # 폴백: 서버 시작 시 결정된 MEMORY_DB (APPDATA 또는 로컬 data/)
     conn = sqlite3.connect(str(MEMORY_DB), timeout=5, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -1272,10 +1292,25 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if rules_md_src.exists():
                         shutil.copy(rules_md_src, Path(target_path) / "RULES.md")
                         
-                    # PROJECT_MAP.md 복사
+                    # PROJECT_MAP.md 복사 — 소스에 없으면 기본 템플릿 생성
+                    # [배포 버전] exe 번들에 PROJECT_MAP.md가 없을 때 빨간불 방지
+                    project_map_dst = Path(target_path) / "PROJECT_MAP.md"
                     project_map_src = source_base / "PROJECT_MAP.md"
                     if project_map_src.exists():
-                        shutil.copy(project_map_src, Path(target_path) / "PROJECT_MAP.md")
+                        shutil.copy(project_map_src, project_map_dst)
+                    elif not project_map_dst.exists():
+                        # 기본 템플릿 생성 — 사용자가 나중에 채울 수 있도록 뼈대 제공
+                        proj_name = Path(target_path).name
+                        project_map_dst.write_text(
+                            f"# 📁 {proj_name} — PROJECT MAP\n\n"
+                            f"> 이 파일은 Vibe Coding 스킬 복구로 자동 생성된 템플릿입니다.\n"
+                            f"> 프로젝트 구조와 역할을 여기에 기록하세요.\n\n"
+                            f"## 프로젝트 구조\n\n"
+                            f"- (파일/폴더 구조를 여기에 기록)\n\n"
+                            f"## 핵심 파일\n\n"
+                            f"- (중요 파일과 역할을 여기에 기록)\n",
+                            encoding='utf-8'
+                        )
 
                     # 대상 프로젝트의 .ai_monitor/data 폴더와 DB 초기화
                     # — 스킬 설치 후 하이브 워치독이 정상 동작하려면 DB가 있어야 함
