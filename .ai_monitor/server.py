@@ -2215,6 +2215,30 @@ class SSEHandler(BaseHTTPRequestHandler):
             }
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
 
+        elif parsed_path.path == '/api/skill-results':
+            # 스킬 오케스트레이터 실행 결과 조회 (최근 50개)
+            # skill_orchestrator.py가 skill_results.jsonl에 저장한 세션별 결과 반환
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                results_file = DATA_DIR / 'skill_results.jsonl'
+                rows = []
+                if results_file.exists():
+                    for line in results_file.read_text(encoding='utf-8').splitlines():
+                        line = line.strip()
+                        if line:
+                            try:
+                                rows.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                pass
+                # 최신 50개만 반환 (최신순)
+                rows = rows[-50:][::-1]
+                self.wfile.write(json.dumps(rows, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+
         else:
             # 정적 파일 서비스 로직 (Vite 빌드 결과물)
             # 요청 경로를 정리

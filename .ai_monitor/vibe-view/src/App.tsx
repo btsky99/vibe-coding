@@ -6,6 +6,10 @@
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트로, 파일 탐색기, 다중 윈도우 퀵 뷰, 
  *          터미널 분할 화면 및 활성 파일 뷰어를 관리하는 메인 파일입니다.
  * REVISION HISTORY:
+ * - 2026-03-01 Claude: 각 패널 JSX를 독립 컴포넌트(MessagesPanel, TasksPanel, MemoryPanel,
+ *                      OrchestratorPanel, HivePanel, GitPanel, McpPanel, SkillResultsPanel)로 교체.
+ *                      배지 카운트는 콜백(onUnreadCount, onActiveCount 등)으로 수신하는 방식으로 전환.
+ *                      skills 탭 및 Activity Bar 버튼 추가. App.tsx 3289→2197줄으로 대폭 감소.
  * - 2026-03-01 Claude: 파일 탐색기 가로 스크롤 추가 (overflow-auto + min-w-max 래퍼),
  *                      파일명 truncate→whitespace-nowrap 변경, 버튼 overflow-hidden 제거
  * - 2026-03-01 Claude: 사이드바 좌우 드래그 리사이즈 핸들 추가 (sidebarWidth 동적 상태, 150~600px),
@@ -23,8 +27,7 @@ import {
   ChevronLeft, X, Zap, Search, Settings,
   Files, Cpu, Info, ChevronRight, ChevronDown,
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
-  GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
-  Bot, Play, CircleDot, Package, CheckCircle2, Circle,
+  GitBranch, Package,
   Maximize2, Minimize2, Minus, Send, Edit3, Network
 } from 'lucide-react';
 import { 
@@ -38,7 +41,17 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import VibeEditor from './components/VibeEditor';
-import { LogRecord, AgentMessage, Task, MemoryEntry, GitStatus, GitCommit, OrchestratorStatus, McpEntry, HiveHealth } from './types';
+/* ── 패널 컴포넌트 import — 각 탭 패널을 독립 컴포넌트로 분리하여 App.tsx 가독성 향상 ── */
+import MessagesPanel from './components/panels/MessagesPanel';
+import TasksPanel from './components/panels/TasksPanel';
+import MemoryPanel from './components/panels/MemoryPanel';
+import OrchestratorPanel from './components/panels/OrchestratorPanel';
+import HivePanel from './components/panels/HivePanel';
+import GitPanel from './components/panels/GitPanel';
+import McpPanel from './components/panels/McpPanel';
+import SkillResultsPanel from './components/panels/SkillResultsPanel';
+/* Task는 TerminalSlot props 타입에 사용, MemoryEntry는 memory 상태 타입에 사용 */
+import { LogRecord, AgentMessage, Task, MemoryEntry } from './types';
 
 // 현재 접속 포트 기반으로 API/WS 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -110,6 +123,13 @@ export interface OpenFile {
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
+  // ─── 패널 컴포넌트에서 콜백으로 전달받는 배지 카운트 상태 ────────────────────────
+  // 각 패널이 독립 컴포넌트로 분리되어 있으므로, 배지 표시에 필요한 카운트를 콜백으로 받아 App 레벨에서 관리
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  const [activeTaskCount, setActiveTaskCount] = useState(0);
+  const [totalGitChanges, setTotalGitChanges] = useState(0);
+  const [conflictCount, setConflictCount] = useState(0);
+  const [orchWarningCount, setOrchWarningCount] = useState(0);
   // 사이드바 너비 — 드래그 리사이즈로 동적 조절 (최소 150px, 최대 600px)
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const isResizingSidebar = useRef(false);
@@ -175,22 +195,15 @@ function App() {
   };
 
   // ─── 에이전트 간 메시지 채널 상태 ───────────────────────────────────
+  // messages는 sendMessage 함수(사이드바 하단 고정 입력창)와 터미널 모드에서 사용
   const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [lastSeenMsgCount, setLastSeenMsgCount] = useState(0);
   const [msgFrom, setMsgFrom] = useState('claude');
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
   const [msgContent, setMsgContent] = useState('');
 
-  // 읽지 않은 메시지 수 — 메시지 탭을 열면 0으로 초기화
-  const unreadMsgCount = activeTab === 'messages' ? 0 : Math.max(0, messages.length - lastSeenMsgCount);
-
-  // 메시지 탭 진입 시 읽음 처리
-  useEffect(() => {
-    if (activeTab === 'messages') setLastSeenMsgCount(messages.length);
-  }, [activeTab, messages.length]);
-
-  // 메시지 채널 폴링 (3초 간격)
+  // 메시지 채널 폴링 (3초 간격) — 메시지 목록은 MessagesPanel 내부에서 관리되나,
+  // sendMessage 함수가 App 레벨에 남아 있으므로 최신 메시지 조회용으로 유지
   useEffect(() => {
     const fetchMessages = () => {
       fetch(`${API_BASE}/api/messages`)
@@ -203,224 +216,25 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // ─── 태스크 보드 상태 ─────────────────────────────────────────────
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'in_progress' | 'done'>('all');
-  const [showTaskForm, setShowTaskForm] = useState(false);
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskDesc, setNewTaskDesc] = useState('');
-  const [newTaskAssignee, setNewTaskAssignee] = useState('all');
-  const [newTaskPriority, setNewTaskPriority] = useState<'high' | 'medium' | 'low'>('medium');
-
-  // 활성 작업 수 배지 (pending + in_progress)
-  const activeTaskCount = tasks.filter(t => t.status !== 'done').length;
-
-  // 태스크 폴링 (4초 간격)
-  useEffect(() => {
-    const fetchTasks = () => {
-      fetch(`${API_BASE}/api/tasks`)
-        .then(res => res.json())
-        .then(data => setTasks(Array.isArray(data) ? data : []))
-        .catch(() => {});
-    };
-    fetchTasks();
-    const interval = setInterval(fetchTasks, 4000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 새 작업 생성
-  const createTask = () => {
-    if (!newTaskTitle.trim()) return;
-    fetch(`${API_BASE}/api/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: newTaskTitle,
-        description: newTaskDesc,
-        assigned_to: newTaskAssignee,
-        priority: newTaskPriority,
-        created_by: 'user',
-      }),
-    })
-      .then(res => res.json())
-      .then(() => {
-        setNewTaskTitle('');
-        setNewTaskDesc('');
-        setShowTaskForm(false);
-        return fetch(`${API_BASE}/api/tasks`);
-      })
-      .then(res => res.json())
-      .then(data => setTasks(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  };
-
-  // 작업 상태/필드 업데이트
-  const updateTask = (id: string, fields: Partial<Task>) => {
-    fetch(`${API_BASE}/api/tasks/update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...fields }),
-    })
-      .then(res => res.json())
-      .then(() => fetch(`${API_BASE}/api/tasks`))
-      .then(res => res.json())
-      .then(data => setTasks(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  };
-
-  // 작업 삭제
-  const deleteTask = (id: string) => {
-    fetch(`${API_BASE}/api/tasks/delete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-      .then(res => res.json())
-      .then(() => fetch(`${API_BASE}/api/tasks`))
-      .then(res => res.json())
-      .then(data => setTasks(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  };
-
-  // ─── 공유 메모리(SQLite) 상태 ────────────────────────────────────────────
+  // ─── 공유 메모리(SQLite) 상태 — Activity Bar 배지(memory.length)용 최소 폴링 유지 ─────
+  // 나머지 메모리 편집 로직은 MemoryPanel 내부로 이동됨
   const [memory, setMemory] = useState<MemoryEntry[]>([]);
-  const [memSearch, setMemSearch] = useState('');
-  const [showMemForm, setShowMemForm] = useState(false);
-  const [editingMemKey, setEditingMemKey] = useState<string | null>(null);
-  const [memKey, setMemKey] = useState('');
-  const [memTitle, setMemTitle] = useState('');
-  const [memContent, setMemContent] = useState('');
-  const [memTags, setMemTags] = useState('');
-  const [memAuthor, setMemAuthor] = useState('claude');
 
-  // 검색어가 있으면 서버 검색, 없으면 전체 목록 사용
-  const fetchMemory = (q = '') => {
-    const url = q ? `${API_BASE}/api/memory?q=${encodeURIComponent(q)}` : `${API_BASE}/api/memory`;
-    fetch(url)
-      .then(res => res.json())
-      .then(data => setMemory(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  };
-
-  // 공유 메모리 폴링 (5초 간격 — 자주 바뀌지 않으므로 느리게)
+  // 공유 메모리 폴링 (5초 간격) — memory.length 배지 갱신용
   useEffect(() => {
+    const fetchMemory = () => {
+      fetch(`${API_BASE}/api/memory`)
+        .then(res => res.json())
+        .then(data => setMemory(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    };
     fetchMemory();
-    const interval = setInterval(() => fetchMemory(memSearch), 5000);
-    return () => clearInterval(interval);
-  }, [memSearch]);
-
-  // 검색어 변경 시 즉시 검색
-  useEffect(() => { fetchMemory(memSearch); }, [memSearch]);
-
-  // 메모리 저장 (신규 또는 수정 — key 기준 UPSERT)
-  const saveMemory = () => {
-    if (!memKey.trim() || !memContent.trim()) return;
-    fetch(`${API_BASE}/api/memory/set`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        key:     memKey.trim(),
-        title:   memTitle.trim() || memKey.trim(),
-        content: memContent.trim(),
-        tags:    memTags.split(',').map(t => t.trim()).filter(Boolean),
-        author:  memAuthor,
-      }),
-    })
-      .then(() => {
-        setMemKey(''); setMemTitle(''); setMemContent('');
-        setMemTags(''); setShowMemForm(false); setEditingMemKey(null);
-        fetchMemory(memSearch);
-      })
-      .catch(() => {});
-  };
-
-  // 메모리 항목 삭제
-  const deleteMemory = (key: string) => {
-    fetch(`${API_BASE}/api/memory/delete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key }),
-    }).then(() => fetchMemory(memSearch)).catch(() => {});
-  };
-
-  // 수정 폼 열기 (기존 항목 데이터 주입)
-  const startEditMemory = (entry: MemoryEntry) => {
-    setMemKey(entry.key);
-    setMemTitle(entry.title);
-    setMemContent(entry.content);
-    setMemTags(entry.tags.join(', '));
-    setMemAuthor(entry.author);
-    setEditingMemKey(entry.key);
-    setShowMemForm(true);
-  };
-
-  // ─── Git 실시간 감시 상태 ─────────────────────────────────────────────
-  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
-  const [gitLog, setGitLog] = useState<GitCommit[]>([]);
-  // 초기값 빈 문자열 — currentPath와 동기화되므로 하드코딩 불필요
-  const [gitPath, setGitPath] = useState("");
-
-  // Git 상태 폴링 (5초 간격)
-  useEffect(() => {
-    // gitPath가 비어있으면 API 호출 생략 (경로 미설정 상태)
-    if (!gitPath) return;
-    const fetchGit = () => {
-      const encodedPath = encodeURIComponent(gitPath);
-      fetch(`${API_BASE}/api/git/status?path=${encodedPath}`)
-        .then(res => res.json())
-        .then((data: GitStatus) => setGitStatus(data))
-        .catch(() => {});
-      fetch(`${API_BASE}/api/git/log?path=${encodedPath}&n=15`)
-        .then(res => res.json())
-        .then((data: GitCommit[]) => setGitLog(Array.isArray(data) ? data : []))
-        .catch(() => {});
-    };
-    fetchGit();
-    const interval = setInterval(fetchGit, 5000);
-    return () => clearInterval(interval);
-  }, [gitPath]);
-
-  // 충돌 파일 수 (Activity Bar 배지용)
-  const conflictCount = gitStatus?.conflicts?.length ?? 0;
-  const totalGitChanges = (gitStatus?.staged?.length ?? 0) + (gitStatus?.unstaged?.length ?? 0) + (gitStatus?.untracked?.length ?? 0);
-
-  // ─── 오케스트레이터 상태 ──────────────────────────────────────────────
-  const [orchStatus, setOrchStatus] = useState<OrchestratorStatus | null>(null);
-  const [orchRunning, setOrchRunning] = useState(false);
-  const [orchLastRun, setOrchLastRun] = useState<string | null>(null);
-
-  // 오케스트레이터 상태 폴링 (3초 간격 — 터미널 에이전트 실시간 감지)
-  useEffect(() => {
-    const fetchOrch = () => {
-      fetch(`${API_BASE}/api/orchestrator/status`)
-        .then(res => res.json())
-        .then((data: OrchestratorStatus) => setOrchStatus(data))
-        .catch(() => {});
-    };
-    fetchOrch();
-    const interval = setInterval(fetchOrch, 3000);
+    const interval = setInterval(fetchMemory, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  // 오케스트레이터 수동 실행
-  const runOrchestrator = () => {
-    setOrchRunning(true);
-    fetch(`${API_BASE}/api/orchestrator/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then(res => res.json())
-      .then(() => {
-        setOrchLastRun(new Date().toLocaleTimeString());
-        return fetch(`${API_BASE}/api/orchestrator/status`);
-      })
-      .then(res => res.json())
-      .then((data: OrchestratorStatus) => setOrchStatus(data))
-      .catch(() => {})
-      .finally(() => setOrchRunning(false));
-  };
-
-  // 오케스트레이터 경고 수 (Hive 탭 배지용)
-  const orchWarningCount = orchStatus?.warnings?.length ?? 0;
 
   // ─── 스킬 체인 실행 상태 (AI 오케스트레이터) ───────────────────────────────
+  // skillChain은 Activity Bar의 "실행 중" 펄스 애니메이션 배지에 사용
   // vibe-orchestrate 스킬이 저장한 skill_chain.json을 3초마다 폴링
   // 대시보드에 실행 흐름(skill1 → skill2 → skill3) 실시간 표시
   const [skillChain, setSkillChain] = useState<{
@@ -445,32 +259,26 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // ─── 하이브 시스템 진단 상태 ──────────────────────────────────────────────
-  const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
-  const [spMsg, setSpMsg] = useState('');
+  // ─── MCP 관리자 상태 — Activity Bar 배지(mcpInstalled.length)용으로 폴링 유지 ─────────
+  // mcpCatalog, mcpTool, mcpScope 등은 McpPanel 내부로 이동됨
+  const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
 
-  // 하이브 헬스 API 호출
-  const fetchHiveHealth = () => {
-    fetch(`${API_BASE}/api/hive/health`)
-      .then(res => res.json())
-      .then(data => setHiveHealth(data))
-      .catch(() => {});
-  };
-
-  // 컴포넌트 마운트 시 1회 + 30초 간격으로 자동 갱신
+  // MCP 설치 현황 폴링 (5초 간격) — mcpInstalled.length 배지 갱신용 (global/claude 기준)
   useEffect(() => {
-    fetchHiveHealth();
-    const interval = setInterval(fetchHiveHealth, 30000);
+    const fetchInstalled = () => {
+      fetch(`${API_BASE}/api/mcp/installed?tool=claude&scope=global`)
+        .then(res => res.json())
+        .then(data => setMcpInstalled(data.installed ?? []))
+        .catch(() => {});
+    };
+    fetchInstalled();
+    const interval = setInterval(fetchInstalled, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // ─── MCP 관리자 상태 ─────────────────────────────────────────────────────
-  const [mcpCatalog, setMcpCatalog] = useState<McpEntry[]>([]);
-  const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
-  const [mcpTool, setMcpTool] = useState<'claude' | 'gemini'>('claude');
+  // ─── Gemini 컨텍스트 사용량 — TerminalSlot 컴포넌트의 컨텍스트 게이지에 사용 ─────────
   const [geminiUsage, setGeminiUsage] = useState<{ total_tokens: number, context_window: number, percentage: number } | null>(null);
 
-  // ─── Gemini 컨텍스트 사용량 폴링 ──────────────────────────────────────────
   useEffect(() => {
     const fetchUsage = () => {
       fetch(`${API_BASE}/api/gemini-context-usage`)
@@ -482,62 +290,6 @@ function App() {
     const interval = setInterval(fetchUsage, 10000);
     return () => clearInterval(interval);
   }, []);
-  const [mcpScope, setMcpScope] = useState<'global' | 'project'>('global');
-  const [mcpLoading, setMcpLoading] = useState<Record<string, boolean>>({}); // 이름 → 로딩 여부
-  const [mcpMsg, setMcpMsg] = useState(''); // 마지막 작업 결과 메시지
-
-  // 카탈로그는 최초 1회만 불러옴
-  useEffect(() => {
-    fetch(`${API_BASE}/api/mcp/catalog`)
-      .then(res => res.json())
-      .then((data: McpEntry[]) => setMcpCatalog(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  }, []);
-
-  // 설치 현황 폴링 (5초 간격 — 도구·범위 변경 시 즉시 재조회)
-  const fetchMcpInstalled = () => {
-    fetch(`${API_BASE}/api/mcp/installed?tool=${mcpTool}&scope=${mcpScope}`)
-      .then(res => res.json())
-      .then(data => setMcpInstalled(data.installed ?? []))
-      .catch(() => {});
-  };
-  useEffect(() => {
-    fetchMcpInstalled();
-    const interval = setInterval(fetchMcpInstalled, 5000);
-    return () => clearInterval(interval);
-  }, [mcpTool, mcpScope]);
-
-  // MCP 설치 핸들러
-  const installMcp = (entry: McpEntry) => {
-    setMcpLoading(prev => ({ ...prev, [entry.name]: true }));
-    fetch(`${API_BASE}/api/mcp/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tool: mcpTool, scope: mcpScope,
-        name: entry.name, package: entry.package,
-        requiresEnv: entry.requiresEnv ?? [],
-      }),
-    })
-      .then(res => res.json())
-      .then(data => { setMcpMsg(data.message ?? ''); fetchMcpInstalled(); })
-      .catch(() => {})
-      .finally(() => setMcpLoading(prev => ({ ...prev, [entry.name]: false })));
-  };
-
-  // MCP 제거 핸들러
-  const uninstallMcp = (name: string) => {
-    setMcpLoading(prev => ({ ...prev, [name]: true }));
-    fetch(`${API_BASE}/api/mcp/uninstall`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool: mcpTool, scope: mcpScope, name }),
-    })
-      .then(res => res.json())
-      .then(data => { setMcpMsg(data.message ?? ''); fetchMcpInstalled(); })
-      .catch(() => {})
-      .finally(() => setMcpLoading(prev => ({ ...prev, [name]: false })));
-  };
 
   // 메시지 전송
   const sendMessage = () => {
@@ -767,8 +519,7 @@ function App() {
   // ─── 컨텍스트 메뉴 상태 ──────────────────────────────────────────────────
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string, isDir: boolean } | null>(null);
 
-  // currentPath 변경 시 Git 감시 경로도 동기화 + 트리 초기화
-  useEffect(() => { setGitPath(currentPath); }, [currentPath]);
+  // currentPath 변경 시 트리 초기화 (Git 감시 경로 동기화는 GitPanel 내부에서 처리)
   useEffect(() => { setTreeExpanded({}); setTreeChildren({}); }, [currentPath]);
 
   // 트리 데이터 갱신
@@ -1201,6 +952,10 @@ function App() {
               </span>
             )}
           </button>
+          {/* 스킬 실행 결과 탭 — 스킬 결과 패널 표시 */}
+          <button onClick={() => { setActiveTab('skills'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'skills' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`} title="스킬 실행 결과">
+            <Zap className="w-5 h-5" />
+          </button>
           <div className="mt-auto flex flex-col gap-4">
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Info className="w-6 h-6" /></button>
             <button className="p-2 text-[#858585] hover:text-white transition-colors"><Settings className="w-6 h-6" /></button>
@@ -1214,883 +969,38 @@ function App() {
           style={{ minWidth: isSidebarOpen ? 150 : 0 }}
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'orchestrate' ? 'AI 오케스트레이터' : '하이브 진단'}</span>
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'skills' ? '스킬 결과' : activeTab === 'orchestrate' ? 'AI 오케스트레이터' : '하이브 진단'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
           <div className="p-3 flex-1 overflow-hidden flex flex-col">
+            {/* 메시지 채널 패널 — MessagesPanel 컴포넌트로 분리 (배지 카운트는 콜백으로 수신) */}
             {activeTab === 'messages' ? (
-              /* ── 메시지 채널 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 메시지 목록 (최신순 — 역순 표시) */}
-                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
-                  {messages.length === 0 ? (
-                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                      <MessageSquare className="w-7 h-7 opacity-20" />
-                      아직 메시지가 없습니다
-                    </div>
-                  ) : (
-                    [...messages].reverse().map(msg => (
-                      <div key={msg.id} className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors">
-                        {/* 발신자 → 수신자 + 타입 배지 */}
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-1 font-mono font-bold">
-                            <span className="text-success">{msg.from}</span>
-                            <span className="text-white/30 font-normal">→</span>
-                            <span className="text-accent">{msg.to}</span>
-                          </div>
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                            msg.type === 'handoff'       ? 'bg-yellow-500/20 text-yellow-400' :
-                            msg.type === 'request'       ? 'bg-blue-500/20 text-blue-400' :
-                            msg.type === 'task_complete' ? 'bg-green-500/20 text-green-400' :
-                            msg.type === 'warning'       ? 'bg-red-500/20 text-red-400' :
-                            'bg-white/10 text-white/50'
-                          }`}>{msg.type}</span>
-                        </div>
-                        {/* 메시지 본문 */}
-                        <p className="text-[#cccccc] leading-relaxed break-words whitespace-pre-wrap">{msg.content}</p>
-                        {/* 타임스탬프 */}
-                        <div className="text-[#858585] mt-1 text-[9px] font-mono">{msg.timestamp.replace('T', ' ')}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* 메시지 작성 폼 */}
-                <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
-                  {/* 발신자 → 수신자 선택 */}
-                  <div className="flex gap-1 items-center">
-                    <select value={msgFrom} onChange={e => setMsgFrom(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
-                      <option value="claude">Claude</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="system">System</option>
-                    </select>
-                    <span className="text-white/30 text-[10px] px-0.5">→</span>
-                    <select value={msgTo} onChange={e => setMsgTo(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
-                      <option value="all">All</option>
-                      <option value="claude">Claude</option>
-                      <option value="gemini">Gemini</option>
-                    </select>
-                  </div>
-                  {/* 메시지 유형 선택 */}
-                  <select value={msgType} onChange={e => setMsgType(e.target.value)} className="w-full bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer hover:border-white/20 transition-colors">
-                    <option value="info">ℹ️ 정보 공유</option>
-                    <option value="handoff">🤝 핸드오프 (작업 위임)</option>
-                    <option value="request">📋 작업 요청</option>
-                    <option value="task_complete">✅ 완료 알림</option>
-                    <option value="warning">⚠️ 경고</option>
-                  </select>
-                  {/* 메시지 본문 입력 */}
-                  <textarea
-                    value={msgContent}
-                    onChange={e => setMsgContent(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
-                        e.preventDefault();
-
-                        // 한글 조합 중이 아닐 때만 명령어를 전송합니다.
-                        if (!e.nativeEvent.isComposing && msgContent.trim()) {
-                          sendMessage();
-                          // 전송 후 입력창을 비울 때 레이스 컨디션 방지를 위해 지연 처리
-                          setTimeout(() => setMsgContent(''), 0);
-                        }
-                      }
-                    }}
-                    placeholder="메시지 입력... (Enter: 전송, Shift+Enter: 줄바꿈)"
-                    rows={3}
-                    className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
-                  />
-                  <button
-                    onClick={sendMessage}
-                    disabled={!msgContent.trim()}
-                    className="w-full py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded text-[10px] font-bold transition-colors"
-                  >
-                    전송 (Enter)
-                  </button>
-                </div>
-              </div>
+              <MessagesPanel onUnreadCount={setUnreadMsgCount} />
             ) : activeTab === 'tasks' ? (
-              /* ── 태스크 보드 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 상태 필터 탭 */}
-                <div className="flex gap-1 shrink-0">
-                  {(['all', 'pending', 'in_progress', 'done'] as const).map(s => {
-                    const label = s === 'all' ? '전체' : s === 'pending' ? '할 일' : s === 'in_progress' ? '진행' : '완료';
-                    const count = s === 'all' ? tasks.length : tasks.filter(t => t.status === s).length;
-                    return (
-                      <button key={s} onClick={() => setTaskFilter(s)} className={`flex-1 py-1 rounded text-[9px] font-bold transition-colors ${taskFilter === s ? 'bg-primary text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}>
-                        {label}{count > 0 && ` (${count})`}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* 작업 목록 */}
-                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
-                  {tasks.filter(t => taskFilter === 'all' || t.status === taskFilter).length === 0 ? (
-                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                      <ClipboardList className="w-7 h-7 opacity-20" />
-                      작업이 없습니다
-                    </div>
-                  ) : (
-                    tasks
-                      .filter(t => taskFilter === 'all' || t.status === taskFilter)
-                      .slice().reverse()
-                      .map(task => {
-                        const priorityDot =
-                          task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
-                        const statusLabel =
-                          task.status === 'pending' ? '할 일' : task.status === 'in_progress' ? '진행 중' : '완료';
-                        return (
-                          <div key={task.id} className={`p-2 rounded border text-[10px] transition-colors ${task.status === 'done' ? 'border-white/5 opacity-50' : 'border-white/10 hover:border-white/20'}`}>
-                            {/* 제목 + 우선순위 */}
-                            <div className="flex items-start gap-1.5 mb-1">
-                              <span className="text-[11px] shrink-0">{priorityDot}</span>
-                              <span className={`font-bold flex-1 break-words leading-tight ${task.status === 'done' ? 'line-through text-[#858585]' : 'text-[#cccccc]'}`}>{task.title}</span>
-                            </div>
-                            {/* 설명 (있을 경우) */}
-                            {task.description && (
-                              <p className="text-[#858585] text-[9px] mb-1.5 leading-relaxed pl-4">{task.description}</p>
-                            )}
-                            {/* 담당자 + 상태 */}
-                            <div className="flex items-center justify-between pl-4 mb-1.5">
-                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold font-mono ${
-                                task.assigned_to === 'claude'  ? 'bg-green-500/15 text-green-400' :
-                                task.assigned_to === 'gemini' ? 'bg-blue-500/15 text-blue-400' :
-                                'bg-white/10 text-white/50'
-                              }`}>{task.assigned_to}</span>
-                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
-                                task.status === 'pending'     ? 'bg-white/10 text-[#858585]' :
-                                task.status === 'in_progress' ? 'bg-primary/20 text-primary' :
-                                'bg-green-500/20 text-green-400'
-                              }`}>{statusLabel}</span>
-                            </div>
-                            {/* 액션 버튼 */}
-                            <div className="flex gap-1 pl-4">
-                              {task.status === 'pending' && (
-                                <button onClick={() => updateTask(task.id, { status: 'in_progress' })} className="flex-1 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[9px] font-bold transition-colors">▶ 시작</button>
-                              )}
-                              {task.status === 'in_progress' && (
-                                <>
-                                  <button onClick={() => updateTask(task.id, { status: 'done' })} className="flex-1 py-0.5 bg-green-500/20 hover:bg-green-500/40 text-green-400 rounded text-[9px] font-bold transition-colors">✅ 완료</button>
-                                  <button onClick={() => updateTask(task.id, { status: 'pending' })} className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩</button>
-                                </>
-                              )}
-                              {task.status === 'done' && (
-                                <button onClick={() => updateTask(task.id, { status: 'pending' })} className="flex-1 py-0.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[9px] transition-colors">↩ 다시</button>
-                              )}
-                              <button onClick={() => deleteTask(task.id)} className="px-1.5 py-0.5 bg-red-500/10 hover:bg-red-500/25 text-red-400 rounded text-[9px] transition-colors" title="삭제">🗑️</button>
-                            </div>
-                          </div>
-                        );
-                      })
-                  )}
-                </div>
-
-                {/* 새 작업 추가 */}
-                {showTaskForm ? (
-                  <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
-                    <input
-                      type="text"
-                      value={newTaskTitle}
-                      onChange={e => setNewTaskTitle(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') createTask(); if (e.key === 'Escape') setShowTaskForm(false); }}
-                      placeholder="작업 제목 (필수)"
-                      autoFocus
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
-                    />
-                    <input
-                      type="text"
-                      value={newTaskDesc}
-                      onChange={e => setNewTaskDesc(e.target.value)}
-                      placeholder="상세 설명 (선택)"
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
-                    />
-                    <div className="flex gap-1">
-                      <select value={newTaskAssignee} onChange={e => setNewTaskAssignee(e.target.value)} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
-                        <option value="all">All</option>
-                        <option value="claude">Claude</option>
-                        <option value="gemini">Gemini</option>
-                      </select>
-                      <select value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')} className="flex-1 bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
-                        <option value="high">🔴 높음</option>
-                        <option value="medium">🟡 보통</option>
-                        <option value="low">🟢 낮음</option>
-                      </select>
-                    </div>
-                    <div className="flex gap-1">
-                      <button onClick={createTask} disabled={!newTaskTitle.trim()} className="flex-1 py-1.5 bg-primary/80 hover:bg-primary disabled:opacity-30 text-white rounded text-[10px] font-bold transition-colors">추가</button>
-                      <button onClick={() => setShowTaskForm(false)} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[10px] transition-colors">취소</button>
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={() => setShowTaskForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-primary/40 hover:bg-primary/5 rounded text-[10px] text-[#858585] hover:text-primary transition-colors flex items-center justify-center gap-1.5">
-                    <Plus className="w-3 h-3" /> 새 작업 추가
-                  </button>
-                )}
-              </div>
+              /* 태스크 보드 패널 — TasksPanel 컴포넌트로 분리 */
+              <TasksPanel onActiveCount={setActiveTaskCount} />
             ) : activeTab === 'memory' ? (
-              /* ── 공유 메모리 패널 (SQLite 기반) ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 검색 입력 */}
-                <div className="relative shrink-0">
-                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#858585]" />
-                  <input
-                    type="text"
-                    value={memSearch}
-                    onChange={e => setMemSearch(e.target.value)}
-                    placeholder="키 / 내용 / 태그 검색..."
-                    className="w-full bg-[#1e1e1e] border border-white/10 rounded pl-6 pr-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors"
-                  />
-                </div>
-                {/* 항목 수 요약 */}
-                <div className="text-[9px] text-[#858585] shrink-0 px-0.5">
-                  총 {memory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
-                </div>
-
-                {/* 메모리 항목 목록 */}
-                <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar">
-                  {memory.length === 0 ? (
-                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                      <Brain className="w-7 h-7 opacity-20" />
-                      {memSearch ? '검색 결과 없음' : '저장된 메모리 없음'}
-                    </div>
-                  ) : (
-                    memory.map(entry => (
-                      <div key={entry.key} className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors group">
-                        {/* 키 + 액션 버튼 */}
-                        <div className="flex items-start justify-between gap-1 mb-1">
-                          <span className="font-mono font-bold text-cyan-400 text-[10px] break-all leading-tight">{entry.key}</span>
-                          <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => startEditMemory(entry)} className="px-1.5 py-0.5 bg-white/5 hover:bg-primary/20 rounded text-[9px] text-[#858585] hover:text-primary transition-colors">✏️</button>
-                            <button onClick={() => deleteMemory(entry.key)} className="px-1.5 py-0.5 bg-white/5 hover:bg-red-500/20 rounded text-[9px] text-[#858585] hover:text-red-400 transition-colors">🗑️</button>
-                          </div>
-                        </div>
-                        {/* 제목 (키와 다를 경우만) */}
-                        {entry.title && entry.title !== entry.key && (
-                          <p className="text-[#cccccc] font-semibold text-[10px] mb-0.5">{entry.title}</p>
-                        )}
-                        {/* 내용 미리보기 */}
-                        <p className="text-[#969696] text-[9px] leading-relaxed line-clamp-2 break-words">{entry.content}</p>
-                        {/* 태그 + 작성자 + 날짜 */}
-                        <div className="flex items-center flex-wrap gap-1 mt-1.5">
-                          {entry.tags.map(tag => (
-                            <span key={tag} onClick={() => setMemSearch(tag)} className="px-1 py-0.5 bg-cyan-500/10 text-cyan-400 rounded text-[8px] font-mono cursor-pointer hover:bg-cyan-500/20 transition-colors">#{tag}</span>
-                          ))}
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ml-auto ${entry.author === 'claude' ? 'bg-green-500/15 text-green-400' : entry.author === 'gemini' ? 'bg-blue-500/15 text-blue-400' : 'bg-white/10 text-white/50'}`}>{entry.author}</span>
-                          <span className="text-[#858585] text-[8px] font-mono">{entry.updated_at.slice(5, 16).replace('T', ' ')}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* 저장 폼 또는 추가 버튼 */}
-                {showMemForm ? (
-                  <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5 shrink-0">
-                    <div className="text-[9px] text-[#858585] font-bold uppercase tracking-wider">
-                      {editingMemKey ? `✏️ 수정: ${editingMemKey}` : '+ 새 메모리 항목'}
-                    </div>
-                    <input
-                      type="text"
-                      value={memKey}
-                      onChange={e => setMemKey(e.target.value)}
-                      placeholder="키 (예: db_schema, auth_method)"
-                      disabled={!!editingMemKey}
-                      className="w-full bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-mono"
-                    />
-                    <input
-                      type="text"
-                      value={memTitle}
-                      onChange={e => setMemTitle(e.target.value)}
-                      placeholder="제목 (선택, 비워두면 키 사용)"
-                      className="w-full bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors"
-                    />
-                    <textarea
-                      value={memContent}
-                      onChange={e => setMemContent(e.target.value)}
-                      placeholder="내용 (에이전트가 공유할 정보)"
-                      rows={4}
-                      className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors resize-none"
-                    />
-                    <div className="flex gap-1">
-                      <input
-                        type="text"
-                        value={memTags}
-                        onChange={e => setMemTags(e.target.value)}
-                        placeholder="태그 (쉼표 구분)"
-                        className="flex-1 bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-cyan-500 text-white transition-colors"
-                      />
-                      <select value={memAuthor} onChange={e => setMemAuthor(e.target.value)} className="bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer">
-                        <option value="claude">Claude</option>
-                        <option value="gemini">Gemini</option>
-                        <option value="user">User</option>
-                      </select>
-                    </div>
-                    <div className="flex gap-1">
-                      <button onClick={saveMemory} disabled={!memKey.trim() || !memContent.trim()} className="flex-1 py-1.5 bg-cyan-500/80 hover:bg-cyan-500 disabled:opacity-30 text-black rounded text-[10px] font-black transition-colors">저장</button>
-                      <button onClick={() => { setShowMemForm(false); setEditingMemKey(null); setMemKey(''); setMemTitle(''); setMemContent(''); setMemTags(''); }} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[#858585] rounded text-[10px] transition-colors">취소</button>
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={() => setShowMemForm(true)} className="shrink-0 w-full py-1.5 border border-dashed border-white/15 hover:border-cyan-500/40 hover:bg-cyan-500/5 rounded text-[10px] text-[#858585] hover:text-cyan-400 transition-colors flex items-center justify-center gap-1.5">
-                    <Plus className="w-3 h-3" /> 새 메모리 항목 추가
-                  </button>
-                )}
-              </div>
+              /* 공유 메모리 패널 — MemoryPanel 컴포넌트로 분리 */
+              <MemoryPanel currentProjectName={currentPath.split(/[/\\]/).filter(Boolean).pop()} />
             ) : activeTab === 'orchestrate' ? (
-              /* ── AI 오케스트레이터 패널 — 스킬 체인 실행/모니터링 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 헤더: 실행 버튼 + 마지막 실행 시각 */}
-                <div className="flex items-center justify-between shrink-0">
-                  <div className="text-[9px] text-[#858585] font-mono">
-                    {orchLastRun ? `마지막 실행: ${orchLastRun}` : '자동 조율 엔진'}
-                  </div>
-                  <button
-                    onClick={runOrchestrator}
-                    disabled={orchRunning}
-                    className="flex items-center gap-1 px-2 py-1 bg-primary/20 hover:bg-primary/40 disabled:opacity-40 text-primary rounded text-[9px] font-bold transition-colors"
-                  >
-                    <Play className="w-3 h-3" />
-                    {orchRunning ? '실행 중...' : '지금 실행'}
-                  </button>
-                </div>
-
-                {/* ── 스킬 체인 실행 흐름 위젯 (AI 오케스트레이터) ── */}
-                {skillChain.status !== 'idle' && skillChain.plan && skillChain.plan.length > 0 && (
-                  <div className={`p-2 rounded border shrink-0 ${
-                    skillChain.status === 'running'
-                      ? 'border-primary/40 bg-primary/5 animate-pulse-subtle'
-                      : skillChain.status === 'done'
-                        ? 'border-green-500/30 bg-green-500/5'
-                        : 'border-red-500/30 bg-red-500/5'
-                  }`}>
-                    {/* 헤더 */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-bold text-[#bbbbbb] uppercase tracking-wider">
-                          🎯 AI 오케스트레이터
-                        </span>
-                        <span className={`px-1.5 py-0.5 rounded text-[7px] font-bold ${
-                          skillChain.status === 'running' ? 'bg-primary/20 text-primary' :
-                          skillChain.status === 'done'    ? 'bg-green-500/20 text-green-400' :
-                                                            'bg-red-500/20 text-red-400'
-                        }`}>
-                          {skillChain.status === 'running' ? '실행 중' :
-                           skillChain.status === 'done'    ? '완료' : '실패'}
-                        </span>
-                      </div>
-                      {skillChain.updated_at && (
-                        <span className="text-[7px] text-[#666] font-mono">
-                          {new Date(skillChain.updated_at).toLocaleTimeString()}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* 요청 내용 */}
-                    {skillChain.request && (
-                      <div className="text-[8px] text-[#aaa] mb-2 truncate" title={skillChain.request}>
-                        📋 {skillChain.request}
-                      </div>
-                    )}
-
-                    {/* 스킬 체인 흐름 시각화: [skill1 ✅] → [skill2 🔄] → [skill3 ⏳] */}
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {(skillChain.results ?? []).map((r, i) => {
-                        const icon = r.status === 'done'    ? '✅' :
-                                     r.status === 'running' ? '🔄' :
-                                     r.status === 'failed'  ? '❌' :
-                                     r.status === 'skipped' ? '⏭️' : '⏳';
-                        const color = r.status === 'done'    ? 'border-green-500/40 bg-green-500/10 text-green-400' :
-                                      r.status === 'running' ? 'border-primary/50 bg-primary/10 text-primary animate-pulse' :
-                                      r.status === 'failed'  ? 'border-red-500/40 bg-red-500/10 text-red-400' :
-                                                               'border-white/10 bg-white/5 text-[#666]';
-                        const skillShort = r.skill.replace('vibe-', '');
-                        return (
-                          <div key={i} className="flex items-center gap-1">
-                            {i > 0 && <span className="text-[#444] text-[8px]">→</span>}
-                            <div
-                              className={`px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold ${color}`}
-                              title={r.summary || r.skill}
-                            >
-                              {icon} {skillShort}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* 현재 실행 스킬 요약 */}
-                    {skillChain.status === 'running' && skillChain.results && (
-                      <div className="mt-1.5 text-[7px] text-[#888] truncate">
-                        {(() => {
-                          const running = skillChain.results.find(r => r.status === 'running');
-                          const done = skillChain.results.filter(r => r.status === 'done');
-                          if (running) return `⚡ ${running.skill} 실행 중...`;
-                          if (done.length > 0) return `✅ ${done[done.length-1].skill}: ${done[done.length-1].summary}`;
-                          return '준비 중...';
-                        })()}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 스킬 체인 대기 상태 — 활성 체인 없을 때 안내 */}
-                {skillChain.status === 'idle' && (
-                  <div className="text-center text-[#858585] text-xs py-8 flex flex-col items-center gap-2 italic">
-                    <Network className="w-7 h-7 opacity-20" />
-                    <span>스킬 체인 대기 중</span>
-                    <span className="text-[9px]">/vibe-orchestrate 스킬로 체인 실행</span>
-                  </div>
-                )}
-
-                {/* 최근 오케스트레이터 액션 로그 — 오케스트레이터 탭에서만 표시 */}
-                {orchStatus?.recent_actions && orchStatus.recent_actions.length > 0 ? (
-                  <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="p-2 rounded border border-white/10">
-                      <div className="text-[9px] font-bold text-[#969696] mb-1.5">최근 자동 액션</div>
-                      {orchStatus.recent_actions.slice(0, 8).map((act, i) => {
-                        const actionColor = act.action === 'auto_assign' ? 'text-green-400' : act.action === 'idle_agent' ? 'text-yellow-400' : act.action.includes('overload') ? 'text-red-400' : 'text-[#858585]';
-                        return (
-                          <div key={i} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1">
-                            <span className={`text-[8px] font-mono shrink-0 mt-0.5 ${actionColor}`}>{act.action}</span>
-                            <span className="text-[9px] text-[#cccccc] flex-1 break-words leading-tight">{act.detail}</span>
-                            <span className="text-[8px] text-[#858585] shrink-0 font-mono">{act.timestamp?.slice(11, 16)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-2 rounded border border-white/5 text-center text-[9px] text-[#858585] italic">
-                    자동 액션 기록 없음
-                  </div>
-                )}
-              </div>
-
+              /* AI 오케스트레이터 패널 — OrchestratorPanel 컴포넌트로 분리 */
+              <OrchestratorPanel onWarningCount={setOrchWarningCount} />
             ) : activeTab === 'hive' ? (
-              /* ── 하이브 진단 패널 — 에이전트 상태 + 시스템 헬스 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-
-                {!orchStatus ? (
-                  <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                    <Bot className="w-7 h-7 opacity-20" />
-                    하이브 데이터 연결 중...
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
-
-                    {/* 경고 배너 */}
-                    {orchStatus.warnings && orchStatus.warnings.length > 0 && (
-                      <div className="p-2 rounded border border-red-500/40 bg-red-500/5">
-                        <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-red-400">
-                          <AlertTriangle className="w-3.5 h-3.5" /> 경고 ({orchStatus.warnings.length})
-                        </div>
-                        {orchStatus.warnings.map((w, i) => (
-                          <div key={i} className="text-[9px] text-red-300 pl-3 py-0.5">⚠ {w}</div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 에이전트 상태 카드 */}
-                    <div className="p-2 rounded border border-white/10">
-                      <div className="text-[9px] font-bold text-[#969696] mb-1.5 flex items-center gap-1">
-                        <Bot className="w-3 h-3" /> 에이전트 상태
-                      </div>
-                      {Object.entries(orchStatus.agent_status ?? {}).map(([agent, st]) => {
-                        const dotColor = st.state === 'active' ? 'text-green-400' : st.state === 'idle' ? 'text-yellow-400' : 'text-[#858585]';
-                        const stateLabel = st.state === 'active' ? '활성' : st.state === 'idle' ? `유휴 ${st.idle_sec ? Math.floor(st.idle_sec / 60) + '분' : ''}` : '미확인';
-                        const taskDist = orchStatus.task_distribution?.[agent] ?? { pending: 0, in_progress: 0, done: 0 };
-                        // 이 에이전트가 사용 중인 슬롯 번호 목록 (실시간 PTY 기반)
-                        const activeSlots = Object.entries(orchStatus.terminal_agents ?? {})
-                          .filter(([, a]) => a === agent)
-                          .map(([slot]) => `T${slot}`);
-                        return (
-                          <div key={agent} className="flex items-center gap-2 py-1 border-b border-white/5 last:border-0">
-                            <CircleDot className={`w-3 h-3 shrink-0 ${dotColor}`} />
-                            <span className={`font-mono font-bold text-[10px] w-12 shrink-0 ${agent === 'claude' ? 'text-green-400' : 'text-blue-400'}`}>{agent}</span>
-                            <span className={`text-[9px] ${dotColor}`}>{stateLabel}</span>
-                            {/* 실제 실행 중인 터미널 슬롯 번호 표시 */}
-                            {activeSlots.length > 0 && (
-                              <span className="text-[8px] font-mono text-primary/70 bg-primary/10 px-1 rounded">
-                                {activeSlots.join(' ')}
-                              </span>
-                            )}
-                            <div className="ml-auto flex gap-1.5 text-[8px] font-mono">
-                              <span className="text-[#858585]">P:{taskDist.pending}</span>
-                              <span className="text-primary">W:{taskDist.in_progress}</span>
-                              <span className="text-green-400">D:{taskDist.done}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {/* 터미널 슬롯 전체 현황 (8개) */}
-                      <div className="mt-2 pt-2 border-t border-white/5">
-                        <div className="text-[8px] text-[#555] mb-1">터미널 슬롯 현황</div>
-                        <div className="grid grid-cols-8 gap-0.5">
-                          {Array.from({ length: 8 }, (_, i) => {
-                            const slot = String(i + 1);
-                            const a = (orchStatus.terminal_agents ?? {})[slot] || '';
-                            const color = a === 'claude' ? 'bg-green-500/60' : a === 'gemini' ? 'bg-blue-500/60' : a ? 'bg-yellow-500/60' : 'bg-white/10';
-                            const label = a === 'claude' ? 'C' : a === 'gemini' ? 'G' : a ? a[0].toUpperCase() : '';
-                            return (
-                              <div key={slot} title={a ? `T${slot}: ${a}` : `T${slot}: 비어있음`}
-                                className={`h-4 rounded text-[7px] font-bold flex items-center justify-center ${color} text-white/80`}>
-                                {label || slot}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 태스크 분배 전체 요약 */}
-                    {orchStatus.task_distribution?.all && (
-                      <div className="p-2 rounded border border-white/10">
-                        <div className="text-[9px] font-bold text-[#969696] mb-1">미할당 태스크 (all)</div>
-                        <div className="flex gap-3 text-[9px] font-mono">
-                          <span className="text-[#858585]">대기: {orchStatus.task_distribution.all.pending}</span>
-                          <span className="text-primary">진행: {orchStatus.task_distribution.all.in_progress}</span>
-                          <span className="text-green-400">완료: {orchStatus.task_distribution.all.done}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 최근 액션은 AI 오케스트레이터 탭에서 확인 */}
-                  </div>
-                )}
-
-                {/* 하이브 시스템 진단 위젯 — 에이전트 상태 하단 고정 배치 */}
-                <div className="shrink-0 p-3 rounded border border-white/10 bg-black/20 flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
-                      <Cpu className="w-4 h-4" /> 하이브 시스템 진단
-                    </div>
-                    <button onClick={fetchHiveHealth} className="p-1 hover:bg-white/10 rounded transition-colors text-[#858585]" title="새로고침">
-                      <RotateCw className="w-3 h-3" />
-                    </button>
-                  </div>
-
-                  {!hiveHealth ? (
-                    <div className="text-xs text-[#555] italic">진단 데이터 로드 중...</div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                        {/* 코어 지침 */}
-                        <div className="flex flex-col gap-1">
-                          <div className="text-[10px] text-[#666] mb-0.5 font-bold">📜 코어 지침</div>
-                          {([['RULES.md', hiveHealth.constitution?.rules_md], ['CLAUDE.md', hiveHealth.constitution?.claude_md], ['GEMINI.md', hiveHealth.constitution?.gemini_md], ['PROJECT_MAP', hiveHealth.constitution?.project_map]] as [string, boolean | undefined][]).map(([label, ok]) => (
-                            <div key={label} className="flex items-center justify-between text-xs">
-                              <span className="text-[#bbb]">{label}</span>
-                              {ok ? <CheckCircle2 className="w-3 h-3 text-green-400" /> : <AlertTriangle className="w-3 h-3 text-red-500" />}
-                            </div>
-                          ))}
-                        </div>
-                        {/* 핵심 스킬 */}
-                        <div className="flex flex-col gap-1">
-                          <div className="text-[10px] text-[#666] mb-0.5 font-bold">🧠 핵심 스킬</div>
-                          {([['Master', hiveHealth.skills?.master], ['Brainstorm', hiveHealth.skills?.brainstorm], ['Memory', hiveHealth.skills?.memory_script]] as [string, boolean | undefined][]).map(([label, ok]) => (
-                            <div key={label} className="flex items-center justify-between text-xs">
-                              <span className="text-[#bbb]">{label}</span>
-                              {ok ? <CheckCircle2 className="w-3 h-3 text-green-400" /> : <AlertTriangle className="w-3 h-3 text-red-500" />}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 자가 치유 엔진 상태 */}
-                      <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
-                        <div className="text-[10px] text-[#666] flex items-center justify-between font-bold">
-                          <span>🛡️ 자가 치유 엔진</span>
-                          <span className="text-primary/60">v4.0</span>
-                        </div>
-                        {([['DB 연결성', hiveHealth.db_ok ? '정상' : '오류', hiveHealth.db_ok], ['에이전트 활동', hiveHealth.agent_active ? '활발' : '유휴', hiveHealth.agent_active]] as [string, string, boolean][]).map(([label, val, ok]) => (
-                          <div key={label} className="flex items-center justify-between text-xs">
-                            <span className="text-[#bbb]">{label}</span>
-                            <span className={`font-bold ${ok ? 'text-green-400' : 'text-yellow-400'}`}>{val}</span>
-                          </div>
-                        ))}
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-[#bbb]">인프라 복구</span>
-                          <span className="text-primary font-bold">{hiveHealth.repair_count ?? 0}회</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-[#bbb]">스킬 자기치유</span>
-                          <span className="text-green-400 font-bold">{hiveHealth.skill_heal_count ?? 0}회</span>
-                        </div>
-                        {hiveHealth.last_check && (
-                          <div className="text-[10px] text-[#555] text-right italic">
-                            최근 점검: {new Date(hiveHealth.last_check).toLocaleTimeString()}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 자기치유 이벤트 로그 — 워치독이 실제로 무엇을 복구했는지 표시 */}
-                      {hiveHealth.logs && hiveHealth.logs.length > 0 && (
-                        <div className="pt-2 border-t border-white/10 flex flex-col gap-1">
-                          <div className="text-[10px] text-[#666] mb-1 font-bold">📋 자기치유 이벤트 로그</div>
-                          <div className="flex flex-col gap-1 max-h-32 overflow-y-auto pr-0.5">
-                            {[...hiveHealth.logs].reverse().map((log, i) => {
-                              const isHeal = log.includes('✅') || log.includes('자기치유') || log.includes('완료');
-                              const isWarn = log.includes('⚠️') || log.includes('장시간');
-                              const isErr  = log.includes('❌') || log.includes('실패');
-                              const color  = isErr ? 'text-red-400' : isWarn ? 'text-yellow-400' : isHeal ? 'text-green-400' : 'text-[#777]';
-                              return (
-                                <div key={i} className={`text-[10px] font-mono leading-snug ${color}`}>
-                                  {log}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 메시지 표시 */}
-                  {spMsg && <div className="text-xs text-green-400 font-mono truncate">{spMsg}</div>}
-
-                  {/* 복구 버튼 */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        if (confirm(`현재 프로젝트(${currentPath})에 누락된 하이브 지침과 스킬을 자동 복구하시겠습니까?`)) {
-                          fetch(`${API_BASE}/api/install-skills?path=${encodeURIComponent(currentPath)}`)
-                            .then(res => res.json())
-                            .then(data => { setSpMsg(data.message); fetchHiveHealth(); });
-                        }
-                      }}
-                      className="flex-1 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <Zap className="w-3 h-3" /> 스킬 복구
-                    </button>
-                    <button
-                      onClick={() => {
-                        fetch(`${API_BASE}/api/hive/health/repair`)
-                          .then(res => res.json())
-                          .then(() => { setSpMsg('하이브 엔진 정밀 진단 및 자가 치유 완료'); fetchHiveHealth(); });
-                      }}
-                      className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs font-bold rounded border border-green-500/20 transition-all flex items-center justify-center gap-1.5"
-                      title="하이브 엔진 정밀 점검"
-                    >
-                      <Cpu className="w-3 h-3" /> 자가 치유
-                    </button>
-                  </div>
-                </div>
-              </div>
+              /* 하이브 진단 패널 — HivePanel 컴포넌트로 분리 */
+              <HivePanel />
             ) : activeTab === 'git' ? (
-              /* ── Git 실시간 감시 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 경로 입력 (모니터링 대상 변경) */}
-                <input
-                  type="text"
-                  value={gitPath}
-                  onChange={e => setGitPath(e.target.value)}
-                  onBlur={() => setGitPath(gitPath.trim() || currentPath)}
-                  placeholder="Git 저장소 경로..."
-                  className="w-full bg-[#1e1e1e] border border-white/10 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors font-mono shrink-0"
-                />
-
-                {!gitStatus || !gitStatus.is_git_repo ? (
-                  <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                    <GitBranch className="w-7 h-7 opacity-20" />
-                    {gitStatus?.error ? gitStatus.error : 'Git 저장소가 아닙니다'}
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
-                    {/* 브랜치 + ahead/behind */}
-                    <div className="p-2 rounded border border-white/10 bg-white/2">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <GitBranch className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span className="text-[11px] font-bold text-primary font-mono">{gitStatus.branch}</span>
-                        {gitStatus.ahead > 0 && (
-                          <span className="flex items-center gap-0.5 text-[9px] text-green-400 font-bold ml-auto">
-                            <ArrowUp className="w-3 h-3" />{gitStatus.ahead}
-                          </span>
-                        )}
-                        {gitStatus.behind > 0 && (
-                          <span className="flex items-center gap-0.5 text-[9px] text-orange-400 font-bold ml-auto">
-                            <ArrowDown className="w-3 h-3" />{gitStatus.behind}
-                          </span>
-                        )}
-                      </div>
-                      {/* 요약 통계 행 */}
-                      <div className="flex gap-2 text-[9px] font-mono">
-                        <span className="text-green-400">S:{gitStatus.staged.length}</span>
-                        <span className="text-yellow-400">M:{gitStatus.unstaged.length}</span>
-                        <span className="text-[#858585]">?:{gitStatus.untracked.length}</span>
-                        {gitStatus.conflicts.length > 0 && (
-                          <span className="text-red-400 font-black animate-pulse">⚠ C:{gitStatus.conflicts.length}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* 충돌 파일 (최우선 경고) */}
-                    {gitStatus.conflicts.length > 0 && (
-                      <div className="p-2 rounded border border-red-500/40 bg-red-500/5">
-                        <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-red-400">
-                          <AlertTriangle className="w-3.5 h-3.5" /> 충돌 파일 ({gitStatus.conflicts.length})
-                        </div>
-                        {gitStatus.conflicts.map(f => (
-                          <div key={f} className="text-[9px] font-mono text-red-300 pl-4 py-0.5 truncate">{f}</div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 스테이징된 파일 */}
-                    {gitStatus.staged.length > 0 && (
-                      <div className="p-2 rounded border border-green-500/20 bg-green-500/3">
-                        <div className="text-[9px] font-bold text-green-400 mb-1">스테이징됨 ({gitStatus.staged.length})</div>
-                        {gitStatus.staged.slice(0, 8).map(f => (
-                          <div key={f} className="text-[9px] font-mono text-green-300/70 pl-2 py-0.5 truncate">+{f}</div>
-                        ))}
-                        {gitStatus.staged.length > 8 && <div className="text-[8px] text-green-400/50 pl-2">... +{gitStatus.staged.length - 8}개 더</div>}
-                      </div>
-                    )}
-
-                    {/* 수정됨 (unstaged) */}
-                    {gitStatus.unstaged.length > 0 && (
-                      <div className="p-2 rounded border border-yellow-500/20 bg-yellow-500/3">
-                        <div className="text-[9px] font-bold text-yellow-400 mb-1">수정됨 (unstaged) ({gitStatus.unstaged.length})</div>
-                        {gitStatus.unstaged.slice(0, 8).map(f => (
-                          <div key={f} className="text-[9px] font-mono text-yellow-300/70 pl-2 py-0.5 truncate">~{f}</div>
-                        ))}
-                        {gitStatus.unstaged.length > 8 && <div className="text-[8px] text-yellow-400/50 pl-2">... +{gitStatus.unstaged.length - 8}개 더</div>}
-                      </div>
-                    )}
-
-                    {/* 미추적 파일 */}
-                    {gitStatus.untracked.length > 0 && (
-                      <div className="p-2 rounded border border-white/10">
-                        <div className="text-[9px] font-bold text-[#858585] mb-1">미추적 ({gitStatus.untracked.length})</div>
-                        {gitStatus.untracked.slice(0, 5).map(f => (
-                          <div key={f} className="text-[9px] font-mono text-[#858585] pl-2 py-0.5 truncate">?{f}</div>
-                        ))}
-                        {gitStatus.untracked.length > 5 && <div className="text-[8px] text-[#858585]/50 pl-2">... +{gitStatus.untracked.length - 5}개 더</div>}
-                      </div>
-                    )}
-
-                    {/* 최근 커밋 로그 */}
-                    {gitLog.length > 0 && (
-                      <div className="p-2 rounded border border-white/10">
-                        <div className="flex items-center gap-1.5 mb-1.5 text-[9px] font-bold text-[#969696]">
-                          <GitCommitIcon className="w-3 h-3" /> 최근 커밋
-                        </div>
-                        {gitLog.slice(0, 8).map(commit => (
-                          <div key={commit.hash} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1 transition-colors">
-                            <span className="font-mono text-[8px] text-primary shrink-0 mt-0.5">{commit.hash}</span>
-                            <span className="text-[9px] text-[#cccccc] flex-1 truncate leading-tight">{commit.message}</span>
-                            <span className="text-[8px] text-[#858585] shrink-0 font-mono">{commit.date.replace(' ago', '')}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              /* Git 감시 패널 — GitPanel 컴포넌트로 분리 (충돌/변경 수는 콜백으로 수신) */
+              <GitPanel
+                currentPath={currentPath}
+                onChangesCount={(c, conf) => { setTotalGitChanges(c); setConflictCount(conf); }}
+              />
             ) : activeTab === 'mcp' ? (
-              /* ── MCP 관리자 패널 ── */
-              <div className="flex-1 flex flex-col overflow-hidden gap-2">
-                {/* 도구 탭 선택: Claude Code / Gemini CLI */}
-                <div className="flex gap-1 shrink-0">
-                  {(['claude', 'gemini'] as const).map(t => (
-                    <button
-                      key={t}
-                      onClick={() => setMcpTool(t)}
-                      className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${mcpTool === t ? 'bg-primary text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}
-                    >
-                      {t === 'claude' ? 'Claude Code' : 'Gemini CLI'}
-                    </button>
-                  ))}
-                </div>
-                {/* 범위 탭 선택: 전역 / 프로젝트 */}
-                <div className="flex gap-1 shrink-0">
-                  {(['global', 'project'] as const).map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setMcpScope(s)}
-                      className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${mcpScope === s ? 'bg-accent/80 text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}
-                    >
-                      {s === 'global' ? '전역 (Global)' : '프로젝트'}
-                    </button>
-                  ))}
-                </div>
-
-                {/* 마지막 작업 결과 메시지 */}
-                {mcpMsg && (
-                  <div className="text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 font-mono truncate shrink-0" title={mcpMsg}>
-                    {mcpMsg}
-                  </div>
-                )}
-
-                {/* MCP 카드 목록 */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5">
-                  {mcpCatalog.length === 0 ? (
-                    <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
-                      <Package className="w-7 h-7 opacity-20" />
-                      카탈로그 로딩 중...
-                    </div>
-                  ) : (
-                    mcpCatalog.map(entry => {
-                      const isInstalled = mcpInstalled.includes(entry.name);
-                      const isLoading = mcpLoading[entry.name] ?? false;
-                      // 카테고리별 색상
-                      const catColor: Record<string, string> = {
-                        '문서': 'bg-blue-500/20 text-blue-300',
-                        '개발': 'bg-orange-500/20 text-orange-300',
-                        '검색': 'bg-yellow-500/20 text-yellow-300',
-                        'AI':   'bg-purple-500/20 text-purple-300',
-                        '브라우저': 'bg-green-500/20 text-green-300',
-                        'DB':   'bg-red-500/20 text-red-300',
-                      };
-                      return (
-                        <div key={entry.name} className={`p-2 rounded border transition-colors ${isInstalled ? 'border-green-500/30 bg-green-500/5' : 'border-white/10 bg-white/2 hover:border-white/20'}`}>
-                          {/* 이름 + 카테고리 배지 + 설치 아이콘 */}
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            {isInstalled
-                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                              : <Circle className="w-3.5 h-3.5 text-[#555] shrink-0" />
-                            }
-                            <span className="text-[11px] font-bold text-white flex-1 truncate">{entry.name}</span>
-                            <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${catColor[entry.category] ?? 'bg-white/10 text-white/50'}`}>
-                              {entry.category}
-                            </span>
-                          </div>
-                          {/* 설명 */}
-                          <p className="text-[9px] text-[#858585] pl-5 mb-1.5 leading-tight">{entry.description}</p>
-                          {/* 환경변수 안내 */}
-                          {entry.requiresEnv && entry.requiresEnv.length > 0 && (
-                            <p className="text-[8px] text-yellow-400/70 pl-5 mb-1.5 font-mono">
-                              ENV: {entry.requiresEnv.join(', ')}
-                            </p>
-                          )}
-                          {/* 설치 / 제거 버튼 */}
-                          <div className="pl-5">
-                            {isInstalled ? (
-                              <button
-                                onClick={() => uninstallMcp(entry.name)}
-                                disabled={isLoading}
-                                className="text-[9px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50 transition-colors"
-                              >
-                                {isLoading ? '처리 중...' : '제거'}
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => installMcp(entry)}
-                                disabled={isLoading}
-                                className="text-[9px] font-bold px-2 py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50 transition-colors"
-                              >
-                                {isLoading ? '처리 중...' : '설치'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+              /* MCP 관리자 패널 — McpPanel 컴포넌트로 분리 */
+              <McpPanel />
+            ) : activeTab === 'skills' ? (
+              /* 스킬 실행 결과 패널 — SkillResultsPanel 컴포넌트로 분리 */
+              <SkillResultsPanel />
             ) : (
               /* ── 파일 탐색기 ── */
               <>
@@ -2428,8 +1338,9 @@ function App() {
               layoutMode === '6' ? 'grid-cols-3 grid-rows-2' :
               'grid-cols-4 grid-rows-2'
             }`}>
+              {/* tasks는 TasksPanel로 이동됨 — TerminalSlot에는 빈 배열 전달 */}
               {slots.map(slotId => (
-                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={tasks} geminiUsage={geminiUsage} />
+                <TerminalSlot key={slotId} slotId={slotId} logs={logs} currentPath={currentPath} terminalCount={terminalCount} locks={locks} messages={messages} tasks={[]} geminiUsage={geminiUsage} />
               ))}            </div>
           </main>
         </div>
