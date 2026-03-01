@@ -3212,8 +3212,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(content_length).decode('utf-8'))
                 tool = str(body.get('tool', 'claude'))
                 home = Path.home()
-                import shutil
-
                 _proj = _current_project_root()  # 현재 활성 프로젝트 경로
                 if tool == 'claude':
                     # 프로젝트별 설치 경로에서 제거 (배포 버전 호환)
