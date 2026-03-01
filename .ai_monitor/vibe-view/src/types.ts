@@ -116,7 +116,8 @@ export interface HiveHealth {
   memory_sync_ok?: boolean;
   agent_active?: boolean;
   repair_count?: number;
-  logs?: string[];
+  skill_heal_count?: number;  // 스킬 자기치유 성공 횟수 (skill_analyzer 연동)
+  logs?: string[];             // 워치독 이벤트 로그 (최근 20개)
   constitution?: {
     rules_md: boolean;
     gemini_md: boolean;

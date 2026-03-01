@@ -1584,8 +1584,12 @@ function App() {
                           </div>
                         ))}
                         <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">누적 복구 횟수</span>
+                          <span className="text-[#aaa]">인프라 복구</span>
                           <span className="text-primary">{hiveHealth.repair_count ?? 0}회</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-[#aaa]">스킬 자기치유</span>
+                          <span className="text-green-400">{hiveHealth.skill_heal_count ?? 0}회</span>
                         </div>
                         {hiveHealth.last_check && (
                           <div className="text-[7px] text-[#444] text-right italic">
@@ -1593,6 +1597,26 @@ function App() {
                           </div>
                         )}
                       </div>
+
+                      {/* 자기치유 이벤트 로그 — 워치독이 실제로 무엇을 복구했는지 표시 */}
+                      {hiveHealth.logs && hiveHealth.logs.length > 0 && (
+                        <div className="pt-1 border-t border-white/5 flex flex-col gap-0.5">
+                          <div className="text-[8px] text-[#666] mb-0.5">📋 자기치유 이벤트 로그</div>
+                          <div className="flex flex-col gap-0.5 max-h-24 overflow-y-auto pr-0.5">
+                            {[...hiveHealth.logs].reverse().map((log, i) => {
+                              const isHeal = log.includes('✅') || log.includes('자기치유') || log.includes('완료');
+                              const isWarn = log.includes('⚠️') || log.includes('장시간');
+                              const isErr  = log.includes('❌') || log.includes('실패');
+                              const color  = isErr ? 'text-red-400' : isWarn ? 'text-yellow-500' : isHeal ? 'text-green-400' : 'text-[#666]';
+                              return (
+                                <div key={i} className={`text-[7px] font-mono leading-tight ${color}`}>
+                                  {log}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
