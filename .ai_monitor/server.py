@@ -2422,35 +2422,63 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/apply-update':
-            # [업데이트 적용] GET에서 이동됨
+            # [업데이트 적용] — 응답 전송 후 비동기로 exe 교체 실행
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            
+
             update_file = DATA_DIR / "update_ready.json"
             if not update_file.exists():
                 self.wfile.write(json.dumps({"success": False, "error": "No update ready"}).encode('utf-8'))
+                self.wfile.flush()
                 return
-                
+
             try:
                 with open(update_file, "r", encoding="utf-8") as f:
                     update_data = json.load(f)
-                
+
                 exe_path = update_data.get("exe_path")
                 if not exe_path or not os.path.exists(exe_path):
-                    self.wfile.write(json.dumps({"success": False, "error": "New executable not found"}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"success": False, "error": "New executable not found", "path": exe_path}).encode('utf-8'))
+                    self.wfile.flush()
                     return
-                
+
+                # 응답을 먼저 완전히 전송 — os._exit() 전에 클라이언트가 수신하도록 보장
                 self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+                self.wfile.flush()
                 try:
                     update_file.unlink()
                 except OSError: pass
-                
+
                 from updater import apply_update_from_temp
-                threading.Thread(target=apply_update_from_temp, args=(Path(exe_path),), daemon=True).start()
+                _exe = Path(exe_path)
+
+                def _do_apply():
+                    """응답 전송 완료 후 실행되는 업데이트 스레드.
+                    오류 발생 시 update_error.json에 기록 — UI가 폴링으로 확인 가능.
+                    """
+                    # 소켓 버퍼 플러시 대기 (0.3s) — 응답이 클라이언트에 도달할 시간 확보
+                    time.sleep(0.3)
+                    try:
+                        apply_update_from_temp(_exe)
+                    except Exception as ex:
+                        print(f"[!] apply_update_from_temp 실패: {ex}")
+                        # 실패 시 update_ready.json 복원 — UI에 버튼 다시 표시
+                        try:
+                            _update_info = {"ready": True, "downloading": False,
+                                            "version": _exe.stem, "exe_path": str(_exe),
+                                            "error": str(ex)}
+                            with open(DATA_DIR / "update_ready.json", "w", encoding="utf-8") as ef:
+                                json.dump(_update_info, ef)
+                        except OSError:
+                            pass
+
+                # daemon=False: 메인 프로세스가 종료되어도 업데이트 스레드는 완료까지 실행
+                threading.Thread(target=_do_apply, daemon=False).start()
             except Exception as e:
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
+                self.wfile.flush()
 
         elif parsed_path.path == '/api/agents/heartbeat':
             # 에이전트 실시간 상태 보고 수신

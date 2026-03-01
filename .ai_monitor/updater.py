@@ -144,61 +144,70 @@ def _download_asset(url, dest, token):
 
 
 def apply_update_from_temp(new_exe):
-    """
-    Replace the running exe and restart.
+    """현재 실행 중인 exe를 새 버전으로 교체하고 재시작합니다.
 
-    Windows does not allow deleting/overwriting a running exe,
-    but it DOES allow renaming it.  Strategy:
-      1. Rename running.exe -> running.exe.old
-      2. Move downloaded new.exe -> running.exe
-      3. Spawn a batch script that:
-         a. Waits for the old process to exit
-         b. Deletes the .old file
-         c. Starts the new exe
-         d. Deletes itself
-      4. Exit the current process
+    Windows는 실행 중인 exe를 덮어쓸 수 없지만 이름 변경은 허용됩니다.
+    전략:
+      1. 실행 중인 exe를 .old로 이름 변경
+      2. 다운로드된 새 exe를 원래 이름으로 이동
+      3. 배치 스크립트를 생성하여:
+         a. 현재 프로세스 종료 대기
+         b. .old 파일 삭제
+         c. 새 exe 실행
+         d. 배치 스크립트 자기 삭제
+      4. 현재 프로세스 종료
     """
     import shutil
 
     exe_path = Path(sys.executable).resolve()
     old_path = exe_path.with_suffix(".exe.old")
 
-    # Step 1: rename running exe
+    logger.info("업데이트 적용 시작: %s → %s", new_exe, exe_path)
+
+    # Step 1: 이전 .old 파일이 있으면 먼저 정리
     if old_path.exists():
         try:
             old_path.unlink()
-        except OSError:
-            pass  # will be cleaned up by batch script
+        except OSError as e:
+            logger.warning(".old 파일 삭제 실패 (배치 스크립트에서 정리 예정): %s", e)
 
+    # Step 1: 실행 중인 exe → .old 로 이름 변경 (Windows는 실행 중 이름 변경 허용)
     os.rename(exe_path, old_path)
+    logger.info("exe 이름 변경 완료: %s → %s", exe_path, old_path)
 
-    # Step 2: move new exe into place
+    # Step 2: 새 exe를 원래 위치로 이동
     shutil.move(str(new_exe), str(exe_path))
+    logger.info("새 exe 배치 완료: %s", exe_path)
 
-    # Step 3: write a self-deleting batch script
+    # Step 3: 자기 삭제 배치 스크립트 작성
+    # - 인코딩: mbcs (Windows ANSI) — 한국어 경로 포함 시에도 안전
+    # - 경로는 큰따옴표로 감싸 공백 포함 경로 처리
     bat_path = exe_path.parent / "_update.bat"
-    bat_content = f'''@echo off
-:wait
-tasklist /FI "PID eq {os.getpid()}" 2>NUL | find /I "{os.getpid()}" >NUL
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >NUL
-    goto wait
-)
-del /f "{old_path}"
-start "" "{exe_path}"
-del /f "%~f0"
-'''
-    with open(bat_path, "w") as f:
+    pid = os.getpid()
+    bat_content = (
+        "@echo off\n"
+        ":wait\n"
+        f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL\n'
+        "if not errorlevel 1 (\n"
+        "    timeout /t 1 /nobreak >NUL\n"
+        "    goto wait\n"
+        ")\n"
+        f'if exist "{old_path}" del /f /q "{old_path}"\n'
+        f'start "" "{exe_path}"\n'
+        'del /f /q "%~f0"\n'
+    )
+    with open(bat_path, "w", encoding="mbcs", errors="replace") as f:
         f.write(bat_content)
 
-    # Step 4: launch the batch script hidden and exit
+    # Step 4: 배치 스크립트를 숨김 모드로 실행 후 현재 프로세스 종료
     subprocess.Popen(
         ["cmd.exe", "/c", str(bat_path)],
         creationflags=0x08000000,  # CREATE_NO_WINDOW
         close_fds=True,
     )
-    # Give the batch script a moment to start
-    time.sleep(0.5)
+    logger.info("배치 스크립트 실행됨. 프로세스 종료 중...")
+    # 배치 스크립트 시작 대기 후 종료
+    time.sleep(0.8)
     os._exit(0)
 
 
