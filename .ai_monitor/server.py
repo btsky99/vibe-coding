@@ -1230,6 +1230,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "error", "message": "Shutdown is disabled for 24/7 operation."}).encode('utf-8'))
         elif parsed_path.path == '/api/files':
+            # [수정] parse_qs UnboundLocalError 해결을 위한 명시적 임포트
+            from urllib.parse import parse_qs
             # [수정] Windows 경로(드라이브 루트 등) 처리 및 응답 안정성 강화.
             # 1. 경로 구분자 표준화 및 드라이브 루트(/) 유효성 보정.
             # 2. 예외 발생 시 빈 배열([])을 안전하게 반환하여 연결 끊김 방지.
@@ -1273,7 +1275,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(body)        elif parsed_path.path == '/api/install-skills':
+            self.wfile.write(body)
+        elif parsed_path.path == '/api/install-skills':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -3905,7 +3908,7 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
                 continue
     return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
 
-HTTP_PORT = _find_free_port(9571)
+HTTP_PORT = 9571
 WS_PORT = _find_free_port(HTTP_PORT + 1)  # HTTP 포트 다음부터 탐색 — 포트 충돌 방지
 
 async def run_ws_server():
