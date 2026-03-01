@@ -132,7 +132,21 @@ def _hook_response(decision="allow", context=None):
     _real_stdout.write(json.dumps(resp) + "\n")
     _real_stdout.flush()
 
+def _send_heartbeat(status="active", task="Thinking..."):
+    """서버에 현재 상태(활성)를 알려 대시보드에서 '유휴'로 표시되지 않도록 합니다."""
+    import urllib.request
+    import json
+    try:
+        data = json.dumps({"agent": "Gemini", "status": status, "task": task}).encode("utf-8")
+        req = urllib.request.Request("http://localhost:9571/api/agents/heartbeat", data=data, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=0.5)
+    except Exception:
+        pass
+
 def main():
+    # ── 하트비트 전송 (제미나이가 살아있음을 알림) ────────────────────
+    _send_heartbeat()
+
     # ── stdin에서 훅 이벤트 JSON 수신 ──────────────────────────────────
     try:
         raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
