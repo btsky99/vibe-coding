@@ -18,6 +18,10 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: AI 오케스트레이터 자동 트리거 추가
+  - _INTENT_MAP 최상단에 "orchestrate" 의도 추가 (최고 우선순위)
+  - 복잡도 감지: 여러 의도 동시 매칭 또는 "자동/전부/다/전체" 키워드 → orchestrate 강제
+  - /vibe-orchestrate 스킬로 스킬 체인 자동 수립·실행 지시
 - 2026-03-01 Claude: 빌드 워크플로에 Inno Setup Step3 추가 + 확인 없이 자동 실행 지시
   - Step3 = Inno Setup (ISCC.exe) 설치버전 빌드 추가 (dist/vibe-coding-setup-X.Y.Z.exe)
   - ISCC.exe 경로: C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe
@@ -64,7 +68,44 @@ _SKIP_BASH_PREFIXES = (
 # ── 자동 의도 감지 워크플로 맵 ──────────────────────────────────────────────
 # 각 항목: keywords(한/영 포함) + context(Claude에게 주입할 워크플로 설명)
 # 우선순위: 리스트 순서 (앞이 높음)
+# [중요] orchestrate가 항상 0번 (최고 우선순위) — 복잡한 요청은 여기서 처리
 _INTENT_MAP = [
+    {
+        "name": "orchestrate",
+        # 복잡한 요청 감지 — 여러 작업이 복합된 경우 오케스트레이터로 위임
+        # 단독 빌드/커밋/리뷰는 각 하위 인텐트가 처리하므로 여기선 복합 요청만
+        "keywords": [
+            # 복합 작업 지시 키워드
+            "자동으로", "전부", "전체", "다 해줘", "다해줘", "알아서",
+            "순서대로", "차례로", "단계별로", "하나씩",
+            # 여러 작업 나열 패턴
+            "하고", "그리고", "다음에", "그 다음",
+            # 오케스트레이션 명시
+            "오케스트레이터", "오케스트레이션", "orchestrat",
+            # 복합 요청 예시 키워드
+            "고치고 테스트", "테스트하고 배포", "리뷰하고 수정",
+            "만들고 커밋", "구현하고 빌드",
+        ],
+        "context": (
+            "═══════════════════════════════════════════════════════\n"
+            "🎯  [자동 감지] 복합 요청 → AI 오케스트레이터 모드\n"
+            "═══════════════════════════════════════════════════════\n"
+            "⚡ 즉시 `/vibe-orchestrate` 스킬을 실행하세요.\n"
+            "\n"
+            "【오케스트레이터 동작 순서】\n"
+            "1) 요청 분석 → 필요한 스킬 목록 결정\n"
+            "2) skill_orchestrator.py로 체인 계획 저장 (대시보드 연동)\n"
+            "   python scripts/skill_orchestrator.py plan \"요청\" skill1 skill2 ...\n"
+            "3) 각 스킬을 Skill 도구로 순서대로 자동 실행\n"
+            "4) 각 단계 완료 시 상태 업데이트\n"
+            "   python scripts/skill_orchestrator.py update <step> done \"요약\"\n"
+            "5) 전체 완료 후 보고\n"
+            "   python scripts/skill_orchestrator.py done\n"
+            "\n"
+            "⚠️  중간에 사용자에게 확인 요청 금지 — 완전 자동 실행\n"
+            "═══════════════════════════════════════════════════════"
+        ),
+    },
     {
         "name": "build_exe",
         # Windows 실행파일/설치버전 빌드 의도
@@ -253,16 +294,41 @@ def _check_and_install_skills() -> list[str]:
 def _detect_intent(prompt: str) -> str | None:
     """사용자 프롬프트에서 워크플로 의도를 감지하고 컨텍스트 문자열을 반환합니다.
 
-    [매칭 방식]
-    - 프롬프트를 소문자로 변환 후 키워드 부분 문자열 검색
-    - 첫 번째 매칭 의도를 반환 (우선순위: _INTENT_MAP 순서)
-    - 매칭 없으면 None 반환
+    [매칭 방식 — 2단계 감지]
+    1단계) 복잡도 감지: 여러 의도가 동시에 매칭되면 orchestrate 강제 적용
+       - build + debug, debug + test 등 복합 요청은 오케스트레이터로 위임
+    2단계) 단순 의도 감지: _INTENT_MAP 순서대로 첫 번째 매칭 반환
+
+    [orchestrate 우선순위]
+    - _INTENT_MAP[0] = orchestrate (키워드 우선 매칭)
+    - 2개 이상 의도 동시 매칭 → orchestrate 자동 전환
     """
     prompt_lower = prompt.lower()
+
+    # 1단계: 복잡도 감지 — 2개 이상의 서로 다른 의도(orchestrate 제외)가 동시 매칭되면
+    # 복합 요청으로 판단하고 orchestrate 컨텍스트 반환
+    matched_intents = []
+    orchestrate_ctx = None
+    for intent in _INTENT_MAP:
+        if intent["name"] == "orchestrate":
+            orchestrate_ctx = intent["context"]
+            continue  # orchestrate는 1단계에서 제외하고 카운트만
+        for kw in intent["keywords"]:
+            if kw.lower() in prompt_lower:
+                if intent["name"] not in matched_intents:
+                    matched_intents.append(intent["name"])
+                break
+
+    # 서로 다른 의도 2개 이상 → 복합 요청 → orchestrate 강제
+    if len(matched_intents) >= 2 and orchestrate_ctx:
+        return orchestrate_ctx
+
+    # 2단계: 단순 의도 감지 — _INTENT_MAP 순서대로 첫 번째 매칭 반환 (orchestrate 포함)
     for intent in _INTENT_MAP:
         for kw in intent["keywords"]:
             if kw.lower() in prompt_lower:
                 return intent["context"]
+
     return None
 
 

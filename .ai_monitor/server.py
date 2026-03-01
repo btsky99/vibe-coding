@@ -1488,6 +1488,23 @@ class SSEHandler(BaseHTTPRequestHandler):
                 with open(TASKS_FILE, 'r', encoding='utf-8') as f:
                     tasks = json.load(f)
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/orchestrator/skill-chain':
+            # 스킬 체인 실행 상태 반환 — vibe-orchestrate 스킬이 저장한 skill_chain.json 읽기
+            # 대시보드가 3초마다 폴링하여 오케스트레이터 진행 흐름을 실시간 표시
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            chain_file = DATA_DIR / 'skill_chain.json'
+            if chain_file.exists():
+                try:
+                    with open(chain_file, 'r', encoding='utf-8') as f:
+                        self.wfile.write(f.read().encode('utf-8'))
+                except Exception:
+                    self.wfile.write(json.dumps({"status": "idle"}).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({"status": "idle"}).encode('utf-8'))
+
         elif parsed_path.path == '/api/orchestrator/status':
             # 오케스트레이터 현황 — 에이전트 활동 상태, 태스크 분배, 최근 액션 로그 반환
             self.send_response(200)
@@ -3215,6 +3232,35 @@ class SSEHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
+
+        elif parsed_path.path == '/api/orchestrator/skill-chain/update':
+            # 스킬 체인 단계 상태 갱신 — vibe-orchestrate 스킬이 각 단계 완료 시 호출
+            # body: {"step": 0, "status": "done", "summary": "버그 원인 파악 완료"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                step = int(body.get('step', 0))
+                status = body.get('status', 'done')
+                summary = body.get('summary', '')
+                # skill_orchestrator.py CLI 호출로 상태 갱신
+                orch_script = str(SCRIPTS_DIR / 'skill_orchestrator.py')
+                cmd = [sys.executable, orch_script, 'update', str(step), status]
+                if summary:
+                    cmd.append(summary)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=5,
+                    encoding='utf-8', creationflags=0x08000000
+                )
+                self.wfile.write(json.dumps({
+                    'status': 'success',
+                    'output': result.stdout.strip()
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/orchestrator/run':
             # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행

@@ -378,6 +378,31 @@ function App() {
   // 오케스트레이터 경고 수 (Hive 탭 배지용)
   const orchWarningCount = orchStatus?.warnings?.length ?? 0;
 
+  // ─── 스킬 체인 실행 상태 (AI 오케스트레이터) ───────────────────────────────
+  // vibe-orchestrate 스킬이 저장한 skill_chain.json을 3초마다 폴링
+  // 대시보드에 실행 흐름(skill1 → skill2 → skill3) 실시간 표시
+  const [skillChain, setSkillChain] = useState<{
+    status: string;
+    request?: string;
+    plan?: string[];
+    current_step?: number;
+    results?: { skill: string; status: string; summary: string }[];
+    started_at?: string;
+    updated_at?: string;
+  }>({ status: 'idle' });
+
+  useEffect(() => {
+    const fetchChain = () => {
+      fetch(`${API_BASE}/api/orchestrator/skill-chain`)
+        .then(res => res.json())
+        .then(data => setSkillChain(data))
+        .catch(() => {});
+    };
+    fetchChain();
+    const interval = setInterval(fetchChain, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ─── 하이브 시스템 진단 상태 ──────────────────────────────────────────────
   const [hiveHealth, setHiveHealth] = useState<HiveHealth | null>(null);
   const [spMsg, setSpMsg] = useState('');
@@ -1481,6 +1506,85 @@ function App() {
                     {orchRunning ? '실행 중...' : '지금 실행'}
                   </button>
                 </div>
+
+                {/* ── 스킬 체인 실행 흐름 위젯 (AI 오케스트레이터) ── */}
+                {skillChain.status !== 'idle' && skillChain.plan && skillChain.plan.length > 0 && (
+                  <div className={`p-2 rounded border shrink-0 ${
+                    skillChain.status === 'running'
+                      ? 'border-primary/40 bg-primary/5 animate-pulse-subtle'
+                      : skillChain.status === 'done'
+                        ? 'border-green-500/30 bg-green-500/5'
+                        : 'border-red-500/30 bg-red-500/5'
+                  }`}>
+                    {/* 헤더 */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-bold text-[#bbbbbb] uppercase tracking-wider">
+                          🎯 AI 오케스트레이터
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-[7px] font-bold ${
+                          skillChain.status === 'running' ? 'bg-primary/20 text-primary' :
+                          skillChain.status === 'done'    ? 'bg-green-500/20 text-green-400' :
+                                                            'bg-red-500/20 text-red-400'
+                        }`}>
+                          {skillChain.status === 'running' ? '실행 중' :
+                           skillChain.status === 'done'    ? '완료' : '실패'}
+                        </span>
+                      </div>
+                      {skillChain.updated_at && (
+                        <span className="text-[7px] text-[#666] font-mono">
+                          {new Date(skillChain.updated_at).toLocaleTimeString()}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 요청 내용 */}
+                    {skillChain.request && (
+                      <div className="text-[8px] text-[#aaa] mb-2 truncate" title={skillChain.request}>
+                        📋 {skillChain.request}
+                      </div>
+                    )}
+
+                    {/* 스킬 체인 흐름 시각화: [skill1 ✅] → [skill2 🔄] → [skill3 ⏳] */}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {(skillChain.results ?? []).map((r, i) => {
+                        const icon = r.status === 'done'    ? '✅' :
+                                     r.status === 'running' ? '🔄' :
+                                     r.status === 'failed'  ? '❌' :
+                                     r.status === 'skipped' ? '⏭️' : '⏳';
+                        const color = r.status === 'done'    ? 'border-green-500/40 bg-green-500/10 text-green-400' :
+                                      r.status === 'running' ? 'border-primary/50 bg-primary/10 text-primary animate-pulse' :
+                                      r.status === 'failed'  ? 'border-red-500/40 bg-red-500/10 text-red-400' :
+                                                               'border-white/10 bg-white/5 text-[#666]';
+                        const skillShort = r.skill.replace('vibe-', '');
+                        return (
+                          <div key={i} className="flex items-center gap-1">
+                            {i > 0 && <span className="text-[#444] text-[8px]">→</span>}
+                            <div
+                              className={`px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold ${color}`}
+                              title={r.summary || r.skill}
+                            >
+                              {icon} {skillShort}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 현재 실행 스킬 요약 */}
+                    {skillChain.status === 'running' && skillChain.results && (
+                      <div className="mt-1.5 text-[7px] text-[#888] truncate">
+                        {(() => {
+                          const running = skillChain.results.find(r => r.status === 'running');
+                          const done = skillChain.results.filter(r => r.status === 'done');
+                          if (running) return `⚡ ${running.skill} 실행 중...`;
+                          if (done.length > 0) return `✅ ${done[done.length-1].skill}: ${done[done.length-1].summary}`;
+                          return '준비 중...';
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {!orchStatus ? (
                   <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
