@@ -1762,65 +1762,65 @@ function App() {
                 )}
 
                 {/* 하이브 시스템 진단 위젯 — 에이전트 상태 하단 고정 배치 */}
-                <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-2">
+                <div className="shrink-0 p-3 rounded border border-white/10 bg-black/20 flex flex-col gap-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-[10px] font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
-                      <Cpu className="w-3.5 h-3.5" /> 하이브 시스템 진단
+                    <div className="text-xs font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
+                      <Cpu className="w-4 h-4" /> 하이브 시스템 진단
                     </div>
                     <button onClick={fetchHiveHealth} className="p-1 hover:bg-white/10 rounded transition-colors text-[#858585]" title="새로고침">
-                      <RotateCw className="w-2.5 h-2.5" />
+                      <RotateCw className="w-3 h-3" />
                     </button>
                   </div>
 
                   {!hiveHealth ? (
-                    <div className="text-[9px] text-[#555] italic">진단 데이터 로드 중...</div>
+                    <div className="text-xs text-[#555] italic">진단 데이터 로드 중...</div>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                         {/* 코어 지침 */}
-                        <div className="flex flex-col gap-0.5">
-                          <div className="text-[8px] text-[#666] mb-0.5">📜 코어 지침</div>
+                        <div className="flex flex-col gap-1">
+                          <div className="text-[10px] text-[#666] mb-0.5 font-bold">📜 코어 지침</div>
                           {([['RULES.md', hiveHealth.constitution?.rules_md], ['CLAUDE.md', hiveHealth.constitution?.claude_md], ['GEMINI.md', hiveHealth.constitution?.gemini_md], ['PROJECT_MAP', hiveHealth.constitution?.project_map]] as [string, boolean | undefined][]).map(([label, ok]) => (
-                            <div key={label} className="flex items-center justify-between text-[9px]">
-                              <span className="text-[#aaa]">{label}</span>
-                              {ok ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                            <div key={label} className="flex items-center justify-between text-xs">
+                              <span className="text-[#bbb]">{label}</span>
+                              {ok ? <CheckCircle2 className="w-3 h-3 text-green-400" /> : <AlertTriangle className="w-3 h-3 text-red-500" />}
                             </div>
                           ))}
                         </div>
                         {/* 핵심 스킬 */}
-                        <div className="flex flex-col gap-0.5">
-                          <div className="text-[8px] text-[#666] mb-0.5">🧠 핵심 스킬</div>
-                          {([['Master Skill', hiveHealth.skills?.master], ['Brainstorm', hiveHealth.skills?.brainstorm], ['Memory Script', hiveHealth.skills?.memory_script]] as [string, boolean | undefined][]).map(([label, ok]) => (
-                            <div key={label} className="flex items-center justify-between text-[9px]">
-                              <span className="text-[#aaa]">{label}</span>
-                              {ok ? <CheckCircle2 className="w-2.5 h-2.5 text-green-400" /> : <AlertTriangle className="w-2.5 h-2.5 text-red-500" />}
+                        <div className="flex flex-col gap-1">
+                          <div className="text-[10px] text-[#666] mb-0.5 font-bold">🧠 핵심 스킬</div>
+                          {([['Master', hiveHealth.skills?.master], ['Brainstorm', hiveHealth.skills?.brainstorm], ['Memory', hiveHealth.skills?.memory_script]] as [string, boolean | undefined][]).map(([label, ok]) => (
+                            <div key={label} className="flex items-center justify-between text-xs">
+                              <span className="text-[#bbb]">{label}</span>
+                              {ok ? <CheckCircle2 className="w-3 h-3 text-green-400" /> : <AlertTriangle className="w-3 h-3 text-red-500" />}
                             </div>
                           ))}
                         </div>
                       </div>
 
                       {/* 자가 치유 엔진 상태 */}
-                      <div className="pt-1 border-t border-white/5 flex flex-col gap-1">
-                        <div className="text-[8px] text-[#666] flex items-center justify-between">
+                      <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
+                        <div className="text-[10px] text-[#666] flex items-center justify-between font-bold">
                           <span>🛡️ 자가 치유 엔진</span>
-                          <span className="text-primary/50">v4.0</span>
+                          <span className="text-primary/60">v4.0</span>
                         </div>
                         {([['DB 연결성', hiveHealth.db_ok ? '정상' : '오류', hiveHealth.db_ok], ['에이전트 활동', hiveHealth.agent_active ? '활발' : '유휴', hiveHealth.agent_active]] as [string, string, boolean][]).map(([label, val, ok]) => (
-                          <div key={label} className="flex items-center justify-between text-[9px]">
-                            <span className="text-[#aaa]">{label}</span>
-                            <span className={ok ? 'text-green-400' : 'text-yellow-500'}>{val}</span>
+                          <div key={label} className="flex items-center justify-between text-xs">
+                            <span className="text-[#bbb]">{label}</span>
+                            <span className={`font-bold ${ok ? 'text-green-400' : 'text-yellow-400'}`}>{val}</span>
                           </div>
                         ))}
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">인프라 복구</span>
-                          <span className="text-primary">{hiveHealth.repair_count ?? 0}회</span>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[#bbb]">인프라 복구</span>
+                          <span className="text-primary font-bold">{hiveHealth.repair_count ?? 0}회</span>
                         </div>
-                        <div className="flex items-center justify-between text-[9px]">
-                          <span className="text-[#aaa]">스킬 자기치유</span>
-                          <span className="text-green-400">{hiveHealth.skill_heal_count ?? 0}회</span>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[#bbb]">스킬 자기치유</span>
+                          <span className="text-green-400 font-bold">{hiveHealth.skill_heal_count ?? 0}회</span>
                         </div>
                         {hiveHealth.last_check && (
-                          <div className="text-[7px] text-[#444] text-right italic">
+                          <div className="text-[10px] text-[#555] text-right italic">
                             최근 점검: {new Date(hiveHealth.last_check).toLocaleTimeString()}
                           </div>
                         )}
@@ -1828,16 +1828,16 @@ function App() {
 
                       {/* 자기치유 이벤트 로그 — 워치독이 실제로 무엇을 복구했는지 표시 */}
                       {hiveHealth.logs && hiveHealth.logs.length > 0 && (
-                        <div className="pt-1 border-t border-white/5 flex flex-col gap-0.5">
-                          <div className="text-[8px] text-[#666] mb-0.5">📋 자기치유 이벤트 로그</div>
-                          <div className="flex flex-col gap-0.5 max-h-24 overflow-y-auto pr-0.5">
+                        <div className="pt-2 border-t border-white/10 flex flex-col gap-1">
+                          <div className="text-[10px] text-[#666] mb-1 font-bold">📋 자기치유 이벤트 로그</div>
+                          <div className="flex flex-col gap-1 max-h-32 overflow-y-auto pr-0.5">
                             {[...hiveHealth.logs].reverse().map((log, i) => {
                               const isHeal = log.includes('✅') || log.includes('자기치유') || log.includes('완료');
                               const isWarn = log.includes('⚠️') || log.includes('장시간');
                               const isErr  = log.includes('❌') || log.includes('실패');
-                              const color  = isErr ? 'text-red-400' : isWarn ? 'text-yellow-500' : isHeal ? 'text-green-400' : 'text-[#666]';
+                              const color  = isErr ? 'text-red-400' : isWarn ? 'text-yellow-400' : isHeal ? 'text-green-400' : 'text-[#777]';
                               return (
-                                <div key={i} className={`text-[7px] font-mono leading-tight ${color}`}>
+                                <div key={i} className={`text-[10px] font-mono leading-snug ${color}`}>
                                   {log}
                                 </div>
                               );
@@ -1849,10 +1849,10 @@ function App() {
                   )}
 
                   {/* 메시지 표시 */}
-                  {spMsg && <div className="text-[9px] text-green-400 font-mono truncate">{spMsg}</div>}
+                  {spMsg && <div className="text-xs text-green-400 font-mono truncate">{spMsg}</div>}
 
                   {/* 복구 버튼 */}
-                  <div className="flex gap-1">
+                  <div className="flex gap-2">
                     <button
                       onClick={() => {
                         if (confirm(`현재 프로젝트(${currentPath})에 누락된 하이브 지침과 스킬을 자동 복구하시겠습니까?`)) {
@@ -1861,9 +1861,9 @@ function App() {
                             .then(data => { setSpMsg(data.message); fetchHiveHealth(); });
                         }
                       }}
-                      className="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary text-[9px] font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1"
+                      className="flex-1 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold rounded border border-primary/20 transition-all flex items-center justify-center gap-1.5"
                     >
-                      <Zap className="w-2.5 h-2.5" /> 스킬 복구
+                      <Zap className="w-3 h-3" /> 스킬 복구
                     </button>
                     <button
                       onClick={() => {
@@ -1871,10 +1871,10 @@ function App() {
                           .then(res => res.json())
                           .then(() => { setSpMsg('하이브 엔진 정밀 진단 및 자가 치유 완료'); fetchHiveHealth(); });
                       }}
-                      className="px-2 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[9px] font-bold rounded border border-green-500/20 transition-all flex items-center justify-center gap-1"
+                      className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs font-bold rounded border border-green-500/20 transition-all flex items-center justify-center gap-1.5"
                       title="하이브 엔진 정밀 점검"
                     >
-                      <Cpu className="w-2.5 h-2.5" /> 자가 치유
+                      <Cpu className="w-3 h-3" /> 자가 치유
                     </button>
                   </div>
                 </div>
