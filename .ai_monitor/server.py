@@ -292,6 +292,9 @@ if getattr(sys, 'frozen', False) and sys.stdout is None:
     print(f"\n--- Server Started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
 
 sys.path.append(str(BASE_DIR / 'src'))
+# api 모듈 패키지 경로 등록 — frozen(PyInstaller) 및 개발 모드 모두 대응
+# BASE_DIR = _MEIPASS(frozen) 또는 server.py 위치(개발) → api/ 패키지가 동일 위치에 있음
+sys.path.insert(0, str(BASE_DIR))
 try:
     from db import init_db
     from db_helper import insert_log, get_recent_logs, send_message, get_messages
@@ -1295,19 +1298,59 @@ class SSEHandler(BaseHTTPRequestHandler):
                     result = {"status": "error", "message": str(e)}
             
             self.wfile.write(json.dumps(result).encode('utf-8'))
-        elif parsed_path.path == '/api/hive/skill-analysis':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            analysis_file = DATA_DIR / "skill_analysis.json"
-            analysis_data = {"proposals": []}
-            if analysis_file.exists():
-                try:
-                    with open(analysis_file, 'r', encoding='utf-8') as f:
-                        analysis_data = json.load(f)
-                except: pass
-            self.wfile.write(json.dumps(analysis_data, ensure_ascii=False).encode('utf-8'))
+
+        # ── [모듈 위임] hive_api — /api/hive/*, /api/orchestrator/*, /api/superpowers/status,
+        #    /api/skill-results, /api/context-usage, /api/gemini-context-usage, /api/local-models ──
+        elif (parsed_path.path.startswith('/api/hive/') or
+              parsed_path.path.startswith('/api/orchestrator/') or
+              parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
+                                   '/api/context-usage', '/api/gemini-context-usage',
+                                   '/api/local-models')):
+            from api import hive_api
+            from urllib.parse import parse_qs
+            _params = parse_qs(parsed_path.query)
+            hive_api.handle_get(
+                self, parsed_path.path, _params,
+                DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
+                PROJECT_ROOT=PROJECT_ROOT, PROJECT_ID=PROJECT_ID,
+                TASKS_FILE=TASKS_FILE, AGENT_STATUS=AGENT_STATUS,
+                AGENT_STATUS_LOCK=AGENT_STATUS_LOCK,
+                pty_sessions=pty_sessions,
+                _current_project_root=_current_project_root,
+                _parse_session_tail=_parse_session_tail,
+                _parse_gemini_session=_parse_gemini_session,
+            )
+
+        # ── [모듈 위임] git_api — /api/git/* ─────────────────────────────
+        elif parsed_path.path.startswith('/api/git/'):
+            from api import git_api
+            from urllib.parse import parse_qs
+            _params = parse_qs(parsed_path.query)
+            git_api.handle_get(self, parsed_path.path, _params, BASE_DIR=BASE_DIR)
+
+        # ── [모듈 위임] mcp_api — /api/mcp/* ─────────────────────────────
+        elif parsed_path.path.startswith('/api/mcp/'):
+            from api import mcp_api
+            from urllib.parse import parse_qs
+            _params = parse_qs(parsed_path.query)
+            mcp_api.handle_get(
+                self, parsed_path.path, _params,
+                _smithery_api_key=_smithery_api_key,
+                _mcp_config_path=_mcp_config_path,
+            )
+
+        # ── [모듈 위임] memory_api — /api/memory, /api/project-info ──────
+        elif parsed_path.path in ('/api/memory', '/api/project-info'):
+            from api import memory_api
+            from urllib.parse import parse_qs
+            _params = parse_qs(parsed_path.query)
+            memory_api.handle_get(
+                self, parsed_path.path, _params,
+                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID, PROJECT_ROOT=PROJECT_ROOT,
+                _memory_conn=_memory_conn, _embed=_embed, _cosine_sim=_cosine_sim,
+                __version__=__version__,
+            )
+
         elif parsed_path.path == '/api/hive/health/repair':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2637,6 +2680,61 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "success", "projects": projects}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
+        # ── [모듈 위임 - POST] hive_api ──────────────────────────────────
+        # /api/hive/approve-skill, /api/orchestrator/skill-chain/update,
+        # /api/orchestrator/run, /api/superpowers/install|uninstall
+        elif (parsed_path.path.startswith('/api/hive/') or
+              parsed_path.path.startswith('/api/orchestrator/') or
+              parsed_path.path.startswith('/api/superpowers/')):
+            from api import hive_api
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            hive_api.handle_post(
+                self, parsed_path.path, _body,
+                DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
+                PROJECT_ROOT=PROJECT_ROOT,
+                _current_project_root=_current_project_root,
+            )
+
+        # ── [모듈 위임 - POST] git_api ────────────────────────────────────
+        # /api/git/rollback, /api/git/diff (쿼리스트링 방식)
+        elif parsed_path.path.startswith('/api/git/'):
+            from api import git_api
+            from urllib.parse import parse_qs as _parse_qs
+            # /api/git/diff는 query string 방식이므로 query dict를 data로 전달
+            _qs = _parse_qs(parsed_path.query)
+            if parsed_path.path == '/api/git/diff':
+                git_api.handle_post(self, parsed_path.path, _qs, BASE_DIR=BASE_DIR)
+            else:
+                content_length = int(self.headers.get('Content-Length', 0))
+                _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+                git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
+
+        # ── [모듈 위임 - POST] mcp_api ────────────────────────────────────
+        # /api/mcp/apikey, /api/mcp/install, /api/mcp/uninstall
+        elif parsed_path.path.startswith('/api/mcp/'):
+            from api import mcp_api
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            mcp_api.handle_post(
+                self, parsed_path.path, _body,
+                _smithery_api_key_setter=_SMITHERY_CFG,
+                _mcp_config_path=_mcp_config_path,
+            )
+
+        # ── [모듈 위임 - POST] memory_api ────────────────────────────────
+        # /api/memory/set, /api/memory/delete
+        elif parsed_path.path.startswith('/api/memory/'):
+            from api import memory_api
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            memory_api.handle_post(
+                self, parsed_path.path, _body,
+                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
+                _memory_conn=_memory_conn, _embed=_embed,
+            )
+
         elif parsed_path.path == '/api/hive/approve-skill':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
