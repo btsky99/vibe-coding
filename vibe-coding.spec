@@ -3,15 +3,26 @@
 # 📦 파일명: vibe-coding.spec
 # 📝 설명: PyInstaller 패키징 스펙.
 #          server.py를 진입점으로 하는 단일 EXE를 생성합니다.
+#          출력 파일명: vibe-coding-vX.Y.Z.exe (버전 자동 포함)
 #
 # 🕒 변경 이력:
+# [2026-03-01] Claude — EXE 파일명에 버전 자동 포함
+#   - _version.py에서 버전 읽어 name='vibe-coding-vX.Y.Z'로 설정
+#   - 이전 버전과 동시에 보관 가능 / 다운로드 시 버전 식별 용이
 # [2026-03-01] Claude — datas 보강: scripts/, src/, skills/claude/, .gemini/skills/
 #   - 배포 버전에서 스킬 설치/인식 실패 버그 수정
-#   - scripts/ 없으면 SCRIPTS_DIR 참조 실패 → 워치독/memory.py/hive_bridge 미동작
-#   - skills/claude/ 없으면 /api/superpowers/install Claude 설치 불가
-#   - .gemini/skills/ 없으면 /api/superpowers/install Gemini 설치 불가
-#   - src/ 없으면 db_helper, db, logger import 실패
 # ────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+# _version.py에서 버전 자동 읽기 — EXE 파일명에 포함
+with open('.ai_monitor/_version.py', 'r', encoding='utf-8') as _vf:
+    _ver_content = _vf.read()
+_ver_match = _re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_content)
+_APP_VERSION = _ver_match.group(1) if _ver_match else '0.0.0'
+_EXE_NAME = f'vibe-coding-v{_APP_VERSION}'
+
+print(f'[spec] 빌드 버전: {_APP_VERSION}  →  {_EXE_NAME}.exe')
 
 a = Analysis(
     ['.ai_monitor\\server.py'],
@@ -48,7 +59,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='vibe-coding',
+    name=_EXE_NAME,  # 예: vibe-coding-v3.6.5
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
