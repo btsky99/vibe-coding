@@ -58,6 +58,7 @@ interface TerminalChain {
   request: string;
   status: string;   // running | done
   updated_at: string;
+  agent?: string;   // DB에 저장된 에이전트 이름 (PTY 세션 종료 후에도 유지)
   steps: TerminalStep[];
 }
 
@@ -267,7 +268,8 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
               터미널별 사용 순서
             </div>
             {activeTerminals.map(([termId, chain]) => {
-              const agentName = (orchStatus?.terminal_agents ?? {})[termId] || '';
+              // 우선순위: 실시간 PTY 세션 > DB 저장값 (PTY 세션 종료 후에도 유지)
+              const agentName = (orchStatus?.terminal_agents ?? {})[termId] || chain.agent || '';
               return (
                 <div key={termId} className={`rounded border ${chainBorderColor(chain.status)} p-2 shrink-0`}>
 

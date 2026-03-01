@@ -1251,7 +1251,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                     pass
             # 폴더가 먼저 오도록 정렬
             items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
-            self.wfile.write(json.dumps(items).encode('utf-8'))
+            try:
+                self.wfile.write(json.dumps(items).encode('utf-8'))
+                self.wfile.flush()
+            except Exception as _e:
+                # pythonw.exe는 콘솔이 없으므로 파일로 에러 기록
+                import traceback
+                _err_log = DATA_DIR / 'api_files_error.log'
+                try:
+                    with open(_err_log, 'a', encoding='utf-8') as _f:
+                        _f.write(f'[/api/files ERROR] {_e}\n{traceback.format_exc()}\n')
+                except Exception:
+                    pass
         elif parsed_path.path == '/api/install-skills':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1519,7 +1530,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             dirs.sort(key=lambda x: x['name'].lower())
-            self.wfile.write(json.dumps(dirs).encode('utf-8'))
+            try:
+                self.wfile.write(json.dumps(dirs).encode('utf-8'))
+                self.wfile.flush()
+            except Exception as _e:
+                print(f'[/api/dirs write ERROR] {_e}', flush=True)
         elif parsed_path.path == '/api/help':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -3730,21 +3745,29 @@ async def pty_handler(websocket):
         
         is_yolo = qs.get('yolo', ['false'])[0].lower() == 'true'
 
-        if agent == 'claude':
-            # 클로드는 --dangerously-skip-permissions 플래그 지원 (YOLO)
-            yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
-            pty.write(f'claude{yolo_flag}\r\n')
-        elif agent == 'gemini':
-            # 제미나이는 -y 또는 --yolo 플래그 지원
-            yolo_flag = " -y" if is_yolo else ""
-            pty.write(f'gemini{yolo_flag}\r\n')
-
+        # ── session_id를 에이전트 실행 전에 먼저 계산 ──────────────────────────
+        # TERMINAL_ID/HIVE_AGENT 환경변수 주입에 session_id가 필요하므로 순서 이동.
         match = re.search(r'/pty/slot(\d+)', path)
         if match:
             # UI의 Terminal 1, Terminal 2 와 맞추기 위해 slot + 1 을 ID로 사용
             session_id = str(int(match.group(1)) + 1)
         else:
             session_id = str(id(websocket))
+
+        if agent == 'claude':
+            # 클로드는 --dangerously-skip-permissions 플래그 지원 (YOLO)
+            yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
+            # TERMINAL_ID/HIVE_AGENT 자동 주입 — skill_orchestrator가 --terminal 없이도 올바른 터미널로 저장되도록 함
+            pty.write(f'set TERMINAL_ID={session_id}\r\n')
+            pty.write(f'set HIVE_AGENT=claude\r\n')
+            pty.write(f'claude{yolo_flag}\r\n')
+        elif agent == 'gemini':
+            # 제미나이는 -y 또는 --yolo 플래그 지원
+            yolo_flag = " -y" if is_yolo else ""
+            # TERMINAL_ID/HIVE_AGENT 자동 주입 — skill_orchestrator가 --terminal 없이도 올바른 터미널로 저장되도록 함
+            pty.write(f'set TERMINAL_ID={session_id}\r\n')
+            pty.write(f'set HIVE_AGENT=gemini\r\n')
+            pty.write(f'gemini{yolo_flag}\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo 정보도 함께 저장
         pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat()}

@@ -101,6 +101,7 @@ def _connect() -> sqlite3.Connection:
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id  TEXT NOT NULL,
             terminal_id INTEGER NOT NULL DEFAULT 0,
+            agent       TEXT DEFAULT '',
             request     TEXT,
             skill_num   INTEGER DEFAULT 0,
             skill_name  TEXT,
@@ -111,12 +112,23 @@ def _connect() -> sqlite3.Connection:
             updated_at  TEXT
         )
     """)
+    # agent 컬럼 마이그레이션 — 기존 DB에 없는 경우 추가 (하위 호환)
+    try:
+        conn.execute("ALTER TABLE skill_chains ADD COLUMN agent TEXT DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # 이미 존재하면 무시
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_sc_terminal_session
         ON skill_chains (terminal_id, session_id)
     """)
     conn.commit()
     return conn
+
+
+def _get_agent() -> str:
+    """환경변수 HIVE_AGENT 또는 빈 문자열 반환. server.py가 PTY 실행 시 자동 주입."""
+    return os.getenv('HIVE_AGENT', '')
 
 
 def _get_terminal_id() -> int:
@@ -162,6 +174,7 @@ def cmd_plan(terminal_id: int, request: str, skills: list[str]) -> None:
     [동작]
     - 해당 터미널의 기존 running/pending 레코드를 모두 skipped로 처리
     - 각 스킬을 pending 상태로 INSERT
+    - HIVE_AGENT 환경변수에서 에이전트 이름(claude/gemini) 자동 읽기
 
     Args:
         terminal_id: 터미널 번호 (0=unknown, 1~8)
@@ -169,6 +182,7 @@ def cmd_plan(terminal_id: int, request: str, skills: list[str]) -> None:
         skills:      실행할 스킬 이름 목록
     """
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    agent = _get_agent()  # server.py가 PTY 시작 시 자동 주입한 HIVE_AGENT 읽기
     now = _now()
 
     conn = _connect()
@@ -179,21 +193,21 @@ def cmd_plan(terminal_id: int, request: str, skills: list[str]) -> None:
             "WHERE terminal_id=? AND status IN ('running','pending')",
             (now, terminal_id)
         )
-        # 각 스킬을 개별 레코드로 INSERT
+        # 각 스킬을 개별 레코드로 INSERT (agent 컬럼 포함)
         for order, skill_name in enumerate(skills):
             num = _skill_num(skill_name)
             conn.execute(
                 "INSERT INTO skill_chains "
-                "(session_id, terminal_id, request, skill_num, skill_name, step_order, status, summary, started_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'pending', '', ?, ?)",
-                (session_id, terminal_id, request, num, skill_name, order, now, now)
+                "(session_id, terminal_id, agent, request, skill_num, skill_name, step_order, status, summary, started_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '', ?, ?)",
+                (session_id, terminal_id, agent, request, num, skill_name, order, now, now)
             )
         conn.commit()
     finally:
         conn.close()
 
     print(f"[OK] 스킬 체인 계획 저장: {' → '.join(skills)}")
-    print(f"     세션 ID: {session_id}  터미널: T{terminal_id or '?'}")
+    print(f"     세션 ID: {session_id}  터미널: T{terminal_id or '?'}  에이전트: {agent or '(미지정)'}")
 
 
 def cmd_update(terminal_id: int, step: int, status: str, summary: str = "") -> None:
@@ -346,7 +360,7 @@ def _build_response() -> dict:
             if tid == 0:
                 continue  # unknown 터미널은 제외
             steps_rows = conn.execute(
-                "SELECT skill_num, skill_name, step_order, status, summary, request, updated_at "
+                "SELECT skill_num, skill_name, step_order, status, summary, request, updated_at, agent "
                 "FROM skill_chains WHERE session_id=? AND terminal_id=? ORDER BY step_order",
                 (session_id, tid)
             ).fetchall()
@@ -355,6 +369,8 @@ def _build_response() -> dict:
 
             request = steps_rows[0]['request'] or ''
             updated_at = max(r['updated_at'] for r in steps_rows if r['updated_at'])
+            # agent: 세션 레코드에 저장된 값 사용 (HIVE_AGENT 환경변수가 주입된 경우에만 존재)
+            agent_in_db = steps_rows[0]['agent'] or ''
 
             # 세션 전체 상태 결정: 하나라도 running이면 running, 전부 done/skipped면 done
             statuses = [r['status'] for r in steps_rows]
@@ -381,6 +397,7 @@ def _build_response() -> dict:
                 "request": request,
                 "status": chain_status,
                 "updated_at": updated_at,
+                "agent": agent_in_db,   # PTY 세션 종료 후에도 에이전트 정보 유지
                 "steps": steps,
             }
 
