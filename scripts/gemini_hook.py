@@ -30,6 +30,7 @@ import sys
 import json
 import os
 import io
+import re
 
 # ── [중요] stdout → stderr 교체 ────────────────────────────────────────────
 # Gemini CLI는 훅 stdout의 JSON을 파싱함. hive_bridge의 print()가 섞이면 파싱 오류 발생.
@@ -56,17 +57,50 @@ _SKIP_SHELL_PREFIXES = (
     "python scripts/memory.py",
 )
 
+# ── 자동 의도 감지 워크플로 맵 (Gemini용) ──────────────────────────────────────────────
+_INTENT_MAP = [
+    {
+        "name": "bug_fix",
+        "keywords": ["버그", "에러", "수정", "고쳐", "안돼", "안됨", "문제", "오류", "bug", "error", "fix"],
+        "context": (
+            "==================================================\n"
+            "🚨 [자동 감지] 디버깅/자가 치유(Self-Healing) 워크플로\n"
+            "==================================================\n"
+            "사용자의 입력에서 버그/에러 수정 의도가 감지되었습니다.\n"
+            "당신은 즉시 'systematic-debugging' 스킬을 가동해야 합니다.\n"
+            "[행동 지침]\n"
+            "1. 원인 분석 없이 묻지 마십시오. 스스로 memory.py와 task_logs.jsonl을 확인하세요.\n"
+            "2. 코드를 수정한 후 반드시 백그라운드에서 코드를 실행/테스트하여 스스로 검증하세요.\n"
+            "3. 에러가 나면 스스로 다시 고칩니다. 완벽히 동작할 때만 사용자에게 보고하세요.\n"
+            "=================================================="
+        ),
+    },
+    {
+        "name": "new_feature",
+        "keywords": ["추가", "만들어", "구현", "개발", "기능", "feature", "create", "make"],
+        "context": (
+            "==================================================\n"
+            "✨ [자동 감지] 신규 기능 개발/브레인스토밍 워크플로\n"
+            "==================================================\n"
+            "사용자의 입력에서 새로운 기능 추가 의도가 감지되었습니다.\n"
+            "당신은 즉시 'brainstorming' 및 'master' 스킬을 가동하여 설계를 시작해야 합니다.\n"
+            "[행동 지침]\n"
+            "1. 구현 전 ai_monitor_plan.md에 마이크로 태스크 계획을 작성하세요.\n"
+            "2. 설계가 완료되면 스스로 TDD 방식으로 구현을 시작하세요.\n"
+            "3. 구현 후 반드시 코드를 실행하여 검증하고, PROJECT_MAP.md에 기록하세요.\n"
+            "=================================================="
+        ),
+    }
+]
 
 def _short_path(fp: str, depth: int = 3) -> str:
     """파일 경로를 마지막 N단계만 남겨 짧게 반환합니다."""
     parts = fp.replace("\\", "/").split("/")
     return "/".join(parts[-depth:]) if len(parts) >= depth else fp
 
-
 def _short_cmd(cmd: str, max_len: int = 80) -> str:
     """명령어를 한 줄, max_len자 이내로 압축합니다."""
     return cmd.strip().replace("\n", " ")[:max_len]
-
 
 def _snippet(text: str, max_len: int = 60) -> str:
     """긴 텍스트를 짧게 줄여 한 줄 스니펫으로 반환합니다.
@@ -75,7 +109,6 @@ def _snippet(text: str, max_len: int = 60) -> str:
         return ""
     s = text.strip().replace("\n", "↵ ")
     return s[:max_len] + "…" if len(s) > max_len else s
-
 
 def _get_path(tool_input: dict) -> str:
     """Gemini 버전에 따라 경로 필드명이 다를 수 있으므로 여러 키를 시도합니다."""
@@ -86,12 +119,18 @@ def _get_path(tool_input: dict) -> str:
         or "?"
     )
 
-
 def _success_response():
     """Gemini CLI가 기대하는 성공 JSON을 실제 stdout으로 출력합니다."""
     _real_stdout.write("{}\n")
     _real_stdout.flush()
 
+def _hook_response(decision="allow", context=None):
+    """Gemini CLI 훅 응답 형식을 맞추어 출력합니다 (특히 BeforeAgent용)."""
+    resp = {"decision": decision}
+    if context:
+        resp["hookSpecificOutput"] = {"additionalContext": context}
+    _real_stdout.write(json.dumps(resp) + "\n")
+    _real_stdout.flush()
 
 def main():
     # ── stdin에서 훅 이벤트 JSON 수신 ──────────────────────────────────
@@ -107,7 +146,34 @@ def main():
 
     event = data.get("hook_event_name", "")
 
-    # ── hive_bridge import ─────────────────────────────────────────────
+    # ── BeforeAgent (User Prompt Intent Detection) ──────────────────
+    if event == "BeforeAgent":
+        prompt = data.get("prompt", "")
+        additional_context = ""
+        
+        # 키워드 매칭으로 의도 파악
+        for intent in _INTENT_MAP:
+            for keyword in intent["keywords"]:
+                if re.search(r"\b" + re.escape(keyword) + r"\b", prompt, re.IGNORECASE) or keyword in prompt:
+                    additional_context = intent["context"]
+                    break
+            if additional_context:
+                break
+        
+        # 의도가 파악되었으면 컨텍스트를 주입하고, 아니면 그냥 통과
+        if additional_context:
+            _hook_response(decision="allow", context=additional_context)
+            # 로그도 남김
+            try:
+                from hive_bridge import log_task
+                log_task("Gemini-Hook", f"[의도 감지] '{prompt[:20]}...' -> {intent['name']} 워크플로 주입")
+            except:
+                pass
+        else:
+            _hook_response(decision="allow")
+        return
+
+    # ── hive_bridge import (BeforeTool, AfterTool, SessionEnd) ──────
     try:
         from hive_bridge import log_task
     except ImportError:
