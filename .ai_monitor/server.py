@@ -1292,25 +1292,118 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if rules_md_src.exists():
                         shutil.copy(rules_md_src, Path(target_path) / "RULES.md")
                         
-                    # PROJECT_MAP.md 복사 — 소스에 없으면 기본 템플릿 생성
+                    # PROJECT_MAP.md 복사 — 소스에 없으면 파일 구조 자동 분석으로 생성
                     # [배포 버전] exe 번들에 PROJECT_MAP.md가 없을 때 빨간불 방지
                     project_map_dst = Path(target_path) / "PROJECT_MAP.md"
                     project_map_src = source_base / "PROJECT_MAP.md"
                     if project_map_src.exists():
                         shutil.copy(project_map_src, project_map_dst)
                     elif not project_map_dst.exists():
-                        # 기본 템플릿 생성 — 사용자가 나중에 채울 수 있도록 뼈대 제공
+                        # 실제 프로젝트 파일 구조를 분석하여 PROJECT_MAP.md 자동 생성
+                        # LLM 없이도 유용한 맵을 만들 수 있도록 구조 탐색
                         proj_name = Path(target_path).name
-                        project_map_dst.write_text(
+                        proj_root = Path(target_path)
+
+                        # 무시할 디렉터리/패턴 목록
+                        IGNORE_DIRS = {
+                            '.git', '.ai_monitor', 'node_modules', '__pycache__',
+                            '.venv', 'venv', '.ruff_cache', 'dist', 'build',
+                            '.cache', '.tox', 'coverage', '.pytest_cache',
+                        }
+                        IGNORE_EXTS = {'.pyc', '.pyo', '.db', '.db-shm', '.db-wal',
+                                       '.log', '.tmp', '.exe', '.dll', '.so'}
+
+                        # 기술 스택 감지 (특정 파일 존재 여부로 판단)
+                        tech_hints = []
+                        if (proj_root / 'package.json').exists():
+                            try:
+                                pkg = json.loads((proj_root / 'package.json').read_text(encoding='utf-8'))
+                                deps = list((pkg.get('dependencies', {}) or {}).keys())
+                                if 'react' in deps: tech_hints.append('React')
+                                if 'vue' in deps: tech_hints.append('Vue')
+                                if 'next' in deps: tech_hints.append('Next.js')
+                                if 'vite' in deps or 'vite' in str(pkg.get('devDependencies', {})): tech_hints.append('Vite')
+                                if 'typescript' in str(pkg.get('devDependencies', {})): tech_hints.append('TypeScript')
+                            except Exception: pass
+                            if not tech_hints: tech_hints.append('Node.js')
+                        if (proj_root / 'requirements.txt').exists() or (proj_root / 'pyproject.toml').exists():
+                            tech_hints.append('Python')
+                        if (proj_root / 'Cargo.toml').exists(): tech_hints.append('Rust')
+                        if (proj_root / 'go.mod').exists(): tech_hints.append('Go')
+                        if (proj_root / '.claude').is_dir(): tech_hints.append('Claude Code')
+                        if (proj_root / '.gemini').is_dir(): tech_hints.append('Gemini')
+
+                        # 파일 역할 추론 (파일명 패턴 → 설명)
+                        FILE_ROLES = {
+                            'server.py': 'HTTP/WebSocket 서버 진입점',
+                            'main.py': '메인 진입점',
+                            'app.py': '앱 진입점',
+                            'index.ts': '메인 진입점',
+                            'index.js': '메인 진입점',
+                            'App.tsx': 'React 루트 컴포넌트',
+                            'App.vue': 'Vue 루트 컴포넌트',
+                            'package.json': 'Node.js 패키지 설정',
+                            'requirements.txt': 'Python 패키지 목록',
+                            'pyproject.toml': 'Python 프로젝트 설정',
+                            'Cargo.toml': 'Rust 패키지 설정',
+                            'go.mod': 'Go 모듈 설정',
+                            'CLAUDE.md': 'Claude AI 지침',
+                            'GEMINI.md': 'Gemini AI 지침',
+                            'RULES.md': 'AI 에이전트 공통 규칙',
+                            '.env': '환경 변수 (민감 정보 포함)',
+                            'docker-compose.yml': 'Docker Compose 설정',
+                            'Dockerfile': 'Docker 빌드 설정',
+                        }
+
+                        # 최상위 구조 탐색 (2레벨)
+                        structure_lines = []
+                        key_files = []
+
+                        def _scan_dir(path: Path, depth: int, prefix: str = '') -> None:
+                            if depth > 2: return
+                            try:
+                                items = sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
+                            except PermissionError:
+                                return
+                            for item in items:
+                                if item.name.startswith('.') and item.name not in ('.claude', '.gemini'):
+                                    continue
+                                if item.is_dir() and item.name in IGNORE_DIRS:
+                                    continue
+                                if item.is_file() and item.suffix in IGNORE_EXTS:
+                                    continue
+                                rel = f"{prefix}{'📁 ' if item.is_dir() else '📄 '}{item.name}"
+                                role = FILE_ROLES.get(item.name, '')
+                                structure_lines.append(f"- {rel}" + (f" — {role}" if role else ''))
+                                if item.is_file() and role:
+                                    key_files.append((str(item.relative_to(proj_root)), role))
+                                if item.is_dir() and depth < 2:
+                                    _scan_dir(item, depth + 1, prefix + '  ')
+
+                        _scan_dir(proj_root, 1)
+
+                        # PROJECT_MAP.md 내용 조립
+                        tech_str = ' + '.join(tech_hints) if tech_hints else '미확인'
+                        now_str = datetime.now().strftime('%Y-%m-%d')
+                        map_content = (
                             f"# 📁 {proj_name} — PROJECT MAP\n\n"
-                            f"> 이 파일은 Vibe Coding 스킬 복구로 자동 생성된 템플릿입니다.\n"
-                            f"> 프로젝트 구조와 역할을 여기에 기록하세요.\n\n"
+                            f"> **자동 생성:** {now_str} (Vibe Coding 스킬 복구)\n"
+                            f"> 이 파일은 프로젝트 파일 구조를 분석하여 자동으로 생성되었습니다.\n"
+                            f"> 내용을 검토하고 필요한 부분을 보완해주세요.\n\n"
+                            f"## 기술 스택\n\n"
+                            f"- **감지된 기술:** {tech_str}\n\n"
                             f"## 프로젝트 구조\n\n"
-                            f"- (파일/폴더 구조를 여기에 기록)\n\n"
-                            f"## 핵심 파일\n\n"
-                            f"- (중요 파일과 역할을 여기에 기록)\n",
-                            encoding='utf-8'
+                            + ('\n'.join(structure_lines[:60]) or '- (파일 없음)')
+                            + '\n\n'
+                            + (
+                                "## 핵심 파일\n\n"
+                                + '\n'.join(f"- `{f}` — {r}" for f, r in key_files[:20])
+                                + '\n'
+                                if key_files else
+                                "## 핵심 파일\n\n- (자동 감지 없음 — 직접 기록해주세요)\n"
+                            )
                         )
+                        project_map_dst.write_text(map_content, encoding='utf-8')
 
                     # 대상 프로젝트의 .ai_monitor/data 폴더와 DB 초기화
                     # — 스킬 설치 후 하이브 워치독이 정상 동작하려면 DB가 있어야 함
@@ -1850,6 +1943,36 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(commits, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps([]).encode('utf-8'))
+        elif parsed_path.path == '/api/memory/db-info':
+            # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
+            # 배포 버전에서 어떤 DB를 바라보고 있는지 UI에서 확인할 수 있게 함
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                # _memory_conn()과 동일한 로직으로 실제 DB 경로 결정
+                actual_db = str(MEMORY_DB)
+                is_local = False
+                if CONFIG_FILE.exists():
+                    cfg_data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+                    last_path = cfg_data.get('last_path', '')
+                    if last_path:
+                        local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
+                        if local_db.exists():
+                            actual_db = str(local_db)
+                            is_local = True
+                # 항목 수 조회
+                with _memory_conn() as conn:
+                    count = conn.execute('SELECT COUNT(*) FROM memory').fetchone()[0]
+                self.wfile.write(json.dumps({
+                    'db_path': actual_db,
+                    'is_local': is_local,
+                    'count': count,
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e), 'count': 0}).encode('utf-8'))
+
         elif parsed_path.path == '/api/memory':
             # 공유 메모리 조회 — 임베딩 의미 검색 우선, 폴백 키워드 LIKE
             # ?q=검색어  ?top=N(기본20)  ?threshold=0.5  ?all=true(전체 프로젝트)
@@ -3192,6 +3315,73 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/memory/sync':
+            # APPDATA DB → 현재 프로젝트 로컬 DB 동기화
+            # 배포 버전에서 APPDATA DB에 있는 항목을 로컬 DB로 가져옴 (updated_at 기준 최신 우선)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                # 소스: APPDATA DB / 타겟: 현재 프로젝트 로컬 DB
+                src_db_path = str(MEMORY_DB)  # 서버 시작 시 결정된 DB (APPDATA 또는 로컬)
+                # 현재 로컬 DB 경로 결정 (_memory_conn 로직과 동일)
+                tgt_db_path = src_db_path
+                if CONFIG_FILE.exists():
+                    cfg_data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+                    last_path = cfg_data.get('last_path', '')
+                    if last_path:
+                        local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
+                        if local_db.exists():
+                            tgt_db_path = str(local_db)
+                merged = 0
+                skipped = 0
+                if src_db_path != tgt_db_path:
+                    # 두 DB가 다를 때만 동기화 의미 있음
+                    src_conn = sqlite3.connect(src_db_path, timeout=5)
+                    src_conn.row_factory = sqlite3.Row
+                    tgt_conn = sqlite3.connect(tgt_db_path, timeout=5)
+                    tgt_conn.row_factory = sqlite3.Row
+                    try:
+                        src_rows = src_conn.execute('SELECT * FROM memory').fetchall()
+                        for row in src_rows:
+                            key = row['key']
+                            src_updated = row['updated_at'] or ''
+                            # 타겟에 같은 key가 있는지 확인
+                            existing = tgt_conn.execute(
+                                'SELECT updated_at FROM memory WHERE key=?', (key,)
+                            ).fetchone()
+                            if existing is None or (existing['updated_at'] or '') < src_updated:
+                                # 타겟에 없거나 더 오래됐으면 병합
+                                tgt_conn.execute('''
+                                    INSERT OR REPLACE INTO memory
+                                    (key, id, title, content, tags, author, project, embedding, created_at, updated_at)
+                                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                                ''', (
+                                    row['key'], row['id'], row['title'], row['content'],
+                                    row['tags'], row['author'], row['project'],
+                                    row['embedding'] if 'embedding' in row.keys() else None,
+                                    row['created_at'], row['updated_at'],
+                                ))
+                                merged += 1
+                            else:
+                                skipped += 1
+                        tgt_conn.commit()
+                    finally:
+                        src_conn.close()
+                        tgt_conn.close()
+                    msg = f'동기화 완료: {merged}개 병합, {skipped}개 최신 유지'
+                else:
+                    msg = '로컬 DB와 APPDATA DB가 동일하여 동기화 불필요'
+                self.wfile.write(json.dumps(
+                    {'status': 'ok', 'message': msg, 'merged': merged, 'skipped': skipped},
+                    ensure_ascii=False
+                ).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps(
+                    {'status': 'error', 'message': str(e)}
+                ).encode('utf-8'))
+
         elif parsed_path.path == '/api/memory/set':
             # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (SQLite INSERT OR REPLACE)
             self.send_response(200)

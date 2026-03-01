@@ -2,11 +2,13 @@
  * FILE: MemoryPanel.tsx
  * DESCRIPTION: 에이전트 간 공유 메모리(SQLite) 패널 — 검색, CRUD, 폴링 로직을 포함한 독립 컴포넌트
  * REVISION HISTORY:
+ * - 2026-03-01 Claude: DB 정보 표시 + APPDATA→로컬 동기화 버튼 추가
+ *                      배포 버전에서 어떤 DB를 사용 중인지 표시하고 수동 동기화 지원
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화
  */
 
 import { useState, useEffect } from 'react';
-import { Search, Brain, Plus } from 'lucide-react';
+import { Search, Brain, Plus, RefreshCw, Database } from 'lucide-react';
 import { MemoryEntry } from '../../types';
 
 // 현재 접속 포트 기반으로 API 주소 자동 결정 (App.tsx와 동일한 방식)
@@ -61,6 +63,33 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
 
   // 검색어 변경 시 즉시 재검색 (디바운스 없이 즉시 — 서버 부하 낮음)
   useEffect(() => { fetchMemory(memSearch); }, [memSearch]);
+
+  // ─── DB 정보 상태 ────────────────────────────────────────────────────────
+  const [dbInfo, setDbInfo] = useState<{ db_path?: string; is_local?: boolean; count?: number } | null>(null);
+  const [syncMsg, setSyncMsg] = useState('');
+  const [syncing, setSyncing] = useState(false);
+
+  // DB 정보 로드 (마운트 시 1회)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/memory/db-info`)
+      .then(res => res.json())
+      .then(data => setDbInfo(data))
+      .catch(() => {});
+  }, [memory]); // memory 갱신 시마다 DB 정보도 갱신
+
+  // APPDATA→로컬 DB 동기화 핸들러
+  const syncMemory = () => {
+    setSyncing(true);
+    setSyncMsg('');
+    fetch(`${API_BASE}/api/memory/sync`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        setSyncMsg(data.message || '완료');
+        fetchMemory(memSearch); // 목록 즉시 갱신
+      })
+      .catch(() => setSyncMsg('동기화 실패'))
+      .finally(() => setSyncing(false));
+  };
 
   // ─── 표시할 목록 계산 ──────────────────────────────────────────────────
   // memShowAll=false이고 currentProjectName이 있으면 프로젝트 필터 적용
@@ -315,6 +344,32 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         >
           <Plus className="w-3 h-3" /> 새 메모리 항목 추가
         </button>
+      )}
+
+      {/* ── DB 정보 + 동기화 버튼 ─────────────────────────────────────────── */}
+      {/* 배포 버전에서 현재 어떤 DB를 바라보는지 표시하고, APPDATA→로컬 동기화 제공 */}
+      {dbInfo && (
+        <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <Database className="w-3 h-3 text-[#666] shrink-0" />
+            <span className={`text-[8px] font-mono truncate flex-1 ${dbInfo.is_local ? 'text-green-400/70' : 'text-yellow-400/70'}`}
+                  title={dbInfo.db_path}>
+              {dbInfo.is_local ? '📂 로컬 DB' : '🌐 APPDATA DB'} ({dbInfo.count ?? 0}개)
+            </span>
+            <button
+              onClick={syncMemory}
+              disabled={syncing}
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-white/10 bg-white/5 hover:bg-cyan-500/10 hover:border-cyan-500/30 text-[8px] text-[#858585] hover:text-cyan-400 transition-colors disabled:opacity-40 shrink-0"
+              title="APPDATA DB → 로컬 DB 동기화"
+            >
+              <RefreshCw className={`w-2.5 h-2.5 ${syncing ? 'animate-spin' : ''}`} />
+              동기화
+            </button>
+          </div>
+          {syncMsg && (
+            <div className="text-[8px] text-cyan-400/80 font-mono truncate">{syncMsg}</div>
+          )}
+        </div>
       )}
     </div>
   );
