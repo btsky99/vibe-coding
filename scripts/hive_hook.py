@@ -18,6 +18,10 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: 빌드 워크플로에 Inno Setup Step3 추가 + 확인 없이 자동 실행 지시
+  - Step3 = Inno Setup (ISCC.exe) 설치버전 빌드 추가 (dist/vibe-coding-setup-X.Y.Z.exe)
+  - ISCC.exe 경로: C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe
+  - "중간에 묻지 말 것" 지시로 완전 자동 실행 강제
 - 2026-03-01 Claude: 빌드 워크플로에 Step3(git commit+push) 추가 + 스킬 자동 실행 지시
   - build_exe: npm build → pyinstaller → git commit+push 전체 사이클로 확장
   - 각 의도에 "즉시 /vibe-XXX 스킬을 실행하세요" 지시 추가
@@ -71,25 +75,32 @@ _INTENT_MAP = [
         ],
         "context": (
             "═══════════════════════════════════════════════════════\n"
-            "🏗️  [자동 감지] 빌드 워크플로 — Windows EXE 빌드 + Git 배포\n"
+            "🏗️  [자동 감지] 빌드 워크플로 — Windows EXE + 설치버전 + Git 배포\n"
             "═══════════════════════════════════════════════════════\n"
-            "⚡ 즉시 `/vibe-release` 스킬을 실행하거나 아래 순서를 따르세요.\n"
+            "🚨 중요: 사용자 확인 없이 모든 Step을 순서대로 즉시 실행하세요.\n"
             "\n"
-            "【빌드 순서 — 반드시 이 순서대로 전부 실행】\n"
+            "【빌드 순서 — 전부 자동 실행, 중간에 묻지 말 것】\n"
             "Step 1) 프론트엔드 빌드 (React/Vite)\n"
             "  cd D:/vibe-coding/.ai_monitor/vibe-view && npm run build\n"
             "\n"
             "Step 2) Windows EXE 패키징 (PyInstaller)\n"
             "  cd D:/vibe-coding && pyinstaller vibe-coding.spec --noconfirm\n"
-            "  → dist/vibe-coding.exe 생성 (약 60MB)\n"
+            "  → dist/vibe-coding-vX.Y.Z.exe 생성 (버전은 _version.py에서 자동)\n"
             "\n"
-            "Step 3) Git 커밋 + 푸시 (빌드 결과 GitHub에 반영)\n"
-            "  git add .ai_monitor/vibe-view/dist/ vibe-coding.spec\n"
+            "Step 3) 설치버전 빌드 (Inno Setup)\n"
+            "  ISCC_PATH=\"C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe\"\n"
+            "  \"$ISCC_PATH\" D:/vibe-coding/vibe-coding-setup.iss\n"
+            "  → dist/vibe-coding-setup-X.Y.Z.exe 생성\n"
+            "\n"
+            "Step 4) Git 커밋 + 푸시 (빌드 결과 GitHub에 반영)\n"
+            "  cd D:/vibe-coding\n"
+            "  git add .ai_monitor/vibe-view/dist/ vibe-coding.spec vibe-coding-setup.iss\n"
             "  git add -f .ai_monitor/vibe-view/dist/\n"
-            "  git commit -m 'build: EXE 및 프론트엔드 빌드 업데이트'\n"
+            "  git commit -m 'build: EXE+설치버전 빌드 및 프론트엔드 업데이트'\n"
             "  git push origin main\n"
             "\n"
-            "⚠️  Step 1 → Step 2 → Step 3 순서 필수. 빌드 = 깃 푸시까지 완료해야 끝.\n"
+            "⚠️  Step 1→2→3→4 순서 필수. 각 Step 완료 확인 후 다음 진행.\n"
+            "⚠️  빌드 완료 = 깃 푸시까지 완료. 중간에 사용자에게 묻지 말 것.\n"
             "═══════════════════════════════════════════════════════"
         ),
     },
