@@ -5,6 +5,10 @@
  *              자체 폴링하여 렌더링합니다.
  * REVISION HISTORY:
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화
+ * - 2026-03-01 Claude: [버그수정] terminal_agents / agent_status 미렌더링 버그 수정
+ *                      — 터미널별 에이전트 현황 그리드 추가 (T1~T8 슬롯 시각화)
+ *                      — 근본원인: orchStatus 수신 후 recent_actions만 표시하고
+ *                        terminal_agents / agent_status 렌더링 코드가 누락되어 있었음
  */
 
 import { useState, useEffect } from 'react';
@@ -213,6 +217,44 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
           <Network className="w-7 h-7 opacity-20" />
           <span>스킬 체인 대기 중</span>
           <span className="text-[9px]">/vibe-orchestrate 스킬로 체인 실행</span>
+        </div>
+      )}
+
+      {/* ── 터미널별 에이전트 현황 그리드 ── */}
+      {/* terminal_agents 데이터가 있을 때만 표시 — 슬롯별로 어떤 에이전트가 동작 중인지 시각화 */}
+      {orchStatus && Object.keys(orchStatus.terminal_agents ?? {}).length > 0 && (
+        <div className="shrink-0 p-2 rounded border border-white/10">
+          <div className="text-[9px] font-bold text-[#969696] mb-1.5 uppercase tracking-wider">터미널별 에이전트</div>
+          <div className="grid grid-cols-4 gap-1">
+            {Array.from({ length: 8 }, (_, i) => {
+              const slot = String(i + 1);
+              const agent = (orchStatus.terminal_agents ?? {})[slot] || '';
+              const st = agent ? (orchStatus.agent_status ?? {})[agent] : null;
+              // 에이전트별 색상: claude=초록, gemini=파랑, shell=노랑, 비어있음=회색
+              const color = !agent
+                ? 'border-white/5 bg-white/3 text-[#555]'
+                : agent === 'claude'
+                  ? 'border-green-500/40 bg-green-500/10 text-green-400'
+                  : agent === 'gemini'
+                    ? 'border-blue-500/40 bg-blue-500/10 text-blue-400'
+                    : 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400';
+              // 활성 상태 표시용 점
+              const dotColor = !st ? '' : st.state === 'active' ? 'bg-green-400' : st.state === 'idle' ? 'bg-yellow-400' : 'bg-gray-500';
+              return (
+                <div key={slot} className={`flex flex-col items-center gap-0.5 p-1 rounded border text-[8px] font-mono ${color}`}>
+                  <span className="text-[7px] text-[#555] font-bold">T{slot}</span>
+                  {agent ? (
+                    <div className="flex items-center gap-0.5">
+                      {dotColor && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />}
+                      <span className="truncate font-bold" style={{ maxWidth: 36 }}>{agent}</span>
+                    </div>
+                  ) : (
+                    <span className="opacity-30">—</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
