@@ -1230,40 +1230,50 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "error", "message": "Shutdown is disabled for 24/7 operation."}).encode('utf-8'))
         elif parsed_path.path == '/api/files':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
+            # [수정] Windows 경로(드라이브 루트 등) 처리 및 응답 안정성 강화.
+            # 1. 경로 구분자 표준화 및 드라이브 루트(/) 유효성 보정.
+            # 2. 예외 발생 시 빈 배열([])을 안전하게 반환하여 연결 끊김 방지.
             query = parse_qs(parsed_path.query)
-            target_path = query.get('path', [''])[0]
+            target_path = query.get('path', [''])[0].replace('\\', '/')
+
+            # [핵심] 경로가 비어있을 경우 기본값으로 PROJECT_ROOT(문자열) 사용
+            if not target_path:
+                target_path = str(PROJECT_ROOT).replace('\\', '/')
+
+            # 드라이브 루트(예: D:) 처리 보정
+            if target_path and len(target_path) == 2 and target_path[1] == ':':
+                target_path += '/'
+
             items = []
-            if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
-                try:
+            try:
+                # 실제 경로 존재 여부 및 디렉터리 여부 재검증
+                p = Path(target_path)
+                if p.exists() and p.is_dir():
                     for entry in os.scandir(target_path):
-                        # .으로 시작하는 숨김 항목 중 주요 설정 폴더/파일은 허용
+                        # 숨김 항목 필터링 (주요 설정 파일 제외)
                         if not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github', '.gitignore', '.env'):
                             items.append({
-                                "name": entry.name, 
+                                "name": entry.name,
                                 "path": entry.path.replace('\\', '/'),
                                 "isDir": entry.is_dir()
                             })
-                except Exception:
-                    pass
-            # 폴더가 먼저 오도록 정렬
-            items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
+            except Exception as e:
+                # 권한 문제 등으로 인한 실패 시 로그 기록 후 빈 목록 반환 (서버 중단 방지)
+                print(f"[ERROR] /api/files failed for {target_path}: {e}")
+
+            # 폴더 우선 정렬
             try:
-                self.wfile.write(json.dumps(items).encode('utf-8'))
-                self.wfile.flush()
-            except Exception as _e:
-                # pythonw.exe는 콘솔이 없으므로 파일로 에러 기록
-                import traceback
-                _err_log = DATA_DIR / 'api_files_error.log'
-                try:
-                    with open(_err_log, 'a', encoding='utf-8') as _f:
-                        _f.write(f'[/api/files ERROR] {_e}\n{traceback.format_exc()}\n')
-                except Exception:
-                    pass
-        elif parsed_path.path == '/api/install-skills':
+                items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
+            except Exception:
+                pass
+
+            body = json.dumps(items).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)        elif parsed_path.path == '/api/install-skills':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
