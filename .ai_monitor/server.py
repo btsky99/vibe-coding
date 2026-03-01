@@ -48,6 +48,10 @@ import re
 import threading
 import sys
 import asyncio
+import api.mcp_api as mcp_api
+import api.hive_api as hive_api
+import api.git_api as git_api
+import api.memory_api as memory_api
 import string
 import socket
 from pathlib import Path
@@ -997,15 +1001,23 @@ AGENT_STATUS = {}
 AGENT_STATUS_LOCK = threading.Lock()
 # ─────────────────────────────────────────────────────────────────────────────
 
-main_window = None
-
-import string
-from urllib.parse import urlparse, parse_qs
-
 class SSEHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+
+        # MCP API 연동 (POST)
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+            data = json.loads(post_data)
+            if mcp_api.handle_post(self, path, data, DATA_DIR=DATA_DIR):
+                return
+        except Exception as e: print(f'[MCP Router Error] {e}')
+
+        # MCP API 연동 (GET)
+        if mcp_api.handle_get(self, path):
+            return
         
         # ─── 신규: 사고 과정 실시간 스트리밍 ───
         if path == '/api/events/thoughts':
@@ -1458,8 +1470,6 @@ class SSEHandler(BaseHTTPRequestHandler):
               parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
                                    '/api/context-usage', '/api/gemini-context-usage',
                                    '/api/local-models')):
-            from api import hive_api
-            from urllib.parse import parse_qs
             _params = parse_qs(parsed_path.query)
             hive_api.handle_get(
                 self, parsed_path.path, _params,
@@ -1473,17 +1483,12 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _parse_gemini_session=_parse_gemini_session,
             )
 
-        # ── [모듈 위임] git_api — /api/git/* ─────────────────────────────
         elif parsed_path.path.startswith('/api/git/'):
-            from api import git_api
-            from urllib.parse import parse_qs
             _params = parse_qs(parsed_path.query)
             git_api.handle_get(self, parsed_path.path, _params, BASE_DIR=BASE_DIR)
 
         # ── [모듈 위임] mcp_api — /api/mcp/* ─────────────────────────────
         elif parsed_path.path.startswith('/api/mcp/'):
-            from api import mcp_api
-            from urllib.parse import parse_qs
             _params = parse_qs(parsed_path.query)
             mcp_api.handle_get(
                 self, parsed_path.path, _params,
@@ -1493,8 +1498,6 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         # ── [모듈 위임] memory_api — /api/memory, /api/project-info ──────
         elif parsed_path.path in ('/api/memory', '/api/project-info'):
-            from api import memory_api
-            from urllib.parse import parse_qs
             _params = parse_qs(parsed_path.query)
             memory_api.handle_get(
                 self, parsed_path.path, _params,
@@ -2919,7 +2922,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
 
         # ── [모듈 위임 - POST] mcp_api ────────────────────────────────────
-        # /api/mcp/apikey, /api/mcp/install, /api/mcp/uninstall
+        # /api/mcp/apikey, /api/mcp/install, /api/mcp/uninstall, /api/mcp/rpc
         elif parsed_path.path.startswith('/api/mcp/'):
             from api import mcp_api
             content_length = int(self.headers.get('Content-Length', 0))
@@ -2928,6 +2931,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self, parsed_path.path, _body,
                 _smithery_api_key_setter=_SMITHERY_CFG,
                 _mcp_config_path=_mcp_config_path,
+                DATA_DIR=DATA_DIR
             )
 
         # ── [모듈 위임 - POST] memory_api ────────────────────────────────
