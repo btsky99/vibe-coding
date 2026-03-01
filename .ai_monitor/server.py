@@ -3462,7 +3462,7 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
     return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
 
 HTTP_PORT = _find_free_port(9571)
-WS_PORT = _find_free_port(9572)
+WS_PORT = _find_free_port(HTTP_PORT + 1)  # HTTP 포트 다음부터 탐색 — 포트 충돌 방지
 
 async def run_ws_server():
     try:

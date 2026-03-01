@@ -1,12 +1,16 @@
 # 📜 변경 이력 (CHANGELOG)
 
-## [2026-03-01] - v3.6.7 (업데이터 에셋 탐색 버그 수정)
+## [2026-03-01] - v3.6.7 (업데이터 에셋 탐색 버그 수정 + 포트 충돌 방지)
 
 ### 🐛 버그 수정
 - **[Fix] updater.py 에셋 이름 불일치 수정**:
     - GitHub 릴리스 에셋명이 `vibe-coding-v*.exe` 형태일 때도 탐지 가능하도록 패턴 매칭 추가.
     - 탐색 우선순위: `vibe-coding.exe` (정확 일치) → `vibe-coding-v*.exe` → `vibe-coding*.exe` (setup 제외).
     - `browser_download_url` 사용으로 Public 리포에서 인증 없이 직접 다운로드 가능.
+- **[Fix] server.py HTTP/WebSocket 포트 충돌 방지**:
+    - `WS_PORT`를 `_find_free_port(9572)` 고정 → `_find_free_port(HTTP_PORT + 1)`로 변경.
+    - 9571이 사용 중일 때 HTTP와 WS가 동일 포트(9572)로 충돌하는 버그 수정.
+- **[Fix] server.py do_POST 내 불필요한 `import shutil` 제거** (ruff F823).
 
 ## [2026-03-01] - v3.6.6 (AI 오케스트레이터 통합)
 
