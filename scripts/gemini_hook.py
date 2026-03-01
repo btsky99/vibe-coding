@@ -16,6 +16,10 @@ DESCRIPTION: Gemini CLI 전용 자동 액션 트레이스 훅 핸들러.
              - SessionEnd : 세션 종료 시 → "─── 세션 종료 ───" 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: Claude↔Gemini 양방향 메시지 연결 추가
+  - BeforeAgent: _read_gemini_messages("gemini") 호출 → Claude가 보낸 미읽음 메시지 컨텍스트 주입
+  - SessionEnd: _send_session_summary() 호출 → 오늘 Gemini 활동 요약을 messages.jsonl에 기록
+  - → Claude의 다음 UserPromptSubmit 시 자동 수신
 - 2026-03-01 Claude: 파일 수정 내용 상세 기록 강화
   - BeforeTool(수정): 변경 전/후 내용 스니펫 포함 (Claude PreToolUse와 동일 수준)
   - BeforeTool(생성): 파일 내용 미리보기 포함
@@ -93,6 +97,124 @@ _INTENT_MAP = [
     }
 ]
 
+def _read_gemini_messages(agent_name: str) -> list[dict]:
+    """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다.
+
+    [동작 순서]
+    1. .ai_monitor/data/messages.jsonl 읽기
+    2. to == agent_name AND read_at가 없는 항목 필터
+    3. 해당 메시지에 read_at 타임스탬프 기록 후 파일 재저장
+    4. 읽은 메시지 목록 반환
+
+    [에러 시]
+    빈 리스트 반환 — Gemini CLI 훅 실행 방해 안 함
+    """
+    from pathlib import Path
+    from datetime import datetime
+
+    project_root = Path(_scripts_dir).parent
+    messages_file = project_root / ".ai_monitor" / "data" / "messages.jsonl"
+
+    if not messages_file.exists():
+        return []
+
+    try:
+        messages = []
+        with open(messages_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        messages.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+
+        unread = [
+            m for m in messages
+            if m.get("to") in (agent_name, "all")
+            and not m.get("read_at")
+        ]
+
+        if not unread:
+            return []
+
+        now = datetime.now().isoformat()
+        for m in messages:
+            if m in unread:
+                m["read_at"] = now
+
+        with open(messages_file, "w", encoding="utf-8") as f:
+            for m in messages:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+
+        return unread
+    except Exception:
+        return []
+
+
+def _send_session_summary() -> None:
+    """SessionEnd 시 오늘 Gemini 활동 요약을 messages.jsonl에 기록합니다.
+
+    [동작 순서]
+    1. task_logs.jsonl에서 오늘의 Gemini 완료 액션 추출
+    2. messages.jsonl에 from=gemini, to=claude, type=session_summary 메시지 추가
+    3. Claude의 다음 UserPromptSubmit 시 hive_hook.py가 자동 수신
+
+    [에러 시]
+    모든 예외 무시
+    """
+    try:
+        from pathlib import Path
+        from datetime import datetime
+
+        project_root = Path(_scripts_dir).parent
+        data_dir = project_root / ".ai_monitor" / "data"
+        logs_file = data_dir / "task_logs.jsonl"
+        messages_file = data_dir / "messages.jsonl"
+
+        if not logs_file.exists():
+            return
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        actions = []
+        with open(logs_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if not entry.get("timestamp", "").startswith(today):
+                    continue
+                task = entry.get("task", "")
+                agent = entry.get("agent", "")
+                if agent == "Gemini" and any(k in task for k in ["수정 완료", "생성 완료", "커밋", "실행 완료"]):
+                    actions.append(task)
+
+        if not actions:
+            return
+
+        summary = "\n".join(actions[-10:])
+        now = datetime.now().isoformat()
+        msg = {
+            "from": "gemini",
+            "to": "claude",
+            "type": "session_summary",
+            "content": f"[Gemini 세션 종료 요약 {today}]\n{summary}",
+            "timestamp": now,
+            "read_at": None,
+        }
+
+        # 기존 메시지 유지 + 새 메시지 추가
+        with open(messages_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+
+    except Exception:
+        pass
+
+
 def _short_path(fp: str, depth: int = 3) -> str:
     """파일 경로를 마지막 N단계만 남겨 짧게 반환합니다."""
     parts = fp.replace("\\", "/").split("/")
@@ -160,28 +282,37 @@ def main():
 
     event = data.get("hook_event_name", "")
 
-    # ── BeforeAgent (User Prompt Intent Detection) ──────────────────
+    # ── BeforeAgent (User Prompt Intent Detection + Claude 메시지 수신) ──
     if event == "BeforeAgent":
         prompt = data.get("prompt", "")
         additional_context = ""
-        
+
+        # [메시지 폴링] Claude가 보낸 미읽음 메시지 확인 후 컨텍스트에 추가
+        unread = _read_gemini_messages("gemini")
+        if unread:
+            msg_lines = [
+                f"📨 [{m.get('from','?')} → gemini] ({m.get('type','info')}) {m.get('content','')}".strip()
+                for m in unread
+            ]
+            additional_context += "[Claude 메시지]\n" + "\n".join(msg_lines) + "\n\n"
+
         # 키워드 매칭으로 의도 파악
         for intent in _INTENT_MAP:
             for keyword in intent["keywords"]:
                 if re.search(r"\b" + re.escape(keyword) + r"\b", prompt, re.IGNORECASE) or keyword in prompt:
-                    additional_context = intent["context"]
+                    additional_context += intent["context"]
                     break
-            if additional_context:
+            if additional_context and intent["context"] in additional_context:
                 break
-        
+
         # 의도가 파악되었으면 컨텍스트를 주입하고, 아니면 그냥 통과
         if additional_context:
             _hook_response(decision="allow", context=additional_context)
-            # 로그도 남김
             try:
                 from hive_bridge import log_task
-                log_task("Gemini-Hook", f"[의도 감지] '{prompt[:20]}...' -> {intent['name']} 워크플로 주입")
-            except:
+                if unread:
+                    log_task("Gemini-Hook", f"[메시지 수신] {len(unread)}개 읽음: {msg_lines[0][:60]}")
+            except Exception:
                 pass
         else:
             _hook_response(decision="allow")
@@ -293,8 +424,11 @@ def main():
         # read_file / glob / grep 등 조회 도구는 스킵
 
     elif event == "SessionEnd":
-        # Gemini 세션 종료 — 구분선 기록
+        # Gemini 세션 종료 — 구분선 기록 + Claude에게 활동 요약 전송
         log_task("Gemini", "─── Gemini 세션 종료 ───")
+        # 오늘 Gemini가 완료한 작업 요약을 messages.jsonl에 기록
+        # → Claude의 다음 UserPromptSubmit 시 자동으로 수신
+        _send_session_summary()
 
     # ── Gemini CLI가 요구하는 JSON 응답 출력 ───────────────────────────
     _success_response()

@@ -18,6 +18,10 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: Stop 이벤트 세션 자동 스냅샷 저장 추가
+  - _save_session_snapshot(): 오늘 task_logs에서 사용자 지시 + 완료 액션 추출
+  - shared_memory.db에 "claude:auto-session:YYYY-MM-DD" 키로 INSERT OR REPLACE
+  - 다음 세션에서 이전 세션 활동을 즉시 확인 가능
 - 2026-03-01 Claude: Gemini↔Claude 메시지 폴링 추가
   - read_messages(agent_name): messages.jsonl에서 미읽음 메시지 필터링 후 read_at 마킹
   - UserPromptSubmit 시 read_messages("claude") 호출 → 미읽음 메시지 stdout 출력
@@ -249,6 +253,86 @@ _INTENT_MAP = [
         ),
     },
 ]
+
+
+def _save_session_snapshot() -> None:
+    """Stop 이벤트 시 오늘의 세션 활동을 shared_memory.db에 자동 저장합니다.
+
+    [동작 순서]
+    1. task_logs.jsonl에서 오늘 날짜의 Claude/사용자 로그 추출
+    2. 중요 항목 필터 (사용자 지시, 파일 수정, 커밋 완료)
+    3. shared_memory.db에 "claude:auto-session:YYYY-MM-DD" 키로 저장
+       (INSERT OR REPLACE → 당일 내 호출마다 최신 상태로 갱신)
+    4. 다음 세션에서 이 키를 조회하여 이전 작업 내용 파악 가능
+
+    [에러 시]
+    모든 예외 무시 — Stop 훅 실행을 방해하지 않음
+    """
+    try:
+        import sqlite3
+        from pathlib import Path
+        from datetime import datetime
+
+        project_root = Path(_scripts_dir).parent
+        data_dir = project_root / ".ai_monitor" / "data"
+        logs_file = data_dir / "task_logs.jsonl"
+        db_file = data_dir / "shared_memory.db"
+
+        if not logs_file.exists() or not db_file.exists():
+            return
+
+        # 오늘 날짜의 로그만 수집
+        today = datetime.now().strftime("%Y-%m-%d")
+        important_lines = []
+        with open(logs_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if not entry.get("timestamp", "").startswith(today):
+                    continue
+                task = entry.get("task", "")
+                agent = entry.get("agent", "")
+                # 중요 이벤트만 추출 (노이즈 제거)
+                if agent == "사용자" and "[지시]" in task:
+                    important_lines.append(task)
+                elif agent == "Claude" and any(k in task for k in ["수정 완료", "생성 완료", "커밋 완료"]):
+                    important_lines.append(task)
+
+        if not important_lines:
+            return
+
+        # 최근 20개만 보관 (과거 항목은 truncate)
+        summary = "\n".join(important_lines[-20:])
+        now = datetime.now().isoformat()
+        key = f"claude:auto-session:{today}"
+
+        conn = sqlite3.connect(str(db_file))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO memory
+              (key, id, title, content, tags, author, timestamp, updated_at, project)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                key, key,
+                f"[자동] Claude 세션 활동 요약 ({today})",
+                summary,
+                '["auto","session","claude","snapshot"]',
+                "claude",
+                now, now,
+                "vibe-coding",
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def _read_messages(agent_name: str) -> list[dict]:
@@ -530,10 +614,13 @@ def main():
             nb = tool_input.get("notebook_path", "?")
             log_task("Claude", f"[노트북 수정] {_short_path(nb)} ✓")
 
-    # ── Stop: 응답 완료 구분선 ─────────────────────────────────────────
+    # ── Stop: 응답 완료 구분선 + 세션 활동 자동 스냅샷 ──────────────────
     elif event == "Stop":
         if log_task:
             log_task("Claude", "─── 응답 완료 ───")
+        # 오늘의 사용자 지시 + 완료 액션을 shared_memory.db에 갱신
+        # → 다음 세션 시작 시 "이전에 뭘 했지?"를 바로 파악 가능
+        _save_session_snapshot()
 
 
 if __name__ == "__main__":
