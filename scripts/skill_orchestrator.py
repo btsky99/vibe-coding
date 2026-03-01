@@ -23,6 +23,8 @@ DESCRIPTION: AI 오케스트레이터 스킬 체인 실행 상태 추적기.
                → 상태 초기화 (idle로 전환)
 
 REVISION HISTORY:
+- 2026-03-01 Claude: 스킬 결과 영구 저장 추가
+  - cmd_done(): 완료 시 skill_results.jsonl에 session_id/request/results/completed_at append
 - 2026-03-01 Claude: 최초 구현 — AI 오케스트레이터 B안 상태 추적기
   - skill_chain.json 읽기/쓰기로 실행 상태 영속화
   - frozen(배포)/개발 모드 자동 경로 구분
@@ -78,6 +80,36 @@ def _save(data: dict) -> None:
     data["updated_at"] = _now()
     with open(CHAIN_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _save_result_history(data: dict) -> None:
+    """완료된 스킬 체인 결과를 skill_results.jsonl에 영구 누적 저장합니다.
+
+    [저장 항목]
+    - session_id: 세션 식별자
+    - request: 사용자 원본 요청
+    - results: 각 스킬 이름 + 상태 + 요약
+    - completed_at: 완료 시각
+
+    [파일 형식]
+    JSON Lines (한 줄 = 한 세션 결과) — 쉽게 tail/grep 가능
+    """
+    results_file = DATA_DIR / "skill_results.jsonl"
+    record = {
+        "session_id": data.get("session_id", ""),
+        "request": data.get("request", ""),
+        "results": [
+            {"skill": r.get("skill"), "status": r.get("status"), "summary": r.get("summary", "")}
+            for r in data.get("results", [])
+        ],
+        "completed_at": data.get("completed_at", _now()),
+    }
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(results_file, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[WARN] 결과 저장 실패: {e}")
 
 
 def cmd_plan(request: str, skills: list[str]) -> None:
@@ -182,7 +214,11 @@ def cmd_done() -> None:
 
     data["results"] = results
     data["status"] = "done"
+    data["completed_at"] = datetime.now().isoformat()
     _save(data)
+
+    # 완료 결과를 skill_results.jsonl에 영구 저장 (세션 기록 누적)
+    _save_result_history(data)
 
     # 완료 요약 출력
     print("[OK] ✅ 오케스트레이터 체인 완료")

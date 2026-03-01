@@ -18,6 +18,9 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: Gemini↔Claude 메시지 폴링 추가
+  - read_messages(agent_name): messages.jsonl에서 미읽음 메시지 필터링 후 read_at 마킹
+  - UserPromptSubmit 시 read_messages("claude") 호출 → 미읽음 메시지 stdout 출력
 - 2026-03-01 Claude: AI 오케스트레이터 자동 트리거 추가
   - _INTENT_MAP 최상단에 "orchestrate" 의도 추가 (최고 우선순위)
   - 복잡도 감지: 여러 의도 동시 매칭 또는 "자동/전부/다/전체" 키워드 → orchestrate 강제
@@ -248,6 +251,67 @@ _INTENT_MAP = [
 ]
 
 
+def _read_messages(agent_name: str) -> list[dict]:
+    """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다.
+
+    [동작 순서]
+    1. .ai_monitor/data/messages.jsonl 읽기
+    2. to == agent_name AND read_at가 없는(None/빈 문자열) 항목 필터
+    3. 해당 메시지들에 read_at 타임스탬프 기록
+    4. 전체 메시지 목록 파일에 재저장 (원자적 쓰기)
+    5. 읽은 메시지 목록 반환
+
+    [파일 없거나 에러 시]
+    빈 리스트 반환 — 훅 실행을 중단하지 않음
+    """
+    from pathlib import Path
+    from datetime import datetime
+
+    project_root = Path(_scripts_dir).parent
+    messages_file = project_root / ".ai_monitor" / "data" / "messages.jsonl"
+
+    if not messages_file.exists():
+        return []
+
+    try:
+        # 전체 메시지 읽기
+        messages = []
+        with open(messages_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        messages.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+
+        # 미읽음 메시지 필터 (나에게 온 것 + read_at 없음)
+        unread = [
+            m for m in messages
+            if m.get("to") in (agent_name, "all")
+            and not m.get("read_at")
+        ]
+
+        if not unread:
+            return []
+
+        # read_at 타임스탬프 마킹
+        now = datetime.now().isoformat()
+        for m in messages:
+            if m in unread:
+                m["read_at"] = now
+
+        # 파일 재저장 (원자적: 전체 덮어쓰기)
+        with open(messages_file, "w", encoding="utf-8") as f:
+            for m in messages:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+
+        return unread
+
+    except Exception:
+        return []
+
+
 def _check_and_install_skills() -> list[str]:
     """Claude Code 스킬 자동 설치 — UserPromptSubmit마다 실행.
 
@@ -374,6 +438,16 @@ def main():
         newly_installed = _check_and_install_skills()
         if newly_installed and log_task:
             log_task("Hive", f"[자기치유] 스킬 자동 설치: {', '.join(newly_installed)}")
+
+        # [메시지 폴링] Gemini 또는 다른 에이전트가 보낸 미읽음 메시지 확인
+        # 메시지가 있으면 컨텍스트로 출력하여 Claude가 인지하도록 함
+        unread = _read_messages("claude")
+        if unread:
+            lines = [f"📨 [{m.get('from','?')} → claude] ({m.get('type','info')}) {m.get('content','')}".strip()
+                     for m in unread]
+            print("[Hive 메시지] 미읽음 메시지:\n" + "\n".join(lines), flush=True)
+            if log_task:
+                log_task("Hive", f"[메시지 수신] {len(unread)}개 읽음: {lines[0][:60]}")
 
         prompt = (
             data.get("prompt")

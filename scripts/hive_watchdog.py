@@ -9,6 +9,10 @@ DESCRIPTION: 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing
              계층 3 — 지식 치유: (미래) LLM 응답 분석 → 스킬 파일 갱신
 
 REVISION HISTORY:
+- 2026-03-01 Claude: [자기치유 계층 1 강화] restart_server() 추가
+  - server 다운 감지 시 subprocess.Popen으로 server.py 자동 재시작
+  - _restart_fail_count 추적: 3회 연속 실패 시 🚨 경고 로그
+  - run_check(): check_server() 실패 시 restart_server() 자동 호출
 - 2026-03-01 Claude: [자기치유 계층 2 완성] skill_analyzer 연동
   - check_skill_gaps(): skill_analyzer로 패턴 감지 → vibe-master.md 자동 업데이트
   - start_loop(): _loop_count 추적, 10루프(10분)마다 check_skill_gaps() 호출
@@ -60,7 +64,8 @@ class HiveWatchdog:
     def __init__(self, interval=60):
         self.interval = interval
         self.is_running = False
-        self._loop_count = 0  # 루프 횟수 추적 (10회마다 스킬 갭 분석)
+        self._loop_count = 0          # 루프 횟수 추적 (10회마다 스킬 갭 분석)
+        self._restart_fail_count = 0  # 서버 재시작 연속 실패 횟수 (3회 초과 시 경고)
         self.status = {
             "last_check": None,
             "db_ok": False,
@@ -68,7 +73,8 @@ class HiveWatchdog:
             "memory_sync_ok": False,
             "agent_active": False,
             "repair_count": 0,
-            "skill_heal_count": 0,  # 스킬 자기치유 성공 횟수
+            "skill_heal_count": 0,   # 스킬 자기치유 성공 횟수
+            "restart_count": 0,      # 서버 자동 재시작 성공 횟수
             "logs": []
         }
 
@@ -105,6 +111,50 @@ class HiveWatchdog:
         self._add_log("⚠️ 중앙 제어 서버(server.py) 응답 없음")
         self.status["server_ok"] = False
         return False
+
+    def restart_server(self):
+        """server.py가 다운되었을 때 자동으로 재시작한다.
+
+        [재시작 로직]
+        - PROJECT_ROOT/.ai_monitor/server.py 경로로 subprocess 실행
+        - 성공 시 _restart_fail_count 초기화 + restart_count 증가
+        - 연속 3회 실패 시 🚨 경고 로그 출력 (추가 재시도 없음)
+
+        [배포 버전 대응]
+        - frozen(EXE) 환경에서는 server.py가 내장되어 있으므로 직접 실행 불가
+        - 해당 경우 경고 로그만 남기고 스킵
+        """
+        server_py = PROJECT_ROOT / ".ai_monitor" / "server.py"
+
+        # 배포(frozen) 환경에서는 server.py 직접 실행 불가 — 스킵
+        if not server_py.exists():
+            self._add_log("⚠️ server.py 경로를 찾을 수 없음 — 자동 재시작 불가")
+            return False
+
+        self._add_log("🔄 server.py 자동 재시작 시도...")
+        try:
+            # 새 프로세스로 server.py 실행 (부모 프로세스와 독립)
+            subprocess.Popen(
+                [sys.executable, str(server_py)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+            # 3초 대기 후 실제로 응답하는지 확인
+            time.sleep(3)
+            if self.check_server():
+                self._add_log("✅ server.py 자동 재시작 성공")
+                self._restart_fail_count = 0
+                self.status["restart_count"] = self.status.get("restart_count", 0) + 1
+                return True
+            else:
+                raise RuntimeError("재시작 후에도 서버 응답 없음")
+        except Exception as e:
+            self._restart_fail_count += 1
+            self._add_log(f"❌ 서버 재시작 실패 ({self._restart_fail_count}회): {e}")
+            if self._restart_fail_count >= 3:
+                self._add_log("🚨 서버 자동 재시작 3회 연속 실패 — 수동 점검 필요")
+            return False
 
     def check_db(self):
         """DB 파일 존재 여부 및 연결성 체크"""
@@ -242,10 +292,14 @@ class HiveWatchdog:
         db_ok = self.check_db()
         activity_ok = self.check_agent_activity()
 
-        # 서버가 죽어있으면 메모리 동기화도 안 되므로 상태 반영
+        # 서버가 죽어있으면 자동 재시작 시도 후 메모리 동기화 상태 반영
         if not server_ok:
             self.status["memory_sync_ok"] = False
-        elif db_ok:
+            # 연속 실패 3회 미만인 경우에만 재시작 시도
+            if self._restart_fail_count < 3:
+                server_ok = self.restart_server()
+
+        if server_ok and db_ok:
             self.status["memory_sync_ok"] = True
 
         # 복구 로직: 서버/DB는 OK인데 에이전트가 오랫동안 비활성 상태일 때만 동기화 재시도
