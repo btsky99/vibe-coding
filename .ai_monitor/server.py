@@ -1461,14 +1461,32 @@ class SSEHandler(BaseHTTPRequestHandler):
                 try:
                     with open(update_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    # 이미 현재 버전과 같으면 업데이트 파일 삭제 후 ready:false 반환
+                    # update_ready.json에 저장된 버전이 현재 실행 중인 버전보다
+                    # 낮거나 같으면 → 이미 해당 버전 이상으로 업데이트된 것이므로
+                    # 파일을 삭제하고 "업데이트 없음" 상태로 반환한다.
+                    # [버그수정] 이전 코드는 == 비교만 했기 때문에 v3.6.9 캐시가
+                    # v3.6.10에서도 "업데이트 있음"으로 잘못 표시되는 문제가 있었음.
                     file_ver = data.get("version", "").lstrip("v").strip()
                     cur_ver  = __version__.lstrip("v").strip()
-                    if file_ver == cur_ver:
+
+                    def _parse_ver(v):
+                        """'3.6.10' → (3, 6, 10) 정수 튜플로 변환"""
+                        parts = v.split(".")
+                        result = []
+                        for p in parts:
+                            try: result.append(int(p))
+                            except ValueError: result.append(0)
+                        while len(result) < 3:
+                            result.append(0)
+                        return tuple(result)
+
+                    # 저장된 업데이트 버전이 현재 버전보다 실제로 높을 때만 알림 표시
+                    if file_ver and _parse_ver(file_ver) > _parse_ver(cur_ver):
+                        self.wfile.write(json.dumps(data).encode('utf-8'))
+                    else:
+                        # 같거나 낮은 버전 → 오래된 캐시이므로 삭제
                         update_file.unlink(missing_ok=True)
                         self.wfile.write(json.dumps({"ready": False, "downloading": False}).encode('utf-8'))
-                    else:
-                        self.wfile.write(json.dumps(data).encode('utf-8'))
                 except Exception as e:
                     self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
             else:
@@ -1532,21 +1550,24 @@ class SSEHandler(BaseHTTPRequestHandler):
                     tasks = json.load(f)
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/orchestrator/skill-chain':
-            # 스킬 체인 실행 상태 반환 — vibe-orchestrate 스킬이 저장한 skill_chain.json 읽기
-            # 대시보드가 3초마다 폴링하여 오케스트레이터 진행 흐름을 실시간 표시
+            # 스킬 체인 실행 상태 반환 — skill_chain.db(SQLite) 조회
+            # 응답: {skill_registry: [...], terminals: {T1: {steps:[...]}, ...}}
+            # 대시보드가 3초마다 폴링하여 터미널별 스킬 실행 흐름을 실시간 표시
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            chain_file = DATA_DIR / 'skill_chain.json'
-            if chain_file.exists():
-                try:
-                    with open(chain_file, 'r', encoding='utf-8') as f:
-                        self.wfile.write(f.read().encode('utf-8'))
-                except Exception:
-                    self.wfile.write(json.dumps({"status": "idle"}).encode('utf-8'))
-            else:
-                self.wfile.write(json.dumps({"status": "idle"}).encode('utf-8'))
+            try:
+                _orch_dir = str(SCRIPTS_DIR)
+                if _orch_dir not in sys.path:
+                    sys.path.insert(0, _orch_dir)
+                from skill_orchestrator import _build_response
+                result = _build_response()
+                self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({
+                    "skill_registry": [], "terminals": {}, "error": str(e)
+                }, ensure_ascii=False).encode('utf-8'))
 
         elif parsed_path.path == '/api/orchestrator/status':
             # 오케스트레이터 현황 — 에이전트 활동 상태, 태스크 분배, 최근 액션 로그 반환
@@ -3402,8 +3423,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
 
         elif parsed_path.path == '/api/orchestrator/skill-chain/update':
-            # 스킬 체인 단계 상태 갱신 — vibe-orchestrate 스킬이 각 단계 완료 시 호출
-            # body: {"step": 0, "status": "done", "summary": "버그 원인 파악 완료"}
+            # 스킬 체인 단계 상태 갱신 — skill_chain.db에 직접 UPDATE
+            # body: {"step": 0, "status": "done", "summary": "...", "terminal_id": 1}
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -3414,19 +3435,13 @@ class SSEHandler(BaseHTTPRequestHandler):
                 step = int(body.get('step', 0))
                 status = body.get('status', 'done')
                 summary = body.get('summary', '')
-                # skill_orchestrator.py CLI 호출로 상태 갱신
-                orch_script = str(SCRIPTS_DIR / 'skill_orchestrator.py')
-                cmd = [sys.executable, orch_script, 'update', str(step), status]
-                if summary:
-                    cmd.append(summary)
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=5,
-                    encoding='utf-8', creationflags=0x08000000
-                )
-                self.wfile.write(json.dumps({
-                    'status': 'success',
-                    'output': result.stdout.strip()
-                }, ensure_ascii=False).encode('utf-8'))
+                terminal_id = int(body.get('terminal_id', 0))
+                _orch_dir = str(SCRIPTS_DIR)
+                if _orch_dir not in sys.path:
+                    sys.path.insert(0, _orch_dir)
+                from skill_orchestrator import cmd_update as _orch_update
+                _orch_update(terminal_id, step, status, summary)
+                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
 
