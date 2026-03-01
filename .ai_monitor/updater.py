@@ -80,20 +80,55 @@ def _is_newer(latest_tag, current):
 
 
 def _find_asset_url(release):
-    """Find the download URL for vibe-coding.exe in the release assets."""
-    for asset in release.get("assets", []):
-        if asset.get("name") == ASSET_NAME:
-            return asset.get("url")  # API url (needs Accept header)
+    """릴리스 에셋에서 포터블 exe(설치 불필요) URL을 찾습니다.
+    GitHub 릴리스 에셋명 패턴: vibe-coding-v3.6.x.exe (setup 제외)
+    browser_download_url 사용 → Public 리포에서 인증 없이 직접 다운로드 가능.
+    """
+    assets = release.get("assets", [])
+
+    # 1순위: 정확히 ASSET_NAME과 일치하는 것 (하위 호환)
+    for asset in assets:
+        name = asset.get("name", "")
+        if name == ASSET_NAME:
+            return asset.get("browser_download_url") or asset.get("url")
+
+    # 2순위: vibe-coding-v*.exe 패턴 (setup 제외)
+    for asset in assets:
+        name = asset.get("name", "")
+        if (
+            name.startswith("vibe-coding-v")
+            and name.endswith(".exe")
+            and "setup" not in name.lower()
+        ):
+            logger.info("에셋 발견: %s", name)
+            return asset.get("browser_download_url") or asset.get("url")
+
+    # 3순위: vibe-coding*.exe 중 setup 아닌 것
+    for asset in assets:
+        name = asset.get("name", "")
+        if (
+            name.startswith("vibe-coding")
+            and name.endswith(".exe")
+            and "setup" not in name.lower()
+        ):
+            logger.info("에셋 발견(3순위): %s", name)
+            return asset.get("browser_download_url") or asset.get("url")
+
     return None
 
 
 def _download_asset(url, dest, token):
-    """Download the release asset to dest. Returns True on success."""
+    """릴리스 에셋을 dest 경로에 다운로드합니다.
+    browser_download_url은 Public 리포에서 인증 없이 직접 다운로드 가능.
+    API URL(api.github.com)인 경우 Accept: application/octet-stream 추가.
+    """
     req = Request(url)
-    req.add_header("Accept", "application/octet-stream")
     req.add_header("User-Agent", "vibe-coding-updater")
-    if token:
-        req.add_header("Authorization", f"token {token}")
+    # API URL인 경우에만 octet-stream 헤더 필요
+    if "api.github.com" in url:
+        req.add_header("Accept", "application/octet-stream")
+        if token:
+            req.add_header("Authorization", f"token {token}")
     try:
         with urlopen(req, timeout=120) as resp:
             with open(dest, "wb") as f:

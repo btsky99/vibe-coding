@@ -1,5 +1,13 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-03-01] - v3.6.7 (업데이터 에셋 탐색 버그 수정)
+
+### 🐛 버그 수정
+- **[Fix] updater.py 에셋 이름 불일치 수정**:
+    - GitHub 릴리스 에셋명이 `vibe-coding-v*.exe` 형태일 때도 탐지 가능하도록 패턴 매칭 추가.
+    - 탐색 우선순위: `vibe-coding.exe` (정확 일치) → `vibe-coding-v*.exe` → `vibe-coding*.exe` (setup 제외).
+    - `browser_download_url` 사용으로 Public 리포에서 인증 없이 직접 다운로드 가능.
+
 ## [2026-03-01] - v3.6.6 (AI 오케스트레이터 통합)
 
 ### 🎯 AI 오케스트레이터 A안 + B안 통합 구현
