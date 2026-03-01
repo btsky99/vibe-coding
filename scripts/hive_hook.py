@@ -196,6 +196,49 @@ _INTENT_MAP = [
 ]
 
 
+def _check_and_install_skills() -> list[str]:
+    """Claude Code 스킬 자동 설치 — UserPromptSubmit마다 실행.
+
+    [동작 원리]
+    1. scripts/ 기준으로 프로젝트 루트 탐지
+    2. skills/claude/*.md 목록과 .claude/commands/*.md 목록 비교
+    3. 누락된 스킬 파일을 .claude/commands/에 자동 복사
+    4. 설치된 스킬 이름 목록을 반환 (로깅용)
+
+    [자기치유 관점]
+    스킬이 삭제되거나 새 스킬이 추가되어도 다음 사용자 입력 시 자동 복구됨.
+    수동으로 대시보드에서 설치할 필요 없음.
+    """
+    installed = []
+    try:
+        import shutil
+        from pathlib import Path
+
+        # 프로젝트 루트: scripts/hive_hook.py 기준 상위 폴더
+        project_root = Path(_scripts_dir).parent
+
+        skills_src = project_root / "skills" / "claude"
+        commands_dst = project_root / ".claude" / "commands"
+
+        if not skills_src.exists():
+            return []
+
+        # .claude/commands/ 폴더 없으면 자동 생성
+        commands_dst.mkdir(parents=True, exist_ok=True)
+
+        # 소스와 대상 비교 → 누락 파일 복사
+        for skill_file in skills_src.glob("*.md"):
+            target = commands_dst / skill_file.name
+            if not target.exists():
+                shutil.copy2(str(skill_file), str(target))
+                installed.append(skill_file.stem)
+
+    except Exception:
+        pass
+
+    return installed
+
+
 def _detect_intent(prompt: str) -> str | None:
     """사용자 프롬프트에서 워크플로 의도를 감지하고 컨텍스트 문자열을 반환합니다.
 
@@ -247,8 +290,14 @@ def main():
     except ImportError:
         log_task = None
 
-    # ── UserPromptSubmit: 사용자 지시 기록 + 의도 감지 컨텍스트 주입 ──────
+    # ── UserPromptSubmit: 스킬 자동 설치 + 사용자 지시 기록 + 의도 감지 ────
     if event == "UserPromptSubmit":
+        # [자기치유] 누락된 Claude Code 스킬 자동 감지 및 설치
+        # 매 사용자 입력 시 skills/claude/와 .claude/commands/ 비교 → 자동 동기화
+        newly_installed = _check_and_install_skills()
+        if newly_installed and log_task:
+            log_task("Hive", f"[자기치유] 스킬 자동 설치: {', '.join(newly_installed)}")
+
         prompt = (
             data.get("prompt")
             or data.get("content")
