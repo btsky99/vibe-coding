@@ -543,6 +543,36 @@ def main():
             if log_task:
                 log_task("사용자", f"[지시] {short}")
 
+            # ── 태스크 보드 자동 등록 ──────────────────────────────────────────
+            # 사용자 지시가 들어올 때마다 tasks.json에 pending 태스크로 추가합니다.
+            # 에이전트가 작업을 시작하면 in_progress, 완료 시 done으로 상태를 변경할 수 있습니다.
+            try:
+                import datetime
+                _data_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
+                )
+                _tasks_file = os.path.join(_data_dir, 'tasks.json')
+                _tasks: list = []
+                if os.path.exists(_tasks_file):
+                    with open(_tasks_file, 'r', encoding='utf-8') as _f:
+                        _tasks = json.load(_f)
+                # 새 태스크 항목 구성 — 대시보드 TasksPanel이 기대하는 형식 그대로 사용
+                _new_task = {
+                    "id": datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                    "title": short[:80],
+                    "description": prompt.strip()[:500],
+                    "status": "in_progress",  # 지시 수신 즉시 작업 시작
+                    "assigned_to": "claude",
+                    "priority": "medium",
+                    "created_by": "user",
+                    "created_at": datetime.datetime.now().isoformat(),
+                }
+                _tasks.append(_new_task)
+                with open(_tasks_file, 'w', encoding='utf-8') as _f:
+                    json.dump(_tasks, _f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass  # 태스크 보드 기록 실패는 조용히 무시 (훅 자체가 중단되면 안 됨)
+
             # 의도 감지: 키워드 매칭 → 관련 워크플로 컨텍스트를 stdout으로 출력
             # Claude Code는 이 출력을 Claude에게 시스템 컨텍스트로 주입함
             # 사용자가 자연어로 "빌드해줘", "커밋해줘" 등만 말해도 자동 워크플로 실행 가능
@@ -614,10 +644,34 @@ def main():
             nb = tool_input.get("notebook_path", "?")
             log_task("Claude", f"[노트북 수정] {_short_path(nb)} ✓")
 
-    # ── Stop: 응답 완료 구분선 + 세션 활동 자동 스냅샷 ──────────────────
+    # ── Stop: 응답 완료 구분선 + 태스크 done 처리 + 세션 스냅샷 ───────────
     elif event == "Stop":
         if log_task:
             log_task("Claude", "─── 응답 완료 ───")
+
+        # Claude 응답이 끝나면 in_progress 상태인 claude 태스크를 모두 done으로 변경
+        # → 태스크 보드에서 "완료" 탭으로 자동 이동
+        try:
+            import os as _os
+            _data_dir = _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
+            )
+            _tasks_file = _os.path.join(_data_dir, 'tasks.json')
+            if _os.path.exists(_tasks_file):
+                with open(_tasks_file, 'r', encoding='utf-8') as _f:
+                    _tasks = json.load(_f)
+                _changed = False
+                for _t in _tasks:
+                    # pending(아직 시작 안 한 것 포함) + in_progress 모두 완료 처리
+                    if _t.get('assigned_to') == 'claude' and _t.get('status') in ('pending', 'in_progress'):
+                        _t['status'] = 'done'
+                        _changed = True
+                if _changed:
+                    with open(_tasks_file, 'w', encoding='utf-8') as _f:
+                        json.dump(_tasks, _f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
         # 오늘의 사용자 지시 + 완료 액션을 shared_memory.db에 갱신
         # → 다음 세션 시작 시 "이전에 뭘 했지?"를 바로 파악 가능
         _save_session_snapshot()

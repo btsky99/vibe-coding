@@ -16,6 +16,8 @@ DESCRIPTION: Gemini CLI 전용 자동 액션 트레이스 훅 핸들러.
              - SessionEnd : 세션 종료 시 → "─── 세션 종료 ───" 구분선
 
 REVISION HISTORY:
+- 2026-03-01 Claude: BeforeAgent에 태스크 보드 자동 등록 추가
+  - 사용자 지시 수신 시 tasks.json에 pending 태스크 자동 추가 (assigned_to: gemini)
 - 2026-03-01 Claude: Claude↔Gemini 양방향 메시지 연결 추가
   - BeforeAgent: _read_gemini_messages("gemini") 호출 → Claude가 보낸 미읽음 메시지 컨텍스트 주입
   - SessionEnd: _send_session_summary() 호출 → 오늘 Gemini 활동 요약을 messages.jsonl에 기록
@@ -305,6 +307,37 @@ def main():
             if additional_context and intent["context"] in additional_context:
                 break
 
+        # ── 태스크 보드 자동 등록 ──────────────────────────────────────────
+        # Gemini가 사용자 지시를 받을 때마다 tasks.json에 pending 태스크로 추가합니다.
+        # stdout은 JSON 전용이므로 모든 예외는 무시하고 조용히 처리합니다.
+        if prompt and prompt.strip():
+            try:
+                import datetime
+                _data_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
+                )
+                _tasks_file = os.path.join(_data_dir, 'tasks.json')
+                _tasks: list = []
+                if os.path.exists(_tasks_file):
+                    with open(_tasks_file, 'r', encoding='utf-8') as _f:
+                        _tasks = json.load(_f)
+                _short = prompt.strip().replace("\n", " ")[:80]
+                _new_task = {
+                    "id": datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                    "title": _short,
+                    "description": prompt.strip()[:500],
+                    "status": "in_progress",  # 지시 수신 즉시 작업 시작
+                    "assigned_to": "gemini",
+                    "priority": "medium",
+                    "created_by": "user",
+                    "created_at": datetime.datetime.now().isoformat(),
+                }
+                _tasks.append(_new_task)
+                with open(_tasks_file, 'w', encoding='utf-8') as _f:
+                    json.dump(_tasks, _f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass  # 태스크 보드 기록 실패는 조용히 무시
+
         # 의도가 파악되었으면 컨텍스트를 주입하고, 아니면 그냥 통과
         if additional_context:
             _hook_response(decision="allow", context=additional_context)
@@ -426,6 +459,27 @@ def main():
     elif event == "SessionEnd":
         # Gemini 세션 종료 — 구분선 기록 + Claude에게 활동 요약 전송
         log_task("Gemini", "─── Gemini 세션 종료 ───")
+
+        # Gemini 세션이 끝나면 in_progress 상태인 gemini 태스크를 모두 done으로 변경
+        try:
+            _data_dir_g = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
+            )
+            _tasks_file_g = os.path.join(_data_dir_g, 'tasks.json')
+            if os.path.exists(_tasks_file_g):
+                with open(_tasks_file_g, 'r', encoding='utf-8') as _f:
+                    _tasks_g = json.load(_f)
+                _changed_g = False
+                for _t in _tasks_g:
+                    if _t.get('assigned_to') == 'gemini' and _t.get('status') in ('pending', 'in_progress'):
+                        _t['status'] = 'done'
+                        _changed_g = True
+                if _changed_g:
+                    with open(_tasks_file_g, 'w', encoding='utf-8') as _f:
+                        json.dump(_tasks_g, _f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
         # 오늘 Gemini가 완료한 작업 요약을 messages.jsonl에 기록
         # → Claude의 다음 UserPromptSubmit 시 자동으로 수신
         _send_session_summary()
