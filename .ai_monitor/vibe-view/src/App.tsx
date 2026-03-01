@@ -25,7 +25,7 @@ import {
   Trash2, LayoutDashboard, MessageSquare, ClipboardList, Plus, Brain, Save,
   GitBranch, AlertTriangle, GitCommit as GitCommitIcon, ArrowUp, ArrowDown,
   Bot, Play, CircleDot, Package, CheckCircle2, Circle,
-  Maximize2, Minimize2, Minus, Send, Edit3
+  Maximize2, Minimize2, Minus, Send, Edit3, Network
 } from 'lucide-react';
 import { 
   SiPython, SiJavascript, SiTypescript, SiMarkdown, 
@@ -1136,7 +1136,14 @@ function App() {
           <button onClick={() => { setActiveTab('search'); setIsSidebarOpen(true); }} className={`p-2 transition-colors ${activeTab === 'search' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Search className="w-6 h-6" />
           </button>
-          {/* 하이브 오케스트레이터 탭 — 경고 수 배지 */}
+          {/* AI 오케스트레이터 탭 — 스킬 체인 실행/모니터링 */}
+          <button onClick={() => { setActiveTab('orchestrate'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'orchestrate' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
+            <Network className="w-6 h-6" />
+            {skillChain.status === 'running' && (
+              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-primary rounded-full animate-pulse" />
+            )}
+          </button>
+          {/* 하이브 진단 탭 — 에이전트 상태 + 시스템 헬스 */}
           <button onClick={() => { setActiveTab('hive'); setIsSidebarOpen(true); }} className={`p-2 transition-colors relative ${activeTab === 'hive' ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`}>
             <Zap className="w-6 h-6" />
             {orchWarningCount > 0 && (
@@ -1207,7 +1214,7 @@ function App() {
           style={{ minWidth: isSidebarOpen ? 150 : 0 }}
         >
           <div className="h-9 px-4 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb] shrink-0 border-b border-black/10">
-            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : '하이브 마인드'}</span>
+            <span className="flex items-center gap-1.5"><ChevronDown className="w-3.5 h-3.5" />{activeTab === 'explorer' ? 'Explorer' : activeTab === 'search' ? 'Search' : activeTab === 'messages' ? '메시지 채널' : activeTab === 'tasks' ? '태스크 보드' : activeTab === 'memory' ? '공유 메모리' : activeTab === 'git' ? 'Git 감시' : activeTab === 'mcp' ? 'MCP 관리자' : activeTab === 'orchestrate' ? 'AI 오케스트레이터' : '하이브 진단'}</span>
             <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-white/10 p-0.5 rounded transition-colors"><X className="w-4 h-4" /></button>
           </div>
 
@@ -1532,8 +1539,8 @@ function App() {
                   </button>
                 )}
               </div>
-            ) : activeTab === 'hive' ? (
-              /* ── 오케스트레이터 대시보드 패널 ── */
+            ) : activeTab === 'orchestrate' ? (
+              /* ── AI 오케스트레이터 패널 — 스킬 체인 실행/모니터링 ── */
               <div className="flex-1 flex flex-col overflow-hidden gap-2">
                 {/* 헤더: 실행 버튼 + 마지막 실행 시각 */}
                 <div className="flex items-center justify-between shrink-0">
@@ -1629,10 +1636,47 @@ function App() {
                   </div>
                 )}
 
+                {/* 스킬 체인 대기 상태 — 활성 체인 없을 때 안내 */}
+                {skillChain.status === 'idle' && (
+                  <div className="text-center text-[#858585] text-xs py-8 flex flex-col items-center gap-2 italic">
+                    <Network className="w-7 h-7 opacity-20" />
+                    <span>스킬 체인 대기 중</span>
+                    <span className="text-[9px]">/vibe-orchestrate 스킬로 체인 실행</span>
+                  </div>
+                )}
+
+                {/* 최근 오케스트레이터 액션 로그 — 오케스트레이터 탭에서만 표시 */}
+                {orchStatus?.recent_actions && orchStatus.recent_actions.length > 0 ? (
+                  <div className="flex-1 overflow-y-auto custom-scrollbar">
+                    <div className="p-2 rounded border border-white/10">
+                      <div className="text-[9px] font-bold text-[#969696] mb-1.5">최근 자동 액션</div>
+                      {orchStatus.recent_actions.slice(0, 8).map((act, i) => {
+                        const actionColor = act.action === 'auto_assign' ? 'text-green-400' : act.action === 'idle_agent' ? 'text-yellow-400' : act.action.includes('overload') ? 'text-red-400' : 'text-[#858585]';
+                        return (
+                          <div key={i} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1">
+                            <span className={`text-[8px] font-mono shrink-0 mt-0.5 ${actionColor}`}>{act.action}</span>
+                            <span className="text-[9px] text-[#cccccc] flex-1 break-words leading-tight">{act.detail}</span>
+                            <span className="text-[8px] text-[#858585] shrink-0 font-mono">{act.timestamp?.slice(11, 16)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2 rounded border border-white/5 text-center text-[9px] text-[#858585] italic">
+                    자동 액션 기록 없음
+                  </div>
+                )}
+              </div>
+
+            ) : activeTab === 'hive' ? (
+              /* ── 하이브 진단 패널 — 에이전트 상태 + 시스템 헬스 ── */
+              <div className="flex-1 flex flex-col overflow-hidden gap-2">
+
                 {!orchStatus ? (
                   <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
                     <Bot className="w-7 h-7 opacity-20" />
-                    오케스트레이터 연결 중...
+                    하이브 데이터 연결 중...
                   </div>
                 ) : (
                   <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3">
@@ -1713,30 +1757,11 @@ function App() {
                       </div>
                     )}
 
-                    {/* 최근 오케스트레이터 액션 로그 */}
-                    {orchStatus.recent_actions && orchStatus.recent_actions.length > 0 ? (
-                      <div className="p-2 rounded border border-white/10">
-                        <div className="text-[9px] font-bold text-[#969696] mb-1.5">최근 자동 액션</div>
-                        {orchStatus.recent_actions.slice(0, 8).map((act, i) => {
-                          const actionColor = act.action === 'auto_assign' ? 'text-green-400' : act.action === 'idle_agent' ? 'text-yellow-400' : act.action.includes('overload') ? 'text-red-400' : 'text-[#858585]';
-                          return (
-                            <div key={i} className="flex items-start gap-1.5 py-0.5 hover:bg-white/3 rounded px-1">
-                              <span className={`text-[8px] font-mono shrink-0 mt-0.5 ${actionColor}`}>{act.action}</span>
-                              <span className="text-[9px] text-[#cccccc] flex-1 break-words leading-tight">{act.detail}</span>
-                              <span className="text-[8px] text-[#858585] shrink-0 font-mono">{act.timestamp?.slice(11, 16)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="p-2 rounded border border-white/5 text-center text-[9px] text-[#858585] italic">
-                        자동 액션 기록 없음 — "지금 실행"으로 첫 조율을 시작하세요
-                      </div>
-                    )}
+                    {/* 최근 액션은 AI 오케스트레이터 탭에서 확인 */}
                   </div>
                 )}
 
-                {/* 하이브 시스템 진단 위젯 — 오케스트레이터 탭 하단 고정 배치 */}
+                {/* 하이브 시스템 진단 위젯 — 에이전트 상태 하단 고정 배치 */}
                 <div className="shrink-0 p-2 rounded border border-white/10 bg-black/20 flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <div className="text-[10px] font-bold text-[#969696] flex items-center gap-1.5 uppercase tracking-tighter">
