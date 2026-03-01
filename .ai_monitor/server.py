@@ -1268,6 +1268,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                     rules_md_src = source_base / "RULES.md"
                     if rules_md_src.exists():
                         shutil.copy(rules_md_src, Path(target_path) / "RULES.md")
+                        
+                    # PROJECT_MAP.md 복사
+                    project_map_src = source_base / "PROJECT_MAP.md"
+                    if project_map_src.exists():
+                        shutil.copy(project_map_src, Path(target_path) / "PROJECT_MAP.md")
 
                     # 대상 프로젝트의 .ai_monitor/data 폴더와 DB 초기화
                     # — 스킬 설치 후 하이브 워치독이 정상 동작하려면 DB가 있어야 함

@@ -23,6 +23,7 @@ a = Analysis(
         ('../GEMINI.md', '.'),
         ('../CLAUDE.md', '.'),
         ('../RULES.md', '.'),
+        ('../PROJECT_MAP.md', '.'),
         ('../scripts', 'scripts'),
     ],
     hiddenimports=['websockets', 'winpty', 'chromadb', 'pysqlite3'],
