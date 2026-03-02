@@ -1020,12 +1020,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
             data = json.loads(post_data)
-            if mcp_api.handle_post(self, path, data, _smithery_api_key=_smithery_api_key, _mcp_config_path=_mcp_config_path):
+            if mcp_api.handle_post(self, path, data, _smithery_api_key_setter=_SMITHERY_CFG, _mcp_config_path=_mcp_config_path):
                 return
         except Exception as e: print(f'[MCP Router Error] {e}')
 
         # MCP API 연동 (GET)
-        if mcp_api.handle_get(self, path, parse_qs(parsed_path.query), _smithery_api_key=_smithery_api_key, _mcp_config_path=_mcp_config_path):
+        if mcp_api.handle_get(self, path, urllib.parse.parse_qs(parsed_path.query), _smithery_api_key=_smithery_api_key, _mcp_config_path=_mcp_config_path):
             return
         
         # ─── 신규: 사고 과정 실시간 스트리밍 ───
