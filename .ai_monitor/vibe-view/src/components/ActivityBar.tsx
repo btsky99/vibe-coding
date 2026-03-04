@@ -16,7 +16,7 @@ import {
   Search, Settings,
   Files, Info, Zap,
   MessageSquare, ClipboardList, Brain,
-  GitBranch, Package, Network, Cpu, Bot
+  GitBranch, Package, Network, Bot
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -32,7 +32,7 @@ interface ActivityBarProps {
   conflictCount: number;       // Git 충돌 배지 (충돌 우선)
   totalGitChanges: number;     // Git 변경 파일 수 배지
   mcpCount: number;            // 설치된 MCP 수 배지
-  isThinking?: boolean;        // AI가 생각 중인지 여부
+  isThinking?: boolean;        // 오케스트레이터 사고 중 여부
   isAgentRunning?: boolean;    // 자율 에이전트 실행 중 여부
 }
 
@@ -65,11 +65,11 @@ export default function ActivityBar({
         <Search className="w-6 h-6" />
       </button>
 
-      {/* 🧠 중앙 통제실 (AI 사고 과정) */}
-      <button onClick={() => handleTab('mission-control')} className={tabCls('mission-control')} title="중앙 통제실 (AI)">
-        <Cpu className={`w-6 h-6 ${isThinking ? 'text-primary animate-pulse' : ''}`} />
-        {isThinking && (
-          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-primary rounded-full animate-ping" />
+      {/* 🤖 자율 에이전트 (Agent 탭) — 실행 중이면 배지 표시 */}
+      <button onClick={() => handleTab('agent')} className={`${tabCls('agent')} relative`} title="자율 에이전트">
+        <Bot className="w-6 h-6" />
+        {isAgentRunning && (
+          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-yellow-400 rounded-full animate-pulse" />
         )}
       </button>
 
@@ -111,9 +111,9 @@ export default function ActivityBar({
         )}
       </button>
 
-      {/* 🧠 공유 메모리 (항목 수 배지) */}
-      <button onClick={() => handleTab('memory')} className={tabCls('memory')} title="공유 메모리"> 
-        <Brain className="w-6 h-6" />
+      {/* 🧠 공유 메모리 (항목 수 배지, 오케스트레이터 사고 중 펄스) */}
+      <button onClick={() => handleTab('memory')} className={tabCls('memory')} title="공유 메모리">
+        <Brain className={`w-6 h-6 ${isThinking ? 'text-cyan-400 animate-pulse' : ''}`} />
         {memoryCount > 0 && (
           <span className="absolute top-1 right-1 w-4 h-4 bg-cyan-500 text-black text-[8px] font-black rounded-full flex items-center justify-center leading-none">
             {memoryCount > 99 ? '99+' : memoryCount}
@@ -150,12 +150,9 @@ export default function ActivityBar({
         <Zap className="w-5 h-5" />
       </button>
 
-      {/* 🤖 자율 에이전트 (실행 중이면 주황색 펄스 배지) */}
-      <button onClick={() => handleTab('agent')} className={tabCls('agent')} title="자율 에이전트 (OpenHands)">
-        <Bot className={`w-6 h-6 ${isAgentRunning ? 'text-orange-400' : ''}`} />
-        {isAgentRunning && (
-          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-orange-400 rounded-full animate-pulse" />
-        )}
+      {/* 💬 Discord 설정 (9채널 브릿지) */}
+      <button onClick={() => handleTab('discord')} className={tabCls('discord')} title="Discord 브릿지 설정">
+        <MessageSquare className="w-6 h-6 text-indigo-400" />
       </button>
 
       {/* ⚙️ 하단 고정 버튼 (설정 / 정보) */}

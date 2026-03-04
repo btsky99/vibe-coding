@@ -36,13 +36,12 @@ import MessagesPanel from './components/panels/MessagesPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import OrchestratorPanel from './components/panels/OrchestratorPanel';
-import MissionControlPanel from './components/panels/MissionControlPanel';
-import AutonomousPopup from './components/AutonomousPopup';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import SkillResultsPanel from './components/panels/SkillResultsPanel';
 import AgentPanel from './components/panels/AgentPanel';
+import DiscordConfigPanel from './components/panels/DiscordConfigPanel';
 /* ── 레이아웃 컴포넌트 — App.tsx 2차 분리에서 추출 ── */
 import TopMenuBar from './components/TopMenuBar';
 import ActivityBar from './components/ActivityBar';
@@ -61,7 +60,7 @@ function App() {
   // ─── 레이아웃 상태 ────────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
-  const [isAutoMode, setIsAutoMode] = useState(false);
+  // isAutoMode 제거 — 자율 주행 버튼은 agent 탭(자율 에이전트)으로 포커스 전환
   // activeMenu: 상단 메뉴 드롭다운 활성 상태 — 루트 div 클릭으로 닫기 위해 App에서 관리
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   // 사이드바 너비 — 드래그 리사이즈로 동적 조절 (최소 150px, 최대 600px)
@@ -71,7 +70,7 @@ function App() {
   const sidebarResizeStartWidth = useRef(260);
   // 터미널 레이아웃 모드 — '2x2'는 parseInt 불가, 직접 매핑
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('2');
-  const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8 };
+  const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8, '9':9 };
   const terminalCount = terminalCountMap[layoutMode] ?? 2;
 
   // ─── 앱 버전 + 업데이트 상태 ─────────────────────────────────────────
@@ -420,7 +419,6 @@ function App() {
   // 사이드바 탭 제목 매핑
   const sidebarTitle = {
     explorer: '파일 탐색기', search: '파일 검색',
-    'mission-control': '중앙 통제실 (AI)',
     messages: '메시지 채널', tasks: '태스크 보드',
     memory: '공유 메모리', git: 'Git 감시',
     mcp: 'MCP 관리자', skills: '스킬 결과',
@@ -475,8 +473,7 @@ function App() {
         onInstallTool={installTool}
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
-        isAutoMode={isAutoMode}
-        setIsAutoMode={setIsAutoMode}
+        onOpenMissionControl={() => setActiveTab('agent')}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -492,7 +489,6 @@ function App() {
           conflictCount={conflictCount}
           totalGitChanges={totalGitChanges}
           mcpCount={mcpInstalled.length}
-          isThinking={skillChain.status === 'running'}
           isAgentRunning={isAgentRunning}
         />
 
@@ -529,9 +525,6 @@ function App() {
             ) : activeTab === 'orchestrate' ? (
               /* AI 오케스트레이터 패널 */
               <OrchestratorPanel onWarningCount={setOrchWarningCount} />
-            ) : activeTab === 'mission-control' ? (
-              /* Mission Control 패널 */
-              <MissionControlPanel />
             ) : activeTab === 'hive' ? (
               /* 하이브 진단 패널 */
               <HivePanel />
@@ -550,6 +543,9 @@ function App() {
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} />
+            ) : activeTab === 'discord' ? (
+              /* 디스코드 설정 패널 */
+              <DiscordConfigPanel />
             ) : (
               /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
               <FileExplorer
@@ -606,12 +602,12 @@ function App() {
               </button>
               {/* 레이아웃 전환 버튼 그룹 */}
               <div className="flex items-center gap-1 bg-black/30 rounded-md p-0.5 ml-1 border border-white/5 flex-wrap">
-                {(['1', '2', '3', '4', '2x2', '6', '8'] as const).map(mode => (
+                {(['1', '2', '3', '4', '2x2', '6', '8', '9'] as const).map(mode => (
                   <button
                     key={mode}
                     onClick={() => setLayoutMode(mode)}
                     className={`px-1.5 h-5 rounded text-[10px] font-bold transition-all ${layoutMode === mode ? 'bg-primary text-white' : 'hover:bg-white/5 text-[#858585]'}`}
-                    title={mode === '4' ? '4 분할 (가로 4열)' : mode === '2x2' ? '4 분할 (2×2 격자)' : mode === '6' ? '6 분할 (3×2 격자)' : mode === '8' ? '8 분할 (4×2 격자)' : `${mode} 분할`}
+                    title={mode === '4' ? '4 분할 (가로 4열)' : mode === '2x2' ? '4 분할 (2×2 격자)' : mode === '6' ? '6 분할 (3×2 격자)' : mode === '8' ? '8 분할 (4×2 격자)' : mode === '9' ? '9 분할 (3×3 격자)' : `${mode} 분할`}
                   >
                     {mode}
                   </button>
@@ -629,7 +625,8 @@ function App() {
               layoutMode === '4' ? 'grid-cols-4' :
               layoutMode === '2x2' ? 'grid-cols-2 grid-rows-2' :
               layoutMode === '6' ? 'grid-cols-3 grid-rows-2' :
-              'grid-cols-4 grid-rows-2'
+              layoutMode === '8' ? 'grid-cols-4 grid-rows-2' :
+              'grid-cols-3 grid-rows-3'
             }`}>
               {slots.map(slotId => (
                 <TerminalSlot
@@ -662,21 +659,6 @@ function App() {
         />
       ))}
 
-      {/* ── 자율 주행 모드 팝업 ── */}
-      <AutonomousPopup 
-        isOpen={isAutoMode} 
-        onClose={() => setIsAutoMode(false)}
-        thoughts={[
-          { time: '19:45:10', agent: 'Gemini', text: '자율 주행 모드를 활성화했습니다. 시스템 분석 중...' },
-          { time: '19:45:12', agent: 'Gemini', text: '프로젝트 구조를 확인하고 자율 구현 계획을 수립합니다.' },
-          { time: '19:45:15', agent: 'Gemini', text: '메인 패널에 자율 주행 팝업 UI를 성공적으로 통합했습니다.' },
-        ]}
-        planSteps={[
-          { title: '자율 주행 팝업 컴포넌트 생성', status: 'done' },
-          { title: 'App.tsx 상태 및 레이아웃 통합', status: 'running' },
-          { title: 'TopMenuBar 🧠 버튼 추가', status: 'pending' },
-        ]}
-      />
     </div>
   );
 }
