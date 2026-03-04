@@ -31,7 +31,15 @@ import { motion } from 'framer-motion';
 import { Menu, ChevronRight, ChevronDown, RotateCw, X } from 'lucide-react';
 /* ── 공유 상수/타입 ── */
 import { API_BASE, OpenFile, TreeItem } from './constants';
-/* ── 탭 패널 컴포넌트 — 각 탭 영역을 독립 파일로 관리 ── */
+/* ── 레이아웃 컴포넌트 — App.tsx 2차 분리에서 추출 ── */
+import TopMenuBar from './components/TopMenuBar';
+import ActivityBar from './components/ActivityBar';
+import FileExplorer from './components/FileExplorer';
+import MessageComposer from './components/MessageComposer';
+/* ── 유틸리티 컴포넌트 ── */
+import FloatingWindow from './components/FloatingWindow';
+import TerminalSlot from './components/TerminalSlot';
+/* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import MessagesPanel from './components/panels/MessagesPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
@@ -41,22 +49,25 @@ import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import SkillResultsPanel from './components/panels/SkillResultsPanel';
 import AgentPanel from './components/panels/AgentPanel';
-import DiscordConfigPanel from './components/panels/DiscordConfigPanel';
-/* ── 레이아웃 컴포넌트 — App.tsx 2차 분리에서 추출 ── */
-import TopMenuBar from './components/TopMenuBar';
-import ActivityBar from './components/ActivityBar';
-import FileExplorer from './components/FileExplorer';
-import MessageComposer from './components/MessageComposer';
-/* ── 유틸리티 컴포넌트 ── */
-import FloatingWindow from './components/FloatingWindow';
-import TerminalSlot from './components/TerminalSlot';
+import DiscordSettingsModal from './components/DiscordSettingsModal';
+/* ── 대시보드 페이지 — 메인 페이지와 완전히 분리된 독립 페이지 ── */
+import DashboardPage from './pages/DashboardPage';
 /* ── 공유 타입 ── */
 import { LogRecord, AgentMessage, MemoryEntry } from './types';
 
-// 레이아웃 모드 타입 정의 — TopMenuBar와 공유
-type LayoutMode = '1' | '2' | '3' | '4' | '2x2' | '6' | '8';
+// 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
+type LayoutMode = '1' | '2' | '3' | '4' | '2x2' | '6' | '8' | '9';
+
+// 페이지 타입 — 'main': 터미널 메인 페이지, 'dashboard': 대시보드 별도 페이지
+type PageType = 'main' | 'dashboard';
 
 function App() {
+  // ─── 현재 페이지 — 메인(터미널) / 대시보드 전환 ───────────────────────
+  const [currentPage, setCurrentPage] = useState<PageType>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('page') as PageType) || 'main';
+  });
+
   // ─── 레이아웃 상태 ────────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
@@ -103,7 +114,11 @@ function App() {
 
   // ─── 플로팅 윈도우 상태 (파일 퀵 뷰) ─────────────────────────────────
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
-  const [maxZIndex, setMaxZIndex] = useState(100);
+  const [_maxZIndex, setMaxZIndex] = useState(100);
+
+  // ─── 설정 팝업 상태 (메인 창 내부 팝업용) ──────────────────────────────
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsZIndex, setSettingsZIndex] = useState(1000);
 
   // ─── 파일 목록 강제 새로고침 트리거 (헤더 새로고침 버튼 → FileExplorer) ──
   const [fileRefreshKey, setFileRefreshKey] = useState(0);
@@ -331,16 +346,19 @@ function App() {
   };
 
   // 도움말 문서 — 플로팅 윈도우로 열기 (이미 열린 경우 앞으로 가져오기)
+  // setMaxZIndex 함수형 업데이트로 stale closure 방지 (bringToFront와 동일 패턴)
   const openHelpDoc = (topic: string, title: string) => {
     const existing = openFiles.find(f => f.path === `help:${topic}`);
     if (existing) { bringToFront(existing.id); return; }
     const newId = Date.now().toString();
-    const newZIndex = maxZIndex + 1;
-    setMaxZIndex(newZIndex);
-    setOpenFiles(prev => [...prev, {
-      id: newId, name: title, path: `help:${topic}`,
-      content: 'Loading...', isLoading: true, zIndex: newZIndex
-    }]);
+    setMaxZIndex(prev => {
+      const newZIndex = prev + 1;
+      setOpenFiles(files => [...files, {
+        id: newId, name: title, path: `help:${topic}`,
+        content: 'Loading...', isLoading: true, zIndex: newZIndex
+      }]);
+      return newZIndex;
+    });
     fetch(`${API_BASE}/api/help?topic=${topic}`)
       .then(res => res.json())
       .then(data => {
@@ -357,9 +375,26 @@ function App() {
   };
 
   // ─── 플로팅 윈도우 조작 ────────────────────────────────────────────────
+  // setMaxZIndex 콜백 안에서 setOpenFiles를 호출해 stale closure 방지
   const bringToFront = (id: string) => {
-    setMaxZIndex(prev => prev + 1);
-    setOpenFiles(prev => prev.map(f => f.id === id ? { ...f, zIndex: maxZIndex + 1 } : f));
+    setMaxZIndex(prev => {
+      const newZ = prev + 1;
+      setOpenFiles(files => files.map(f => f.id === id ? { ...f, zIndex: newZ } : f));
+      return newZ;
+    });
+  };
+
+  const bringSettingsToFront = () => {
+    setMaxZIndex(prev => {
+      const newZ = prev + 1;
+      setSettingsZIndex(newZ);
+      return newZ;
+    });
+    setIsSettingsOpen(true);
+  };
+
+  const openDiscordNewWindow = () => {
+    window.open('/?page=dashboard&tab=discord', 'vibe-discord-settings', 'width=1200,height=900');
   };
 
   const closeFile = (id: string) => setOpenFiles(prev => prev.filter(f => f.id !== id));
@@ -386,17 +421,20 @@ function App() {
   };
 
   // FileExplorer의 onOpenFile 콜백 — 파일 클릭 시 FloatingWindow 생성
+  // setMaxZIndex 함수형 업데이트로 stale closure 방지 (bringToFront와 동일 패턴)
   const handleOpenFile = (item: TreeItem) => {
     const existing = openFiles.find(f => f.path === item.path);
     if (existing) { bringToFront(existing.id); return; }
     const newId = Date.now().toString();
-    const newZIndex = maxZIndex + 1;
-    setMaxZIndex(newZIndex);
     const isImg = /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(item.name);
-    setOpenFiles(prev => [...prev, {
-      id: newId, name: item.name, path: item.path,
-      content: isImg ? '' : 'Loading...', isLoading: !isImg, zIndex: newZIndex
-    }]);
+    setMaxZIndex(prev => {
+      const newZIndex = prev + 1;
+      setOpenFiles(files => [...files, {
+        id: newId, name: item.name, path: item.path,
+        content: isImg ? '' : 'Loading...', isLoading: !isImg, zIndex: newZIndex
+      }]);
+      return newZIndex;
+    });
     if (!isImg) {
       fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(item.path)}`)
         .then(res => res.json())
@@ -418,13 +456,29 @@ function App() {
 
   // 사이드바 탭 제목 매핑
   const sidebarTitle = {
-    explorer: '파일 탐색기', search: '파일 검색',
-    messages: '메시지 채널', tasks: '태스크 보드',
-    memory: '공유 메모리', git: 'Git 감시',
-    mcp: 'MCP 관리자', skills: '스킬 결과',
-    orchestrate: 'AI 오케스트레이터', hive: '하이브 진단',
-    agent: '🤖 자율 에이전트',
+    explorer: '파일 탐색기',
+    search: '파일 검색',
+    messages: '메시지 채널',
+    tasks: '태스크보드',
+    memory: '공유 메모리',
+    orchestrate: 'AI 오케스트레이터',
+    hive: '하이브 진단 / 스킬',
+    git: 'Git 감시',
+    mcp: 'MCP 관리자',
+    agent: '자율 에이전트',
+    skills: '스킬 실행 결과',
   }[activeTab] ?? activeTab;
+
+  // ─── 대시보드 페이지 — 완전히 독립된 별도 페이지 렌더링 ───────────────
+  if (currentPage === 'dashboard') {
+    return (
+      <DashboardPage
+        onBack={() => setCurrentPage('main')}
+        currentPath={currentPath}
+        onSetIsAgentRunning={setIsAgentRunning}
+      />
+    );
+  }
 
   return (
     <div
@@ -481,6 +535,9 @@ function App() {
         <ActivityBar
           activeTab={activeTab}
           onTabChange={(tab) => { setActiveTab(tab); setIsSidebarOpen(true); }}
+          onOpenDashboard={() => window.open(`/?page=dashboard&tab=agent`, 'vibe-dashboard', 'width=1200,height=900')}
+          onOpenSettings={bringSettingsToFront}
+          onOpenDiscordNewWindow={openDiscordNewWindow}
           skillChainStatus={skillChain.status}
           orchWarningCount={orchWarningCount}
           unreadMsgCount={unreadMsgCount}
@@ -543,9 +600,6 @@ function App() {
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} />
-            ) : activeTab === 'discord' ? (
-              /* 디스코드 설정 패널 */
-              <DiscordConfigPanel />
             ) : (
               /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
               <FileExplorer
@@ -584,7 +638,7 @@ function App() {
               )}
               {/* 경로 브레드크럼 */}
               <div className="text-[11px] text-[#969696] truncate font-mono flex items-center">
-                {currentPath.split('/').filter(Boolean).map((p, i) => (
+                {currentPath.split(/[/\\]/).filter(Boolean).map((p, i) => (
                   <span key={i} className="flex items-center">
                     <ChevronRight className="w-3 h-3 mx-1 text-white/20" />{p}
                   </span>
@@ -617,8 +671,8 @@ function App() {
           </header>
 
           {/* 터미널 그리드 — layoutMode에 따른 열/행 분할 */}
-          <main className="flex-1 p-2 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
-            <div className={`min-h-full w-full gap-2 grid ${
+          <main className="flex-1 p-2 bg-[#1e1e1e] overflow-hidden">
+            <div className={`h-full w-full gap-2 grid ${
               layoutMode === '1' ? 'grid-cols-1' :
               layoutMode === '2' ? 'grid-cols-2' :
               layoutMode === '3' ? 'grid-cols-3' :
@@ -627,7 +681,7 @@ function App() {
               layoutMode === '6' ? 'grid-cols-3 grid-rows-2' :
               layoutMode === '8' ? 'grid-cols-4 grid-rows-2' :
               'grid-cols-3 grid-rows-3'
-            }`}>
+            }`} style={{ gridAutoRows: '1fr' }}>
               {slots.map(slotId => (
                 <TerminalSlot
                   key={slotId}
@@ -658,6 +712,14 @@ function App() {
           handleSaveFile={handleSaveFile}
         />
       ))}
+
+      {/* ── 디스코드 설정 팝업 (메인 창 내부) ── */}
+      <DiscordSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        zIndex={settingsZIndex}
+        bringToFront={bringSettingsToFront}
+      />
 
     </div>
   );

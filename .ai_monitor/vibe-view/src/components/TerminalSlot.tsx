@@ -512,19 +512,13 @@ export default function TerminalSlot({
           </div>
 
           {/* 배경 로그 (블러 처리하여 생동감 부여) */}
-          <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1.5 custom-scrollbar blur-[4px] opacity-10 pointer-events-none scale-95 origin-center">
-            {slotLogs.map((log, idx) => (
-              <div key={idx} className="flex items-start gap-2 border-l-2 border-primary/30 pl-2 py-0.5 bg-white/2 rounded-r">
-                <span className="text-primary font-bold whitespace-nowrap opacity-80">[{log.agent}]</span>
-                <span className="flex-1 text-[#cccccc] break-all leading-relaxed whitespace-pre-wrap">{log.trigger}</span>
+          <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1 custom-scrollbar opacity-20">
+            {slotLogs.slice(-30).map((log, idx) => (
+              <div key={idx} className="flex items-start gap-2 border-l border-primary/20 pl-2 py-0.5">
+                <span className="text-primary/60 font-bold whitespace-nowrap">[{log.agent}]</span>
+                <span className="flex-1 text-[#aaaaaa] break-all leading-relaxed whitespace-pre-wrap">{log.trigger}</span>
               </div>
             ))}
-            {slotLogs.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-white/10 italic">
-                <Cpu className="w-8 h-8 mb-2 opacity-10" />
-                System ready...
-              </div>
-            )}
           </div>
         </div>
       )}

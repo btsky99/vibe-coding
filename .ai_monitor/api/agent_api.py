@@ -13,12 +13,25 @@
 #   - handle_stop: POST /api/agent/stop — 실행 중인 프로세스 강제 종료
 #   - handle_status: GET /api/agent/status — 현재 상태 반환
 #   - handle_runs: GET /api/agent/runs — 최근 실행 히스토리 반환
+# [2026-03-05] Claude: 터미널 상태 감지 범위 확장
+#   - _merge_live_file_status: idle만 → idle+done 슬롯도 running으로 갱신 허용
+#   - handle_terminals 외부 Gemini 매핑: idle만 → idle+done 슬롯도 허용
+#   - 이전 작업이 done으로 끝난 터미널에 새 Gemini 실행이 시작돼도 상황판에 표시
+# [2026-03-05] Claude: 외부 Gemini 감지 기능 추가
+#   - _detect_external_gemini(): ~/.gemini/tmp/*/chats/ 600초 이내 수정 파일 스캔
+#   - _merge_live_file_status(): agent_live.jsonl 읽어 터미널별 상태 병합
+#   - handle_terminals(): 감지된 외부 Gemini + agent_live.jsonl 상태 오버레이
+#   - 대시보드 API 없이 터미널에서 직접 실행된 Gemini도 상황판에 표시
+# [2026-03-04] Claude: 레이스 컨디션 수정
+#   - _run_gate Lock 추가: 상태 체크 → 스레드 시작 구간을 원자적으로 보호
+#   - 동시 요청 시 중복 실행 방지 (동일 태스크 여러 번 실행 버그 수정)
 # ------------------------------------------------------------------------
 """
 
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 # ─── cli_agent 모듈 경로 등록 ─────────────────────────────────────────────────
@@ -79,29 +92,53 @@ def handle_run(handler) -> None:
     task = data.get('task', '').strip()
     cli_choice = data.get('cli', 'auto')
     cwd = data.get('cwd', None)
+    terminal_id = data.get('terminal_id', 'T1')  # 요청 터미널 식별자 (기본값: T1, T1~T8만 유효)
+    # "2" → "T2" 정규화: 숫자만 오면 T 접두사 자동 추가 (hook_bridge TERMINAL_ID 미설정 케이스)
+    if terminal_id and terminal_id.isdigit():
+        terminal_id = f'T{terminal_id}'
 
     # 빈 지시 거부
     if not task:
         _json_response(handler, {'error': 'empty_task'}, 400)
         return
 
-    # 이미 실행 중이면 거부
-    current = cli_agent.get_status()
-    if current['status'] == 'running':
-        _json_response(handler, {'error': 'already_running',
-                                 'current': current['current']}, 409)
-        return
+    # cli_agent._status_lock 안에서 체크 → 상태 예약 → 스레드 시작을 원자적으로 수행
+    # Lock 해제 전에 _run_status를 'running'으로 설정하므로 다음 요청은
+    # Lock 획득 시 이미 'running'을 보게 되어 중복 실행이 완전히 차단됨
+    with cli_agent._status_lock:
+        # 이미 실행 중이면 거부
+        if cli_agent._run_status == 'running':
+            _json_response(handler, {'error': 'already_running',
+                                     'current': cli_agent._current_run}, 409)
+            return
 
-    # CLI 자동 선택
-    if cli_choice == 'auto':
-        chosen_cli = cli_agent.route_task(task)
-    else:
-        chosen_cli = cli_choice
+        # CLI 자동 선택
+        # 'orchestrate' 요청: vibe-orchestrate 스킬을 Claude에게 지시로 래핑
+        # Claude가 /vibe-orchestrate 스킬을 인식하여 자동으로 스킬 체인 수립
+        if cli_choice == 'orchestrate':
+            task = f'/vibe-orchestrate\n\n{task}'
+            chosen_cli = 'claude'
+            cli_choice = 'claude'
+        elif cli_choice == 'auto':
+            chosen_cli = cli_agent.route_task(task)
+        else:
+            chosen_cli = cli_choice
 
-    # 백그라운드 스레드에서 실행 (HTTP 응답을 블로킹하지 않음)
+        # 상태를 'running'으로 선점 (Lock 안에서 설정해야 원자적 보장)
+        cli_agent._run_status = 'running'
+        cli_agent._current_run = {
+            'id': 'pending',
+            'task': task,
+            'cli': chosen_cli,
+            'ts': '',
+            'cwd': cwd or '',
+            'terminal_id': terminal_id,  # 어느 터미널에서 요청했는지 추적
+        }
+
+    # 백그라운드 스레드에서 실행 (Lock 밖에서 시작해야 run() 내부 Lock 획득 가능)
     t = threading.Thread(
         target=cli_agent.run,
-        args=(task, cli_choice, cwd),
+        args=(task, cli_choice, cwd, terminal_id),
         daemon=True,
         name=f'cli-agent-{chosen_cli}',
     )
@@ -112,6 +149,7 @@ def handle_run(handler) -> None:
         'cli': chosen_cli,
         'run_id': 'pending',  # 실제 run_id는 SSE 이벤트로 전달
         'task': task,
+        'terminal_id': terminal_id,
     })
 
 
@@ -162,6 +200,203 @@ def handle_runs(handler) -> None:
     _json_response(handler, runs)
 
 
+def _detect_external_gemini() -> list[dict]:
+    """~/.gemini/tmp/ 세션 파일을 스캔하여 외부 실행 중인 Gemini 세션을 감지합니다.
+
+    최근 60초 이내에 수정된 세션 파일이 있으면 해당 프로젝트의 Gemini가
+    외부 터미널에서 활성 상태라고 판단합니다.
+
+    반환값: [{ 'project': str, 'session_file': str, 'ts': str }, ...]
+    """
+    gemini_tmp = Path.home() / '.gemini' / 'tmp'
+    if not gemini_tmp.exists():
+        return []
+
+    active = []
+    now = time.time()
+    # 60초 이내 수정된 세션 파일 탐색
+    for proj_dir in gemini_tmp.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        chats_dir = proj_dir / 'chats'
+        if not chats_dir.exists():
+            continue
+        for sf in sorted(chats_dir.glob('session-*.json'), reverse=True):
+            try:
+                mtime = sf.stat().st_mtime
+                if now - mtime <= 600:  # 600초(10분) 이내 수정 = 활성 세션
+                    active.append({
+                        'project': proj_dir.name,
+                        'session_file': sf.name,
+                        'ts': sf.stat().st_mtime,
+                    })
+                    break  # 프로젝트당 최신 1개만
+            except OSError:
+                continue
+    return active
+
+
+def _merge_live_file_status(terminals: dict) -> None:
+    """agent_live.jsonl의 최근 이벤트를 읽어 터미널별 상태를 병합합니다.
+
+    agent_shell.py(T1~T8.bat)가 직접 실행한 Gemini/Claude 작업은
+    cli_agent._terminals 메모리에 반영되지 않습니다.
+    이 함수는 agent_live.jsonl의 최근 이벤트를 분석하여
+    각 터미널의 실제 상태(running/done/error)를 덮어씁니다.
+
+    판단 규칙:
+    - 터미널별로 가장 최근 started 이벤트를 찾음
+    - 그 이후에 done 이벤트가 없으면 running으로 표시
+    - 최근 10분(600초) 이내 이벤트만 고려 (오래된 이력 무시)
+    """
+    import datetime as _dt
+
+    # agent_live.jsonl 경로: .ai_monitor/data/agent_live.jsonl
+    _api_dir = Path(__file__).resolve().parent
+    live_file = _api_dir.parent / 'data' / 'agent_live.jsonl'
+    if not live_file.exists():
+        return
+
+    try:
+        lines = live_file.read_text(encoding='utf-8').strip().splitlines()
+    except Exception:
+        return
+
+    now = time.time()
+    cutoff = 600  # 10분 이내 이벤트만 처리
+
+    # 터미널별 최근 상태를 추적할 임시 딕셔너리
+    # { 'T1': {'last_started': {...}, 'last_done': {...}} }
+    terminal_events: dict = {}
+
+    for line in lines[-500:]:  # 마지막 500줄만 처리 (성능 보호)
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+
+        # agent_shell.py는 'terminal' 키를, cli_agent.py는 'terminal_id' 키를 사용
+        tid = ev.get('terminal') or ev.get('terminal_id', '')
+        if not tid or not tid.startswith('T'):
+            continue
+
+        ts_str = ev.get('ts', '')
+        if not ts_str:
+            continue
+
+        # ISO 타임스탬프를 epoch 초로 변환 (시간 범위 필터링용)
+        try:
+            ts_epoch = _dt.datetime.fromisoformat(ts_str).timestamp()
+        except Exception:
+            continue
+
+        if now - ts_epoch > cutoff:
+            continue  # 10분 이전 이벤트 무시
+
+        if tid not in terminal_events:
+            terminal_events[tid] = {'last_started': None, 'last_done': None}
+
+        ev_type = ev.get('type', '')
+        if ev_type == 'started':
+            terminal_events[tid]['last_started'] = ev
+        elif ev_type in ('done', 'stopped', 'error'):
+            # done 이벤트는 started 이후에만 유효하도록 ts 비교
+            current_done = terminal_events[tid].get('last_done')
+            if current_done is None or ts_str > current_done.get('ts', ''):
+                terminal_events[tid]['last_done'] = ev
+
+    # 수집한 이벤트로 terminals 딕셔너리 업데이트
+    for tid, evs in terminal_events.items():
+        started = evs.get('last_started')
+        done = evs.get('last_done')
+
+        if started is None:
+            continue
+
+        # started가 done보다 나중이면 → 아직 실행 중
+        if done is None or started.get('ts', '') > done.get('ts', ''):
+            # idle 또는 done 슬롯에 덮어씀 (cli_agent가 running으로 추적 중인 슬롯만 보호)
+            # 이전 작업이 done으로 끝난 슬롯도 새 실행이 시작되면 running으로 갱신해야 함
+            if tid in terminals and terminals[tid].get('status') != 'running':
+                terminals[tid].update({
+                    'status': 'running',
+                    'task': started.get('task', ''),
+                    'cli': started.get('cli', ''),
+                    'run_id': started.get('run_id', ''),
+                    'ts': started.get('ts', ''),
+                    'last_line': '',
+                    'pipeline_stage': 'analyzing',  # 외부 실행: 분석 단계부터 시작
+                    'external': True,  # agent_live.jsonl 기반 감지 플래그
+                })
+        else:
+            # done 이벤트가 있고 started보다 나중 → 완료 상태
+            # pipeline_stage가 없으면 done으로 기본 설정
+            if tid in terminals and not terminals[tid].get('pipeline_stage'):
+                terminals[tid]['pipeline_stage'] = 'done'
+
+
+def handle_terminals(handler) -> None:
+    """GET /api/agent/terminals — T1~T8 터미널별 에이전트 상태 반환.
+
+    상황판(AgentPanel 상황판 탭)이 3초마다 폴링합니다.
+    외부 터미널에서 직접 실행 중인 Gemini도 감지하여 반영합니다.
+
+    응답:
+        {
+            "T1": { "status": "running", "task": "...", "cli": "claude", "ts": "...", "last_line": "..." },
+            "T2": { "status": "idle", ... },
+            ...
+            "T8": { "status": "done", ... }
+        }
+    """
+    if not _CLI_AGENT_AVAILABLE:
+        # cli_agent 미사용 시 8개 터미널 idle 반환
+        _json_response(handler, {
+            f'T{i}': {'status': 'idle', 'task': '', 'cli': '', 'run_id': '', 'ts': '', 'last_line': ''}
+            for i in range(1, 9)
+        })
+        return
+
+    terminals = cli_agent.get_terminals()
+
+    # ── agent_live.jsonl 기반 터미널 상태 병합 (agent_shell.py 실행 감지) ───────
+    # T1.bat ~ T8.bat를 통해 agent_shell.py로 실행한 Gemini/Claude는
+    # cli_agent._terminals 메모리에 반영되지 않으므로, 로그 파일에서 읽어 병합합니다.
+    _merge_live_file_status(terminals)
+
+    # ── 외부 실행 중인 Gemini 세션 감지 및 오버레이 ──────────────────────────
+    # 대시보드 API를 통하지 않고 직접 터미널에서 실행된 Gemini를 감지합니다.
+    # 감지된 세션은 이미 idle 상태인 가장 낮은 번호 터미널 슬롯에 매핑합니다.
+    external_sessions = _detect_external_gemini()
+    if external_sessions:
+        import datetime
+        for session in external_sessions:
+            # idle 또는 done 슬롯 찾기 (T1부터 순서대로)
+            # 이전 작업이 done으로 끝난 슬롯도 외부 Gemini 감지로 재사용 가능
+            target_slot = None
+            for i in range(1, 9):
+                slot_key = f'T{i}'
+                if terminals[slot_key]['status'] in ('idle', 'done'):
+                    target_slot = slot_key
+                    break
+
+            if target_slot is None:
+                break  # 비어 있는 슬롯 없음
+
+            ts_str = datetime.datetime.fromtimestamp(session['ts']).isoformat()
+            terminals[target_slot].update({
+                'status': 'running',
+                'task': f'[외부] {session["project"]} 프로젝트',
+                'cli': 'gemini',
+                'run_id': '',
+                'ts': ts_str,
+                'last_line': f'Gemini CLI 활성 — {session["session_file"]}',
+                'external': True,  # 외부 감지 플래그 (UI 구분용)
+            })
+
+    _json_response(handler, terminals)
+
+
 def handle_get(handler, path: str) -> bool:
     """GET 요청 라우터 — server.py do_GET에서 호출.
 
@@ -172,6 +407,9 @@ def handle_get(handler, path: str) -> bool:
         return True
     if path == '/api/agent/runs':
         handle_runs(handler)
+        return True
+    if path == '/api/agent/terminals':
+        handle_terminals(handler)
         return True
     return False
 

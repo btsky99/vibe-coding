@@ -8,6 +8,11 @@
  *          하나의 SSE 스트림을 공유하여 모든 뷰를 동시 업데이트합니다.
  *
  * REVISION HISTORY:
+ * - 2026-03-05 Claude: [신규] 터미널별 상황판 — T1~T8 카드 그리드
+ *   - 상황판 탭: 1개 파이프라인 → T1~T8 독립 카드 2×4 그리드로 전환
+ *   - /api/agent/terminals 3초 폴링으로 터미널별 상태 실시간 갱신
+ *   - 카드 클릭 → 해당 터미널 선택 → 다음 실행이 그 터미널 ID로 전송
+ *   - 할때마다 탭 전환 없이 한 창에서만 보임 (기본 탭 = 상황판)
  * - 2026-03-04 Claude: 최초 구현 (AgentPanel 단독)
  * - 2026-03-04 Claude: [통합 리팩터] AgentPanel + MissionControlPanel + AutonomousPopup 통합
  *   - 세 패널 → 하나의 탭형 패널로 중복 제거
@@ -40,13 +45,18 @@
  *   - SSE 재연결 딜레이 5000ms→2000ms 단축 (출력 공백 구간 최소화)
  * - 2026-03-04 Claude: [버그수정] es.onopen → 재연결 직후 즉시 상태 동기화
  *   - SSE 재연결(2초) 후 done 이벤트가 유실된 경우 3초 폴 대기 없이 즉시 복구
+ * - 2026-03-05 Claude: [신규] 상황판 탭 추가 — 워크플로우 상태 머신 시각화
+ *   - 터미널 raw 출력 대신 분석→수정→검증→완료 단계를 시각적으로 표시
+ *   - 출력 파싱으로 현재 단계 자동 감지 (키워드 기반)
+ *   - 이슈 발생 시 루프 카운터 표시 (분석→수정→검증 재시작)
  * ------------------------------------------------------------------------
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot, Play, Square, RotateCw, ChevronDown, Clock,
-  Brain, CheckCircle2, Circle, XCircle, Terminal,
+  Brain, CheckCircle2, Circle, XCircle, Terminal, LayoutDashboard,
+  Search, Pencil, ShieldCheck, RefreshCw,
 } from 'lucide-react';
 
 // 현재 접속 포트 기반으로 API 주소 자동 결정
@@ -54,9 +64,78 @@ const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
 
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
-type AgentStatus = 'idle' | 'running' | 'done' | 'error' | 'unavailable';
-type CliChoice   = 'auto' | 'claude' | 'gemini';
-type ActiveTab   = 'terminal' | 'thoughts' | 'history';
+type AgentStatus   = 'idle' | 'running' | 'done' | 'error' | 'unavailable';
+type CliChoice     = 'auto' | 'claude' | 'gemini';
+type ActiveTab     = 'workflow' | 'terminal' | 'thoughts' | 'history';
+
+// ─── 워크플로우 단계 타입 ─────────────────────────────────────────────────────
+type WorkflowStage = 'idle' | 'analyzing' | 'modifying' | 'verifying' | 'done' | 'error';
+
+/** 출력 텍스트 한 줄을 보고 워크플로우 단계를 추론합니다.
+ *  키워드 기반 휴리스틱: Claude Code의 도구 호출 패턴을 우선 감지 */
+function detectStage(line: string): WorkflowStage | null {
+  const l = line.toLowerCase();
+
+  // 수정 (Edit/Write/Create 도구 호출) — 분석보다 먼저 체크
+  if (
+    l.startsWith('● edit') || l.startsWith('● write') || l.startsWith('● create') ||
+    l.includes('editfile') || l.includes('writefile') || l.includes('createfile') ||
+    l.includes('notebookedit') ||
+    l.includes(' edit ') || l.includes('수정 중') || l.includes('파일 수정') ||
+    l.includes('코드 수정') || l.includes('변경 중')
+  ) return 'modifying';
+
+  // 검증 (Bash/Run/Test 도구 호출)
+  if (
+    l.startsWith('● bash') || l.startsWith('● run') ||
+    l.includes('running test') || l.includes('npm test') || l.includes('pytest') ||
+    l.includes('검증 중') || l.includes('테스트 중') || l.includes('빌드 중') ||
+    l.includes('실행 중...') || (l.includes('bash') && l.includes('tool'))
+  ) return 'verifying';
+
+  // 분석 (Read/Glob/Grep/Search 도구 호출)
+  if (
+    l.startsWith('● read') || l.startsWith('● glob') || l.startsWith('● grep') ||
+    l.startsWith('● search') || l.startsWith('● agent') ||
+    l.includes('readfile') || l.includes('분석 중') || l.includes('파악 중') ||
+    l.includes('코드 분석') || l.includes('let me read') || l.includes('looking at') ||
+    l.includes('확인 중') || l.includes('조사 중')
+  ) return 'analyzing';
+
+  // 완료
+  if (
+    l.includes('완료') || l.includes('✓') || l.includes('모든 작업') ||
+    l.includes('성공적') || (l.includes('done') && l.length < 30)
+  ) return 'done';
+
+  // 오류/이슈
+  if (
+    l.startsWith('[오류]') || l.startsWith('error:') || l.includes('✗') ||
+    l.includes('실패') || l.includes('오류 발생')
+  ) return 'error';
+
+  return null;
+}
+
+// 단계 설명 텍스트
+const STAGE_LABEL: Record<WorkflowStage, string> = {
+  idle:       '대기 중',
+  analyzing:  '분석 중',
+  modifying:  '수정 중',
+  verifying:  '검증 중',
+  done:       '완료',
+  error:      '오류',
+};
+
+// ─── 터미널별 상태 타입 ──────────────────────────────────────────────────────
+interface TerminalState {
+  status: 'idle' | 'running' | 'done' | 'error';
+  task: string;       // 마지막/현재 실행 지시
+  cli: string;        // claude | gemini | ''
+  run_id: string;
+  ts: string;         // ISO 타임스탬프
+  last_line: string;  // 마지막 출력 줄 (워크플로우 단계 감지용)
+}
 
 interface AgentRun {
   id: string;
@@ -124,6 +203,204 @@ function StatusIcon({ status }: { status: string }) {
   return <Circle className="w-3.5 h-3.5 text-white/20 shrink-0" />;
 }
 
+// ─── 단계 스타일 상수 ────────────────────────────────────────────────────────
+
+const STAGE_COLOR: Record<WorkflowStage, string> = {
+  idle:       'text-white/20',
+  analyzing:  'text-blue-400',
+  modifying:  'text-yellow-400',
+  verifying:  'text-purple-400',
+  done:       'text-green-400',
+  error:      'text-red-400',
+};
+
+// ─── 워크플로우 파이프라인 컴포넌트 ─────────────────────────────────────────
+/** 분석 → 수정 → 검증 → 완료 단계를 가로 스텝 형태로 시각화.
+ *  현재 단계를 강조하고, 이슈 발생 시 루프 카운터를 표시합니다. */
+function WorkflowPipeline({
+  stage, loopCount, agentStatus,
+}: {
+  stage: WorkflowStage;
+  loopCount: number;
+  agentStatus: AgentStatus;
+}) {
+  // 파이프라인 고정 단계 (idle/error는 별도 처리)
+  const steps: { id: WorkflowStage; label: string; icon: React.ReactNode }[] = [
+    { id: 'analyzing', label: '분석',  icon: <Search       className="w-4 h-4" /> },
+    { id: 'modifying', label: '수정',  icon: <Pencil       className="w-4 h-4" /> },
+    { id: 'verifying', label: '검증',  icon: <ShieldCheck  className="w-4 h-4" /> },
+    { id: 'done',      label: '완료',  icon: <CheckCircle2 className="w-4 h-4" /> },
+  ];
+
+  // 단계 순서 인덱스 (done=-1이면 완료)
+  const ORDER: Record<string, number> = {
+    analyzing: 0, modifying: 1, verifying: 2, done: 3,
+  };
+  const currentIdx = ORDER[stage] ?? -1;
+
+  return (
+    <div className="bg-black/20 rounded border border-white/5 p-3">
+      {/* 루프 배지 */}
+      {loopCount > 0 && (
+        <div className="flex items-center gap-1 mb-2 text-[9px] text-orange-400/80">
+          <RefreshCw className="w-3 h-3" />
+          <span>재시도 {loopCount}회 — 이슈 발견 후 재분석 중</span>
+        </div>
+      )}
+
+      {/* 스텝 체인 */}
+      <div className="flex items-center gap-0">
+        {steps.map((step, i) => {
+          const isActive   = step.id === stage && agentStatus === 'running';
+          const isDone     = currentIdx > i || (stage === 'done');
+          const isError    = stage === 'error' && currentIdx === i;
+          const isIdle     = agentStatus === 'idle' || stage === 'idle';
+
+          return (
+            <React.Fragment key={step.id}>
+              {/* 연결선 (첫 번째 스텝 앞에는 없음) */}
+              {i > 0 && (
+                <div className={`flex-1 h-px mx-1 transition-all duration-500 ${
+                  isDone ? 'bg-green-500/60' : 'bg-white/10'
+                }`} />
+              )}
+
+              {/* 스텝 원 */}
+              <div className={`flex flex-col items-center gap-1 transition-all duration-300`}>
+                <div className={`
+                  w-9 h-9 rounded-full flex items-center justify-center
+                  border-2 transition-all duration-300
+                  ${isActive  ? 'border-yellow-400 text-yellow-400 bg-yellow-400/10 shadow-[0_0_8px_rgba(250,204,21,0.4)] animate-pulse' :
+                    isError   ? 'border-red-400    text-red-400    bg-red-400/10' :
+                    isDone    ? 'border-green-500  text-green-400  bg-green-500/10' :
+                    isIdle    ? 'border-white/10   text-white/15' :
+                                'border-white/20   text-white/25'}
+                `}>
+                  {isActive
+                    ? <div className="w-3 h-3 rounded-full border-2 border-yellow-400 border-t-transparent animate-spin" />
+                    : isDone
+                      ? <CheckCircle2 className="w-4 h-4" />
+                      : step.icon
+                  }
+                </div>
+                <span className={`text-[9px] font-bold uppercase tracking-tight ${
+                  isActive ? 'text-yellow-400' :
+                  isDone   ? 'text-green-400/70' :
+                  isError  ? 'text-red-400' :
+                             'text-white/25'
+                }`}>
+                  {step.label}
+                </span>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {/* 오류/완료 상태 메시지 */}
+      {stage === 'error' && agentStatus !== 'running' && (
+        <div className="mt-2 text-[9px] text-red-400/80 flex items-center gap-1">
+          <XCircle className="w-3 h-3" /> 오류 발생 — 다시 실행하여 재시도
+        </div>
+      )}
+      {stage === 'done' && (
+        <div className="mt-2 text-[9px] text-green-400/80 flex items-center gap-1">
+          <CheckCircle2 className="w-3 h-3" /> 모든 단계 완료
+        </div>
+      )}
+      {(stage === 'idle' || agentStatus === 'idle') && (
+        <div className="mt-2 text-[9px] text-white/20 text-center">
+          실행 전 — 지시를 입력하고 실행하세요
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 단일 터미널 카드 (상황판 그리드용) ──────────────────────────────────────
+/** T1~T8 각각의 상태를 컴팩트 카드로 표시.
+ *  클릭 시 해당 터미널을 '선택 상태'로 강조합니다. */
+function TerminalCard({
+  id, state, selected, onClick,
+}: {
+  id: string;
+  state: TerminalState;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const { status, task, cli, ts, last_line } = state;
+
+  // 상태별 색상
+  const dotColor =
+    status === 'running' ? 'bg-yellow-400 animate-pulse' :
+    status === 'done'    ? 'bg-green-500' :
+    status === 'error'   ? 'bg-red-500' :
+                           'bg-white/15';
+
+  const cardBorder = selected
+    ? 'border-primary/60 bg-primary/5'
+    : status === 'running'
+      ? 'border-yellow-400/30 bg-yellow-400/3'
+      : 'border-white/8 bg-black/20 hover:border-white/15';
+
+  // CLI 배지 색상
+  const cliBadge =
+    cli === 'claude' ? 'bg-orange-500/20 text-orange-300' :
+    cli === 'gemini' ? 'bg-blue-500/20 text-blue-300' :
+                       'bg-white/5 text-white/20';
+
+  // 시간 포맷 (HH:MM)
+  const timeStr = ts ? ts.slice(11, 16) : '';
+
+  // 마지막 줄 기반 워크플로우 단계
+  const detectedStage = last_line ? detectStage(last_line) : null;
+  const stageLabel = detectedStage ? STAGE_LABEL[detectedStage] : '';
+  const stageColor = detectedStage ? STAGE_COLOR[detectedStage] : '';
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col gap-1 p-2 rounded border transition-all duration-200 text-left w-full ${cardBorder}`}
+    >
+      {/* 헤더: 터미널 ID + CLI 배지 */}
+      <div className="flex items-center justify-between">
+        <span className="font-bold text-[11px] text-white/70 font-mono">{id}</span>
+        <div className="flex items-center gap-1">
+          {cli && (
+            <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${cliBadge}`}>
+              {cli === 'claude' ? '⚡' : cli === 'gemini' ? '✨' : ''}{cli}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 상태 도트 + 단계 */}
+      <div className="flex items-center gap-1.5">
+        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+        <span className={`text-[9px] font-semibold ${
+          status === 'running' ? 'text-yellow-400' :
+          status === 'done'    ? 'text-green-400' :
+          status === 'error'   ? 'text-red-400' :
+                                 'text-white/25'
+        }`}>
+          {status === 'idle' ? '대기 중' :
+           status === 'running' ? '실행 중' :
+           status === 'done' ? '완료' : '오류'}
+        </span>
+        {stageLabel && status === 'running' && (
+          <span className={`text-[8px] ${stageColor}`}>· {stageLabel}</span>
+        )}
+        <span className="ml-auto text-[8px] text-white/20 font-mono">{timeStr}</span>
+      </div>
+
+      {/* 작업 내용 (1줄 트런케이트) */}
+      <div className="text-[9px] text-white/40 truncate leading-tight min-h-[1rem]">
+        {task || '—'}
+      </div>
+    </button>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 
 export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
@@ -133,7 +410,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
   const [status, setStatus]           = useState<AgentStatus>('idle');
   const [activeCli, setActiveCli]     = useState<string>('');
   const [showCliMenu, setShowCliMenu] = useState(false);
-  const [activeTab, setActiveTab]     = useState<ActiveTab>('terminal');
+  const [activeTab, setActiveTab]     = useState<ActiveTab>('workflow');
 
   // 터미널 탭 데이터
   const [outputLines, setOutputLines] = useState<OutputLine[]>([]);
@@ -145,6 +422,24 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
   // 히스토리 탭 데이터
   const [history, setHistory]         = useState<AgentRun[]>([]);
+
+  // ── 터미널별 상태 카드 (T1~T8) — /api/agent/terminals 폴링 ─────────────────
+  const [terminals, setTerminals] = useState<Record<string, TerminalState>>(() => {
+    const init: Record<string, TerminalState> = {};
+    for (let i = 1; i <= 8; i++) {
+      init[`T${i}`] = { status: 'idle', task: '', cli: '', run_id: '', ts: '', last_line: '' };
+    }
+    return init;
+  });
+  // 실행할 터미널 선택 (카드 클릭으로 변경, 기본: T1)
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string>('T1');
+
+  // ── 상황판 탭: 워크플로우 상태 머신 ────────────────────────────────────────
+  // wfStage/wfLoop: WorkflowPipeline 렌더링에 사용
+  // wfAction/wfLog: 선택 터미널 실행 중일 때만 파이프라인 표시 (상황판 탭 내)
+  const [wfStage, setWfStage]         = useState<WorkflowStage>('idle');
+  const [wfLoop, setWfLoop]           = useState(0);
+  const wfCurrentStageRef             = useRef<WorkflowStage>('idle');
 
   const outputEndRef      = useRef<HTMLDivElement>(null);
   const thoughtEndRef     = useRef<HTMLDivElement>(null);
@@ -171,6 +466,37 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
     if (activeTab === 'thoughts')
       thoughtEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [thoughts, activeTab]);
+
+  // ─── 터미널별 상태 폴링 (T1~T8 상황판 카드 갱신) ────────────────────────
+  const loadTerminals = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/agent/terminals`);
+      if (!res.ok) return;
+      const data: Record<string, TerminalState> = await res.json();
+      // 선택된 터미널이 외부에서 새로 running 진입 시 워크플로우 파이프라인 초기화
+      // (대시보드가 아닌 T1.bat 등 외부 실행으로 감지된 경우)
+      setTerminals(prev => {
+        const prevStatus  = prev[selectedTerminalId]?.status;
+        const newStatus   = data[selectedTerminalId]?.status;
+        // 외부 실행으로 running 진입 → 파이프라인 초기화
+        if (newStatus === 'running' && prevStatus !== 'running' && status !== 'running') {
+          setWfStage('analyzing');
+          wfCurrentStageRef.current = 'analyzing';
+          setWfLoop(0);
+        }
+        // 서버에 저장된 pipeline_stage로 wfStage 복원
+        // — 대시보드를 새로 열었을 때 이전 실행의 파이프라인 단계를 복구합니다.
+        const serverStage = (data[selectedTerminalId] as any)?.pipeline_stage as WorkflowStage | undefined;
+        if (serverStage && serverStage !== 'idle' && wfCurrentStageRef.current === 'idle') {
+          wfCurrentStageRef.current = serverStage;
+          setWfStage(serverStage);
+        }
+        return data;
+      });
+    } catch {
+      // 서버 미실행 시 무시 (초기 idle 상태 유지)
+    }
+  }, [selectedTerminalId, status]);
 
   // ─── 히스토리 로드 ──────────────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
@@ -246,6 +572,11 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           setActiveCli(cli);
           setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : 'Auto');
 
+          // 상황판: 초기화
+          setWfStage('analyzing');
+          wfCurrentStageRef.current = 'analyzing';
+          setWfLoop(0);
+
           // 터미널: 구분선 추가
           setOutputLines(prev => [...prev, { text: `── 실행 시작 (ID: ${data.run_id}) ──`, ts, type: 'started' }]);
 
@@ -261,6 +592,22 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
           // 터미널: raw 출력 추가 (최대 500줄 유지 — 무제한 누적 시 렌더링 지연 방지)
           setOutputLines(prev => [...prev.slice(-499), { text: line, ts, type }]);
+
+          // 상황판: 출력 라인에서 워크플로우 단계 추론 및 갱신
+          if (line) {
+            const detected = detectStage(line);
+            if (detected && detected !== 'idle') {
+              const prev = wfCurrentStageRef.current;
+              // 검증 후 오류 발생 → 분석으로 루프백 시 루프 카운터 증가
+              if (detected === 'analyzing' && (prev === 'verifying' || prev === 'error')) {
+                setWfLoop(n => n + 1);
+              }
+              if (detected !== prev) {
+                wfCurrentStageRef.current = detected;
+                setWfStage(detected);
+              }
+            }
+          }
 
           // 사고 흐름: Thought 엔트리로 추가
           if (line) {
@@ -280,6 +627,11 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           setStatus(runStatus);
           onStatusChange?.(false);
           setActiveSkill(runStatus === 'error' ? '오류' : '완료');
+
+          // 상황판: 최종 단계 반영
+          const finalStage: WorkflowStage = runStatus === 'error' ? 'error' : 'done';
+          wfCurrentStageRef.current = finalStage;
+          setWfStage(finalStage);
 
           const doneText = runStatus === 'error' ? '── 실행 오류 ──' : '── 실행 완료 ──';
           setOutputLines(prev => [...prev, { text: doneText, ts, type: 'done' }]);
@@ -319,6 +671,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
   useEffect(() => {
     loadStatus();
     loadHistory();
+    loadTerminals();
     connectSSE();
 
     // 10초마다 히스토리 + 에이전트 상태 자동 동기화
@@ -327,8 +680,14 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       loadHistory();
       loadStatus();
     }, 10000);
+
+    // 3초마다 터미널별 상태 폴링 (상황판 T1~T8 카드 갱신)
+    const terminalTimer = setInterval(() => {
+      loadTerminals();
+    }, 3000);
     return () => {
       clearInterval(timer);
+      clearInterval(terminalTimer);
       // 언마운트 시: 모든 타이머 취소 + sseRef null 교체 → stale 재연결/타임아웃 완전 차단
       if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
       if (runTimeoutRef.current) { clearTimeout(runTimeoutRef.current); runTimeoutRef.current = null; }
@@ -337,7 +696,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       sseRef.current = null;
       es?.close();
     };
-  }, [loadStatus, loadHistory, connectSSE]);
+  }, [loadStatus, loadHistory, loadTerminals, connectSSE]);
 
   // ─── 양방향 상태 동기화: 3초마다 서버 폴링 ─────────────────────────────────
   // 케이스 A: UI=running, 서버!=running → done 이벤트 유실 복구 (running 고착 해소)
@@ -426,6 +785,11 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
     setStatus('running');
     setActiveCli(selectedCli === 'auto' ? '분석 중...' : selectedCli);
 
+    // 상황판 초기화
+    setWfStage('analyzing');
+    wfCurrentStageRef.current = 'analyzing';
+    setWfLoop(0);
+
     // 30초 내 SSE started 이벤트 없으면 자동 오류 처리
     // 출력 유무와 무관하게 항상 타임아웃 메시지를 추가해야 "중간에 멈춘 것처럼 보이는" 버그를 방지
     if (runTimeoutRef.current) clearTimeout(runTimeoutRef.current);
@@ -441,7 +805,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       const res = await fetch(`${API_BASE}/api/agent/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, cli: selectedCli }),
+        body: JSON.stringify({ task, cli: selectedCli, terminal_id: selectedTerminalId }),
       });
       const data = await res.json();
       if (data.error) {
@@ -598,15 +962,69 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
       {/* ── 탭 바 ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 shrink-0 border-b border-white/5 pb-1">
-        {tabBtn('terminal', '터미널', <Terminal className="w-3 h-3" />)}
+        {tabBtn('workflow', '상황판',   <LayoutDashboard className="w-3 h-3" />)}
+        {tabBtn('terminal', '터미널',  <Terminal className="w-3 h-3" />)}
         {tabBtn('thoughts', '사고 흐름', <Brain className="w-3 h-3" />)}
         {tabBtn('history',  '히스토리', <Clock className="w-3 h-3" />)}
-        {/* 활성 스킬 표시 (우측 정렬) */}
         <div className="ml-auto text-[9px] text-primary/60 font-mono uppercase">{activeSkill}</div>
       </div>
 
       {/* ── 탭 콘텐츠 ───────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden min-h-0">
+
+        {/* ──────────────────────────────────────────────────────────────
+             상황판 탭: T1~T8 터미널별 에이전트 현황 카드 그리드 (2열 x 4행)
+             3초 폴링으로 각 터미널의 상태/단계/작업을 독립 표시.
+             카드 클릭 → 해당 터미널 선택 → 실행 버튼이 그 터미널로 전송.
+        ─────────────────────────────────────────────────────────────── */}
+        {activeTab === 'workflow' && (
+          <div className="flex flex-col h-full overflow-y-auto gap-2 pr-0.5">
+
+            {/* ── 선택 터미널 안내 배너 ──────────────────────────────────── */}
+            <div className="shrink-0 flex items-center gap-2 px-0.5">
+              <span className="text-[9px] text-white/25">실행 대상:</span>
+              <span className="text-[10px] font-bold font-mono text-primary">{selectedTerminalId}</span>
+              <span className="text-[9px] text-white/15">— 카드 클릭으로 변경</span>
+            </div>
+
+            {/* ── T1~T8 카드 그리드 ──────────────────────────────────────── */}
+            <div className="grid grid-cols-2 gap-2 shrink-0">
+              {Array.from({ length: 8 }, (_, i) => `T${i + 1}`).map(tid => {
+                const state: TerminalState = terminals[tid] ?? {
+                  status: 'idle', task: '', cli: '', run_id: '', ts: '', last_line: '',
+                };
+                return (
+                  <TerminalCard
+                    key={tid}
+                    id={tid}
+                    state={state}
+                    selected={selectedTerminalId === tid}
+                    onClick={() => setSelectedTerminalId(tid)}
+                  />
+                );
+              })}
+            </div>
+
+            {/* ── 선택된 터미널의 워크플로우 파이프라인 표시
+                  running: 실행 중 (실시간 진행)
+                  done/error: 완료 후에도 마지막 단계 유지 표시 */}
+            {(['running', 'done', 'error'] as const).includes(
+              terminals[selectedTerminalId]?.status as any
+            ) && wfStage !== 'idle' && (
+              <div className="shrink-0">
+                <WorkflowPipeline stage={wfStage} loopCount={wfLoop} agentStatus={status} />
+              </div>
+            )}
+
+            {/* ── 선택된 터미널의 마지막 출력 줄 ──────────────────────────── */}
+            {terminals[selectedTerminalId]?.last_line && (
+              <div className="shrink-0 px-2 py-1.5 bg-black/30 rounded border border-white/5 font-mono text-[9px] text-white/35 break-all">
+                {terminals[selectedTerminalId].last_line}
+              </div>
+            )}
+
+          </div>
+        )}
 
         {/* 터미널 탭: raw 출력 */}
         {activeTab === 'terminal' && (

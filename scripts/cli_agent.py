@@ -47,6 +47,32 @@ RUNS_FILE = DATA_DIR / "agent_runs.jsonl"
 # 포트 9000 자율 에이전트 UI가 tail하는 실시간 라이브 로그 파일
 LIVE_FILE = DATA_DIR / "agent_live.jsonl"
 
+# ─── CLI 실행 파일 전체 경로 탐색 ────────────────────────────────────────────
+# 배경: hook_bridge.py → cli_agent.py 흐름에서 subprocess가 DETACHED_PROCESS로
+#       실행될 때, Windows npm 경로(AppData/Roaming/npm)가 PATH에 없어서
+#       'claude' 명령어를 못 찾는 문제가 있었음.
+# 해결: 우선순위 순으로 전체 경로를 탐색하여 발견된 경로를 사용.
+#       못 찾으면 'claude'(쉘 PATH에 의존)를 그대로 사용.
+def _find_cli(name: str) -> str:
+    """CLI 실행 파일의 전체 경로를 반환합니다. 못 찾으면 name 그대로 반환."""
+    import shutil
+    # 1) shutil.which: 현재 프로세스 PATH 검색
+    found = shutil.which(name) or shutil.which(f'{name}.cmd')
+    if found:
+        return found
+    # 2) Windows npm 기본 설치 경로 직접 확인
+    if os.name == 'nt':
+        npm_dir = Path(os.environ.get('APPDATA', '')) / 'npm'
+        for ext in ('', '.cmd', '.ps1'):
+            candidate = npm_dir / f'{name}{ext}'
+            if candidate.exists():
+                return str(candidate)
+    return name  # 못 찾으면 쉘에 위임
+
+# 모듈 로드 시 한 번만 탐색 (반복 탐색 방지)
+_CLAUDE_CMD = _find_cli('claude')
+_GEMINI_CMD = _find_cli('gemini')
+
 # ─── 라우팅 키워드 테이블 ─────────────────────────────────────────────────────
 # Claude Code CLI: 코드 작성/수정/버그 수정 등 구현 작업
 CLAUDE_KEYWORDS = [
@@ -70,6 +96,43 @@ _run_status: str = 'idle'                          # idle | running | done | err
 _current_run: dict = {}                            # 현재 실행 중인 태스크 정보
 _status_lock = threading.Lock()                    # 상태 동시 접근 보호 락
 
+# ─── 터미널별 독립 상태 추적 (T1~T8) ─────────────────────────────────────────
+# 각 터미널이 독립적으로 에이전트를 실행할 수 있도록 상태를 분리합니다.
+# 상황판(AgentPanel 상황판 탭)이 이 데이터를 폴링하여 8개 카드를 렌더링합니다.
+_terminals: dict = {
+    f'T{i}': {
+        'status': 'idle',         # idle | running | done | error
+        'task': '',               # 마지막 실행 지시 내용
+        'cli': '',                # claude | gemini
+        'run_id': '',             # 실행 ID
+        'ts': '',                 # 마지막 실행 시각 (ISO 형식)
+        'last_line': '',          # 마지막 출력 줄 (워크플로우 단계 감지용)
+        'pipeline_stage': 'idle', # 파이프라인 단계: idle|analyzing|modifying|verifying|done|error
+    }
+    for i in range(1, 9)          # T1 ~ T8
+}
+
+# ─── 파이프라인 단계 감지 (프론트엔드 detectStage와 동일한 키워드) ──────────────
+# 출력 한 줄을 분석하여 현재 워크플로우 단계를 추론합니다.
+_STAGE_MODIFY  = ['edit ', 'write ', 'writing', 'modif', 'updat', 'creat', 'inserting']
+_STAGE_ANALYZE = ['read ', 'reading', 'glob ', 'grep ', 'search', 'analyz', 'inspect']
+_STAGE_VERIFY  = ['bash ', 'running', 'verif', 'test', 'check', 'lint', 'npm run', 'pytest']
+_STAGE_DONE    = ['task complete', '✓', '── 실행 완료', 'done', 'completed']
+
+def _detect_pipeline_stage(line: str) -> str | None:
+    """출력 라인에서 파이프라인 단계를 감지합니다. 감지 불가 시 None 반환."""
+    l = line.lower()
+    if any(kw in l for kw in _STAGE_MODIFY):
+        return 'modifying'
+    if any(kw in l for kw in _STAGE_ANALYZE):
+        return 'analyzing'
+    if any(kw in l for kw in _STAGE_VERIFY):
+        return 'verifying'
+    if any(kw in l for kw in _STAGE_DONE):
+        return 'done'
+    return None
+_terminals_lock = threading.Lock()  # 터미널별 상태 동시 접근 보호 락
+
 
 def route_task(task: str) -> str:
     """키워드 분석으로 최적 CLI를 자동 선택합니다.
@@ -88,7 +151,8 @@ def route_task(task: str) -> str:
     return 'claude'  # 기본값: Claude Code CLI
 
 
-def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '') -> list[str]:
+def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
+                   task: str = '', terminal_id: str = 'T1') -> list[str]:
     """subprocess 출력을 줄 단위로 읽어 전역 큐에 Push합니다.
 
     프로세스 stdout을 실시간으로 읽어 _output_queue에 넣으면
@@ -107,15 +171,28 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '') -> lis
         except Exception:
             pass  # 라이브 파일 기록 실패는 무시 (메인 흐름 영향 없음)
 
+    # subprocess 모드 감지: discord_bridge.py 등 외부 프로세스가 stdout을 파싱할 때
+    # CLI_AGENT_JSON_STDOUT=1 환경변수로 이벤트를 stdout에도 출력 (SSE 큐와 병행)
+    _json_stdout = os.environ.get('CLI_AGENT_JSON_STDOUT', '') == '1'
+
+    def _emit(event: dict):
+        """이벤트를 큐에 넣고, JSON_STDOUT 모드이면 stdout에도 출력합니다."""
+        serialized = json.dumps(event, ensure_ascii=False)
+        _output_queue.put(serialized)
+        if _json_stdout:
+            print(serialized, flush=True)
+
     # 시작 이벤트 전송 + 파일 기록
     # cli 필드 포함: 프론트엔드 AgentPanel이 activeCli 표시에 사용
     start_event = {
         'type': 'started',
         'run_id': run_id,
         'cli': cli,
+        'task': task,          # 상황판: 현재 작업 내용 표시
+        'terminal_id': terminal_id,  # 상황판: 터미널별 카드 구분
         'ts': datetime.now().isoformat(),
     }
-    _output_queue.put(json.dumps(start_event, ensure_ascii=False))
+    _emit(start_event)
     _write_live(start_event)
 
     try:
@@ -124,6 +201,21 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '') -> lis
                 # UTF-8 디코딩 (Windows 환경 cp949 오류 방지)
                 line = raw_line.decode('utf-8', errors='replace').rstrip()
                 all_lines.append(line)
+                # 터미널별 마지막 출력 줄 + 파이프라인 단계 업데이트
+                if line.strip():
+                    with _terminals_lock:
+                        if terminal_id in _terminals:
+                            _terminals[terminal_id]['last_line'] = line[:120]
+                            # 단계 감지: 단계 순서(analyzing→modifying→verifying→done)는
+                            # 역행하지 않도록 현재 단계보다 높은 경우만 업데이트
+                            detected = _detect_pipeline_stage(line)
+                            if detected:
+                                _STAGE_ORDER = ['idle', 'analyzing', 'modifying', 'verifying', 'done', 'error']
+                                cur = _terminals[terminal_id].get('pipeline_stage', 'idle')
+                                cur_idx = _STAGE_ORDER.index(cur) if cur in _STAGE_ORDER else 0
+                                det_idx = _STAGE_ORDER.index(detected) if detected in _STAGE_ORDER else 0
+                                if det_idx > cur_idx:
+                                    _terminals[terminal_id]['pipeline_stage'] = detected
                 # 큐에 출력 이벤트 Push + 라이브 파일 기록
                 out_event = {
                     'type': 'output',
@@ -131,7 +223,7 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '') -> lis
                     'run_id': run_id,
                     'ts': datetime.now().isoformat(),
                 }
-                _output_queue.put(json.dumps(out_event, ensure_ascii=False))
+                _emit(out_event)
                 _write_live(out_event)
     except Exception as e:
         err_event = {
@@ -140,13 +232,14 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '') -> lis
             'run_id': run_id,
             'ts': datetime.now().isoformat(),
         }
-        _output_queue.put(json.dumps(err_event, ensure_ascii=False))
+        _emit(err_event)
         _write_live(err_event)
 
     return all_lines
 
 
-def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
+def run(task: str, cli: str = 'auto', working_dir: str | None = None,
+        terminal_id: str = 'T1') -> dict:
     """CLI를 비대화형 모드로 실행하고 결과를 반환합니다.
 
     백그라운드 스레드에서 호출되어야 합니다 (agent_api.py가 스레드 생성).
@@ -155,6 +248,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
         task: 실행할 지시 내용
         cli: 'auto' | 'claude' | 'gemini' — auto면 route_task()로 자동 선택
         working_dir: 작업 디렉토리 (None이면 PROJECT_ROOT 사용)
+        terminal_id: 요청한 터미널 식별자 (상황판 터미널별 구분에 사용)
 
     Returns:
         실행 결과 dict (status, cli, output_lines, run_id 포함)
@@ -168,16 +262,30 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
     if cli == 'auto':
         cli = route_task(task)
 
-    # 상태 업데이트
+    # 전역 상태 업데이트 (단일 실행 추적용 — 하위 호환)
+    now_ts = datetime.now().isoformat()
     with _status_lock:
         _run_status = 'running'
         _current_run = {
             'id': run_id,
             'task': task,
             'cli': cli,
-            'ts': datetime.now().isoformat(),
+            'ts': now_ts,
             'cwd': cwd,
+            'terminal_id': terminal_id,  # 어느 터미널에서 요청했는지 추적
         }
+
+    # 터미널별 상태 업데이트 (상황판 카드용)
+    with _terminals_lock:
+        if terminal_id in _terminals:
+            _terminals[terminal_id].update({
+                'status': 'running',
+                'task': task,
+                'cli': cli,
+                'run_id': run_id,
+                'ts': now_ts,
+                'last_line': '',
+            })
 
     output_lines = []
     status = 'done'
@@ -187,13 +295,13 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
         # ── CLI별 명령어 구성 ─────────────────────────────────────────────
         if cli == 'claude':
             # Claude Code CLI: -p 플래그로 비대화형(print) 모드 실행
-            # --no-stream: 스트리밍 없이 전체 출력 한 번에 (안정성)
             # --dangerously-skip-permissions: 자동 승인 (오케스트레이터 자율 실행)
-            cmd = ['claude', '-p', task, '--dangerously-skip-permissions']
+            # _CLAUDE_CMD: 모듈 초기화 시 탐색한 전체 경로 (PATH 미등록 환경 대응)
+            cmd = [_CLAUDE_CMD, '-p', task, '--dangerously-skip-permissions']
         elif cli == 'gemini':
             # Gemini CLI: stdin으로 지시 전달
-            # Windows에서 echo | gemini 방식
-            cmd = ['gemini', '-p', task]
+            # _GEMINI_CMD: 모듈 초기화 시 탐색한 전체 경로
+            cmd = [_GEMINI_CMD, '-p', task]
         else:
             raise ValueError(f'알 수 없는 CLI: {cli}')
 
@@ -208,12 +316,27 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
             use_shell = True
             cmd = subprocess.list2cmdline(cmd)  # 리스트 → 문자열 (shell=True용)
 
+        # ── 중첩 세션 방지: CLAUDECODE 환경변수 제거 ────────────────────────
+        # hook_bridge.py → cli_agent.py 흐름에서 Claude Code CLI를 재실행할 때
+        # "Cannot be launched inside another Claude Code session" 에러가 발생함.
+        # 원인: 부모 프로세스(Claude Code)가 CLAUDECODE 환경변수를 설정해두기 때문.
+        # 해결: 자식 프로세스에서 CLAUDECODE를 제거한 clean 환경변수 전달.
+        #
+        # ── 훅 무한루프 방지: VIBE_CLI_AGENT=1 주입 ──────────────────────────
+        # cli_agent.py가 생성한 Claude Code 자식 세션에서도 UserPromptSubmit 훅이
+        # 발동되면 hook_bridge.py → cli_agent.py → claude -p → 훅 발동 → ... 무한루프!
+        # 해결: 자식 env에 VIBE_CLI_AGENT=1을 심어두면 hook_bridge.py가 이를 감지하고
+        #       즉시 종료(exit 0)하여 루프를 차단합니다.
+        child_env = {k: v for k, v in os.environ.items() if k != 'CLAUDECODE'}
+        child_env['VIBE_CHILD_AGENT'] = '1'  # hook_bridge.py 루프 방지 전용 마커
+
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,  # 자식 프로세스가 stdin 대기로 블로킹되는 현상 방지
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # stderr를 stdout으로 합쳐서 통합 출력
             cwd=cwd,
+            env=child_env,             # CLAUDECODE 제거된 환경변수 (중첩 세션 에러 방지)
             creationflags=creationflags,
             shell=use_shell,
             bufsize=0,  # 파이프 버퍼링 비활성화 — Windows에서 중간 출력이 뭉쳐 오는 현상 방지
@@ -267,7 +390,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
         # 실시간 출력 스트리밍 (프로세스 종료까지 블로킹)
         # 로컬 변수 proc 사용 — stop()이 전역 _current_process를 None으로 설정해도
         # AttributeError 없이 wait() / returncode 접근 가능
-        output_lines = _stream_output(proc, run_id, cli)
+        output_lines = _stream_output(proc, run_id, cli, task, terminal_id)
         proc.wait()
 
         # 종료 코드 확인 (stop()으로 kill된 경우 returncode는 음수/1로 반환됨)
@@ -306,6 +429,16 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
 
         final_status = 'stopped' if _was_stopped else status
 
+        # 터미널별 완료 상태 업데이트 (pipeline_stage도 최종 반영)
+        with _terminals_lock:
+            if terminal_id in _terminals:
+                terminal_final = final_status if final_status != 'stopped' else 'done'
+                _terminals[terminal_id]['status'] = terminal_final
+                # 파이프라인 단계: 완료 시 done, 에러 시 error 강제 설정
+                _terminals[terminal_id]['pipeline_stage'] = (
+                    'error' if terminal_final == 'error' else 'done'
+                )
+
         # stop() 호출 시에는 done 이벤트를 보내지 않음
         # (stopped 이벤트가 이미 전송됐으므로 done이 추가되면 UI 상태가 혼란스러움)
         if not _was_stopped:
@@ -315,6 +448,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None) -> dict:
                 'task': task,
                 'cli': cli,
                 'status': status,
+                'terminal_id': terminal_id,  # 상황판 터미널별 완료 처리
                 'ts': datetime.now().isoformat(),
             }
             _output_queue.put(json.dumps(done_event, ensure_ascii=False))
@@ -397,6 +531,16 @@ def get_status() -> dict:
         }
 
 
+def get_terminals() -> dict:
+    """T1~T8 모든 터미널의 현재 상태를 반환합니다.
+
+    상황판(AgentPanel)이 3초마다 폴링하여 8개 카드를 렌더링합니다.
+    반환값: { 'T1': {...}, 'T2': {...}, ..., 'T8': {...} }
+    """
+    with _terminals_lock:
+        return {k: v.copy() for k, v in _terminals.items()}
+
+
 def _save_run(result: dict) -> None:
     """실행 결과를 agent_runs.jsonl에 영구 저장합니다.
 
@@ -459,4 +603,6 @@ if __name__ == '__main__':
 
     print(f'\n{"─" * 50}')
     print(f'[cli_agent] 완료: {result["status"]} (ID: {result["id"]})')
-    print(f'[cli_agent] 출력 줄 수: {len(result["output_lines"])}')
+    # 실제 출력 내용 표시 — hook_bridge.py가 캡처하여 Claude 컨텍스트에 전달
+    for line in result['output_lines']:
+        print(line)
