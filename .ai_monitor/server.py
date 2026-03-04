@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-04] - Claude (CLI 오케스트레이터 자율 에이전트 통합)
+#   - api.agent_api 임포트 추가
+#   - /api/events/agent SSE 엔드포인트 추가 (cli_agent 출력 실시간 스트리밍)
+#   - do_GET, do_POST에 /api/agent/* 라우팅 추가
 # [2026-03-01] - Claude (배포 버전 경로 버그 수정 — 스킬/MCP 인식 안 됨)
 #   - _current_project_root() 헬퍼 추가: config.json last_path 우선 참조
 #     → 배포 버전에서 PROJECT_ROOT가 exe 폴더/임시폴더로 잘못 설정되던 문제 해소
@@ -52,6 +56,7 @@ import api.mcp_api as mcp_api
 import api.hive_api as hive_api
 import api.git_api as git_api
 import api.memory_api as memory_api
+import api.agent_api as agent_api
 import string
 import socket
 from pathlib import Path
@@ -1057,6 +1062,39 @@ class SSEHandler(BaseHTTPRequestHandler):
                 THOUGHT_CLIENTS.discard(self)
             return
 
+        # ─── 자율 에이전트 출력 실시간 스트리밍 ───
+        # cli_agent._output_queue에서 줄 단위로 읽어 SSE 포맷으로 전달
+        if path == '/api/events/agent':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            try:
+                # cli_agent 모듈에서 전역 큐 직접 참조
+                _scripts = str(Path(__file__).resolve().parent.parent / 'scripts')
+                if _scripts not in sys.path:
+                    sys.path.insert(0, _scripts)
+                import cli_agent as _ca
+                self.connection.settimeout(1.0)
+                while True:
+                    try:
+                        # 1초 타임아웃으로 큐에서 메시지 꺼내기 (하트비트 유지)
+                        msg = _ca._output_queue.get(timeout=1.0)
+                        self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                    except Exception:
+                        # 큐가 비어있으면 하트비트 전송 (연결 유지)
+                        try:
+                            self.wfile.write(b": heartbeat\n\n")
+                            self.wfile.flush()
+                        except Exception:
+                            break  # 클라이언트 연결 끊김
+            except Exception:
+                pass
+            return
+
         # ─── 신규: 파일 시스템 변경 이벤트 스트리밍 ───
         if path == '/api/events/fs':
             self.send_response(200)
@@ -1251,8 +1289,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "error", "message": "Shutdown is disabled for 24/7 operation."}).encode('utf-8'))
         elif parsed_path.path == '/api/files':
-            # [수정] parse_qs UnboundLocalError 해결을 위한 명시적 임포트
-            from urllib.parse import parse_qs
             # [수정] Windows 경로(드라이브 루트 등) 처리 및 응답 안정성 강화.
             # 1. 경로 구분자 표준화 및 드라이브 루트(/) 유효성 보정.
             # 2. 예외 발생 시 빈 배열([])을 안전하게 반환하여 연결 끊김 방지.
@@ -1504,6 +1540,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _smithery_api_key=_smithery_api_key,
                 _mcp_config_path=_mcp_config_path,
             )
+
+        # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
+        elif parsed_path.path.startswith('/api/agent/'):
+            agent_api.handle_get(self, parsed_path.path)
 
         # ── [모듈 위임] memory_api — /api/memory, /api/project-info ──────
         elif parsed_path.path in ('/api/memory', '/api/project-info'):
@@ -2942,6 +2982,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _mcp_config_path=_mcp_config_path,
                 DATA_DIR=DATA_DIR
             )
+
+        # ── [모듈 위임 - POST] agent_api — /api/agent/run, /api/agent/stop ─
+        elif parsed_path.path.startswith('/api/agent/'):
+            agent_api.handle_post(self, parsed_path.path)
 
         # ── [모듈 위임 - POST] memory_api ────────────────────────────────
         # /api/memory/set, /api/memory/delete

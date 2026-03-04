@@ -16,7 +16,7 @@ import {
   Search, Settings,
   Files, Info, Zap,
   MessageSquare, ClipboardList, Brain,
-  GitBranch, Package, Network, Cpu
+  GitBranch, Package, Network, Cpu, Bot
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -33,6 +33,7 @@ interface ActivityBarProps {
   totalGitChanges: number;     // Git 변경 파일 수 배지
   mcpCount: number;            // 설치된 MCP 수 배지
   isThinking?: boolean;        // AI가 생각 중인지 여부
+  isAgentRunning?: boolean;    // 자율 에이전트 실행 중 여부
 }
 
 export default function ActivityBar({
@@ -41,6 +42,7 @@ export default function ActivityBar({
   unreadMsgCount, activeTaskCount,
   memoryCount, conflictCount, totalGitChanges, mcpCount,
   isThinking = false,
+  isAgentRunning = false,
 }: ActivityBarProps) {
 
   // 탭 버튼 공통 스타일 계산 (활성 시 왼쪽 보더 + 배경 강조)
@@ -63,8 +65,8 @@ export default function ActivityBar({
         <Search className="w-6 h-6" />
       </button>
 
-      {/* 🧠 Mission Control (AI 생각 과정) */}
-      <button onClick={() => handleTab('mission-control')} className={tabCls('mission-control')} title="Mission Control (AI Brain)">
+      {/* 🧠 중앙 통제실 (AI 사고 과정) */}
+      <button onClick={() => handleTab('mission-control')} className={tabCls('mission-control')} title="중앙 통제실 (AI)">
         <Cpu className={`w-6 h-6 ${isThinking ? 'text-primary animate-pulse' : ''}`} />
         {isThinking && (
           <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-primary rounded-full animate-ping" />
@@ -146,6 +148,14 @@ export default function ActivityBar({
       {/* ⚡ 스킬 실행 결과 */}
       <button onClick={() => handleTab('skills')} className={tabCls('skills')} title="스킬 실행 결과">
         <Zap className="w-5 h-5" />
+      </button>
+
+      {/* 🤖 자율 에이전트 (실행 중이면 주황색 펄스 배지) */}
+      <button onClick={() => handleTab('agent')} className={tabCls('agent')} title="자율 에이전트 (OpenHands)">
+        <Bot className={`w-6 h-6 ${isAgentRunning ? 'text-orange-400' : ''}`} />
+        {isAgentRunning && (
+          <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-orange-400 rounded-full animate-pulse" />
+        )}
       </button>
 
       {/* ⚙️ 하단 고정 버튼 (설정 / 정보) */}

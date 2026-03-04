@@ -37,10 +37,12 @@ import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import OrchestratorPanel from './components/panels/OrchestratorPanel';
 import MissionControlPanel from './components/panels/MissionControlPanel';
+import AutonomousPopup from './components/AutonomousPopup';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import SkillResultsPanel from './components/panels/SkillResultsPanel';
+import AgentPanel from './components/panels/AgentPanel';
 /* ── 레이아웃 컴포넌트 — App.tsx 2차 분리에서 추출 ── */
 import TopMenuBar from './components/TopMenuBar';
 import ActivityBar from './components/ActivityBar';
@@ -59,6 +61,7 @@ function App() {
   // ─── 레이아웃 상태 ────────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
+  const [isAutoMode, setIsAutoMode] = useState(false);
   // activeMenu: 상단 메뉴 드롭다운 활성 상태 — 루트 div 클릭으로 닫기 위해 App에서 관리
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   // 사이드바 너비 — 드래그 리사이즈로 동적 조절 (최소 150px, 최대 600px)
@@ -83,6 +86,7 @@ function App() {
   const [totalGitChanges, setTotalGitChanges] = useState(0);
   const [conflictCount, setConflictCount] = useState(0);
   const [orchWarningCount, setOrchWarningCount] = useState(0);
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
 
   // ─── 데이터 스트림 (TerminalSlot + Activity Bar 배지용) ───────────────
   const [logs, setLogs] = useState<LogRecord[]>([]);
@@ -415,12 +419,13 @@ function App() {
 
   // 사이드바 탭 제목 매핑
   const sidebarTitle = {
-    explorer: 'Explorer', search: 'Search',
-    'mission-control': 'Mission Control',
+    explorer: '파일 탐색기', search: '파일 검색',
+    'mission-control': '중앙 통제실 (AI)',
     messages: '메시지 채널', tasks: '태스크 보드',
     memory: '공유 메모리', git: 'Git 감시',
     mcp: 'MCP 관리자', skills: '스킬 결과',
     orchestrate: 'AI 오케스트레이터', hive: '하이브 진단',
+    agent: '🤖 자율 에이전트',
   }[activeTab] ?? activeTab;
 
   return (
@@ -470,6 +475,8 @@ function App() {
         onInstallTool={installTool}
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
+        isAutoMode={isAutoMode}
+        setIsAutoMode={setIsAutoMode}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -486,6 +493,7 @@ function App() {
           totalGitChanges={totalGitChanges}
           mcpCount={mcpInstalled.length}
           isThinking={skillChain.status === 'running'}
+          isAgentRunning={isAgentRunning}
         />
 
         {/* ── 사이드바 — 탭 패널 + 메시지 작성창 ── */}
@@ -539,6 +547,9 @@ function App() {
             ) : activeTab === 'skills' ? (
               /* 스킬 실행 결과 패널 */
               <SkillResultsPanel />
+            ) : activeTab === 'agent' ? (
+              /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
+              <AgentPanel onStatusChange={setIsAgentRunning} />
             ) : (
               /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
               <FileExplorer
@@ -650,6 +661,22 @@ function App() {
           handleSaveFile={handleSaveFile}
         />
       ))}
+
+      {/* ── 자율 주행 모드 팝업 ── */}
+      <AutonomousPopup 
+        isOpen={isAutoMode} 
+        onClose={() => setIsAutoMode(false)}
+        thoughts={[
+          { time: '19:45:10', agent: 'Gemini', text: '자율 주행 모드를 활성화했습니다. 시스템 분석 중...' },
+          { time: '19:45:12', agent: 'Gemini', text: '프로젝트 구조를 확인하고 자율 구현 계획을 수립합니다.' },
+          { time: '19:45:15', agent: 'Gemini', text: '메인 패널에 자율 주행 팝업 UI를 성공적으로 통합했습니다.' },
+        ]}
+        planSteps={[
+          { title: '자율 주행 팝업 컴포넌트 생성', status: 'done' },
+          { title: 'App.tsx 상태 및 레이아웃 통합', status: 'running' },
+          { title: 'TopMenuBar 🧠 버튼 추가', status: 'pending' },
+        ]}
+      />
     </div>
   );
 }
