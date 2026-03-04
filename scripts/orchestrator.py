@@ -21,14 +21,40 @@ import argparse
 import sqlite3
 import urllib.request
 import urllib.error
+import webbrowser
 from datetime import datetime, timedelta
 
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
 DEFAULT_PORTS = [8005, 8000]
 KNOWN_AGENTS  = ['claude', 'gemini']    # 알려진 에이전트 목록
 IDLE_THRESHOLD_SEC = 300                # 유휴 판정 기준: 5분 (300초)
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        '..', '.ai_monitor', 'data', 'orchestrator_log.jsonl')
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data')
+LOG_FILE = os.path.join(DATA_DIR, 'orchestrator_log.jsonl')
+THOUGHT_FILE = os.path.join(DATA_DIR, 'thought_stream.jsonl')
+UI_URL = "http://localhost:5173/orchestrator" # 대시보드 URL
+
+# ─── API 헬퍼 ─────────────────────────────────────────────────────────────────
+
+def _write_thought(agent: str, thought: str, skill: str = None) -> None:
+    """AI의 내부 추론(Thought)을 실시간으로 기록"""
+    entry = {
+        'timestamp': datetime.now().isoformat(),
+        'agent': agent,
+        'skill': skill,
+        'thought': thought,
+    }
+    os.makedirs(os.path.dirname(THOUGHT_FILE), exist_ok=True)
+    with open(THOUGHT_FILE, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+def open_mission_control() -> None:
+    """대시보드(Mission Control)를 자동으로 브라우저에 띄움"""
+    try:
+        print(f"[오케스트레이터] UI 자동 팝업 시도: {UI_URL}")
+        webbrowser.open(UI_URL)
+        _write_thought('orchestrator', 'UI를 자동으로 팝업했습니다.', 'system')
+    except Exception as e:
+        print(f"[오케스트레이터][오류] UI 팝업 실패: {e}")
 
 # ─── API 헬퍼 ─────────────────────────────────────────────────────────────────
 

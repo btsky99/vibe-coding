@@ -36,6 +36,7 @@ import MessagesPanel from './components/panels/MessagesPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import OrchestratorPanel from './components/panels/OrchestratorPanel';
+import MissionControlPanel from './components/panels/MissionControlPanel';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
@@ -415,6 +416,7 @@ function App() {
   // 사이드바 탭 제목 매핑
   const sidebarTitle = {
     explorer: 'Explorer', search: 'Search',
+    'mission-control': 'Mission Control',
     messages: '메시지 채널', tasks: '태스크 보드',
     memory: '공유 메모리', git: 'Git 감시',
     mcp: 'MCP 관리자', skills: '스킬 결과',
@@ -483,6 +485,7 @@ function App() {
           conflictCount={conflictCount}
           totalGitChanges={totalGitChanges}
           mcpCount={mcpInstalled.length}
+          isThinking={skillChain.status === 'running'}
         />
 
         {/* ── 사이드바 — 탭 패널 + 메시지 작성창 ── */}
@@ -518,6 +521,9 @@ function App() {
             ) : activeTab === 'orchestrate' ? (
               /* AI 오케스트레이터 패널 */
               <OrchestratorPanel onWarningCount={setOrchWarningCount} />
+            ) : activeTab === 'mission-control' ? (
+              /* Mission Control 패널 */
+              <MissionControlPanel />
             ) : activeTab === 'hive' ? (
               /* 하이브 진단 패널 */
               <HivePanel />
