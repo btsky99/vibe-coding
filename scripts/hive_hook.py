@@ -63,6 +63,10 @@ _scripts_dir = os.path.dirname(os.path.abspath(__file__))
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
+# 터미널 ID — hook_bridge.py와 동일한 환경변수 사용 (T1~T8, 기본 T0)
+# 각 터미널에서 `set TERMINAL_ID=T1 && claude` 형태로 실행하면 자동 추적
+_TERMINAL_ID = os.environ.get('TERMINAL_ID', 'T0')
+
 # 단순 조회 명령어 스킵 목록
 _SKIP_BASH_PREFIXES = (
     "ls ", "ls\n", "cat ", "head ", "tail ", "echo ",
@@ -109,7 +113,8 @@ _INTENT_MAP = [
             "5) 전체 완료 후 보고\n"
             "   python scripts/skill_orchestrator.py done\n"
             "\n"
-            "⚠️  중간에 사용자에게 확인 요청 금지 — 완전 자동 실행\n"
+            "⚠️  에러/실패 발생 시 즉시 사용자에게 보고하고 중단할 것 — 에러 무시하고 완료 보고 금지\n"
+            "⚠️  각 스킬 실행 후 실제로 성공했는지 확인(검증) 후 다음 단계 진행\n"
             "═══════════════════════════════════════════════════════"
         ),
     },
@@ -335,6 +340,126 @@ def _save_session_snapshot() -> None:
         pass
 
 
+def _inject_hive_context() -> str:
+    """UserPromptSubmit 시 하이브 메모리에서 현재 작업 컨텍스트를 자동 주입합니다.
+
+    [동작]
+    1. shared_memory.db에서 current-work 키 조회 (현재 진행 중인 작업 상태)
+    2. 오늘의 auto-session 스냅샷 조회 (오늘 완료한 작업 목록)
+    3. 두 정보를 하나의 컨텍스트 문자열로 합쳐 반환
+    → Claude가 항상 하이브 상태를 알고 시작하도록 보장
+
+    [에러 시] 빈 문자열 반환 — 훅 실행 방해하지 않음
+    """
+    try:
+        import sqlite3
+        from pathlib import Path
+        from datetime import datetime
+
+        project_root = Path(_scripts_dir).parent
+        db_file = project_root / ".ai_monitor" / "data" / "shared_memory.db"
+        if not db_file.exists():
+            return ""
+
+        conn = sqlite3.connect(str(db_file))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # 터미널 번호로 current-work 키 동적 탐색
+        rows = cur.execute(
+            "SELECT key, content FROM memory WHERE key LIKE '%:current-work' ORDER BY updated_at DESC LIMIT 1"
+        ).fetchall()
+        current_work = rows[0]["content"] if rows else ""
+
+        # 오늘의 세션 스냅샷
+        today = datetime.now().strftime("%Y-%m-%d")
+        snap_rows = cur.execute(
+            "SELECT content FROM memory WHERE key = ? LIMIT 1",
+            (f"claude:auto-session:{today}",)
+        ).fetchall()
+        today_snap = snap_rows[0]["content"] if snap_rows else ""
+        conn.close()
+
+        parts = []
+        if current_work:
+            # current-work에서 핵심 정보만 추출 (전체 출력 시 노이즈)
+            lines = [l for l in current_work.split("\n") if l.strip()]
+            # 진행 중([x] 미완, [ ] 미완) 항목만 필터
+            todo_lines = [l for l in lines if "[ ]" in l or "🔄" in l or "진행 상황" in l]
+            summary = "\n".join(todo_lines[:10]) if todo_lines else "\n".join(lines[:8])
+            parts.append(f"[하이브 현재 작업 상태]\n{summary}")
+
+        if today_snap:
+            snap_lines = today_snap.strip().split("\n")[-5:]  # 오늘 완료 최근 5개
+            parts.append(f"[오늘 완료 항목]\n" + "\n".join(snap_lines))
+
+        if not parts:
+            return ""
+
+        return (
+            "[INFO] 하이브 컨텍스트 자동 로드됨 — 아래 내용을 바탕으로 작업 맥락을 파악하세요\n"
+            + "\n\n".join(parts)
+            + "\n[END 하이브 컨텍스트]"
+        )
+    except Exception:
+        return ""
+
+
+def _update_current_work(completed_items: list[str]) -> None:
+    """Stop 이벤트 시 오늘 완료된 항목을 current-work 메모리에 자동 반영합니다.
+
+    [동작]
+    1. current-work에서 미완료([  ]) 항목 중 오늘 완료된 것 → [x]로 변경
+    2. 완료된 작업을 '완료 이력' 섹션에 추가
+    → 다음 세션에서 current-work를 보면 최신 진행 상황 파악 가능
+
+    [에러 시] 조용히 무시
+    """
+    try:
+        import sqlite3
+        from pathlib import Path
+        from datetime import datetime
+
+        if not completed_items:
+            return
+
+        project_root = Path(_scripts_dir).parent
+        db_file = project_root / ".ai_monitor" / "data" / "shared_memory.db"
+        if not db_file.exists():
+            return
+
+        conn = sqlite3.connect(str(db_file))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        rows = cur.execute(
+            "SELECT key, content FROM memory WHERE key LIKE '%:current-work' ORDER BY updated_at DESC LIMIT 1"
+        ).fetchall()
+        if not rows:
+            conn.close()
+            return
+
+        key = rows[0]["key"]
+        content = rows[0]["content"]
+
+        # 오늘 완료 항목 섹션 추가
+        today = datetime.now().strftime("%Y-%m-%d %H:%M")
+        completed_block = f"\n## 자동 업데이트 ({today})\n" + "\n".join(
+            f"- [x] {item}" for item in completed_items[-10:]
+        )
+        new_content = content + completed_block
+
+        now = datetime.now().isoformat()
+        cur.execute(
+            "UPDATE memory SET content = ?, updated_at = ? WHERE key = ?",
+            (new_content, now, key)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def _read_messages(agent_name: str) -> list[dict]:
     """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다.
 
@@ -521,7 +646,15 @@ def main():
         # 매 사용자 입력 시 skills/claude/와 .claude/commands/ 비교 → 자동 동기화
         newly_installed = _check_and_install_skills()
         if newly_installed and log_task:
-            log_task("Hive", f"[자기치유] 스킬 자동 설치: {', '.join(newly_installed)}")
+            log_task("Hive", f"[자기치유] 스킬 자동 설치: {', '.join(newly_installed)}", _TERMINAL_ID)
+
+        # [하이브 컨텍스트 자동 주입] 작업 시작 전 current-work + 오늘 활동 자동 로드
+        # → Claude가 매번 수동으로 memory.py list를 실행하지 않아도 항상 컨텍스트 보유
+        hive_ctx = _inject_hive_context()
+        if hive_ctx:
+            print(hive_ctx, flush=True)
+            if log_task:
+                log_task("Hive", "[하이브 컨텍스트] 자동 주입 완료 — current-work + 오늘 활동", _TERMINAL_ID)
 
         # [메시지 폴링] Gemini 또는 다른 에이전트가 보낸 미읽음 메시지 확인
         # 메시지가 있으면 컨텍스트로 출력하여 Claude가 인지하도록 함
@@ -531,7 +664,7 @@ def main():
                      for m in unread]
             print("[Hive 메시지] 미읽음 메시지:\n" + "\n".join(lines), flush=True)
             if log_task:
-                log_task("Hive", f"[메시지 수신] {len(unread)}개 읽음: {lines[0][:60]}")
+                log_task("Hive", f"[메시지 수신] {len(unread)}개 읽음: {lines[0][:60]}", _TERMINAL_ID)
 
         prompt = (
             data.get("prompt")
@@ -541,7 +674,7 @@ def main():
         if prompt and prompt.strip():
             short = prompt.strip().replace("\n", " ")[:120]
             if log_task:
-                log_task("사용자", f"[지시] {short}")
+                log_task("사용자", f"[지시] {short}", _TERMINAL_ID)
 
             # ── 태스크 보드 자동 등록 ──────────────────────────────────────────
             # 사용자 지시가 들어올 때마다 tasks.json에 pending 태스크로 추가합니다.
@@ -591,20 +724,20 @@ def main():
             fp = tool_input.get("file_path", "?")
             old = _snippet(tool_input.get("old_string", ""), 50)
             new = _snippet(tool_input.get("new_string", ""), 50)
-            log_task("Claude", f"[수정 시작] {_short_path(fp)}\n  변경 전: {old}\n  변경 후: {new}")
+            log_task("Claude", f"[수정 시작] {_short_path(fp)}\n  변경 전: {old}\n  변경 후: {new}", _TERMINAL_ID)
 
         elif tool_name == "Write":
             fp = tool_input.get("file_path", "?")
-            log_task("Claude", f"[파일 생성 시작] {_short_path(fp)}")
+            log_task("Claude", f"[파일 생성 시작] {_short_path(fp)}", _TERMINAL_ID)
 
         elif tool_name == "Bash":
             cmd = tool_input.get("command", "").strip()
             if any(cmd.startswith(p) for p in _SKIP_BASH_PREFIXES):
                 return
             if "git commit" in cmd:
-                log_task("Claude", f"[커밋 시작] {_short_cmd(cmd)}")
+                log_task("Claude", f"[커밋 시작] {_short_cmd(cmd)}", _TERMINAL_ID)
             else:
-                log_task("Claude", f"[명령 실행] {_short_cmd(cmd)}")
+                log_task("Claude", f"[명령 실행] {_short_cmd(cmd)}", _TERMINAL_ID)
 
     # ── PostToolUse: 수정 완료 결과 로그 ──────────────────────────────
     elif event == "PostToolUse":
@@ -615,13 +748,13 @@ def main():
 
         if tool_name == "Edit":
             fp = tool_input.get("file_path", "?")
-            log_task("Claude", f"[수정 완료] {_short_path(fp)} ✓")
+            log_task("Claude", f"[수정 완료] {_short_path(fp)} ✓", _TERMINAL_ID)
 
         elif tool_name == "Write":
             fp = tool_input.get("file_path", "?")
             content = tool_input.get("content", "")
             lines = len(content.splitlines())
-            log_task("Claude", f"[생성 완료] {_short_path(fp)} ({lines}줄) ✓")
+            log_task("Claude", f"[생성 완료] {_short_path(fp)} ({lines}줄) ✓", _TERMINAL_ID)
 
         elif tool_name == "Bash":
             cmd = tool_input.get("command", "").strip()
@@ -636,23 +769,25 @@ def main():
             result_snippet = _snippet(output, 60) if output else ""
             suffix = f" → {result_snippet}" if result_snippet else " ✓"
             if "git commit" in cmd:
-                log_task("Claude", f"[커밋 완료]{suffix}")
+                log_task("Claude", f"[커밋 완료]{suffix}", _TERMINAL_ID)
             else:
-                log_task("Claude", f"[명령 완료] {_short_cmd(cmd, 50)}{suffix}")
+                log_task("Claude", f"[명령 완료] {_short_cmd(cmd, 50)}{suffix}", _TERMINAL_ID)
 
         elif tool_name == "NotebookEdit":
             nb = tool_input.get("notebook_path", "?")
-            log_task("Claude", f"[노트북 수정] {_short_path(nb)} ✓")
+            log_task("Claude", f"[노트북 수정] {_short_path(nb)} ✓", _TERMINAL_ID)
 
     # ── Stop: 응답 완료 구분선 + 태스크 done 처리 + 세션 스냅샷 ───────────
     elif event == "Stop":
         if log_task:
-            log_task("Claude", "─── 응답 완료 ───")
+            log_task("Claude", "─── 응답 완료 ───", _TERMINAL_ID)
 
-        # Claude 응답이 끝나면 in_progress 상태인 claude 태스크를 모두 done으로 변경
-        # → 태스크 보드에서 "완료" 탭으로 자동 이동
+        # Claude 응답이 끝나면 in_progress 상태인 claude 태스크 처리
+        # → stop_reason이 'error'가 아닌 경우에만 done으로 변경
+        # → 에러/실패 상태에서는 무조건 done 처리하지 않음 (거짓 완료 방지)
         try:
             import os as _os
+            _stop_reason = data.get('stop_reason', '')  # 에러 여부 확인
             _data_dir = _os.path.join(
                 _os.path.dirname(_os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
             )
@@ -662,9 +797,9 @@ def main():
                     _tasks = json.load(_f)
                 _changed = False
                 for _t in _tasks:
-                    # pending(아직 시작 안 한 것 포함) + in_progress 모두 완료 처리
                     if _t.get('assigned_to') == 'claude' and _t.get('status') in ('pending', 'in_progress'):
-                        _t['status'] = 'done'
+                        # 에러로 중단된 경우 'failed'로 표시, 정상 완료 시만 'done'
+                        _t['status'] = 'failed' if _stop_reason == 'error' else 'done'
                         _changed = True
                 if _changed:
                     with open(_tasks_file, 'w', encoding='utf-8') as _f:
@@ -675,6 +810,37 @@ def main():
         # 오늘의 사용자 지시 + 완료 액션을 shared_memory.db에 갱신
         # → 다음 세션 시작 시 "이전에 뭘 했지?"를 바로 파악 가능
         _save_session_snapshot()
+
+        # [current-work 자동 업데이트] 오늘 완료된 항목을 하이브 메모리에 자동 반영
+        # → 다음 세션에서 current-work를 보면 최신 진행 상황 바로 파악 가능
+        try:
+            import os as _os2
+            from datetime import datetime as _dt2
+            _today2 = _dt2.now().strftime("%Y-%m-%d")
+            _logs2 = _os2.path.join(
+                _os2.path.dirname(_os2.path.abspath(__file__)), '..', '.ai_monitor', 'data', 'task_logs.jsonl'
+            )
+            _done_items = []
+            if _os2.path.exists(_logs2):
+                with open(_logs2, "r", encoding="utf-8") as _lf:
+                    for _line in _lf:
+                        _line = _line.strip()
+                        if not _line:
+                            continue
+                        try:
+                            _entry = json.loads(_line)
+                        except Exception:
+                            continue
+                        if not _entry.get("timestamp", "").startswith(_today2):
+                            continue
+                        _task = _entry.get("task", "")
+                        if _entry.get("agent") == "Claude" and any(
+                            k in _task for k in ["수정 완료", "생성 완료", "커밋 완료", "빌드 완료"]
+                        ):
+                            _done_items.append(_task[:80])
+            _update_current_work(_done_items)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -51,25 +51,32 @@ def _resolve_log_dir() -> str:
     )
 
 
-def log_task(agent_name, task_summary):
+def log_task(agent_name, task_summary, terminal_id=None):
     """
     하이브 마인드 상황판에 수행한 작업 결과를 로그로 남깁니다.
     이 파일은 프로젝트의 모든 에이전트(Gemini, Claude 등)가 공통으로 사용합니다.
+
+    terminal_id: 터미널 식별자 (T1~T8). None이면 환경변수 TERMINAL_ID 자동 참조.
+                 로그에 포함되어 대시보드에서 터미널별 필터링에 사용됨.
     """
     log_dir = _resolve_log_dir()
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    
+
     log_file = os.path.join(log_dir, "task_logs.jsonl")
     archive_file = os.path.join(log_dir, "task_logs_archive.jsonl")
     MAX_LINES = 50  # 최신 로그 유지 개수 (AI 토큰 최적화)
-    
+
     # 보안 마스킹 처리 적용 (API Key, 토큰 등 누출 방지)
     safe_summary = mask_sensitive_data(task_summary)
-    
+
+    # 터미널 ID: 인자 > 환경변수 > 기본값 T0 순으로 결정
+    _tid = terminal_id or os.environ.get('TERMINAL_ID', 'T0')
+
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "agent": agent_name,
+        "terminal_id": _tid,
         "task": safe_summary
     }
     

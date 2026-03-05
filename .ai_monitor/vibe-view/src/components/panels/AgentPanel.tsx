@@ -8,6 +8,11 @@
  *          하나의 SSE 스트림을 공유하여 모든 뷰를 동시 업데이트합니다.
  *
  * REVISION HISTORY:
+ * - 2026-03-05 Claude: [리디자인] 상황판 탭 — TerminalSlot 상단 모니터링 기준 터미널별 패널
+ *   - 2열 컴팩트 카드 그리드 → 1열 확장 모니터링 패널 목록으로 교체
+ *   - 각 터미널 카드: 파이프라인(분석/수정/검증/완료) + 현재 작업 + 마지막 출력 표시
+ *   - TerminalSlot 상단 모니터링 뷰와 동일한 시각 언어 사용 (터미널별 독립 상태)
+ *   - 카드 클릭 → 해당 터미널 선택 (선택 터미널로 다음 실행 전송)
  * - 2026-03-05 Claude: [신규] 터미널별 상황판 — T1~T8 카드 그리드
  *   - 상황판 탭: 1개 파이프라인 → T1~T8 독립 카드 2×4 그리드로 전환
  *   - /api/agent/terminals 3초 폴링으로 터미널별 상태 실시간 갱신
@@ -49,6 +54,14 @@
  *   - 터미널 raw 출력 대신 분석→수정→검증→완료 단계를 시각적으로 표시
  *   - 출력 파싱으로 현재 단계 자동 감지 (키워드 기반)
  *   - 이슈 발생 시 루프 카운터 표시 (분석→수정→검증 재시작)
+ * - 2026-03-05 Claude: [UI 한글화] 영어 텍스트 → 한글 전환
+ *   - 'Autonomous Agent' → '자율 에이전트'
+ *   - '최근 실행 이력' → '최근 실행 이력', 'AI 사고 흐름' → 'AI 사고 흐름'
+ *   - 스킬 short 이름(debug/review/…) → 한글(디버그/코드리뷰/…)
+ *   - TerminalCard: 이전 날짜 데이터에 날짜 표시 추가 (오늘 것만 HH:MM, 아니면 MM/DD)
+ * - 2026-03-05 Claude: [신규] 분석/수정 파일 추적 — 상황판 탭에 표시
+ *   - SSE 출력 파싱: '● Read(file)' → 분석 파일, '● Edit(file)' → 수정 파일 추적
+ *   - 워크플로우 파이프라인 아래에 '분석한 파일 / 수정한 파일' 목록 표시
  * ------------------------------------------------------------------------
  */
 
@@ -56,7 +69,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot, Play, Square, RotateCw, ChevronDown, Clock,
   Brain, CheckCircle2, Circle, XCircle, Terminal, LayoutDashboard,
-  Search, Pencil, ShieldCheck, RefreshCw,
+  Search, Pencil, ShieldCheck, RefreshCw, Network, Database,
 } from 'lucide-react';
 
 // 현재 접속 포트 기반으로 API 주소 자동 결정
@@ -66,7 +79,16 @@ const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
 
 type AgentStatus   = 'idle' | 'running' | 'done' | 'error' | 'unavailable';
 type CliChoice     = 'auto' | 'claude' | 'gemini';
-type ActiveTab     = 'workflow' | 'terminal' | 'thoughts' | 'history';
+type ActiveTab     = 'workflow' | 'terminal' | 'thoughts' | 'history' | 'orchestrator' | 'hive';
+
+// 하이브 활동 이벤트 타입 — /api/hive/activity 응답 형식
+interface HiveEvent {
+  timestamp: string;
+  agent: string;
+  terminal_id?: string;   // 로그를 남긴 터미널 ID (T1~T8, T0=미설정)
+  type: 'memory_read' | 'memory_write' | 'orchestrate' | 'message' | 'heal' | 'hive_ctx' | 'session';
+  task: string;
+}
 
 // ─── 워크플로우 단계 타입 ─────────────────────────────────────────────────────
 type WorkflowStage = 'idle' | 'analyzing' | 'modifying' | 'verifying' | 'done' | 'error';
@@ -317,8 +339,9 @@ function WorkflowPipeline({
   );
 }
 
-// ─── 단일 터미널 카드 (상황판 그리드용) ──────────────────────────────────────
-/** T1~T8 각각의 상태를 컴팩트 카드로 표시.
+// ─── 단일 터미널 모니터링 패널 (상황판 목록용) ───────────────────────────────
+/** T1~T8 각각의 상태를 TerminalSlot 상단 모니터링 뷰와 동일한 형식으로 표시.
+ *  파이프라인 단계 + 현재 작업 + 마지막 출력을 터미널별로 독립 표시합니다.
  *  클릭 시 해당 터미널을 '선택 상태'로 강조합니다. */
 function TerminalCard({
   id, state, selected, onClick,
@@ -330,73 +353,150 @@ function TerminalCard({
 }) {
   const { status, task, cli, ts, last_line } = state;
 
-  // 상태별 색상
+  // 카드 테두리: 선택 > running > 기본
+  const cardBorder = selected
+    ? 'border-primary/60 bg-primary/5'
+    : status === 'running'
+      ? 'border-yellow-400/30 bg-yellow-400/5'
+      : status === 'done'
+        ? 'border-green-600/20 bg-green-900/5'
+        : status === 'error'
+          ? 'border-red-500/20 bg-red-900/5'
+          : 'border-white/8 bg-black/20 hover:border-white/15';
+
+  // 상태 도트 색상 + 애니메이션
   const dotColor =
     status === 'running' ? 'bg-yellow-400 animate-pulse' :
     status === 'done'    ? 'bg-green-500' :
     status === 'error'   ? 'bg-red-500' :
                            'bg-white/15';
 
-  const cardBorder = selected
-    ? 'border-primary/60 bg-primary/5'
-    : status === 'running'
-      ? 'border-yellow-400/30 bg-yellow-400/3'
-      : 'border-white/8 bg-black/20 hover:border-white/15';
-
   // CLI 배지 색상
   const cliBadge =
-    cli === 'claude' ? 'bg-orange-500/20 text-orange-300' :
-    cli === 'gemini' ? 'bg-blue-500/20 text-blue-300' :
-                       'bg-white/5 text-white/20';
+    cli === 'claude' ? 'bg-orange-500/20 text-orange-300 border-orange-500/20' :
+    cli === 'gemini' ? 'bg-blue-500/20 text-blue-300 border-blue-500/20' :
+                       'bg-white/5 text-white/20 border-white/5';
 
-  // 시간 포맷 (HH:MM)
-  const timeStr = ts ? ts.slice(11, 16) : '';
+  // 시간 포맷: 오늘 → HH:MM, 이전 날짜 → MM/DD
+  const timeStr = (() => {
+    if (!ts) return '';
+    const today = new Date().toISOString().slice(0, 10);
+    const itemDate = ts.slice(0, 10);
+    if (itemDate === today) return ts.slice(11, 16);
+    return `${ts.slice(5, 7)}/${ts.slice(8, 10)}`;
+  })();
 
-  // 마지막 줄 기반 워크플로우 단계
+  // last_line으로 현재 워크플로우 단계 추론
   const detectedStage = last_line ? detectStage(last_line) : null;
-  const stageLabel = detectedStage ? STAGE_LABEL[detectedStage] : '';
-  const stageColor = detectedStage ? STAGE_COLOR[detectedStage] : '';
+
+  // 파이프라인 단계 목록 — TerminalSlot 모니터링 상단과 동일한 순서
+  const PIPELINE = [
+    { id: 'analyzing', label: '분석' },
+    { id: 'modifying', label: '수정' },
+    { id: 'verifying', label: '검증' },
+    { id: 'done',      label: '완료' },
+  ] as const;
+  const stageOrder: Record<string, number> = { analyzing: 0, modifying: 1, verifying: 2, done: 3 };
+  const currentIdx = detectedStage ? (stageOrder[detectedStage] ?? -1) : (status === 'done' ? 3 : -1);
+
+  // idle 터미널은 최소 높이 유지 (헤더+상태만 표시)
+  const isActive = status !== 'idle';
 
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col gap-1 p-2 rounded border transition-all duration-200 text-left w-full ${cardBorder}`}
+      className={`flex flex-col gap-0 rounded border transition-all duration-200 text-left w-full overflow-hidden ${cardBorder}`}
     >
-      {/* 헤더: 터미널 ID + CLI 배지 */}
-      <div className="flex items-center justify-between">
-        <span className="font-bold text-[11px] text-white/70 font-mono">{id}</span>
-        <div className="flex items-center gap-1">
+      {/* ── 모니터링 헤더: ID + CLI + 상태 + 시간 ─────────────────────────── */}
+      <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/5">
+        <div className="flex items-center gap-2">
+          {/* 터미널 ID */}
+          <span className="font-bold text-[11px] text-white/80 font-mono tracking-wider">{id}</span>
+          {/* CLI 배지 */}
           {cli && (
-            <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${cliBadge}`}>
-              {cli === 'claude' ? '⚡' : cli === 'gemini' ? '✨' : ''}{cli}
+            <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${cliBadge}`}>
+              {cli === 'claude' ? '⚡' : '✨'} {cli}
             </span>
           )}
+          {/* 상태 도트 + 텍스트 */}
+          <div className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+            <span className={`text-[9px] font-semibold ${
+              status === 'running' ? 'text-yellow-400' :
+              status === 'done'    ? 'text-green-400' :
+              status === 'error'   ? 'text-red-400' :
+                                     'text-white/20'
+            }`}>
+              {status === 'idle' ? '대기' : status === 'running' ? '실행 중' : status === 'done' ? '완료' : '오류'}
+            </span>
+          </div>
         </div>
+        <span className="text-[8px] text-white/20 font-mono">{timeStr}</span>
       </div>
 
-      {/* 상태 도트 + 단계 */}
-      <div className="flex items-center gap-1.5">
-        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-        <span className={`text-[9px] font-semibold ${
-          status === 'running' ? 'text-yellow-400' :
-          status === 'done'    ? 'text-green-400' :
-          status === 'error'   ? 'text-red-400' :
+      {/* ── 파이프라인 단계 (실행 이력이 있는 터미널만 표시) ────────────────── */}
+      {isActive && (
+        <div className="flex items-center justify-center gap-0 px-3 py-2 border-b border-white/5">
+          {PIPELINE.map((step, idx) => {
+            const isStepActive = step.id === detectedStage && status === 'running';
+            const isPast       = currentIdx > idx;
+            return (
+              <React.Fragment key={step.id}>
+                {/* 단계 간 연결선 */}
+                {idx > 0 && (
+                  <div className={`flex-1 h-px mx-0.5 transition-all ${
+                    isPast || isStepActive ? 'bg-green-600/40' : 'bg-white/8'
+                  }`} />
+                )}
+                {/* 단계 원형 + 레이블 */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border transition-all ${
+                    isStepActive ? 'border-yellow-400 bg-yellow-400/20 shadow-[0_0_6px_rgba(250,204,21,0.35)] animate-pulse' :
+                    isPast       ? 'border-green-600/50 bg-green-900/20' :
+                                   'border-white/10 bg-white/3'
+                  }`}>
+                    <CheckCircle2 className={`w-3 h-3 ${
+                      isStepActive ? 'text-yellow-400' :
+                      isPast       ? 'text-green-600/60' :
+                                     'text-white/15'
+                    }`} />
+                  </div>
+                  <span className={`text-[8px] font-bold ${
+                    isStepActive ? 'text-yellow-400' :
+                    isPast       ? 'text-green-600/50' :
+                                   'text-white/18'
+                  }`}>
+                    {step.label}
+                  </span>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── 현재 작업 텍스트 ────────────────────────────────────────────────── */}
+      <div className="flex items-start gap-1.5 px-2.5 py-1.5">
+        <Clock className={`w-3 h-3 shrink-0 mt-0.5 ${
+          status === 'running' ? 'text-yellow-400/60' : 'text-white/15'
+        }`} />
+        <span className={`text-[9px] truncate leading-tight ${
+          status === 'running' ? 'text-yellow-200/70' :
+          status === 'done'    ? 'text-green-200/40 line-through' :
                                  'text-white/25'
         }`}>
-          {status === 'idle' ? '대기 중' :
-           status === 'running' ? '실행 중' :
-           status === 'done' ? '완료' : '오류'}
+          {task || '—'}
         </span>
-        {stageLabel && status === 'running' && (
-          <span className={`text-[8px] ${stageColor}`}>· {stageLabel}</span>
-        )}
-        <span className="ml-auto text-[8px] text-white/20 font-mono">{timeStr}</span>
       </div>
 
-      {/* 작업 내용 (1줄 트런케이트) */}
-      <div className="text-[9px] text-white/40 truncate leading-tight min-h-[1rem]">
-        {task || '—'}
-      </div>
+      {/* ── 마지막 출력 줄 (running 중에만 표시) ────────────────────────────── */}
+      {last_line && status === 'running' && (
+        <div className="px-2.5 pb-1.5">
+          <div className="text-[8px] text-white/25 font-mono truncate bg-black/30 rounded px-1.5 py-0.5 border border-white/5">
+            {last_line}
+          </div>
+        </div>
+      )}
     </button>
   );
 }
@@ -422,6 +522,40 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
   // 히스토리 탭 데이터
   const [history, setHistory]         = useState<AgentRun[]>([]);
+
+  // ── 분석/수정 파일 추적 (상황판 탭에서 표시) ──────────────────────────────
+  // SSE 출력에서 '● Read(file)' → 분석, '● Edit(file)' → 수정 으로 파싱
+  const [analyzedFiles, setAnalyzedFiles] = useState<string[]>([]);
+  const [modifiedFiles, setModifiedFiles] = useState<string[]>([]);
+
+  // ── 하이브 활동 탭 데이터 — /api/hive/activity 3초 폴링 ───────────────────
+  // 하이브 메모리 읽기/쓰기, 오케스트레이션, 메시지 수신 이벤트를 시각화
+  const [hiveEvents, setHiveEvents] = useState<HiveEvent[]>([]);
+
+  // ── 오케스트레이터 탭 데이터 (구 OrchestratorPanel 통합) ──────────────────
+  // 스킬 레지스트리: 기본 7개 고정, API 데이터 우선
+  const DEFAULT_ORCH_SKILLS = [
+    { num: 1, name: 'vibe-debug',        short: '디버그' },
+    { num: 2, name: 'vibe-tdd',          short: 'TDD' },
+    { num: 3, name: 'vibe-brainstorm',   short: '아이디어' },
+    { num: 4, name: 'vibe-write-plan',   short: '계획작성' },
+    { num: 5, name: 'vibe-execute-plan', short: '계획실행' },
+    { num: 6, name: 'vibe-code-review',  short: '코드리뷰' },
+    { num: 7, name: 'vibe-release',      short: '릴리스' },
+  ];
+  const CIRCLE_NUMS = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦'];
+  const [orchChainData, setOrchChainData] = useState<{
+    skill_registry: { num: number; name: string; short: string }[];
+    terminals: Record<string, {
+      session_id: string; request: string; status: string;
+      updated_at: string; agent?: string;
+      steps: { label: string; skill_num: number; skill_name: string;
+               step_order: number; status: string; summary: string }[];
+    }>;
+  }>({ skill_registry: [], terminals: {} });
+  const [orchRunning, setOrchRunning]     = useState(false);
+  const [orchLastRun, setOrchLastRun]     = useState<string | null>(null);
+  const [orchTerminalAgents, setOrchTerminalAgents] = useState<Record<string, string>>({});
 
   // ── 터미널별 상태 카드 (T1~T8) — /api/agent/terminals 폴링 ─────────────────
   const [terminals, setTerminals] = useState<Record<string, TerminalState>>(() => {
@@ -466,6 +600,54 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
     if (activeTab === 'thoughts')
       thoughtEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [thoughts, activeTab]);
+
+  // ─── 오케스트레이터 스킬 체인 폴링 (3초) — 오케스트레이터 탭 데이터 갱신 ──
+  useEffect(() => {
+    const fetchOrch = () => {
+      // 스킬 체인 데이터 (스킬 목록 + 터미널별 단계)
+      fetch(`${API_BASE}/api/orchestrator/skill-chain`)
+        .then(res => res.json())
+        .then(data => { if (data.skill_registry !== undefined) setOrchChainData(data); })
+        .catch(() => {});
+      // 터미널 에이전트 매핑 (orchTerminalAgents)
+      fetch(`${API_BASE}/api/orchestrator/status`)
+        .then(res => res.json())
+        .then(data => { if (data.terminal_agents) setOrchTerminalAgents(data.terminal_agents); })
+        .catch(() => {});
+    };
+    fetchOrch();
+    const iv = setInterval(fetchOrch, 3000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ─── 하이브 활동 폴링 (5초) — 하이브 탭 데이터 갱신 ─────────────────────
+  // task_logs에서 하이브 시스템 관련 이벤트만 필터링하여 표시
+  // → 사용자가 Claude/Gemini가 실제로 하이브를 사용하는지 눈으로 확인 가능
+  useEffect(() => {
+    const fetchHive = () => {
+      fetch(`${API_BASE}/api/hive/activity`)
+        .then(res => res.json())
+        .then((data: HiveEvent[]) => { if (Array.isArray(data)) setHiveEvents(data); })
+        .catch(() => {});
+    };
+    fetchHive();
+    const iv = setInterval(fetchHive, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ─── 오케스트레이터 수동 실행 핸들러 ───────────────────────────────────
+  const runOrchestrator = () => {
+    setOrchRunning(true);
+    fetch(`${API_BASE}/api/orchestrator/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+      .then(res => res.json())
+      .then(() => setOrchLastRun(new Date().toLocaleTimeString()))
+      .catch(() => {})
+      .finally(() => setOrchRunning(false));
+  };
 
   // ─── 터미널별 상태 폴링 (T1~T8 상황판 카드 갱신) ────────────────────────
   const loadTerminals = useCallback(async () => {
@@ -576,6 +758,8 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           setWfStage('analyzing');
           wfCurrentStageRef.current = 'analyzing';
           setWfLoop(0);
+          setAnalyzedFiles([]);
+          setModifiedFiles([]);
 
           // 터미널: 구분선 추가
           setOutputLines(prev => [...prev, { text: `── 실행 시작 (ID: ${data.run_id}) ──`, ts, type: 'started' }]);
@@ -606,6 +790,28 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
                 wfCurrentStageRef.current = detected;
                 setWfStage(detected);
               }
+            }
+          }
+
+          // 상황판: 분석/수정 파일 추적 — Claude Code 도구 호출 패턴 파싱
+          // '● Read(file)' → 분석 파일, '● Edit(file)' → 수정 파일 목록에 추가
+          if (line) {
+            // 경로에서 파일명만 추출하는 헬퍼 (경로 구분자 기준 마지막 세그먼트 반환)
+            const basename = (p: string) => {
+              const segs = p.replace(/\\\\/g, '/').split('/');
+              return (segs[segs.length - 1] || p).trim();
+            };
+            const readMatch = /Read|Glob|Grep|Search/i.test(line)
+              ? line.match(/(?:Read|Glob|Grep|Search)\s*\(([^)]{3,80})\)/i) : null;
+            if (readMatch) {
+              const fname = basename(readMatch[1]);
+              setAnalyzedFiles(prev => prev.includes(fname) ? prev : [...prev.slice(-9), fname]);
+            }
+            const editMatch = /Edit|Write|Create/i.test(line)
+              ? line.match(/(?:Edit|Write|Create)\s*\(([^)]{3,80})\)/i) : null;
+            if (editMatch) {
+              const fname = basename(editMatch[1]);
+              setModifiedFiles(prev => prev.includes(fname) ? prev : [...prev.slice(-9), fname]);
             }
           }
 
@@ -785,10 +991,12 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
     setStatus('running');
     setActiveCli(selectedCli === 'auto' ? '분석 중...' : selectedCli);
 
-    // 상황판 초기화
+    // 상황판 초기화 (분석/수정 파일 목록도 함께 초기화)
     setWfStage('analyzing');
     wfCurrentStageRef.current = 'analyzing';
     setWfLoop(0);
+    setAnalyzedFiles([]);
+    setModifiedFiles([]);
 
     // 30초 내 SSE started 이벤트 없으면 자동 오류 처리
     // 출력 유무와 무관하게 항상 타임아웃 메시지를 추가해야 "중간에 멈춘 것처럼 보이는" 버그를 방지
@@ -873,7 +1081,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       <div className="flex items-center justify-between shrink-0 px-1">
         <div className="flex items-center gap-1.5 font-bold text-primary uppercase tracking-tighter">
           <Bot className="w-3.5 h-3.5" />
-          Autonomous Agent
+          자율 에이전트
         </div>
         <div className={`flex items-center gap-1 ${STATUS_COLORS[status]}`}>
           {status === 'running' && (
@@ -962,10 +1170,12 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
       {/* ── 탭 바 ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 shrink-0 border-b border-white/5 pb-1">
-        {tabBtn('workflow', '상황판',   <LayoutDashboard className="w-3 h-3" />)}
-        {tabBtn('terminal', '터미널',  <Terminal className="w-3 h-3" />)}
-        {tabBtn('thoughts', '사고 흐름', <Brain className="w-3 h-3" />)}
-        {tabBtn('history',  '히스토리', <Clock className="w-3 h-3" />)}
+        {tabBtn('workflow',     '상황판',    <LayoutDashboard className="w-3 h-3" />)}
+        {tabBtn('terminal',    '터미널',   <Terminal className="w-3 h-3" />)}
+        {tabBtn('thoughts',    '사고 흐름', <Brain className="w-3 h-3" />)}
+        {tabBtn('history',     '히스토리', <Clock className="w-3 h-3" />)}
+        {tabBtn('orchestrator','스킬체인', <Network className="w-3 h-3" />)}
+        {tabBtn('hive',        '하이브',   <Database className="w-3 h-3" />)}
         <div className="ml-auto text-[9px] text-primary/60 font-mono uppercase">{activeSkill}</div>
       </div>
 
@@ -973,22 +1183,23 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       <div className="flex-1 overflow-hidden min-h-0">
 
         {/* ──────────────────────────────────────────────────────────────
-             상황판 탭: T1~T8 터미널별 에이전트 현황 카드 그리드 (2열 x 4행)
-             3초 폴링으로 각 터미널의 상태/단계/작업을 독립 표시.
+             상황판 탭: T1~T8 터미널별 모니터링 패널 목록 (1열 스크롤)
+             TerminalSlot 상단 모니터링 기준: 파이프라인 + 작업 + 출력 표시.
+             3초 폴링으로 각 터미널 상태 실시간 갱신.
              카드 클릭 → 해당 터미널 선택 → 실행 버튼이 그 터미널로 전송.
         ─────────────────────────────────────────────────────────────── */}
         {activeTab === 'workflow' && (
-          <div className="flex flex-col h-full overflow-y-auto gap-2 pr-0.5">
+          <div className="flex flex-col h-full overflow-y-auto gap-1.5 pr-0.5">
 
             {/* ── 선택 터미널 안내 배너 ──────────────────────────────────── */}
-            <div className="shrink-0 flex items-center gap-2 px-0.5">
+            <div className="shrink-0 flex items-center gap-2 px-0.5 pb-0.5">
               <span className="text-[9px] text-white/25">실행 대상:</span>
               <span className="text-[10px] font-bold font-mono text-primary">{selectedTerminalId}</span>
               <span className="text-[9px] text-white/15">— 카드 클릭으로 변경</span>
             </div>
 
-            {/* ── T1~T8 카드 그리드 ──────────────────────────────────────── */}
-            <div className="grid grid-cols-2 gap-2 shrink-0">
+            {/* ── T1~T8 모니터링 패널 목록 (1열, TerminalSlot 상단 모니터링 기준) ── */}
+            <div className="flex flex-col gap-1.5 shrink-0">
               {Array.from({ length: 8 }, (_, i) => `T${i + 1}`).map(tid => {
                 const state: TerminalState = terminals[tid] ?? {
                   status: 'idle', task: '', cli: '', run_id: '', ts: '', last_line: '',
@@ -1005,14 +1216,40 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
               })}
             </div>
 
-            {/* ── 선택된 터미널의 워크플로우 파이프라인 표시
-                  running: 실행 중 (실시간 진행)
-                  done/error: 완료 후에도 마지막 단계 유지 표시 */}
+            {/* ── 선택된 터미널의 워크플로우 파이프라인 (SSE 실시간 데이터)
+                  TerminalCard에 last_line 기반 단계가 표시되나,
+                  SSE 직접 연결 시의 더 정확한 단계를 여기서 보완 표시 */}
             {(['running', 'done', 'error'] as const).includes(
               terminals[selectedTerminalId]?.status as any
             ) && wfStage !== 'idle' && (
               <div className="shrink-0">
                 <WorkflowPipeline stage={wfStage} loopCount={wfLoop} agentStatus={status} />
+              </div>
+            )}
+
+            {/* ── 분석/수정 파일 목록 — SSE 출력에서 파싱한 도구 호출 내역 ─ */}
+            {(analyzedFiles.length > 0 || modifiedFiles.length > 0) && (
+              <div className="shrink-0 rounded border border-white/8 overflow-hidden text-[9px]">
+                {analyzedFiles.length > 0 && (
+                  <div className="px-2 py-1.5 border-b border-white/5">
+                    <div className="text-[8px] text-blue-400/70 font-bold uppercase tracking-wider mb-1">📖 분석한 파일</div>
+                    <div className="flex flex-wrap gap-1">
+                      {analyzedFiles.map((f, i) => (
+                        <span key={i} className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded font-mono text-blue-300/70">{f}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {modifiedFiles.length > 0 && (
+                  <div className="px-2 py-1.5">
+                    <div className="text-[8px] text-yellow-400/70 font-bold uppercase tracking-wider mb-1">✏️ 수정한 파일</div>
+                    <div className="flex flex-wrap gap-1">
+                      {modifiedFiles.map((f, i) => (
+                        <span key={i} className="px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded font-mono text-yellow-300/70">{f}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1056,10 +1293,10 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
         {/* 사고 흐름 탭: Thought Stream (구 MissionControlPanel) */}
         {activeTab === 'thoughts' && (
           <div className="flex flex-col h-full gap-2 overflow-hidden">
-            {/* Live Micro-Plan: 최근 실행 이력 */}
+            {/* 최근 실행 이력: 최근 실행 이력 */}
             <div className="flex flex-col gap-1 shrink-0">
               <div className="flex items-center gap-1.5 text-[10px] font-bold text-primary uppercase tracking-tighter">
-                <CheckCircle2 className="w-3 h-3" /> Live Micro-Plan
+                <CheckCircle2 className="w-3 h-3" /> 최근 실행 이력
               </div>
               <div className="bg-black/20 rounded border border-white/5 p-2 flex flex-col gap-1.5 max-h-28 overflow-y-auto">
                 {history.length === 0
@@ -1081,10 +1318,10 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
               </div>
             </div>
 
-            {/* AI Thought Stream */}
+            {/* AI 사고 흐름 */}
             <div className="flex flex-col flex-1 gap-1 overflow-hidden">
               <div className="flex items-center gap-1.5 text-[10px] font-bold text-cyan-400 uppercase tracking-tighter">
-                <Brain className="w-3 h-3" /> AI Thought Stream
+                <Brain className="w-3 h-3" /> AI 사고 흐름
               </div>
               <div className="flex-1 bg-black/40 rounded border border-white/5 p-2 font-mono text-[10px]
                               overflow-y-auto flex flex-col gap-1.5">
@@ -1148,6 +1385,302 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
                   </button>
                 ))
             }
+          </div>
+        )}
+
+        {/* ──────────────────────────────────────────────────────────────
+             스킬체인 탭: AI 오케스트레이터 스킬 레지스트리 + 터미널별 체인
+             (구 OrchestratorPanel 내용을 이 탭으로 통합)
+             - 상단: 스킬 ①~⑦ 세로 목록 + 각 스킬 사용 중인 터미널 배지
+             - 하단: 터미널별 스킬 체인 순서 (T1: 1-① → 1-③ → ...)
+        ─────────────────────────────────────────────────────────────── */}
+        {activeTab === 'orchestrator' && (() => {
+          // 표시할 스킬 목록 (API 없으면 기본값)
+          const orchSkills = orchChainData.skill_registry.length > 0
+            ? orchChainData.skill_registry : DEFAULT_ORCH_SKILLS;
+          // 활성 터미널 (steps 있는 것만, 번호 순)
+          const activeOrchTerminals = Object.entries(orchChainData.terminals ?? {})
+            .filter(([, chain]) => chain.steps && chain.steps.length > 0)
+            .sort(([a], [b]) => Number(a) - Number(b));
+          // 스킬번호 → 사용 터미널+스텝 매핑
+          const skillUsage: Record<number, { termId: string; step: typeof activeOrchTerminals[0][1]['steps'][0] }[]> = {};
+          activeOrchTerminals.forEach(([termId, chain]) => {
+            chain.steps.forEach(step => {
+              if (!skillUsage[step.skill_num]) skillUsage[step.skill_num] = [];
+              skillUsage[step.skill_num].push({ termId, step });
+            });
+          });
+          const stepBadgeColor = (s: string) =>
+            s === 'done'    ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+            s === 'running' ? 'bg-primary/20 text-primary border-primary/40 animate-pulse' :
+            s === 'failed'  ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+            s === 'skipped' ? 'bg-white/5 text-[#555] border-white/10' :
+                              'bg-white/5 text-[#666] border-white/10';
+          const stepIcon = (s: string) =>
+            s === 'done' ? '✅' : s === 'running' ? '🔄' : s === 'failed' ? '❌' : s === 'skipped' ? '⏭️' : '⏳';
+          const agentBadgeColor = (agent: string) =>
+            agent === 'claude' ? 'bg-green-500/20 text-green-400' :
+            agent === 'gemini' ? 'bg-blue-500/20 text-blue-400' :
+                                 'bg-yellow-500/20 text-yellow-400';
+
+          return (
+            <div className="flex flex-col h-full overflow-hidden gap-2">
+              {/* 헤더: 마지막 실행 시각 + 수동 실행 버튼 */}
+              <div className="flex items-center justify-between shrink-0">
+                <div className="text-[9px] text-[#858585] font-mono">
+                  {orchLastRun ? `마지막 실행: ${orchLastRun}` : '스킬 체인 모니터'}
+                </div>
+                <button
+                  onClick={runOrchestrator}
+                  disabled={orchRunning}
+                  className="flex items-center gap-1 px-2 py-1 bg-primary/20 hover:bg-primary/40
+                             disabled:opacity-40 text-primary rounded text-[9px] font-bold transition-colors"
+                >
+                  <Play className="w-3 h-3" />
+                  {orchRunning ? '실행 중...' : '지금 실행'}
+                </button>
+              </div>
+
+              {/* 스킬 레지스트리 ①~⑦ */}
+              <div className="shrink-0 rounded border border-white/10 overflow-hidden">
+                <div className="px-2 py-1.5 border-b border-white/10 flex items-center justify-between">
+                  <span className="text-[9px] font-bold text-[#969696] uppercase tracking-wider">스킬 레지스트리</span>
+                  <span className="text-[8px] text-[#555]">사용 중인 터미널 →</span>
+                </div>
+                <div className="flex flex-col">
+                  {orchSkills.map((sk, idx) => {
+                    const usages = skillUsage[sk.num] ?? [];
+                    const isInUse = usages.length > 0;
+                    return (
+                      <div
+                        key={sk.num}
+                        className={`flex items-center gap-2 px-2 py-1.5 ${
+                          idx < orchSkills.length - 1 ? 'border-b border-white/5' : ''
+                        } ${isInUse ? 'bg-white/3' : ''}`}
+                      >
+                        <span className="text-primary font-bold text-[10px] font-mono w-4 shrink-0">
+                          {CIRCLE_NUMS[sk.num] ?? sk.num}
+                        </span>
+                        <span className={`text-[9px] font-mono w-16 shrink-0 ${isInUse ? 'text-[#cccccc]' : 'text-[#666]'}`}>
+                          {sk.short}
+                        </span>
+                        <div className="flex items-center gap-1 flex-wrap flex-1">
+                          {usages.map(({ termId, step }, i) => (
+                            <div
+                              key={i}
+                              className={`flex items-center gap-0.5 px-1 py-0.5 rounded border text-[8px] font-mono font-bold cursor-default ${stepBadgeColor(step.status)}`}
+                              title={step.summary || `T${termId} — ${step.status}`}
+                            >
+                              {stepIcon(step.status)} T{termId}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 터미널별 스킬 체인 순서 */}
+              <div className="flex-1 overflow-y-auto flex flex-col gap-1.5">
+                {activeOrchTerminals.length > 0 ? (
+                  <>
+                    <div className="text-[9px] font-bold text-[#969696] uppercase tracking-wider px-1 shrink-0">
+                      터미널별 사용 순서
+                    </div>
+                    {activeOrchTerminals.map(([termId, chain]) => {
+                      const agentName = orchTerminalAgents[termId] || chain.agent || '';
+                      const chainBorder =
+                        chain.status === 'running' ? 'border-primary/30 bg-primary/5' :
+                        chain.status === 'done'    ? 'border-green-500/20 bg-green-500/5' :
+                                                     'border-white/10';
+                      return (
+                        <div key={termId} className={`rounded border ${chainBorder} p-2 shrink-0`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold text-[#dddddd] font-mono">T{termId}</span>
+                              {agentName && (
+                                <span className={`px-1 py-0.5 rounded text-[7px] font-bold ${agentBadgeColor(agentName)}`}>
+                                  {agentName}
+                                </span>
+                              )}
+                              {chain.status === 'running' && (
+                                <span className="text-[7px] text-primary animate-pulse">● 실행중</span>
+                              )}
+                              {chain.status === 'done' && (
+                                <span className="text-[7px] text-green-400">✓ 완료</span>
+                              )}
+                            </div>
+                            {chain.updated_at && (
+                              <span className="text-[7px] text-[#555] font-mono shrink-0">
+                                {new Date(chain.updated_at).toLocaleTimeString()}
+                              </span>
+                            )}
+                          </div>
+                          {chain.request && (
+                            <div className="text-[7px] text-[#777] mb-1.5 truncate" title={chain.request}>
+                              "{chain.request}"
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {chain.steps.map((step, i) => {
+                              const circleNum = CIRCLE_NUMS[step.skill_num] ?? step.skill_num;
+                              return (
+                                <div key={i} className="flex items-center gap-1">
+                                  {i > 0 && <span className="text-[#333] text-[8px]">→</span>}
+                                  <div
+                                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold ${stepBadgeColor(step.status)}`}
+                                    title={step.summary || step.skill_name}
+                                  >
+                                    {stepIcon(step.status)}
+                                    <span className="text-[#555]">{termId}-</span>
+                                    <span>{circleNum}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {(() => {
+                            const running = chain.steps.find(s => s.status === 'running');
+                            const lastDone = [...chain.steps].reverse().find(s => s.status === 'done');
+                            if (running) return (
+                              <div className="mt-1.5 text-[7px] text-primary truncate">
+                                ⚡ {running.skill_name} 실행 중...
+                              </div>
+                            );
+                            if (lastDone?.summary) return (
+                              <div className="mt-1.5 text-[7px] text-[#777] truncate">
+                                ✅ {lastDone.summary}
+                              </div>
+                            );
+                            return null;
+                          })()}
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <div className="text-center text-[#555] text-[9px] py-4 italic">
+                    실행 중인 터미널 없음
+                    <div className="text-[8px] mt-1 text-[#444]">
+                      /vibe-orchestrate 실행 시 여기에 순서가 표시됩니다
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ──────────────────────────────────────────────────────────────
+             하이브 활동 탭: Claude/Gemini가 하이브 시스템을 실제로 쓰는지 시각화
+             - 초록: 메모리 읽기 (current-work 자동 로드)
+             - 파랑: 메모리 쓰기 (작업 후 저장)
+             - 보라: 오케스트레이션 (스킬 체인 실행)
+             - 노랑: 메시지 수신 (Gemini↔Claude 통신)
+             - 빨강: 자기치유 (스킬 자동 설치)
+             5초마다 /api/hive/activity 폴링 → 실시간 갱신
+        ─────────────────────────────────────────────────────────────── */}
+        {activeTab === 'hive' && (
+          <div className="flex flex-col h-full overflow-hidden">
+            {/* 범례 헤더 */}
+            <div className="shrink-0 flex items-center gap-2 px-1 py-1 border-b border-white/5 flex-wrap">
+              <span className="text-[8px] text-white/30">범례:</span>
+              {[
+                { type: 'memory_read',  label: '메모리 읽기',    color: 'text-emerald-400' },
+                { type: 'memory_write', label: '메모리 쓰기',    color: 'text-blue-400'   },
+                { type: 'hive_ctx',     label: '컨텍스트 주입',  color: 'text-cyan-400'   },
+                { type: 'orchestrate',  label: '오케스트레이션', color: 'text-purple-400' },
+                { type: 'message',      label: '메시지',         color: 'text-yellow-400' },
+                { type: 'heal',         label: '자기치유',       color: 'text-red-400'    },
+                { type: 'session',      label: '세션',           color: 'text-white/30'   },
+              ].map(({ label, color }) => (
+                <span key={label} className={`text-[8px] font-mono ${color}`}>● {label}</span>
+              ))}
+            </div>
+
+            {/* 이벤트 피드 — selectedTerminalId 기준 필터링 */}
+            <div className="flex-1 overflow-y-auto flex flex-col gap-0.5 p-1">
+              {(() => {
+                // selectedTerminalId(T1~T8) 기준으로 필터링. T0는 미설정(전체 표시)
+                const filtered = selectedTerminalId && selectedTerminalId !== 'T0'
+                  ? hiveEvents.filter(e => !e.terminal_id || e.terminal_id === selectedTerminalId)
+                  : hiveEvents;
+                if (filtered.length === 0) return (
+                  <div className="flex items-center justify-center h-full text-[10px] text-white/20">
+                    {selectedTerminalId && selectedTerminalId !== 'T0'
+                      ? `${selectedTerminalId} 하이브 활동 없음`
+                      : '하이브 활동 없음 — 서버를 시작하고 Claude에게 지시를 내려보세요'}
+                  </div>
+                );
+                return filtered.map((ev, i) => {
+                // 이벤트 타입별 색상 및 아이콘
+                const typeStyle: Record<string, { color: string; icon: string; label: string }> = {
+                  memory_read:  { color: 'text-emerald-400 border-emerald-900/40', icon: '↓', label: '읽기' },
+                  memory_write: { color: 'text-blue-400 border-blue-900/40',       icon: '↑', label: '저장' },
+                  hive_ctx:     { color: 'text-cyan-400 border-cyan-900/40',       icon: '⬇', label: '주입' },
+                  orchestrate:  { color: 'text-purple-400 border-purple-900/40',   icon: '⚡', label: '오케' },
+                  message:      { color: 'text-yellow-400 border-yellow-900/40',   icon: '✉', label: '메시지' },
+                  heal:         { color: 'text-red-400 border-red-900/40',         icon: '🔧', label: '치유' },
+                  session:      { color: 'text-white/25 border-white/5',           icon: '—', label: '세션' },
+                };
+                const style = typeStyle[ev.type] ?? typeStyle.session;
+                // 시간 포맷: HH:MM:SS
+                const ts = ev.timestamp ? ev.timestamp.substring(11, 19) : '';
+                // 에이전트 배지 색상
+                const agentColor = ev.agent === 'Claude' ? 'text-primary' :
+                                   ev.agent === 'Gemini' ? 'text-yellow-400' :
+                                   ev.agent === 'Hive'   ? 'text-cyan-400' : 'text-white/40';
+                return (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-1.5 px-1.5 py-1 rounded border ${style.color} bg-white/2 hover:bg-white/4 transition-colors`}
+                  >
+                    {/* 타입 아이콘 */}
+                    <span className={`shrink-0 text-[10px] w-3 text-center ${style.color.split(' ')[0]}`}>
+                      {style.icon}
+                    </span>
+                    {/* 타입 배지 */}
+                    <span className={`shrink-0 text-[8px] font-mono font-bold w-8 ${style.color.split(' ')[0]}`}>
+                      {style.label}
+                    </span>
+                    {/* 에이전트 */}
+                    <span className={`shrink-0 text-[8px] font-mono font-bold w-10 ${agentColor}`}>
+                      {ev.agent}
+                    </span>
+                    {/* 내용 */}
+                    <span className="flex-1 text-[9px] text-white/60 font-mono truncate" title={ev.task}>
+                      {ev.task}
+                    </span>
+                    {/* 터미널 배지 */}
+                    {ev.terminal_id && ev.terminal_id !== 'T0' && (
+                      <span className="shrink-0 text-[7px] font-mono font-bold px-1 rounded bg-white/5 text-white/40">
+                        {ev.terminal_id}
+                      </span>
+                    )}
+                    {/* 시간 */}
+                    <span className="shrink-0 text-[8px] text-white/20 font-mono">{ts}</span>
+                  </div>
+                );
+              });
+              })()}
+            </div>
+
+            {/* 요약 푸터 — 필터 적용 기준으로 카운트 */}
+            {(() => {
+              const filtered = selectedTerminalId && selectedTerminalId !== 'T0'
+                ? hiveEvents.filter(e => !e.terminal_id || e.terminal_id === selectedTerminalId)
+                : hiveEvents;
+              return (
+                <div className="shrink-0 flex items-center gap-3 px-2 py-1 border-t border-white/5 text-[8px] text-white/25 font-mono">
+                  <span className="text-primary/50 font-bold">{selectedTerminalId}</span>
+                  <span>총 {filtered.length}개</span>
+                  <span>읽기: {filtered.filter(e => e.type === 'memory_read' || e.type === 'hive_ctx').length}회</span>
+                  <span>저장: {filtered.filter(e => e.type === 'memory_write').length}회</span>
+                  <span>오케: {filtered.filter(e => e.type === 'orchestrate').length}회</span>
+                </div>
+              );
+            })()}
           </div>
         )}
 

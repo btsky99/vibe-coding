@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Bot, AlertTriangle, CircleDot, Cpu, RotateCw, CheckCircle2, Zap } from 'lucide-react';
+import { Bot, AlertTriangle, Cpu, RotateCw, CheckCircle2, Zap } from 'lucide-react';
 import { HiveHealth, OrchestratorStatus } from '../../types';
 
 // 현재 접속 포트 기반으로 API 주소 자동 결정 (App.tsx와 동일한 패턴)
@@ -97,84 +97,6 @@ export default function HivePanel() {
               ))}
             </div>
           )}
-
-          {/* 에이전트 상태 카드 */}
-          <div className="p-2 rounded border border-white/10">
-            <div className="text-[9px] font-bold text-[#969696] mb-1.5 flex items-center gap-1">
-              <Bot className="w-3 h-3" /> 에이전트 상태
-            </div>
-            {Object.entries(orchStatus.agent_status ?? {}).map(([agent, st]) => {
-              // 에이전트 활성 상태별 색상 (active=녹색, idle=노랑, unknown=회색)
-              const dotColor =
-                st.state === 'active' ? 'text-green-400' :
-                st.state === 'idle'   ? 'text-yellow-400' :
-                                        'text-[#858585]';
-              // 상태 레이블 — 유휴 시 경과 분수 함께 표시
-              const stateLabel =
-                st.state === 'active' ? '활성' :
-                st.state === 'idle'   ? `유휴 ${st.idle_sec ? Math.floor(st.idle_sec / 60) + '분' : ''}` :
-                                        '미확인';
-              // 이 에이전트의 태스크 분배 현황 (없으면 0으로 처리)
-              const taskDist = orchStatus.task_distribution?.[agent] ?? { pending: 0, in_progress: 0, done: 0 };
-              // 이 에이전트가 실제로 사용 중인 터미널 슬롯 번호 목록 (PTY 기반 실시간)
-              const activeSlots = Object.entries(orchStatus.terminal_agents ?? {})
-                .filter(([, a]) => a === agent)
-                .map(([slot]) => `T${slot}`);
-              return (
-                <div key={agent} className="flex items-center gap-2 py-1 border-b border-white/5 last:border-0">
-                  <CircleDot className={`w-3 h-3 shrink-0 ${dotColor}`} />
-                  <span className={`font-mono font-bold text-[10px] w-12 shrink-0 ${agent === 'claude' ? 'text-green-400' : 'text-blue-400'}`}>
-                    {agent}
-                  </span>
-                  <span className={`text-[9px] ${dotColor}`}>{stateLabel}</span>
-                  {/* 실제 실행 중인 터미널 슬롯 번호 배지 */}
-                  {activeSlots.length > 0 && (
-                    <span className="text-[8px] font-mono text-primary/70 bg-primary/10 px-1 rounded">
-                      {activeSlots.join(' ')}
-                    </span>
-                  )}
-                  {/* 태스크 분배 현황 (대기/진행/완료) */}
-                  <div className="ml-auto flex gap-1.5 text-[8px] font-mono">
-                    <span className="text-[#858585]">P:{taskDist.pending}</span>
-                    <span className="text-primary">W:{taskDist.in_progress}</span>
-                    <span className="text-green-400">D:{taskDist.done}</span>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* 터미널 슬롯 전체 현황 (T1~T8 그리드 시각화) */}
-            <div className="mt-2 pt-2 border-t border-white/5">
-              <div className="text-[8px] text-[#555] mb-1">터미널 슬롯 현황</div>
-              <div className="grid grid-cols-8 gap-0.5">
-                {Array.from({ length: 8 }, (_, i) => {
-                  const slot = String(i + 1);
-                  const a = (orchStatus.terminal_agents ?? {})[slot] || '';
-                  // 에이전트별 색상 (claude=녹색, gemini=파랑, 기타=노랑, 비어있음=흰색)
-                  const color =
-                    a === 'claude' ? 'bg-green-500/60' :
-                    a === 'gemini' ? 'bg-blue-500/60' :
-                    a              ? 'bg-yellow-500/60' :
-                                     'bg-white/10';
-                  // 에이전트별 단축 레이블 (C/G/첫글자/슬롯번호)
-                  const label =
-                    a === 'claude' ? 'C' :
-                    a === 'gemini' ? 'G' :
-                    a              ? a[0].toUpperCase() :
-                                     '';
-                  return (
-                    <div
-                      key={slot}
-                      title={a ? `T${slot}: ${a}` : `T${slot}: 비어있음`}
-                      className={`h-4 rounded text-[7px] font-bold flex items-center justify-center ${color} text-white/80`}
-                    >
-                      {label || slot}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
 
           {/* 태스크 분배 전체 요약 — all 키가 있을 때만 표시 */}
           {orchStatus.task_distribution?.all && (

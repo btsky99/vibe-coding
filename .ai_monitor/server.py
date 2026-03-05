@@ -5,10 +5,27 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-04] - Claude (PTY 터미널 자율 에이전트 자동 트리거)
+#   - read_from_ws()에 입력 버퍼 + Enter 인터셉션 추가
+#   - Gemini 터미널: Enter 입력 시 cli_agent.py 자동 백그라운드 라우팅
+#   - Claude 터미널: UserPromptSubmit 훅(hook_bridge.py) 중복 방지로 PTY 인터셉션 스킵
+#   - _ws_init_done 플래그: 세션 시작 직후 자동 주입 명령(set TERMINAL_ID 등) 무시
 # [2026-03-04] - Claude (CLI 오케스트레이터 자율 에이전트 통합)
 #   - api.agent_api 임포트 추가
 #   - /api/events/agent SSE 엔드포인트 추가 (cli_agent 출력 실시간 스트리밍)
 #   - do_GET, do_POST에 /api/agent/* 라우팅 추가
+# [2026-03-04] - Claude (SSE 중간 멈춤 버그 수정 v3 — 브로드캐스트 워커 중복 기동 제거)
+#   - _agent_broadcast_worker를 두 곳에서 시작하던 중복 코드 제거
+#     → 두 워커가 동일 cli_agent._output_queue를 경쟁 소비 → 이벤트가 분산되어 클라이언트 미전달
+#   - 4094~4099 블록에서 한 번만 시작하도록 수정
+# [2026-03-04] - Claude (SSE 중간 멈춤 버그 수정 v2 — 브로드캐스트 워커 활성화)
+#   - _agent_broadcast_worker 스레드를 서버 시작 시 시작하도록 수정
+#     → 이전에는 함수 정의만 있고 스레드가 시작 안 됨 → AGENT_CLIENTS에 아무것도 없어 이벤트 소실
+#   - SSE 핸들러: per-client Queue 방식으로 완전 전환 (직접 큐 읽기 제거)
+# [2026-03-04] - Claude (SSE 중간 멈춤 버그 수정 v1)
+#   - /api/events/agent: settimeout(1.0) 제거 — Queue.get()과 소켓 타임아웃이
+#     겹쳐 빠른 출력 시 socket.timeout이 except Exception에 걸려 연결 강제 종료됨
+#   - queue.Empty와 소켓 오류를 별도 except로 분리하여 정확한 에러 처리
 # [2026-03-01] - Claude (배포 버전 경로 버그 수정 — 스킬/MCP 인식 안 됨)
 #   - _current_project_root() 헬퍼 추가: config.json last_path 우선 참조
 #     → 배포 버전에서 PROJECT_ROOT가 exe 폴더/임시폴더로 잘못 설정되던 문제 해소
@@ -57,6 +74,7 @@ import api.hive_api as hive_api
 import api.git_api as git_api
 import api.memory_api as memory_api
 import api.agent_api as agent_api
+import api.config_api as config_api
 import string
 import socket
 from pathlib import Path
@@ -164,6 +182,39 @@ except ImportError:
 
 FS_CLIENTS = set() # SSE 클라이언트 연결 세트
 THOUGHT_CLIENTS = set() # 사고 과정 SSE 클라이언트 연결 세트
+# 자율 에이전트 SSE: 클라이언트별 개별 Queue 세트 (브로드캐스트 방식)
+# 단일 Queue 방식은 다중 연결 시 이벤트를 한 클라이언트만 소비하는 버그가 있어 교체
+AGENT_CLIENTS: set = set()
+
+
+def _agent_broadcast_worker():
+    """cli_agent._output_queue를 읽어 모든 연결된 SSE 클라이언트에게 팬아웃합니다.
+
+    단일 생산자(cli_agent) → 다중 소비자(SSE 클라이언트) 패턴 구현.
+    cli_agent가 Queue에 이벤트를 넣으면 이 워커가 즉시 모든 클라이언트 큐에 복사합니다.
+    """
+    from queue import Empty as _Empty
+    _scripts = str(Path(__file__).resolve().parent.parent / 'scripts')
+    if _scripts not in sys.path:
+        sys.path.insert(0, _scripts)
+    try:
+        import cli_agent as _ca
+    except ImportError:
+        return  # cli_agent 미설치 시 종료
+
+    while True:
+        try:
+            msg = _ca._output_queue.get(timeout=1.0)
+            # 연결된 모든 클라이언트 큐에 동일 메시지 복사 전송
+            for cq in list(AGENT_CLIENTS):
+                try:
+                    cq.put_nowait(msg)
+                except Exception:
+                    pass  # 클라이언트 큐 가득 참 등 무시
+        except _Empty:
+            pass  # 1초 타임아웃 — 정상, 계속 대기
+        except Exception:
+            pass  # 기타 오류 무시 후 재시도
 
 class FSChangeHandler(FileSystemEventHandler):
     """파일 시스템 변경 이벤트를 감지하여 SSE 클라이언트들에게 알립니다."""
@@ -1063,7 +1114,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             return
 
         # ─── 자율 에이전트 출력 실시간 스트리밍 ───
-        # cli_agent._output_queue에서 줄 단위로 읽어 SSE 포맷으로 전달
+        # _agent_broadcast_worker가 cli_agent 큐를 읽어 AGENT_CLIENTS 세트의
+        # 각 클라이언트 전용 큐로 팬아웃 — 다중 연결/재연결 시 이벤트 손실 없음
         if path == '/api/events/agent':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -1071,21 +1123,21 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
+            from queue import Queue as _ClientQueue, Empty as _QEmpty
+            client_q = _ClientQueue(maxsize=0)  # 클라이언트별 전용 큐 (무제한 — done 이벤트 드롭 방지)
+            AGENT_CLIENTS.add(client_q)
             try:
-                # cli_agent 모듈에서 전역 큐 직접 참조
-                _scripts = str(Path(__file__).resolve().parent.parent / 'scripts')
-                if _scripts not in sys.path:
-                    sys.path.insert(0, _scripts)
-                import cli_agent as _ca
-                self.connection.settimeout(1.0)
+                self.connection.settimeout(None)
                 while True:
                     try:
-                        # 1초 타임아웃으로 큐에서 메시지 꺼내기 (하트비트 유지)
-                        msg = _ca._output_queue.get(timeout=1.0)
-                        self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                    except Exception:
-                        # 큐가 비어있으면 하트비트 전송 (연결 유지)
+                        msg = client_q.get(timeout=1.0)
+                        try:
+                            self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
+                            self.wfile.flush()
+                        except Exception:
+                            break  # 클라이언트 연결 끊김
+                    except _QEmpty:
+                        # 큐 비어있으면 하트비트 전송 (연결 유지)
                         try:
                             self.wfile.write(b": heartbeat\n\n")
                             self.wfile.flush()
@@ -1093,6 +1145,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                             break  # 클라이언트 연결 끊김
             except Exception:
                 pass
+            finally:
+                AGENT_CLIENTS.discard(client_q)  # 연결 종료 시 세트에서 제거
             return
 
         # ─── 신규: 파일 시스템 변경 이벤트 스트리밍 ───
@@ -1544,6 +1598,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
         elif parsed_path.path.startswith('/api/agent/'):
             agent_api.handle_get(self, parsed_path.path)
+        elif parsed_path.path == '/api/config/discord':
+            config_api.handle_get_config(self)
 
         # ── [모듈 위임] memory_api — /api/memory, /api/project-info ──────
         elif parsed_path.path in ('/api/memory', '/api/project-info'):
@@ -2277,6 +2333,67 @@ class SSEHandler(BaseHTTPRequestHandler):
                 result["ollama_error"] = str(e)
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
 
+        elif parsed_path.path == '/api/hive/activity':
+            # [신규] 하이브 활동 피드 — task_logs.jsonl에서 하이브 시스템 사용 이벤트만 필터링
+            # 대시보드에서 "Claude/Gemini가 하이브를 실제로 쓰고 있는가?"를 눈으로 확인
+            # 필터 대상: [하이브 컨텍스트], [메모리 저장], [오케스트레이션], [스킬 체인], Hive 에이전트
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                import re as _re
+                log_path = DATA_DIR / 'task_logs.jsonl'
+                hive_events = []
+                # 하이브 이벤트 키워드 분류 (type 결정용)
+                _HIVE_KEYWORDS = {
+                    'memory_read':  ['하이브 컨텍스트', 'current-work', 'memory.py list', '하이브 컨텍스트 자동 로드'],
+                    'memory_write': ['메모리 저장', '하이브 메모리', 'current-work 업데이트', '자동 저장', 'INSERT OR REPLACE'],
+                    'orchestrate':  ['오케스트레이션', '스킬 체인', 'vibe-orchestrate', 'skill_orchestrator', '스킬 실행'],
+                    'message':      ['메시지 수신', '미읽음 메시지', '→ claude', '→ gemini'],
+                    'heal':         ['자기치유', 'heal', '스킬 자동 설치'],
+                    'hive_ctx':     ['하이브 컨텍스트 자동 주입', '[하이브 컨텍스트]'],
+                    'session':      ['세션 스냅샷', '응답 완료', '─── 응답 완료'],
+                }
+                if log_path.exists():
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                            except Exception:
+                                continue
+                            agent = entry.get('agent', '')
+                            task = entry.get('task', '')
+                            ts = entry.get('timestamp', '')
+                            # Hive 에이전트이거나 하이브 키워드 포함 항목만 수집
+                            if agent not in ('Hive', 'Claude', '사용자', 'Gemini'):
+                                continue
+                            event_type = None
+                            for etype, keywords in _HIVE_KEYWORDS.items():
+                                if any(kw in task for kw in keywords):
+                                    event_type = etype
+                                    break
+                            # Hive 에이전트는 무조건 포함
+                            if event_type is None and agent == 'Hive':
+                                event_type = 'hive_ctx'
+                            if event_type is None:
+                                continue
+                            hive_events.append({
+                                'timestamp': ts,
+                                'agent': agent,
+                                'type': event_type,
+                                'task': task[:200],
+                            })
+                # 최신 100개만 반환 (시간 역순)
+                hive_events = hive_events[-100:]
+                hive_events.reverse()
+                self.wfile.write(json.dumps(hive_events, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/hive/logs':
             # 하이브 통합 로그 조회 (SQLite session_logs)
             self.send_response(200)
@@ -2547,6 +2664,10 @@ class SSEHandler(BaseHTTPRequestHandler):
             path = self.path
             if path == '/':
                 path = '/index.html'
+
+            # /monitor → 에이전트 상황판 독립 페이지
+            if path.rstrip('/') == '/monitor':
+                path = '/monitor.html'
             
             # 쿼리스트링 제거
             path = path.split('?')[0]
@@ -3890,12 +4011,64 @@ async def pty_handler(websocket):
                 print("PTY read Exception:", e)
                 break
 
+    # ── [자율 에이전트 자동 트리거] PTY 입력 버퍼 ────────────────────────────────
+    # 사용자가 타이핑하는 문자를 누적해두고, Enter(\r) 입력 시 완성된 명령을
+    # cli_agent.py로 자동 라우팅합니다.
+    # Claude 터미널: UserPromptSubmit 훅(hook_bridge.py)이 이미 동작하므로 중복 방지를 위해
+    #   실제 터미널이 claude가 아닌 경우(gemini, 빈 셸 등)에만 PTY 인터셉션 발동.
+    # 단, 세션 시작 직후 자동 입력(set TERMINAL_ID=... 등)은 누적하지 않도록 _ws_init_done 플래그 활용.
+    _ws_input_buf: list[str] = []   # 현재 줄 누적 버퍼
+    _ws_init_done = False            # 초기 세팅 명령 무시 플래그
+
+    def _dispatch_to_agent(instruction: str) -> None:
+        """누적된 명령을 백그라운드 cli_agent.py로 라우팅합니다.
+
+        Claude 터미널은 훅이 이미 동작하므로 Gemini / 기타 에이전트에만 적용합니다.
+        메인 asyncio 루프를 블로킹하지 않도록 스레드로 실행합니다.
+        """
+        instruction = instruction.strip()
+        # 너무 짧거나 제어 문자로만 이루어진 입력 무시
+        if len(instruction) < 4:
+            return
+        # claude 터미널은 UserPromptSubmit 훅(hook_bridge.py)이 이미 처리하므로 중복 실행 방지
+        if agent == 'claude':
+            return
+
+        import threading as _t
+        import subprocess as _sp
+        scripts_dir = Path(__file__).parent.parent / 'scripts'
+        cli_agent_py = scripts_dir / 'cli_agent.py'
+
+        def _run():
+            try:
+                _sp.Popen(
+                    [sys.executable, str(cli_agent_py), instruction, 'auto'],
+                    cwd=str(Path(__file__).parent.parent),
+                    stdout=_sp.DEVNULL,
+                    stderr=_sp.DEVNULL,
+                    creationflags=(
+                        _sp.CREATE_NO_WINDOW | _sp.DETACHED_PROCESS
+                        if os.name == 'nt' else 0
+                    ),
+                )
+                print(f"[PTY→AGENT] {agent or 'shell'} 터미널 자율 에이전트 라우팅: {instruction[:60]}")
+            except Exception as _e:
+                print(f"[PTY→AGENT] 라우팅 실패: {_e}")
+
+        _t.Thread(target=_run, daemon=True).start()
+
     async def read_from_ws():
+        nonlocal _ws_init_done, _ws_input_buf
+        # 초기화 명령(set TERMINAL_ID, chcp 등)이 모두 전송된 뒤 1초 후부터 인터셉션 활성화
+        # → PTY spawn 직후 자동으로 write()하는 명령들을 에이전트에 전달하지 않기 위함
+        await asyncio.sleep(1.5)
+        _ws_init_done = True
+
         async for message in websocket:
             try:
                 if isinstance(message, bytes):
                     message = message.decode('utf-8')
-                
+
                 if message:
                     # [추가] 제어 메시지(JSON) 처리 — 리사이즈 등
                     try:
@@ -3912,10 +4085,25 @@ async def pty_handler(websocket):
                     # [수정] 윈도우 IME 및 xterm.js 호환성 개선
                     # \r\n 중복 방지 및 조합 중인 문자 처리 안정화
                     if message == "\r":
+                        # ── Enter 키: 완성된 명령을 자율 에이전트로 라우팅 ──────────
+                        if _ws_init_done and _ws_input_buf:
+                            completed_line = ''.join(_ws_input_buf)
+                            _ws_input_buf.clear()
+                            # 백스페이스(\x7f, \x08) 처리: 실제 표시 문자열 복원
+                            import re as _re
+                            cleaned = _re.sub(r'[\x00-\x1f\x7f-\x9f]', '', completed_line).strip()
+                            if cleaned:
+                                _dispatch_to_agent(cleaned)
                         pty.write("\r")
                     else:
-                        # 일반 텍스트 입력의 경우 개행 문자를 \r로 통일하여 전송
+                        # ── 일반 문자: 버퍼에 누적 + PTY로 전달 ─────────────────────
                         processed = message.replace('\r\n', '\r').replace('\n', '\r')
+                        if _ws_init_done:
+                            # 백스페이스(\x7f): 버퍼의 마지막 문자 제거
+                            if message in ('\x7f', '\x08') and _ws_input_buf:
+                                _ws_input_buf.pop()
+                            elif '\r' not in processed:
+                                _ws_input_buf.append(message)
                         pty.write(processed)
             except Exception as e:
                 print(f"[WS ERROR] {e}")
@@ -4023,6 +4211,14 @@ if __name__ == '__main__':
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except: pass
 
+    # 서버 시작 시 상황판 창 플래그 초기화 (새 세션에서 창이 다시 열릴 수 있도록)
+    try:
+        _win_flag = DATA_DIR / '.monitor_opened'
+        if _win_flag.exists():
+            _win_flag.unlink()
+    except Exception:
+        pass
+
     # --- Auto-update check (non-blocking) ---
     if getattr(sys, 'frozen', False):
         try:
@@ -4053,6 +4249,10 @@ if __name__ == '__main__':
 
     # 1. 백그라운드 스레드 시작
     threading.Thread(target=start_ws_server, daemon=True).start()
+
+    # 자율 에이전트 브로드캐스트 워커: cli_agent 큐 → 다중 SSE 클라이언트 팬아웃
+    threading.Thread(target=_agent_broadcast_worker, daemon=True,
+                     name='AgentBroadcast').start()
     
     # 실시간 파일 감시 시작
     start_fs_watcher(PROJECT_ROOT)
@@ -4076,12 +4276,55 @@ if __name__ == '__main__':
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             )
     threading.Thread(target=run_watchdog, daemon=True).start()
-    
+
+    # Discord 브릿지 자동 시작: .env에 DISCORD_BOT_TOKEN이 설정된 경우에만 실행
+    # 터미널 #1~8 Discord 채널에서 지시 입력 → cli_agent.py 자동 실행 (원격 자율 에이전트)
+    def run_discord_bridge():
+        discord_script = SCRIPTS_DIR / "discord_bridge.py"
+        env_file = PROJECT_ROOT / ".env"
+        if not discord_script.exists():
+            return
+        # .env 파일에 DISCORD_BOT_TOKEN이 있을 때만 시작
+        try:
+            env_content = env_file.read_text(encoding='utf-8') if env_file.exists() else ""
+            if 'DISCORD_BOT_TOKEN' not in env_content:
+                return
+        except Exception:
+            return
+        subprocess.Popen(
+            [sys.executable, str(discord_script)],
+            cwd=str(PROJECT_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding='utf-8',
+            errors='replace',
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+        )
+        print("[*] Discord Bridge 자동 시작됨")
+    threading.Thread(target=run_discord_bridge, daemon=True).start()
+
+    # 자기치유 데몬 자동 시작: 5분마다 task_logs 패턴 분석 → 반복 오류 자동 치유
+    def run_heal_daemon():
+        heal_script = SCRIPTS_DIR / "heal_daemon.py"
+        if heal_script.exists():
+            subprocess.Popen(
+                [sys.executable, str(heal_script), "--interval", "300"],
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+            )
+            print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
+    threading.Thread(target=run_heal_daemon, daemon=True).start()
+
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:
         server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
         print(f"[*] Server running on http://localhost:{HTTP_PORT}")
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        # 브로드캐스트 워커는 HTTP 서버 시작 전(4097~4099)에서 이미 시작됨 — 중복 시작 금지
     except Exception as e:
         print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
         import sys as _sys; _sys.exit(1)
