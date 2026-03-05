@@ -139,15 +139,6 @@ function detectStage(line: string): WorkflowStage | null {
   return null;
 }
 
-// 단계 설명 텍스트
-const STAGE_LABEL: Record<WorkflowStage, string> = {
-  idle:       '대기 중',
-  analyzing:  '분석 중',
-  modifying:  '수정 중',
-  verifying:  '검증 중',
-  done:       '완료',
-  error:      '오류',
-};
 
 // ─── 터미널별 상태 타입 ──────────────────────────────────────────────────────
 interface TerminalState {
@@ -227,14 +218,6 @@ function StatusIcon({ status }: { status: string }) {
 
 // ─── 단계 스타일 상수 ────────────────────────────────────────────────────────
 
-const STAGE_COLOR: Record<WorkflowStage, string> = {
-  idle:       'text-white/20',
-  analyzing:  'text-blue-400',
-  modifying:  'text-yellow-400',
-  verifying:  'text-purple-400',
-  done:       'text-green-400',
-  error:      'text-red-400',
-};
 
 // ─── 워크플로우 파이프라인 컴포넌트 ─────────────────────────────────────────
 /** 분석 → 수정 → 검증 → 완료 단계를 가로 스텝 형태로 시각화.

@@ -6,6 +6,7 @@
  *          발신자별 색상/정렬, 방향별 버블 코너, 상대 타임스탬프, 자동 스크롤,
  *          미읽음 카운트, 전체 삭제를 포함합니다.
  * REVISION HISTORY:
+ * - 2026-03-05 Claude: 긴 메시지 접기(200자 초과 → 더보기), session_summary 배지, 날짜 구분선 추가
  * - 2026-03-02 Claude: 버블 방향별 코너, 상대 타임스탬프, 미읽음 카운트 로직 수정,
  *                      헤더 + 메시지 건수 + 전체 삭제 버튼 추가
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화
@@ -14,7 +15,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageSquare, Send, Trash2 } from 'lucide-react';
+import { MessageSquare, Send, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+
+// 긴 메시지 접기 기준 (글자 수)
+const COLLAPSE_THRESHOLD = 200;
 import { AgentMessage } from '../../types';
 import { API_BASE } from '../../constants';
 
@@ -64,11 +68,12 @@ const AGENT_STYLE: Record<string, {
 
 // ─── 메시지 유형 배지 스타일 ────────────────────────────────────────────────
 const TYPE_BADGE: Record<string, { cls: string; emoji: string }> = {
-  handoff:       { cls: 'bg-yellow-500/25 text-yellow-300',  emoji: '🤝' },
-  request:       { cls: 'bg-blue-500/25 text-blue-300',      emoji: '📋' },
-  task_complete: { cls: 'bg-green-500/25 text-green-300',    emoji: '✅' },
-  warning:       { cls: 'bg-red-500/25 text-red-300',        emoji: '⚠️' },
-  info:          { cls: 'bg-white/10 text-white/40',         emoji: 'ℹ️' },
+  handoff:         { cls: 'bg-yellow-500/25 text-yellow-300',  emoji: '🤝' },
+  request:         { cls: 'bg-blue-500/25 text-blue-300',      emoji: '📋' },
+  task_complete:   { cls: 'bg-green-500/25 text-green-300',    emoji: '✅' },
+  warning:         { cls: 'bg-red-500/25 text-red-300',        emoji: '⚠️' },
+  info:            { cls: 'bg-white/10 text-white/40',         emoji: 'ℹ️' },
+  session_summary: { cls: 'bg-purple-500/25 text-purple-300',  emoji: '📝' },
 };
 
 // ─── 상대 타임스탬프 헬퍼 ────────────────────────────────────────────────────
@@ -83,6 +88,88 @@ function relativeTime(iso: string): string {
       month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   } catch { return iso; }
+}
+
+// ─── 버블 아이템 서브컴포넌트 (접기 상태 독립 관리) ────────────────────────
+
+interface BubbleItemProps {
+  msg: AgentMessage;
+  style: typeof AGENT_STYLE[string];
+  isRight: boolean;
+  typeBadge: typeof TYPE_BADGE[string];
+  isNew: boolean;
+  isLong: boolean;
+  cornerCls: string;
+  showDateSep: boolean;
+  dateLabel: string;
+}
+
+function BubbleItem({ msg, style, isRight, typeBadge, isNew, isLong, cornerCls, showDateSep, dateLabel }: BubbleItemProps) {
+  // 긴 메시지 접힘 상태 — 기본적으로 접힘
+  const [expanded, setExpanded] = useState(false);
+  const displayContent = isLong && !expanded
+    ? msg.content.slice(0, COLLAPSE_THRESHOLD) + '…'
+    : msg.content;
+
+  return (
+    <div>
+      {/* 날짜 구분선 */}
+      {showDateSep && (
+        <div className="flex items-center gap-2 my-2">
+          <div className="flex-1 h-px bg-white/5" />
+          <span className="text-[8px] text-[#444] font-mono shrink-0">{dateLabel}</span>
+          <div className="flex-1 h-px bg-white/5" />
+        </div>
+      )}
+      <div className={`flex flex-col gap-0.5 ${isRight ? 'items-end' : 'items-start'} ${isNew ? 'opacity-100' : 'opacity-80'}`}>
+        {/* 발신자 메타 */}
+        <div className={`flex items-center gap-1.5 ${isRight ? 'flex-row-reverse' : ''}`}>
+          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${style.avatar}`}>
+            {msg.from.charAt(0).toUpperCase()}
+          </div>
+          <span className="text-[9px] text-[#555] font-mono">
+            {msg.from}<span className="text-[#333] mx-0.5">→</span>{msg.to}
+          </span>
+          <span className="text-[8px] text-[#444]">{relativeTime(msg.timestamp)}</span>
+        </div>
+
+        {/* 버블 본문 */}
+        <div className={`max-w-[88%] ${isRight ? 'mr-7' : 'ml-7'}`}>
+          <div className={`border px-2.5 py-1.5 ${style.bubble} ${cornerCls} ${isNew ? 'ring-1 ring-yellow-400/20' : ''}`}>
+            {/* 유형 배지 (info 제외) */}
+            {msg.type !== 'info' && (
+              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full mb-1 inline-flex items-center gap-0.5 ${typeBadge.cls}`}>
+                <span>{typeBadge.emoji}</span>
+                <span>{msg.type}</span>
+              </span>
+            )}
+            {/* 본문 텍스트 */}
+            <p className={`text-[10px] leading-relaxed break-words whitespace-pre-wrap ${style.text}`}>
+              {displayContent}
+            </p>
+            {/* 더보기 / 접기 토글 (긴 메시지만) */}
+            {isLong && (
+              <button
+                onClick={() => setExpanded(v => !v)}
+                className={`mt-1 flex items-center gap-0.5 text-[8px] font-bold opacity-60 hover:opacity-100 transition-opacity ${style.text}`}
+              >
+                {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {expanded ? '접기' : `더보기 (${msg.content.length}자)`}
+              </button>
+            )}
+            {/* 읽음 표시 */}
+            {isRight && (
+              <div className="text-right mt-0.5">
+                <span className={`text-[7px] ${msg.read ? 'text-primary/60' : 'text-white/20'}`}>
+                  {msg.read ? '읽음' : '•'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function MessagesPanel({ onUnreadCount }: MessagesPanelProps) {
@@ -180,6 +267,13 @@ export default function MessagesPanel({ onUnreadCount }: MessagesPanelProps) {
   // 발신자 스타일 결정 (알 수 없는 에이전트 → system 스타일)
   const getStyle = (from: string) => AGENT_STYLE[from.toLowerCase()] ?? AGENT_STYLE['system'];
 
+  // 날짜 문자열 추출 (날짜 구분선용)
+  const toDateLabel = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    } catch { return ''; }
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden gap-0">
 
@@ -216,66 +310,54 @@ export default function MessagesPanel({ onUnreadCount }: MessagesPanelProps) {
             // 새로 수신된 메시지 (seenCount 기준) — 미읽음 강조
             const isNew = idx >= seenCount;
 
+            // 날짜 구분선: 이전 메시지와 날짜가 다를 때 표시
+            const prevMsg = messages[idx - 1];
+            const showDateSep = idx === 0 || toDateLabel(msg.timestamp) !== toDateLabel(prevMsg?.timestamp ?? '');
+
             // 버블 코너 — 채팅앱 스타일: 자기 쪽 상단 코너는 각지게
             const cornerCls = isCenter
               ? 'rounded-lg'
               : isRight
-                ? 'rounded-l-xl rounded-br-xl rounded-tr-sm'  // 우측: 우상단 각짐
-                : 'rounded-r-xl rounded-bl-xl rounded-tl-sm'; // 좌측: 좌상단 각짐
+                ? 'rounded-l-xl rounded-br-xl rounded-tr-sm'
+                : 'rounded-r-xl rounded-bl-xl rounded-tl-sm';
+
+            // 긴 메시지 접기 여부 — 컴포넌트 외부에서 관리하려면 Map 필요,
+            // 여기서는 key를 msg.id로 쓰는 expandedIds Set으로 관리
+            const isLong = msg.content.length > COLLAPSE_THRESHOLD;
 
             if (isCenter) {
-              /* ── 시스템 메시지 — 중앙 작은 텍스트 ── */
               return (
-                <div key={msg.id} className="flex justify-center">
-                  <div className={`rounded-full border px-3 py-0.5 ${style.bubble} ${isNew ? 'ring-1 ring-yellow-500/30' : ''}`}>
-                    <p className={`text-[9px] italic ${style.text}`}>{msg.content}</p>
+                <div key={msg.id}>
+                  {showDateSep && (
+                    <div className="flex items-center gap-2 my-2">
+                      <div className="flex-1 h-px bg-white/5" />
+                      <span className="text-[8px] text-[#444] font-mono shrink-0">{toDateLabel(msg.timestamp)}</span>
+                      <div className="flex-1 h-px bg-white/5" />
+                    </div>
+                  )}
+                  {/* 시스템 메시지 — 중앙 작은 텍스트 */}
+                  <div className="flex justify-center">
+                    <div className={`rounded-full border px-3 py-0.5 ${style.bubble} ${isNew ? 'ring-1 ring-yellow-500/30' : ''}`}>
+                      <p className={`text-[9px] italic ${style.text}`}>{msg.content}</p>
+                    </div>
                   </div>
                 </div>
               );
             }
 
             return (
-              <div
+              <BubbleItem
                 key={msg.id}
-                className={`flex flex-col gap-0.5 ${isRight ? 'items-end' : 'items-start'} ${isNew ? 'opacity-100' : 'opacity-90'}`}
-              >
-                {/* 발신자 메타 (아바타 + from→to + 시간) */}
-                <div className={`flex items-center gap-1.5 ${isRight ? 'flex-row-reverse' : ''}`}>
-                  {/* 원형 아바타 (이니셜) */}
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${style.avatar}`}>
-                    {msg.from.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="text-[9px] text-[#555] font-mono">
-                    {msg.from}<span className="text-[#333] mx-0.5">→</span>{msg.to}
-                  </span>
-                  <span className="text-[8px] text-[#444]">{relativeTime(msg.timestamp)}</span>
-                </div>
-
-                {/* 버블 본문 */}
-                <div className={`max-w-[88%] ${isRight ? 'mr-7' : 'ml-7'}`}>
-                  <div className={`border px-2.5 py-1.5 ${style.bubble} ${cornerCls} ${isNew ? 'ring-1 ring-yellow-400/20' : ''}`}>
-                    {/* 유형 배지 (info 제외) */}
-                    {msg.type !== 'info' && (
-                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full mb-1 inline-flex items-center gap-0.5 ${typeBadge.cls}`}>
-                        <span>{typeBadge.emoji}</span>
-                        <span>{msg.type}</span>
-                      </span>
-                    )}
-                    {/* 본문 텍스트 */}
-                    <p className={`text-[10px] leading-relaxed break-words whitespace-pre-wrap ${style.text}`}>
-                      {msg.content}
-                    </p>
-                    {/* 읽음 표시 (자기 쪽 메시지에만) */}
-                    {isRight && (
-                      <div className="text-right mt-0.5">
-                        <span className={`text-[7px] ${msg.read ? 'text-primary/60' : 'text-white/20'}`}>
-                          {msg.read ? '읽음' : '•'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+                msg={msg}
+                style={style}
+                isRight={isRight}
+                typeBadge={typeBadge}
+                isNew={isNew}
+                isLong={isLong}
+                cornerCls={cornerCls}
+                showDateSep={showDateSep}
+                dateLabel={toDateLabel(msg.timestamp)}
+              />
             );
           })
         )}

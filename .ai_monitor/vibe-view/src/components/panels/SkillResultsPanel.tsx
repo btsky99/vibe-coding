@@ -2,18 +2,31 @@
  * ------------------------------------------------------------------------
  * 📄 파일명: SkillResultsPanel.tsx
  * 📝 설명: AI 오케스트레이터 스킬 실행 결과 패널.
- *          skill_orchestrator.py가 skill_results.jsonl에 저장한 세션별 결과를
- *          10초마다 폴링하여 대시보드에 표시합니다.
- *          터미널별 필터, 완료 통계, terminal_id 배지를 포함합니다.
+ *          [현재 실행 중] 섹션: /api/orchestrator/skill-chain 3초 폴링 → 라이브 체인 표시
+ *          [완료 기록] 섹션: skill_results.jsonl 10초 폴링 → 이전 세션 히스토리
  * REVISION HISTORY:
+ * - 2026-03-05 Claude: 현재 실행 중 섹션 추가 — skill-chain 라이브 폴링으로 과거/현재 분리
  * - 2026-03-02 Claude: terminal_id 배지, 터미널 필터 탭, 통계 헤더, 폴링 30→10s 강화
  * - 2026-03-01 Claude: Task 3 신규 구현 — skill_results.jsonl → 대시보드 표시
  * ------------------------------------------------------------------------
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import { Zap, CheckCircle2, SkipForward, AlertCircle, Clock, BarChart3 } from 'lucide-react';
+import { Zap, CheckCircle2, SkipForward, AlertCircle, Clock, BarChart3, Radio } from 'lucide-react';
 import { API_BASE } from '../../constants';
+
+// ─── 현재 실행 중 체인 타입 ────────────────────────────────────────────────
+
+interface LiveStep {
+  skill_name: string;
+  status: string;  // pending | running | done | failed
+}
+
+interface LiveChain {
+  request: string;
+  steps: LiveStep[];
+  terminal_id?: number;
+}
 
 // ─── 타입 정의 ────────────────────────────────────────────────────────────
 
@@ -30,6 +43,28 @@ interface SkillSessionResult {
   results: SkillResultEntry[];  // 실행된 스킬 체인 결과
   completed_at: string;         // 완료 시각 (ISO)
 }
+
+// ─── 스킬명 한글 표시 매핑 ───────────────────────────────────────────
+const SKILL_LABELS: Record<string, string> = {
+  'debug':        '🔍 디버그',
+  'tdd':          '🧪 테스트',
+  'brainstorm':   '💡 아이디어',
+  'write-plan':   '📝 계획작성',
+  'execute-plan': '⚡ 계획실행',
+  'execute':      '⚡ 계획실행',
+  'code-review':  '🔎 코드리뷰',
+  'release':      '🚀 릴리스',
+  'orchestrate':  '🤖 오케스트레이터',
+  'master':       '🎯 마스터',
+};
+
+// 상태 한글 변환
+const STATUS_KR: Record<string, string> = {
+  'done':    '완료',
+  'error':   '오류',
+  'skipped': '건너뜀',
+  'running': '실행중',
+};
 
 // ─── 상수 ────────────────────────────────────────────────────────────────
 
@@ -50,8 +85,39 @@ export default function SkillResultsPanel() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // 'all' 또는 터미널 번호 문자열 ('1', '2', ...)
   const [filterTerminal, setFilterTerminal] = useState<string>('all');
+  // 현재 실행 중인 스킬 체인 (터미널별)
+  const [liveChains, setLiveChains] = useState<Record<string, LiveChain>>({});
 
-  // 스킬 결과 폴링 (10초 간격 — 30s보다 빠른 갱신)
+  // [라이브] 현재 실행 중 스킬 체인 — 3초마다 빠르게 폴링
+  useEffect(() => {
+    const fetchLive = () => {
+      fetch(`${API_BASE}/api/orchestrator/skill-chain`)
+        .then(res => res.json())
+        .then(data => {
+          // terminals 맵에서 running/pending 스텝이 있는 것만 추출
+          const active: Record<string, LiveChain> = {};
+          const terminals: Record<string, any> = data?.terminals ?? {};
+          for (const [tid, chain] of Object.entries(terminals)) {
+            const steps: LiveStep[] = chain?.steps ?? [];
+            const isActive = steps.some((s: LiveStep) => s.status === 'running' || s.status === 'pending');
+            if (isActive) {
+              active[tid] = {
+                request: chain?.request ?? '',
+                steps,
+                terminal_id: parseInt(tid, 10) || undefined,
+              };
+            }
+          }
+          setLiveChains(active);
+        })
+        .catch(() => {});
+    };
+    fetchLive();
+    const interval = setInterval(fetchLive, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // [히스토리] 완료된 스킬 결과 폴링 (10초 간격)
   useEffect(() => {
     const fetchResults = () => {
       fetch(`${API_BASE}/api/skill-results`)
@@ -127,13 +193,54 @@ export default function SkillResultsPanel() {
     } catch { return iso; }
   };
 
+  // 현재 실행 중 체인 목록 (터미널 순 정렬)
+  const liveChainList = Object.entries(liveChains).sort(([a], [b]) => a.localeCompare(b));
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden gap-2">
 
-      {/* ── 헤더: 제목 + 통계 ── */}
+      {/* ── 현재 실행 중 섹션 (라이브 데이터) ── */}
+      {liveChainList.length > 0 && (
+        <div className="shrink-0 rounded border border-green-500/30 bg-green-500/5 p-2 flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <Radio className="w-3 h-3 text-green-400 animate-pulse" />
+            <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider">현재 실행 중</span>
+          </div>
+          {liveChainList.map(([tid, chain]) => (
+            <div key={tid} className="flex flex-col gap-1">
+              {/* 요청 원문 */}
+              {chain.request && (
+                <span className="text-[9px] text-white/40 font-mono line-clamp-1">
+                  T{tid}: {chain.request}
+                </span>
+              )}
+              {/* 스텝 배지 */}
+              <div className="flex flex-wrap gap-1">
+                {chain.steps.map((step, i) => {
+                  const rawKey = step.skill_name.replace(/^vibe-/, '');
+                  const label = SKILL_LABELS[rawKey] ?? rawKey;
+                  const s = step.status;
+                  const colorCls = s === 'running'  ? 'border-yellow-400/60 text-yellow-300 bg-yellow-400/10 animate-pulse'
+                                 : s === 'done'     ? 'border-green-500/50 text-green-400 bg-green-500/10'
+                                 : s === 'failed'   ? 'border-red-500/50 text-red-400 bg-red-500/10'
+                                 :                   'border-white/10 text-white/30 bg-white/5';
+                  const icon = s === 'running' ? '●' : s === 'done' ? '✓' : s === 'failed' ? '✗' : '○';
+                  return (
+                    <span key={i} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${colorCls}`}>
+                      {icon} {label}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── 헤더: 완료 기록 제목 + 통계 ── */}
       <div className="flex items-center gap-2 shrink-0">
         <Zap className="w-4 h-4 text-yellow-400" />
-        <span className="text-[11px] font-bold text-white">스킬 실행 결과</span>
+        <span className="text-[11px] font-bold text-white/60">완료 기록</span>
         <div className="ml-auto flex items-center gap-1.5">
           {/* 완료 통계 배지 */}
           {stats.total > 0 && (
@@ -158,7 +265,7 @@ export default function SkillResultsPanel() {
             onClick={() => setFilterTerminal('all')}
             className={`text-[9px] font-bold px-2 py-0.5 rounded border transition-colors ${filterTerminal === 'all' ? 'bg-primary/30 text-primary border-primary/50' : 'bg-white/5 text-[#858585] border-white/10 hover:border-white/20'}`}
           >
-            All
+            전체
           </button>
           {terminalIds.map(tid => (
             <button
@@ -197,7 +304,7 @@ export default function SkillResultsPanel() {
                   onClick={() => setExpandedId(isExpanded ? null : session.session_id)}
                   className="w-full p-2 text-left flex flex-col gap-1"
                 >
-                  {/* 요청 내용 + 터미널 배지 + 완료 시각 */}
+                  {/* 분석 결과(summary) 헤더 표시 — 터미널 배지 + 분석 내용 */}
                   <div className="flex items-start gap-1.5">
                     {/* 터미널 번호 배지 */}
                     {session.terminal_id ? (
@@ -207,27 +314,60 @@ export default function SkillResultsPanel() {
                     ) : (
                       <Zap className="w-3 h-3 text-yellow-400 shrink-0 mt-0.5" />
                     )}
-                    <span className="text-[10px] text-white flex-1 leading-tight line-clamp-2">
-                      {session.request}
-                    </span>
+                    <div className="flex-1 min-w-0">
+                      {/* 분석 결과 요약 — 마지막 비어있지 않은 summary 우선, 없으면 request */}
+                      {(() => {
+                        const summaries = session.results
+                          .map(r => r.summary)
+                          .filter(s => s && s.trim());
+                        const mainText = summaries.length > 0
+                          ? summaries[summaries.length - 1]
+                          : session.request;
+                        return (
+                          <span className="text-[10px] text-white leading-tight line-clamp-2 block">
+                            {mainText}
+                          </span>
+                        );
+                      })()}
+                      {/* 지시 원문 — 작게 보조 표시 */}
+                      <span className="text-[8px] text-[#555] leading-tight line-clamp-1 block mt-0.5">
+                        지시: {session.request}
+                      </span>
+                    </div>
                   </div>
 
-                  {/* 스킬 체인 태그 + 완료율 */}
-                  <div className="flex items-center gap-1.5 pl-4">
-                    <div className="flex gap-1 flex-1 flex-wrap">
-                      {session.results.map((r, i) => (
-                        <span
-                          key={i}
-                          className={`text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5 ${statusBadgeCls(r.status)}`}
-                        >
-                          {statusIcon(r.status)}
-                          {r.skill.replace('vibe-', '')}
-                        </span>
-                      ))}
-                    </div>
-                    {/* 완료율 배지 */}
-                    <span className={`text-[9px] font-bold shrink-0 ${doneCount === totalCount ? 'text-green-400' : 'text-[#858585]'}`}>
-                      {doneCount}/{totalCount}
+                  {/* 스킬별 실행 결과 내러티브 — 각 스킬이 실제로 무엇을 했는지 한 줄씩 표시 */}
+                  <div className="pl-4 flex flex-col gap-0.5">
+                    {session.results.map((r, i) => {
+                      const shortName = r.skill.replace('vibe-', '');
+                      const label = SKILL_LABELS[shortName] ?? shortName;
+                      return (
+                        <div key={i} className="flex items-start gap-1">
+                          {/* 스킬 배지 */}
+                          <span
+                            className={`text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5 shrink-0 ${statusBadgeCls(r.status)}`}
+                          >
+                            {statusIcon(r.status)}
+                            {label}
+                          </span>
+                          {/* 스킬이 생성한 분석/결과 요약 */}
+                          {r.summary ? (
+                            <span className="text-[9px] text-[#aaa] leading-tight pt-0.5 line-clamp-1">
+                              {r.summary}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-[#444] leading-tight pt-0.5 italic">
+                              {STATUS_KR[r.status] ?? r.status}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* 완료율 */}
+                  <div className="pl-4">
+                    <span className={`text-[9px] font-bold ${doneCount === totalCount ? 'text-green-400' : 'text-[#858585]'}`}>
+                      {doneCount}/{totalCount} 완료
                     </span>
                   </div>
 
@@ -244,14 +384,18 @@ export default function SkillResultsPanel() {
                       <div key={i} className="flex items-start gap-1.5">
                         {statusIcon(r.status)}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] font-bold text-white">{r.skill}</span>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {/* 스킬 한글명 + 원본명 */}
+                            <span className="text-[10px] font-bold text-white">
+                              {SKILL_LABELS[r.skill.replace('vibe-', '')] ?? r.skill.replace('vibe-', '')}
+                            </span>
+                            <span className="text-[8px] text-white/25 font-mono">({r.skill})</span>
                             <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${statusBadgeCls(r.status)}`}>
-                              {r.status}
+                              {STATUS_KR[r.status] ?? r.status}
                             </span>
                           </div>
                           {r.summary && (
-                            <p className="text-[9px] text-[#858585] leading-tight mt-0.5 break-words">
+                            <p className="text-[9px] text-[#aaaaaa] leading-tight mt-0.5 break-words whitespace-pre-wrap">
                               {r.summary}
                             </p>
                           )}

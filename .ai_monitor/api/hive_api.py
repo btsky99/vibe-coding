@@ -134,6 +134,64 @@ def handle_get(handler, path: str, params: dict,
         handler.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         return True
 
+    # ── /api/hive/activity ──────────────────────────────────────────────
+    # task_logs.jsonl에서 하이브 시스템 사용 이벤트만 필터링하여 반환.
+    # 대시보드 AgentPanel 하이브 탭에서 3초 폴링으로 사용.
+    elif path == '/api/hive/activity':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        try:
+            import re as _re
+            log_path = DATA_DIR / 'task_logs.jsonl'
+            hive_events = []
+            _HIVE_KEYWORDS = {
+                'memory_read':  ['하이브 컨텍스트', 'current-work', 'memory.py list', '하이브 컨텍스트 자동 로드'],
+                'memory_write': ['메모리 저장', '하이브 메모리', 'current-work 업데이트', '자동 저장', 'INSERT OR REPLACE'],
+                'orchestrate':  ['오케스트레이션', '스킬 체인', 'vibe-orchestrate', 'skill_orchestrator', '스킬 실행'],
+                'message':      ['메시지 수신', '미읽음 메시지', '→ claude', '→ gemini'],
+                'heal':         ['자기치유', 'heal', '스킬 자동 설치'],
+                'hive_ctx':     ['하이브 컨텍스트 자동 주입', '[하이브 컨텍스트]'],
+                'session':      ['세션 스냅샷', '응답 완료', '─── 응답 완료'],
+            }
+            if log_path.exists():
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except Exception:
+                            continue
+                        agent = entry.get('agent', '')
+                        task  = entry.get('task', '')
+                        ts    = entry.get('timestamp', '')
+                        if agent not in ('Hive', 'Claude', '사용자', 'Gemini'):
+                            continue
+                        event_type = None
+                        for etype, keywords in _HIVE_KEYWORDS.items():
+                            if any(kw in task for kw in keywords):
+                                event_type = etype
+                                break
+                        if event_type is None and agent == 'Hive':
+                            event_type = 'hive_ctx'
+                        if event_type is None:
+                            continue
+                        hive_events.append({
+                            'timestamp': ts,
+                            'agent': agent,
+                            'type': event_type,
+                            'task': task[:200],
+                        })
+            hive_events = hive_events[-100:]
+            hive_events.reverse()
+            handler.wfile.write(json.dumps(hive_events, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        return True
+
     # ── /api/hive/logs ──────────────────────────────────────────────────
     elif path == '/api/hive/logs':
         handler.send_response(200)
