@@ -113,7 +113,23 @@ class SessionViewer(App):
         ("q", "quit", "종료"),
         ("r", "refresh_data", "새로고침"),
         ("b", "toggle_sidebar", "탐색기 보기/숨기기"),
+        ("m", "open_mission_control", "Mission Control"),
+        ("a", "toggle_autonomous", "Autonomous 모드"),
     ]
+
+    def action_open_mission_control(self) -> None:
+        """Mission Control (AI 사고 과정) 팝업 또는 뷰 전환"""
+        self.notify("Mission Control 활성화: AI 사고 흐름 분석 중...", title="🧠 AI Brain")
+
+    def action_toggle_autonomous(self) -> None:
+        """자율 주행 모드 토글"""
+        if hasattr(self, "auto_mode"):
+            self.auto_mode = not self.auto_mode
+        else:
+            self.auto_mode = True
+        
+        status = "ON" if self.auto_mode else "OFF"
+        self.notify(f"자율 주행 모드: {status}", severity="info" if self.auto_mode else "warning")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)

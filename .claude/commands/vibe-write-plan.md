@@ -1,5 +1,13 @@
 ---
-description: "승인된 아이디어를 마이크로태스크로 분해하여 ai_monitor_plan.md에 저장합니다."
+name: vibe-write-plan
+description: >
+  승인된 아이디어를 마이크로태스크로 분해하여 ai_monitor_plan.md에 저장합니다.
+  Use when: 브레인스토밍 후 설계가 승인되었을 때, "계획 짜줘", "태스크 분해해줘", vibe-brainstorm 완료 직후.
+allowed-tools:
+  - Read
+  - Write
+  - Bash
+  - Glob
 ---
 
 당신은 지금 Vibe Coding 계획 작성 프로토콜을 실행합니다.

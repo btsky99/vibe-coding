@@ -29,6 +29,9 @@ REVISION HISTORY:
   - --terminal N 플래그로 터미널별 독립 체인 추적
   - SKILL_REGISTRY 상수로 스킬 번호 전역 관리 (1=debug ~ 7=release)
   - 터미널별 최신 세션만 활성 상태로 노출 (API 응답에 terminals 맵 반환)
+- 2026-03-06 Claude: [버그수정] 스테일 체인 표시 문제 — _build_response() 활성 세션 쿼리에
+  15분 시간 제한 추가. 프로세스 비정상 종료로 상태 미갱신된 running/pending 레코드가
+  대시보드에 영원히 남는 레거시 데이터 오염 현상 수정.
 - 2026-03-01 Claude: 최초 구현 — AI 오케스트레이터 B안 상태 추적기
   - skill_chain.json 읽기/쓰기로 실행 상태 영속화
 """
@@ -51,6 +54,7 @@ SKILL_REGISTRY = [
     {"num": 5, "name": "vibe-execute-plan", "short": "execute"},
     {"num": 6, "name": "vibe-code-review",  "short": "review"},
     {"num": 7, "name": "vibe-release",      "short": "release"},
+    {"num": 8, "name": "vibe-heal",         "short": "heal"},    # 자기치유 스킬
 ]
 
 # 스킬 이름 → 번호 조회용 딕셔너리 (plan 시 스킬 이름을 번호로 변환)
@@ -132,19 +136,43 @@ def _get_agent() -> str:
 
 
 def _get_terminal_id() -> int:
-    """환경변수 TERMINAL_ID 또는 0(unknown) 반환."""
+    """환경변수 TERMINAL_ID 또는 0(unknown) 반환.
+
+    'T3', 'T1' 형식(hook_bridge.py 방식)과 순수 숫자 '3' 형식 모두 지원.
+    예: 'T3' → 3, '3' → 3, '' → 0
+    """
+    raw = os.getenv('TERMINAL_ID', '').strip()
+    if not raw:
+        return 0
     try:
-        return int(os.getenv('TERMINAL_ID', '0'))
+        # 'T3' → '3' → 3
+        return int(raw.lstrip('Tt'))
     except (ValueError, TypeError):
         return 0
 
 
 def _active_session(conn: sqlite3.Connection, terminal_id: int) -> str | None:
-    """해당 터미널의 가장 최근 running/pending 세션 ID 반환."""
+    """해당 터미널의 가장 최근 활성 세션 ID 반환.
+
+    우선순위:
+    1) running/pending 상태가 있는 세션 (진행 중)
+    2) 없으면 최근 5분 이내 가장 최근 세션 (모든 step이 done/skipped인 경우 — done 명령 직후)
+    """
+    # 1순위: running 또는 pending 상태 세션
     row = conn.execute(
         "SELECT session_id FROM skill_chains "
         "WHERE terminal_id = ? AND status IN ('running', 'pending') "
         "ORDER BY started_at DESC LIMIT 1",
+        (terminal_id,)
+    ).fetchone()
+    if row:
+        return row['session_id']
+    # 2순위: 최근 5분 내 가장 최근 세션 (update가 모두 완료된 직후 done 호출 대응)
+    row = conn.execute(
+        "SELECT session_id FROM skill_chains "
+        "WHERE terminal_id = ? "
+        "AND updated_at >= datetime('now', '-5 minutes', 'localtime') "
+        "ORDER BY updated_at DESC LIMIT 1",
         (terminal_id,)
     ).fetchone()
     return row['session_id'] if row else None
@@ -156,6 +184,7 @@ def _save_result_history(terminal_id: int, session_id: str, request: str,
     record = {
         "session_id": session_id,
         "terminal_id": terminal_id,
+        "agent": _get_agent(),  # HIVE_AGENT 환경변수 — 프론트엔드 에이전트별 필터링용
         "request": request,
         "results": results,
         "completed_at": completed_at,
@@ -166,6 +195,32 @@ def _save_result_history(terminal_id: int, session_id: str, request: str,
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
         print(f"[WARN] 결과 저장 실패: {e}")
+
+
+def _broadcast_status(agent: str, content: str) -> None:
+    """messages.jsonl에 스킬 실행 상태를 브로드캐스트합니다 (Phase 3).
+
+    대시보드 메시지 탭에 "XX 에이전트가 현재 XX 작업 중" 메시지를 자동 게시합니다.
+    서버 HTTP 의존 없이 직접 파일 기록 방식을 사용합니다.
+    """
+    import time as _time
+    from datetime import datetime as _dt
+    messages_file = DATA_DIR / "messages.jsonl"
+    msg = {
+        "id": str(int(_time.time() * 1000)),
+        "timestamp": _dt.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "from": agent or "agent",
+        "to": "all",
+        "type": "status",
+        "content": content,
+        "read": False,
+    }
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(messages_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[WARN] 메시지 브로드캐스트 실패: {e}")
 
 
 def cmd_plan(terminal_id: int, request: str, skills: list[str]) -> None:
@@ -209,6 +264,13 @@ def cmd_plan(terminal_id: int, request: str, skills: list[str]) -> None:
     print(f"[OK] 스킬 체인 계획 저장: {' → '.join(skills)}")
     print(f"     세션 ID: {session_id}  터미널: T{terminal_id or '?'}  에이전트: {agent or '(미지정)'}")
 
+    # Phase 3: 체인 계획을 메시지 채널에 브로드캐스트 (상대 에이전트에게 브리핑)
+    chain_str = " → ".join(skills)
+    _broadcast_status(
+        agent=agent or "agent",
+        content=f"[스킬 체인 시작] T{terminal_id or '?'}: {request[:60]} | 체인: {chain_str}",
+    )
+
 
 def cmd_update(terminal_id: int, step: int, status: str, summary: str = "") -> None:
     """특정 단계의 실행 상태를 DB에서 갱신합니다.
@@ -248,6 +310,20 @@ def cmd_update(terminal_id: int, step: int, status: str, summary: str = "") -> N
         skill_name = row['skill_name']
         icon = {"running": "🔄", "done": "✅", "failed": "❌", "skipped": "⏭️"}.get(status, "❓")
         print(f"[OK] {icon} {skill_name}: {status}" + (f" — {summary}" if summary else ""))
+
+        # Phase 3: 스킬 상태 변경을 메시지 채널에 자동 게시
+        # "XX 에이전트가 현재 XX 작업 중입니다" 형식으로 대시보드 메시지 탭에 표시
+        agent = _get_agent()
+        agent_label = agent or "에이전트"
+        if status == "running":
+            status_msg = f"{icon} {agent_label}가 현재 [{skill_name}] 작업 중입니다"
+        elif status == "done":
+            status_msg = f"{icon} {agent_label}: [{skill_name}] 완료" + (f" — {summary}" if summary else "")
+        elif status == "failed":
+            status_msg = f"{icon} {agent_label}: [{skill_name}] 실패" + (f" — {summary}" if summary else "")
+        else:
+            status_msg = f"{icon} {agent_label}: [{skill_name}] {status}"
+        _broadcast_status(agent=agent_label, content=status_msg)
     finally:
         conn.close()
 
@@ -323,11 +399,12 @@ def _build_response() -> dict:
     conn = _connect()
     try:
         # 터미널별 최신 활성(running/pending) 세션 ID 조회
-        # 없으면 가장 최근 완료 세션으로 fallback (최근 1시간 이내)
+        # 15분 이내 업데이트된 세션만 활성으로 간주 — 프로세스 죽어서 상태 미갱신된 스테일 체인 제외
         active_sessions: dict[int, str] = {}
         rows = conn.execute(
             "SELECT terminal_id, session_id FROM skill_chains "
             "WHERE status IN ('running', 'pending') "
+            "AND updated_at >= datetime('now', '-15 minutes', 'localtime') "
             "GROUP BY terminal_id "
             "ORDER BY updated_at DESC"
         ).fetchall()
@@ -337,17 +414,25 @@ def _build_response() -> dict:
                 active_sessions[tid] = row['session_id']
 
         # 활성 세션 없는 터미널에 대해 최근 완료 세션 fallback (최근 30분)
+        # [버그수정] active_sessions 빈 경우 NOT IN () 바인딩 오류 방지:
+        #   빈 경우 NOT IN 조건 자체를 제거하여 전체 터미널 대상으로 조회
         cutoff = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        if active_sessions:
+            where_clause = "WHERE terminal_id NOT IN ({}) AND ".format(
+                ','.join(['?'] * len(active_sessions))
+            )
+            params: list = list(active_sessions.keys()) + [cutoff]
+        else:
+            where_clause = "WHERE "
+            params = [cutoff]
         fallback_rows = conn.execute(
             "SELECT terminal_id, session_id, MAX(updated_at) as last_update "
             "FROM skill_chains "
-            "WHERE terminal_id NOT IN ({}) "
-            "AND updated_at >= datetime(?, '-30 minutes') "
+            "{}"
+            "updated_at >= datetime(?, '-30 minutes') "
             "GROUP BY terminal_id, session_id "
-            "ORDER BY last_update DESC".format(
-                ','.join(['?'] * len(active_sessions)) if active_sessions else '?'
-            ),
-            list(active_sessions.keys()) + [cutoff] if active_sessions else [cutoff]
+            "ORDER BY last_update DESC".format(where_clause),
+            params
         ).fetchall()
         for row in fallback_rows:
             tid = row['terminal_id']
@@ -357,8 +442,6 @@ def _build_response() -> dict:
         # 각 세션의 스킬 목록 조회 → terminals 맵 구성
         terminals: dict[str, dict] = {}
         for tid, session_id in active_sessions.items():
-            if tid == 0:
-                continue  # unknown 터미널은 제외
             steps_rows = conn.execute(
                 "SELECT skill_num, skill_name, step_order, status, summary, request, updated_at, agent "
                 "FROM skill_chains WHERE session_id=? AND terminal_id=? ORDER BY step_order",
@@ -366,6 +449,8 @@ def _build_response() -> dict:
             ).fetchall()
             if not steps_rows:
                 continue
+            # terminal_id=0(TERMINAL_ID 미설정 — Claude Code 직접 실행)도 표시 허용
+            # → 기존 "unknown 터미널 제외" 로직 제거
 
             request = steps_rows[0]['request'] or ''
             updated_at = max(r['updated_at'] for r in steps_rows if r['updated_at'])
@@ -411,6 +496,15 @@ def _build_response() -> dict:
 
 def main():
     """CLI 진입점 — 서브커맨드를 파싱하여 해당 함수 호출."""
+    # Windows cp949 환경에서 emoji/유니코드 출력 시 UnicodeEncodeError 방지
+    # (Python 3.7+ 지원, reconfigure 없는 경우 errors='replace' fallback)
+    if sys.platform == 'win32':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except AttributeError:
+            pass  # Python 3.6 이하 호환
+
     args = sys.argv[1:]
     if not args:
         print("사용법:")

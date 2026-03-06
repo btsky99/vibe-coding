@@ -259,99 +259,131 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
         </div>
       </div>
 
-      {/* ── ② 터미널별 스킬 사용 순서 ───────────────────────────────────── */}
-      {/* T1: 1-① → 1-③ → 1-⑤  형태로 각 터미널이 어떤 순서로 스킬 사용하는지 표시 */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
+      {/* ── ② 오케스트레이션 파이프라인 (수평 흐름) ─────────────────────── */}
+      {/* 왼쪽부터: [오케스트레이터] → [스킬1: 뭐하는지] → [스킬2: 뭐하는지] */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2">
         {activeTerminals.length > 0 ? (
-          <>
-            <div className="text-[9px] font-bold text-[#969696] uppercase tracking-wider px-1 shrink-0">
-              터미널별 사용 순서
-            </div>
-            {activeTerminals.map(([termId, chain]) => {
-              // 우선순위: 실시간 PTY 세션 > DB 저장값 (PTY 세션 종료 후에도 유지)
-              const agentName = (orchStatus?.terminal_agents ?? {})[termId] || chain.agent || '';
-              return (
-                <div key={termId} className={`rounded border ${chainBorderColor(chain.status)} p-2 shrink-0`}>
+          activeTerminals.map(([termId, chain]) => {
+            const agentName = (orchStatus?.terminal_agents ?? {})[termId] || chain.agent || '';
+            return (
+              <div key={termId} className={`rounded border ${chainBorderColor(chain.status)} p-2 shrink-0`}>
 
-                  {/* 터미널 헤더: T번호 + 에이전트 + 요청 + 시각 */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold text-[#dddddd] font-mono">
-                        T{termId}
+                {/* 터미널 헤더 */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-[#dddddd] font-mono">T{termId}</span>
+                    {agentName && (
+                      <span className={`px-1 py-0.5 rounded text-[7px] font-bold ${agentBadgeColor(agentName)}`}>
+                        {agentName}
                       </span>
-                      {agentName && (
-                        <span className={`px-1 py-0.5 rounded text-[7px] font-bold ${agentBadgeColor(agentName)}`}>
-                          {agentName}
+                    )}
+                    {chain.status === 'running' && (
+                      <span className="text-[7px] text-primary animate-pulse">● 실행중</span>
+                    )}
+                    {chain.status === 'done' && (
+                      <span className="text-[7px] text-green-400">✓ 완료</span>
+                    )}
+                  </div>
+                  {chain.updated_at && (
+                    <span className="text-[7px] text-[#555] font-mono shrink-0">
+                      {new Date(chain.updated_at).toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+
+                {/* ── 수평 파이프라인: [오케스트레이터] → [스킬1] → [스킬2] ── */}
+                <div className="flex items-stretch gap-0 overflow-x-auto custom-scrollbar pb-1">
+
+                  {/* 오케스트레이터 카드 (파이프라인 첫 번째) */}
+                  <div className="flex items-center shrink-0">
+                    <div className="flex flex-col gap-1 px-2 py-1.5 rounded border border-primary/30 bg-primary/8 min-w-[72px] max-w-[96px]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-primary text-[9px]">🎯</span>
+                        <span className="text-[8px] font-bold text-primary">오케스트</span>
+                      </div>
+                      {chain.request && (
+                        <span
+                          className="text-[7px] text-[#888] leading-tight line-clamp-2"
+                          title={chain.request}
+                        >
+                          "{chain.request}"
                         </span>
                       )}
-                      {chain.status === 'running' && (
-                        <span className="text-[7px] text-primary animate-pulse">● 실행중</span>
-                      )}
-                      {chain.status === 'done' && (
-                        <span className="text-[7px] text-green-400">✓ 완료</span>
-                      )}
                     </div>
-                    {chain.updated_at && (
-                      <span className="text-[7px] text-[#555] font-mono shrink-0">
-                        {new Date(chain.updated_at).toLocaleTimeString()}
-                      </span>
+                    {/* 화살표 */}
+                    {chain.steps.length > 0 && (
+                      <span className="text-[#444] text-[10px] px-1 shrink-0">→</span>
                     )}
                   </div>
 
-                  {/* 요청 내용 */}
-                  {chain.request && (
-                    <div className="text-[7px] text-[#777] mb-1.5 truncate" title={chain.request}>
-                      "{chain.request}"
-                    </div>
-                  )}
+                  {/* 스킬 카드들 (파이프라인 2번째 이후) */}
+                  {chain.steps.map((step, i) => {
+                    const shortName = step.skill_name.replace(/^vibe-/, '');
+                    const isRunning = step.status === 'running';
+                    const isDone    = step.status === 'done';
+                    const isFailed  = step.status === 'failed';
+                    const isPending = step.status === 'pending';
 
-                  {/* 스킬 사용 순서: 1-① → 1-③ → 1-⑤ */}
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {chain.steps.map((step, i) => {
-                      const circleNum = CIRCLE_NUMS[step.skill_num] ?? step.skill_num;
-                      return (
-                        <div key={i} className="flex items-center gap-1">
-                          {i > 0 && <span className="text-[#333] text-[8px]">→</span>}
-                          <div
-                            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold ${stepBadgeColor(step.status)}`}
-                            title={step.summary || step.skill_name}
-                          >
-                            {stepIcon(step.status)}
-                            {/* N-M 표기: 터미널번호-스킬번호 */}
-                            <span className="text-[#555]">{termId}-</span>
-                            <span>{circleNum}</span>
+                    // 카드 테두리·배경 색상
+                    const cardCls = isRunning ? 'border-primary/50 bg-primary/10'
+                                  : isDone    ? 'border-green-500/30 bg-green-500/8'
+                                  : isFailed  ? 'border-red-500/30 bg-red-500/8'
+                                  :             'border-white/8 bg-white/2';
+
+                    // 스킬명 텍스트 색상
+                    const nameCls  = isRunning ? 'text-primary'
+                                  : isDone    ? 'text-green-400'
+                                  : isFailed  ? 'text-red-400'
+                                  :             'text-[#555]';
+
+                    return (
+                      <div key={i} className="flex items-center shrink-0">
+                        {/* 스킬 카드 */}
+                        <div
+                          className={`flex flex-col gap-1 px-2 py-1.5 rounded border ${cardCls} min-w-[80px] max-w-[110px]`}
+                          title={step.summary || step.skill_name}
+                        >
+                          {/* 상태 아이콘 + 스킬명 */}
+                          <div className="flex items-center gap-1">
+                            <span className={`text-[9px] ${isRunning ? 'animate-pulse' : ''}`}>
+                              {stepIcon(step.status)}
+                            </span>
+                            <span className={`text-[8px] font-bold font-mono truncate ${nameCls}`}>
+                              {shortName}
+                            </span>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
 
-                  {/* 현재 실행 중인 스킬 상태 메시지 */}
-                  {(() => {
-                    const running = chain.steps.find(s => s.status === 'running');
-                    const lastDone = [...chain.steps].reverse().find(s => s.status === 'done');
-                    if (running) return (
-                      <div className="mt-1.5 text-[7px] text-primary truncate">
-                        ⚡ {running.skill_name} 실행 중...
+                          {/* 뭘 하는지 — summary 또는 상태 텍스트 */}
+                          {step.summary ? (
+                            <span className="text-[7px] text-[#888] leading-tight line-clamp-2">
+                              {step.summary}
+                            </span>
+                          ) : (
+                            <span className={`text-[7px] leading-tight italic ${
+                              isRunning ? 'text-primary/70' :
+                              isPending ? 'text-[#444]' : 'text-[#555]'
+                            }`}>
+                              {isRunning ? '실행 중...' : isPending ? '대기' : step.status}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 스킬 사이 화살표 (마지막 카드 제외) */}
+                        {i < chain.steps.length - 1 && (
+                          <span className="text-[#333] text-[10px] px-1 shrink-0">→</span>
+                        )}
                       </div>
                     );
-                    if (lastDone?.summary) return (
-                      <div className="mt-1.5 text-[7px] text-[#777] truncate">
-                        ✅ {lastDone.summary}
-                      </div>
-                    );
-                    return null;
-                  })()}
+                  })}
                 </div>
-              );
-            })}
-          </>
+              </div>
+            );
+          })
         ) : (
-          /* 실행 중인 터미널 없을 때 — 스킬 목록은 위에서 항상 보임 */
           <div className="text-center text-[#555] text-[9px] py-4 italic">
             실행 중인 터미널 없음
             <div className="text-[8px] mt-1 text-[#444]">
-              /vibe-orchestrate 실행 시 여기에 순서가 표시됩니다
+              /vibe-orchestrate 실행 시 파이프라인이 여기에 표시됩니다
             </div>
           </div>
         )}

@@ -1,3 +1,15 @@
+---
+name: vibe-release
+description: >
+  빌드 + 릴리즈 파이프라인 자동 실행. 버전 증가 → 커밋 → 푸시 → GitHub Actions 빌드.
+  Use when: "빌드해줘", "배포해줘", "릴리즈", "push하고 업데이트", "EXE 만들어줘" 요청 시.
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+---
+
 <!-- FILE: skills/claude/vibe-release.md
 DESCRIPTION: Vibe Coding 릴리즈 스킬 (Claude Code 전용).
              /vibe-release 명령으로 호출. 표준 릴리즈 파이프라인을 단계별로 실행합니다.

@@ -13,4 +13,4 @@
 
 ## 📂 핵심 참조 파일
 - **작업 계획**: `ai_monitor_plan.md`
-- **전문 지식**: `.gemini/skills/master/references/` 폴더 내 모든 가이드 참고
+- **전문 지식**: `.gemini/skills/orchestrate/` 폴더 내 가이드 참고

@@ -386,13 +386,77 @@ def run_cycle(port: int | None) -> tuple[list, list]:
 
 # ─── 진입점 ──────────────────────────────────────────────────────────────────
 
+def print_summary(port: int | None):
+    """현재 하이브 상태 및 장기 메모리 요약 브리핑을 출력"""
+    tasks = api_get('/api/tasks', port) or _load_tasks()
+    last_seen = get_agent_last_seen()
+    task_count = get_agent_task_count(tasks)
+    
+    # 최근 액션 로그 가져오기 (마지막 3줄)
+    recent_logs = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            recent_logs = [json.loads(l) for l in lines[-3:]]
+
+    # 장기 메모리(memory.md) 가져오기
+    long_term_mem = "기록된 메모리 없음"
+    mem_path = os.path.join(DATA_DIR, '..', '..', 'memory.md')
+    if os.path.exists(mem_path):
+        try:
+            with open(mem_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # '## 📌 1. 핵심 기술적 결정' 섹션의 내용 추출 (간단한 파싱)
+                if '## 📌 1. 핵심 기술적 결정' in content:
+                    section = content.split('## 📌 1. 핵심 기술적 결정')[1].split('##')[0].strip()
+                    lines = [l.strip() for l in section.split('\n') if l.strip().startswith('*')]
+                    if lines:
+                        long_term_mem = "\n  ".join(lines[-2:]) # 마지막 2줄만
+        except Exception:
+            long_term_mem = "메모리 읽기 실패"
+
+    # 브리핑 생성
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[📡 하이브 마스터 브리핑 - {ts}]")
+    
+    # 1. 에이전트 상태
+    active_agents = [a for a, seen in last_seen.items() if seen and (datetime.now() - datetime.fromisoformat(seen.replace('Z',''))).total_seconds() < IDLE_THRESHOLD_SEC]
+    print(f"● 활성 에이전트: {', '.join(active_agents) if active_agents else '없음'}")
+    
+    # 2. 장기 메모리 요약 (New)
+    print(f"● 최신 기술 결정:\n  {long_term_mem}")
+    
+    # 3. 태스크 부하
+    total_pending = sum(1 for t in tasks if t.get('status') == 'pending')
+    print(f"● 태스크 부하: 대기 중 {total_pending}개 (배정 현황: {', '.join([f'{a}:{c}' for a, c in task_count.items() if a != 'all'])})")
+    
+    # 4. 최근 주요 활동
+    if recent_logs:
+        print("● 최근 주요 활동:")
+        for log in recent_logs:
+            print(f"  - [{log['action']}] {log['detail']}")
+    
+    # 5. 권장 전략
+    if total_pending > 0:
+        print(f"● 권장 전략: 대기 중인 {total_pending}개의 태스크를 처리하거나 에이전트 간 업무를 재분배하세요.")
+    else:
+        print("● 권장 전략: 현재 대기 중인 태스크가 없습니다. 새로운 작업을 대기하거나 유휴 에이전트를 점검하세요.")
+    print("-" * 50)
+
 def main():
     parser = argparse.ArgumentParser(description='하이브 마인드 오케스트레이터')
     parser.add_argument('--daemon', action='store_true',
                         help='데몬 모드 (반복 실행, Ctrl+C로 종료)')
     parser.add_argument('--interval', type=int, default=30,
                         help='조율 주기 (초, 기본값: 30)')
+    parser.add_argument('--summary', action='store_true',
+                        help='현재 하이브 상태 요약 보고 (에이전트 브리핑용)')
     args = parser.parse_args()
+
+    if args.summary:
+        port = find_port()
+        print_summary(port)
+        return
 
     if args.daemon:
         print(f"[오케스트레이터] 데몬 모드 시작 (주기: {args.interval}초, Ctrl+C 종료)")

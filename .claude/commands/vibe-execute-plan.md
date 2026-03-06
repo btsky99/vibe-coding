@@ -1,5 +1,15 @@
 ---
-description: "ai_monitor_plan.md의 계획을 순서대로 실행합니다. 계획 외 작업 추가 금지."
+name: vibe-execute-plan
+description: >
+  ai_monitor_plan.md의 계획을 순서대로 실행합니다. 계획 외 작업 추가 금지.
+  Use when: "계획 실행", "플랜 실행해줘", "계획대로 진행", vibe-write-plan 완료 직후, ai_monitor_plan.md에 태스크 목록이 있을 때.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Glob
+  - Grep
 ---
 
 당신은 지금 Vibe Coding 계획 실행 프로토콜을 실행합니다.

@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "python D:/vibe-coding/scripts/hive_hook.py"
+          },
+          {
+            "type": "command",
+            "command": "python D:/vibe-coding/scripts/hook_bridge.py"
           }
         ]
       }

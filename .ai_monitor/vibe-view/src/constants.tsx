@@ -58,7 +58,6 @@ export type TreeItem = { name: string; path: string; isDir: boolean };
 export interface Shortcut { label: string; cmd: string; }
 
 export const defaultShortcuts: Shortcut[] = [
-  { label: '마스터 호출', cmd: 'gemini --skill master' },
   { label: '🧹 화면 지우기', cmd: '/clear' },
   { label: '깃 커밋', cmd: 'git add . && git commit -m "update"' },
   { label: '깃 푸시', cmd: 'git push' },

@@ -260,6 +260,35 @@ _INTENT_MAP = [
 ]
 
 
+def _update_pipeline_stage(stage: str, task: str = '') -> None:
+    """서버 API를 통해 이 대화형 세션의 파이프라인 단계를 실시간 업데이트합니다.
+
+    [동작]
+    - POST /api/agent/stage 호출 → agent_api._interactive_stages 업데이트
+    - 모니터링 패널(TerminalSlot)에서 현재 단계가 실시간으로 표시됨
+    - 단계: analyzing(사용자 지시 접수) → modifying(파일 수정) → verifying(후처리) → done(완료)
+
+    [에러 시] 서버 미실행 등 예외는 조용히 무시 (훅 자체를 방해하지 않음)
+    """
+    try:
+        import urllib.request as _req
+        from datetime import datetime as _dt
+        payload = json.dumps({
+            'terminal_id': _TERMINAL_ID,
+            'stage': stage,
+            'task': task[:120] if task else '',
+        }).encode('utf-8')
+        req = _req.Request(
+            'http://localhost:9571/api/agent/stage',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        _req.urlopen(req, timeout=1)
+    except Exception:
+        pass  # 서버 미실행 시 조용히 무시
+
+
 def _save_session_snapshot() -> None:
     """Stop 이벤트 시 오늘의 세션 활동을 shared_memory.db에 자동 저장합니다.
 
@@ -676,6 +705,9 @@ def main():
             if log_task:
                 log_task("사용자", f"[지시] {short}", _TERMINAL_ID)
 
+            # [파이프라인 단계 업데이트] 사용자 지시 수신 → "분석" 단계 표시
+            _update_pipeline_stage('analyzing', short)
+
             # ── 태스크 보드 자동 등록 ──────────────────────────────────────────
             # 사용자 지시가 들어올 때마다 tasks.json에 pending 태스크로 추가합니다.
             # 에이전트가 작업을 시작하면 in_progress, 완료 시 done으로 상태를 변경할 수 있습니다.
@@ -725,10 +757,14 @@ def main():
             old = _snippet(tool_input.get("old_string", ""), 50)
             new = _snippet(tool_input.get("new_string", ""), 50)
             log_task("Claude", f"[수정 시작] {_short_path(fp)}\n  변경 전: {old}\n  변경 후: {new}", _TERMINAL_ID)
+            # [파이프라인 단계] 파일 수정 시작 → "수정" 단계 표시
+            _update_pipeline_stage('modifying', f'수정 중: {_short_path(fp)}')
 
         elif tool_name == "Write":
             fp = tool_input.get("file_path", "?")
             log_task("Claude", f"[파일 생성 시작] {_short_path(fp)}", _TERMINAL_ID)
+            # [파이프라인 단계] 파일 생성 시작 → "수정" 단계 표시
+            _update_pipeline_stage('modifying', f'생성 중: {_short_path(fp)}')
 
         elif tool_name == "Bash":
             cmd = tool_input.get("command", "").strip()
@@ -781,6 +817,9 @@ def main():
     elif event == "Stop":
         if log_task:
             log_task("Claude", "─── 응답 완료 ───", _TERMINAL_ID)
+
+        # [파이프라인 단계] Claude 응답 완료 → "완료" 단계 표시
+        _update_pipeline_stage('done')
 
         # Claude 응답이 끝나면 in_progress 상태인 claude 태스크 처리
         # → stop_reason이 'error'가 아닌 경우에만 done으로 변경

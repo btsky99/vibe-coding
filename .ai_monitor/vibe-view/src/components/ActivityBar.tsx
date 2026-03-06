@@ -13,17 +13,15 @@
  */
 
 import {
-  Search, Settings, Files, LayoutDashboard,
-  MessageSquare, ClipboardList, Brain, GitBranch, Package, Network, Bot, Zap,
-  ExternalLink
+  Search, Settings, Files,
+  MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
+  ExternalLink, LayoutDashboard
 } from 'lucide-react';
 
 interface ActivityBarProps {
   // 파일 탐색기 탭 관련 — 사이드바 탭 전환
   activeTab: string;
   onTabChange: (tab: string) => void;
-  // 대시보드 페이지 진입 콜백
-  onOpenDashboard: () => void;
   // 설정 팝업 오픈 콜백
   onOpenSettings: () => void;
   // 디스코드 새 창 열기 콜백 (분리된 기능)
@@ -43,7 +41,7 @@ interface ActivityBarProps {
 
 export default function ActivityBar({
   activeTab, onTabChange,
-  onOpenDashboard, onOpenSettings,
+  onOpenSettings,
   onOpenDiscordNewWindow,
   skillChainStatus, orchWarningCount,
   unreadMsgCount, activeTaskCount,
@@ -55,11 +53,6 @@ export default function ActivityBar({
   // 탭 버튼 공통 스타일 (활성 시 왼쪽 보더 + 배경 강조)
   const tabCls = (tab: string) =>
     `p-2 transition-colors relative ${activeTab === tab ? 'text-white border-l-2 border-primary bg-white/5' : 'text-[#858585] hover:text-white'}`;
-
-  // 대시보드 진입 버튼의 통합 배지 카운트
-  // 미읽음 메시지 + 진행 중 태스크 + Git 충돌 + 에이전트 실행 + 오케스트레이터 경고
-  const dashboardBadgeCount = unreadMsgCount + activeTaskCount + conflictCount + orchWarningCount;
-  const hasDashboardActivity = dashboardBadgeCount > 0 || isAgentRunning || skillChainStatus === 'running' || isThinking;
 
   return (
     <div className="w-12 h-full bg-[#333333] border-r border-black/40 flex flex-col items-center py-4 gap-4 shrink-0">
@@ -77,24 +70,7 @@ export default function ActivityBar({
       {/* ── 구분선 ── */}
       <div className="w-6 h-px bg-white/10" />
 
-      {/* 🎛️ 대시보드 페이지 진입 버튼 — 모든 패널을 별도 페이지에서 보기 */}
-      <button
-        onClick={() => onOpenDashboard()}
-        className="p-2 transition-colors relative text-[#858585] hover:text-primary group"
-        title="대시보드 열기 — 메시지·태스크·메모리·Git·하이브·에이전트 등"
-      >
-        <LayoutDashboard className="w-6 h-6 group-hover:scale-110 transition-transform" />
-        {/* 통합 활동 배지 — 어느 패널에서든 활동이 있으면 표시 */}
-        {hasDashboardActivity && (
-          <span className={`absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full ${
-            conflictCount > 0 ? 'bg-red-500' :
-            dashboardBadgeCount > 0 ? 'bg-yellow-400' :
-            'bg-primary'
-          } ${skillChainStatus === 'running' || isAgentRunning ? 'animate-pulse' : ''}`} />
-        )}
-      </button>
-
-      {/* ── 간소화된 빠른 접근 아이콘 (사이드바 탭 전환) ── */}
+      {/* ── 빠른 접근 아이콘 (사이드바 탭 전환) ── */}
       <button onClick={() => onTabChange('messages')} className={tabCls('messages')} title="메시지 채널">
         <MessageSquare className="w-5 h-5" />
         {unreadMsgCount > 0 && (
@@ -102,10 +78,18 @@ export default function ActivityBar({
         )}
       </button>
 
-      <button onClick={() => onTabChange('tasks')} className={tabCls('tasks')} title="태스크보드">
+      <button onClick={() => onTabChange('tasks')} className={tabCls('tasks')} title="태스크보드 (리스트)">
         <ClipboardList className="w-5 h-5" />
         {activeTaskCount > 0 && (
           <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-yellow-400 rounded-full" />
+        )}
+      </button>
+
+      {/* 태스크보드 — 스킬 실행결과 + 칸반 통합 팝업 */}
+      <button onClick={() => onTabChange('kanban')} className={tabCls('kanban')} title="태스크보드 (스킬결과 + 칸반 통합)">
+        <LayoutDashboard className="w-5 h-5" />
+        {activeTaskCount > 0 && (
+          <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
         )}
       </button>
 
@@ -123,17 +107,13 @@ export default function ActivityBar({
         )}
       </button>
 
-      <button onClick={() => onTabChange('orchestrate')} className={tabCls('orchestrate')} title="AI 오케스트레이터">
-        <Network className="w-5 h-5" />
-        {skillChainStatus === 'running' && (
-          <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-primary rounded-full animate-pulse" />
-        )}
-      </button>
-
-      <button onClick={() => onTabChange('agent')} className={tabCls('agent')} title="자율 에이전트">
+      <button onClick={() => onTabChange('agent')} className={tabCls('agent')} title="자율 에이전트 / 스킬체인">
         <Bot className="w-5 h-5" />
-        {isAgentRunning && (
-          <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
+        {/* 에이전트 실행 중: 노랑 / 스킬체인 실행 중: primary 펄스 */}
+        {(isAgentRunning || skillChainStatus === 'running') && (
+          <span className={`absolute top-0.5 right-0.5 w-2 h-2 rounded-full animate-pulse ${
+            isAgentRunning ? 'bg-yellow-400' : 'bg-primary'
+          }`} />
         )}
       </button>
 

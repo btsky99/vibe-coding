@@ -5,6 +5,9 @@
  *          [현재 실행 중] 섹션: /api/orchestrator/skill-chain 3초 폴링 → 라이브 체인 표시
  *          [완료 기록] 섹션: skill_results.jsonl 10초 폴링 → 이전 세션 히스토리
  * REVISION HISTORY:
+ * - 2026-03-06 Claude: 오케스트레이션 현황판 수평 파이프라인 레인 뷰로 전면 개편
+ *          [오케스트레이션] → [스킬1: 뭘하는지] → [스킬2: 뭘하는지] 가로 레인 구조
+ *          완료 기록도 동일한 가로 파이프라인 미니뷰로 통일
  * - 2026-03-05 Claude: 현재 실행 중 섹션 추가 — skill-chain 라이브 폴링으로 과거/현재 분리
  * - 2026-03-02 Claude: terminal_id 배지, 터미널 필터 탭, 통계 헤더, 폴링 30→10s 강화
  * - 2026-03-01 Claude: Task 3 신규 구현 — skill_results.jsonl → 대시보드 표시
@@ -55,7 +58,6 @@ const SKILL_LABELS: Record<string, string> = {
   'code-review':  '🔎 코드리뷰',
   'release':      '🚀 릴리스',
   'orchestrate':  '🤖 오케스트레이터',
-  'master':       '🎯 마스터',
 };
 
 // 상태 한글 변환
@@ -199,39 +201,93 @@ export default function SkillResultsPanel() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden gap-2">
 
-      {/* ── 현재 실행 중 섹션 (라이브 데이터) ── */}
+      {/* ── 오케스트레이션 현황판 — 수평 파이프라인 레인 뷰 ── */}
       {liveChainList.length > 0 && (
-        <div className="shrink-0 rounded border border-green-500/30 bg-green-500/5 p-2 flex flex-col gap-1.5">
+        <div className="shrink-0 rounded border border-green-500/30 bg-green-500/5 p-2 flex flex-col gap-2">
           <div className="flex items-center gap-1.5">
             <Radio className="w-3 h-3 text-green-400 animate-pulse" />
-            <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider">현재 실행 중</span>
+            <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider">오케스트레이션 현황</span>
           </div>
           {liveChainList.map(([tid, chain]) => (
-            <div key={tid} className="flex flex-col gap-1">
-              {/* 요청 원문 */}
-              {chain.request && (
-                <span className="text-[9px] text-white/40 font-mono line-clamp-1">
-                  T{tid}: {chain.request}
-                </span>
-              )}
-              {/* 스텝 배지 */}
-              <div className="flex flex-wrap gap-1">
-                {chain.steps.map((step, i) => {
-                  const rawKey = step.skill_name.replace(/^vibe-/, '');
-                  const label = SKILL_LABELS[rawKey] ?? rawKey;
-                  const s = step.status;
-                  const colorCls = s === 'running'  ? 'border-yellow-400/60 text-yellow-300 bg-yellow-400/10 animate-pulse'
-                                 : s === 'done'     ? 'border-green-500/50 text-green-400 bg-green-500/10'
-                                 : s === 'failed'   ? 'border-red-500/50 text-red-400 bg-red-500/10'
-                                 :                   'border-white/10 text-white/30 bg-white/5';
-                  const icon = s === 'running' ? '●' : s === 'done' ? '✓' : s === 'failed' ? '✗' : '○';
-                  return (
-                    <span key={i} className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${colorCls}`}>
-                      {icon} {label}
-                    </span>
-                  );
-                })}
+            <div key={tid} className="flex items-stretch gap-0 overflow-x-auto custom-scrollbar pb-1">
+
+              {/* ── 레인 1: 오케스트레이션 — 어떤 스킬에 지시를 내리는지 ── */}
+              <div className="shrink-0 w-[88px] flex flex-col gap-1 rounded-l border border-blue-500/40 bg-blue-500/8 p-1.5">
+                <span className="text-[8px] font-black text-blue-400 uppercase tracking-wide leading-tight">오케스트레이션</span>
+                <span className="text-[7px] font-bold text-blue-300/50">T{tid}</span>
+                {chain.request && (
+                  <span className="text-[8px] text-white/45 leading-tight line-clamp-3 break-all">
+                    {chain.request}
+                  </span>
+                )}
+                {/* 지시 대상 스킬 목록 */}
+                <div className="flex flex-col gap-0.5 mt-auto pt-1">
+                  {chain.steps.map((step, i) => {
+                    const rawKey = step.skill_name.replace(/^vibe-/, '');
+                    const label = SKILL_LABELS[rawKey] ?? rawKey;
+                    return (
+                      <span key={i} className="text-[7px] text-blue-300/60 font-mono flex items-center gap-0.5">
+                        <span className="text-blue-400/40">→</span> {label}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
+
+              {/* ── 레인 2~N: 각 스킬이 뭘 하는지 ── */}
+              {chain.steps.map((step, i) => {
+                const rawKey = step.skill_name.replace(/^vibe-/, '');
+                const label = SKILL_LABELS[rawKey] ?? rawKey;
+                const s = step.status;
+                const isRunning = s === 'running';
+                const isDone    = s === 'done';
+                const isFailed  = s === 'failed';
+                const isPending = !isRunning && !isDone && !isFailed;
+                const isLast    = i === chain.steps.length - 1;
+
+                const borderCls = isRunning ? 'border-yellow-400/60 bg-yellow-400/8'
+                                : isDone    ? 'border-green-500/40 bg-green-500/8'
+                                : isFailed  ? 'border-red-500/40 bg-red-500/8'
+                                :             'border-white/8 bg-white/3';
+                const labelCls  = isRunning ? 'text-yellow-300'
+                                : isDone    ? 'text-green-400'
+                                : isFailed  ? 'text-red-400'
+                                :             'text-white/20';
+                const arrowCls  = isRunning ? 'bg-yellow-400/40 border-l-yellow-400/40'
+                                : isDone    ? 'bg-green-500/35 border-l-green-500/35'
+                                :             'bg-white/10 border-l-white/10';
+                const icon = isRunning ? '●' : isDone ? '✓' : isFailed ? '✗' : '○';
+                const statusText = isRunning ? '실행 중' : isDone ? '완료' : isFailed ? '실패' : '대기';
+
+                return (
+                  <div key={i} className="flex items-stretch">
+                    {/* 화살표 연결선 */}
+                    <div className="flex items-center shrink-0 px-0.5">
+                      <div className={`w-2.5 h-px ${arrowCls}`} />
+                      <div className={`w-0 h-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[4px] ${arrowCls}`} />
+                    </div>
+
+                    {/* 스킬 레인 카드 */}
+                    <div className={`shrink-0 w-[82px] flex flex-col gap-1 border ${borderCls} p-1.5 ${isLast ? 'rounded-r' : ''}`}>
+                      {/* 스킬 이름 */}
+                      <span className={`text-[8px] font-black leading-tight ${labelCls} ${isRunning ? 'animate-pulse' : ''}`}>
+                        {icon} {label}
+                      </span>
+                      {/* 상태 */}
+                      <span className={`text-[7px] font-bold ${isRunning ? 'text-yellow-400' : isDone ? 'text-green-400' : isFailed ? 'text-red-400' : 'text-white/20'}`}>
+                        {statusText}
+                      </span>
+                      {/* 원본 스킬명 */}
+                      <span className="text-[7px] text-white/18 font-mono leading-tight break-all">
+                        {step.skill_name}
+                      </span>
+                      {isPending && (
+                        <span className="text-[6px] text-white/15 italic leading-tight">앞 단계 후 실행</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -336,30 +392,43 @@ export default function SkillResultsPanel() {
                     </div>
                   </div>
 
-                  {/* 스킬별 실행 결과 내러티브 — 각 스킬이 실제로 무엇을 했는지 한 줄씩 표시 */}
-                  <div className="pl-4 flex flex-col gap-0.5">
+                  {/* 스킬 파이프라인 — 가로 레인 뷰 (오케스트레이션 → 스킬1 → 스킬2 ...) */}
+                  <div className="flex items-stretch gap-0 overflow-x-auto custom-scrollbar mt-1">
+                    {/* 오케스트레이션 레인 */}
+                    <div className="shrink-0 w-[60px] flex flex-col gap-0.5 rounded-l border border-blue-500/30 bg-blue-500/6 px-1 py-1">
+                      <span className="text-[6px] font-black text-blue-400/80 uppercase tracking-wide">오케스트</span>
+                      <span className="text-[6px] text-white/30 leading-tight line-clamp-2">
+                        {session.request}
+                      </span>
+                    </div>
+                    {/* 각 스킬 레인 */}
                     {session.results.map((r, i) => {
                       const shortName = r.skill.replace('vibe-', '');
                       const label = SKILL_LABELS[shortName] ?? shortName;
+                      const isLast = i === session.results.length - 1;
+                      const arrowCls = r.status === 'done'    ? 'bg-green-500/30 border-l-green-500/30'
+                                     : r.status === 'error'   ? 'bg-red-500/30 border-l-red-500/30'
+                                     : r.status === 'running' ? 'bg-yellow-400/30 border-l-yellow-400/30'
+                                     :                          'bg-white/8 border-l-white/8';
                       return (
-                        <div key={i} className="flex items-start gap-1">
-                          {/* 스킬 배지 */}
-                          <span
-                            className={`text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5 shrink-0 ${statusBadgeCls(r.status)}`}
-                          >
-                            {statusIcon(r.status)}
-                            {label}
-                          </span>
-                          {/* 스킬이 생성한 분석/결과 요약 */}
-                          {r.summary ? (
-                            <span className="text-[9px] text-[#aaa] leading-tight pt-0.5 line-clamp-1">
-                              {r.summary}
-                            </span>
-                          ) : (
-                            <span className="text-[9px] text-[#444] leading-tight pt-0.5 italic">
-                              {STATUS_KR[r.status] ?? r.status}
-                            </span>
-                          )}
+                        <div key={i} className="flex items-stretch">
+                          {/* 화살표 */}
+                          <div className="flex items-center shrink-0">
+                            <div className={`w-2 h-px ${arrowCls}`} />
+                            <div className={`w-0 h-0 border-t-[2px] border-t-transparent border-b-[2px] border-b-transparent border-l-[3px] ${arrowCls}`} />
+                          </div>
+                          {/* 스킬 카드 */}
+                          <div className={`shrink-0 w-[68px] flex flex-col gap-0.5 border border-current/30 px-1 py-1 ${statusBadgeCls(r.status)} ${isLast ? 'rounded-r' : ''}`}>
+                            <div className="flex items-center gap-0.5">
+                              {statusIcon(r.status)}
+                              <span className="text-[7px] font-bold leading-tight truncate">{label}</span>
+                            </div>
+                            {r.summary ? (
+                              <span className="text-[6px] text-[#aaa] leading-tight line-clamp-2">{r.summary}</span>
+                            ) : (
+                              <span className="text-[6px] text-[#444] italic">{STATUS_KR[r.status] ?? r.status}</span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

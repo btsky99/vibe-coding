@@ -1,5 +1,14 @@
 ---
-description: "RED-GREEN-REFACTOR 사이클로 테스트 주도 개발을 진행합니다."
+name: vibe-tdd
+description: >
+  RED-GREEN-REFACTOR 사이클로 테스트 주도 개발을 진행합니다.
+  Use when: "테스트 짜줘", "TDD로 구현", 버그 수정 후 회귀 방지, 새 기능 구현 시 테스트 먼저.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Glob
 ---
 
 당신은 지금 Vibe Coding TDD 프로토콜을 실행합니다.

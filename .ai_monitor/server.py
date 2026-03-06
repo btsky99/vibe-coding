@@ -1817,9 +1817,74 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             tasks = []
             if TASKS_FILE.exists():
+                try:
+                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                        tasks = json.load(f)
+                except (json.JSONDecodeError, ValueError):
+                    # 파일 손상 시 빈 배열 반환 (파싱 오류가 빈 칸반으로 이어지는 버그 방지)
+                    tasks = []
+            self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/tasks/kanban':
+            # 칸반 보드 데이터 — 태스크를 5컬럼으로 그룹화하여 반환
+            # kanban_status 필드 우선, 없으면 status에서 매핑 (pending→todo 하위 호환)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            tasks = []
+            if TASKS_FILE.exists():
                 with open(TASKS_FILE, 'r', encoding='utf-8') as f:
                     tasks = json.load(f)
-            self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
+            columns: dict = {'todo': [], 'claimed': [], 'in_progress': [], 'review': [], 'done': []}
+            for t in tasks:
+                # kanban_status 우선 적용, 없으면 status 필드에서 변환
+                st = t.get('kanban_status') or t.get('status', 'todo')
+                if st == 'pending':
+                    st = 'todo'
+                if st in columns:
+                    columns[st].append(t)
+                else:
+                    columns['todo'].append(t)
+            total = len(tasks)
+            done_cnt = len(columns['done'])
+            active = total - done_cnt
+            rate = round(done_cnt / total * 100) if total > 0 else 0
+            result = {**columns, 'stats': {'total': total, 'active': active, 'done': done_cnt, 'rate': rate}}
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/task-logs':
+            # task_logs.jsonl에서 최근 로그 반환 — 모니터링 뷰 직접 폴링용
+            # ?agent=claude  ?terminal_id=T1  ?limit=20
+            # SSE 스트림과 달리 JSONL 파일을 직접 읽어 즉시 반환합니다.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            _agent_f  = params.get('agent',       [''])[0].lower()
+            _tid_f    = params.get('terminal_id', [''])[0].upper()
+            _limit    = int(params.get('limit',   ['20'])[0])
+            _log_file = DATA_DIR / 'task_logs.jsonl'
+            _results: list = []
+            if _log_file.exists():
+                _lines = _log_file.read_text(encoding='utf-8').strip().splitlines()
+                for _ln in reversed(_lines[-500:]):
+                    try:
+                        _entry = json.loads(_ln)
+                        # 에이전트 필터 (대소문자 무시)
+                        if _agent_f and _entry.get('agent', '').lower() != _agent_f:
+                            continue
+                        # 터미널 ID 필터 (T1/1 모두 허용)
+                        if _tid_f:
+                            _raw_tid = _entry.get('terminal_id', '')
+                            _norm = f'T{_raw_tid}' if _raw_tid.isdigit() else _raw_tid.upper()
+                            if _norm != _tid_f and _raw_tid.upper() != _tid_f:
+                                continue
+                        _results.append(_entry)
+                        if len(_results) >= _limit:
+                            break
+                    except Exception:
+                        pass
+            # 시간순으로 정렬하여 반환 (최신 순 → 오래된 순)
+            self.wfile.write(json.dumps(_results, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/orchestrator/skill-chain':
             # 스킬 체인 실행 상태 반환 — skill_chain.db(SQLite) 조회
             # 응답: {skill_registry: [...], terminals: {T1: {steps:[...]}, ...}}
@@ -2799,6 +2864,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
 
                 now = time.strftime('%Y-%m-%dT%H:%M:%S')
+                # tags 필드 — 리스트 타입 검증 (문자열이면 쉼표 분리)
+                raw_tags = data.get('tags', [])
+                if isinstance(raw_tags, str):
+                    raw_tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
                 task = {
                     'id': str(int(time.time() * 1000)),
                     'timestamp': now,
@@ -2809,6 +2878,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'assigned_to': str(data.get('assigned_to', 'all')),
                     'priority': str(data.get('priority', 'medium')),
                     'created_by': str(data.get('created_by', 'user')),
+                    # ── 칸반 확장 필드 ──
+                    'kanban_status': str(data.get('kanban_status', 'todo')),
+                    'role': str(data.get('role', '')),
+                    'claimed_by': str(data.get('claimed_by', '')),
+                    'tags': raw_tags,
                 }
 
                 # 기존 작업 목록 읽기 후 새 항목 추가
@@ -2859,10 +2933,17 @@ class SSEHandler(BaseHTTPRequestHandler):
                 updated_task = None
                 for i, t in enumerate(tasks):
                     if t['id'] == task_id:
-                        # 허용된 필드만 업데이트 (임의 키 주입 방지)
-                        for key in ('status', 'assigned_to', 'priority', 'title', 'description'):
+                        # 허용된 문자열 필드 업데이트 (임의 키 주입 방지)
+                        for key in ('status', 'assigned_to', 'priority', 'title',
+                                    'description', 'kanban_status', 'role', 'claimed_by'):
                             if key in data:
                                 tasks[i][key] = str(data[key])
+                        # tags는 리스트 타입 별도 처리
+                        if 'tags' in data:
+                            raw_tags = data['tags']
+                            if isinstance(raw_tags, str):
+                                raw_tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
+                            tasks[i]['tags'] = list(raw_tags) if isinstance(raw_tags, list) else []
                         tasks[i]['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
                         updated_task = tasks[i]
                         break
@@ -2895,6 +2976,35 @@ class SSEHandler(BaseHTTPRequestHandler):
                     json.dump(tasks, f, ensure_ascii=False, indent=2)
 
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/tasks/claim':
+            # 터미널이 태스크를 Claim — kanban_status=claimed, claimed_by=terminal_id로 업데이트
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                task_id = str(data.get('id', ''))
+                terminal_id = str(data.get('terminal_id', ''))
+                tasks = []
+                if TASKS_FILE.exists():
+                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                        tasks = json.load(f)
+                claimed_task = None
+                for i, t in enumerate(tasks):
+                    if t['id'] == task_id:
+                        tasks[i]['kanban_status'] = 'claimed'
+                        tasks[i]['claimed_by'] = terminal_id
+                        tasks[i]['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+                        claimed_task = tasks[i]
+                        break
+                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+                self.wfile.write(json.dumps({'status': 'success', 'task': claimed_task}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/memory/sync':

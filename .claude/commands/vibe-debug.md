@@ -1,5 +1,14 @@
 ---
-description: "버그의 근본 원인을 4단계로 분석합니다. 증상이 아닌 원인을 수정합니다."
+name: vibe-debug
+description: >
+  버그의 근본 원인을 4단계로 분석합니다. 증상이 아닌 원인을 수정합니다.
+  Use when: 오류, 에러, 버그, "안 돼", "안됨", "왜 안되", "고쳐줘", 예외(Exception), 스택 트레이스 발생 시.
+allowed-tools:
+  - Read
+  - Bash
+  - Grep
+  - Glob
+  - Edit
 ---
 
 당신은 지금 Vibe Coding 지능형 디버깅 프로토콜을 실행합니다.

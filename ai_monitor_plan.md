@@ -1,274 +1,48 @@
-# AI 오케스트레이터 스킬 체인 DB 전환 계획
+# 🧠 하이브 마인드 "슈퍼 DB" 구축 계획서 (ai_monitor_plan.md)
 
-**작성일:** 2026-03-01
-**작성자:** Claude (vibe-write-plan)
-**목표:** skill_chain.json → skill_chain.db(SQLite) 전환 + 터미널별 스킬 실행 추적 UI
-
----
-
-## 설계 요약
-
-- **DB 파일**: `.ai_monitor/data/skill_chain.db` (신규, 오케스트레이터 전용)
-- **터미널 구분**: `--terminal N` 플래그로 1~8번 터미널에 체인 귀속
-- **표기 방식**: `N-M` (터미널N, 스킬번호M) → 예: `1-3 → 1-4 → 1-5`
-- **스킬 번호 고정**: 1=debug, 2=tdd, 3=brainstorm, 4=write-plan, 5=execute, 6=review, 7=release
+> 작성: 2026-03-06 (Gemini-1)
+> 목표: PostgreSQL 하나로 Vector DB(기억), Search(검색), MQ(메시지 큐)를 통합하여 하이브 마인드의 인프라를 최적화하고 지능을 극대화함.
 
 ---
 
-## 태스크 목록
+## 🏗️ Phase 4: 하이브 "슈퍼 DB" 구축 (Postgres is All You Need)
 
-### [x] Task 1: skill_orchestrator.py — JSON→SQLite 전환 + --terminal 플래그
-### [x] Task 2: hive_api.py — skill-chain 엔드포인트 DB 쿼리로 변경
-### [x] Task 3: server.py — skill-chain 엔드포인트 DB 쿼리로 변경
-### [x] Task 4: OrchestratorPanel.tsx — 스킬 레지스트리 + 터미널별 N-M 표기 UI
+### 4.1. 전용 포터블 PostgreSQL 환경 구축
+- [x] `.ai_monitor/bin/pgsql/` 디렉토리 구조 생성.
+- [x] PostgreSQL 18 윈도우 64비트 바이너리 확보.
+- [x] 포터블 DB 초기화 (`initdb`) 및 포트 **5433** 설정 완료.
 
----
+### 4.2. PGVector (AI 장기 기억 장치)
+- [x] `pgvector` v0.8.2-pg18 배치 완료 (lib/vector.dll + share/extension/).
+- [x] `CREATE EXTENSION vector;` 활성화 완료 (v0.8.2).
+- [ ] `shared_memory.db`의 지식 이관 준비.
 
----
+### 4.3. PG Search (지능형 고성능 검색)
+- [x] `pg_trgm` v1.6 및 `fuzzystrmatch` v1.2 익스텐션 활성화 완료.
+- [ ] 에이전트가 모든 소스 코드를 '의미 단위'로 검색할 수 있는 인덱스 설계.
 
-# [신규] CLI 오케스트레이터 자율 에이전트 시스템
+### 4.4. PGMQ (에이전트 간 고속 통신 큐)
+- [x] PGMQ SQL 스크립트 확보 및 DB 적용.
+- [x] 에이전트 간의 메시지(messages.jsonl)를 고속 DB 큐 방식으로 전환 고려.
+- [x] **[완료]** `pgmq.sql` (SQL-only) 수동 배치 및 `pgmq` 스키마 초기화.
 
-**작성일:** 2026-03-04
-**작성자:** Claude (vibe-write-plan)
-**목표:** 대시보드에서 지시 입력 → Claude Code CLI / Gemini CLI 자동 제어 → 자율 실행 (OpenHands 스타일, 도커 없이)
+### 4.5. PG Search 고도화 (Elasticsearch급 검색)
+- [x] `pg_trgm` 기반 GIN 인덱스 고도화 및 BM25 유사 검색 쿼리 튜닝.
+- [x] 하이브 지식 베이스(shared_memory)를 위한 전문 검색 뷰(Materialized View) 구축.
 
----
-
-## 설계 요약
-
-```
-[사용자] 대시보드 AgentPanel에 지시 입력
-    ↓
-[라우터] 키워드 분석 → Claude Code CLI / Gemini CLI / 체인 결정
-    ↓
-[엔진] scripts/cli_agent.py → subprocess로 CLI 비대화형 실행
-    - Claude Code: claude -p "지시내용"
-    - Gemini CLI: echo "지시내용" | gemini
-    ↓
-[스트림] 실시간 출력 → SSE /api/events/agent → 대시보드 실시간 표시
-    ↓
-[완료] 프로세스 종료 감지 → agent_runs.jsonl 저장 → 다음 태스크 체인 가능
-```
-
-## 새 파일 구조
-
-```
-scripts/
-└── cli_agent.py                    ← NEW: CLI 오케스트레이터 핵심 엔진
-
-.ai_monitor/
-├── api/
-│   └── agent_api.py                ← NEW: 에이전트 REST API
-├── server.py                       ← MODIFY: agent_api 임포트 + SSE 추가
-├── data/
-│   └── agent_runs.jsonl            ← 자동 생성: 실행 히스토리
-└── vibe-view/src/
-    ├── App.tsx                     ← MODIFY: AgentPanel 탭 추가
-    └── components/panels/
-        └── AgentPanel.tsx          ← NEW: 자율 에이전트 UI 패널
-```
+### 4.6. 통합 DB 매니저 및 자동화
+- [x] `pg_manager.py`: 시작/중지/상태/setup 커맨드 구현 완료 (UnicodeEncodeError 수정).
+- [x] **[완료]** `pg_manager.py`에 PGMQ 초기화 SQL 구문 추가 및 자동 실행 연동.
 
 ---
 
-## 태스크 목록
-
-### [x] Task 5: scripts/cli_agent.py — CLI 오케스트레이터 핵심 엔진
-
-**파일:** `scripts/cli_agent.py` (신규 생성)
-
-**방법:**
-1. `CLIAgent` 클래스 구현
-   - `route_task(task: str) -> str`: 키워드 기반 CLI 선택 로직
-     - 코드/구현/수정/버그/파일 → `claude`
-     - 설계/분석/검토/브레인스토밍 → `gemini`
-     - 기본값 → `claude`
-   - `run(task: str, cli: str, output_queue: Queue) -> dict`: 비대화형 실행
-     - Claude Code: `subprocess.Popen(['claude', '-p', task], stdout=PIPE, stderr=STDOUT)`
-     - Gemini CLI: `subprocess.Popen(['gemini'], stdin=PIPE, stdout=PIPE, stderr=STDOUT)` + `communicate(input=task)`
-     - 출력을 줄 단위로 읽어 `output_queue`에 실시간 Push
-   - `stop()`: 실행 중 프로세스 강제 종료 (`process.terminate()`)
-   - `save_run(task, cli, output, status)`: `agent_runs.jsonl`에 결과 저장
-
-2. 전역 상태 (모듈 레벨)
-   - `_current_process`: 현재 실행 중인 subprocess
-   - `_output_queue`: SSE 스트리밍용 Queue
-   - `_run_status`: 'idle' | 'running' | 'done' | 'error'
-
-3. 라우팅 키워드 테이블 (한글 + 영문 지원)
-   ```python
-   CLAUDE_KEYWORDS = ['코드', '구현', '수정', '버그', '파일', 'code', 'fix', 'implement', 'write']
-   GEMINI_KEYWORDS = ['설계', '분석', '검토', '브레인', 'design', 'analyze', 'review', 'plan']
-   ```
-
-**검증:** `python scripts/cli_agent.py "간단한 hello.py 만들어줘"` 실행 → 터미널에 출력 확인
+## 🕒 진행 상태 및 이슈 리포트
+- **[2026-03-06]**: EDB PostgreSQL 바이너리 설치 성공.
+- **[2026-03-06]**: `pgvector` 다운로드 링크 404 이슈 발생 -> 수동 확보 및 로컬 배치 전략으로 선회.
 
 ---
 
-### [x] Task 6: .ai_monitor/api/agent_api.py — 에이전트 REST API
-**의존성:** Task 5 완료 후
-
-**파일:** `.ai_monitor/api/agent_api.py` (신규 생성)
-
-**방법:**
-엔드포인트 4개 구현:
-
-1. **POST `/api/agent/run`**
-   ```json
-   요청: { "task": "지시내용", "cli": "auto" }
-   응답: { "status": "started", "cli": "claude", "run_id": "uuid" }
-   ```
-   - `cli_agent.route_task()` 호출 → CLI 결정
-   - 백그라운드 스레드에서 `cli_agent.run()` 실행
-   - 이미 실행 중이면 `{ "error": "already_running" }` 반환
-
-2. **POST `/api/agent/stop`**
-   ```json
-   응답: { "status": "stopped" }
-   ```
-   - `cli_agent.stop()` 호출
-
-3. **GET `/api/agent/status`**
-   ```json
-   응답: { "status": "idle|running|done|error", "cli": "claude", "task": "..." }
-   ```
-
-4. **GET `/api/agent/runs`**
-   ```json
-   응답: [{ "id": "...", "task": "...", "cli": "claude", "status": "done", "ts": "..." }]
-   ```
-   - `agent_runs.jsonl` 최근 20개 읽어서 반환
-
-**검증:** 서버 실행 후 `curl -X POST http://localhost:8005/api/agent/run -d '{"task":"테스트"}'` 성공
-
----
-
-### [x] Task 7: .ai_monitor/server.py — agent_api 임포트 + SSE 엔드포인트 추가
-**의존성:** Task 6 완료 후
-
-**파일:** `.ai_monitor/server.py` (수정)
-
-**방법:**
-
-1. **임포트 추가** (파일 상단 api 임포트 섹션, 약 51-53번째 줄 근처)
-   ```python
-   import api.agent_api as agent_api
-   ```
-
-2. **SSE 엔드포인트 추가** — `/api/events/agent`
-   - 기존 `/api/events/thoughts` SSE 패턴과 동일하게 구현
-   - `cli_agent._output_queue`에서 줄 단위로 읽어 SSE 포맷으로 전송
-   - 클라이언트 연결 종료 시 자동 정리
-
-3. **라우팅 추가** — `do_POST`, `do_GET` 핸들러에
-   ```python
-   elif path == '/api/agent/run':    return agent_api.handle_run(self)
-   elif path == '/api/agent/stop':   return agent_api.handle_stop(self)
-   elif path == '/api/agent/status': return agent_api.handle_status(self)
-   elif path == '/api/agent/runs':   return agent_api.handle_runs(self)
-   ```
-
-**검증:** 서버 재시작 후 `/api/agent/status` GET 요청 → `{"status": "idle"}` 응답 확인
-
----
-
-### [x] Task 8: .ai_monitor/vibe-view/src/components/panels/AgentPanel.tsx — 자율 에이전트 UI
-**의존성:** Task 7 완료 후
-
-**파일:** `.ai_monitor/vibe-view/src/components/panels/AgentPanel.tsx` (신규 생성)
-
-**방법:**
-```
-레이아웃:
-┌─────────────────────────────┐
-│ 🤖 Autonomous Agent         │
-│ ┌──────────────────────┐    │
-│ │ 지시 입력 textarea   │    │
-│ └──────────────────────┘    │
-│ [CLI: Auto▼]  [▶ 실행] [■ 중단] │
-│─────────────────────────────│
-│ 상태: 🟢 Running (claude)   │
-│─────────────────────────────│
-│ ▼ 실시간 출력               │
-│  > 파일 분석 중...          │
-│  > App.tsx 수정 완료        │
-│─────────────────────────────│
-│ ▼ 실행 히스토리 (최근 5개)  │
-└─────────────────────────────┘
-```
-
-구현 세부:
-1. **상태 관리**
-   - `status`: 'idle' | 'running' | 'done' | 'error'
-   - `outputLines`: string[] (실시간 출력)
-   - `selectedCli`: 'auto' | 'claude' | 'gemini'
-   - `taskInput`: string
-   - `history`: 실행 히스토리 배열
-
-2. **SSE 연결** (`useEffect`)
-   - `/api/events/agent` SSE 구독
-   - 수신 데이터 → `outputLines` 추가
-   - `status` 업데이트 (started/done/error 이벤트)
-
-3. **API 호출**
-   - `handleRun()`: POST `/api/agent/run` → SSE 자동 시작
-   - `handleStop()`: POST `/api/agent/stop`
-   - `loadHistory()`: GET `/api/agent/runs`
-
-4. **스타일**: 기존 패널과 동일한 다크테마 (`bg-black/20`, `text-white/80`)
-   - 출력창: 터미널 스타일 (`font-mono`, `text-green-400`)
-   - 실행 중 애니메이션 스피너
-
-**검증:** `npx tsc --noEmit` 오류 없음 + 브라우저에서 패널 렌더링 확인
-
----
-
-### [x] Task 9: .ai_monitor/vibe-view/src/App.tsx — AgentPanel 탭 추가
-**의존성:** Task 8 완료 후
-
-**파일:** `.ai_monitor/vibe-view/src/App.tsx` (수정)
-
-**방법:**
-
-1. **임포트 추가**
-   ```typescript
-   import AgentPanel from './components/panels/AgentPanel';
-   ```
-
-2. **ActivityBar 탭 추가** — 기존 탭 배열에 삽입
-   ```typescript
-   { id: 'agent', icon: <Bot />, label: 'Agent', title: 'Autonomous Agent' }
-   ```
-   - `lucide-react`의 `Bot` 아이콘 사용 (이미 설치됨)
-
-3. **패널 렌더링 추가** — 탭 패널 스위치에
-   ```typescript
-   {activeTab === 'agent' && <AgentPanel />}
-   ```
-
-4. **배지** — 실행 중일 때 주황색 점 표시 (AgentPanel 콜백으로 수신)
-
-**검증:** `npm run build` 성공 + 브라우저에서 Agent 탭 클릭 → AgentPanel 표시 확인
-
----
-
-## 실행 순서
-
-```
-Task 5 (cli_agent.py)        ← 핵심 엔진, 독립 구현
-    ↓
-Task 6 (agent_api.py)        ← Task 5 의존
-    ↓
-Task 7 (server.py 수정)      ← Task 6 의존
-    ↓
-Task 8 (AgentPanel.tsx)      ← Task 7 의존 (API 완성 후 UI)
-    ↓
-Task 9 (App.tsx 탭 추가)     ← Task 8 의존
-```
-
-## 비고
-
-- **도커 없음**: subprocess + 가상환경으로 격리 대체
-- **API 키 없음**: Claude Code CLI / Gemini CLI가 각자 인증 처리
-- **비대화형 모드 우선**: `claude -p` 플래그 사용 (안정성 우선, 대화형은 v2)
-- **체인 실행**: Task 5 완성 후 `run_chain(tasks: list)` 함수로 확장 가능
-- **기존 PTY 터미널 영향 없음**: 독립 subprocess 사용, WebSocket PTY와 충돌 없음
+## 📢 검증 전략
+1. `psql`로 접속하여 `vector`, `pgmq` 익스텐션이 정상 로드되는지 확인.
+2. 5433 포트가 윈도우 부팅이나 다른 DB 설치와 무관하게 독립적으로 작동하는지 확인.
+3. 데이터 폴더가 프로젝트 루트(`.ai_monitor/data/pgsql_data/`) 내에 안전하게 보관되는지 확인.

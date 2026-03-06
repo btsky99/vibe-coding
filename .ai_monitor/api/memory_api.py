@@ -1,12 +1,13 @@
 """
 FILE: api/memory_api.py
 DESCRIPTION: /api/memory, /api/memory/set, /api/memory/delete,
-             /api/project-info 엔드포인트 핸들러 모듈.
+             /api/memory/sync, /api/project-info 엔드포인트 핸들러 모듈.
              SQLite 기반의 공유 메모리(shared_memory.db) CRUD 와
              벡터 임베딩 의미 검색 로직을 담당합니다.
              server.py에서 메모리 관련 API를 분리하여 응집도를 높입니다.
 
 REVISION HISTORY:
+- 2026-03-05 Claude: /api/memory/sync 추가 — server.py 비활성 핸들러를 모듈로 이전
 - 2026-03-01 Claude: server.py에서 분리 — memory/project-info API 핸들러 담당
 """
 
@@ -130,7 +131,7 @@ def handle_get(handler, path: str, params: dict,
 def handle_post(handler, path: str, data: dict,
                 DATA_DIR: Path, PROJECT_ID: str,
                 _memory_conn, _embed) -> bool:
-    """POST 요청 처리 — /api/memory/set, /api/memory/delete 담당.
+    """POST 요청 처리 — /api/memory/set, /api/memory/delete, /api/memory/sync 담당.
 
     반환값: 처리됐으면 True, 해당 없으면 False.
     """
@@ -205,6 +206,76 @@ def handle_post(handler, path: str, data: dict,
             handler.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
+
+    # ── /api/memory/sync ──────────────────────────────────────────────────
+    # APPDATA DB → 현재 프로젝트 로컬 DB 동기화.
+    # 배포 버전에서 APPDATA DB에 저장된 항목을 로컬 DB로 가져옴 (updated_at 최신 우선).
+    elif path == '/api/memory/sync':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        try:
+            import sqlite3 as _sqlite3
+            # DATA_DIR에서 두 DB 경로 결정 — MEMORY_DB와 CONFIG_FILE은 모두 DATA_DIR 하위
+            memory_db  = DATA_DIR / 'shared_memory.db'
+            config_file = DATA_DIR / 'config.json'
+            src_db_path = str(memory_db)
+            tgt_db_path = src_db_path
+            # config.json의 last_path가 가리키는 로컬 프로젝트 DB를 타겟으로 사용
+            if config_file.exists():
+                cfg_data = json.loads(config_file.read_text(encoding='utf-8'))
+                last_path = cfg_data.get('last_path', '')
+                if last_path:
+                    local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
+                    if local_db.exists():
+                        tgt_db_path = str(local_db)
+            merged = 0
+            skipped = 0
+            if src_db_path != tgt_db_path:
+                # 두 DB가 다를 때만 동기화 의미 있음
+                src_conn = _sqlite3.connect(src_db_path, timeout=5)
+                src_conn.row_factory = _sqlite3.Row
+                tgt_conn = _sqlite3.connect(tgt_db_path, timeout=5)
+                tgt_conn.row_factory = _sqlite3.Row
+                try:
+                    src_rows = src_conn.execute('SELECT * FROM memory').fetchall()
+                    for row in src_rows:
+                        key = row['key']
+                        src_updated = row['updated_at'] or ''
+                        existing = tgt_conn.execute(
+                            'SELECT updated_at FROM memory WHERE key=?', (key,)
+                        ).fetchone()
+                        if existing is None or (existing['updated_at'] or '') < src_updated:
+                            tgt_conn.execute('''
+                                INSERT OR REPLACE INTO memory
+                                (key, id, title, content, tags, author, project, embedding, created_at, updated_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?)
+                            ''', (
+                                row['key'], row['id'], row['title'], row['content'],
+                                row['tags'], row['author'], row['project'],
+                                row['embedding'] if 'embedding' in row.keys() else None,
+                                row['created_at'], row['updated_at'],
+                            ))
+                            merged += 1
+                        else:
+                            skipped += 1
+                    tgt_conn.commit()
+                finally:
+                    src_conn.close()
+                    tgt_conn.close()
+                msg = f'동기화 완료: {merged}개 병합, {skipped}개 최신 유지'
+            else:
+                msg = '로컬 DB와 APPDATA DB가 동일하여 동기화 불필요'
+            handler.wfile.write(json.dumps(
+                {'status': 'ok', 'message': msg, 'merged': merged, 'skipped': skipped},
+                ensure_ascii=False
+            ).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps(
+                {'status': 'error', 'message': str(e)}
+            ).encode('utf-8'))
         return True
 
     return False

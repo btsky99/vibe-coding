@@ -91,11 +91,21 @@ def cmd_list(args):
     entries = []
     
     if is_pg_available():
-        # PostgreSQL 검색 (Trgm 활용)
-        sql = "SELECT key, title, author, updated_at, content FROM hive_memory"
+        # [PG Search 고도화] pg_trgm 유사도 검색 + tsvector 전문 검색 하이브리드
         if q:
-            sql += f" WHERE content ILIKE '%{q.replace("'", "''")}%' OR title ILIKE '%{q.replace("'", "''")}%'"
-        sql += " ORDER BY updated_at DESC LIMIT 20"
+            # 1. pg_trgm 유사도 검색 (% 연산자) + tsvector 텍스트 검색 (@@ 연산자)
+            # 2. ts_rank를 이용한 결과 랭킹 (Elasticsearch 수준)
+            sql = f"""
+            SELECT key, title, author, updated_at, content,
+                   ts_rank_cd(to_tsvector('simple', content || ' ' || title), plainto_tsquery('simple', '{q}')) AS rank
+            FROM hive_memory
+            WHERE (to_tsvector('simple', content || ' ' || title) @@ plainto_tsquery('simple', '{q}'))
+               OR (content % '{q}' OR title % '{q}')
+            ORDER BY rank DESC, updated_at DESC
+            LIMIT 20;
+            """
+        else:
+            sql = "SELECT key, title, author, updated_at, content, 0 as rank FROM hive_memory ORDER BY updated_at DESC LIMIT 20"
         
         res = run_pg_query(sql)
         if res:
@@ -107,7 +117,7 @@ def cmd_list(args):
                         "updated_at": parts[3], "content": parts[4]
                     })
     else:
-        # SQLite 검색
+        # SQLite 검색 (기본)
         with sqlite3.connect(str(SQLITE_DB)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT * FROM memory ORDER BY updated_at DESC LIMIT 20").fetchall()
@@ -118,45 +128,44 @@ def cmd_list(args):
         print("📭 저장된 기억이 없습니다.")
         return
 
-    print(f"\n--- [하이브 지능 센터: 기억 목록 ({'PostgreSQL' if is_pg_available() else 'SQLite'})] ---")
+    print(f"\n--- [하이브 지능 센터: 고도화 검색 결과 ({'PostgreSQL' if is_pg_available() else 'SQLite'})] ---")
     for e in entries:
         print(f"🧠 [{e['key']}]  by {e.get('author', 'unknown')} | {e.get('updated_at', '')[:19]}")
         print(f"   내용: {e['content'][:100].replace('\n', ' ')}...")
     print("--------------------------------------------------\n")
 
-def cmd_sync(args):
-    """PostgreSQL 18과 SQLite 간의 데이터 동기화 확인 및 연결 체크"""
-    print("🔄 [하이브 지능 센터] 메모리 동기화 체크 중...")
+# ── PGMQ (메시지 큐) 지원 ───────────────────────────────────────────────
+
+def cmd_q(args):
+    """PGMQ를 활용한 에이전트 간 메시징"""
+    if not is_pg_available():
+        print("⚠️ PGMQ는 PostgreSQL 전용 기능입니다.")
+        return
+
+    subcmd = args.q_cmd
+    q_name = args.q_name
+
+    if subcmd == "create":
+        sql = f"SELECT pgmq.create('{q_name}');"
+        run_pg_query(sql)
+        print(f"📥 [PGMQ] 큐 생성 완료: {q_name}")
     
-    pg_ok = is_pg_available()
-    if pg_ok:
-        # PostgreSQL 연결 확인 및 테이블 존재 체크
-        sql = "SELECT count(*) FROM hive_memory"
+    elif subcmd == "send":
+        msg = args.content
+        sql = f"SELECT * FROM pgmq.send('{q_name}', '{json.dumps({'msg': msg})}');"
         res = run_pg_query(sql)
-        if res is not None:
-            print(f"✅ PostgreSQL 18 (Port 5433) 연결 정상: {res}개 항목 확인")
+        print(f"✉️ [PGMQ] 메시지 전송: {res}")
+    
+    elif subcmd == "read":
+        sql = f"SELECT * FROM pgmq.read('{q_name}', 30, 1);"
+        res = run_pg_query(sql)
+        if res:
+            print(f"📖 [PGMQ] 수신: {res}")
         else:
-            print("⚠️ PostgreSQL 연결은 되나 hive_memory 테이블을 찾을 수 없습니다. 스키마 확인 필요.")
-    else:
-        print("⚠️ PostgreSQL 18 (Port 5433) 서버가 응답하지 않습니다. SQLite 폴백 상태입니다.")
-
-    if SQLITE_DB.exists():
-        try:
-            with sqlite3.connect(str(SQLITE_DB)) as conn:
-                count = conn.execute("SELECT count(*) FROM memory").fetchone()[0]
-                print(f"✅ SQLite 폴백 DB 정상: {count}개 항목 확인")
-        except Exception as e:
-            print(f"❌ SQLite DB 체크 실패: {e}")
-    else:
-        print(f"⚠️ SQLite DB 파일이 존재하지 않습니다: {SQLITE_DB}")
-
-    if pg_ok:
-        print("✨ 메모리 엔진: PostgreSQL 18 (Primary)")
-    else:
-        print("✨ 메모리 엔진: SQLite (Secondary/Fallback)")
+            print("📭 수신할 메시지가 없습니다.")
 
 def main():
-    parser = argparse.ArgumentParser(description='하이브 통합 메모리 매니저')
+    parser = argparse.ArgumentParser(description='하이브 통합 메모리 매니저 (Super DB Edition)')
     sub = parser.add_subparsers(dest='command')
 
     p_set = sub.add_parser('set')
@@ -172,10 +181,17 @@ def main():
     # [자기치유] hive_watchdog.py에서 호출하는 sync 명령 추가
     p_sync = sub.add_parser('sync')
 
+    # [신규] PGMQ 메시지 큐 명령
+    p_q = sub.add_parser('q')
+    p_q.add_argument('q_cmd', choices=['create', 'send', 'read'])
+    p_q.add_argument('q_name', default='hive_task_queue', nargs='?')
+    p_q.add_argument('content', default='', nargs='?')
+
     args = parser.parse_args()
     if args.command == 'set': cmd_set(args)
     elif args.command == 'list': cmd_list(args)
     elif args.command == 'sync': cmd_sync(args)
+    elif args.command == 'q': cmd_q(args)
     else: parser.print_help()
 
 if __name__ == '__main__':

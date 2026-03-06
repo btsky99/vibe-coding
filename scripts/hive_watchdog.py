@@ -14,7 +14,7 @@ REVISION HISTORY:
   - _restart_fail_count 추적: 3회 연속 실패 시 🚨 경고 로그
   - run_check(): check_server() 실패 시 restart_server() 자동 호출
 - 2026-03-01 Claude: [자기치유 계층 2 완성] skill_analyzer 연동
-  - check_skill_gaps(): skill_analyzer로 패턴 감지 → vibe-master.md 자동 업데이트
+  - check_skill_gaps(): skill_analyzer로 패턴 감지 → vibe-orchestrate.md 자동 업데이트
   - start_loop(): _loop_count 추적, 10루프(10분)마다 check_skill_gaps() 호출
   - status에 skill_heal_count 추가
 - 2026-02-28 Claude: --data-dir 인자 추가 — 설치 버전에서 DATA_DIR 하드코딩 오류 수정.
@@ -210,7 +210,7 @@ class HiveWatchdog:
         [동작 순서]
         1. SkillAnalyzer로 task_logs.jsonl의 사용자 [지시] 로그 분석
         2. 3회 이상 반복 패턴 감지
-        3. apply_knowledge_to_skill()로 vibe-master.md 자동 업데이트
+        3. apply_knowledge_to_skill()로 vibe-orchestrate.md 자동 업데이트
         4. 성공 시 skill_heal_count 증가 + 로그 기록
 
         [호출 시점]

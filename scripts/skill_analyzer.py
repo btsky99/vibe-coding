@@ -7,7 +7,7 @@ DESCRIPTION: 작업 로그를 분석하여 반복되는 패턴을 감지하고,
              [자기치유 동작 원리]
              1. task_logs.jsonl에서 사용자 [지시] 로그만 추출
              2. 한글/영문 키워드 빈도 분석 (불용어 제거)
-             3. 3회 이상 반복 패턴 → vibe-master.md의 "자기치유 섹션"에 자동 기록
+             3. 3회 이상 반복 패턴 → vibe-orchestrate.md의 "자기치유 섹션"에 자동 기록
              4. hive_watchdog.py가 10분마다 이 스크립트를 호출하여 루프 완성
 
              [이전 버전과의 차이]
@@ -17,7 +17,7 @@ DESCRIPTION: 작업 로그를 분석하여 반복되는 패턴을 감지하고,
 REVISION HISTORY:
 - 2026-03-01 Claude: [자기치유 완성] apply_knowledge_to_skill() 추가
   - extract_user_instructions(): 사용자 지시 로그만 필터링
-  - apply_knowledge_to_skill(): 반복 패턴을 vibe-master.md에 자동 반영
+  - apply_knowledge_to_skill(): 반복 패턴을 vibe-orchestrate.md에 자동 반영
   - project_root 파라미터 추가 — 워치독이 경로 주입 가능하도록
 - 2026-02-26 Gemini-1: 초기 생성. 로그 기반 키워드 빈도 분석 및 스킬 초안 제안 로직 구현.
 """
@@ -62,7 +62,9 @@ class SkillAnalyzer:
         self.project_root = project_root or _DEFAULT_ROOT
         self.log_file = self.project_root / ".ai_monitor" / "data" / "task_logs.jsonl"
         self.skills_dir = self.project_root / ".gemini" / "skills"
-        self.claude_skills_dir = self.project_root / "skills" / "claude"
+        # [자기치유 수정 2026-03-05] skills/claude/ 디렉토리 삭제됨 →
+        # 실제 Claude 스킬은 .claude/commands/ 로 이전됨
+        self.claude_skills_dir = self.project_root / ".claude" / "commands"
 
     # ── 로그 읽기 ─────────────────────────────────────────────────────────
 
@@ -159,10 +161,10 @@ class SkillAnalyzer:
     # ── 자기치유 적용 ──────────────────────────────────────────────────────
 
     def apply_knowledge_to_skill(self, proposals: list) -> bool:
-        """감지된 반복 패턴을 vibe-master.md의 자기치유 섹션에 자동 기록.
+        """감지된 반복 패턴을 vibe-orchestrate.md의 자기치유 섹션에 자동 기록.
 
         [동작]
-        - vibe-master.md 하단에 "## 🔄 자기치유 감지 패턴" 섹션을 추가/갱신
+        - vibe-orchestrate.md 하단에 "## 🔄 자기치유 감지 패턴" 섹션을 추가/갱신
         - 기존 섹션이 있으면 최신 내용으로 교체 (누적 아닌 최신 유지)
         - proposals가 비어있으면 아무것도 하지 않음 (과다 기록 방지)
 
@@ -171,7 +173,8 @@ class SkillAnalyzer:
         if not proposals:
             return False
 
-        skill_file = self.claude_skills_dir / "vibe-master.md"
+        # [자기치유 수정 2026-03-05] vibe-master.md 삭제됨 → vibe-orchestrate.md로 이전
+        skill_file = self.claude_skills_dir / "vibe-orchestrate.md"
         if not skill_file.exists():
             return False
 
@@ -225,7 +228,7 @@ if __name__ == "__main__":
     if proposals:
         applied = analyzer.apply_knowledge_to_skill(proposals)
         if applied:
-            print("[OK] 자기치유 완료 — vibe-master.md 업데이트됨")
+            print("[OK] 자기치유 완료 — vibe-orchestrate.md 업데이트됨")
         else:
             print("[WARN] 스킬 파일 업데이트 실패 (파일 없거나 쓰기 오류)")
     else:

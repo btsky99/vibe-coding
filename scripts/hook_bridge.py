@@ -30,7 +30,6 @@ import sys
 import json
 import subprocess
 import os
-import webbrowser
 from pathlib import Path
 from urllib import request as urllib_request
 from urllib.error import URLError
@@ -50,66 +49,6 @@ HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 #   Terminal 2: set TERMINAL_ID=T2 && claude
 # 미지정 시 "T0" 사용
 TERMINAL_ID   = os.environ.get('TERMINAL_ID', 'T0')
-MONITOR_PORT  = 9580  # 상황판 전용 미니 서버 포트
-MONITOR_URL   = f'http://localhost:{MONITOR_PORT}'
-MONITOR_SRV   = SCRIPT_DIR / 'monitor_server.py'
-# 창 열림 여부를 프로세스 간 공유하는 플래그 파일 (중복 창 방지)
-_WINDOW_FLAG  = SCRIPT_DIR.parent / '.ai_monitor' / 'data' / '.monitor_opened'
-# Chrome 실행 파일 경로 (우선순위 순)
-_CHROME_PATHS = [
-    r'C:\Program Files\Google\Chrome\Application\chrome.exe',
-    r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-    r'C:\Users\com\AppData\Local\Google\Chrome\Application\chrome.exe',
-]
-
-def _ensure_monitor_server() -> bool:
-    """상황판 미니 서버(9572)가 실행 중인지 확인, 없으면 시작합니다."""
-    import urllib.request
-    try:
-        urllib.request.urlopen(MONITOR_URL, timeout=1)
-        return True  # 이미 실행 중
-    except Exception:
-        pass
-    # 서버 시작
-    try:
-        subprocess.Popen(
-            [sys.executable, str(MONITOR_SRV)],
-            cwd=str(CWD),
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS if os.name == 'nt' else 0,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        import time; time.sleep(1)
-        return True
-    except Exception:
-        return False
-
-def _open_monitor_window() -> None:
-    """에이전트 상황판을 별도 Chrome 창으로 엽니다 (포트 9580 전용 서버).
-    플래그 파일로 프로세스 간 중복 창 방지: 이미 열린 경우 재오픈하지 않음.
-    """
-    # 플래그 파일 존재 시 이미 창이 열린 것으로 간주 → 즉시 스킵
-    if _WINDOW_FLAG.exists():
-        return
-    # 플래그 파일 생성 (다른 프로세스/터미널이 동시에 열지 못하도록)
-    try:
-        _WINDOW_FLAG.parent.mkdir(parents=True, exist_ok=True)
-        _WINDOW_FLAG.touch()
-    except Exception:
-        pass
-    # 서버 시작 + 창 오픈
-    _ensure_monitor_server()
-    for chrome in _CHROME_PATHS:
-        if Path(chrome).exists():
-            try:
-                subprocess.Popen([chrome, '--new-window', MONITOR_URL])
-                return
-            except Exception:
-                continue
-    try:
-        webbrowser.open_new(MONITOR_URL)
-    except Exception:
-        pass
 
 # --- 무시할 접두사 (무한루프 방지) ---
 SKIP_PREFIXES = ['[지시]', '[오류]', '[완료]', '[INFO]', '[OK]', '[🤖', 'python ', 'git ']
@@ -280,8 +219,6 @@ def main():
         else:
             chosen_cli = result.get('cli', 'auto')
             _notify(f'[🤖 {TERMINAL_ID}→{chosen_cli.upper()}] 자율 에이전트 시작됨: "{short_prompt}"')
-            # 에이전트 시작 시 상황판을 별도 Chrome 창으로 오픈
-            _open_monitor_window()
     else:
         # ── 서버 미실행 → 자동 시작 시도 후 재연결, 실패 시 동기 fallback
         _notify(f'[🤖 {TERMINAL_ID}] 백엔드 오프라인 — 자동 시작 중...')

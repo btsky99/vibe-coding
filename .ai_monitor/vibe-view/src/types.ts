@@ -77,6 +77,14 @@ export interface Task {
     assigned_to: string;               // 담당 에이전트 (claude / gemini / all)
     priority: 'high' | 'medium' | 'low';
     created_by: string;                // 생성 주체
+    // ── 칸반 보드 확장 필드 (TaskForce.AI 스타일) ──
+    kanban_status?: 'todo' | 'claimed' | 'in_progress' | 'review' | 'done';
+    // 역할 태그 — 어떤 종류의 에이전트가 처리할지 분류
+    role?: 'backend' | 'frontend' | 'test' | 'devops' | '';
+    // 이 태스크를 Claim한 터미널 ID (예: "T1", "T2", "claude-1", "gemini-2")
+    claimed_by?: string;
+    // 상태 태그 목록 — 'Blocked', 'Critical', 'Feedback', 'PR', 'Review' 등
+    tags?: string[];
 }
 
 // MCP 카탈로그 항목 — 설치 가능한 MCP 서버 정보
@@ -126,7 +134,6 @@ export interface HiveHealth {
     project_map: boolean;
   };
   skills?: {
-    master: boolean;
     brainstorm: boolean;
     memory_script: boolean;
   };

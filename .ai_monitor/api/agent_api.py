@@ -25,6 +25,11 @@
 # [2026-03-04] Claude: 레이스 컨디션 수정
 #   - _run_gate Lock 추가: 상태 체크 → 스레드 시작 구간을 원자적으로 보호
 #   - 동시 요청 시 중복 실행 방지 (동일 태스크 여러 번 실행 버그 수정)
+# [2026-03-05] Claude: 대화형 세션 파이프라인 실시간 추적 추가
+#   - _interactive_stages: hive_hook.py가 업데이트하는 인메모리 stage dict
+#   - handle_stage_update: POST /api/agent/stage — hook이 stage를 직접 업데이트
+#   - handle_terminals에서 interactive stage를 cli_agent 상태보다 우선 적용
+#   - 사용자가 이 대화에서 지시 → 모니터링에 분석/수정/완료 단계 실시간 표시
 # ------------------------------------------------------------------------
 """
 
@@ -50,6 +55,13 @@ try:
 except ImportError as e:
     _CLI_AGENT_AVAILABLE = False
     _CLI_AGENT_ERROR = str(e)
+
+
+# ── 대화형 세션 파이프라인 단계 인메모리 저장소 ─────────────────────────────────
+# hive_hook.py가 UserPromptSubmit/PreToolUse/Stop 훅에서 POST /api/agent/stage로 업데이트.
+# 구조: {terminal_id: {stage, task, ts}}
+# handle_terminals()에서 cli_agent 상태를 이 값으로 오버라이드하여 대화형 세션을 실시간 표시.
+_interactive_stages: dict = {}
 
 
 def _json_response(handler, data: dict | list, status: int = 200) -> None:
@@ -394,7 +406,182 @@ def handle_terminals(handler) -> None:
                 'external': True,  # 외부 감지 플래그 (UI 구분용)
             })
 
+    # ── 대화형 세션 파이프라인 오버라이드 ──────────────────────────────────────────
+    # hive_hook.py가 업데이트한 interactive stage가 있으면 cli_agent 상태보다 우선 적용.
+    # CLI 에이전트가 없는 대화형 세션(Claude Code)도 표시하기 위해
+    # terminals에 없는 tid도 신규 항목으로 추가함.
+    # 10분 이내의 stage만 유효 (오래된 데이터는 자동 만료).
+    now_ts = time.time()
+    for tid, info in _interactive_stages.items():
+        if now_ts - info.get('ts', 0) > 600:
+            continue  # 10분 이상 지난 stage는 만료
+
+        stage = info['pipeline_stage']
+        task = info.get('task', '')
+
+        # terminals에 없으면 대화형 세션 항목으로 신규 추가
+        if tid not in terminals:
+            terminals[tid] = {
+                'id': tid,
+                'status': 'idle',
+                'agent': 'claude',
+                'task': '',
+                'pipeline_stage': 'idle',
+                'interactive': True,  # 대화형 Claude Code 세션 구분 플래그
+            }
+
+        # analyzing/modifying/verifying 단계: status를 running으로 변경 + stage 업데이트
+        if stage in ('analyzing', 'modifying', 'verifying'):
+            terminals[tid]['pipeline_stage'] = stage
+            terminals[tid]['status'] = 'running'
+            if task:
+                terminals[tid]['task'] = task
+        # done 단계: stage만 업데이트 (status는 기존 유지)
+        elif stage == 'done':
+            terminals[tid]['pipeline_stage'] = 'done'
+            terminals[tid]['status'] = 'idle'
+            if task:
+                terminals[tid]['task'] = task
+
     _json_response(handler, terminals)
+
+
+def handle_stage_update(handler) -> None:
+    """POST /api/agent/stage — 대화형 Claude 세션의 파이프라인 단계 실시간 업데이트.
+
+    hive_hook.py의 훅 이벤트마다 호출되어 모니터링 패널에 현재 작업 단계를 표시합니다.
+    - UserPromptSubmit → stage: "analyzing"
+    - PreToolUse (Edit/Write) → stage: "modifying"
+    - PostToolUse → stage: "verifying"
+    - Stop → stage: "done"
+
+    요청 본문:
+        {"terminal_id": "T2", "stage": "analyzing", "task": "사용자 메시지"}
+
+    응답:
+        {"ok": true}
+    """
+    data = _read_body(handler)
+    tid = data.get('terminal_id', 'T0')
+    stage = data.get('stage', 'idle')
+    task = data.get('task', '')
+
+    # 터미널 ID 정규화 (숫자 "2" → "T2")
+    if tid and tid.isdigit():
+        tid = f'T{tid}'
+
+    _interactive_stages[tid] = {
+        'pipeline_stage': stage,
+        'task': task,
+        'ts': time.time(),  # epoch 초 — 10분 이내만 유효
+    }
+    _json_response(handler, {'ok': True})
+
+
+def handle_live_runs(handler) -> None:
+    """GET /api/agent/live-runs — agent_live.jsonl에서 터미널별 실행 히스토리 반환.
+
+    각 터미널의 최근 실행 기록을 최대 20개씩 반환합니다.
+    반환 구조: { "T1": [...runs], "T2": [...runs], ... }
+    각 run: { run_id, task, cli, status, ts, output_preview }
+    """
+    live_file = _api_dir.parent / 'data' / 'agent_live.jsonl'
+    result: dict[str, list[dict]] = {}
+
+    if not live_file.exists():
+        _json_response(handler, result)
+        return
+
+    try:
+        # ── agent_live.jsonl 파싱 — run_id 단위로 묶음 ────────────────────────
+        # started 이벤트로 run을 열고, done/error 이벤트로 닫습니다.
+        # output 이벤트는 미리보기 3줄만 캡처합니다.
+        runs_by_id: dict[str, dict] = {}
+        order: list[str] = []  # 삽입 순서 유지
+
+        with open(live_file, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+
+                rid = ev.get('run_id')
+                if not rid:
+                    continue
+                etype = ev.get('type', '')
+
+                if etype == 'started':
+                    # 이스케이프 시퀀스가 섞인 task 문자열 정리
+                    raw_task = ev.get('task', '')
+                    # ANSI/VT 이스케이프 + OSC 시퀀스 제거 후 의미 있는 텍스트만 추출
+                    import re as _re
+                    # 1단계: ESC CSI 시퀀스 제거 (\x1b[31m 등)
+                    _s = _re.sub(r'\x1b\[[^a-zA-Z]*[a-zA-Z]', '', raw_task)
+                    # 2단계: OSC 시퀀스 제거 (]11;rgb:1e1e/...\) — 다음 OSC/CSI 시작까지 매칭
+                    _s = _re.sub(r']\d+;[^"\n]*?(?=]|\[|\Z)', '', _s)
+                    # 3단계: 이스케이프 없는 CSI 제거 ([?1;2c, [O, [I 등)
+                    _s = _re.sub(r'\[[\?]?[0-9;]*[a-zA-Z]', '', _s)
+                    # 4단계: 나머지 제어문자 + 백슬래시(\x5c) 제거
+                    _s = _re.sub(r'[\x00-\x1f\x7f\x5c]', '', _s)
+                    clean_task = _s.strip(" '\"")
+                    # 5단계: 의미 있는 텍스트 판별 (한글 or 5자 이상 영문 단어)
+                    # → 3자 이하 영문은 'rgb', 'I', 'O' 같은 노이즈도 포함되므로 5자로 제한
+                    has_korean = bool(_re.search(r'[가-힣ㄱ-ㅎㅏ-ㅣ]', clean_task))
+                    has_words  = bool(_re.search(r'[a-zA-Z]{5,}', clean_task))
+                    if not has_korean and not has_words:
+                        continue
+                    runs_by_id[rid] = {
+                        'run_id': rid,
+                        'task': clean_task,
+                        'cli': ev.get('cli', ''),
+                        'terminal_id': ev.get('terminal_id', ''),
+                        'status': 'running',
+                        'ts': ev.get('ts', ''),
+                        'output': [],
+                    }
+                    if rid not in order:
+                        order.append(rid)
+
+                elif etype in ('done', 'error'):
+                    if rid in runs_by_id:
+                        runs_by_id[rid]['status'] = ev.get('status', etype)
+                        if ev.get('terminal_id'):
+                            runs_by_id[rid]['terminal_id'] = ev['terminal_id']
+
+                elif etype == 'output':
+                    if rid in runs_by_id and len(runs_by_id[rid]['output']) < 3:
+                        text = ev.get('line', '').strip()
+                        if text:
+                            runs_by_id[rid]['output'].append(text)
+
+        # ── 터미널별로 그룹화 (최근 20개, 역순) ─────────────────────────────
+        for rid in reversed(order):
+            run = runs_by_id[rid]
+            tid = run.get('terminal_id') or 'unknown'
+            if not tid or not run.get('task'):
+                continue  # task 없는 노이즈 제외
+
+            if tid not in result:
+                result[tid] = []
+            if len(result[tid]) < 20:
+                result[tid].append({
+                    'run_id': run['run_id'],
+                    'task': run['task'],
+                    'cli': run['cli'],
+                    'status': run['status'],
+                    'ts': run['ts'],
+                    'output_preview': run['output'],
+                })
+
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+
+    _json_response(handler, result)
 
 
 def handle_get(handler, path: str) -> bool:
@@ -411,6 +598,9 @@ def handle_get(handler, path: str) -> bool:
     if path == '/api/agent/terminals':
         handle_terminals(handler)
         return True
+    if path == '/api/agent/live-runs':
+        handle_live_runs(handler)
+        return True
     return False
 
 
@@ -424,5 +614,8 @@ def handle_post(handler, path: str) -> bool:
         return True
     if path == '/api/agent/stop':
         handle_stop(handler)
+        return True
+    if path == '/api/agent/stage':
+        handle_stage_update(handler)
         return True
     return False

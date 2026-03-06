@@ -161,7 +161,6 @@ export default function HivePanel() {
                 <div className="text-[10px] text-[#666] mb-0.5 font-bold">🧠 핵심 스킬</div>
                 {(
                   [
-                    ['Master',     hiveHealth.skills?.master],
                     ['Brainstorm', hiveHealth.skills?.brainstorm],
                     ['Memory',     hiveHealth.skills?.memory_script],
                   ] as [string, boolean | undefined][]

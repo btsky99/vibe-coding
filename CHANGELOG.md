@@ -1,5 +1,32 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-03-05] - v3.7.7 (메시지 채널 실시간 자동 협업 구현)
+
+### 🤝 에이전트 실시간 협업
+- **[Feature] hive_bridge.py — Phase 1/2 실시간 협업 기능 추가**:
+    - `_post_message()`: messages.jsonl 직접 기록 헬퍼 (서버 미실행 시에도 동작).
+    - `log_task()` 호출 시 heartbeat 메시지를 messages.jsonl에 자동 기록 (Phase 1).
+    - `lock_file(agent, file)`: 파일 수정 시작 시 LOCK 메시지 기록.
+    - `unlock_file(agent, file)`: 파일 수정 완료 시 UNLOCK 메시지 기록.
+    - `check_conflict(file, my_agent)`: 최근 20줄 LOCK 탐지 → 충돌 에이전트명 반환 (Phase 2).
+- **[Feature] skill_orchestrator.py — Phase 3 실시간 리포팅**:
+    - `_broadcast_status()`: messages.jsonl에 스킬 상태 메시지 자동 게시.
+    - `cmd_plan()` 실행 시 체인 계획을 메시지 채널에 브로드캐스트.
+    - `cmd_update()` 실행 시 "XX 에이전트가 현재 [스킬] 작업 중" 자동 게시.
+- **[Update] vibe-orchestrate.md — 충돌 감지 + LOCK/UNLOCK 절차 통합**:
+    - 0단계: `check_conflict()` 호출로 충돌 사전 감지.
+    - 3단계: 파일 수정 전 `lock_file()`, 완료 후 `unlock_file()` 지시 추가.
+
+## [2026-03-05] - v3.7.6 (터미널 파일뷰어 → 에이전트 모니터링 뷰 교체)
+
+### 🎯 자율 에이전트 모니터링 뷰
+- **[Feature] TerminalSlot.tsx — 파일뷰어 완전 제거, 모니터링 뷰 신규 구현**:
+    - `👀 파일 뷰어` 버튼 → `📡 모니터링` 버튼으로 교체 (같은 토글 자리).
+    - 모니터링 뷰 표시 항목: 에이전트 상태(RUNNING/WORKING/IDLE) + 현재 태스크 + 최근 메시지 + 최근 로그 5줄.
+    - 에이전트 상태 자동 계산: 최근 30초 내 로그 → RUNNING, in_progress 태스크 → WORKING, 그 외 → IDLE.
+    - 기존 props(`logs`, `tasks`, `messages`) 100% 재활용 — 추가 API 호출 없음.
+    - 파일 fetch 로직(3초 인터벌), `VibeEditor` import, `getFileIcon` import, `API_BASE` import 전면 삭제.
+
 ## [2026-03-01] - v3.6.7 (업데이터 에셋 탐색 버그 수정 + 포트 충돌 방지)
 
 ### 🐛 버그 수정
