@@ -27,13 +27,7 @@ import '@xterm/xterm/css/xterm.css';
 import { API_BASE, WS_PORT, Shortcut, defaultShortcuts, SLASH_COMMANDS } from '../constants';
 import { LogRecord, AgentMessage, Task } from '../types';
 
-// 파이프라인 실행 단계 정의 — cli_agent.py의 _STAGE_ORDER와 동기화
-const PIPELINE_STAGES = [
-  { id: 'analyzing',  label: '분석' },
-  { id: 'modifying',  label: '수정' },
-  { id: 'verifying',  label: '검증' },
-  { id: 'done',       label: '완료' },
-];
+// 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
 
 interface TerminalSlotProps {
   slotId: number;
@@ -475,37 +469,7 @@ export default function TerminalSlot({
                 </div>
               </div>
 
-              {/* 파이프라인 실행 단계 표시 — 현재 단계가 초록 원형으로 강조 */}
-              <div className="flex items-center justify-center gap-0 px-3 py-2 shrink-0">
-                {PIPELINE_STAGES.map((stage, idx) => {
-                  // IDLE이거나 done인데 실제 작업 중이 아니면 파이프라인 전부 grey (완료 잔류 방지)
-                  const isIdle = agentStatus === 'IDLE';
-                  const stageIdx = isIdle ? -1 : PIPELINE_STAGES.findIndex(s => s.id === pipelineStage);
-                  const isActive = !isIdle && stage.id === pipelineStage;
-                  const isPast   = stageIdx > idx;
-                  return (
-                    <div key={stage.id} className="flex items-center">
-                      {/* 단계 원형 버튼 */}
-                      <div className={`flex flex-col items-center gap-0.5 w-14`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
-                          isActive ? 'border-green-400 bg-green-400/20 shadow-[0_0_8px_2px_rgba(74,222,128,0.4)]' :
-                          isPast   ? 'border-green-600/50 bg-green-900/20' :
-                                     'border-white/10 bg-white/5'
-                        }`}>
-                          <CheckCircle2 className={`w-3.5 h-3.5 ${isActive ? 'text-green-400' : isPast ? 'text-green-600/60' : 'text-white/20'}`} />
-                        </div>
-                        <span className={`text-[9px] font-bold ${isActive ? 'text-green-400' : isPast ? 'text-green-600/60' : 'text-white/25'}`}>
-                          {stage.label}
-                        </span>
-                      </div>
-                      {/* 단계 간 구분선 (마지막 이후 제외) */}
-                      {idx < PIPELINE_STAGES.length - 1 && (
-                        <div className={`w-4 h-px mb-4 ${isPast || isActive ? 'bg-green-600/50' : 'bg-white/10'}`} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              {/* 파이프라인 단계 표시는 이제 ActivityBar(왼쪽 메뉴)로 통합되어 여기서 제거되었습니다. */}
 
               {/* 오케스트레이터 스킬 체인 (있을 때만 표시) */}
               {chainSteps.length > 0 && (
