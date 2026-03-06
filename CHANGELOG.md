@@ -1,5 +1,29 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-03-06] - v3.7.8 (자율 에이전트 고도화 Phase 6)
+
+### 🤖 자율 에이전트 3종 고도화
+
+- **[Feature] Self-Reflect 루프 (hive_hook.py + hive_bridge.py)**:
+    - `PostToolUse`: 수정/생성 파일 경로를 `_SESSION_MODIFIED_FILES`에 자동 누적.
+    - `Stop`: `reflect_to_pg()`로 학습 내용·실패 이유를 pg_thoughts에 자동 기록.
+    - `UserPromptSubmit`: pg_thoughts 유사 과거 반성 2건을 컨텍스트로 자동 주입.
+- **[Feature] Bounded Autonomy (scripts/safety_guard.py + hive_hook.py)**:
+    - `safety_guard.py`: 위험 명령 패턴 14종 탐지 엔진 신규 생성.
+      - 차단: `rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE` 등.
+      - 경고: `git push origin main`, `pip install --upgrade` 등.
+    - `PreToolUse(Bash)`: `safety_guard.check()` 호출 → 위험 시 `exit(2)` 차단.
+- **[Feature] Model Routing (scripts/cli_agent.py + agent_api.py)**:
+    - `route_task_with_reason()`: `(cli, reason)` 튜플 반환으로 선택 근거 추적.
+    - Claude 키워드 20종: 코드/수정/디버그/구현 등. Gemini 키워드 18종: 분석/검색/설명 등.
+    - `agent_api.py`: `routing_reason`을 터미널 상태에 기록하여 UI에 전달.
+- **[Feature] KanbanPanel pg-activity 컬럼 (server.py + KanbanPanel.tsx)**:
+    - `/api/kanban/pg-activity`: pg_logs 터미널별 최근 활동 집계 엔드포인트 추가.
+    - KanbanPanel: 스킬 체인 컬럼 + pg_logs 터미널 활동 컬럼 동시 표시.
+- **[Update] AgentPanel.tsx — routing_reason 뱃지 표시**:
+    - TerminalCard 헤더에 CLI 배지 옆 `routing_reason` 7px 텍스트 표시.
+    - 실행 중(running) 상태에서만 표시하여 노이즈 최소화.
+
 ## [2026-03-05] - v3.7.7 (메시지 채널 실시간 자동 협업 구현)
 
 ### 🤝 에이전트 실시간 협업
