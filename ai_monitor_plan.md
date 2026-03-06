@@ -1,31 +1,65 @@
-# 🤖 AI 모니터링 및 UI 개선 계획 (AI Monitor & UI Improvement Plan)
+# Harness 패턴 이식 — Acceptance Criteria + Plan Validator + 에이전트 자동 중지
 
-## 🎯 목표
-- 터미널 상단의 중복된 3단계(분석/수정/검증) 파이프라인 표시를 왼쪽 메뉴(Activity Bar)로 통합.
-- 새로 추가된 엔진(자가 치유, 하이브 코어)의 상태를 한눈에 볼 수 있는 통합 인디케이터 구현.
-- 터미널 슬롯의 모니터링 뷰를 슬림화하여 작업 공간 극대화.
+## 목표
+Claude Code Harness의 핵심 패턴 3가지를 Vibe Coding에 이식하여 에이전트 신뢰도 향상.
+1. Acceptance Criteria(완료 조건) 강화 — 태스크마다 "Done When" 명시
+2. Plan Validator V1-V5 — 실행 전 계획 품질 자동 검증
+3. 에이전트 자동 중지 — 모든 태스크 완료 시 `{"continue": false}` 신호
 
-## 📅 일정 (2026-03-06)
+## 날짜: 2026-03-07
 
-### 1단계: 데이터 파이프라인 및 상태 통합
-- [ ] `App.tsx`: 모든 터미널의 `agentTerminals` 데이터를 분석하여 글로벌 엔진 상태(최고 우선순위 단계) 계산 로직 추가.
-- [ ] `App.tsx`: `hive_health.json`을 폴링하여 자가 치유 엔진의 활성 상태 확인.
+---
 
-### 2단계: ActivityBar 통합 인디케이터 구현
-- [ ] `ActivityBar.tsx`: 최상단에 `HiveEngineStatus` 영역 추가.
-- [ ] `ActivityBar.tsx`: 3단계 LED 링(Cyan/Yellow/Purple) 및 자가 치유 Live Dot 구현.
-- [ ] `ActivityBar.tsx`: 엔진 아이콘 클릭 시 '중앙 통제실(AgentPanel)'로 즉시 이동하는 기능.
+- [x] Task 1: vibe-write-plan.md에 완료 조건(Done When) 필드 추가
+    파일: .claude/commands/vibe-write-plan.md
+    방법: 태스크 형식 템플릿에 `완료 조건:` 필드를 추가하여 모든 계획에 검증 가능한 완료 기준 명시 강제.
+          "검증"을 "완료 조건(Done When)"으로 강화 — 단순 확인법이 아닌 통과/실패 판별 가능한 조건으로.
+    완료 조건: vibe-write-plan.md에 Done When 필드가 포함된 태스크 템플릿이 있을 것.
 
-### 3단계: TerminalSlot UI 슬림화 리팩토링
-- [ ] `TerminalSlot.tsx`: 상단 `showMonitor` 영역(파이프라인 단계 표시부) 제거 또는 선택적 최소화.
-- [ ] `TerminalSlot.tsx`: 헤더 디자인을 더 얇고 간결하게 수정하여 터미널 가로/세로 공간 확보.
+- [x] Task 2: vibe-execute-plan.md에 plan_validator 실행 단계 추가
+    파일: .claude/commands/vibe-execute-plan.md
+    방법: 실행 전 "0단계: 계획 검증" 추가.
+          `python scripts/plan_validator.py ai_monitor_plan.md` 실행 후 V1-V5 통과 시에만 진행.
+    완료 조건: vibe-execute-plan.md 실행 절차 0번에 plan_validator 호출 단계가 있을 것.
+    의존성: Task 3 완료 후 시작 가능.
 
-### 4단계: 검증 및 기록
-- [ ] 전체 레이아웃에서 상태 동기화 확인 (에이전트 실행 시 ActivityBar LED 반응 테스트).
-- [ ] `PROJECT_MAP.md` 업데이트 및 작업 완료 보고.
+- [x] Task 3: scripts/plan_validator.py 신규 생성 — V1-V5 검증 엔진
+    파일: scripts/plan_validator.py (신규)
+    방법: ai_monitor_plan.md를 파싱하여 5가지 품질 규칙 검사.
+          V1: 파일 경로 명시 여부 (범위 명확성)
+          V2: 방법 필드 존재 여부 (모호성 제거)
+          V3: 같은 파일이 2개 이상 태스크에 중복 등장 여부 (겹침 검사)
+          V4: 의존성 태스크가 실제 존재하는지 (순서 검증)
+          V5: 완료 조건 필드 존재 여부 (Done When 명시)
+          검사 통과 → exit(0), 실패 → 경고 출력 후 exit(1).
+    완료 조건: `python scripts/plan_validator.py ai_monitor_plan.md` 실행 시 V1-V5 결과가 출력될 것.
 
-## 🛠️ 기술 스택
-- React (TypeScript)
-- Tailwind CSS
-- Lucide React (Icons)
-- Framer Motion (Animations)
+- [x] Task 4: hive_hook.py Stop 이벤트에 자동 중지 신호 추가
+    파일: scripts/hive_hook.py
+    방법: Stop 이벤트 처리부에서 ai_monitor_plan.md를 파싱.
+          모든 [ ] 태스크가 [x]로 완료된 경우 stdout에
+          `{"continue": false}` JSON 출력 → Claude Code가 세션 자동 종료.
+          완료되지 않은 태스크가 있으면 출력하지 않음 (정상 계속).
+    완료 조건: 모든 태스크 완료 상태의 plan 파일로 테스트 시 {"continue": false} 출력될 것.
+    의존성: Task 3 완료 후 시작 (plan 파싱 로직 재사용).
+
+- [x] Task 5: plan_validator를 UserPromptSubmit 훅에도 연동
+    파일: scripts/hive_hook.py
+    방법: UserPromptSubmit 이벤트에서 "계획 실행", "execute-plan", "실행해줘" 등의
+          키워드 감지 시 plan_validator.py 자동 실행 후 결과를 컨텍스트로 주입.
+          검증 실패 시 "⚠️ 계획 검증 실패: V3 파일 중복" 경고를 Claude에게 알림.
+    완료 조건: "계획 실행" 입력 시 훅이 validator 결과를 자동으로 주입할 것.
+    의존성: Task 3, Task 4 완료 후 시작.
+
+---
+
+## 검증 시나리오 (전체 완료 후)
+
+1. `python scripts/plan_validator.py ai_monitor_plan.md` → V1-V5 검사 결과 출력
+2. 모든 태스크 [x] 상태 파일로 hive_hook.py Stop 이벤트 테스트 → `{"continue": false}` 확인
+3. vibe-write-plan 스킬 실행 시 새 태스크 형식(Done When 포함) 확인
+
+## 기술 스택
+- Python 3.11+ (plan_validator.py, hive_hook.py)
+- Markdown 파싱 (정규식 기반, 외부 의존성 없음)
+- Claude Code Hooks 시스템 (Stop, UserPromptSubmit)
