@@ -42,6 +42,9 @@ REVISION HISTORY:
   - 지원 의도: 빌드(EXE/프론트엔드), 커밋/푸시, 코드리뷰, 디버그, 테스트
   - stdout 출력 → Claude Code가 Claude에게 시스템 컨텍스트로 전달
   - 사용자가 매번 설명 없이 자연어 지시만으로 자동 워크플로 실행 가능
+- 2026-03-07 Claude: [Phase7] Harness 패턴 이식 — Auto-Stop + UserPromptSubmit 검증 연동
+  - Stop 이벤트: plan_validator.check_all_done() → 모든 [x] 시 {"continue": false} 출력
+  - UserPromptSubmit: "계획 실행" 키워드 감지 시 plan_validator 자동 실행 후 결과 주입
 - 2026-03-01 Claude: 최초 구현 — 자동 하이브 마인드 액션 트레이스 시스템 구축
 - 2026-03-01 Claude: PreToolUse 추가 + PostToolUse에 실제 변경 내용(old→new) 포함
 """
@@ -792,6 +795,41 @@ def main():
             except Exception:
                 pass  # 태스크 보드 기록 실패는 조용히 무시 (훅 자체가 중단되면 안 됨)
 
+            # ── Plan Validator 자동 연동 (Harness 패턴) ──────────────────────
+            # "계획 실행", "execute-plan", "실행해줘" 등 실행 키워드 감지 시
+            # plan_validator.py를 자동 실행하여 V1-V5 결과를 컨텍스트로 주입.
+            # 검증 실패 시 Claude에게 경고 → 불완전한 계획 실행 방지.
+            _EXECUTE_KEYWORDS = [
+                "계획 실행", "execute-plan", "실행해줘", "플랜 실행",
+                "plan 실행", "vibe-execute", "계획대로", "진행해줘", "진행해"
+            ]
+            if any(kw in prompt for kw in _EXECUTE_KEYWORDS):
+                try:
+                    import subprocess as _sp_val
+                    _plan_f = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), '..', 'ai_monitor_plan.md'
+                    )
+                    _val_script = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), 'plan_validator.py'
+                    )
+                    if os.path.exists(_val_script) and os.path.exists(_plan_f):
+                        _no_win = getattr(_sp_val, 'CREATE_NO_WINDOW', 0x08000000)
+                        _val_r = _sp_val.run(
+                            [sys.executable, _val_script, _plan_f],
+                            capture_output=True, text=True,
+                            encoding='utf-8', errors='replace',
+                            creationflags=_no_win
+                        )
+                        # ANSI 코드 제거 후 출력 (Claude가 읽기 쉽게)
+                        import re as _re_ansi
+                        _ansi_re = _re_ansi.compile(r'\x1b\[[0-9;]*m')
+                        _val_out = _ansi_re.sub('', _val_r.stdout).strip()
+                        if _val_out:
+                            _prefix = "⚠️ [계획 검증 경고]" if _val_r.returncode > 0 else "[계획 검증]"
+                            print(f"{_prefix}\n{_val_out}", flush=True)
+                except Exception:
+                    pass  # validator 오류는 조용히 무시
+
             # 의도 감지: 키워드 매칭 → 관련 워크플로 컨텍스트를 stdout으로 출력
             # Claude Code는 이 출력을 Claude에게 시스템 컨텍스트로 주입함
             # 사용자가 자연어로 "빌드해줘", "커밋해줘" 등만 말해도 자동 워크플로 실행 가능
@@ -965,6 +1003,28 @@ def main():
             _update_current_work(_done_items)
         except Exception:
             pass
+
+        # ── Auto-Stop: 계획 완료 시 {"continue": false} 신호 출력 ────────────
+        # ai_monitor_plan.md의 모든 태스크가 [x] 상태이면 Claude Code에
+        # continue: false 신호를 보내 세션을 자동 종료합니다.
+        # Harness의 {"continue": false} 패턴을 Vibe Coding에 이식.
+        try:
+            import re as _re_stop, json as _json_stop, os as _os_stop
+            from pathlib import Path as _PV_Path
+            # _scripts_dir 글로벌 변수 대신 직접 계산 — self-reflect 블록의 지역 재할당 충돌 방지
+            _stop_scripts = _os_stop.path.dirname(_os_stop.path.abspath(__file__))
+            _plan_path = _PV_Path(_stop_scripts).parent / "ai_monitor_plan.md"
+            if _plan_path.exists():
+                _plan_txt = _plan_path.read_text(encoding='utf-8')
+                # [ ] 미완료 태스크가 없고 [x] 완료 태스크가 하나라도 있으면 전체 완료
+                _incomplete = _re_stop.findall(r'-\s+\[ \]', _plan_txt)
+                _complete   = _re_stop.findall(r'-\s+\[[xX]\]', _plan_txt)
+                if _complete and not _incomplete:
+                    if log_task:
+                        log_task("Claude", "[Auto-Stop] 계획 완료 — 세션 자동 종료", _TERMINAL_ID)
+                    print(_json_stop.dumps({"continue": False}), flush=True)
+        except Exception:
+            pass  # validator 오류는 무시 — 훅 흐름 방해 금지
 
         # ── Self-Reflect: 세션 완료 후 pg_thoughts에 자기반성 기록 ──────────
         # 수정한 파일이 있을 때만 반성 기록 (단순 질문 응답은 제외)
