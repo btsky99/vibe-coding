@@ -40,7 +40,6 @@ a = Analysis(
         ('.ai_monitor/src', 'src'),
         # Claude 스킬 템플릿 파일 (vibe-*.md)
         # → /api/superpowers/install 시 현재 프로젝트 .claude/commands/ 에 복사
-        ('skills/claude', 'skills/claude'),
         # Gemini 스킬 템플릿 파일 (SKILL.md 디렉터리 구조 유지)
         # → /api/superpowers/install 시 현재 프로젝트 .gemini/skills/ 에 복사
         ('.gemini/skills', '.gemini/skills'),
