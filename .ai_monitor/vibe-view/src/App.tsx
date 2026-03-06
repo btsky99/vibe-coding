@@ -101,6 +101,8 @@ function App() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   // 터미널별 에이전트 파이프라인 상태 — TerminalSlot 모니터링 뷰에 표시
   const [agentTerminals, setAgentTerminals] = useState<Record<string, any>>({});
+  // 하이브 엔진 상태 (자가 치유 등)
+  const [hiveHealth, setHiveHealth] = useState<any>(null);
 
   // ─── 데이터 스트림 (TerminalSlot + Activity Bar 배지용) ───────────────
   const [logs, setLogs] = useState<LogRecord[]>([]);
@@ -227,6 +229,29 @@ function App() {
     const interval = setInterval(fetchTerminals, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // 하이브 엔진 헬스 상태 폴링 (5초) — ActivityBar 엔진 라이브 표시용
+  useEffect(() => {
+    const fetchHealth = () => {
+      fetch(`${API_BASE}/api/hive/health`)
+        .then(res => res.json())
+        .then(data => setHiveHealth(data))
+        .catch(() => {});
+    };
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 글로벌 파이프라인 단계 계산 — 모든 터미널 중 가장 '전진된' 단계를 표시
+  const globalPipelineStage = (() => {
+    const stages = Object.values(agentTerminals).map(t => t.pipeline_stage);
+    if (stages.includes('modifying')) return 'modifying';
+    if (stages.includes('verifying')) return 'verifying';
+    if (stages.includes('analyzing')) return 'analyzing';
+    if (stages.includes('done')) return 'done';
+    return 'idle';
+  })();
 
   // Gemini 컨텍스트 사용량 폴링 (10초) — TerminalSlot 게이지용
   useEffect(() => {
@@ -561,6 +586,8 @@ function App() {
           totalGitChanges={totalGitChanges}
           mcpCount={mcpInstalled.length}
           isAgentRunning={isAgentRunning}
+          globalPipelineStage={globalPipelineStage}
+          hiveHealth={hiveHealth}
         />
 
         {/* ── 사이드바 — 탭 패널 + 메시지 작성창 ── */}
