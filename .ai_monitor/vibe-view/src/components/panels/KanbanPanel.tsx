@@ -15,7 +15,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Monitor, Cpu, CheckCircle, Clock, AlertCircle, Loader, BookOpen, Radio } from 'lucide-react';
+import { Monitor, Cpu, CheckCircle, Clock, AlertCircle, Loader, BookOpen, Radio, Database, Terminal } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -42,6 +42,15 @@ interface SkillSession {
   request: string;
   results: SkillResult[];
   completed_at: string;
+}
+
+// pg_logs 한 행
+interface PgLogRow {
+  terminal_id: string;
+  agent: string;
+  task: string;
+  status: string;
+  ts: string;
 }
 
 // ─── 전체 스킬 카탈로그 ────────────────────────────────────────────────────────
@@ -81,6 +90,8 @@ export default function KanbanPanel() {
   const [liveChains, setLiveChains] = useState<Record<string, LiveChain>>({});
   // 최근 완료 세션 (요약 데이터)
   const [sessions, setSessions] = useState<SkillSession[]>([]);
+  // pg_logs 터미널별 활동 (Postgres-First)
+  const [pgActivity, setPgActivity] = useState<Record<string, PgLogRow[]>>({});
   // 터미널 필터
   const [filter, setFilter] = useState<string>('all');
 
@@ -116,6 +127,20 @@ export default function KanbanPanel() {
         .catch(() => {});
     load();
     const id = setInterval(load, 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── /api/kanban/pg-activity 폴링 (5초) — Postgres 터미널별 활동 ──────────
+  useEffect(() => {
+    const load = () =>
+      fetch(`${API_BASE}/api/kanban/pg-activity`)
+        .then(r => r.json())
+        .then(data => {
+          if (data && !data.error) setPgActivity(data as Record<string, PgLogRow[]>);
+        })
+        .catch(() => {});
+    load();
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
 
@@ -217,7 +242,50 @@ export default function KanbanPanel() {
             </div>
           </div>
 
-          {/* ════ 2번~: 실행 중인 스킬 컬럼들 ══════════════════════════════ */}
+          {/* ════ 2번~: Postgres pg_logs 터미널 활동 컬럼 (항상 표시) ═════ */}
+          {Object.entries(pgActivity)
+            .filter(([tid]) => filter === 'all' || tid === filter)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([tid, rows]) => (
+              <div key={`pg-${tid}`} className="flex flex-col w-[240px] shrink-0 rounded-lg overflow-hidden border border-blue-500/25 bg-[#0d0d10]">
+                {/* 컬럼 헤더 */}
+                <div className="px-3 py-2.5 flex items-center gap-2 shrink-0 border-b border-blue-500/15 bg-[#0d1120]">
+                  <Terminal className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                  <span className="text-[11px] font-bold text-blue-300 font-mono">T{tid}</span>
+                  <Database className="w-2.5 h-2.5 text-blue-600 ml-1" />
+                  <span className="text-[8px] text-blue-700 font-bold uppercase">pg_logs</span>
+                  <span className="ml-auto text-[8px] text-[#333] font-mono">{rows.length}건</span>
+                </div>
+                {/* 활동 목록 */}
+                <div className="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-1">
+                  {rows.length === 0 ? (
+                    <p className="text-[8px] text-[#2a2a2a] italic text-center pt-4">기록 없음</p>
+                  ) : rows.map((row, i) => (
+                    <div key={i} className="rounded bg-white/2 border border-white/4 px-2 py-1.5 hover:border-blue-500/20 transition-colors">
+                      {/* 에이전트 + 시각 */}
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className={`text-[8px] font-bold font-mono px-1 rounded ${
+                          row.agent?.toLowerCase().includes('claude') ? 'text-yellow-400 bg-yellow-400/8' :
+                          row.agent?.toLowerCase().includes('gemini') ? 'text-blue-400 bg-blue-400/8' :
+                          'text-[#666] bg-white/5'
+                        }`}>{row.agent || 'agent'}</span>
+                        <span className="text-[7px] text-[#333] font-mono">{row.ts}</span>
+                      </div>
+                      {/* 태스크 내용 */}
+                      <p className="text-[8px] text-white/40 leading-snug line-clamp-2">{row.task}</p>
+                      {/* 상태 */}
+                      {row.status && row.status !== 'success' && (
+                        <span className={`text-[7px] font-bold mt-0.5 inline-block ${
+                          row.status === 'error' ? 'text-red-400' : 'text-green-400/50'
+                        }`}>{row.status}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+          {/* ════ 3번~: 실행 중인 스킬 컬럼들 ══════════════════════════════ */}
           {hasLive ? (
             chainEntries.flatMap(([tid, chain]) =>
               chain.steps.map((step, stepIdx) => {
@@ -342,17 +410,19 @@ export default function KanbanPanel() {
               })
             )
           ) : (
-            /* ── 대기 상태: 빈 슬롯 안내 ── */
-            <div className="flex items-center justify-center flex-1 min-w-[400px]">
-              <div className="flex flex-col items-center gap-3 text-center">
-                <Cpu className="w-10 h-10 text-[#1e1e1e]" />
-                <p className="text-[12px] text-[#333] font-bold">오케스트레이션 대기 중</p>
-                <p className="text-[9px] text-[#222] leading-relaxed">
-                  지시를 내리면 오케스트레이션이 분석하여<br />
-                  실행할 스킬 컬럼이 순서대로 나타납니다
-                </p>
+            /* ── 스킬 체인 없음: pg_logs도 없을 때만 안내 표시 ── */
+            Object.keys(pgActivity).length === 0 && (
+              <div className="flex items-center justify-center flex-1 min-w-[300px]">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <Cpu className="w-10 h-10 text-[#1e1e1e]" />
+                  <p className="text-[12px] text-[#333] font-bold">오케스트레이션 대기 중</p>
+                  <p className="text-[9px] text-[#222] leading-relaxed">
+                    에이전트가 작업을 시작하면<br />
+                    터미널별 활동이 나타납니다
+                  </p>
+                </div>
               </div>
-            </div>
+            )
           )}
         </div>
       </div>

@@ -132,9 +132,10 @@ def handle_run(handler) -> None:
             chosen_cli = 'claude'
             cli_choice = 'claude'
         elif cli_choice == 'auto':
-            chosen_cli = cli_agent.route_task(task)
+            chosen_cli, _routing_reason = cli_agent.route_task_with_reason(task)
         else:
             chosen_cli = cli_choice
+            _routing_reason = "사용자 지정"
 
         # 상태를 'running'으로 선점 (Lock 안에서 설정해야 원자적 보장)
         cli_agent._run_status = 'running'
@@ -145,6 +146,7 @@ def handle_run(handler) -> None:
             'ts': '',
             'cwd': cwd or '',
             'terminal_id': terminal_id,  # 어느 터미널에서 요청했는지 추적
+            'routing_reason': _routing_reason,  # 모델 선택 근거 (UI 표시용)
         }
 
     # 백그라운드 스레드에서 실행 (Lock 밖에서 시작해야 run() 내부 Lock 획득 가능)

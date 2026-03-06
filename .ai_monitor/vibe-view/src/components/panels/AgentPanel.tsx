@@ -8,6 +8,9 @@
  *          하나의 SSE 스트림을 공유하여 모든 뷰를 동시 업데이트합니다.
  *
  * REVISION HISTORY:
+ * - 2026-03-06 Claude: [Phase6] 모델 라우팅 근거 뱃지 — TerminalCard 헤더에 routing_reason 표시
+ *   - 실행 중(running) 상태에서 CLI 배지 옆에 자동 선택 근거 텍스트를 7px 회색으로 표시
+ *   - 예: "claude | 코드 수정 감지 (수정)" 형태로 why 모델이 선택됐는지 즉시 확인 가능
  * - 2026-03-05 Claude: [리디자인] 상황판 탭 — TerminalSlot 상단 모니터링 기준 터미널별 패널
  *   - 2열 컴팩트 카드 그리드 → 1열 확장 모니터링 패널 목록으로 교체
  *   - 각 터미널 카드: 파이프라인(분석/수정/검증/완료) + 현재 작업 + 마지막 출력 표시
@@ -143,11 +146,13 @@ function detectStage(line: string): WorkflowStage | null {
 // ─── 터미널별 상태 타입 ──────────────────────────────────────────────────────
 interface TerminalState {
   status: 'idle' | 'running' | 'done' | 'error';
-  task: string;       // 마지막/현재 실행 지시
-  cli: string;        // claude | gemini | ''
+  task: string;           // 마지막/현재 실행 지시
+  cli: string;            // claude | gemini | ''
   run_id: string;
-  ts: string;         // ISO 타임스탬프
-  last_line: string;  // 마지막 출력 줄 (워크플로우 단계 감지용)
+  ts: string;             // ISO 타임스탬프
+  last_line: string;      // 마지막 출력 줄 (워크플로우 단계 감지용)
+  external?: boolean;     // true = 외부 Gemini 세션 (다른 프로젝트) — UI에서 숨김
+  routing_reason?: string; // 모델 자동 선택 근거 (예: "코드 작업 감지 (수정)")
 }
 
 interface AgentRun {
@@ -399,6 +404,12 @@ function TerminalCard({
           {cli && (
             <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${cliBadge}`}>
               {cli === 'claude' ? '⚡' : '✨'} {cli}
+            </span>
+          )}
+          {/* 모델 자동 선택 근거 뱃지 — 실행 중일 때만 표시 */}
+          {state.routing_reason && status === 'running' && (
+            <span className="text-[7px] text-white/30 font-mono truncate max-w-[80px]" title={state.routing_reason}>
+              {state.routing_reason}
             </span>
           )}
           {/* 상태 도트 + 텍스트 */}
@@ -1182,11 +1193,14 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
             </div>
 
             {/* ── T1~T8 모니터링 패널 목록 (1열, TerminalSlot 상단 모니터링 기준) ── */}
+            {/* external=true인 외부 Gemini 세션은 다른 프로젝트이므로 표시 제외 */}
             <div className="flex flex-col gap-1.5 shrink-0">
               {Array.from({ length: 8 }, (_, i) => `T${i + 1}`).map(tid => {
                 const state: TerminalState = terminals[tid] ?? {
                   status: 'idle', task: '', cli: '', run_id: '', ts: '', last_line: '',
                 };
+                // 외부 에이전트(다른 프로젝트 Gemini)는 목록에서 제외
+                if (state.external) return null;
                 return (
                   <TerminalCard
                     key={tid}

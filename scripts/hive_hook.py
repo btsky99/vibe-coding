@@ -67,6 +67,12 @@ if _scripts_dir not in sys.path:
 # 각 터미널에서 `set TERMINAL_ID=T1 && claude` 형태로 실행하면 자동 추적
 _TERMINAL_ID = os.environ.get('TERMINAL_ID', 'T0')
 
+# ── Self-Reflect 세션 추적 변수 ────────────────────────────────────────────
+# Stop 이벤트 시 pg_thoughts에 자기반성 기록에 사용 (세션 단위 누적)
+_SESSION_MODIFIED_FILES: list = []   # PostToolUse에서 수정된 파일 경로 누적
+_SESSION_LAST_TASK: str = ""         # UserPromptSubmit에서 마지막 지시 내용
+_SESSION_HAD_ERROR: bool = False     # Stop reason이 error이면 True
+
 # 단순 조회 명령어 스킵 목록
 _SKIP_BASH_PREFIXES = (
     "ls ", "ls\n", "cat ", "head ", "tail ", "echo ",
@@ -685,6 +691,48 @@ def main():
             if log_task:
                 log_task("Hive", "[하이브 컨텍스트] 자동 주입 완료 — current-work + 오늘 활동", _TERMINAL_ID)
 
+        # [Self-Reflect 주입] 과거 유사 작업 반성 자동 주입
+        # pg_thoughts에서 keyword 매칭 반성 2건을 컨텍스트로 출력합니다.
+        try:
+            _prompt_for_reflect = (
+                data.get("prompt") or data.get("content") or data.get("message", "")
+            )
+            if _prompt_for_reflect and _prompt_for_reflect.strip():
+                _kw = _prompt_for_reflect.strip()[:50].replace("'", "''")
+                _reflect_sql = (
+                    f"SELECT thought->>'task' AS task, thought->>'learned' AS learned, "
+                    f"thought->>'failed' AS failed "
+                    f"FROM pg_thoughts "
+                    f"WHERE skill = 'self-reflect' "
+                    f"AND thought::text ILIKE '%{_kw[:20]}%' "
+                    f"ORDER BY ts DESC LIMIT 2;"
+                )
+                import subprocess as _sp_r, os as _osr
+                _pg_bin = _osr.path.join(
+                    _osr.path.dirname(_osr.path.abspath(__file__)),
+                    '..', '.ai_monitor', 'bin', 'pgsql', 'bin', 'psql.exe'
+                )
+                if _osr.path.exists(_pg_bin):
+                    _no_win = getattr(_sp_r, 'CREATE_NO_WINDOW', 0x08000000)
+                    _res = _sp_r.run(
+                        [_pg_bin, "-p", "5433", "-U", "postgres", "-d", "postgres",
+                         "--csv", "-c", _reflect_sql],
+                        capture_output=True, text=True, encoding='utf-8', errors='replace',
+                        creationflags=_no_win
+                    )
+                    import csv as _csv_r, io as _io_r
+                    _rows = list(_csv_r.DictReader(_io_r.StringIO(_res.stdout.strip())))
+                    if _rows:
+                        _lines_r = ["[과거 유사 작업 경험]"]
+                        for _row in _rows:
+                            _lines_r.append(f"  작업: {_row.get('task','')}")
+                            _lines_r.append(f"  배운점: {_row.get('learned','')}")
+                            if _row.get('failed'):
+                                _lines_r.append(f"  실패: {_row.get('failed','')}")
+                        print("\n".join(_lines_r), flush=True)
+        except Exception:
+            pass
+
         # [메시지 폴링] Gemini 또는 다른 에이전트가 보낸 미읽음 메시지 확인
         # 메시지가 있으면 컨텍스트로 출력하여 Claude가 인지하도록 함
         unread = _read_messages("claude")
@@ -704,6 +752,12 @@ def main():
             short = prompt.strip().replace("\n", " ")[:120]
             if log_task:
                 log_task("사용자", f"[지시] {short}", _TERMINAL_ID)
+
+            # self-reflect: 새 지시 시작 시 마지막 지시 + 파일 목록 리셋
+            global _SESSION_LAST_TASK, _SESSION_MODIFIED_FILES, _SESSION_HAD_ERROR
+            _SESSION_LAST_TASK = short
+            _SESSION_MODIFIED_FILES = []
+            _SESSION_HAD_ERROR = False
 
             # [파이프라인 단계 업데이트] 사용자 지시 수신 → "분석" 단계 표시
             _update_pipeline_stage('analyzing', short)
@@ -770,6 +824,29 @@ def main():
             cmd = tool_input.get("command", "").strip()
             if any(cmd.startswith(p) for p in _SKIP_BASH_PREFIXES):
                 return
+
+            # ── Bounded Autonomy: 위험 명령 사전 차단 ────────────────────
+            try:
+                import sys as _sys_sg
+                _sg_dir = os.path.dirname(os.path.abspath(__file__))
+                if _sg_dir not in _sys_sg.path:
+                    _sys_sg.path.insert(0, _sg_dir)
+                from safety_guard import check as _sg_check, warn as _sg_warn
+                _safe, _reason = _sg_check(cmd)
+                if not _safe:
+                    # 차단: pg_logs에 BLOCKED 기록 + 경고 출력
+                    log_task("Claude", f"[BLOCKED] {_reason}: {_short_cmd(cmd)}", _TERMINAL_ID, "blocked")
+                    print(f"\n⚠️  [Bounded Autonomy] 위험 명령 차단: {_reason}\n명령: {cmd[:80]}", flush=True)
+                    import sys as _sys_exit
+                    _sys_exit.exit(2)  # PreToolUse exit(2) = 도구 실행 차단
+                _warn_msg = _sg_warn(cmd)
+                if _warn_msg:
+                    print(f"⚠️  [경고] {_warn_msg}", flush=True)
+            except SystemExit:
+                raise  # exit(2) 재전파
+            except Exception:
+                pass  # safety_guard 오류는 무시 (보수적 접근)
+
             if "git commit" in cmd:
                 log_task("Claude", f"[커밋 시작] {_short_cmd(cmd)}", _TERMINAL_ID)
             else:
@@ -785,12 +862,18 @@ def main():
         if tool_name == "Edit":
             fp = tool_input.get("file_path", "?")
             log_task("Claude", f"[수정 완료] {_short_path(fp)} ✓", _TERMINAL_ID)
+            # self-reflect: 수정 파일 누적
+            if fp not in _SESSION_MODIFIED_FILES:
+                _SESSION_MODIFIED_FILES.append(_short_path(fp))
 
         elif tool_name == "Write":
             fp = tool_input.get("file_path", "?")
             content = tool_input.get("content", "")
             lines = len(content.splitlines())
             log_task("Claude", f"[생성 완료] {_short_path(fp)} ({lines}줄) ✓", _TERMINAL_ID)
+            # self-reflect: 생성 파일 누적
+            if fp not in _SESSION_MODIFIED_FILES:
+                _SESSION_MODIFIED_FILES.append(_short_path(fp))
 
         elif tool_name == "Bash":
             cmd = tool_input.get("command", "").strip()
@@ -827,6 +910,8 @@ def main():
         try:
             import os as _os
             _stop_reason = data.get('stop_reason', '')  # 에러 여부 확인
+            if _stop_reason == 'error':
+                _SESSION_HAD_ERROR = True
             _data_dir = _os.path.join(
                 _os.path.dirname(_os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
             )
@@ -878,6 +963,28 @@ def main():
                         ):
                             _done_items.append(_task[:80])
             _update_current_work(_done_items)
+        except Exception:
+            pass
+
+        # ── Self-Reflect: 세션 완료 후 pg_thoughts에 자기반성 기록 ──────────
+        # 수정한 파일이 있을 때만 반성 기록 (단순 질문 응답은 제외)
+        try:
+            if _SESSION_MODIFIED_FILES or _SESSION_HAD_ERROR:
+                import sys as _sys_r
+                _scripts_dir = _os2.path.dirname(_os2.path.abspath(__file__))
+                if _scripts_dir not in _sys_r.path:
+                    _sys_r.path.insert(0, _scripts_dir)
+                from hive_bridge import reflect_to_pg as _reflect
+                _learned = [f"수정 완료: {f}" for f in _SESSION_MODIFIED_FILES] if _SESSION_MODIFIED_FILES else []
+                _failed  = ["에러로 종료됨"] if _SESSION_HAD_ERROR else []
+                _reflect(
+                    agent_name="claude",
+                    task_summary=_SESSION_LAST_TASK or "작업 완료",
+                    learned=_learned,
+                    failed=_failed,
+                    files_changed=list(_SESSION_MODIFIED_FILES),
+                    terminal_id=_TERMINAL_ID
+                )
         except Exception:
             pass
 

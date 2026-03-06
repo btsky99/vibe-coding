@@ -76,17 +76,25 @@ _GEMINI_CMD = _find_cli('gemini')
 # ─── 라우팅 키워드 테이블 ─────────────────────────────────────────────────────
 # Claude Code CLI: 코드 작성/수정/버그 수정 등 구현 작업
 CLAUDE_KEYWORDS = [
+    # 한글 코드 작업
     '코드', '구현', '수정', '버그', '파일', '함수', '클래스', '테스트',
-    '추가', '삭제', '리팩터', '리팩토링', '컴포넌트', '빌드',
+    '추가', '삭제', '리팩터', '리팩토링', '컴포넌트', '빌드', '고쳐',
+    '만들어', '작성해', '수정해', '올려', '배포', '커밋', '푸시',
+    # 영어 코드 작업
     'code', 'fix', 'implement', 'write', 'create', 'test', 'build',
     'refactor', 'bug', 'error', 'class', 'function', 'component',
+    'edit', 'modify', 'update', 'deploy', 'commit', 'push',
 ]
-# Gemini CLI: 설계/분석/검토 등 사고 중심 작업
+# Gemini CLI: 설계/분석/검토/정보 조회 등 사고 중심 작업
 GEMINI_KEYWORDS = [
+    # 한글 분석/조회
     '설계', '분석', '검토', '브레인', '아키텍처', '계획', '문서',
-    '리뷰', '평가', '조사', '정리', '요약',
+    '리뷰', '평가', '조사', '정리', '요약', '검색', '찾아봐', '알아봐',
+    '뭐야', '어때', '어떻게', '왜', '설명', '알려줘', '뭐가', '어디',
+    # 영어 분석/조회
     'design', 'analyze', 'review', 'plan', 'architecture',
-    'document', 'research', 'summary', 'evaluate',
+    'document', 'research', 'summary', 'evaluate', 'explain',
+    'search', 'find', 'what', 'how', 'why', 'describe',
 ]
 
 # ─── 전역 상태 (모듈 레벨 — agent_api.py에서 직접 접근) ──────────────────────
@@ -138,17 +146,37 @@ def route_task(task: str) -> str:
     """키워드 분석으로 최적 CLI를 자동 선택합니다.
 
     판단 기준:
-    - Gemini 키워드 수 > Claude 키워드 수 → gemini
-    - 그 외 모든 경우 → claude (코딩 작업이 기본)
+    - Gemini 키워드 수 > Claude 키워드 수 → gemini (분석/조회 작업)
+    - 그 외 모든 경우 → claude (코딩/수정 작업 기본)
     반환값: 'claude' | 'gemini'
     """
+    cli, _ = route_task_with_reason(task)
+    return cli
+
+
+def route_task_with_reason(task: str) -> tuple[str, str]:
+    """키워드 분석으로 최적 CLI + 선택 이유를 반환합니다.
+
+    Returns:
+        (cli, reason): ('claude'|'gemini', 선택 이유 문자열)
+    """
     task_lower = task.lower()
-    claude_score = sum(1 for kw in CLAUDE_KEYWORDS if kw in task_lower)
-    gemini_score = sum(1 for kw in GEMINI_KEYWORDS if kw in task_lower)
+
+    # 매칭된 키워드 수집 (점수 + 근거 동시)
+    matched_claude  = [kw for kw in CLAUDE_KEYWORDS  if kw in task_lower]
+    matched_gemini  = [kw for kw in GEMINI_KEYWORDS  if kw in task_lower]
+    claude_score    = len(matched_claude)
+    gemini_score    = len(matched_gemini)
 
     if gemini_score > claude_score:
-        return 'gemini'
-    return 'claude'  # 기본값: Claude Code CLI
+        reason = f"분석/조회 감지 ({', '.join(matched_gemini[:3])})"
+        return 'gemini', reason
+
+    if matched_claude:
+        reason = f"코드 작업 감지 ({', '.join(matched_claude[:3])})"
+    else:
+        reason = "기본값 (코드 작업 우선)"
+    return 'claude', reason
 
 
 def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
@@ -239,7 +267,7 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
 
 
 def run(task: str, cli: str = 'auto', working_dir: str | None = None,
-        terminal_id: str = 'T1') -> dict:
+        terminal_id: str = 'T1', routing_reason: str = '') -> dict:
     """CLI를 비대화형 모드로 실행하고 결과를 반환합니다.
 
     백그라운드 스레드에서 호출되어야 합니다 (agent_api.py가 스레드 생성).
@@ -284,6 +312,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
                 'cli': cli,
                 'run_id': run_id,
                 'ts': now_ts,
+                'routing_reason': routing_reason,  # 모델 선택 근거
                 'last_line': '',
             })
 

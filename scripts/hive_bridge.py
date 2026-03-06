@@ -109,6 +109,32 @@ def post_message(from_agent, to_agent, content, msg_type="info"):
         "type": msg_type
     })
 
+def reflect_to_pg(agent_name: str, task_summary: str, learned: list, failed: list,
+                  files_changed: list, terminal_id: str = None):
+    """작업 완료 후 자기반성(self-reflect) 내용을 pg_thoughts에 기록합니다.
+
+    에이전트가 매 작업 후 무엇을 배웠고 무엇이 실패했는지 구조화하여 저장합니다.
+    다음 유사 작업 시 컨텍스트로 자동 주입됩니다 (UserPromptSubmit 훅 연동).
+
+    Args:
+        agent_name:    기록 주체 에이전트 이름 (예: "claude", "gemini")
+        task_summary:  완료된 작업 요약 (지시 내용 앞 50자)
+        learned:       잘 된 것 / 배운 점 목록 (예: ["pg_logs 쿼리 패턴 확인"])
+        failed:        실패하거나 막혔던 점 목록 (예: ["psql CSV 출력 파싱 오류"])
+        files_changed: 수정된 파일 경로 목록
+        terminal_id:   터미널 ID (없으면 환경변수 TERMINAL_ID 사용)
+    """
+    _tid = terminal_id or os.environ.get('TERMINAL_ID', 'T0')
+    thought_dict = {
+        "type": "reflect",
+        "task": task_summary[:100],
+        "learned": learned,
+        "failed": failed,
+        "files": files_changed,
+        "terminal": _tid
+    }
+    log_thought(agent_name, "self-reflect", thought_dict)
+
 # --- LOCK / UNLOCK (Postgres 기반 확장 예정) ---
 def lock_file(agent_name, file_path):
     post_message(agent_name, "all", f"[LOCK] {file_path}", "LOCK")
