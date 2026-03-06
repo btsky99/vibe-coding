@@ -5,34 +5,30 @@
 
 ---
 
-## 🏗️ Phase 4: 하이브 "슈퍼 DB" 구축 (Postgres is All You Need)
+## 🚀 Phase 4: 하이브 "슈퍼 DB" 완전 통합 및 레거시 제거 (Postgres-First)
 
-### 4.1. 전용 포터블 PostgreSQL 환경 구축
-- [x] `.ai_monitor/bin/pgsql/` 디렉토리 구조 생성.
-- [x] PostgreSQL 18 윈도우 64비트 바이너리 확보.
-- [x] 포터블 DB 초기화 (`initdb`) 및 포트 **5433** 설정 완료.
+> **"기존의 모든 JSONL 및 SQLite 레거시를 폐기하고 PostgreSQL 18로 단일화합니다."**
 
-### 4.2. PGVector (AI 장기 기억 장치)
-- [x] `pgvector` v0.8.2-pg18 배치 완료 (lib/vector.dll + share/extension/).
-- [x] `CREATE EXTENSION vector;` 활성화 완료 (v0.8.2).
-- [ ] `shared_memory.db`의 지식 이관 준비.
+### 4.1. 통합 로깅 시스템 구축 (Postgres)
+- [x] `.ai_monitor/bin/pgsql/` 인프라 구축 및 실행 (Port 5433).
+- [ ] `pg_logs`, `pg_thoughts`, `pg_messages` 테이블 스키마 설계 및 생성.
+- [ ] `scripts/hive_bridge.py`: JSONL 쓰기 중단 및 Postgres PGMQ/Table 기반 전환.
 
-### 4.3. PG Search (지능형 고성능 검색)
-- [x] `pg_trgm` v1.6 및 `fuzzystrmatch` v1.2 익스텐션 활성화 완료.
-- [ ] 에이전트가 모든 소스 코드를 '의미 단위'로 검색할 수 있는 인덱스 설계.
+### 4.2. 사고 과정(Thought Stream) 고도화
+- [ ] `orchestrator.py`: `_write_thought`를 Postgres `pg_thoughts` 테이블로 전환.
+- [ ] AI 사고의 연쇄(Thought Chain)를 `JSONB`로 구조화하여 저장.
+- [ ] **[시각화]** Mission Control UI에서 에이전트 간 사고 교차 분석 뷰 구현.
 
-### 4.4. PGMQ (에이전트 간 고속 통신 큐)
-- [x] PGMQ SQL 스크립트 확보 및 DB 적용.
-- [x] 에이전트 간의 메시지(messages.jsonl)를 고속 DB 큐 방식으로 전환 고려.
-- [x] **[완료]** `pgmq.sql` (SQL-only) 수동 배치 및 `pgmq` 스키마 초기화.
+### 4.3. 실시간 시각화 엔진 (Vibe-View)
+- [ ] `server.py`: Postgres `LISTEN/NOTIFY` 기반의 실시간 스트리밍 구현.
+- [ ] 레거시 SQLite(`hive_mind.db`) 및 JSONL 데이터 마이그레이션 후 파일 삭제.
 
-### 4.5. PG Search 고도화 (Elasticsearch급 검색)
-- [x] `pg_trgm` 기반 GIN 인덱스 고도화 및 BM25 유사 검색 쿼리 튜닝.
-- [x] 하이브 지식 베이스(shared_memory)를 위한 전문 검색 뷰(Materialized View) 구축.
+---
 
-### 4.6. 통합 DB 매니저 및 자동화
-- [x] `pg_manager.py`: 시작/중지/상태/setup 커맨드 구현 완료 (UnicodeEncodeError 수정).
-- [x] **[완료]** `pg_manager.py`에 PGMQ 초기화 SQL 구문 추가 및 자동 실행 연동.
+## 🛠️ 현재 진행 상태 및 마스터 지침
+- **전략**: 모든 에이전트 통신은 이제 파일이 아닌 DB 트랜잭션을 통해 이루어집니다.
+- **상태**: PostgreSQL 18 서버 정상 작동 중 (PID: 32040).
+- **목표**: 2026-03-07까지 모든 레거시 파일 기반 로깅 완전 제거.
 
 ---
 

@@ -33,19 +33,31 @@ LOG_FILE = os.path.join(DATA_DIR, 'orchestrator_log.jsonl')
 THOUGHT_FILE = os.path.join(DATA_DIR, 'thought_stream.jsonl')
 UI_URL = "http://localhost:5173/orchestrator" # 대시보드 URL
 
-# ─── API 헬퍼 ─────────────────────────────────────────────────────────────────
+# ─── 하이브 브릿지 로깅 연동 (Postgres-First) ──────────────────────────────────
+try:
+    import hive_bridge
+except ImportError:
+    # 경로 문제 시 직접 sys.path 추가
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    import hive_bridge
 
 def _write_thought(agent: str, thought: str, skill: str = None) -> None:
-    """AI의 내부 추론(Thought)을 실시간으로 기록"""
-    entry = {
-        'timestamp': datetime.now().isoformat(),
-        'agent': agent,
-        'skill': skill,
-        'thought': thought,
+    """AI의 내부 추론(Thought)을 PostgreSQL pg_thoughts 테이블에 실시간으로 기록"""
+    # 구조화된 사고 데이터 생성
+    thought_data = {
+        "text": thought,
+        "context": "orchestration",
+        "metadata": {
+            "is_daemon": "--daemon" in sys.argv,
+            "timestamp": datetime.now().isoformat()
+        }
     }
-    os.makedirs(os.path.dirname(THOUGHT_FILE), exist_ok=True)
-    with open(THOUGHT_FILE, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    # hive_bridge를 통해 Postgres로 전송 (API 우선, psql 폴백)
+    hive_bridge.log_thought(agent, skill or "general", thought_data)
+    
+    # [백업] 콘솔 출력 (디버깅용)
+    ts = datetime.now().strftime('%H:%M:%S')
+    # print(f"[{ts}][THOUGHT][{agent}] {thought[:60]}...")
 
 def open_mission_control() -> None:
     """대시보드(Mission Control)를 자동으로 브라우저에 띄움"""

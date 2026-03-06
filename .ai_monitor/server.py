@@ -86,6 +86,62 @@ import string
 import socket
 from pathlib import Path
 
+# ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
+PG_BIN = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
+PG_PORT = 5433
+
+def run_pg_sql(sql: str, db: str = "postgres"):
+    """psql.exe를 사용하여 SQL을 실행하고 결과를 반환합니다 (psycopg2 미설치 대비)"""
+    if not PG_BIN.exists():
+        return None
+    try:
+        # 윈도우 cp949 인코딩 문제 방지를 위해 CREATE_NO_WINDOW 사용
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        res = subprocess.run(
+            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "-c", sql],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        return res.stdout.strip()
+    except Exception as e:
+        print(f"[Postgres ERROR] {e}")
+        return None
+
+def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
+    """pg_logs 테이블에 로그 기록"""
+    # 따옴표 이스케이프 (단순 SQL 인젝션 방지)
+    safe_task = task.replace("'", "''")
+    sql = f"INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES ('{agent}', '{terminal_id}', '{safe_task}', '{status}');"
+    run_pg_sql(sql)
+    # PGMQ에도 동시에 쌓기 (실시간 큐)
+    mq_msg = json.dumps({"agent": agent, "tid": terminal_id, "task": task, "status": status}, ensure_ascii=False).replace("'", "''")
+    run_pg_sql(f"SELECT pgmq.send('hive_queue', '{mq_msg}');")
+
+def thought_to_pg(agent: str, skill: str, thought: dict):
+    """pg_thoughts 테이블에 사고 과정 기록 (JSONB)"""
+    safe_thought = json.dumps(thought, ensure_ascii=False).replace("'", "''")
+    sql = f"INSERT INTO pg_thoughts (agent, skill, thought) VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb);"
+    run_pg_sql(sql)
+
+def run_pg_sql_csv(sql: str, db: str = "postgres") -> list:
+    """CSV 형식으로 Postgres 쿼리 결과를 dict 리스트로 반환 (칸반/대시보드 조회용)"""
+    if not PG_BIN.exists():
+        return []
+    try:
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        res = subprocess.run(
+            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "--csv", "-c", sql],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        import csv, io
+        return list(csv.DictReader(io.StringIO(res.stdout.strip())))
+    except Exception as e:
+        print(f"[Postgres CSV ERROR] {e}")
+        return []
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 # [수정] 오케스트레이터 스킬 체인 모듈 전역 임포트 (scripts 폴더)
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
 if _SCRIPTS_DIR not in sys.path:
@@ -1885,6 +1941,33 @@ class SSEHandler(BaseHTTPRequestHandler):
                         pass
             # 시간순으로 정렬하여 반환 (최신 순 → 오래된 순)
             self.wfile.write(json.dumps(_results, ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/kanban/pg-activity':
+            # Postgres-First 칸반 데이터: pg_logs에서 최근 8시간 터미널별 활동 조회
+            # 응답: { "T1": [{agent, task, status, ts}, ...], "T2": [...], ... }
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                rows = run_pg_sql_csv(
+                    "SELECT terminal_id, agent, task, status, "
+                    "to_char(ts, 'HH24:MI:SS') AS ts "
+                    "FROM pg_logs "
+                    "WHERE ts > NOW() - INTERVAL '8 hours' "
+                    "ORDER BY ts DESC LIMIT 300"
+                )
+                # 터미널별 그룹화 (최대 15개/터미널)
+                by_terminal: dict = {}
+                for row in rows:
+                    tid = row.get('terminal_id') or 'T0'
+                    if tid not in by_terminal:
+                        by_terminal[tid] = []
+                    if len(by_terminal[tid]) < 15:
+                        by_terminal[tid].append(row)
+                self.wfile.write(json.dumps(by_terminal, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
         elif parsed_path.path == '/api/orchestrator/skill-chain':
             # 스킬 체인 실행 상태 반환 — skill_chain.db(SQLite) 조회
             # 응답: {skill_registry: [...], terminals: {T1: {steps:[...]}, ...}}
@@ -2150,6 +2233,44 @@ class SSEHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         
         # ─── 신규: 사고 과정 로그 추가 (v5.0) ───
+        # ─── 신규: PostgreSQL 통합 로깅 API (v5.0) ───
+        if path == '/api/hive/log/pg':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                log_to_pg(
+                    agent=data.get('agent', 'unknown'),
+                    terminal_id=data.get('terminal_id', 'T0'),
+                    task=data.get('task', ''),
+                    status=data.get('status', 'success')
+                )
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
+        if path == '/api/hive/thought/pg':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                thought_to_pg(
+                    agent=data.get('agent', 'unknown'),
+                    skill=data.get('skill', 'general'),
+                    thought=data.get('thought', {})
+                )
+                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
         if path == '/api/thoughts/add':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
