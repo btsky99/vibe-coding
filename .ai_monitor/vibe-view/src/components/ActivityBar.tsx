@@ -37,9 +37,13 @@ interface ActivityBarProps {
   mcpCount: number;
   isThinking?: boolean;
   isAgentRunning?: boolean;
-  // 글로벌 엔진 상태 (추가)
+  // 글로벌 엔진 상태 — ActivityBar 최상단 HiveEngineStatus 영역에 표시
   globalPipelineStage?: string;
   hiveHealth?: any;
+  // App.tsx에서 파생된 자가 치유 활성 여부 (hiveHealth에서 내부 계산과 동일)
+  isHealingActive?: boolean;
+  // 엔진 인디케이터 클릭 시 agent 탭으로 직접 이동 (App.tsx 상태 직접 조작용)
+  onNavigateToAgent?: () => void;
 }
 
 export default function ActivityBar({
@@ -52,7 +56,9 @@ export default function ActivityBar({
   isThinking = false,
   isAgentRunning = false,
   globalPipelineStage = 'idle',
-  hiveHealth = null
+  hiveHealth = null,
+  isHealingActive: _isHealingActive = false,
+  onNavigateToAgent,
 }: ActivityBarProps) {
 
   // 각 버튼 공통 스타일 (활성 시 왼쪽 보더 + 배경 강조)
@@ -67,7 +73,7 @@ export default function ActivityBar({
     <div className="w-12 h-full bg-[#333333] border-r border-black/40 flex flex-col items-center py-2 gap-4 shrink-0 overflow-y-auto overflow-x-hidden no-scrollbar">
 
       {/* 🧠 HIVE 엔진 통합 상태 인디케이터 (최상단 고정) */}
-      <div className="flex flex-col items-center gap-1 py-2 mb-2 relative group cursor-pointer" onClick={() => onTabChange('agent')}>
+      <div className="flex flex-col items-center gap-1 py-2 mb-2 relative group cursor-pointer" onClick={() => onNavigateToAgent ? onNavigateToAgent() : onTabChange('agent')}>
         <div className="relative p-1.5 rounded-xl bg-black/20 border border-white/5 group-hover:border-primary/50 transition-colors">
           <Zap className={`w-6 h-6 ${isAgentRunning ? 'text-primary animate-pulse' : 'text-textMuted'}`} />
 

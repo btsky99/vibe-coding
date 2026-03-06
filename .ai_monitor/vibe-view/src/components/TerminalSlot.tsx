@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-07 Claude: 모니터링 뷰 슬림화 — max-h 280px→160px, 헤더 h-6→h-5로 축소.
+ *                      파이프라인 단계 표시는 ActivityBar LED 링으로 통합 완료.
  * - 2026-03-01 Claude: App.tsx에서 독립 컴포넌트로 분리. constants.ts의 공유 상수 사용.
  * - 2026-03-05 Claude: 파일 뷰어 제거 → 자율 에이전트 모니터링 뷰로 교체.
  *                      showActiveFile → showMonitor, 파일 fetch 로직 완전 삭제.
@@ -452,10 +454,10 @@ export default function TerminalSlot({
 
           {/* ── 자율 에이전트 모니터링 뷰 (상단 영역, 구 파일뷰어 자리) ── */}
           {showMonitor && (
-            <div className="max-h-[280px] border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 overflow-y-auto custom-scrollbar">
+            <div className="max-h-[160px] border-b border-black/40 bg-[#1a1a1a] flex flex-col shrink-0 overflow-y-auto custom-scrollbar">
 
-              {/* 모니터링 헤더: 에이전트명 + 상태 뱃지 */}
-              <div className="h-6 bg-[#2d2d2d] px-2 flex items-center justify-between shrink-0 border-b border-white/5">
+              {/* 모니터링 헤더: 에이전트명 + 상태 뱃지 (슬림화) */}
+              <div className="h-5 bg-[#2d2d2d] px-2 flex items-center justify-between shrink-0 border-b border-white/5">
                 <div className="flex items-center gap-2">
                   <Activity className="w-3 h-3 text-green-400" />
                   <span className="text-[10px] font-bold text-[#cccccc] uppercase tracking-wider">

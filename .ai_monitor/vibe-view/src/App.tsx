@@ -7,6 +7,8 @@
  *          각 기능 영역은 독립 컴포넌트(TopMenuBar, ActivityBar, FileExplorer,
  *          MessageComposer, 각 패널)로 분리되어 있습니다.
  * REVISION HISTORY:
+ * - 2026-03-07 Claude: ActivityBar HiveEngineStatus 통합 — globalEngineStage 계산 + hive_health 폴링 추가.
+ *                      agentTerminals에서 최고 우선순위 파이프라인 단계를 추출, ActivityBar LED 링에 연동.
  * - 2026-03-02 Claude: TopMenuBar, ActivityBar, FileExplorer, MessageComposer 분리.
  *                      App.tsx 1303→~430줄로 감소. 상태/로직을 책임 영역별 컴포넌트로 이동.
  * - 2026-03-01 Claude: FileTreeNode, FloatingWindow, TerminalSlot을 독립 컴포넌트 파일로 분리.
@@ -101,8 +103,10 @@ function App() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   // 터미널별 에이전트 파이프라인 상태 — TerminalSlot 모니터링 뷰에 표시
   const [agentTerminals, setAgentTerminals] = useState<Record<string, any>>({});
-  // 하이브 엔진 상태 (자가 치유 등)
+  // 하이브 엔진 상태 (자가 치유 등) — /api/hive/health 폴링으로 수신
   const [hiveHealth, setHiveHealth] = useState<any>(null);
+  // 자가 치유 활성 여부 — hiveHealth에서 파생 (별도 폴링 불필요)
+  const isHealingActive = hiveHealth?.healing_active === true || hiveHealth?.status === 'healing';
 
   // ─── 데이터 스트림 (TerminalSlot + Activity Bar 배지용) ───────────────
   const [logs, setLogs] = useState<LogRecord[]>([]);
@@ -588,6 +592,8 @@ function App() {
           isAgentRunning={isAgentRunning}
           globalPipelineStage={globalPipelineStage}
           hiveHealth={hiveHealth}
+          isHealingActive={isHealingActive}
+          onNavigateToAgent={() => { setActiveTab('agent'); setIsSidebarOpen(true); }}
         />
 
         {/* ── 사이드바 — 탭 패널 + 메시지 작성창 ── */}
