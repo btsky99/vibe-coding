@@ -593,7 +593,6 @@ function App() {
           globalPipelineStage={globalPipelineStage}
           hiveHealth={hiveHealth}
           isHealingActive={isHealingActive}
-          onNavigateToAgent={() => { setActiveTab('agent'); setIsSidebarOpen(true); }}
         />
 
         {/* ── 사이드바 — 탭 패널 + 메시지 작성창 ── */}

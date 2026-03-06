@@ -1192,9 +1192,9 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
               <span className="text-[9px] text-white/15">— 카드 클릭으로 변경</span>
             </div>
 
-            {/* ── T1~T8 모니터링 패널 목록 (1열, TerminalSlot 상단 모니터링 기준) ── */}
+            {/* ── T1~T8 모니터링 패널 목록 (2열 그리드) ── */}
             {/* external=true인 외부 Gemini 세션은 다른 프로젝트이므로 표시 제외 */}
-            <div className="flex flex-col gap-1.5 shrink-0">
+            <div className="grid grid-cols-2 gap-1.5 shrink-0">
               {Array.from({ length: 8 }, (_, i) => `T${i + 1}`).map(tid => {
                 const state: TerminalState = terminals[tid] ?? {
                   status: 'idle', task: '', cli: '', run_id: '', ts: '', last_line: '',

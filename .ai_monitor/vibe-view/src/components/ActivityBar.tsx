@@ -15,7 +15,7 @@
 import {
   Search, Settings, Files,
   MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
-  ExternalLink, LayoutDashboard
+  ExternalLink, LayoutDashboard, Activity
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -42,8 +42,6 @@ interface ActivityBarProps {
   hiveHealth?: any;
   // App.tsx에서 파생된 자가 치유 활성 여부 (hiveHealth에서 내부 계산과 동일)
   isHealingActive?: boolean;
-  // 엔진 인디케이터 클릭 시 agent 탭으로 직접 이동 (App.tsx 상태 직접 조작용)
-  onNavigateToAgent?: () => void;
 }
 
 export default function ActivityBar({
@@ -58,7 +56,6 @@ export default function ActivityBar({
   globalPipelineStage = 'idle',
   hiveHealth = null,
   isHealingActive: _isHealingActive = false,
-  onNavigateToAgent,
 }: ActivityBarProps) {
 
   // 각 버튼 공통 스타일 (활성 시 왼쪽 보더 + 배경 강조)
@@ -73,8 +70,8 @@ export default function ActivityBar({
     <div className="w-12 h-full bg-[#333333] border-r border-black/40 flex flex-col items-center py-2 gap-4 shrink-0 overflow-y-auto overflow-x-hidden no-scrollbar">
 
       {/* 🧠 HIVE 엔진 통합 상태 인디케이터 (최상단 고정) */}
-      <div className="flex flex-col items-center gap-1 py-2 mb-2 relative group cursor-pointer" onClick={() => onNavigateToAgent ? onNavigateToAgent() : onTabChange('agent')}>
-        <div className="relative p-1.5 rounded-xl bg-black/20 border border-white/5 group-hover:border-primary/50 transition-colors">
+      <div className="flex flex-col items-center gap-1 py-2 mb-2 relative group cursor-default">
+        <div className="relative p-1.5 rounded-xl bg-black/20 border border-white/5 transition-colors">
           <Zap className={`w-6 h-6 ${isAgentRunning ? 'text-primary animate-pulse' : 'text-textMuted'}`} />
 
           {/* 🛡️ 자가 치유 엔진 상태 (Live Dot) */}
@@ -181,7 +178,7 @@ export default function ActivityBar({
       </button>
 
       <button onClick={() => onTabChange('hive')} className={tabCls('hive')} title="하이브 진단 / 스킬">
-        <Zap className="w-5 h-5" />
+        <Activity className="w-5 h-5" />
         {orchWarningCount > 0 && (
           <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-orange-500 rounded-full" />
         )}
