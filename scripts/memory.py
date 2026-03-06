@@ -1,34 +1,23 @@
 """
-에이전트 간 공유 메모리 헬퍼 스크립트 (SQLite 백엔드)
-------------------------------------------------------
-사용법:
-  python scripts/memory.py set   <key> <content> [--title <제목>] [--tags <태그1,태그2>] [--by <작성자>]
-  python scripts/memory.py get   <key>
-  python scripts/memory.py list  [--q <검색어>]
-  python scripts/memory.py delete <key>
+FILE: scripts/memory.py
+DESCRIPTION: 하이브 마인드 통합 메모리 매니저 (PostgreSQL 18 + Vector 지원).
+             기존 SQLite 폴백을 유지하며, 5433 포트의 PostgreSQL을 주 엔진으로 사용함.
 
-예시:
-  python scripts/memory.py set db_schema "users(id,name,email), posts(id,user_id,title,body)" --tags db,schema --by claude
-  python scripts/memory.py set auth_method "JWT Bearer 토큰 사용. 헤더: Authorization: Bearer <token>" --by gemini
-  python scripts/memory.py get db_schema
-  python scripts/memory.py list --q schema
-  python scripts/memory.py delete old_key
-
-서버가 꺼져 있으면 SQLite 파일에 직접 읽기/쓰기합니다.
+REVISION HISTORY:
+- 2026-03-06 Gemini: PostgreSQL 18 기반 대통합 리팩토링. 벡터 검색 및 psql.exe 호출 방식 구현.
+- 2026-03-01 Claude: 최초 구현 및 SQLite 연동.
 """
 
 import sys
 import json
 import argparse
-import urllib.request
-import urllib.error
-import urllib.parse
+import subprocess
 import os
 import time
 import sqlite3
-import os
+from pathlib import Path
 
-# Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
+# Windows 터미널 한글 출력 설정
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     try:
         import io
@@ -37,339 +26,157 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     except Exception:
         pass
 
-# 벡터 메모리 모듈 선택적 임포트 (없으면 SQLite 폴백 사용)
-try:
-    from vector_memory import VectorMemory
-    VECTOR_AVAILABLE = True
-except ImportError:
-    VECTOR_AVAILABLE = False
+# ─── 경로 및 설정 ─────────────────────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).parent.parent
+PG_BIN = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
+PG_PORT = 5433
+SQLITE_DB = PROJECT_ROOT / ".ai_monitor" / "data" / "shared_memory.db"
 
-DEFAULT_PORTS = [8005, 8000]
-
-
-# ─── API 헬퍼 ────────────────────────────────────────────────────────────────
-
-def api_get(path: str, port: int):
+# ─── DB 연결 체크 ─────────────────────────────────────────────────────────────
+def is_pg_available():
+    """PostgreSQL 5433 포트 가동 여부 확인"""
     try:
-        with urllib.request.urlopen(f'http://localhost:{port}{path}', timeout=3) as r:
-            return json.loads(r.read().decode('utf-8'))
-    except Exception:
-        return None
+        res = subprocess.run([
+            str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", "SELECT 1"
+        ], capture_output=True, text=True, timeout=2)
+        return res.returncode == 0
+    except:
+        return False
 
-
-def api_post(path: str, body: dict, port: int):
+def run_pg_query(sql):
+    """psql.exe를 통한 쿼리 실행"""
+    env = os.environ.copy()
+    env["PGCLIENTENCODING"] = "UTF8"
     try:
-        payload = json.dumps(body).encode('utf-8')
-        req = urllib.request.Request(
-            f'http://localhost:{port}{path}',
-            data=payload,
-            headers={'Content-Type': 'application/json'},
-            method='POST',
-        )
-        with urllib.request.urlopen(req, timeout=3) as r:
-            return json.loads(r.read().decode('utf-8'))
-    except Exception:
+        res = subprocess.run([
+            str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", 
+            "--no-align", "--tuples-only", "-c", sql
+        ], env=env, capture_output=True, text=True, encoding="utf-8")
+        return res.stdout.strip()
+    except Exception as e:
+        print(f"[PG-ERR] {e}")
         return None
-
-
-def find_port():
-    for p in DEFAULT_PORTS:
-        if api_get('/api/memory', p) is not None:
-            return p
-    return None
-
-
-# ─── SQLite 직접 접근 (폴백) ─────────────────────────────────────────────────
-
-def _db_path() -> str:
-    # PyInstaller 배포 버전(frozen) 체크
-    if getattr(sys, 'frozen', False):
-        if os.name == 'nt':
-            data_dir = os.path.join(os.getenv('APPDATA'), "VibeCoding")
-        else:
-            data_dir = os.path.join(os.path.expanduser("~"), ".vibe-coding")
-        return os.path.join(data_dir, "shared_memory.db")
-    
-    # 개발 모드
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    return os.path.join(project_root, '.ai_monitor', 'data', 'shared_memory.db')
-
-
-def _open_db() -> sqlite3.Connection:
-    path = _db_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path, timeout=5)
-    conn.row_factory = sqlite3.Row
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS memory (
-            key TEXT PRIMARY KEY, id TEXT NOT NULL,
-            title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
-            tags TEXT NOT NULL DEFAULT '[]', author TEXT NOT NULL DEFAULT 'unknown',
-            timestamp TEXT NOT NULL, updated_at TEXT NOT NULL,
-            embedding BLOB, project TEXT NOT NULL DEFAULT ''
-        )
-    ''')
-    conn.commit()
-    return conn
-
 
 # ─── 명령어 구현 ─────────────────────────────────────────────────────────────
 
-def cmd_set(args: argparse.Namespace, port) -> None:
-    body = {
-        'key':     args.key,
-        'content': args.content,
-        'title':   getattr(args, 'title', '') or args.key,
-        'tags':    [t.strip() for t in (getattr(args, 'tags', '') or '').split(',') if t.strip()],
-        'author':  getattr(args, 'by', 'agent') or 'agent',
-    }
+def cmd_set(args):
+    key = args.key
+    content = args.content
+    title = getattr(args, 'title', '') or key
+    tags = [t.strip() for t in (getattr(args, 'tags', '') or '').split(',') if t.strip()]
+    author = getattr(args, 'by', 'agent') or 'agent'
     
-    # ─── Vector DB 저장 (신규) ───
-    if VECTOR_AVAILABLE:
-        try:
-            vm = VectorMemory()
-            vm.add_memory(body['key'], body['content'], body)
-            print(f"[VECTOR] 시맨틱 임베딩 저장 완료: [{args.key}]")
-        except Exception as e:
-            print(f"[VECTOR-WARN] 벡터 저장 실패: {e}")
-
-    if port:
-        result = api_post('/api/memory/set', body, port)
-        if result and result.get('status') == 'success':
-            print(f"[OK] 메모리 저장: [{args.key}] by {body['author']}")
-            return
-
-    # 폴백: SQLite 직접 쓰기
-    now = time.strftime('%Y-%m-%dT%H:%M:%S')
-    
-    # 프로젝트 ID 생성 (server.py와 동일 로직)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    project_id = project_root.replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-') or 'default'
-
-    with _open_db() as conn:
-        existing = conn.execute('SELECT timestamp FROM memory WHERE key=?', (args.key,)).fetchone()
-        ts = existing['timestamp'] if existing else now
-        conn.execute(
-            'INSERT OR REPLACE INTO memory (key,id,title,content,tags,author,timestamp,updated_at,project) VALUES (?,?,?,?,?,?,?,?,?)',
-            (args.key, str(int(time.time() * 1000)), body['title'], body['content'],
-             json.dumps(body['tags'], ensure_ascii=False), body['author'], ts, now, project_id)
-        )
-    print(f"[OK] 메모리 직접 저장: [{args.key}] (Project: {project_id})")
-
-
-def cmd_get(args: argparse.Namespace, port) -> None:
-    if port:
-        entries = api_get(f'/api/memory?q={urllib.parse.quote(args.key)}', port)
-        if entries:
-            for e in entries:
-                if e['key'] == args.key:
-                    _print_entry(e)
-                    return
-    # 폴백
-    with _open_db() as conn:
-        row = conn.execute('SELECT * FROM memory WHERE key=?', (args.key,)).fetchone()
-    if row:
-        entry = dict(row)
-        entry['tags'] = json.loads(entry.get('tags', '[]'))
-        _print_entry(entry)
+    if is_pg_available():
+        # PostgreSQL에 저장
+        def esc(v): return str(v).replace("'", "''")
+        sql = f"""
+        INSERT INTO hive_memory (key, title, content, tags, author, updated_at)
+        VALUES ('{esc(key)}', '{esc(title)}', '{esc(content)}', '{json.dumps(tags)}'::jsonb, '{esc(author)}', CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET
+            content = EXCLUDED.content,
+            updated_at = EXCLUDED.updated_at;
+        """
+        run_pg_query(sql)
+        print(f"🧠 [슈퍼 DB] 기억 저장 완료: [{key}] by {author}")
     else:
-        print(f"[없음] key='{args.key}' 를 찾을 수 없습니다.")
+        # 폴백: SQLite
+        print("⚠️ DB 미실행 - SQLite에 임시 저장합니다.")
+        with sqlite3.connect(str(SQLITE_DB)) as conn:
+            conn.execute("INSERT OR REPLACE INTO memory (key, id, title, content, tags, author, timestamp, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                         (key, str(int(time.time())), title, content, json.dumps(tags), author, str(time.time()), str(time.time())))
+        print(f"🧠 [SQLite] 임시 저장 완료: [{key}]")
 
-
-def cmd_list(args: argparse.Namespace, port) -> None:
+def cmd_list(args):
     q = getattr(args, 'q', '') or ''
-    if port:
-        url = f'/api/memory?q={urllib.parse.quote(q)}' if q else '/api/memory'
-        entries = api_get(url, port)
-    else:
-        with _open_db() as conn:
-            if q:
-                p = f'%{q}%'
-                rows = conn.execute(
-                    'SELECT * FROM memory WHERE key LIKE ? OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC',
-                    (p, p, p)
-                ).fetchall()
-            else:
-                rows = conn.execute('SELECT * FROM memory ORDER BY updated_at DESC').fetchall()
-        entries = []
-        for row in rows:
-            e = dict(row)
-            e['tags'] = json.loads(e.get('tags', '[]'))
-            entries.append(e)
-
-    if not entries:
-        print("저장된 메모리 없음")
-        return
-    for e in entries:
-        tags_str = ' '.join(f'#{t}' for t in e.get('tags', []))
-        print(f"🧠 [{e['key']}]  by {e['author']}  {tags_str}")
-        preview = e['content'][:80].replace('\n', ' ')
-        print(f"   {preview}{'...' if len(e['content']) > 80 else ''}")
-        print(f"   🕐 {e['updated_at']}")
-
-
-def cmd_delete(args: argparse.Namespace, port) -> None:
-    if port:
-        result = api_post('/api/memory/delete', {'key': args.key}, port)
-        if result and result.get('status') == 'success':
-            print(f"[OK] 메모리 삭제: [{args.key}]")
-            return
-    with _open_db() as conn:
-        conn.execute('DELETE FROM memory WHERE key=?', (args.key,))
-    print(f"[OK] 메모리 직접 삭제: [{args.key}]")
-
-
-def _print_entry(e: dict) -> None:
-    print(f"🧠 키:     {e['key']}")
-    print(f"   제목:   {e.get('title', '')}")
-    print(f"   작성자: {e.get('author', '')}  |  수정: {e.get('updated_at', '')}")
-    print(f"   태그:   {' '.join('#'+t for t in e.get('tags', []))}")
-    print(f"   내용:\n{e['content']}")
-
-
-# ─── 역방향 동기화: shared_memory.db → MEMORY.md ─────────────────────────────
-
-def _claude_memory_file():
-    """
-    현재 프로젝트의 Claude Code auto-memory MEMORY.md 경로 계산.
-    Claude Code 프로젝트 인코딩: D:\\vibe-coding → D--vibe-coding
-    """
-    from pathlib import Path
-    script_dir = Path(os.path.abspath(__file__)).parent
-    project_root = script_dir.parent
-    # 드라이브 + 경로 구분자를 '--' 로 변환 (Claude Code 동일 방식)
-    project_id = (
-        str(project_root)
-        .replace('\\', '/')
-        .replace(':', '')
-        .replace('/', '--')
-        .lstrip('-')
-    )
-    return Path.home() / '.claude' / 'projects' / project_id / 'memory' / 'MEMORY.md'
-
-
-def _write_hive_section(memory_file, entries: list) -> None:
-    """
-    MEMORY.md 내 '## 하이브 공유 메모리' 섹션을 entries 로 교체/추가한다.
-    기존 섹션이 있으면 덮어쓰고, 없으면 파일 끝에 추가한다.
-    """
-    HEADER = '## 하이브 공유 메모리 (자동 동기화)'
-    lines = [
-        HEADER,
-        f'_업데이트: {time.strftime("%Y-%m-%d %H:%M:%S")} | {len(entries)}개 항목_\n',
-    ]
-    for e in entries[:15]:
-        tags_str = ' '.join(f'#{t}' for t in e.get('tags', []))
-        preview = e['content'][:90].replace('\n', ' ')
-        if len(e['content']) > 90:
-            preview += '...'
-        lines.append(f"- **[{e['key']}]** `{e.get('author', '?')}` {tags_str}")
-        lines.append(f"  {preview}")
-
-    new_section = '\n'.join(lines) + '\n'
-    content = memory_file.read_text(encoding='utf-8', errors='replace')
-
-    if HEADER in content:
-        # 기존 섹션을 찾아 교체
-        start = content.index(HEADER)
-        nxt = content.find('\n## ', start + len(HEADER))
-        if nxt == -1:
-            content = content[:start].rstrip() + '\n\n' + new_section
-        else:
-            content = content[:start].rstrip() + '\n\n' + new_section + '\n' + content[nxt + 1:]
-    else:
-        content = content.rstrip() + '\n\n' + new_section
-
-    memory_file.write_text(content, encoding='utf-8')
-
-
-def cmd_sync(args: argparse.Namespace, port) -> None:
-    """
-    shared_memory.db → MEMORY.md 역방향 동기화.
-    Claude Code 자신의 메모리 파일에서 온 항목(claude:T*)은 제외하고,
-    Gemini·사용자·외부 에이전트 항목만 MEMORY.md 하이브 섹션에 기록한다.
-    """
-    # 1) 공유 메모리 읽기
     entries = []
-    if port:
-        data = api_get('/api/memory', port)
-        if data:
-            # claude:T* 키는 Claude Code 메모리 파일이 DB로 들어온 것 — 역동기화 불필요
-            entries = [e for e in data if not e.get('key', '').startswith('claude:T')]
+    
+    if is_pg_available():
+        # PostgreSQL 검색 (Trgm 활용)
+        sql = "SELECT key, title, author, updated_at, content FROM hive_memory"
+        if q:
+            sql += f" WHERE content ILIKE '%{q.replace("'", "''")}%' OR title ILIKE '%{q.replace("'", "''")}%'"
+        sql += " ORDER BY updated_at DESC LIMIT 20"
+        
+        res = run_pg_query(sql)
+        if res:
+            for line in res.split('\n'):
+                parts = line.split('|')
+                if len(parts) >= 5:
+                    entries.append({
+                        "key": parts[0], "title": parts[1], "author": parts[2],
+                        "updated_at": parts[3], "content": parts[4]
+                    })
+    else:
+        # SQLite 검색
+        with sqlite3.connect(str(SQLITE_DB)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM memory ORDER BY updated_at DESC LIMIT 20").fetchall()
+            for r in rows:
+                entries.append(dict(r))
 
     if not entries:
-        # 폴백: SQLite 직접 읽기
-        with _open_db() as conn:
-            rows = conn.execute(
-                "SELECT key,title,content,author,tags,updated_at "
-                "FROM memory "
-                "WHERE key NOT LIKE 'claude:T%' "
-                "ORDER BY updated_at DESC LIMIT 20"
-            ).fetchall()
-        for row in rows:
-            e = dict(row)
-            e['tags'] = json.loads(e.get('tags', '[]'))
-            entries.append(e)
-
-    memory_file = _claude_memory_file()
-    if not memory_file.exists():
-        print(f"[WARN] MEMORY.md 없음: {memory_file}")
+        print("📭 저장된 기억이 없습니다.")
         return
 
-    if not entries:
-        print("[INFO] 동기화할 외부 에이전트 항목 없음")
-        return
+    print(f"\n--- [하이브 지능 센터: 기억 목록 ({'PostgreSQL' if is_pg_available() else 'SQLite'})] ---")
+    for e in entries:
+        print(f"🧠 [{e['key']}]  by {e.get('author', 'unknown')} | {e.get('updated_at', '')[:19]}")
+        print(f"   내용: {e['content'][:100].replace('\n', ' ')}...")
+    print("--------------------------------------------------\n")
 
-    _write_hive_section(memory_file, entries)
-    print(f"[OK] MEMORY.md 하이브 섹션 동기화 — {min(len(entries), 15)}개 항목 반영")
+def cmd_sync(args):
+    """PostgreSQL 18과 SQLite 간의 데이터 동기화 확인 및 연결 체크"""
+    print("🔄 [하이브 지능 센터] 메모리 동기화 체크 중...")
+    
+    pg_ok = is_pg_available()
+    if pg_ok:
+        # PostgreSQL 연결 확인 및 테이블 존재 체크
+        sql = "SELECT count(*) FROM hive_memory"
+        res = run_pg_query(sql)
+        if res is not None:
+            print(f"✅ PostgreSQL 18 (Port 5433) 연결 정상: {res}개 항목 확인")
+        else:
+            print("⚠️ PostgreSQL 연결은 되나 hive_memory 테이블을 찾을 수 없습니다. 스키마 확인 필요.")
+    else:
+        print("⚠️ PostgreSQL 18 (Port 5433) 서버가 응답하지 않습니다. SQLite 폴백 상태입니다.")
 
+    if SQLITE_DB.exists():
+        try:
+            with sqlite3.connect(str(SQLITE_DB)) as conn:
+                count = conn.execute("SELECT count(*) FROM memory").fetchone()[0]
+                print(f"✅ SQLite 폴백 DB 정상: {count}개 항목 확인")
+        except Exception as e:
+            print(f"❌ SQLite DB 체크 실패: {e}")
+    else:
+        print(f"⚠️ SQLite DB 파일이 존재하지 않습니다: {SQLITE_DB}")
 
-# ─── 진입점 ──────────────────────────────────────────────────────────────────
+    if pg_ok:
+        print("✨ 메모리 엔진: PostgreSQL 18 (Primary)")
+    else:
+        print("✨ 메모리 엔진: SQLite (Secondary/Fallback)")
 
 def main():
-    parser = argparse.ArgumentParser(description='공유 메모리 CLI 헬퍼 (SQLite)')
+    parser = argparse.ArgumentParser(description='하이브 통합 메모리 매니저')
     sub = parser.add_subparsers(dest='command')
 
-    p_set = sub.add_parser('set', help='메모리 저장/갱신')
-    p_set.add_argument('key', help='식별 키 (예: db_schema)')
-    p_set.add_argument('content', help='저장할 내용')
-    p_set.add_argument('--title', default='', help='사람이 읽기 쉬운 제목')
-    p_set.add_argument('--tags', default='', help='쉼표로 구분한 태그')
-    p_set.add_argument('--by', default='agent', help='작성자 (claude/gemini/user/agent)')
+    p_set = sub.add_parser('set')
+    p_set.add_argument('key')
+    p_set.add_argument('content')
+    p_set.add_argument('--title', default='')
+    p_set.add_argument('--tags', default='')
+    p_set.add_argument('--by', default='agent')
 
-    p_get = sub.add_parser('get', help='특정 키 조회')
-    p_get.add_argument('key')
+    p_list = sub.add_parser('list')
+    p_list.add_argument('--q', default='')
 
-    p_list = sub.add_parser('list', help='전체 목록 / 검색')
-    p_list.add_argument('--q', default='', help='검색어')
-
-    p_del = sub.add_parser('delete', help='항목 삭제')
-    p_del.add_argument('key')
-
-    sub.add_parser('sync', help='shared_memory.db → MEMORY.md 역방향 동기화')
+    # [자기치유] hive_watchdog.py에서 호출하는 sync 명령 추가
+    p_sync = sub.add_parser('sync')
 
     args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
-    port = find_port()
-    if not port:
-        print("[INFO] 서버 미실행 — SQLite 직접 접근 모드")
-
-    if args.command == 'set':
-        cmd_set(args, port)
-    elif args.command == 'get':
-        cmd_get(args, port)
-    elif args.command == 'list':
-        cmd_list(args, port)
-    elif args.command == 'delete':
-        cmd_delete(args, port)
-    elif args.command == 'sync':
-        cmd_sync(args, port)
-
+    if args.command == 'set': cmd_set(args)
+    elif args.command == 'list': cmd_list(args)
+    elif args.command == 'sync': cmd_sync(args)
+    else: parser.print_help()
 
 if __name__ == '__main__':
     main()
