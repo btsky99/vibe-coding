@@ -72,6 +72,10 @@ export default function TerminalSlot({
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
 
+  // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
+  // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
+
   // 자율 에이전트 모니터링 뷰 표시 여부 — localStorage에서 마지막 상태 복원 (기본값: false)
   // 기본값 false: 터미널 화면 최대 확보, 필요 시 버튼으로 토글
   const [showMonitor, setShowMonitor] = useState<boolean>(() => {
@@ -179,17 +183,11 @@ export default function TerminalSlot({
         }
       });
 
-      // 터미널 우클릭 시 클립보드 내용 붙여넣기
-      xtermRef.current.addEventListener('contextmenu', async (e) => {
+      // 터미널 우클릭: 컨텍스트 메뉴 표시
+      // 텍스트 선택 유무를 메뉴 state에 전달 → JSX에서 복사/붙여넣기 버튼 구성
+      xtermRef.current.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        try {
-          const text = await navigator.clipboard.readText();
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(text);
-          }
-        } catch (err) {
-          console.error('Failed to paste from clipboard', err);
-        }
+        setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() });
       });
 
       // ref에 저장하여 모니터링 뷰 토글 시에도 fit() 호출 가능하게
@@ -227,6 +225,14 @@ export default function TerminalSlot({
       return () => window.removeEventListener('resize', handleResize);
     }, 50);
   };
+
+  // 컨텍스트 메뉴가 열려 있을 때 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [ctxMenu]);
 
   // 모니터링 뷰 토글 시 xterm 터미널 크기 재조정
   // ResizeObserver가 주 역할이며, 이 타이머는 폴백으로 이중 호출해 안정성 확보
@@ -645,6 +651,46 @@ export default function TerminalSlot({
 
           {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
           <div className="flex-1 relative min-h-0 overflow-hidden"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
+
+          {/* 터미널 우클릭 컨텍스트 메뉴 — 복사(선택 있을 때) / 붙여넣기(선택 없을 때) */}
+          {ctxMenu && (
+            <div
+              className="fixed z-[9999] bg-[#2d2d2d] border border-white/20 rounded shadow-xl text-xs text-white min-w-[120px] py-1"
+              style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              onMouseLeave={() => setCtxMenu(null)}
+            >
+              {ctxMenu.hasSelection && (
+                <button
+                  className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+                  onClick={async () => {
+                    try {
+                      if (termRef.current) {
+                        await navigator.clipboard.writeText(termRef.current.getSelection());
+                        termRef.current.clearSelection();
+                      }
+                    } catch (err) { console.error(err); }
+                    setCtxMenu(null);
+                  }}
+                >
+                  복사
+                </button>
+              )}
+              <button
+                className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(text);
+                    }
+                  } catch (err) { console.error(err); }
+                  setCtxMenu(null);
+                }}
+              >
+                붙여넣기
+              </button>
+            </div>
+          )}
 
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
