@@ -1,5 +1,25 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-03-07] - v3.7.9 (윈도우 네이티브 미션 컨트롤 고도화)
+
+### 🛰️ Windows Native Mission Control (CMUX 스타일)
+
+- **[Feature] 윈도우 네이티브 관제 센터 (mission_control.py)**:
+    - PySide6 기반의 고성능 시스템 트레이 위젯 및 사이드바 HUD 구축.
+    - 웹 브라우저 없이 윈도우 OS에서 직접 구동되는 하이브리드 관제 환경.
+- **[Feature] CMUX 스타일 상태 링 (mission_control_ui.py)**:
+    - 에이전트 활동 상태(Gemini/Claude)를 실시간으로 시각화하는 펄싱 링 위젯.
+    - 화면 우측에서 슬라이드인(Slide-in)되는 반투명 HUD 인터페이스.
+- **[Feature] 실시간 로그 테일링 (Hive Log Stream)**:
+    - `task_logs.jsonl` 파일을 실시간으로 감시하여 사이드바에 즉각 로그 출력.
+    - 에이전트 간의 통신과 작업 내역을 터미널 밖에서도 관제 가능.
+- **[Feature] 트레이 아이콘 펄스 (Status Pulse)**:
+    - 에이전트가 '생각 중'일 때 트레이 아이콘에 화려한 색상 펄스 애니메이션 적용.
+    - 아이콘 툴팁을 통해 현재 어떤 에이전트가 어떤 작업을 하는지 즉시 확인.
+- **[Improvement] 터미널 통합 상태바 (terminal_status.py)**:
+    - `rich.live`를 활용하여 터미널 내부에서도 에이전트 상태를 요약 표시.
+    - `run_vibe.bat` 실행 시 서버와 관제 센터가 동시에 백그라운드 자동 기동.
+
 ## [2026-03-06] - v3.7.8 (자율 에이전트 고도화 Phase 6)
 
 ### 🤖 자율 에이전트 3종 고도화

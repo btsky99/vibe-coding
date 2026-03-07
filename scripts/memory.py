@@ -35,10 +35,12 @@ SQLITE_DB = PROJECT_ROOT / ".ai_monitor" / "data" / "shared_memory.db"
 # ─── DB 연결 체크 ─────────────────────────────────────────────────────────────
 def is_pg_available():
     """PostgreSQL 5433 포트 가동 여부 확인"""
+    # CREATE_NO_WINDOW: 백그라운드에서 호출 시 콘솔 창 팝업 방지
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         res = subprocess.run([
             str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", "SELECT 1"
-        ], capture_output=True, text=True, timeout=2)
+        ], capture_output=True, text=True, timeout=2, creationflags=_no_window)
         return res.returncode == 0
     except:
         return False
@@ -47,11 +49,13 @@ def run_pg_query(sql):
     """psql.exe를 통한 쿼리 실행"""
     env = os.environ.copy()
     env["PGCLIENTENCODING"] = "UTF8"
+    # CREATE_NO_WINDOW: 백그라운드에서 호출 시 콘솔 창 팝업 방지
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         res = subprocess.run([
-            str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", 
+            str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres",
             "--no-align", "--tuples-only", "-c", sql
-        ], env=env, capture_output=True, text=True, encoding="utf-8")
+        ], env=env, capture_output=True, text=True, encoding="utf-8", creationflags=_no_window)
         return res.stdout.strip()
     except Exception as e:
         print(f"[PG-ERR] {e}")
@@ -134,6 +138,64 @@ def cmd_list(args):
         print(f"   내용: {e['content'][:100].replace('\n', ' ')}...")
     print("--------------------------------------------------\n")
 
+def cmd_get(args):
+    """특정 키의 전체 내용 조회 — 현재 작업 상태 파악용"""
+    key = args.key
+    if is_pg_available():
+        def esc(v): return str(v).replace("'", "''")
+        sql = f"SELECT key, author, updated_at, content FROM hive_memory WHERE key = '{esc(key)}' LIMIT 1;"
+        res = run_pg_query(sql)
+        if res:
+            parts = res.split('|', 3)
+            if len(parts) >= 4:
+                print(f"🧠 [{parts[0]}] by {parts[1]} | {parts[2][:19]}")
+                print(parts[3])
+            else:
+                print(res)
+        else:
+            print(f"📭 키 없음: {key}")
+    else:
+        with sqlite3.connect(str(SQLITE_DB)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM memory WHERE key=?", (key,)).fetchone()
+            if row:
+                print(f"🧠 [{row['key']}] by {row.get('author','?')} | {row.get('updated_at','')[:19]}")
+                print(row['content'])
+            else:
+                print(f"📭 키 없음: {key}")
+
+def cmd_sync(args):
+    """SQLite → PostgreSQL 동기화. hive_watchdog에서 주기적으로 호출됨."""
+    if not is_pg_available():
+        print("⚠️ PostgreSQL 미실행 — sync 건너뜀")
+        return
+    # SQLite에 있는 항목을 PostgreSQL로 마이그레이션
+    migrated = 0
+    try:
+        with sqlite3.connect(str(SQLITE_DB)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM memory ORDER BY updated_at ASC").fetchall()
+        for r in rows:
+            def esc(v): return str(v or '').replace("'", "''")
+            tags = r['tags'] if r['tags'] else '[]'
+            try:
+                json.loads(tags)
+            except Exception:
+                tags = '[]'
+            r = dict(r)
+            sql = f"""
+            INSERT INTO hive_memory (key, title, content, tags, author, updated_at)
+            VALUES ('{esc(r["key"])}', '{esc(r.get("title",""))}', '{esc(r["content"])}',
+                    '{tags}'::jsonb, '{esc(r.get("author","agent"))}', CURRENT_TIMESTAMP)
+            ON CONFLICT (key) DO NOTHING;
+            """
+            run_pg_query(sql)
+            migrated += 1
+        print(f"✅ [sync] SQLite→PG 동기화 완료: {migrated}건")
+    except Exception as e:
+        print(f"❌ [sync] 오류: {e}")
+        sys.exit(1)
+
 # ── PGMQ (메시지 큐) 지원 ───────────────────────────────────────────────
 
 def cmd_q(args):
@@ -178,6 +240,9 @@ def main():
     p_list = sub.add_parser('list')
     p_list.add_argument('--q', default='')
 
+    p_get = sub.add_parser('get')
+    p_get.add_argument('key')
+
     # [자기치유] hive_watchdog.py에서 호출하는 sync 명령 추가
     p_sync = sub.add_parser('sync')
 
@@ -190,6 +255,7 @@ def main():
     args = parser.parse_args()
     if args.command == 'set': cmd_set(args)
     elif args.command == 'list': cmd_list(args)
+    elif args.command == 'get': cmd_get(args)
     elif args.command == 'sync': cmd_sync(args)
     elif args.command == 'q': cmd_q(args)
     else: parser.print_help()

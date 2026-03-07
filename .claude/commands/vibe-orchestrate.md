@@ -37,24 +37,30 @@ REVISION HISTORY:
 
 ---
 
-## 0단계: 하이브 컨텍스트 로드 (필수 — 가장 먼저)
+## 0단계: 하이브 컨텍스트 로드 + Worktree 격리 (필수 — 가장 먼저)
 
 ```bash
 # 공유 메모리에서 기술 결정 사항 로드
 python scripts/memory.py list
 
+# [NEW] Git Worktree 격리 — 내 슬롯의 worktree 확인 및 자동 생성
+# 각 에이전트는 독립된 Git worktree에서 작업하여 파일 충돌 구조적 차단
+python scripts/worktree_manager.py status
+# 슬롯이 없으면 생성:
+# python scripts/worktree_manager.py setup T1
+
 # Phase 2: 수정 예정 파일에 대한 충돌(LOCK) 감지
-# check_conflict()는 messages.jsonl 최근 20줄에서 다른 에이전트의 LOCK을 자동 탐지
 python -c "
 import sys; sys.path.insert(0, 'scripts')
 from hive_bridge import check_conflict
-# 예시 — 실제 수정 파일명으로 교체:
-# conflict = check_conflict('수정할파일.py', my_agent='Claude')
-# if conflict: print(f'[경고] {conflict}가 작업 중! 조율 필요')
 print('[OK] 충돌 없음 — 작업 진행 가능')
 "
+
+# [NEW] 이전 완료 신호 초기화 (새 작업 시작 전)
+python scripts/completion_guard.py reset --slot T1
 ```
 
+- **Worktree 격리**: 슬롯별 독립 worktree → 파일 충돌 0% (Harness 방식)
 - **충돌 감지**: 수정할 파일을 다른 에이전트가 작업 중이면 → 조율 우선
 - **경고/충돌** 있으면 해당 에이전트 태스크 정리 후 진행
 - ai_monitor_plan.md 확인하여 기존 계획 이어서 진행 여부 판단
@@ -161,6 +167,10 @@ python -c "import sys; sys.path.insert(0,'scripts'); from hive_bridge import unl
 ```bash
 # 전체 완료 처리
 python scripts/skill_orchestrator.py done
+
+# [NEW] Completion Guard — 완료 신호 전송 (다른 에이전트가 루프 중단 가능)
+# --summary 에 핵심 결과를 한 줄로 요약해서 전달
+python scripts/completion_guard.py done --slot T1 --summary "[완료] <핵심 결과 한 줄 요약>"
 ```
 
 ### 사후 처리 (자동 수행)
@@ -199,9 +209,9 @@ python scripts/skill_orchestrator.py done
 
 ---
 
-## 🔄 자기치유 감지 패턴 (자동 업데이트: 2026-03-06 22:46)
+## 🔄 자기치유 감지 패턴 (자동 업데이트: 2026-03-06 22:51)
 
 > 워치독이 `task_logs.jsonl`에서 자동 감지한 반복 요청 패턴입니다.
 > 이 패턴들을 인지하고 작업 시 우선적으로 고려하세요.
 
-- **`그럼`** (4회 반복): '그럼' 관련 요청이 4회 반복되었습니다. 이 패턴을 스킬에 등록하면 다음 에이전트가 즉시 활용 가능합니다.
+- **`rgb`** (6회 반복): 'rgb' 관련 요청이 6회 반복되었습니다. 이 패턴을 스킬에 등록하면 다음 에이전트가 즉시 활용 가능합니다.

@@ -170,10 +170,21 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     else:
         cmd = ['gemini', '-p', task]
 
+    # 중복 세션 에러 방지: CLAUDECODE 관련 환경 변수 제거
+    # VIBE_CHILD_AGENT=1: 자식 claude -p 세션에서 hook_bridge.py가 또 실행되어
+    # 서버 API를 재호출하는 이중 실행 루프 방지
+    env = os.environ.copy()
+    env.pop('CLAUDECODE', None)
+    env.pop('CLAUDE_CODE_ENTRYPOINT', None)
+    env.pop('CLAUDE_CODE_SSE_PORT', None)
+    env['VIBE_CHILD_AGENT'] = '1'
+
     kw = {}
     use_shell = False
     if os.name == 'nt':
-        kw['creationflags'] = subprocess.CREATE_NO_WINDOW
+        # DETACHED_PROCESS 추가: shell=True 시 생성되는 cmd.exe가 CREATE_NO_WINDOW만으로는
+        # 순간 깜빡이는 현상 발생. cli_agent.py, hook_bridge.py, terminal_agent.py와 동일하게 적용.
+        kw['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
         use_shell = True
         cmd = subprocess.list2cmdline(cmd)
 
@@ -187,6 +198,7 @@ def run_agent(task, cli='auto', terminal_id='T?'):
             shell=use_shell,
             bufsize=0,
             cwd=str(_ROOT),
+            env=env,
             **kw,
         )
         _active_proc = proc

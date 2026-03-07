@@ -18,6 +18,9 @@
 - **`scripts/auto_release.py`**: [Step 4] 빌드, 패키징, 릴리즈 자동화(Autonomous Release) 엔진.
 
 ## 🛰️ 하이브 마인드 및 오케스트레이션 (Hive Mind Core)
+- **`.ai_monitor/mission_control.py`**: [Windows Native] CMUX 스타일 시스템 트레이 및 HUD 관제 센터.
+- **`.ai_monitor/mission_control_ui.py`**: [Windows Native] 슬라이드인 사이드바 HUD (에이전트 상태 링).
+- **`scripts/terminal_status.py`**: 터미널 내부 실시간 상태 표시줄 (rich.live 기반).
 - **`scripts/hive_bridge.py`**: [Postgres-First] 작업/사고 로그 통합 전송 브릿지.
 - **`scripts/orchestrator.py`**: 하이브 마스터 조율기. 사고 과정(Thought) JSONB 기록.
 - **`scripts/analyze_hive.py`**: Postgres 데이터를 분석하여 하이브 상태 분석 보고서 생성.

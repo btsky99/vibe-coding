@@ -87,7 +87,8 @@ import socket
 from pathlib import Path
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
-PG_BIN = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
+# [수정] PROJECT_ROOT가 아래(180번줄)에서 정의되므로, server.py 위치 기준으로 직접 경로 산출
+PG_BIN = Path(__file__).resolve().parent / "bin" / "pgsql" / "bin" / "psql.exe"
 PG_PORT = 5433
 
 def run_pg_sql(sql: str, db: str = "postgres"):
@@ -1099,8 +1100,9 @@ def _parse_gemini_session(path: Path):
 
 # 정적 파일 경로 결정 (PyInstaller 배포 환경 대응 최적화)
 if getattr(sys, 'frozen', False):
-    # PyInstaller로 빌드된 경우, dist 폴더는 보통 _MEIPASS 직하에 위치하도록 패키징함
-    STATIC_DIR = (BASE_DIR / "dist").resolve()
+    # [수정] spec에서 'vibe-view/dist'로 패키징하므로 _MEIPASS/vibe-view/dist가 실제 경로
+    # 이전: BASE_DIR / "dist" → _MEIPASS/dist 존재하지 않아 exe_dir/dist(빌드 산출물)로 오탐
+    STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
 else:
     # 개발 환경: 최신 UI인 vibe-view를 우선 확인
     STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
@@ -1915,6 +1917,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
+            params    = parse_qs(parsed_path.query)
             _agent_f  = params.get('agent',       [''])[0].lower()
             _tid_f    = params.get('terminal_id', [''])[0].upper()
             _limit    = int(params.get('limit',   ['20'])[0])
@@ -3629,8 +3632,10 @@ async def pty_handler(websocket):
         # 너무 짧거나 제어 문자로만 이루어진 입력 무시
         if len(instruction) < 4:
             return
-        # claude 터미널은 UserPromptSubmit 훅(hook_bridge.py)이 이미 처리하므로 중복 실행 방지
-        if agent == 'claude':
+        # 에이전트(claude/gemini 등)가 이미 PTY에서 실행 중이면 라우팅 불필요.
+        # PTY 자체가 입력을 처리하므로 cli_agent.py를 추가 spawn하면
+        # 이중 실행 + CMD 창 깜빡임 발생. 빈 셸 터미널에서만 라우팅.
+        if agent:
             return
 
         import threading as _t

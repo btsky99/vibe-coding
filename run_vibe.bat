@@ -6,9 +6,11 @@ set PYTHONW=.ai_monitor\venv\Scripts\pythonw.exe
 
 if exist "%PYTHONW%" (
     start "" "%PYTHONW%" .ai_monitor\server.py
+    start "" "%PYTHONW%" .ai_monitor\mission_control.py
 ) else (
     :: 가상환경이 없을 경우 시스템 pythonw 시도
     start "" pythonw .ai_monitor\server.py
+    start "" pythonw .ai_monitor\mission_control.py
 )
 
 :: 배치 파일 자체를 즉시 종료하여 터미널 창을 없앱니다.

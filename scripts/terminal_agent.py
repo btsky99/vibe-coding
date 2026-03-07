@@ -163,7 +163,10 @@ def _run_direct(task: str, cli: str = 'auto') -> None:
 
     터미널 에이전트 모드에서는 출력이 보여야 하므로 DEVNULL이 아닌 PIPE를 사용합니다.
     """
-    env = {k: v for k, v in os.environ.items() if k != 'CLAUDECODE'}
+    env = os.environ.copy()
+    env.pop('CLAUDECODE', None)
+    env.pop('CLAUDE_CODE_ENTRYPOINT', None)
+    env.pop('CLAUDE_CODE_SSE_PORT', None)
     env['VIBE_AGENT_MODE'] = '1'
 
     use_shell = False

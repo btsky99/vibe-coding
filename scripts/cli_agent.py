@@ -13,6 +13,11 @@
 #   - 키워드 기반 Claude Code / Gemini CLI 자동 선택
 #   - agent_runs.jsonl 실행 히스토리 영구 저장
 #   - CLI 단독 테스트 지원 (python scripts/cli_agent.py "지시내용")
+# [2026-03-07] Claude: [버그수정] OSC/ANSI 이스케이프 시퀀스 필터링 추가
+#   - Claude CLI가 파이프 환경에서도 \x1b]11;rgb:... 배경색 쿼리 시퀀스를 출력
+#   - _ANSI_ESCAPE 정규식으로 CSI/OSC/2바이트 이스케이프 전부 제거 후 UI 전달
+# [2026-03-07] Claude: [버그수정] CREATE_NO_WINDOW | DETACHED_PROCESS 추가
+#   - shell=True 시 cmd.exe 창이 순간 깜빡이는 현상 수정
 # [2026-03-04] Claude: [버그수정] Windows shell=True 환경 '중간 멈춤' 버그 수정
 #   - stop(): terminate()가 cmd.exe만 종료 → 자식(claude.exe)이 stdout 파이프를 붙들어
 #     readline()이 영원히 블로킹되는 문제 수정
@@ -29,6 +34,7 @@
 """
 
 import os
+import re
 import sys
 import json
 import uuid
@@ -37,6 +43,16 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
+
+# ANSI/OSC 이스케이프 시퀀스 필터 — Claude CLI가 파이프 환경에서도 출력하는
+# OSC 배경색 쿼리(\x1b]11;rgb:...)와 CSI 색상 코드(\x1b[...m)를 제거합니다.
+_ANSI_ESCAPE = re.compile(
+    r'\x1b(?:'
+    r'\[[0-?]*[ -/]*[@-~]'   # CSI 시퀀스: \x1b[ ... 종료자
+    r'|\][^\x07\x1b]*(?:\x07|\x1b\\)'  # OSC 시퀀스: \x1b] ... BEL or ST
+    r'|[@-Z\\-_]'            # 2바이트 이스케이프
+    r')'
+)
 
 # ─── 경로 설정 ────────────────────────────────────────────────────────────────
 # 이 스크립트는 scripts/ 폴더에 위치하므로, 데이터 디렉토리는 상위 .ai_monitor/data
@@ -226,8 +242,10 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
     try:
         for raw_line in iter(process.stdout.readline, b''):
             if raw_line:
-                # UTF-8 디코딩 (Windows 환경 cp949 오류 방지)
-                line = raw_line.decode('utf-8', errors='replace').rstrip()
+                # UTF-8 디코딩 후 ANSI/OSC 이스케이프 시퀀스 제거
+                # Claude CLI가 파이프 환경에서도 ]11;rgb:... 등 터미널 색상 코드를
+                # 출력하는 문제가 있어 UI에 노이즈가 생기므로 필터링합니다.
+                line = _ANSI_ESCAPE.sub('', raw_line.decode('utf-8', errors='replace')).rstrip()
                 all_lines.append(line)
                 # 터미널별 마지막 출력 줄 + 파이프라인 단계 업데이트
                 if line.strip():
@@ -338,10 +356,13 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         # Windows 환경: CREATE_NO_WINDOW로 콘솔 창 팝업 방지
         # shell=True: Windows에서 .cmd 확장자(claude.cmd, gemini.cmd 등 npm 설치 CLI)를
         #             PATH에서 찾으려면 shell=True가 필요함. 리스트를 문자열로 변환 필요.
+        # DETACHED_PROCESS 추가 이유: shell=True로 생성되는 cmd.exe가 DETACHED_PROCESS 없이
+        #   CREATE_NO_WINDOW만 사용하면 Windows에서 cmd.exe 창이 순간 깜빡이는 현상 발생.
+        #   hook_bridge.py, terminal_agent.py 등과 동일하게 두 플래그를 함께 사용.
         creationflags = 0
         use_shell = False
         if os.name == 'nt':
-            creationflags = subprocess.CREATE_NO_WINDOW
+            creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
             use_shell = True
             cmd = subprocess.list2cmdline(cmd)  # 리스트 → 문자열 (shell=True용)
 
@@ -356,7 +377,10 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         # 발동되면 hook_bridge.py → cli_agent.py → claude -p → 훅 발동 → ... 무한루프!
         # 해결: 자식 env에 VIBE_CLI_AGENT=1을 심어두면 hook_bridge.py가 이를 감지하고
         #       즉시 종료(exit 0)하여 루프를 차단합니다.
-        child_env = {k: v for k, v in os.environ.items() if k != 'CLAUDECODE'}
+        child_env = os.environ.copy()
+        child_env.pop('CLAUDECODE', None)
+        child_env.pop('CLAUDE_CODE_ENTRYPOINT', None)
+        child_env.pop('CLAUDE_CODE_SSE_PORT', None)
         child_env['VIBE_CHILD_AGENT'] = '1'  # hook_bridge.py 루프 방지 전용 마커
 
         proc = subprocess.Popen(

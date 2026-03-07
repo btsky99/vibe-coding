@@ -29,6 +29,13 @@ REVISION HISTORY:
   - --terminal N 플래그로 터미널별 독립 체인 추적
   - SKILL_REGISTRY 상수로 스킬 번호 전역 관리 (1=debug ~ 7=release)
   - 터미널별 최신 세션만 활성 상태로 노출 (API 응답에 terminals 맵 반환)
+- 2026-03-07 Claude: [버그수정] Ghost 세션 표시 문제 — 3가지 수정:
+  1) cmd_plan()/cmd_reset(): 이전 pending 레코드 skip 시 updated_at 갱신 제거.
+     기존에는 updated_at을 현재 시각으로 갱신하여 오래된 ghost 세션이 "최근 8시간"
+     fallback 쿼리에 계속 노출되는 문제가 있었음.
+  2) _build_response() fallback: HAVING 절 추가 — 모든 step이 skipped인 세션 제외.
+     (이미 updated_at이 갱신된 기존 ghost 레코드에 대한 안전망)
+  3) 의미 있는 세션(done/running/failed step 1개 이상)만 대시보드에 표시.
 - 2026-03-06 Claude: [버그수정] 스테일 체인 표시 문제 — _build_response() 활성 세션 쿼리에
   15분 시간 제한 추가. 프로세스 비정상 종료로 상태 미갱신된 running/pending 레코드가
   대시보드에 영원히 남는 레거시 데이터 오염 현상 수정.
@@ -243,10 +250,12 @@ def cmd_plan(terminal_id: int, request: str, skills: list[str]) -> None:
     conn = _connect()
     try:
         # 해당 터미널의 기존 활성 세션 종료 처리 (덮어쓰기 방지)
+        # [버그수정] updated_at을 현재 시각으로 갱신하지 않음 — 이전 레코드의 타임스탬프를
+        #   갱신하면 오래된 ghost 세션이 "최근" 세션으로 오인되어 대시보드에 계속 노출됩니다.
         conn.execute(
-            "UPDATE skill_chains SET status='skipped', updated_at=? "
+            "UPDATE skill_chains SET status='skipped' "
             "WHERE terminal_id=? AND status IN ('running','pending')",
-            (now, terminal_id)
+            (terminal_id,)
         )
         # 각 스킬을 개별 레코드로 INSERT (agent 컬럼 포함)
         for order, skill_name in enumerate(skills):
@@ -380,13 +389,17 @@ def cmd_done(terminal_id: int) -> None:
 
 
 def cmd_reset(terminal_id: int) -> None:
-    """해당 터미널의 스킬 체인 상태를 초기화합니다 (running/pending → skipped)."""
+    """해당 터미널의 스킬 체인 상태를 초기화합니다 (running/pending → skipped).
+
+    [버그수정] updated_at을 갱신하지 않음 — 타임스탬프 갱신 시 오래된 ghost 세션이
+    "최근 활동" 세션으로 오인되어 대시보드 fallback 쿼리에 계속 노출됩니다.
+    """
     conn = _connect()
     try:
         conn.execute(
-            "UPDATE skill_chains SET status='skipped', updated_at=? "
+            "UPDATE skill_chains SET status='skipped' "
             "WHERE terminal_id=? AND status IN ('running','pending')",
-            (_now(), terminal_id)
+            (terminal_id,)
         )
         conn.commit()
     finally:
@@ -398,13 +411,25 @@ def _build_response() -> dict:
     """API 응답용: 스킬 레지스트리 + 터미널별 최신 세션 반환."""
     conn = _connect()
     try:
+        # ── 스테일 pending 세션 자동 정리 ─────────────────────────────────────
+        # 1시간 이상 업데이트 없는 pending/running 세션 → skipped 처리
+        # (프로세스 비정상 종료로 상태가 갱신되지 않은 좀비 세션 제거)
+        # [중요] updated_at을 변경하지 않음 — 타임스탬프 변경 시 8시간 fallback이
+        #   오래된 스테일 세션을 "최근 데이터"로 오인하여 패널에 표시하는 부작용 방지
+        conn.execute(
+            "UPDATE skill_chains SET status='skipped' "
+            "WHERE status IN ('running', 'pending') "
+            "AND updated_at < datetime('now', '-1 hours', 'localtime')"
+        )
+        conn.commit()
+
         # 터미널별 최신 활성(running/pending) 세션 ID 조회
-        # 15분 이내 업데이트된 세션만 활성으로 간주 — 프로세스 죽어서 상태 미갱신된 스테일 체인 제외
+        # 1시간 이내 업데이트된 세션만 활성으로 간주 — 위에서 이미 정리했으나 경계 케이스 방어용
         active_sessions: dict[int, str] = {}
         rows = conn.execute(
             "SELECT terminal_id, session_id FROM skill_chains "
             "WHERE status IN ('running', 'pending') "
-            "AND updated_at >= datetime('now', '-15 minutes', 'localtime') "
+            "AND updated_at >= datetime('now', '-1 hours', 'localtime') "
             "GROUP BY terminal_id "
             "ORDER BY updated_at DESC"
         ).fetchall()
@@ -413,7 +438,8 @@ def _build_response() -> dict:
             if tid not in active_sessions:
                 active_sessions[tid] = row['session_id']
 
-        # 활성 세션 없는 터미널에 대해 최근 완료 세션 fallback (최근 30분)
+        # 활성 세션 없는 터미널에 대해 최근 완료 세션 fallback (최근 8시간)
+        # [기존 30분 → 8시간] 오늘 작업한 내역이 패널에서 사라지지 않도록 연장
         # [버그수정] active_sessions 빈 경우 NOT IN () 바인딩 오류 방지:
         #   빈 경우 NOT IN 조건 자체를 제거하여 전체 터미널 대상으로 조회
         cutoff = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -425,12 +451,17 @@ def _build_response() -> dict:
         else:
             where_clause = "WHERE "
             params = [cutoff]
+        # [버그수정] all-skipped 세션(ghost session) 제외 — HAVING 절 추가:
+        #   cmd_plan()/cmd_reset()에서 이미 updated_at을 갱신하지 않도록 수정했으나,
+        #   이전 버전의 잔존 ghost 레코드(updated_at이 이미 갱신된 것)에 대한 안전망.
+        #   하나라도 'done'/'running'/'failed' 단계가 있는 세션만 표시 (의미 있는 세션).
         fallback_rows = conn.execute(
             "SELECT terminal_id, session_id, MAX(updated_at) as last_update "
             "FROM skill_chains "
             "{}"
-            "updated_at >= datetime(?, '-30 minutes') "
+            "updated_at >= datetime(?, '-8 hours') "
             "GROUP BY terminal_id, session_id "
+            "HAVING COUNT(CASE WHEN status IN ('done','running','failed') THEN 1 END) > 0 "
             "ORDER BY last_update DESC".format(where_clause),
             params
         ).fetchall()

@@ -134,11 +134,15 @@ class HiveWatchdog:
         self._add_log("🔄 server.py 자동 재시작 시도...")
         try:
             # 새 프로세스로 server.py 실행 (부모 프로세스와 독립)
+            # CREATE_NO_WINDOW: Windows에서 콘솔 창이 팝업되지 않도록 방지
+            # 미설정 시 서버 재시작마다 가시 콘솔 창이 생성되어 무한 창 생성 버그 발생
+            _creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             subprocess.Popen(
                 [sys.executable, str(server_py)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 close_fds=True,
+                creationflags=_creationflags,
             )
             # 3초 대기 후 실제로 응답하는지 확인
             time.sleep(3)
@@ -265,9 +269,13 @@ class HiveWatchdog:
         self._add_log("🔧 메모리 동기화 복구 시도 중...")
         try:
             memory_script = PROJECT_ROOT / "scripts" / "memory.py"
+            # CREATE_NO_WINDOW: 워치독(백그라운드 프로세스)에서 subprocess 실행 시
+            # Windows가 새 콘솔 창을 생성하지 않도록 방지
+            _no_window = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             subprocess.run(
                 [sys.executable, str(memory_script), "sync"],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, check=True,
+                creationflags=_no_window
             )
             self._add_log("✅ 메모리 동기화 완료")
             self.status["memory_sync_ok"] = True  # 성공 시 상태 반영
