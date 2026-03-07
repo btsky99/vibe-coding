@@ -3,17 +3,28 @@
 # 🗺️ 메인 프로젝트 맵: PROJECT_MAP.md
 # 📝 설명: 미션 컨트롤의 사이드바 HUD UI 컴포넌트.
 #          에이전트 상태 링 및 실시간 로그를 시각화합니다.
+#          Codex 에이전트 링 및 NORMAL/YOLO 글로벌 모드 토글 포함.
+#
+# REVISION HISTORY:
+# - 2026-03-07 Claude Sonnet 4.6: Codex 링, 모드 토글 위젯 추가 — Phase 5 Task 12
 # ------------------------------------------------------------------------
 
 import sys
 import json
 import math
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QScrollArea, QFrame, QApplication)
-from PySide6.QtGui import (QColor, QPainter, QBrush, QPen, QFont, 
-                         QLinearGradient, QPainterPath)
-from PySide6.QtCore import (Qt, QPropertyAnimation, QEasingCurve, 
-                          QRect, QTimer, Signal)
+import subprocess
+from pathlib import Path
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                               QScrollArea, QFrame, QApplication, QPushButton)
+from PySide6.QtGui import (QColor, QPainter, QBrush, QPen, QFont,
+                           QLinearGradient, QPainterPath)
+from PySide6.QtCore import (Qt, QPropertyAnimation, QEasingCurve,
+                            QRect, QTimer, Signal)
+
+# 에이전트 런처 경로 (모드 저장/로드에 사용)
+_ROOT = Path(__file__).resolve().parent.parent
+_LAUNCHER = _ROOT / "scripts" / "agent_launcher.py"
+_CONFIG = _ROOT / ".ai_monitor" / "config.json"
 
 class AgentRing(QWidget):
     """CMUX 스타일의 에이전트 상태 링 위젯"""
@@ -102,30 +113,104 @@ class LogEntry(QFrame):
         content.setWordWrap(True)
         layout.addWidget(content)
 
+class ModeToggle(QWidget):
+    """NORMAL / YOLO 글로벌 실행 모드 전환 위젯.
+
+    Why: 사용자가 에이전트를 재시작하지 않고 UI에서 바로 모드를 전환할 수 있어야
+         워크플로우가 끊기지 않습니다. 선택된 모드는 config.json에 즉시 저장됩니다.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(6)
+
+        # 현재 저장된 모드 로드
+        self._current_mode = self._load_mode()
+
+        self.btn_normal = QPushButton("NORMAL")
+        self.btn_yolo = QPushButton("YOLO")
+        for btn in (self.btn_normal, self.btn_yolo):
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
+
+        self.btn_normal.clicked.connect(lambda: self._set_mode("normal"))
+        self.btn_yolo.clicked.connect(lambda: self._set_mode("yolo"))
+
+        layout.addWidget(QLabel("모드:"))
+        layout.addWidget(self.btn_normal)
+        layout.addWidget(self.btn_yolo)
+
+        self._refresh_style()
+
+    def _load_mode(self) -> str:
+        """config.json에서 agent_mode 읽기. 없으면 'normal'."""
+        if _CONFIG.exists():
+            try:
+                with open(_CONFIG, "r", encoding="utf-8") as f:
+                    return json.load(f).get("agent_mode", "normal")
+            except Exception:
+                pass
+        return "normal"
+
+    def _set_mode(self, mode: str) -> None:
+        """모드를 config.json에 저장하고 UI 색상 갱신."""
+        self._current_mode = mode
+        # agent_launcher.py로 저장 (서브프로세스 호출)
+        if _LAUNCHER.exists():
+            subprocess.Popen(
+                [sys.executable, str(_LAUNCHER), "--set-mode", mode],
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+            )
+        else:
+            # 런처가 없으면 직접 파일 수정
+            cfg: dict = {}
+            if _CONFIG.exists():
+                try:
+                    with open(_CONFIG, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                except Exception:
+                    pass
+            cfg["agent_mode"] = mode
+            _CONFIG.parent.mkdir(parents=True, exist_ok=True)
+            with open(_CONFIG, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        self._refresh_style()
+
+    def _refresh_style(self) -> None:
+        """현재 모드에 따라 버튼 강조 스타일 적용."""
+        active = "background-color: #e74c3c; color: white; border-radius: 4px;" if self._current_mode == "yolo" else ""
+        inactive = "background-color: #27ae60; color: white; border-radius: 4px;" if self._current_mode == "normal" else ""
+        self.btn_normal.setStyleSheet(inactive or "background-color: #555; color: #aaa; border-radius: 4px;")
+        self.btn_yolo.setStyleSheet(active or "background-color: #555; color: #aaa; border-radius: 4px;")
+
+
 class MissionControlSidebar(QWidget):
     """슬라이드인 사이드바 HUD"""
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        
+
         # 윈도우 크기 설정 (우측 사이드바)
         screen = QApplication.primaryScreen().geometry()
         self.w = 350
         self.h = screen.height() - 100
         self.setFixedSize(self.w, self.h)
-        
+
         self.is_visible = False
         self.target_x = screen.width() - self.w - 20
         self.hidden_x = screen.width() + 10
         self.move(self.hidden_x, 50)
-        
+
         self.setup_ui()
-        
+
     def setup_ui(self):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         # 배경 컨테이너
         self.container = QFrame()
         self.container.setObjectName("sidebar_container")
@@ -137,25 +222,39 @@ class MissionControlSidebar(QWidget):
             }
         """)
         self.main_layout.addWidget(self.container)
-        
+
         self.content_layout = QVBoxLayout(self.container)
-        
+
         # 상단 타이틀
         title = QLabel("MISSION CONTROL")
         title.setStyleSheet("color: #bdc3c7; font-size: 14pt; font-weight: bold; margin: 10px;")
         title.setAlignment(Qt.AlignCenter)
         self.content_layout.addWidget(title)
-        
-        # 에이전트 링 영역
+
+        # 글로벌 모드 토글 (NORMAL / YOLO)
+        # Why: 사이드바 최상단에 노출하여 현재 실행 모드를 항상 인지할 수 있게 합니다.
+        self.mode_toggle = ModeToggle()
+        self.content_layout.addWidget(self.mode_toggle)
+
+        self.content_layout.addWidget(
+            QFrame(frameShape=QFrame.HLine, styleSheet="background-color: rgba(255,255,255,20);")
+        )
+
+        # 에이전트 링 영역 — Gemini / Claude / Codex
         ring_layout = QHBoxLayout()
         self.gemini_ring = AgentRing("Gemini", "#3498db")
         self.claude_ring = AgentRing("Claude", "#2ecc71")
+        # Codex 링: 주황색으로 구분 (OpenAI 브랜드 계열)
+        self.codex_ring = AgentRing("Codex", "#f39c12")
         ring_layout.addWidget(self.gemini_ring)
         ring_layout.addWidget(self.claude_ring)
+        ring_layout.addWidget(self.codex_ring)
         self.content_layout.addLayout(ring_layout)
-        
-        self.content_layout.addWidget(QFrame(frameShape=QFrame.HLine, styleSheet="background-color: rgba(255,255,255,20)"))
-        
+
+        self.content_layout.addWidget(
+            QFrame(frameShape=QFrame.HLine, styleSheet="background-color: rgba(255,255,255,20);")
+        )
+
         # 로그 영역
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -168,8 +267,8 @@ class MissionControlSidebar(QWidget):
 
     def add_log(self, agent, text):
         entry = LogEntry(agent, text)
-        self.log_layout.insertWidget(0, entry) # 최신 로그 상단 배치
-        
+        self.log_layout.insertWidget(0, entry)  # 최신 로그 상단 배치
+
         # 로그 개수 제한 (최신 30개)
         if self.log_layout.count() > 30:
             item = self.log_layout.takeAt(self.log_layout.count() - 1)
@@ -177,9 +276,17 @@ class MissionControlSidebar(QWidget):
                 item.widget().deleteLater()
 
     def update_status(self, status):
-        """에이전트 상태 업데이트 (링 애니메이션)"""
-        self.gemini_ring.set_active("gemini" in [a.lower() for a in status.keys()] and status.get("gemini", {}).get("status") == "active")
-        self.claude_ring.set_active("claude" in [a.lower() for a in status.keys()] and status.get("claude", {}).get("status") == "active")
+        """에이전트 상태 업데이트 (링 애니메이션).
+
+        status 딕셔너리 예시:
+            {"gemini": {"status": "active"}, "claude": {"status": "idle"}, "codex": {"status": "active"}}
+        """
+        def _is_active(name: str) -> bool:
+            return status.get(name, {}).get("status") == "active"
+
+        self.gemini_ring.set_active(_is_active("gemini"))
+        self.claude_ring.set_active(_is_active("claude"))
+        self.codex_ring.set_active(_is_active("codex"))
 
     def toggle(self):
         self.is_visible = not self.is_visible
