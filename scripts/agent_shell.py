@@ -3,13 +3,14 @@
 # ------------------------------------------------------------------------
 # 파일명: scripts/agent_shell.py
 # 설명: 터미널 전용 자율 에이전트 인터랙티브 쉘.
-#       각 터미널에서 직접 지시를 입력하면 Claude/Gemini CLI가 자동 실행되고
+#       각 터미널에서 직접 지시를 입력하면 Claude/Gemini/Codex CLI가 자동 실행되고
 #       출력을 실시간으로 터미널에 스트리밍합니다.
 #
 # 사용법:
 #   python scripts/agent_shell.py                         # 자동 라우팅
 #   python scripts/agent_shell.py --cli claude            # 항상 Claude
 #   python scripts/agent_shell.py --cli gemini            # 항상 Gemini
+#   python scripts/agent_shell.py --cli codex             # 항상 Codex (YOLO 자율 모드)
 #   python scripts/agent_shell.py --terminal T2           # 터미널 ID 지정
 #
 # 변경 이력 (REVISION HISTORY):
@@ -23,6 +24,9 @@
 # [2026-03-04] Claude: 오케스트레이터 자동 라우팅 추가
 #   - 복합 지시(여러 작업 나열) 감지 시 서버 API 경유 오케스트레이터 실행
 #   - _route()가 'orchestrator' 반환 시 HTTP API로 전달 (대시보드 연동)
+# [2026-03-07] Claude: Codex CLI 지원 추가
+#   - --cli codex: Vibe Coding Codex 래퍼를 통해 자율 YOLO 모드 실행
+#   - !cli codex: 실행 중 즉석 CLI 변경 지원
 # ------------------------------------------------------------------------
 """
 
@@ -91,24 +95,6 @@ def _route(task):
     return 'gemini' if g > c else 'claude'
 
 
-def _open_dashboard_once() -> None:
-    """서버가 실행 중이면 대시보드를 브라우저에서 자동으로 엽니다.
-    이미 열었으면 재오픈하지 않습니다 (중복 방지).
-    """
-    global _dashboard_opened
-    if _dashboard_opened:
-        return
-    try:
-        with _urllib_req.urlopen(_DASHBOARD_URL, timeout=1) as resp:
-            if resp.status == 200:
-                import webbrowser
-                webbrowser.open(_DASHBOARD_URL)
-                _dashboard_opened = True
-    except Exception:
-        # 서버 미실행 상태면 열지 않음
-        pass
-
-
 def _call_api(task: str) -> bool:
     """서버 API로 오케스트레이터 실행 요청을 전송합니다.
 
@@ -154,8 +140,6 @@ def run_agent(task, cli='auto', terminal_id='T?'):
             print(f'[{terminal_id}] 오케스트레이터 실행 요청 전송됨')
             _write_live({'type': 'done', 'status': 'dispatched', 'cli': 'orchestrator',
                          'terminal': terminal_id, 'ts': ts})
-            # 오케스트레이터 실행 시 대시보드 자동 오픈 (미열린 경우)
-            _open_dashboard_once()
             return 0
         else:
             # 서버 미실행: claude로 fallback
@@ -167,6 +151,10 @@ def run_agent(task, cli='auto', terminal_id='T?'):
 
     if chosen == 'claude':
         cmd = ['claude', '-p', task, '--dangerously-skip-permissions']
+    elif chosen == 'codex':
+        # Codex CLI: 프로젝트 루트의 codex.bat을 통해 YOLO 자율 모드로 실행
+        # --yolo 플래그: 확인 없이 자율적으로 과업을 완수하는 에이전트 모드
+        cmd = ['codex', '--yolo', task]
     else:
         cmd = ['gemini', '-p', task]
 
@@ -182,9 +170,9 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     kw = {}
     use_shell = False
     if os.name == 'nt':
-        # DETACHED_PROCESS 추가: shell=True 시 생성되는 cmd.exe가 CREATE_NO_WINDOW만으로는
-        # 순간 깜빡이는 현상 발생. cli_agent.py, hook_bridge.py, terminal_agent.py와 동일하게 적용.
-        kw['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+        # CREATE_NO_WINDOW만 사용: DETACHED_PROCESS를 같이 쓰면
+        # stdout PIPE 연결이 끊어져 Claude/Gemini 출력이 터미널에 안 나옴.
+        kw['creationflags'] = subprocess.CREATE_NO_WINDOW
         use_shell = True
         cmd = subprocess.list2cmdline(cmd)
 
@@ -277,15 +265,12 @@ def main():
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    cli_label = cli_mode.upper() if cli_mode != 'auto' else 'AUTO(Claude/Gemini)'
+    cli_label = cli_mode.upper() if cli_mode != 'auto' else 'AUTO(Claude/Gemini/Codex)'
     print('=' * 60)
     print(f' Agent Shell [{terminal_id}]  CLI: {cli_label}')
     print(f' 프로젝트: {_ROOT.name}')
     print(f' 종료: exit | 에이전트 중단: Ctrl+C')
     print('=' * 60)
-
-    # 서버가 실행 중이면 대시보드를 자동으로 브라우저에서 오픈
-    _open_dashboard_once()
 
     while True:
         try:
@@ -305,14 +290,14 @@ def main():
             print('[무시] 3자 이상 입력해주세요.')
             continue
 
-        # 즉석 CLI 변경: !cli claude / !cli gemini / !cli auto
+        # 즉석 CLI 변경: !cli claude / !cli gemini / !cli codex / !cli auto
         if task.startswith('!cli '):
             new_cli = task[5:].strip()
-            if new_cli in ('auto', 'claude', 'gemini'):
+            if new_cli in ('auto', 'claude', 'gemini', 'codex'):
                 cli_mode = new_cli
                 print(f'[설정] CLI 변경 -> {cli_mode}')
             else:
-                print('[오류] auto / claude / gemini 중 선택하세요.')
+                print('[오류] auto / claude / gemini / codex 중 선택하세요.')
             continue
 
         run_agent(task, cli_mode, terminal_id)

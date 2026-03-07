@@ -51,7 +51,7 @@ CWD         = SCRIPT_DIR.parent
 DATA_DIR    = CWD / '.ai_monitor' / 'data'
 LIVE_FILE   = DATA_DIR / 'agent_live.jsonl'
 
-SERVER_PORT = 8005
+SERVER_PORT = int(os.environ.get('VIBE_SERVER_PORT', '9571'))
 API_URL     = f'http://localhost:{SERVER_PORT}/api/agent/run'
 HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 
@@ -172,9 +172,12 @@ def _run_direct(task: str, cli: str = 'auto') -> None:
     use_shell = False
     cmd = [sys.executable, str(CLI_AGENT), task, cli]
 
+    creationflags = 0
     if os.name == 'nt':
         use_shell = True
         cmd_str = subprocess.list2cmdline(cmd)
+        # PIPE 기반 실시간 출력이 필요하므로 DETACHED_PROCESS는 사용하지 않습니다.
+        creationflags = subprocess.CREATE_NO_WINDOW
     else:
         cmd_str = cmd  # type: ignore[assignment]
 
@@ -186,6 +189,7 @@ def _run_direct(task: str, cli: str = 'auto') -> None:
         env=env,
         shell=use_shell,
         bufsize=0,
+        creationflags=creationflags,
     )
 
     # 실시간 출력 스트리밍

@@ -8,7 +8,7 @@
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화, 상태 내부 관리
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Package, CheckCircle2, Circle, Search } from 'lucide-react';
 import { McpEntry, SmitheryServer } from '../../types';
 
@@ -20,10 +20,11 @@ export default function McpPanel() {
   // ── 카탈로그 / 설치 현황 상태 ──────────────────────────────────
   const [mcpCatalog, setMcpCatalog] = useState<McpEntry[]>([]);
   const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
-  const [mcpTool, setMcpTool] = useState<'claude' | 'gemini'>('claude');
+  const [mcpTool, setMcpTool] = useState<'claude' | 'gemini' | 'codex'>('claude');
   const [mcpScope, setMcpScope] = useState<'global' | 'project'>('global');
   const [mcpLoading, setMcpLoading] = useState<Record<string, boolean>>({});
   const [mcpMsg, setMcpMsg] = useState('');
+  const [mcpMsgType, setMcpMsgType] = useState<'success' | 'error'>('success');
 
   // ── Smithery 검색 상태 ─────────────────────────────────────────
   const [mcpSubTab, setMcpSubTab] = useState<'catalog' | 'smithery'>('catalog');
@@ -31,9 +32,11 @@ export default function McpPanel() {
   const [smitheryResults, setSmitheryResults] = useState<SmitheryServer[]>([]);
   const [smitheryPage, setSmitheryPage] = useState(1);
   const [smitheryLoading, setSmitheryLoading] = useState(false);
-  const [smitheryApiKey, setSmitheryApiKey] = useState('');
+  const [smitheryHasApiKey, setSmitheryHasApiKey] = useState(false);
+  const [smitheryApiKeyMasked, setSmitheryApiKeyMasked] = useState('');
   const [smitheryApiKeyInput, setSmitheryApiKeyInput] = useState('');
   const [smitheryApiKeySaved, setSmitheryApiKeySaved] = useState(false);
+  const visibleCatalog = mcpCatalog;
 
   // 카탈로그는 최초 1회만 로드
   useEffect(() => {
@@ -48,29 +51,33 @@ export default function McpPanel() {
     fetch(`${API_BASE}/api/mcp/apikey`)
       .then(res => res.json())
       .then(data => {
-        if (data.apikey) {
-          setSmitheryApiKey(data.apikey);
-          setSmitheryApiKeyInput(data.apikey);
-        }
+        setSmitheryHasApiKey(Boolean(data.has_key));
+        setSmitheryApiKeyMasked(data.masked ?? '');
       })
       .catch(() => {});
   }, []);
 
   // 설치 현황 폴링 (5초 간격 — 도구·범위 변경 시 즉시 재조회)
-  const fetchMcpInstalled = () => {
-    fetch(`${API_BASE}/api/mcp/installed?tool=${mcpTool}&scope=${mcpScope}`)
+  const fetchMcpInstalled = useCallback((tool = mcpTool, scope = mcpScope) => {
+    fetch(`${API_BASE}/api/mcp/installed?tool=${tool}&scope=${scope}`)
       .then(res => res.json())
       .then(data => setMcpInstalled(data.installed ?? []))
       .catch(() => {});
-  };
+  }, [mcpScope, mcpTool]);
 
   useEffect(() => {
-    fetchMcpInstalled();
-    const interval = setInterval(fetchMcpInstalled, 5000);
+    fetchMcpInstalled(mcpTool, mcpScope);
+    const interval = setInterval(() => fetchMcpInstalled(mcpTool, mcpScope), 5000);
     return () => clearInterval(interval);
-  }, [mcpTool, mcpScope]);
+  }, [fetchMcpInstalled, mcpTool, mcpScope]);
 
   // MCP 설치 핸들러
+  useEffect(() => {
+    if (mcpTool === 'codex' && mcpScope !== 'global') {
+      setMcpScope('global');
+    }
+  }, [mcpTool, mcpScope]);
+
   const installMcp = (entry: McpEntry) => {
     setMcpLoading(prev => ({ ...prev, [entry.name]: true }));
     fetch(`${API_BASE}/api/mcp/install`, {
@@ -80,11 +87,20 @@ export default function McpPanel() {
         tool: mcpTool, scope: mcpScope,
         name: entry.name, package: entry.package,
         requiresEnv: entry.requiresEnv ?? [],
+        // 커스텀 command가 있으면 (Codex CLI 등 로컬 서버) 함께 전송
+        ...(entry.command ? { command: entry.command, args: entry.args ?? [] } : {}),
       }),
     })
       .then(res => res.json())
-      .then(data => { setMcpMsg(data.message ?? ''); fetchMcpInstalled(); })
-      .catch(() => {})
+      .then(data => {
+        setMcpMsgType(data.status === 'error' ? 'error' : 'success');
+        setMcpMsg(data.message ?? '');
+        fetchMcpInstalled();
+      })
+      .catch(() => {
+        setMcpMsgType('error');
+        setMcpMsg('MCP 설치 요청에 실패했습니다.');
+      })
       .finally(() => setMcpLoading(prev => ({ ...prev, [entry.name]: false })));
   };
 
@@ -97,8 +113,15 @@ export default function McpPanel() {
       body: JSON.stringify({ tool: mcpTool, scope: mcpScope, name }),
     })
       .then(res => res.json())
-      .then(data => { setMcpMsg(data.message ?? ''); fetchMcpInstalled(); })
-      .catch(() => {})
+      .then(data => {
+        setMcpMsgType(data.status === 'error' ? 'error' : 'success');
+        setMcpMsg(data.message ?? '');
+        fetchMcpInstalled();
+      })
+      .catch(() => {
+        setMcpMsgType('error');
+        setMcpMsg('MCP 제거 요청에 실패했습니다.');
+      })
       .finally(() => setMcpLoading(prev => ({ ...prev, [name]: false })));
   };
 
@@ -107,15 +130,26 @@ export default function McpPanel() {
     fetch(`${API_BASE}/api/mcp/apikey`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apikey: smitheryApiKeyInput }),
+      body: JSON.stringify({ api_key: smitheryApiKeyInput }),
     })
       .then(res => res.json())
-      .then(() => {
-        setSmitheryApiKey(smitheryApiKeyInput);
+      .then(data => {
+        if (data.status === 'error') {
+          throw new Error(data.message ?? 'Smithery API 키 저장에 실패했습니다.');
+        }
+        const masked = smitheryApiKeyInput.length > 12
+          ? `${smitheryApiKeyInput.slice(0, 6)}...${smitheryApiKeyInput.slice(-4)}`
+          : '*'.repeat(smitheryApiKeyInput.length);
+        setSmitheryHasApiKey(Boolean(smitheryApiKeyInput));
+        setSmitheryApiKeyMasked(masked);
+        setSmitheryApiKeyInput('');
         setSmitheryApiKeySaved(true);
         setTimeout(() => setSmitheryApiKeySaved(false), 2000);
       })
-      .catch(() => {});
+      .catch(() => {
+        setMcpMsgType('error');
+        setMcpMsg('Smithery API 키 저장에 실패했습니다.');
+      });
   };
 
   // Smithery 검색
@@ -145,15 +179,18 @@ export default function McpPanel() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden gap-2">
-      {/* 도구 탭 선택: Claude Code / Gemini CLI */}
+      {/* 도구 탭 선택: Claude Code / Gemini CLI / Codex CLI */}
       <div className="flex gap-1 shrink-0">
-        {(['claude', 'gemini'] as const).map(t => (
+        {(['claude', 'gemini', 'codex'] as const).map(t => (
           <button
             key={t}
-            onClick={() => setMcpTool(t)}
+            onClick={() => {
+              setMcpTool(t);
+              if (t === 'codex') setMcpScope('global');
+            }}
             className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${mcpTool === t ? 'bg-primary text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}
           >
-            {t === 'claude' ? 'Claude Code' : 'Gemini CLI'}
+            {t === 'claude' ? 'Claude Code' : t === 'gemini' ? 'Gemini CLI' : 'Codex CLI'}
           </button>
         ))}
       </div>
@@ -164,7 +201,8 @@ export default function McpPanel() {
           <button
             key={s}
             onClick={() => setMcpScope(s)}
-            className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${mcpScope === s ? 'bg-accent/80 text-white' : 'bg-white/5 text-[#858585] hover:text-white'}`}
+            disabled={mcpTool === 'codex' && s === 'project'}
+            className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${mcpScope === s ? 'bg-accent/80 text-white' : 'bg-white/5 text-[#858585] hover:text-white'} ${mcpTool === 'codex' && s === 'project' ? 'opacity-40 cursor-not-allowed hover:text-[#858585]' : ''}`}
           >
             {s === 'global' ? '전역 (Global)' : '프로젝트'}
           </button>
@@ -189,7 +227,14 @@ export default function McpPanel() {
 
       {/* 마지막 작업 결과 메시지 */}
       {mcpMsg && (
-        <div className="text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-2 py-1 font-mono truncate shrink-0" title={mcpMsg}>
+        <div
+          className={`text-[9px] border rounded px-2 py-1 font-mono truncate shrink-0 ${
+            mcpMsgType === 'error'
+              ? 'text-red-300 bg-red-500/10 border-red-500/20'
+              : 'text-green-400 bg-green-500/10 border-green-500/20'
+          }`}
+          title={mcpMsg}
+        >
           {mcpMsg}
         </div>
       )}
@@ -197,13 +242,13 @@ export default function McpPanel() {
       {mcpSubTab === 'catalog' ? (
         /* ── 내장 카탈로그 목록 ── */
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5">
-          {mcpCatalog.length === 0 ? (
+          {visibleCatalog.length === 0 ? (
             <div className="text-center text-[#858585] text-xs py-10 flex flex-col items-center gap-2 italic">
               <Package className="w-7 h-7 opacity-20" />
               카탈로그 로딩 중...
             </div>
           ) : (
-            mcpCatalog.map(entry => {
+            visibleCatalog.map(entry => {
               const isInstalled = mcpInstalled.includes(entry.name);
               const isLoading = mcpLoading[entry.name] ?? false;
               return (
@@ -224,7 +269,7 @@ export default function McpPanel() {
                   {/* 필수 환경변수 안내 */}
                   {entry.requiresEnv && entry.requiresEnv.length > 0 && (
                     <p className="text-[8px] text-yellow-400/70 pl-5 mb-1.5 font-mono">
-                      ENV: {entry.requiresEnv.join(', ')}
+                      ENV 필요: {entry.requiresEnv.join(', ')} (설치 후 실제 키 입력)
                     </p>
                   )}
                   {/* 설치 / 제거 버튼 */}
@@ -271,6 +316,11 @@ export default function McpPanel() {
               {smitheryApiKeySaved ? '저장됨 ✓' : '저장'}
             </button>
           </div>
+          {smitheryHasApiKey && (
+            <div className="text-[9px] text-[#858585]">
+              저장된 키: {smitheryApiKeyMasked || '설정됨'}
+            </div>
+          )}
 
           {/* 검색창 */}
           <div className="flex gap-1 shrink-0">
@@ -284,7 +334,7 @@ export default function McpPanel() {
             />
             <button
               onClick={() => searchSmithery(1)}
-              disabled={smitheryLoading || !smitheryApiKey}
+              disabled={smitheryLoading || !smitheryHasApiKey}
               className="px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40 transition-colors"
             >
               <Search className="w-3.5 h-3.5" />
@@ -297,7 +347,7 @@ export default function McpPanel() {
               <div className="text-center text-[#858585] text-xs py-6 italic">검색 중...</div>
             ) : smitheryResults.length === 0 ? (
               <div className="text-center text-[#858585] text-xs py-6 italic">
-                {smitheryApiKey ? '검색어를 입력하세요' : 'API 키를 먼저 저장하세요'}
+                {smitheryHasApiKey ? '검색어를 입력하세요' : 'API 키를 먼저 저장하세요'}
               </div>
             ) : (
               smitheryResults.map(srv => (

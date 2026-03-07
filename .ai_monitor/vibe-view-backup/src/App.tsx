@@ -655,9 +655,23 @@ function App() {
   };
 
   const installTool = (tool: string) => {
-    const url = tool === 'gemini' ? `${API_BASE}/api/install-gemini-cli` : `${API_BASE}/api/install-claude-code`;
+    const urlMap: Record<string, string> = {
+      gemini: `${API_BASE}/api/install-gemini-cli`,
+      claude: `${API_BASE}/api/install-claude-code`,
+      codex:  `${API_BASE}/api/install-codex-cli`,
+    };
+    const url = urlMap[tool] ?? `${API_BASE}/api/install-claude-code`;
     fetch(url).then(res => res.json()).then(data => alert(data.message)).catch(err => alert(err));
     setActiveMenu(null);
+  };
+
+  // Vibe Coding Codex를 Gemini CLI / Claude Desktop MCP 서버로 등록합니다.
+  const registerCodexToAI = () => {
+    setActiveMenu(null);
+    fetch(`${API_BASE}/api/register-codex-to-ai`)
+      .then(res => res.json())
+      .then(data => alert(data.message))
+      .catch(err => alert('등록 실패: ' + err));
   };
 
   const goUp = () => {
@@ -795,8 +809,19 @@ function App() {
                   <span>Gemini CLI 설치 (npm -g)</span>
                 </button>
                 <button onClick={() => installTool('claude')} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2">
-                  <Cpu className="w-3.5 h-3.5 text-success" /> 
+                  <Cpu className="w-3.5 h-3.5 text-success" />
                   <span>Claude Code 설치 (npm -g)</span>
+                </button>
+                <button onClick={() => installTool('codex')} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 text-[#f39c12]" />
+                  <span>Codex CLI 설치 (npm -g)</span>
+                </button>
+                <button onClick={() => registerCodexToAI()} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-3.5 h-3.5 text-[#f39c12]" />
+                    <span>Codex → AI 도구에 등록 (MCP)</span>
+                  </div>
+                  <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono">Gemini·Claude</span>
                 </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
                 <button onClick={() => window.location.reload()} className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2">
@@ -2289,6 +2314,43 @@ function TerminalSlot({ slotId, logs, currentPath, terminalCount, locks, message
                    >
                      <Zap className="w-3.5 h-3.5 fill-current" /> Gemini 욜로(YOLO)
                    </button>
+                </div>
+              </motion.div>
+
+              {/* Codex Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                whileHover={{ scale: 1.02, translateY: -5 }}
+                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-[#f39c12]/50 group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <Zap className="w-12 h-12 text-[#f39c12]" />
+                </div>
+                <div className="w-16 h-16 rounded-2xl bg-[#f39c12]/10 flex items-center justify-center mb-2 group-hover:bg-[#f39c12]/20 transition-colors shadow-inner">
+                  <Zap className="w-8 h-8 text-[#f39c12]" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">CODEX CLI</h3>
+                  <p className="text-[10px] text-[#f39c12] font-bold uppercase tracking-widest opacity-60">Autonomous Code Agent</p>
+                </div>
+                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
+                  OpenAI 기반 자율 코딩 에이전트.<br/>YOLO 모드로 확인 없이 완전 자율 실행합니다.
+                </p>
+                <div className="flex flex-col w-full gap-2 mt-4">
+                  <button
+                    onClick={() => launchAgent('codex', false)}
+                    className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
+                  >
+                    Codex 일반 모드
+                  </button>
+                  <button
+                    onClick={() => launchAgent('codex', true)}
+                    className="w-full py-2.5 bg-[#f39c12]/20 hover:bg-[#f39c12]/40 text-[#f39c12] rounded-xl text-[11px] font-black transition-all border border-[#f39c12]/30 flex items-center justify-center gap-2 shadow-lg shadow-[#f39c12]/10"
+                  >
+                    <Zap className="w-3.5 h-3.5 fill-current" /> Codex 욜로(YOLO)
+                  </button>
                 </div>
               </motion.div>
 

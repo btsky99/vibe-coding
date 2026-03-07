@@ -91,4 +91,35 @@ if __name__ == "__main__":
     if not os.path.exists(PG_BIN):
         print(f"[오류] Postgres 바이너리 없음: {PG_BIN}")
         sys.exit(1)
+
+    # ── 싱글톤 보호: 중복 실행 방지 ────────────────────────────────────────────
+    # server.py 재시작 시 heal_daemon 인스턴스가 누적되는 문제 방지.
+    _pid_file = os.path.join(PROJECT_ROOT, ".ai_monitor", "data", "heal_daemon.pid")
+    _my_pid   = os.getpid()
+    try:
+        if os.path.exists(_pid_file):
+            with open(_pid_file) as _f:
+                _old_pid = int(_f.read().strip())
+            if _old_pid != _my_pid:
+                _alive = False
+                try:
+                    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                    _r = subprocess.run(
+                        ['tasklist', '/FI', f'PID eq {_old_pid}', '/FO', 'CSV'],
+                        capture_output=True, text=True, timeout=3,
+                        creationflags=_no_window
+                    ) if os.name == 'nt' else None
+                    _alive = _r is not None and str(_old_pid) in _r.stdout
+                    if _r is None:
+                        os.kill(_old_pid, 0)
+                        _alive = True
+                except Exception:
+                    _alive = False
+                if _alive:
+                    sys.exit(0)
+        with open(_pid_file, 'w') as _f:
+            _f.write(str(_my_pid))
+    except Exception:
+        pass  # PID 파일 I/O 실패 시 무시하고 계속 실행
+
     main()

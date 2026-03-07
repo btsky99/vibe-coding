@@ -169,6 +169,14 @@ export default function TopMenuBar({
                 <Cpu className="w-3.5 h-3.5 text-success" />
                 <span>Claude Code 설치 (npm -g)</span>
               </button>
+              {/* Codex CLI 설치 — OpenAI Codex CLI 글로벌 설치 */}
+              <button
+                onClick={() => onInstallTool('codex')}
+                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2"
+              >
+                <Terminal className="w-3.5 h-3.5 text-[#f0a500]" />
+                <span>Codex CLI 설치 (npm -g)</span>
+              </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <button
                 onClick={() => window.location.reload()}

@@ -333,6 +333,10 @@ class HiveWatchdog:
         self.is_running = True
         self._loop_count = 0
         self._add_log("🚀 하이브 워치독 엔진 가동 시작 (계층 1 인프라 + 계층 2 스킬 치유)")
+        # 서버 초기화 대기: Flask가 포트를 열기 전에 첫 체크를 실행하면
+        # "서버 다운" 오탐이 발생하여 불필요한 재시작 시도로 중복 서버 인스턴스가 생성됨.
+        # 15초 대기 후 첫 체크 실행 — server.py 기동 완료에 충분한 시간.
+        time.sleep(15)
         while self.is_running:
             try:
                 self.run_check()
@@ -347,9 +351,41 @@ class HiveWatchdog:
             time.sleep(self.interval)
 
 if __name__ == "__main__":
+    # ── 싱글톤 보호: 이미 실행 중인 워치독 인스턴스가 있으면 즉시 종료 ──────────────────
+    # server.py가 재시작할 때마다 새 인스턴스를 spawn하여 누적되는 문제 방지.
+    # --check 모드(1회 점검)는 싱글톤 체크 없이 항상 실행 허용.
+    _is_check_mode = len(sys.argv) > 1 and sys.argv[1] == "--check"
+    if not _is_check_mode:
+        _pid_file = Path(__file__).resolve().parent.parent / ".ai_monitor" / "data" / "watchdog.pid"
+        _my_pid   = os.getpid()
+        try:
+            if _pid_file.exists():
+                _old_pid = int(_pid_file.read_text().strip())
+                _alive = False
+                if _old_pid != _my_pid:
+                    try:
+                        if os.name == 'nt':
+                            _r = subprocess.run(
+                                ['tasklist', '/FI', f'PID eq {_old_pid}', '/FO', 'CSV'],
+                                capture_output=True, text=True, timeout=3,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                            )
+                            _alive = str(_old_pid) in _r.stdout
+                        else:
+                            os.kill(_old_pid, 0)
+                            _alive = True
+                    except Exception:
+                        _alive = False
+                    if _alive:
+                        # 이미 실행 중인 워치독 존재 → 중복 인스턴스 즉시 종료
+                        sys.exit(0)
+            _pid_file.write_text(str(_my_pid))
+        except Exception:
+            pass  # PID 파일 I/O 실패 시 무시하고 계속 실행
+
     # 단독 실행 시 --check 인자가 있으면 1회 점검 후 종료
     watchdog = HiveWatchdog(interval=60)
-    if len(sys.argv) > 1 and sys.argv[1] == "--check":
+    if _is_check_mode:
         watchdog.run_check()
         print(json.dumps(watchdog.status, indent=2, ensure_ascii=False))
     else:

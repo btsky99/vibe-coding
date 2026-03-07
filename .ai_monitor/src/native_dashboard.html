@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Coding - Windows Native Desktop Dashboard</title>
+    <!-- XTerm.js CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.8.0/lib/addon-fit.js"></script>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --slot-bg: #252526;
+            --border-color: #333;
+            --accent-color: #3498db;
+            --text-color: #cccccc;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 10px;
+            overflow: hidden;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 10px;
+            height: calc(100% - 20px);
+        }
+        .slot {
+            background-color: var(--slot-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-col: column;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .slot-header {
+            padding: 5px 10px;
+            background-color: #2d2d2d;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .terminal-container {
+            flex: 1;
+            background-color: black;
+            padding: 5px;
+            min-height: 0;
+        }
+        .slot-footer {
+            padding: 8px;
+            background-color: #2d2d2d;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 5px;
+        }
+        input {
+            flex: 1;
+            background-color: #1e1e1e;
+            border: 1px solid #444;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        button {
+            background-color: var(--accent-color);
+            border: none;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 11px;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #2980b9; }
+        button.codex-btn { background-color: #9b59b6; }
+        button.codex-btn:hover { background-color: #8e44ad; }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #555;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-active { background-color: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
+    </style>
+</head>
+<body>
+    <div class="container" id="grid">
+        <!-- 8 Slots will be generated here -->
+    </div>
+
+    <script>
+        const grid = document.getElementById('grid');
+        const terms = {};
+        const fitAddons = {};
+
+        function createSlot(id) {
+            const slot = document.createElement('div');
+            slot.className = 'slot';
+            slot.innerHTML = `
+                <div class="slot-header">
+                    <span><span class="status-dot" id="dot-T${id}"></span>Terminal T${id}</span>
+                    <span id="agent-T${id}" style="color: #888;">IDLE</span>
+                </div>
+                <div class="terminal-container" id="term-T${id}"></div>
+                <div class="slot-footer">
+                    <input type="text" id="input-T${id}" placeholder="AI에게 지시를 내리세요...">
+                    <button onclick="runAgent(${id}, 'auto')">RUN</button>
+                    <button class="codex-btn" onclick="runAgent(${id}, 'codex')">CODEX</button>
+                </div>
+            `;
+            grid.appendChild(slot);
+
+            const term = new Terminal({
+                theme: { background: '#000000', foreground: '#cccccc' },
+                fontSize: 12,
+                fontFamily: 'Consolas, monospace',
+                cursorBlink: true
+            });
+            const fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(document.getElementById(`term-T${id}`));
+            fitAddon.fit();
+            
+            terms[`T${id}`] = term;
+            fitAddons[`T${id}`] = fitAddon;
+
+            // Enter key listener
+            document.getElementById(`input-T${id}`).addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') runAgent(id, 'auto');
+            });
+        }
+
+        for (let i = 1; i <= 8; i++) {
+            createSlot(i);
+        }
+
+        window.addEventListener('resize', () => {
+            Object.values(fitAddons).forEach(fit => fit.fit());
+        });
+
+        async function runAgent(id, mode) {
+            const input = document.getElementById(`input-T${id}`);
+            const task = input.value.trim();
+            if (!task) return;
+
+            input.value = '';
+            const terminalId = `T${id}`;
+            
+            // Log to terminal
+            terms[terminalId].writeln(`\r\n\x1b[34m[SYSTEM]\x1b[0m ${mode.toUpperCase()} 실행 요청: ${task}`);
+            
+            // Python API 호출 (pywebview bridge)
+            if (window.pywebview) {
+                window.pywebview.api.run_agent(terminalId, task, mode);
+            }
+        }
+
+        // Python에서 호출할 함수들 (Exposed to Python)
+        window.dashboard = {
+            writeLog: function(terminalId, text) {
+                if (terms[terminalId]) {
+                    terms[terminalId].write(text.replace(/\n/g, '\r\n'));
+                }
+            },
+            setStatus: function(terminalId, agent, status) {
+                const dot = document.getElementById(`dot-${terminalId}`);
+                const agentLbl = document.getElementById(`agent-${terminalId}`);
+                if (dot) dot.className = `status-dot ${status === 'active' ? 'status-active' : ''}`;
+                if (agentLbl) agentLbl.innerText = agent.toUpperCase();
+            }
+        };
+    </script>
+</body>
+</html>

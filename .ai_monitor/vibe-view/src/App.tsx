@@ -30,7 +30,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Menu, ChevronRight, ChevronDown, RotateCw, X, Minimize2, ExternalLink } from 'lucide-react';
+import { Menu, ChevronRight, ChevronDown, RotateCw, X, Minimize2, Maximize2, ExternalLink } from 'lucide-react';
 /* ── 공유 상수/타입 ── */
 import { API_BASE, OpenFile, TreeItem } from './constants';
 /* ── 레이아웃 컴포넌트 — App.tsx 2차 분리에서 추출 ── */
@@ -78,6 +78,8 @@ function App() {
   const kanbanResizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
   const [isKanbanDragging, setIsKanbanDragging] = useState(false);
   const [isKanbanResizing, setIsKanbanResizing] = useState(false);
+  // 칸반 전체화면 토글 — 플로팅 창 뷰포트 전체 점유 모드
+  const [isKanbanMaximized, setIsKanbanMaximized] = useState(false);
   // 사이드바 너비 — 드래그 리사이즈로 동적 조절 (최소 150px, 최대 600px)
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const isResizingSidebar = useRef(false);
@@ -383,10 +385,12 @@ function App() {
     setActiveMenu(null);
   };
 
-  // AI 도구 글로벌 설치 (Gemini CLI / Claude Code)
+  // AI 도구 글로벌 설치 (Gemini CLI / Claude Code / Codex CLI)
   const installTool = (tool: string) => {
     const url = tool === 'gemini'
       ? `${API_BASE}/api/install-gemini-cli`
+      : tool === 'codex'
+      ? `${API_BASE}/api/install-codex-cli`
       : `${API_BASE}/api/install-claude-code`;
     fetch(url).then(res => res.json()).then(data => alert(data.message)).catch(err => alert(err));
     setActiveMenu(null);
@@ -747,8 +751,16 @@ function App() {
       {/* ── 칸반 보드 드래그 가능 플로팅 윈도우 — 다른 모니터로도 이동 가능 ── */}
       {isKanbanExpanded && (
         <div
-          className="fixed z-[9999] bg-[#1e1e1e] border border-white/15 rounded-lg flex flex-col overflow-hidden shadow-2xl"
-          style={{
+          className={`fixed z-[9999] bg-[#1e1e1e] flex flex-col overflow-hidden shadow-2xl transition-none ${
+            isKanbanMaximized
+              ? 'border-0 rounded-none'
+              : 'border border-white/15 rounded-lg'
+          }`}
+          style={isKanbanMaximized ? {
+            // 전체화면: pywebview 네이티브 창 전체를 점유 (인터넷 브라우저 창 없음)
+            left: 0, top: 0, width: '100vw', height: '100vh',
+            cursor: 'default',
+          } : {
             left: kanbanPos.x,
             top: kanbanPos.y,
             width: kanbanSize.width,
@@ -779,9 +791,10 @@ function App() {
           {/* 팝아웃 헤더 — grab 커서로 드래그 가능 */}
           <div
             className="h-10 px-4 flex items-center justify-between bg-[#252526] border-b border-black/40 shrink-0 select-none"
-            style={{ cursor: isKanbanDragging ? 'grabbing' : 'grab' }}
+            style={{ cursor: isKanbanMaximized ? 'default' : (isKanbanDragging ? 'grabbing' : 'grab') }}
             onPointerDown={e => {
-              // 헤더를 잡고 드래그 시작
+              // 전체화면 모드에서는 드래그 비활성화
+              if (isKanbanMaximized) return;
               setIsKanbanDragging(true);
               kanbanDragStart.current = {
                 x: e.clientX - kanbanPos.x,
@@ -794,32 +807,45 @@ function App() {
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">
                 칸반 보드
               </span>
-              {/* 드래그 힌트 아이콘 */}
-              <span className="text-[9px] text-[#555] select-none">⠿ 드래그로 이동</span>
+              {/* 전체화면이 아닐 때만 드래그 힌트 표시 */}
+              {!isKanbanMaximized && (
+                <span className="text-[9px] text-[#555] select-none">⠿ 드래그로 이동</span>
+              )}
             </div>
             <div className="flex items-center gap-1">
-              {/* 새 창으로 열기 — 다른 모니터로 드래그 가능한 독립 창 */}
+              {/* 네이티브 창으로 열기 — PySide6 OS 네이티브 데스크톱 창 실행 (브라우저 창 X) */}
               <button
                 onPointerDown={e => e.stopPropagation()}
                 onClick={() => {
-                  // 현재 서버 URL에 ?kanban=1 파라미터를 추가하여 칸반 전용 창 열기
-                  // window.open()으로 열린 창은 OS 네이티브 창이므로 다른 모니터로 드래그 가능
-                  const url = `${window.location.origin}${window.location.pathname}?kanban=1`;
-                  window.open(url, 'kanban-board', `width=${kanbanSize.width},height=${kanbanSize.height},menubar=no,toolbar=no,location=no,status=no`);
-                  setIsKanbanExpanded(false); // 플로팅 오버레이는 닫기 (새 창으로 이동)
+                  // window.open() 대신 백엔드 API로 PySide6 kanban_board.py 실행
+                  // — window.open은 인터넷 브라우저 창으로 열리는 문제 해결
+                  fetch(`${API_BASE}/api/kanban/launch`, { method: 'POST' }).catch(() => {});
+                  setIsKanbanExpanded(false);
                 }}
                 className="hover:bg-white/10 p-1 rounded transition-colors"
-                title="새 창으로 열기 (다른 모니터로 드래그 가능)"
+                title="네이티브 창으로 열기"
               >
                 <ExternalLink className="w-4 h-4 text-[#aaa]" />
               </button>
+              {/* 전체화면 토글 — pywebview 네이티브 창 안에서 최대화 (브라우저 창 X) */}
               <button
-                onPointerDown={e => e.stopPropagation()} // 버튼 클릭이 드래그 트리거 안 되게
-                onClick={() => setIsKanbanExpanded(false)}
+                onPointerDown={e => e.stopPropagation()}
+                onClick={() => setIsKanbanMaximized(v => !v)}
+                className="hover:bg-white/10 p-1 rounded transition-colors"
+                title={isKanbanMaximized ? '창 크기 복원' : '전체화면으로 확장'}
+              >
+                {isKanbanMaximized
+                  ? <Minimize2 className="w-4 h-4 text-[#aaa]" />
+                  : <Maximize2 className="w-4 h-4 text-[#aaa]" />
+                }
+              </button>
+              <button
+                onPointerDown={e => e.stopPropagation()}
+                onClick={() => { setIsKanbanMaximized(false); setIsKanbanExpanded(false); }}
                 className="hover:bg-white/10 p-1 rounded transition-colors"
                 title="닫기"
               >
-                <Minimize2 className="w-4 h-4" />
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>

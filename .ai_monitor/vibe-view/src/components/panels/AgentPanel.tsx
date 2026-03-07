@@ -81,7 +81,7 @@ const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
 type AgentStatus   = 'idle' | 'running' | 'done' | 'error' | 'unavailable';
-type CliChoice     = 'auto' | 'claude' | 'gemini';
+type CliChoice     = 'auto' | 'claude' | 'gemini' | 'codex';
 type ActiveTab     = 'workflow' | 'terminal' | 'thoughts' | 'history' | 'orchestrator' | 'hive';
 
 // 하이브 활동 이벤트 타입 — /api/hive/activity 응답 형식
@@ -183,6 +183,7 @@ const CLI_LABELS: Record<CliChoice, string> = {
   auto:   '🤖 Auto (자동 선택)',
   claude: '⚡ Claude Code',
   gemini: '✨ Gemini CLI',
+  codex:  '🟠 Codex CLI',
 };
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
@@ -363,6 +364,7 @@ function TerminalCard({
   const cliBadge =
     cli === 'claude' ? 'bg-orange-500/20 text-orange-300 border-orange-500/20' :
     cli === 'gemini' ? 'bg-blue-500/20 text-blue-300 border-blue-500/20' :
+    cli === 'codex'  ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/20' :
                        'bg-white/5 text-white/20 border-white/5';
 
   // 시간 포맷: 오늘 → HH:MM, 이전 날짜 → MM/DD
@@ -746,7 +748,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           setStatus('running');
           onStatusChange?.(true);
           setActiveCli(cli);
-          setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : 'Auto');
+          setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : cli === 'codex' ? 'Codex' : 'Auto');
 
           // 상황판: 초기화
           setWfStage('analyzing');
@@ -951,7 +953,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           if (data.current?.cli) {
             setActiveCli(data.current.cli);
             const cli = String(data.current.cli);
-            setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : 'Auto');
+            setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : cli === 'codex' ? 'Codex' : 'Auto');
           }
           if (runTimeoutRef.current) { clearTimeout(runTimeoutRef.current); runTimeoutRef.current = null; }
         }
@@ -1333,6 +1335,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
                             t.agent === 'DONE'   ? 'text-green-400' :
                             t.agent === 'CLAUDE' ? 'text-orange-400' :
                             t.agent === 'GEMINI' ? 'text-blue-400' :
+                            t.agent === 'CODEX'  ? 'text-yellow-400' :
                             'text-primary'
                           }`}>{t.agent}</span>
                         </div>

@@ -27,7 +27,7 @@ REVISION HISTORY:
 - `server.py`: FastAPI 기반 중앙 허브 서버.
 - `config.json`: 시스템 전역 설정 파일.
 - **`data/`**: 하이브 마인드의 기억 저장소 (SQLite, JSONL, Vector DB).
-- **`vibe-view/`**: React 기반의 실시간 모니터링 대시보드 (HUD).
+- **`vibe-view/`**: 네이티브 데스크톱 셸 안에서 렌더링되는 React 기반 모니터링 UI/HUD.
 
 ### 🛠️ 통합 브릿지 & 유틸리티 (`scripts/`)
 에이전트와 시스템을 연결하는 핵심 로직들입니다.

@@ -5,6 +5,9 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-08] - Claude (칸반 네이티브 창 실행 API 추가)
+#   - POST /api/kanban/launch: PySide6 kanban_board.py를 서브프로세스로 실행
+#     → window.open() 브라우저 창 대신 OS 네이티브 데스크톱 창으로 열림
 # [2026-03-05] - Claude (모듈 분리 — 데드 코드 639줄 제거)
 #   - /api/git/status, /api/git/log: git_api 위임 중복 직접 구현 제거
 #   - /api/memory, /api/project-info: memory_api 위임 중복 구현 제거
@@ -184,6 +187,35 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).resolve().parent
     PROJECT_ROOT = BASE_DIR.parent
+
+
+def _python_runner_cmds() -> list[str]:
+    """Python 스크립트를 실행할 인터프리터 후보 목록을 반환합니다."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    for path in (
+        BASE_DIR / 'venv' / 'Scripts' / 'python.exe',
+        PROJECT_ROOT / '.ai_monitor' / 'venv' / 'Scripts' / 'python.exe',
+        PROJECT_ROOT / 'venv' / 'Scripts' / 'python.exe',
+    ):
+        path_str = str(path)
+        if path.exists() and path_str not in seen:
+            candidates.append(path_str)
+            seen.add(path_str)
+
+    exe_name = Path(sys.executable).name.lower()
+    if exe_name.startswith('python') and sys.executable not in seen:
+        candidates.append(sys.executable)
+        seen.add(sys.executable)
+
+    for name in ('python', 'py'):
+        resolved = shutil.which(name)
+        if resolved and resolved not in seen:
+            candidates.append(resolved)
+            seen.add(resolved)
+
+    return candidates or ['python']
 
 try:
     import websockets
@@ -947,6 +979,8 @@ def _mcp_config_path(tool: str, scope: str) -> Path:
     - claude / project → {현재프로젝트루트}/.claude/settings.local.json
     - gemini / global  → ~/.gemini/settings.json
     - gemini / project → {현재프로젝트루트}/.gemini/settings.json
+    - codex  / global  → ~/.codex/config.toml
+    - codex  / project → {현재프로젝트루트}/.codex/config.toml
 
     [수정] BASE_DIR.parent 대신 _current_project_root() 사용.
     배포 버전에서 BASE_DIR = sys._MEIPASS(임시 폴더)라서 project_root가 잘못 지정되던 버그 수정.
@@ -958,6 +992,12 @@ def _mcp_config_path(tool: str, scope: str) -> Path:
             return home / '.claude' / 'settings.json'
         else:
             return project_root / '.claude' / 'settings.local.json'
+    elif tool == 'codex':
+        # OpenAI Codex CLI — mcpServers 포맷 동일 (JSON)
+        if scope == 'global':
+            return home / '.codex' / 'config.toml'
+        else:
+            return project_root / '.codex' / 'config.toml'
     else:  # gemini
         if scope == 'global':
             return home / '.gemini' / 'settings.json'
@@ -1401,6 +1441,47 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
             self.wfile.write(json.dumps(result).encode('utf-8'))
+        elif parsed_path.path == '/api/install-codex-cli':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                subprocess.Popen('cmd.exe /k "echo Installing Codex CLI... && npm install -g @openai/codex"', shell=True)
+                result = {"status": "success", "message": "Codex CLI installation started in a new window."}
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            self.wfile.write(json.dumps(result).encode('utf-8'))
+        elif parsed_path.path == '/api/register-codex-to-ai':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                python_cmds = _python_runner_cmds()
+                wrapper_script = str(BASE_DIR / 'bin' / 'codex_wrapper.py')
+                last_error = ''
+                for python_cmd in python_cmds:
+                    proc = subprocess.run(
+                        [python_cmd, wrapper_script, '--install'],
+                        input='all\n',
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        cwd=str(PROJECT_ROOT),
+                    )
+                    output = proc.stdout.strip() or proc.stderr.strip()
+                    if proc.returncode == 0:
+                        result = {"status": "success", "message": f"Gemini CLI & Claude Desktop에 vibe-coding MCP 등록 완료!\n{output}"}
+                        break
+                    last_error = output or f"등록 실패 (exit code {proc.returncode})"
+                else:
+                    result = {"status": "error", "message": last_error or "사용 가능한 Python 실행기를 찾지 못했습니다."}
+            except subprocess.TimeoutExpired:
+                result = {"status": "error", "message": "등록 시간 초과 (30초)"}
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/shutdown-disabled':
             # 24시간 가동을 위해 셧다운 기능 비활성화
             self.send_response(403)
@@ -1998,7 +2079,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                KNOWN_AGENTS = ['claude', 'gemini']
+                KNOWN_AGENTS = ['claude', 'gemini', 'codex']
                 IDLE_SEC = 300  # 5분
 
                 # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
@@ -2010,7 +2091,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     conn_h.row_factory = sqlite3.Row
                     for row in conn_h.execute(
                         "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
-                        "WHERE LOWER(agent) LIKE '%claude%' OR LOWER(agent) LIKE '%gemini%' "
+                        "WHERE LOWER(agent) LIKE '%claude%' "
+                        "OR LOWER(agent) LIKE '%gemini%' "
+                        "OR LOWER(agent) LIKE '%codex%' "
                         "GROUP BY LOWER(agent) ORDER BY last_seen DESC"
                     ).fetchall():
                         agent_lower = row['agent'].lower()
@@ -2018,6 +2101,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                             agent_last_seen['claude'] = row['last_seen']
                         elif 'gemini' in agent_lower and agent_last_seen.get('gemini') is None:
                             agent_last_seen['gemini'] = row['last_seen']
+                        elif 'codex' in agent_lower and agent_last_seen.get('codex') is None:
+                            agent_last_seen['codex'] = row['last_seen']
                     conn_h.close()
                 except Exception:
                     pass
@@ -2028,7 +2113,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     conn_sm.row_factory = sqlite3.Row
                     for row in conn_sm.execute(
                         "SELECT author, MAX(updated_at) as last_seen FROM memory "
-                        "WHERE LOWER(author) LIKE '%claude%' OR LOWER(author) LIKE '%gemini%' "
+                        "WHERE LOWER(author) LIKE '%claude%' "
+                        "OR LOWER(author) LIKE '%gemini%' "
+                        "OR LOWER(author) LIKE '%codex%' "
                         "GROUP BY LOWER(author) ORDER BY last_seen DESC"
                     ).fetchall():
                         author_lower = row['author'].lower()
@@ -2039,6 +2126,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                         elif 'gemini' in author_lower:
                             if agent_last_seen.get('gemini') is None or (last and last > (agent_last_seen['gemini'] or '')):
                                 agent_last_seen['gemini'] = last
+                        elif 'codex' in author_lower:
+                            if agent_last_seen.get('codex') is None or (last and last > (agent_last_seen['codex'] or '')):
+                                agent_last_seen['codex'] = last
                     conn_sm.close()
                 except Exception:
                     pass
@@ -2046,7 +2136,12 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # in-memory AGENT_STATUS 로 보완 (가장 실시간 하트비트)
                 with AGENT_STATUS_LOCK:
                     for a_name, st in AGENT_STATUS.items():
-                        a_key = 'claude' if 'claude' in a_name.lower() else 'gemini' if 'gemini' in a_name.lower() else None
+                        a_key = (
+                            'claude' if 'claude' in a_name.lower()
+                            else 'gemini' if 'gemini' in a_name.lower()
+                            else 'codex' if 'codex' in a_name.lower()
+                            else None
+                        )
                         if a_key and st.get('last_seen'):
                             hb_dt = datetime.fromtimestamp(st['last_seen'])
                             hb_iso = hb_dt.isoformat()
@@ -2234,7 +2329,28 @@ class SSEHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
-        
+
+        # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
+        # window.open() 대신 PySide6 네이티브 프로세스를 직접 실행하여
+        # 인터넷 브라우저 창이 아닌 OS 네이티브 데스크톱 창으로 띄웁니다.
+        if path == '/api/kanban/launch':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                kanban_script = BASE_DIR / 'kanban_board.py'
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                subprocess.Popen(
+                    [sys.executable, str(kanban_script)],
+                    creationflags=_no_window,
+                    close_fds=True,
+                )
+                self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
         # ─── 신규: 사고 과정 로그 추가 (v5.0) ───
         # ─── 신규: PostgreSQL 통합 로깅 API (v5.0) ───
         if path == '/api/hive/log/pg':
@@ -2805,6 +2921,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 elif agent == 'gemini':
                     yolo_flag = " --yolo" if is_yolo else ""
                     cmd = f'start "Gemini CLI" cmd.exe /k "cd /d {target_dir} && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
+                elif agent == 'codex':
+                    yolo_flag = " --yolo" if is_yolo else ""
+                    cmd = f'start "Codex CLI" cmd.exe /k "cd /d {target_dir} && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}"'
                 else:
                     cmd = f'start "Terminal" cmd.exe /k "cd /d {target_dir}"'
                 
@@ -3569,6 +3688,11 @@ async def pty_handler(websocket):
             pty.write(f'set TERMINAL_ID={session_id}\r\n')
             pty.write(f'set HIVE_AGENT=gemini\r\n')
             pty.write(f'gemini{yolo_flag}\r\n')
+        elif agent == 'codex':
+            yolo_flag = " --yolo" if is_yolo else ""
+            pty.write(f'set TERMINAL_ID={session_id}\r\n')
+            pty.write('set HIVE_AGENT=codex\r\n')
+            pty.write(f'codex{yolo_flag}\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo 정보도 함께 저장
         pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat()}
@@ -3645,16 +3769,34 @@ async def pty_handler(websocket):
 
         def _run():
             try:
-                _sp.Popen(
+                child_env = os.environ.copy()
+                child_env['CLI_AGENT_JSON_STDOUT'] = '1'
+                proc = _sp.Popen(
                     [sys.executable, str(cli_agent_py), instruction, 'auto'],
                     cwd=str(Path(__file__).parent.parent),
-                    stdout=_sp.DEVNULL,
-                    stderr=_sp.DEVNULL,
-                    creationflags=(
-                        _sp.CREATE_NO_WINDOW | _sp.DETACHED_PROCESS
-                        if os.name == 'nt' else 0
-                    ),
+                    stdout=_sp.PIPE,
+                    stderr=_sp.STDOUT,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    env=child_env,
+                    creationflags=(_sp.CREATE_NO_WINDOW if os.name == 'nt' else 0),
                 )
+                if proc.stdout is not None:
+                    for raw_line in proc.stdout:
+                        raw_line = raw_line.strip()
+                        if not raw_line:
+                            continue
+                        try:
+                            event = json.loads(raw_line)
+                            line = event.get('line', '')
+                            if line:
+                                pty.write(line + '\r\n')
+                            elif event.get('type') == 'done':
+                                status = event.get('status', 'done')
+                                pty.write(f'[agent:{status}]\r\n')
+                        except Exception:
+                            pty.write(raw_line + '\r\n')
                 print(f"[PTY→AGENT] {agent or 'shell'} 터미널 자율 에이전트 라우팅: {instruction[:60]}")
             except Exception as _e:
                 print(f"[PTY→AGENT] 라우팅 실패: {_e}")
@@ -3790,6 +3932,15 @@ def open_app_window(url):
 
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
+
+    _LOCK_PORT = 9570
+    try:
+        _lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        _lock_sock.bind(('127.0.0.1', _LOCK_PORT))
+    except OSError:
+        print(f"[!] 이미 실행 중인 서버 인스턴스 감지 (포트 {_LOCK_PORT} 선점) — 중복 실행 방지로 종료합니다.")
+        os._exit(0)
 
     if os.name == 'nt':
         try:

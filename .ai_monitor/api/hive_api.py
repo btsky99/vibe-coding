@@ -255,7 +255,8 @@ def handle_get(handler, path: str, params: dict,
             },
             "agents": {
                 "claude_config": check_exists(_proj / ".claude/commands/vibe-master.md"),
-                "gemini_config": check_exists(_proj / ".gemini/settings.json")
+                "gemini_config": check_exists(_proj / ".gemini/settings.json"),
+                "codex_config":  check_exists(BASE_DIR / "bin" / "codex_wrapper.py")
             },
             "data": {
                 "shared_memory": check_exists(DATA_DIR / "shared_memory.db"),
@@ -297,7 +298,7 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         try:
-            KNOWN_AGENTS = ['claude', 'gemini']
+            KNOWN_AGENTS = ['claude', 'gemini', 'codex']
             IDLE_SEC = 300  # 5분
 
             # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
@@ -307,7 +308,9 @@ def handle_get(handler, path: str, params: dict,
                 conn_h.row_factory = sqlite3.Row
                 for row in conn_h.execute(
                     "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
-                    "WHERE LOWER(agent) LIKE '%claude%' OR LOWER(agent) LIKE '%gemini%' "
+                    "WHERE LOWER(agent) LIKE '%claude%' "
+                    "OR LOWER(agent) LIKE '%gemini%' "
+                    "OR LOWER(agent) LIKE '%codex%' "
                     "GROUP BY LOWER(agent) ORDER BY last_seen DESC"
                 ).fetchall():
                     agent_lower = row['agent'].lower()
@@ -315,6 +318,8 @@ def handle_get(handler, path: str, params: dict,
                         agent_last_seen['claude'] = row['last_seen']
                     elif 'gemini' in agent_lower and agent_last_seen.get('gemini') is None:
                         agent_last_seen['gemini'] = row['last_seen']
+                    elif 'codex' in agent_lower and agent_last_seen.get('codex') is None:
+                        agent_last_seen['codex'] = row['last_seen']
                 conn_h.close()
             except Exception:
                 pass
@@ -325,7 +330,9 @@ def handle_get(handler, path: str, params: dict,
                 conn_sm.row_factory = sqlite3.Row
                 for row in conn_sm.execute(
                     "SELECT author, MAX(updated_at) as last_seen FROM memory "
-                    "WHERE LOWER(author) LIKE '%claude%' OR LOWER(author) LIKE '%gemini%' "
+                    "WHERE LOWER(author) LIKE '%claude%' "
+                    "OR LOWER(author) LIKE '%gemini%' "
+                    "OR LOWER(author) LIKE '%codex%' "
                     "GROUP BY LOWER(author) ORDER BY last_seen DESC"
                 ).fetchall():
                     author_lower = row['author'].lower()
@@ -336,6 +343,9 @@ def handle_get(handler, path: str, params: dict,
                     elif 'gemini' in author_lower:
                         if agent_last_seen.get('gemini') is None or (last and last > (agent_last_seen['gemini'] or '')):
                             agent_last_seen['gemini'] = last
+                    elif 'codex' in author_lower:
+                        if agent_last_seen.get('codex') is None or (last and last > (agent_last_seen['codex'] or '')):
+                            agent_last_seen['codex'] = last
                 conn_sm.close()
             except Exception:
                 pass
@@ -345,6 +355,7 @@ def handle_get(handler, path: str, params: dict,
                 for a_name, st in AGENT_STATUS.items():
                     a_key = ('claude' if 'claude' in a_name.lower()
                              else 'gemini' if 'gemini' in a_name.lower()
+                             else 'codex' if 'codex' in a_name.lower()
                              else None)
                     if a_key and st.get('last_seen'):
                         hb_dt = datetime.fromtimestamp(st['last_seen'])

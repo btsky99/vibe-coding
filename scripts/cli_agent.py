@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 # ------------------------------------------------------------------------
 # 📄 파일명: scripts/cli_agent.py
@@ -88,6 +88,7 @@ def _find_cli(name: str) -> str:
 # 모듈 로드 시 한 번만 탐색 (반복 탐색 방지)
 _CLAUDE_CMD = _find_cli('claude')
 _GEMINI_CMD = _find_cli('gemini')
+_CODEX_CMD = _find_cli('codex')
 
 # ─── 라우팅 키워드 테이블 ─────────────────────────────────────────────────────
 # Claude Code CLI: 코드 작성/수정/버그 수정 등 구현 작업
@@ -349,20 +350,20 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
             # Gemini CLI: stdin으로 지시 전달
             # _GEMINI_CMD: 모듈 초기화 시 탐색한 전체 경로
             cmd = [_GEMINI_CMD, '-p', task]
+        elif cli == 'codex':
+            cmd = [_CODEX_CMD, '--yolo', task]
         else:
-            raise ValueError(f'알 수 없는 CLI: {cli}')
+            raise ValueError(f'알 수 없는 CLI: {cli} (지원: claude | gemini | codex)')
 
         # ── subprocess 실행 ───────────────────────────────────────────────
         # Windows 환경: CREATE_NO_WINDOW로 콘솔 창 팝업 방지
         # shell=True: Windows에서 .cmd 확장자(claude.cmd, gemini.cmd 등 npm 설치 CLI)를
         #             PATH에서 찾으려면 shell=True가 필요함. 리스트를 문자열로 변환 필요.
-        # DETACHED_PROCESS 추가 이유: shell=True로 생성되는 cmd.exe가 DETACHED_PROCESS 없이
-        #   CREATE_NO_WINDOW만 사용하면 Windows에서 cmd.exe 창이 순간 깜빡이는 현상 발생.
-        #   hook_bridge.py, terminal_agent.py 등과 동일하게 두 플래그를 함께 사용.
+        # 실시간 stdout 스트리밍이 필요하므로 DETACHED_PROCESS는 사용하지 않습니다.
         creationflags = 0
         use_shell = False
         if os.name == 'nt':
-            creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            creationflags = subprocess.CREATE_NO_WINDOW
             use_shell = True
             cmd = subprocess.list2cmdline(cmd)  # 리스트 → 문자열 (shell=True용)
 
@@ -636,10 +637,10 @@ def get_recent_runs(limit: int = 20) -> list[dict]:
 # ─── CLI 단독 테스트 진입점 ───────────────────────────────────────────────────
 if __name__ == '__main__':
     """직접 실행 시 테스트 모드:
-    python scripts/cli_agent.py "지시내용" [claude|gemini|auto]
+    python scripts/cli_agent.py "지시내용" [claude|gemini|codex|auto]
     """
     if len(sys.argv) < 2:
-        print('사용법: python scripts/cli_agent.py "지시내용" [claude|gemini|auto]')
+        print('사용법: python scripts/cli_agent.py "지시내용" [claude|gemini|codex|auto]')
         sys.exit(1)
 
     task_input = sys.argv[1]

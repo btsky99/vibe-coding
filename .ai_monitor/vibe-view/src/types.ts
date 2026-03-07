@@ -90,11 +90,12 @@ export interface Task {
 // MCP 카탈로그 항목 — 설치 가능한 MCP 서버 정보
 export interface McpEntry {
     name: string;          // 식별 이름 (예: context7)
-    package: string;       // npm 패키지 경로 (예: @upstash/context7-mcp)
+    package: string;       // npm 패키지 경로 (예: @upstash/context7-mcp) — 로컬이면 "__local__"
     description: string;   // 기능 설명
     category: string;      // 카테고리 (문서 / 개발 / 검색 / AI / 브라우저 / DB)
     requiresEnv?: string[]; // 필수 환경변수 목록 (있으면 플레이스홀더로 설치)
-    args?: string[];        // npx 실행 시 추가 인수
+    args?: string[];        // 실행 시 추가 인수
+    command?: string;       // 커스텀 실행 명령어 (없으면 npx 기본값 사용)
 }
 
 // Smithery 레지스트리 검색 결과 항목
@@ -140,6 +141,7 @@ export interface HiveHealth {
   agents?: {
     claude_config: boolean;
     gemini_config: boolean;
+    codex_config: boolean;
   };
   data?: {
     shared_memory: boolean;
