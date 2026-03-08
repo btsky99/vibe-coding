@@ -513,6 +513,12 @@ def handle_terminals(handler) -> None:
             terminals[tid]['status'] = 'running'
             if task:
                 terminals[tid]['task'] = task
+            # [버그수정 2026-03-09] 기존 슬롯(T1~T8)도 cli 타입 업데이트
+            # 이전 수정(6f05536)은 신규 슬롯 생성 시에만 cli를 설정했으나,
+            # 기존 슬롯은 cli=''인 채로 유지되어 잘못된 배지가 표시되는 문제 수정.
+            cli_from_hook = info.get('cli', '')
+            if cli_from_hook and not terminals[tid].get('cli'):
+                terminals[tid]['cli'] = cli_from_hook
         # done 단계: stage만 업데이트 (status는 기존 유지)
         elif stage == 'done':
             terminals[tid]['pipeline_stage'] = 'done'

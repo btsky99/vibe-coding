@@ -1,0 +1,535 @@
+Ignore file not found: D:\vibe-coding\.geminiignore, continue without it.
+[DEBUG] [MemoryDiscovery] Loading server hierarchical memory for CWD: D:\vibe-coding (importFormat: tree)
+[DEBUG] [MemoryDiscovery] Found readable global GEMINI.md: c:/users/com/.gemini/gemini.md
+[DEBUG] [MemoryDiscovery] Searching for GEMINI.md starting from CWD: d:/vibe-coding
+[DEBUG] [MemoryDiscovery] Determined project root: d:/vibe-coding
+[DEBUG] [BfsFileSearch] Scanning [1/200]: batch of 1
+[DEBUG] [BfsFileSearch] Scanning [16/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [31/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [46/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [61/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [76/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [91/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [106/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [121/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [136/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [151/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [166/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [181/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [196/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [200/200]: batch of 4
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/extensions/gemini-superpowers/gemini.md (Length: 3689)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/agent-expansion/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/dashboard-launcher/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/codex-integration/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/gemini.md (Length: 473)
+Loaded cached credentials.
+Experiments loaded {
+  experimentIds: [
+    106018683,
+    105979538,
+    105979560,
+    106015337,
+    105979579,
+    105867471,
+    105995634,
+    105640665,
+    104638466,
+    105704191,
+    101868197,
+    104817729,
+    105695344,
+    106012640,
+    104913215,
+    105821930,
+    104922093,
+    103012598,
+    105886425,
+    105856899,
+    102617194,
+    105098746,
+    105903990,
+    105757908,
+    104892493,
+    105723762,
+    105822884,
+    105785683,
+    105897325,
+    105658071,
+    105864343,
+    105943702,
+    105620019,
+    105935281,
+    106019377,
+    106029321,
+    104739378,
+    105887313,
+    105849474,
+    106045721,
+    106032303,
+    106033846,
+    106067761,
+    106054541,
+    105979531,
+    105979553,
+    106015328,
+    105867469,
+    105640661,
+    104638459,
+    105704187,
+    101551624,
+    104673683,
+    105695346,
+    104913210,
+    105821928,
+    104922082,
+    103012592,
+    105885093,
+    102519585,
+    105098743,
+    105903988,
+    104892490,
+    105011762,
+    105822881,
+    105895316,
+    105658068,
+    105863625,
+    105943694,
+    105620012,
+    105935274,
+    106019370,
+    106029319,
+    105887311,
+    106045719,
+    106032301,
+    106033844,
+    106031647,
+    106018680
+  ],
+  flags: [
+    {
+      flagId: '45740196',
+      boolValue: true
+    },
+    {
+      flagId: '45740197',
+      floatValue: 0.7
+    },
+    {
+      flagId: '45740199',
+      stringValue: ''
+    },
+    {
+      flagId: '45740200',
+      stringValue: ''
+    },
+    {
+      flagId: '45743869',
+      boolValue: true
+    },
+    {
+      flagId: '45750526',
+      boolValue: true
+    },
+    {
+      flagId: '45750527',
+      intValue: '90'
+    },
+    {
+      flagId: '45752213',
+      boolValue: false
+    },
+    {
+      flagId: '45760185',
+      boolValue: true
+    }
+  ]
+}
+Ignore file not found: D:\vibe-coding\.geminiignore, continue without it.
+[DEBUG] [MemoryDiscovery] Loading server hierarchical memory for CWD: D:\vibe-coding (importFormat: tree)
+[DEBUG] [MemoryDiscovery] Found readable global GEMINI.md: c:/users/com/.gemini/gemini.md
+[DEBUG] [MemoryDiscovery] Searching for GEMINI.md starting from CWD: d:/vibe-coding
+[DEBUG] [MemoryDiscovery] Determined project root: d:/vibe-coding
+[DEBUG] [BfsFileSearch] Scanning [1/200]: batch of 1
+[DEBUG] [BfsFileSearch] Scanning [16/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [31/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [46/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [61/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [76/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [91/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [106/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [121/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [136/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [151/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [166/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [181/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [196/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [200/200]: batch of 4
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/extensions/gemini-superpowers/gemini.md (Length: 3689)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/agent-expansion/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/dashboard-launcher/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/codex-integration/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/gemini.md (Length: 473)
+Experiments loaded {
+  experimentIds: [
+    106018683,
+    105979538,
+    105979560,
+    106015337,
+    105979579,
+    105867471,
+    105995634,
+    105640665,
+    104638466,
+    105704191,
+    101868197,
+    104817729,
+    105695344,
+    106012640,
+    104913215,
+    105821930,
+    104922093,
+    103012598,
+    105886425,
+    105856899,
+    102617194,
+    105098746,
+    105903990,
+    105757908,
+    104892493,
+    105723762,
+    105822884,
+    105785683,
+    105897325,
+    105658071,
+    105864343,
+    105943702,
+    105620019,
+    105935281,
+    106019377,
+    106029321,
+    104739378,
+    105887313,
+    105849474,
+    106045721,
+    106032303,
+    106033846,
+    106067761,
+    106054541,
+    105979531,
+    105979553,
+    106015328,
+    105867469,
+    105640661,
+    104638459,
+    105704187,
+    101551624,
+    104673683,
+    105695346,
+    104913210,
+    105821928,
+    104922082,
+    103012592,
+    105885093,
+    102519585,
+    105098743,
+    105903988,
+    104892490,
+    105011762,
+    105822881,
+    105895316,
+    105658068,
+    105863625,
+    105943694,
+    105620012,
+    105935274,
+    106019370,
+    106029319,
+    105887311,
+    106045719,
+    106032301,
+    106033844,
+    106031647,
+    106018680
+  ],
+  flags: [
+    {
+      flagId: '45740196',
+      boolValue: true
+    },
+    {
+      flagId: '45740197',
+      floatValue: 0.7
+    },
+    {
+      flagId: '45740199',
+      stringValue: ''
+    },
+    {
+      flagId: '45740200',
+      stringValue: ''
+    },
+    {
+      flagId: '45743869',
+      boolValue: true
+    },
+    {
+      flagId: '45750526',
+      boolValue: true
+    },
+    {
+      flagId: '45750527',
+      intValue: '90'
+    },
+    {
+      flagId: '45752213',
+      boolValue: false
+    },
+    {
+      flagId: '45760185',
+      boolValue: true
+    }
+  ]
+}
+Ignore file not found: D:\vibe-coding\.geminiignore, continue without it.
+Ignore file not found: D:\vibe-coding\.geminiignore, continue without it.
+Loading extension: gemini-superpowers
+[DEBUG] [MemoryDiscovery] Loading server hierarchical memory for CWD: D:\vibe-coding (importFormat: tree)
+[DEBUG] [MemoryDiscovery] Found readable global GEMINI.md: c:/users/com/.gemini/gemini.md
+[DEBUG] [MemoryDiscovery] Searching for GEMINI.md starting from CWD: d:/vibe-coding
+[DEBUG] [MemoryDiscovery] Determined project root: d:/vibe-coding
+[DEBUG] [BfsFileSearch] Scanning [1/200]: batch of 1
+[DEBUG] [BfsFileSearch] Scanning [16/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [31/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [46/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [61/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [76/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [91/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [106/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [121/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [136/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [151/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [166/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [181/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [196/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [200/200]: batch of 4
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/extensions/gemini-superpowers/gemini.md (Length: 3689)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/codex-integration/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/agent-expansion/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/dashboard-launcher/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/gemini.md (Length: 473)
+[DEBUG] [MCP STDERR (github)]:  GitHub MCP Server running on stdio
+[DEBUG] [MCP STDERR (context7)]:  Context7 Documentation MCP Server v2.1.3 running on stdio
+Server 'context7' supports tool updates. Listening for changes...
+Flushing log events to Clearcut.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 1 events for retry (queue size: 1)
+[MCP error] Error during discovery for MCP server 'vibe-coding': MCP error -32001: Request timed out McpError: MCP error -32001: Request timed out
+    at McpError.fromError (file:///C:/Users/com/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js:2035:16)
+    at Timeout.timeoutHandler (file:///C:/Users/com/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js:705:58)
+    at listOnTimeout (node:internal/timers:588:17)
+    at process.processTimers (node:internal/timers:523:7) {
+  code: -32001,
+  data: { timeout: 600000 }
+}
+MCP issues detected. Run /mcp list for status.[DEBUG] [MemoryDiscovery] Loading server hierarchical memory for CWD: D:\vibe-coding (importFormat: tree)
+[DEBUG] [MemoryDiscovery] Found readable global GEMINI.md: c:/users/com/.gemini/gemini.md
+[DEBUG] [MemoryDiscovery] Searching for GEMINI.md starting from CWD: d:/vibe-coding
+[DEBUG] [MemoryDiscovery] Determined project root: d:/vibe-coding
+[DEBUG] [BfsFileSearch] Scanning [1/200]: batch of 1
+[DEBUG] [BfsFileSearch] Scanning [16/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [31/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [46/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [61/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [76/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [91/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [106/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [121/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [136/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [151/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [166/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [181/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [196/200]: batch of 15
+[DEBUG] [BfsFileSearch] Scanning [200/200]: batch of 4
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/extensions/gemini-superpowers/gemini.md (Length: 3689)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/dashboard-launcher/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/agent-expansion/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: d:/vibe-coding/.worktrees/codex-integration/gemini.md (Length: 724)
+[DEBUG] [MemoryDiscovery] Successfully read and processed imports: c:/users/com/.gemini/gemini.md (Length: 473)
+Skill conflict detected: "systematic-debugging" from "D:\vibe-coding\.gemini\skills\debug\SKILL.md" is overriding the same skill from "C:\Users\com\.gemini\extensions\gemini-superpowers\skills\systematic-debugging\SKILL.md".Skill conflict detected: "brainstorming" from "D:\vibe-coding\.gemini\skills\brainstorming\SKILL.md" is overriding the same skill from "C:\Users\com\.gemini\extensions\gemini-superpowers\skills\brainstorming\SKILL.md".Hook registry initialized with 4 hook entries
+Hook system initialized successfully
+[STARTUP] StartupProfiler.flush() called with 7 phases
+[STARTUP] Recording metric for phase: cli_startup duration: 3115.8877999999995
+[STARTUP] Recording metric for phase: load_settings duration: 7.991499999999178
+[STARTUP] Recording metric for phase: parse_arguments duration: 13.424200000000383
+[STARTUP] Recording metric for phase: load_cli_config duration: 21.987699999999677
+[STARTUP] Recording metric for phase: initialize_app duration: 498.4221000000007
+[STARTUP] Recording metric for phase: authenticate duration: 496.59460000000036
+[STARTUP] Recording metric for phase: discover_tools duration: 64.28049999999985
+Flushing log events to Clearcut.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 2 events for retry (queue size: 2)
+Experiments loaded {
+  experimentIds: [
+    106018683,
+    105979538,
+    105979560,
+    106015337,
+    105979579,
+    105867471,
+    105995634,
+    105640665,
+    104638466,
+    105704191,
+    101868197,
+    104817729,
+    105695344,
+    106012640,
+    104913215,
+    105821930,
+    104922093,
+    103012598,
+    105886425,
+    105856899,
+    102617194,
+    105098746,
+    105903990,
+    105757908,
+    104892493,
+    105723762,
+    105822884,
+    105785683,
+    105897325,
+    105658071,
+    105864343,
+    105943702,
+    105620019,
+    105935281,
+    106019377,
+    106029321,
+    104739378,
+    105887313,
+    105849474,
+    106045721,
+    106032303,
+    106033846,
+    106067761,
+    106054541,
+    105979531,
+    105979553,
+    106015328,
+    105867469,
+    105640661,
+    104638459,
+    105704187,
+    101551624,
+    104673683,
+    105695346,
+    104913210,
+    105821928,
+    104922082,
+    103012592,
+    105885093,
+    102519585,
+    105098743,
+    105903988,
+    104892490,
+    105011762,
+    105822881,
+    105895316,
+    105658068,
+    105863625,
+    105943694,
+    105620012,
+    105935274,
+    106019370,
+    106029319,
+    105887311,
+    106045719,
+    106032301,
+    106033844,
+    106031647,
+    106018680
+  ],
+  flags: [
+    {
+      flagId: '45740196',
+      boolValue: true
+    },
+    {
+      flagId: '45740197',
+      floatValue: 0.7
+    },
+    {
+      flagId: '45740199',
+      stringValue: ''
+    },
+    {
+      flagId: '45740200',
+      stringValue: ''
+    },
+    {
+      flagId: '45743869',
+      boolValue: true
+    },
+    {
+      flagId: '45750526',
+      boolValue: true
+    },
+    {
+      flagId: '45750527',
+      intValue: '90'
+    },
+    {
+      flagId: '45752213',
+      boolValue: false
+    },
+    {
+      flagId: '45760185',
+      boolValue: true
+    }
+  ]
+}
+Session ID: 8ac4d8f8-99a2-4f12-b22b-c957091f3a56
+Created execution plan for BeforeAgent: 1 hook(s) to execute in parallel
+Expanding hook command: python D:/vibe-coding/scripts/gemini_hook.py (cwd: D:\vibe-coding)
+Hook execution for BeforeAgent: 1 hooks executed successfully, total duration: 867ms
+Flushing log events to Clearcut.
+ClearcutLogger: Flush already in progress, marking pending flush.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 3 events for retry (queue size: 4)
+Flushing log events to Clearcut.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 4 events for retry (queue size: 4)
+Flushing log events to Clearcut.
+[Routing] Selected model: gemini-3-flash-preview (Source: agent-router/NumericalClassifier (Remote), Latency: 1291ms)
+	[Routing] Reasoning: [Score: 10 / Threshold: 90] Simple arithmetic calculation.
+ClearcutLogger: Flush already in progress, marking pending flush.
+ClearcutLogger: Flush already in progress, marking pending flush.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 5 events for retry (queue size: 7)
+Flushing log events to Clearcut.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 7 events for retry (queue size: 7)
+2입니다.Flushing log events to Clearcut.
+
+Created execution plan for SessionEnd: 1 hook(s) to execute in parallel
+Expanding hook command: python D:/vibe-coding/scripts/gemini_hook.py (cwd: D:\vibe-coding)
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 8 events for retry (queue size: 8)
+Hook execution for SessionEnd: 1 hooks executed successfully, total duration: 2805ms
+Flushing log events to Clearcut.
+Created execution plan for SessionEnd: 1 hook(s) to execute in parallel
+Expanding hook command: python D:/vibe-coding/scripts/gemini_hook.py (cwd: D:\vibe-coding)
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 9 events for retry (queue size: 9)
+Hook execution for SessionEnd: 1 hooks executed successfully, total duration: 2817ms
+Flushing log events to Clearcut.
+ClearcutLogger: Flush already in progress, marking pending flush.
+Error flushing log events: HTTP 400: Bad Request
+ClearcutLogger: Re-queued 10 events for retry (queue size: 11)
+Flushing log events to Clearcut.

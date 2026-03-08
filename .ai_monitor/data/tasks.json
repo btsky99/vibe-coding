@@ -1,1 +1,412 @@
-[]
+[
+  {
+    "id": "20260308222513602263",
+    "title": "지금 이거 만드는 방향이 맏는거아 다시 전체적인 프로젝트를  분석해보자 먼가  가 아닌거 같아 빠진거 같아 서로  각 터미널 llm 끼리 서로 ",
+    "description": "지금 이거 만드는 방향이 맏는거아 다시 전체적인 프로젝트를  분석해보자 먼가  가 아닌거 같아 빠진거 같아 서로  각 터미널 llm 끼리 서로 소통도 안되느거같가  공유 메모리  하이브 시스템도 전여  안되는 늦김이야    스클 오케스트레이션도 안되는거같가",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:25:13.602263"
+  },
+  {
+    "id": "20260308222539533911",
+    "title": "지금 이거 만드는 방향이 맏는거아 다시 전체적인 프로젝트를  분석해보자 먼가  가 아닌거 같아 빠진거 같아 서로  각 터미널 llm 끼리 서로 ",
+    "description": "지금 이거 만드는 방향이 맏는거아 다시 전체적인 프로젝트를  분석해보자 먼가  가 아닌거 같아 빠진거 같아 서로  각 터미널 llm 끼리 서로 소통도 안되느거같가  공유 메모리  하이브 시스템도 전여  안되는 늦김이야    스클 오케스트레이션도 안되는거같가",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:25:39.533911"
+  },
+  {
+    "id": "20260308223356896694",
+    "title": "SQLite 공유 메모리(shared_memory.db)는 작동하지만, 실시간이 아닌 \"수동으로   읽어야 하는\" 노트 수준입니다. 이거더 퍼트",
+    "description": "SQLite 공유 메모리(shared_memory.db)는 작동하지만, 실시간이 아닌 \"수동으로\n  읽어야 하는\" 노트 수준입니다. 이거더 퍼트 sql롤가야해 아니 나는 가능하다고봐  각 터미널 과 터미널의 과 의 서로 대화가 불가능하다고  너말대로 퍼트스 slq 을 메개채로 하면 완전 서로 소통은 아니니진 지금 프로젝트의 핵심  프로젝트가 가능 방향을 이렁버리지 안지 안을가  서러 다른 에이전트들끼리  서로소통 가능하다고보는데 외 안된다는거지 너의 창의성을 발위해보 너는 새상에 없는  코드 언어도 만들잖아  안그러니 외 불가능하다고 봐그럼 서로 소통하룻 있는 터미널을만들어봐 통신 프로토콜을",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:33:56.896694"
+  },
+  {
+    "id": "20260308223649113994",
+    "title": "PostgreSQL  이거 이용해",
+    "description": "PostgreSQL  이거 이용해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:36:49.113994"
+  },
+  {
+    "id": "20260308223720875096",
+    "title": "PostgreSQL  이거 이용해",
+    "description": "PostgreSQL  이거 이용해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:37:20.875096"
+  },
+  {
+    "id": "20260308225215578580",
+    "title": "안녕",
+    "description": "안녕",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:52:15.578580"
+  },
+  {
+    "id": "20260308225649976704",
+    "title": "<task-notification> <task-id>bp10khi5x</task-id> <tool-use-id>toolu_01KWMUW4VVcu",
+    "description": "<task-notification>\n<task-id>bp10khi5x</task-id>\n<tool-use-id>toolu_01KWMUW4VVcukhFhchWA5WTN</tool-use-id>\n<output-file>C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\bp10khi5x.output</output-file>\n<status>completed</status>\n<summary>Background command \"PostgreSQL 시작 (동기)\" completed (exit code 0)</summary>\n</task-notification>\nRead the output file to retrieve the result: C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\bp10khi5x.output",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:56:49.976704"
+  },
+  {
+    "id": "20260308225700583444",
+    "title": "<task-notification> <task-id>bq75rgo8w</task-id> <tool-use-id>toolu_017p8533hHAL",
+    "description": "<task-notification>\n<task-id>bq75rgo8w</task-id>\n<tool-use-id>toolu_017p8533hHALwPuHf35osgVK</tool-use-id>\n<output-file>C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\bq75rgo8w.output</output-file>\n<status>completed</status>\n<summary>Background command \"PostgreSQL 직접 시작\" completed (exit code 0)</summary>\n</task-notification>\nRead the output file to retrieve the result: C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\bq75rgo8w.output",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:57:00.583444"
+  },
+  {
+    "id": "20260308225835836974",
+    "title": "그건 너가 알아야지 안을가 다음은 뭘해야하지",
+    "description": "그건 너가 알아야지 안을가 다음은 뭘해야하지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:58:35.836974"
+  },
+  {
+    "id": "20260308225907754611",
+    "title": "그건 너가 알아야지 안을가 다음은 뭘해야하지",
+    "description": "그건 너가 알아야지 안을가 다음은 뭘해야하지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T22:59:07.754611"
+  },
+  {
+    "id": "20260308231052944964",
+    "title": "멀수정하다 말아는지  팅겨는데  분석해봐 이거  이거 분석안되멘 지금  시스템 다시 점검해야해",
+    "description": "멀수정하다 말아는지  팅겨는데  분석해봐 이거  이거 분석안되멘 지금  시스템 다시 점검해야해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:10:52.944964"
+  },
+  {
+    "id": "20260308231057189099",
+    "title": "멀수정하다 말아는지  팅겨는데  분석해봐 이거  이거 분석안되멘 지금  시스템 다시 점검해야해",
+    "description": "멀수정하다 말아는지  팅겨는데  분석해봐 이거  이거 분석안되멘 지금  시스템 다시 점검해야해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:10:57.189201"
+  },
+  {
+    "id": "20260308231522247520",
+    "title": "정확히  퍼스트 slq 잘 잘 실행되고   여기에 다 저장 되는거지",
+    "description": "정확히  퍼스트 slq 잘 잘 실행되고   여기에 다 저장 되는거지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:15:22.247520"
+  },
+  {
+    "id": "20260308231526658218",
+    "title": "정확히  퍼스트 slq 잘 잘 실행되고   여기에 다 저장 되는거지",
+    "description": "정확히  퍼스트 slq 잘 잘 실행되고   여기에 다 저장 되는거지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:15:26.658218"
+  },
+  {
+    "id": "20260308231952088675",
+    "title": "다시 분석 공유메모리 하이브  시스템 메모리  다 퍼스트 sql 을 이용한다  외내  llm 이 읽기좋은 확장 프로그램 머지 기억은 안나는데 설",
+    "description": "다시 분석 공유메모리 하이브  시스템 메모리  다 퍼스트 sql 을 이용한다  외내  llm 이 읽기좋은 확장 프로그램 머지 기억은 안나는데 설치해다 맞지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:19:52.088675"
+  },
+  {
+    "id": "20260308232002553073",
+    "title": "다시 분석 공유메모리 하이브  시스템 메모리  다 퍼스트 sql 을 이용한다  외내  llm 이 읽기좋은 확장 프로그램 머지 기억은 안나는데 설",
+    "description": "다시 분석 공유메모리 하이브  시스템 메모리  다 퍼스트 sql 을 이용한다  외내  llm 이 읽기좋은 확장 프로그램 머지 기억은 안나는데 설치해다 맞지",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:20:02.553073"
+  },
+  {
+    "id": "20260308232244974249",
+    "title": "ok 자그럼  스킬들은 어떻게 할거야 오케스트레이션 이거도 각 llm에 맞게 설정해애할거같은데",
+    "description": "ok 자그럼  스킬들은 어떻게 할거야 오케스트레이션 이거도 각 llm에 맞게 설정해애할거같은데",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:22:44.974249"
+  },
+  {
+    "id": "20260308232256018763",
+    "title": "ok 자그럼  스킬들은 어떻게 할거야 오케스트레이션 이거도 각 llm에 맞게 설정해애할거같은데",
+    "description": "ok 자그럼  스킬들은 어떻게 할거야 오케스트레이션 이거도 각 llm에 맞게 설정해애할거같은데",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:22:56.018763"
+  },
+  {
+    "id": "20260308232456294333",
+    "title": "순서대로수정하는데  외 코덱스는 빼먹는거지",
+    "description": "순서대로수정하는데  외 코덱스는 빼먹는거지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:24:56.294333"
+  },
+  {
+    "id": "20260308232500780909",
+    "title": "순서대로수정하는데  외 코덱스는 빼먹는거지",
+    "description": "순서대로수정하는데  외 코덱스는 빼먹는거지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:25:00.780909"
+  },
+  {
+    "id": "20260308232638571792",
+    "title": "추가해 줘",
+    "description": "추가해 줘",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:26:38.571792"
+  },
+  {
+    "id": "20260308232643221322",
+    "title": "추가해 줘",
+    "description": "추가해 줘",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:26:43.221322"
+  },
+  {
+    "id": "20260308233111523494",
+    "title": "ok 다시 오켓스트레이션  은 각 llm 이 어떻게 사용할거야",
+    "description": "ok 다시 오켓스트레이션  은 각 llm 이 어떻게 사용할거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:31:11.523494"
+  },
+  {
+    "id": "20260308233122344885",
+    "title": "ok 다시 오켓스트레이션  은 각 llm 이 어떻게 사용할거야",
+    "description": "ok 다시 오켓스트레이션  은 각 llm 이 어떻게 사용할거야",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:31:22.344885"
+  },
+  {
+    "id": "20260308233500924658",
+    "title": "당현한거 이니니 ?  이내용들이   다른 pc에 설치되데 내용이 다들어가야해 기본적으로",
+    "description": "당현한거 이니니 ?  이내용들이   다른 pc에 설치되데 내용이 다들어가야해 기본적으로",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:35:00.924658"
+  },
+  {
+    "id": "20260308233505137757",
+    "title": "당현한거 이니니 ?  이내용들이   다른 pc에 설치되데 내용이 다들어가야해 기본적으로",
+    "description": "당현한거 이니니 ?  이내용들이   다른 pc에 설치되데 내용이 다들어가야해 기본적으로",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:35:05.137757"
+  },
+  {
+    "id": "20260308233735315134",
+    "title": "ok 커밋은 자동을 되는지 확인",
+    "description": "ok 커밋은 자동을 되는지 확인",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:37:35.315134"
+  },
+  {
+    "id": "20260308233739689047",
+    "title": "ok 커밋은 자동을 되는지 확인",
+    "description": "ok 커밋은 자동을 되는지 확인",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:37:39.689047"
+  },
+  {
+    "id": "20260308233825893979",
+    "title": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-08 233743.png\"  자 이거봐   외 여전이 터미",
+    "description": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-08 233743.png\"  자 이거봐   외 여전이 터미널 1과 3에   모니터링 에 같은 글짜가 표시가 되지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:38:25.893979"
+  },
+  {
+    "id": "20260308233830872499",
+    "title": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-08 233743.png\"  자 이거봐   외 여전이 터미",
+    "description": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-08 233743.png\"  자 이거봐   외 여전이 터미널 1과 3에   모니터링 에 같은 글짜가 표시가 되지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:38:30.872499"
+  },
+  {
+    "id": "20260308234623035902",
+    "title": "푸시해줘  완벽하면 빌드 닐리지 까지해줘",
+    "description": "푸시해줘  완벽하면 빌드 닐리지 까지해줘",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:46:23.035902"
+  },
+  {
+    "id": "20260308235653305210",
+    "title": "자그럼 다음은 뭘 테스트 해봐할까   지금까지 구현헉중에",
+    "description": "자그럼 다음은 뭘 테스트 해봐할까   지금까지 구현헉중에",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:56:53.305210"
+  },
+  {
+    "id": "20260308235657830178",
+    "title": "자그럼 다음은 뭘 테스트 해봐할까   지금까지 구현헉중에",
+    "description": "자그럼 다음은 뭘 테스트 해봐할까   지금까지 구현헉중에",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-08T23:56:57.830178"
+  },
+  {
+    "id": "20260309000144610611",
+    "title": "1번부터 순서대로",
+    "description": "1번부터 순서대로",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:01:44.610611"
+  },
+  {
+    "id": "20260309000149199820",
+    "title": "1번부터 순서대로",
+    "description": "1번부터 순서대로",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:01:49.199820"
+  },
+  {
+    "id": "20260309000805793680",
+    "title": "넘어가",
+    "description": "넘어가",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:08:05.793680"
+  },
+  {
+    "id": "20260309001034639428",
+    "title": "진행해",
+    "description": "진행해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:10:34.639428"
+  },
+  {
+    "id": "20260309002315218055",
+    "title": "추가테스트도 너가판단해지 안니",
+    "description": "추가테스트도 너가판단해지 안니",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:23:15.218055"
+  },
+  {
+    "id": "20260309002320012456",
+    "title": "추가테스트도 너가판단해지 안니",
+    "description": "추가테스트도 너가판단해지 안니",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:23:20.012456"
+  },
+  {
+    "id": "20260309003605858782",
+    "title": "그럼 푸시하고  빌드 리리지 해줘",
+    "description": "그럼 푸시하고  빌드 리리지 해줘",
+    "status": "in_progress",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:36:05.858782"
+  },
+  {
+    "id": "20260309003610314761",
+    "title": "그럼 푸시하고  빌드 리리지 해줘",
+    "description": "그럼 푸시하고  빌드 리리지 해줘",
+    "status": "in_progress",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T00:36:10.314761"
+  }
+]
