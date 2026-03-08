@@ -15,7 +15,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Monitor, Cpu, CheckCircle, Clock, AlertCircle, Loader, BookOpen, Radio, Database, Terminal } from 'lucide-react';
+import { Monitor, Cpu, CheckCircle, Clock, AlertCircle, Loader, BookOpen, Radio, Database, Terminal, ExternalLink } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
@@ -94,6 +94,12 @@ export default function KanbanPanel() {
   const [pgActivity, setPgActivity] = useState<Record<string, PgLogRow[]>>({});
   // 터미널 필터
   const [filter, setFilter] = useState<string>('all');
+
+  // ── /api/kanban/launch 호출 (네이티브 창 팝아웃) ────────────────────────
+  const handlePopOut = () => {
+    fetch(`${API_BASE}/api/kanban/launch`, { method: 'POST' })
+      .catch(err => console.error('Kanban Launch Error:', err));
+  };
 
   // ── /api/orchestrator/skill-chain 폴링 (3초) ─────────────────────────────
   useEffect(() => {
@@ -200,6 +206,15 @@ export default function KanbanPanel() {
 
         <div className="ml-auto flex items-center gap-3 text-[9px] text-[#555]">
           <span>실행 중 <span className={`font-bold ${runningCount > 0 ? 'text-amber-400' : 'text-[#444]'}`}>{runningCount}</span></span>
+          
+          <button
+            onClick={handlePopOut}
+            title="독립 창으로 열기"
+            className="flex items-center gap-1.5 px-2 py-1 rounded bg-white/5 text-white/50 hover:bg-primary/20 hover:text-primary transition-all border border-white/5 active:scale-95"
+          >
+            <ExternalLink className="w-3 h-3" />
+            <span className="text-[10px] font-bold">팝아웃</span>
+          </button>
         </div>
       </div>
 

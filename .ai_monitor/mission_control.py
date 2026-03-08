@@ -15,6 +15,12 @@ from PySide6.QtGui import QIcon, QAction, QColor, QPainter, QBrush
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from mission_control_ui import MissionControlSidebar
 
+# ── 칸반 보드 윈도우 임포트 ──────────────────────────────────────────────
+try:
+    from kanban_board import KanbanBoardWindow
+except ImportError:
+    KanbanBoardWindow = None
+
 # 경로 설정
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
@@ -145,6 +151,11 @@ class MissionControlApp(QObject):
         self.open_action = QAction("사이드바 열기 (Ctrl+Alt+M)", self)
         self.open_action.triggered.connect(self.toggle_sidebar)
         menu.addAction(self.open_action)
+
+        if KanbanBoardWindow:
+            kanban_action = QAction("칸반 보드 열기 (네이티브)", self)
+            kanban_action.triggered.connect(self.open_kanban)
+            menu.addAction(kanban_action)
         
         menu.addSeparator()
         
@@ -154,6 +165,24 @@ class MissionControlApp(QObject):
         
         self.tray_icon.setContextMenu(menu)
         self.tray_icon.activated.connect(self.on_tray_activated)
+
+    def open_kanban(self):
+        """네이티브 칸반 보드 창을 독립 프로세스로 실행합니다.
+        
+        Why: Mission Control 프로세스 안에서 창을 띄우면 사이드바와 생명주기를 공유하게 되므로,
+             독립적으로 다른 모니터로 이동하거나 닫을 수 있도록 별도 프로세스로 띄우는 것이 유리합니다.
+        """
+        try:
+            import subprocess
+            kanban_script = BASE_DIR / 'kanban_board.py'
+            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            subprocess.Popen(
+                [sys.executable, str(kanban_script)],
+                creationflags=_no_window,
+                close_fds=True,
+            )
+        except Exception as e:
+            print(f"[Mission Control] 칸반 보드 실행 실패: {e}")
 
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -264,6 +293,20 @@ class MissionControlApp(QObject):
             self.tray_icon.setToolTip("Vibe 에이전트 대기 중")
 
 if __name__ == "__main__":
+    # --kanban 인자가 있으면 칸반 보드 창만 독립 실행
+    if "--kanban" in sys.argv and KanbanBoardWindow:
+        app = QApplication(sys.argv)
+        # 칸반 보드 전용 다크 테마 팔레트 설정
+        from PySide6.QtGui import QPalette, QColor
+        pal = QPalette()
+        pal.setColor(QPalette.Window, QColor("#1e1e1e"))
+        pal.setColor(QPalette.WindowText, QColor("#cccccc"))
+        app.setPalette(pal)
+        
+        window = KanbanBoardWindow()
+        window.show()
+        sys.exit(app.exec())
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     mc = MissionControlApp()
