@@ -97,8 +97,9 @@ class HiveWatchdog:
         except Exception:
             pass
         
-        # 포트 9571이 안되면 8005나 8000 등 다른 포트 시도 (서버가 포트 충돌로 밀려났을 경우 대비)
-        for p in [8005, 8000]:
+        # 포트 9571이 안되면 9001~9010, 8005, 8000 등 시도 (동적 포트 할당 대비)
+        # [2026-03-08] server.py가 _find_free_port(9571) 사용 — 9572~9590까지 확인 추가
+        for p in [9001, 9002, 9003, 9004, 9005, 8005, 8000]:
             try:
                 url = f"http://localhost:{p}/api/heartbeat"
                 with urllib.request.urlopen(url, timeout=2) as resp:

@@ -163,11 +163,55 @@ def _fallback_subprocess(prompt: str) -> None:
     )
 
 
+def _ensure_postgres() -> None:
+    """PostgreSQL이 미실행 중이면 백그라운드로 자동 시작합니다.
+
+    [설계 의도]
+    프로그램 실행 시(UserPromptSubmit 훅) PostgreSQL이 자동으로 켜지도록 합니다.
+    사용자가 수동으로 DB를 시작할 필요 없습니다.
+    서버(server.py) 기동 여부와 무관하게 DB는 항상 실행 상태를 유지합니다.
+
+    [변경 이력] 2026-03-08 Claude: ITCP 도입에 따라 PostgreSQL 자동 시작 로직 추가
+    """
+    try:
+        import urllib.request as _ur
+        # psql.exe 헬스체크 (가장 빠른 방법)
+        _pg_bin = CWD / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
+        if not _pg_bin.exists():
+            return
+        no_window = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        result = subprocess.run(
+            [str(_pg_bin), "-p", "5433", "-U", "postgres", "-d", "postgres",
+             "-c", "SELECT 1;", "--tuples-only"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=2, creationflags=no_window,
+        )
+        if result.returncode == 0:
+            return  # 이미 실행 중
+
+        # pg_manager.py로 백그라운드 시작
+        pg_manager = SCRIPT_DIR / "pg_manager.py"
+        if pg_manager.exists():
+            subprocess.Popen(
+                [sys.executable, str(pg_manager), "start"],
+                cwd=str(CWD),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS if os.name == 'nt' else 0,
+            )
+    except Exception:
+        pass
+
+
 def main():
     # 캐스케이드 루프 방지: cli_agent.py가 spawn한 자식 프로세스(VIBE_CHILD_AGENT=1)는 즉시 종료.
     # VIBE_AGENT_MODE는 서버/다른 용도로도 사용되므로 체크하지 않음.
     if os.environ.get('VIBE_CHILD_AGENT'):
         sys.exit(0)
+
+    # PostgreSQL 자동 시작 (ITCP 통신 인프라 보장)
+    # 서버(server.py)와 무관하게 DB는 항상 실행 상태를 유지해야 합니다
+    _ensure_postgres()
 
     # stdin에서 훅 데이터 읽기
     try:

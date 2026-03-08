@@ -3928,8 +3928,8 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
                 continue
     return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
 
-HTTP_PORT = _find_free_port(9001)          # HTTP 포트 동적 탐색 — 9001부터 탐색 (배포버전 9000번대)
-WS_PORT = _find_free_port(HTTP_PORT + 1)  # HTTP 포트 다음부터 탐색 — 포트 충돌 방지
+HTTP_PORT = _find_free_port(9571)          # HTTP 포트: 9571 고정 (충돌 시 다음 포트 자동 탐색)
+WS_PORT = _find_free_port(9572)           # WebSocket 포트: 9572 고정 (충돌 시 다음 포트 자동 탐색)
 
 async def run_ws_server():
     try:

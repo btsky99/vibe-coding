@@ -46,7 +46,13 @@ def is_pg_available():
         return False
 
 def run_pg_query(sql):
-    """psql.exe를 통한 쿼리 실행"""
+    """psql.exe를 통한 쿼리 실행.
+
+    [인코딩 처리 — 중요]
+    Windows 환경에서 커맨드라인 인자(-c SQL)로 한글을 전달하면 CP949 충돌 발생.
+    해결: SQL을 stdin으로 전달하여 UTF-8 인코딩을 명시적으로 보장합니다.
+    PGCLIENTENCODING=UTF8 환경변수로 PostgreSQL 클라이언트 인코딩 강제.
+    """
     env = os.environ.copy()
     env["PGCLIENTENCODING"] = "UTF8"
     # CREATE_NO_WINDOW: 백그라운드에서 호출 시 콘솔 창 팝업 방지
@@ -54,8 +60,8 @@ def run_pg_query(sql):
     try:
         res = subprocess.run([
             str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres",
-            "--no-align", "--tuples-only", "-c", sql
-        ], env=env, capture_output=True, text=True, encoding="utf-8", creationflags=_no_window)
+            "--no-align", "--tuples-only"
+        ], input=sql, env=env, capture_output=True, text=True, encoding="utf-8", creationflags=_no_window)
         return res.stdout.strip()
     except Exception as e:
         print(f"[PG-ERR] {e}")

@@ -57,8 +57,122 @@ TOOLS = [
     },
     {
         "name": "vibe_memory_list",
-        "description": "List shared hive memory items.",
+        "description": "List shared hive memory items from PostgreSQL hive_memory table.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    # ── ITCP: Inter-Terminal Communication Protocol 도구 ─────────────────────
+    # Codex가 Claude/Gemini와 PostgreSQL을 통해 메시지를 주고받을 수 있습니다.
+    {
+        "name": "itcp_send",
+        "description": (
+            "Send a message to another terminal agent via the Hive ITCP protocol (PostgreSQL pg_messages). "
+            "Use this to communicate with Claude or Gemini terminals. "
+            "to_terminal: 'claude', 'gemini', 'all' (broadcast). "
+            "channel: 'general', 'task', 'debug', 'review', 'broadcast', 'hive'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "to_terminal": {
+                    "type": "string",
+                    "description": "Recipient: 'claude', 'gemini', or 'all'",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Message content",
+                },
+                "channel": {
+                    "type": "string",
+                    "description": "Channel: general/task/debug/review/broadcast/hive",
+                    "default": "general",
+                },
+                "msg_type": {
+                    "type": "string",
+                    "description": "Type: info/request/response/alert/summary",
+                    "default": "info",
+                },
+            },
+            "required": ["to_terminal", "content"],
+        },
+    },
+    {
+        "name": "itcp_receive",
+        "description": (
+            "Check and retrieve unread messages sent to this Codex terminal from other agents "
+            "(Claude, Gemini) via PostgreSQL pg_messages. Call this at session start to catch up."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "terminal": {
+                    "type": "string",
+                    "description": "This terminal's name (default: 'codex')",
+                    "default": "codex",
+                }
+            },
+        },
+    },
+    {
+        "name": "itcp_history",
+        "description": "View recent inter-terminal message history from pg_messages.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of recent messages to show",
+                    "default": 10,
+                },
+                "channel": {
+                    "type": "string",
+                    "description": "Filter by channel (optional)",
+                    "default": "",
+                },
+            },
+        },
+    },
+    {
+        "name": "hive_memory_get",
+        "description": (
+            "Read a specific key from the Hive shared memory (PostgreSQL hive_memory table). "
+            "Use this to access knowledge shared by Claude or Gemini."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Memory key to retrieve",
+                },
+            },
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "hive_memory_set",
+        "description": (
+            "Write a key-value entry to the Hive shared memory (PostgreSQL hive_memory table). "
+            "Other agents (Claude, Gemini) will be able to read this knowledge."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Memory key",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Value / content to store",
+                },
+                "tags": {
+                    "type": "string",
+                    "description": "Comma-separated tags (e.g. 'bug,server,memory')",
+                    "default": "",
+                },
+            },
+            "required": ["key", "content"],
+        },
     },
 ]
 
@@ -159,6 +273,89 @@ def handle_tool_call(name: str, args: dict) -> str:
                 cwd=str(PROJECT_ROOT),
             )
             return result.stdout or result.stderr or "(no memory items)"
+        except Exception as exc:
+            return f"[error] {exc}"
+
+    # ── ITCP 도구 핸들러 ────────────────────────────────────────────────────
+    # Codex가 Claude/Gemini와 PostgreSQL pg_messages를 통해 통신할 수 있도록 합니다.
+    if name == "itcp_send":
+        to_terminal = args.get("to_terminal", "all")
+        content = args.get("content", "")
+        channel = args.get("channel", "general")
+        msg_type = args.get("msg_type", "info")
+        itcp_script = SCRIPTS_DIR / "itcp.py"
+        try:
+            result = subprocess.run(
+                [str(PYTHON_BIN), str(itcp_script), "send",
+                 "codex", to_terminal, content, channel],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(PROJECT_ROOT),
+                env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
+            )
+            return result.stdout.strip() or result.stderr.strip() or "전송 완료"
+        except Exception as exc:
+            return f"[error] {exc}"
+
+    if name == "itcp_receive":
+        terminal = args.get("terminal", "codex")
+        itcp_script = SCRIPTS_DIR / "itcp.py"
+        try:
+            result = subprocess.run(
+                [str(PYTHON_BIN), str(itcp_script), "receive", terminal],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(PROJECT_ROOT),
+                env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
+            )
+            return result.stdout.strip() or "(미읽음 메시지 없음)"
+        except Exception as exc:
+            return f"[error] {exc}"
+
+    if name == "itcp_history":
+        limit = args.get("limit", 10)
+        channel_filter = args.get("channel", "")
+        itcp_script = SCRIPTS_DIR / "itcp.py"
+        try:
+            result = subprocess.run(
+                [str(PYTHON_BIN), str(itcp_script), "history", str(limit)],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(PROJECT_ROOT),
+                env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
+            )
+            output = result.stdout.strip()
+            if channel_filter:
+                lines = [l for l in output.splitlines() if channel_filter in l or l.startswith("📜")]
+                return "\n".join(lines) or f"({channel_filter} 채널 메시지 없음)"
+            return output or "(메시지 없음)"
+        except Exception as exc:
+            return f"[error] {exc}"
+
+    if name == "hive_memory_get":
+        key = args.get("key", "")
+        memory_script = SCRIPTS_DIR / "memory.py"
+        try:
+            result = subprocess.run(
+                [str(PYTHON_BIN), str(memory_script), "get", key],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(PROJECT_ROOT),
+            )
+            return result.stdout.strip() or f"(키 '{key}' 없음)"
+        except Exception as exc:
+            return f"[error] {exc}"
+
+    if name == "hive_memory_set":
+        key = args.get("key", "")
+        content = args.get("content", "")
+        tags = args.get("tags", "")
+        memory_script = SCRIPTS_DIR / "memory.py"
+        try:
+            cmd = [str(PYTHON_BIN), str(memory_script), "set", key, content]
+            if tags:
+                cmd.extend(["--tags", tags])
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=15,
+                cwd=str(PROJECT_ROOT),
+            )
+            return result.stdout.strip() or "저장 완료"
         except Exception as exc:
             return f"[error] {exc}"
 

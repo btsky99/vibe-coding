@@ -498,62 +498,29 @@ def _update_current_work(completed_items: list[str]) -> None:
 
 
 def _read_messages(agent_name: str) -> list[dict]:
-    """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다.
+    """PostgreSQL pg_messages에서 나(agent_name)에게 온 미읽음 메시지를 가져옵니다.
+
+    [변경 이력]
+    - 2026-03-08 Claude: ITCP(itcp.py) 기반으로 전환
+      이전: messages.jsonl 파일 직접 파싱 (동시 쓰기 충돌 위험)
+      현재: PostgreSQL pg_messages 테이블 (원자적, 동시성 안전)
 
     [동작 순서]
-    1. .ai_monitor/data/messages.jsonl 읽기
-    2. to == agent_name AND read_at가 없는(None/빈 문자열) 항목 필터
-    3. 해당 메시지들에 read_at 타임스탬프 기록
-    4. 전체 메시지 목록 파일에 재저장 (원자적 쓰기)
-    5. 읽은 메시지 목록 반환
+    1. itcp.receive(agent_name) 호출 → pg_messages에서 미읽음 메시지 조회
+    2. PostgreSQL 미실행 시 messages.jsonl 폴백 자동 처리 (itcp 내부에서 처리)
+    3. 조회한 메시지를 is_read=true로 업데이트 (이중 수신 방지)
+    4. 읽은 메시지 목록 반환
 
     [파일 없거나 에러 시]
     빈 리스트 반환 — 훅 실행을 중단하지 않음
     """
-    from pathlib import Path
-    from datetime import datetime
-
-    project_root = Path(_scripts_dir).parent
-    messages_file = project_root / ".ai_monitor" / "data" / "messages.jsonl"
-
-    if not messages_file.exists():
-        return []
-
     try:
-        # 전체 메시지 읽기
-        messages = []
-        with open(messages_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        messages.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-
-        # 미읽음 메시지 필터 (나에게 온 것 + read_at 없음)
-        unread = [
-            m for m in messages
-            if m.get("to") in (agent_name, "all")
-            and not m.get("read_at")
-        ]
-
-        if not unread:
-            return []
-
-        # read_at 타임스탬프 마킹
-        now = datetime.now().isoformat()
-        for m in messages:
-            if m in unread:
-                m["read_at"] = now
-
-        # 파일 재저장 (원자적: 전체 덮어쓰기)
-        with open(messages_file, "w", encoding="utf-8") as f:
-            for m in messages:
-                f.write(json.dumps(m, ensure_ascii=False) + "\n")
-
-        return unread
-
+        # itcp 모듈 동적 임포트 (scripts/ 디렉토리에 위치)
+        import sys as _sys_itcp
+        if _scripts_dir not in _sys_itcp.path:
+            _sys_itcp.path.insert(0, _scripts_dir)
+        from itcp import receive as _itcp_receive
+        return _itcp_receive(agent_name, mark_read=True)
     except Exception:
         return []
 
@@ -735,15 +702,26 @@ def main():
         except Exception:
             pass
 
-        # [메시지 폴링] Gemini 또는 다른 에이전트가 보낸 미읽음 메시지 확인
-        # 메시지가 있으면 컨텍스트로 출력하여 Claude가 인지하도록 함
+        # [ITCP 메시지 폴링] PostgreSQL pg_messages에서 Claude에게 온 미읽음 메시지 수신
+        # Gemini, Codex 등 다른 터미널 에이전트가 보낸 메시지를 자동으로 컨텍스트에 주입
+        # [2026-03-08] ITCP(itcp.py) 기반으로 전환 — PostgreSQL pg_messages FIRST
         unread = _read_messages("claude")
         if unread:
-            lines = [f"📨 [{m.get('from','?')} → claude] ({m.get('type','info')}) {m.get('content','')}".strip()
-                     for m in unread]
-            print("[Hive 메시지] 미읽음 메시지:\n" + "\n".join(lines), flush=True)
+            # 채널별 이모지 매핑 — 메시지 유형을 시각적으로 구분
+            _CHANNEL_EMOJI = {
+                "debug": "🐛", "task": "📋", "review": "🔍",
+                "broadcast": "📢", "hive": "🧠", "general": "💬",
+            }
+            lines = []
+            for m in unread:
+                emoji = _CHANNEL_EMOJI.get(m.get('channel', 'general'), '📨')
+                from_a = m.get('from_agent', m.get('from', '?'))
+                ch = m.get('channel', 'general')
+                content = m.get('content', '')
+                lines.append(f"{emoji} [{from_a} → claude] ({ch}) {content}")
+            print("[ITCP 수신 메시지] 다른 에이전트에서 온 메시지:\n" + "\n".join(lines), flush=True)
             if log_task:
-                log_task("Hive", f"[메시지 수신] {len(unread)}개 읽음: {lines[0][:60]}", _TERMINAL_ID)
+                log_task("Hive", f"[ITCP 메시지 수신] {len(unread)}개: {lines[0][:60]}", _TERMINAL_ID)
 
         prompt = (
             data.get("prompt")

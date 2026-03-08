@@ -8,6 +8,11 @@ DESCRIPTION: Codex CLI용 고성능 래퍼.
 
 REVISION HISTORY:
 - 2026-03-07 Gemini-1: 대폭 고도화 (메뉴 시스템, AI 도구 설치 기능 추가)
+REVISION HISTORY:
+- 2026-03-08 Claude: ITCP 자동 수신 로직 추가
+  - _itcp_auto_receive(): 세션 시작 시 pg_messages에서 미읽음 메시지 자동 수신
+  - Claude/Gemini는 UserPromptSubmit 훅으로 자동 수신하지만
+    Codex는 훅 시스템이 없으므로 래퍼 진입 시점에 직접 호출합니다.
 """
 
 import os
@@ -33,6 +38,43 @@ CLI_AGENT       = SCRIPTS_DIR / "cli_agent.py"
 PYTHON_BIN      = AI_MONITOR_DIR / "venv" / "Scripts" / "python.exe"
 
 console = Console()
+
+
+# ── ITCP 자동 수신 ─────────────────────────────────────────────────────────────
+def _itcp_auto_receive() -> None:
+    """세션 시작 시 PostgreSQL pg_messages에서 Codex에게 온 미읽음 메시지를 자동 수신합니다.
+
+    [설계 의도]
+    Claude/Gemini는 UserPromptSubmit 훅(hive_hook.py, gemini_hook.py)이 매 프롬프트마다
+    자동으로 itcp.receive()를 호출하지만, Codex는 훅 시스템이 없습니다.
+    따라서 래퍼 진입 시점(main)에 이 함수를 호출하여 메시지 수신 공백을 보완합니다.
+
+    [변경 이력] 2026-03-08 Claude: ITCP 도입으로 신규 추가
+    """
+    itcp_script = SCRIPTS_DIR / "itcp.py"
+    if not itcp_script.exists():
+        return
+
+    try:
+        no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        result = subprocess.run(
+            [str(PYTHON_BIN), str(itcp_script), "receive", "codex"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=5, cwd=str(PROJECT_ROOT),
+            env={**os.environ, "PGCLIENTENCODING": "UTF8"},
+            creationflags=no_window,
+        )
+        output = result.stdout.strip()
+        if output and "미읽음 없음" not in output and "no unread" not in output.lower():
+            # 메시지가 있을 때만 출력 (없으면 조용히 통과)
+            console.print(Panel(
+                output,
+                title="[bold cyan]📨 하이브 메시지[/bold cyan]",
+                border_style="cyan",
+            ))
+    except Exception:
+        pass  # 수신 실패 시 조용히 통과 — 메인 기능에 영향 없음
+
 
 # ── 로고 및 시각 효과 ──────────────────────────────────────────────────────────
 def print_logo():
@@ -207,6 +249,10 @@ def main():
     parser.add_argument("--install", action="store_true", help="AI 도구(Gemini, Claude)에 Codex를 설치합니다.")
 
     args, unknown = parser.parse_known_args()
+
+    # 세션 시작 시 ITCP 미읽음 메시지 자동 수신
+    # Claude/Gemini는 훅으로 자동 처리되지만 Codex는 여기서 직접 호출
+    _itcp_auto_receive()
 
     if args.install:
         install_to_ai()

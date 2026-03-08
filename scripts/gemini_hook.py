@@ -93,46 +93,21 @@ _INTENT_MAP = [
 ]
 
 def _read_gemini_messages(agent_name: str) -> list[dict]:
-    """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다."""
-    from pathlib import Path
-    from datetime import datetime
+    """PostgreSQL pg_messages에서 Gemini에게 온 미읽음 메시지를 가져옵니다.
 
-    project_root = Path(_scripts_dir).parent
-    messages_file = project_root / ".ai_monitor" / "data" / "messages.jsonl"
-
-    if not messages_file.exists():
-        return []
-
+    [변경 이력]
+    - 2026-03-08 Claude: ITCP(itcp.py) 기반으로 전환
+      이전: messages.jsonl 파일 직접 파싱 (동시 쓰기 충돌 위험)
+      현재: PostgreSQL pg_messages 테이블 (원자적, 동시성 안전)
+      Claude와 Gemini가 동일한 pg_messages 테이블을 공유하므로
+      양방향 메시지 전달이 안정적으로 작동합니다.
+    """
     try:
-        messages = []
-        with open(messages_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        messages.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-
-        unread = [
-            m for m in messages
-            if m.get("to") in (agent_name, "all")
-            and not m.get("read_at")
-        ]
-
-        if not unread:
-            return []
-
-        now = datetime.now().isoformat()
-        for m in messages:
-            if m in unread:
-                m["read_at"] = now
-
-        with open(messages_file, "w", encoding="utf-8") as f:
-            for m in messages:
-                f.write(json.dumps(m, ensure_ascii=False) + "\n")
-
-        return unread
+        import sys as _sys_i
+        if _scripts_dir not in _sys_i.path:
+            _sys_i.path.insert(0, _scripts_dir)
+        from itcp import receive as _itcp_recv
+        return _itcp_recv(agent_name, mark_read=True)
     except Exception:
         return []
 
@@ -173,18 +148,23 @@ def _send_session_summary() -> None:
             return
 
         summary = "\n".join(actions[-10:])
-        now = datetime.now().isoformat()
-        msg = {
-            "from": "gemini",
-            "to": "claude",
-            "type": "session_summary",
-            "content": f"[Gemini 세션 종료 요약 {today}]\n{summary}",
-            "timestamp": now,
-            "read_at": None,
-        }
 
-        with open(messages_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        # ITCP를 통해 PostgreSQL pg_messages에 저장 (files.jsonl 폴백 자동 처리)
+        # [변경 이력] 2026-03-08: messages.jsonl 직접 쓰기 → ITCP(pg_messages) 방식으로 전환
+        try:
+            import sys as _sys_i
+            if _scripts_dir not in _sys_i.path:
+                _sys_i.path.insert(0, _scripts_dir)
+            from itcp import send as _itcp_send
+            _itcp_send(
+                from_terminal="gemini",
+                to_terminal="claude",
+                content=f"[Gemini 세션 종료 요약 {today}]\n{summary}",
+                channel="hive",
+                msg_type="session_summary",
+            )
+        except Exception:
+            pass
 
     except Exception:
         pass
