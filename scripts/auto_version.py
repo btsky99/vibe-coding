@@ -42,6 +42,20 @@ def increment_version(version_path):
     print(f"{current_version} -> {new_version}")
     return new_version
 
+def sync_package_json(new_version: str, pkg_path: str = ".ai_monitor/vibe-view/package.json"):
+    """package.json의 version 필드를 _version.py와 동기화합니다."""
+    if not os.path.exists(pkg_path):
+        return
+    with open(pkg_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    new_content = re.sub(r'"version"\s*:\s*"[^"]+"', f'"version": "{new_version}"', content)
+    with open(pkg_path, 'w', encoding='utf-8') as f:
+        f.write(new_content)
+    print(f"package.json 버전 동기화: {new_version}")
+
+
 if __name__ == "__main__":
     v_path = ".ai_monitor/_version.py"
-    increment_version(v_path)
+    new_ver = increment_version(v_path)
+    if new_ver:
+        sync_package_json(new_ver)
