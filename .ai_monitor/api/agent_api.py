@@ -387,10 +387,11 @@ def handle_terminals(handler) -> None:
     if external_sessions:
         import datetime
         for session in external_sessions:
-            # idle 또는 done 슬롯 찾기 (T1부터 순서대로)
-            # 이전 작업이 done으로 끝난 슬롯도 외부 Gemini 감지로 재사용 가능
+            # idle 또는 done 슬롯 찾기 (T8부터 역순으로)
+            # Why: 외부 세션은 높은 번호 슬롯에 배치해야 T1 카드가 숨겨지지 않음
+            # T1~T4는 사용자 주 작업 슬롯이므로 외부 세션이 점유하면 안 됨
             target_slot = None
-            for i in range(1, 9):
+            for i in range(8, 0, -1):
                 slot_key = f'T{i}'
                 if terminals[slot_key]['status'] in ('idle', 'done'):
                     target_slot = slot_key
