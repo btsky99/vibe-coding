@@ -55,10 +55,21 @@ _ANSI_ESCAPE = re.compile(
 )
 
 # ─── 경로 설정 ────────────────────────────────────────────────────────────────
-# 이 스크립트는 scripts/ 폴더에 위치하므로, 데이터 디렉토리는 상위 .ai_monitor/data
+# [2026-03-08] Claude: [버그수정] EXE(frozen) 환경에서 DATA_DIR 오류 수정
+#   - 개발 환경: __file__ = scripts/cli_agent.py → DATA_DIR = root/.ai_monitor/data (정상)
+#   - EXE 환경:  __file__ = MEIPASS/scripts/cli_agent.py → DATA_DIR = MEIPASS/.ai_monitor/data (잘못됨!)
+#     server.py는 DATA_DIR = APPDATA/VibeCoding 으로 쓰는데, cli_agent는 다른 경로에 쓰게 됨
+#     → SSE live 파일 경로 불일치 → 클라이언트가 LLM 출력을 못 받음 → 30초 타임아웃
+#   - 수정: frozen 모드에서는 APPDATA/VibeCoding 을 DATA_DIR로 사용 (server.py와 동일)
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPTS_DIR.parent
-DATA_DIR  = _PROJECT_ROOT / ".ai_monitor" / "data"
+if getattr(sys, 'frozen', False):
+    # PyInstaller EXE: server.py와 동일한 데이터 디렉토리 사용 (APPDATA/VibeCoding)
+    _appdata = Path(os.environ.get('APPDATA', Path.home())) / 'VibeCoding'
+    DATA_DIR = _appdata
+else:
+    # 개발 환경: scripts/ 상위 폴더의 .ai_monitor/data
+    DATA_DIR  = _PROJECT_ROOT / ".ai_monitor" / "data"
 RUNS_FILE = DATA_DIR / "agent_runs.jsonl"
 # 포트 9000 자율 에이전트 UI가 tail하는 실시간 라이브 로그 파일
 LIVE_FILE = DATA_DIR / "agent_live.jsonl"
