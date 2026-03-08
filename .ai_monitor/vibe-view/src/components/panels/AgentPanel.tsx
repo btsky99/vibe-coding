@@ -397,15 +397,44 @@ function TerminalCard({
   const serverStage = pipeline_stage && pipeline_stage !== 'idle' ? pipeline_stage : null;
   const detectedStage = serverStage ?? (last_line ? detectStage(last_line) : null);
 
-  // 파이프라인 단계 목록 — TerminalSlot 모니터링 상단과 동일한 순서
+  // 파이프라인 단계 목록 — 각 단계별 고유 아이콘/색상으로 한눈에 구분
   const PIPELINE = [
-    { id: 'analyzing', label: '분석' },
-    { id: 'modifying', label: '수정' },
-    { id: 'verifying', label: '검증' },
-    { id: 'done',      label: '완료' },
+    {
+      id: 'analyzing', label: '분석',
+      icon: <Search className="w-3 h-3" />,
+      activeBorder: 'border-cyan-400 bg-cyan-400/20 shadow-[0_0_6px_rgba(34,211,238,0.4)] animate-pulse',
+      activeText: 'text-cyan-400', activeIcon: 'text-cyan-400',
+      idleIcon: 'text-cyan-400/25', idleBorder: 'border-cyan-400/20 bg-cyan-400/5',
+    },
+    {
+      id: 'modifying', label: '수정',
+      icon: <Pencil className="w-3 h-3" />,
+      activeBorder: 'border-yellow-400 bg-yellow-400/20 shadow-[0_0_6px_rgba(250,204,21,0.4)] animate-pulse',
+      activeText: 'text-yellow-400', activeIcon: 'text-yellow-400',
+      idleIcon: 'text-yellow-400/25', idleBorder: 'border-yellow-400/20 bg-yellow-400/5',
+    },
+    {
+      id: 'verifying', label: '검증',
+      icon: <ShieldCheck className="w-3 h-3" />,
+      activeBorder: 'border-purple-400 bg-purple-400/20 shadow-[0_0_6px_rgba(168,85,247,0.4)] animate-pulse',
+      activeText: 'text-purple-400', activeIcon: 'text-purple-400',
+      idleIcon: 'text-purple-400/25', idleBorder: 'border-purple-400/20 bg-purple-400/5',
+    },
+    {
+      id: 'done', label: '완료',
+      icon: <CheckCircle2 className="w-3 h-3" />,
+      activeBorder: 'border-green-400 bg-green-400/20 shadow-[0_0_6px_rgba(74,222,128,0.4)] animate-pulse',
+      activeText: 'text-green-400', activeIcon: 'text-green-400',
+      idleIcon: 'text-green-400/25', idleBorder: 'border-green-400/20 bg-green-400/5',
+    },
   ] as const;
   const stageOrder: Record<string, number> = { analyzing: 0, modifying: 1, verifying: 2, done: 3 };
-  const currentIdx = detectedStage ? (stageOrder[detectedStage] ?? -1) : (status === 'done' ? 3 : -1);
+  // running 중 단계 미감지 시 → 분析(0)을 디폴트 활성으로 표시 (시작 단계임을 명시)
+  const currentIdx = detectedStage
+    ? (stageOrder[detectedStage] ?? -1)
+    : status === 'done' ? 3
+    : status === 'running' ? 0   // 감지 전이면 분析 단계 활성
+    : -1;
 
   // idle 터미널은 최소 높이 유지 (헤더+상태만 표시)
   const isActive = status !== 'idle';
@@ -500,23 +529,23 @@ function TerminalCard({
                     isPast || isStepActive ? 'bg-green-600/40' : 'bg-white/8'
                   }`} />
                 )}
-                {/* 단계 원형 + 레이블 */}
+                {/* 단계 원형 + 레이블 — 단계별 고유 색상으로 현재 위치 즉시 파악 */}
                 <div className="flex flex-col items-center gap-0.5">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border transition-all ${
-                    isStepActive ? 'border-yellow-400 bg-yellow-400/20 shadow-[0_0_6px_rgba(250,204,21,0.35)] animate-pulse' :
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border transition-all duration-300 ${
+                    isStepActive ? step.activeBorder :
                     isPast       ? 'border-green-600/50 bg-green-900/20' :
-                                   'border-white/10 bg-white/3'
+                                   step.idleBorder
                   }`}>
-                    <CheckCircle2 className={`w-3 h-3 ${
-                      isStepActive ? 'text-yellow-400' :
-                      isPast       ? 'text-green-600/60' :
-                                     'text-white/15'
-                    }`} />
+                    <span className={`transition-all ${
+                      isStepActive ? step.activeIcon :
+                      isPast       ? 'text-green-500/70' :
+                                     step.idleIcon
+                    }`}>{step.icon}</span>
                   </div>
-                  <span className={`text-[8px] font-bold ${
-                    isStepActive ? 'text-yellow-400' :
+                  <span className={`text-[8px] font-bold transition-all ${
+                    isStepActive ? step.activeText :
                     isPast       ? 'text-green-600/50' :
-                                   'text-white/18'
+                                   'text-white/20'
                   }`}>
                     {step.label}
                   </span>
