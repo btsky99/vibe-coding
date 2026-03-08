@@ -11,14 +11,16 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-03-08] Claude — 설치 EXE 고정 파일명(vibe-coding.exe)으로 변경. 버전 업 시 자동 덮어쓰기
 ; [2026-03-01] Claude — 최초 생성. 포터블 EXE → 설치버전 파이프라인 구축
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Vibe Coding"
-#define MyAppVersion   "3.7.20"
+#define MyAppVersion   "3.7.21"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
-#define MyAppExeName   "vibe-coding-v" + MyAppVersion + ".exe"
+#define MyAppExeName   "vibe-coding.exe"
+#define MyAppSrcExe    "vibe-coding-v" + MyAppVersion + ".exe"
 #define MySetupName    "vibe-coding-setup-" + MyAppVersion
 
 [Setup]
@@ -46,6 +48,9 @@ WizardStyle=modern
 ; 권한 설정 (관리자 불필요 — 사용자 폴더에도 설치 가능)
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+; 설치 전 실행 중인 앱 자동 종료 (덮어쓰기 허용)
+CloseApplications=yes
+CloseApplicationsFilter=*vibe-coding*
 
 ; 아이콘
 SetupIconFile=.ai_monitor\bin\app_icon.ico
@@ -60,8 +65,8 @@ Name: "desktopicon";    Description: "바탕화면 바로가기 만들기"; Grou
 Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDescription: "추가 옵션:";  Flags: unchecked
 
 [Files]
-; PyInstaller로 생성된 EXE (단일 파일)
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; PyInstaller로 생성된 EXE (단일 파일) — 고정 파일명(vibe-coding.exe)으로 설치
+Source: "dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 [Icons]
 ; 시작 메뉴
@@ -77,8 +82,8 @@ Name: "{userstartup}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; Tas
 Filename: "{app}\{#MyAppExeName}"; Description: "Vibe Coding 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; 제거 전 실행 중인 프로세스 종료
-Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden
+; 제거 전 실행 중인 프로세스 종료 (고정 파일명 사용)
+Filename: "taskkill.exe"; Parameters: "/F /IM vibe-coding.exe"; Flags: runhidden; RunOnceId: "KillVibeCoding"
 
 [Code]
 // 버전 체크: 구버전 설치되어 있으면 먼저 제거 유도
