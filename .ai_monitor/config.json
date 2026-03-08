@@ -6,5 +6,6 @@
   "projects": {
     "vibe-coding": "D:/vibe-coding",
     "shop": "D:/shop"
-  }
+  },
+  "agent_mode": "yolo"
 }

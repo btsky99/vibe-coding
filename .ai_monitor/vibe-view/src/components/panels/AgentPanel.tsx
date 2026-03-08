@@ -1274,15 +1274,18 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
               })()}
             </div>
 
-            {/* ── T1~T8 모니터링 패널 목록 (2열 그리드) ── */}
+            {/* ── 활성 터미널만 표시 (idle 카드 숨김, 선택된 터미널은 예외) ── */}
             {/* external=true인 외부 Gemini 세션은 다른 프로젝트이므로 표시 제외 */}
-            <div className="grid grid-cols-2 gap-1.5 shrink-0">
+            <div className="flex flex-col gap-1.5 shrink-0">
               {Array.from({ length: 8 }, (_, i) => `T${i + 1}`).map(tid => {
                 const state: TerminalState = terminals[tid] ?? {
                   status: 'idle', task: '', cli: '', run_id: '', ts: '', last_line: '',
                 };
                 // 외부 에이전트(다른 프로젝트 Gemini)는 목록에서 제외
                 if (state.external) return null;
+                // running 중이 아니고 선택된 터미널도 아니면 숨김
+                // (idle/done 상태의 비선택 터미널은 불필요하게 표시하지 않음)
+                if (state.status !== 'running' && selectedTerminalId !== tid) return null;
                 return (
                   <TerminalCard
                     key={tid}

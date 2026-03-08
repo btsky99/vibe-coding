@@ -23,11 +23,24 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
     PROJECT_ROOT = BASE_DIR.parent
 
-# 데이터 디렉토리 (server.py와 동일 로직)
-if os.name == 'nt':
-    DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
+# 데이터 디렉토리 결정 로직 (프로젝트 로컬 우선)
+# Why: agent_shell.py와 server.py가 프로젝트 로컬 .ai_monitor/data를 사용하므로
+#      모니터링 앱도 동일한 소스를 바라봐야 실시간 동기화가 가능합니다.
+_local_data = PROJECT_ROOT / ".ai_monitor" / "data"
+if _local_data.exists():
+    DATA_DIR = _local_data
+elif getattr(sys, 'frozen', False):
+    if os.name == 'nt':
+        DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
+    else:
+        DATA_DIR = Path.home() / ".vibe-coding"
 else:
-    DATA_DIR = Path.home() / ".vibe-coding"
+    # 개발 모드 폴백
+    DATA_DIR = BASE_DIR / "data"
+
+if not DATA_DIR.exists():
+    try: os.makedirs(DATA_DIR, exist_ok=True)
+    except: pass
 
 # 아이콘 경로
 ICON_PATH = PROJECT_ROOT / ".ai_monitor" / "bin" / "app_icon.ico"
@@ -111,9 +124,12 @@ class MissionControlApp(QObject):
                         try:
                             data = json.loads(line)
                             agent = data.get("agent", "SYSTEM")
+                            tid = data.get("terminal_id", "")
+                            # 터미널 ID가 있으면 에이전트 이름 옆에 표시 (예: CLAUDE [T1])
+                            display_name = f"{agent} [{tid}]" if tid else agent
                             task = data.get("task", "")
                             if task:
-                                self.sidebar.add_log(agent, task)
+                                self.sidebar.add_log(display_name, task)
                         except: pass
         except Exception as e:
             print(f"[Mission Control] 로그 테일링 오류: {e}")
@@ -151,20 +167,53 @@ class MissionControlApp(QObject):
             self.open_action.setText("사이드바 열기")
 
     def poll_agent_status(self):
-        """에이전트 라이브 상태 파일을 읽어 상태를 업데이트합니다."""
+        """agent_live.jsonl 이벤트를 분석하여 다중 터미널 상태를 집계합니다.
+
+        Why: 여러 터미널(T1~T8)에서 에이전트가 동시에 실행될 수 있으므로,
+             개별 이벤트들을 모아 현재 활성 상태인 에이전트 목록을 추출해야 합니다.
+        """
         live_file = DATA_DIR / "agent_live.jsonl"
         if not live_file.exists():
             return
             
         try:
             with open(live_file, "r", encoding="utf-8") as f:
-                content = f.read().strip().split('\n')
-                if not content: return
-                status = json.loads(content[-1])
-                
-            if status != self.last_status:
-                self.last_status = status
-                self.active_agents = [name for name, info in status.items() if info.get('status') == 'active']
+                # 성능을 위해 마지막 200줄만 읽음
+                lines = f.readlines()[-200:]
+                if not lines: return
+
+            # 터미널별 최근 상태 추적
+            terminal_status = {}
+            for line in lines:
+                try:
+                    ev = json.loads(line)
+                    # agent_shell은 'terminal_id' 또는 'terminal' 키를 사용
+                    tid = ev.get("terminal_id") or ev.get("terminal")
+                    if not tid: continue
+                    
+                    etype = ev.get("type")
+                    if etype == "started":
+                        terminal_status[tid] = {"status": "active", "cli": ev.get("cli")}
+                    elif etype in ("done", "error", "stopped"):
+                        terminal_status[tid] = {"status": "idle"}
+                except: continue
+
+            # 에이전트 종류별(claude, gemini, codex) 활성 여부 집계
+            current_map = {"claude": {"status": "idle"}, "gemini": {"status": "idle"}, "codex": {"status": "idle"}}
+            active_names = []
+            
+            for tid, info in terminal_status.items():
+                if info.get("status") == "active":
+                    cli = info.get("cli", "").lower()
+                    if cli in current_map:
+                        current_map[cli]["status"] = "active"
+                        if cli not in active_names:
+                            active_names.append(cli)
+
+            # 상태 변경 시에만 UI 업데이트
+            if current_map != self.last_status:
+                self.last_status = current_map
+                self.active_agents = active_names
                 
                 if self.active_agents:
                     if not self.is_pulsing:
@@ -175,8 +224,8 @@ class MissionControlApp(QObject):
                     self.pulse_timer.stop()
                     self.reset_icon()
                 
-                self.update_tray_visuals(status)
-                self.status_changed.emit(status)
+                self.update_tray_visuals(current_map)
+                self.status_changed.emit(current_map)
         except Exception as e:
             print(f"[Mission Control] 폴링 오류: {e}")
 

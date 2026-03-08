@@ -102,6 +102,13 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     # 모드 영속 저장
     set_mode(mode)
 
+    # 중첩 세션 방지: CLAUDE 관련 환경 변수 제거
+    # Why: Gemini CLI 등에서 실행 시 상속된 변수가 Claude Code의 중첩 실행 방지 로직을 트리거함.
+    claude_vars = [k for k in os.environ.keys() if "CLAUDE" in k.upper()]
+    if claude_vars:
+        for k in claude_vars:
+            del os.environ[k]
+
     cmd = AGENT_CMDS[agent][mode] + extra_args
     print(f"[실행] {agent.upper()} / {mode.upper()} 모드")
     print(f"  명령: {' '.join(cmd)}")

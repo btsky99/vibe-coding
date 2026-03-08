@@ -8,6 +8,9 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-03-08] Claude: PTY 세션 병합 — handle_terminals()에서 pty_sessions도 반영
+#   - _pty_sessions_getter 콜백 추가: server.py가 set_pty_sessions_getter()로 주입
+#   - PTY로 실행된 Claude/Gemini/Codex도 T1~T8 카드에 running 상태로 표시
 # [2026-03-04] Claude: 최초 구현
 #   - handle_run: POST /api/agent/run — CLI 실행 시작 (백그라운드 스레드)
 #   - handle_stop: POST /api/agent/stop — 실행 중인 프로세스 강제 종료
@@ -64,6 +67,17 @@ except ImportError as e:
 # 구조: {terminal_id: {stage, task, ts}}
 # handle_terminals()에서 cli_agent 상태를 이 값으로 오버라이드하여 대화형 세션을 실시간 표시.
 _interactive_stages: dict = {}
+
+# ── PTY 세션 getter (server.py에서 주입) ─────────────────────────────────────
+# server.py의 pty_sessions dict를 직접 임포트하면 순환 의존성이 생기므로,
+# server.py 초기화 시 set_pty_sessions_getter()로 콜백을 주입받아 사용합니다.
+_pty_sessions_getter = None  # callable: () -> dict
+
+
+def set_pty_sessions_getter(getter) -> None:
+    """server.py 초기화 시 호출 — pty_sessions 딕셔너리 접근 콜백을 등록합니다."""
+    global _pty_sessions_getter
+    _pty_sessions_getter = getter
 
 
 def _json_response(handler, data: dict | list, status: int = 200) -> None:
@@ -341,8 +355,10 @@ def _merge_live_file_status(terminals: dict) -> None:
                     'run_id': started.get('run_id', ''),
                     'ts': started.get('ts', ''),
                     'last_line': '',
-                    'pipeline_stage': 'analyzing',  # 외부 실행: 분석 단계부터 시작
-                    'external': True,  # agent_live.jsonl 기반 감지 플래그
+                    'pipeline_stage': 'analyzing',  # 분석 단계부터 시작
+                    # external 플래그 미설정 — 이 터미널은 현재 프로젝트 소속
+                    # (external=True는 _detect_external_gemini()에서만 설정:
+                    #  다른 프로젝트 Gemini 세션 전용 플래그)
                 })
         else:
             # done 이벤트가 있고 started보다 나중 → 완료 상태
@@ -387,11 +403,11 @@ def handle_terminals(handler) -> None:
     if external_sessions:
         import datetime
         for session in external_sessions:
-            # idle 또는 done 슬롯 찾기 (T8부터 역순으로)
-            # Why: 외부 세션은 높은 번호 슬롯에 배치해야 T1 카드가 숨겨지지 않음
-            # T1~T4는 사용자 주 작업 슬롯이므로 외부 세션이 점유하면 안 됨
+            # idle 또는 done 슬롯 찾기 (T8부터 T5까지만 역순으로)
+            # Why: 외부 세션은 T5~T8에만 배치 — T1~T4는 절대 점유 안 함
+            # range(8, 4, -1) = T8, T7, T6, T5 (T1~T4 완전 보호)
             target_slot = None
-            for i in range(8, 0, -1):
+            for i in range(8, 4, -1):
                 slot_key = f'T{i}'
                 if terminals[slot_key]['status'] in ('idle', 'done'):
                     target_slot = slot_key
@@ -447,6 +463,33 @@ def handle_terminals(handler) -> None:
             terminals[tid]['status'] = 'idle'
             if task:
                 terminals[tid]['task'] = task
+
+    # ── PTY 세션 병합 — TerminalSlot에서 직접 실행한 Claude/Gemini/Codex 반영 ────
+    # server.py의 pty_sessions는 슬롯 번호(string "1"~"8")를 키로 사용합니다.
+    # cli_agent._terminals이 idle 상태인 슬롯에 한해, PTY에서 에이전트가 실행 중이면
+    # status='running'으로 오버라이드하여 상황판 카드가 표시되도록 합니다.
+    if _pty_sessions_getter is not None:
+        try:
+            import datetime as _dt
+            pty_sessions = _pty_sessions_getter()
+            for slot_num in range(1, 9):
+                tid = f'T{slot_num}'
+                info = pty_sessions.get(str(slot_num))
+                if not info:
+                    continue
+                agent = info.get('agent', '') or ''
+                if not agent:
+                    continue
+                # PTY 세션이 있고 현재 idle/done 상태이면 running으로 표시
+                # (이미 cli_agent가 running으로 표시 중이면 유지)
+                if terminals[tid]['status'] not in ('running',):
+                    terminals[tid]['status'] = 'running'
+                    terminals[tid]['cli'] = agent
+                    terminals[tid]['task'] = terminals[tid].get('task') or f'[PTY] {agent.upper()} 세션'
+                    terminals[tid]['ts'] = info.get('started', '')
+                    terminals[tid]['pipeline_stage'] = terminals[tid].get('pipeline_stage') or 'analyzing'
+        except Exception:
+            pass  # PTY 세션 병합 실패 시 무시 (서버 미실행 등)
 
     _json_response(handler, terminals)
 

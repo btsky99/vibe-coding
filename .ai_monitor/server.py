@@ -3635,6 +3635,9 @@ class SSEHandler(BaseHTTPRequestHandler):
         pass
 
 pty_sessions = {}
+# agent_api가 PTY 세션 상태를 /api/agent/terminals 응답에 병합할 수 있도록
+# pty_sessions 딕셔너리 접근 콜백을 주입합니다.
+agent_api.set_pty_sessions_getter(lambda: pty_sessions)
 
 async def pty_handler(websocket):
     try:

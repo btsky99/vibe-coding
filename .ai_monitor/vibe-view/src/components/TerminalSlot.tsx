@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-08 Claude: 서버 실행 상태 자동 감지 — agentTerminals 폴링으로 LLM 실행 중인 슬롯 자동 터미널 모드 전환.
+ *                      isTerminalMode=false 상태에서 T${slotId+1}.status==='running'이면 선택 카드 건너뛰고 모니터링 뷰 표시.
  * - 2026-03-08 Claude: Codex CLI 에이전트 선택 카드 추가 — Code2 아이콘 + 오렌지 색상테마.
  *                      launchAgent('codex', yolo) 연결 완료. 백엔드 codex 케이스는 이미 존재함.
  * - 2026-03-07 Claude: 모니터링 뷰 슬림화 — max-h 280px→160px, 헤더 h-6→h-5로 축소.
@@ -367,6 +369,20 @@ export default function TerminalSlot({
     }
     prevAgentStatus.current = agentStatus;
   }, [agentStatus, isTerminalMode, activeAgent, slotId, liveTask]);
+
+  // 서버 실행 상태 자동 감지 — agentTerminals 폴링(3초) 결과에 따라 터미널 모드 자동 전환
+  // 사용자가 버튼을 누르지 않아도 서버에서 LLM이 실행 중이면 선택 카드를 건너뜁니다.
+  // 반대로 idle/done 전환 시에는 자동 복귀하지 않음 (출력 내용 보존, 사용자가 직접 닫기)
+  useEffect(() => {
+    if (isTerminalMode) return; // 이미 터미널 모드면 무시
+    const serverStatus = agentTerminals?.[terminalId];
+    if (serverStatus?.status === 'running' || serverStatus?.status === 'started') {
+      const detectedCli = serverStatus.cli ?? 'claude';
+      setActiveAgent(detectedCli);
+      setIsTerminalMode(true);
+      setShowMonitor(true); // 모니터링 뷰 자동 활성화 (XTerm 없이도 상태 확인 가능)
+    }
+  }, [agentTerminals, terminalId, isTerminalMode]);
 
   // 알림 링 글로우 — 에이전트 상태에 따라 패널 테두리 색상/그림자 변경 (cmux 스타일)
   const ringClass = !isTerminalMode
