@@ -376,14 +376,18 @@ export default function TerminalSlot({
   // 서버 실행 상태 자동 감지 — agentTerminals 폴링(3초) 결과에 따라 터미널 모드 자동 전환
   // 사용자가 버튼을 누르지 않아도 서버에서 LLM이 실행 중이면 선택 카드를 건너뜁니다.
   // 반대로 idle/done 전환 시에는 자동 복귀하지 않음 (출력 내용 보존, 사용자가 직접 닫기)
+  // [버그수정 2026-03-08] isTerminalMode=true여도 activeAgent는 항상 서버 cli에 동기화해야 함.
+  // 이전에 Claude로 실행 후 Codex로 재시작하면 activeAgent='claude' 잔류 → T1 데이터 표시 버그.
   useEffect(() => {
-    if (isTerminalMode) return; // 이미 터미널 모드면 무시
     const serverStatus = agentTerminals?.[terminalId];
     if (serverStatus?.status === 'running' || serverStatus?.status === 'started') {
       const detectedCli = serverStatus.cli ?? 'claude';
-      setActiveAgent(detectedCli);
-      setIsTerminalMode(true);
-      setShowMonitor(true); // 모니터링 뷰 자동 활성화 (XTerm 없이도 상태 확인 가능)
+      // activeAgent는 항상 갱신 — 에이전트 타입이 바뀌어도 올바른 termData 선택 보장
+      if (detectedCli) setActiveAgent(detectedCli);
+      if (!isTerminalMode) {
+        setIsTerminalMode(true);
+        setShowMonitor(true); // 모니터링 뷰 자동 활성화 (XTerm 없이도 상태 확인 가능)
+      }
     }
   }, [agentTerminals, terminalId, isTerminalMode]);
 
