@@ -25,6 +25,8 @@
 # [2026-03-04] Claude: 레이스 컨디션 수정
 #   - _run_gate Lock 추가: 상태 체크 → 스레드 시작 구간을 원자적으로 보호
 #   - 동시 요청 시 중복 실행 방지 (동일 태스크 여러 번 실행 버그 수정)
+# [2026-03-08] Claude: [버그수정] _detect_external_gemini 주석 오류 수정
+#   - 주석 "60초 이내" → "600초(10분) 이내"로 수정 (실제 코드와 일치)
 # [2026-03-05] Claude: 대화형 세션 파이프라인 실시간 추적 추가
 #   - _interactive_stages: hive_hook.py가 업데이트하는 인메모리 stage dict
 #   - handle_stage_update: POST /api/agent/stage — hook이 stage를 직접 업데이트
@@ -228,7 +230,7 @@ def _detect_external_gemini() -> list[dict]:
 
     active = []
     now = time.time()
-    # 60초 이내 수정된 세션 파일 탐색
+    # 600초(10분) 이내 수정된 세션 파일 탐색
     for proj_dir in gemini_tmp.iterdir():
         if not proj_dir.is_dir():
             continue

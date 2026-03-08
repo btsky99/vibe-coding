@@ -8,6 +8,19 @@
  *          하나의 SSE 스트림을 공유하여 모든 뷰를 동시 업데이트합니다.
  *
  * REVISION HISTORY:
+ * - 2026-03-08 Claude: [UI] 각 TerminalCard가 개별 파이프라인 표시하도록 개선
+ *   - TerminalState에 pipeline_stage 필드 추가 (서버 값 직접 사용)
+ *   - TerminalCard: 서버 pipeline_stage 우선, last_line detectStage fallback
+ *   - 하단 통합 WorkflowPipeline 제거 — 카드별 독립 표시로 전환 (T1~T8 동시 추적)
+ * - 2026-03-08 Claude: [UI] 상황판 배너에 "실행 중인 터미널" 목록 추가
+ *   - 선택 대상(좌) + 현재 running 터미널 배지(우) 좌우 분리 레이아웃
+ *   - running 터미널 없으면 "실행 중 없음" 텍스트 표시
+ *   - running 배지는 animate-pulse로 시각적 강조 (3초 폴링 실시간 갱신)
+ * - 2026-03-08 Claude: [UX] 터미널 카드 실행 상태 명시화 — 어느 터미널이 동작 중인지 한눈에 확인
+ *   - 실행 중(running) 카드 상단에 좌→우 스캔 애니메이션 진행 바 추가 (노란색)
+ *   - "LIVE" 배지: running 터미널 ID 옆에 pulse 애니메이션으로 표시
+ *   - "실행 대상" 배지: selected 터미널 카드 내부에 primary 색상으로 표시
+ *   - 상태/시간을 우측으로 이동, 헤더 레이아웃 정리
  * - 2026-03-06 Claude: [Phase6] 모델 라우팅 근거 뱃지 — TerminalCard 헤더에 routing_reason 표시
  *   - 실행 중(running) 상태에서 CLI 배지 옆에 자동 선택 근거 텍스트를 7px 회색으로 표시
  *   - 예: "claude | 코드 수정 감지 (수정)" 형태로 why 모델이 선택됐는지 즉시 확인 가능
@@ -150,7 +163,8 @@ interface TerminalState {
   cli: string;            // claude | gemini | ''
   run_id: string;
   ts: string;             // ISO 타임스탬프
-  last_line: string;      // 마지막 출력 줄 (워크플로우 단계 감지용)
+  last_line: string;      // 마지막 출력 줄
+  pipeline_stage?: string; // 서버에서 직접 받는 파이프라인 단계 (idle|analyzing|modifying|verifying|done|error)
   external?: boolean;     // true = 외부 Gemini 세션 (다른 프로젝트) — UI에서 숨김
   routing_reason?: string; // 모델 자동 선택 근거 (예: "코드 작업 감지 (수정)")
 }
@@ -228,7 +242,7 @@ function StatusIcon({ status }: { status: string }) {
 // ─── 워크플로우 파이프라인 컴포넌트 ─────────────────────────────────────────
 /** 분석 → 수정 → 검증 → 완료 단계를 가로 스텝 형태로 시각화.
  *  현재 단계를 강조하고, 이슈 발생 시 루프 카운터를 표시합니다. */
-function WorkflowPipeline({
+export function _WorkflowPipeline({
   stage, loopCount, agentStatus,
 }: {
   stage: WorkflowStage;
@@ -340,7 +354,7 @@ function TerminalCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  const { status, task, cli, ts, last_line } = state;
+  const { status, task, cli, ts, last_line, pipeline_stage } = state;
 
   // 카드 테두리: 선택 > running > 기본
   const cardBorder = selected
@@ -376,8 +390,12 @@ function TerminalCard({
     return `${ts.slice(5, 7)}/${ts.slice(8, 10)}`;
   })();
 
-  // last_line으로 현재 워크플로우 단계 추론
-  const detectedStage = last_line ? detectStage(last_line) : null;
+  // 파이프라인 단계: 서버 pipeline_stage 우선, 없으면 last_line 키워드 fallback
+  // Why: 서버(cli_agent.py)가 출력 파싱으로 이미 정확한 stage를 계산해 전달하므로
+  //      클라이언트에서 last_line을 재파싱할 필요 없음. 단, SSE로만 실행한 경우
+  //      서버 stage가 없을 수 있어 fallback을 유지함.
+  const serverStage = pipeline_stage && pipeline_stage !== 'idle' ? pipeline_stage : null;
+  const detectedStage = serverStage ?? (last_line ? detectStage(last_line) : null);
 
   // 파이프라인 단계 목록 — TerminalSlot 모니터링 상단과 동일한 순서
   const PIPELINE = [
@@ -397,11 +415,47 @@ function TerminalCard({
       onClick={onClick}
       className={`flex flex-col gap-0 rounded border transition-all duration-200 text-left w-full overflow-hidden ${cardBorder}`}
     >
-      {/* ── 모니터링 헤더: ID + CLI + 상태 + 시간 ─────────────────────────── */}
+      {/* ── 실행 중 상태: 상단 애니메이션 진행 바 ────────────────────────────── */}
+      {status === 'running' && (
+        <div className="h-0.5 w-full overflow-hidden shrink-0 bg-yellow-400/15">
+          <div style={{
+            height: '100%',
+            background: 'rgba(250,204,21,0.7)',
+            animation: 'termCardLive 1.6s ease-in-out infinite',
+          }} />
+          <style>{`
+            @keyframes termCardLive {
+              0%   { width:0%;  margin-left:0%; }
+              50%  { width:55%; margin-left:22%; }
+              100% { width:0%;  margin-left:100%; }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* ── 모니터링 헤더: ID + 배지 + 상태 + 시간 ─────────────────────────── */}
       <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/5">
-        <div className="flex items-center gap-2">
-          {/* 터미널 ID */}
-          <span className="font-bold text-[11px] text-white/80 font-mono tracking-wider">{id}</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* 터미널 ID — 실행 중이면 노란색 강조 */}
+          <span className={`font-bold text-[11px] font-mono tracking-wider ${
+            status === 'running' ? 'text-yellow-300' : 'text-white/80'
+          }`}>{id}</span>
+
+          {/* 실행 중 LIVE 배지 */}
+          {status === 'running' && (
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-yellow-400/15 border border-yellow-400/35 text-yellow-400 text-[8px] font-bold animate-pulse">
+              <span className="w-1 h-1 rounded-full bg-yellow-400 inline-block" />
+              LIVE
+            </span>
+          )}
+
+          {/* 실행 대상(선택됨) 배지 */}
+          {selected && (
+            <span className="px-1.5 py-0.5 rounded bg-primary/20 border border-primary/40 text-primary text-[8px] font-bold">
+              실행 대상
+            </span>
+          )}
+
           {/* CLI 배지 */}
           {cli && (
             <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${cliBadge}`}>
@@ -414,6 +468,8 @@ function TerminalCard({
               {state.routing_reason}
             </span>
           )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           {/* 상태 도트 + 텍스트 */}
           <div className="flex items-center gap-1">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
@@ -426,8 +482,8 @@ function TerminalCard({
               {status === 'idle' ? '대기' : status === 'running' ? '실행 중' : status === 'done' ? '완료' : '오류'}
             </span>
           </div>
+          <span className="text-[8px] text-white/20 font-mono">{timeStr}</span>
         </div>
-        <span className="text-[8px] text-white/20 font-mono">{timeStr}</span>
       </div>
 
       {/* ── 파이프라인 단계 (실행 이력이 있는 터미널만 표시) ────────────────── */}
@@ -521,8 +577,8 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
   // ── 분석/수정 파일 추적 (상황판 탭에서 표시) ──────────────────────────────
   // SSE 출력에서 '● Read(file)' → 분석, '● Edit(file)' → 수정 으로 파싱
-  const [analyzedFiles, setAnalyzedFiles] = useState<string[]>([]);
-  const [modifiedFiles, setModifiedFiles] = useState<string[]>([]);
+  const [_analyzedFiles, setAnalyzedFiles] = useState<string[]>([]);
+  const [_modifiedFiles, setModifiedFiles] = useState<string[]>([]);
 
   // ── 하이브 활동 탭 데이터 — /api/hive/activity 3초 폴링 ───────────────────
   // 하이브 메모리 읽기/쓰기, 오케스트레이션, 메시지 수신 이벤트를 시각화
@@ -567,8 +623,8 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
   // ── 상황판 탭: 워크플로우 상태 머신 ────────────────────────────────────────
   // wfStage/wfLoop: WorkflowPipeline 렌더링에 사용
   // wfAction/wfLog: 선택 터미널 실행 중일 때만 파이프라인 표시 (상황판 탭 내)
-  const [wfStage, setWfStage]         = useState<WorkflowStage>('idle');
-  const [wfLoop, setWfLoop]           = useState(0);
+  const [_wfStage, setWfStage]        = useState<WorkflowStage>('idle');
+  const [_wfLoop, setWfLoop]          = useState(0);
   const wfCurrentStageRef             = useRef<WorkflowStage>('idle');
 
   const outputEndRef      = useRef<HTMLDivElement>(null);
@@ -1187,11 +1243,35 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
         {activeTab === 'workflow' && (
           <div className="flex flex-col h-full overflow-y-auto gap-1.5 pr-0.5">
 
-            {/* ── 선택 터미널 안내 배너 ──────────────────────────────────── */}
-            <div className="shrink-0 flex items-center gap-2 px-0.5 pb-0.5">
-              <span className="text-[9px] text-white/25">실행 대상:</span>
-              <span className="text-[10px] font-bold font-mono text-primary">{selectedTerminalId}</span>
-              <span className="text-[9px] text-white/15">— 카드 클릭으로 변경</span>
+            {/* ── 선택 터미널 안내 배너 + 현재 실행 중인 터미널 목록 ──────── */}
+            {/* 좌측: 다음 실행을 보낼 대상 터미널. 우측: 지금 실제 동작 중인 터미널 배지 */}
+            <div className="shrink-0 flex items-center justify-between px-0.5 pb-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-white/25">실행 대상:</span>
+                <span className="text-[10px] font-bold font-mono text-primary">{selectedTerminalId}</span>
+                <span className="text-[9px] text-white/15">— 카드 클릭으로 변경</span>
+              </div>
+              {/* 현재 running 상태인 터미널을 노란 배지로 우측에 나열 */}
+              {(() => {
+                const runningIds = Array.from({ length: 8 }, (_, i) => `T${i + 1}`)
+                  .filter(tid => terminals[tid]?.status === 'running' && !(terminals[tid] as any)?.external);
+                if (runningIds.length === 0) return (
+                  <span className="text-[8px] text-white/15 font-mono">실행 중 없음</span>
+                );
+                return (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[8px] text-yellow-400/50">실행 중:</span>
+                    {runningIds.map(tid => (
+                      <span
+                        key={tid}
+                        className="text-[9px] font-bold font-mono text-yellow-300 bg-yellow-400/15 px-1.5 py-0.5 rounded border border-yellow-400/30 animate-pulse"
+                      >
+                        {tid}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ── T1~T8 모니터링 패널 목록 (2열 그리드) ── */}
@@ -1214,50 +1294,6 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
                 );
               })}
             </div>
-
-            {/* ── 선택된 터미널의 워크플로우 파이프라인 (SSE 실시간 데이터)
-                  TerminalCard에 last_line 기반 단계가 표시되나,
-                  SSE 직접 연결 시의 더 정확한 단계를 여기서 보완 표시 */}
-            {(['running', 'done', 'error'] as const).includes(
-              terminals[selectedTerminalId]?.status as any
-            ) && wfStage !== 'idle' && (
-              <div className="shrink-0">
-                <WorkflowPipeline stage={wfStage} loopCount={wfLoop} agentStatus={status} />
-              </div>
-            )}
-
-            {/* ── 분석/수정 파일 목록 — SSE 출력에서 파싱한 도구 호출 내역 ─ */}
-            {(analyzedFiles.length > 0 || modifiedFiles.length > 0) && (
-              <div className="shrink-0 rounded border border-white/8 overflow-hidden text-[9px]">
-                {analyzedFiles.length > 0 && (
-                  <div className="px-2 py-1.5 border-b border-white/5">
-                    <div className="text-[8px] text-blue-400/70 font-bold uppercase tracking-wider mb-1">📖 분석한 파일</div>
-                    <div className="flex flex-wrap gap-1">
-                      {analyzedFiles.map((f, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded font-mono text-blue-300/70">{f}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {modifiedFiles.length > 0 && (
-                  <div className="px-2 py-1.5">
-                    <div className="text-[8px] text-yellow-400/70 font-bold uppercase tracking-wider mb-1">✏️ 수정한 파일</div>
-                    <div className="flex flex-wrap gap-1">
-                      {modifiedFiles.map((f, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded font-mono text-yellow-300/70">{f}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── 선택된 터미널의 마지막 출력 줄 ──────────────────────────── */}
-            {terminals[selectedTerminalId]?.last_line && (
-              <div className="shrink-0 px-2 py-1.5 bg-black/30 rounded border border-white/5 font-mono text-[9px] text-white/35 break-all">
-                {terminals[selectedTerminalId].last_line}
-              </div>
-            )}
 
           </div>
         )}

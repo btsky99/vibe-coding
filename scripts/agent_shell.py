@@ -27,18 +27,35 @@
 # [2026-03-07] Claude: Codex CLI 지원 추가
 #   - --cli codex: Vibe Coding Codex 래퍼를 통해 자율 YOLO 모드 실행
 #   - !cli codex: 실행 중 즉석 CLI 변경 지원
+# [2026-03-08] Claude: [버그수정] live 이벤트 키/구조 불일치 5건 수정
+#   - run_id 누락: uuid 생성하여 모든 live 이벤트에 포함 (handle_live_runs 연동)
+#   - 'terminal' → 'terminal_id' 키 통일 (handle_live_runs는 terminal_id만 읽음)
+#   - _call_api에 terminal_id 인자 추가 (오케스트레이터 요청이 T1로 고정되던 문제)
+#   - _ANSI_ESCAPE 필터 추가: live 파일에 ANSI 코드 저장되던 노이즈 제거
 # ------------------------------------------------------------------------
 """
 
 import os
+import re
 import sys
 import json
+import uuid
 import signal
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from urllib import request as _urllib_req
 from urllib.error import URLError
+
+# ANSI/OSC 이스케이프 시퀀스 필터 — cli_agent.py와 동일한 패턴
+# live 파일에 ANSI 코드가 저장되면 대시보드 파싱 노이즈가 생기므로 제거
+_ANSI_ESCAPE = re.compile(
+    r'\x1b(?:'
+    r'\[[0-?]*[ -/]*[@-~]'
+    r'|\][^\x07\x1b]*(?:\x07|\x1b\\)'
+    r'|[@-Z\\-_]'
+    r')'
+)
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _ROOT        = _SCRIPTS_DIR.parent
@@ -95,12 +112,13 @@ def _route(task):
     return 'gemini' if g > c else 'claude'
 
 
-def _call_api(task: str) -> bool:
+def _call_api(task: str, terminal_id: str = 'T?') -> bool:
     """서버 API로 오케스트레이터 실행 요청을 전송합니다.
 
     성공 시 True 반환. 서버 미실행 시 False 반환 (fallback: claude 직접 실행).
+    terminal_id를 전달해야 대시보드 상황판에 올바른 터미널 슬롯에 표시됩니다.
     """
-    payload = json.dumps({'task': task, 'cli': 'auto'}).encode('utf-8')
+    payload = json.dumps({'task': task, 'cli': 'auto', 'terminal_id': terminal_id}).encode('utf-8')
     req = _urllib_req.Request(
         _API_URL,
         data=payload,
@@ -128,6 +146,8 @@ def run_agent(task, cli='auto', terminal_id='T?'):
 
     chosen = _route(task) if cli == 'auto' else cli
     ts = datetime.now().isoformat()
+    # run_id: handle_live_runs가 이벤트를 묶을 때 필요 (없으면 이벤트 전부 무시됨)
+    run_id = str(uuid.uuid4())[:8]
 
     print(f'\n+--[{terminal_id}] {chosen.upper()} 에이전트 실행')
     print(f'|  지시: {task[:80]}{"..." if len(task) > 80 else ""}')
@@ -135,19 +155,20 @@ def run_agent(task, cli='auto', terminal_id='T?'):
 
     # 오케스트레이터 모드: 복합 지시는 서버 API로 전달 (대시보드 연동)
     if chosen == 'orchestrator':
-        ok = _call_api(task)
+        ok = _call_api(task, terminal_id)
         if ok:
             print(f'[{terminal_id}] 오케스트레이터 실행 요청 전송됨')
             _write_live({'type': 'done', 'status': 'dispatched', 'cli': 'orchestrator',
-                         'terminal': terminal_id, 'ts': ts})
+                         'terminal_id': terminal_id, 'run_id': run_id, 'ts': ts})
             return 0
         else:
             # 서버 미실행: claude로 fallback
             print(f'[{terminal_id}] 서버 미실행 — Claude로 fallback 실행')
             chosen = 'claude'
 
+    # terminal_id 키 사용 (구 'terminal' 키는 handle_live_runs가 인식 못함)
     _write_live({'type': 'started', 'cli': chosen, 'task': task,
-                 'terminal': terminal_id, 'ts': ts})
+                 'terminal_id': terminal_id, 'run_id': run_id, 'ts': ts})
 
     if chosen == 'claude':
         cmd = ['claude', '-p', task, '--dangerously-skip-permissions']
@@ -193,11 +214,12 @@ def run_agent(task, cli='auto', terminal_id='T?'):
 
         for raw in iter(proc.stdout.readline, b''):
             if raw:
-                line = raw.decode('utf-8', errors='replace').rstrip()
+                # ANSI/OSC 이스케이프 제거 후 live 파일 기록 (대시보드 파싱 노이즈 방지)
+                line = _ANSI_ESCAPE.sub('', raw.decode('utf-8', errors='replace')).rstrip()
                 print(line)
                 _write_live({'type': 'output', 'line': line,
-                             'cli': chosen, 'terminal': terminal_id,
-                             'ts': datetime.now().isoformat()})
+                             'cli': chosen, 'terminal_id': terminal_id,
+                             'run_id': run_id, 'ts': datetime.now().isoformat()})
 
         proc.wait()
         rc = proc.returncode
@@ -215,7 +237,8 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     icon = 'OK' if status == 'done' else ('STOP' if status == 'stopped' else 'ERR')
     print(f'\n[{icon}] [{terminal_id}] 완료 -- 상태: {status} (코드: {rc})')
     _write_live({'type': 'done', 'status': status, 'cli': chosen,
-                 'terminal': terminal_id, 'ts': datetime.now().isoformat()})
+                 'terminal_id': terminal_id, 'run_id': run_id,
+                 'ts': datetime.now().isoformat()})
 
     return rc
 
