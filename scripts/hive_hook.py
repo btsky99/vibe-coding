@@ -281,10 +281,14 @@ def _update_pipeline_stage(stage: str, task: str = '') -> None:
     try:
         import urllib.request as _req
         from datetime import datetime as _dt
+        # cli 타입을 함께 전송 — backend가 에이전트 종류를 정확히 식별하기 위함
+        # [2026-03-08] Codex가 T3 슬롯에서 claude 타입으로 잘못 표시되던 버그 수정
+        _cli_type = os.environ.get('VIBE_CLI_TYPE', 'claude')  # codex_wrapper.py 등이 설정
         payload = json.dumps({
             'terminal_id': _TERMINAL_ID,
             'stage': stage,
             'task': task[:120] if task else '',
+            'cli': _cli_type,
         }).encode('utf-8')
         req = _req.Request(
             'http://localhost:9571/api/agent/stage',

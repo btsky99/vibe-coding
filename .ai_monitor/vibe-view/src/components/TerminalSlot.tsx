@@ -104,8 +104,11 @@ export default function TerminalSlot({
   // 이 슬롯의 터미널 ID — cli_agent.py의 _terminals 키와 일치 (T1, T2, ...)
   const terminalId = `T${slotId + 1}`;
 
-  // 이 슬롯의 에이전트 타입 (claude / gemini)
-  const agentType = activeAgent.toLowerCase().includes('gemini') ? 'gemini' : 'claude';
+  // 이 슬롯의 에이전트 타입 (claude / gemini / codex)
+  // [버그수정 2026-03-08] Codex가 'claude'로 분류되어 T1 데이터를 T3에 표시하는 문제 수정
+  const agentType = activeAgent.toLowerCase().includes('gemini') ? 'gemini'
+    : activeAgent.toLowerCase().includes('codex') ? 'codex'
+    : 'claude';
 
   // 이 슬롯의 데이터 결정 전략:
   // 1순위) 같은 ID의 터미널 데이터 (terminalId 일치)

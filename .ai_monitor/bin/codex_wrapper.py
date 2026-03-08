@@ -225,7 +225,12 @@ def _install_to_claude(mcp_entry: dict):
 # ── 에이전트 실행 ──────────────────────────────────────────────────────────────
 def run_agent(task, yolo_mode=False, cli="auto"):
     env = os.environ.copy()
-    env["TERMINAL_ID"] = "CODEX"
+    # TERMINAL_ID를 숫자형(T3)으로 설정해야 대시보드가 올바른 슬롯에 표시합니다.
+    # [버그수정 2026-03-08] "CODEX" 문자열 → "T3"으로 변경
+    # 이전: "CODEX" → backend가 T3에 매핑 못 해서 Claude(T1) 데이터를 Codex 슬롯에 표시하는 버그 발생
+    # 현재: "T3" → backend _interactive_stages["T3"]에 저장되어 슬롯 3 카드에 정확히 표시됨
+    env["TERMINAL_ID"] = os.environ.get("TERMINAL_ID", "T3")  # 외부에서 오버라이드 가능
+    env["VIBE_CLI_TYPE"] = "codex"  # 모니터링 패널이 Codex 슬롯에 올바르게 표시하기 위해 필요
     
     if not task:
         # 대화형 모드

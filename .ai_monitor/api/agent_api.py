@@ -493,14 +493,18 @@ def handle_terminals(handler) -> None:
         task = info.get('task', '')
 
         # terminals에 없으면 대화형 세션 항목으로 신규 추가
+        # [버그수정 2026-03-08] agent를 info에서 읽도록 수정 (항상 'claude'로 하드코딩하던 버그 제거)
+        # hook_bridge.py가 TERMINAL_ID 환경변수에서 에이전트 타입을 함께 전송하면 정확하게 표시됨
         if tid not in terminals:
+            inferred_agent = info.get('cli', 'claude')  # hook이 cli 타입을 보낸 경우 사용
             terminals[tid] = {
                 'id': tid,
                 'status': 'idle',
-                'agent': 'claude',
+                'agent': inferred_agent,
+                'cli': inferred_agent,
                 'task': '',
                 'pipeline_stage': 'idle',
-                'interactive': True,  # 대화형 Claude Code 세션 구분 플래그
+                'interactive': True,  # 대화형 세션 구분 플래그 (Claude Code, Codex 등)
             }
 
         # analyzing/modifying/verifying 단계: status를 running으로 변경 + stage 업데이트
