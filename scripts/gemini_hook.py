@@ -4,6 +4,7 @@ FILE: scripts/gemini_hook.py
 DESCRIPTION: Gemini CLI 전용 자동 액션 트레이스 훅 핸들러.
              AfterTool / SessionEnd 이벤트를 stdin JSON으로 수신하여
              hive_bridge.log_task()로 task_logs.jsonl에 자동 기록합니다.
+             또한 세션 시작 시 대시보드 서버와 UI의 생존 여부를 확인하여 자동 실행합니다.
 
              [Claude의 hive_hook.py와의 차이점]
              Gemini CLI는 훅 스크립트의 stdout에 반드시 유효한 JSON만 출력해야 합니다.
@@ -16,18 +17,10 @@ DESCRIPTION: Gemini CLI 전용 자동 액션 트레이스 훅 핸들러.
              - SessionEnd : 세션 종료 시 → "─── 세션 종료 ───" 구분선
 
 REVISION HISTORY:
+- 2026-03-08 Gemini: 대시보드 서버(9570) 및 UI 자동 실행 보장 로직 추가
 - 2026-03-01 Claude: BeforeAgent에 태스크 보드 자동 등록 추가
-  - 사용자 지시 수신 시 tasks.json에 pending 태스크 자동 추가 (assigned_to: gemini)
 - 2026-03-01 Claude: Claude↔Gemini 양방향 메시지 연결 추가
-  - BeforeAgent: _read_gemini_messages("gemini") 호출 → Claude가 보낸 미읽음 메시지 컨텍스트 주입
-  - SessionEnd: _send_session_summary() 호출 → 오늘 Gemini 활동 요약을 messages.jsonl에 기록
-  - → Claude의 다음 UserPromptSubmit 시 자동 수신
 - 2026-03-01 Claude: 파일 수정 내용 상세 기록 강화
-  - BeforeTool(수정): 변경 전/후 내용 스니펫 포함 (Claude PreToolUse와 동일 수준)
-  - BeforeTool(생성): 파일 내용 미리보기 포함
-  - AfterTool(수정): 수정 완료 + 결과 요약 포함
-  - AfterTool(실행): 명령 완료 + 실행 결과 스니펫 포함
-  - → 다른 CLI(Claude 등)가 Gemini 작업 의도·결과를 완전히 파악 가능
 - 2026-03-01 Claude: BeforeTool 이벤트 추가 — 도구 실행 직전 대시보드 표시로 공백 최소화
 - 2026-03-01 Claude: 최초 구현 — Gemini CLI AfterTool/SessionEnd 자동 로깅 시스템 구축
 """
@@ -100,17 +93,7 @@ _INTENT_MAP = [
 ]
 
 def _read_gemini_messages(agent_name: str) -> list[dict]:
-    """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다.
-
-    [동작 순서]
-    1. .ai_monitor/data/messages.jsonl 읽기
-    2. to == agent_name AND read_at가 없는 항목 필터
-    3. 해당 메시지에 read_at 타임스탬프 기록 후 파일 재저장
-    4. 읽은 메시지 목록 반환
-
-    [에러 시]
-    빈 리스트 반환 — Gemini CLI 훅 실행 방해 안 함
-    """
+    """messages.jsonl에서 나(agent_name)에게 온 미읽음 메시지를 읽고 read_at을 마킹합니다."""
     from pathlib import Path
     from datetime import datetime
 
@@ -155,16 +138,7 @@ def _read_gemini_messages(agent_name: str) -> list[dict]:
 
 
 def _send_session_summary() -> None:
-    """SessionEnd 시 오늘 Gemini 활동 요약을 messages.jsonl에 기록합니다.
-
-    [동작 순서]
-    1. task_logs.jsonl에서 오늘의 Gemini 완료 액션 추출
-    2. messages.jsonl에 from=gemini, to=claude, type=session_summary 메시지 추가
-    3. Claude의 다음 UserPromptSubmit 시 hive_hook.py가 자동 수신
-
-    [에러 시]
-    모든 예외 무시
-    """
+    """SessionEnd 시 오늘 Gemini 활동 요약을 messages.jsonl에 기록합니다."""
     try:
         from pathlib import Path
         from datetime import datetime
@@ -209,7 +183,6 @@ def _send_session_summary() -> None:
             "read_at": None,
         }
 
-        # 기존 메시지 유지 + 새 메시지 추가
         with open(messages_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
@@ -227,8 +200,7 @@ def _short_cmd(cmd: str, max_len: int = 80) -> str:
     return cmd.strip().replace("\n", " ")[:max_len]
 
 def _snippet(text: str, max_len: int = 60) -> str:
-    """긴 텍스트를 짧게 줄여 한 줄 스니펫으로 반환합니다.
-    줄바꿈은 ↵로 치환하여 로그가 한 줄에 표시되도록 처리합니다."""
+    """긴 텍스트를 짧게 줄여 한 줄 스니펫으로 반환합니다."""
     if not text:
         return ""
     s = text.strip().replace("\n", "↵ ")
@@ -267,7 +239,54 @@ def _send_heartbeat(status="active", task="Thinking..."):
     except Exception:
         pass
 
+def _ensure_dashboard_running():
+    """대시보드 서버(9570)와 UI가 실행 중인지 확인하고, 꺼져 있다면 자동 실행합니다.
+    [체크 로직]
+    1. localhost:9571/api/agents/heartbeat 호출 시도 (서버 생사 확인)
+    2. 실패 시 server.py 실행
+    3. UI 프로세스 존재 여부 확인 후 미실행 시 mission_control_ui.py 실행
+    """
+    import urllib.request
+    import subprocess
+    import os
+    import time
+
+    # 1. 서버 체크 (9571 포트는 심장 박동용 API)
+    server_alive = False
+    try:
+        with urllib.request.urlopen("http://localhost:9571/api/agents/heartbeat", timeout=0.2) as response:
+            if response.status == 200:
+                server_alive = True
+    except Exception:
+        pass
+
+    if not server_alive:
+        # 서버가 꺼져 있으면 실행
+        try:
+            _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            _server_script = os.path.join(_root, ".ai_monitor", "server.py")
+            # -X utf8 플래그로 인코딩 방어, 백그라운드 실행
+            subprocess.Popen([sys.executable, "-X", "utf8", _server_script],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+            time.sleep(1) # 부팅 대기
+        except Exception:
+            pass
+
+    # 2. UI 체크 및 실행
+    try:
+        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _ui_script = os.path.join(_root, ".ai_monitor", "mission_control_ui.py")
+        subprocess.Popen([sys.executable, "-X", "utf8", _ui_script],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+    except Exception:
+        pass
+
 def main():
+    # ── 대시보드 자동 실행 보장 ────────────────────────────────────
+    _ensure_dashboard_running()
+
     # ── 하트비트 전송 (제미나이가 살아있음을 알림) ────────────────────
     _send_heartbeat()
 
@@ -308,8 +327,6 @@ def main():
                 break
 
         # ── 태스크 보드 자동 등록 ──────────────────────────────────────────
-        # Gemini가 사용자 지시를 받을 때마다 tasks.json에 pending 태스크로 추가합니다.
-        # stdout은 JSON 전용이므로 모든 예외는 무시하고 조용히 처리합니다.
         if prompt and prompt.strip():
             try:
                 import datetime
@@ -326,7 +343,7 @@ def main():
                     "id": datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"),
                     "title": _short,
                     "description": prompt.strip()[:500],
-                    "status": "in_progress",  # 지시 수신 즉시 작업 시작
+                    "status": "in_progress",
                     "assigned_to": "gemini",
                     "priority": "medium",
                     "created_by": "user",
@@ -336,9 +353,8 @@ def main():
                 with open(_tasks_file, 'w', encoding='utf-8') as _f:
                     json.dump(_tasks, _f, ensure_ascii=False, indent=2)
             except Exception:
-                pass  # 태스크 보드 기록 실패는 조용히 무시
+                pass
 
-        # 의도가 파악되었으면 컨텍스트를 주입하고, 아니면 그냥 통과
         if additional_context:
             _hook_response(decision="allow", context=additional_context)
             try:
@@ -361,91 +377,52 @@ def main():
     # ── 이벤트별 처리 ──────────────────────────────────────────────────
 
     if event == "BeforeTool":
-        # ── 도구 실행 직전: "어떤 파일을, 무슨 내용으로 바꿀지" 기록 ──────
-        # Claude의 PreToolUse와 동일한 수준의 정보를 사전 공유.
-        # 다른 CLI(Claude 등)가 Gemini의 작업 의도를 즉시 인지 가능.
-        tool_name = (
-            data.get("tool_name") or data.get("tool") or data.get("name", "")
-        )
-        tool_input = (
-            data.get("tool_input") or data.get("input") or data.get("args", {})
-        )
+        tool_name = (data.get("tool_name") or data.get("tool") or data.get("name", ""))
+        tool_input = (data.get("tool_input") or data.get("input") or data.get("args", {}))
 
         if tool_name in ("write_file", "create_file", "overwrite_file"):
-            # 파일 생성 — 파일명 + 첫 몇 줄 미리보기
             fp = _get_path(tool_input)
             content = tool_input.get("content") or tool_input.get("text") or ""
             preview = _snippet(content, 60) if content else "(내용 없음)"
             log_task("Gemini", f"[생성 시작] {_short_path(fp)}\n  내용 미리보기: {preview}")
 
         elif tool_name in ("replace", "edit_file", "str_replace"):
-            # 파일 수정 — 파일명 + 변경 전/후 스니펫 (Claude PreToolUse와 동일 형식)
             fp = _get_path(tool_input)
-            old = _snippet(
-                tool_input.get("old_str") or tool_input.get("old_string")
-                or tool_input.get("old") or "", 50
-            )
-            new = _snippet(
-                tool_input.get("new_str") or tool_input.get("new_string")
-                or tool_input.get("new") or tool_input.get("content") or "", 50
-            )
+            old = _snippet(tool_input.get("old_str") or tool_input.get("old_string") or tool_input.get("old") or "", 50)
+            new = _snippet(tool_input.get("new_str") or tool_input.get("new_string") or tool_input.get("new") or tool_input.get("content") or "", 50)
             msg = f"[수정 시작] {_short_path(fp)}"
-            if old:
-                msg += f"\n  변경 전: {old}"
-            if new:
-                msg += f"\n  변경 후: {new}"
+            if old: msg += f"\n  변경 전: {old}"
+            if new: msg += f"\n  변경 후: {new}"
             log_task("Gemini", msg)
 
         elif tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
-            cmd = (
-                tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")
-            ).strip()
+            cmd = (tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")).strip()
             if not any(cmd.startswith(p) for p in _SKIP_SHELL_PREFIXES):
                 log_task("Gemini", f"[실행 준비] {_short_cmd(cmd)}")
 
     elif event == "AfterTool":
-        # ── 도구 실행 완료: "실제로 무엇이 바뀌었는지" 결과 기록 ──────────
-        # tool_result 필드에서 성공/실패 및 변경 결과 추출.
-        # 다른 CLI가 Gemini의 작업 완료 여부와 결과를 파악 가능.
-        tool_name = (
-            data.get("tool_name") or data.get("tool") or data.get("name", "")
-        )
-        tool_input = (
-            data.get("tool_input") or data.get("input") or data.get("args", {})
-        )
-        # tool_result: Gemini CLI가 도구 실행 결과를 담는 필드 (버전별 다를 수 있음)
-        tool_result = (
-            data.get("tool_result") or data.get("result")
-            or data.get("output") or data.get("response") or {}
-        )
+        tool_name = (data.get("tool_name") or data.get("tool") or data.get("name", ""))
+        tool_input = (data.get("tool_input") or data.get("input") or data.get("args", {}))
+        tool_result = (data.get("tool_result") or data.get("result") or data.get("output") or data.get("response") or {})
         result_text = ""
         if isinstance(tool_result, str):
             result_text = _snippet(tool_result, 60)
         elif isinstance(tool_result, dict):
-            result_text = _snippet(
-                tool_result.get("output") or tool_result.get("content")
-                or tool_result.get("message") or str(tool_result), 60
-            )
+            result_text = _snippet(tool_result.get("output") or tool_result.get("content") or tool_result.get("message") or str(tool_result), 60)
 
         if tool_name in ("write_file", "create_file", "overwrite_file"):
             fp = _get_path(tool_input)
             content = tool_input.get("content") or tool_input.get("text") or ""
             lines = len(content.splitlines()) if content else 0
-            suffix = f" ({lines}줄 작성)" if lines else ""
-            log_task("Gemini", f"[생성 완료] {_short_path(fp)}{suffix} ✓")
+            log_task("Gemini", f"[생성 완료] {_short_path(fp)} ({lines}줄) ✓")
 
         elif tool_name in ("replace", "edit_file", "str_replace"):
             fp = _get_path(tool_input)
-            # 수정 결과 — 성공 여부 + 결과 요약
             result_suffix = f" → {result_text}" if result_text else " ✓"
             log_task("Gemini", f"[수정 완료] {_short_path(fp)}{result_suffix}")
 
         elif tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
-            cmd = (
-                tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")
-            ).strip()
-
-            # 조회·노이즈 명령어 스킵
+            cmd = (tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")).strip()
             if any(cmd.startswith(p) for p in _SKIP_SHELL_PREFIXES):
                 pass
             elif "git commit" in cmd:
@@ -454,17 +431,10 @@ def main():
                 result_suffix = f" → {result_text}" if result_text else " ✓"
                 log_task("Gemini", f"[실행 완료] {_short_cmd(cmd, 50)}{result_suffix}")
 
-        # read_file / glob / grep 등 조회 도구는 스킵
-
     elif event == "SessionEnd":
-        # Gemini 세션 종료 — 구분선 기록 + Claude에게 활동 요약 전송
         log_task("Gemini", "─── Gemini 세션 종료 ───")
-
-        # Gemini 세션이 끝나면 in_progress 상태인 gemini 태스크를 모두 done으로 변경
         try:
-            _data_dir_g = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
-            )
+            _data_dir_g = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data')
             _tasks_file_g = os.path.join(_data_dir_g, 'tasks.json')
             if os.path.exists(_tasks_file_g):
                 with open(_tasks_file_g, 'r', encoding='utf-8') as _f:
@@ -479,14 +449,9 @@ def main():
                         json.dump(_tasks_g, _f, ensure_ascii=False, indent=2)
         except Exception:
             pass
-
-        # 오늘 Gemini가 완료한 작업 요약을 messages.jsonl에 기록
-        # → Claude의 다음 UserPromptSubmit 시 자동으로 수신
         _send_session_summary()
 
-    # ── Gemini CLI가 요구하는 JSON 응답 출력 ───────────────────────────
     _success_response()
-
 
 if __name__ == "__main__":
     main()

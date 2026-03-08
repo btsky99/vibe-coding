@@ -3,8 +3,9 @@
 Minimal MCP stdio server for the local vibe-coding workspace.
 
 This server exposes a few local helper tools to MCP-capable clients such as
-Codex CLI. It supports standard MCP stdio framing using Content-Length
-headers, while also accepting line-delimited JSON for ad-hoc local testing.
+Codex CLI. Different MCP clients on Windows do not always agree on stdio
+framing, so this server mirrors the transport style used by the client:
+Content-Length framing or line-delimited JSON.
 """
 
 import json
@@ -62,11 +63,14 @@ TOOLS = [
 ]
 
 
-def send(obj: dict) -> None:
+def send(obj: dict, transport: str = "content-length") -> None:
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-    header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
-    sys.stdout.buffer.write(header)
-    sys.stdout.buffer.write(body)
+    if transport == "jsonl":
+        sys.stdout.buffer.write(body + b"\n")
+    else:
+        header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+        sys.stdout.buffer.write(header)
+        sys.stdout.buffer.write(body)
     sys.stdout.buffer.flush()
 
 
@@ -74,14 +78,14 @@ def read_message():
     stdin = sys.stdin.buffer
     first_line = stdin.readline()
     if not first_line:
-        return None
+        return None, None
 
     stripped = first_line.strip()
     if stripped.startswith(b"{"):
         try:
-            return json.loads(stripped.decode("utf-8"))
+            return json.loads(stripped.decode("utf-8")), "jsonl"
         except json.JSONDecodeError:
-            return None
+            return None, "jsonl"
 
     headers = {}
     line = first_line
@@ -96,21 +100,21 @@ def read_message():
 
     content_length = headers.get("content-length")
     if not content_length:
-        return None
+        return None, "content-length"
 
     try:
         length = int(content_length)
     except ValueError:
-        return None
+        return None, "content-length"
 
     body = stdin.read(length)
     if not body:
-        return None
+        return None, "content-length"
 
     try:
-        return json.loads(body.decode("utf-8"))
+        return json.loads(body.decode("utf-8")), "content-length"
     except json.JSONDecodeError:
-        return None
+        return None, "content-length"
 
 
 def handle_tool_call(name: str, args: dict) -> str:
@@ -162,10 +166,13 @@ def handle_tool_call(name: str, args: dict) -> str:
 
 
 def main() -> None:
+    transport = "content-length"
     while True:
-        req = read_message()
+        req, detected_transport = read_message()
         if req is None:
             break
+        if detected_transport:
+            transport = detected_transport
 
         req_id = req.get("id")
         method = req.get("method", "")
@@ -181,7 +188,8 @@ def main() -> None:
                         "capabilities": {"tools": {}},
                         "serverInfo": {"name": "vibe-coding", "version": "1.0.1"},
                     },
-                }
+                },
+                transport=transport,
             )
             continue
 
@@ -189,7 +197,7 @@ def main() -> None:
             continue
 
         if method == "tools/list":
-            send({"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}})
+            send({"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}, transport=transport)
             continue
 
         if method == "tools/call":
@@ -204,13 +212,14 @@ def main() -> None:
                         "content": [{"type": "text", "text": output}],
                         "isError": False,
                     },
-                }
+                },
+                transport=transport,
             )
             continue
 
         # Some clients probe with pings during startup.
         if method == "ping":
-            send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+            send({"jsonrpc": "2.0", "id": req_id, "result": {}}, transport=transport)
             continue
 
         if req_id is not None:
@@ -222,7 +231,8 @@ def main() -> None:
                         "code": -32601,
                         "message": f"Unsupported method: {method}",
                     },
-                }
+                },
+                transport=transport,
             )
 
 

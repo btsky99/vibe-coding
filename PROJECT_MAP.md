@@ -27,6 +27,7 @@
 - **`scripts/orchestrator.py`**: 하이브 마스터 조율기. 사고 과정(Thought) JSONB 기록.
 - **`scripts/analyze_hive.py`**: Postgres 데이터를 분석하여 하이브 상태 분석 보고서 생성.
 - **`scripts/pg_manager.py`**: PostgreSQL 18 서버 관리 및 확장 기능 제어.
+- **`scripts/gemini_hook.py`**: Gemini CLI 전용 훅 핸들러 (로깅, 메시지 폴링, 대시보드 자동 실행 보장).
 
 ## 🏗️ 빌드 및 설치 (Build & Installer)
 - **`vibe-coding.spec`**: PyInstaller 실행 파일 빌드 설정.

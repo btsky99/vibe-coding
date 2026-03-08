@@ -59,11 +59,15 @@
       "args": [
         "mcp-server-sqlite",
         "--db-path",
-        ".ai_monitor/data/hive_mind.db"
+        "D:/vibe-coding/.ai_monitor/data/hive_mind.db"
       ]
     }
   },
+  "mcp": {
+    "excluded": ["vibe-coding"]
+  },
   "ui": {
+    "hideContextSummary": true,
     "footer": {
       "hideContextPercentage": false
     }
