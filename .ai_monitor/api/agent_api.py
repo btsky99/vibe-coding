@@ -8,6 +8,11 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-03-08] Claude: Gemini 세션 실제 작업 표시 — PTY Gemini 현재 지시 내용 보완
+#   - _get_gemini_last_task(): Gemini 세션 JSON에서 마지막 사용자 메시지 추출
+#   - server.py pty_sessions에 cwd 필드 추가 → 프로젝트별 세션 파일 정확 매핑
+#   - PTY 병합: status 이미 running이어도 task 비어있으면 Gemini 마지막 지시로 보완
+#   - PTY last_line: 기존 값 있어도 PTY 최신값으로 항상 갱신 (Gemini 응답 실시간 표시)
 # [2026-03-08] Claude: PTY 세션 병합 — handle_terminals()에서 pty_sessions도 반영
 #   - _pty_sessions_getter 콜백 추가: server.py가 set_pty_sessions_getter()로 주입
 #   - PTY로 실행된 Claude/Gemini/Codex도 T1~T8 카드에 running 상태로 표시
@@ -45,12 +50,21 @@ import time
 from pathlib import Path
 
 # ─── cli_agent 모듈 경로 등록 ─────────────────────────────────────────────────
-# api/ 폴더는 .ai_monitor/ 하위, scripts/는 프로젝트 루트 하위
-# server.py가 sys.path에 SCRIPTS_DIR을 추가하므로 직접 임포트 가능
-# 배포(frozen) 환경 대비 추가 경로 등록
+# [2026-03-08] Claude: [버그수정] 배포(frozen) EXE에서 cli_agent를 못 찾는 버그 수정
+#   - Dev 환경: __file__ = .ai_monitor/api/agent_api.py
+#               → _BASE_DIR.parent/scripts = root/scripts ← 정상
+#   - EXE 환경: __file__ = MEIPASS/api/agent_api.py
+#               → _BASE_DIR.parent/scripts = MEIPASS/../scripts ← 존재 안 함! (버그)
+#   - 수정: sys.frozen 여부로 분기 — EXE는 MEIPASS/scripts, Dev는 기존 경로 사용
 _API_DIR = Path(__file__).resolve().parent
 _BASE_DIR = _API_DIR.parent
-_SCRIPTS_DIR = _BASE_DIR.parent / 'scripts'
+if getattr(sys, 'frozen', False):
+    # PyInstaller EXE: scripts/는 MEIPASS 루트 직하에 있음
+    import sys as _sys
+    _SCRIPTS_DIR = Path(getattr(_sys, '_MEIPASS', _BASE_DIR)) / 'scripts'
+else:
+    # 개발 환경: api/../.. = 프로젝트 루트, 거기서 scripts/
+    _SCRIPTS_DIR = _BASE_DIR.parent / 'scripts'
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
@@ -230,13 +244,45 @@ def handle_runs(handler) -> None:
     _json_response(handler, runs)
 
 
+def _get_gemini_last_task(session_path) -> str:
+    """Gemini 세션 JSON 파일에서 마지막 사용자 메시지 텍스트를 반환합니다.
+
+    세션 파일 구조:
+        { "messages": [ {"type": "user", "content": [{"text": "..."}]}, ... ] }
+
+    사용자 메시지(type='user')를 역순 탐색하여 첫 번째 텍스트를 반환합니다.
+    읽기 실패 시 빈 문자열 반환.
+    """
+    try:
+        import json as _json
+        with open(session_path, 'r', encoding='utf-8') as f:
+            data = _json.load(f)
+        msgs = data.get('messages', [])
+        # 역순으로 탐색하여 가장 최근 사용자 메시지 반환
+        for m in reversed(msgs):
+            if m.get('type') == 'user':
+                content = m.get('content', [])
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict):
+                            text = c.get('text', '').strip()
+                            if text:
+                                # 줄바꿈 제거 후 80자 제한
+                                return text.replace('\n', ' ')[:80]
+                elif isinstance(content, str) and content.strip():
+                    return content.strip().replace('\n', ' ')[:80]
+    except Exception:
+        pass
+    return ''
+
+
 def _detect_external_gemini() -> list[dict]:
     """~/.gemini/tmp/ 세션 파일을 스캔하여 외부 실행 중인 Gemini 세션을 감지합니다.
 
     최근 60초 이내에 수정된 세션 파일이 있으면 해당 프로젝트의 Gemini가
     외부 터미널에서 활성 상태라고 판단합니다.
 
-    반환값: [{ 'project': str, 'session_file': str, 'ts': str }, ...]
+    반환값: [{ 'project': str, 'session_file': str, 'ts': str, 'last_task': str }, ...]
     """
     gemini_tmp = Path.home() / '.gemini' / 'tmp'
     if not gemini_tmp.exists():
@@ -255,10 +301,14 @@ def _detect_external_gemini() -> list[dict]:
             try:
                 mtime = sf.stat().st_mtime
                 if now - mtime <= 600:  # 600초(10분) 이내 수정 = 활성 세션
+                    # 마지막 사용자 메시지를 task로 함께 반환 (UI에 실제 작업 표시용)
+                    last_task = _get_gemini_last_task(sf)
                     active.append({
                         'project': proj_dir.name,
                         'session_file': sf.name,
+                        'session_path': str(sf),  # PTY 매핑 시 정확한 task 재조회용
                         'ts': sf.stat().st_mtime,
+                        'last_task': last_task,
                     })
                     break  # 프로젝트당 최신 1개만
             except OSError:
@@ -417,9 +467,11 @@ def handle_terminals(handler) -> None:
                 break  # 비어 있는 슬롯 없음
 
             ts_str = datetime.datetime.fromtimestamp(session['ts']).isoformat()
+            # 마지막 사용자 지시가 있으면 그것을 task로, 없으면 프로젝트명 표시
+            ext_task = session.get('last_task') or f'[외부] {session["project"]} 프로젝트'
             terminals[target_slot].update({
                 'status': 'running',
-                'task': f'[외부] {session["project"]} 프로젝트',
+                'task': ext_task,
                 'cli': 'gemini',
                 'run_id': '',
                 'ts': ts_str,
@@ -485,9 +537,51 @@ def handle_terminals(handler) -> None:
                 if terminals[tid]['status'] not in ('running',):
                     terminals[tid]['status'] = 'running'
                     terminals[tid]['cli'] = agent
-                    terminals[tid]['task'] = terminals[tid].get('task') or f'[PTY] {agent.upper()} 세션'
                     terminals[tid]['ts'] = info.get('started', '')
                     terminals[tid]['pipeline_stage'] = terminals[tid].get('pipeline_stage') or 'analyzing'
+
+                # ── task 보완: Gemini PTY는 세션 파일에서 마지막 지시 항상 갱신 ──────
+                # Why: PTY 세션은 task 필드가 없으므로 task가 ''이면 아무것도 표시 안 됨.
+                #      Gemini 세션 JSON에서 마지막 사용자 메시지를 읽어 실제 작업을 표시.
+                #      대화가 진행되면서 새 지시가 추가되므로 매 폴링마다 갱신 필요.
+                #      단, cli_agent나 hive_hook이 이미 task를 설정한 경우는 유지.
+                if agent == 'gemini':
+                    # cwd로 프로젝트명 추출 → ~/.gemini/tmp/{project}/chats/ 최신 파일 탐색
+                    cwd = info.get('cwd', '')
+                    pty_task = ''
+                    if cwd:
+                        project_name = Path(cwd).name
+                        gemini_tmp = Path.home() / '.gemini' / 'tmp' / project_name / 'chats'
+                        if gemini_tmp.exists():
+                            # 최신 세션 파일 찾기 (수정 시간 기준)
+                            session_files = sorted(
+                                gemini_tmp.glob('session-*.json'),
+                                key=lambda p: p.stat().st_mtime,
+                                reverse=True,
+                            )
+                            for sf in session_files[:1]:  # 최신 1개만 확인
+                                pty_task = _get_gemini_last_task(sf)
+                                break
+                    # 세션에서 읽은 task가 있으면 항상 갱신 (대화 진행 중 최신 지시 반영)
+                    # 없으면 기존 task 유지 또는 기본 텍스트 설정
+                    if pty_task:
+                        terminals[tid]['task'] = pty_task
+                    elif not terminals[tid].get('task'):
+                        terminals[tid]['task'] = f'[PTY] {agent.upper()} 세션'
+                elif not terminals[tid].get('task'):
+                    # Claude/Codex PTY: 세션 파일 없으므로 기본 텍스트
+                    terminals[tid]['task'] = f'[PTY] {agent.upper()} 세션'
+
+                # ── cli 배지 보완: running이었던 슬롯에 cli 정보 없으면 채움 ─────────
+                if not terminals[tid].get('cli'):
+                    terminals[tid]['cli'] = agent
+
+                # ── PTY last_line 항상 갱신 — Gemini 응답 출력 실시간 표시 ───────────
+                # Why: PTY 세션의 last_line이 가장 최신 출력임.
+                #      기존 last_line 값이 있어도 PTY 값으로 덮어씌워야 실시간 갱신됨.
+                pty_last = info.get('last_line', '')
+                if pty_last:
+                    terminals[tid]['last_line'] = pty_last
         except Exception:
             pass  # PTY 세션 병합 실패 시 무시 (서버 미실행 등)
 
