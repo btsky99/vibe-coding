@@ -3697,8 +3697,9 @@ async def pty_handler(websocket):
             pty.write('set HIVE_AGENT=codex\r\n')
             pty.write(f'codex{yolo_flag}\r\n')
 
-        # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo 정보도 함께 저장
-        pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat()}
+        # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
+        # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음
+        pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat(), 'cwd': cwd}
 
         # ── [세션 시작 로그] ──────────────────────────────────────────────
         # PTY 터미널에서 에이전트가 시작될 때 즉시 session_logs에 기록.
@@ -3724,6 +3725,10 @@ async def pty_handler(websocket):
         await websocket.close()
         return
 
+    # ANSI 이스케이프 코드 제거용 정규식 — PTY last_line 정제에 사용
+    import re as _re
+    _ANSI_ESCAPE = _re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
     async def read_from_pty():
         loop = asyncio.get_running_loop()
         while True:
@@ -3733,6 +3738,19 @@ async def pty_handler(websocket):
                     await asyncio.sleep(0.01)
                     continue
                 await websocket.send(data)
+                # ── PTY 출력의 마지막 줄을 pty_sessions에 저장 ─────────────────────
+                # 목적: agent_api.py가 /api/agent/terminals 응답 빌드 시 last_line을
+                #       참조하여 자율 에이전트 패널에 "현재 무엇을 하고 있는지" 표시.
+                # ANSI 이스케이프 코드를 제거하고 빈 줄·제어문자 줄은 무시.
+                if session_id in pty_sessions:
+                    try:
+                        clean = _ANSI_ESCAPE.sub('', data)
+                        clean = clean.replace('\r', '\n')
+                        lines = [l.strip() for l in clean.split('\n') if l.strip() and len(l.strip()) > 2]
+                        if lines:
+                            pty_sessions[session_id]['last_line'] = lines[-1][:120]
+                    except Exception:
+                        pass  # last_line 업데이트 실패 시 무시 (메인 흐름 보호)
             except EOFError:
                 print("PTY read EOFError")
                 break
@@ -3910,7 +3928,7 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
                 continue
     return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
 
-HTTP_PORT = 9571
+HTTP_PORT = _find_free_port(9001)          # HTTP 포트 동적 탐색 — 9001부터 탐색 (배포버전 9000번대)
 WS_PORT = _find_free_port(HTTP_PORT + 1)  # HTTP 포트 다음부터 탐색 — 포트 충돌 방지
 
 async def run_ws_server():
@@ -3936,7 +3954,7 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
-    _LOCK_PORT = 9570
+    _LOCK_PORT = 9000
     try:
         _lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
