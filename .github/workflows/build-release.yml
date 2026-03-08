@@ -97,7 +97,7 @@ jobs:
 
       - name: Bundle skills into .ai_monitor
         run: |
-          xcopy skills .ai_monitor\skills /E /I /Y
+          xcopy .gemini\skills .ai_monitor\skills /E /I /Y
           xcopy .gemini\skills .ai_monitor\.gemini\skills /E /I /Y
           xcopy scripts .ai_monitor\scripts /E /I /Y
           copy GEMINI.md .ai_monitor\GEMINI.md /Y
