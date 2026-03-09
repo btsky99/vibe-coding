@@ -29,7 +29,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 # 프로젝트 루트 및 서버 정보 설정
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-SERVER_URL = "http://localhost:9571"
+SERVER_URL = "http://localhost:9000"
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
 
 def _call_api(path: str, data: dict) -> bool:

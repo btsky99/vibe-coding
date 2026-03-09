@@ -3915,8 +3915,8 @@ async def pty_handler(websocket):
     if session_id in pty_sessions:
         del pty_sessions[session_id]
 
-# 포트 설정: 9571(HTTP) / 9572(WS) — 충돌 시 빈 포트 자동 탐색 (최대 20개)
-# 9571/9572는 IANA 미등록 범위로 일반 앱과 충돌이 적음
+# 포트 설정: 9000(HTTP) / 9001(WS) — 충돌 시 빈 포트 자동 탐색 (최대 20개)
+# 9000은 개발/모니터링 도구 관례 포트 (사용자 지정)
 def _find_free_port(start: int, max_tries: int = 20) -> int:
     import socket
     for port in range(start, start + max_tries):
@@ -3928,8 +3928,8 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
                 continue
     return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
 
-HTTP_PORT = _find_free_port(9571)          # HTTP 포트: 9571 고정 (충돌 시 다음 포트 자동 탐색)
-WS_PORT = _find_free_port(9572)           # WebSocket 포트: 9572 고정 (충돌 시 다음 포트 자동 탐색)
+HTTP_PORT = _find_free_port(9000)          # HTTP 포트: 9000 시작 (충돌 시 다음 포트 자동 탐색)
+WS_PORT = _find_free_port(HTTP_PORT + 1)  # WebSocket 포트: HTTP+1 기반 탐색 (독립 탐색 시 동일 포트 충돌 버그 수정)
 
 async def run_ws_server():
     try:

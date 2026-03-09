@@ -291,7 +291,7 @@ def _update_pipeline_stage(stage: str, task: str = '') -> None:
             'cli': _cli_type,
         }).encode('utf-8')
         req = _req.Request(
-            'http://localhost:9571/api/agent/stage',
+            'http://localhost:9000/api/agent/stage',
             data=payload,
             headers={'Content-Type': 'application/json'},
             method='POST',

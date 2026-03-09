@@ -87,7 +87,7 @@ _ORCH_KW = [
 ]
 
 # 서버 API 포트 (server.py 기본값)
-_SERVER_PORT   = 9571
+_SERVER_PORT   = 9000
 _API_URL       = f'http://localhost:{_SERVER_PORT}/api/agent/run'
 _DASHBOARD_URL = f'http://localhost:{_SERVER_PORT}'
 

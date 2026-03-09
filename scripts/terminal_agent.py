@@ -51,7 +51,7 @@ CWD         = SCRIPT_DIR.parent
 DATA_DIR    = CWD / '.ai_monitor' / 'data'
 LIVE_FILE   = DATA_DIR / 'agent_live.jsonl'
 
-SERVER_PORT = int(os.environ.get('VIBE_SERVER_PORT', '9571'))
+SERVER_PORT = int(os.environ.get('VIBE_SERVER_PORT', '9000'))
 API_URL     = f'http://localhost:{SERVER_PORT}/api/agent/run'
 HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 

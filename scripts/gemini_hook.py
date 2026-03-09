@@ -214,7 +214,7 @@ def _send_heartbeat(status="active", task="Thinking..."):
     import json
     try:
         data = json.dumps({"agent": "Gemini", "status": status, "task": task}).encode("utf-8")
-        req = urllib.request.Request("http://localhost:9571/api/agents/heartbeat", data=data, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request("http://localhost:9000/api/agents/heartbeat", data=data, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=0.5)
     except Exception:
         pass
@@ -222,7 +222,7 @@ def _send_heartbeat(status="active", task="Thinking..."):
 def _ensure_dashboard_running():
     """대시보드 서버(9570)와 UI가 실행 중인지 확인하고, 꺼져 있다면 자동 실행합니다.
     [체크 로직]
-    1. localhost:9571/api/agents/heartbeat 호출 시도 (서버 생사 확인)
+    1. localhost:9000/api/agents/heartbeat 호출 시도 (서버 생사 확인)
     2. 실패 시 server.py 실행
     3. UI 프로세스 존재 여부 확인 후 미실행 시 mission_control_ui.py 실행
     """
@@ -231,10 +231,10 @@ def _ensure_dashboard_running():
     import os
     import time
 
-    # 1. 서버 체크 (9571 포트는 심장 박동용 API)
+    # 1. 서버 체크 (9000 포트는 심장 박동용 API)
     server_alive = False
     try:
-        with urllib.request.urlopen("http://localhost:9571/api/agents/heartbeat", timeout=0.2) as response:
+        with urllib.request.urlopen("http://localhost:9000/api/agents/heartbeat", timeout=0.2) as response:
             if response.status == 200:
                 server_alive = True
     except Exception:

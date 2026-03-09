@@ -57,8 +57,8 @@ LOG_FILE = DATA_DIR / "task_logs.jsonl"
 DB_FILE = DATA_DIR / "hive_mind.db"
 MEMORY_DB = DATA_DIR / "shared_memory.db"
 
-# 기본 HTTP 포트 (server.py와 동일하게 9571 선호)
-HTTP_PORT = 9571
+# 기본 HTTP 포트 (server.py와 동일하게 9000 선호)
+HTTP_PORT = 9000
 
 class HiveWatchdog:
     def __init__(self, interval=60):
@@ -97,8 +97,8 @@ class HiveWatchdog:
         except Exception:
             pass
         
-        # 포트 9571이 안되면 9001~9010, 8005, 8000 등 시도 (동적 포트 할당 대비)
-        # [2026-03-08] server.py가 _find_free_port(9571) 사용 — 9572~9590까지 확인 추가
+        # 포트 9000이 안되면 9001~9010, 8005, 8000 등 시도 (동적 포트 할당 대비)
+        # [2026-03-09] server.py가 _find_free_port(9000) 사용 — 9001~9020까지 확인 추가
         for p in [9001, 9002, 9003, 9004, 9005, 8005, 8000]:
             try:
                 url = f"http://localhost:{p}/api/heartbeat"

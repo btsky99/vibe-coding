@@ -39,7 +39,7 @@ SCRIPT_DIR  = Path(__file__).parent
 CLI_AGENT   = SCRIPT_DIR / 'cli_agent.py'
 SERVER_PY   = SCRIPT_DIR.parent / '.ai_monitor' / 'server.py'
 CWD         = SCRIPT_DIR.parent  # D:/vibe-coding
-SERVER_PORT = 9571
+SERVER_PORT = 9000
 API_URL     = f'http://localhost:{SERVER_PORT}/api/agent/run'
 HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 
