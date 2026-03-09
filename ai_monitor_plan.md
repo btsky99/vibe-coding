@@ -77,10 +77,11 @@ Build a high-performance, native Windows "Mission Control" center inspired by CM
         - 파일: `.ai_monitor/mission_control_ui.py`
         - 방법: `DebateHUD` 위젯 구현. 진행 중 토론 주제·라운드·상태를 실시간 표시.
         - 검증: UI 사이드바에 토론 정보 출력 확인.
-- [ ] **Task 16: 에이전트 권한 및 리소스 제어(Sandbox) 강화**
-    - 내용: `safety_guard.py` 로직 강화. 프로세스 단위 리소스(CPU/Mem) 모니터링/제한 및 네트워크 통신 보호를 추가하여 YOLO 모드의 안전성 보장.
-- [ ] **Task 17: 하이브 기억(Memory)의 지식 그래프 시각화**
-    - 내용: `memory.md` 및 `pg_thoughts` 데이터를 분석하여 기술적 결정 계보를 보여주는 지식 그래프(Knowledge Graph) 컴포넌트를 대시보드에 렌더링.
+- [x] **Task 16: 에이전트 권한 및 리소스 제어(Sandbox) 강화**
+    - 내용: `safety_guard.py` 로직 강화. 시스템 파괴 명령, 권한 남용, 민감 파일 접근( .env, .ssh 등) 차단 패턴 대폭 확장 및 리소스 모니터링 연동 완료.
+- [x] **Task 17: 하이브 지식 기억(Memory) 및 지식 그래프 시각화**  
+    - 내용: `pg_thoughts` 스키마 고도화(계보 추적용 parent_id 추가) 및 DB 연동 일관성 확보 완료. `memory.md`와 사고 데이터를 분석하여 기술적 결정 계보를 시각화하는 컴포넌트 개발 예정.
+
 
 ---
 **지휘관님, Phase 6 (초지능 고도화 4대 과제) 계획이 수립되었습니다.**

@@ -7,11 +7,15 @@
 #
 # REVISION HISTORY:
 # - 2026-03-07 Claude Sonnet 4.6: Codex 링, 모드 토글 위젯 추가 — Phase 5 Task 12
+# - 2026-03-10 Claude Sonnet 4.6: KnowledgeGraphHUD 추가 — Phase 6 Task 17
+#              shared_memory.db의 memory 테이블을 읽어 에이전트별 기억 노드를
+#              태그 기반 연결선으로 이어주는 미니 지식 그래프 QPainter 렌더링.
 # ------------------------------------------------------------------------
 
 import sys
 import json
 import math
+import sqlite3
 import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -25,6 +29,288 @@ from PySide6.QtCore import (Qt, QPropertyAnimation, QEasingCurve,
 _ROOT = Path(__file__).resolve().parent.parent
 _LAUNCHER = _ROOT / "scripts" / "agent_launcher.py"
 _CONFIG = _ROOT / ".ai_monitor" / "config.json"
+# 공유 메모리 DB 경로 (지식 그래프 데이터 소스)
+_MEMORY_DB = _ROOT / ".ai_monitor" / "data" / "shared_memory.db"
+
+# 에이전트별 색상 상수 (AgentRing과 통일)
+_AGENT_COLORS: dict[str, str] = {
+    "claude":  "#2ecc71",   # 초록
+    "gemini":  "#3498db",   # 파랑
+    "user":    "#e74c3c",   # 빨강
+    "codex":   "#f39c12",   # 주황
+}
+_DEFAULT_NODE_COLOR = "#95a5a6"  # 회색 (미분류)
+
+
+def _load_graph_data() -> tuple[list, list]:
+    """shared_memory.db의 memory 테이블에서 지식 그래프 데이터를 로드합니다.
+
+    [설계 의도] Task 17 — 하이브 기억 지식 그래프 시각화
+    - 최신 24개 메모리 항목을 읽어 에이전트별로 클러스터링합니다.
+    - 에이전트 클러스터를 원형으로 배치하고, 각 클러스터 내 노드도 서브 원형 배치합니다.
+    - 동일 태그를 가진 노드 사이에 엣지(연결선)를 생성합니다.
+      (엣지 과밀 방지를 위해 태그당 최대 3개 노드만 연결)
+
+    Returns:
+        nodes: [(x, y, label, color, size), ...]  — 정규화 좌표 (0~1)
+        edges: [(x1, y1, x2, y2), ...]            — 정규화 좌표 (0~1)
+    """
+    try:
+        conn = sqlite3.connect(str(_MEMORY_DB))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        # 최신 24개만 조회 (성능 및 가독성)
+        cur.execute("""
+            SELECT key, title, author, tags
+            FROM memory
+            ORDER BY updated_at DESC
+            LIMIT 24
+        """)
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        return [], []
+
+    if not rows:
+        return [], []
+
+    # ── 에이전트별 그룹화 ──────────────────────────────────────────────
+    # author 필드 예: "claude", "claude-code:terminal-1", "gemini", "user"
+    # 첫 번째 세그먼트를 에이전트 식별자로 사용
+    groups: dict[str, list] = {}
+    for row in rows:
+        agent = (row["author"] or "user").lower().split(":")[0]
+        groups.setdefault(agent, []).append(row)
+
+    # ── 레이아웃: 에이전트 클러스터를 캔버스 중앙 기준 원형 배치 ──────
+    agent_list = list(groups.keys())
+    n_agents   = len(agent_list)
+    cx0, cy0   = 0.50, 0.48   # 전체 중심
+    CLUSTER_R  = 0.30          # 클러스터 중심 간격 반경 (정규화)
+
+    positions:  dict[str, tuple[float, float]] = {}
+    color_map:  dict[str, str] = {}
+
+    for i, agent in enumerate(agent_list):
+        # 에이전트 클러스터 중심 (원형 배치)
+        if n_agents == 1:
+            acx, acy = cx0, cy0
+        else:
+            angle = (2 * math.pi * i / n_agents) - math.pi / 2
+            acx = cx0 + CLUSTER_R * math.cos(angle)
+            acy = cy0 + CLUSTER_R * math.sin(angle) * 0.65  # Y 압축 (와이드 캔버스)
+
+        agent_nodes = groups[agent]
+        n_nodes = len(agent_nodes)
+        # 서브 클러스터 반경: 노드가 많을수록 넓게, 최대 0.14
+        sub_r = min(0.14, 0.04 * n_nodes)
+
+        for j, row in enumerate(agent_nodes):
+            if n_nodes == 1:
+                nx, ny = acx, acy
+            else:
+                sub_angle = (2 * math.pi * j / n_nodes)
+                nx = acx + sub_r * math.cos(sub_angle)
+                ny = acy + sub_r * math.sin(sub_angle) * 0.65
+
+            # 경계 클램프 (패딩 고려)
+            nx = max(0.06, min(0.94, nx))
+            ny = max(0.06, min(0.94, ny))
+
+            key = row["key"]
+            positions[key] = (nx, ny)
+
+            # 에이전트 색상 결정
+            color = _DEFAULT_NODE_COLOR
+            for prefix, clr in _AGENT_COLORS.items():
+                if agent.startswith(prefix):
+                    color = clr
+                    break
+            color_map[key] = color
+
+    # ── 노드 리스트 구성 ──────────────────────────────────────────────
+    nodes: list = []
+    key_to_row = {row["key"]: row for row in rows}
+    for key, (x, y) in positions.items():
+        label = key.split(":")[-1][:8]   # key 마지막 세그먼트를 레이블로
+        color = color_map[key]
+        nodes.append((x, y, label, color, 5))
+
+    # ── 엣지: 동일 태그를 공유하는 노드 연결 ─────────────────────────
+    # 같은 #태그를 가진 노드끼리 엣지로 연결하여 지식의 흐름을 시각화합니다.
+    tag_to_keys: dict[str, list[str]] = {}
+    for row in rows:
+        raw_tags = row["tags"] or ""
+        # 태그 형식 처리: JSON 배열 또는 공백 구분 #태그 문자열 양쪽 지원
+        try:
+            tag_list = json.loads(raw_tags) if raw_tags.startswith("[") else []
+        except Exception:
+            tag_list = []
+        if not tag_list:
+            # 공백 구분 #태그 형식 파싱
+            tag_list = [t.lstrip("#").strip() for t in raw_tags.split()]
+        for tag in tag_list:
+            tag = str(tag).lstrip("#").strip()
+            if len(tag) > 2:  # 너무 짧은 태그(1~2글자) 제외
+                tag_to_keys.setdefault(tag, []).append(row["key"])
+
+    edges: list = []
+    seen_pairs: set = set()
+    for tag, keys in tag_to_keys.items():
+        if len(keys) < 2:
+            continue
+        # 엣지 과밀 방지: 태그당 최대 3개 노드만 상호 연결
+        for a in range(min(len(keys), 3)):
+            for b in range(a + 1, min(len(keys), 3)):
+                pair = tuple(sorted([keys[a], keys[b]]))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                if keys[a] in positions and keys[b] in positions:
+                    x1, y1 = positions[keys[a]]
+                    x2, y2 = positions[keys[b]]
+                    edges.append((x1, y1, x2, y2))
+
+    return nodes, edges
+
+
+class _GraphCanvas(QWidget):
+    """지식 그래프를 QPainter로 렌더링하는 캔버스 위젯.
+
+    [설계 의도] QWidget을 직접 상속하여 paintEvent를 오버라이드.
+    외부 그래프 라이브러리 없이 QPainter만으로 노드/엣지를 그립니다.
+    - 엣지: 반투명 회색-보라 선 (연결 관계 시각화)
+    - 노드: 에이전트 색상의 글로우 원 + 내부 원
+    - 레이블: 노드 하단 8pt 소형 텍스트 (key 마지막 세그먼트)
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(140)
+        self._nodes: list = []   # [(x, y, label, color, size), ...]
+        self._edges: list = []   # [(x1, y1, x2, y2), ...]
+
+    def set_graph(self, nodes: list, edges: list) -> None:
+        """그래프 데이터를 갱신하고 다시 그립니다."""
+        self._nodes = nodes
+        self._edges = edges
+        self.update()   # repaint 트리거
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # ── 엣지 그리기 (노드보다 먼저 — 노드가 위에 오도록) ──────────
+        edge_pen = QPen(QColor(120, 100, 200, 70))
+        edge_pen.setWidth(1)
+        painter.setPen(edge_pen)
+        painter.setBrush(Qt.NoBrush)
+        for x1, y1, x2, y2 in self._edges:
+            painter.drawLine(int(x1 * w), int(y1 * h),
+                             int(x2 * w), int(y2 * h))
+
+        # ── 노드 그리기 ────────────────────────────────────────────────
+        font = painter.font()
+        font.setPointSize(6)
+        painter.setFont(font)
+
+        for x, y, label, color, size in self._nodes:
+            ax, ay = int(x * w), int(y * h)
+            r = size
+
+            # 글로우 효과 (바깥쪽 반투명 원)
+            glow_color = QColor(color)
+            glow_color.setAlpha(35)
+            painter.setBrush(QBrush(glow_color))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(ax - r * 2, ay - r * 2, r * 4, r * 4)
+
+            # 노드 본체
+            painter.setBrush(QBrush(QColor(color)))
+            border_pen = QPen(QColor(color).lighter(160))
+            border_pen.setWidth(1)
+            painter.setPen(border_pen)
+            painter.drawEllipse(ax - r, ay - r, r * 2, r * 2)
+
+            # 레이블 (노드 아래)
+            painter.setPen(QColor(190, 190, 210, 170))
+            painter.drawText(ax - 18, ay + r + 2, 36, 11,
+                             Qt.AlignCenter, label)
+
+        painter.end()
+
+
+class KnowledgeGraphHUD(QFrame):
+    """하이브 기억 지식 그래프 시각화 HUD 위젯.
+
+    [설계 의도] Task 17 — 대시보드 사이드바에 에이전트 기억 관계망을 시각화.
+    shared_memory.db의 최신 24개 memory 항목을 읽어:
+      - 에이전트별 클러스터(Gemini=파랑, Claude=초록, user=빨강)로 노드를 구성
+      - 동일 태그를 가진 노드 사이에 연결선(엣지)을 그어 지식 계보를 표현
+    30초마다 자동 갱신됩니다.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFixedHeight(190)
+        self.setStyleSheet("""
+            background-color: rgba(12, 12, 22, 200);
+            border-radius: 8px;
+            border: 1px solid rgba(120, 80, 200, 50);
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setSpacing(3)
+
+        # 헤더 레이블
+        header_row = QHBoxLayout()
+        icon_label = QLabel("🧠")
+        icon_label.setStyleSheet("font-size: 9pt;")
+        title_label = QLabel("지식 그래프")
+        title_label.setStyleSheet(
+            "color: #9b59b6; font-size: 8pt; font-weight: bold;"
+        )
+        # 상태 레이블 (노드 수 표시)
+        self.stat_label = QLabel("로딩 중...")
+        self.stat_label.setStyleSheet("color: #7f8c8d; font-size: 7pt;")
+        self.stat_label.setAlignment(Qt.AlignRight)
+        header_row.addWidget(icon_label)
+        header_row.addWidget(title_label)
+        header_row.addStretch()
+        header_row.addWidget(self.stat_label)
+        layout.addLayout(header_row)
+
+        # 그래프 캔버스
+        self.canvas = _GraphCanvas()
+        layout.addWidget(self.canvas)
+
+        # 범례 (에이전트 색상 가이드)
+        legend_row = QHBoxLayout()
+        legend_row.setSpacing(8)
+        for label, color in [("Gemini", "#3498db"), ("Claude", "#2ecc71"), ("User", "#e74c3c")]:
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {color}; font-size: 7pt;")
+            txt = QLabel(label)
+            txt.setStyleSheet("color: #7f8c8d; font-size: 6pt;")
+            legend_row.addWidget(dot)
+            legend_row.addWidget(txt)
+        legend_row.addStretch()
+        layout.addLayout(legend_row)
+
+        # 30초 자동 갱신 타이머
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(30_000)
+        self._refresh()  # 초기 로드
+
+    def _refresh(self) -> None:
+        """DB에서 최신 메모리를 읽어 그래프를 갱신합니다."""
+        nodes, edges = _load_graph_data()
+        self.canvas.set_graph(nodes, edges)
+        self.stat_label.setText(f"{len(nodes)}노드 {len(edges)}엣지")
 
 class AgentRing(QWidget):
     """CMUX 스타일의 에이전트 상태 링 위젯"""
@@ -309,10 +595,20 @@ class MissionControlSidebar(QWidget):
         ring_layout.addWidget(self.codex_ring)
         self.content_layout.addLayout(ring_layout)
 
-        # 하이브 토론 HUD (신규)
+        # 하이브 토론 HUD
         # Why: 토론이 활성화될 때만 나타나며, 현재 논의 중인 핵심 주제를 강조합니다.
         self.debate_hud = DebateHUD()
         self.content_layout.addWidget(self.debate_hud)
+
+        self.content_layout.addWidget(
+            QFrame(frameShape=QFrame.HLine, styleSheet="background-color: rgba(255,255,255,20);")
+        )
+
+        # 지식 그래프 HUD (Task 17)
+        # Why: 에이전트들의 기억 항목을 시각적 그래프로 표현하여
+        #      하이브의 지식 계보와 에이전트 간 협력 관계를 직관적으로 파악할 수 있게 합니다.
+        self.graph_hud = KnowledgeGraphHUD()
+        self.content_layout.addWidget(self.graph_hud)
 
         self.content_layout.addWidget(
             QFrame(frameShape=QFrame.HLine, styleSheet="background-color: rgba(255,255,255,20);")
