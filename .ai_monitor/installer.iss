@@ -42,7 +42,7 @@ Name: "startup"; Description: "Windows 시작 시 자동 실행"; GroupDescripti
 
 [Files]
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\vibe-coding_console.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\vibe-coding-console-{#MyAppVersion}.exe"; DestDir: "{app}"; DestName: "vibe-coding-console.exe"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
