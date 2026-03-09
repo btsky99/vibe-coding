@@ -1,8 +1,14 @@
 import sqlite3
 import json
 import time
+import psycopg2
 from datetime import datetime
 from src.db import get_connection, init_db
+
+# PostgreSQL 연결 정보
+PG_PORT = 5433
+PG_USER = "postgres"
+PG_DB = "postgres"
 
 def _ensure_tables():
     """테이블이 존재하는지 확인하고 없으면 초기화합니다."""
@@ -18,7 +24,8 @@ def _ensure_tables():
         conn.close()
 
 def insert_log(session_id, terminal_id, agent, trigger_msg, project="hive", status="running"):
-    """작업 로그를 삽입합니다. 실패 시 에러를 던지지 않고 로그만 남깁니다."""
+    """작업 로그를 삽입합니다. SQLite와 PostgreSQL 양쪽으로 전송합니다."""
+    # 1. SQLite 저장 (기존 유지)
     try:
         _ensure_tables()
         conn = get_connection()
@@ -31,7 +38,36 @@ def insert_log(session_id, terminal_id, agent, trigger_msg, project="hive", stat
         finally:
             conn.close()
     except Exception as e:
-        print(f"[DB-ERR] insert_log 실패 (무시됨): {e}")
+        print(f"[DB-ERR] SQLite insert_log 실패: {e}")
+
+    # 2. PostgreSQL 저장 및 실시간 NOTIFY (신규)
+    try:
+        pg_conn = psycopg2.connect(
+            host="localhost", port=PG_PORT, user=PG_USER, database=PG_DB,
+            connect_timeout=2
+        )
+        try:
+            with pg_conn.cursor() as cursor:
+                cursor.execute('''
+                    INSERT INTO hive_logs (agent, level, message, task_id, metadata)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (
+                    agent, 
+                    "INFO" if status == "running" else status.upper(),
+                    trigger_msg,
+                    session_id,
+                    json.dumps({
+                        "terminal_id": terminal_id,
+                        "project": project,
+                        "raw_status": status
+                    })
+                ))
+            pg_conn.commit()
+        finally:
+            pg_conn.close()
+    except Exception as e:
+        # DB가 꺼져 있거나 연결 실패 시 조용히 넘어감 (로그 폭풍 방지)
+        pass
 
 def get_recent_logs(limit=50):
     """최근 로그를 가져옵니다."""

@@ -1286,60 +1286,69 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
             
-            # SSE 스트리밍 루프 (SQLite 기반)
-            last_id = 0
+            import psycopg2
+            import select
             
-            # 초기 진입 시 최신 50개 전송
+            # 1. 초기 데이터 전송 (최근 50개 - PostgreSQL에서 조회)
             try:
-                recent_logs = get_recent_logs(50)
-                if recent_logs:
-                    last_id = recent_logs[-1]['id'] # 가장 최신 id 저장
-                    for log in recent_logs:
-                        self.wfile.write(f"data: {json.dumps(log, ensure_ascii=False)}\n\n".encode('utf-8'))
+                rows = run_pg_sql_csv(
+                    "SELECT agent, level, message as trigger, task_id as session_id, "
+                    "metadata->>'terminal_id' as terminal_id, metadata->>'project' as project, "
+                    "metadata->>'raw_status' as status, to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp "
+                    "FROM hive_logs ORDER BY id DESC LIMIT 50"
+                )
+                if rows:
+                    for row in reversed(rows):
+                        self.wfile.write(f"data: {json.dumps(row, ensure_ascii=False)}\n\n".encode('utf-8'))
                         self.wfile.flush()
             except Exception as e:
-                print(f"Initial DB Read error: {e}")
-            
-            # SSE 연결 타임아웃 완화 (60초)
-            self.connection.settimeout(60.0)
-            heartbeat_tick = 0
+                print(f"[SSE-PG] Initial Read Error: {e}")
 
-            while True:
-                try:
-                    # 새로운 로그가 있는지 확인 (last_id 보다 큰 id 조회)
-                    # DB 락 대응을 위해 timeout=20.0으로 설정
-                    conn = sqlite3.connect(str(DATA_DIR / "hive_mind.db"), timeout=20.0)
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.execute("SELECT * FROM session_logs WHERE id > ? ORDER BY id ASC", (last_id,))
-                    new_rows = [dict(row) for row in cursor.fetchall()]
-                    conn.close()
+            # 2. 실시간 LISTEN 루프
+            try:
+                pg_conn = psycopg2.connect(host="localhost", port=5433, user="postgres", database="postgres")
+                pg_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+                cursor = pg_conn.cursor()
+                cursor.execute("LISTEN hive_log_channel;")
+                
+                self.connection.settimeout(60.0) # SSE 연결 타임아웃
+                
+                while True:
+                    if select.select([pg_conn], [], [], 5) == ([], [], []):
+                        # 하트비트 전송
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+                        continue
                     
-                    if new_rows:
-                        for row in new_rows:
-                            # 프론트엔드가 기대하는 포맷으로 키 이름 매핑
-                            out_row = dict(row)
-                            if 'trigger_msg' in out_row:
-                                out_row['trigger'] = out_row.pop('trigger_msg')
-                            
-                            self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
-                            self.wfile.flush()
-                        last_id = new_rows[-1]['id']
-                        heartbeat_tick = 0
-                    else:
-                        heartbeat_tick += 1
-                        # 30초마다 하트비트 전송
-                        if heartbeat_tick >= 30:
-                            self.wfile.write(b": heartbeat\n\n")
-                            self.wfile.flush()
-                            heartbeat_tick = 0
-                    
-                    time.sleep(1.0) # 감시 주기를 1.0s로 유지
-                except (BrokenPipeError, ConnectionResetError, TimeoutError, socket.timeout):
-                    break
-                except Exception as e:
-                    # 에러가 반복되면 루프 중단 (서버 먹통 방지)
-                    print(f"SSE DB Stream error: {e}")
-                    time.sleep(2)
+                    pg_conn.poll()
+                    while pg_conn.notifies:
+                        notify = pg_conn.notifies.pop(0)
+                        payload = json.loads(notify.payload)
+                        
+                        # 프론트엔드 호환 포맷 변환
+                        meta = payload.get('metadata', {})
+                        if isinstance(meta, str): meta = json.loads(meta)
+                        
+                        out_row = {
+                            "agent": payload.get('agent'),
+                            "level": payload.get('level'),
+                            "trigger": payload.get('message'),
+                            "session_id": payload.get('task_id'),
+                            "terminal_id": meta.get('terminal_id'),
+                            "project": meta.get('project'),
+                            "status": meta.get('raw_status'),
+                            "timestamp": payload.get('timestamp')
+                        }
+                        
+                        self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, socket.timeout):
+                pass
+            except Exception as e:
+                print(f"[SSE-PG] Stream Error: {e}")
+            finally:
+                try: pg_conn.close()
+                except: pass
         elif parsed_path.path == '/api/heartbeat':
             # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
             self.send_response(200)
@@ -3635,6 +3644,31 @@ class SSEHandler(BaseHTTPRequestHandler):
         pass
 
 pty_sessions = {}
+_CODEX_BACKSPACE_RE = re.compile(r'[^\n]\x08')
+_CODEX_CONTROL_RE = re.compile(r'[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f]')
+_CODEX_ESCAPE_RE = re.compile(
+    r'\x1b(?:'
+    r'\][^\x07\x1b]*(?:\x07|\x1b\\)'
+    r'|\[\?(?:25|47|1047|1049|2004)[hl]'
+    r'|\[[0-?]*[ -/]*[@-~]'
+    r'|[@-Z\\-_]'
+    r')'
+)
+
+
+def _normalize_codex_stream(data: str) -> str:
+    """Flatten Codex cursor-heavy output so it stays readable through winpty."""
+    text = data.replace('\r\r\n', '\r\n')
+    while True:
+        collapsed = _CODEX_BACKSPACE_RE.sub('', text)
+        if collapsed == text:
+            break
+        text = collapsed
+    text = _CODEX_ESCAPE_RE.sub('', text)
+    text = re.sub(r'\r(?!\n)', '\n', text)
+    text = _CODEX_CONTROL_RE.sub('', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text
 # agent_api가 PTY 세션 상태를 /api/agent/terminals 응답에 병합할 수 있도록
 # pty_sessions 딕셔너리 접근 콜백을 주입합니다.
 agent_api.set_pty_sessions_getter(lambda: pty_sessions)
@@ -3659,6 +3693,8 @@ async def pty_handler(websocket):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["LANG"] = "ko_KR.UTF-8"
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
         
         pty = PtyProcess.spawn('cmd.exe', cwd=cwd, dimensions=(rows, cols), env=env)
         
@@ -3695,7 +3731,7 @@ async def pty_handler(websocket):
             yolo_flag = " --yolo" if is_yolo else ""
             pty.write(f'set TERMINAL_ID={session_id}\r\n')
             pty.write('set HIVE_AGENT=codex\r\n')
-            pty.write(f'codex{yolo_flag}\r\n')
+            pty.write(f'codex{yolo_flag} --no-alt-screen\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
         # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음
@@ -3737,14 +3773,17 @@ async def pty_handler(websocket):
                 if not data:
                     await asyncio.sleep(0.01)
                     continue
-                await websocket.send(data)
+                stream_data = _normalize_codex_stream(data) if agent == 'codex' else data
+                if not stream_data:
+                    continue
+                await websocket.send(stream_data)
                 # ── PTY 출력의 마지막 줄을 pty_sessions에 저장 ─────────────────────
                 # 목적: agent_api.py가 /api/agent/terminals 응답 빌드 시 last_line을
                 #       참조하여 자율 에이전트 패널에 "현재 무엇을 하고 있는지" 표시.
                 # ANSI 이스케이프 코드를 제거하고 빈 줄·제어문자 줄은 무시.
                 if session_id in pty_sessions:
                     try:
-                        clean = _ANSI_ESCAPE.sub('', data)
+                        clean = _ANSI_ESCAPE.sub('', stream_data)
                         clean = clean.replace('\r', '\n')
                         lines = [l.strip() for l in clean.split('\n') if l.strip() and len(l.strip()) > 2]
                         if lines:

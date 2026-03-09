@@ -53,10 +53,59 @@ ICON_PATH = PROJECT_ROOT / ".ai_monitor" / "bin" / "app_icon.ico"
 if not ICON_PATH.exists():
     ICON_PATH = PROJECT_ROOT / "assets" / "vibe_coding_icon.ico"
 
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread
+import psycopg2
+import select
+
+class PgListenerThread(QThread):
+    """PostgreSQL LISTEN 채널을 감시하는 백그라운드 스레드"""
+    log_received = Signal(dict)
+    status_changed = Signal(dict)
+
+    def __init__(self):
+        super().__init__()
+        self.running = True
+
+    def run(self):
+        try:
+            conn = psycopg2.connect(host="localhost", port=5433, user="postgres", database="postgres")
+            conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.connect().cursor() if hasattr(conn, 'connect') else conn.cursor()
+            cursor.execute("LISTEN hive_log_channel;")
+            
+            while self.running:
+                if select.select([conn], [], [], 2) == ([], [], []):
+                    continue
+                
+                conn.poll()
+                while conn.notifies:
+                    notify = conn.notifies.pop(0)
+                    try:
+                        data = json.loads(notify.payload)
+                        # 1. 로그 데이터 처리
+                        self.log_received.emit(data)
+                        
+                        # 2. 상태 데이터 처리 (status가 포함된 경우)
+                        meta = data.get("metadata", {})
+                        if isinstance(meta, str): meta = json.loads(meta)
+                        status = meta.get("raw_status")
+                        if status:
+                            # 기존 poll_agent_status 로직을 대체하는 상태 맵 생성
+                            # (단순화를 위해 현재 수신된 에이전트 상태를 기반으로 업데이트)
+                            self.status_changed.emit({
+                                "agent": data.get("agent"),
+                                "status": status,
+                                "terminal_id": meta.get("terminal_id")
+                            })
+                    except: continue
+            conn.close()
+        except Exception as e:
+            print(f"[PgListener] Error: {e}")
+
 class MissionControlApp(QObject):
     """
     미션 컨트롤의 메인 애플리케이션 엔진.
-    트레이 아이콘 관리 및 상태 폴링을 담당합니다.
+    트레이 아이콘 관리 및 PostgreSQL 실시간 이벤트를 담당합니다.
     """
     status_changed = Signal(dict)
 
@@ -82,17 +131,11 @@ class MissionControlApp(QObject):
         self.setup_menu()
         self.tray_icon.show()
         
-        # 상태 폴링 타이머 (1초 간격)
-        self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(self.poll_agent_status)
-        self.poll_timer.start(1000)
-        
-        # 로그 테일링 타이머 (500ms 간격)
-        self.log_timer = QTimer(self)
-        self.log_timer.timeout.connect(self.tail_logs)
-        self.log_timer.start(500)
-        self.last_log_pos = 0
-        self.initialize_log_pos()
+        # PostgreSQL 실시간 리스너 시작
+        self.pg_thread = PgListenerThread()
+        self.pg_thread.log_received.connect(self.on_pg_log)
+        self.pg_thread.status_changed.connect(self.on_pg_status)
+        self.pg_thread.start()
         
         # 펄스 애니메이션 타이머 (50ms 간격)
         self.pulse_timer = QTimer(self)
@@ -102,43 +145,55 @@ class MissionControlApp(QObject):
         
         self.last_status = {}
         self.active_agents = []
+        self.terminal_states = {} # 터미널별 상태 저장
 
-    def initialize_log_pos(self):
-        """서버 시작 시 로그 파일의 끝으로 포인터 이동"""
-        log_file = DATA_DIR / "task_logs.jsonl"
-        if log_file.exists():
-            self.last_log_pos = log_file.stat().st_size
-
-    def tail_logs(self):
-        """task_logs.jsonl 파일을 실시간으로 읽어 사이드바에 추가합니다."""
-        log_file = DATA_DIR / "task_logs.jsonl"
-        if not log_file.exists(): return
+    def on_pg_log(self, data):
+        """PG 리스너로부터 로그 수신 시 사이드바 업데이트"""
+        agent = data.get("agent", "SYSTEM")
+        meta = data.get("metadata", {})
+        if isinstance(meta, str): meta = json.loads(meta)
+        tid = meta.get("terminal_id", "")
         
-        try:
-            curr_size = log_file.stat().st_size
-            if curr_size < self.last_log_pos: # 파일이 로테이트되거나 비워진 경우
-                self.last_log_pos = 0
-                
-            if curr_size > self.last_log_pos:
-                with open(log_file, "r", encoding="utf-8") as f:
-                    f.seek(self.last_log_pos)
-                    new_lines = f.readlines()
-                    self.last_log_pos = f.tell()
-                    
-                    for line in new_lines:
-                        if not line.strip(): continue
-                        try:
-                            data = json.loads(line)
-                            agent = data.get("agent", "SYSTEM")
-                            tid = data.get("terminal_id", "")
-                            # 터미널 ID가 있으면 에이전트 이름 옆에 표시 (예: CLAUDE [T1])
-                            display_name = f"{agent} [{tid}]" if tid else agent
-                            task = data.get("task", "")
-                            if task:
-                                self.sidebar.add_log(display_name, task)
-                        except: pass
-        except Exception as e:
-            print(f"[Mission Control] 로그 테일링 오류: {e}")
+        display_name = f"{agent} [{tid}]" if tid else agent
+        message = data.get("message", "")
+        if message:
+            self.sidebar.add_log(display_name, message)
+
+    def on_pg_status(self, ev):
+        """PG 리스너로부터 상태 변경 수신 시 트레이 아이콘 업데이트"""
+        tid = ev.get("terminal_id")
+        if not tid: return
+        
+        status = ev.get("status")
+        agent = ev.get("agent", "").lower()
+        
+        if status == "running":
+            self.terminal_states[tid] = agent
+        else:
+            if tid in self.terminal_states:
+                del self.terminal_states[tid]
+
+        # 활성 에이전트 목록 추출
+        active_names = list(set(self.terminal_states.values()))
+        
+        # 상태가 변했는지 확인
+        if active_names != self.active_agents:
+            self.active_agents = active_names
+            if self.active_agents:
+                if not self.is_pulsing:
+                    self.is_pulsing = True
+                    self.pulse_timer.start(50)
+            else:
+                self.is_pulsing = False
+                self.pulse_timer.stop()
+                self.reset_icon()
+            
+            self.update_tray_visuals(None)
+            # 사이드바 상태 업데이트용 데이터 포맷팅
+            ui_status = {name: {"status": "active"} for name in active_names}
+            for name in ["claude", "gemini", "codex"]:
+                if name not in ui_status: ui_status[name] = {"status": "idle"}
+            self.status_changed.emit(ui_status)
 
     def setup_menu(self):
         menu = QMenu()
@@ -194,69 +249,6 @@ class MissionControlApp(QObject):
             self.open_action.setText("사이드바 닫기")
         else:
             self.open_action.setText("사이드바 열기")
-
-    def poll_agent_status(self):
-        """agent_live.jsonl 이벤트를 분석하여 다중 터미널 상태를 집계합니다.
-
-        Why: 여러 터미널(T1~T8)에서 에이전트가 동시에 실행될 수 있으므로,
-             개별 이벤트들을 모아 현재 활성 상태인 에이전트 목록을 추출해야 합니다.
-        """
-        live_file = DATA_DIR / "agent_live.jsonl"
-        if not live_file.exists():
-            return
-            
-        try:
-            with open(live_file, "r", encoding="utf-8") as f:
-                # 성능을 위해 마지막 200줄만 읽음
-                lines = f.readlines()[-200:]
-                if not lines: return
-
-            # 터미널별 최근 상태 추적
-            terminal_status = {}
-            for line in lines:
-                try:
-                    ev = json.loads(line)
-                    # agent_shell은 'terminal_id' 또는 'terminal' 키를 사용
-                    tid = ev.get("terminal_id") or ev.get("terminal")
-                    if not tid: continue
-                    
-                    etype = ev.get("type")
-                    if etype == "started":
-                        terminal_status[tid] = {"status": "active", "cli": ev.get("cli")}
-                    elif etype in ("done", "error", "stopped"):
-                        terminal_status[tid] = {"status": "idle"}
-                except: continue
-
-            # 에이전트 종류별(claude, gemini, codex) 활성 여부 집계
-            current_map = {"claude": {"status": "idle"}, "gemini": {"status": "idle"}, "codex": {"status": "idle"}}
-            active_names = []
-            
-            for tid, info in terminal_status.items():
-                if info.get("status") == "active":
-                    cli = info.get("cli", "").lower()
-                    if cli in current_map:
-                        current_map[cli]["status"] = "active"
-                        if cli not in active_names:
-                            active_names.append(cli)
-
-            # 상태 변경 시에만 UI 업데이트
-            if current_map != self.last_status:
-                self.last_status = current_map
-                self.active_agents = active_names
-                
-                if self.active_agents:
-                    if not self.is_pulsing:
-                        self.is_pulsing = True
-                        self.pulse_timer.start(50)
-                else:
-                    self.is_pulsing = False
-                    self.pulse_timer.stop()
-                    self.reset_icon()
-                
-                self.update_tray_visuals(current_map)
-                self.status_changed.emit(current_map)
-        except Exception as e:
-            print(f"[Mission Control] 폴링 오류: {e}")
 
     def update_pulse(self):
         """아이콘에 펄싱하는 상태 점을 그립니다."""

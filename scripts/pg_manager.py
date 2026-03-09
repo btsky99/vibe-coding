@@ -64,7 +64,7 @@ def status():
     print(f"📊 DB 상태: {res}")
 
 def setup_extensions():
-    """핵심 확장 기능(Vector, Search, MQ) 활성화 SQL 실행"""
+    """핵심 확장 기능(Vector, Search, MQ) 및 로그 스키마 활성화 SQL 실행"""
     psql = BIN_DIR / "psql.exe"
     
     # 1. PGVector, PGSearch(trgm), PGMQ 활성화 쿼리
@@ -72,26 +72,75 @@ def setup_extensions():
     CREATE EXTENSION IF NOT EXISTS vector;
     CREATE EXTENSION IF NOT EXISTS pg_trgm;
     CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
-    -- PGMQ는 SQL 파일이 있는 경우 실행
     """
     
     print("🧩 확장 기능 활성화 시도 중...")
     try:
         subprocess.run([
             str(psql), "-p", str(PORT), "-U", "postgres", "-d", "postgres", "-c", sql
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, encoding="utf-8", errors="replace")
         
         # PGMQ SQL 파일 실행
         mq_sql_path = PG_DIR / "share" / "extension" / "pgmq.sql"
         if mq_sql_path.exists():
             subprocess.run([
                 str(psql), "-p", str(PORT), "-U", "postgres", "-d", "postgres", "-f", str(mq_sql_path)
-            ], capture_output=True, text=True)
+            ], capture_output=True, text=True, encoding="utf-8", errors="replace")
             print("✅ PGMQ (SQL) 설치 완료")
             
-        print("✅ 핵심 확장 기능 세팅 완료.")
+        # 2. 로그 스키마 및 트리거 초기화
+        init_log_schema()
+            
+        print("✅ 핵심 확장 기능 및 로그 스키마 세팅 완료.")
     except Exception as e:
         print(f"⚠️ 확장 기능 설치 중 경고: {e} (아직 바이너리가 배치되지 않았을 수 있습니다)")
+
+def init_log_schema():
+    """로그 저장용 테이블 및 실시간 NOTIFY 트리거 생성"""
+    psql = BIN_DIR / "psql.exe"
+    
+    schema_sql = """
+    -- 1. Create table
+    CREATE TABLE IF NOT EXISTS hive_logs (
+        id SERIAL PRIMARY KEY,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        agent VARCHAR(50),
+        level VARCHAR(20),
+        message TEXT,
+        task_id VARCHAR(100),
+        metadata JSONB
+    );
+
+    -- 2. Create notify function
+    CREATE OR REPLACE FUNCTION notify_hive_log()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        PERFORM pg_notify('hive_log_channel', row_to_json(NEW)::text);
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    -- 3. Set trigger
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_log_insert') THEN
+            CREATE TRIGGER trg_hive_log_insert
+            AFTER INSERT ON hive_logs
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_log();
+        END IF;
+    END $$;
+    """
+    
+    print("📝 로그 스키마 및 실시간 트리거 초기화 중...")
+    try:
+        subprocess.run([
+            str(psql), "-p", str(PORT), "-U", "postgres", "-d", "postgres", "-c", schema_sql
+        ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        print("✅ 로그 스키마 세팅 성공.")
+    except Exception as e:
+        # 에러 발생 시 stderr 출력 시도
+        stderr = getattr(e, 'stderr', 'No stderr')
+        print(f"❌ 로그 스키마 세팅 실패: {e}\n{stderr}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

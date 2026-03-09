@@ -393,7 +393,7 @@
     "id": "20260309003605858782",
     "title": "그럼 푸시하고  빌드 리리지 해줘",
     "description": "그럼 푸시하고  빌드 리리지 해줘",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "claude",
     "priority": "medium",
     "created_by": "user",
@@ -403,10 +403,320 @@
     "id": "20260309003610314761",
     "title": "그럼 푸시하고  빌드 리리지 해줘",
     "description": "그럼 푸시하고  빌드 리리지 해줘",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "claude",
     "priority": "medium",
     "created_by": "user",
     "created_at": "2026-03-09T00:36:10.314761"
+  },
+  {
+    "id": "20260309212652793160",
+    "title": "skill-creator   이거 공식을 나온거 야 검색해봐",
+    "description": "skill-creator   이거 공식을 나온거 야 검색해봐",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T21:26:52.793160"
+  },
+  {
+    "id": "20260309212739927195",
+    "title": "skill-creator   이거 공식을 나온거 야 검색해봐",
+    "description": "skill-creator   이거 공식을 나온거 야 검색해봐",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T21:27:39.927195"
+  },
+  {
+    "id": "20260309213308756441",
+    "title": "자 지금 어디까지 진행이 된거지",
+    "description": "자 지금 어디까지 진행이 된거지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T21:33:08.756441"
+  },
+  {
+    "id": "20260309213325606940",
+    "title": "자 지금 어디까지 진행이 된거지",
+    "description": "자 지금 어디까지 진행이 된거지",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T21:33:25.606940"
+  },
+  {
+    "id": "20260309223210852642",
+    "title": "지금가지   프로젝트 진행상황 분석해봐   앞을고 개선하거는 없느지도",
+    "description": "지금가지   프로젝트 진행상황 분석해봐   앞을고 개선하거는 없느지도",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:32:10.852642"
+  },
+  {
+    "id": "20260309223243168273",
+    "title": "지금까지   프로젝드  어디가지 되는지 분석해봐  앞을 계선할사항은 없는지도",
+    "description": "지금까지   프로젝드  어디가지 되는지 분석해봐  앞을 계선할사항은 없는지도",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:32:43.168273"
+  },
+  {
+    "id": "20260309223303930288",
+    "title": "지금까지   프로젝드  어디가지 되는지 분석해봐  앞을 계선할사항은 없는지도",
+    "description": "지금까지   프로젝드  어디가지 되는지 분석해봐  앞을 계선할사항은 없는지도",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:33:03.930288"
+  },
+  {
+    "id": "20260309224658721459",
+    "title": "시작해",
+    "description": "시작해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:46:58.721459"
+  },
+  {
+    "id": "20260309224836496444",
+    "title": "너는 무슨 말인 자 하나도 모르겠다",
+    "description": "너는 무슨 말인 자 하나도 모르겠다",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:48:36.496444"
+  },
+  {
+    "id": "20260309224953819344",
+    "title": "전부 진행해",
+    "description": "전부 진행해",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:49:53.819344"
+  },
+  {
+    "id": "20260309225451544431",
+    "title": "<task-notification> <task-id>boczwka0a</task-id> <tool-use-id>toolu_01Fpq4VXwjnp",
+    "description": "<task-notification>\n<task-id>boczwka0a</task-id>\n<tool-use-id>toolu_01Fpq4VXwjnpuM5qZu4ixS29</tool-use-id>\n<output-file>C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\boczwka0a.output</output-file>\n<status>completed</status>\n<summary>Background command \"Find all files that write repair_count\" completed (exit code 0)</summary>\n</task-notification>\nRead the output file to retrieve the result: C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\boczwka0a.output",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T22:54:51.544431"
+  },
+  {
+    "id": "20260309230347443727",
+    "title": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-09 230319.png\"  그런데 외  코덱스 용은 없어",
+    "description": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-09 230319.png\"  그런데 외  코덱스 용은 없어  에이전트 .md 던가",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:03:47.443727"
+  },
+  {
+    "id": "20260309230659547351",
+    "title": "멈춘거야 다된거야",
+    "description": "멈춘거야 다된거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:06:59.547351"
+  },
+  {
+    "id": "20260309230704335559",
+    "title": "멈춘거야 다된거야",
+    "description": "멈춘거야 다된거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:07:04.335559"
+  },
+  {
+    "id": "20260309230901487280",
+    "title": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-09 230842.png\"  외 너만 화면이 자꾸 깨저 냐",
+    "description": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-09 230842.png\"  외 너만 화면이 자꾸 깨저 냐오지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:09:01.487280"
+  },
+  {
+    "id": "20260309230905893932",
+    "title": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-09 230842.png\"  외 너만 화면이 자꾸 깨저 냐",
+    "description": "\"C:\\Users\\com\\Pictures\\Screenshots\\스크린샷 2026-03-09 230842.png\"  외 너만 화면이 자꾸 깨저 냐오지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:09:05.893932"
+  },
+  {
+    "id": "20260309231327171549",
+    "title": "굴사거 이중 삼중으로 나오잖아 봐봐   글씨가 깨지는게 아니고",
+    "description": "굴사거 이중 삼중으로 나오잖아 봐봐   글씨가 깨지는게 아니고",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:13:27.171549"
+  },
+  {
+    "id": "20260309231331735903",
+    "title": "굴사거 이중 삼중으로 나오잖아 봐봐   글씨가 깨지는게 아니고",
+    "description": "굴사거 이중 삼중으로 나오잖아 봐봐   글씨가 깨지는게 아니고",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:13:31.735903"
+  },
+  {
+    "id": "20260309231353050736",
+    "title": "잔상이 남는다고 해야하나",
+    "description": "잔상이 남는다고 해야하나",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:13:53.050736"
+  },
+  {
+    "id": "20260309232157075478",
+    "title": "너는 리셋하기전 뭘  수정한거야",
+    "description": "너는 리셋하기전 뭘  수정한거야",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:21:57.075478"
+  },
+  {
+    "id": "20260309232208485889",
+    "title": "너는 리셋전 멀수정한거야",
+    "description": "너는 리셋전 멀수정한거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:22:08.485889"
+  },
+  {
+    "id": "20260309232212785475",
+    "title": "너는 리셋전 멀수정한거야",
+    "description": "너는 리셋전 멀수정한거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:22:12.785475"
+  },
+  {
+    "id": "20260309232256691994",
+    "title": "그럼 진행해줘",
+    "description": "그럼 진행해줘",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:22:56.691994"
+  },
+  {
+    "id": "20260309232334750879",
+    "title": "자지금되 외 킷을 뒤저서 그전에한네요응으르 찾지  db를 검색안하고  ?  내말이 틀리니",
+    "description": "자지금되 외 킷을 뒤저서 그전에한네요응으르 찾지  db를 검색안하고  ?  내말이 틀리니",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:23:34.750879"
+  },
+  {
+    "id": "20260309232356613617",
+    "title": "자지금되 외 킷을 뒤저서 그전에한네요응으르 찾지  db를 검색안하고  ?  내말이 틀리니",
+    "description": "자지금되 외 킷을 뒤저서 그전에한네요응으르 찾지  db를 검색안하고  ?  내말이 틀리니",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:23:56.613617"
+  },
+  {
+    "id": "20260309232834009392",
+    "title": "아니 근본적인 원이르 찾아 여저닝 똑같아 외 이거내거 몇일전부터 지적한건데 또고같아  처음히작해서   어디가지했지혐   깃 부터 훌터보고 찾아",
+    "description": "아니 근본적인 원이르 찾아 여저닝 똑같아 외 이거내거 몇일전부터 지적한건데 또고같아  처음히작해서   어디가지했지혐   깃 부터 훌터보고 찾아",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:28:34.009392"
+  },
+  {
+    "id": "20260309232850671336",
+    "title": "아니 근본적인 원이르 찾아 여저닝 똑같아 외 이거내거 몇일전부터 지적한건데 또고같아  처음히작해서   어디가지했지혐   깃 부터 훌터보고 찾아",
+    "description": "아니 근본적인 원이르 찾아 여저닝 똑같아 외 이거내거 몇일전부터 지적한건데 또고같아  처음히작해서   어디가지했지혐   깃 부터 훌터보고 찾아",
+    "status": "in_progress",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:28:50.671336"
+  },
+  {
+    "id": "20260309233731339667",
+    "title": "자내가 분며  바이브 코딩 제시행하거나 리셋하면   어디가지 했어 물어보면 여전이 깃 을뒤저서 어디까지 했느지 찾는다고 맞지  그리고 외 db ",
+    "description": "자내가 분며  바이브 코딩 제시행하거나 리셋하면   어디가지 했어 물어보면 여전이 깃 을뒤저서 어디까지 했느지 찾는다고 맞지  그리고 외 db  하이브 마인드 시스템에 분명 기록이 되있을텐데 db에  외 그걸 안보고 깃 커밋내뇽을 모냐고 이거 계속 반복이라고",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:37:31.339667"
+  },
+  {
+    "id": "20260309233742649048",
+    "title": "시작해",
+    "description": "시작해",
+    "status": "in_progress",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:37:42.649048"
+  },
+  {
+    "id": "20260309235454822250",
+    "title": "진행해",
+    "description": "진행해",
+    "status": "in_progress",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-09T23:54:54.822250"
+  },
+  {
+    "id": "20260310000647437601",
+    "title": "1번",
+    "description": "1번",
+    "status": "in_progress",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T00:06:47.437601"
   }
 ]
