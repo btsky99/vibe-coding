@@ -110,7 +110,7 @@ jobs:
           cd .ai_monitor
           set WINPTY=${{ steps.winpty.outputs.path }}
           pyinstaller --onefile --noconsole ^
-            --name vibe-coding ^
+            --name vibe-coding-update-${{ steps.version.outputs.ver }} ^
             --icon bin/vibe_final.ico ^
             --add-data "src;src" ^
             --add-data "bin;bin" ^
@@ -135,7 +135,7 @@ jobs:
           cd .ai_monitor
           set WINPTY=${{ steps.winpty.outputs.path }}
           pyinstaller --onefile --console ^
-            --name vibe-coding_console ^
+            --name vibe-coding-console-${{ steps.version.outputs.ver }} ^
             --icon bin/vibe_final.ico ^
             --add-data "src;src" ^
             --add-data "bin;bin" ^
@@ -175,4 +175,4 @@ jobs:
             - 빌드 시간: ${{ github.event.head_commit.timestamp }}
           files: |
             .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.ver }}.exe
-            .ai_monitor/dist/vibe-coding.exe
+            .ai_monitor/dist/vibe-coding-update-${{ steps.version.outputs.ver }}.exe
