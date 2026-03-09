@@ -3954,7 +3954,7 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
-    _LOCK_PORT = 9000
+    _LOCK_PORT = 19001  # 중복 실행 방지 전용 포트 — HTTP(9000)와 겹치지 않도록 별도 범위 사용
     try:
         _lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
