@@ -62,6 +62,7 @@ export default function TerminalSlot({
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
+  const [hasAttachedTerminal, setHasAttachedTerminal] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [shortcuts, setShortcuts] = useState<Shortcut[]>(() => {
@@ -158,6 +159,23 @@ export default function TerminalSlot({
 
   // XTerm 인스턴스 생성 + WebSocket PTY 연결 + ResizeObserver 등록
   const launchAgent = (agent: string, yolo: boolean = false) => {
+    // 기존 터미널이 살아있으면 먼저 정리 — dispose 없이 덮어쓰면
+    // 이전 xterm 캔버스가 DOM에 남아 잔상(이중 삼중 출력) 현상 발생
+    if (termRef.current) {
+      termRef.current.dispose();
+      termRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    // xterm이 DOM에 주입한 캔버스/래퍼 엘리먼트 제거 (dispose만으론 DOM 잔여물 남음)
+    if (xtermRef.current) {
+      xtermRef.current.innerHTML = '';
+    }
+
     setIsTerminalMode(true);
     setActiveAgent(agent);
     // 터미널 재시작 시 localStorage 기반으로 모니터링 뷰 상태 복원
@@ -169,7 +187,7 @@ export default function TerminalSlot({
       const term = new XTerm({
         theme: { background: '#1e1e1e', foreground: '#cccccc', cursor: '#3794ef', selectionBackground: '#3794ef55' },
         fontFamily: "'Fira Code', 'Consolas', monospace",
-        fontSize: 12,
+        fontSize: 13,
         cursorBlink: true
       });
       const fitAddon = new FitAddon();
@@ -180,6 +198,7 @@ export default function TerminalSlot({
       term.open(xtermRef.current);
       fitAddon.fit();
       termRef.current = term;
+      setHasAttachedTerminal(true);
 
       // 텍스트 드래그(선택) 시 자동 클립보드 복사
       term.onSelectionChange(() => {
@@ -219,6 +238,7 @@ export default function TerminalSlot({
         const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
         term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
       };
+      ws.onclose = () => setHasAttachedTerminal(false);
       ws.onmessage = async (e) => {
         const data = e.data instanceof Blob ? await e.data.text() : e.data;
         term.write(data);
@@ -296,6 +316,7 @@ export default function TerminalSlot({
 
   const closeTerminal = () => {
     setIsTerminalMode(false);
+    setHasAttachedTerminal(false);
     fitAddonRef.current = null;
     // ResizeObserver 해제 (메모리 누수 방지)
     resizeObserverRef.current?.disconnect();
@@ -384,12 +405,11 @@ export default function TerminalSlot({
       const detectedCli = serverStatus.cli ?? 'claude';
       // activeAgent는 항상 갱신 — 에이전트 타입이 바뀌어도 올바른 termData 선택 보장
       if (detectedCli) setActiveAgent(detectedCli);
-      if (!isTerminalMode) {
-        setIsTerminalMode(true);
+      if (!isTerminalMode && !hasAttachedTerminal) {
         setShowMonitor(true); // 모니터링 뷰 자동 활성화 (XTerm 없이도 상태 확인 가능)
       }
     }
-  }, [agentTerminals, terminalId, isTerminalMode]);
+  }, [agentTerminals, terminalId, isTerminalMode, hasAttachedTerminal]);
 
   // 알림 링 글로우 — 에이전트 상태에 따라 패널 테두리 색상/그림자 변경 (cmux 스타일)
   const ringClass = !isTerminalMode
@@ -673,7 +693,33 @@ export default function TerminalSlot({
           )}
 
           {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
-          <div className="flex-1 relative min-h-0 overflow-hidden"><div ref={xtermRef} className="absolute inset-0 p-2" /></div>
+          <div className="flex-1 relative min-h-0 overflow-hidden">
+            <div ref={xtermRef} className="absolute inset-0 p-2" />
+            {!hasAttachedTerminal && (
+              <div className="absolute inset-0 flex items-center justify-center p-6">
+                <div className="max-w-md rounded-2xl border border-white/10 bg-[#252526] px-5 py-4 text-left shadow-2xl">
+                  <div className="text-[12px] font-bold text-white">터미널 출력 연결이 아직 없습니다.</div>
+                  <div className="mt-2 text-[11px] leading-relaxed text-[#b8b8b8]">
+                    실행 상태는 감지됐지만 이 슬롯에 실제 터미널 화면이 붙지 않아 빈 화면처럼 보일 수 있습니다.
+                  </div>
+                  <div className="mt-4 flex items-center gap-2">
+                    <button
+                      onClick={() => launchAgent(activeAgent || 'claude', false)}
+                      className="rounded bg-primary px-3 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-primary/80"
+                    >
+                      이 슬롯에서 새 터미널 열기
+                    </button>
+                    <button
+                      onClick={() => setIsTerminalMode(false)}
+                      className="rounded border border-white/10 px-3 py-1.5 text-[11px] font-bold text-[#cccccc] transition-colors hover:bg-white/5"
+                    >
+                      선택 화면으로 돌아가기
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* 터미널 우클릭 컨텍스트 메뉴 — 복사(선택 있을 때) / 붙여넣기(선택 없을 때) */}
           {ctxMenu && (
