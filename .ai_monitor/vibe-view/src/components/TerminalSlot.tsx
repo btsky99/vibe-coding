@@ -742,8 +742,8 @@ export default function TerminalSlot({
                   }
                 }}
                 placeholder="터미널 명령어 전송 (한글 완벽 지원, 엔터:전송, 쉬프트+엔터:줄바꿈)..."
-                rows={Math.max(1, Math.min(8, inputValue.split('\n').length))}
-                className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white transition-all resize-none custom-scrollbar leading-relaxed h-auto"
+                rows={2}
+                className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white resize-none custom-scrollbar leading-relaxed"
               />
               {/* 슬래시 커맨드 퀵 팝업 버튼 */}
               <div className="relative">
