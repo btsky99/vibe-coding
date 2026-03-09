@@ -61,6 +61,7 @@ class PgListenerThread(QThread):
     """PostgreSQL LISTEN 채널을 감시하는 백그라운드 스레드"""
     log_received = Signal(dict)
     status_changed = Signal(dict)
+    debate_received = Signal(dict) # 토론 이벤트 신규
 
     def __init__(self):
         super().__init__()
@@ -70,7 +71,7 @@ class PgListenerThread(QThread):
         try:
             conn = psycopg2.connect(host="localhost", port=5433, user="postgres", database="postgres")
             conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-            cursor = conn.connect().cursor() if hasattr(conn, 'connect') else conn.cursor()
+            cursor = conn.cursor()
             cursor.execute("LISTEN hive_log_channel;")
             
             while self.running:
@@ -81,26 +82,34 @@ class PgListenerThread(QThread):
                 while conn.notifies:
                     notify = conn.notifies.pop(0)
                     try:
-                        data = json.loads(notify.payload)
-                        # 1. 로그 데이터 처리
-                        self.log_received.emit(data)
+                        ev = json.loads(notify.payload)
+                        table = ev.get("table")
+                        data = ev.get("data", {})
                         
-                        # 2. 상태 데이터 처리 (status가 포함된 경우)
-                        meta = data.get("metadata", {})
-                        if isinstance(meta, str): meta = json.loads(meta)
-                        status = meta.get("raw_status")
-                        if status:
-                            # 기존 poll_agent_status 로직을 대체하는 상태 맵 생성
-                            # (단순화를 위해 현재 수신된 에이전트 상태를 기반으로 업데이트)
-                            self.status_changed.emit({
-                                "agent": data.get("agent"),
-                                "status": status,
-                                "terminal_id": meta.get("terminal_id")
-                            })
-                    except: continue
+                        # 1. 로그 데이터 처리
+                        if table == "hive_logs":
+                            self.log_received.emit(data)
+                            
+                            # 상태 데이터 처리
+                            meta = data.get("metadata", {})
+                            if isinstance(meta, str): meta = json.loads(meta)
+                            status = meta.get("raw_status")
+                            if status:
+                                self.status_changed.emit({
+                                    "agent": data.get("agent"),
+                                    "status": status,
+                                    "terminal_id": meta.get("terminal_id")
+                                })
+                        
+                        # 2. 토론 데이터 처리 (신규)
+                        elif table in ("hive_debates", "hive_debate_messages"):
+                            self.debate_received.emit({"table": table, "data": data})
+                            
+                    except Exception as e: 
+                        print(f"[PgListener] Parse Error: {e}")
             conn.close()
         except Exception as e:
-            print(f"[PgListener] Error: {e}")
+            print(f"[PgListener] Connection Error: {e}")
 
 class MissionControlApp(QObject):
     """
@@ -135,6 +144,7 @@ class MissionControlApp(QObject):
         self.pg_thread = PgListenerThread()
         self.pg_thread.log_received.connect(self.on_pg_log)
         self.pg_thread.status_changed.connect(self.on_pg_status)
+        self.pg_thread.debate_received.connect(self.on_pg_debate) # 토론 연동
         self.pg_thread.start()
         
         # 펄스 애니메이션 타이머 (50ms 간격)
@@ -158,6 +168,28 @@ class MissionControlApp(QObject):
         message = data.get("message", "")
         if message:
             self.sidebar.add_log(display_name, message)
+
+    def on_pg_debate(self, ev):
+        """토론 이벤트 발생 시 HUD 및 로그 업데이트"""
+        table = ev["table"]
+        data = ev["data"]
+        
+        if table == "hive_debates":
+            # 토론 HUD 업데이트
+            self.sidebar.debate_hud.update_debate(
+                data.get("topic"), 
+                data.get("current_round", 1), 
+                data.get("status")
+            )
+            if data.get("status") == "closed":
+                self.sidebar.add_log("SYSTEM", f"🏁 결론: {data.get('final_decision')}", "synthesis")
+        
+        elif table == "hive_debate_messages":
+            # 개별 의견을 색상별 로그로 출력
+            agent = data.get("agent")
+            msg_type = data.get("type", "proposal")
+            content = data.get("content")
+            self.sidebar.add_log(agent, content, msg_type)
 
     def on_pg_status(self, ev):
         """PG 리스너로부터 상태 변경 수신 시 트레이 아이콘 업데이트"""

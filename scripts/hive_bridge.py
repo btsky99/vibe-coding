@@ -135,6 +135,37 @@ def reflect_to_pg(agent_name: str, task_summary: str, learned: list, failed: lis
     }
     log_thought(agent_name, "self-reflect", thought_dict)
 
+def get_active_debate_context():
+    """현재 진행 중인(open/debating) 토론이 있다면 그 내용과 메시지들을 가져옵니다."""
+    sql = """
+    SELECT d.id, d.topic, d.status, d.participants,
+           (SELECT json_agg(m.*) FROM (
+               SELECT agent, type, content, round FROM hive_debate_messages 
+               WHERE debate_id = d.id ORDER BY created_at ASC
+           ) m) as messages
+    FROM hive_debates d
+    WHERE d.status IN ('open', 'debating')
+    ORDER BY d.id DESC LIMIT 1;
+    """
+    # psql을 사용하여 결과 가져오기 (CSV 포맷)
+    if not os.path.exists(PG_BIN):
+        return None
+    try:
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        res = subprocess.run(
+            [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            # CSV 첫 줄(헤더) 제외하고 데이터 파싱 (간단한 구현)
+            lines = res.stdout.strip().split('\n')
+            if len(lines) > 1:
+                return lines[1] # JSON 결과 반환
+        return None
+    except Exception:
+        return None
+
 # --- LOCK / UNLOCK (Postgres 기반 확장 예정) ---
 def lock_file(agent_name, file_path):
     post_message(agent_name, "all", f"[LOCK] {file_path}", "LOCK")

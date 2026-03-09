@@ -102,6 +102,17 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     # 모드 영속 저장
     set_mode(mode)
 
+    # 하이브 토론 컨텍스트 주입
+    # Why: 진행 중인 토론이 있다면 에이전트가 이를 인지하고 첫 마디부터 토론에 참여하게 합니다.
+    try:
+        from scripts.hive_bridge import get_active_debate_context
+        debate_json = get_active_debate_context()
+        if debate_json:
+            os.environ["HIVE_DEBATE_CONTEXT"] = debate_json
+            print(f"[HIVE] Debate context injected for {agent.upper()}")
+    except Exception as e:
+        print(f"[HIVE] Failed to fetch debate context: {e}")
+
     # 중첩 세션 방지: CLAUDE 관련 환경 변수 제거
     # Why: Gemini CLI 등에서 실행 시 상속된 변수가 Claude Code의 중첩 실행 방지 로직을 트리거함.
     claude_vars = [k for k in os.environ.keys() if "CLAUDE" in k.upper()]

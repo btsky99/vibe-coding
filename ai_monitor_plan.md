@@ -55,25 +55,28 @@ Build a high-performance, native Windows "Mission Control" center inspired by CM
     - 검증: `run_vibe.bat` 실행 시 현재 설정된 모드로 에이전트가 자동 시작.
 
 ### Phase 6: 하이브 초지능 고도화 4대 과제 (Super Intelligence)
-- [ ] **Task 14: 로그 아키텍처의 완전한 통합 (PostgreSQL)**
-    - [ ] **Task 14-1: PostgreSQL 로그 테이블 및 실시간 알림 트리거 생성**
-        - 파일: `scripts/pg_manager.py` (또는 신규 `scripts/init_log_db.sql`)
-        - 방법: `hive_logs` 테이블 생성 및 로그 삽입 시 `NOTIFY`를 호출하는 트리거 SQL 작성/실행 로직 추가.
-        - 검증: `psql`에서 직접 로그 삽입 시 `LISTEN` 채널에 신호 오는지 확인.
-    - [ ] **Task 14-2: 통합 로거의 PostgreSQL 핸들러 구현**
-        - 파일: `scripts/logger.py`
-        - 방법: `psycopg2` 또는 `asyncpg`를 사용하여 로그를 DB에 저장하는 클래스 구현. 비동기 큐 처리로 성능 최적화.
-        - 검증: `python scripts/logger.py "Test Log"` 실행 후 DB에 기록 확인.
-    - [ ] **Task 14-3: server.py를 PostgreSQL LISTEN 기반 SSE로 전환**
-        - 파일: `server.py`
-        - 방법: 기존 `.jsonl` 파일 감시 루프를 제거하고, DB `LISTEN` 채널을 구독하는 비동기 SSE 엔드포인트 구현.
-        - 검증: `/stream/logs` 호출 시 실시간 데이터 수신 확인.
-    - [ ] **Task 14-4: 미션 컨트롤 UI의 데이터 소스 전환 및 검증**
-        - 파일: `.ai_monitor/mission_control.py`, `.ai_monitor/mission_control_ui.py`
-        - 방법: UI에서 파일 대신 SSE 엔드포인트를 구독하여 로그 표시하도록 수정.
-        - 검증: 에이전트 동작 시 UI HUD에 즉각적인 로그 스트리밍 확인.
-- [ ] **Task 15: "하이브 토론(Hive Debate)" 모드 활성화 및 UI 연동**
-    - 내용: `scripts/hive_debate.py`를 미션 컨트롤 UI와 연동. 복잡한 설계 결정 시 Gemini vs Claude 토론 과정을 HUD에 실시간 중계 및 사용자 승인(Approve) 기능 구현.
+- [x] **Task 14: 로그 아키텍처의 완전한 통합 (PostgreSQL)**
+    - [x] **Task 14-1: PostgreSQL 로그 테이블 및 실시간 알림 트리거 생성**
+    - [x] **Task 14-2: 통합 로거의 PostgreSQL 핸들러 구현**
+    - [x] **Task 14-3: server.py를 PostgreSQL LISTEN 기반 SSE로 전환**
+    - [x] **Task 14-4: 미션 컨트롤 UI의 데이터 소스 전환 및 검증**
+- [x] **Task 15: 하이브 브레인(Hive Brain) 토론 모드 구현**
+    - [x] **Task 15-1: 하이브 토론 상태 관리 및 스키마 확장**
+        - 파일: `scripts/pg_manager.py`
+        - 방법: `hive_debates` (주제, 상태, 참여자, 최종합의) 및 `hive_debate_messages` (의견, 라운드, 찬반) 테이블 추가.
+        - 검증: 토론 주제 생성 및 메시지 삽입 쿼리 정상 작동 확인.
+    - [x] **Task 15-2: 하이브 토론 엔진 클래스 구현 (scripts/hive_debate.py)**
+        - 파일: `scripts/hive_debate.py` (신규)
+        - 방법: `DebateEngine` 클래스 구현. 라운드 기반 토론 진행 (의견 수집 -> 비판 -> 최종 합의) 로직 작성.
+        - 검증: `python scripts/hive_debate.py "New Feature Design"` 명령으로 목업 토론 세션 실행 확인.
+    - [x] **Task 15-3: 에이전트 프로토콜 통합 (scripts/agent_protocol.py)**
+        - 파일: `scripts/agent_protocol.py`
+        - 방법: `DebateParticipant` 클래스 구현. 에이전트 페르소나·라운드별 의견 유형·프롬프트 생성·의견 게시 체인 구축.
+        - 검증: `python scripts/agent_protocol.py debate 3 claude critique "..."` 실행 시 비판적 의견 정상 게시 확인.
+    - [x] **Task 15-4: 미션 컨트롤 UI에 하이브 토론 시각화 HUD 추가**
+        - 파일: `.ai_monitor/mission_control_ui.py`
+        - 방법: `DebateHUD` 위젯 구현. 진행 중 토론 주제·라운드·상태를 실시간 표시.
+        - 검증: UI 사이드바에 토론 정보 출력 확인.
 - [ ] **Task 16: 에이전트 권한 및 리소스 제어(Sandbox) 강화**
     - 내용: `safety_guard.py` 로직 강화. 프로세스 단위 리소스(CPU/Mem) 모니터링/제한 및 네트워크 통신 보호를 추가하여 YOLO 모드의 안전성 보장.
 - [ ] **Task 17: 하이브 기억(Memory)의 지식 그래프 시각화**

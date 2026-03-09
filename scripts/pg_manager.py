@@ -100,7 +100,7 @@ def init_log_schema():
     psql = BIN_DIR / "psql.exe"
     
     schema_sql = """
-    -- 1. Create table
+    -- 1. Log table
     CREATE TABLE IF NOT EXISTS hive_logs (
         id SERIAL PRIMARY KEY,
         timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -111,22 +111,68 @@ def init_log_schema():
         metadata JSONB
     );
 
-    -- 2. Create notify function
-    CREATE OR REPLACE FUNCTION notify_hive_log()
+    -- 2. Debate sessions table
+    CREATE TABLE IF NOT EXISTS hive_debates (
+        id SERIAL PRIMARY KEY,
+        topic TEXT NOT NULL,
+        status VARCHAR(20) DEFAULT 'open', -- open, debating, consensus, closed
+        participants JSONB, -- list of agent names
+        current_round INTEGER DEFAULT 1,
+        final_decision TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 3. Debate messages (opinions, critiques)
+    CREATE TABLE IF NOT EXISTS hive_debate_messages (
+        id SERIAL PRIMARY KEY,
+        debate_id INTEGER REFERENCES hive_debates(id) ON DELETE CASCADE,
+        round INTEGER NOT NULL,
+        agent VARCHAR(50) NOT NULL,
+        type VARCHAR(20), -- proposal, critique, synthesis, vote
+        content TEXT NOT NULL,
+        vote_value INTEGER, -- 1 (agree), -1 (disagree), 0 (neutral)
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 4. Create notify function for all hive tables
+    CREATE OR REPLACE FUNCTION notify_hive_event()
     RETURNS TRIGGER AS $$
+    DECLARE
+        payload JSON;
     BEGIN
-        PERFORM pg_notify('hive_log_channel', row_to_json(NEW)::text);
+        payload = json_build_object(
+            'table', TG_TABLE_NAME,
+            'action', TG_OP,
+            'data', row_to_json(NEW)
+        );
+        PERFORM pg_notify('hive_log_channel', payload::text);
         RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
 
-    -- 3. Set trigger
+    -- 5. Set triggers
     DO $$
     BEGIN
+        -- Logs trigger
         IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_log_insert') THEN
             CREATE TRIGGER trg_hive_log_insert
             AFTER INSERT ON hive_logs
-            FOR EACH ROW EXECUTE FUNCTION notify_hive_log();
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_event();
+        END IF;
+
+        -- Debates trigger
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_debate_update') THEN
+            CREATE TRIGGER trg_hive_debate_update
+            AFTER INSERT OR UPDATE ON hive_debates
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_event();
+        END IF;
+
+        -- Debate messages trigger
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_debate_msg_insert') THEN
+            CREATE TRIGGER trg_hive_debate_msg_insert
+            AFTER INSERT ON hive_debate_messages
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_event();
         END IF;
     END $$;
     """
