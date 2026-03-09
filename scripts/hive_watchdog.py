@@ -9,6 +9,14 @@ DESCRIPTION: 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing
              계층 3 — 지식 치유: (미래) LLM 응답 분석 → 스킬 파일 갱신
 
 REVISION HISTORY:
+- 2026-03-09 Claude: [버그 3건 수정]
+  Bug 1) repair_memory_sync() subprocess.run에 encoding='utf-8' 미지정 →
+         Windows CP949 환경에서 이모지 포함 출력 시 UnicodeDecodeError 발생 →
+         Thread-1 crash로 루프 불안정 유발. encoding/errors 명시로 수정.
+  Bug 2) repair_memory_sync() 쿨다운 없음 → 에이전트 비활성(8h+) 상태에서
+         매 60초마다 실행 → repair_count 127+ 누적. 최소 1시간 쿨다운 추가.
+  Bug 3) _restart_fail_count >= 3 조건에서 영구 재시작 포기 →
+         30분 쿨다운 후 재시도 허용으로 변경 (_restart_fail_time 추적).
 - 2026-03-01 Claude: [자기치유 계층 1 강화] restart_server() 추가
   - server 다운 감지 시 subprocess.Popen으로 server.py 자동 재시작
   - _restart_fail_count 추적: 3회 연속 실패 시 🚨 경고 로그
@@ -65,7 +73,9 @@ class HiveWatchdog:
         self.interval = interval
         self.is_running = False
         self._loop_count = 0          # 루프 횟수 추적 (10회마다 스킬 갭 분석)
-        self._restart_fail_count = 0  # 서버 재시작 연속 실패 횟수 (3회 초과 시 경고)
+        self._restart_fail_count = 0  # 서버 재시작 연속 실패 횟수 (3회 초과 시 쿨다운)
+        self._restart_fail_time: datetime | None = None  # 3회 실패 시점 (30분 후 재시도 허용)
+        self._last_memory_sync_time: datetime | None = None  # 마지막 메모리 동기화 성공 시각 (쿨다운용)
         self.status = {
             "last_check": None,
             "db_ok": False,
@@ -158,7 +168,8 @@ class HiveWatchdog:
             self._restart_fail_count += 1
             self._add_log(f"❌ 서버 재시작 실패 ({self._restart_fail_count}회): {e}")
             if self._restart_fail_count >= 3:
-                self._add_log("🚨 서버 자동 재시작 3회 연속 실패 — 수동 점검 필요")
+                self._restart_fail_time = datetime.now()
+                self._add_log("🚨 서버 자동 재시작 3회 연속 실패 — 30분 후 재시도 예정")
             return False
 
     def check_db(self):
@@ -276,11 +287,15 @@ class HiveWatchdog:
             subprocess.run(
                 [sys.executable, str(memory_script), "sync"],
                 capture_output=True, text=True, check=True,
+                # encoding 명시: Windows CP949 환경에서 이모지 포함 출력 시
+                # UnicodeDecodeError → Thread-1 crash 방지 (Bug 1 수정)
+                encoding='utf-8', errors='replace',
                 creationflags=_no_window
             )
             self._add_log("✅ 메모리 동기화 완료")
             self.status["memory_sync_ok"] = True  # 성공 시 상태 반영
             self.status["repair_count"] += 1
+            self._last_memory_sync_time = datetime.now()  # 쿨다운 시작 시각 기록
             return True
         except Exception as e:
             self._add_log(f"❌ 동기화 복구 실패: {e}")
@@ -304,7 +319,14 @@ class HiveWatchdog:
         # 서버가 죽어있으면 자동 재시작 시도 후 메모리 동기화 상태 반영
         if not server_ok:
             self.status["memory_sync_ok"] = False
-            # 연속 실패 3회 미만인 경우에만 재시작 시도
+            # 3회 연속 실패 후 30분이 지났으면 카운터 리셋하여 재시도 허용
+            # 영구 포기 방지: _restart_fail_time 기록 후 30분 쿨다운
+            if self._restart_fail_count >= 3 and self._restart_fail_time:
+                elapsed = (datetime.now() - self._restart_fail_time).total_seconds()
+                if elapsed > 1800:  # 30분 = 1800초
+                    self._add_log("🔄 서버 재시작 쿨다운 해제 — 재시도 허용")
+                    self._restart_fail_count = 0
+                    self._restart_fail_time = None
             if self._restart_fail_count < 3:
                 server_ok = self.restart_server()
 
@@ -312,7 +334,12 @@ class HiveWatchdog:
             self.status["memory_sync_ok"] = True
 
         # 복구 로직: 서버/DB는 OK인데 에이전트가 오랫동안 비활성 상태일 때만 동기화 재시도
-        if server_ok and db_ok and not activity_ok:
+        # 쿨다운 1시간: 매 60초마다 실행되면 repair_count가 무한 누적되는 버그 방지
+        _sync_cooldown_ok = (
+            self._last_memory_sync_time is None or
+            (datetime.now() - self._last_memory_sync_time).total_seconds() > 3600
+        )
+        if server_ok and db_ok and not activity_ok and _sync_cooldown_ok:
             self.repair_memory_sync()
         
         # 점검 결과를 파일로 저장 (서버/UI에서 읽기 위함)
