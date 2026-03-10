@@ -53,6 +53,12 @@ import sys
 import json
 import os
 import io
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MONITOR_DIR = ROOT_DIR / '.ai_monitor'
+if str(MONITOR_DIR) not in sys.path:
+    sys.path.insert(0, str(MONITOR_DIR))
 
 # Windows 환경 UTF-8 인코딩 강제 설정
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -315,16 +321,14 @@ def _save_session_snapshot() -> None:
     모든 예외 무시 — Stop 훅 실행을 방해하지 않음
     """
     try:
-        import sqlite3
         from pathlib import Path
         from datetime import datetime
+        from src.pg_store import set_memory
 
         project_root = Path(_scripts_dir).parent
         data_dir = project_root / ".ai_monitor" / "data"
         logs_file = data_dir / "task_logs.jsonl"
-        db_file = data_dir / "shared_memory.db"
-
-        if not logs_file.exists() or not db_file.exists():
+        if not logs_file.exists():
             return
 
         # 오늘 날짜의 로그만 수집
@@ -356,6 +360,17 @@ def _save_session_snapshot() -> None:
         summary = "\n".join(important_lines[-20:])
         now = datetime.now().isoformat()
         key = f"claude:auto-session:{today}"
+        set_memory(
+            key=key,
+            title=f"[?먮룞] Claude ?몄뀡 ?쒕룞 ?붿빟 ({today})",
+            content=summary,
+            tags=["auto", "session", "claude", "snapshot"],
+            author="claude",
+            project="vibe-coding",
+            created_at=now,
+            updated_at=now,
+        )
+        return
 
         conn = sqlite3.connect(str(db_file))
         cur = conn.cursor()
@@ -393,6 +408,36 @@ def _inject_hive_context() -> str:
     [에러 시] 빈 문자열 반환 — 훅 실행 방해하지 않음
     """
     try:
+        from datetime import datetime
+        from src.pg_store import get_memory, list_memory
+
+        rows = [row for row in list_memory(top_k=20, show_all=True) if str(row.get('key', '')).endswith(':current-work')]
+        current_work = rows[0]["content"] if rows else ""
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_row = get_memory(f"claude:auto-session:{today}")
+        today_snap = today_row.get("content", "") if today_row else ""
+
+        parts = []
+        if current_work:
+            lines = [l for l in current_work.split("\n") if l.strip()]
+            todo_lines = [l for l in lines if "[ ]" in l or "?봽" in l or "吏꾪뻾 ?곹솴" in l]
+            summary = "\n".join(todo_lines[:10]) if todo_lines else "\n".join(lines[:8])
+            parts.append(f"[?섏씠釉??꾩옱 ?묒뾽 ?곹깭]\n{summary}")
+
+        if today_snap:
+            snap_lines = today_snap.strip().split("\n")[-5:]
+            parts.append(f"[?ㅻ뒛 ?꾨즺 ??ぉ]\n" + "\n".join(snap_lines))
+
+        if not parts:
+            return ""
+
+        return (
+            "[INFO] ?섏씠釉?而⑦뀓?ㅽ듃 ?먮룞 濡쒕뱶?????꾨옒 ?댁슜??諛뷀깢?쇰줈 ?묒뾽 留λ씫???뚯븙?섏꽭??n"
+            + "\n\n".join(parts)
+            + "\n[END ?섏씠釉?而⑦뀓?ㅽ듃]"
+        )
+
         import sqlite3
         from pathlib import Path
         from datetime import datetime
@@ -457,6 +502,33 @@ def _update_current_work(completed_items: list[str]) -> None:
     [에러 시] 조용히 무시
     """
     try:
+        from datetime import datetime
+        from src.pg_store import list_memory, set_memory
+
+        if not completed_items:
+            return
+
+        rows = [row for row in list_memory(top_k=20, show_all=True) if str(row.get('key', '')).endswith(':current-work')]
+        if not rows:
+            return
+
+        key = rows[0]["key"]
+        content = rows[0]["content"]
+        completed_block = f"\n## ?먮룞 ?낅뜲?댄듃 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n" + "\n".join(
+            f"- [x] {item}" for item in completed_items[-10:]
+        )
+        set_memory(
+            key=key,
+            title=rows[0].get("title", key),
+            content=content + completed_block,
+            tags=rows[0].get("tags", []),
+            author=rows[0].get("author", "claude"),
+            project=rows[0].get("project", "vibe-coding"),
+            created_at=rows[0].get("created_at", ""),
+            updated_at=datetime.now().isoformat(),
+        )
+        return
+
         import sqlite3
         from pathlib import Path
         from datetime import datetime
@@ -751,14 +823,7 @@ def main():
             # 에이전트가 작업을 시작하면 in_progress, 완료 시 done으로 상태를 변경할 수 있습니다.
             try:
                 import datetime
-                _data_dir = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
-                )
-                _tasks_file = os.path.join(_data_dir, 'tasks.json')
-                _tasks: list = []
-                if os.path.exists(_tasks_file):
-                    with open(_tasks_file, 'r', encoding='utf-8') as _f:
-                        _tasks = json.load(_f)
+                from src.pg_store import save_task
                 # 새 태스크 항목 구성 — 대시보드 TasksPanel이 기대하는 형식 그대로 사용
                 _new_task = {
                     "id": datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"),
@@ -770,9 +835,7 @@ def main():
                     "created_by": "user",
                     "created_at": datetime.datetime.now().isoformat(),
                 }
-                _tasks.append(_new_task)
-                with open(_tasks_file, 'w', encoding='utf-8') as _f:
-                    json.dump(_tasks, _f, ensure_ascii=False, indent=2)
+                save_task(_new_task)
             except Exception:
                 pass  # 태스크 보드 기록 실패는 조용히 무시 (훅 자체가 중단되면 안 됨)
 
@@ -927,26 +990,15 @@ def main():
         # → stop_reason이 'error'가 아닌 경우에만 done으로 변경
         # → 에러/실패 상태에서는 무조건 done 처리하지 않음 (거짓 완료 방지)
         try:
-            import os as _os
+            from src.pg_store import bulk_update_tasks
             _stop_reason = data.get('stop_reason', '')  # 에러 여부 확인
             if _stop_reason == 'error':
                 _SESSION_HAD_ERROR = True
-            _data_dir = _os.path.join(
-                _os.path.dirname(_os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
+            bulk_update_tasks(
+                'claude',
+                ['pending', 'in_progress'],
+                'failed' if _stop_reason == 'error' else 'done',
             )
-            _tasks_file = _os.path.join(_data_dir, 'tasks.json')
-            if _os.path.exists(_tasks_file):
-                with open(_tasks_file, 'r', encoding='utf-8') as _f:
-                    _tasks = json.load(_f)
-                _changed = False
-                for _t in _tasks:
-                    if _t.get('assigned_to') == 'claude' and _t.get('status') in ('pending', 'in_progress'):
-                        # 에러로 중단된 경우 'failed'로 표시, 정상 완료 시만 'done'
-                        _t['status'] = 'failed' if _stop_reason == 'error' else 'done'
-                        _changed = True
-                if _changed:
-                    with open(_tasks_file, 'w', encoding='utf-8') as _f:
-                        json.dump(_tasks, _f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 

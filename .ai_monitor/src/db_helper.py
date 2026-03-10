@@ -1,137 +1,94 @@
-import sqlite3
 import json
+import sqlite3
 import time
-import psycopg2
-from datetime import datetime
-from src.db import get_connection, init_db
 
-# PostgreSQL 연결 정보
-PG_PORT = 5433
-PG_USER = "postgres"
-PG_DB = "postgres"
+from src.db import get_connection, init_db
+from src.pg_store import ensure_schema, list_session_logs, upsert_session_log
+
 
 def _ensure_tables():
-    """테이블이 존재하는지 확인하고 없으면 초기화합니다."""
     conn = get_connection()
     try:
         cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_logs'")
         if not cursor.fetchone():
-            print("[DB] session_logs 테이블이 없어 초기화를 시도합니다.")
             init_db()
-    except Exception as e:
-        print(f"[DB-ERR] 테이블 확인 실패: {e}")
+    except Exception:
+        pass
     finally:
         conn.close()
 
-def insert_log(session_id, terminal_id, agent, trigger_msg, project="hive", status="running"):
-    """작업 로그를 삽입합니다. SQLite와 PostgreSQL 양쪽으로 전송합니다."""
-    # 1. SQLite 저장 (기존 유지)
-    try:
-        _ensure_tables()
-        conn = get_connection()
-        try:
-            conn.execute('''
-                INSERT INTO session_logs (session_id, terminal_id, project, agent, trigger_msg, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (session_id, terminal_id, project, agent, trigger_msg, status))
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"[DB-ERR] SQLite insert_log 실패: {e}")
 
-    # 2. PostgreSQL 저장 및 실시간 NOTIFY (신규)
+def insert_log(session_id, terminal_id, agent, trigger_msg, project="hive", status="running"):
     try:
-        pg_conn = psycopg2.connect(
-            host="localhost", port=PG_PORT, user=PG_USER, database=PG_DB,
-            connect_timeout=2
+        ensure_schema()
+        upsert_session_log(
+            session_id=session_id,
+            terminal_id=terminal_id,
+            project=project,
+            agent=agent,
+            trigger_msg=trigger_msg,
+            status=status,
+            ts_start=time.strftime('%Y-%m-%dT%H:%M:%S'),
         )
-        try:
-            with pg_conn.cursor() as cursor:
-                cursor.execute('''
-                    INSERT INTO hive_logs (agent, level, message, task_id, metadata)
-                    VALUES (%s, %s, %s, %s, %s)
-                ''', (
-                    agent, 
-                    "INFO" if status == "running" else status.upper(),
-                    trigger_msg,
-                    session_id,
-                    json.dumps({
-                        "terminal_id": terminal_id,
-                        "project": project,
-                        "raw_status": status
-                    })
-                ))
-            pg_conn.commit()
-        finally:
-            pg_conn.close()
-    except Exception as e:
-        # DB가 꺼져 있거나 연결 실패 시 조용히 넘어감 (로그 폭풍 방지)
+    except Exception:
         pass
 
+
 def get_recent_logs(limit=50):
-    """최근 로그를 가져옵니다."""
     try:
-        _ensure_tables()
-        conn = get_connection()
-        try:
-            cursor = conn.execute('''
-                SELECT * FROM session_logs
-                ORDER BY id DESC LIMIT ?
-            ''', (limit,))
-            rows = [dict(row) for row in cursor.fetchall()]
-            return rows[::-1] 
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"[DB-ERR] get_recent_logs 실패: {e}")
+        ensure_schema()
+        return list_session_logs(limit)[::-1]
+    except Exception:
         return []
 
+
 def send_message(msg_id, from_agent, to_agent, msg_type, content):
-    """메시지를 삽입합니다. ID 중복 시 재시도 로직을 포함합니다."""
     try:
         _ensure_tables()
         conn = get_connection()
         try:
-            # 중복 ID 방지를 위한 루프 (최대 3회)
             for attempt in range(3):
                 try:
                     current_id = msg_id if attempt == 0 else f"{msg_id}_{int(time.time() % 1000)}"
-                    conn.execute('''
+                    conn.execute(
+                        '''
                         INSERT INTO messages (id, msg_from, msg_to, msg_type, content)
                         VALUES (?, ?, ?, ?, ?)
-                    ''', (current_id, from_agent, to_agent, msg_type, content))
+                        ''',
+                        (current_id, from_agent, to_agent, msg_type, content),
+                    )
                     conn.commit()
                     return True
                 except sqlite3.IntegrityError:
-                    if attempt == 2: raise
+                    if attempt == 2:
+                        raise
                     time.sleep(0.01)
-                    continue
         finally:
             conn.close()
-    except Exception as e:
-        print(f"[DB-ERR] send_message 실패 (무시됨): {e}")
+    except Exception:
         return False
 
+
 def get_messages(limit=50):
-    """최근 메시지를 가져옵니다."""
     try:
         _ensure_tables()
         conn = get_connection()
         try:
-            cursor = conn.execute('''
+            cursor = conn.execute(
+                '''
                 SELECT * FROM messages
                 ORDER BY timestamp DESC LIMIT ?
-            ''', (limit,))
+                ''',
+                (limit,),
+            )
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
-    except Exception as e:
-        print(f"[DB-ERR] get_messages 실패: {e}")
+    except Exception:
         return []
 
+
 def clear_messages():
-    """messages 테이블의 모든 레코드를 삭제합니다 (대시보드 UI 초기화용)."""
     try:
         _ensure_tables()
         conn = get_connection()
@@ -141,6 +98,5 @@ def clear_messages():
             return True
         finally:
             conn.close()
-    except Exception as e:
-        print(f"[DB-ERR] clear_messages 실패: {e}")
+    except Exception:
         return False

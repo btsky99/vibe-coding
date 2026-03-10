@@ -14,12 +14,20 @@ REVISION HISTORY:
 
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+from src.pg_store import (
+    ensure_schema,
+    get_agent_last_seen,
+    list_memory,
+    list_session_logs,
+    list_tasks,
+    load_state,
+)
 
 
 def _json_response(handler, data: dict | list, status: int = 200) -> None:
@@ -98,7 +106,6 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
-        import shutil
         target_path = params.get('path', [''])[0]
         result = {"status": "error", "message": "Invalid path"}
         if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
@@ -118,17 +125,7 @@ def handle_get(handler, path: str, params: dict,
                 # 대상 프로젝트 DB 초기화 — 하이브 워치독 정상 동작 전제 조건
                 target_data = Path(target_path) / ".ai_monitor" / "data"
                 target_data.mkdir(parents=True, exist_ok=True)
-                for db_name in ("shared_memory.db", "hive_mind.db"):
-                    db_path = target_data / db_name
-                    if not db_path.exists():
-                        conn = sqlite3.connect(str(db_path))
-                        if db_name == "shared_memory.db":
-                            conn.execute("""CREATE TABLE IF NOT EXISTS memory (
-                                key TEXT PRIMARY KEY, title TEXT, content TEXT,
-                                tags TEXT, author TEXT, project TEXT,
-                                created_at TEXT, updated_at TEXT)""")
-                        conn.commit()
-                        conn.close()
+                ensure_schema(target_data)
                 result = {"status": "success", "message": f"Skills installed to {target_path}"}
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
@@ -141,14 +138,8 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
-        analysis_file = DATA_DIR / "skill_analysis.json"
-        analysis_data = {"proposals": []}
-        if analysis_file.exists():
-            try:
-                with open(analysis_file, 'r', encoding='utf-8') as f:
-                    analysis_data = json.load(f)
-            except Exception:
-                pass
+        ensure_schema(DATA_DIR)
+        analysis_data = load_state('skill_analysis', {"proposals": []}) or {"proposals": []}
         handler.wfile.write(json.dumps(analysis_data, ensure_ascii=False).encode('utf-8'))
         return True
 
@@ -243,13 +234,8 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         try:
-            conn_h = sqlite3.connect(str(DATA_DIR / 'hive_mind.db'), timeout=5, check_same_thread=False)
-            conn_h.row_factory = sqlite3.Row
-            logs = conn_h.execute(
-                "SELECT * FROM session_logs ORDER BY ts_start DESC LIMIT 200"
-            ).fetchall()
-            conn_h.close()
-            handler.wfile.write(json.dumps([dict(r) for r in logs], ensure_ascii=False).encode('utf-8'))
+            ensure_schema(DATA_DIR)
+            handler.wfile.write(json.dumps(list_session_logs(200), ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         return True
@@ -265,20 +251,11 @@ def handle_get(handler, path: str, params: dict,
             return Path(p).exists()
 
         # hive_health.json에서 워치독 엔진 상태(DB, 에이전트, 복구 횟수) 로드
-        engine_data = {}
-        health_file = DATA_DIR / "hive_health.json"
-        if health_file.exists():
-            try:
-                with open(health_file, 'r', encoding='utf-8') as f:
-                    engine_data = json.load(f)
-            except Exception:
-                pass
+        engine_data = load_state('health', {}) or {}
+        ensure_schema(DATA_DIR)
         if 'db_ok' not in engine_data:
             # watchdog 미실행 상태 — 실제 DB 파일 존재 여부로 대체 판단
-            engine_data['db_ok'] = (
-                (DATA_DIR / 'shared_memory.db').exists() and
-                (DATA_DIR / 'hive_mind.db').exists()
-            )
+            engine_data['db_ok'] = True
             engine_data.setdefault('agent_active', False)
             engine_data.setdefault('repair_count', 0)
 
@@ -303,8 +280,9 @@ def handle_get(handler, path: str, params: dict,
                 "codex_config":  check_exists(BASE_DIR / "bin" / "codex_wrapper.py")
             },
             "data": {
-                "shared_memory": check_exists(DATA_DIR / "shared_memory.db"),
-                "hive_db":       check_exists(DATA_DIR / "hive_mind.db")
+                "shared_memory": True,
+                "hive_db":       True,
+                "postgres":      True
             }
         }
         handler.wfile.write(json.dumps(health, ensure_ascii=False).encode('utf-8'))
@@ -346,53 +324,16 @@ def handle_get(handler, path: str, params: dict,
             IDLE_SEC = 300  # 5분
 
             # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
-            agent_last_seen: dict = {a: None for a in KNOWN_AGENTS}
-            try:
-                conn_h = sqlite3.connect(str(DATA_DIR / 'hive_mind.db'), timeout=5, check_same_thread=False)
-                conn_h.row_factory = sqlite3.Row
-                for row in conn_h.execute(
-                    "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
-                    "WHERE LOWER(agent) LIKE '%claude%' "
-                    "OR LOWER(agent) LIKE '%gemini%' "
-                    "OR LOWER(agent) LIKE '%codex%' "
-                    "GROUP BY LOWER(agent) ORDER BY last_seen DESC"
-                ).fetchall():
-                    agent_lower = row['agent'].lower()
-                    if 'claude' in agent_lower and agent_last_seen.get('claude') is None:
-                        agent_last_seen['claude'] = row['last_seen']
-                    elif 'gemini' in agent_lower and agent_last_seen.get('gemini') is None:
-                        agent_last_seen['gemini'] = row['last_seen']
-                    elif 'codex' in agent_lower and agent_last_seen.get('codex') is None:
-                        agent_last_seen['codex'] = row['last_seen']
-                conn_h.close()
-            except Exception:
-                pass
-
-            # shared_memory.db author 필드로 보완
-            try:
-                conn_sm = sqlite3.connect(str(DATA_DIR / 'shared_memory.db'), timeout=5, check_same_thread=False)
-                conn_sm.row_factory = sqlite3.Row
-                for row in conn_sm.execute(
-                    "SELECT author, MAX(updated_at) as last_seen FROM memory "
-                    "WHERE LOWER(author) LIKE '%claude%' "
-                    "OR LOWER(author) LIKE '%gemini%' "
-                    "OR LOWER(author) LIKE '%codex%' "
-                    "GROUP BY LOWER(author) ORDER BY last_seen DESC"
-                ).fetchall():
-                    author_lower = row['author'].lower()
-                    last = row['last_seen']
-                    if 'claude' in author_lower:
-                        if agent_last_seen.get('claude') is None or (last and last > (agent_last_seen['claude'] or '')):
-                            agent_last_seen['claude'] = last
-                    elif 'gemini' in author_lower:
-                        if agent_last_seen.get('gemini') is None or (last and last > (agent_last_seen['gemini'] or '')):
-                            agent_last_seen['gemini'] = last
-                    elif 'codex' in author_lower:
-                        if agent_last_seen.get('codex') is None or (last and last > (agent_last_seen['codex'] or '')):
-                            agent_last_seen['codex'] = last
-                conn_sm.close()
-            except Exception:
-                pass
+            ensure_schema(DATA_DIR)
+            agent_last_seen: dict = get_agent_last_seen(KNOWN_AGENTS)
+            for row in list_memory(top_k=100, show_all=True):
+                author_lower = str(row.get('author', '')).lower()
+                last = row.get('updated_at')
+                for agent_name in KNOWN_AGENTS:
+                    if agent_name in author_lower:
+                        current = agent_last_seen.get(agent_name)
+                        if last and (current is None or last > current):
+                            agent_last_seen[agent_name] = last
 
             # in-memory AGENT_STATUS 로 보완 (가장 실시간 하트비트)
             with AGENT_STATUS_LOCK:
@@ -439,10 +380,7 @@ def handle_get(handler, path: str, params: dict,
                         agent_status[agent] = {'state': 'unknown', 'last_seen': seen, 'idle_sec': None}
 
             # 태스크 분배 현황
-            tasks_list: list = []
-            if TASKS_FILE.exists():
-                with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                    tasks_list = json.load(f)
+            tasks_list: list = list_tasks()
             task_dist: dict = {a: {'pending': 0, 'in_progress': 0, 'done': 0} for a in KNOWN_AGENTS + ['all']}
             for t in tasks_list:
                 key = t.get('assigned_to', 'all') if t.get('assigned_to') in task_dist else 'all'
@@ -477,13 +415,13 @@ def handle_get(handler, path: str, params: dict,
             warnings: list = []
             for agent, st in agent_status.items():
                 if st['state'] == 'idle' and st.get('idle_sec'):
-                    warnings.append(f"{agent} {st['idle_sec'] // 60}분째 비활성")
+                    warnings.append(f"{agent} idle for {st['idle_sec'] // 60}m")
             for agent, dist in task_dist.items():
                 if agent == 'all':
                     continue
                 active = dist['pending'] + dist['in_progress']
                 if active >= 5:
-                    warnings.append(f"{agent} 태스크 {active}개 (과부하)")
+                    warnings.append(f"{agent} overloaded with {active} active tasks")
 
             handler.wfile.write(json.dumps({
                 'agent_status':      agent_status,

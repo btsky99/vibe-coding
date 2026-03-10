@@ -1,127 +1,52 @@
 """
 FILE: api/memory_api.py
-DESCRIPTION: /api/memory, /api/memory/set, /api/memory/delete,
-             /api/memory/sync, /api/project-info 엔드포인트 핸들러 모듈.
-             SQLite 기반의 공유 메모리(shared_memory.db) CRUD 와
-             벡터 임베딩 의미 검색 로직을 담당합니다.
-             server.py에서 메모리 관련 API를 분리하여 응집도를 높입니다.
-
-REVISION HISTORY:
-- 2026-03-05 Claude: /api/memory/sync 추가 — server.py 비활성 핸들러를 모듈로 이전
-- 2026-03-01 Claude: server.py에서 분리 — memory/project-info API 핸들러 담당
+DESCRIPTION: Postgres-first memory API handlers.
 """
 
 import json
 import time
 from pathlib import Path
 
+from src.pg_store import (
+    ensure_schema,
+    list_memory,
+    set_memory,
+    delete_memory,
+    migrate_legacy_data,
+)
+
 
 def handle_get(handler, path: str, params: dict,
                DATA_DIR: Path, PROJECT_ID: str, PROJECT_ROOT: Path,
                _memory_conn, _embed, _cosine_sim,
                __version__: str) -> bool:
-    """GET 요청 처리 — /api/memory, /api/project-info 담당.
-
-    반환값: 경로가 처리됐으면 True, 해당 없으면 False.
-    """
-
-    # ── /api/memory ───────────────────────────────────────────────────────
     if path == '/api/memory':
-        # 공유 메모리 조회 — 임베딩 의미 검색 우선, 폴백 키워드 LIKE
-        # ?q=검색어  ?top=N(기본20)  ?threshold=0.5  ?all=true(전체 프로젝트)
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
-        q         = params.get('q',         [''])[0].strip()
-        top_k     = int(params.get('top',   ['20'])[0])
-        threshold = float(params.get('threshold', ['0.45'])[0])
-        show_all  = params.get('all', ['false'])[0].lower() == 'true'
-        # 프로젝트 필터: all=true가 아니면 현재 프로젝트만 표시
-        proj_filter = '' if show_all else PROJECT_ID
+        q = params.get('q', [''])[0].strip()
+        top_k = int(params.get('top', ['20'])[0])
+        show_all = params.get('all', ['false'])[0].lower() == 'true'
+        project = '' if show_all else PROJECT_ID
         try:
-            with _memory_conn() as conn:
-                if q:
-                    q_emb = _embed(q)
-                    if q_emb:
-                        # ── 임베딩 의미 검색 ──────────────────────────────
-                        if proj_filter:
-                            all_rows = conn.execute(
-                                'SELECT * FROM memory WHERE project=? ORDER BY updated_at DESC',
-                                (proj_filter,)
-                            ).fetchall()
-                        else:
-                            all_rows = conn.execute(
-                                'SELECT * FROM memory ORDER BY updated_at DESC'
-                            ).fetchall()
-                        scored = []
-                        for row in all_rows:
-                            r_emb = row['embedding']
-                            if r_emb:
-                                score = _cosine_sim(q_emb, r_emb)
-                                if score >= threshold:
-                                    scored.append((dict(row), score))
-                            else:
-                                # 임베딩 없는 항목은 키워드 폴백
-                                if any(q.lower() in str(row[f]).lower()
-                                       for f in ('key', 'title', 'content', 'tags')):
-                                    scored.append((dict(row), 0.0))
-                        scored.sort(key=lambda x: -x[1])
-                        rows_data = [r for r, _ in scored[:top_k]]
-                        # 유사도 점수를 결과에 포함
-                        for (r, s), rd in zip(scored[:top_k], rows_data):
-                            rd['_score'] = round(s, 4)
-                    else:
-                        # 임베딩 모델 미로드 → 키워드 폴백
-                        pattern = f'%{q}%'
-                        if proj_filter:
-                            rows_raw = conn.execute(
-                                'SELECT * FROM memory WHERE project=? AND '
-                                '(key LIKE ? OR title LIKE ? OR content LIKE ? OR tags LIKE ?) '
-                                'ORDER BY updated_at DESC LIMIT ?',
-                                (proj_filter, pattern, pattern, pattern, pattern, top_k)
-                            ).fetchall()
-                        else:
-                            rows_raw = conn.execute(
-                                'SELECT * FROM memory WHERE key LIKE ? OR title LIKE ? '
-                                'OR content LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?',
-                                (pattern, pattern, pattern, pattern, top_k)
-                            ).fetchall()
-                        rows_data = [dict(r) for r in rows_raw]
-                else:
-                    if proj_filter:
-                        rows_raw = conn.execute(
-                            'SELECT * FROM memory WHERE project=? ORDER BY updated_at DESC LIMIT ?',
-                            (proj_filter, top_k)
-                        ).fetchall()
-                    else:
-                        rows_raw = conn.execute(
-                            'SELECT * FROM memory ORDER BY updated_at DESC LIMIT ?', (top_k,)
-                        ).fetchall()
-                    rows_data = [dict(r) for r in rows_raw]
-
-            entries = []
-            for entry in rows_data:
-                entry['tags'] = json.loads(entry.get('tags', '[]'))
-                entry.pop('embedding', None)  # bytes는 JSON 직렬화 불가 — 제거
-                entries.append(entry)
+            ensure_schema(DATA_DIR)
+            entries = list_memory(q=q, top_k=top_k, project=project, show_all=show_all)
             handler.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         return True
 
-    # ── /api/project-info ────────────────────────────────────────────────
-    elif path == '/api/project-info':
-        # 현재 서버가 서비스하는 프로젝트 정보 반환
+    if path == '/api/project-info':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         handler.wfile.write(json.dumps({
-            'project_id':   PROJECT_ID,
+            'project_id': PROJECT_ID,
             'project_name': PROJECT_ROOT.name,
             'project_root': str(PROJECT_ROOT).replace('\\', '/'),
-            'version':      __version__,
+            'version': __version__,
         }, ensure_ascii=False).encode('utf-8'))
         return True
 
@@ -131,151 +56,72 @@ def handle_get(handler, path: str, params: dict,
 def handle_post(handler, path: str, data: dict,
                 DATA_DIR: Path, PROJECT_ID: str,
                 _memory_conn, _embed) -> bool:
-    """POST 요청 처리 — /api/memory/set, /api/memory/delete, /api/memory/sync 담당.
-
-    반환값: 처리됐으면 True, 해당 없으면 False.
-    """
-
-    # ── /api/memory/set ───────────────────────────────────────────────────
     if path == '/api/memory/set':
-        # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (SQLite INSERT OR REPLACE)
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         try:
-            key     = str(data.get('key', '')).strip()[:200]
+            key = str(data.get('key', '')).strip()[:200]
             content = str(data.get('content', '')).strip()
             if not key or not content:
                 handler.wfile.write(json.dumps(
-                    {'status': 'error', 'message': 'key와 content는 필수입니다'}
+                    {'status': 'error', 'message': 'key and content are required'}
                 ).encode('utf-8'))
                 return True
 
-            now     = time.strftime('%Y-%m-%dT%H:%M:%S')
-            title   = str(data.get('title', key)).strip()[:300]
+            now = time.strftime('%Y-%m-%dT%H:%M:%S')
+            title = str(data.get('title', key)).strip()[:300]
             project = str(data.get('project', PROJECT_ID)).strip() or PROJECT_ID
-            entry = {
-                'key':        key,
-                'id':         str(int(time.time() * 1000)),
-                'title':      title,
-                'content':    content,
-                'tags':       json.dumps(data.get('tags', []), ensure_ascii=False),
-                'author':     str(data.get('author', 'unknown')),
-                'timestamp':  now,
-                'updated_at': now,
-                'project':    project,
-            }
+            tags = data.get('tags', [])
+            if isinstance(tags, str):
+                tags = [tag.strip() for tag in tags.split(',') if tag.strip()]
 
-            # 임베딩 생성 — 동기 처리 (보통 0.05초 이내, 의미 검색 품질 향상)
-            emb = _embed(f"{title}\n{content}")
-
-            with _memory_conn() as conn:
-                # 기존 항목이면 timestamp(최초 생성 시각)는 유지, updated_at만 갱신
-                existing = conn.execute('SELECT timestamp FROM memory WHERE key=?', (key,)).fetchone()
-                if existing:
-                    entry['timestamp'] = existing['timestamp']
-                conn.execute(
-                    'INSERT OR REPLACE INTO memory '
-                    '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
-                    'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                    (entry['key'], entry['id'], entry['title'], entry['content'],
-                     entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'],
-                     entry['project'], emb)
-                )
-
-            entry['tags'] = json.loads(entry['tags'])
+            ensure_schema(DATA_DIR)
+            saved = set_memory(
+                key=key,
+                content=content,
+                title=title,
+                tags=tags if isinstance(tags, list) else [],
+                author=str(data.get('author', 'unknown')),
+                project=project,
+                created_at=now,
+                updated_at=now,
+            )
             handler.wfile.write(json.dumps(
-                {'status': 'success', 'entry': entry}, ensure_ascii=False
+                {'status': 'success', 'entry': saved or {}}, ensure_ascii=False
             ).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True
 
-    # ── /api/memory/delete ────────────────────────────────────────────────
-    elif path == '/api/memory/delete':
-        # 공유 메모리 항목 삭제 (key 기준)
+    if path == '/api/memory/delete':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         try:
-            key = str(data.get('key', '')).strip()
-            with _memory_conn() as conn:
-                conn.execute('DELETE FROM memory WHERE key=?', (key,))
+            ensure_schema(DATA_DIR)
+            delete_memory(str(data.get('key', '')).strip())
             handler.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True
 
-    # ── /api/memory/sync ──────────────────────────────────────────────────
-    # APPDATA DB → 현재 프로젝트 로컬 DB 동기화.
-    # 배포 버전에서 APPDATA DB에 저장된 항목을 로컬 DB로 가져옴 (updated_at 최신 우선).
-    elif path == '/api/memory/sync':
+    if path == '/api/memory/sync':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         try:
-            import sqlite3 as _sqlite3
-            # DATA_DIR에서 두 DB 경로 결정 — MEMORY_DB와 CONFIG_FILE은 모두 DATA_DIR 하위
-            memory_db  = DATA_DIR / 'shared_memory.db'
-            config_file = DATA_DIR / 'config.json'
-            src_db_path = str(memory_db)
-            tgt_db_path = src_db_path
-            # config.json의 last_path가 가리키는 로컬 프로젝트 DB를 타겟으로 사용
-            if config_file.exists():
-                cfg_data = json.loads(config_file.read_text(encoding='utf-8'))
-                last_path = cfg_data.get('last_path', '')
-                if last_path:
-                    local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
-                    if local_db.exists():
-                        tgt_db_path = str(local_db)
-            merged = 0
-            skipped = 0
-            if src_db_path != tgt_db_path:
-                # 두 DB가 다를 때만 동기화 의미 있음
-                src_conn = _sqlite3.connect(src_db_path, timeout=5)
-                src_conn.row_factory = _sqlite3.Row
-                tgt_conn = _sqlite3.connect(tgt_db_path, timeout=5)
-                tgt_conn.row_factory = _sqlite3.Row
-                try:
-                    src_rows = src_conn.execute('SELECT * FROM memory').fetchall()
-                    for row in src_rows:
-                        key = row['key']
-                        src_updated = row['updated_at'] or ''
-                        existing = tgt_conn.execute(
-                            'SELECT updated_at FROM memory WHERE key=?', (key,)
-                        ).fetchone()
-                        if existing is None or (existing['updated_at'] or '') < src_updated:
-                            tgt_conn.execute('''
-                                INSERT OR REPLACE INTO memory
-                                (key, id, title, content, tags, author, project, embedding, created_at, updated_at)
-                                VALUES (?,?,?,?,?,?,?,?,?,?)
-                            ''', (
-                                row['key'], row['id'], row['title'], row['content'],
-                                row['tags'], row['author'], row['project'],
-                                row['embedding'] if 'embedding' in row.keys() else None,
-                                row['created_at'], row['updated_at'],
-                            ))
-                            merged += 1
-                        else:
-                            skipped += 1
-                    tgt_conn.commit()
-                finally:
-                    src_conn.close()
-                    tgt_conn.close()
-                msg = f'동기화 완료: {merged}개 병합, {skipped}개 최신 유지'
-            else:
-                msg = '로컬 DB와 APPDATA DB가 동일하여 동기화 불필요'
+            ensure_schema(DATA_DIR)
+            migrate_legacy_data(DATA_DIR)
             handler.wfile.write(json.dumps(
-                {'status': 'ok', 'message': msg, 'merged': merged, 'skipped': skipped},
+                {'status': 'ok', 'message': 'legacy memory migrated to PostgreSQL', 'merged': 0, 'skipped': 0},
                 ensure_ascii=False
             ).encode('utf-8'))
         except Exception as e:
-            handler.wfile.write(json.dumps(
-                {'status': 'error', 'message': str(e)}
-            ).encode('utf-8'))
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True
 
     return False

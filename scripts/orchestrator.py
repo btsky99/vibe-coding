@@ -23,6 +23,14 @@ import urllib.request
 import urllib.error
 import webbrowser
 from datetime import datetime, timedelta
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MONITOR_DIR = ROOT_DIR / '.ai_monitor'
+if str(MONITOR_DIR) not in sys.path:
+    sys.path.insert(0, str(MONITOR_DIR))
+
+from src.pg_store import get_agent_last_seen as pg_get_agent_last_seen, list_tasks, save_task
 
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
 DEFAULT_PORTS = [8005, 8000]
@@ -127,22 +135,17 @@ def _open_hive_db() -> sqlite3.Connection:
 
 def _load_tasks() -> list:
     """tasks.json 직접 읽기"""
-    path = _tasks_file_path()
-    if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
+    try:
+        return list_tasks()
+    except Exception:
+        return []
 
 
 def _save_tasks(tasks: list) -> None:
     """tasks.json 직접 쓰기"""
-    path = _tasks_file_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=2)
+    for task in tasks:
+        if isinstance(task, dict) and task.get('id'):
+            save_task(task)
 
 
 # ─── 오케스트레이터 핵심 로직 ─────────────────────────────────────────────────
@@ -152,22 +155,10 @@ def get_agent_last_seen() -> dict:
     hive_mind.db session_logs 테이블에서 에이전트별 마지막 활동 시각 조회.
     반환: {'claude': '2026-02-23T12:00:00', 'gemini': None, ...}
     """
-    conn = _open_hive_db()
-    result = {agent: None for agent in KNOWN_AGENTS}
-    if not conn:
-        return result
     try:
-        rows = conn.execute(
-            "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
-            "WHERE agent IN ('claude','gemini') GROUP BY agent"
-        ).fetchall()
-        for row in rows:
-            result[row['agent']] = row['last_seen']
+        return pg_get_agent_last_seen(KNOWN_AGENTS)
     except Exception:
-        pass
-    finally:
-        conn.close()
-    return result
+        return {agent: None for agent in KNOWN_AGENTS}
 
 
 def get_agent_task_count(tasks: list) -> dict:

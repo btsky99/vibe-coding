@@ -24,9 +24,17 @@ REVISION HISTORY:
 
 import json
 import re
+import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MONITOR_DIR = ROOT_DIR / '.ai_monitor'
+if str(MONITOR_DIR) not in sys.path:
+    sys.path.insert(0, str(MONITOR_DIR))
+
+from src.pg_store import ensure_schema, save_state
 
 # 기본 경로 (단독 실행 시)
 _DEFAULT_ROOT = Path(__file__).resolve().parent.parent
@@ -209,10 +217,13 @@ class SkillAnalyzer:
     # ── 분석 결과 저장 ─────────────────────────────────────────────────────
 
     def save_analysis(self, report: dict) -> Path:
-        """분석 결과를 skill_analysis.json에 저장 (UI/외부 참조용)."""
+        """Persist the latest analysis report to Postgres state."""
         analysis_file = self.project_root / ".ai_monitor" / "data" / "skill_analysis.json"
-        with open(analysis_file, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        try:
+            ensure_schema(analysis_file.parent)
+            save_state("skill_analysis", report)
+        except Exception:
+            pass
         return analysis_file
 
 

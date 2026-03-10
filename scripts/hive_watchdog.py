@@ -41,6 +41,13 @@ import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MONITOR_DIR = ROOT_DIR / '.ai_monitor'
+if str(MONITOR_DIR) not in sys.path:
+    sys.path.insert(0, str(MONITOR_DIR))
+
+from src.pg_store import ensure_schema, save_state
+
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     try:
@@ -175,13 +182,10 @@ class HiveWatchdog:
     def check_db(self):
         """DB 파일 존재 여부 및 연결성 체크"""
         try:
-            if not DB_FILE.exists() or not MEMORY_DB.exists():
-                self._add_log("⚠️ DB 파일 누락 감지")
+            if not ensure_schema(DATA_DIR):
+                self._add_log("⚠️ PostgreSQL schema unavailable")
+                self.status["db_ok"] = False
                 return False
-            
-            conn = sqlite3.connect(str(MEMORY_DB), timeout=2)
-            conn.execute("SELECT count(*) FROM memory")
-            conn.close()
             self.status["db_ok"] = True
             return True
         except Exception as e:
@@ -342,10 +346,11 @@ class HiveWatchdog:
         if server_ok and db_ok and not activity_ok and _sync_cooldown_ok:
             self.repair_memory_sync()
         
-        # 점검 결과를 파일로 저장 (서버/UI에서 읽기 위함)
-        health_file = DATA_DIR / "hive_health.json"
-        with open(health_file, "w", encoding="utf-8") as f:
-            json.dump(self.status, f, indent=2, ensure_ascii=False)
+        # 점검 결과를 Postgres state에 저장
+        try:
+            save_state("health", self.status)
+        except Exception:
+            pass
 
     def start_loop(self):
         """워치독 메인 루프.

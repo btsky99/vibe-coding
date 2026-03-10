@@ -88,6 +88,18 @@ import api.config_api as config_api
 import string
 import socket
 from pathlib import Path
+from src.pg_store import (
+    ensure_schema,
+    get_memory,
+    list_memory,
+    list_tasks,
+    migrate_legacy_data,
+    query_rows,
+    save_task,
+    set_memory,
+    update_task,
+    delete_task,
+)
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
 # [수정] PROJECT_ROOT가 아래(180번줄)에서 정의되므로, server.py 위치 기준으로 직접 경로 산출
@@ -505,10 +517,8 @@ if not LOCKS_FILE.exists():
 if not MESSAGES_FILE.exists():
     MESSAGES_FILE.touch()
 
-# 작업 큐 파일 초기화 (없을 경우)
-if not TASKS_FILE.exists():
-    with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-        json.dump([], f)
+# Postgres-backed state schema 초기화
+ensure_schema(DATA_DIR)
 
 # ── 공유 메모리 SQLite 초기화 ────────────────────────────────────────────────
 def _memory_conn() -> sqlite3.Connection:
@@ -557,32 +567,8 @@ def _migrate_project_column(conn: sqlite3.Connection) -> None:
 
 
 def _init_memory_db() -> None:
-    """shared_memory.db 스키마 초기화 (서버 시작 시 1회 실행)"""
-    with _memory_conn() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS memory (
-                key        TEXT PRIMARY KEY,
-                id         TEXT NOT NULL,
-                title      TEXT NOT NULL DEFAULT '',
-                content    TEXT NOT NULL,
-                tags       TEXT NOT NULL DEFAULT '[]',
-                author     TEXT NOT NULL DEFAULT 'unknown',
-                timestamp  TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                project    TEXT NOT NULL DEFAULT '',
-                embedding  BLOB         -- 의미 벡터 (fastembed, float32 bytes)
-            )
-        ''')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_author ON memory(author)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_updated ON memory(updated_at)')
-        # 기존 DB 마이그레이션 — 없는 컬럼 추가
-        cols = [r[1] for r in conn.execute('PRAGMA table_info(memory)').fetchall()]
-        if 'embedding' not in cols:
-            conn.execute('ALTER TABLE memory ADD COLUMN embedding BLOB')
-        if 'project' not in cols:
-            conn.execute("ALTER TABLE memory ADD COLUMN project TEXT NOT NULL DEFAULT ''")
-            _migrate_project_column(conn)
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project)')
+    """Initialize the Postgres-backed memory schema."""
+    ensure_schema(DATA_DIR)
 
 _init_memory_db()
 # ─────────────────────────────────────────────────────────────────────────────
@@ -684,13 +670,10 @@ class MemoryWatcher(threading.Thread):
         if not memory_file.exists():
             return
         try:
-            with _memory_conn() as conn:
-                rows = conn.execute(
-                    "SELECT key,title,content,author,tags,updated_at "
-                    "FROM memory "
-                    "WHERE key NOT LIKE 'claude:T%' "
-                    "ORDER BY updated_at DESC LIMIT 15"
-                ).fetchall()
+            rows = [
+                row for row in list_memory(top_k=30, show_all=True)
+                if not str(row.get('key', '')).startswith('claude:T')
+            ][:15]
             if not rows:
                 return
 
@@ -742,45 +725,25 @@ class MemoryWatcher(threading.Thread):
             self._next_terminal += 1
         return self._terminal_map[source_key]
 
-    # ── 내부: DB 저장 (HTTP 없이 직접 SQLite, 임베딩 포함) ──────────────────
+    # ── 내부: DB 저장 (Postgres-backed memory store) ───────────────────────
     def _upsert(self, key: str, title: str, content: str,
                 author: str, tags: list, project: str = '') -> None:
         now = time.strftime('%Y-%m-%dT%H:%M:%S')
-        tags_json = json.dumps(tags, ensure_ascii=False)
-        emb = _embed(f"{title}\n{content}")  # 제목+내용 합쳐서 벡터화
         proj = project or PROJECT_ID
-        
-        # [수정] 전역 DATA_DIR 내의 shared_memory.db 경로를 사용하도록 강제
-        db_path = DATA_DIR / "shared_memory.db"
-        
         try:
-            conn = sqlite3.connect(str(db_path), timeout=10)
-            conn.row_factory = sqlite3.Row
-            # 테이블 자동 생성 보장 (없을 경우 대비)
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS memory (
-                    key TEXT PRIMARY KEY, id TEXT NOT NULL,
-                    title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
-                    tags TEXT NOT NULL DEFAULT '[]', author TEXT NOT NULL DEFAULT 'unknown',
-                    timestamp TEXT NOT NULL, updated_at TEXT NOT NULL,
-                    embedding BLOB, project TEXT NOT NULL DEFAULT ''
-                )
-            ''')
-            
-            existing = conn.execute(
-                'SELECT timestamp FROM memory WHERE key=?', (key,)
-            ).fetchone()
-            orig_ts = existing['timestamp'] if existing else now
-            conn.execute(
-                'INSERT OR REPLACE INTO memory '
-                '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
-                'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                (key, str(int(time.time() * 1000)), title,
-                 content, tags_json, author, orig_ts, now, proj, emb)
+            existing = get_memory(key)
+            created_at = existing.get('created_at', now) if existing else now
+            set_memory(
+                key=key,
+                title=title,
+                content=content,
+                tags=tags,
+                author=author,
+                project=proj,
+                created_at=created_at,
+                updated_at=now,
             )
-            conn.commit()
-            conn.close()
-            print(f"[MemoryWatcher] 동기화 완료: {key} (경로: {db_path})")
+            print(f"[MemoryWatcher] 동기화 완료: {key}")
         except Exception as e:
             print(f"[MemoryWatcher] DB 쓰기 오류: {e}")
 
@@ -1699,17 +1662,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     # — 스킬 설치 후 하이브 워치독이 정상 동작하려면 DB가 있어야 함
                     target_data = Path(target_path) / ".ai_monitor" / "data"
                     target_data.mkdir(parents=True, exist_ok=True)
-                    for db_name in ("shared_memory.db", "hive_mind.db"):
-                        db_path = target_data / db_name
-                        if not db_path.exists():
-                            conn = sqlite3.connect(str(db_path))
-                            if db_name == "shared_memory.db":
-                                conn.execute("""CREATE TABLE IF NOT EXISTS memory (
-                                    key TEXT PRIMARY KEY, title TEXT, content TEXT,
-                                    tags TEXT, author TEXT, project TEXT,
-                                    created_at TEXT, updated_at TEXT)""")
-                            conn.commit()
-                            conn.close()
+                    ensure_schema(target_data)
 
                     result = {"status": "success", "message": f"Skills installed to {target_path}"}
                 except Exception as e:
@@ -1964,14 +1917,10 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            tasks = []
-            if TASKS_FILE.exists():
-                try:
-                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                        tasks = json.load(f)
-                except (json.JSONDecodeError, ValueError):
-                    # 파일 손상 시 빈 배열 반환 (파싱 오류가 빈 칸반으로 이어지는 버그 방지)
-                    tasks = []
+            try:
+                tasks = list_tasks()
+            except Exception:
+                tasks = []
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/tasks/kanban':
             # 칸반 보드 데이터 — 태스크를 5컬럼으로 그룹화하여 반환
@@ -1980,10 +1929,10 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            tasks = []
-            if TASKS_FILE.exists():
-                with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                    tasks = json.load(f)
+            try:
+                tasks = list_tasks()
+            except Exception:
+                tasks = []
             columns: dict = {'todo': [], 'claimed': [], 'in_progress': [], 'review': [], 'done': []}
             for t in tasks:
                 # kanban_status 우선 적용, 없으면 status 필드에서 변환
@@ -2260,23 +2209,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                # _memory_conn()과 동일한 로직으로 실제 DB 경로 결정
-                actual_db = str(MEMORY_DB)
-                is_local = False
-                if CONFIG_FILE.exists():
-                    cfg_data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-                    last_path = cfg_data.get('last_path', '')
-                    if last_path:
-                        local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
-                        if local_db.exists():
-                            actual_db = str(local_db)
-                            is_local = True
-                # 항목 수 조회
-                with _memory_conn() as conn:
-                    count = conn.execute('SELECT COUNT(*) FROM memory').fetchone()[0]
+                ensure_schema(DATA_DIR)
+                rows = query_rows("SELECT COUNT(*) AS count FROM hive_memory;")
+                count = int(rows[0].get('count', 0)) if rows else 0
                 self.wfile.write(json.dumps({
-                    'db_path': actual_db,
-                    'is_local': is_local,
+                    'db_path': 'postgres://localhost:5433/postgres',
+                    'is_local': False,
+                    'backend': 'postgres',
                     'count': count,
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -2444,21 +2383,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if step:  content += f"\n📍 step: {step}"
 
                     tags = ['thought', level, agent]
-                    emb  = _embed(f"{title}\n{content}")
+                    set_memory(
+                        key=key,
+                        title=title,
+                        content=content,
+                        tags=tags,
+                        author=agent,
+                        project=PROJECT_ID,
+                        created_at=data['timestamp'],
+                        updated_at=data['timestamp'],
+                    )
 
-                    with _memory_conn() as conn:
-                        conn.execute(
-                            'INSERT OR REPLACE INTO memory '
-                            '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
-                            'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                            (key, ts_ms, title, content,
-                             json.dumps(tags, ensure_ascii=False),
-                             agent, data['timestamp'], data['timestamp'],
-                             PROJECT_ID, emb)
-                        )
-                    
-
-                    print(f"🧠 [Thought→DB] {key} (임베딩: {'✓' if emb else '✗'})")
+                    print(f"🧠 [Thought→DB] {key}")
                 except Exception as db_err:
                     print(f"[Thought→DB] 저장 실패 (무시): {db_err}")
                 # ─────────────────────────────────────────────────────────
@@ -3137,15 +3073,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'claimed_by': str(data.get('claimed_by', '')),
                     'tags': raw_tags,
                 }
-
-                # 기존 작업 목록 읽기 후 새 항목 추가
-                tasks = []
-                if TASKS_FILE.exists():
-                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                        tasks = json.load(f)
-                tasks.append(task)
-                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+                save_task(task)
 
                 # SSE 로그에도 반영 (태스크 보드 알림)
                 try:
@@ -3178,31 +3106,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
 
                 task_id = str(data.get('id', ''))
-                tasks = []
-                if TASKS_FILE.exists():
-                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                        tasks = json.load(f)
-
-                updated_task = None
-                for i, t in enumerate(tasks):
-                    if t['id'] == task_id:
-                        # 허용된 문자열 필드 업데이트 (임의 키 주입 방지)
-                        for key in ('status', 'assigned_to', 'priority', 'title',
-                                    'description', 'kanban_status', 'role', 'claimed_by'):
-                            if key in data:
-                                tasks[i][key] = str(data[key])
-                        # tags는 리스트 타입 별도 처리
-                        if 'tags' in data:
-                            raw_tags = data['tags']
-                            if isinstance(raw_tags, str):
-                                raw_tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
-                            tasks[i]['tags'] = list(raw_tags) if isinstance(raw_tags, list) else []
-                        tasks[i]['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-                        updated_task = tasks[i]
-                        break
-
-                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+                updates = {}
+                for key in ('status', 'assigned_to', 'priority', 'title',
+                            'description', 'kanban_status', 'role', 'claimed_by'):
+                    if key in data:
+                        updates[key] = str(data[key])
+                if 'tags' in data:
+                    raw_tags = data['tags']
+                    if isinstance(raw_tags, str):
+                        raw_tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
+                    updates['tags'] = list(raw_tags) if isinstance(raw_tags, list) else []
+                updates['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+                updated_task = update_task(task_id, updates)
 
                 self.wfile.write(json.dumps({'status': 'success', 'task': updated_task}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -3219,14 +3134,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
 
                 task_id = str(data.get('id', ''))
-                tasks = []
-                if TASKS_FILE.exists():
-                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                        tasks = json.load(f)
-
-                tasks = [t for t in tasks if t['id'] != task_id]
-                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+                delete_task(task_id)
 
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
@@ -3243,20 +3151,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
                 task_id = str(data.get('id', ''))
                 terminal_id = str(data.get('terminal_id', ''))
-                tasks = []
-                if TASKS_FILE.exists():
-                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                        tasks = json.load(f)
-                claimed_task = None
-                for i, t in enumerate(tasks):
-                    if t['id'] == task_id:
-                        tasks[i]['kanban_status'] = 'claimed'
-                        tasks[i]['claimed_by'] = terminal_id
-                        tasks[i]['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-                        claimed_task = tasks[i]
-                        break
-                with open(TASKS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(tasks, f, ensure_ascii=False, indent=2)
+                claimed_task = update_task(task_id, {
+                    'kanban_status': 'claimed',
+                    'claimed_by': terminal_id,
+                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                })
                 self.wfile.write(json.dumps({'status': 'success', 'task': claimed_task}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
@@ -3957,14 +3856,54 @@ def _cleanup_all_pty_sessions():
     pty_sessions.clear()
 
 
-# ── atexit 등록 — 정상 종료(sys.exit, return from __main__)에도 PTY 정리 보장 ──
+# 워치독/Discord/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
+# — X 버튼 종료 시 이 목록을 순회하여 모두 taskkill로 강제 종료
+_child_procs: list = []
+
+
+def _cleanup_child_procs():
+    """_child_procs 목록에 등록된 모든 서브프로세스를 강제 종료합니다.
+
+    Windows 환경에서 부모 프로세스가 os._exit(0)으로 종료돼도
+    자식 프로세스(hive_watchdog, heal_daemon, discord_bridge 등)는
+    자동으로 죽지 않아 좀비로 남습니다.
+    'taskkill /F /T /PID'로 프로세스 트리 전체를 강제 종료합니다.
+    """
+    for proc in list(_child_procs):
+        if proc is None:
+            continue
+        try:
+            if proc.poll() is not None:
+                # 이미 종료된 프로세스는 건너뜀
+                continue
+            if os.name == 'nt':
+                # /F: 강제, /T: 자식 트리 포함
+                subprocess.call(
+                    ['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+                )
+            else:
+                import signal as _sig
+                try:
+                    os.killpg(os.getpgid(proc.pid), _sig.SIGTERM)
+                except Exception:
+                    proc.kill()
+            print(f"[cleanup] 자식 프로세스 종료: PID {proc.pid}")
+        except Exception as e:
+            print(f"[cleanup] 자식 프로세스 종료 실패 (PID {getattr(proc, 'pid', '?')}): {e}")
+    _child_procs.clear()
+
+
+# ── atexit 등록 — 정상 종료(sys.exit, return from __main__)에도 PTY + 자식 프로세스 정리 보장 ──
 import atexit, signal as _signal
 atexit.register(_cleanup_all_pty_sessions)
+atexit.register(_cleanup_child_procs)
 
 def _signal_exit_handler(sig, frame):
-    """SIGTERM / SIGBREAK(Ctrl+Break) 수신 시 PTY 정리 후 즉시 종료."""
-    print(f"[*] 시그널 {sig} 수신 — PTY 정리 후 종료합니다.")
+    """SIGTERM / SIGBREAK(Ctrl+Break) 수신 시 PTY + 자식 프로세스 정리 후 즉시 종료."""
+    print(f"[*] 시그널 {sig} 수신 — PTY 및 자식 프로세스 정리 후 종료합니다.")
     _cleanup_all_pty_sessions()
+    _cleanup_child_procs()
     os._exit(0)
 
 _signal.signal(_signal.SIGTERM, _signal_exit_handler)
@@ -4108,7 +4047,8 @@ if __name__ == '__main__':
         if watchdog_script.exists():
             # 윈도우 환경에서 CP949 인코딩 에러 방지를 위해 encoding 및 errors 설정 추가
             # CREATE_NO_WINDOW: 워치독 데몬 시작 시 콘솔 창 표시 방지
-            subprocess.Popen(
+            # 반환된 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
+            proc = subprocess.Popen(
                 [sys.executable, str(watchdog_script), "--data-dir", str(DATA_DIR)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -4117,6 +4057,7 @@ if __name__ == '__main__':
                 errors='replace',
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             )
+            _child_procs.append(proc)
     threading.Thread(target=run_watchdog, daemon=True).start()
 
     # Discord 브릿지 자동 시작: .env에 DISCORD_BOT_TOKEN이 설정된 경우에만 실행
@@ -4133,7 +4074,8 @@ if __name__ == '__main__':
                 return
         except Exception:
             return
-        subprocess.Popen(
+        # Discord 브릿지 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
+        proc = subprocess.Popen(
             [sys.executable, str(discord_script)],
             cwd=str(PROJECT_ROOT),
             stdout=subprocess.PIPE,
@@ -4142,6 +4084,7 @@ if __name__ == '__main__':
             errors='replace',
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
+        _child_procs.append(proc)
         print("[*] Discord Bridge 자동 시작됨")
     threading.Thread(target=run_discord_bridge, daemon=True).start()
 
@@ -4149,7 +4092,8 @@ if __name__ == '__main__':
     def run_heal_daemon():
         heal_script = SCRIPTS_DIR / "heal_daemon.py"
         if heal_script.exists():
-            subprocess.Popen(
+            # 힐데몬 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
+            proc = subprocess.Popen(
                 [sys.executable, str(heal_script), "--interval", "300"],
                 cwd=str(PROJECT_ROOT),
                 stdout=subprocess.PIPE,
@@ -4158,6 +4102,7 @@ if __name__ == '__main__':
                 errors='replace',
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
             )
+            _child_procs.append(proc)
             print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
     threading.Thread(target=run_heal_daemon, daemon=True).start()
 
@@ -4226,8 +4171,9 @@ if __name__ == '__main__':
         # os._exit()는 소켓을 강제 종료 → 포트 TIME_WAIT 잔류 원인
         # server.shutdown() + server_close()로 포트를 먼저 해제한 뒤 종료
         # X 버튼으로 창이 닫힘 → PTY 자식 프로세스 먼저 kill → HTTP 서버 소켓 해제 → 프로세스 종료
-        print("[*] GUI 창이 닫혔습니다. 좀비 프로세스 방지 — PTY 세션 및 서버 소켓 정리 중...")
+        print("[*] GUI 창이 닫혔습니다. 좀비 프로세스 방지 — 모든 자식 프로세스 정리 중...")
         _cleanup_all_pty_sessions()          # Claude/Gemini/Codex 터미널 자식 프로세스 종료
+        _cleanup_child_procs()               # hive_watchdog / heal_daemon / discord_bridge 종료
         try:
             server.shutdown()                # HTTP 요청 처리 스레드 정지
             server.server_close()            # 포트 소켓 해제 (TIME_WAIT 방지)
@@ -4245,6 +4191,7 @@ if __name__ == '__main__':
         except KeyboardInterrupt:
             print("[*] Ctrl+C 감지 — PTY 세션 및 서버 정리 후 종료합니다.")
             _cleanup_all_pty_sessions()
+            _cleanup_child_procs()           # 좀비 방지: watchdog/heal/discord 종료
             try:
                 server.shutdown()
                 server.server_close()

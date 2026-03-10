@@ -30,6 +30,12 @@ import json
 import os
 import io
 import re
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MONITOR_DIR = ROOT_DIR / '.ai_monitor'
+if str(MONITOR_DIR) not in sys.path:
+    sys.path.insert(0, str(MONITOR_DIR))
 
 # ── [중요] stdout → stderr 교체 ────────────────────────────────────────────
 # Gemini CLI는 훅 stdout의 JSON을 파싱함. hive_bridge의 print()가 섞이면 파싱 오류 발생.
@@ -310,14 +316,7 @@ def main():
         if prompt and prompt.strip():
             try:
                 import datetime
-                _data_dir = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data'
-                )
-                _tasks_file = os.path.join(_data_dir, 'tasks.json')
-                _tasks: list = []
-                if os.path.exists(_tasks_file):
-                    with open(_tasks_file, 'r', encoding='utf-8') as _f:
-                        _tasks = json.load(_f)
+                from src.pg_store import save_task
                 _short = prompt.strip().replace("\n", " ")[:80]
                 _new_task = {
                     "id": datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"),
@@ -329,9 +328,7 @@ def main():
                     "created_by": "user",
                     "created_at": datetime.datetime.now().isoformat(),
                 }
-                _tasks.append(_new_task)
-                with open(_tasks_file, 'w', encoding='utf-8') as _f:
-                    json.dump(_tasks, _f, ensure_ascii=False, indent=2)
+                save_task(_new_task)
             except Exception:
                 pass
 
@@ -414,19 +411,8 @@ def main():
     elif event == "SessionEnd":
         log_task("Gemini", "─── Gemini 세션 종료 ───")
         try:
-            _data_dir_g = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data')
-            _tasks_file_g = os.path.join(_data_dir_g, 'tasks.json')
-            if os.path.exists(_tasks_file_g):
-                with open(_tasks_file_g, 'r', encoding='utf-8') as _f:
-                    _tasks_g = json.load(_f)
-                _changed_g = False
-                for _t in _tasks_g:
-                    if _t.get('assigned_to') == 'gemini' and _t.get('status') in ('pending', 'in_progress'):
-                        _t['status'] = 'done'
-                        _changed_g = True
-                if _changed_g:
-                    with open(_tasks_file_g, 'w', encoding='utf-8') as _f:
-                        json.dump(_tasks_g, _f, ensure_ascii=False, indent=2)
+            from src.pg_store import bulk_update_tasks
+            bulk_update_tasks('gemini', ['pending', 'in_progress'], 'done')
         except Exception:
             pass
         _send_session_summary()
