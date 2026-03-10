@@ -1,3 +1,5 @@
 {"id": "1773064244906", "timestamp": "2026-03-09T22:50:44", "from": "gemini", "to": "all", "type": "status", "content": "[스킬 체인 시작] T2: 초지능 하이브 고도화 4대 과제 통합 진행 | 체인: vibe-brainstorm → vibe-write-plan → vibe-execute-plan", "read": false}
 {"id": "1773064345549", "timestamp": "2026-03-09T22:52:25", "from": "gemini", "to": "all", "type": "status", "content": "✅ gemini: [vibe-write-plan] 완료 — Phase 6 기획 및 계획서 작성 완료", "read": false}
 {"id": "1773064828030", "timestamp": "2026-03-09T23:00:28", "from": "gemini", "to": "all", "type": "status", "content": "✅ gemini: [vibe-execute-plan] 완료 — Phase 6 (Task 14~17) 코어 구현 완료", "read": false}
+{"id": "1773151282969", "timestamp": "2026-03-10T23:01:22", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 하드코딩 문제 — 전체 창/UI 아무것도 안 보임 | vibe-debug -> vibe-code-review", "read": false}
+{"id": "1773151331194", "timestamp": "2026-03-10T23:02:11", "from": "agent", "to": "all", "type": "status", "content": "agent running [vibe-code-review]", "read": false}

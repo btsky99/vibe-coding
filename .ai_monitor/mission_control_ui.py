@@ -15,7 +15,6 @@
 import sys
 import json
 import math
-import sqlite3
 import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -24,13 +23,14 @@ from PySide6.QtGui import (QColor, QPainter, QBrush, QPen, QFont,
                            QLinearGradient, QPainterPath)
 from PySide6.QtCore import (Qt, QPropertyAnimation, QEasingCurve,
                             QRect, QTimer, Signal)
+from src.pg_store import ensure_schema, list_memory
 
 # 에이전트 런처 경로 (모드 저장/로드에 사용)
 _ROOT = Path(__file__).resolve().parent.parent
 _LAUNCHER = _ROOT / "scripts" / "agent_launcher.py"
 _CONFIG = _ROOT / ".ai_monitor" / "config.json"
 # 공유 메모리 DB 경로 (지식 그래프 데이터 소스)
-_MEMORY_DB = _ROOT / ".ai_monitor" / "data" / "shared_memory.db"
+_DATA_DIR = _ROOT / ".ai_monitor" / "data"
 
 # 에이전트별 색상 상수 (AgentRing과 통일)
 _AGENT_COLORS: dict[str, str] = {
@@ -56,18 +56,9 @@ def _load_graph_data() -> tuple[list, list]:
         edges: [(x1, y1, x2, y2), ...]            — 정규화 좌표 (0~1)
     """
     try:
-        conn = sqlite3.connect(str(_MEMORY_DB))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+        ensure_schema(_DATA_DIR)
+        rows = list_memory(top_k=24, show_all=True)
         # 최신 24개만 조회 (성능 및 가독성)
-        cur.execute("""
-            SELECT key, title, author, tags
-            FROM memory
-            ORDER BY updated_at DESC
-            LIMIT 24
-        """)
-        rows = cur.fetchall()
-        conn.close()
     except Exception:
         return [], []
 

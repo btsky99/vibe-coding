@@ -308,34 +308,20 @@ def _update_pipeline_stage(stage: str, task: str = '') -> None:
 
 
 def _save_session_snapshot() -> None:
-    """Stop 이벤트 시 오늘의 세션 활동을 shared_memory.db에 자동 저장합니다.
-
-    [동작 순서]
-    1. task_logs.jsonl에서 오늘 날짜의 Claude/사용자 로그 추출
-    2. 중요 항목 필터 (사용자 지시, 파일 수정, 커밋 완료)
-    3. shared_memory.db에 "claude:auto-session:YYYY-MM-DD" 키로 저장
-       (INSERT OR REPLACE → 당일 내 호출마다 최신 상태로 갱신)
-    4. 다음 세션에서 이 키를 조회하여 이전 작업 내용 파악 가능
-
-    [에러 시]
-    모든 예외 무시 — Stop 훅 실행을 방해하지 않음
-    """
+    """Stop 이벤트 시 오늘의 세션 활동을 메모리 저장소에 자동 저장합니다."""
     try:
-        from pathlib import Path
         from datetime import datetime
         from src.pg_store import set_memory
 
         project_root = Path(_scripts_dir).parent
-        data_dir = project_root / ".ai_monitor" / "data"
-        logs_file = data_dir / "task_logs.jsonl"
+        logs_file = project_root / ".ai_monitor" / "data" / "task_logs.jsonl"
         if not logs_file.exists():
             return
 
-        # 오늘 날짜의 로그만 수집
         today = datetime.now().strftime("%Y-%m-%d")
         important_lines = []
-        with open(logs_file, "r", encoding="utf-8") as f:
-            for line in f:
+        with open(logs_file, "r", encoding="utf-8") as handle:
+            for line in handle:
                 line = line.strip()
                 if not line:
                     continue
@@ -347,66 +333,31 @@ def _save_session_snapshot() -> None:
                     continue
                 task = entry.get("task", "")
                 agent = entry.get("agent", "")
-                # 중요 이벤트만 추출 (노이즈 제거)
                 if agent == "사용자" and "[지시]" in task:
                     important_lines.append(task)
-                elif agent == "Claude" and any(k in task for k in ["수정 완료", "생성 완료", "커밋 완료"]):
+                elif agent == "Claude" and any(keyword in task for keyword in ["수정 완료", "생성 완료", "커밋 완료"]):
                     important_lines.append(task)
 
         if not important_lines:
             return
 
-        # 최근 20개만 보관 (과거 항목은 truncate)
-        summary = "\n".join(important_lines[-20:])
         now = datetime.now().isoformat()
-        key = f"claude:auto-session:{today}"
         set_memory(
-            key=key,
-            title=f"[?먮룞] Claude ?몄뀡 ?쒕룞 ?붿빟 ({today})",
-            content=summary,
+            key=f"claude:auto-session:{today}",
+            title=f"[자동] Claude 세션 활동 요약 ({today})",
+            content="\n".join(important_lines[-20:]),
             tags=["auto", "session", "claude", "snapshot"],
             author="claude",
             project="vibe-coding",
             created_at=now,
             updated_at=now,
         )
-        return
-
-        conn = sqlite3.connect(str(db_file))
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT OR REPLACE INTO memory
-              (key, id, title, content, tags, author, timestamp, updated_at, project)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                key, key,
-                f"[자동] Claude 세션 활동 요약 ({today})",
-                summary,
-                '["auto","session","claude","snapshot"]',
-                "claude",
-                now, now,
-                "vibe-coding",
-            ),
-        )
-        conn.commit()
-        conn.close()
     except Exception:
         pass
 
 
 def _inject_hive_context() -> str:
-    """UserPromptSubmit 시 하이브 메모리에서 현재 작업 컨텍스트를 자동 주입합니다.
-
-    [동작]
-    1. shared_memory.db에서 current-work 키 조회 (현재 진행 중인 작업 상태)
-    2. 오늘의 auto-session 스냅샷 조회 (오늘 완료한 작업 목록)
-    3. 두 정보를 하나의 컨텍스트 문자열로 합쳐 반환
-    → Claude가 항상 하이브 상태를 알고 시작하도록 보장
-
-    [에러 시] 빈 문자열 반환 — 훅 실행 방해하지 않음
-    """
+    """UserPromptSubmit 시 하이브 메모리에서 현재 작업 컨텍스트를 자동 주입합니다."""
     try:
         from datetime import datetime
         from src.pg_store import get_memory, list_memory
@@ -420,70 +371,19 @@ def _inject_hive_context() -> str:
 
         parts = []
         if current_work:
-            lines = [l for l in current_work.split("\n") if l.strip()]
-            todo_lines = [l for l in lines if "[ ]" in l or "?봽" in l or "吏꾪뻾 ?곹솴" in l]
-            summary = "\n".join(todo_lines[:10]) if todo_lines else "\n".join(lines[:8])
-            parts.append(f"[?섏씠釉??꾩옱 ?묒뾽 ?곹깭]\n{summary}")
-
-        if today_snap:
-            snap_lines = today_snap.strip().split("\n")[-5:]
-            parts.append(f"[?ㅻ뒛 ?꾨즺 ??ぉ]\n" + "\n".join(snap_lines))
-
-        if not parts:
-            return ""
-
-        return (
-            "[INFO] ?섏씠釉?而⑦뀓?ㅽ듃 ?먮룞 濡쒕뱶?????꾨옒 ?댁슜??諛뷀깢?쇰줈 ?묒뾽 留λ씫???뚯븙?섏꽭??n"
-            + "\n\n".join(parts)
-            + "\n[END ?섏씠釉?而⑦뀓?ㅽ듃]"
-        )
-
-        import sqlite3
-        from pathlib import Path
-        from datetime import datetime
-
-        project_root = Path(_scripts_dir).parent
-        db_file = project_root / ".ai_monitor" / "data" / "shared_memory.db"
-        if not db_file.exists():
-            return ""
-
-        conn = sqlite3.connect(str(db_file))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        # 터미널 번호로 current-work 키 동적 탐색
-        rows = cur.execute(
-            "SELECT key, content FROM memory WHERE key LIKE '%:current-work' ORDER BY updated_at DESC LIMIT 1"
-        ).fetchall()
-        current_work = rows[0]["content"] if rows else ""
-
-        # 오늘의 세션 스냅샷
-        today = datetime.now().strftime("%Y-%m-%d")
-        snap_rows = cur.execute(
-            "SELECT content FROM memory WHERE key = ? LIMIT 1",
-            (f"claude:auto-session:{today}",)
-        ).fetchall()
-        today_snap = snap_rows[0]["content"] if snap_rows else ""
-        conn.close()
-
-        parts = []
-        if current_work:
-            # current-work에서 핵심 정보만 추출 (전체 출력 시 노이즈)
-            lines = [l for l in current_work.split("\n") if l.strip()]
-            # 진행 중([x] 미완, [ ] 미완) 항목만 필터
-            todo_lines = [l for l in lines if "[ ]" in l or "🔄" in l or "진행 상황" in l]
+            lines = [line for line in current_work.split("\n") if line.strip()]
+            todo_lines = [line for line in lines if "[ ]" in line or "진행 상황" in line or "🔄" in line]
             summary = "\n".join(todo_lines[:10]) if todo_lines else "\n".join(lines[:8])
             parts.append(f"[하이브 현재 작업 상태]\n{summary}")
 
         if today_snap:
-            snap_lines = today_snap.strip().split("\n")[-5:]  # 오늘 완료 최근 5개
-            parts.append(f"[오늘 완료 항목]\n" + "\n".join(snap_lines))
+            parts.append(f"[오늘 완료 항목]\n" + "\n".join(today_snap.strip().split("\n")[-5:]))
 
         if not parts:
             return ""
 
         return (
-            "[INFO] 하이브 컨텍스트 자동 로드됨 — 아래 내용을 바탕으로 작업 맥락을 파악하세요\n"
+            "[INFO] 하이브 컨텍스트 자동 로드됨. 아래 내용을 바탕으로 작업 맥락을 파악하세요.\n"
             + "\n\n".join(parts)
             + "\n[END 하이브 컨텍스트]"
         )
@@ -492,15 +392,7 @@ def _inject_hive_context() -> str:
 
 
 def _update_current_work(completed_items: list[str]) -> None:
-    """Stop 이벤트 시 오늘 완료된 항목을 current-work 메모리에 자동 반영합니다.
-
-    [동작]
-    1. current-work에서 미완료([  ]) 항목 중 오늘 완료된 것 → [x]로 변경
-    2. 완료된 작업을 '완료 이력' 섹션에 추가
-    → 다음 세션에서 current-work를 보면 최신 진행 상황 파악 가능
-
-    [에러 시] 조용히 무시
-    """
+    """Stop 이벤트 시 오늘 완료된 항목을 current-work 메모리에 자동 반영합니다."""
     try:
         from datetime import datetime
         from src.pg_store import list_memory, set_memory
@@ -514,7 +406,7 @@ def _update_current_work(completed_items: list[str]) -> None:
 
         key = rows[0]["key"]
         content = rows[0]["content"]
-        completed_block = f"\n## ?먮룞 ?낅뜲?댄듃 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n" + "\n".join(
+        completed_block = f"\n## 자동 업데이트 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n" + "\n".join(
             f"- [x] {item}" for item in completed_items[-10:]
         )
         set_memory(
@@ -527,48 +419,6 @@ def _update_current_work(completed_items: list[str]) -> None:
             created_at=rows[0].get("created_at", ""),
             updated_at=datetime.now().isoformat(),
         )
-        return
-
-        import sqlite3
-        from pathlib import Path
-        from datetime import datetime
-
-        if not completed_items:
-            return
-
-        project_root = Path(_scripts_dir).parent
-        db_file = project_root / ".ai_monitor" / "data" / "shared_memory.db"
-        if not db_file.exists():
-            return
-
-        conn = sqlite3.connect(str(db_file))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        rows = cur.execute(
-            "SELECT key, content FROM memory WHERE key LIKE '%:current-work' ORDER BY updated_at DESC LIMIT 1"
-        ).fetchall()
-        if not rows:
-            conn.close()
-            return
-
-        key = rows[0]["key"]
-        content = rows[0]["content"]
-
-        # 오늘 완료 항목 섹션 추가
-        today = datetime.now().strftime("%Y-%m-%d %H:%M")
-        completed_block = f"\n## 자동 업데이트 ({today})\n" + "\n".join(
-            f"- [x] {item}" for item in completed_items[-10:]
-        )
-        new_content = content + completed_block
-
-        now = datetime.now().isoformat()
-        cur.execute(
-            "UPDATE memory SET content = ?, updated_at = ? WHERE key = ?",
-            (new_content, now, key)
-        )
-        conn.commit()
-        conn.close()
     except Exception:
         pass
 

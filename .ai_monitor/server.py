@@ -74,7 +74,6 @@ import mimetypes
 import webbrowser
 import shutil
 import subprocess
-import sqlite3
 import re
 import threading
 import sys
@@ -88,12 +87,20 @@ import api.config_api as config_api
 import string
 import socket
 from pathlib import Path
+from src.file_store import (
+    delete_memory_entry,
+    ensure_legacy_store,
+    get_agent_last_seen_from_sessions,
+    get_memory_entry,
+    merge_memory_files,
+    upsert_memory_entry,
+)
 from src.pg_store import (
     ensure_schema,
+    get_agent_last_seen,
     get_memory,
     list_memory,
     list_tasks,
-    migrate_legacy_data,
     query_rows,
     save_task,
     set_memory,
@@ -134,8 +141,12 @@ def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
     run_pg_sql(f"SELECT pgmq.send('hive_queue', '{mq_msg}');")
 
 def thought_to_pg(agent: str, skill: str, thought: dict):
-    """pg_thoughts 테이블에 사고 과정 기록 (JSONB)"""
-    safe_thought = json.dumps(thought, ensure_ascii=False).replace("'", "''")
+    """pg_thoughts 테이블에 사고 과정 기록 (JSONB)
+
+    ensure_ascii=True: 한글을 \\uXXXX 이스케이프로 변환하여 psql.exe -c 인수 인코딩 오류 방지.
+    JSONB는 유니코드 이스케이프를 정상 처리하므로 조회 시 한글이 정상 표시됩니다.
+    """
+    safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
     sql = f"INSERT INTO pg_thoughts (agent, skill, thought) VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb);"
     run_pg_sql(sql)
 
@@ -494,8 +505,6 @@ CONFIG_FILE = DATA_DIR / "config.json"
 MESSAGES_FILE = DATA_DIR / "messages.jsonl"
 # 에이전트 간 공유 작업 큐 파일 (JSON 배열 — 업데이트/삭제 지원)
 TASKS_FILE = DATA_DIR / "tasks.json"
-# 에이전트 간 공유 메모리/지식 베이스 (SQLite — 동시성·검색 안정성 확보)
-MEMORY_DB = DATA_DIR / "shared_memory.db"
 # 프로젝트 목록 파일 (최근 사용 프로젝트 저장)
 PROJECTS_FILE = DATA_DIR / "projects.json"
 
@@ -517,53 +526,29 @@ if not LOCKS_FILE.exists():
 if not MESSAGES_FILE.exists():
     MESSAGES_FILE.touch()
 
+ensure_legacy_store(DATA_DIR)
+
 # Postgres-backed state schema 초기화
 ensure_schema(DATA_DIR)
 
-# ── 공유 메모리 SQLite 초기화 ────────────────────────────────────────────────
-def _memory_conn() -> sqlite3.Connection:
-    """요청마다 새 커넥션 생성 (스레드 안전 — ThreadedHTTPServer 대응)
-
-    [배포 버전 DATA_DIR 불일치 해소]
-    배포(frozen) 버전에서 DATA_DIR = APPDATA/VibeCoding로 설정되더라도,
-    현재 활성 프로젝트(config.json last_path)의 로컬 DB가 있으면 우선 사용합니다.
-    이를 통해 CLI(개발 버전)가 저장한 공유 메모리를 배포 대시보드에서도 표시합니다.
-    """
-    # 현재 활성 프로젝트 로컬 DB 우선 확인 (config.json last_path 참조)
+# ── 파일 기반 레거시 메모리 저장소 초기화 ─────────────────────────────────────
+def _legacy_memory_data_dir() -> Path:
     try:
         if CONFIG_FILE.exists():
             cfg_data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
             last_path = cfg_data.get('last_path', '')
             if last_path:
-                local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
-                if local_db.exists():
-                    conn = sqlite3.connect(str(local_db), timeout=5, check_same_thread=False)
-                    conn.row_factory = sqlite3.Row
-                    return conn
+                local_dir = Path(last_path) / '.ai_monitor' / 'data'
+                if local_dir.exists():
+                    ensure_legacy_store(local_dir)
+                    return local_dir
     except Exception:
         pass
-    # 폴백: 서버 시작 시 결정된 MEMORY_DB (APPDATA 또는 로컬 data/)
-    conn = sqlite3.connect(str(MEMORY_DB), timeout=5, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return DATA_DIR
 
-def _migrate_project_column(conn: sqlite3.Connection) -> None:
-    """project 컬럼이 없는 기존 행을 마이그레이션: tags 패턴으로 출처 프로젝트 추론"""
-    rows = conn.execute("SELECT key, tags FROM memory WHERE project = ''").fetchall()
-    for row in rows:
-        try:
-            tags = json.loads(row['tags']) if row['tags'] else []
-            project = ''
-            if 'claude' in tags and len(tags) > 3:
-                project = tags[3]      # ['claude', 'terminal-N', stem, proj_dir_name]
-            elif 'gemini' in tags and len(tags) > 2:
-                project = tags[2]      # ['gemini', 'terminal-N', proj_name, type]
-            else:
-                project = PROJECT_ID   # 수동 추가 항목 → 현재 프로젝트 귀속
-            if project:
-                conn.execute("UPDATE memory SET project = ? WHERE key = ?", (project, row['key']))
-        except Exception:
-            pass
+
+def _memory_conn():
+    return None
 
 
 def _init_memory_db() -> None:
@@ -2041,56 +2026,21 @@ class SSEHandler(BaseHTTPRequestHandler):
                 KNOWN_AGENTS = ['claude', 'gemini', 'codex']
                 IDLE_SEC = 300  # 5분
 
-                # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
-                agent_last_seen: dict = {a: None for a in KNOWN_AGENTS}
-                try:
-                    # hive_mind.db session_logs에서 에이전트 활동 시각 조회
-                    # 실제 agent 값이 'Claude', 'Gemini CLI', 'Gemini-1' 등 대소문자 혼합이므로 LOWER/LIKE 사용
-                    conn_h = sqlite3.connect(str(DATA_DIR / 'hive_mind.db'), timeout=5, check_same_thread=False)
-                    conn_h.row_factory = sqlite3.Row
-                    for row in conn_h.execute(
-                        "SELECT agent, MAX(ts_start) as last_seen FROM session_logs "
-                        "WHERE LOWER(agent) LIKE '%claude%' "
-                        "OR LOWER(agent) LIKE '%gemini%' "
-                        "OR LOWER(agent) LIKE '%codex%' "
-                        "GROUP BY LOWER(agent) ORDER BY last_seen DESC"
-                    ).fetchall():
-                        agent_lower = row['agent'].lower()
-                        if 'claude' in agent_lower and agent_last_seen.get('claude') is None:
-                            agent_last_seen['claude'] = row['last_seen']
-                        elif 'gemini' in agent_lower and agent_last_seen.get('gemini') is None:
-                            agent_last_seen['gemini'] = row['last_seen']
-                        elif 'codex' in agent_lower and agent_last_seen.get('codex') is None:
-                            agent_last_seen['codex'] = row['last_seen']
-                    conn_h.close()
-                except Exception:
-                    pass
+                # 에이전트 마지막 활동 시각 (Postgres 우선, 파일 레거시 폴백)
+                agent_last_seen: dict = get_agent_last_seen(KNOWN_AGENTS)
+                for agent_name, last_seen in get_agent_last_seen_from_sessions(DATA_DIR, KNOWN_AGENTS).items():
+                    if last_seen and (agent_last_seen.get(agent_name) is None or last_seen > agent_last_seen[agent_name]):
+                        agent_last_seen[agent_name] = last_seen
 
-                # shared_memory.db author 필드로 보완 — 더 최신 활동 기록 포함
-                try:
-                    conn_sm = sqlite3.connect(str(DATA_DIR / 'shared_memory.db'), timeout=5, check_same_thread=False)
-                    conn_sm.row_factory = sqlite3.Row
-                    for row in conn_sm.execute(
-                        "SELECT author, MAX(updated_at) as last_seen FROM memory "
-                        "WHERE LOWER(author) LIKE '%claude%' "
-                        "OR LOWER(author) LIKE '%gemini%' "
-                        "OR LOWER(author) LIKE '%codex%' "
-                        "GROUP BY LOWER(author) ORDER BY last_seen DESC"
-                    ).fetchall():
-                        author_lower = row['author'].lower()
-                        last = row['last_seen']
-                        if 'claude' in author_lower:
-                            if agent_last_seen.get('claude') is None or (last and last > (agent_last_seen['claude'] or '')):
-                                agent_last_seen['claude'] = last
-                        elif 'gemini' in author_lower:
-                            if agent_last_seen.get('gemini') is None or (last and last > (agent_last_seen['gemini'] or '')):
-                                agent_last_seen['gemini'] = last
-                        elif 'codex' in author_lower:
-                            if agent_last_seen.get('codex') is None or (last and last > (agent_last_seen['codex'] or '')):
-                                agent_last_seen['codex'] = last
-                    conn_sm.close()
-                except Exception:
-                    pass
+                # 메모리 작성 시각으로 보완 — 더 최신 활동 기록 포함
+                for row in list_memory(top_k=100, show_all=True):
+                    author_lower = str(row.get('author', '')).lower()
+                    last = row.get('updated_at')
+                    for agent_name in KNOWN_AGENTS:
+                        if agent_name in author_lower:
+                            current = agent_last_seen.get(agent_name)
+                            if last and (current is None or last > current):
+                                agent_last_seen[agent_name] = last
 
                 # in-memory AGENT_STATUS 로 보완 (가장 실시간 하트비트)
                 with AGENT_STATUS_LOCK:
@@ -2292,6 +2242,25 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
                 subprocess.Popen(
                     [sys.executable, str(kanban_script)],
+                    creationflags=_no_window,
+                    close_fds=True,
+                )
+                self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
+        # ── 지식 그래프 독립 창 실행 — PySide6 QWebEngineView (?graph=1 모드) ──
+        if path == '/api/graph/launch':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                graph_script = BASE_DIR / 'knowledge_graph_window.py'
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                subprocess.Popen(
+                    [sys.executable, str(graph_script), str(HTTP_PORT)],
                     creationflags=_no_window,
                     close_fds=True,
                 )
@@ -3167,56 +3136,15 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                # 소스: APPDATA DB / 타겟: 현재 프로젝트 로컬 DB
-                src_db_path = str(MEMORY_DB)  # 서버 시작 시 결정된 DB (APPDATA 또는 로컬)
-                # 현재 로컬 DB 경로 결정 (_memory_conn 로직과 동일)
-                tgt_db_path = src_db_path
-                if CONFIG_FILE.exists():
-                    cfg_data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-                    last_path = cfg_data.get('last_path', '')
-                    if last_path:
-                        local_db = Path(last_path) / ".ai_monitor" / "data" / "shared_memory.db"
-                        if local_db.exists():
-                            tgt_db_path = str(local_db)
+                src_data_dir = DATA_DIR
+                tgt_data_dir = _legacy_memory_data_dir()
                 merged = 0
                 skipped = 0
-                if src_db_path != tgt_db_path:
-                    # 두 DB가 다를 때만 동기화 의미 있음
-                    src_conn = sqlite3.connect(src_db_path, timeout=5)
-                    src_conn.row_factory = sqlite3.Row
-                    tgt_conn = sqlite3.connect(tgt_db_path, timeout=5)
-                    tgt_conn.row_factory = sqlite3.Row
-                    try:
-                        src_rows = src_conn.execute('SELECT * FROM memory').fetchall()
-                        for row in src_rows:
-                            key = row['key']
-                            src_updated = row['updated_at'] or ''
-                            # 타겟에 같은 key가 있는지 확인
-                            existing = tgt_conn.execute(
-                                'SELECT updated_at FROM memory WHERE key=?', (key,)
-                            ).fetchone()
-                            if existing is None or (existing['updated_at'] or '') < src_updated:
-                                # 타겟에 없거나 더 오래됐으면 병합
-                                tgt_conn.execute('''
-                                    INSERT OR REPLACE INTO memory
-                                    (key, id, title, content, tags, author, project, embedding, created_at, updated_at)
-                                    VALUES (?,?,?,?,?,?,?,?,?,?)
-                                ''', (
-                                    row['key'], row['id'], row['title'], row['content'],
-                                    row['tags'], row['author'], row['project'],
-                                    row['embedding'] if 'embedding' in row.keys() else None,
-                                    row['created_at'], row['updated_at'],
-                                ))
-                                merged += 1
-                            else:
-                                skipped += 1
-                        tgt_conn.commit()
-                    finally:
-                        src_conn.close()
-                        tgt_conn.close()
+                if src_data_dir != tgt_data_dir:
+                    merged, skipped = merge_memory_files(src_data_dir, tgt_data_dir)
                     msg = f'동기화 완료: {merged}개 병합, {skipped}개 최신 유지'
                 else:
-                    msg = '로컬 DB와 APPDATA DB가 동일하여 동기화 불필요'
+                    msg = '로컬 저장소와 활성 프로젝트 저장소가 동일하여 동기화 불필요'
                 self.wfile.write(json.dumps(
                     {'status': 'ok', 'message': msg, 'merged': merged, 'skipped': skipped},
                     ensure_ascii=False
@@ -3227,7 +3155,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 ).encode('utf-8'))
 
         elif parsed_path.path == '/api/memory/set':
-            # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (SQLite INSERT OR REPLACE)
+            # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (file store)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -3246,37 +3174,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                 now     = time.strftime('%Y-%m-%dT%H:%M:%S')
                 title   = str(data.get('title', key)).strip()[:300]
                 project = str(data.get('project', PROJECT_ID)).strip() or PROJECT_ID
-                entry = {
-                    'key':        key,
-                    'id':         str(int(time.time() * 1000)),
-                    'title':      title,
-                    'content':    content,
-                    'tags':       json.dumps(data.get('tags', []), ensure_ascii=False),
-                    'author':     str(data.get('author', 'unknown')),
-                    'timestamp':  now,
+                legacy_dir = _legacy_memory_data_dir()
+                existing = get_memory_entry(legacy_dir, key)
+                entry = upsert_memory_entry(legacy_dir, {
+                    'key': key,
+                    'title': title,
+                    'content': content,
+                    'tags': data.get('tags', []),
+                    'author': str(data.get('author', 'unknown')),
+                    'project': project,
+                    'created_at': existing.get('created_at', now) if existing else now,
                     'updated_at': now,
-                    'project':    project,
-                }
-
-                # 임베딩 생성 (백그라운드 스레드에서 비동기로 수행해도 되지만
-                # 여기서는 단순화를 위해 동기 처리 — 보통 0.05초 이내)
-                emb = _embed(f"{title}\n{content}")
-
-                with _memory_conn() as conn:
-                    # 기존 항목이면 timestamp(최초)는 유지, updated_at만 갱신
-                    existing = conn.execute('SELECT timestamp FROM memory WHERE key=?', (key,)).fetchone()
-                    if existing:
-                        entry['timestamp'] = existing['timestamp']
-                    conn.execute(
-                        'INSERT OR REPLACE INTO memory '
-                        '(key,id,title,content,tags,author,timestamp,updated_at,project,embedding) '
-                        'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                        (entry['key'], entry['id'], entry['title'], entry['content'],
-                         entry['tags'], entry['author'], entry['timestamp'], entry['updated_at'],
-                         entry['project'], emb)
-                    )
-
-                entry['tags'] = json.loads(entry['tags'])
+                })
                 self.wfile.write(json.dumps({'status': 'success', 'entry': entry}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
@@ -3291,9 +3200,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 post_data = self.rfile.read(content_length)
                 data = json.loads(post_data.decode('utf-8'))
                 key = str(data.get('key', '')).strip()
-                with _memory_conn() as conn:
-                    conn.execute('DELETE FROM memory WHERE key=?', (key,))
-                
+                delete_memory_entry(_legacy_memory_data_dir(), key)
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))

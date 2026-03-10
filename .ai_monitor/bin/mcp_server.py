@@ -149,6 +149,40 @@ TOOLS = [
         },
     },
     {
+        "name": "log_thought",
+        "description": (
+            "Record a thought/decision/action to the Hive knowledge graph (pg_thoughts table). "
+            "This is how Codex appears as nodes in the Knowledge Graph visualization. "
+            "Call this after completing significant actions: file edits, decisions, git commits, "
+            "bug fixes, etc. Use type='decision' for architectural choices, 'action' for file "
+            "changes, 'log' for general notes."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short title for the thought (e.g. '파일 수정: App.tsx', 'Git 커밋')",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Detail of what was done or decided",
+                },
+                "skill": {
+                    "type": "string",
+                    "description": "Skill/category (e.g. 'file-edit', 'git', 'debug', 'build', 'session')",
+                    "default": "general",
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Node type: 'decision', 'action', or 'log'",
+                    "default": "action",
+                },
+            },
+            "required": ["title", "content"],
+        },
+    },
+    {
         "name": "hive_memory_set",
         "description": (
             "Write a key-value entry to the Hive shared memory (PostgreSQL hive_memory table). "
@@ -326,6 +360,32 @@ def handle_tool_call(name: str, args: dict) -> str:
                 lines = [l for l in output.splitlines() if channel_filter in l or l.startswith("📜")]
                 return "\n".join(lines) or f"({channel_filter} 채널 메시지 없음)"
             return output or "(메시지 없음)"
+        except Exception as exc:
+            return f"[error] {exc}"
+
+    if name == "log_thought":
+        # pg_thoughts에 Codex 노드 기록 — 지식 그래프에 표시됨
+        title   = args.get("title", "")
+        content = args.get("content", "")
+        skill   = args.get("skill", "general")
+        t_type  = args.get("type", "action")
+        thought = {"type": t_type, "title": title, "content": content}
+        # ensure_ascii=True: 한글 → \\uXXXX 이스케이프 (psql -c 인코딩 오류 방지)
+        safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought) "
+               f"VALUES ('codex', '{skill}', '{safe_thought}'::jsonb);")
+        try:
+            pg_bin = AI_MONITOR_DIR / "bin" / "pgsql" / "bin" / "psql.exe"
+            if not pg_bin.exists():
+                pg_bin = Path("psql")
+            result = subprocess.run(
+                [str(pg_bin), "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql],
+                capture_output=True, text=True, timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if "INSERT" in result.stdout:
+                return f"[지식 그래프] Codex 노드 기록 완료: {title}"
+            return f"[지식 그래프] 기록 실패: {result.stderr.strip()[:100]}"
         except Exception as exc:
             return f"[error] {exc}"
 

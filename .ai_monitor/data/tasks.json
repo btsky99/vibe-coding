@@ -1093,7 +1093,7 @@
     "id": "20260310203837496336",
     "title": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
     "description": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "claude",
     "priority": "medium",
     "created_by": "user",
@@ -1103,10 +1103,90 @@
     "id": "20260310203841709348",
     "title": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
     "description": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "claude",
     "priority": "medium",
     "created_by": "user",
     "created_at": "2026-03-10T20:38:41.709348"
+  },
+  {
+    "id": "20260310210234063791",
+    "title": "ui당현이 만들어야지 어디다 어떻게 만들거야",
+    "description": "ui당현이 만들어야지 어디다 어떻게 만들거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:02:34.063791"
+  },
+  {
+    "id": "20260310210252897704",
+    "title": "ui당현이 만들어야지 어디다 어떻게 만들거야",
+    "description": "ui당현이 만들어야지 어디다 어떻게 만들거야",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:02:52.897704"
+  },
+  {
+    "id": "20260310210504869312",
+    "title": "- A안 + 2안 — 독립 패널로 크게  퀀리티 있게 이걸로 가야지 안니",
+    "description": "- A안 + 2안 — 독립 패널로 크게  퀀리티 있게 이걸로 가야지 안니",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:05:04.869312"
+  },
+  {
+    "id": "20260310211248671760",
+    "title": "자 질문  지금  설치 버전이던     개발 용이던    실해용이던 한개만 실행이 되젆아  복수로 실행되게도가능한가 4개까지  4개이상이면  버",
+    "description": "자 질문  지금  설치 버전이던     개발 용이던    실해용이던 한개만 실행이 되젆아  복수로 실행되게도가능한가 4개까지  4개이상이면  버거울거같고 가낭한가 바이브 코디잉 4개까지는 실행되게  ?",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:12:48.671760"
+  },
+  {
+    "id": "20260310211253316248",
+    "title": "자 질문  지금  설치 버전이던     개발 용이던    실해용이던 한개만 실행이 되젆아  복수로 실행되게도가능한가 4개까지  4개이상이면  버",
+    "description": "자 질문  지금  설치 버전이던     개발 용이던    실해용이던 한개만 실행이 되젆아  복수로 실행되게도가능한가 4개까지  4개이상이면  버거울거같고 가낭한가 바이브 코디잉 4개까지는 실행되게  ?",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:12:53.316248"
+  },
+  {
+    "id": "20260310211430176859",
+    "title": "시작해",
+    "description": "시작해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:14:30.176859"
+  },
+  {
+    "id": "20260310211818780393",
+    "title": "중요한거  프로그램 x 버튼 종료시  좀비서버가 남으면 안됨 ok",
+    "description": "중요한거  프로그램 x 버튼 종료시  좀비서버가 남으면 안됨 ok",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:18:18.780393"
+  },
+  {
+    "id": "20260310211823063026",
+    "title": "중요한거  프로그램 x 버튼 종료시  좀비서버가 남으면 안됨 ok",
+    "description": "중요한거  프로그램 x 버튼 종료시  좀비서버가 남으면 안됨 ok",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T21:18:23.063026"
   }
 ]

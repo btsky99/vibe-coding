@@ -2,11 +2,17 @@ import csv
 import io
 import json
 import os
-import sqlite3
 import subprocess
 import threading
 import time
 from pathlib import Path
+
+from src.file_store import (
+    ensure_legacy_store,
+    load_memory_entries,
+    load_session_logs,
+    load_skill_chain_rows,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -225,27 +231,18 @@ def execute_raw(sql: str, timeout: int = 15) -> bool:
 
 def migrate_legacy_data(data_dir: Path | None = None) -> None:
     data_dir = data_dir or DATA_DIR
-    _migrate_memory(data_dir / 'shared_memory.db')
-    _migrate_sessions(data_dir / 'hive_mind.db')
+    ensure_legacy_store(data_dir)
+    _migrate_memory(data_dir)
+    _migrate_sessions(data_dir)
     _migrate_tasks(data_dir / 'tasks.json')
     _migrate_state_file(data_dir / 'hive_health.json', 'health')
     _migrate_state_file(data_dir / 'skill_analysis.json', 'skill_analysis')
-    _migrate_skill_chains(data_dir / 'skill_chain.db')
+    _migrate_skill_chains(data_dir)
 
 
-def _migrate_memory(path: Path) -> None:
-    if not path.exists():
-        return
-    try:
-        with sqlite3.connect(str(path)) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT key, title, content, tags, author, project, timestamp, updated_at FROM memory"
-            ).fetchall()
-    except Exception:
-        return
+def _migrate_memory(data_dir: Path) -> None:
+    rows = load_memory_entries(data_dir)
     for row in rows:
-        row = dict(row)
         set_memory(
             key=row.get('key', ''),
             content=row.get('content', ''),
@@ -253,27 +250,14 @@ def _migrate_memory(path: Path) -> None:
             tags=_parse_json_text(row.get('tags'), []),
             author=row.get('author', 'unknown'),
             project=row.get('project', ''),
-            created_at=row.get('timestamp') or row.get('updated_at') or '',
-            updated_at=row.get('updated_at') or row.get('timestamp') or '',
+            created_at=row.get('created_at') or row.get('updated_at') or '',
+            updated_at=row.get('updated_at') or row.get('created_at') or '',
         )
 
 
-def _migrate_sessions(path: Path) -> None:
-    if not path.exists():
-        return
-    try:
-        with sqlite3.connect(str(path)) as conn:
-            conn.row_factory = sqlite3.Row
-            exists = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='session_logs'"
-            ).fetchone()
-            if not exists:
-                return
-            rows = conn.execute("SELECT * FROM session_logs ORDER BY id").fetchall()
-    except Exception:
-        return
+def _migrate_sessions(data_dir: Path) -> None:
+    rows = list(reversed(load_session_logs(data_dir)))
     for row in rows:
-        row = dict(row)
         upsert_session_log(
             session_id=row.get('session_id', ''),
             terminal_id=row.get('terminal_id', ''),
@@ -285,7 +269,7 @@ def _migrate_sessions(path: Path) -> None:
             files_changed=_parse_json_text(row.get('files_changed'), []),
             ts_start=row.get('ts_start', ''),
             ts_end=row.get('ts_end', ''),
-            legacy_source='hive_mind.db',
+            legacy_source='session_logs.jsonl',
             legacy_id=row.get('id'),
         )
 
@@ -314,22 +298,9 @@ def _migrate_state_file(path: Path, state_key: str) -> None:
     save_state(state_key, payload)
 
 
-def _migrate_skill_chains(path: Path) -> None:
-    if not path.exists():
-        return
-    try:
-        with sqlite3.connect(str(path)) as conn:
-            conn.row_factory = sqlite3.Row
-            exists = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='skill_chains'"
-            ).fetchone()
-            if not exists:
-                return
-            rows = conn.execute("SELECT * FROM skill_chains ORDER BY id").fetchall()
-    except Exception:
-        return
+def _migrate_skill_chains(data_dir: Path) -> None:
+    rows = load_skill_chain_rows(data_dir)
     for row in rows:
-        row = dict(row)
         upsert_skill_chain_row(row, legacy_id=row.get('id'))
 
 

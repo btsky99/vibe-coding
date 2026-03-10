@@ -1,30 +1,86 @@
-{
-  "session_id": "20260301_155339",
-  "request": "커밋하고 푸시하고 릴리즈",
-  "plan": [
-    "git-commit",
-    "git-push",
-    "vibe-release"
-  ],
-  "current_step": 1,
-  "results": [
-    {
-      "skill": "git-commit",
-      "status": "pending",
-      "summary": ""
-    },
-    {
-      "skill": "git-push",
-      "status": "running",
-      "summary": ""
-    },
-    {
-      "skill": "vibe-release",
-      "status": "pending",
-      "summary": ""
-    }
-  ],
-  "status": "running",
-  "started_at": "2026-03-01T15:53:39",
-  "updated_at": "2026-03-01T15:54:21"
-}
+[
+  {
+    "id": 6,
+    "session_id": "20260309_225044",
+    "terminal_id": 2,
+    "request": "초지능 하이브 고도화 4대 과제 통합 진행",
+    "skill_num": 5,
+    "skill_name": "vibe-execute-plan",
+    "step_order": 2,
+    "status": "done",
+    "summary": "Phase 6 (Task 14~17) 코어 구현 완료",
+    "started_at": "2026-03-09T22:50:44",
+    "updated_at": "2026-03-09T23:00:28",
+    "agent": "gemini"
+  },
+  {
+    "id": 5,
+    "session_id": "20260309_225044",
+    "terminal_id": 2,
+    "request": "초지능 하이브 고도화 4대 과제 통합 진행",
+    "skill_num": 4,
+    "skill_name": "vibe-write-plan",
+    "step_order": 1,
+    "status": "done",
+    "summary": "Phase 6 기획 및 계획서 작성 완료",
+    "started_at": "2026-03-09T22:50:44",
+    "updated_at": "2026-03-09T22:52:25",
+    "agent": "gemini"
+  },
+  {
+    "id": 4,
+    "session_id": "20260309_225044",
+    "terminal_id": 2,
+    "request": "초지능 하이브 고도화 4대 과제 통합 진행",
+    "skill_num": 3,
+    "skill_name": "vibe-brainstorm",
+    "step_order": 0,
+    "status": "skipped",
+    "summary": "",
+    "started_at": "2026-03-09T22:50:44",
+    "updated_at": "2026-03-09T22:50:44",
+    "agent": "gemini"
+  },
+  {
+    "id": 3,
+    "session_id": "20260301_191521",
+    "terminal_id": 1,
+    "request": "테스트 요청",
+    "skill_num": 3,
+    "skill_name": "vibe-brainstorm",
+    "step_order": 2,
+    "status": "skipped",
+    "summary": "",
+    "started_at": "2026-03-01T19:15:21",
+    "updated_at": "2026-03-01T19:15:21",
+    "agent": ""
+  },
+  {
+    "id": 2,
+    "session_id": "20260301_191521",
+    "terminal_id": 1,
+    "request": "테스트 요청",
+    "skill_num": 2,
+    "skill_name": "vibe-tdd",
+    "step_order": 1,
+    "status": "skipped",
+    "summary": "",
+    "started_at": "2026-03-01T19:15:21",
+    "updated_at": "2026-03-01T19:15:21",
+    "agent": ""
+  },
+  {
+    "id": 1,
+    "session_id": "20260301_191521",
+    "terminal_id": 1,
+    "request": "테스트 요청",
+    "skill_num": 1,
+    "skill_name": "vibe-debug",
+    "step_order": 0,
+    "status": "skipped",
+    "summary": "",
+    "started_at": "2026-03-01T19:15:21",
+    "updated_at": "2026-03-01T19:15:21",
+    "agent": ""
+  }
+]

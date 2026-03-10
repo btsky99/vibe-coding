@@ -346,7 +346,7 @@ def main():
 
     # ── hive_bridge import (BeforeTool, AfterTool, SessionEnd) ──────
     try:
-        from hive_bridge import log_task
+        from hive_bridge import log_task, log_thought
     except ImportError:
         _success_response()
         return
@@ -392,11 +392,21 @@ def main():
             content = tool_input.get("content") or tool_input.get("text") or ""
             lines = len(content.splitlines()) if content else 0
             log_task("Gemini", f"[생성 완료] {_short_path(fp)} ({lines}줄) ✓")
+            log_thought("gemini", "file-write", {
+                "type": "action",
+                "title": f"파일 생성: {_short_path(fp)}",
+                "content": f"{lines}줄 작성. 미리보기: {_snippet(content, 80)}"
+            })
 
         elif tool_name in ("replace", "edit_file", "str_replace"):
             fp = _get_path(tool_input)
             result_suffix = f" → {result_text}" if result_text else " ✓"
             log_task("Gemini", f"[수정 완료] {_short_path(fp)}{result_suffix}")
+            log_thought("gemini", "file-edit", {
+                "type": "action",
+                "title": f"파일 수정: {_short_path(fp)}",
+                "content": f"결과: {result_text or '성공'}"
+            })
 
         elif tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
             cmd = (tool_input.get("command") or tool_input.get("cmd") or tool_input.get("code", "")).strip()
@@ -404,6 +414,11 @@ def main():
                 pass
             elif "git commit" in cmd:
                 log_task("Gemini", f"[커밋] {_short_cmd(cmd)}")
+                log_thought("gemini", "git", {
+                    "type": "decision",
+                    "title": "Git 커밋",
+                    "content": _short_cmd(cmd)
+                })
             else:
                 result_suffix = f" → {result_text}" if result_text else " ✓"
                 log_task("Gemini", f"[실행 완료] {_short_cmd(cmd, 50)}{result_suffix}")

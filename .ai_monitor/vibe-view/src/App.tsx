@@ -68,6 +68,19 @@ function App() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   // 칸반 보드 팝아웃 모드 — 드래그 가능한 플로팅 윈도우로 표시
   const [isKanbanExpanded, setIsKanbanExpanded] = useState(false);
+  // 지식 그래프 팝아웃 모드 — 좁은 사이드바 대신 플로팅 창으로 표시
+  const [isGraphExpanded, setIsGraphExpanded] = useState(false);
+  const initGraphSize = { width: Math.min(window.innerWidth * 0.80, 1100), height: Math.min(window.innerHeight * 0.80, 760) };
+  const [graphPos, setGraphPos] = useState({
+    x: Math.round((window.innerWidth  - initGraphSize.width)  / 2),
+    y: Math.round((window.innerHeight - initGraphSize.height) / 2),
+  });
+  const [graphSize, setGraphSize] = useState(initGraphSize);
+  const graphDragStart = useRef({ x: 0, y: 0 });
+  const graphResizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const [isGraphDragging, setIsGraphDragging] = useState(false);
+  const [isGraphResizing, setIsGraphResizing] = useState(false);
+  const [isGraphMaximized, setIsGraphMaximized] = useState(false);
   // 칸반 팝업 위치/크기 — 열릴 때마다 화면 중앙에서 시작, 드래그로 자유롭게 이동 가능
   const initKanbanSize = { width: Math.min(window.innerWidth * 0.85, 1300), height: Math.min(window.innerHeight * 0.82, 820) };
   const [kanbanPos, setKanbanPos] = useState({
@@ -581,6 +594,11 @@ function App() {
               setIsKanbanExpanded(true);
               return;
             }
+            // 지식 그래프 — 좁은 사이드바 대신 팝업 창으로 열기
+            if (tab === 'graph') {
+              setIsGraphExpanded(true);
+              return;
+            }
             setActiveTab(tab);
             setIsSidebarOpen(true);
           }}
@@ -647,9 +665,6 @@ function App() {
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} />
-            ) : activeTab === 'graph' ? (
-              /* 지식 그래프 패널 — pg_thoughts 계보 force-directed 시각화 */
-              <KnowledgeGraphPanel />
             ) : (
               /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
               <FileExplorer
@@ -751,6 +766,98 @@ function App() {
           </main>
         </div>
       </div>
+
+      {/* ── 지식 그래프 드래그 가능 플로팅 윈도우 ── */}
+      {isGraphExpanded && (
+        <div
+          className={`fixed z-[9990] bg-[#1e1e1e] flex flex-col overflow-hidden shadow-2xl transition-none ${
+            isGraphMaximized ? 'border-0 rounded-none' : 'border border-white/15 rounded-lg'
+          }`}
+          style={isGraphMaximized ? {
+            left: 0, top: 0, width: '100vw', height: '100vh', cursor: 'default',
+          } : {
+            left: graphPos.x,
+            top: graphPos.y,
+            width: graphSize.width,
+            height: graphSize.height,
+            minWidth: 500,
+            minHeight: 400,
+            cursor: isGraphDragging ? 'grabbing' : 'default',
+          }}
+          onPointerMove={e => {
+            if (isGraphDragging) {
+              setGraphPos({ x: e.clientX - graphDragStart.current.x, y: e.clientY - graphDragStart.current.y });
+            } else if (isGraphResizing) {
+              const dw = e.clientX - graphResizeStart.current.x;
+              const dh = e.clientY - graphResizeStart.current.y;
+              setGraphSize({ width: Math.max(500, graphResizeStart.current.w + dw), height: Math.max(400, graphResizeStart.current.h + dh) });
+            }
+          }}
+          onPointerUp={() => { setIsGraphDragging(false); setIsGraphResizing(false); }}
+        >
+          {/* 팝업 헤더 */}
+          <div
+            className="h-10 px-4 flex items-center justify-between bg-[#252526] border-b border-black/40 shrink-0 select-none"
+            style={{ cursor: isGraphMaximized ? 'default' : (isGraphDragging ? 'grabbing' : 'grab') }}
+            onPointerDown={e => {
+              if (isGraphMaximized) return;
+              setIsGraphDragging(true);
+              graphDragStart.current = { x: e.clientX - graphPos.x, y: e.clientY - graphPos.y };
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">지식 그래프</span>
+              {!isGraphMaximized && <span className="text-[9px] text-[#555] select-none">⠿ 드래그로 이동</span>}
+            </div>
+            <div className="flex items-center gap-1">
+              {/* 독립 창으로 열기 — 다른 모니터로 이동 가능한 PySide6 네이티브 창 */}
+              <button
+                onPointerDown={e => e.stopPropagation()}
+                onClick={() => {
+                  fetch(`${API_BASE}/api/graph/launch`, { method: 'POST' }).catch(() => {});
+                  setIsGraphExpanded(false);
+                }}
+                className="hover:bg-white/10 p-1 rounded transition-colors"
+                title="독립 창으로 열기 (다른 모니터 이동 가능)"
+              >
+                <ExternalLink className="w-4 h-4 text-[#aaa]" />
+              </button>
+              <button
+                onPointerDown={e => e.stopPropagation()}
+                onClick={() => setIsGraphMaximized(v => !v)}
+                className="hover:bg-white/10 p-1 rounded transition-colors"
+                title={isGraphMaximized ? '창 크기 복원' : '전체화면으로 확장'}
+              >
+                {isGraphMaximized ? <Minimize2 className="w-4 h-4 text-[#aaa]" /> : <Maximize2 className="w-4 h-4 text-[#aaa]" />}
+              </button>
+              <button
+                onPointerDown={e => e.stopPropagation()}
+                onClick={() => { setIsGraphMaximized(false); setIsGraphExpanded(false); }}
+                className="hover:bg-white/10 p-1 rounded transition-colors"
+                title="닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          {/* 지식 그래프 패널 본문 */}
+          <div className="flex-1 overflow-hidden">
+            <KnowledgeGraphPanel />
+          </div>
+          {/* 우하단 리사이즈 핸들 */}
+          <div
+            className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
+            style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.15) 50%)' }}
+            onPointerDown={e => {
+              e.stopPropagation();
+              setIsGraphResizing(true);
+              graphResizeStart.current = { x: e.clientX, y: e.clientY, w: graphSize.width, h: graphSize.height };
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            }}
+          />
+        </div>
+      )}
 
       {/* ── 칸반 보드 드래그 가능 플로팅 윈도우 — 다른 모니터로도 이동 가능 ── */}
       {isKanbanExpanded && (
@@ -922,11 +1029,30 @@ function KanbanOnlyApp() {
   );
 }
 
+// ─── 지식 그래프 전용 창 — ?graph=1 파라미터로 열릴 때 렌더링 ─────────────
+// PySide6 QWebEngineView 독립 창에서 로드되는 풀스크린 그래프 뷰
+function GraphOnlyApp() {
+  return (
+    <div className="w-screen h-screen bg-[#0d0d0d] text-[#cccccc] font-sans flex flex-col overflow-hidden">
+      {/* 최소 타이틀바 */}
+      <div className="h-8 bg-[#252526] border-b border-black/40 flex items-center px-3 shrink-0 select-none">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">지식 그래프</span>
+        <span className="text-[9px] text-[#555] ml-2">— 이 창을 다른 모니터로 드래그하세요</span>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <KnowledgeGraphPanel />
+      </div>
+    </div>
+  );
+}
+
 // ─── 루트 진입점 — URL 파라미터로 렌더링 모드 분기 ─────────────────────────
-// ?kanban=1 쿼리 파라미터가 있으면 칸반 전용 창, 없으면 전체 앱 렌더링
+// ?kanban=1 / ?graph=1 쿼리 파라미터에 따라 전용 창 렌더링
 function Root() {
-  const isKanbanMode = new URLSearchParams(window.location.search).has('kanban');
-  return isKanbanMode ? <KanbanOnlyApp /> : <App />;
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('kanban')) return <KanbanOnlyApp />;
+  if (params.has('graph'))  return <GraphOnlyApp />;
+  return <App />;
 }
 
 export default Root;

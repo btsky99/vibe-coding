@@ -34,7 +34,6 @@ import os
 import sys
 import time
 import json
-import sqlite3
 import subprocess
 import urllib.request
 import urllib.error
@@ -69,8 +68,6 @@ def _resolve_data_dir() -> Path:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = _resolve_data_dir()
 LOG_FILE = DATA_DIR / "task_logs.jsonl"
-DB_FILE = DATA_DIR / "hive_mind.db"
-MEMORY_DB = DATA_DIR / "shared_memory.db"
 
 # 기본 HTTP 포트 (server.py와 동일하게 9000 선호)
 HTTP_PORT = 9000

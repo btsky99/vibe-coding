@@ -18,7 +18,6 @@ import os
 import time
 import json
 import argparse
-import sqlite3
 import urllib.request
 import urllib.error
 import webbrowser
@@ -111,28 +110,6 @@ def find_port() -> int | None:
     return None
 
 
-# ─── 로컬 DB / 파일 접근 헬퍼 ────────────────────────────────────────────────
-
-def _hive_db_path() -> str:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, '..', '.ai_monitor', 'data', 'hive_mind.db')
-
-
-def _tasks_file_path() -> str:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, '..', '.ai_monitor', 'data', 'tasks.json')
-
-
-def _open_hive_db() -> sqlite3.Connection:
-    """hive_mind.db 커넥션 반환 (없으면 None)"""
-    path = _hive_db_path()
-    if not os.path.exists(path):
-        return None
-    conn = sqlite3.connect(path, timeout=5)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def _load_tasks() -> list:
     """tasks.json 직접 읽기"""
     try:
@@ -152,7 +129,7 @@ def _save_tasks(tasks: list) -> None:
 
 def get_agent_last_seen() -> dict:
     """
-    hive_mind.db session_logs 테이블에서 에이전트별 마지막 활동 시각 조회.
+    Postgres 세션 로그에서 에이전트별 마지막 활동 시각 조회.
     반환: {'claude': '2026-02-23T12:00:00', 'gemini': None, ...}
     """
     try:
