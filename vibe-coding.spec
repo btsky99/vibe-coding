@@ -11,6 +11,9 @@
 #   - 이전 버전과 동시에 보관 가능 / 다운로드 시 버전 식별 용이
 # [2026-03-01] Claude — datas 보강: scripts/, src/, skills/claude/, .gemini/skills/
 #   - 배포 버전에서 스킬 설치/인식 실패 버그 수정
+# [2026-03-11] Claude — binaries 보강: winpty-agent.exe, OpenConsole.exe 추가
+#   - 이 파일들이 없으면 PtyProcess.spawn() 실패 → PTY Init Error → WS 즉시 닫힘
+#   - winpty.dll/conpty.dll은 자동 감지되나 .exe 파일은 수동으로 포함해야 함
 # [2026-03-08] Claude — datas 보강: .claude/commands/, AGENTS.md 추가
 #   - .claude/commands/ 주석엔 있었지만 실제 datas에 누락되어 있던 버그 수정
 #   - AGENTS.md(Codex 지침) 추가 — 다른 PC 설치 시 Codex 오케스트레이션 규칙 포함
@@ -19,6 +22,13 @@
 # ────────────────────────────────────────────────────────────────────────────
 
 import re as _re
+import sys as _sys
+from pathlib import Path as _Path
+import winpty as _winpty_mod
+
+# winpty 실행 파일 경로 (winpty-agent.exe, OpenConsole.exe)
+# 이 파일들이 EXE 번들에 없으면 PtyProcess.spawn() 실패 → PTY 터미널 불가
+_winpty_dir = _Path(_winpty_mod.__file__).parent
 
 # _version.py에서 버전 자동 읽기 — EXE 파일명에 포함
 with open('.ai_monitor/_version.py', 'r', encoding='utf-8') as _vf:
@@ -32,7 +42,15 @@ print(f'[spec] 빌드 버전: {_APP_VERSION}  →  {_EXE_NAME}.exe')
 a = Analysis(
     ['.ai_monitor\\server.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        # winpty 실행 파일 — PtyProcess.spawn()이 내부적으로 이 파일들을 필요로 함
+        # winpty.dll/conpty.dll은 PyInstaller가 자동 감지하나 .exe는 수동 포함 필수
+        # 'winpty' 서브디렉터리에 배치: server.py가 os.add_dll_directory(BASE_DIR/'winpty') 호출함
+        (str(_winpty_dir / 'winpty-agent.exe'), 'winpty'),
+        (str(_winpty_dir / 'OpenConsole.exe'), 'winpty'),
+        (str(_winpty_dir / 'winpty.dll'), 'winpty'),
+        (str(_winpty_dir / 'conpty.dll'), 'winpty'),
+    ],
     datas=[
         # 프론트엔드 빌드 결과물 (React/Vite)
         ('.ai_monitor/vibe-view/dist', 'vibe-view/dist'),
