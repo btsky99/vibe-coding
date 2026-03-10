@@ -11,12 +11,14 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-03-11] Claude — PostgreSQL 포터블 바이너리 자동 설치 추가 (v3.7.48)
+;              {app}\pgsql\ 에 bin/lib/share 포함. initdb 및 포트 설정은 server.py가 최초 기동 시 수행.
 ; [2026-03-08] Claude — 설치 EXE 고정 파일명(vibe-coding.exe)으로 변경. 버전 업 시 자동 덮어쓰기
 ; [2026-03-01] Claude — 최초 생성. 포터블 EXE → 설치버전 파이프라인 구축
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Vibe Coding"
-#define MyAppVersion   "3.7.46"
+#define MyAppVersion   "3.7.48"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
@@ -67,6 +69,13 @@ Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDe
 [Files]
 ; PyInstaller로 생성된 EXE (단일 파일) — 고정 파일명(vibe-coding.exe)으로 설치
 Source: "dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+
+; ── PostgreSQL 포터블 바이너리 (pgAdmin 4 제외, 필수 파일만 포함 — ~142MB) ──
+; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb + pg_ctl start 자동 수행.
+; data/ 폴더는 포함하지 않음 → 각 PC의 %APPDATA%\VibeCoding\pgdata\ 에 새로 생성됨.
+Source: ".ai_monitor\bin\pgsql\bin\*"; DestDir: "{app}\pgsql\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: ".ai_monitor\bin\pgsql\lib\*"; DestDir: "{app}\pgsql\lib"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: ".ai_monitor\bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; 시작 메뉴

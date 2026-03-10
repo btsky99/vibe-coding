@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-11] - Claude (배포 버전 PostgreSQL 자동 시작/경로 수정)
+#   - PG_BIN: frozen 모드에서 {exe 디렉터리}\pgsql\bin\psql.exe 로 수정
+#   - ensure_postgres_running(): 배포 버전 최초 실행 시 initdb + pg_ctl start 자동 수행
+#   - 서버 기동 시 ensure_postgres_running() 호출하여 PG 자동 초기화/시작
 # [2026-03-11] - Claude (frozen EXE 무한 창 생성 버그 수정 v3.7.47)
 #   - run_watchdog/run_discord_bridge/run_heal_daemon: sys.executable → _python_runner_cmds()[0]
 #   - frozen 모드에서 sys.executable = EXE 자신이므로 subprocess 실행 시 EXE가 무한 재귀 생성되던 버그
@@ -113,9 +117,128 @@ from src.pg_store import (
 )
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
-# [수정] PROJECT_ROOT가 아래(180번줄)에서 정의되므로, server.py 위치 기준으로 직접 경로 산출
-PG_BIN = Path(__file__).resolve().parent / "bin" / "pgsql" / "bin" / "psql.exe"
+# [수정] frozen(배포) 모드에서는 exe 옆의 pgsql\ 폴더를 사용하고,
+#        개발 모드에서는 .ai_monitor/bin/pgsql/ 을 사용합니다.
+#        installer가 {app}\pgsql\ 에 바이너리를 설치하므로 frozen 시 exe 옆 경로 우선.
+if getattr(sys, 'frozen', False):
+    # 배포 버전: vibe-coding.exe 옆에 installer가 설치한 pgsql\ 폴더
+    _PG_DIR = Path(sys.executable).resolve().parent / "pgsql"
+else:
+    # 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/
+    _PG_DIR = Path(__file__).resolve().parent / "bin" / "pgsql"
+
+PG_BIN     = _PG_DIR / "bin" / "psql.exe"
+PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
+INITDB_BIN = _PG_DIR / "bin" / "initdb.exe"
 PG_PORT = 5433
+
+# 배포 버전 DB 데이터 디렉터리: %APPDATA%\VibeCoding\pgdata
+# 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/data
+if getattr(sys, 'frozen', False):
+    _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
+else:
+    _PG_DATA_DIR = _PG_DIR / "data"
+
+
+def ensure_postgres_running():
+    """배포(frozen) 모드 전용: PostgreSQL이 실행 중이지 않으면 자동으로 초기화하고 시작합니다.
+
+    1) pgsql 바이너리가 없으면 스킵 (설치 안 된 환경 — 개발 모드 등)
+    2) pgdata 디렉터리가 없으면 initdb로 초기화
+    3) pg_ctl status로 실행 여부 확인 후, 미실행 시 pg_ctl start
+    4) 확장(vector, pg_trgm) 활성화 SQL 실행
+    """
+    if not PG_CTL_BIN.exists():
+        print(f"[PG] pg_ctl.exe 없음 → PG 자동시작 스킵 ({PG_CTL_BIN})")
+        return
+
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    pg_log = _PG_DATA_DIR.parent / "pgsql.log"
+
+    # 1) initdb — pgdata 없으면 최초 DB 클러스터 생성
+    if not _PG_DATA_DIR.exists():
+        print(f"[PG] pgdata 없음 → initdb 실행: {_PG_DATA_DIR}")
+        _PG_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            res = subprocess.run(
+                [str(INITDB_BIN), "-D", str(_PG_DATA_DIR),
+                 "-U", "postgres", "-E", "UTF8", "--no-locale"],
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                creationflags=_no_window
+            )
+            if res.returncode != 0:
+                print(f"[PG] initdb 오류:\n{res.stderr}")
+                return
+            print(f"[PG] initdb 완료")
+
+            # postgresql.conf에서 포트를 5433으로 변경
+            pg_conf = _PG_DATA_DIR / "postgresql.conf"
+            if pg_conf.exists():
+                conf_text = pg_conf.read_text(encoding='utf-8')
+                # 기본 포트(5432) → 5433으로 교체, listen_addresses 활성화
+                conf_text = conf_text.replace("#listen_addresses = 'localhost'", "listen_addresses = 'localhost'")
+                conf_text = conf_text.replace("#port = 5432", f"port = {PG_PORT}")
+                conf_text = conf_text.replace("port = 5432", f"port = {PG_PORT}")
+                pg_conf.write_text(conf_text, encoding='utf-8')
+                print(f"[PG] postgresql.conf 포트 {PG_PORT} 설정 완료")
+        except Exception as e:
+            print(f"[PG] initdb 예외: {e}")
+            return
+
+    # 2) 실행 여부 확인
+    try:
+        status_res = subprocess.run(
+            [str(PG_CTL_BIN), "status", "-D", str(_PG_DATA_DIR)],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        if "server is running" in status_res.stdout:
+            print("[PG] 이미 실행 중")
+            return
+    except Exception:
+        pass
+
+    # 3) pg_ctl start
+    print(f"[PG] PostgreSQL 시작 중 (port={PG_PORT})...")
+    try:
+        subprocess.run(
+            [str(PG_CTL_BIN), "start", "-D", str(_PG_DATA_DIR),
+             "-l", str(pg_log), "-o", f"-p {PG_PORT}"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        import time as _time
+        _time.sleep(2)  # PG 기동 대기
+        print("[PG] PostgreSQL 시작 완료")
+
+        # 4) pgvector 확장 설치 시도
+        run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;")
+        run_pg_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+        run_pg_sql("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;")
+        run_pg_sql("""
+            CREATE TABLE IF NOT EXISTS pg_thoughts (
+                id BIGSERIAL PRIMARY KEY,
+                agent TEXT NOT NULL,
+                terminal_id TEXT DEFAULT '',
+                skill TEXT DEFAULT '',
+                thought JSONB NOT NULL DEFAULT '{}',
+                parent_id BIGINT REFERENCES pg_thoughts(id),
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+        run_pg_sql("""
+            CREATE TABLE IF NOT EXISTS pg_logs (
+                id BIGSERIAL PRIMARY KEY,
+                agent TEXT NOT NULL,
+                terminal_id TEXT DEFAULT '',
+                task TEXT NOT NULL,
+                status TEXT DEFAULT 'success',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+        print("[PG] 스키마 및 확장 초기화 완료")
+    except Exception as e:
+        print(f"[PG] 시작 오류: {e}")
 
 def run_pg_sql(sql: str, db: str = "postgres"):
     """psql.exe를 사용하여 SQL을 실행하고 결과를 반환합니다 (psycopg2 미설치 대비)"""
@@ -3863,6 +3986,12 @@ def open_app_window(url):
 
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
+
+    # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 ─────────────────────────────
+    # installer가 {app}\pgsql\ 에 설치한 바이너리를 사용하여 pgdata 초기화 + 서버 기동.
+    # 개발 버전에서는 이미 pg_manager.py가 수동으로 관리하므로 frozen 모드에서만 실행.
+    if getattr(sys, 'frozen', False):
+        ensure_postgres_running()
 
     # ── 프로젝트별 다중 인스턴스 슬롯 락 ────────────────────────────────────
     # 아이콘 클릭할 때마다 새 창이 열리고, 최대 4개까지 동시 실행 가능.
