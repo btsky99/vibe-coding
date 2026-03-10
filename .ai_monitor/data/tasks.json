@@ -673,7 +673,7 @@
     "id": "20260309232850671336",
     "title": "아니 근본적인 원이르 찾아 여저닝 똑같아 외 이거내거 몇일전부터 지적한건데 또고같아  처음히작해서   어디가지했지혐   깃 부터 훌터보고 찾아",
     "description": "아니 근본적인 원이르 찾아 여저닝 똑같아 외 이거내거 몇일전부터 지적한건데 또고같아  처음히작해서   어디가지했지혐   깃 부터 훌터보고 찾아",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "gemini",
     "priority": "medium",
     "created_by": "user",
@@ -693,7 +693,7 @@
     "id": "20260309233742649048",
     "title": "시작해",
     "description": "시작해",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "gemini",
     "priority": "medium",
     "created_by": "user",
@@ -703,7 +703,7 @@
     "id": "20260309235454822250",
     "title": "진행해",
     "description": "진행해",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "gemini",
     "priority": "medium",
     "created_by": "user",
@@ -713,10 +713,400 @@
     "id": "20260310000647437601",
     "title": "1번",
     "description": "1번",
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "gemini",
     "priority": "medium",
     "created_by": "user",
     "created_at": "2026-03-10T00:06:47.437601"
+  },
+  {
+    "id": "20260310013733177070",
+    "title": "시작해",
+    "description": "시작해",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T01:37:33.177070"
+  },
+  {
+    "id": "20260310013818942184",
+    "title": "2. messages.jsonl   3. tasks.json  이건 뭐야 이거  db  퍼스트 에스큐엘로 통합한거 아니야  ?   이건 별겐가",
+    "description": "2. messages.jsonl\n  3. tasks.json  이건 뭐야 이거  db  퍼스트 에스큐엘로 통합한거 아니야  ?   이건 별겐가",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T01:38:18.942184"
+  },
+  {
+    "id": "20260310014318185266",
+    "title": "어 진행해",
+    "description": "어 진행해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T01:43:18.185266"
+  },
+  {
+    "id": "20260310014323781787",
+    "title": "어 진행해",
+    "description": "어 진행해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T01:43:23.781787"
+  },
+  {
+    "id": "20260310014949944219",
+    "title": "ok 커믹하고 넘어가는게 좋지 안을까",
+    "description": "ok 커믹하고 넘어가는게 좋지 안을까",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T01:49:49.944219"
+  },
+  {
+    "id": "20260310015727134617",
+    "title": "하이브 메모리 db 확인 방금 수정중 팅기고   개발용 서버 실행안됨 확인해봐",
+    "description": "하이브 메모리 db 확인 방금 수정중 팅기고   개발용 서버 실행안됨 확인해봐",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T01:57:27.134617"
+  },
+  {
+    "id": "20260310020830961508",
+    "title": "작업 하다 팅겨서   어디까지해지",
+    "description": "작업 하다 팅겨서   어디까지해지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T02:08:30.961508"
+  },
+  {
+    "id": "20260310020838317046",
+    "title": "작업하다 팅겨서  어디까지했지",
+    "description": "작업하다 팅겨서  어디까지했지",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T02:08:38.317046"
+  },
+  {
+    "id": "20260310020848329826",
+    "title": "작업 하다 팅겨서   어디까지해지",
+    "description": "작업 하다 팅겨서   어디까지해지",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T02:08:48.329826"
+  },
+  {
+    "id": "20260310021012545635",
+    "title": "개발서버 안되는거 해결해서  아까하더거 진해해",
+    "description": "개발서버 안되는거 해결해서  아까하더거 진해해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T02:10:12.545635"
+  },
+  {
+    "id": "20260310021016955832",
+    "title": "개발서버 안되는거 해결해서  아까하더거 진해해",
+    "description": "개발서버 안되는거 해결해서  아까하더거 진해해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T02:10:16.955832"
+  },
+  {
+    "id": "20260310080203327822",
+    "title": "먼지 모르겠지만 또 팅겨서",
+    "description": "먼지 모르겠지만 또 팅겨서",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:02:03.327822"
+  },
+  {
+    "id": "20260310080207587614",
+    "title": "먼지 모르겠지만 또 팅겨서",
+    "description": "먼지 모르겠지만 또 팅겨서",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:02:07.587614"
+  },
+  {
+    "id": "20260310080208714323",
+    "title": "어디까지 했지 또 팅겨서",
+    "description": "어디까지 했지 또 팅겨서",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:02:08.714323"
+  },
+  {
+    "id": "20260310080351945811",
+    "title": "진행해",
+    "description": "진행해",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:03:51.945811"
+  },
+  {
+    "id": "20260310082134114755",
+    "title": "다된거야",
+    "description": "다된거야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:21:34.114755"
+  },
+  {
+    "id": "20260310082500303122",
+    "title": "s • esc to intrrupt)Starting Startng MC•arting MCPrting MCP ›Improve documentati",
+    "description": "s • esc to intrrupt)Starting Startng MC•arting MCPrting MCP ›Improve documentation in @filename  gpt-5.4 high · 100% left · D:\\vibe-coding",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:25:00.303122"
+  },
+  {
+    "id": "20260310082517543416",
+    "title": "s • esc to intrrupt)Starting Startng MC•arting MCPrting MCP ›Improve documentati",
+    "description": "s • esc to intrrupt)Starting Startng MC•arting MCPrting MCP ›Improve documentation in @filename  gpt-5.4 high · 100% left · D:\\vibe-coding",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:25:17.543416"
+  },
+  {
+    "id": "20260310082528308966",
+    "title": "Active code page: 65001                                                         ",
+    "description": "Active code page: 65001    \n                                                                       \n                                                                   D:\\vibe-coding>cls                                                         \n                                                                       \n              D:\\vibe-coding>set TERMINAL_ID=3                         \n                                                                       \n                                         ",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:25:28.308966"
+  },
+  {
+    "id": "20260310082735018648",
+    "title": "D:\\vibe-coding>cls                                                              ",
+    "description": "D:\\vibe-coding>cls                                                         \n                                                                       \n              D:\\vibe-coding>set TERMINAL_ID=3                         \n                                                                       \n                                              D:\\vibe-coding>set HIVE_AGENT=codex                                                             \n                                                                 ",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:27:35.018648"
+  },
+  {
+    "id": "20260310084222466219",
+    "title": "D:\\vibe-coding>cls                                                              ",
+    "description": "D:\\vibe-coding>cls                                                         \n                                                                       \n              D:\\vibe-coding>set TERMINAL_ID=3                         \n                                                                       \n                                              D:\\vibe-coding>set HIVE_AGENT=codex                                                             \n                                                                 ",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T08:42:22.466219"
+  },
+  {
+    "id": "20260310183703096451",
+    "title": "오지",
+    "description": "오지",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T18:37:03.096451"
+  },
+  {
+    "id": "20260310183718135486",
+    "title": "ibe-coding>cls                                                                  ",
+    "description": "ibe-coding>cls                                                         \n                                                                       \n              D:\\vibe-coding>set TERMINAL_ID=3                         \n                                                                       \n                                              D:\\vibe-coding>set HIVE_AGENT=codex                                                             \n                                                                     ",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T18:37:18.135486"
+  },
+  {
+    "id": "20260310183941053080",
+    "title": "그건 너가 확인해보면 되는거 아니니",
+    "description": "그건 너가 확인해보면 되는거 아니니",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T18:39:41.053080"
+  },
+  {
+    "id": "20260310183945259597",
+    "title": "그건 너가 확인해보면 되는거 아니니",
+    "description": "그건 너가 확인해보면 되는거 아니니",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T18:39:45.259597"
+  },
+  {
+    "id": "20260310200518791468",
+    "title": "터미털 차잉 좁아야지는되 무슨소리야",
+    "description": "터미털 차잉 좁아야지는되 무슨소리야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:05:18.791468"
+  },
+  {
+    "id": "20260310200523764226",
+    "title": "터미털 차잉 좁아야지는되 무슨소리야",
+    "description": "터미털 차잉 좁아야지는되 무슨소리야",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:05:23.764226"
+  },
+  {
+    "id": "20260310200608505845",
+    "title": "•WorkiWorkin•Working8•Working•WorkingWorking•orking•rking•kinging•ngg9WWo•Wor•Wo",
+    "description": "•WorkiWorkin•Working8•Working•WorkingWorking•orking•rking•kinging•ngg9WWo•Wor•Work•WorkiWorkin•Working20•Working•Working•Workingorking•rking•king•ingngg1WWo•Wor•Work•Worki•WorkinWorking2•WorkingWorking•Working•orking•rking•kinging•ngg3WWo•Wor•Work•Worki•WorkinWorking4•WorkingWorking•Working•orking•rking•kinging•ngg5WWo•Wor•Work•WorkiWorkin•Working6•Working•Working•Workingorking•rking•kinging•ngg7WWo•Wor•Work•WorkiWorkin•8Working•Working•Working•Workingorking•rking•king•ingngg9WWo•Wor•Work•WorkiW",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:06:08.505845"
+  },
+  {
+    "id": "20260310200612598350",
+    "title": "•WorkiWorkin•Working8•Working•WorkingWorking•orking•rking•kinging•ngg9WWo•Wor•Wo",
+    "description": "•WorkiWorkin•Working8•Working•WorkingWorking•orking•rking•kinging•ngg9WWo•Wor•Work•WorkiWorkin•Working20•Working•Working•Workingorking•rking•king•ingngg1WWo•Wor•Work•Worki•WorkinWorking2•WorkingWorking•Working•orking•rking•kinging•ngg3WWo•Wor•Work•Worki•WorkinWorking4•WorkingWorking•Working•orking•rking•kinging•ngg5WWo•Wor•Work•WorkiWorkin•Working6•Working•Working•Workingorking•rking•kinging•ngg7WWo•Wor•Work•WorkiWorkin•8Working•Working•Working•Workingorking•rking•king•ingngg9WWo•Wor•Work•WorkiW",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:06:12.598350"
+  },
+  {
+    "id": "20260310200643095166",
+    "title": "그럼 ㅈ수정해줘",
+    "description": "그럼 ㅈ수정해줘",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:06:43.095166"
+  },
+  {
+    "id": "20260310200945365410",
+    "title": "<task-notification> <task-id>b4yl51kua</task-id> <tool-use-id>toolu_01UXWU4ShLtR",
+    "description": "<task-notification>\n<task-id>b4yl51kua</task-id>\n<tool-use-id>toolu_01UXWU4ShLtRY8UxbtzhwP6e</tool-use-id>\n<output-file>C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vibe-coding\\tasks\\b4yl51kua.output</output-file>\n<status>completed</status>\n<summary>Background command \"grep -r \"codex\" D:/vibe-coding/.ai_monitor/ --include=\"*.py\" -l 2>/dev/null | head -10\" completed (exit code 0)</summary>\n</task-notification>\nRead the output file to retrieve the result: C:\\Users\\com\\AppData\\Local\\Temp\\claude\\D--vib",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:09:45.365410"
+  },
+  {
+    "id": "20260310203037856111",
+    "title": "ajf t nwjdgkoTeksmsrjdi duwjsd lEhrrkxdmsep    멀 수정했다느거지 여전이 똑같은데",
+    "description": "ajf t nwjdgkoTeksmsrjdi duwjsd lEhrrkxdmsep    멀 수정했다느거지 여전이 똑같은데",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:30:37.856111"
+  },
+  {
+    "id": "20260310203042086213",
+    "title": "ajf t nwjdgkoTeksmsrjdi duwjsd lEhrrkxdmsep    멀 수정했다느거지 여전이 똑같은데",
+    "description": "ajf t nwjdgkoTeksmsrjdi duwjsd lEhrrkxdmsep    멀 수정했다느거지 여전이 똑같은데",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:30:42.086213"
+  },
+  {
+    "id": "20260310203253001785",
+    "title": "com\\Pictures\\Screenshots\\스크린샷 2026-03-10 203212.png\"  이거 봐봐 코덱스가  터미널에서 ㅏㄴ오는게 이상",
+    "description": "com\\Pictures\\Screenshots\\스크린샷 2026-03-10 203212.png\"  이거 봐봐 코덱스가  터미널에서 ㅏㄴ오는게 이상하잖아 깨져서나와",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:32:53.001785"
+  },
+  {
+    "id": "20260310203257369873",
+    "title": "com\\Pictures\\Screenshots\\스크린샷 2026-03-10 203212.png\"  이거 봐봐 코덱스가  터미널에서 ㅏㄴ오는게 이상",
+    "description": "com\\Pictures\\Screenshots\\스크린샷 2026-03-10 203212.png\"  이거 봐봐 코덱스가  터미널에서 ㅏㄴ오는게 이상하잖아 깨져서나와",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:32:57.369873"
+  },
+  {
+    "id": "20260310203626218623",
+    "title": "ok 저김 어디까지  진행되고  완성된건 먼지 분석해봐",
+    "description": "ok 저김 어디까지  진행되고  완성된건 먼지 분석해봐",
+    "status": "done",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:36:26.218623"
+  },
+  {
+    "id": "20260310203643125132",
+    "title": "ok 저김 어디까지  진행되고  완성된건 먼지 분석해봐",
+    "description": "ok 저김 어디까지  진행되고  완성된건 먼지 분석해봐",
+    "status": "done",
+    "assigned_to": "gemini",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:36:43.125132"
+  },
+  {
+    "id": "20260310203837496336",
+    "title": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
+    "description": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
+    "status": "in_progress",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:38:37.496336"
+  },
+  {
+    "id": "20260310203841709348",
+    "title": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
+    "description": "일딴 커밋해줘 죽 잘되는지 테스티 해야하지 안나 지식 그래피 시각화 이건 어디서 봐",
+    "status": "in_progress",
+    "assigned_to": "claude",
+    "priority": "medium",
+    "created_by": "user",
+    "created_at": "2026-03-10T20:38:41.709348"
   }
 ]

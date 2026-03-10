@@ -5,6 +5,7 @@ DESCRIPTION: 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저.
 
 REVISION HISTORY:
 - 2026-03-06 Gemini: 최초 작성. 시작/중지/상태체크 및 확장 기능 활성화 로직 구현.
+- 2026-03-10 Gemini: Task 17 강화 - pg_logs/pg_thoughts 스키마 통합 및 지식 그래프 기반 마련.
 """
 
 import os
@@ -100,42 +101,85 @@ def init_log_schema():
     psql = BIN_DIR / "psql.exe"
     
     schema_sql = """
-    -- 1. Log table
-    CREATE TABLE IF NOT EXISTS hive_logs (
+    -- 1. Unified Log Table (pg_logs)
+    CREATE TABLE IF NOT EXISTS pg_logs (
         id SERIAL PRIMARY KEY,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        ts TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         agent VARCHAR(50),
-        level VARCHAR(20),
-        message TEXT,
-        task_id VARCHAR(100),
+        terminal_id VARCHAR(50),
+        task TEXT,
+        status VARCHAR(20) DEFAULT 'success',
         metadata JSONB
     );
 
-    -- 2. Debate sessions table
+    -- 2. Thought Trace Table (pg_thoughts)
+    CREATE TABLE IF NOT EXISTS pg_thoughts (
+        id SERIAL PRIMARY KEY,
+        ts TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        agent VARCHAR(50),
+        skill VARCHAR(100),
+        thought JSONB,
+        parent_id INTEGER,
+        project_id VARCHAR(100)
+    );
+
+    -- Migration: Add missing columns if they don't exist
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='parent_id') THEN
+            ALTER TABLE pg_thoughts ADD COLUMN parent_id INTEGER REFERENCES pg_thoughts(id) ON DELETE SET NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='project_id') THEN
+            ALTER TABLE pg_thoughts ADD COLUMN project_id VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='ts') THEN
+            -- Renaming if someone named it timestamp
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='timestamp') THEN
+                ALTER TABLE pg_thoughts RENAME COLUMN "timestamp" TO ts;
+            ELSE
+                ALTER TABLE pg_thoughts ADD COLUMN ts TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+            END IF;
+        END IF;
+    END $$;
+
+    CREATE INDEX IF NOT EXISTS idx_thoughts_parent ON pg_thoughts(parent_id);
+
+    -- 3. Agent Messaging Table (pg_messages)
+    CREATE TABLE IF NOT EXISTS pg_messages (
+        id SERIAL PRIMARY KEY,
+        ts TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        from_agent VARCHAR(50),
+        to_agent VARCHAR(50),
+        msg_type VARCHAR(20) DEFAULT 'info',
+        content TEXT,
+        is_read BOOLEAN DEFAULT FALSE
+    );
+
+    -- 4. Hive Debates Table
     CREATE TABLE IF NOT EXISTS hive_debates (
         id SERIAL PRIMARY KEY,
         topic TEXT NOT NULL,
-        status VARCHAR(20) DEFAULT 'open', -- open, debating, consensus, closed
-        participants JSONB, -- list of agent names
+        status VARCHAR(20) DEFAULT 'open',
+        participants JSONB,
         current_round INTEGER DEFAULT 1,
         final_decision TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- 3. Debate messages (opinions, critiques)
+    -- 5. Hive Debate Messages Table
     CREATE TABLE IF NOT EXISTS hive_debate_messages (
         id SERIAL PRIMARY KEY,
         debate_id INTEGER REFERENCES hive_debates(id) ON DELETE CASCADE,
         round INTEGER NOT NULL,
         agent VARCHAR(50) NOT NULL,
-        type VARCHAR(20), -- proposal, critique, synthesis, vote
+        type VARCHAR(20),
         content TEXT NOT NULL,
-        vote_value INTEGER, -- 1 (agree), -1 (disagree), 0 (neutral)
+        vote_value INTEGER,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- 4. Create notify function for all hive tables
+    -- 6. NOTIFY function for real-time events
     CREATE OR REPLACE FUNCTION notify_hive_event()
     RETURNS TRIGGER AS $$
     DECLARE
@@ -151,28 +195,28 @@ def init_log_schema():
     END;
     $$ LANGUAGE plpgsql;
 
-    -- 5. Set triggers
+    -- 7. Trigger Setup
     DO $$
     BEGIN
-        -- Logs trigger
-        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_log_insert') THEN
-            CREATE TRIGGER trg_hive_log_insert
-            AFTER INSERT ON hive_logs
-            FOR EACH ROW EXECUTE FUNCTION notify_hive_event();
+        -- pg_logs trigger
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_pg_log_insert') THEN
+            CREATE TRIGGER trg_pg_log_insert
+            AFTER INSERT ON pg_logs
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_event(); 
         END IF;
 
-        -- Debates trigger
+        -- pg_thoughts trigger
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_pg_thought_insert') THEN
+            CREATE TRIGGER trg_pg_thought_insert
+            AFTER INSERT ON pg_thoughts
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_event(); 
+        END IF;
+
+        -- hive_debates trigger
         IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_debate_update') THEN
             CREATE TRIGGER trg_hive_debate_update
             AFTER INSERT OR UPDATE ON hive_debates
-            FOR EACH ROW EXECUTE FUNCTION notify_hive_event();
-        END IF;
-
-        -- Debate messages trigger
-        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_debate_msg_insert') THEN
-            CREATE TRIGGER trg_hive_debate_msg_insert
-            AFTER INSERT ON hive_debate_messages
-            FOR EACH ROW EXECUTE FUNCTION notify_hive_event();
+            FOR EACH ROW EXECUTE FUNCTION notify_hive_event(); 
         END IF;
     END $$;
     """
@@ -184,7 +228,6 @@ def init_log_schema():
         ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
         print("✅ 로그 스키마 세팅 성공.")
     except Exception as e:
-        # 에러 발생 시 stderr 출력 시도
         stderr = getattr(e, 'stderr', 'No stderr')
         print(f"❌ 로그 스키마 세팅 실패: {e}\n{stderr}")
 

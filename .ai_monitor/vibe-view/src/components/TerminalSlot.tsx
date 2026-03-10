@@ -237,6 +237,9 @@ export default function TerminalSlot({
       ws.onopen = () => {
         const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
         term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+        // WS 연결 직후 현재 터미널 크기를 PTY에 전달
+        // ResizeObserver가 WS 연결 전에 fire됐을 경우 누락된 resize를 보정
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       };
       ws.onclose = () => setHasAttachedTerminal(false);
       ws.onmessage = async (e) => {
@@ -244,6 +247,13 @@ export default function TerminalSlot({
         term.write(data);
       };
       term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
+      // xterm cols/rows가 바뀔 때마다 서버 PTY에 SIGWINCH 전달
+      // fitAddon.fit() → term.onResize 순으로 발생하므로 여기서 resize 메시지 전송
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
       // 창 크기 변경 시 터미널 재조정 (클린업 포함)
       const handleResize = () => fitAddon.fit();
       window.addEventListener('resize', handleResize);

@@ -1735,6 +1735,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _current_project_root=_current_project_root,
                 _parse_session_tail=_parse_session_tail,
                 _parse_gemini_session=_parse_gemini_session,
+                run_pg_sql_csv=run_pg_sql_csv
             )
 
         elif parsed_path.path.startswith('/api/git/'):
@@ -3644,31 +3645,17 @@ class SSEHandler(BaseHTTPRequestHandler):
         pass
 
 pty_sessions = {}
-_CODEX_BACKSPACE_RE = re.compile(r'[^\n]\x08')
-_CODEX_CONTROL_RE = re.compile(r'[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f]')
-_CODEX_ESCAPE_RE = re.compile(
-    r'\x1b(?:'
-    r'\][^\x07\x1b]*(?:\x07|\x1b\\)'
-    r'|\[\?(?:25|47|1047|1049|2004)[hl]'
-    r'|\[[0-?]*[ -/]*[@-~]'
-    r'|[@-Z\\-_]'
-    r')'
-)
 
 
 def _normalize_codex_stream(data: str) -> str:
-    """Flatten Codex cursor-heavy output so it stays readable through winpty."""
-    text = data.replace('\r\r\n', '\r\n')
-    while True:
-        collapsed = _CODEX_BACKSPACE_RE.sub('', text)
-        if collapsed == text:
-            break
-        text = collapsed
-    text = _CODEX_ESCAPE_RE.sub('', text)
-    text = re.sub(r'\r(?!\n)', '\n', text)
-    text = _CODEX_CONTROL_RE.sub('', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text
+    """Codex PTY 스트림 정규화.
+
+    이전 버전에서 ANSI escape 시퀀스를 모두 제거했으나,
+    xterm.js가 커서 이동/색상 코드 등을 직접 처리해야 하므로
+    ANSI 코드는 그대로 통과시키고 \r\r\n 중복만 정리합니다.
+    """
+    # \r\r\n → \r\n: winpty가 가끔 CR을 이중으로 보내는 현상만 보정
+    return data.replace('\r\r\n', '\r\n')
 # agent_api가 PTY 세션 상태를 /api/agent/terminals 응답에 병합할 수 있도록
 # pty_sessions 딕셔너리 접근 콜백을 주입합니다.
 agent_api.set_pty_sessions_getter(lambda: pty_sessions)

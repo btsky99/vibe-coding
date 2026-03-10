@@ -9,6 +9,7 @@ DESCRIPTION: /api/hive/*, /api/orchestrator/*, /api/install-skills,
 
 REVISION HISTORY:
 - 2026-03-01 Claude: server.py에서 분리 — hive/orchestrator/superpowers API 담당
+- 2026-03-10 Gemini: /api/hive/knowledge-graph 추가 (Task 17)
 """
 
 import json
@@ -39,14 +40,57 @@ def handle_get(handler, path: str, params: dict,
                PROJECT_ROOT: Path, PROJECT_ID: str,
                TASKS_FILE: Path, AGENT_STATUS: dict, AGENT_STATUS_LOCK,
                pty_sessions: dict,
-               _current_project_root, _parse_session_tail, _parse_gemini_session) -> bool:
-    """GET 요청 처리 — /api/hive/*, /api/orchestrator/*, /api/superpowers/status,
-    /api/install-skills, /api/skill-results, /api/context-usage,
+               _current_project_root, _parse_session_tail, _parse_gemini_session,
+               run_pg_sql_csv=None) -> bool:
+    """GET 요청 처리 — /api/hive/*, /api/orchestrator/*, /api/install-skills,
+    /api/skill-results, /api/context-usage,
     /api/gemini-context-usage, /api/local-models 를 담당합니다.
 
     반환값: 경로가 처리됐으면 True, 해당 없으면 False.
     caller(server.py의 do_GET)는 False를 받으면 다른 핸들러를 시도합니다.
     """
+
+    # ── /api/hive/knowledge-graph (Task 17) ─────────────────────────────
+    if path == '/api/hive/knowledge-graph':
+        if not run_pg_sql_csv:
+            _json_response(handler, {"error": "Postgres helper not provided"}, status=500)
+            return True
+        
+        try:
+            # 1. 노드 수집
+            nodes_sql = "SELECT id, agent, skill, thought->>'title' as label, thought->>'type' as type FROM pg_thoughts ORDER BY id"
+            nodes_raw = run_pg_sql_csv(nodes_sql)
+            
+            # 2. 링크(Edge) 수집
+            links_sql = "SELECT parent_id as source, id as target FROM pg_thoughts WHERE parent_id IS NOT NULL"
+            links_raw = run_pg_sql_csv(links_sql)
+            
+            # 3. 데이터 정제
+            nodes = []
+            if nodes_raw:
+                for n in nodes_raw:
+                    nodes.append({
+                        "id": int(n.get('id', 0)),
+                        "label": n.get('label') or f"Node {n.get('id')}",
+                        "agent": n.get('agent', 'unknown'),
+                        "type": n.get('type') or "general"
+                    })
+                
+            links = []
+            if links_raw:
+                for l in links_raw:
+                    try:
+                        links.append({
+                            "source": int(l.get('source')),
+                            "target": int(l.get('target'))
+                        })
+                    except (TypeError, ValueError):
+                        continue
+                
+            _json_response(handler, {"nodes": nodes, "links": links})
+        except Exception as e:
+            _json_response(handler, {"error": str(e)}, status=500)
+        return True
 
     # ── /api/install-skills ────────────────────────────────────────────────
     if path == '/api/install-skills':

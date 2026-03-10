@@ -32,9 +32,10 @@ REVISION HISTORY:
   - **[방어]** 작업 전 반드시 `lock_manager.py acquire`로 소유권을 확보할 것.
 
 ## 🔗 4. 지식 간의 관계 (Knowledge Graph)
-- `server.py` → `dashboard.py` (SSE 스트림 의존성)
-- `skill_orchestrator.py` → `skill_chain.db` (상태 영속화)
-- `rules_validator.py` → `RULES.md` (검증 기준 정의)
+- `오케스트레이션` → `데이터 저장` (상태 영속성 의존)
+- `Git 전략` → `오케스트레이션` (워크트리 기반 작업 흐름)
+- `주석 표준` → `Git 전략` (커밋 및 코드 품질 표준)
+- `server.py` → `데이터 저장` (PostgreSQL 연동)
 
 ---
 **마지막 업데이트**: 2026-03-06

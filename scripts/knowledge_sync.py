@@ -1,77 +1,153 @@
 # -*- coding: utf-8 -*-
 # ------------------------------------------------------------------------
 # 📄 파일명: scripts/knowledge_sync.py
-# 📝 설명: 프로젝트 소스 코드 및 장기 메모리(memory.md)를 PostgreSQL 18 벡터 DB에 동기화.
-#          pgvector를 활용한 하이브 지식 그래프 구축 도구.
+# 📑 설명: memory.md의 장기 기억을 PostgreSQL pg_thoughts 테이블로 동기화.
+#          지식 그래프 시각화를 위한 데이터 계보(Lineage)를 형성합니다.
 #
-# REVISION HISTORY:
-# - 2026-03-06 Gemini-1: 최초 작성 및 지식 임베딩/동기화 로직 구현.
+# 🕒 변경 이력 (History):
+# [2026-03-10] Gemini: 최초 생성 및 동기화 로직 구현 (Task 17)
 # ------------------------------------------------------------------------
 import os
-import sys
+import re
 import json
 import subprocess
-from datetime import datetime
+import sys
+from pathlib import Path
 
-# 프로젝트 루트 경로 설정
-PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
+# 윈도우 인코딩 대응
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-def run_query(sql: str):
-    """psql을 통해 쿼리를 실행합니다."""
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MEMORY_MD = PROJECT_ROOT / "memory.md"
+PG_BIN = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
+PG_PORT = 5433
+
+def run_sql(sql: str):
+    """임시 파일을 생성하여 SQL 실행 (인코딩 오류 방지 및 순수 값 추출)"""
+    if not PG_BIN.exists():
+        print(f"❌ psql.exe를 찾을 수 없음: {PG_BIN}")
+        return None
+    
+    tmp_file = Path("tmp_sync.sql")
     try:
+        # UTF-8로 파일 저장
+        tmp_file.write_text(sql, encoding='utf-8')
+        
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        subprocess.run(
-            [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql],
+        # -t (tuples only), -A (no align) 옵션 추가
+        res = subprocess.run(
+            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-t", "-A", "-f", str(tmp_file)],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )
-        return True
-    except Exception as e:
-        print(f"[!] SQL Error: {e}")
-        return False
-
-def sync_file_to_db(file_path: str):
-    """파일 내용을 읽어 Postgres pg_knowledge 테이블에 기록합니다 (임시 텍스트 기반 저장)."""
-    # [주의] 실제 환경에서는 임베딩 생성 API(OpenAI/Gemini 등)를 연동해야 합니다.
-    # 여기서는 고도화된 스키마 구조와 인프라 연동에 집중합니다.
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
         
-        rel_path = os.path.relpath(file_path, PROJECT_ROOT)
-        safe_content = content.replace("'", "''")
-        metadata = json.dumps({"size": len(content), "type": os.path.splitext(file_path)[1]})
-        
-        # INSERT (임베딩은 현재 널 값으로 처리 후 별도 워커로 생성 가능)
-        sql = f"INSERT INTO pg_knowledge (file_path, content, metadata) VALUES ('{rel_path}', '{safe_content[:5000]}', '{metadata}'::jsonb);"
-        run_query(sql)
-        print(f"[*] 지식 동기화 완료: {rel_path}")
+        if tmp_file.exists():
+            tmp_file.unlink()
+            
+        if res.returncode != 0:
+            print(f"❌ SQL 오류: {res.stderr}")
+            return None
+        return res.stdout.strip()
     except Exception as e:
-        print(f"[!] 동기화 오류 ({file_path}): {e}")
+        if tmp_file.exists(): tmp_file.unlink()
+        print(f"❌ 실행 에러: {e}")
+        return None
 
-def sync_project():
-    """프로젝트 내 주요 파일들을 순회하며 지식 베이스 구축"""
-    print(f"[*] 하이브 지식 그래프 동기화 시작 (PostgreSQL 18)...")
-    target_exts = ('.py', '.ts', '.md', '.tsx', '.json', '.bat', '.spec', '.iss')
-    exclude_dirs = ('.git', '.worktrees', 'node_modules', 'venv', '.ai_monitor/bin', '.ai_monitor/data')
+def parse_memory():
+    """memory.md 파싱하여 결정 사항 및 관계 추출"""
+    if not MEMORY_MD.exists():
+        return [], []
+    
+    content = MEMORY_MD.read_text(encoding='utf-8')
+    
+    # 1. 핵심 결정 사항 추출 (Section 2)
+    decisions = []
+    dec_section = re.search(r"## 🏗️ 2\. 핵심 아키텍처 및 결정 사항.*?(?=##|$)", content, re.S)
+    if dec_section:
+        items = re.findall(r"- \*\*([^*]+)\*\*: ([^\n]+)", dec_section.group(0))
+        for title, desc in items:
+            decisions.append({
+                "title": title.strip(),
+                "description": desc.strip()
+            })
+            
+    # 2. 지식 관계 추출 (Section 4)
+    relations = []
+    rel_section = re.search(r"## 🔗 4\. 지식 간의 관계.*?(?=\n---|$)", content, re.S)
+    if rel_section:
+        # 형식: `A` → `B` (관계 설명)
+        links = re.findall(r"- `([^`]+)` → `([^`]+)`\s*(?:\(([^)]+)\))?", rel_section.group(0))
+        for src, dest, reason in links:
+            relations.append({
+                "source": src.strip(),
+                "target": dest.strip(),
+                "reason": reason.strip() if reason else "의존성"
+            })
+            
+    return decisions, relations
 
-    for root, dirs, files in os.walk(PROJECT_ROOT):
-        # 제외 디렉토리 건너뛰기
-        dirs[:] = [d for d in dirs if d not in exclude_dirs]
-        for file in files:
-            if file.endswith(target_exts):
-                full_path = os.path.join(root, file)
-                sync_file_to_db(full_path)
+def sync():
+    print(f"📂 {MEMORY_MD.name} 분석 중...")
+    decisions, relations = parse_memory()
+    
+    if not decisions:
+        print("⚠️ 추출된 결정 사항이 없습니다.")
+        return
+
+    print(f"🧠 {len(decisions)}개의 결정 사항 동기화 중...")
+    
+    # 제목 -> ID 매핑 (관계 설정을 위함)
+    title_to_id = {}
+    
+    for dec in decisions:
+        title = dec['title']
+        desc = dec['description']
+        thought_json = json.dumps({
+            "type": "decision",
+            "title": title,
+            "content": desc
+        }, ensure_ascii=False).replace("'", "''")
+        
+        # Upsert 로직 (제목 기준)
+        # 먼저 존재하는지 확인
+        safe_title = title.replace("'", "''")
+        check_sql = f"SELECT id FROM pg_thoughts WHERE skill = 'architecture' AND thought->>'title' = '{safe_title}'"
+        res = run_sql(check_sql)
+        
+        if res and res.strip().isdigit():
+            tid = int(res.strip())
+            update_sql = f"UPDATE pg_thoughts SET thought = '{thought_json}'::jsonb WHERE id = {tid}"
+            run_sql(update_sql)
+            title_to_id[title] = tid
+        else:
+            insert_sql = f"INSERT INTO pg_thoughts (agent, skill, thought, project_id) VALUES ('Gemini', 'architecture', '{thought_json}'::jsonb, 'vibe-coding') RETURNING id"
+            res = run_sql(insert_sql)
+            if res and res.strip().isdigit():
+                title_to_id[title] = int(res.strip())
+
+    print(f"🔗 {len(relations)}개의 관계망(Edge) 설정 중...")
+    for rel in relations:
+        src = rel['source']
+        target = rel['target']
+        
+        src_id = None
+        target_id = None
+        
+        # 정확한 매칭 시도
+        for title, tid in title_to_id.items():
+            if src == title: src_id = tid
+            if target == title: target_id = tid
+            
+        if src_id and target_id:
+            # target의 parent를 source로 설정
+            link_sql = f"UPDATE pg_thoughts SET parent_id = {src_id} WHERE id = {target_id}"
+            run_sql(link_sql)
+            print(f"  ✅ [{src}] (ID:{src_id}) -> [{target}] (ID:{target_id}) 연결 완료")
+        else:
+            print(f"  ⚠️ 연결 실패: [{src}]({src_id}) -> [{target}]({target_id})")
+
+    print("\n✨ 하이브 지능 동기화 완료.")
 
 if __name__ == "__main__":
-    if not os.path.exists(PG_BIN):
-        print(f"[오류] Postgres 바이너리 없음: {PG_BIN}")
-        sys.exit(1)
-    
-    # 1. 기존 데이터 정리 (Optional)
-    run_query("TRUNCATE TABLE pg_knowledge;")
-    
-    # 2. 전역 동기화 실행
-    sync_project()
-    print(f"\n✅ 하이브 지식 그래프 동기화 완료 (PostgreSQL 18 PGVector Ready)")
+    sync()

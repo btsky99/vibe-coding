@@ -124,6 +124,13 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     print(f"[실행] {agent.upper()} / {mode.upper()} 모드")
     print(f"  명령: {' '.join(cmd)}")
 
+    # Codex는 TUI 스피너가 터미널 너비만큼 렌더링하므로
+    # 창이 좁으면 줄 바꿈 + 덮어쓰기로 출력이 깨짐.
+    # Windows에서 mode con으로 터미널 너비를 220으로 늘려 예방합니다.
+    if agent == "codex" and sys.platform == "win32":
+        os.system("mode con cols=220")
+        os.environ["COLUMNS"] = "220"
+
     # 에이전트 프로세스 실행 (현재 터미널에서 대화형)
     os.execvp(cmd[0], cmd)  # execvp: 현재 프로세스를 대체하여 실행
 
