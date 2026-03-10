@@ -3953,41 +3953,45 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
-    # ── 프로젝트별 단일 인스턴스 락 ─────────────────────────────────────────
-    # 같은 프로젝트 중복 실행은 막되, 서로 다른 프로젝트는 동시에 최대 4개 실행 가능.
-    # PROJECT_ROOT 경로 해시를 기반으로 락 포트(19001~19099)와 뮤텍스 이름을 결정한다.
+    # ── 프로젝트별 다중 인스턴스 슬롯 락 ────────────────────────────────────
+    # 아이콘 클릭할 때마다 새 창이 열리고, 최대 4개까지 동시 실행 가능.
+    # 같은 프로젝트라도 슬롯(0~3)이 남아 있으면 추가 실행 허용.
+    # PROJECT_ROOT 경로 해시 기반으로 슬롯 포트 범위를 결정한다:
+    #   슬롯 0: 19001 + (hash%96)*4 + 0
+    #   슬롯 1: 19001 + (hash%96)*4 + 1  (최대 19001+95*4+3 = 19384 이내)
     _proj_hash    = hash(str(PROJECT_ROOT)) & 0xFFFF      # 경로 해시 (양수 고정)
-    _LOCK_PORT    = 19001 + (_proj_hash % 99)             # 19001~19099 범위의 프로젝트 전용 포트
-    _proj_id      = f"{_proj_hash:04x}"                   # 뮤텍스·타이틀용 짧은 hex ID
-    try:
-        _lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _lock_sock.bind(('127.0.0.1', _LOCK_PORT))
-    except OSError:
-        print(f"[!] 같은 프로젝트({PROJECT_ROOT.name})가 이미 실행 중입니다 (락 포트 {_LOCK_PORT}) — 중복 실행 방지로 종료합니다.")
+    _BASE_PORT    = 19001 + (_proj_hash % 96) * 4         # 프로젝트별 슬롯 시작 포트 (4개 연속 확보)
+    _MAX_INSTANCES = 4                                     # 최대 동시 실행 수
+    _proj_id      = f"{_proj_hash:04x}"                   # 타이틀용 짧은 hex ID
+
+    # 빈 슬롯(포트)을 순서대로 시도하여 첫 번째 빈 자리를 점유
+    _lock_sock = None
+    _instance_slot = -1
+    for _slot in range(_MAX_INSTANCES):
+        _try_port = _BASE_PORT + _slot
+        try:
+            _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            _sock.bind(('127.0.0.1', _try_port))
+            _lock_sock = _sock
+            _instance_slot = _slot
+            break  # 슬롯 확보 성공 — 루프 종료
+        except OSError:
+            continue  # 이미 사용 중인 슬롯 → 다음 슬롯 시도
+
+    if _instance_slot == -1:
+        # 모든 슬롯이 점유됨 — 최대 인스턴스 수 초과
+        print(f"[!] 최대 {_MAX_INSTANCES}개 인스턴스가 이미 실행 중입니다 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
         os._exit(0)
+
+    print(f"[*] 인스턴스 슬롯 {_instance_slot + 1}/{_MAX_INSTANCES} 점유 (포트 {_BASE_PORT + _instance_slot})")
 
     if os.name == 'nt':
         try:
             import ctypes
             import ctypes.wintypes
 
-            # ── 프로젝트별 Named Mutex — 같은 프로젝트 중복 실행만 차단 ──────
-            # 뮤텍스 이름에 프로젝트 해시(_proj_id)를 포함하여
-            # 서로 다른 프로젝트는 각자 독립적인 뮤텍스를 갖도록 한다.
-            _MUTEX_NAME   = f"Global\\VibeCodingAppMutex_{_proj_id}"
-            _proj_title   = f"바이브 코딩 [{PROJECT_ROOT.name}]"  # 창 제목에 프로젝트명 표시
-            _mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
-            if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-                # 같은 프로젝트의 기존 창을 최상단으로 올리기
-                _hwnd = ctypes.windll.user32.FindWindowW(None, _proj_title)
-                if _hwnd:
-                    ctypes.windll.user32.ShowWindow(_hwnd, 9)   # SW_RESTORE
-                    ctypes.windll.user32.SetForegroundWindow(_hwnd)
-                print(f"[!] 이미 실행 중인 Vibe Coding 인스턴스가 있습니다 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
-                os._exit(0)
-            # ──────────────────────────────────────────────────────────────
-
+            # 작업표시줄 AppUserModelID — 같은 앱으로 그룹화
             myappid = f'com.vibe.coding.{__version__}'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except: pass
