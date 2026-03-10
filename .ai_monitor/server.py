@@ -3941,6 +3941,40 @@ async def pty_handler(websocket):
     if session_id in pty_sessions:
         del pty_sessions[session_id]
 
+def _cleanup_all_pty_sessions():
+    """X 버튼 또는 시그널 종료 시 모든 PTY 자식 프로세스를 강제 종료합니다.
+
+    os._exit(0)은 Python 프로세스만 종료하고 자식 프로세스(Claude/Gemini/Codex 터미널)는
+    좀비로 남깁니다. 이 함수를 먼저 호출해 모든 PTY 세션을 명시적으로 kill합니다.
+    atexit + SIGTERM/SIGBREAK 핸들러 양쪽에 등록하여 어떤 종료 경로에서도 실행됩니다.
+    """
+    for sid, info in list(pty_sessions.items()):
+        try:
+            info['pty'].terminate(force=True)
+            print(f"[cleanup] PTY 세션 종료: {sid}")
+        except Exception as e:
+            print(f"[cleanup] PTY 종료 실패 ({sid}): {e}")
+    pty_sessions.clear()
+
+
+# ── atexit 등록 — 정상 종료(sys.exit, return from __main__)에도 PTY 정리 보장 ──
+import atexit, signal as _signal
+atexit.register(_cleanup_all_pty_sessions)
+
+def _signal_exit_handler(sig, frame):
+    """SIGTERM / SIGBREAK(Ctrl+Break) 수신 시 PTY 정리 후 즉시 종료."""
+    print(f"[*] 시그널 {sig} 수신 — PTY 정리 후 종료합니다.")
+    _cleanup_all_pty_sessions()
+    os._exit(0)
+
+_signal.signal(_signal.SIGTERM, _signal_exit_handler)
+try:
+    # Windows 전용 Ctrl+Break 시그널 처리 (SIGBREAK = 21)
+    _signal.signal(_signal.SIGBREAK, _signal_exit_handler)
+except (AttributeError, OSError):
+    pass  # 비-Windows 환경에서는 SIGBREAK 없음
+
+
 # 포트 설정: 9000(HTTP) / 9001(WS) — 충돌 시 빈 포트 자동 탐색 (최대 20개)
 # 9000은 개발/모니터링 도구 관례 포트 (사용자 지정)
 def _find_free_port(start: int, max_tries: int = 20) -> int:
@@ -4191,15 +4225,29 @@ if __name__ == '__main__':
         # 창 닫힘 = 서버 소켓 정상 종료 후 프로세스 종료
         # os._exit()는 소켓을 강제 종료 → 포트 TIME_WAIT 잔류 원인
         # server.shutdown() + server_close()로 포트를 먼저 해제한 뒤 종료
-        print("[*] GUI 창이 닫혔습니다. 서버 소켓 종료 중...")
+        # X 버튼으로 창이 닫힘 → PTY 자식 프로세스 먼저 kill → HTTP 서버 소켓 해제 → 프로세스 종료
+        print("[*] GUI 창이 닫혔습니다. 좀비 프로세스 방지 — PTY 세션 및 서버 소켓 정리 중...")
+        _cleanup_all_pty_sessions()          # Claude/Gemini/Codex 터미널 자식 프로세스 종료
         try:
-            server.shutdown()
-            server.server_close()
+            server.shutdown()                # HTTP 요청 처리 스레드 정지
+            server.server_close()            # 포트 소켓 해제 (TIME_WAIT 방지)
         except Exception:
             pass
-        print("[*] 프로세스를 종료합니다.")
+        print("[*] 정리 완료 — 프로세스를 종료합니다.")
         os._exit(0)
     except Exception as e:
         print(f"[!] GUI Error: {e}")
         open_app_window(f"http://localhost:{HTTP_PORT}")
-        while True: time.sleep(10)
+        # 브라우저 모드에서는 Ctrl+C(SIGINT)로 종료 — KeyboardInterrupt 잡아서 정리 후 종료
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("[*] Ctrl+C 감지 — PTY 세션 및 서버 정리 후 종료합니다.")
+            _cleanup_all_pty_sessions()
+            try:
+                server.shutdown()
+                server.server_close()
+            except Exception:
+                pass
+            os._exit(0)
