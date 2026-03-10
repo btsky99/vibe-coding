@@ -49,6 +49,7 @@ import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
+import KnowledgeGraphPanel from './components/panels/KnowledgeGraphPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import DiscordSettingsModal from './components/DiscordSettingsModal';
 /* ── 공유 타입 ── */
@@ -646,6 +647,9 @@ function App() {
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} />
+            ) : activeTab === 'graph' ? (
+              /* 지식 그래프 패널 — pg_thoughts 계보 force-directed 시각화 */
+              <KnowledgeGraphPanel />
             ) : (
               /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
               <FileExplorer
