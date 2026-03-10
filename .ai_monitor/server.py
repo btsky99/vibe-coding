@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-11] - Claude (frozen EXE 무한 창 생성 버그 수정 v3.7.47)
+#   - run_watchdog/run_discord_bridge/run_heal_daemon: sys.executable → _python_runner_cmds()[0]
+#   - frozen 모드에서 sys.executable = EXE 자신이므로 subprocess 실행 시 EXE가 무한 재귀 생성되던 버그
+#   - Python 인터프리터 미탐색 시 해당 데몬 스킵(경고 출력)
 # [2026-03-08] - Claude (칸반 네이티브 창 실행 API 추가)
 #   - POST /api/kanban/launch: PySide6 kanban_board.py를 서브프로세스로 실행
 #     → window.open() 브라우저 창 대신 OS 네이티브 데스크톱 창으로 열림
@@ -3956,11 +3960,18 @@ if __name__ == '__main__':
     def run_watchdog():
         watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
-            # 윈도우 환경에서 CP949 인코딩 에러 방지를 위해 encoding 및 errors 설정 추가
+            # [버그수정] frozen(EXE) 모드에서 sys.executable = EXE 자신 → subprocess로 실행 시
+            # EXE가 무한 재귀 생성되는 버그 수정.
+            # _python_runner_cmds()로 실제 Python 인터프리터를 탐색하여 사용.
+            _python_cmds = _python_runner_cmds()
+            if not _python_cmds:
+                print("[!] run_watchdog: Python 인터프리터를 찾을 수 없어 워치독 스킵")
+                return
+            python_exe = _python_cmds[0]
             # CREATE_NO_WINDOW: 워치독 데몬 시작 시 콘솔 창 표시 방지
             # 반환된 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
             proc = subprocess.Popen(
-                [sys.executable, str(watchdog_script), "--data-dir", str(DATA_DIR)],
+                [python_exe, str(watchdog_script), "--data-dir", str(DATA_DIR)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -3985,9 +3996,15 @@ if __name__ == '__main__':
                 return
         except Exception:
             return
+        # [버그수정] frozen 모드에서 sys.executable = EXE → 실제 Python 인터프리터 탐색
+        _python_cmds = _python_runner_cmds()
+        if not _python_cmds:
+            print("[!] run_discord_bridge: Python 인터프리터를 찾을 수 없어 Discord 브릿지 스킵")
+            return
+        python_exe = _python_cmds[0]
         # Discord 브릿지 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
         proc = subprocess.Popen(
-            [sys.executable, str(discord_script)],
+            [python_exe, str(discord_script)],
             cwd=str(PROJECT_ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -4003,9 +4020,15 @@ if __name__ == '__main__':
     def run_heal_daemon():
         heal_script = SCRIPTS_DIR / "heal_daemon.py"
         if heal_script.exists():
+            # [버그수정] frozen 모드에서 sys.executable = EXE → 실제 Python 인터프리터 탐색
+            _python_cmds = _python_runner_cmds()
+            if not _python_cmds:
+                print("[!] run_heal_daemon: Python 인터프리터를 찾을 수 없어 힐데몬 스킵")
+                return
+            python_exe = _python_cmds[0]
             # 힐데몬 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
             proc = subprocess.Popen(
-                [sys.executable, str(heal_script), "--interval", "300"],
+                [python_exe, str(heal_script), "--interval", "300"],
                 cwd=str(PROJECT_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
