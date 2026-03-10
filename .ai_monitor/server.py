@@ -3595,7 +3595,10 @@ agent_api.set_pty_sessions_getter(lambda: pty_sessions)
 
 async def pty_handler(websocket):
     try:
-        path = websocket.request.path
+        # [버그수정 2026-03-11] websockets >= 14.0에서 websockets.serve가 legacy API로 변경됨.
+        # legacy WebSocketServerProtocol에는 request 속성이 없고 path 속성을 직접 사용해야 함.
+        # websocket.request.path → AttributeError → PTY Init Error → WS 즉시 닫힘 현상 수정.
+        path = getattr(websocket, 'path', None) or getattr(getattr(websocket, 'request', None), 'path', '/')
         parsed = urlparse(path)
         qs = parse_qs(parsed.query)
         agent = qs.get('agent', [''])[0]
