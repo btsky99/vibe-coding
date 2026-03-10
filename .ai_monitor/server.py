@@ -3980,13 +3980,18 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
-    _LOCK_PORT = 19001  # 중복 실행 방지 전용 포트 — HTTP(9000)와 겹치지 않도록 별도 범위 사용
+    # ── 프로젝트별 단일 인스턴스 락 ─────────────────────────────────────────
+    # 같은 프로젝트 중복 실행은 막되, 서로 다른 프로젝트는 동시에 최대 4개 실행 가능.
+    # PROJECT_ROOT 경로 해시를 기반으로 락 포트(19001~19099)와 뮤텍스 이름을 결정한다.
+    _proj_hash    = hash(str(PROJECT_ROOT)) & 0xFFFF      # 경로 해시 (양수 고정)
+    _LOCK_PORT    = 19001 + (_proj_hash % 99)             # 19001~19099 범위의 프로젝트 전용 포트
+    _proj_id      = f"{_proj_hash:04x}"                   # 뮤텍스·타이틀용 짧은 hex ID
     try:
         _lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         _lock_sock.bind(('127.0.0.1', _LOCK_PORT))
     except OSError:
-        print(f"[!] 이미 실행 중인 서버 인스턴스 감지 (포트 {_LOCK_PORT} 선점) — 중복 실행 방지로 종료합니다.")
+        print(f"[!] 같은 프로젝트({PROJECT_ROOT.name})가 이미 실행 중입니다 (락 포트 {_LOCK_PORT}) — 중복 실행 방지로 종료합니다.")
         os._exit(0)
 
     if os.name == 'nt':
@@ -3994,18 +3999,19 @@ if __name__ == '__main__':
             import ctypes
             import ctypes.wintypes
 
-            # ── 단일 인스턴스 강제 (Named Mutex) ──────────────────────────
-            # 이미 실행 중인 인스턴스가 있으면 해당 창을 앞으로 가져오고 종료.
-            # ERROR_ALREADY_EXISTS(183) 코드로 중복 실행 여부를 판단한다.
-            _MUTEX_NAME = "Global\\VibeCodingAppMutex_v1"
+            # ── 프로젝트별 Named Mutex — 같은 프로젝트 중복 실행만 차단 ──────
+            # 뮤텍스 이름에 프로젝트 해시(_proj_id)를 포함하여
+            # 서로 다른 프로젝트는 각자 독립적인 뮤텍스를 갖도록 한다.
+            _MUTEX_NAME   = f"Global\\VibeCodingAppMutex_{_proj_id}"
+            _proj_title   = f"바이브 코딩 [{PROJECT_ROOT.name}]"  # 창 제목에 프로젝트명 표시
             _mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
             if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-                # 기존 창을 최상단으로 올리기
-                _hwnd = ctypes.windll.user32.FindWindowW(None, "바이브 코딩")
+                # 같은 프로젝트의 기존 창을 최상단으로 올리기
+                _hwnd = ctypes.windll.user32.FindWindowW(None, _proj_title)
                 if _hwnd:
                     ctypes.windll.user32.ShowWindow(_hwnd, 9)   # SW_RESTORE
                     ctypes.windll.user32.SetForegroundWindow(_hwnd)
-                print("[!] 이미 실행 중인 Vibe Coding 인스턴스가 있습니다. 종료합니다.")
+                print(f"[!] 이미 실행 중인 Vibe Coding 인스턴스가 있습니다 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
                 os._exit(0)
             # ──────────────────────────────────────────────────────────────
 
@@ -4157,8 +4163,8 @@ if __name__ == '__main__':
                     # 창이 생성될 때까지 잠시 대기
                     time.sleep(2)
                     
-                    # 바이브 코딩 창 핸들 찾기
-                    hwnd = ctypes.windll.user32.FindWindowW(None, "바이브 코딩")
+                    # 바이브 코딩 창 핸들 찾기 — 프로젝트명 포함 제목으로 검색
+                    hwnd = ctypes.windll.user32.FindWindowW(None, f"바이브 코딩 [{PROJECT_ROOT.name}]")
                     if hwnd:
                         # 아이콘 파일 로드 (유효한 경로인지 재확인)
                         hicon = ctypes.windll.user32.LoadImageW(
@@ -4174,7 +4180,8 @@ if __name__ == '__main__':
                     print(f"[!] Win32 Icon Fix Error: {e}")
 
         print(f"[*] Launching Desktop Window with Official Icon...")
-        main_window = webview.create_window('바이브 코딩', f"http://localhost:{HTTP_PORT}", 
+        # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
+        main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]', f"http://localhost:{HTTP_PORT}",
                               width=1400, height=900)
         
         # 아이콘 교체 스레드 별도 실행
