@@ -10,6 +10,9 @@ DESCRIPTION: /api/hive/*, /api/orchestrator/*, /api/install-skills,
 REVISION HISTORY:
 - 2026-03-01 Claude: server.py에서 분리 — hive/orchestrator/superpowers API 담당
 - 2026-03-10 Gemini: /api/hive/knowledge-graph 추가 (Task 17)
+- 2026-03-11 Claude: knowledge-graph SQL 수정 — thought->>'title' 단독 조회 시
+                     MCP 경유 삽입 외 대부분 레코드가 NULL 반환되는 문제 수정.
+                     COALESCE(title, task, text) + skill 필드 dict 포함 추가.
 """
 
 import json
@@ -66,13 +69,23 @@ def handle_get(handler, path: str, params: dict,
         
         try:
             # 1. 노드 수집
-            nodes_sql = "SELECT id, agent, skill, thought->>'title' as label, thought->>'type' as type FROM pg_thoughts ORDER BY id"
+            # thought 구조가 삽입 경로마다 다름:
+            #   - mcp_server: {"title": ..., "type": ..., "content": ...}
+            #   - hive_bridge.reflect_to_pg: {"type": "reflect", "task": ..., ...}
+            #   - claude_hook/hive_hook: {"text": ..., "context": ...}
+            # → COALESCE로 title > task > text 순서로 fallback하여 레이블 확보
+            nodes_sql = (
+                "SELECT id, agent, skill, "
+                "COALESCE(thought->>'title', thought->>'task', thought->>'text', 'Node '||id) as label, "
+                "COALESCE(thought->>'type', 'log') as type "
+                "FROM pg_thoughts ORDER BY id"
+            )
             nodes_raw = run_pg_sql_csv(nodes_sql)
-            
-            # 2. 링크(Edge) 수집
+
+            # 2. 링크(Edge) 수집 — parent_id가 설정된 레코드만 연결선 생성
             links_sql = "SELECT parent_id as source, id as target FROM pg_thoughts WHERE parent_id IS NOT NULL"
             links_raw = run_pg_sql_csv(links_sql)
-            
+
             # 3. 데이터 정제
             nodes = []
             if nodes_raw:
@@ -81,7 +94,8 @@ def handle_get(handler, path: str, params: dict,
                         "id": int(n.get('id', 0)),
                         "label": n.get('label') or f"Node {n.get('id')}",
                         "agent": n.get('agent', 'unknown'),
-                        "type": n.get('type') or "general"
+                        "skill": n.get('skill') or '',  # 프론트 GraphNode.skill 필드 누락 수정
+                        "type": n.get('type') or "log"
                     })
                 
             links = []
@@ -118,7 +132,7 @@ def handle_get(handler, path: str, params: dict,
                 scripts_src = SCRIPTS_DIR
                 if scripts_src.exists():
                     shutil.copytree(scripts_src, Path(target_path) / "scripts", dirs_exist_ok=True)
-                for md in ("GEMINI.md", "CLAUDE.md", "RULES.md", "PROJECT_MAP.md"):
+                for md in ("GEMINI.md", "CLAUDE.md", "RULES.md", "AGENTS.md", "PROJECT_MAP.md"):
                     src = source_base / md
                     if src.exists():
                         shutil.copy(src, Path(target_path) / md)
@@ -267,12 +281,14 @@ def handle_get(handler, path: str, params: dict,
                 "rules_md":    check_exists(_proj / "RULES.md"),
                 "gemini_md":   check_exists(_proj / "GEMINI.md"),
                 "claude_md":   check_exists(_proj / "CLAUDE.md"),
+                "agents_md":   check_exists(_proj / "AGENTS.md"),
                 "project_map": check_exists(_proj / "PROJECT_MAP.md")
             },
             "skills": {
                 "master":        check_exists(_proj / ".gemini/skills/master/SKILL.md"),
                 "brainstorm":    check_exists(_proj / ".gemini/skills/brainstorming/SKILL.md"),
-                "memory_script": check_exists(SCRIPTS_DIR / "memory.py")
+                "memory_script": check_exists(SCRIPTS_DIR / "memory.py"),
+                "gui":           check_exists(_proj / ".gemini/skills/pattern-view/SKILL.md")
             },
             "agents": {
                 "claude_config": check_exists(_proj / ".claude/commands/vibe-master.md"),

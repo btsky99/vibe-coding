@@ -5,6 +5,10 @@
 #          기존의 JSONL 및 SQLite 레거시를 대체합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-11] - Claude (지식 그래프 연결선 수정)
+#   - log_thought: parent_id 파라미터 추가 → API/psql 양쪽 경로에 parent_id 전달
+#   - log_thought: 삽입 완료 후 반환된 id를 _LAST_THOUGHT_ID에 저장
+#   - reflect_to_pg: 동일 에이전트 직전 thought id를 parent_id로 전달 → 연결선 생성
 # [2026-03-06] - Gemini (Postgres 완전 통합 고도화)
 #   - JSONL 파일 기반 로깅 중단 및 PostgreSQL 테이블(pg_logs, pg_thoughts) 전환.
 #   - server.py API (/api/hive/log/pg) 우선 호출, 실패 시 psql.exe 직접 호출 폴백.
@@ -32,6 +36,10 @@ PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 SERVER_URL = "http://localhost:9000"
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
 
+# 에이전트별 마지막 삽입된 thought id — reflect_to_pg parent_id 체인에 사용
+# (프로세스 수명 동안 인메모리 유지, 재시작 시 리셋됨)
+_LAST_THOUGHT_ID: dict = {}
+
 def _call_api(path: str, data: dict) -> bool:
     """server.py API를 호출합니다."""
     try:
@@ -45,20 +53,24 @@ def _call_api(path: str, data: dict) -> bool:
     except Exception:
         return False
 
-def _run_psql(sql: str) -> bool:
-    """psql.exe를 직접 호출하여 SQL을 실행합니다 (서버 미가동 시 폴백)."""
+def _run_psql(sql: str) -> str:
+    """psql.exe를 직접 호출하여 SQL을 실행하고 stdout을 반환합니다 (서버 미가동 시 폴백).
+
+    Returns:
+        str: psql stdout 출력 (RETURNING id 파싱 등에 활용), 실패 시 빈 문자열
+    """
     if not os.path.exists(PG_BIN):
-        return False
+        return ''
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        subprocess.run(
+        res = subprocess.run(
             [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )
-        return True
+        return res.stdout or ''
     except Exception:
-        return False
+        return ''
 
 def log_task(agent_name, task_summary, terminal_id=None, status="success"):
     """작업 로그를 PostgreSQL에 기록합니다."""
@@ -83,21 +95,59 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success"):
     else:
         print(f"[ERROR] Failed to log task to Postgres.")
 
-def log_thought(agent_name, skill, thought_dict):
-    """AI의 사고 과정을 PostgreSQL에 기록합니다 (JSONB)."""
+def log_thought(agent_name: str, skill: str, thought_dict: dict,
+                parent_id: int = None) -> int:
+    """AI의 사고 과정을 PostgreSQL에 기록합니다 (JSONB).
+
+    parent_id를 전달하면 지식 그래프에서 이전 thought와 연결선이 생성됩니다.
+    삽입 완료 후 새로 생성된 thought id를 _LAST_THOUGHT_ID[agent_name]에 저장합니다.
+
+    Returns:
+        int: 삽입된 thought의 id, 실패 시 0
+    """
     data = {
         "agent": agent_name,
         "skill": skill,
-        "thought": thought_dict
+        "thought": thought_dict,
     }
-    
-    if _call_api('/api/hive/thought/pg', data):
-        return
+    if parent_id:
+        data["parent_id"] = int(parent_id)
 
-    # 폴백
+    # 1. 서버 API 우선 호출 — 응답 body에서 id 파싱
+    try:
+        req = __import__('urllib.request', fromlist=['Request']).Request(
+            f"{SERVER_URL}/api/hive/thought/pg",
+            data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
+        import urllib.request as _ur
+        with _ur.urlopen(req, timeout=2) as res:
+            if res.status == 200:
+                body = json.loads(res.read().decode('utf-8'))
+                new_id = int(body.get('id', 0))
+                if new_id:
+                    _LAST_THOUGHT_ID[agent_name] = new_id
+                return new_id
+    except Exception:
+        pass
+
+    # 2. 서버 미가동 시 psql 직접 호출 폴백
     safe_thought = json.dumps(thought_dict, ensure_ascii=False).replace("'", "''")
-    sql = f"INSERT INTO pg_thoughts (agent, skill, thought) VALUES ('{agent_name}', '{skill}', '{safe_thought}'::jsonb);"
-    _run_psql(sql)
+    if parent_id:
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
+               f"VALUES ('{agent_name}', '{skill}', '{safe_thought}'::jsonb, {int(parent_id)}) RETURNING id;")
+    else:
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought) "
+               f"VALUES ('{agent_name}', '{skill}', '{safe_thought}'::jsonb) RETURNING id;")
+    output = _run_psql(sql)
+    # RETURNING id 파싱 (psql 기본 출력: " id\n----\n 42\n(1 row)")
+    for line in output.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            new_id = int(line)
+            _LAST_THOUGHT_ID[agent_name] = new_id
+            return new_id
+    return 0
 
 def post_message(from_agent, to_agent, content, msg_type="info"):
     """에이전트 간 메시지를 PostgreSQL에 기록합니다."""
@@ -127,13 +177,16 @@ def reflect_to_pg(agent_name: str, task_summary: str, learned: list, failed: lis
     _tid = terminal_id or os.environ.get('TERMINAL_ID', 'T0')
     thought_dict = {
         "type": "reflect",
+        "title": task_summary[:60],   # 지식 그래프 레이블용 title 추가
         "task": task_summary[:100],
         "learned": learned,
         "failed": failed,
         "files": files_changed,
         "terminal": _tid
     }
-    log_thought(agent_name, "self-reflect", thought_dict)
+    # 동일 에이전트의 직전 thought를 parent로 연결 → 지식 그래프에 연결선 생성
+    _prev_id = _LAST_THOUGHT_ID.get(agent_name)
+    log_thought(agent_name, "self-reflect", thought_dict, parent_id=_prev_id)
 
 def get_active_debate_context():
     """현재 진행 중인(open/debating) 토론이 있다면 그 내용과 메시지들을 가져옵니다."""

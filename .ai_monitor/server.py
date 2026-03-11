@@ -5,6 +5,9 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-11] - Claude (지식 그래프 연결선 수정)
+#   - thought_to_pg: parent_id 파라미터 추가 + RETURNING id로 신규 노드 id 반환
+#   - /api/hive/thought/pg: parent_id 수신 + 응답에 id 포함
 # [2026-03-11] - Claude (배포 버전 PostgreSQL 자동 시작/경로 수정)
 #   - PG_BIN: frozen 모드에서 {exe 디렉터리}\pgsql\bin\psql.exe 로 수정
 #   - ensure_postgres_running(): 배포 버전 최초 실행 시 initdb + pg_ctl start 자동 수행
@@ -267,15 +270,33 @@ def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
     mq_msg = json.dumps({"agent": agent, "tid": terminal_id, "task": task, "status": status}, ensure_ascii=False).replace("'", "''")
     run_pg_sql(f"SELECT pgmq.send('hive_queue', '{mq_msg}');")
 
-def thought_to_pg(agent: str, skill: str, thought: dict):
-    """pg_thoughts 테이블에 사고 과정 기록 (JSONB)
+def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) -> int:
+    """pg_thoughts 테이블에 사고 과정 기록 (JSONB).
 
+    parent_id를 지정하면 이전 thought와 연결선이 생성되어 지식 그래프에 계보 표시.
     ensure_ascii=True: 한글을 \\uXXXX 이스케이프로 변환하여 psql.exe -c 인수 인코딩 오류 방지.
     JSONB는 유니코드 이스케이프를 정상 처리하므로 조회 시 한글이 정상 표시됩니다.
+
+    Returns:
+        int: 삽입된 행의 id (RETURNING id), 실패 시 0
     """
     safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
-    sql = f"INSERT INTO pg_thoughts (agent, skill, thought) VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb);"
-    run_pg_sql(sql)
+    if parent_id:
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
+               f"VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb, {int(parent_id)}) RETURNING id;")
+    else:
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought) "
+               f"VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb) RETURNING id;")
+    result = run_pg_sql(sql)
+    # RETURNING id 출력 파싱: psql --csv가 아닌 기본 출력 형식 → " id\n----\n 42\n(1 row)" 형태
+    try:
+        for line in (result or '').splitlines():
+            line = line.strip()
+            if line.isdigit():
+                return int(line)
+    except Exception:
+        pass
+    return 0
 
 def run_pg_sql_csv(sql: str, db: str = "postgres") -> list:
     """CSV 형식으로 Postgres 쿼리 결과를 dict 리스트로 반환 (칸반/대시보드 조회용)"""
@@ -2425,12 +2446,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 content_length = int(self.headers['Content-Length'])
                 data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                thought_to_pg(
+                # parent_id를 받아 지식 그래프 연결선 생성 지원
+                new_id = thought_to_pg(
                     agent=data.get('agent', 'unknown'),
                     skill=data.get('skill', 'general'),
-                    thought=data.get('thought', {})
+                    thought=data.get('thought', {}),
+                    parent_id=data.get('parent_id')
                 )
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                self.wfile.write(json.dumps({"status": "success", "id": new_id}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
