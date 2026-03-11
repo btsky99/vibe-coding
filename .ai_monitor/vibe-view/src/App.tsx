@@ -51,6 +51,7 @@ import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
 import KnowledgeGraphPanel from './components/panels/KnowledgeGraphPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
+import DiscordConfigPanel from './components/panels/DiscordConfigPanel';
 import DiscordSettingsModal from './components/DiscordSettingsModal';
 /* ── 공유 타입 ── */
 import { LogRecord, AgentMessage, MemoryEntry } from './types';
@@ -121,6 +122,8 @@ function App() {
   const [agentTerminals, setAgentTerminals] = useState<Record<string, any>>({});
   // 하이브 엔진 상태 (자가 치유 등) — /api/hive/health 폴링으로 수신
   const [hiveHealth, setHiveHealth] = useState<any>(null);
+  // 하이브 활동 이벤트 — /api/hive/activity 폴링 (memory_write/orchestrate 여부 TerminalSlot에 전달)
+  const [hiveActivity, setHiveActivity] = useState<any[]>([]);
   // 자가 치유 활성 여부 — hiveHealth에서 파생 (별도 폴링 불필요)
   const isHealingActive = hiveHealth?.healing_active === true || hiveHealth?.status === 'healing';
 
@@ -260,6 +263,19 @@ function App() {
     };
     fetchHealth();
     const interval = setInterval(fetchHealth, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 하이브 활동 이벤트 폴링 (5초) — TerminalSlot 모니터링 패널 하이브 저장 상태 표시용
+  useEffect(() => {
+    const fetchActivity = () => {
+      fetch(`${API_BASE}/api/hive/activity`)
+        .then(res => res.json())
+        .then(data => setHiveActivity(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    };
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -760,6 +776,7 @@ function App() {
                   geminiUsage={geminiUsage}
                   agentTerminals={agentTerminals}
                   orchestratorData={skillChain}
+                  hiveActivity={hiveActivity}
                 />
               ))}
             </div>
@@ -816,7 +833,6 @@ function App() {
                 onPointerDown={e => e.stopPropagation()}
                 onClick={() => {
                   fetch(`${API_BASE}/api/graph/launch`, { method: 'POST' }).catch(() => {});
-                  setIsGraphExpanded(false);
                 }}
                 className="hover:bg-white/10 p-1 rounded transition-colors"
                 title="독립 창으로 열기 (다른 모니터 이동 가능)"
@@ -916,7 +932,7 @@ function App() {
           >
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">
-                칸반 보드
+                오케스트레이션 보드
               </span>
               {/* 전체화면이 아닐 때만 드래그 힌트 표시 */}
               {!isKanbanMaximized && (
@@ -931,7 +947,6 @@ function App() {
                   // window.open() 대신 백엔드 API로 PySide6 kanban_board.py 실행
                   // — window.open은 인터넷 브라우저 창으로 열리는 문제 해결
                   fetch(`${API_BASE}/api/kanban/launch`, { method: 'POST' }).catch(() => {});
-                  setIsKanbanExpanded(false);
                 }}
                 className="hover:bg-white/10 p-1 rounded transition-colors"
                 title="네이티브 창으로 열기"
@@ -1018,7 +1033,7 @@ function KanbanOnlyApp() {
     <div className="w-screen h-screen bg-[#1e1e1e] text-[#cccccc] font-sans flex flex-col overflow-hidden">
       {/* 최소 타이틀바 — 창 이동 구분용 */}
       <div className="h-8 bg-[#252526] border-b border-black/40 flex items-center px-3 shrink-0 select-none">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">칸반 보드</span>
+        <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">오케스트레이션 보드</span>
         <span className="text-[9px] text-[#555] ml-2">— 이 창을 다른 모니터로 드래그하세요</span>
       </div>
       {/* 태스크보드 패널 전체 화면 표시 — 네이티브 앱 플로팅과 동일한 컴포넌트 */}
@@ -1048,10 +1063,68 @@ function GraphOnlyApp() {
 
 // ─── 루트 진입점 — URL 파라미터로 렌더링 모드 분기 ─────────────────────────
 // ?kanban=1 / ?graph=1 쿼리 파라미터에 따라 전용 창 렌더링
+function DashboardOnlyApp() {
+  const params = new URLSearchParams(window.location.search);
+  const rawTab = (params.get('tab') || 'agent').toLowerCase();
+  const tab = (
+    rawTab === 'master' ||
+    rawTab === 'vibe-master' ||
+    rawTab === 'mission-control'
+  ) ? 'agent' : rawTab;
+
+  const titleMap: Record<string, string> = {
+    agent: 'Vibe Coding Master',
+    discord: 'Discord Bridge Settings',
+    messages: 'Messages',
+    tasks: 'Tasks',
+    memory: 'Shared Memory',
+    git: 'Git',
+    mcp: 'MCP',
+    hive: 'Hive',
+  };
+
+  const renderPanel = () => {
+    switch (tab) {
+      case 'discord':
+        return <DiscordConfigPanel />;
+      case 'messages':
+        return <MessagesPanel onUnreadCount={() => {}} />;
+      case 'tasks':
+        return <TasksPanel onActiveCount={() => {}} />;
+      case 'memory':
+        return <MemoryPanel />;
+      case 'git':
+        return <GitPanel currentPath="" onChangesCount={() => {}} />;
+      case 'mcp':
+        return <McpPanel />;
+      case 'hive':
+        return <HivePanel />;
+      case 'agent':
+      default:
+        return <AgentPanel onStatusChange={() => {}} />;
+    }
+  };
+
+  return (
+    <div className="w-screen h-screen bg-[#1e1e1e] text-[#cccccc] font-sans flex flex-col overflow-hidden">
+      <div className="h-8 bg-[#252526] border-b border-black/40 flex items-center px-3 shrink-0 select-none">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">
+          {titleMap[tab] ?? titleMap.agent}
+        </span>
+        <span className="text-[9px] text-[#555] ml-2">standalone dashboard</span>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden p-3 flex flex-col">
+        {renderPanel()}
+      </div>
+    </div>
+  );
+}
+
 function Root() {
   const params = new URLSearchParams(window.location.search);
   if (params.has('kanban')) return <KanbanOnlyApp />;
   if (params.has('graph'))  return <GraphOnlyApp />;
+  if (params.get('page') === 'dashboard') return <DashboardOnlyApp />;
   return <App />;
 }
 

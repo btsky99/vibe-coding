@@ -48,10 +48,12 @@ interface TerminalSlotProps {
   agentTerminals?: Record<string, any>;
   // 오케스트레이터 스킬 체인 데이터 — /api/orchestrator/skill-chain 폴링
   orchestratorData?: { skill_registry?: any[]; terminals?: Record<string, any> };
+  // 하이브 활동 이벤트 — /api/hive/activity 폴링 (memory_write/orchestrate 여부 표시용)
+  hiveActivity?: Array<{ timestamp: string; agent: string; type: string; task: string }>;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, agentTerminals, orchestratorData
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, agentTerminals, orchestratorData, hiveActivity
 }: TerminalSlotProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
@@ -86,21 +88,11 @@ export default function TerminalSlot({
     return saved === null ? false : saved === 'true';
   });
 
-  // task_logs.jsonl 직접 폴링 — SSE 스트림 보완용
-  // hive_hook 로그가 SSE에 즉시 반영 안 될 때 task_logs API로 실시간 보완
-  const [taskLogs, setTaskLogs] = useState<Array<{timestamp: string; agent: string; terminal_id: string; task: string}>>([]);
-
   // Git 브랜치명 — 헤더에 현재 브랜치 표시 (cmux 스타일)
   const [gitBranch, setGitBranch] = useState<string>('');
 
   // 에이전트 완료 알림 — 이전 상태 추적용 ref (WORKING→IDLE 전환 시 브라우저 알림)
   const prevAgentStatus = useRef<string>('IDLE');
-
-  // 이 터미널의 스킬 실행 결과 히스토리 — skill_results.jsonl에서 terminal_id 필터
-  const [skillResults, setSkillResults] = useState<Array<{
-    session_id: string; request: string; results: Array<{skill: string; status: string; summary: string}>;
-    completed_at: string; terminal_id?: number;
-  }>>([]);
 
   // 이 슬롯의 터미널 ID — cli_agent.py의 _terminals 키와 일치 (T1, T2, ...)
   const terminalId = `T${slotId + 1}`;
@@ -278,51 +270,6 @@ export default function TerminalSlot({
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [showMonitor]);
 
-  // task_logs.jsonl 직접 폴링 — 모니터링 뷰가 열려 있을 때만 3초마다 갱신
-  // SSE 스트림은 SQLite 기반이라 hive_hook 로그가 지연될 수 있어 이 폴링으로 보완
-  useEffect(() => {
-    if (!showMonitor || !isTerminalMode) return;
-    const fetchTaskLogs = () => {
-      const agentParam = activeAgent.toLowerCase();
-      fetch(`${API_BASE}/api/task-logs?agent=${agentParam}&limit=10`)
-        .then(res => res.json())
-        .then(data => setTaskLogs(Array.isArray(data) ? data : []))
-        .catch(() => {});
-    };
-    fetchTaskLogs();
-    const iv = setInterval(fetchTaskLogs, 3000);
-    return () => clearInterval(iv);
-  }, [showMonitor, isTerminalMode, activeAgent]);
-
-  // 이 터미널의 스킬 실행 결과 폴링 — 모니터링 뷰 활성 시 10초마다 갱신
-  // terminal_id로 클라이언트 필터링하여 각 슬롯에 귀속된 결과만 표시
-  useEffect(() => {
-    if (!showMonitor || !isTerminalMode) return;
-    const myTerminalNum = slotId + 1;
-    const fetchSkillResults = () => {
-      fetch(`${API_BASE}/api/skill-results`)
-        .then(res => res.json())
-        .then(data => {
-          if (!Array.isArray(data)) return;
-          // terminal_id가 이 슬롯 번호와 일치하거나,
-          // terminal_id=0(TERMINAL_ID 미설정)인 경우 agent 필드로 에이전트 타입 매칭 → 해당 터미널에 표시
-          // agent 필드도 없으면(구 포맷) 모든 터미널에 표시 (skill_orchestrator가 terminal_id 없이 실행될 때)
-          const filtered = data.filter((s: any) => {
-            if (s.terminal_id === myTerminalNum) return true;
-            if (s.terminal_id === 0 || s.terminal_id == null) {
-              if (s.agent) return s.agent.toLowerCase().includes(agentType);
-              return true; // 구 포맷 폴백: agent 미설정 결과는 모든 터미널에 표시
-            }
-            return false;
-          });
-          setSkillResults(filtered.slice(-5)); // 최근 5건만 유지
-        })
-        .catch(() => {});
-    };
-    fetchSkillResults();
-    const iv = setInterval(fetchSkillResults, 10000);
-    return () => clearInterval(iv);
-  }, [showMonitor, isTerminalMode, slotId, agentType]);
 
   const closeTerminal = () => {
     setIsTerminalMode(false);
@@ -576,12 +523,11 @@ export default function TerminalSlot({
                 </div>
               )}
 
-              {/* 모니터링 본문 */}
-              <div className="flex-1 overflow-hidden flex flex-col px-2 pb-2 gap-1">
+              {/* 모니터링 본문 — 오케스트레이션 + 하이브 저장 상태 중심으로 재설계 */}
+              <div className="flex-1 overflow-hidden flex flex-col px-2 pb-2 gap-1.5">
 
-                {/* 현재 작업 — agentTerminals의 task 우선, 없으면 태스크 보드 조회 */}
-                <div className="text-[8px] text-white/20 font-bold uppercase tracking-widest shrink-0">현재 작업</div>
-                <div className="flex items-start gap-2 shrink-0">
+                {/* ── 현재 작업 ── */}
+                <div className="flex items-start gap-2 shrink-0 mt-1">
                   {liveTask ? (
                     <>
                       <Clock className="w-3 h-3 text-yellow-400 mt-0.5 shrink-0" />
@@ -600,7 +546,7 @@ export default function TerminalSlot({
                     <>
                       <ClipboardList className="w-3 h-3 text-[#858585] mt-0.5 shrink-0" />
                       <span className="text-[10px] text-[#858585] font-mono leading-tight truncate">
-                        대기 중: {myPendingTasks[0].title ?? '작업 대기'}
+                        대기: {myPendingTasks[0].title ?? '작업 대기'}
                       </span>
                     </>
                   ) : (
@@ -611,93 +557,48 @@ export default function TerminalSlot({
                   )}
                 </div>
 
-                {/* 최근 메시지 (있을 때만) */}
-                {recentAgentMsgs.length > 0 && (
-                  <div className="flex items-start gap-2 shrink-0 px-1.5 py-1 bg-primary/5 border border-primary/20 rounded">
-                    <MessageSquare className="w-3 h-3 text-primary mt-0.5 shrink-0" />
-                    <span className="text-[10px] text-primary/80 leading-tight truncate">
-                      {recentAgentMsgs[recentAgentMsgs.length - 1].content}
-                    </span>
-                  </div>
-                )}
-
-                {/* 최근 활동 — raw 커맨드 로그 제외, 의미 있는 작업 이벤트만 표시
-                    [명령 실행]/[명령 완료]/시스템 메시지 필터링 → 수정·분석·검증 이벤트만 노출 */}
+                {/* ── 하이브 저장 상태 — memory_write / orchestrate 최근 이벤트 ── */}
                 {(() => {
-                  // 제외 패턴: raw 커맨드 실행 로그 + 시스템 내부 메시지
-                  const NOISE = [
-                    '[명령 실행]', '[명령 완료]', '─── ', '[메시지 수신]',
-                    '[하이브 컨텍스트]', '[지시]', '자동 주입', '읽음:',
-                  ];
-                  const filtered = taskLogs.filter(log =>
-                    log.task && !NOISE.some(p => log.task.includes(p))
-                  );
-                  if (filtered.length === 0) return null;
+                  const acts = hiveActivity ?? [];
+                  // memory_write: 가장 최근 메모리 저장 이벤트
+                  const lastWrite = acts.find(a => a.type === 'memory_write');
+                  // orchestrate: 가장 최근 오케스트레이션 이벤트
+                  const lastOrch = acts.find(a => a.type === 'orchestrate');
+                  // 5분 이내 이벤트는 "방금" 표시
+                  const fmtTime = (ts: string) => {
+                    const diffMs = Date.now() - new Date(ts).getTime();
+                    if (diffMs < 60000) return '방금';
+                    if (diffMs < 300000) return `${Math.floor(diffMs/60000)}분 전`;
+                    return new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                  };
                   return (
-                    <div className="flex flex-col gap-0.5 border-t border-white/5 pt-1 mt-0.5">
-                      <div className="text-[8px] text-white/15 font-bold uppercase tracking-widest">── 최근 활동</div>
-                      {filtered.slice(-5).reverse().map((log, idx) => {
-                        // 완료 항목은 초록, 시작/진행은 노란색으로 구분
-                        const isDone = log.task.includes('완료') || log.task.includes('✓');
-                        const color = isDone ? 'text-green-400/70' : 'text-yellow-300/60';
-                        return (
-                          <div key={idx} className="flex items-baseline gap-2 min-w-0">
-                            <span className="text-[9px] text-[#555] font-mono shrink-0 w-14">
-                              {log.timestamp
-                                ? new Date(log.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-                                : '--:--'}
-                            </span>
-                            <span className={`text-[9px] font-mono truncate leading-tight ${color}`}>
-                              {log.task}
-                            </span>
-                          </div>
-                        );
-                      })}
+                    <div className="flex flex-col gap-0.5 border-t border-white/5 pt-1.5 shrink-0">
+                      <div className="text-[8px] text-white/20 font-bold uppercase tracking-widest mb-0.5">하이브 상태</div>
+                      {/* 하이브 메모리 저장 상태 */}
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${lastWrite ? 'bg-green-400' : 'bg-[#444]'}`} />
+                        <span className="text-[9px] text-[#888] font-mono">메모리 저장</span>
+                        {lastWrite ? (
+                          <span className="text-[9px] text-green-400 font-mono ml-auto">{fmtTime(lastWrite.timestamp)}</span>
+                        ) : (
+                          <span className="text-[9px] text-[#444] font-mono ml-auto">없음</span>
+                        )}
+                      </div>
+                      {/* 오케스트레이션 실행 상태 */}
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${chainSteps.length > 0 ? 'bg-yellow-400 animate-pulse' : lastOrch ? 'bg-blue-400' : 'bg-[#444]'}`} />
+                        <span className="text-[9px] text-[#888] font-mono">오케스트레이션</span>
+                        {chainSteps.length > 0 ? (
+                          <span className="text-[9px] text-yellow-300 font-mono ml-auto animate-pulse">실행 중</span>
+                        ) : lastOrch ? (
+                          <span className="text-[9px] text-blue-400 font-mono ml-auto">{fmtTime(lastOrch.timestamp)}</span>
+                        ) : (
+                          <span className="text-[9px] text-[#444] font-mono ml-auto">없음</span>
+                        )}
+                      </div>
                     </div>
                   );
                 })()}
-
-                {/* ── 스킬 실행 결과 (이 터미널 귀속 히스토리) ── */}
-                {skillResults.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-1">
-                    <div className="text-[8px] text-white/15 font-bold uppercase tracking-widest shrink-0">── 스킬 실행 기록</div>
-                    {skillResults.slice().reverse().map((session, idx) => {
-                      const doneCount = session.results.filter(r => r.status === 'done').length;
-                      return (
-                        <div key={idx} className="rounded border border-white/8 bg-white/2 px-1.5 py-1 flex flex-col gap-0.5">
-                          {/* 요청 원문 */}
-                          <span className="text-[9px] text-white/60 leading-tight truncate">{session.request}</span>
-                          {/* 스킬 배지 목록 */}
-                          <div className="flex flex-wrap gap-1">
-                            {session.results.map((r, i) => {
-                              const shortName = r.skill.replace('vibe-', '');
-                              const s = r.status;
-                              const colorCls = s === 'done'    ? 'border-green-500/50 text-green-400 bg-green-500/10'
-                                             : s === 'error'   ? 'border-red-500/50 text-red-400 bg-red-500/10'
-                                             : s === 'skipped' ? 'border-white/10 text-white/30 bg-white/5'
-                                             :                   'border-yellow-400/60 text-yellow-300 bg-yellow-400/10';
-                              const icon = s === 'done' ? '✓' : s === 'error' ? '✗' : s === 'skipped' ? '—' : '●';
-                              return (
-                                <span key={i} className={`text-[8px] font-bold px-1 py-0.5 rounded border ${colorCls}`} title={r.summary}>
-                                  {icon} {shortName}
-                                </span>
-                              );
-                            })}
-                          </div>
-                          {/* 완료율 + 시각 */}
-                          <div className="flex items-center justify-between">
-                            <span className={`text-[8px] font-bold ${doneCount === session.results.length ? 'text-green-400' : 'text-[#858585]'}`}>
-                              {doneCount}/{session.results.length} 완료
-                            </span>
-                            <span className="text-[8px] text-[#444] font-mono">
-                              {session.completed_at ? new Date(session.completed_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
           )}
