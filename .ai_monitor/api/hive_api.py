@@ -47,6 +47,98 @@ def _json_response(handler, data: dict | list, status: int = 200) -> None:
     handler.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
 
 
+def _parse_iso_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', ''))
+    except Exception:
+        return None
+
+
+def _chain_has_live_steps(chain: dict | None) -> bool:
+    if not isinstance(chain, dict):
+        return False
+    steps = chain.get('steps') or []
+    return any(
+        isinstance(step, dict) and step.get('status') in {'running', 'pending'}
+        for step in steps
+    )
+
+
+def _synthetic_chain_request(agent: str, last_line: str) -> str:
+    if last_line:
+        return last_line[:120]
+    label = (agent or 'agent').upper()
+    return f'[PTY] {label} session running'
+
+
+def _merge_live_pty_skill_chains(result: dict, pty_sessions: dict) -> dict:
+    terminals = dict(result.get('terminals') or {})
+    now_iso = datetime.now().isoformat(timespec='seconds')
+
+    for slot_num in range(1, 9):
+        info = pty_sessions.get(str(slot_num))
+        if not isinstance(info, dict):
+            continue
+
+        agent = str(info.get('agent') or '').strip().lower()
+        if agent not in {'claude', 'gemini', 'codex'}:
+            continue
+
+        terminal_key = str(slot_num)
+        existing = terminals.get(terminal_key)
+        if _chain_has_live_steps(existing):
+            continue
+
+        started_at = str(info.get('started') or '')
+        started_dt = _parse_iso_dt(started_at)
+        updated_at = started_dt.isoformat(timespec='seconds') if started_dt else now_iso
+        last_line = str(info.get('last_line') or '').strip()
+        if existing:
+            steps = [step for step in (existing.get('steps') or []) if isinstance(step, dict)]
+            synthetic_step = {
+                'label': f'{slot_num}-{len(steps)}',
+                'skill_num': 0,
+                'skill_name': 'vibe-orchestrate',
+                'step_order': len(steps),
+                'status': 'running',
+                'summary': last_line,
+            }
+            steps.append(synthetic_step)
+            existing['steps'] = steps
+            existing['status'] = 'running'
+            existing['updated_at'] = updated_at
+            existing['agent'] = existing.get('agent') or agent
+            existing['request'] = existing.get('request') or _synthetic_chain_request(agent, last_line)
+            existing['session_id'] = existing.get('session_id') or f'pty-{slot_num}'
+            terminals[terminal_key] = existing
+            continue
+
+        terminals[terminal_key] = {
+            'session_id': f'pty-{slot_num}',
+            'request': _synthetic_chain_request(agent, last_line),
+            'status': 'running',
+            'updated_at': updated_at,
+            'agent': agent,
+            'steps': [{
+                'label': f'{slot_num}-0',
+                'skill_num': 0,
+                'skill_name': 'vibe-orchestrate',
+                'step_order': 0,
+                'status': 'running',
+                'summary': last_line,
+            }],
+        }
+
+    result['terminals'] = terminals
+    skill_registry = list(result.get('skill_registry') or [])
+    if not any(isinstance(skill, dict) and skill.get('name') == 'vibe-orchestrate' for skill in skill_registry):
+        skill_registry.insert(0, {'num': 0, 'name': 'vibe-orchestrate', 'short': 'orchestrate'})
+    result['skill_registry'] = skill_registry
+    return result
+
+
 def handle_get(handler, path: str, params: dict,
                DATA_DIR: Path, SCRIPTS_DIR: Path, BASE_DIR: Path,
                PROJECT_ROOT: Path, PROJECT_ID: str,
@@ -335,8 +427,8 @@ def handle_get(handler, path: str, params: dict,
             _orch_dir = str(DATA_DIR.parent.parent / 'scripts')
             if _orch_dir not in _sys.path:
                 _sys.path.insert(0, _orch_dir)
-            from skill_orchestrator import _build_response, SKILL_REGISTRY
-            result = _build_response()
+            from skill_orchestrator import _build_response
+            result = _merge_live_pty_skill_chains(_build_response(), pty_sessions)
             handler.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             # fallback: 빈 응답
