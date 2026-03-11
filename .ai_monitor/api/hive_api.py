@@ -17,6 +17,7 @@ REVISION HISTORY:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -126,21 +127,38 @@ def handle_get(handler, path: str, params: dict,
             try:
                 # 배포(frozen) 여부에 따라 소스 경로 결정
                 source_base = BASE_DIR if getattr(sys, 'frozen', False) else BASE_DIR.parent
+                target_root = Path(target_path)
+                installed_targets = []
+
                 gemini_src = source_base / ".gemini"
                 if gemini_src.exists():
-                    shutil.copytree(gemini_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
+                    shutil.copytree(gemini_src, target_root / ".gemini", dirs_exist_ok=True)
+                    installed_targets.append(".gemini")
+
+                claude_src = source_base / ".claude"
+                if claude_src.exists():
+                    shutil.copytree(claude_src, target_root / ".claude", dirs_exist_ok=True)
+                    installed_targets.append(".claude")
+
                 scripts_src = SCRIPTS_DIR
                 if scripts_src.exists():
-                    shutil.copytree(scripts_src, Path(target_path) / "scripts", dirs_exist_ok=True)
+                    shutil.copytree(scripts_src, target_root / "scripts", dirs_exist_ok=True)
+                    installed_targets.append("scripts")
+
                 for md in ("GEMINI.md", "CLAUDE.md", "RULES.md", "AGENTS.md", "PROJECT_MAP.md"):
                     src = source_base / md
                     if src.exists():
-                        shutil.copy(src, Path(target_path) / md)
+                        shutil.copy(src, target_root / md)
+                        installed_targets.append(md)
                 # 대상 프로젝트 DB 초기화 — 하이브 워치독 정상 동작 전제 조건
-                target_data = Path(target_path) / ".ai_monitor" / "data"
+                target_data = target_root / ".ai_monitor" / "data"
                 target_data.mkdir(parents=True, exist_ok=True)
                 ensure_schema(target_data)
-                result = {"status": "success", "message": f"Skills installed to {target_path}"}
+                installed_summary = ", ".join(installed_targets) if installed_targets else "no files copied"
+                result = {
+                    "status": "success",
+                    "message": f"Hive skills installed to {target_path} ({installed_summary})"
+                }
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
         handler.wfile.write(json.dumps(result).encode('utf-8'))
@@ -291,9 +309,9 @@ def handle_get(handler, path: str, params: dict,
                 "gui":           check_exists(_proj / ".gemini/skills/pattern-view/SKILL.md")
             },
             "agents": {
-                "claude_config": check_exists(_proj / ".claude/commands/vibe-master.md"),
-                "gemini_config": check_exists(_proj / ".gemini/settings.json"),
-                "codex_config":  check_exists(BASE_DIR / "bin" / "codex_wrapper.py")
+                "claude_config": check_exists(_proj / ".claude/commands/vibe-orchestrate.md"),
+                "gemini_config": check_exists(_proj / ".gemini/skills/orchestrate/SKILL.md"),
+                "codex_config":  check_exists(_proj / "AGENTS.md")
             },
             "data": {
                 "shared_memory": True,
