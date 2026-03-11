@@ -176,8 +176,18 @@ def apply_update_from_temp(new_exe):
     logger.info("exe 이름 변경 완료: %s → %s", exe_path, old_path)
 
     # Step 2: 새 exe를 원래 위치로 이동
-    shutil.move(str(new_exe), str(exe_path))
-    logger.info("새 exe 배치 완료: %s", exe_path)
+    # rename 성공 후 move 실패 시 반드시 롤백하여 exe_path 복원 (앱 실행 불가 방지)
+    try:
+        shutil.move(str(new_exe), str(exe_path))
+        logger.info("새 exe 배치 완료: %s", exe_path)
+    except Exception as move_err:
+        logger.error("새 exe 이동 실패 — 롤백 시작: %s", move_err)
+        try:
+            os.rename(old_path, exe_path)
+            logger.info("롤백 완료: .old → %s", exe_path)
+        except Exception as rb_err:
+            logger.error("롤백 실패: %s", rb_err)
+        raise RuntimeError(f"업데이트 이동 실패 (롤백 완료): {move_err}") from move_err
 
     # Step 3: 자기 삭제 배치 스크립트 작성
     # - 인코딩: mbcs (Windows ANSI) — 한국어 경로 포함 시에도 안전

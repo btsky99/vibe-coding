@@ -41,9 +41,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startup"; Description: "Windows 시작 시 자동 실행"; GroupDescription: "추가 옵션:"
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; DestName: "vibe-coding.exe"; Flags: ignoreversion
 Source: "dist\vibe-coding-console-{#MyAppVersion}.exe"; DestDir: "{app}"; DestName: "vibe-coding-console.exe"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; ── PostgreSQL 포터블 바이너리 (pgsql\bin, lib, share) ──────────────────────
+; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb+pg_ctl 자동 수행.
+; data/ 폴더 미포함 → 각 PC의 %APPDATA%\VibeCoding\pgdata\ 에 새로 생성됨.
+Source: "bin\pgsql\bin\*"; DestDir: "{app}\pgsql\bin"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "bin\pgsql\lib\*"; DestDir: "{app}\pgsql\lib"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Dirs]
 Name: "{app}\data"

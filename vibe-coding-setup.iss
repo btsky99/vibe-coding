@@ -18,10 +18,11 @@
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Vibe Coding"
-#define MyAppVersion   "3.7.50"
+#define MyAppVersion   "3.7.52"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
+; CI는 vibe-coding-update-{ver}.exe로 빌드 → 로컬도 동일 이름 사용
 #define MyAppSrcExe    "vibe-coding-v" + MyAppVersion + ".exe"
 #define MySetupName    "vibe-coding-setup-" + MyAppVersion
 
@@ -54,9 +55,10 @@ PrivilegesRequiredOverridesAllowed=dialog
 CloseApplications=yes
 CloseApplicationsFilter=*vibe-coding*
 
-; 아이콘
-SetupIconFile=.ai_monitor\bin\app_icon.ico
-UninstallDisplayIcon={app}\{#MyAppExeName}
+; 아이콘 — vibe_final.ico를 설치 폴더에 복사 후 바로가기에 명시적 지정
+; (자동 업데이트로 EXE만 교체해도 아이콘이 최신 상태로 유지됨)
+SetupIconFile=.ai_monitor\bin\vibe_final.ico
+UninstallDisplayIcon={app}\vibe_final.ico
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
@@ -69,6 +71,8 @@ Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDe
 [Files]
 ; PyInstaller로 생성된 EXE (단일 파일) — 고정 파일명(vibe-coding.exe)으로 설치
 Source: "dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; 아이콘 파일 — 자동 업데이트 후에도 바로가기 아이콘이 유지되도록 별도 배포
+Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ── PostgreSQL 포터블 바이너리 (pgAdmin 4 제외, 필수 파일만 포함 — ~142MB) ──
 ; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb + pg_ctl start 자동 수행.
@@ -78,13 +82,13 @@ Source: ".ai_monitor\bin\pgsql\lib\*"; DestDir: "{app}\pgsql\lib"; Flags: ignore
 Source: ".ai_monitor\bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-; 시작 메뉴
-Name: "{group}\{#MyAppName}";             Filename: "{app}\{#MyAppExeName}"
+; 시작 메뉴 — IconFilename 명시로 EXE 교체 후에도 아이콘 유지
+Name: "{group}\{#MyAppName}";             Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"
 Name: "{group}\{#MyAppName} 제거";        Filename: "{uninstallexe}"
 ; 바탕화면 (선택)
-Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: desktopicon
 ; 시작프로그램 (선택)
-Name: "{userstartup}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon
+Name: "{userstartup}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startupicon
 
 [Run]
 ; 설치 완료 후 바로 실행 (선택)
