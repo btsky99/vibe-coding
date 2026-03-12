@@ -5,6 +5,11 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-12] - Claude (배포 서브창 EXE 런처 수정 — A안)
+#   - /api/dashboard/launch, /api/kanban/launch, /api/graph/launch:
+#     frozen(배포) 모드에서 Python 스크립트 서브프로세스 대신
+#     vibe-dashboard.exe / vibe-kanban.exe / vibe-graph.exe 직접 실행
+#   - 개발(dev) 모드는 기존 Python 스크립트 방식 유지
 # [2026-03-11] - Claude (지식 그래프 연결선 수정)
 #   - thought_to_pg: parent_id 파라미터 추가 + RETURNING id로 신규 노드 id 반환
 #   - /api/hive/thought/pg: parent_id 수신 + 응답에 id 포함
@@ -2380,19 +2385,77 @@ class SSEHandler(BaseHTTPRequestHandler):
         # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
         # window.open() 대신 PySide6 네이티브 프로세스를 직접 실행하여
         # 인터넷 브라우저 창이 아닌 OS 네이티브 데스크톱 창으로 띄웁니다.
+        if path == '/api/dashboard/launch':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                tab = 'agent'
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length > 0:
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    payload = json.loads(body or '{}')
+                    if isinstance(payload, dict):
+                        tab = str(payload.get('tab', 'agent')).strip().lower() or 'agent'
+
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                if getattr(sys, 'frozen', False):
+                    # 배포(frozen) 모드: vibe-coding.exe 옆의 vibe-dashboard.exe 직접 실행
+                    exe_dir = Path(sys.executable).resolve().parent
+                    launch_exe = exe_dir / 'vibe-dashboard.exe'
+                    if not launch_exe.exists():
+                        raise RuntimeError(f'vibe-dashboard.exe 없음: {launch_exe}')
+                    subprocess.Popen(
+                        [str(launch_exe), str(HTTP_PORT), tab],
+                        creationflags=_no_window,
+                        close_fds=True,
+                    )
+                else:
+                    # 개발(dev) 모드: Python 스크립트 서브프로세스로 실행
+                    dashboard_script = BASE_DIR / 'dashboard_window.py'
+                    python_cmds = _python_runner_cmds()
+                    if not python_cmds:
+                        raise RuntimeError('Python interpreter not found for dashboard launch')
+                    subprocess.Popen(
+                        [python_cmds[0], str(dashboard_script), str(HTTP_PORT), tab],
+                        creationflags=_no_window,
+                        close_fds=True,
+                    )
+                self.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
         if path == '/api/kanban/launch':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                kanban_script = BASE_DIR / 'kanban_board.py'
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                subprocess.Popen(
-                    [sys.executable, str(kanban_script)],
-                    creationflags=_no_window,
-                    close_fds=True,
-                )
+                if getattr(sys, 'frozen', False):
+                    # 배포(frozen) 모드: vibe-coding.exe 옆의 vibe-kanban.exe 직접 실행
+                    exe_dir = Path(sys.executable).resolve().parent
+                    launch_exe = exe_dir / 'vibe-kanban.exe'
+                    if not launch_exe.exists():
+                        raise RuntimeError(f'vibe-kanban.exe 없음: {launch_exe}')
+                    subprocess.Popen(
+                        [str(launch_exe)],
+                        creationflags=_no_window,
+                        close_fds=True,
+                    )
+                else:
+                    # 개발(dev) 모드: Python 스크립트 서브프로세스로 실행
+                    kanban_script = BASE_DIR / 'kanban_board.py'
+                    python_cmds = _python_runner_cmds()
+                    if not python_cmds:
+                        raise RuntimeError('Python interpreter not found for kanban launch')
+                    subprocess.Popen(
+                        [python_cmds[0], str(kanban_script)],
+                        creationflags=_no_window,
+                        close_fds=True,
+                    )
                 self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -2405,13 +2468,29 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                graph_script = BASE_DIR / 'knowledge_graph_window.py'
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                subprocess.Popen(
-                    [sys.executable, str(graph_script), str(HTTP_PORT)],
-                    creationflags=_no_window,
-                    close_fds=True,
-                )
+                if getattr(sys, 'frozen', False):
+                    # 배포(frozen) 모드: vibe-coding.exe 옆의 vibe-graph.exe 직접 실행
+                    exe_dir = Path(sys.executable).resolve().parent
+                    launch_exe = exe_dir / 'vibe-graph.exe'
+                    if not launch_exe.exists():
+                        raise RuntimeError(f'vibe-graph.exe 없음: {launch_exe}')
+                    subprocess.Popen(
+                        [str(launch_exe), str(HTTP_PORT)],
+                        creationflags=_no_window,
+                        close_fds=True,
+                    )
+                else:
+                    # 개발(dev) 모드: Python 스크립트 서브프로세스로 실행
+                    graph_script = BASE_DIR / 'knowledge_graph_window.py'
+                    python_cmds = _python_runner_cmds()
+                    if not python_cmds:
+                        raise RuntimeError('Python interpreter not found for graph launch')
+                    subprocess.Popen(
+                        [python_cmds[0], str(graph_script), str(HTTP_PORT)],
+                        creationflags=_no_window,
+                        close_fds=True,
+                    )
                 self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))

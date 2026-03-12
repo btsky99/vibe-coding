@@ -1,11 +1,14 @@
 # ------------------------------------------------------------------------
 # 파일명: knowledge_graph_window.py
 # 설명: 지식 그래프 독립 창 — PySide6 QWebEngineView 기반.
-#       메인 앱에서 /api/graph/launch 호출 시 서브프로세스로 실행됩니다.
+#       배포 버전: vibe-graph.exe 로 PyInstaller 빌드되어 {app}\ 에 설치됨.
+#       메인 앱(server.py frozen 모드)이 vibe-graph.exe를 직접 실행.
+#       개발 버전: python knowledge_graph_window.py <port> 로 직접 실행.
 #       포트는 커맨드라인 인수로 전달받아 로컬 서버의 ?graph=1 페이지를 로드하며,
 #       다른 모니터로 자유롭게 이동할 수 있는 독립 데스크톱 창입니다.
 #
 # REVISION HISTORY:
+# - 2026-03-12 Claude: 배포 EXE 분리 대응 — 헤더 문서 업데이트 (A안)
 # - 2026-03-10 Claude: 최초 구현 — PySide6 QWebEngineView 지식 그래프 독립 창
 # ------------------------------------------------------------------------
 

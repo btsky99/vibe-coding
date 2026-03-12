@@ -45,6 +45,15 @@ Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; DestName: "vibe-coding.exe"; F
 Source: "dist\vibe-coding-console-{#MyAppVersion}.exe"; DestDir: "{app}"; DestName: "vibe-coding-console.exe"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 
+; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
+; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
+; vibe-graph.exe    : 지식 그래프 독립 창 (QWebEngineView)
+; vibe-dashboard.exe: 대시보드 독립 창   (QWebEngineView)
+; vibe-kanban.exe   : 오케스트레이션 보드 (PySide6 네이티브)
+Source: "dist\vibe-graph.exe";     DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\vibe-dashboard.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\vibe-kanban.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
 ; ── PostgreSQL 포터블 바이너리 (pgsql\bin, lib, share) ──────────────────────
 ; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb+pg_ctl 자동 수행.
 ; data/ 폴더 미포함 → 각 PC의 %APPDATA%\VibeCoding\pgdata\ 에 새로 생성됨.

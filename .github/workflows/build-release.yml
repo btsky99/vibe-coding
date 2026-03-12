@@ -155,6 +155,32 @@ jobs:
             server.py
         shell: cmd
 
+      - name: Build sub-window EXEs
+        # server.py frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
+        # vibe-graph.exe / vibe-dashboard.exe / vibe-kanban.exe → {app}\ 에 설치됨.
+        run: |
+          cd .ai_monitor
+          pyinstaller --onefile --noconsole ^
+            --name vibe-graph ^
+            --icon bin/vibe_final.ico ^
+            --add-data "bin;bin" ^
+            --hidden-import PySide6.QtWebEngineWidgets ^
+            --hidden-import PySide6.QtWebEngineCore ^
+            knowledge_graph_window.py
+          pyinstaller --onefile --noconsole ^
+            --name vibe-dashboard ^
+            --icon bin/vibe_final.ico ^
+            --add-data "bin;bin" ^
+            --hidden-import PySide6.QtWebEngineWidgets ^
+            --hidden-import PySide6.QtWebEngineCore ^
+            dashboard_window.py
+          pyinstaller --onefile --noconsole ^
+            --name vibe-kanban ^
+            --icon bin/vibe_final.ico ^
+            --add-data "bin;bin" ^
+            kanban_board.py
+        shell: cmd
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
         shell: cmd

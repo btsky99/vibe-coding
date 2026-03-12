@@ -18,7 +18,7 @@
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Vibe Coding"
-#define MyAppVersion   "3.7.52"
+#define MyAppVersion   "3.7.54"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
@@ -73,6 +73,12 @@ Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDe
 Source: "dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 ; 아이콘 파일 — 자동 업데이트 후에도 바로가기 아이콘이 유지되도록 별도 배포
 Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
+; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
+Source: ".ai_monitor\dist\vibe-graph.exe";     DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: ".ai_monitor\dist\vibe-dashboard.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: ".ai_monitor\dist\vibe-kanban.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── PostgreSQL 포터블 바이너리 (pgAdmin 4 제외, 필수 파일만 포함 — ~142MB) ──
 ; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb + pg_ctl start 자동 수행.
