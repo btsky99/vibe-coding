@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-12] - Claude (지식 그래프 연결선 자동 생성)
+#   - thought_to_pg(): parent_id 미지정 시 같은 에이전트 직전 thought를 자동 부모로 연결
+#     → hive_bridge.py 새 프로세스 호출마다 체인이 끊기던 근본 원인 수정
+#   - _backfill_thought_parent_ids(): 서버 기동 시 기존 고아 노드 소급 연결
 # [2026-03-12] - Claude (배포 서브창 EXE 런처 수정 — A안)
 #   - /api/dashboard/launch, /api/kanban/launch, /api/graph/launch:
 #     frozen(배포) 모드에서 Python 스크립트 서브프로세스 대신
@@ -99,9 +103,11 @@ import api.hive_api as hive_api
 import api.git_api as git_api
 import api.memory_api as memory_api
 import api.agent_api as agent_api
+import api.pty_api as pty_api
 import api.config_api as config_api
 import string
 import socket
+from collections import deque
 from pathlib import Path
 from src.file_store import (
     delete_memory_entry,
@@ -279,6 +285,8 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) 
     """pg_thoughts 테이블에 사고 과정 기록 (JSONB).
 
     parent_id를 지정하면 이전 thought와 연결선이 생성되어 지식 그래프에 계보 표시.
+    parent_id가 없으면 같은 에이전트의 마지막 thought를 자동으로 부모로 연결
+    → hive_bridge.py가 매 호출마다 새 프로세스로 실행되어 인메모리 체인이 깨지는 문제 해결.
     ensure_ascii=True: 한글을 \\uXXXX 이스케이프로 변환하여 psql.exe -c 인수 인코딩 오류 방지.
     JSONB는 유니코드 이스케이프를 정상 처리하므로 조회 시 한글이 정상 표시됩니다.
 
@@ -286,6 +294,23 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) 
         int: 삽입된 행의 id (RETURNING id), 실패 시 0
     """
     safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
+
+    # parent_id 미지정 시 같은 에이전트의 직전 thought를 자동으로 부모로 설정
+    # 이 덕분에 hive_bridge.py가 매번 새 프로세스로 호출되어도 연결선이 끊기지 않음
+    if not parent_id:
+        safe_agent = agent.replace("'", "''")
+        prev_result = run_pg_sql(
+            f"SELECT id FROM pg_thoughts WHERE agent='{safe_agent}' ORDER BY id DESC LIMIT 1;"
+        )
+        try:
+            for line in (prev_result or '').splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    parent_id = int(line)
+                    break
+        except Exception:
+            pass
+
     if parent_id:
         sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
                f"VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb, {int(parent_id)}) RETURNING id;")
@@ -683,6 +708,30 @@ ensure_legacy_store(DATA_DIR)
 
 # Postgres-backed state schema 초기화
 ensure_schema(DATA_DIR)
+
+# ── 지식 그래프: 기존 고아 노드 parent_id 소급 연결 (서버 기동 시 1회) ────────
+# hive_bridge.py가 새 프로세스로 호출될 때마다 인메모리 체인이 끊겨
+# parent_id 없이 삽입된 고아 노드들을 동일 에이전트의 이전 thought와 연결.
+def _backfill_thought_parent_ids():
+    """pg_thoughts에서 parent_id가 NULL인 노드를 같은 에이전트의 직전 id로 소급 연결."""
+    try:
+        backfill_sql = (
+            "UPDATE pg_thoughts t "
+            "SET parent_id = prev.id "
+            "FROM ("
+            "  SELECT id, agent, "
+            "         LAG(id) OVER (PARTITION BY agent ORDER BY id) AS prev_id "
+            "  FROM pg_thoughts"
+            ") prev "
+            "WHERE t.id = prev.id "
+            "  AND prev.prev_id IS NOT NULL "
+            "  AND t.parent_id IS NULL;"
+        )
+        run_pg_sql(backfill_sql)
+    except Exception:
+        pass
+
+_backfill_thought_parent_ids()
 
 # ── 파일 기반 레거시 메모리 저장소 초기화 ─────────────────────────────────────
 def _legacy_memory_data_dir() -> Path:
@@ -1845,6 +1894,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
         elif parsed_path.path.startswith('/api/agent/'):
             agent_api.handle_get(self, parsed_path.path)
+        elif parsed_path.path.startswith('/api/pty/'):
+            pty_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
         elif parsed_path.path == '/api/config/discord':
             config_api.handle_get_config(self)
 
@@ -2924,6 +2975,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         # ── [모듈 위임 - POST] agent_api — /api/agent/run, /api/agent/stop ─
         elif parsed_path.path.startswith('/api/agent/'):
             agent_api.handle_post(self, parsed_path.path)
+        elif parsed_path.path.startswith('/api/pty/'):
+            pty_api.handle_post(self, parsed_path.path)
 
         # ── [모듈 위임 - POST] memory_api ────────────────────────────────
         # /api/memory/set, /api/memory/delete
@@ -3680,6 +3733,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         pass
 
 pty_sessions = {}
+pty_output_buffers = {}
+pty_output_seq = {}
 
 
 def _normalize_codex_stream(data: str) -> str:
@@ -3691,9 +3746,33 @@ def _normalize_codex_stream(data: str) -> str:
     """
     # \r\r\n → \r\n: winpty가 가끔 CR을 이중으로 보내는 현상만 보정
     return data.replace('\r\r\n', '\r\n')
+
+
+def _append_pty_output(session_id: str, stream_data: str, ansi_regex) -> None:
+    """Store recent PTY output lines for remote bridge polling."""
+    try:
+        clean = ansi_regex.sub('', stream_data)
+        clean = clean.replace('\r', '\n')
+        lines = [line.strip() for line in clean.split('\n') if line.strip()]
+        if not lines:
+            return
+
+        buf = pty_output_buffers.setdefault(session_id, deque(maxlen=400))
+        next_seq = pty_output_seq.get(session_id, 0)
+        for line in lines:
+            next_seq += 1
+            buf.append({
+                'seq': next_seq,
+                'text': line[:500],
+            })
+        pty_output_seq[session_id] = next_seq
+    except Exception:
+        pass
 # agent_api가 PTY 세션 상태를 /api/agent/terminals 응답에 병합할 수 있도록
 # pty_sessions 딕셔너리 접근 콜백을 주입합니다.
 agent_api.set_pty_sessions_getter(lambda: pty_sessions)
+pty_api.set_pty_sessions_getter(lambda: pty_sessions)
+pty_api.set_pty_output_getter(lambda: pty_output_buffers)
 
 async def pty_handler(websocket):
     try:
@@ -3761,6 +3840,8 @@ async def pty_handler(websocket):
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
         # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음
         pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat(), 'cwd': cwd}
+        pty_output_buffers[session_id] = deque(maxlen=400)
+        pty_output_seq[session_id] = 0
 
         # ── [세션 시작 로그] ──────────────────────────────────────────────
         # PTY 터미널에서 에이전트가 시작될 때 즉시 session_logs에 기록.
@@ -3802,6 +3883,7 @@ async def pty_handler(websocket):
                 if not stream_data:
                     continue
                 await websocket.send(stream_data)
+                _append_pty_output(session_id, stream_data, _ANSI_ESCAPE)
                 # ── PTY 출력의 마지막 줄을 pty_sessions에 저장 ─────────────────────
                 # 목적: agent_api.py가 /api/agent/terminals 응답 빌드 시 last_line을
                 #       참조하여 자율 에이전트 패널에 "현재 무엇을 하고 있는지" 표시.
@@ -3978,6 +4060,8 @@ async def pty_handler(websocket):
         pass
     if session_id in pty_sessions:
         del pty_sessions[session_id]
+    pty_output_buffers.pop(session_id, None)
+    pty_output_seq.pop(session_id, None)
 
 def _cleanup_all_pty_sessions():
     """X 버튼 또는 시그널 종료 시 모든 PTY 자식 프로세스를 강제 종료합니다.
@@ -3993,6 +4077,8 @@ def _cleanup_all_pty_sessions():
         except Exception as e:
             print(f"[cleanup] PTY 종료 실패 ({sid}): {e}")
     pty_sessions.clear()
+    pty_output_buffers.clear()
+    pty_output_seq.clear()
 
 
 # 워치독/Discord/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
@@ -4236,12 +4322,15 @@ if __name__ == '__main__':
             print("[!] run_discord_bridge: Python 인터프리터를 찾을 수 없어 Discord 브릿지 스킵")
             return
         python_exe = _python_cmds[0]
+        child_env = os.environ.copy()
+        child_env['VIBE_SERVER_PORT'] = str(HTTP_PORT)
         # Discord 브릿지 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
         proc = subprocess.Popen(
             [python_exe, str(discord_script)],
             cwd=str(PROJECT_ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=child_env,
             encoding='utf-8',
             errors='replace',
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
