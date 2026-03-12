@@ -82,6 +82,9 @@ except ImportError as e:
 # handle_terminals()에서 cli_agent 상태를 이 값으로 오버라이드하여 대화형 세션을 실시간 표시.
 _interactive_stages: dict = {}
 
+# 모든 사용자 지시는 항상 오케스트레이션으로 시작합니다.
+FORCE_ORCHESTRATION = True
+
 # ── PTY 세션 getter (server.py에서 주입) ─────────────────────────────────────
 # server.py의 pty_sessions dict를 직접 임포트하면 순환 의존성이 생기므로,
 # server.py 초기화 시 set_pty_sessions_getter()로 콜백을 주입받아 사용합니다.
@@ -113,6 +116,13 @@ def _read_body(handler) -> dict:
     except Exception:
         pass
     return {}
+
+
+def _wrap_orchestrator_task(task: str) -> str:
+    """Ensure the task enters Claude through /vibe-orchestrate exactly once."""
+    if task.lstrip().startswith('/vibe-orchestrate'):
+        return task
+    return f'/vibe-orchestrate\n\n{task}'
 
 
 def handle_run(handler) -> None:
@@ -154,13 +164,12 @@ def handle_run(handler) -> None:
                                      'current': cli_agent._current_run}, 409)
             return
 
-        # CLI 자동 선택
-        # 'orchestrate' 요청: vibe-orchestrate 스킬을 Claude에게 지시로 래핑
-        # Claude가 /vibe-orchestrate 스킬을 인식하여 자동으로 스킬 체인 수립
-        if cli_choice == 'orchestrate':
-            task = f'/vibe-orchestrate\n\n{task}'
+        # 모든 사용자 지시는 오케스트레이터를 먼저 거치도록 강제합니다.
+        if FORCE_ORCHESTRATION or cli_choice == 'orchestrate':
+            task = _wrap_orchestrator_task(task)
             chosen_cli = 'claude'
             cli_choice = 'claude'
+            _routing_reason = 'forced_orchestration'
         elif cli_choice == 'auto':
             chosen_cli, _routing_reason = cli_agent.route_task_with_reason(task)
         else:
@@ -191,6 +200,7 @@ def handle_run(handler) -> None:
     _json_response(handler, {
         'status': 'started',
         'cli': chosen_cli,
+        'orchestrated': FORCE_ORCHESTRATION,
         'run_id': 'pending',  # 실제 run_id는 SSE 이벤트로 전달
         'task': task,
         'terminal_id': terminal_id,

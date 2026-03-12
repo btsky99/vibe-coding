@@ -485,6 +485,56 @@ function App() {
   const updateFileContent = (id: string, newContent: string) =>
     setOpenFiles(prev => prev.map(f => f.id === id ? { ...f, content: newContent } : f));
 
+  const normalizePreviewPath = (rawPath: string) => {
+    const trimmed = rawPath.trim().replace(/^[("'`[{<]+/, '').replace(/[),\].!?'"`}>]+$/, '');
+    if (!trimmed) return '';
+
+    const withoutHashLine = trimmed.replace(/#L\d+(?:C\d+)?$/i, '');
+    const lineSuffixMatch = withoutHashLine.match(/:(\d+)(?::\d+)?$/);
+    if (!lineSuffixMatch) return withoutHashLine;
+
+    const colonIndex = lineSuffixMatch.index ?? -1;
+    const lastSlashIndex = Math.max(withoutHashLine.lastIndexOf('/'), withoutHashLine.lastIndexOf('\\'));
+    return colonIndex > lastSlashIndex ? withoutHashLine.slice(0, colonIndex) : withoutHashLine;
+  };
+
+  const openFileWindow = (targetPath: string, fileName?: string) => {
+    const existing = openFiles.find(f => f.path === targetPath);
+    if (existing) { bringToFront(existing.id); return; }
+
+    const newId = Date.now().toString();
+    const displayName = fileName || targetPath.split(/[\\/]/).pop() || targetPath;
+    const isImg = /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(displayName);
+
+    setMaxZIndex(prev => {
+      const newZIndex = prev + 1;
+      setOpenFiles(files => [...files, {
+        id: newId,
+        name: displayName,
+        path: targetPath,
+        content: isImg ? '' : 'Loading...',
+        isLoading: !isImg,
+        zIndex: newZIndex
+      }]);
+      return newZIndex;
+    });
+
+    if (!isImg) {
+      fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(targetPath)}`)
+        .then(res => res.json())
+        .then(data => {
+          setOpenFiles(prev => prev.map(f => f.id === newId
+            ? { ...f, content: data.error ? `Error: ${data.error}` : data.content, isLoading: false }
+            : f));
+        })
+        .catch(err => {
+          setOpenFiles(prev => prev.map(f => f.id === newId
+            ? { ...f, content: `Failed to load file: ${err}`, isLoading: false }
+            : f));
+        });
+    }
+  };
+
   // 파일 저장 API 호출
   const handleSaveFile = (path: string, content: string) => {
     const targetPath = path.includes(':') || path.startsWith('/') || path.startsWith('\\')
@@ -506,32 +556,13 @@ function App() {
   // FileExplorer의 onOpenFile 콜백 — 파일 클릭 시 FloatingWindow 생성
   // setMaxZIndex 함수형 업데이트로 stale closure 방지 (bringToFront와 동일 패턴)
   const handleOpenFile = (item: TreeItem) => {
-    const existing = openFiles.find(f => f.path === item.path);
-    if (existing) { bringToFront(existing.id); return; }
-    const newId = Date.now().toString();
-    const isImg = /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(item.name);
-    setMaxZIndex(prev => {
-      const newZIndex = prev + 1;
-      setOpenFiles(files => [...files, {
-        id: newId, name: item.name, path: item.path,
-        content: isImg ? '' : 'Loading...', isLoading: !isImg, zIndex: newZIndex
-      }]);
-      return newZIndex;
-    });
-    if (!isImg) {
-      fetch(`${API_BASE}/api/read-file?path=${encodeURIComponent(item.path)}`)
-        .then(res => res.json())
-        .then(data => {
-          setOpenFiles(prev => prev.map(f => f.id === newId
-            ? { ...f, content: data.error ? `Error: ${data.error}` : data.content, isLoading: false }
-            : f));
-        })
-        .catch(err => {
-          setOpenFiles(prev => prev.map(f => f.id === newId
-            ? { ...f, content: `Failed to load file: ${err}`, isLoading: false }
-            : f));
-        });
-    }
+    openFileWindow(item.path, item.name);
+  };
+
+  const handleOpenFilePath = (rawPath: string) => {
+    const normalizedPath = normalizePreviewPath(rawPath);
+    if (!normalizedPath) return;
+    openFileWindow(normalizedPath);
   };
 
   // 터미널 슬롯 인덱스 배열
@@ -659,7 +690,7 @@ function App() {
           <div className="p-3 flex-1 overflow-hidden flex flex-col">
             {activeTab === 'messages' ? (
               /* 메시지 채널 패널 */
-              <MessagesPanel onUnreadCount={setUnreadMsgCount} />
+              <MessagesPanel onUnreadCount={setUnreadMsgCount} onOpenFilePath={handleOpenFilePath} />
             ) : activeTab === 'tasks' ? (
               /* 태스크 보드 패널 (리스트 뷰) */
               <TasksPanel onActiveCount={setActiveTaskCount} />
@@ -680,7 +711,7 @@ function App() {
               <McpPanel />
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
-              <AgentPanel onStatusChange={setIsAgentRunning} />
+              <AgentPanel onStatusChange={setIsAgentRunning} onOpenFilePath={handleOpenFilePath} />
             ) : (
               /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
               <FileExplorer

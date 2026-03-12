@@ -6,6 +6,7 @@ DESCRIPTION: 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저.
 REVISION HISTORY:
 - 2026-03-06 Gemini: 최초 작성. 시작/중지/상태체크 및 확장 기능 활성화 로직 구현.
 - 2026-03-10 Gemini: Task 17 강화 - pg_logs/pg_thoughts 스키마 통합 및 지식 그래프 기반 마련.
+- 2026-03-11 Claude: frozen(배포) 모드 경로 추가 — {exe dir}\pgsql + %APPDATA%\VibeCoding\pgdata
 """
 
 import os
@@ -21,9 +22,17 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 PROJECT_ROOT = Path(__file__).parent.parent
-PG_DIR = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql"
+
+# frozen(배포) 모드: installer가 {app}\pgsql\ 에 설치한 바이너리 사용
+# 개발 모드: 소스 트리 내 .ai_monitor/bin/pgsql/ 사용
+if getattr(sys, 'frozen', False):
+    PG_DIR = Path(sys.executable).resolve().parent / "pgsql"
+    DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
+else:
+    PG_DIR = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql"
+    DATA_DIR = PG_DIR / "data"
+
 BIN_DIR = PG_DIR / "bin"
-DATA_DIR = PG_DIR / "data"
 PORT = 5433
 
 def run_pg_ctl(cmd_args):
@@ -31,7 +40,7 @@ def run_pg_ctl(cmd_args):
     cmd = [str(pg_ctl)] + cmd_args + ["-D", str(DATA_DIR)]
     try:
         # 로그 파일 지정
-        log_file = PROJECT_ROOT / ".ai_monitor" / "data" / "pgsql.log"
+        log_file = DATA_DIR.parent / "pgsql.log" if getattr(sys, 'frozen', False) else PROJECT_ROOT / ".ai_monitor" / "data" / "pgsql.log"
         if "start" in cmd_args:
             cmd += ["-l", str(log_file)]
         

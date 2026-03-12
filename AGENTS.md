@@ -36,3 +36,9 @@
 ## Configuration & Security
 - Copy `.env.template` to `.env` for Discord integration and keep real tokens and channel IDs out of git.
 - Treat logs, `dist/`, `build/`, and machine-local `.ai_monitor/data/` changes as non-source artifacts unless a release or fixture update explicitly requires them.
+
+## GitHub CLI & Token Efficiency
+- **NEVER** use external GitHub MCP servers unless explicitly requested.
+- **ALWAYS** use the GitHub CLI (`gh`) directly or via `scripts/utils/gh_helper.py` to minimize token consumption.
+- When using `gh`, prefer `--json` with specific fields (e.g., `gh pr list --json number,title`) to avoid fetching unnecessary metadata.
+- Use `GitHubHelper.run_gh()` for automated tasks to ensure data trimming (removal of URLs, timestamps, etc.) is applied before the AI processes the result.

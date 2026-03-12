@@ -57,6 +57,35 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread
 import psycopg2
 import select
 
+
+def _python_runner_cmds() -> list[str]:
+    """독립 창용 보조 스크립트를 실행할 실제 Python 인터프리터 후보를 반환합니다."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    for path in (
+        BASE_DIR / 'venv' / 'Scripts' / 'python.exe',
+        PROJECT_ROOT / '.ai_monitor' / 'venv' / 'Scripts' / 'python.exe',
+        PROJECT_ROOT / 'venv' / 'Scripts' / 'python.exe',
+    ):
+        path_str = str(path)
+        if path.exists() and path_str not in seen:
+            candidates.append(path_str)
+            seen.add(path_str)
+
+    exe_name = Path(sys.executable).name.lower()
+    if exe_name.startswith('python') and sys.executable not in seen:
+        candidates.append(sys.executable)
+        seen.add(sys.executable)
+
+    for name in ('python', 'py'):
+        resolved = shutil.which(name)
+        if resolved and resolved not in seen:
+            candidates.append(resolved)
+            seen.add(resolved)
+
+    return candidates or ['python']
+
 class PgListenerThread(QThread):
     """PostgreSQL LISTEN 채널을 감시하는 백그라운드 스레드"""
     log_received = Signal(dict)
@@ -262,9 +291,12 @@ class MissionControlApp(QObject):
         try:
             import subprocess
             kanban_script = BASE_DIR / 'kanban_board.py'
+            python_cmds = _python_runner_cmds()
+            if not python_cmds:
+                raise RuntimeError('Python interpreter not found for kanban launch')
             _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             subprocess.Popen(
-                [sys.executable, str(kanban_script)],
+                [python_cmds[0], str(kanban_script)],
                 creationflags=_no_window,
                 close_fds=True,
             )

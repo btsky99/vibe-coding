@@ -83,10 +83,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Bot, Play, Square, RotateCw, ChevronDown, Clock,
+  Bot, Play, Square, RotateCw, Clock,
   Brain, CheckCircle2, Circle, XCircle, Terminal, LayoutDashboard,
-  Search, Pencil, ShieldCheck, RefreshCw, Network, Database,
+  Search, Pencil, ShieldCheck, RefreshCw, Network, Database, ExternalLink,
 } from 'lucide-react';
+import FilePathText from '../FilePathText';
 
 // 현재 접속 포트 기반으로 API 주소 자동 결정
 const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
@@ -94,7 +95,7 @@ const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
 type AgentStatus   = 'idle' | 'running' | 'done' | 'error' | 'unavailable';
-type CliChoice     = 'auto' | 'claude' | 'gemini' | 'codex';
+type CliChoice     = 'orchestrate' | 'auto' | 'claude' | 'gemini' | 'codex';
 type ActiveTab     = 'workflow' | 'terminal' | 'thoughts' | 'history' | 'orchestrator' | 'hive';
 
 // 하이브 활동 이벤트 타입 — /api/hive/activity 응답 형식
@@ -194,11 +195,16 @@ interface ThoughtEntry {
 // ─── 상수 ───────────────────────────────────────────────────────────────────
 
 const CLI_LABELS: Record<CliChoice, string> = {
+  orchestrate: '오케스트레이션',
   auto:   '🤖 Auto (자동 선택)',
   claude: '⚡ Claude Code',
   gemini: '✨ Gemini CLI',
   codex:  '🟠 Codex CLI',
 };
+
+const ORCHESTRATION_LABEL = '오케스트레이션';
+const AUTO_PREVIEW_INTENT_REGEX = /(보여줘|보여주|열어줘|띄워줘|팝업|show|open|preview)/i;
+const INLINE_PATH_REGEX = /([A-Za-z]:[\\/][^\s"'`()<>]+|\/[^\s"'`()<>]+|(?:\.{1,2}[\\/]|[A-Za-z_.-][A-Za-z0-9_.-]*[\\/])[^\s"'`()<>]+)/g;
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
   idle:        'text-white/40',
@@ -216,11 +222,46 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
   unavailable: 'CLI 미설치',
 };
 
+function stripPreviewPath(rawPath: string): string {
+  const trimmed = rawPath.trim().replace(/^[("'`[{<]+/, '').replace(/[),\].!?'"`}>]+$/, '');
+  if (!trimmed) return '';
+
+  const withoutHashLine = trimmed.replace(/#L\d+(?:C\d+)?$/i, '');
+  const lineSuffixMatch = withoutHashLine.match(/:(\d+)(?::\d+)?$/);
+  if (!lineSuffixMatch) return withoutHashLine;
+
+  const colonIndex = lineSuffixMatch.index ?? -1;
+  const lastSlashIndex = Math.max(withoutHashLine.lastIndexOf('/'), withoutHashLine.lastIndexOf('\\'));
+  return colonIndex > lastSlashIndex ? withoutHashLine.slice(0, colonIndex) : withoutHashLine;
+}
+
+function extractAutoPreviewPath(line: string): string | null {
+  const toolPathMatch = line.match(/(?:Read|Edit|Write|Create)\s*\(([^)\n]{1,260})\)/i);
+  if (toolPathMatch) {
+    const candidate = stripPreviewPath(toolPathMatch[1]);
+    if (candidate && !candidate.includes('*')) {
+      return candidate;
+    }
+  }
+
+  for (const match of line.matchAll(INLINE_PATH_REGEX)) {
+    const candidate = stripPreviewPath(match[0]);
+    const protocolProbe = line.slice(Math.max(0, (match.index ?? 0) - 8), match.index ?? 0);
+    if (!candidate || (candidate.startsWith('/') && /https?:$/i.test(protocolProbe))) {
+      continue;
+    }
+    return candidate;
+  }
+
+  return null;
+}
+
 // ─── Props ──────────────────────────────────────────────────────────────────
 
 interface AgentPanelProps {
   /** App.tsx에 에이전트 실행 상태를 알리는 콜백 (ActivityBar 배지 표시용) */
   onStatusChange?: (running: boolean) => void;
+  onOpenFilePath?: (path: string) => void;
 }
 
 // ─── 상태 아이콘 (히스토리 / 사고 흐름 공용) ───────────────────────────────
@@ -584,14 +625,13 @@ function TerminalCard({
 
 // ────────────────────────────────────────────────────────────────────────────
 
-export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
+export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPanelProps) {
   // ─── 상태 ───────────────────────────────────────────────────────────────
-  const [taskInput, setTaskInput]     = useState('');
-  const [selectedCli, setSelectedCli] = useState<CliChoice>('auto');
-  const [status, setStatus]           = useState<AgentStatus>('idle');
-  const [activeCli, setActiveCli]     = useState<string>('');
-  const [showCliMenu, setShowCliMenu] = useState(false);
-  const [activeTab, setActiveTab]     = useState<ActiveTab>('workflow');
+  const [taskInput, setTaskInput] = useState('');
+  const selectedCli: CliChoice = 'orchestrate';
+  const [status, setStatus] = useState<AgentStatus>('idle');
+  const [activeCli, setActiveCli] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('workflow');
 
   // 터미널 탭 데이터
   const [outputLines, setOutputLines] = useState<OutputLine[]>([]);
@@ -648,6 +688,16 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
   });
   // 실행할 터미널 선택 (카드 클릭으로 변경, 기본: T1)
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>('T1');
+  const autoPreviewRequestedRef = useRef(false);
+  const autoPreviewOpenedRef = useRef(false);
+
+  const openStandaloneDashboard = useCallback(() => {
+    fetch(`${API_BASE}/api/dashboard/launch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tab: 'agent' }),
+    }).catch(() => {});
+  }, []);
 
   // ── 상황판 탭: 워크플로우 상태 머신 ────────────────────────────────────────
   // wfStage/wfLoop: WorkflowPipeline 렌더링에 사용
@@ -788,7 +838,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
         }
         return srvStatus;
       });
-      if (data.current?.cli) setActiveCli(data.current.cli);
+      if (data.current?.cli) setActiveCli(ORCHESTRATION_LABEL);
     } catch {
       // 무시
     }
@@ -829,11 +879,10 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
             maxRunTimeoutRef.current = null;
           }, 300_000);
 
-          const cli = data.cli || 'auto';
           setStatus('running');
           onStatusChange?.(true);
-          setActiveCli(cli);
-          setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : cli === 'codex' ? 'Codex' : 'Auto');
+          setActiveCli(ORCHESTRATION_LABEL);
+          setActiveSkill(ORCHESTRATION_LABEL);
 
           // 상황판: 초기화
           setWfStage('analyzing');
@@ -847,7 +896,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
           // 사고 흐름: 초기화 후 시작 메시지
           const id = ++thoughtIdRef.current;
-          setThoughts([{ id, time, agent: cli.toUpperCase(), text: `▶ 에이전트 시작 [${data.run_id || ''}]` }]);
+          setThoughts([{ id, time, agent: ORCHESTRATION_LABEL, text: `▶ 에이전트 시작 [${data.run_id || ''}]` }]);
 
         } else if (type === 'output' || type === 'error') {
           const line = data.line || '';
@@ -857,6 +906,14 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
 
           // 터미널: raw 출력 추가 (최대 500줄 유지 — 무제한 누적 시 렌더링 지연 방지)
           setOutputLines(prev => [...prev.slice(-499), { text: line, ts, type }]);
+
+          if (line && autoPreviewRequestedRef.current && !autoPreviewOpenedRef.current && onOpenFilePath) {
+            const previewPath = extractAutoPreviewPath(line);
+            if (previewPath) {
+              autoPreviewOpenedRef.current = true;
+              onOpenFilePath(previewPath);
+            }
+          }
 
           // 상황판: 출력 라인에서 워크플로우 단계 추론 및 갱신
           if (line) {
@@ -909,6 +966,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
         } else if (type === 'done') {
           // 최대 실행 타임아웃 해제
           if (maxRunTimeoutRef.current) { clearTimeout(maxRunTimeoutRef.current); maxRunTimeoutRef.current = null; }
+          autoPreviewRequestedRef.current = false;
           // data.status로 성공/실패 구분 (cli_agent는 type='done' 고정, status 필드로 판단)
           const runStatus: AgentStatus = data.status === 'error' ? 'error' : 'done';
           setStatus(runStatus);
@@ -930,6 +988,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
         } else if (type === 'stopped') {
           // 최대 실행 타임아웃 해제
           if (maxRunTimeoutRef.current) { clearTimeout(maxRunTimeoutRef.current); maxRunTimeoutRef.current = null; }
+          autoPreviewRequestedRef.current = false;
           setStatus('idle');
           onStatusChange?.(false);
           setActiveSkill('대기 중');
@@ -952,7 +1011,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       reconnectTimer.current = setTimeout(connectSSE, 2000);
     };
-  }, [loadHistory, loadStatus, onStatusChange]);
+  }, [loadHistory, loadStatus, onOpenFilePath, onStatusChange]);
 
   // ─── 초기화 ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1036,9 +1095,8 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           setStatus('running');
           onStatusChange?.(true);
           if (data.current?.cli) {
-            setActiveCli(data.current.cli);
-            const cli = String(data.current.cli);
-            setActiveSkill(cli === 'claude' ? 'Claude Code' : cli === 'gemini' ? 'Gemini' : cli === 'codex' ? 'Codex' : 'Auto');
+            setActiveCli(ORCHESTRATION_LABEL);
+            setActiveSkill(ORCHESTRATION_LABEL);
           }
           if (runTimeoutRef.current) { clearTimeout(runTimeoutRef.current); runTimeoutRef.current = null; }
         }
@@ -1068,9 +1126,13 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
     const task = taskInput.trim();
     if (!task || status === 'running') return;
 
+    autoPreviewRequestedRef.current = AUTO_PREVIEW_INTENT_REGEX.test(task);
+    autoPreviewOpenedRef.current = false;
+
     setOutputLines([]);
     setStatus('running');
-    setActiveCli(selectedCli === 'auto' ? '분석 중...' : selectedCli);
+    setActiveCli(ORCHESTRATION_LABEL);
+    setActiveSkill(ORCHESTRATION_LABEL);
 
     // 상황판 초기화 (분석/수정 파일 목록도 함께 초기화)
     setWfStage('analyzing');
@@ -1094,18 +1156,20 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
       const res = await fetch(`${API_BASE}/api/agent/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, cli: selectedCli, terminal_id: selectedTerminalId }),
+        body: JSON.stringify({ task, cli: 'orchestrate', terminal_id: selectedTerminalId }),
       });
       const data = await res.json();
       if (data.error) {
         clearTimeout(runTimeoutRef.current!);
+        autoPreviewRequestedRef.current = false;
         setStatus('error');
         setOutputLines([{ text: `[오류] ${data.error}`, ts: new Date().toISOString(), type: 'error' }]);
       } else {
-        setActiveCli(data.cli || selectedCli);
+        setActiveCli(ORCHESTRATION_LABEL);
       }
     } catch {
       clearTimeout(runTimeoutRef.current!);
+      autoPreviewRequestedRef.current = false;
       setStatus('error');
       setOutputLines([{ text: '[오류] 서버 연결 실패', ts: new Date().toISOString(), type: 'error' }]);
     }
@@ -1115,6 +1179,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
   const handleStop = async () => {
     try {
       await fetch(`${API_BASE}/api/agent/stop`, { method: 'POST' });
+      autoPreviewRequestedRef.current = false;
       setStatus('idle');
       // SSE stopped 이벤트를 기다리지 않고 즉시 배지 해제 (SSE 끊김 시 배지 고착 방지)
       onStatusChange?.(false);
@@ -1164,18 +1229,28 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           <Bot className="w-3.5 h-3.5" />
           자율 에이전트
         </div>
-        <div className={`flex items-center gap-1 ${STATUS_COLORS[status]}`}>
-          {status === 'running' && (
-            <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-          )}
-          <span>{STATUS_LABELS[status]}</span>
-          {status === 'running' && (
-            <span className="text-white/30 ml-1 font-mono text-[10px]">
-              {/* 경과 시간 표시: 출력 없어도 에이전트가 살아있음을 사용자에게 알림 */}
-              {`${Math.floor(elapsedSec / 60)}:${String(elapsedSec % 60).padStart(2, '0')}`}
-              {activeCli && ` (${activeCli})`}
-            </span>
-          )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openStandaloneDashboard}
+            className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[10px] text-white/45 transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+            title="Vibe Coding Master 독립 창으로 열기"
+          >
+            <ExternalLink className="w-3 h-3" />
+            <span>독립 창</span>
+          </button>
+          <div className={`flex items-center gap-1 ${STATUS_COLORS[status]}`}>
+            {status === 'running' && (
+              <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+            )}
+            <span>{STATUS_LABELS[status]}</span>
+            {status === 'running' && (
+              <span className="text-white/30 ml-1 font-mono text-[10px]">
+                {/* 경과 시간 표시: 출력 없어도 에이전트가 살아있음을 사용자에게 알림 */}
+                {`${Math.floor(elapsedSec / 60)}:${String(elapsedSec % 60).padStart(2, '0')}`}
+                {activeCli && ` (${activeCli})`}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1186,7 +1261,7 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
           value={taskInput}
           onChange={e => setTaskInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="AI에게 지시하세요... (Ctrl+Enter 실행)"
+          placeholder="지시를 입력하면 자동으로 오케스트레이션이 발동됩니다. (Ctrl+Enter 실행)"
           rows={3}
           disabled={status === 'running'}
           className="w-full bg-transparent text-white/80 placeholder-white/20 resize-none
@@ -1194,32 +1269,8 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
         />
 
         <div className="flex items-center gap-1.5">
-          {/* CLI 선택 드롭다운 */}
-          <div className="relative">
-            <button
-              onClick={() => setShowCliMenu(v => !v)}
-              disabled={status === 'running'}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-white/5 hover:bg-white/10
-                         text-white/60 hover:text-white/80 transition disabled:opacity-40"
-            >
-              <span>{CLI_LABELS[selectedCli]}</span>
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showCliMenu && (
-              <div className="absolute bottom-full mb-1 left-0 z-50 bg-[#1e1e2e] border border-white/10
-                              rounded shadow-xl min-w-[160px] overflow-hidden">
-                {(Object.keys(CLI_LABELS) as CliChoice[]).map(k => (
-                  <button
-                    key={k}
-                    onClick={() => { setSelectedCli(k); setShowCliMenu(false); }}
-                    className={`w-full text-left px-3 py-1.5 hover:bg-white/10 transition
-                                ${selectedCli === k ? 'text-primary' : 'text-white/60'}`}
-                  >
-                    {CLI_LABELS[k]}
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className="px-2 py-1 rounded bg-primary/15 border border-primary/30 text-primary font-semibold">
+            {CLI_LABELS[selectedCli]}
           </div>
 
           <div className="flex-1" />
@@ -1348,7 +1399,11 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
                 ? <div className="text-white/15 italic">실행 결과가 여기에 표시됩니다...</div>
                 : outputLines.map((line, i) => (
                     <div key={i} className={`${getLineColor(line)} whitespace-pre-wrap break-all`}>
-                      {line.text}
+                      <FilePathText
+                        text={line.text}
+                        onPathClick={onOpenFilePath}
+                        pathClassName={getLineColor(line)}
+                      />
                     </div>
                   ))
               }
@@ -1408,7 +1463,11 @@ export default function AgentPanel({ onStatusChange }: AgentPanelProps) {
                           }`}>{t.agent}</span>
                         </div>
                         <div className="text-white/70 leading-relaxed whitespace-pre-wrap break-all">
-                          {t.text}
+                          <FilePathText
+                            text={t.text}
+                            onPathClick={onOpenFilePath}
+                            pathClassName="text-white"
+                          />
                         </div>
                       </div>
                     ))

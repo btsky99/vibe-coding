@@ -9,6 +9,7 @@
 
 import { useState, useRef } from 'react';
 import { X, Maximize2, Minimize2, Minus, Plus, Settings } from 'lucide-react';
+import { API_BASE } from '../constants';
 import DiscordConfigPanel from './panels/DiscordConfigPanel';
 
 interface DiscordSettingsModalProps {
@@ -122,7 +123,13 @@ export default function DiscordSettingsModal({
         </div>
         <div className="flex items-center gap-1 ml-4" onPointerDown={e => e.stopPropagation()}>
           <button
-            onClick={() => window.open('/?page=dashboard&tab=discord', '_blank', 'width=1200,height=900')}
+            onClick={() => {
+              fetch(`${API_BASE}/api/dashboard/launch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tab: 'discord' }),
+              }).catch(() => {});
+            }}
             className="p-1.5 hover:bg-white/10 rounded-md text-slate-400 hover:text-indigo-400 transition-all active:scale-90"
             title="전체 화면(새 창)으로 보기"
           >

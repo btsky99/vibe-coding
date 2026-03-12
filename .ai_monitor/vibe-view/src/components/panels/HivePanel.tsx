@@ -144,6 +144,7 @@ export default function HivePanel() {
                     ['RULES.md',   hiveHealth.constitution?.rules_md],
                     ['CLAUDE.md',  hiveHealth.constitution?.claude_md],
                     ['GEMINI.md',  hiveHealth.constitution?.gemini_md],
+                    ['AGENTS.md',  hiveHealth.constitution?.agents_md],
                     ['PROJECT_MAP', hiveHealth.constitution?.project_map],
                   ] as [string, boolean | undefined][]
                 ).map(([label, ok]) => (
@@ -163,6 +164,7 @@ export default function HivePanel() {
                   [
                     ['Brainstorm', hiveHealth.skills?.brainstorm],
                     ['Memory',     hiveHealth.skills?.memory_script],
+                    ['GUI',        hiveHealth.skills?.gui],
                   ] as [string, boolean | undefined][]
                 ).map(([label, ok]) => (
                   <div key={label} className="flex items-center justify-between text-xs">

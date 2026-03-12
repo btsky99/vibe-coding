@@ -2,6 +2,7 @@
 FILE: ai_monitor_plan.md
 DESCRIPTION: 하이브 마인드 고도화 및 신규 기능 구현 로드맵
 REVISION HISTORY:
+- 2026-03-11 Claude: PostgreSQL 자동 설치 A안 태스크 추가
 - 2026-03-09 Gemini: Phase 6 (하이브 초지능 고도화 4대 과제) 기획 추가
 -->
 # AI Mission Control (Windows Native) Implementation Plan

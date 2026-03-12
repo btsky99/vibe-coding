@@ -21,10 +21,12 @@ import { MessageSquare, Send, Trash2, ChevronDown, ChevronUp } from 'lucide-reac
 const COLLAPSE_THRESHOLD = 200;
 import { AgentMessage } from '../../types';
 import { API_BASE } from '../../constants';
+import FilePathText from '../FilePathText';
 
 interface MessagesPanelProps {
   /** 읽지 않은 메시지 수 변경 시 부모(ActivityBar 배지)에게 알리는 콜백 */
   onUnreadCount: (count: number) => void;
+  onOpenFilePath?: (path: string) => void;
 }
 
 // ─── 발신자별 버블 스타일 정의 ───────────────────────────────────────────────
@@ -102,9 +104,10 @@ interface BubbleItemProps {
   cornerCls: string;
   showDateSep: boolean;
   dateLabel: string;
+  onOpenFilePath?: (path: string) => void;
 }
 
-function BubbleItem({ msg, style, isRight, typeBadge, isNew, isLong, cornerCls, showDateSep, dateLabel }: BubbleItemProps) {
+function BubbleItem({ msg, style, isRight, typeBadge, isNew, isLong, cornerCls, showDateSep, dateLabel, onOpenFilePath }: BubbleItemProps) {
   // 긴 메시지 접힘 상태 — 기본적으로 접힘
   const [expanded, setExpanded] = useState(false);
   const displayContent = isLong && !expanded
@@ -145,7 +148,11 @@ function BubbleItem({ msg, style, isRight, typeBadge, isNew, isLong, cornerCls, 
             )}
             {/* 본문 텍스트 */}
             <p className={`text-[10px] leading-relaxed break-words whitespace-pre-wrap ${style.text}`}>
-              {displayContent}
+              <FilePathText
+                text={displayContent}
+                onPathClick={onOpenFilePath}
+                pathClassName={style.text}
+              />
             </p>
             {/* 더보기 / 접기 토글 (긴 메시지만) */}
             {isLong && (
@@ -172,7 +179,7 @@ function BubbleItem({ msg, style, isRight, typeBadge, isNew, isLong, cornerCls, 
   );
 }
 
-export default function MessagesPanel({ onUnreadCount }: MessagesPanelProps) {
+export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: MessagesPanelProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [msgFrom, setMsgFrom] = useState('claude');
   const [msgTo, setMsgTo] = useState('all');
@@ -338,7 +345,13 @@ export default function MessagesPanel({ onUnreadCount }: MessagesPanelProps) {
                   {/* 시스템 메시지 — 중앙 작은 텍스트 */}
                   <div className="flex justify-center">
                     <div className={`rounded-full border px-3 py-0.5 ${style.bubble} ${isNew ? 'ring-1 ring-yellow-500/30' : ''}`}>
-                      <p className={`text-[9px] italic ${style.text}`}>{msg.content}</p>
+                      <p className={`text-[9px] italic ${style.text}`}>
+                        <FilePathText
+                          text={msg.content}
+                          onPathClick={onOpenFilePath}
+                          pathClassName={style.text}
+                        />
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -357,6 +370,7 @@ export default function MessagesPanel({ onUnreadCount }: MessagesPanelProps) {
                 cornerCls={cornerCls}
                 showDateSep={showDateSep}
                 dateLabel={toDateLabel(msg.timestamp)}
+                onOpenFilePath={onOpenFilePath}
               />
             );
           })

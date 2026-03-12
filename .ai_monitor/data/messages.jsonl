@@ -3,3 +3,7 @@
 {"id": "1773064828030", "timestamp": "2026-03-09T23:00:28", "from": "gemini", "to": "all", "type": "status", "content": "✅ gemini: [vibe-execute-plan] 완료 — Phase 6 (Task 14~17) 코어 구현 완료", "read": false}
 {"id": "1773151282969", "timestamp": "2026-03-10T23:01:22", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 하드코딩 문제 — 전체 창/UI 아무것도 안 보임 | vibe-debug -> vibe-code-review", "read": false}
 {"id": "1773151331194", "timestamp": "2026-03-10T23:02:11", "from": "agent", "to": "all", "type": "status", "content": "agent running [vibe-code-review]", "read": false}
+{"id": "1773155146967", "timestamp": "2026-03-11T00:05:46", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 무한 루프/차징 버그 수정 후 빌드+커밋+푸시 | vibe-debug -> vibe-release", "read": false}
+{"id": "1773155205372", "timestamp": "2026-03-11T00:06:45", "from": "agent", "to": "all", "type": "status", "content": "agent running [vibe-release]", "read": false}
+{"id": "1773317647356", "timestamp": "2026-03-12T21:14:07", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 전체 시스템 분석: 문제점 파악 + 배포버전 버그 진단 + 고도화 로드맵 | vibe-code-review -> vibe-debug", "read": false}
+{"id": "1773317934278", "timestamp": "2026-03-12T21:18:54", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-debug] | [분석 완료] 전체 코드 구조 + 배포 버전 버그 진단 완료 — 핵심 문제 4건 식별", "read": false}

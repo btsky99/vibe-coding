@@ -90,9 +90,16 @@ _ORCH_KW = [
 _SERVER_PORT   = 9000
 _API_URL       = f'http://localhost:{_SERVER_PORT}/api/agent/run'
 _DASHBOARD_URL = f'http://localhost:{_SERVER_PORT}'
+FORCE_ORCHESTRATION = True
 
 # 이미 열린 경우 중복 오픈 방지 (프로세스 내 1회)
 _dashboard_opened = False
+
+
+def _wrap_orchestrator_task(task: str) -> str:
+    if task.lstrip().startswith('/vibe-orchestrate'):
+        return task
+    return f'/vibe-orchestrate\n\n{task}'
 
 
 def _route(task):
@@ -103,6 +110,9 @@ def _route(task):
       'claude'       - 코드 구현/수정
       'gemini'       - 설계/분석
     """
+    if FORCE_ORCHESTRATION:
+        return 'orchestrator'
+
     t = task.lower()
     # 복합 지시 감지 (오케스트레이터 최우선)
     if any(kw in t for kw in _ORCH_KW):
@@ -118,7 +128,11 @@ def _call_api(task: str, terminal_id: str = 'T?') -> bool:
     성공 시 True 반환. 서버 미실행 시 False 반환 (fallback: claude 직접 실행).
     terminal_id를 전달해야 대시보드 상황판에 올바른 터미널 슬롯에 표시됩니다.
     """
-    payload = json.dumps({'task': task, 'cli': 'auto', 'terminal_id': terminal_id}).encode('utf-8')
+    payload = json.dumps({
+        'task': _wrap_orchestrator_task(task),
+        'cli': 'orchestrate',
+        'terminal_id': terminal_id,
+    }).encode('utf-8')
     req = _urllib_req.Request(
         _API_URL,
         data=payload,
@@ -144,7 +158,8 @@ def _write_live(event):
 def run_agent(task, cli='auto', terminal_id='T?'):
     global _active_proc
 
-    chosen = _route(task) if cli == 'auto' else cli
+    chosen = 'orchestrator' if FORCE_ORCHESTRATION else (_route(task) if cli == 'auto' else cli)
+    direct_task = _wrap_orchestrator_task(task) if chosen == 'orchestrator' else task
     ts = datetime.now().isoformat()
     # run_id: handle_live_runs가 이벤트를 묶을 때 필요 (없으면 이벤트 전부 무시됨)
     run_id = str(uuid.uuid4())[:8]
@@ -167,17 +182,17 @@ def run_agent(task, cli='auto', terminal_id='T?'):
             chosen = 'claude'
 
     # terminal_id 키 사용 (구 'terminal' 키는 handle_live_runs가 인식 못함)
-    _write_live({'type': 'started', 'cli': chosen, 'task': task,
+    _write_live({'type': 'started', 'cli': chosen, 'task': direct_task,
                  'terminal_id': terminal_id, 'run_id': run_id, 'ts': ts})
 
     if chosen == 'claude':
-        cmd = ['claude', '-p', task, '--dangerously-skip-permissions']
+        cmd = ['claude', '-p', direct_task, '--dangerously-skip-permissions']
     elif chosen == 'codex':
         # Codex CLI: 프로젝트 루트의 codex.bat을 통해 YOLO 자율 모드로 실행
         # --yolo 플래그: 확인 없이 자율적으로 과업을 완수하는 에이전트 모드
-        cmd = ['codex', '--yolo', task]
+        cmd = ['codex', '--yolo', direct_task]
     else:
-        cmd = ['gemini', '-p', task]
+        cmd = ['gemini', '-p', direct_task]
 
     # 중복 세션 에러 방지: CLAUDECODE 관련 환경 변수 제거
     # VIBE_CHILD_AGENT=1: 자식 claude -p 세션에서 hook_bridge.py가 또 실행되어
@@ -265,7 +280,7 @@ def _stop_active():
 
 def main():
     args = sys.argv[1:]
-    cli_mode    = 'auto'
+    cli_mode    = 'orchestrate'
     terminal_id = 'T1'
 
     i = 0
@@ -288,7 +303,7 @@ def main():
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    cli_label = cli_mode.upper() if cli_mode != 'auto' else 'AUTO(Claude/Gemini/Codex)'
+    cli_label = 'ORCHESTRATION'
     print('=' * 60)
     print(f' Agent Shell [{terminal_id}]  CLI: {cli_label}')
     print(f' 프로젝트: {_ROOT.name}')
@@ -313,14 +328,10 @@ def main():
             print('[무시] 3자 이상 입력해주세요.')
             continue
 
-        # 즉석 CLI 변경: !cli claude / !cli gemini / !cli codex / !cli auto
+        # 즉석 CLI 변경은 비활성화: 모든 요청은 오케스트레이션으로 강제
         if task.startswith('!cli '):
-            new_cli = task[5:].strip()
-            if new_cli in ('auto', 'claude', 'gemini', 'codex'):
-                cli_mode = new_cli
-                print(f'[설정] CLI 변경 -> {cli_mode}')
-            else:
-                print('[오류] auto / claude / gemini / codex 중 선택하세요.')
+            cli_mode = 'orchestrate'
+            print('[설정] 모든 요청은 오케스트레이션으로 자동 실행됩니다.')
             continue
 
         run_agent(task, cli_mode, terminal_id)

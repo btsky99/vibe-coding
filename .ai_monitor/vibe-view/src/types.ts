@@ -132,11 +132,13 @@ export interface HiveHealth {
     rules_md: boolean;
     gemini_md: boolean;
     claude_md: boolean;
+    agents_md: boolean;
     project_map: boolean;
   };
   skills?: {
     brainstorm: boolean;
     memory_script: boolean;
+    gui: boolean;
   };
   agents?: {
     claude_config: boolean;

@@ -138,8 +138,8 @@ export default function ActivityBar({
         )}
       </button>
 
-      {/* 태스크보드 — 스킬 실행결과 + 칸반 통합 팝업 */}
-      <button onClick={() => onTabChange('kanban')} className={tabCls('kanban')} title="태스크보드 (스킬결과 + 칸반 통합)">
+      {/* 오케스트레이션 보드 팝업 */}
+      <button onClick={() => onTabChange('kanban')} className={tabCls('kanban')} title="오케스트레이션 보드">
         <LayoutDashboard className="w-5 h-5" />
         {activeTaskCount > 0 && (
           <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
