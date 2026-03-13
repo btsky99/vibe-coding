@@ -49,10 +49,9 @@ Source: "bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
 ; vibe-graph.exe    : 지식 그래프 독립 창 (QWebEngineView)
 ; vibe-dashboard.exe: 대시보드 독립 창   (QWebEngineView)
-; vibe-kanban.exe   : 오케스트레이션 보드 (PySide6 네이티브)
+; vibe-dashboard.exe: 대시보드 + kanban 탭 통합 (B안 — kanban_board.py 제거됨)
 Source: "dist\vibe-graph.exe";     DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\vibe-dashboard.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "dist\vibe-kanban.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── PostgreSQL 포터블 바이너리 (pgsql\bin, lib, share) ──────────────────────
 ; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb+pg_ctl 자동 수행.

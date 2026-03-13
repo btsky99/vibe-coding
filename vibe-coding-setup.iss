@@ -78,7 +78,7 @@ Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
 Source: ".ai_monitor\dist\vibe-graph.exe";     DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: ".ai_monitor\dist\vibe-dashboard.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: ".ai_monitor\dist\vibe-kanban.exe";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; vibe-kanban.exe 제거됨 — B안 통합: vibe-dashboard.exe kanban 탭으로 실행
 
 ; ── PostgreSQL 포터블 바이너리 (pgAdmin 4 제외, 필수 파일만 포함 — ~142MB) ──
 ; server.py가 최초 기동 시 ensure_postgres_running()으로 initdb + pg_ctl start 자동 수행.

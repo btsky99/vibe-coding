@@ -174,11 +174,7 @@ jobs:
             --hidden-import PySide6.QtWebEngineWidgets ^
             --hidden-import PySide6.QtWebEngineCore ^
             dashboard_window.py
-          pyinstaller --onefile --noconsole ^
-            --name vibe-kanban ^
-            --icon bin/vibe_final.ico ^
-            --add-data "bin;bin" ^
-            kanban_board.py
+          REM vibe-kanban.exe 제거됨 — B안 통합: kanban은 vibe-dashboard.exe kanban 탭으로 실행
         shell: cmd
 
       - name: Install Inno Setup
