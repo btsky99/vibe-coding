@@ -405,9 +405,20 @@ def _merge_live_file_status(terminals: dict) -> None:
 
         # started가 done보다 나중이면 → 아직 실행 중
         if done is None or started.get('ts', '') > done.get('ts', ''):
-            # idle 또는 done 슬롯에 덮어씀 (cli_agent가 running으로 추적 중인 슬롯만 보호)
-            # 이전 작업이 done으로 끝난 슬롯도 새 실행이 시작되면 running으로 갱신해야 함
-            if tid in terminals and terminals[tid].get('status') != 'running':
+            # cli_agent에 미등록된 터미널(T2, T3 등)도 신규 추가
+            # 기존 슬롯이 이미 running이면 cli_agent가 추적 중이므로 덮어쓰지 않음
+            if tid not in terminals:
+                # agent_live.jsonl에 기록이 있지만 cli_agent에 없는 터미널 — 신규 등록
+                terminals[tid] = {
+                    'status': 'running',
+                    'task': started.get('task', ''),
+                    'cli': started.get('cli', ''),
+                    'run_id': started.get('run_id', ''),
+                    'ts': started.get('ts', ''),
+                    'last_line': '',
+                    'pipeline_stage': 'analyzing',
+                }
+            elif terminals[tid].get('status') != 'running':
                 terminals[tid].update({
                     'status': 'running',
                     'task': started.get('task', ''),
@@ -422,8 +433,18 @@ def _merge_live_file_status(terminals: dict) -> None:
                 })
         else:
             # done 이벤트가 있고 started보다 나중 → 완료 상태
-            # pipeline_stage가 없으면 done으로 기본 설정
-            if tid in terminals and not terminals[tid].get('pipeline_stage'):
+            if tid not in terminals:
+                # 미등록 터미널의 완료 이벤트도 보드에 표시
+                terminals[tid] = {
+                    'status': 'done',
+                    'task': started.get('task', ''),
+                    'cli': started.get('cli', ''),
+                    'run_id': started.get('run_id', ''),
+                    'ts': done.get('ts', ''),
+                    'last_line': '',
+                    'pipeline_stage': 'done',
+                }
+            elif not terminals[tid].get('pipeline_stage'):
                 terminals[tid]['pipeline_stage'] = 'done'
 
 

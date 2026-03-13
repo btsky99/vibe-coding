@@ -63,9 +63,6 @@
       ]
     }
   },
-  "mcp": {
-    "excluded": ["vibe-coding"]
-  },
   "ui": {
     "hideContextSummary": true,
     "footer": {

@@ -185,11 +185,14 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
   const [msgContent, setMsgContent] = useState('');
+  const [isComposing, setIsComposing] = useState(false);
   // 패널이 마지막으로 열렸을 때의 메시지 수 — 그 이후 수신된 것이 미읽음
   const [seenCount, setSeenCount] = useState(0);
 
   // 자동 스크롤용 ref
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
   // 마운트 여부 (첫 fetch 후 seenCount 초기화)
   const mountedRef = useRef(false);
 
@@ -236,9 +239,13 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
   }, [messages.length]);
 
   // 메시지 전송
-  const sendMessage = () => {
-    if (!msgContent.trim()) return;
-    const cleanContent = msgContent.replace(/[\r\n]+$/, '');
+  const sendMessage = (rawContent?: string) => {
+    const currentContent = rawContent ?? textareaRef.current?.value ?? msgContent;
+    const cleanContent = currentContent.replace(/[\r\n]+$/, '').trim();
+    if (!cleanContent) return;
+    isComposingRef.current = false;
+    setIsComposing(false);
+
     fetch(`${API_BASE}/api/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -419,15 +426,25 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
         {/* 본문 textarea + 전송 버튼 */}
         <div className="flex gap-1 items-end">
           <textarea
+            ref={textareaRef}
             value={msgContent}
             onChange={e => setMsgContent(e.target.value)}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+              setIsComposing(true);
+            }}
+            onCompositionEnd={e => {
+              isComposingRef.current = false;
+              setIsComposing(false);
+              setMsgContent(e.currentTarget.value);
+            }}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (!e.nativeEvent.isComposing && msgContent.trim()) {
-                  sendMessage();
-                  setTimeout(() => setMsgContent(''), 0);
+                if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+                  return;
                 }
+                e.preventDefault();
+                sendMessage(e.currentTarget.value);
               }
             }}
             placeholder="메시지... (Enter: 전송, Shift+Enter: 줄바꿈)"
@@ -435,8 +452,9 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
             className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded-lg px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none"
           />
           <button
-            onClick={sendMessage}
-            disabled={!msgContent.trim()}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => sendMessage()}
+            disabled={!msgContent.trim() && !isComposing}
             className="p-2 bg-primary/80 hover:bg-primary disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg transition-colors shrink-0"
           >
             <Send className="w-3.5 h-3.5" />

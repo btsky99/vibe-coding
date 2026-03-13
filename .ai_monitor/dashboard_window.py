@@ -6,6 +6,9 @@
 #       개발 버전: python dashboard_window.py <port> <tab> 으로 직접 실행.
 #
 # REVISION HISTORY:
+# - 2026-03-13 Claude: kanban 탭 추가 — B안 통합. kanban_board.py(PySide6 네이티브) 제거하고
+#                      React TaskBoardPanel(?kanban=1)으로 일원화. 동일 API 데이터 사용으로
+#                      두 창 간 데이터 불일치 문제 해소.
 # - 2026-03-12 Claude: 최초 커밋 + 배포 EXE 분리 대응 헤더 추가 (A안)
 # ------------------------------------------------------------------------
 
@@ -46,19 +49,28 @@ TITLE_MAP = {
     'git': 'Git',
     'mcp': 'MCP',
     'hive': 'Hive',
+    # kanban: React TaskBoardPanel 기반 오케스트레이션 보드 (B안 통합)
+    'kanban': 'Vibe Coding - 오케스트레이션 보드',
 }
-DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=dashboard&tab={quote(TAB)}"
+# kanban 탭은 ?kanban=1 파라미터로 KanbanOnlyApp 컴포넌트를 렌더링
+# 그 외 탭은 기존 ?page=dashboard&tab=<name> 경로 사용
+if TAB == 'kanban':
+    DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?kanban=1"
+else:
+    DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=dashboard&tab={quote(TAB)}"
 
 
 class DashboardWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(TITLE_MAP.get(TAB, TITLE_MAP['agent']))
-        self.resize(1400, 900)
+        # kanban(오케스트레이션 보드)은 기존 kanban_board.py와 동일한 크기로 시작
+        w, h = (1440, 860) if TAB == 'kanban' else (1400, 900)
+        self.resize(w, h)
 
         screen = QApplication.primaryScreen().geometry()
-        x = (screen.width() - 1400) // 2
-        y = (screen.height() - 900) // 2
+        x = (screen.width() - w) // 2
+        y = (screen.height() - h) // 2
         self.move(x, y)
 
         if ICON_PATH.exists():

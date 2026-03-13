@@ -9,6 +9,10 @@
 #   - thought_to_pg(): parent_id 미지정 시 같은 에이전트 직전 thought를 자동 부모로 연결
 #     → hive_bridge.py 새 프로세스 호출마다 체인이 끊기던 근본 원인 수정
 #   - _backfill_thought_parent_ids(): 서버 기동 시 기존 고아 노드 소급 연결
+# [2026-03-13] - Claude (B안 통합 — kanban_board.py 제거)
+#   - /api/kanban/launch: kanban_board.py(PySide6 네이티브) → dashboard_window.py kanban 탭으로 변경
+#   - frozen 모드: vibe-kanban.exe → vibe-dashboard.exe <port> kanban 으로 통일
+#   - React TaskBoardPanel(?kanban=1)이 동일 API 사용 → 두 창 데이터 불일치 해소
 # [2026-03-12] - Claude (배포 서브창 EXE 런처 수정 — A안)
 #   - /api/dashboard/launch, /api/kanban/launch, /api/graph/launch:
 #     frozen(배포) 모드에서 Python 스크립트 서브프로세스 대신
@@ -2479,6 +2483,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/kanban/launch':
+            # B안 통합: kanban_board.py(PySide6 네이티브) 제거 →
+            # dashboard_window.py + React TaskBoardPanel(?kanban=1)으로 일원화.
+            # 동일한 API(/api/orchestrator/skill-chain 등)를 통해 데이터 일관성 확보.
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2486,24 +2493,24 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
                 if getattr(sys, 'frozen', False):
-                    # 배포(frozen) 모드: vibe-coding.exe 옆의 vibe-kanban.exe 직접 실행
+                    # 배포(frozen) 모드: vibe-dashboard.exe를 kanban 탭으로 실행
                     exe_dir = Path(sys.executable).resolve().parent
-                    launch_exe = exe_dir / 'vibe-kanban.exe'
+                    launch_exe = exe_dir / 'vibe-dashboard.exe'
                     if not launch_exe.exists():
-                        raise RuntimeError(f'vibe-kanban.exe 없음: {launch_exe}')
+                        raise RuntimeError(f'vibe-dashboard.exe 없음: {launch_exe}')
                     subprocess.Popen(
-                        [str(launch_exe)],
+                        [str(launch_exe), str(HTTP_PORT), 'kanban'],
                         creationflags=_no_window,
                         close_fds=True,
                     )
                 else:
-                    # 개발(dev) 모드: Python 스크립트 서브프로세스로 실행
-                    kanban_script = BASE_DIR / 'kanban_board.py'
+                    # 개발(dev) 모드: dashboard_window.py kanban 탭으로 실행
+                    dashboard_script = BASE_DIR / 'dashboard_window.py'
                     python_cmds = _python_runner_cmds()
                     if not python_cmds:
                         raise RuntimeError('Python interpreter not found for kanban launch')
                     subprocess.Popen(
-                        [python_cmds[0], str(kanban_script)],
+                        [python_cmds[0], str(dashboard_script), str(HTTP_PORT), 'kanban'],
                         creationflags=_no_window,
                         close_fds=True,
                     )
@@ -3152,8 +3159,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if target_slot in pty_sessions:
                     pty = pty_sessions[target_slot]['pty']
                     # 명령어 중간의 \n을 \r\n으로 치환하고 끝에 개행이 없으면 추가하여 즉시 실행 유도
-                    processed_cmd = command.replace('\n', '\r\n')
-                    final_cmd = processed_cmd if processed_cmd.endswith('\r\n') or processed_cmd.endswith('\r') else processed_cmd + '\r\n'
+                    processed_cmd = command.replace('\r\n', '\r').replace('\n', '\r')
+                    final_cmd = processed_cmd if processed_cmd.endswith('\r') else processed_cmd + '\r'
                     pty.write(final_cmd)
                     self.wfile.write(json.dumps({"status": "success", "message": f"Command sent to Terminal {target_slot}"}).encode('utf-8'))
                 else:
@@ -3793,19 +3800,18 @@ async def pty_handler(websocket):
         except ValueError:
             rows = 24
 
-        # [개선] 윈도우 터미널 한글 지원을 위해 환경 변수 및 인코딩 설정 강제
+        # [최적화] 환경변수를 PTY spawn 전에 env dict에 직접 주입
+        # Why: pty.write()로 set 명령을 날리면 cmd.exe가 각 명령을 순차 처리 후 다음으로 진행해
+        #      set 명령 1개당 ~50ms, chcp는 200~500ms 지연이 발생했음.
+        #      env dict에 미리 넣으면 spawn 시점에 이미 환경변수가 설정되어 지연 0.
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["LANG"] = "ko_KR.UTF-8"
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        
-        pty = PtyProcess.spawn('cmd.exe', cwd=cwd, dimensions=(rows, cols), env=env)
-        
-        # [추가] 터미널 시작 직후 UTF-8로 코드페이지 변경
-        pty.write("chcp 65001\r\n")
-        pty.write("cls\r\n")
-        
+        # 한글 UTF-8 코드페이지: 환경변수로 미리 지정 (chcp 65001 명령 실행 불필요)
+        env["PYTHONLEGACYWINDOWSSTDIO"] = "0"
+
         is_yolo = qs.get('yolo', ['false'])[0].lower() == 'true'
 
         # ── session_id를 에이전트 실행 전에 먼저 계산 ──────────────────────────
@@ -3817,25 +3823,30 @@ async def pty_handler(websocket):
         else:
             session_id = str(id(websocket))
 
+        # TERMINAL_ID/HIVE_AGENT를 env dict에 직접 주입 (set 명령 pty.write 제거)
+        env["TERMINAL_ID"] = session_id
         if agent == 'claude':
-            # 클로드는 --dangerously-skip-permissions 플래그 지원 (YOLO)
-            yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
-            # TERMINAL_ID/HIVE_AGENT 자동 주입 — skill_orchestrator가 --terminal 없이도 올바른 터미널로 저장되도록 함
-            pty.write(f'set TERMINAL_ID={session_id}\r\n')
-            pty.write(f'set HIVE_AGENT=claude\r\n')
-            pty.write(f'claude{yolo_flag}\r\n')
+            env["HIVE_AGENT"] = "claude"
         elif agent == 'gemini':
-            # 제미나이는 -y 또는 --yolo 플래그 지원
+            env["HIVE_AGENT"] = "gemini"
+        elif agent == 'codex':
+            env["HIVE_AGENT"] = "codex"
+
+        pty = PtyProcess.spawn('cmd.exe', cwd=cwd, dimensions=(rows, cols), env=env)
+
+        # [최적화] chcp + 에이전트 명령을 단일 write()로 합치고 chcp 출력 억제
+        # Why: 이전에는 pty.write() 5회 호출(chcp, cls, set×2, agent) → 각 명령 처리 대기로
+        #      버튼 클릭부터 에이전트 시작까지 ~700ms 이상 지연 발생.
+        #      단일 write + >nul 출력 억제로 체감 지연을 제거.
+        if agent == 'claude':
+            yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
+            pty.write(f'chcp 65001 >nul & claude{yolo_flag}\r\n')
+        elif agent == 'gemini':
             yolo_flag = " -y" if is_yolo else ""
-            # TERMINAL_ID/HIVE_AGENT 자동 주입 — skill_orchestrator가 --terminal 없이도 올바른 터미널로 저장되도록 함
-            pty.write(f'set TERMINAL_ID={session_id}\r\n')
-            pty.write(f'set HIVE_AGENT=gemini\r\n')
-            pty.write(f'gemini{yolo_flag}\r\n')
+            pty.write(f'chcp 65001 >nul & gemini{yolo_flag}\r\n')
         elif agent == 'codex':
             yolo_flag = " --yolo" if is_yolo else ""
-            pty.write(f'set TERMINAL_ID={session_id}\r\n')
-            pty.write('set HIVE_AGENT=codex\r\n')
-            pty.write(f'codex{yolo_flag} --no-alt-screen\r\n')
+            pty.write(f'chcp 65001 >nul & codex{yolo_flag} --no-alt-screen\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
         # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음
@@ -3849,9 +3860,9 @@ async def pty_handler(websocket):
         # 강제 종료 감지를 위한 기준점 역할도 수행.
         if agent:
             try:
-                from src.db_helper import insert_log as _db_insert_log
+                # insert_log는 모듈 레벨에서 이미 import됨 — 핸들러 내 동적 import 제거
                 mode_tag = "[YOLO]" if is_yolo else "[일반]"
-                _db_insert_log(
+                insert_log(
                     session_id=f"pty_start_{session_id}_{datetime.now().strftime('%H%M%S')}",
                     terminal_id="PTY_TERMINAL",
                     agent=agent.capitalize(),
@@ -3868,8 +3879,8 @@ async def pty_handler(websocket):
         return
 
     # ANSI 이스케이프 코드 제거용 정규식 — PTY last_line 정제에 사용
-    import re as _re
-    _ANSI_ESCAPE = _re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    # re는 모듈 레벨에서 이미 import됨 (중복 import 제거)
+    _ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
     async def read_from_pty():
         loop = asyncio.get_running_loop()
@@ -3970,6 +3981,20 @@ async def pty_handler(websocket):
 
         _t.Thread(target=_run, daemon=True).start()
 
+    def _dispatch_ws_enter():
+        nonlocal _ws_input_buf
+        if _ws_init_done and _ws_input_buf:
+            completed_line = ''.join(_ws_input_buf)
+            _ws_input_buf.clear()
+            # re는 모듈 레벨에서 이미 import됨 — 중복 import 제거
+            cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', completed_line).strip()
+            if cleaned:
+                _dispatch_to_agent(cleaned)
+        # Gemini/Codex submits require a double Enter in the
+        # underlying TUI. Normalize that here so direct XTerm
+        # typing and the textarea sender behave identically.
+        pty.write("\r\r" if agent in ("gemini", "codex") else "\r")
+
     async def read_from_ws():
         nonlocal _ws_init_done, _ws_input_buf
         # 초기화 명령(set TERMINAL_ID, chcp 등)이 모두 전송된 뒤 1초 후부터 인터셉션 활성화
@@ -3997,7 +4022,20 @@ async def pty_handler(websocket):
 
                     # [수정] 윈도우 IME 및 xterm.js 호환성 개선
                     # \r\n 중복 방지 및 조합 중인 문자 처리 안정화
-                    if message == "\r":
+                    processed = message.replace('\r\n', '\r').replace('\n', '\r')
+                    if '\r' in processed:
+                        segments = processed.split('\r')
+                        for idx, segment in enumerate(segments):
+                            if segment:
+                                if _ws_init_done:
+                                    if segment in ('\x7f', '\x08') and _ws_input_buf:
+                                        _ws_input_buf.pop()
+                                    else:
+                                        _ws_input_buf.append(segment)
+                                pty.write(segment)
+                            if idx < len(segments) - 1:
+                                _dispatch_ws_enter()
+                        continue
                         # ── Enter 키: 완성된 명령을 자율 에이전트로 라우팅 ──────────
                         if _ws_init_done and _ws_input_buf:
                             completed_line = ''.join(_ws_input_buf)
@@ -4007,7 +4045,10 @@ async def pty_handler(websocket):
                             cleaned = _re.sub(r'[\x00-\x1f\x7f-\x9f]', '', completed_line).strip()
                             if cleaned:
                                 _dispatch_to_agent(cleaned)
-                        pty.write("\r")
+                        # Gemini/Codex submits require a double Enter in the
+                        # underlying TUI. Normalize that here so direct XTerm
+                        # typing and the textarea sender behave identically.
+                        pty.write("\r\r" if agent in ("gemini", "codex") else "\r")
                     else:
                         # ── 일반 문자: 버퍼에 누적 + PTY로 전달 ─────────────────────
                         processed = message.replace('\r\n', '\r').replace('\n', '\r')
@@ -4307,6 +4348,7 @@ if __name__ == '__main__':
     def run_discord_bridge():
         discord_script = SCRIPTS_DIR / "discord_bridge.py"
         env_file = PROJECT_ROOT / ".env"
+        discord_log = DATA_DIR / "discord_bridge.log"
         if not discord_script.exists():
             return
         # .env 파일에 DISCORD_BOT_TOKEN이 있을 때만 시작
@@ -4324,17 +4366,20 @@ if __name__ == '__main__':
         python_exe = _python_cmds[0]
         child_env = os.environ.copy()
         child_env['VIBE_SERVER_PORT'] = str(HTTP_PORT)
+        discord_log.parent.mkdir(parents=True, exist_ok=True)
+        log_handle = open(discord_log, 'a', encoding='utf-8')
         # Discord 브릿지 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
         proc = subprocess.Popen(
             [python_exe, str(discord_script)],
             cwd=str(PROJECT_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=log_handle,
+            stderr=log_handle,
             env=child_env,
             encoding='utf-8',
             errors='replace',
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
+        proc._vibe_log_handle = log_handle
         _child_procs.append(proc)
         print("[*] Discord Bridge 자동 시작됨")
     threading.Thread(target=run_discord_bridge, daemon=True).start()

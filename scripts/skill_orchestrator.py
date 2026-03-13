@@ -28,6 +28,7 @@ SKILL_REGISTRY = [
     {"num": 6, "name": "vibe-code-review", "short": "review"},
     {"num": 7, "name": "vibe-release", "short": "release"},
     {"num": 8, "name": "vibe-heal", "short": "heal"},
+    {"num": 9, "name": "vibe-security", "short": "security"},
 ]
 
 _SKILL_NAME_TO_NUM = {skill["name"]: skill["num"] for skill in SKILL_REGISTRY}

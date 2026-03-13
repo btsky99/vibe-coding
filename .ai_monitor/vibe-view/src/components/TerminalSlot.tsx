@@ -59,6 +59,7 @@ export default function TerminalSlot({
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isComposingRef = useRef(false);
   // FitAddon 참조 보관 (모니터링 뷰 토글 시 xterm 재조정용)
   const fitAddonRef = useRef<FitAddon | null>(null);
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
@@ -284,10 +285,14 @@ export default function TerminalSlot({
 
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    // 전송할 텍스트 끝의 줄바꿈 문자를 제거하여 중복 입력을 방지합니다.
+    const ws = wsRef.current;
     const cleanText = text.replace(/[\r\n]+$/, '');
-    // 윈도우 PTY(winpty) + cmd.exe 환경에서는 \r\n (CRLF)이 실제 Enter 키 입력과 동일합니다.
-    wsRef.current.send(cleanText.replace(/\n/g, '\r\n') + '\r\n');
+    if (!cleanText) return;
+
+    const lines = cleanText.replace(/\r\n/g, '\n').split('\n');
+    for (const line of lines) {
+      ws.send(`${line}\r`);
+    }
     setInputValue('');
     termRef.current?.focus();
   };
@@ -686,15 +691,23 @@ export default function TerminalSlot({
               <textarea
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
+                onCompositionStart={() => {
+                  isComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  isComposingRef.current = false;
+                }}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey) {
+                    if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+                      return;
+                    }
                     // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.
                     e.preventDefault();
                     // 명령어를 즉시 전송합니다. (한글 입력 시에도 엔터 한 번으로 전송되도록 복원)
                     if (inputValue.trim()) {
                       handleSend(inputValue);
                       // 전송 후 입력창을 확실히 비웁니다.
-                      setTimeout(() => setInputValue(''), 0);
                     }
                   }
                 }}

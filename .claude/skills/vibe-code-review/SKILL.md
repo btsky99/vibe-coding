@@ -3,11 +3,8 @@ name: vibe-code-review
 description: >
   코드 품질, 보안(OWASP), 성능을 4가지 관점에서 검토합니다.
   Use when: "코드 리뷰", "리팩터링", "최적화", "보안 점검", 배포 전 검토, PR 리뷰 요청 시.
-allowed-tools:
-  - Read
-  - Bash
-  - Grep
-  - Glob
+allowed-tools: Read, Bash, Grep, Glob
+user-invocable: true
 ---
 
 당신은 지금 Vibe Coding 코드 리뷰 프로토콜을 실행합니다.

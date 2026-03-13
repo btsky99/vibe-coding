@@ -10,7 +10,7 @@
  * ------------------------------------------------------------------------
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 import { API_BASE } from '../constants';
 
@@ -24,11 +24,18 @@ export default function MessageComposer({ onMessageSent }: MessageComposerProps)
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
   const [msgContent, setMsgContent] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
+  const [isComposing, setIsComposing] = useState(false);
 
   // 메시지 전송 — API 호출 후 입력창 초기화 + 상위 갱신 알림
-  const sendMessage = () => {
-    if (!msgContent.trim()) return;
-    const cleanContent = msgContent.replace(/[\r\n]+$/, '');
+  const sendMessage = (rawContent?: string) => {
+    const currentContent = rawContent ?? textareaRef.current?.value ?? msgContent;
+    const cleanContent = currentContent.replace(/[\r\n]+$/, '').trim();
+    if (!cleanContent) return;
+    isComposingRef.current = false;
+    setIsComposing(false);
+
     fetch(`${API_BASE}/api/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -84,16 +91,26 @@ export default function MessageComposer({ onMessageSent }: MessageComposerProps)
       {/* 메시지 입력 + 전송 버튼 */}
       <div className="relative">
         <textarea
+          ref={textareaRef}
           value={msgContent}
           onChange={e => setMsgContent(e.target.value)}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+            setIsComposing(true);
+          }}
+          onCompositionEnd={e => {
+            isComposingRef.current = false;
+            setIsComposing(false);
+            setMsgContent(e.currentTarget.value);
+          }}
           onKeyDown={e => {
             // Shift+Enter는 줄바꿈, 단독 Enter는 전송 (한글 조합 중 Enter 제외)
             if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              if (!e.nativeEvent.isComposing && msgContent.trim()) {
-                sendMessage();
-                setTimeout(() => setMsgContent(''), 0);
+              if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+                return;
               }
+              e.preventDefault();
+              sendMessage(e.currentTarget.value);
             }
           }}
           placeholder="메시지 입력... (Enter: 전송)"
@@ -101,8 +118,9 @@ export default function MessageComposer({ onMessageSent }: MessageComposerProps)
           className="w-full bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-primary text-white transition-colors resize-none pr-8"
         />
         <button
-          onClick={sendMessage}
-          disabled={!msgContent.trim()}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => sendMessage()}
+          disabled={!msgContent.trim() && !isComposing}
           className="absolute right-1.5 bottom-1.5 p-1 bg-primary hover:bg-primary/80 disabled:opacity-30 text-white rounded transition-colors"
           title="전송 (Enter)"
         >

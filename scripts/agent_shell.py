@@ -202,6 +202,10 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     env.pop('CLAUDE_CODE_ENTRYPOINT', None)
     env.pop('CLAUDE_CODE_SSE_PORT', None)
     env['VIBE_CHILD_AGENT'] = '1'
+    # [버그수정 2026-03-12] hive_hook.py가 자식 프로세스 안에서 TERMINAL_ID를 읽을 때
+    # 환경변수가 없으면 T0(기본값)으로 폴백하여 대시보드에서 T1~T8 슬롯에 표시되지 않는 문제 수정.
+    # agent_shell.py가 아는 terminal_id(T1~T8)를 자식 프로세스에 명시적으로 전달.
+    env['TERMINAL_ID'] = terminal_id
 
     kw = {}
     use_shell = False

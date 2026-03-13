@@ -1,52 +1,43 @@
 # -*- coding: utf-8 -*-
 """
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/discord_bridge.py
-# 📝 설명: Discord Multi-Terminal Bridge.
-#          8개 Discord 채널(#terminal-1~8)을 8개 터미널과 1:1 매핑하여
-#          디스코드 메시지 → cli_agent 자동 실행 → 결과 채널 전송.
-#
-# 🕒 변경 이력 (REVISION HISTORY):
-# [2026-03-04] Gemini: 최초 구현 — 채널 매핑, 큐 처리, API 서버 (8008포트)
-# [2026-03-04] Claude: Task 12 구현 — discord 메시지 수신 시 cli_agent 자동 실행
-#   - 터미널별 CLI 우선순위: T1=gemini, T2=claude, T3+=auto
-#   - asyncio.create_subprocess_exec으로 cli_agent.py 비동기 실행
-#   - 출력 라인 누적 후 코드블록으로 Discord 전송 (rate limit 고려)
-#   - 터미널별 실행 중 플래그 (_running_terminals) — 중복 실행 방지
-#   - messages.jsonl 로깅 유지 (하이브 메모리 연동)
-# ------------------------------------------------------------------------
+Discord Multi-Terminal Bridge.
+
+Revision history:
+- 2026-03-12 Claude: PTY-first remote control with server API integration
+- 2026-03-04 Gemini/Claude: Initial Discord channel mapping and relay server
 """
 
-import os
-import sys
+from __future__ import annotations
+
 import asyncio
-import json
 import collections
+import json
+import os
 import time
 from pathlib import Path
+from typing import Any
 
+import aiohttp
 import discord
+from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
-from aiohttp import web
 
 load_dotenv()
 
-# ─── 경로 설정 ────────────────────────────────────────────────────────────────
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPTS_DIR.parent
-_CLI_AGENT    = _SCRIPTS_DIR / "cli_agent.py"
-_LOG_FILE     = _PROJECT_ROOT / ".ai_monitor" / "data" / "messages.jsonl"
+_LOG_FILE = _PROJECT_ROOT / '.ai_monitor' / 'data' / 'messages.jsonl'
 
-# ─── 터미널별 CLI 우선순위 테이블 ─────────────────────────────────────────────
-# T1 → Gemini (설계/분석 전담), T2 → Claude (코드/구현 전담), 나머지 → auto
 TERMINAL_CLI_MAP = {
     1: 'gemini',
     2: 'claude',
 }
 
-# ─── Discord 메시지 최대 길이 (2000자 제한) ───────────────────────────────────
 DISCORD_MAX_LEN = 1900
+SERVER_PORT = int(os.getenv('VIBE_SERVER_PORT', '9000'))
+API_TIMEOUT = aiohttp.ClientTimeout(total=10)
+SERVER_PORT_SCAN_LIMIT = 12
 
 
 class DiscordBridge(commands.Bot):
@@ -55,9 +46,8 @@ class DiscordBridge(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix='!', intents=intents)
 
-        # 환경변수에서 채널 ID 로드 → terminal_map, channel_to_terminal 구성
-        self.terminal_map: dict[int, int] = {}          # tid → channel_id
-        self.channel_to_terminal: dict[int, int] = {}   # channel_id → tid
+        self.terminal_map: dict[int, int] = {}
+        self.channel_to_terminal: dict[int, int] = {}
         for i in range(1, 9):
             channel_id = os.getenv(f'DISCORD_CHANNEL_T{i}')
             if channel_id and channel_id.isdigit():
@@ -65,183 +55,457 @@ class DiscordBridge(commands.Bot):
                 self.terminal_map[i] = cid
                 self.channel_to_terminal[cid] = i
 
-        # 터미널별 출력 큐 (Discord 전송 속도 제한 대응)
         self.message_queues: dict[int, asyncio.Queue] = collections.defaultdict(asyncio.Queue)
-        # 터미널별 실행 중 여부 플래그 — 동일 터미널 중복 실행 방지
-        self._running_terminals: set[int] = set()
         self.running = True
+        self.http_session: aiohttp.ClientSession | None = None
+        self.server_api_base = f'http://127.0.0.1:{SERVER_PORT}'
+        self._api_server_started = False
+        self._ready_announced = False
+        self._output_poll_started = False
+        self._last_output_seq: dict[int, int] = {tid: 0 for tid in range(1, 9)}
+        self._output_bootstrap_done: set[int] = set()
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # on_ready: 봇 준비 완료 시 큐 처리 태스크 + API 서버 + 인사 메시지 시작
-    # ──────────────────────────────────────────────────────────────────────────
+    async def setup_hook(self):
+        self.http_session = aiohttp.ClientSession(timeout=API_TIMEOUT)
+        await self._discover_server_api_base()
+
+    async def close(self):
+        self.running = False
+        if self.http_session and not self.http_session.closed:
+            await self.http_session.close()
+        await super().close()
+
     async def on_ready(self):
-        print(f'🚀 Discord Bridge 가동: {self.user}')
-        for tid in self.terminal_map:
-            asyncio.create_task(self.process_queue(tid))
-        asyncio.create_task(self.start_api_server())
+        print(f'[*] Discord Bridge connected as {self.user}')
+
+        if not self._api_server_started:
+            for tid in self.terminal_map:
+                asyncio.create_task(self.process_queue(tid))
+            asyncio.create_task(self.start_api_server())
+            self._api_server_started = True
+        if not self._output_poll_started:
+            asyncio.create_task(self.poll_pty_output())
+            self._output_poll_started = True
+
+        if self._ready_announced:
+            return
 
         for tid, cid in self.terminal_map.items():
-            channel = self.get_channel(cid)
-            if channel:
-                cli_hint = TERMINAL_CLI_MAP.get(tid, 'auto')
-                await channel.send(
-                    f"🟢 **Terminal-{tid}** 연결 완료! "
-                    f"CLI 우선순위: `{cli_hint}` — 메시지를 입력하면 에이전트가 자동 실행됩니다."
-                )
+            channel = await self._resolve_channel(cid)
+            if not channel:
+                continue
+            cli_hint = TERMINAL_CLI_MAP.get(tid, 'auto')
+            await channel.send(
+                '\n'.join([
+                    f'**Terminal-{tid}** 연결 완료',
+                    f'- 기본 fallback CLI: `{cli_hint}`',
+                    '- 일반 메시지: PTY가 살아 있으면 직접 입력, 없으면 새 작업 시작',
+                    '- `!status`, `!stop`, `!kill`, `!run <task>`, `!send <text>`, `!help`',
+                ])
+            )
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # on_message: 채널 메시지 수신 → cli_agent 비동기 실행
-    # ──────────────────────────────────────────────────────────────────────────
+        self._ready_announced = True
+
     async def on_message(self, message: discord.Message):
-        # 봇 자신의 메시지는 무시 (무한 루프 방지)
-        if message.author == self.user:
+        if message.author == self.user or message.author.bot:
             return
 
         tid = self.channel_to_terminal.get(message.channel.id)
         if tid is None:
-            return  # 등록된 터미널 채널이 아니면 무시
-
-        # 명령어 처리 우선 (!help 등)
-        await self.process_commands(message)
-
-        # ── 수신 반응: 처리 시작 알림 ─────────────────────────────────────────
-        await message.add_reaction('🧠')
-
-        # ── messages.jsonl 하이브 로그 기록 (다른 에이전트와 공유) ────────────
-        self._log_message(tid, message.author.name, message.content)
-
-        # ── 중복 실행 방지 ────────────────────────────────────────────────────
-        if tid in self._running_terminals:
-            await message.channel.send(
-                f"⚠️ **Terminal-{tid}** 에이전트 실행 중입니다. 완료 후 입력하세요."
-            )
-            await message.add_reaction('⏳')
             return
 
-        # ── cli_agent 비동기 실행 태스크 생성 ────────────────────────────────
-        # 비동기 태스크로 분리하여 on_message 블로킹 방지
-        asyncio.create_task(
-            self._run_agent(tid, message.channel, message.content)
+        content = (message.content or '').strip()
+        if not content:
+            return
+
+        self._log_message(tid, message.author.name, content)
+
+        if content.startswith('!'):
+            await self._handle_command(tid, message.channel, content)
+            return
+
+        await message.add_reaction('🛰️')
+        await self._route_regular_message(tid, message.channel, content)
+
+    async def _handle_command(self, tid: int, channel: discord.abc.Messageable, content: str):
+        parts = content.split(maxsplit=1)
+        command = parts[0].lower()
+        argument = parts[1].strip() if len(parts) > 1 else ''
+
+        if command == '!help':
+            await channel.send(
+                '\n'.join([
+                    '`!status` 현재 채널 터미널 상태',
+                    '`!status all` 전체 T1~T8 상태',
+                    '`!send <text>` 살아 있는 PTY에 직접 입력',
+                    '`!run <task>` PTY와 무관하게 새 agent/run 시작',
+                    '`!stop` 살아 있는 PTY는 Ctrl+C, 아니면 백그라운드 run stop',
+                    '`!kill` 살아 있는 PTY 세션 강제 종료',
+                    '일반 메시지는 PTY 우선 제어입니다.',
+                ])
+            )
+            return
+
+        if command == '!status':
+            if argument.lower() == 'all':
+                await channel.send(await self._format_all_status())
+            else:
+                await channel.send(await self._format_terminal_status(tid))
+            return
+
+        if command == '!send':
+            if not argument:
+                await channel.send('사용법: `!send <text>`')
+                return
+            await self._send_to_pty(tid, channel, argument, require_live=True)
+            return
+
+        if command == '!run':
+            if not argument:
+                await channel.send('사용법: `!run <task>`')
+                return
+            await self._start_agent_run(tid, channel, argument)
+            return
+
+        if command == '!stop':
+            await self._stop_terminal(tid, channel)
+            return
+
+        if command == '!kill':
+            await self._kill_terminal(tid, channel)
+            return
+
+        await channel.send(f'알 수 없는 명령입니다: `{command}`. `!help`를 확인하세요.')
+
+    async def _route_regular_message(self, tid: int, channel: discord.abc.Messageable, content: str):
+        pty_state, agent_state = await self._get_terminal_states(tid)
+
+        if pty_state.get('running'):
+            await self._send_to_pty(tid, channel, content, require_live=False)
+            return
+
+        if agent_state.get('status') == 'running':
+            await channel.send(
+                f'`T{tid}` 는 현재 백그라운드 작업 중입니다. '
+                'PTY가 연결돼 있지 않아 직접 주입은 못 합니다. `!stop` 후 다시 시도하세요.'
+            )
+            return
+
+        await self._start_agent_run(tid, channel, content)
+
+    async def _format_all_status(self) -> str:
+        rows = []
+        for tid in range(1, 9):
+            pty_state, agent_state = await self._get_terminal_states(tid)
+            rows.append(self._status_line(tid, pty_state, agent_state))
+        return '```text\n' + '\n'.join(rows) + '\n```'
+
+    async def _format_terminal_status(self, tid: int) -> str:
+        pty_state, agent_state = await self._get_terminal_states(tid)
+        lines = [
+            f'T{tid} 상태',
+            self._status_line(tid, pty_state, agent_state),
+        ]
+
+        if pty_state.get('running'):
+            if pty_state.get('cwd'):
+                lines.append(f'cwd: {self._trim(pty_state.get("cwd", ""), 120)}')
+            if pty_state.get('last_line'):
+                lines.append(f'last: {self._trim(pty_state.get("last_line", ""), 120)}')
+        elif agent_state.get('status') == 'running':
+            if agent_state.get('task'):
+                lines.append(f'task: {self._trim(agent_state.get("task", ""), 120)}')
+            if agent_state.get('last_line'):
+                lines.append(f'last: {self._trim(agent_state.get("last_line", ""), 120)}')
+
+        return '```text\n' + '\n'.join(lines) + '\n```'
+
+    def _status_line(self, tid: int, pty_state: dict[str, Any], agent_state: dict[str, Any]) -> str:
+        if pty_state.get('running'):
+            agent = pty_state.get('agent', '') or '?'
+            last_line = self._trim(pty_state.get('last_line', ''), 60)
+            suffix = f' | {last_line}' if last_line else ''
+            return f'T{tid}: PTY {agent}{suffix}'
+
+        if agent_state.get('status') == 'running':
+            cli = agent_state.get('cli', '') or '?'
+            task = self._trim(agent_state.get('task', ''), 60)
+            suffix = f' | {task}' if task else ''
+            return f'T{tid}: agent {cli}{suffix}'
+
+        return f'T{tid}: idle'
+
+    async def _stop_terminal(self, tid: int, channel: discord.abc.Messageable):
+        pty_state, agent_state = await self._get_terminal_states(tid)
+
+        if pty_state.get('running'):
+            response = await self._api_post_json('/api/pty/interrupt', {'target': tid})
+            if response.get('status') == 'interrupted':
+                await channel.send(f'`T{tid}` PTY에 Ctrl+C를 보냈습니다.')
+            else:
+                await channel.send(self._format_api_error('PTY interrupt 실패', response))
+            return
+
+        if agent_state.get('status') == 'running':
+            response = await self._api_post_json('/api/agent/stop', {})
+            if response.get('status') == 'stopped':
+                await channel.send(f'`T{tid}` 백그라운드 작업 정지를 요청했습니다.')
+            else:
+                await channel.send(self._format_api_error('agent stop 실패', response))
+            return
+
+        await channel.send(f'`T{tid}` 는 현재 idle 입니다.')
+
+    async def _kill_terminal(self, tid: int, channel: discord.abc.Messageable):
+        response = await self._api_post_json('/api/pty/terminate', {'target': tid})
+        if response.get('status') == 'terminated':
+            await channel.send(f'`T{tid}` PTY 세션을 종료했습니다.')
+            return
+        await channel.send(self._format_api_error('PTY 종료 실패', response))
+
+    async def _send_to_pty(
+        self,
+        tid: int,
+        channel: discord.abc.Messageable,
+        content: str,
+        require_live: bool,
+    ):
+        pty_state = await self._get_pty_state(tid)
+        if require_live:
+            if not pty_state.get('running'):
+                await channel.send(f'`T{tid}` 에 살아 있는 PTY가 없습니다.')
+                return
+
+        submit_count = 2 if str(pty_state.get('agent', '')).lower() in ('gemini', 'codex') else 1
+        normalized = content.replace('\r\n', '\r').replace('\n', '\r').rstrip('\r')
+        submit_text = normalized + ('\r' * submit_count)
+
+        response = await self._api_post_json('/api/send-command', {
+            'target': tid,
+            'command': submit_text,
+        })
+
+        if response.get('status') == 'success':
+            await channel.send(f'`T{tid}` PTY로 전달했습니다.')
+            return
+
+        if not require_live:
+            await self._start_agent_run(tid, channel, content)
+            return
+
+        await channel.send(self._format_api_error('PTY 전달 실패', response))
+
+    async def _start_agent_run(self, tid: int, channel: discord.abc.Messageable, task: str):
+        response = await self._api_post_json('/api/agent/run', {
+            'task': task,
+            'cli': TERMINAL_CLI_MAP.get(tid, 'auto'),
+            'terminal_id': f'T{tid}',
+        })
+
+        if response.get('status') == 'started':
+            cli = response.get('cli', TERMINAL_CLI_MAP.get(tid, 'auto'))
+            await channel.send(
+                f'`T{tid}` 새 작업을 시작했습니다. '
+                f'CLI=`{cli}` task=`{self._trim(task, 100)}`'
+            )
+            return
+
+        if response.get('error') == 'already_running':
+            await channel.send(f'현재 다른 백그라운드 작업이 이미 실행 중입니다. `!status`로 확인하세요.')
+            return
+
+        await channel.send(self._format_api_error('agent/run 실패', response))
+
+    async def _get_terminal_states(self, tid: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        pty_state = await self._get_pty_state(tid)
+        agent_state = await self._get_agent_state(tid)
+        return pty_state, agent_state
+
+    async def _get_pty_state(self, tid: int) -> dict[str, Any]:
+        payload = await self._api_get_json('/api/pty/terminals')
+        return payload.get(f'T{tid}', {}) if isinstance(payload, dict) else {}
+
+    async def _get_agent_state(self, tid: int) -> dict[str, Any]:
+        payload = await self._api_get_json('/api/agent/terminals')
+        return payload.get(f'T{tid}', {}) if isinstance(payload, dict) else {}
+
+    async def _get_pty_output(self, tid: int, since: int) -> dict[str, Any]:
+        return await self._api_get_json(f'/api/pty/output?terminal_id=T{tid}&since={since}&limit=120')
+
+    async def _api_get_json(self, path: str) -> dict[str, Any]:
+        if self.http_session is None:
+            return {'error': 'http_session_unavailable'}
+
+        return await self._api_request_json('get', path)
+
+    async def _api_post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.http_session is None:
+            return {'error': 'http_session_unavailable'}
+
+        return await self._api_request_json('post', path, payload)
+
+    async def _api_request_json(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self.http_session is None:
+            return {'error': 'http_session_unavailable'}
+
+        for attempt in range(2):
+            try:
+                if method == 'get':
+                    request = self.http_session.get(self._api_url(path))
+                else:
+                    request = self.http_session.post(self._api_url(path), json=payload)
+                async with request as response:
+                    data = await self._read_json_response(response)
+                    if isinstance(data, dict):
+                        data['_http_status'] = response.status
+                    return data if isinstance(data, dict) else {'data': data, '_http_status': response.status}
+            except Exception as exc:
+                if attempt == 0 and await self._discover_server_api_base(force=True):
+                    continue
+                return {'error': 'request_failed', 'detail': str(exc)}
+
+        return {'error': 'request_failed', 'detail': 'unreachable'}
+
+    async def _read_json_response(self, response: aiohttp.ClientResponse) -> Any:
+        try:
+            return await response.json(content_type=None)
+        except Exception:
+            return {'error': 'invalid_response', 'detail': await response.text()}
+
+    def _format_api_error(self, prefix: str, response: dict[str, Any]) -> str:
+        message = (
+            response.get('message')
+            or response.get('error')
+            or response.get('detail')
+            or json.dumps(response, ensure_ascii=False)
         )
+        return f'{prefix}: {self._trim(str(message), 180)}'
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # _run_agent: cli_agent.py를 서브프로세스로 실행하고 출력을 Discord로 전송
-    # ──────────────────────────────────────────────────────────────────────────
-    async def _run_agent(self, tid: int, channel, task: str):
-        """cli_agent.py를 비동기 서브프로세스로 실행합니다.
+    def _trim(self, text: str, limit: int) -> str:
+        text = (text or '').replace('\r', ' ').replace('\n', ' ').strip()
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + '...'
 
-        asyncio.create_subprocess_exec으로 cli_agent.py를 가동하고
-        stdout을 실시간으로 읽어 Discord 채널에 전송합니다.
+    def _api_url(self, path: str) -> str:
+        return f'{self.server_api_base}{path}'
 
-        Args:
-            tid: 터미널 ID (1~8)
-            channel: Discord 채널 객체
-            task: 실행할 지시 내용
-        """
-        self._running_terminals.add(tid)
-        cli = TERMINAL_CLI_MAP.get(tid, 'auto')
+    async def _discover_server_api_base(self, force: bool = False) -> bool:
+        if self.http_session is None:
+            return False
 
-        await channel.send(f"⚡ **Terminal-{tid}** `{cli}` 에이전트 시작...\n> {task[:100]}")
+        if not force:
+            try:
+                async with self.http_session.get(self._api_url('/api/heartbeat')) as response:
+                    if response.status == 200:
+                        return True
+            except Exception:
+                pass
+
+        for port in self._candidate_server_ports():
+            base = f'http://127.0.0.1:{port}'
+            try:
+                async with self.http_session.get(f'{base}/api/heartbeat') as response:
+                    if response.status == 200:
+                        if base != self.server_api_base:
+                            print(f'[discord_bridge] server api -> {base}')
+                        self.server_api_base = base
+                        return True
+            except Exception:
+                continue
+
+        return False
+
+    def _candidate_server_ports(self) -> list[int]:
+        ports: list[int] = []
+        for start in (SERVER_PORT, 9000):
+            for port in range(start, start + SERVER_PORT_SCAN_LIMIT):
+                if port not in ports:
+                    ports.append(port)
+        return ports
+
+    async def _resolve_channel(self, channel_id: int | None) -> discord.abc.Messageable | None:
+        if not channel_id:
+            return None
+
+        channel = self.get_channel(channel_id)
+        if channel:
+            return channel
 
         try:
-            # cli_agent.py를 비동기 서브프로세스로 실행
-            # Python 실행 경로는 현재 인터프리터와 동일하게 사용
-            # CLI_AGENT_JSON_STDOUT=1: cli_agent.py가 stdout에 JSON 이벤트 출력
-            # (기본적으로 SSE Queue에만 넣는데, 이 플래그로 subprocess 캡처 가능)
-            env = os.environ.copy()
-            env['CLI_AGENT_JSON_STDOUT'] = '1'
+            return await self.fetch_channel(channel_id)
+        except Exception as exc:
+            print(f'[discord_bridge] channel resolve failed ({channel_id}): {exc}')
+            return None
 
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable,       # 동일 Python 인터프리터
-                str(_CLI_AGENT),      # scripts/cli_agent.py
-                task,                 # 지시 내용
-                cli,                  # CLI 선택 (claude|gemini|auto)
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,  # stderr를 stdout으로 합침
-                cwd=str(_PROJECT_ROOT),
-                env=env,
-            )
+    async def poll_pty_output(self):
+        while self.running:
+            try:
+                for tid in sorted(self.terminal_map):
+                    payload = await self._get_pty_output(tid, self._last_output_seq.get(tid, 0))
+                    if payload.get('error'):
+                        continue
 
-            # ── 실시간 출력 수집 + Discord 전송 ──────────────────────────────
-            # 50줄 또는 2초 타임아웃마다 Discord에 일괄 전송 (rate limit 대응)
-            buffer: list[str] = []
-            last_send_time = asyncio.get_event_loop().time()
+                    latest_seq = int(payload.get('latest_seq', 0) or 0)
+                    entries = payload.get('entries') or []
 
-            async def flush_buffer():
-                """버퍼에 쌓인 출력을 Discord 코드블록으로 전송합니다."""
-                nonlocal buffer, last_send_time
-                if not buffer:
-                    return
-                chunk = '\n'.join(buffer)
-                # Discord 2000자 제한 — 초과 시 잘라서 전송
-                while chunk:
-                    send_part = chunk[:DISCORD_MAX_LEN]
-                    chunk = chunk[DISCORD_MAX_LEN:]
-                    await channel.send(f"```\n{send_part}\n```")
-                buffer = []
-                last_send_time = asyncio.get_event_loop().time()
+                    if tid not in self._output_bootstrap_done:
+                        self._last_output_seq[tid] = latest_seq
+                        self._output_bootstrap_done.add(tid)
+                        continue
 
-            async for line_bytes in proc.stdout:
-                line = line_bytes.decode('utf-8', errors='replace').rstrip()
-                # cli_agent의 내부 이벤트 JSON(started/done/error 타입)은 Discord에 표시 안 함
-                # 일반 텍스트 출력만 전달
-                try:
-                    evt = json.loads(line)
-                    if evt.get('type') == 'done':
-                        await flush_buffer()
-                        status = evt.get('status', 'done')
-                        await channel.send(f"✅ **Terminal-{tid}** 완료 — 상태: `{status}`")
-                    elif evt.get('type') == 'error':
-                        await flush_buffer()
-                        await channel.send(f"❌ **Terminal-{tid}** 오류: {evt.get('line', '')}")
-                    elif evt.get('type') == 'output':
-                        buffer.append(evt.get('line', ''))
-                    # started 이벤트는 이미 위에서 안내 메시지 전송했으므로 무시
-                except json.JSONDecodeError:
-                    # JSON이 아닌 일반 텍스트 출력 (cli_agent 테스트 모드 출력 등)
-                    buffer.append(line)
+                    if not entries:
+                        self._last_output_seq[tid] = max(self._last_output_seq.get(tid, 0), latest_seq)
+                        continue
 
-                # 50줄 누적 또는 2초 경과 시 Discord 전송
-                now = asyncio.get_event_loop().time()
-                if len(buffer) >= 50 or (buffer and now - last_send_time >= 2.0):
-                    await flush_buffer()
+                    self._last_output_seq[tid] = max(
+                        self._last_output_seq.get(tid, 0),
+                        max(int(entry.get('seq', 0) or 0) for entry in entries),
+                    )
 
-            # 남은 버퍼 전송
-            await flush_buffer()
-            await proc.wait()
+                    channel = await self._resolve_channel(self.terminal_map.get(tid))
+                    if not channel:
+                        continue
 
-        except FileNotFoundError:
-            await channel.send(f"❌ **Terminal-{tid}** cli_agent.py를 찾을 수 없습니다: {_CLI_AGENT}")
-        except Exception as e:
-            await channel.send(f"❌ **Terminal-{tid}** 에이전트 실행 오류: {e}")
-        finally:
-            # 실행 완료 후 플래그 해제 — 다음 명령 수신 가능
-            self._running_terminals.discard(tid)
+                    lines = [self._trim(str(entry.get('text', '')), 300) for entry in entries if entry.get('text')]
+                    if not lines:
+                        continue
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # process_queue: 터미널별 Discord 전송 큐 처리 (send_to_discord 경유 메시지)
-    # ──────────────────────────────────────────────────────────────────────────
+                    chunk = ''
+                    for line in lines:
+                        next_chunk = f'{chunk}\n{line}' if chunk else line
+                        if len(next_chunk) > DISCORD_MAX_LEN - 8:
+                            await channel.send(f'```text\n{chunk}\n```')
+                            chunk = line
+                        else:
+                            chunk = next_chunk
+                    if chunk:
+                        await channel.send(f'```text\n{chunk}\n```')
+            except Exception as exc:
+                print(f'[discord_bridge] output poll failed: {exc}')
+
+            await asyncio.sleep(1.0)
+
     async def process_queue(self, tid: int):
-        """외부에서 send_to_discord()로 보낸 메시지를 Discord 채널로 전달합니다."""
-        channel = self.get_channel(self.terminal_map.get(tid))
         queue = self.message_queues[tid]
         while self.running:
             msg = await queue.get()
+            channel = await self._resolve_channel(self.terminal_map.get(tid))
             if channel:
                 if len(msg) > DISCORD_MAX_LEN:
-                    msg = msg[:DISCORD_MAX_LEN] + "..."
-                # 이모지로 시작하는 상태 메시지는 코드블록 없이 전송
-                if msg.startswith(('🟢', '🔴', '⚡', '✅', '❌', '⚠️')):
+                    msg = msg[:DISCORD_MAX_LEN] + '...'
+                if msg.startswith(('**', '`', 'T', '[', '!', '- ')):
                     await channel.send(msg)
                 else:
-                    await channel.send(f"```\n{msg}\n```")
+                    await channel.send(f'```\n{msg}\n```')
             queue.task_done()
             await asyncio.sleep(0.2)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # start_api_server: 외부에서 Discord 채널로 메시지를 보내는 API 서버 (8008포트)
-    # 대시보드/다른 스크립트에서 POST /send → 특정 터미널 채널로 전송
-    # ──────────────────────────────────────────────────────────────────────────
     async def start_api_server(self):
         app = web.Application()
         app.router.add_post('/send', self.handle_api_send)
@@ -249,53 +513,47 @@ class DiscordBridge(commands.Bot):
         await runner.setup()
         site = web.TCPSite(runner, 'localhost', 8008)
         await site.start()
-        print("🌐 Bridge API Server: http://localhost:8008")
+        print('[*] Discord Bridge relay server: http://localhost:8008')
 
     async def handle_api_send(self, request: web.Request) -> web.Response:
-        """POST /send { terminal_id: N, content: "..." } — 특정 터미널 채널로 메시지 전송."""
         data = await request.json()
-        tid = data.get('terminal_id', 1)
+        tid = int(data.get('terminal_id', 1))
         text = data.get('content', '')
         await self.send_to_discord(tid, text)
-        return web.json_response({"status": "sent"})
+        return web.json_response({'status': 'sent'})
 
     async def send_to_discord(self, tid: int, text: str):
-        """외부 호출용: 특정 터미널 채널로 메시지를 큐에 넣습니다."""
         if tid in self.terminal_map:
             await self.message_queues[tid].put(text)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # _log_message: messages.jsonl에 하이브 메시지 로그 기록
-    # ──────────────────────────────────────────────────────────────────────────
     def _log_message(self, tid: int, author: str, content: str):
-        """수신 메시지를 messages.jsonl에 기록합니다 (하이브 메모리 연동)."""
         try:
             _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            msg = {
+            message = {
                 'id': str(int(time.time() * 1000)),
                 'timestamp': __import__('datetime').datetime.now().isoformat(),
                 'from': f'discord_{author}',
                 'to': 'agent',
                 'terminal': tid,
-                'content': f"[Terminal {tid}] {content}",
+                'content': f'[Terminal {tid}] {content}',
                 'read': False,
             }
-            with _LOG_FILE.open('a', encoding='utf-8') as f:
-                f.write(json.dumps(msg, ensure_ascii=False) + '\n')
-        except Exception as e:
-            print(f'[discord_bridge] 로그 기록 실패: {e}')
+            with _LOG_FILE.open('a', encoding='utf-8') as file:
+                file.write(json.dumps(message, ensure_ascii=False) + '\n')
+        except Exception as exc:
+            print(f'[discord_bridge] log write failed: {exc}')
 
 
-# ─── 진입점 ───────────────────────────────────────────────────────────────────
 async def main():
     token = os.getenv('DISCORD_BOT_TOKEN')
     if not token:
-        print("❌ DISCORD_BOT_TOKEN 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
+        print('[!] DISCORD_BOT_TOKEN is missing in .env')
         return
+
     bridge = DiscordBridge()
     async with bridge:
         await bridge.start(token)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
