@@ -30,7 +30,7 @@ AGENT_CMDS: dict[str, dict[str, list[str]]] = {
     },
     "codex": {
         "normal": ["codex"],
-        "yolo": ["codex", "--yolo"],
+        "yolo": ["codex", "--dangerously-bypass-approvals-and-sandbox"],
     },
     "vibe": {
         # vibe-coding은 pythonw로 서버를 백그라운드에 띄우는 방식
@@ -79,6 +79,21 @@ def get_mode() -> str:
     return load_config().get("agent_mode", "normal")
 
 
+def get_codex_main_model() -> str:
+    """Codex 직접 실행 시 사용할 메인 모델을 반환."""
+    env_value = os.environ.get("CODEX_MAIN_MODEL", "").strip()
+    if env_value:
+        return env_value
+    cfg = load_config()
+    nested = cfg.get("codex_models", {})
+    if isinstance(nested, dict):
+        nested_main = nested.get("main", "")
+        if isinstance(nested_main, str) and nested_main.strip():
+            return nested_main.strip()
+    value = cfg.get("codex_main_model", "")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     """지정된 에이전트를 해당 모드로 실행.
 
@@ -121,6 +136,10 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
             del os.environ[k]
 
     cmd = AGENT_CMDS[agent][mode] + extra_args
+    if agent == "codex" and "--model" not in extra_args and "-m" not in extra_args:
+        codex_main_model = get_codex_main_model()
+        if codex_main_model:
+            cmd.extend(["--model", codex_main_model])
     print(f"[실행] {agent.upper()} / {mode.upper()} 모드")
     print(f"  명령: {' '.join(cmd)}")
 

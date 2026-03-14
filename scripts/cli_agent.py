@@ -30,6 +30,10 @@
 #   - run()에 워치독 스레드 추가: MAX_RUN_SECONDS(600초) 초과 시 프로세스 트리 강제 종료
 #   - readline()이 블로킹된 상태에서도 EOF를 강제 유도하여 run() 함수 정상 종료 보장
 #   - UI에 타임아웃 원인 메시지 출력 (type=error로 SSE 전송)
+# [2026-03-14] Codex: Codex 전용 메인/백그라운드 모델 라우팅 추가
+#   - 단순 조회/요약 작업은 저비용 모델(`codex_background_model`)로 자동 라우팅
+#   - 복잡 코딩 작업은 메인 모델(`codex_main_model`) 또는 Codex CLI 기본 모델 유지
+#   - 구형 `--yolo` 대신 `codex exec --dangerously-bypass-approvals-and-sandbox` 사용
 # ------------------------------------------------------------------------
 """
 
@@ -73,6 +77,7 @@ else:
 RUNS_FILE = DATA_DIR / "agent_runs.jsonl"
 # 포트 9000 자율 에이전트 UI가 tail하는 실시간 라이브 로그 파일
 LIVE_FILE = DATA_DIR / "agent_live.jsonl"
+CONFIG_FILE = _PROJECT_ROOT / ".ai_monitor" / "config.json"
 
 # ─── CLI 실행 파일 전체 경로 탐색 ────────────────────────────────────────────
 # 배경: hook_bridge.py → cli_agent.py 흐름에서 subprocess가 DETACHED_PROCESS로
@@ -125,7 +130,92 @@ GEMINI_KEYWORDS = [
     'search', 'find', 'what', 'how', 'why', 'describe',
 ]
 
+# [2026-03-13] Gemini: 백그라운드/단순 작업 전용 키워드 (저비용 모델로 자동 라우팅용)
+GEMINI_BACKGROUND_KEYWORDS = [
+    '정리', '요약', '검색', '찾아봐', '알아봐', '뭐야', '설명', '알려줘', '뭐가', '어디',
+    'search', 'find', 'what', 'how', 'why', 'describe', 'summary', 'explain'
+]
+# [2026-03-13] Gemini: 복잡 설계 작업 전용 키워드 (메인 고성능 모델 유지용)
+GEMINI_COMPLEX_KEYWORDS = [
+    '설계', '분석', '검토', '브레인', '아키텍처', '계획', '평가', '조사',
+    'design', 'analyze', 'review', 'plan', 'architecture'
+]
+
+# Codex CLI: 단순 백그라운드 작업은 저비용 모델로, 복잡 작업은 메인 모델로 라우팅
+CODEX_BACKGROUND_KEYWORDS = [
+    '정리', '요약', '검색', '찾아봐', '알아봐', '설명', '알려줘',
+    'summary', 'summarize', 'search', 'find', 'explain', 'describe',
+]
+CODEX_COMPLEX_KEYWORDS = [
+    *CLAUDE_KEYWORDS,
+    '설계', '분석', '검토', '아키텍처', '계획',
+    'design', 'analyze', 'review', 'architecture', 'plan',
+]
+
+
+def _load_runtime_config() -> dict:
+    """`.ai_monitor/config.json`을 읽어 런타임 모델 설정을 반환합니다."""
+    try:
+        if CONFIG_FILE.exists():
+            with CONFIG_FILE.open('r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _config_model(agent_type: str, model_type: str, env_name: str, default: str = '') -> str:
+    """환경변수 -> config.json -> 기본값 순으로 모델명을 가져옵니다."""
+    # 1. 환경변수 확인
+    env_val = os.environ.get(env_name, '').strip()
+    if env_val:
+        return env_val
+
+    # 2. config.json 확인 (nested 구조: gemini_models.main 등)
+    config = _load_runtime_config()
+    agent_config = config.get(f'{agent_type}_models', {})
+    model_val = agent_config.get(model_type, '').strip()
+    if model_val:
+        return model_val
+
+    # 3. 최후의 수단: 호출부가 넘긴 기본값
+    return default
+
+
+def _select_gemini_model(task: str) -> tuple[str, str]:
+    """Gemini 작업 성격에 따라 메인/백그라운드 모델을 선택합니다."""
+    main_model = _config_model('gemini', 'main', 'GEMINI_MAIN_MODEL')
+    bg_model = _config_model('gemini', 'background', 'GEMINI_BACKGROUND_MODEL')
+
+    task_l = task.lower()
+    is_bg = any(kw in task_l for kw in GEMINI_BACKGROUND_KEYWORDS)
+    is_complex = any(kw in task_l for kw in GEMINI_COMPLEX_KEYWORDS)
+
+    use_background = is_bg and not is_complex and bool(bg_model)
+    selected = bg_model if use_background else main_model
+    lane = 'Background' if use_background else 'Main'
+    reason = f'{lane}: {selected or "default"}'
+    return selected, reason
+
+
+def _select_codex_model(task: str) -> tuple[str, str]:
+    """Codex 작업 성격에 따라 메인/백그라운드 모델을 선택합니다."""
+    main_model = _config_model('codex', 'main', 'CODEX_MAIN_MODEL')
+    bg_model = _config_model('codex', 'background', 'CODEX_BACKGROUND_MODEL')
+
+    task_l = task.lower()
+    is_bg = any(kw in task_l for kw in CODEX_BACKGROUND_KEYWORDS)
+    is_complex = any(kw in task_l for kw in CODEX_COMPLEX_KEYWORDS)
+
+    use_background = is_bg and not is_complex and bool(bg_model)
+    selected = bg_model if use_background else main_model
+    lane = 'Background' if use_background else 'Main'
+    reason = f'{lane}: {selected or "default"}'
+    return selected, reason
+
+
 # ─── 전역 상태 (모듈 레벨 — agent_api.py에서 직접 접근) ──────────────────────
+
 _current_process: subprocess.Popen | None = None  # 현재 실행 중인 subprocess
 _output_queue: Queue = Queue()                     # SSE 스트리밍용 출력 큐
 _run_status: str = 'idle'                          # idle | running | done | error
@@ -317,8 +407,19 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
     cwd = working_dir or str(_PROJECT_ROOT)
 
     # CLI 자동 선택
+    # [2026-03-14] routing_reason 기본값 초기화: cli가 명시적으로 전달될 때도 안전하게 참조 가능
+    routing_reason = ''
     if cli == 'auto':
-        cli = route_task(task)
+        cli, routing_reason = route_task_with_reason(task)
+
+    # 모델 선택: Gemini / Codex는 작업 성격에 따라 모델을 분기합니다.
+    selected_model = None
+    if cli == 'gemini':
+        selected_model, gemini_reason = _select_gemini_model(task)
+        routing_reason = (routing_reason or "Gemini 분석") + f" ({gemini_reason})"
+    elif cli == 'codex':
+        selected_model, codex_reason = _select_codex_model(task)
+        routing_reason = (routing_reason or 'Codex 실행') + f' ({codex_reason})'
 
     # 전역 상태 업데이트 (단일 실행 추적용 — 하위 호환)
     now_ts = datetime.now().isoformat()
@@ -330,7 +431,8 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
             'cli': cli,
             'ts': now_ts,
             'cwd': cwd,
-            'terminal_id': terminal_id,  # 어느 터미널에서 요청했는지 추적
+            'terminal_id': terminal_id,
+            'model': selected_model,  # 선택된 모델 기록
         }
 
     # 터미널별 상태 업데이트 (상황판 카드용)
@@ -342,7 +444,8 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
                 'cli': cli,
                 'run_id': run_id,
                 'ts': now_ts,
-                'routing_reason': routing_reason,  # 모델 선택 근거
+                'routing_reason': routing_reason,  # 모델 선택 근거 포함
+                'model': selected_model,           # [2026-03-14] 사용 모델 필드 추가 (모니터링 표시용)
                 'last_line': '',
             })
 
@@ -354,15 +457,17 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         # ── CLI별 명령어 구성 ─────────────────────────────────────────────
         if cli == 'claude':
             # Claude Code CLI: -p 플래그로 비대화형(print) 모드 실행
-            # --dangerously-skip-permissions: 자동 승인 (오케스트레이터 자율 실행)
-            # _CLAUDE_CMD: 모듈 초기화 시 탐색한 전체 경로 (PATH 미등록 환경 대응)
             cmd = [_CLAUDE_CMD, '-p', task, '--dangerously-skip-permissions']
         elif cli == 'gemini':
-            # Gemini CLI: stdin으로 지시 전달
-            # _GEMINI_CMD: 모듈 초기화 시 탐색한 전체 경로
-            cmd = [_GEMINI_CMD, '-p', task]
+            cmd = [_GEMINI_CMD]
+            if selected_model:
+                cmd.extend(['-m', selected_model])
+            cmd.extend(['-p', task])
         elif cli == 'codex':
-            cmd = [_CODEX_CMD, '--yolo', task]
+            cmd = [_CODEX_CMD, 'exec', '--dangerously-bypass-approvals-and-sandbox']
+            if selected_model:
+                cmd.extend(['-m', selected_model])
+            cmd.append(task)
         else:
             raise ValueError(f'알 수 없는 CLI: {cli} (지원: claude | gemini | codex)')
 

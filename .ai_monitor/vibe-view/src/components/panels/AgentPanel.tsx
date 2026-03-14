@@ -86,6 +86,7 @@ import {
   Bot, Play, Square, RotateCw, Clock,
   Brain, CheckCircle2, Circle, XCircle, Terminal, LayoutDashboard,
   Search, Pencil, ShieldCheck, RefreshCw, Network, Database, ExternalLink,
+  Save, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import FilePathText from '../FilePathText';
 
@@ -170,6 +171,11 @@ interface TerminalState {
   routing_reason?: string; // 모델 자동 선택 근거 (예: "코드 작업 감지 (수정)")
 }
 
+interface CodexModelPolicy {
+  main: string;
+  background: string;
+}
+
 interface AgentRun {
   id: string;
   task: string;
@@ -221,6 +227,25 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
   error:       '오류',
   unavailable: 'CLI 미설치',
 };
+
+const EMPTY_CODEX_MODEL_POLICY: CodexModelPolicy = {
+  main: '',
+  background: '',
+};
+
+function readCodexModelPolicy(config: unknown): CodexModelPolicy {
+  const source = (config && typeof config === 'object') ? config as Record<string, unknown> : {};
+  const nested = (source.codex_models && typeof source.codex_models === 'object')
+    ? source.codex_models as Record<string, unknown>
+    : {};
+  const legacyMain = typeof source.codex_main_model === 'string' ? source.codex_main_model : '';
+  const legacyBackground = typeof source.codex_background_model === 'string' ? source.codex_background_model : '';
+
+  return {
+    main: typeof nested.main === 'string' ? nested.main : legacyMain,
+    background: typeof nested.background === 'string' ? nested.background : legacyBackground,
+  };
+}
 
 function stripPreviewPath(rawPath: string): string {
   const trimmed = rawPath.trim().replace(/^[("'`[{<]+/, '').replace(/[),\].!?'"`}>]+$/, '');
@@ -643,6 +668,12 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
 
   // 히스토리 탭 데이터
   const [history, setHistory]         = useState<AgentRun[]>([]);
+  const [codexPolicy, setCodexPolicy] = useState<CodexModelPolicy>(EMPTY_CODEX_MODEL_POLICY);
+  const [savedCodexPolicy, setSavedCodexPolicy] = useState<CodexModelPolicy>(EMPTY_CODEX_MODEL_POLICY);
+  const [codexPolicyOpen, setCodexPolicyOpen] = useState(false);
+  const [codexPolicyLoading, setCodexPolicyLoading] = useState(true);
+  const [codexPolicySaving, setCodexPolicySaving] = useState(false);
+  const [codexPolicyNotice, setCodexPolicyNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // ── 분석/수정 파일 추적 (상황판 탭에서 표시) ──────────────────────────────
   // SSE 출력에서 '● Read(file)' → 분석, '● Edit(file)' → 수정 으로 파싱
@@ -688,6 +719,9 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
   });
   // 실행할 터미널 선택 (카드 클릭으로 변경, 기본: T1)
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>('T1');
+  const codexPolicyDirty =
+    codexPolicy.main !== savedCodexPolicy.main ||
+    codexPolicy.background !== savedCodexPolicy.background;
   const autoPreviewRequestedRef = useRef(false);
   const autoPreviewOpenedRef = useRef(false);
 
@@ -822,6 +856,55 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       // 서버 미실행 시 무시
     }
   }, []);
+
+  const loadCodexPolicy = useCallback(async () => {
+    setCodexPolicyLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/config`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const nextPolicy = readCodexModelPolicy(data);
+      setCodexPolicy(nextPolicy);
+      setSavedCodexPolicy(nextPolicy);
+    } catch {
+      setCodexPolicyNotice({ type: 'error', text: 'Codex 모델 설정을 불러오지 못했습니다.' });
+    } finally {
+      setCodexPolicyLoading(false);
+    }
+  }, []);
+
+  const saveCodexPolicy = useCallback(async () => {
+    setCodexPolicySaving(true);
+    setCodexPolicyNotice(null);
+    const normalized = {
+      main: codexPolicy.main.trim(),
+      background: codexPolicy.background.trim(),
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codex_models: normalized,
+          codex_main_model: normalized.main,
+          codex_background_model: normalized.background,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('save_failed');
+      }
+
+      setCodexPolicy(normalized);
+      setSavedCodexPolicy(normalized);
+      setCodexPolicyNotice({ type: 'success', text: 'Codex 모델 정책을 저장했습니다.' });
+    } catch {
+      setCodexPolicyNotice({ type: 'error', text: 'Codex 모델 정책 저장에 실패했습니다.' });
+    } finally {
+      setCodexPolicySaving(false);
+    }
+  }, [codexPolicy]);
 
   // ─── 현재 실행 상태 로드 ────────────────────────────────────────────────
   // setStatus만 하면 onStatusChange가 호출되지 않아 ActivityBar 배지가 고착되므로
@@ -1018,6 +1101,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
     loadStatus();
     loadHistory();
     loadTerminals();
+    loadCodexPolicy();
     connectSSE();
 
     // 10초마다 히스토리 + 에이전트 상태 자동 동기화
@@ -1042,7 +1126,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       sseRef.current = null;
       es?.close();
     };
-  }, [loadStatus, loadHistory, loadTerminals, connectSSE]);
+  }, [loadStatus, loadHistory, loadTerminals, loadCodexPolicy, connectSSE]);
 
   // ─── 양방향 상태 동기화: 3초마다 서버 폴링 ─────────────────────────────────
   // 케이스 A: UI=running, 서버!=running → done 이벤트 유실 복구 (running 고착 해소)
@@ -1298,6 +1382,108 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
             실행
           </button>
         </div>
+      </div>
+
+      <div className="shrink-0 rounded border border-white/5 bg-black/10 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setCodexPolicyOpen(open => !open)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-amber-300" />
+          <span className="text-[11px] font-semibold text-white/80">Codex Model Policy</span>
+          <span className="text-[10px] text-white/35 font-mono">
+            main={savedCodexPolicy.main || 'default'} / bg={savedCodexPolicy.background || 'default'}
+          </span>
+          <div className="flex-1" />
+          {codexPolicyLoading && <RefreshCw className="w-3 h-3 text-white/30 animate-spin" />}
+          {codexPolicyOpen ? (
+            <ChevronUp className="w-3.5 h-3.5 text-white/40" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-white/40" />
+          )}
+        </button>
+
+        {codexPolicyOpen && (
+          <div className="border-t border-white/5 px-3 py-3 bg-black/20 flex flex-col gap-3">
+            <div className="text-[10px] text-white/45 leading-relaxed">
+              작업 분류만 코드에서 판단하고, 실제 모델명은 설정에서만 읽습니다. 빈칸이면 Codex CLI 기본 모델을 사용합니다.
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">Main Lane</span>
+                <input
+                  type="text"
+                  value={codexPolicy.main}
+                  onChange={(e) => {
+                    setCodexPolicyNotice(null);
+                    setCodexPolicy(prev => ({ ...prev, main: e.target.value }));
+                  }}
+                  disabled={codexPolicySaving}
+                  placeholder="Codex default"
+                  className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-amber-400/50"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">Background Lane</span>
+                <input
+                  type="text"
+                  value={codexPolicy.background}
+                  onChange={(e) => {
+                    setCodexPolicyNotice(null);
+                    setCodexPolicy(prev => ({ ...prev, background: e.target.value }));
+                  }}
+                  disabled={codexPolicySaving}
+                  placeholder="Codex default"
+                  className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-amber-400/50"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={saveCodexPolicy}
+                disabled={codexPolicySaving || codexPolicyLoading || !codexPolicyDirty}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {codexPolicySaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                저장
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCodexPolicyNotice(null);
+                  setCodexPolicy(savedCodexPolicy);
+                }}
+                disabled={codexPolicySaving || !codexPolicyDirty}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                되돌리기
+              </button>
+
+              <button
+                type="button"
+                onClick={loadCodexPolicy}
+                disabled={codexPolicySaving || codexPolicyLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                다시 불러오기
+              </button>
+
+              {codexPolicyNotice && (
+                <span className={`text-[10px] ${
+                  codexPolicyNotice.type === 'success' ? 'text-emerald-300' : 'text-red-300'
+                }`}>
+                  {codexPolicyNotice.text}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── 탭 바 ───────────────────────────────────────────────────────── */}

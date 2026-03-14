@@ -3150,7 +3150,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     cmd = f'start "Gemini CLI" cmd.exe /k "cd /d {target_dir} && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
-                    cmd = f'start "Codex CLI" cmd.exe /k "cd /d {target_dir} && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}"'
+                    model_name = _codex_main_model()
+                    model_flag = f' --model {model_name}' if model_name else ""
+                    cmd = f'start "Codex CLI" cmd.exe /k "cd /d {target_dir} && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}{model_flag}"'
                 else:
                     cmd = f'start "Terminal" cmd.exe /k "cd /d {target_dir}"'
                 
@@ -3876,7 +3878,9 @@ async def pty_handler(websocket):
             pty.write(f'chcp 65001 >nul & gemini{yolo_flag}\r\n')
         elif agent == 'codex':
             yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
-            pty.write(f'chcp 65001 >nul & codex{yolo_flag} --no-alt-screen\r\n')
+            model_name = _codex_main_model()
+            model_flag = f' --model {model_name}' if model_name else ""
+            pty.write(f'chcp 65001 >nul & codex{yolo_flag}{model_flag} --no-alt-screen\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
         # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음

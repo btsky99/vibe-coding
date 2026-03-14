@@ -188,9 +188,8 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     if chosen == 'claude':
         cmd = ['claude', '-p', direct_task, '--dangerously-skip-permissions']
     elif chosen == 'codex':
-        # Codex CLI: 프로젝트 루트의 codex.bat을 통해 YOLO 자율 모드로 실행
-        # --yolo 플래그: 확인 없이 자율적으로 과업을 완수하는 에이전트 모드
-        cmd = ['codex', '--yolo', direct_task]
+        # Codex CLI: 최신 비대화형 자동 실행 경로
+        cmd = ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', direct_task]
     else:
         cmd = ['gemini', '-p', direct_task]
 

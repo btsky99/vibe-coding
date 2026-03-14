@@ -7,3 +7,47 @@
 {"id": "1773155205372", "timestamp": "2026-03-11T00:06:45", "from": "agent", "to": "all", "type": "status", "content": "agent running [vibe-release]", "read": false}
 {"id": "1773317647356", "timestamp": "2026-03-12T21:14:07", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 전체 시스템 분석: 문제점 파악 + 배포버전 버그 진단 + 고도화 로드맵 | vibe-code-review -> vibe-debug", "read": false}
 {"id": "1773317934278", "timestamp": "2026-03-12T21:18:54", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-debug] | [분석 완료] 전체 코드 구조 + 배포 버전 버그 진단 완료 — 핵심 문제 4건 식별", "read": false}
+{"id": "1773325360247", "timestamp": "2026-03-12T23:22:40.247864", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 안녕", "read": false}
+{"id": "1773325795530", "timestamp": "2026-03-12T23:29:55.530159", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 안녕", "read": false}
+{"id": "1773325862812", "timestamp": "2026-03-12T23:31:02.812825", "from": "discord_palaneebball", "to": "agent", "terminal": 2, "content": "[Terminal 2] 안녕", "read": false}
+{"id": "1773325884822", "timestamp": "2026-03-12T23:31:24.822215", "from": "discord_palaneebball", "to": "agent", "terminal": 3, "content": "[Terminal 3] 실행되는 건 안나오는건가 뭐시 실해되다고", "read": false}
+{"id": "1773326504065", "timestamp": "2026-03-12T23:41:44.065086", "from": "discord_palaneebball", "to": "agent", "terminal": 3, "content": "[Terminal 3] 잘되는지 볼까", "read": false}
+{"id": "1773326504065", "timestamp": "2026-03-12T23:41:44.065685", "from": "discord_palaneebball", "to": "agent", "terminal": 3, "content": "[Terminal 3] 잘되는지 볼까", "read": false}
+{"id": "1773326563857", "timestamp": "2026-03-12T23:42:43.857531", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디까지 했지", "read": false}
+{"id": "1773326563893", "timestamp": "2026-03-12T23:42:43.893975", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디까지 했지", "read": false}
+{"id": "1773326582392", "timestamp": "2026-03-12T23:43:02.392747", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디가지 해지", "read": false}
+{"id": "1773326582393", "timestamp": "2026-03-12T23:43:02.393896", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디가지 해지", "read": false}
+{"id": "1773326582408", "timestamp": "2026-03-12T23:43:02.408728", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디가지 해지", "read": false}
+{"id": "1773326605722", "timestamp": "2026-03-12T23:43:25.722734", "from": "discord_palaneebball", "to": "agent", "terminal": 2, "content": "[Terminal 2] 어디까지 했지", "read": false}
+{"id": "1773326605729", "timestamp": "2026-03-12T23:43:25.729951", "from": "discord_palaneebball", "to": "agent", "terminal": 2, "content": "[Terminal 2] 어디까지 했지", "read": false}
+{"id": "1773326605759", "timestamp": "2026-03-12T23:43:25.759209", "from": "discord_palaneebball", "to": "agent", "terminal": 2, "content": "[Terminal 2] 어디까지 했지", "read": false}
+{"id": "1773327071049", "timestamp": "2026-03-12T23:51:11.049238", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디까지 해지", "read": false}
+{"id": "1773327071050", "timestamp": "2026-03-12T23:51:11.050565", "from": "discord_palaneebball", "to": "agent", "terminal": 1, "content": "[Terminal 1] 어디까지 해지", "read": false}
+{"id": "1773327081861", "timestamp": "2026-03-12T23:51:21.861095", "from": "discord_palaneebball", "to": "agent", "terminal": 2, "content": "[Terminal 2] 어디까지 해지", "read": false}
+{"id": "1773327081869", "timestamp": "2026-03-12T23:51:21.869115", "from": "discord_palaneebball", "to": "agent", "terminal": 2, "content": "[Terminal 2] 어디까지 해지", "read": false}
+{"id": "1773327104869", "timestamp": "2026-03-12T23:51:44.869360", "from": "discord_palaneebball", "to": "agent", "terminal": 3, "content": "[Terminal 3] 여전이 클로드는 잘됨  제미나이 2개 입력됨", "read": false}
+{"id": "1773327104882", "timestamp": "2026-03-12T23:51:44.882434", "from": "discord_palaneebball", "to": "agent", "terminal": 3, "content": "[Terminal 3] 여전이 클로드는 잘됨  제미나이 2개 입력됨", "read": false}
+{"id": "1773404734934", "timestamp": "2026-03-13T21:25:34", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 오케스트레이션 동작 상태 점검 | 직접점검", "read": false}
+{"id": "1773404777020", "timestamp": "2026-03-13T21:26:17", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 오케스트레이션 동작 검증 | system-check -> orchestrator-test", "read": false}
+{"id": "1773404832706", "timestamp": "2026-03-13T21:27:12", "from": "claude", "to": "all", "type": "status", "content": "claude running [orchestrator-test]", "read": false}
+{"id": "1773404855744", "timestamp": "2026-03-13T21:27:35", "from": "claude", "to": "all", "type": "status", "content": "claude finished [system-check] | [정상] 하이브 메모리 로드 완료 — PostgreSQL 15개 항목 정상 응답", "read": false}
+{"id": "1773404942960", "timestamp": "2026-03-13T21:29:02", "from": "claude", "to": "all", "type": "status", "content": "claude finished [orchestrator-test] | [정상] skill_orchestrator.py 상태 추적 정상 동작 확인", "read": false}
+{"id": "1773404981717", "timestamp": "2026-03-13T21:29:41", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 테스트 요청 | vibe-debug -> vibe-code-review", "read": false}
+{"id": "1773405025173", "timestamp": "2026-03-13T21:30:25", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-code-review]", "read": false}
+{"id": "1773405069747", "timestamp": "2026-03-13T21:31:09", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-code-review] | [정상] 테스트 완료 — 오류 없음", "read": false}
+{"id": "1773406393742", "timestamp": "2026-03-13T21:53:13", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 테스트 요청 — 전체 체인 검증 | vibe-debug -> vibe-code-review -> vibe-release", "read": false}
+{"id": "1773406446601", "timestamp": "2026-03-13T21:54:06", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-debug]", "read": false}
+{"id": "1773406489884", "timestamp": "2026-03-13T21:54:49", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-debug] | [오류 발견] server.py:359 skill_orchestrator import 실패 가능성 → try/except로 처리됨", "read": false}
+{"id": "1773406541064", "timestamp": "2026-03-13T21:55:41", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-code-review]", "read": false}
+{"id": "1773406585134", "timestamp": "2026-03-13T21:56:25", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-code-review] | [문법 검사 완료] 문법 오류 없음 / 미사용 변수 0건", "read": false}
+{"id": "1773406637257", "timestamp": "2026-03-13T21:57:17", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-release]", "read": false}
+{"id": "1773406680789", "timestamp": "2026-03-13T21:58:00", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-release] | [배포 완료] v3.7.54 빌드 성공 (테스트)", "read": false}
+{"id": "1773407937696", "timestamp": "2026-03-13T22:18:57", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 Skills 2.0 전체 마이그레이션 + vibe-security 신규 추가 | vibe-execute-plan", "read": false}
+{"id": "1773408351991", "timestamp": "2026-03-13T22:25:51", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-execute-plan] | [실행 완료] Skills 2.0 마이그레이션 12개 태스크 완료 — .claude/skills/ 10개 폴더 생성", "read": false}
+{"id": "1773409857511", "timestamp": "2026-03-13T22:50:57", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 전체 점검 후 빌드/릴리즈 | vibe-code-review -> vibe-release", "read": false}
+{"id": "1773409870315", "timestamp": "2026-03-13T22:51:10", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? Skills 2.0 마이그레이션 마무리 — Task 11 검증 및 플랜 상태 업데이트 | vibe-execute-plan", "read": false}
+{"id": "1773409922465", "timestamp": "2026-03-13T22:52:02", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-release]", "read": false}
+{"id": "1773410061854", "timestamp": "2026-03-13T22:54:21", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-release] | [코드 리뷰 완료] Critical 없음 / Warning 1건 즉시 수정 완료 (server.py:3989 중복 import 제거)", "read": false}
+{"id": "1773494579927", "timestamp": "2026-03-14T22:22:59", "from": "gemini", "to": "all", "type": "status", "content": "[skill-chain] T2 Codex/Gemini 모델 라우팅 기능 코드 리뷰 후 릴리즈 | vibe-code-review -> vibe-release", "read": false}
+{"id": "1773494626247", "timestamp": "2026-03-14T22:23:46", "from": "gemini", "to": "all", "type": "status", "content": "gemini running [vibe-release]", "read": false}
+{"id": "1773494734750", "timestamp": "2026-03-14T22:25:34", "from": "gemini", "to": "all", "type": "status", "content": "gemini finished [vibe-release] | [코드 리뷰 완료] routing_reason 미초기화 NameError 1건 수정 — 나머지 코드 정상", "read": false}
