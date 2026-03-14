@@ -454,39 +454,51 @@ def _read_messages(agent_name: str) -> list[dict]:
 def _check_and_install_skills() -> list[str]:
     """Claude Code 스킬 자동 설치 — UserPromptSubmit마다 실행.
 
-    [동작 원리]
+    [동작 원리 — Skills 2.0]
     1. scripts/ 기준으로 프로젝트 루트 탐지
-    2. skills/claude/*.md 목록과 .claude/commands/*.md 목록 비교
-    3. 누락된 스킬 파일을 .claude/commands/에 자동 복사
-    4. 설치된 스킬 이름 목록을 반환 (로깅용)
+    2. 스킬 소스 탐색:
+       - frozen(배포): sys._MEIPASS/claude_skills/<name>/SKILL.md
+       - dev(개발): PROJECT_ROOT/.claude/skills/<name>/SKILL.md (소스=대상 → 복사 불필요)
+    3. 누락된 스킬 디렉토리를 .claude/skills/<name>/에 자동 복사
+    4. 설치된 스킬 이름 목록 반환 (로깅용)
 
-    [자기치유 관점]
+    [자기치유]
     스킬이 삭제되거나 새 스킬이 추가되어도 다음 사용자 입력 시 자동 복구됨.
-    수동으로 대시보드에서 설치할 필요 없음.
     """
     installed = []
     try:
         import shutil
+        import sys
         from pathlib import Path
 
         # 프로젝트 루트: scripts/hive_hook.py 기준 상위 폴더
         project_root = Path(_scripts_dir).parent
 
-        skills_src = project_root / "skills" / "claude"
-        commands_dst = project_root / ".claude" / "commands"
+        # 소스 경로: frozen → sys._MEIPASS/claude_skills/, dev → .claude/skills/
+        if getattr(sys, 'frozen', False):
+            skills_src = Path(sys._MEIPASS) / 'claude_skills'
+        else:
+            skills_src = project_root / '.claude' / 'skills'
 
         if not skills_src.exists():
             return []
 
-        # .claude/commands/ 폴더 없으면 자동 생성
-        commands_dst.mkdir(parents=True, exist_ok=True)
+        skills_dst = project_root / '.claude' / 'skills'
 
-        # 소스와 대상 비교 → 누락 파일 복사
-        for skill_file in skills_src.glob("*.md"):
-            target = commands_dst / skill_file.name
+        # 소스와 대상이 같으면 (개발 환경) 복사 불필요
+        if skills_src.resolve() == skills_dst.resolve():
+            return []
+
+        skills_dst.mkdir(parents=True, exist_ok=True)
+
+        # 소스 내 각 스킬 디렉토리 순회 → 누락된 것만 복사
+        for skill_dir in skills_src.iterdir():
+            if not skill_dir.is_dir() or not (skill_dir / 'SKILL.md').exists():
+                continue
+            target = skills_dst / skill_dir.name
             if not target.exists():
-                shutil.copy2(str(skill_file), str(target))
-                installed.append(skill_file.stem)
+                shutil.copytree(str(skill_dir), str(target))
+                installed.append(skill_dir.name)
 
     except Exception:
         pass

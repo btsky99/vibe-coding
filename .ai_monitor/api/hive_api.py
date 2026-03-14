@@ -567,13 +567,21 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
-        VIBE_SKILL_NAMES = ['master', 'brainstorm', 'debug', 'write-plan', 'execute-plan', 'tdd', 'code-review']
+        # Skills 2.0: .claude/skills/<name>/SKILL.md 구조로 감지
+        # 구 시스템(.claude/commands/) 설치 여부도 함께 확인하여 마이그레이션 필요 판단
+        VIBE_SKILL_NAMES = ['brainstorm', 'debug', 'write-plan', 'execute-plan', 'tdd', 'code-review',
+                            'orchestrate', 'release', 'heal', 'security']
         _proj = _current_project_root()
-        claude_commands_dir = _proj / '.claude' / 'commands'
+        claude_skills_dir   = _proj / '.claude' / 'skills'
+        claude_commands_dir = _proj / '.claude' / 'commands'  # 구 시스템 (마이그레이션 감지용)
         gemini_skills_dir   = _proj / '.gemini' / 'skills'
         result = {
             'claude': {
-                skill: (claude_commands_dir / f'vibe-{skill}.md').exists()
+                # Skills 2.0 경로 우선 감지, 구 경로도 설치로 인정 (하위 호환)
+                skill: (
+                    (claude_skills_dir / f'vibe-{skill}' / 'SKILL.md').exists() or
+                    (claude_commands_dir / f'vibe-{skill}.md').exists()
+                )
                 for skill in VIBE_SKILL_NAMES
             },
             'gemini': {
@@ -835,34 +843,59 @@ def handle_post(handler, path: str, data: dict,
             tool  = str(data.get('tool', 'claude'))
             _proj = _current_project_root()
             if tool == 'claude':
-                skills_src = BASE_DIR / 'skills' / 'claude'
+                # Skills 2.0: claude_skills/<name>/SKILL.md → .claude/skills/<name>/
+                # 소스 탐색: frozen(sys._MEIPASS/claude_skills/) → dev(.claude/skills/) 순서
+                skills_src = BASE_DIR / 'claude_skills'
                 if not skills_src.exists():
-                    skills_src = _proj / 'skills' / 'claude'
+                    skills_src = _proj / '.claude' / 'skills'
                 if not skills_src.exists():
-                    raise Exception('내장 스킬 파일을 찾을 수 없습니다 (skills/claude/)')
-                dest_dir = _proj / '.claude' / 'commands'
+                    raise Exception('내장 스킬 파일을 찾을 수 없습니다 (claude_skills/)')
+
+                dest_dir = _proj / '.claude' / 'skills'
                 dest_dir.mkdir(parents=True, exist_ok=True)
+
+                # 소스와 대상이 같으면 (개발 환경) 복사 생략
                 installed = []
-                for skill_file in skills_src.glob('vibe-*.md'):
-                    _shutil.copy(skill_file, dest_dir / skill_file.name)
-                    installed.append(skill_file.name)
+                if skills_src.resolve() != dest_dir.resolve():
+                    _shutil.copytree(str(skills_src), str(dest_dir), dirs_exist_ok=True)
+
+                installed = [
+                    d.name for d in dest_dir.iterdir()
+                    if d.is_dir() and (d / 'SKILL.md').exists()
+                ]
+
+                # 구 시스템 .claude/commands/vibe-*.md 자동 제거 (마이그레이션)
+                old_commands_dir = _proj / '.claude' / 'commands'
+                migrated = []
+                if old_commands_dir.exists():
+                    for old_file in old_commands_dir.glob('vibe-*.md'):
+                        old_file.unlink(missing_ok=True)
+                        migrated.append(old_file.name)
+
+                msg = f"Claude 스킬 설치 완료 ({len(installed)}개): {', '.join(installed)}"
+                if migrated:
+                    msg += f" | 구 버전 제거: {', '.join(migrated)}"
                 handler.wfile.write(json.dumps({
                     'status': 'success',
-                    'message': f"Claude 스킬 설치 완료: {', '.join(installed)}",
-                    'installed': installed
+                    'message': msg,
+                    'installed': installed,
+                    'migrated': migrated,
                 }, ensure_ascii=False).encode('utf-8'))
+
             elif tool == 'gemini':
                 skills_src = BASE_DIR / 'skills' / 'gemini'
                 if not skills_src.exists():
                     skills_src = _proj / '.gemini' / 'skills'
                 if not skills_src.exists():
-                    raise Exception('내장 스킬 파일을 찾을 수 없습니다 (skills/gemini/ 또는 .gemini/skills/)')
+                    raise Exception('내장 Gemini 스킬을 찾을 수 없습니다 (skills/gemini/ 또는 .gemini/skills/)')
                 dest_dir = _proj / '.gemini' / 'skills'
                 dest_dir.mkdir(parents=True, exist_ok=True)
-                _shutil.copytree(str(skills_src), str(dest_dir), dirs_exist_ok=True)
+                if skills_src.resolve() != dest_dir.resolve():
+                    _shutil.copytree(str(skills_src), str(dest_dir), dirs_exist_ok=True)
+                installed = [d.name for d in dest_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
                 handler.wfile.write(json.dumps({
                     'status': 'success',
-                    'message': f"Gemini 스킬 설치 완료 → {dest_dir}"
+                    'message': f"Gemini 스킬 설치 완료 ({len(installed)}개) → {dest_dir}"
                 }, ensure_ascii=False).encode('utf-8'))
             else:
                 handler.wfile.write(json.dumps({'status': 'error', 'message': f'지원하지 않는 tool: {tool}'}).encode('utf-8'))
@@ -881,12 +914,20 @@ def handle_post(handler, path: str, data: dict,
             tool  = str(data.get('tool', 'claude'))
             _proj = _current_project_root()
             if tool == 'claude':
-                dest_dir = _proj / '.claude' / 'commands'
                 removed = []
-                if dest_dir.exists():
-                    for skill_file in dest_dir.glob('vibe-*.md'):
-                        skill_file.unlink(missing_ok=True)
-                        removed.append(skill_file.name)
+                # Skills 2.0: .claude/skills/vibe-*/ 디렉토리 제거
+                skills_dir = _proj / '.claude' / 'skills'
+                if skills_dir.exists():
+                    for skill_dir in skills_dir.iterdir():
+                        if skill_dir.is_dir() and skill_dir.name.startswith('vibe-'):
+                            _shutil.rmtree(str(skill_dir), ignore_errors=True)
+                            removed.append(skill_dir.name)
+                # 구 시스템 잔재 .claude/commands/vibe-*.md 도 함께 제거
+                commands_dir = _proj / '.claude' / 'commands'
+                if commands_dir.exists():
+                    for old_file in commands_dir.glob('vibe-*.md'):
+                        old_file.unlink(missing_ok=True)
+                        removed.append(old_file.name)
                 handler.wfile.write(json.dumps({
                     'status': 'success',
                     'message': f"Claude 스킬 제거 완료: {', '.join(removed) if removed else '없음'}",

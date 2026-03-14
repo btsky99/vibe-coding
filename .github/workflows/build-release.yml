@@ -99,6 +99,7 @@ jobs:
         run: |
           xcopy .gemini\skills .ai_monitor\skills /E /I /Y
           xcopy .gemini\skills .ai_monitor\.gemini\skills /E /I /Y
+          xcopy .claude\skills .ai_monitor\claude_skills /E /I /Y
           xcopy scripts .ai_monitor\scripts /E /I /Y
           copy GEMINI.md .ai_monitor\GEMINI.md /Y
           copy CLAUDE.md .ai_monitor\CLAUDE.md /Y
@@ -117,6 +118,7 @@ jobs:
             --add-data "vibe-view\dist;dist" ^
             --add-data "skills;skills" ^
             --add-data ".gemini\skills;.gemini/skills" ^
+            --add-data "claude_skills;claude_skills" ^
             --add-data "scripts;scripts" ^
             --add-data "GEMINI.md;." ^
             --add-data "CLAUDE.md;." ^
@@ -142,6 +144,7 @@ jobs:
             --add-data "vibe-view\dist;dist" ^
             --add-data "skills;skills" ^
             --add-data ".gemini\skills;.gemini/skills" ^
+            --add-data "claude_skills;claude_skills" ^
             --add-data "scripts;scripts" ^
             --add-data "GEMINI.md;." ^
             --add-data "CLAUDE.md;." ^
