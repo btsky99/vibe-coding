@@ -3811,6 +3811,13 @@ async def pty_handler(websocket):
         env["COLORTERM"] = "truecolor"
         # 한글 UTF-8 코드페이지: 환경변수로 미리 지정 (chcp 65001 명령 실행 불필요)
         env["PYTHONLEGACYWINDOWSSTDIO"] = "0"
+        # [비용 최적화] Claude Code 백그라운드 작업(파일 요약, 툴 결정 등)에 Haiku 사용.
+        # Why: Claude Code는 내부적으로 수백 개의 경량 호출을 메인 모델로 처리함.
+        #      ANTHROPIC_DEFAULT_HAIKU_MODEL을 지정하면 이 호출들이 Haiku로 자동 라우팅되어
+        #      메인 모델(Sonnet/Opus) 비용의 ~87%를 절감할 수 있음.
+        #      사용자가 이미 env에 설정한 경우 덮어쓰지 않음 (기존 설정 존중).
+        if not os.environ.get('ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "claude-haiku-4-5-20251001"
 
         is_yolo = qs.get('yolo', ['false'])[0].lower() == 'true'
 
