@@ -4262,16 +4262,12 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
-    # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 ─────────────────────────────
-    # installer가 {app}\pgsql\ 에 설치한 바이너리를 사용하여 pgdata 초기화 + 서버 기동.
-    # 개발 버전에서는 이미 pg_manager.py가 수동으로 관리하므로 frozen 모드에서만 실행.
-    if getattr(sys, 'frozen', False):
-        ensure_postgres_running()
-
-    # ── 단일 인스턴스 락 ────────────────────────────────────────────────────
-    # [버그 수정 2026-03-14] _MAX_INSTANCES=4 이면 이전 인스턴스 소켓이
-    # TIME_WAIT 상태여도 다음 슬롯으로 두 번째 실행이 허용됨.
-    # → 단일 인스턴스 보장을 위해 _MAX_INSTANCES=1 로 변경.
+    # ── 단일 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
+    # [버그 수정 2026-03-14 v3.7.60] 소켓 락을 ensure_postgres_running() 이전에
+    # 먼저 획득해야 한다. 이전 코드는 postgres 초기화(수 초 소요) 이후에 락을
+    # 체크했기 때문에, 두 번째 더블클릭이 그 사이에 발생하면 둘 다 bind 성공하여
+    # 2개 인스턴스가 실행되는 타이밍 버그가 있었음.
+    # [수정 2026-03-14 v3.7.61] 소켓 락을 __main__ 진입 직후 첫 번째 동작으로 이동.
     # PROJECT_ROOT 경로 해시 기반으로 고유 포트 결정 (19001~19480 범위).
     _proj_hash    = hash(str(PROJECT_ROOT)) & 0xFFFF      # 경로 해시 (양수 고정)
     _BASE_PORT    = 19001 + (_proj_hash % 480)             # 프로젝트별 고유 포트
@@ -4300,9 +4296,16 @@ if __name__ == '__main__':
 
     print(f"[*] 인스턴스 락 확보 (포트 {_BASE_PORT})")
 
+    # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 (락 획득 이후) ─────────────────
+    # 소켓 락을 먼저 확보한 뒤 postgres를 기동함.
+    # [이전 버그] postgres 초기화(수 초)가 락 이전에 있어 타이밍 레이스 발생.
+    # installer가 {app}\pgsql\ 에 설치한 바이너리를 사용하여 pgdata 초기화 + 서버 기동.
+    if getattr(sys, 'frozen', False):
+        ensure_postgres_running()
+
     # ── 개발 모드 PID 파일 기록 ─────────────────────────────────────────────
     # run_vibe.bat이 더블클릭 중복 실행 방지를 위해 이 PID 파일을 확인함.
-    # frozen(EXE) 모드는 스플래시 화면으로 충분히 방지되므로 개발 모드에서만 사용.
+    # frozen(EXE) 모드는 소켓 락으로 방지되므로 개발 모드에서만 사용.
     if not getattr(sys, 'frozen', False):
         try:
             _pid_file = DATA_DIR / '.dev_server.pid'
@@ -4540,16 +4543,19 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
 </div></body></html>"""
 
         def _load_app_when_ready(window):
-            """스플래시 표시 후 HTTP 서버 응답 확인 → 실제 앱 URL로 전환"""
+            """스플래시 표시 후 HTTP 서버 응답 확인 → 실제 앱 URL로 전환.
+            [v3.7.61 수정] timeout 0.5→0.1, sleep 0.5→0.1 으로 단축.
+            서버는 이미 socket bind 완료 상태이므로 대부분 첫 번째 시도에서 성공.
+            최대 3초(30회×0.1초) 대기로 충분. 이전 최대 5초(10회×0.5초)에서 단축."""
             import urllib.request as _ureq
+            import time as _t
             _target = f'http://localhost:{HTTP_PORT}'
-            # 서버는 이미 기동 완료 상태 — 최대 5초 대기 (비정상 상황 대비)
-            for _ in range(10):
+            for _ in range(30):
                 try:
-                    _ureq.urlopen(f'http://127.0.0.1:{HTTP_PORT}/', timeout=0.5)
+                    _ureq.urlopen(f'http://127.0.0.1:{HTTP_PORT}/', timeout=0.1)
                     break
                 except Exception:
-                    import time as _t; _t.sleep(0.5)
+                    _t.sleep(0.1)
             window.load_url(_target)
 
         print(f"[*] Launching Desktop Window with Official Icon...")
