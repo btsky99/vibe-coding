@@ -4268,15 +4268,14 @@ if __name__ == '__main__':
     if getattr(sys, 'frozen', False):
         ensure_postgres_running()
 
-    # ── 프로젝트별 다중 인스턴스 슬롯 락 ────────────────────────────────────
-    # 아이콘 클릭할 때마다 새 창이 열리고, 최대 4개까지 동시 실행 가능.
-    # 같은 프로젝트라도 슬롯(0~3)이 남아 있으면 추가 실행 허용.
-    # PROJECT_ROOT 경로 해시 기반으로 슬롯 포트 범위를 결정한다:
-    #   슬롯 0: 19001 + (hash%96)*4 + 0
-    #   슬롯 1: 19001 + (hash%96)*4 + 1  (최대 19001+95*4+3 = 19384 이내)
+    # ── 단일 인스턴스 락 ────────────────────────────────────────────────────
+    # [버그 수정 2026-03-14] _MAX_INSTANCES=4 이면 이전 인스턴스 소켓이
+    # TIME_WAIT 상태여도 다음 슬롯으로 두 번째 실행이 허용됨.
+    # → 단일 인스턴스 보장을 위해 _MAX_INSTANCES=1 로 변경.
+    # PROJECT_ROOT 경로 해시 기반으로 고유 포트 결정 (19001~19480 범위).
     _proj_hash    = hash(str(PROJECT_ROOT)) & 0xFFFF      # 경로 해시 (양수 고정)
-    _BASE_PORT    = 19001 + (_proj_hash % 96) * 4         # 프로젝트별 슬롯 시작 포트 (4개 연속 확보)
-    _MAX_INSTANCES = 4                                     # 최대 동시 실행 수
+    _BASE_PORT    = 19001 + (_proj_hash % 480)             # 프로젝트별 고유 포트
+    _MAX_INSTANCES = 1                                     # 단일 인스턴스만 허용
     _proj_id      = f"{_proj_hash:04x}"                   # 타이틀용 짧은 hex ID
 
     # 빈 슬롯(포트)을 순서대로 시도하여 첫 번째 빈 자리를 점유
@@ -4295,11 +4294,22 @@ if __name__ == '__main__':
             continue  # 이미 사용 중인 슬롯 → 다음 슬롯 시도
 
     if _instance_slot == -1:
-        # 모든 슬롯이 점유됨 — 최대 인스턴스 수 초과
-        print(f"[!] 최대 {_MAX_INSTANCES}개 인스턴스가 이미 실행 중입니다 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
+        # 이미 실행 중 — 단일 인스턴스 정책으로 종료
+        print(f"[!] 이미 실행 중인 인스턴스가 있습니다 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
         os._exit(0)
 
-    print(f"[*] 인스턴스 슬롯 {_instance_slot + 1}/{_MAX_INSTANCES} 점유 (포트 {_BASE_PORT + _instance_slot})")
+    print(f"[*] 인스턴스 락 확보 (포트 {_BASE_PORT})")
+
+    # ── 개발 모드 PID 파일 기록 ─────────────────────────────────────────────
+    # run_vibe.bat이 더블클릭 중복 실행 방지를 위해 이 PID 파일을 확인함.
+    # frozen(EXE) 모드는 스플래시 화면으로 충분히 방지되므로 개발 모드에서만 사용.
+    if not getattr(sys, 'frozen', False):
+        try:
+            _pid_file = DATA_DIR / '.dev_server.pid'
+            _pid_file.parent.mkdir(parents=True, exist_ok=True)
+            _pid_file.write_text(str(os.getpid()), encoding='utf-8')
+        except Exception:
+            pass
 
     if os.name == 'nt':
         try:
@@ -4564,6 +4574,12 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
         try:
             server.shutdown()                # HTTP 요청 처리 스레드 정지
             server.server_close()            # 포트 소켓 해제 (TIME_WAIT 방지)
+        except Exception:
+            pass
+        # 락 소켓 명시적 해제 — os._exit() 전에 닫아야 다음 실행에서 즉시 포트 재사용 가능
+        try:
+            if _lock_sock:
+                _lock_sock.close()
         except Exception:
             pass
         print("[*] 정리 완료 — 프로세스를 종료합니다.")
