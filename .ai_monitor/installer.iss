@@ -1,10 +1,18 @@
 ; Inno Setup Script for Vibe Coding
 ; CI에서 자동 빌드됨
+; [변경 이력]
+; [2026-03-15] Claude — [Run]/[Icons]에서 MyAppExeName 대신 고정명 vibe-coding.exe 사용.
+;              근본 원인: CI가 --name vibe-coding-update-X.Y.Z.exe로 빌드하지만
+;              [Files]는 DestName: "vibe-coding.exe"로 이름을 바꿔 설치하므로
+;              원본 이름을 참조하는 [Run]/[Icons]에서 CreateProcess 코드 2 오류 발생.
 
 #define MyAppName "Vibe Coding"
+; MyAppExeName = CI에서 넘어오는 빌드 소스 파일명 (vibe-coding-update-X.Y.Z.exe)
+; MyInstalledExeName = 실제 설치되는 고정 파일명 (항상 vibe-coding.exe)
 #ifndef MyAppExeName
   #define MyAppExeName "vibe-coding.exe"
 #endif
+#define MyInstalledExeName "vibe-coding.exe"
 #define MyAppPublisher "btsky99"
 #define MyAppURL "https://github.com/btsky99/vibe-coding"
 #ifndef MyAppVersion
@@ -64,10 +72,12 @@ Source: "bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ignoreversion 
 Name: "{app}\data"
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"
+; 설치된 고정 파일명(MyInstalledExeName)을 사용해야 함.
+; MyAppExeName은 CI 빌드 소스명이므로 바로가기에 사용하면 파일을 찾지 못함.
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyInstalledExeName}"; IconFilename: "{app}\vibe_final.ico"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: desktopicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startup
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyInstalledExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: desktopicon
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyInstalledExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startup
 
 [Registry]
 ; 사용자 PATH에 설치 디렉토리 추가 — 터미널(cmd/PowerShell)에서 vibe-coding 명령어 직접 실행 가능
@@ -90,5 +100,6 @@ begin
 end;
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+; 설치 후 실행은 반드시 DestName으로 설치된 고정 파일명(MyInstalledExeName) 사용
+Filename: "{app}\{#MyInstalledExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
