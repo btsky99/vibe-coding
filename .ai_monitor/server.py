@@ -1125,6 +1125,29 @@ def _current_project_root() -> Path:
         pass
     return PROJECT_ROOT
 
+
+def _codex_main_model() -> str:
+    """config.json 또는 환경변수에서 Codex 직접 실행용 메인 모델명을 반환합니다."""
+    env_value = os.environ.get('CODEX_MAIN_MODEL', '').strip()
+    if env_value:
+        return env_value
+
+    try:
+        if CONFIG_FILE.exists():
+            cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+            nested = cfg.get('codex_models', {})
+            if isinstance(nested, dict):
+                nested_main = nested.get('main', '')
+                if isinstance(nested_main, str) and nested_main.strip():
+                    return nested_main.strip()
+            legacy = cfg.get('codex_main_model', '')
+            if isinstance(legacy, str) and legacy.strip():
+                return legacy.strip()
+    except Exception:
+        pass
+
+    return ''
+
 # ── MCP 설정 파일 경로 헬퍼 ──────────────────────────────────────────────────
 def _mcp_config_path(tool: str, scope: str) -> Path:
     """
@@ -3126,7 +3149,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     yolo_flag = " --yolo" if is_yolo else ""
                     cmd = f'start "Gemini CLI" cmd.exe /k "cd /d {target_dir} && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
                 elif agent == 'codex':
-                    yolo_flag = " --yolo" if is_yolo else ""
+                    yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
                     cmd = f'start "Codex CLI" cmd.exe /k "cd /d {target_dir} && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}"'
                 else:
                     cmd = f'start "Terminal" cmd.exe /k "cd /d {target_dir}"'
@@ -3852,12 +3875,19 @@ async def pty_handler(websocket):
             yolo_flag = " -y" if is_yolo else ""
             pty.write(f'chcp 65001 >nul & gemini{yolo_flag}\r\n')
         elif agent == 'codex':
-            yolo_flag = " --yolo" if is_yolo else ""
+            yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
             pty.write(f'chcp 65001 >nul & codex{yolo_flag} --no-alt-screen\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
         # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음
-        pty_sessions[session_id] = {'pty': pty, 'agent': agent, 'yolo': is_yolo, 'started': datetime.now().isoformat(), 'cwd': cwd}
+        # main_model/bg_model: 터미널 슬롯 UI에서 현재 사용 모델 표시용
+        _main_model = env.get('ANTHROPIC_MODEL', 'sonnet-4-6') if agent == 'claude' else ''
+        _bg_model   = env.get('ANTHROPIC_DEFAULT_HAIKU_MODEL', '') if agent == 'claude' else ''
+        pty_sessions[session_id] = {
+            'pty': pty, 'agent': agent, 'yolo': is_yolo,
+            'started': datetime.now().isoformat(), 'cwd': cwd,
+            'main_model': _main_model, 'bg_model': _bg_model,
+        }
         pty_output_buffers[session_id] = deque(maxlen=400)
         pty_output_seq[session_id] = 0
 

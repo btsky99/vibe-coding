@@ -581,6 +581,12 @@ def handle_terminals(handler) -> None:
                     terminals[tid]['ts'] = info.get('started', '')
                     terminals[tid]['pipeline_stage'] = terminals[tid].get('pipeline_stage') or 'analyzing'
 
+                # 모델 정보 병합 — TerminalSlot UI에서 사용 모델 배지 표시용
+                if info.get('main_model'):
+                    terminals[tid]['main_model'] = info['main_model']
+                if info.get('bg_model'):
+                    terminals[tid]['bg_model'] = info['bg_model']
+
                 # ── task 보완: Gemini PTY는 세션 파일에서 마지막 지시 항상 갱신 ──────
                 # Why: PTY 세션은 task 필드가 없으므로 task가 ''이면 아무것도 표시 안 됨.
                 #      Gemini 세션 JSON에서 마지막 사용자 메시지를 읽어 실제 작업을 표시.

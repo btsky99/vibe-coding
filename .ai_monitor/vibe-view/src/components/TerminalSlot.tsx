@@ -431,6 +431,21 @@ export default function TerminalSlot({
           </div>
         ) : (
           <div className="flex gap-2 items-center">
+            {/* Claude Code 모델 배지 — main_model / bg_model 표시 (Claude 에이전트 실행 중일 때만) */}
+            {agentType === 'claude' && termData.main_model && (
+              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[#1a1a2e]/80 border border-blue-500/20 rounded text-[8px] text-blue-300/80 font-mono">
+                <span className="opacity-60">M:</span>
+                <span className="font-bold">{String(termData.main_model).replace('claude-', '').replace(/-\d{8}$/, '')}</span>
+                {termData.bg_model && (
+                  <>
+                    <span className="opacity-40 mx-0.5">|</span>
+                    <span className="opacity-60">BG:</span>
+                    <span className="font-bold text-green-300/70">{String(termData.bg_model).replace('claude-', '').replace(/-\d{8}$/, '')}</span>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Gemini 컨텍스트 사용량 표시 (에이전트가 gemini일 때만) */}
             {activeAgent.toLowerCase().includes('gemini') && geminiUsage && (
               <div className="flex items-center gap-2 mr-2 px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[9px] text-accent animate-in fade-in duration-500">

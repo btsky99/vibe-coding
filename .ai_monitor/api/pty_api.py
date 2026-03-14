@@ -72,6 +72,8 @@ def _snapshot_terminals() -> dict:
             'started': (info or {}).get('started', ''),
             'cwd': (info or {}).get('cwd', ''),
             'last_line': (info or {}).get('last_line', ''),
+            'main_model': (info or {}).get('main_model', ''),
+            'bg_model': (info or {}).get('bg_model', ''),
         }
     return terminals
 
