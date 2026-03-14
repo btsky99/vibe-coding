@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-15 Claude: 절전/노트북 덮개 복귀 시 WebSocket 자동 재연결 — visibilitychange 이벤트 감지.
+ *                      isTerminalMode=true && hasAttachedTerminal=false 상태에서 화면 복귀 시 launchAgent 자동 호출.
+ *                      근본 원인: ws.onclose가 hasAttachedTerminal=false로 하지만 isTerminalMode는 유지 → 팝업 무한 표시 버그.
  * - 2026-03-08 Claude: 서버 실행 상태 자동 감지 — agentTerminals 폴링으로 LLM 실행 중인 슬롯 자동 터미널 모드 전환.
  *                      isTerminalMode=false 상태에서 T${slotId+1}.status==='running'이면 선택 카드 건너뛰고 모니터링 뷰 표시.
  * - 2026-03-08 Claude: Codex CLI 에이전트 선택 카드 추가 — Code2 아이콘 + 오렌지 색상테마.
@@ -372,6 +375,23 @@ export default function TerminalSlot({
       }
     }
   }, [agentTerminals, terminalId, isTerminalMode, hasAttachedTerminal]);
+
+  // [버그수정 2026-03-15] 절전/노트북 덮개 복귀 시 WebSocket 자동 재연결
+  // 원인: PC 절전 또는 노트북 덮개 닫기 → 열기 시 WebSocket이 끊어지면
+  //       ws.onclose → hasAttachedTerminal=false 되지만 isTerminalMode=true 유지됨.
+  //       visibilitychange 이벤트 미처리로 인해 "터미널 출력 연결이 아직 없습니다" 팝업이 계속 떠 있음.
+  // 해결: visibilitychange 이벤트로 화면 복귀를 감지하고 터미널 자동 재연결.
+  useEffect(() => {
+    if (!isTerminalMode) return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !hasAttachedTerminal) {
+        // 화면이 다시 켜질 때 WS가 끊어진 상태이면 같은 에이전트로 자동 재연결
+        launchAgent(activeAgent || 'claude', false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isTerminalMode, hasAttachedTerminal, activeAgent]);
 
   // 알림 링 글로우 — 에이전트 상태에 따라 패널 테두리 색상/그림자 변경 (cmux 스타일)
   const ringClass = !isTerminalMode

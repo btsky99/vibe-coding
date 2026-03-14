@@ -60,8 +60,9 @@ a = Analysis(
         # 내부 Python 모듈 (db_helper, db, logger, secure, view)
         ('.ai_monitor/src', 'src'),
         # Claude 스킬 템플릿 파일 (vibe-*.md)
-        # → /api/superpowers/install 시 현재 프로젝트 .claude/commands/ 에 복사
-        ('.claude/commands', '.claude/commands'),
+        # → /api/superpowers/install 시 현재 프로젝트 .claude/skills/ 에 복사
+        # [2026-03-15] .claude/commands → .claude/skills 로 경로 변경 (Skills 2.0 마이그레이션)
+        ('.claude/skills', '.claude/skills'),
         # Gemini 스킬 템플릿 파일 (SKILL.md 디렉터리 구조 유지)
         # → /api/superpowers/install 시 현재 프로젝트 .gemini/skills/ 에 복사
         ('.gemini/skills', '.gemini/skills'),

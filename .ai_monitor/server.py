@@ -4280,16 +4280,19 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
-    # ── 단일 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
+    # ── 다중 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
     # [버그 수정 2026-03-14 v3.7.60] 소켓 락을 ensure_postgres_running() 이전에
     # 먼저 획득해야 한다. 이전 코드는 postgres 초기화(수 초 소요) 이후에 락을
     # 체크했기 때문에, 두 번째 더블클릭이 그 사이에 발생하면 둘 다 bind 성공하여
     # 2개 인스턴스가 실행되는 타이밍 버그가 있었음.
     # [수정 2026-03-14 v3.7.61] 소켓 락을 __main__ 진입 직후 첫 번째 동작으로 이동.
+    # [수정 2026-03-15 v3.7.64] _MAX_INSTANCES 1→4 — 개발버전과 설치버전을 동시에 실행하면
+    #   동일 PROJECT_ROOT 해시로 락 포트가 충돌하여 두 번째 인스턴스가 os._exit(0) 종료.
+    #   사용자 요구: 같은 프로젝트라도 dev/installer 등 4개까지 동시 실행 허용.
     # PROJECT_ROOT 경로 해시 기반으로 고유 포트 결정 (19001~19480 범위).
     _proj_hash    = hash(str(PROJECT_ROOT)) & 0xFFFF      # 경로 해시 (양수 고정)
-    _BASE_PORT    = 19001 + (_proj_hash % 480)             # 프로젝트별 고유 포트
-    _MAX_INSTANCES = 1                                     # 단일 인스턴스만 허용
+    _BASE_PORT    = 19001 + (_proj_hash % 480)             # 프로젝트별 고유 포트 (슬롯 0)
+    _MAX_INSTANCES = 4                                     # 최대 4개 동시 실행 허용 (dev+installer 공존)
     _proj_id      = f"{_proj_hash:04x}"                   # 타이틀용 짧은 hex ID
 
     # 빈 슬롯(포트)을 순서대로 시도하여 첫 번째 빈 자리를 점유
@@ -4308,11 +4311,11 @@ if __name__ == '__main__':
             continue  # 이미 사용 중인 슬롯 → 다음 슬롯 시도
 
     if _instance_slot == -1:
-        # 이미 실행 중 — 단일 인스턴스 정책으로 종료
-        print(f"[!] 이미 실행 중인 인스턴스가 있습니다 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
+        # 4개 슬롯 전부 사용 중 — 5번째 실행 시도 시 종료
+        print(f"[!] 최대 인스턴스({_MAX_INSTANCES}개) 초과 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
         os._exit(0)
 
-    print(f"[*] 인스턴스 락 확보 (포트 {_BASE_PORT})")
+    print(f"[*] 인스턴스 락 확보 (슬롯 {_instance_slot}, 포트 {_BASE_PORT + _instance_slot})")
 
     # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 (락 획득 이후) ─────────────────
     # 소켓 락을 먼저 확보한 뒤 postgres를 기동함.
