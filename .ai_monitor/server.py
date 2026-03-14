@@ -735,7 +735,9 @@ def _backfill_thought_parent_ids():
     except Exception:
         pass
 
-_backfill_thought_parent_ids()
+# [성능] 모듈 로드 시 동기 실행 시 psql.exe subprocess 생성 ~400ms 소요
+# → 백그라운드 스레드로 지연 실행하여 서버 기동 시간 단축
+threading.Thread(target=_backfill_thought_parent_ids, daemon=True, name='BackfillParentIds').start()
 
 # ── 파일 기반 레거시 메모리 저장소 초기화 ─────────────────────────────────────
 def _legacy_memory_data_dir() -> Path:
@@ -4501,15 +4503,57 @@ if __name__ == '__main__':
                 except Exception as e:
                     print(f"[!] Win32 Icon Fix Error: {e}")
 
+        # ── 로딩 스플래시 HTML ──────────────────────────────────────────────────
+        # webview 창이 뜨자마자 스플래시를 먼저 표시 → 사용자가 "앱이 켜지고 있다"는 피드백 즉시 수신
+        # HTTP 서버가 응답하면 실제 앱 URL로 전환 (보통 < 1초)
+        _SPLASH_HTML = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0f0f1a;display:flex;align-items:center;justify-content:center;
+height:100vh;font-family:-apple-system,'Segoe UI',sans-serif;color:white}}
+.box{{text-align:center}}
+.logo{{font-size:52px;margin-bottom:12px}}
+.title{{font-size:22px;font-weight:600;margin-bottom:6px}}
+.sub{{font-size:13px;color:#666;margin-bottom:28px}}
+.proj{{font-size:12px;color:#7c3aed;margin-bottom:28px;
+background:#1a0a3a;padding:4px 12px;border-radius:20px;display:inline-block}}
+.ring{{width:36px;height:36px;border:3px solid #222;border-top-color:#7c3aed;
+border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+</style></head><body>
+<div class="box">
+  <div class="logo">🚀</div>
+  <div class="title">바이브 코딩</div>
+  <div class="proj">{PROJECT_ROOT.name}</div>
+  <div class="sub">서버 시작 중...</div>
+  <div class="ring"></div>
+</div></body></html>"""
+
+        def _load_app_when_ready(window):
+            """스플래시 표시 후 HTTP 서버 응답 확인 → 실제 앱 URL로 전환"""
+            import urllib.request as _ureq
+            _target = f'http://localhost:{HTTP_PORT}'
+            # 서버는 이미 기동 완료 상태 — 최대 5초 대기 (비정상 상황 대비)
+            for _ in range(10):
+                try:
+                    _ureq.urlopen(f'http://127.0.0.1:{HTTP_PORT}/', timeout=0.5)
+                    break
+                except Exception:
+                    import time as _t; _t.sleep(0.5)
+            window.load_url(_target)
+
         print(f"[*] Launching Desktop Window with Official Icon...")
         # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
-        main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]', f"http://localhost:{HTTP_PORT}",
-                              width=1400, height=900)
-        
+        # html= 파라미터로 스플래시 먼저 표시 → webview.start() 직후 창 즉시 가시화
+        main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
+                              html=_SPLASH_HTML, width=1400, height=900)
+
         # 아이콘 교체 스레드 별도 실행
         threading.Thread(target=force_win32_icon, daemon=True).start()
-        
-        webview.start()
+
+        # _load_app_when_ready: webview GUI 루프 시작 후 별도 스레드에서 실행
+        # → 창이 즉시 뜨고 스플래시 표시 → 서버 확인 후 실제 앱으로 전환
+        webview.start(_load_app_when_ready, args=[main_window])
         # 창 닫힘 = 서버 소켓 정상 종료 후 프로세스 종료
         # os._exit()는 소켓을 강제 종료 → 포트 TIME_WAIT 잔류 원인
         # server.shutdown() + server_close()로 포트를 먼저 해제한 뒤 종료
