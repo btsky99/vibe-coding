@@ -28,7 +28,7 @@
  * ------------------------------------------------------------------------
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { Menu, ChevronRight, ChevronDown, RotateCw, X, Minimize2, Maximize2, ExternalLink } from 'lucide-react';
 /* ── 공유 상수/타입 ── */
@@ -39,7 +39,11 @@ import ActivityBar from './components/ActivityBar';
 import FileExplorer from './components/FileExplorer';
 import MessageComposer from './components/MessageComposer';
 /* ── 유틸리티 컴포넌트 ── */
-import FloatingWindow from './components/FloatingWindow';
+// [v3.7.62] FloatingWindow(Monaco Editor ~800kB) → React.lazy() 동적 import
+// 파일을 열 때만 로드되므로 초기 번들에서 제외 → 첫 화면 렌더링 대폭 단축
+const FloatingWindow = lazy(() => import('./components/FloatingWindow'));
+// [v3.7.62] KnowledgeGraphPanel(D3/그래프 라이브러리) → 탭 클릭 시에만 로드
+const KnowledgeGraphPanel = lazy(() => import('./components/panels/KnowledgeGraphPanel'));
 import TerminalSlot from './components/TerminalSlot';
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import MessagesPanel from './components/panels/MessagesPanel';
@@ -49,7 +53,6 @@ import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
-import KnowledgeGraphPanel from './components/panels/KnowledgeGraphPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import DiscordConfigPanel from './components/panels/DiscordConfigPanel';
 import DiscordSettingsModal from './components/DiscordSettingsModal';
@@ -888,9 +891,11 @@ function App() {
               </button>
             </div>
           </div>
-          {/* 지식 그래프 패널 본문 */}
+          {/* 지식 그래프 패널 본문 — lazy load */}
           <div className="flex-1 overflow-hidden">
-            <KnowledgeGraphPanel />
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-[#555] text-xs">로딩 중...</div>}>
+              <KnowledgeGraphPanel />
+            </Suspense>
           </div>
           {/* 우하단 리사이즈 핸들 */}
           <div
@@ -1031,18 +1036,20 @@ function App() {
         </div>
       )}
 
-      {/* ── 파일 퀵 뷰 플로팅 윈도우들 ── */}
-      {openFiles.map((file, idx) => (
-        <FloatingWindow
-          key={file.id}
-          file={file}
-          idx={idx}
-          bringToFront={bringToFront}
-          closeFile={closeFile}
-          updateFileContent={updateFileContent}
-          handleSaveFile={handleSaveFile}
-        />
-      ))}
+      {/* ── 파일 퀵 뷰 플로팅 윈도우들 — lazy load (Monaco 포함) ── */}
+      <Suspense fallback={null}>
+        {openFiles.map((file, idx) => (
+          <FloatingWindow
+            key={file.id}
+            file={file}
+            idx={idx}
+            bringToFront={bringToFront}
+            closeFile={closeFile}
+            updateFileContent={updateFileContent}
+            handleSaveFile={handleSaveFile}
+          />
+        ))}
+      </Suspense>
 
       {/* ── 디스코드 설정 팝업 (메인 창 내부) ── */}
       <DiscordSettingsModal
@@ -1086,7 +1093,9 @@ function GraphOnlyApp() {
         <span className="text-[9px] text-[#555] ml-2">— 이 창을 다른 모니터로 드래그하세요</span>
       </div>
       <div className="flex-1 overflow-hidden">
-        <KnowledgeGraphPanel />
+        <Suspense fallback={<div className="flex items-center justify-center h-full text-[#555] text-xs">로딩 중...</div>}>
+          <KnowledgeGraphPanel />
+        </Suspense>
       </div>
     </div>
   );
