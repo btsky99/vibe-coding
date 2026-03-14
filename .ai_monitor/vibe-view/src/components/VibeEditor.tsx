@@ -6,6 +6,9 @@ import Editor from '@monaco-editor/react';
  * - VS Code 스타일의 코드 하이라이팅 및 주석 색상 강화 테마 적용
  * - 자동 언어 감지 및 편집 내용 실시간 반영 지원
  * - 저장(Save) API 연동 포함
+ * REVISION HISTORY:
+ * - 2026-03-15 Claude: handleEditorDidMount try-catch 래핑 — Monaco 마운트 예외가
+ *                      상위로 전파되어 ErrorBoundary를 트리거하는 문제 방어.
  */
 interface VibeEditorProps {
   path: string;
@@ -53,6 +56,7 @@ const VibeEditor: React.FC<VibeEditorProps> = ({ path, content, onChange, isRead
   };
 
   const handleEditorDidMount = (editor: any, monaco: any) => {
+    try {
     // 하이브 마인드 전용 다크 테마 정의
     monaco.editor.defineTheme('vibe-dark-pro', {
       base: 'vs-dark',
@@ -80,6 +84,10 @@ const VibeEditor: React.FC<VibeEditorProps> = ({ path, content, onChange, isRead
       const currentVal = editor.getValue();
       handleSave(currentVal);
     });
+    } catch (e) {
+      // Monaco 마운트 예외는 무시하고 기본 테마로 동작 (블랙스크린 방지)
+      console.warn('[VibeEditor] handleEditorDidMount 예외 무시:', e);
+    }
   };
 
   return (

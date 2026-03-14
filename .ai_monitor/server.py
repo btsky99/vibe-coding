@@ -225,9 +225,25 @@ def ensure_postgres_running():
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )
+        # [v3.7.62 수정] 고정 2초 대기 → 실제 ready 폴링으로 교체
+        # pg_ctl start 직후 psql SELECT 1로 100ms 간격으로 최대 5초 폴링.
+        # PG가 빠르게 뜨면 (보통 0.3~0.5초) 즉시 통과 → 기동 시간 단축.
         import time as _time
-        _time.sleep(2)  # PG 기동 대기
-        print("[PG] PostgreSQL 시작 완료")
+        _pg_ready = False
+        for _i in range(50):  # 최대 5초 (100ms × 50회)
+            _time.sleep(0.1)
+            try:
+                _chk = subprocess.run(
+                    [str(PG_CTL_BIN), "status", "-D", str(_PG_DATA_DIR)],
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                    creationflags=_no_window, timeout=1
+                )
+                if "server is running" in _chk.stdout:
+                    _pg_ready = True
+                    break
+            except Exception:
+                pass
+        print(f"[PG] PostgreSQL 시작 완료 ({(_i+1)*100}ms 소요)")
 
         # 4) pgvector 확장 설치 시도
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;")
@@ -471,7 +487,9 @@ def _load_task_logs_into_thoughts():
     except Exception as e:
         print(f"[!] ThoughtTrace 사전 로드 실패: {e}")
 
-_load_task_logs_into_thoughts()
+# [v3.7.62 수정] 모듈 레벨 즉시 실행 → 서버 시작 후 백그라운드 스레드로 이동.
+# 기존: server.py import 시 파일 IO가 즉시 발생 → 창 뜨기 전에 블로킹.
+# 수정: HTTP 서버 시작 후 _schedule_thought_preload()로 호출됨.
 
 # --- 신규: 파일 시스템 실시간 감시 (Watchdog) ---
 try:
@@ -4469,6 +4487,9 @@ if __name__ == '__main__':
         server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
         print(f"[*] Server running on http://localhost:{HTTP_PORT}")
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        # [v3.7.62] task_logs 사전 로드 — 서버 시작 후 백그라운드에서 실행 (기동 시간 단축)
+        threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
+                         name='ThoughtPreload').start()
         # 브로드캐스트 워커는 HTTP 서버 시작 전(4097~4099)에서 이미 시작됨 — 중복 시작 금지
     except Exception as e:
         print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
