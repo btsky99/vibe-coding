@@ -51,3 +51,6 @@
 {"id": "1773494579927", "timestamp": "2026-03-14T22:22:59", "from": "gemini", "to": "all", "type": "status", "content": "[skill-chain] T2 Codex/Gemini 모델 라우팅 기능 코드 리뷰 후 릴리즈 | vibe-code-review -> vibe-release", "read": false}
 {"id": "1773494626247", "timestamp": "2026-03-14T22:23:46", "from": "gemini", "to": "all", "type": "status", "content": "gemini running [vibe-release]", "read": false}
 {"id": "1773494734750", "timestamp": "2026-03-14T22:25:34", "from": "gemini", "to": "all", "type": "status", "content": "gemini finished [vibe-release] | [코드 리뷰 완료] routing_reason 미초기화 NameError 1건 수정 — 나머지 코드 정상", "read": false}
+{"id": "1773506901887", "timestamp": "2026-03-15T01:48:21", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 update EXE 경로 버그 수정 + 커밋 + 푸시 + 빌드 | vibe-debug -> vibe-release", "read": false}
+{"id": "1773506950000", "timestamp": "2026-03-15T01:49:10", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-release]", "read": false}
+{"id": "1773507049484", "timestamp": "2026-03-15T01:50:49", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-release] | [수정 완료] installer.iss [Icons]/[Run] 섹션 MyAppExeName→MyInstalledExeName 교체. 근본 원인: CI 빌드 소스명(vibe-coding-update-X.Y.Z.exe)을 참조했으나 실제 설치 파일은 DestName:vibe-coding.exe로 고정됨", "read": false}
