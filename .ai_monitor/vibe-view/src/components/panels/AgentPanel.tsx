@@ -772,7 +772,11 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       // 스킬 체인 데이터 (스킬 목록 + 터미널별 단계)
       fetch(`${API_BASE}/api/orchestrator/skill-chain`)
         .then(res => res.json())
-        .then(data => { if (data.skill_registry !== undefined) setOrchChainData(data); })
+        .then(data => {
+          // [버그수정] skill_registry가 null일 때 !== undefined 통과 → .length에서 터짐
+          // Array.isArray()로 배열임을 보장한 데이터만 상태에 반영
+          if (Array.isArray(data?.skill_registry)) setOrchChainData(data);
+        })
         .catch(() => {});
       // 터미널 에이전트 매핑 (orchTerminalAgents)
       fetch(`${API_BASE}/api/orchestrator/status`)
@@ -1709,7 +1713,8 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
         ─────────────────────────────────────────────────────────────── */}
         {activeTab === 'orchestrator' && (() => {
           // 표시할 스킬 목록 (API 없으면 기본값)
-          const orchSkills = orchChainData.skill_registry.length > 0
+          // [버그수정] skill_registry가 null일 수 있으므로 옵셔널 체이닝 + fallback 적용
+          const orchSkills = (orchChainData.skill_registry?.length ?? 0) > 0
             ? orchChainData.skill_registry : DEFAULT_ORCH_SKILLS;
           // 활성 터미널 (steps 있는 것만, 번호 순)
           const activeOrchTerminals = Object.entries(orchChainData.terminals ?? {})
