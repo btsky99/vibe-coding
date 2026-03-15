@@ -18,7 +18,7 @@
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Vibe Coding"
-#define MyAppVersion   "3.7.69"
+#define MyAppVersion   "3.7.76"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
@@ -110,8 +110,36 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Vibe Coding 시작"; Flags: now
 Filename: "taskkill.exe"; Parameters: "/F /IM vibe-coding.exe"; Flags: runhidden; RunOnceId: "KillVibeCoding"
 
 [Code]
-// 버전 체크: 구버전 설치되어 있으면 먼저 제거 유도
+// ── 구버전 자동 제거 로직 ──────────────────────────────────────────────
+// 동일 AppId를 가진 이전 설치를 감지하여, 설치 전 자동으로 제거합니다.
+// 이전에 InitializeSetup()이 비어있어 구버전(3.7.64 등)이 프로그램 목록에
+// 계속 남아있는 문제를 해결합니다.
+// [2026-03-15 Claude: 구버전 자동 제거 로직 추가 — 프로그램 중복 등록 방지]
+function GetUninstallString(): String;
+var
+  sUnInstPath: String;
+  sUnInstallString: String;
+begin
+  // 레지스트리에서 현재 AppId의 UninstallString 조회
+  sUnInstPath := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
+  sUnInstallString := '';
+  // HKLM (관리자 설치) 또는 HKCU (사용자 설치) 모두 확인
+  if not RegQueryStringValue(HKLM, sUnInstPath, 'UninstallString', sUnInstallString) then
+    RegQueryStringValue(HKCU, sUnInstPath, 'UninstallString', sUnInstallString);
+  Result := sUnInstallString;
+end;
+
 function InitializeSetup(): Boolean;
+var
+  iResultCode: Integer;
+  sUnInstallString: String;
 begin
   Result := True;
+  sUnInstallString := GetUninstallString();
+  if sUnInstallString <> '' then begin
+    // 구버전 언인스톨러 실행 (사일런트 모드 — 사용자 질문 없이 자동 제거)
+    sUnInstallString := RemoveQuotes(sUnInstallString);
+    Exec(sUnInstallString, '/SILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+    // 제거 완료 후 새 버전 설치 계속 진행
+  end;
 end;
