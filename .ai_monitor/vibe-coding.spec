@@ -48,7 +48,10 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    # [v3.7.65 버그수정] runtime_tmpdir=None → %TEMP% 사용 → Windows/백신이 _MEI* 폴더 삭제
+    # → "Failed to load Python DLL" 오류 발생. APPDATA 고정 경로로 변경하면
+    # 시스템 Temp 청소에도 영향받지 않음.
+    runtime_tmpdir='%APPDATA%\\VibeCoding\\runtime',
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,

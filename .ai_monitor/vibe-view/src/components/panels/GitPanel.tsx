@@ -63,13 +63,18 @@ export default function GitPanel({ currentPath, onChangesCount }: GitPanelProps)
       fetch(`${API_BASE}/api/git/status?path=${encodedPath}`)
         .then(res => res.json())
         .then((data: GitStatus) => {
-          setGitStatus(data);
-          // 부모에게 배지용 숫자 전달 (충돌은 별도 집계)
-          const total =
-            (data.staged?.length ?? 0) +
-            (data.unstaged?.length ?? 0) +
-            (data.untracked?.length ?? 0);
-          onChangesCount(total, data.conflicts?.length ?? 0);
+          // [버그수정] staged/unstaged/untracked/conflicts가 null로 오면
+          // .length 접근 시 TypeError 발생 → 빈 배열로 정규화
+          const safe: GitStatus = {
+            ...data,
+            staged:    Array.isArray(data.staged)    ? data.staged    : [],
+            unstaged:  Array.isArray(data.unstaged)  ? data.unstaged  : [],
+            untracked: Array.isArray(data.untracked) ? data.untracked : [],
+            conflicts: Array.isArray(data.conflicts) ? data.conflicts : [],
+          };
+          setGitStatus(safe);
+          const total = safe.staged.length + safe.unstaged.length + safe.untracked.length;
+          onChangesCount(total, safe.conflicts.length);
         })
         .catch(() => {});
 
