@@ -19,7 +19,6 @@ a = Analysis(
         ('bin', 'bin'),
         ('vibe-view/dist', 'dist'),
         ('../.gemini/skills', '.gemini/skills'),
-        ('../skills/claude', 'skills/claude'),
         ('../GEMINI.md', '.'),
         ('../CLAUDE.md', '.'),
         ('../RULES.md', '.'),
