@@ -548,6 +548,13 @@ def upsert_session_log(
     legacy_id: int | None = None,
 ) -> bool:
     if legacy_source and legacy_id is not None:
+        # SELECT-first: partial unique index와 ON CONFLICT 호환 문제 회피
+        existing = query_rows(
+            f"SELECT id FROM hive_sessions WHERE legacy_source = {_sql_text(legacy_source)} "
+            f"AND legacy_id = {legacy_id} LIMIT 1;"
+        )
+        if existing:
+            return True  # 이미 존재하면 스킵 (레거시 마이그레이션 중복 방지)
         return execute(
             f"""
             INSERT INTO hive_sessions
@@ -558,18 +565,7 @@ def upsert_session_log(
                 {_sql_text(project)}, {_sql_text(agent)}, {_sql_text(trigger_msg)}, {_sql_text(status)},
                 {_sql_text(commit_hash)}, {_sql_json(files_changed or [])}, {_sql_text(ts_start or _now_iso())},
                 {_sql_text(ts_end or '')}
-            )
-            ON CONFLICT (legacy_source, legacy_id) DO UPDATE SET
-                session_id = EXCLUDED.session_id,
-                terminal_id = EXCLUDED.terminal_id,
-                project = EXCLUDED.project,
-                agent = EXCLUDED.agent,
-                trigger_msg = EXCLUDED.trigger_msg,
-                status = EXCLUDED.status,
-                commit_hash = EXCLUDED.commit_hash,
-                files_changed = EXCLUDED.files_changed,
-                ts_start = EXCLUDED.ts_start,
-                ts_end = EXCLUDED.ts_end;
+            );
             """
         )
     return execute(
