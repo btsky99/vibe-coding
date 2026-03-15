@@ -45,7 +45,7 @@ MONITOR_DIR = ROOT_DIR / '.ai_monitor'
 if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
-from src.pg_store import ensure_schema, save_state
+from src.pg_store import ensure_schema, save_state, cleanup_expired_memory
 
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -272,6 +272,97 @@ class HiveWatchdog:
             self._add_log(f"❌ 스킬 갭 분석 오류: {e}")
             return False
 
+    def check_skill_gaps_llm(self):
+        """계층 3 자기치유: LLM이 실패 로그를 분석하여 스킬 개선안을 도출합니다.
+
+        [동작 순서]
+        1. task_logs.jsonl에서 최근 실패/에러 로그 20건 추출
+        2. Gemini API로 근본 원인 분석 요청 (GOOGLE_API_KEY 필요)
+        3. 분석 결과를 vibe-orchestrate.md의 자기치유 섹션에 반영
+        4. API 키 없으면 조용히 스킵 (계층2만 동작)
+
+        [호출 시점]
+        start_loop()에서 50루프(=약 50분)마다 자동 호출.
+        """
+        api_key = os.environ.get('GOOGLE_API_KEY') or os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            return False  # API 키 없으면 스킵
+
+        self._add_log("🧠 [계층3] LLM 기반 스킬 분석 중...")
+        try:
+            # 1. 실패 로그 수집
+            if not LOG_FILE.exists():
+                return False
+            error_logs = []
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        status = entry.get("status", "")
+                        task = entry.get("task", "")
+                        if status in ("error", "fail", "failed") or "오류" in task or "실패" in task:
+                            error_logs.append(task[:200])
+                    except Exception:
+                        continue
+            error_logs = error_logs[-20:]  # 최근 20건
+            if len(error_logs) < 3:
+                self._add_log("ℹ️ [계층3] 실패 로그 3건 미만 — 분석 불필요")
+                return False
+
+            # 2. Gemini API 호출
+            prompt = (
+                "다음은 AI 에이전트 시스템의 최근 실패/에러 로그 목록입니다. "
+                "반복되는 근본 원인을 3개 이내로 분석하고, 각각에 대해 "
+                "에이전트가 다음에 같은 실수를 반복하지 않도록 하는 구체적인 지침을 "
+                "한 줄씩 작성해주세요. 형식: '- [원인]: [지침]'\n\n"
+                + "\n".join(f"- {log}" for log in error_logs)
+            )
+            req_body = json.dumps({
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 500, "temperature": 0.3}
+            }).encode("utf-8")
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+            req = urllib.request.Request(url, data=req_body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+
+            # 3. 응답 파싱
+            text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            if not text.strip():
+                self._add_log("⚠️ [계층3] LLM 응답 비어있음")
+                return False
+
+            # 4. vibe-orchestrate.md에 반영
+            skill_file = PROJECT_ROOT / ".claude" / "commands" / "vibe-orchestrate.md"
+            if not skill_file.exists():
+                return False
+
+            MARKER = "## 🤖 계층3 LLM 분석 결과"
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            section = f"\n\n---\n\n{MARKER} (자동 업데이트: {now})\n\n"
+            section += "> 워치독 계층3이 Gemini API로 실패 로그를 분석한 결과입니다.\n\n"
+            section += text.strip() + "\n"
+
+            content = skill_file.read_text(encoding="utf-8")
+            if MARKER in content:
+                idx = content.find(f"\n\n---\n\n{MARKER}")
+                if idx != -1:
+                    content = content[:idx]
+            content += section
+            skill_file.write_text(content, encoding="utf-8")
+
+            self._add_log(f"✅ [계층3] LLM 분석 완료 — vibe-orchestrate.md 업데이트됨")
+            self.status["skill_heal_count"] = self.status.get("skill_heal_count", 0) + 1
+            return True
+
+        except urllib.error.URLError as e:
+            self._add_log(f"⚠️ [계층3] API 호출 실패: {e}")
+            return False
+        except Exception as e:
+            self._add_log(f"❌ [계층3] LLM 분석 오류: {e}")
+            return False
+
     def repair_memory_sync(self):
         """memory.py를 호출하여 에이전트 간 메모리 강제 동기화.
 
@@ -343,6 +434,12 @@ class HiveWatchdog:
         if server_ok and db_ok and not activity_ok and _sync_cooldown_ok:
             self.repair_memory_sync()
         
+        # 만료된 메모리 항목 자동 정리 (TTL 만료 정책)
+        try:
+            cleanup_expired_memory()
+        except Exception:
+            pass
+
         # 점검 결과를 Postgres state에 저장
         try:
             save_state("health", self.status)
@@ -362,7 +459,7 @@ class HiveWatchdog:
         """
         self.is_running = True
         self._loop_count = 0
-        self._add_log("🚀 하이브 워치독 엔진 가동 시작 (계층 1 인프라 + 계층 2 스킬 치유)")
+        self._add_log("🚀 하이브 워치독 엔진 가동 시작 (계층 1 인프라 + 계층 2 스킬 + 계층 3 LLM 치유)")
         # 서버 초기화 대기: Flask가 포트를 열기 전에 첫 체크를 실행하면
         # "서버 다운" 오탐이 발생하여 불필요한 재시작 시도로 중복 서버 인스턴스가 생성됨.
         # 15초 대기 후 첫 체크 실행 — server.py 기동 완료에 충분한 시간.
@@ -372,9 +469,13 @@ class HiveWatchdog:
                 self.run_check()
                 self._loop_count += 1
 
-                # 10루프(약 10분)마다 스킬 갭 분석 실행
+                # 10루프(약 10분)마다 계층2 스킬 갭 분석 실행
                 if self._loop_count % 10 == 0:
                     self.check_skill_gaps()
+
+                # 50루프(약 50분)마다 계층3 LLM 기반 분석 실행
+                if self._loop_count % 50 == 0:
+                    self.check_skill_gaps_llm()
 
             except Exception as e:
                 self._add_log(f"❌ 루프 실행 에러: {e}")

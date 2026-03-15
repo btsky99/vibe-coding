@@ -161,22 +161,32 @@ def handle_get(handler, path: str, params: dict,
             return True
         
         try:
-            # 1. 노드 수집
+            # 현재 활성 프로젝트 ID 계산 — _current_project_root()로 동적 참조
+            # 폴더 전환 시 config.json last_path 기반으로 즉시 반영됨
+            _curr_root = _current_project_root()
+            _proj_id_filter = str(_curr_root).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
+            _safe_proj_id = _proj_id_filter.replace("'", "''")
+
+            # 1. 노드 수집 — 현재 프로젝트 데이터만 표시 (project_id 필터)
             # thought 구조가 삽입 경로마다 다름:
             #   - mcp_server: {"title": ..., "type": ..., "content": ...}
             #   - hive_bridge.reflect_to_pg: {"type": "reflect", "task": ..., ...}
             #   - claude_hook/hive_hook: {"text": ..., "context": ...}
             # → COALESCE로 title > task > text 순서로 fallback하여 레이블 확보
+            # project_id = '' 인 구버전 레코드도 포함 (마이그레이션 전 데이터 호환)
             nodes_sql = (
                 "SELECT id, agent, skill, "
                 "COALESCE(thought->>'title', thought->>'task', thought->>'text', 'Node '||id) as label, "
                 "COALESCE(thought->>'type', 'log') as type "
-                "FROM pg_thoughts ORDER BY id"
+                f"FROM pg_thoughts WHERE project_id='{_safe_proj_id}' OR project_id='' ORDER BY id"
             )
             nodes_raw = run_pg_sql_csv(nodes_sql)
 
-            # 2. 링크(Edge) 수집 — parent_id가 설정된 레코드만 연결선 생성
-            links_sql = "SELECT parent_id as source, id as target FROM pg_thoughts WHERE parent_id IS NOT NULL"
+            # 2. 링크(Edge) 수집 — 현재 프로젝트 레코드만 연결선 생성
+            links_sql = (
+                "SELECT parent_id as source, id as target FROM pg_thoughts "
+                f"WHERE parent_id IS NOT NULL AND (project_id='{_safe_proj_id}' OR project_id='')"
+            )
             links_raw = run_pg_sql_csv(links_sql)
 
             # 3. 데이터 정제
@@ -452,7 +462,9 @@ def handle_get(handler, path: str, params: dict,
             # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
             ensure_schema(DATA_DIR)
             agent_last_seen: dict = get_agent_last_seen(KNOWN_AGENTS)
-            for row in list_memory(top_k=100, show_all=True):
+            # 현재 프로젝트 메모리만 조회 (프로젝트 격리)
+            _proj_id_str = str(_current_project_root()).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
+            for row in list_memory(top_k=100, project=_proj_id_str):
                 author_lower = str(row.get('author', '')).lower()
                 last = row.get('updated_at')
                 for agent_name in KNOWN_AGENTS:
@@ -615,6 +627,46 @@ def handle_get(handler, path: str, params: dict,
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         return True
 
+    # ── /api/skill-ab-test — 스킬 A/B 테스트 분석 결과 ──────────────────
+    elif path == '/api/skill-ab-test':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        try:
+            scripts_dir = str(Path(SCRIPTS_DIR))
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from skill_ab_test import get_ab_test_report
+            _proj_root = _current_project_root() if _current_project_root else PROJECT_ROOT
+            report = get_ab_test_report(project_root=_proj_root)
+            handler.wfile.write(json.dumps(report, ensure_ascii=False, default=str).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        return True
+
+    # ── /api/skill/predict — 예측적 스킬 실행 (마르코프 체인 기반) ───────
+    elif path == '/api/skill/predict':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        try:
+            scripts_dir = str(Path(SCRIPTS_DIR))
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            current_skill = params.get('current', [''])[0].strip()
+            from skill_predictor import predict_next_skill, get_prediction_report
+            _proj_root = _current_project_root() if _current_project_root else PROJECT_ROOT
+            if current_skill:
+                result = {"predictions": predict_next_skill(current_skill, _proj_root)}
+            else:
+                result = get_prediction_report(_proj_root)
+            handler.wfile.write(json.dumps(result, ensure_ascii=False, default=str).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        return True
+
     # ── /api/context-usage ───────────────────────────────────────────────
     elif path == '/api/context-usage':
         handler.send_response(200)
@@ -633,12 +685,28 @@ def handle_get(handler, path: str, params: dict,
                     except Exception:
                         continue
             sessions.sort(key=lambda s: s.get('last_ts', ''), reverse=True)
+            
+            # [Fix] sessions 리스트 대신 최신 세션의 요약 정보를 반환하여 일관성 유지
+            result = {
+                'total_tokens': 0,
+                'context_window': 200000, # 200k tokens (Claude 3 standard)
+                'percentage': 0,
+                'model': 'claude'
+            }
+            if sessions:
+                latest = sessions[0]
+                result['total_tokens'] = latest.get('input_tokens', 0) + latest.get('output_tokens', 0)
+                result['model'] = latest.get('model', 'claude')
+                # 비율 계산
+                if result['context_window'] > 0:
+                    result['percentage'] = (result['total_tokens'] / result['context_window']) * 100
+
             handler.wfile.write(json.dumps(
-                {'sessions': sessions[:8]}, ensure_ascii=False
+                result, ensure_ascii=False
             ).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps(
-                {'sessions': [], 'error': str(e)}
+                {'total_tokens': 0, 'context_window': 200000, 'percentage': 0, 'error': str(e)}, ensure_ascii=False
             ).encode('utf-8'))
         return True
 
@@ -660,12 +728,30 @@ def handle_get(handler, path: str, params: dict,
                     except Exception:
                         continue
             sessions.sort(key=lambda s: s.get('last_ts', ''), reverse=True)
+            
+            # App.tsx expects { total_tokens, context_window, percentage }
+            # [Fix] sessions 리스트 대신 최신 세션의 요약 정보를 반환하여 게이지가 정상 표시되도록 함
+            result = {
+                'total_tokens': 0,
+                'context_window': 1048576, # 1M tokens (Gemini 1.5/2.0 standard)
+                'percentage': 0,
+                'model': 'gemini'
+            }
+            if sessions:
+                latest = sessions[0]
+                # input + output 을 total_tokens로 합산 (Gemini 세션 로그 기준)
+                result['total_tokens'] = latest.get('input_tokens', 0) + latest.get('output_tokens', 0)
+                result['model'] = latest.get('model', 'gemini')
+                # 비율 계산
+                if result['context_window'] > 0:
+                    result['percentage'] = (result['total_tokens'] / result['context_window']) * 100
+
             handler.wfile.write(json.dumps(
-                {'sessions': sessions[:8]}, ensure_ascii=False
+                result, ensure_ascii=False
             ).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps(
-                {'sessions': [], 'error': str(e)}
+                {'total_tokens': 0, 'context_window': 1000000, 'percentage': 0, 'error': str(e)}, ensure_ascii=False
             ).encode('utf-8'))
         return True
 

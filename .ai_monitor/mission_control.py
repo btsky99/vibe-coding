@@ -346,7 +346,7 @@ class MissionControlApp(QObject):
         if self.active_agents:
             self.tray_icon.setToolTip(f"실행 중: {', '.join(self.active_agents)}")
         else:
-            self.tray_icon.setToolTip("Vibe 에이전트 대기 중")
+            self.tray_icon.setToolTip("바이브 코딩 - 에이전트 대기 중")
 
 if __name__ == "__main__":
     # --kanban 인자가 있으면 칸반 보드 창만 독립 실행

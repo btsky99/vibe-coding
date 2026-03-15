@@ -203,6 +203,9 @@ def apply_update_from_temp(new_exe):
         "    goto wait\n"
         ")\n"
         f'if exist "{old_path}" del /f /q "{old_path}"\n'
+        # 이전 EXE 종료 후 PyInstaller 임시 폴더 정리 및 소켓 락 OS 해제 대기.
+        # 즉시 재시작 시: _MEI임시폴더 충돌 → python311.dll 로드 실패 + 포트 충돌.
+        "timeout /t 3 /nobreak >NUL\n"
         f'start "" "{exe_path}"\n'
         'del /f /q "%~f0"\n'
     )

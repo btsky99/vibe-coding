@@ -41,16 +41,16 @@ except ValueError:
 
 TAB = (sys.argv[2] if len(sys.argv) > 2 else 'agent').strip().lower() or 'agent'
 TITLE_MAP = {
-    'agent': 'Vibe Coding Master',
-    'discord': 'Discord Bridge Settings',
-    'messages': 'Messages',
-    'tasks': 'Tasks',
-    'memory': 'Shared Memory',
-    'git': 'Git',
-    'mcp': 'MCP',
-    'hive': 'Hive',
+    'agent': '바이브 코딩',
+    'discord': '바이브 코딩 - Discord 브릿지',
+    'messages': '바이브 코딩 - 메시지',
+    'tasks': '바이브 코딩 - 태스크',
+    'memory': '바이브 코딩 - 공유 메모리',
+    'git': '바이브 코딩 - Git',
+    'mcp': '바이브 코딩 - MCP',
+    'hive': '바이브 코딩 - 하이브',
     # kanban: React TaskBoardPanel 기반 오케스트레이션 보드 (B안 통합)
-    'kanban': 'Vibe Coding - 오케스트레이션 보드',
+    'kanban': '바이브 코딩 - 오케스트레이션 보드',
 }
 # kanban 탭은 ?kanban=1 파라미터로 KanbanOnlyApp 컴포넌트를 렌더링
 # 그 외 탭은 기존 ?page=dashboard&tab=<name> 경로 사용
@@ -89,7 +89,7 @@ class DashboardWindow(QMainWindow):
 def main() -> None:
     os.environ.setdefault('QT_AUTO_SCREEN_SCALE_FACTOR', '1')
     app = QApplication(sys.argv)
-    app.setApplicationName('VibeCoding Dashboard')
+    app.setApplicationName('바이브 코딩')
     app.setOrganizationName('VibeCoding')
 
     window = DashboardWindow()

@@ -372,8 +372,21 @@ def handle_tool_call(name: str, args: dict) -> str:
         thought = {"type": t_type, "title": title, "content": content}
         # ensure_ascii=True: 한글 → \\uXXXX 이스케이프 (psql -c 인코딩 오류 방지)
         safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought) "
-               f"VALUES ('codex', '{skill}', '{safe_thought}'::jsonb);")
+        safe_skill = skill.replace("'", "''")
+        # project_id: config.json의 last_path 또는 PROJECT_ROOT에서 생성
+        _proj_root = PROJECT_ROOT
+        try:
+            _cfg_file = AI_MONITOR_DIR / "data" / "config.json"
+            if _cfg_file.exists():
+                _cfg = json.loads(_cfg_file.read_text(encoding="utf-8"))
+                _lp = _cfg.get("last_path", "")
+                if _lp and Path(_lp).is_dir():
+                    _proj_root = Path(_lp)
+        except Exception:
+            pass
+        _proj_id = str(_proj_root).replace("\\", "/").replace(":", "").replace("/", "--").lstrip("-").replace("'", "''")
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, project_id) "
+               f"VALUES ('codex', '{safe_skill}', '{safe_thought}'::jsonb, '{_proj_id}');")
         try:
             pg_bin = AI_MONITOR_DIR / "bin" / "pgsql" / "bin" / "psql.exe"
             if not pg_bin.exists():

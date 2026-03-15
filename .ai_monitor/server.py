@@ -257,9 +257,13 @@ def ensure_postgres_running():
                 skill TEXT DEFAULT '',
                 thought JSONB NOT NULL DEFAULT '{}',
                 parent_id BIGINT REFERENCES pg_thoughts(id),
+                project_id TEXT DEFAULT '',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
         """)
+        # 기존 테이블에 project_id 컬럼이 없으면 추가 (마이그레이션)
+        run_pg_sql("ALTER TABLE pg_thoughts ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
+        run_pg_sql("CREATE INDEX IF NOT EXISTS idx_pg_thoughts_project_id ON pg_thoughts(project_id);")
         run_pg_sql("""
             CREATE TABLE IF NOT EXISTS pg_logs (
                 id BIGSERIAL PRIMARY KEY,
@@ -267,19 +271,41 @@ def ensure_postgres_running():
                 terminal_id TEXT DEFAULT '',
                 task TEXT NOT NULL,
                 status TEXT DEFAULT 'success',
+                project_id TEXT DEFAULT '',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
         """)
+        # 기존 pg_logs 테이블에 project_id 컬럼 없으면 추가 (마이그레이션)
+        run_pg_sql("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
+        run_pg_sql("CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs(project_id);")
         print("[PG] 스키마 및 확장 초기화 완료")
     except Exception as e:
         print(f"[PG] 시작 오류: {e}")
 
 def run_pg_sql(sql: str, db: str = "postgres"):
-    """psql.exe를 사용하여 SQL을 실행하고 결과를 반환합니다 (psycopg2 미설치 대비)"""
+    """PostgreSQL SQL 실행. psycopg2 우선, 미설치 시 psql.exe subprocess 폴백."""
+    # psycopg2 직접 연결 (쿼리당 ~1ms vs subprocess ~80ms)
+    try:
+        import psycopg2
+        conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            try:
+                rows = cur.fetchall()
+                # psql 텍스트 출력과 호환되는 형식으로 반환 (RETURNING id 등)
+                return '\n'.join(str(row[0]) for row in rows)
+            except Exception:
+                return ''
+    except ImportError:
+        pass  # psycopg2 없으면 subprocess 폴백
+    except Exception as e:
+        print(f"[Postgres psycopg2 ERROR] {e}")
+        return None
+    # psql.exe subprocess 폴백
     if not PG_BIN.exists():
         return None
     try:
-        # 윈도우 cp949 인코딩 문제 방지를 위해 CREATE_NO_WINDOW 사용
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         res = subprocess.run(
             [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "-c", sql],
@@ -293,15 +319,19 @@ def run_pg_sql(sql: str, db: str = "postgres"):
 
 def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
     """pg_logs 테이블에 로그 기록"""
-    # 따옴표 이스케이프 (단순 SQL 인젝션 방지)
+    # 모든 파라미터 SQL 이스케이프 — 인젝션 방지
+    safe_agent = agent.replace("'", "''")
+    safe_tid = terminal_id.replace("'", "''")
     safe_task = task.replace("'", "''")
-    sql = f"INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES ('{agent}', '{terminal_id}', '{safe_task}', '{status}');"
+    safe_status = status.replace("'", "''")
+    safe_proj = PROJECT_ID.replace("'", "''")
+    sql = f"INSERT INTO pg_logs (agent, terminal_id, task, status, project_id) VALUES ('{safe_agent}', '{safe_tid}', '{safe_task}', '{safe_status}', '{safe_proj}');"
     run_pg_sql(sql)
     # PGMQ에도 동시에 쌓기 (실시간 큐)
-    mq_msg = json.dumps({"agent": agent, "tid": terminal_id, "task": task, "status": status}, ensure_ascii=False).replace("'", "''")
+    mq_msg = json.dumps({"agent": safe_agent, "tid": safe_tid, "task": task, "status": status}, ensure_ascii=False).replace("'", "''")
     run_pg_sql(f"SELECT pgmq.send('hive_queue', '{mq_msg}');")
 
-def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) -> int:
+def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, project_id: str = None) -> int:
     """pg_thoughts 테이블에 사고 과정 기록 (JSONB).
 
     parent_id를 지정하면 이전 thought와 연결선이 생성되어 지식 그래프에 계보 표시.
@@ -314,13 +344,17 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) 
         int: 삽입된 행의 id (RETURNING id), 실패 시 0
     """
     safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
+    # 모든 파라미터 SQL 이스케이프 — 인젝션 방지
+    safe_agent = agent.replace("'", "''")
+    safe_skill = skill.replace("'", "''")
+    # project_id 미지정 시 전역 PROJECT_ID 사용
+    _proj_id = (project_id or PROJECT_ID).replace("'", "''")
 
-    # parent_id 미지정 시 같은 에이전트의 직전 thought를 자동으로 부모로 설정
+    # parent_id 미지정 시 같은 에이전트+프로젝트의 직전 thought를 자동으로 부모로 설정
     # 이 덕분에 hive_bridge.py가 매번 새 프로세스로 호출되어도 연결선이 끊기지 않음
     if not parent_id:
-        safe_agent = agent.replace("'", "''")
         prev_result = run_pg_sql(
-            f"SELECT id FROM pg_thoughts WHERE agent='{safe_agent}' ORDER BY id DESC LIMIT 1;"
+            f"SELECT id FROM pg_thoughts WHERE agent='{safe_agent}' AND project_id='{_proj_id}' ORDER BY id DESC LIMIT 1;"
         )
         try:
             for line in (prev_result or '').splitlines():
@@ -332,11 +366,11 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) 
             pass
 
     if parent_id:
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
-               f"VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb, {int(parent_id)}) RETURNING id;")
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id, project_id) "
+               f"VALUES ('{safe_agent}', '{safe_skill}', '{safe_thought}'::jsonb, {int(parent_id)}, '{_proj_id}') RETURNING id;")
     else:
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought) "
-               f"VALUES ('{agent}', '{skill}', '{safe_thought}'::jsonb) RETURNING id;")
+        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, project_id) "
+               f"VALUES ('{safe_agent}', '{safe_skill}', '{safe_thought}'::jsonb, '{_proj_id}') RETURNING id;")
     result = run_pg_sql(sql)
     # RETURNING id 출력 파싱: psql --csv가 아닌 기본 출력 형식 → " id\n----\n 42\n(1 row)" 형태
     try:
@@ -349,7 +383,22 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None) 
     return 0
 
 def run_pg_sql_csv(sql: str, db: str = "postgres") -> list:
-    """CSV 형식으로 Postgres 쿼리 결과를 dict 리스트로 반환 (칸반/대시보드 조회용)"""
+    """Postgres 쿼리 결과를 dict 리스트로 반환. psycopg2 우선, 없으면 psql --csv 폴백."""
+    # psycopg2 직접 연결 (RealDictCursor로 dict 반환)
+    try:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
+        conn.autocommit = True
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql)
+            return [dict(row) for row in cur.fetchall()]
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[Postgres psycopg2 CSV ERROR] {e}")
+        return []
+    # psql.exe --csv 폴백
     if not PG_BIN.exists():
         return []
     try:
@@ -504,6 +553,9 @@ THOUGHT_CLIENTS = set() # 사고 과정 SSE 클라이언트 연결 세트
 # 자율 에이전트 SSE: 클라이언트별 개별 Queue 세트 (브로드캐스트 방식)
 # 단일 Queue 방식은 다중 연결 시 이벤트를 한 클라이언트만 소비하는 버그가 있어 교체
 AGENT_CLIENTS: set = set()
+# SSE 클라이언트 set 접근 시 thread safety 보장 — 다중 스레드에서 동시 add/discard 시
+# RuntimeError: set changed size during iteration 방지
+_SSE_LOCK = threading.Lock()
 
 
 def _agent_broadcast_worker():
@@ -525,7 +577,9 @@ def _agent_broadcast_worker():
         try:
             msg = _ca._output_queue.get(timeout=1.0)
             # 연결된 모든 클라이언트 큐에 동일 메시지 복사 전송
-            for cq in list(AGENT_CLIENTS):
+            with _SSE_LOCK:
+                cq_snapshot = list(AGENT_CLIENTS)
+            for cq in cq_snapshot:
                 try:
                     cq.put_nowait(msg)
                 except Exception:
@@ -556,17 +610,19 @@ class FSChangeHandler(FileSystemEventHandler):
         
         # 연결된 모든 클라이언트에게 전송 (비정상 연결 조기 제거)
         disconnected = []
-        for client in list(FS_CLIENTS):
+        with _SSE_LOCK:
+            clients_snapshot = list(FS_CLIENTS)
+        for client in clients_snapshot:
             try:
-                # 소켓 타임아웃 설정 (1초 내에 전송 못하면 실패 처리)
                 client.connection.settimeout(1.0)
                 client.wfile.write(msg.encode('utf-8'))
                 client.wfile.flush()
             except Exception:
                 disconnected.append(client)
-        
-        for d in disconnected:
-            FS_CLIENTS.discard(d)
+        if disconnected:
+            with _SSE_LOCK:
+                for d in disconnected:
+                    FS_CLIENTS.discard(d)
 
 def start_fs_watcher(root_path):
     if Observer is None:
@@ -747,12 +803,15 @@ ensure_schema(DATA_DIR)
 def _backfill_thought_parent_ids():
     """pg_thoughts에서 parent_id가 NULL인 노드를 같은 에이전트의 직전 id로 소급 연결."""
     try:
+        # PARTITION BY (agent, project_id): 프로젝트 간 노드 연결 방지
+        # 이전에 agent만으로 분할하면 프로젝트 A의 마지막 노드가
+        # 프로젝트 B의 첫 노드의 부모로 잘못 연결됨
         backfill_sql = (
             "UPDATE pg_thoughts t "
             "SET parent_id = prev.id "
             "FROM ("
-            "  SELECT id, agent, "
-            "         LAG(id) OVER (PARTITION BY agent ORDER BY id) AS prev_id "
+            "  SELECT id, agent, project_id, "
+            "         LAG(id) OVER (PARTITION BY agent, project_id ORDER BY id) AS prev_id "
             "  FROM pg_thoughts"
             ") prev "
             "WHERE t.id = prev.id "
@@ -892,7 +951,7 @@ class MemoryWatcher(threading.Thread):
             return
         try:
             rows = [
-                row for row in list_memory(top_k=30, show_all=True)
+                row for row in list_memory(top_k=30, project=PROJECT_ID)
                 if not str(row.get('key', '')).startswith('claude:T')
             ][:15]
             if not rows:
@@ -1156,6 +1215,16 @@ def _current_project_root() -> Path:
     return PROJECT_ROOT
 
 
+def _current_project_id() -> str:
+    """현재 활성 프로젝트의 PROJECT_ID 문자열을 반환합니다.
+
+    UI에서 폴더를 전환하면 즉시 반영됩니다 (_current_project_root 기반).
+    형식: 경로의 드라이브/슬래시를 '--'로 치환 (예: D--vibe-coding)
+    """
+    root = _current_project_root()
+    return str(root).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
+
+
 def _codex_main_model() -> str:
     """config.json 또는 환경변수에서 Codex 직접 실행용 메인 모델명을 반환합니다."""
     env_value = os.environ.get('CODEX_MAIN_MODEL', '').strip()
@@ -1411,7 +1480,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
             
             # 실시간 업데이트를 위해 클라이언트 등록
-            THOUGHT_CLIENTS.add(self)
+            with _SSE_LOCK:
+                THOUGHT_CLIENTS.add(self)
             try:
                 # SSE 연결 타임아웃 완화 (60초)
                 self.connection.settimeout(60.0)
@@ -1422,7 +1492,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             finally:
-                THOUGHT_CLIENTS.discard(self)
+                with _SSE_LOCK:
+                    THOUGHT_CLIENTS.discard(self)
             return
 
         # ─── 자율 에이전트 출력 실시간 스트리밍 ───
@@ -1437,7 +1508,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             from queue import Queue as _ClientQueue, Empty as _QEmpty
             client_q = _ClientQueue(maxsize=0)  # 클라이언트별 전용 큐 (무제한 — done 이벤트 드롭 방지)
-            AGENT_CLIENTS.add(client_q)
+            with _SSE_LOCK:
+                AGENT_CLIENTS.add(client_q)
             try:
                 self.connection.settimeout(None)
                 while True:
@@ -1458,7 +1530,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             finally:
-                AGENT_CLIENTS.discard(client_q)  # 연결 종료 시 세트에서 제거
+                with _SSE_LOCK:
+                    AGENT_CLIENTS.discard(client_q)
             return
 
         # ─── 신규: 파일 시스템 변경 이벤트 스트리밍 ───
@@ -1470,7 +1543,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
             
-            FS_CLIENTS.add(self)
+            with _SSE_LOCK:
+                FS_CLIENTS.add(self)
             try:
                 # SSE 연결 타임아웃 완화 (60초)
                 self.connection.settimeout(60.0)
@@ -1482,7 +1556,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             finally:
-                FS_CLIENTS.discard(self)
+                with _SSE_LOCK:
+                    FS_CLIENTS.discard(self)
             return
 
         if parsed_path.path == '/stream':
@@ -1919,6 +1994,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif (parsed_path.path.startswith('/api/hive/') or
               parsed_path.path.startswith('/api/orchestrator/') or
               parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
+                                   '/api/skill-ab-test', '/api/skill/predict',
                                    '/api/context-usage', '/api/gemini-context-usage',
                                    '/api/local-models')):
             _params = parse_qs(parsed_path.query)
@@ -2158,13 +2234,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/tasks':
-            # 공유 작업 큐 전체 목록 반환
+            # 공유 작업 큐 전체 목록 반환 — 현재 프로젝트 태스크만
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                tasks = list_tasks()
+                tasks = list_tasks(project_id=_current_project_id())
             except Exception:
                 tasks = []
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
@@ -2176,7 +2252,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                tasks = list_tasks()
+                tasks = list_tasks(project_id=_current_project_id())
             except Exception:
                 tasks = []
             columns: dict = {'todo': [], 'claimed': [], 'in_progress': [], 'review': [], 'done': []}
@@ -2238,11 +2314,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
+                _safe_proj = _current_project_id().replace("'", "''")
                 rows = run_pg_sql_csv(
                     "SELECT terminal_id, agent, task, status, "
                     "to_char(ts, 'HH24:MI:SS') AS ts "
                     "FROM pg_logs "
-                    "WHERE ts > NOW() - INTERVAL '8 hours' "
+                    f"WHERE ts > NOW() - INTERVAL '8 hours' AND (project_id='{_safe_proj}' OR project_id='') "
                     "ORDER BY ts DESC LIMIT 300"
                 )
                 # 터미널별 그룹화 (최대 15개/터미널)
@@ -2294,7 +2371,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         agent_last_seen[agent_name] = last_seen
 
                 # 메모리 작성 시각으로 보완 — 더 최신 활동 기록 포함
-                for row in list_memory(top_k=100, show_all=True):
+                for row in list_memory(top_k=100, project=_current_project_id()):
                     author_lower = str(row.get('author', '')).lower()
                     last = row.get('updated_at')
                     for agent_name in KNOWN_AGENTS:
@@ -2666,15 +2743,19 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # ── 실시간 SSE 브로드캐스트 ──────────────────────────────
                 msg = f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
                 disconnected = []
-                for client in list(THOUGHT_CLIENTS):
+                with _SSE_LOCK:
+                    clients_snapshot = list(THOUGHT_CLIENTS)
+                for client in clients_snapshot:
                     try:
                         client.connection.settimeout(1.0)
                         client.wfile.write(msg.encode('utf-8'))
                         client.wfile.flush()
                     except Exception:
                         disconnected.append(client)
-                for client in disconnected:
-                    THOUGHT_CLIENTS.discard(client)
+                if disconnected:
+                    with _SSE_LOCK:
+                        for client in disconnected:
+                            THOUGHT_CLIENTS.discard(client)
 
                 # ── 벡터 DB에 영구 저장 ──────────────────────────────────
                 try:
@@ -3386,7 +3467,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'claimed_by': str(data.get('claimed_by', '')),
                     'tags': raw_tags,
                 }
-                save_task(task)
+                save_task(task, project_id=PROJECT_ID)
 
                 # SSE 로그에도 반영 (태스크 보드 알림)
                 try:
@@ -3497,6 +3578,28 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(
                     {'status': 'error', 'message': str(e)}
                 ).encode('utf-8'))
+
+        elif parsed_path.path == '/api/screenshot/analyze':
+            # 멀티모달 버그 감지 — 스크린샷을 Gemini Vision API로 분석
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                content_length = int(self.headers['Content-Length'])
+                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                image_b64 = data.get('image', '')
+                if not image_b64:
+                    self.wfile.write(json.dumps({'error': 'image (base64) is required'}).encode('utf-8'))
+                else:
+                    scripts_dir = str(SCRIPTS_DIR)
+                    if scripts_dir not in sys.path:
+                        sys.path.insert(0, scripts_dir)
+                    from screenshot_analyzer import analyze_and_create_tasks
+                    result = analyze_and_create_tasks(image_b64, project_id=PROJECT_ID)
+                    self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/memory/set':
             # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (file store)
@@ -4139,44 +4242,39 @@ async def pty_handler(websocket):
 
     task1 = asyncio.create_task(read_from_pty())
     task2 = asyncio.create_task(read_from_ws())
-    
-    done, pending = await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-
-    # ── [세션 종료/강제종료 감지] ──────────────────────────────────────────
-    # task1(PTY read) 이 먼저 완료 → 프로세스 자체가 종료됨 (정상 or 강제)
-    #   → gemini_hook.py SessionEnd 훅이 실행됐으면 정상 종료
-    #   → SessionEnd가 없으면 강제 종료(Ctrl+C, 프로세스 킬 등) 가능성
-    # task2(WS read) 이 먼저 완료 → 브라우저/WebSocket이 먼저 닫힘
-    if agent:
-        try:
-            from src.db_helper import insert_log as _db_insert_log
-            if task1 in done:
-                # PTY 프로세스 종료 — SessionEnd 훅이 없었다면 강제 종료
-                exit_msg = f"─── {agent.upper()} 프로세스 종료 감지 (SessionEnd 훅 미실행 시 강제종료) ───"
-            else:
-                # WebSocket이 먼저 닫힘 — 브라우저 새로고침 or 탭 닫기
-                exit_msg = f"─── {agent.upper()} 연결 종료 (WebSocket 닫힘) ───"
-            _db_insert_log(
-                session_id=f"pty_end_{session_id}_{datetime.now().strftime('%H%M%S')}",
-                terminal_id="PTY_TERMINAL",
-                agent=agent.capitalize(),
-                trigger_msg=exit_msg,
-                project="hive",
-                status="success"
-            )
-        except Exception as _e:
-            print(f"[PTY] 세션 종료 로그 실패: {_e}")
 
     try:
-        pty.terminate(force=True)
-    except:
-        pass
-    if session_id in pty_sessions:
-        del pty_sessions[session_id]
-    pty_output_buffers.pop(session_id, None)
-    pty_output_seq.pop(session_id, None)
+        done, pending = await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+
+        # ── [세션 종료/강제종료 감지] ──────────────────────────────────────────
+        if agent:
+            try:
+                from src.db_helper import insert_log as _db_insert_log
+                if task1 in done:
+                    exit_msg = f"─── {agent.upper()} 프로세스 종료 감지 (SessionEnd 훅 미실행 시 강제종료) ───"
+                else:
+                    exit_msg = f"─── {agent.upper()} 연결 종료 (WebSocket 닫힘) ───"
+                _db_insert_log(
+                    session_id=f"pty_end_{session_id}_{datetime.now().strftime('%H%M%S')}",
+                    terminal_id="PTY_TERMINAL",
+                    agent=agent.capitalize(),
+                    trigger_msg=exit_msg,
+                    project="hive",
+                    status="success"
+                )
+            except Exception as _e:
+                print(f"[PTY] 세션 종료 로그 실패: {_e}")
+    finally:
+        # 어떤 예외 경로에서든 PTY 세션 + 버퍼 반드시 정리 (메모리 누수 방지)
+        try:
+            pty.terminate(force=True)
+        except Exception:
+            pass
+        pty_sessions.pop(session_id, None)
+        pty_output_buffers.pop(session_id, None)
+        pty_output_seq.pop(session_id, None)
 
 def _cleanup_all_pty_sessions():
     """X 버튼 또는 시그널 종료 시 모든 PTY 자식 프로세스를 강제 종료합니다.
@@ -4261,7 +4359,7 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
     for port in range(start, start + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(('0.0.0.0', port))
+                s.bind(('127.0.0.1', port))
                 return port
             except OSError:
                 continue
@@ -4274,7 +4372,7 @@ WS_PORT   = 9001  # 실제 값은 __main__에서 슬롯 기반으로 재설정�
 
 async def run_ws_server():
     try:
-        async with websockets.serve(pty_handler, "0.0.0.0", WS_PORT):
+        async with websockets.serve(pty_handler, "127.0.0.1", WS_PORT):
             print(f"WebSocket PTY Server started on port {WS_PORT}")
             await asyncio.Future()
     except OSError:
@@ -4305,7 +4403,12 @@ if __name__ == '__main__':
     #   동일 PROJECT_ROOT 해시로 락 포트가 충돌하여 두 번째 인스턴스가 os._exit(0) 종료.
     #   사용자 요구: 같은 프로젝트라도 dev/installer 등 4개까지 동시 실행 허용.
     # PROJECT_ROOT 경로 해시 기반으로 고유 포트 결정 (19001~19480 범위).
-    _proj_hash    = hash(str(PROJECT_ROOT)) & 0xFFFF      # 경로 해시 (양수 고정)
+    # [수정 2026-03-15 v3.7.70] hash() → hashlib.md5 — Python의 hash()는 프로세스마다
+    # 다른 값을 반환(PYTHONHASHSEED 랜덤화)하여 두 인스턴스가 서로 다른 락 포트 범위를 사용,
+    # 결과적으로 동일 HTTP 포트(9000)에 바인딩하는 충돌이 발생했음.
+    # hashlib.md5는 입력이 같으면 항상 동일한 해시를 반환하여 락 포트 범위가 일관됨.
+    import hashlib as _hl
+    _proj_hash    = int(_hl.md5(str(PROJECT_ROOT).encode()).hexdigest()[:4], 16)  # 결정적 해시
     _BASE_PORT    = 19001 + (_proj_hash % 480)             # 프로젝트별 고유 포트 (슬롯 0)
     _MAX_INSTANCES = 4                                     # 최대 4개 동시 실행 허용 (dev+installer 공존)
     _proj_id      = f"{_proj_hash:04x}"                   # 타이틀용 짧은 hex ID
@@ -4515,7 +4618,7 @@ if __name__ == '__main__':
 
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:
-        server = ThreadedHTTPServer(('0.0.0.0', HTTP_PORT), SSEHandler)
+        server = ThreadedHTTPServer(('127.0.0.1', HTTP_PORT), SSEHandler)
         print(f"[*] Server running on http://localhost:{HTTP_PORT}")
         threading.Thread(target=server.serve_forever, daemon=True).start()
         # [v3.7.62] task_logs 사전 로드 — 서버 시작 후 백그라운드에서 실행 (기동 시간 단축)

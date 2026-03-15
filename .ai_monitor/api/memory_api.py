@@ -108,6 +108,47 @@ def handle_post(handler, path: str, data: dict,
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True
 
+    if path == '/api/memory/share':
+        # 크로스 프로젝트 지식 공유 — 현재 프로젝트 메모리를 글로벌로 승격
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        try:
+            key = str(data.get('key', '')).strip()
+            if not key:
+                handler.wfile.write(json.dumps(
+                    {'status': 'error', 'message': 'key is required'}
+                ).encode('utf-8'))
+                return True
+
+            from src.pg_store import get_memory
+            ensure_schema(DATA_DIR)
+            entry = get_memory(key)
+            if not entry:
+                handler.wfile.write(json.dumps(
+                    {'status': 'error', 'message': 'Memory entry not found'}
+                ).encode('utf-8'))
+                return True
+
+            # project를 __global__로 변경하여 모든 프로젝트에서 접근 가능하게 함
+            saved = set_memory(
+                key=key,
+                content=entry.get('content', ''),
+                title=entry.get('title', key),
+                tags=entry.get('tags', []),
+                author=entry.get('author', 'unknown'),
+                project='__global__',
+                updated_at=time.strftime('%Y-%m-%dT%H:%M:%S'),
+            )
+            handler.wfile.write(json.dumps(
+                {'status': 'success', 'entry': saved or {}, 'message': f'"{key}" 글로벌 공유 완료'},
+                ensure_ascii=False
+            ).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
+
     if path == '/api/memory/sync':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')

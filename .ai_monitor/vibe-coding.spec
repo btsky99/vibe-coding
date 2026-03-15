@@ -26,7 +26,7 @@ a = Analysis(
         ('../PROJECT_MAP.md', '.'),
         ('../scripts', 'scripts'),
     ],
-    hiddenimports=['websockets', 'winpty', 'chromadb', 'pysqlite3'],
+    hiddenimports=['websockets', 'winpty', 'chromadb', 'pysqlite3', 'psycopg2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

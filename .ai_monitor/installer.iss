@@ -6,7 +6,7 @@
 ;              [Files]는 DestName: "vibe-coding.exe"로 이름을 바꿔 설치하므로
 ;              원본 이름을 참조하는 [Run]/[Icons]에서 CreateProcess 코드 2 오류 발생.
 
-#define MyAppName "Vibe Coding"
+#define MyAppName "바이브 코딩"
 ; MyAppExeName = CI에서 넘어오는 빌드 소스 파일명 (vibe-coding-update-X.Y.Z.exe)
 ; MyInstalledExeName = 실제 설치되는 고정 파일명 (항상 vibe-coding.exe)
 #ifndef MyAppExeName
