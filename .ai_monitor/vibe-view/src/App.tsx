@@ -183,7 +183,8 @@ function App() {
     const fetchLocks = () => {
       fetch(`${API_BASE}/api/locks`)
         .then(res => res.json())
-        .then(data => setLocks(data))
+        // null/배열 방어: locks는 Record<string,string> 객체여야 함
+        .then(data => setLocks(data && typeof data === 'object' && !Array.isArray(data) ? data : {}))
         .catch(() => {});
     };
     fetchLocks();

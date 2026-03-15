@@ -99,7 +99,12 @@ export default function KnowledgeGraphPanel() {
       const res  = await fetch(`${API_BASE}/api/hive/knowledge-graph`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setGraphData(data);
+      // [버그수정] API가 nodes/links를 null로 반환 시 .length 접근 → TypeError 방어
+      setGraphData({
+        ...data,
+        nodes: Array.isArray(data.nodes) ? data.nodes : [],
+        links: Array.isArray(data.links) ? data.links : [],
+      });
       setLastUpdated(new Date().toLocaleTimeString());
     } catch (e: any) {
       setError(e.message ?? '데이터 로드 실패');
