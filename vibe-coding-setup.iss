@@ -18,7 +18,7 @@
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Vibe Coding"
-#define MyAppVersion   "3.7.68"
+#define MyAppVersion   "3.7.69"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
@@ -73,6 +73,8 @@ Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDe
 Source: "dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 ; 아이콘 파일 — 자동 업데이트 후에도 바로가기 아이콘이 유지되도록 별도 배포
 Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Claude Code 상태줄 스크립트 — 설치 PC의 %USERPROFILE%\.claude\ 에 복사
+Source: "statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignoreversion
 
 ; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
 ; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
@@ -98,6 +100,9 @@ Name: "{userstartup}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; Ico
 
 [Run]
 ; 설치 완료 후 바로 실행 (선택)
+; Claude Code settings.json에 statusLine 자동 설정
+; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
 Filename: "{app}\{#MyAppExeName}"; Description: "Vibe Coding 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
