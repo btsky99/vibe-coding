@@ -86,8 +86,22 @@ _ORCH_KW = [
     'orchestrat',
 ]
 
-# 서버 API 포트 (server.py 기본값)
-_SERVER_PORT   = 9000
+# [수정 2026-03-15 v3.7.67] 실행 중인 서버 포트 자동 탐색 (9000~9019 스캔)
+# VIBE_SERVER_PORT 환경변수가 있으면 우선 사용, 없으면 9000번대에서 응답하는 포트 탐색
+def _find_active_server_port(start: int = 9000, count: int = 20) -> int:
+    """9000번대에서 실제 응답하는 서버 포트를 찾아 반환합니다."""
+    env_port = os.environ.get('VIBE_SERVER_PORT')
+    if env_port:
+        return int(env_port)
+    for port in range(start, start + count):
+        try:
+            _urllib_req.urlopen(f'http://localhost:{port}/api/hive/health', timeout=0.3)
+            return port
+        except Exception:
+            continue
+    return start
+
+_SERVER_PORT   = _find_active_server_port()
 _API_URL       = f'http://localhost:{_SERVER_PORT}/api/agent/run'
 _DASHBOARD_URL = f'http://localhost:{_SERVER_PORT}'
 FORCE_ORCHESTRATION = True

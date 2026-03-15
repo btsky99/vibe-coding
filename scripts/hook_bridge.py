@@ -39,7 +39,22 @@ SCRIPT_DIR  = Path(__file__).parent
 CLI_AGENT   = SCRIPT_DIR / 'cli_agent.py'
 SERVER_PY   = SCRIPT_DIR.parent / '.ai_monitor' / 'server.py'
 CWD         = SCRIPT_DIR.parent  # D:/vibe-coding
-SERVER_PORT = 9000
+# [수정 2026-03-15 v3.7.67] 실행 중인 서버 포트 자동 탐색 (9000~9019 스캔)
+# VIBE_SERVER_PORT 환경변수가 있으면 그걸 우선 사용하고, 없으면 9000부터 스캔
+def _find_active_server_port(start: int = 9000, count: int = 20) -> int:
+    """9000번대에서 실제 응답하는 서버 포트를 찾아 반환합니다."""
+    env_port = os.getenv('VIBE_SERVER_PORT')
+    if env_port:
+        return int(env_port)
+    for port in range(start, start + count):
+        try:
+            urllib_request.urlopen(f'http://localhost:{port}/api/hive/health', timeout=0.3)
+            return port
+        except Exception:
+            continue
+    return start  # 못 찾으면 기본값 반환
+
+SERVER_PORT = _find_active_server_port()
 API_URL     = f'http://localhost:{SERVER_PORT}/api/agent/run'
 HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 
