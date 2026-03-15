@@ -4254,8 +4254,10 @@ def _find_free_port(start: int, max_tries: int = 20) -> int:
                 continue
     return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
 
-HTTP_PORT = _find_free_port(9000)          # HTTP 포트: 9000 시작 (충돌 시 다음 포트 자동 탐색)
-WS_PORT = _find_free_port(HTTP_PORT + 1)  # WebSocket 포트: HTTP+1 기반 탐색 (독립 탐색 시 동일 포트 충돌 버그 수정)
+# [수정 2026-03-15 v3.7.68] HTTP/WS 포트는 __main__ 인스턴스 락 획득 후 슬롯 기반으로 확정
+# 모듈 임포트 시점에는 기본값만 설정. 실제 포트는 아래 __main__ 블록에서 덮어씀.
+HTTP_PORT = 9000  # 실제 값은 __main__에서 슬롯 기반으로 재설정됨
+WS_PORT   = 9001  # 실제 값은 __main__에서 슬롯 기반으로 재설정됨
 
 async def run_ws_server():
     try:
@@ -4316,6 +4318,19 @@ if __name__ == '__main__':
         os._exit(0)
 
     print(f"[*] 인스턴스 락 확보 (슬롯 {_instance_slot}, 포트 {_BASE_PORT + _instance_slot})")
+
+    # ── 포트 확정: 슬롯 기반으로 HTTP/WS 포트 충돌 없이 배정 ────────────────────
+    # [수정 2026-03-15 v3.7.68] _find_free_port를 __main__ 이전에 호출하면 두 인스턴스가
+    # 동시에 "빈 포트"를 확인할 때 둘 다 동일 포트를 선택하는 레이스컨디션 발생.
+    # 인스턴스 슬롯(0~3)은 소켓 락으로 이미 배타 점유가 보장되므로,
+    # 슬롯 번호로 포트를 계산하면 충돌이 구조적으로 불가능.
+    # 슬롯 0 → HTTP:9000 WS:9001
+    # 슬롯 1 → HTTP:9002 WS:9003
+    # 슬롯 2 → HTTP:9004 WS:9005
+    # 슬롯 3 → HTTP:9006 WS:9007
+    HTTP_PORT = 9000 + _instance_slot * 2  # noqa: F811
+    WS_PORT   = HTTP_PORT + 1              # noqa: F811
+    print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
 
     # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 (락 획득 이후) ─────────────────
     # 소켓 락을 먼저 확보한 뒤 postgres를 기동함.
