@@ -251,18 +251,32 @@ class HiveWatchdog:
             # 분석 결과를 JSON 파일로도 저장 (UI 참조용)
             analyzer.save_analysis(report)
 
+            healed = False
+
+            # 계층 2a: 사용자 지시 패턴 → vibe-orchestrate.md
             if proposals:
                 applied = analyzer.apply_knowledge_to_skill(proposals)
                 if applied:
                     count = len(proposals)
-                    self._add_log(f"✅ 자기치유 완료: {count}개 패턴 스킬에 반영")
-                    self.status["skill_heal_count"] = self.status.get("skill_heal_count", 0) + 1
-                    self.status["repair_count"] += 1
-                    return True
-                else:
-                    self._add_log("⚠️ 스킬 파일 업데이트 실패 (파일 없거나 경로 오류)")
+                    self._add_log(f"✅ [계층2a] {count}개 지시 패턴 스킬에 반영")
+                    healed = True
+
+            # 계층 2b: 에러 패턴 → 해당 스킬 파일 자동 업데이트
+            # (기존에 빌드 에러, 포트 충돌 등이 감지 안 되던 근본 원인 수정)
+            logs = analyzer.get_logs()
+            error_patterns = analyzer.extract_error_patterns(logs)
+            if error_patterns:
+                updated = analyzer.apply_error_fixes_to_skills(error_patterns)
+                if updated > 0:
+                    self._add_log(f"✅ [계층2b] {len(error_patterns)}개 에러 패턴 → {updated}개 스킬 업데이트")
+                    healed = True
+
+            if healed:
+                self.status["skill_heal_count"] = self.status.get("skill_heal_count", 0) + 1
+                self.status["repair_count"] += 1
+                return True
             else:
-                self._add_log("ℹ️ 신규 반복 패턴 없음 — 스킬 최신 상태")
+                self._add_log("ℹ️ 신규 패턴 없음 — 스킬 최신 상태")
             return False
 
         except ImportError:

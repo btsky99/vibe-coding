@@ -138,7 +138,21 @@ def cmd_sync(args) -> None:
         print("PostgreSQL is not available.")
         sys.exit(1)
 
+    # DB에 마이그레이션 완료 플래그 확인 — 이미 완료됐으면 재실행 방지
+    # 매 UserPromptSubmit 훅마다 호출되는데, 매번 전체 마이그레이션을 돌리면
+    # ON CONFLICT 에러 대량 발생 + 불필요한 IO 부하
+    from src.pg_store import query_rows
+    _mig_check = query_rows("SELECT state_key FROM hive_state WHERE state_key = 'migration_done' LIMIT 1;")
+    if _mig_check:
+        print("legacy SQLite data migrated to PostgreSQL")
+        return
+
     migrate_legacy_data(DATA_DIR)
+    # 완료 플래그 저장
+    from src.pg_store import execute
+    execute("INSERT INTO hive_state (state_key, payload, updated_at) "
+            "VALUES ('migration_done', '{\"v\":1}'::jsonb, NOW()::text) "
+            "ON CONFLICT (state_key) DO NOTHING;")
     print("legacy SQLite data migrated to PostgreSQL")
 
 

@@ -168,6 +168,117 @@ class SkillAnalyzer:
 
     # ── 자기치유 적용 ──────────────────────────────────────────────────────
 
+    def extract_error_patterns(self, logs: list) -> list[dict]:
+        """로그에서 반복되는 에러/실패 패턴을 추출합니다.
+
+        [기존 문제점]
+        extract_user_instructions()는 사용자 [지시] 로그만 분석하여
+        빌드 실패, 포트 충돌, 경로 오류 등 시스템 에러를 놓침.
+        이 메서드는 에러 로그를 분석하여 반복되는 실패 패턴을 감지합니다.
+        """
+        error_counts = Counter()
+        error_examples = {}
+        for entry in logs:
+            task = entry.get("task", "")
+            status = entry.get("status", "")
+            # 에러/실패 로그 감지 (status 기반 + 키워드 기반)
+            is_error = (
+                status in ("error", "fail", "failed") or
+                "오류" in task or "실패" in task or "에러" in task or
+                "충돌" in task or "ERROR" in task or "FAIL" in task
+            )
+            if not is_error:
+                continue
+            # 에러 메시지에서 핵심 키워드 추출
+            clean = re.sub(r'[\[\](){}]', ' ', task)
+            # 긴 에러 메시지는 첫 80자만
+            key = clean.strip()[:80]
+            if len(key) > 10:
+                error_counts[key] += 1
+                error_examples[key] = task
+
+        # 2회 이상 반복된 에러만 반환
+        patterns = []
+        for msg, count in error_counts.most_common(10):
+            if count >= 2:
+                patterns.append({
+                    "error": msg,
+                    "count": count,
+                    "example": error_examples.get(msg, ""),
+                })
+        return patterns
+
+    def find_target_skill(self, error_msg: str) -> str | None:
+        """에러 메시지 내용으로 관련 스킬 파일을 찾습니다.
+
+        에러에 특정 스킬/기능 키워드가 포함되면 해당 스킬 파일명 반환.
+        없으면 vibe-orchestrate.md 기본값.
+        """
+        keyword_to_skill = {
+            "릴리": "vibe-release.md",
+            "빌드": "vibe-release.md",
+            "배포": "vibe-release.md",
+            "포트": "vibe-release.md",
+            "EXE": "vibe-release.md",
+            "PyInstaller": "vibe-release.md",
+            "디버그": "vibe-debug.md",
+            "debug": "vibe-debug.md",
+            "테스트": "vibe-tdd.md",
+            "test": "vibe-tdd.md",
+            "리뷰": "vibe-code-review.md",
+            "review": "vibe-code-review.md",
+            "계획": "vibe-write-plan.md",
+            "plan": "vibe-write-plan.md",
+        }
+        for keyword, skill_file in keyword_to_skill.items():
+            if keyword.lower() in error_msg.lower():
+                return skill_file
+        return "vibe-orchestrate.md"  # 기본값
+
+    def apply_error_fixes_to_skills(self, error_patterns: list) -> int:
+        """반복된 에러 패턴을 해당 스킬 파일에 자동 기록합니다.
+
+        [기존 문제점]
+        apply_knowledge_to_skill()은 vibe-orchestrate.md만 업데이트했지만,
+        빌드 에러는 vibe-release.md에, 디버그 에러는 vibe-debug.md에 기록해야 함.
+
+        반환값: 업데이트된 스킬 파일 수
+        """
+        if not error_patterns:
+            return 0
+
+        # 에러를 대상 스킬별로 그룹화
+        from collections import defaultdict
+        by_skill = defaultdict(list)
+        for pattern in error_patterns:
+            target = self.find_target_skill(pattern["error"])
+            by_skill[target].append(pattern)
+
+        updated_count = 0
+        MARKER = "## 🚨 자기치유 에러 감지"
+
+        for skill_name, patterns in by_skill.items():
+            skill_file = self.claude_skills_dir / skill_name
+            if not skill_file.exists():
+                continue
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            section = f"\n\n---\n\n{MARKER} (자동 업데이트: {now})\n\n"
+            section += "> 워치독이 반복 에러를 감지하여 자동 기록했습니다. 이 패턴을 다음 실행에서 방지하세요.\n\n"
+            for p in patterns[:5]:
+                section += f"- **{p['count']}회 반복**: `{p['error']}`\n"
+
+            content = skill_file.read_text(encoding="utf-8")
+            if MARKER in content:
+                idx = content.find(f"\n\n---\n\n{MARKER}")
+                if idx != -1:
+                    content = content[:idx]
+            content += section
+            skill_file.write_text(content, encoding="utf-8")
+            updated_count += 1
+
+        return updated_count
+
     def apply_knowledge_to_skill(self, proposals: list) -> bool:
         """감지된 반복 패턴을 vibe-orchestrate.md의 자기치유 섹션에 자동 기록.
 
