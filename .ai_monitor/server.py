@@ -608,14 +608,10 @@ from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
 from _version import __version__
 
-# 데이터 디렉토리 설정 (BASE_DIR 설정 이후로 이동)
+# 데이터 디렉토리 설정 — PROJECT_ROOT 확정 후(아래 frozen 블록 이후) 재설정됨
+# 이 초기값은 _find_project_root 전에 DATA_DIR을 참조하는 코드(early-init 등)용 임시값
 if getattr(sys, 'frozen', False):
-    # [수정] 현재 프로젝트 폴더 내의 .ai_monitor/data 가 있으면 이를 우선적으로 사용 (CLI와 데이터 공유 강제)
-    _local_data = PROJECT_ROOT / ".ai_monitor" / "data"
-    if _local_data.exists():
-        DATA_DIR = _local_data
-        print(f"[*] Local project data found: {DATA_DIR}")
-    elif os.name == 'nt':
+    if os.name == 'nt':
         DATA_DIR = Path(os.getenv('APPDATA')) / "VibeCoding"
     else:
         DATA_DIR = Path.home() / ".vibe-coding"
@@ -645,24 +641,38 @@ def _find_project_root(start: Path) -> Path:
     return start  # 마커를 찾지 못하면 exe 위치 그대로 사용
 
 if getattr(sys, 'frozen', False):
-    _exe_parent = Path(sys.executable).resolve().parent
-    _root_candidate = _find_project_root(_exe_parent)
-    # _find_project_root가 마커(.git 등)를 못 찾아 exe 위치 자체를 반환했으면
-    # → DATA_DIR/projects.json에서 마지막 사용 프로젝트 경로를 PROJECT_ROOT로 사용
-    # [버그 수정] 설치 경로(C:\...\Programs\)에서 실행 시 PROJECT_ID가 틀려
-    #             공유 메모리 현재 프로젝트 필터가 빈 결과를 반환하는 문제 해결
-    _no_marker = not any((_root_candidate / m).exists() for m in ['.git', 'CLAUDE.md', 'GEMINI.md'])
-    if _no_marker:
-        _projs_file = DATA_DIR / 'projects.json'
-        try:
-            _saved_projs = json.loads(_projs_file.read_text(encoding='utf-8'))
-            if _saved_projs and isinstance(_saved_projs, list):
-                _first = Path(str(_saved_projs[0]).replace('/', os.sep))
-                if _first.exists():
-                    _root_candidate = _first
-        except Exception:
-            pass
+    # [버그수정] exe 설치 경로 대신 현재 작업 디렉토리(cwd)를 먼저 탐색
+    # 사용자가 C:/ons 에서 EXE를 실행하면 cwd=C:/ons → .git 마커 발견 → PROJECT_ROOT=C:/ons
+    # 이전 방식(exe 경로 기준)은 설치 폴더에서 마커 못 찾고 projects.json[0]=D:/vibe-coding을
+    # 사용해 DB가 vibe-coding과 공유되는 버그 발생
+    _cwd_candidate = _find_project_root(Path.cwd())
+    _cwd_has_marker = any((_cwd_candidate / m).exists() for m in ['.git', 'CLAUDE.md', 'GEMINI.md'])
+    if _cwd_has_marker:
+        _root_candidate = _cwd_candidate
+    else:
+        # cwd에 마커 없으면 exe 위치 탐색 → 그래도 없으면 projects.json 폴백
+        _exe_parent = Path(sys.executable).resolve().parent
+        _root_candidate = _find_project_root(_exe_parent)
+        _no_marker = not any((_root_candidate / m).exists() for m in ['.git', 'CLAUDE.md', 'GEMINI.md'])
+        if _no_marker:
+            _projs_file = DATA_DIR / 'projects.json'
+            try:
+                _saved_projs = json.loads(_projs_file.read_text(encoding='utf-8'))
+                if _saved_projs and isinstance(_saved_projs, list):
+                    _first = Path(str(_saved_projs[0]).replace('/', os.sep))
+                    if _first.exists():
+                        _root_candidate = _first
+            except Exception:
+                pass
     PROJECT_ROOT = _root_candidate
+    # PROJECT_ROOT 확정 후 DATA_DIR 재설정
+    # 프로젝트 로컬에 .ai_monitor/data가 있으면 그걸 쓰고(개발 클론 등), 없으면 APPDATA 공유 디렉토리 사용
+    _local_data = PROJECT_ROOT / ".ai_monitor" / "data"
+    if _local_data.exists():
+        DATA_DIR = _local_data
+        print(f"[*] Local project data: {DATA_DIR}")
+    # else: DATA_DIR은 위 초기값(%APPDATA%/VibeCoding) 유지
+    print(f"[*] PROJECT_ROOT={PROJECT_ROOT}  PROJECT_ID 예정='{str(PROJECT_ROOT).replace(chr(92),'/').replace(':','').replace('/','--').lstrip('-')}'")
 else:
     PROJECT_ROOT = BASE_DIR.parent
 
@@ -3900,7 +3910,10 @@ async def pty_handler(websocket):
             yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
             model_name = _codex_main_model()
             model_flag = f' --model {model_name}' if model_name else ""
-            pty.write(f'chcp 65001 >nul & codex{yolo_flag}{model_flag} --no-alt-screen\r\n')
+            # Codex TUI must keep alternate-screen mode enabled here.
+            # Inline mode (`--no-alt-screen`) was corrupting the header/status area
+            # in the embedded terminal, which also broke the context usage display.
+            pty.write(f'chcp 65001 >nul & codex{yolo_flag}{model_flag}\r\n')
 
         # 슬롯별 에이전트 실시간 감지를 위해 agent/yolo/cwd 정보도 함께 저장
         # cwd를 포함해야 agent_api.py가 Gemini 세션 파일을 정확히 매핑할 수 있음
