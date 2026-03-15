@@ -306,7 +306,9 @@ export default function TerminalSlot({
     ? logs.filter(l => l.agent?.toLowerCase() === activeAgent.toLowerCase())
     : logs.filter(l => {
         let hash = 0;
-        for (let i = 0; i < l.terminal_id.length; i++) hash = ((hash << 5) - hash) + l.terminal_id.charCodeAt(i);
+        // [버그수정] terminal_id가 null/undefined일 때 .length 접근 → TypeError 방어
+        const tid = l.terminal_id ?? '';
+        for (let i = 0; i < tid.length; i++) hash = ((hash << 5) - hash) + tid.charCodeAt(i);
         return Math.abs(hash) % terminalCount === slotId;
       });
 

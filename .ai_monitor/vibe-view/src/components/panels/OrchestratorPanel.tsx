@@ -115,7 +115,8 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
       fetch(`${API_BASE}/api/orchestrator/skill-chain`)
         .then(res => res.json())
         .then((data: SkillChainResponse) => {
-          if (data.skill_registry !== undefined) {
+          // [버그수정] skill_registry가 null이면 !== undefined 통과 → .length 터짐
+        if (Array.isArray(data?.skill_registry)) {
             setChainData(data);
           }
         })
@@ -149,7 +150,8 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
   };
 
   // ── 표시할 스킬 목록 (API 데이터 우선, 없으면 기본값) ───────────────────
-  const skills = chainData.skill_registry.length > 0
+  // [버그수정] skill_registry가 null이면 .length 접근 시 TypeError → 옵셔널 체이닝 적용
+  const skills = (chainData.skill_registry?.length ?? 0) > 0
     ? chainData.skill_registry
     : DEFAULT_SKILLS;
 

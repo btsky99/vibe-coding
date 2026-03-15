@@ -222,7 +222,8 @@ function App() {
     const fetchChain = () => {
       fetch(`${API_BASE}/api/orchestrator/skill-chain`)
         .then(res => res.json())
-        .then(data => setSkillChain(data))
+        // [버그수정] API가 null 반환 시 setSkillChain(null) → skillChain.status 접근 TypeError
+        .then(data => { if (data && typeof data === 'object') setSkillChain(data); })
         .catch(() => {});
     };
     fetchChain();
