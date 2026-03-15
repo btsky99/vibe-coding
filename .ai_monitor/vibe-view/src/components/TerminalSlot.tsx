@@ -194,7 +194,6 @@ export default function TerminalSlot({
       term.open(xtermRef.current);
       fitAddon.fit();
       termRef.current = term;
-      setHasAttachedTerminal(true);
 
       // 텍스트 드래그(선택) 시 자동 클립보드 복사
       term.onSelectionChange(() => {
@@ -214,7 +213,7 @@ export default function TerminalSlot({
       fitAddonRef.current = fitAddon;
       // ResizeObserver: 터미널 컨테이너 크기 변화 감지 시 자동으로 xterm 재조정
       // 모니터링 뷰 열기/닫기로 컨테이너 높이가 바뀔 때마다 즉시 반응
-      const termContainer = xtermRef.current.parentElement;
+      const termContainer = xtermRef.current;
       if (termContainer) {
         const ro = new ResizeObserver(() => fitAddon.fit());
         ro.observe(termContainer);
@@ -231,6 +230,7 @@ export default function TerminalSlot({
       const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
       ws.onopen = () => {
+        setHasAttachedTerminal(true);
         const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
         term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
         // WS 연결 직후 현재 터미널 크기를 PTY에 전달
@@ -269,9 +269,20 @@ export default function TerminalSlot({
   // ResizeObserver가 주 역할이며, 이 타이머는 폴백으로 이중 호출해 안정성 확보
   useEffect(() => {
     if (!fitAddonRef.current) return;
-    const t1 = setTimeout(() => fitAddonRef.current?.fit(), 100);
-    const t2 = setTimeout(() => fitAddonRef.current?.fit(), 350);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const fitNow = () => {
+      fitAddonRef.current?.fit();
+      termRef.current?.scrollToBottom();
+    };
+    const raf1 = requestAnimationFrame(fitNow);
+    const raf2 = requestAnimationFrame(() => requestAnimationFrame(fitNow));
+    const t1 = setTimeout(fitNow, 100);
+    const t2 = setTimeout(fitNow, 350);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [showMonitor]);
 
 
@@ -473,7 +484,7 @@ export default function TerminalSlot({
               <div className="flex items-center gap-2 mr-2 px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[9px] text-accent animate-in fade-in duration-500">
                 <div className="flex flex-col items-end leading-none gap-0.5">
                   <span className="font-bold opacity-80 uppercase text-[8px]">Context</span>
-                  <span className="font-black">{(geminiUsage.total_tokens / 1000).toFixed(1)}K / {(geminiUsage.context_window / 1000).toFixed(1)}K</span>
+                  <span className="font-black">{((geminiUsage.total_tokens ?? 0) / 1000).toFixed(1)}K / {((geminiUsage.context_window ?? 0) / 1000).toFixed(1)}K</span>
                 </div>
                 <div className="w-12 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
                   <div
@@ -481,7 +492,7 @@ export default function TerminalSlot({
                     style={{ width: `${Math.min(100, geminiUsage.percentage)}%` }}
                   />
                 </div>
-                <span className="font-bold w-6 text-right">{Math.round(geminiUsage.percentage)}%</span>
+                <span className="font-bold w-6 text-right">{Math.round(geminiUsage.percentage ?? 0)}%</span>
               </div>
             )}
 
@@ -647,7 +658,9 @@ export default function TerminalSlot({
 
           {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
           <div className="flex-1 relative min-h-0 overflow-hidden">
-            <div ref={xtermRef} className="absolute inset-0 p-2" />
+            <div className="absolute inset-0 overflow-hidden p-2">
+              <div ref={xtermRef} className="h-full w-full" />
+            </div>
             {!hasAttachedTerminal && (
               <div className="absolute inset-0 flex items-center justify-center p-6">
                 <div className="max-w-md rounded-2xl border border-white/10 bg-[#252526] px-5 py-4 text-left shadow-2xl">
