@@ -18,7 +18,7 @@
 ; ────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "바이브코딩"
-#define MyAppVersion   "3.7.76"
+#define MyAppVersion   "3.7.77"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
