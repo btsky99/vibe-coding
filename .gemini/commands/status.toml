@@ -1,0 +1,7 @@
+description = "Claude 스타일 블록 그리드 상태줄 표시"
+prompt = """
+현재 컨텍스트 사용량과 하이브 마인드 상태를 시각화합니다.
+"""
+
+[[steps]]
+command = "python D:\\vibe-coding\\gemini_statusline.py"

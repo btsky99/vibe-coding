@@ -34,6 +34,7 @@ interface TerminalStatus {
   ts?: string;
   last_line?: string;
   pipeline_stage?: 'analyzing' | 'modifying' | 'verifying' | 'done' | 'idle';
+  external?: boolean;
 }
 
 interface SkillResultEntry {
@@ -253,6 +254,7 @@ export default function TaskBoardPanel() {
     Object.keys(liveChains).forEach((id) => ids.add(id));
     // agent_live.jsonl 기반 터미널도 포함
     Object.entries(terminals).forEach(([id, status]) => {
+      if (status.external) return;
       if (status.status === 'running' || status.status === 'error' || status.status === 'done') {
         ids.add(id.replace(/^T/i, ''));
       }

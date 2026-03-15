@@ -3,26 +3,22 @@ name: vibe-heal
 description: >
   자기치유 스킬. 반복 오류 패턴을 감지하고 근본 원인을 수정하여 재발을 방지합니다.
   Use when: 같은 에러가 반복, "또 같은 에러", "계속 안 돼", "자꾸 터져", 반복 오류 패턴 감지 시.
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+user-invocable: true
+context: fork
+agent: general-purpose
 ---
 
 <!--
-FILE: .claude/commands/vibe-heal.md
+FILE: .claude/skills/vibe-heal/SKILL.md
 DESCRIPTION: Vibe Coding 자기치유(Self-Healing) 스킬.
              task_logs.jsonl에서 반복 오류 패턴을 감지하고
              근본 원인을 수정하여 같은 에러가 반복되지 않도록 합니다.
+             Skills 2.0: context: fork — 격리된 서브에이전트에서 실행하여 메인 컨텍스트 보호.
 
 REVISION HISTORY:
+- 2026-03-13 Claude: [Skills 2.0] context: fork 적용, known-patterns.md 보조파일 추가
 - 2026-03-05 Claude: [신규] 자기치유 스킬 생성
-  - 반복 패턴 감지 (task_logs 분석)
-  - 근본 원인 추적 및 자동 수정
-  - 지식 베이스 업데이트 (references/ 폴더)
 -->
 
 당신은 지금 **Vibe Coding 자기치유 프로토콜**을 실행합니다.
@@ -31,13 +27,15 @@ REVISION HISTORY:
 
 **핵심 원칙: 같은 에러가 2번 이상 반복되는 것은 스킬/코드/구조의 문제다. 증상이 아닌 패턴을 제거한다.**
 
+> 이 스킬은 격리된 컨텍스트(fork)에서 실행됩니다. 치유 작업이 메인 컨텍스트를 오염시키지 않습니다.
+> 알려진 반복 패턴 목록: `$CLAUDE_SKILL_DIR/known-patterns.md` 참조
+
 ---
 
 ## 1단계: 반복 패턴 감지
 
 ```bash
 # 최근 task_logs에서 반복 요청/오류 패턴 확인
-# (task_logs.jsonl 최근 50개 분석)
 python scripts/claude_watchdog.py --analyze 2>/dev/null || true
 ```
 
@@ -46,7 +44,7 @@ python scripts/claude_watchdog.py --analyze 2>/dev/null || true
 - **동일 파일 수정** 3회 이상 → 구조적 문제 의심
 - **동일 요청 키워드** 3회 이상 → 스킬 부재 또는 스킬 오작동
 
-감지된 패턴 형식으로 보고:
+감지된 패턴 보고:
 ```
 🔍 반복 패턴 감지:
   - "X 오류" — 최근 N회 반복 (파일: Y)
@@ -56,8 +54,6 @@ python scripts/claude_watchdog.py --analyze 2>/dev/null || true
 ---
 
 ## 2단계: 근본 원인 분류
-
-감지된 패턴을 3가지 원인으로 분류합니다:
 
 | 원인 유형 | 증상 | 치유 방법 |
 |-----------|------|----------|
@@ -71,14 +67,14 @@ python scripts/claude_watchdog.py --analyze 2>/dev/null || true
 
 ### A. 코드 결함인 경우
 - `vibe-debug` 스킬을 호출하여 근본 원인 수정
-- 수정 후 동일 조건으로 재현 테스트 (에러가 사라졌는지 확인)
+- 수정 후 동일 조건으로 재현 테스트
 - 한글 주석에 "자기치유 수정" 표시 필수
 
 ### B. 스킬 누락인 경우
 - 반복 패턴에 맞는 신규 스킬 파일 초안 작성
-- `.claude/commands/vibe-[이름].md` 생성
+- `.claude/skills/vibe-[이름]/SKILL.md` 생성 (Skills 2.0 형식)
 - `.gemini/skills/[이름]/SKILL.md` 동기화 생성
-- 사용자에게 "새 스킬 '[이름]'을 생성했습니다" 보고
+- `known-patterns.md`에 패턴 추가
 
 ### C. 지식 부재인 경우
 - `.gemini/skills/master/references/` 관련 파일 업데이트
@@ -88,22 +84,16 @@ python scripts/claude_watchdog.py --analyze 2>/dev/null || true
 
 ## 4단계: 치유 결과 검증
 
-```bash
-# 치유 후 동일 패턴이 재발하는지 확인
-# 빌드/실행으로 정상 동작 확인
-```
-
 검증 기준:
 - ✅ 에러 메시지가 사라졌는가
 - ✅ 기존 기능이 정상 동작하는가
-- ✅ 치유 내용이 문서화되었는가
+- ✅ 치유 내용이 `known-patterns.md`에 문서화되었는가
 
 ---
 
 ## 5단계: 하이브 메모리 업데이트
 
 ```bash
-# 치유 결과를 하이브 공유 메모리에 기록
 python scripts/memory.py set "heal:[패턴명]" "[치유 방법 요약]"
 ```
 
@@ -126,4 +116,4 @@ python scripts/memory.py set "heal:[패턴명]" "[치유 방법 요약]"
 1. **패턴 우선**: 개별 증상이 아닌 반복 패턴에 집중
 2. **최소 변경**: 치유에 필요한 최소한의 수정만
 3. **검증 필수**: 치유 후 반드시 동작 확인 후 완료 보고
-4. **지식화**: 모든 치유는 기록으로 남겨 다음 에이전트가 활용
+4. **지식화**: 모든 치유는 `known-patterns.md`에 기록하여 다음 에이전트가 활용

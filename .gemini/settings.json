@@ -11,6 +11,17 @@
         ]
       }
     ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/vibe-coding/gemini_statusline.py",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
     "BeforeTool": [
       {
         "matcher": "write_file|create_file|overwrite_file|replace|edit_file|str_replace|run_shell_command|shell|bash|execute_command",

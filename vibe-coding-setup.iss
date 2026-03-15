@@ -17,7 +17,7 @@
 ; [2026-03-01] Claude — 최초 생성. 포터블 EXE → 설치버전 파이프라인 구축
 ; ────────────────────────────────────────────────────────────────────────────
 
-#define MyAppName      "Vibe Coding"
+#define MyAppName      "바이브코딩"
 #define MyAppVersion   "3.7.76"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -103,7 +103,7 @@ Name: "{userstartup}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; Ico
 ; Claude Code settings.json에 statusLine 자동 설정
 ; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
-Filename: "{app}\{#MyAppExeName}"; Description: "Vibe Coding 시작"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "바이브코딩 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 제거 전 실행 중인 프로세스 종료 (고정 파일명 사용)
