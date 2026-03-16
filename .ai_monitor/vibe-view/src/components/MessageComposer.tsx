@@ -10,7 +10,7 @@
  * ------------------------------------------------------------------------
  */
 
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 import { API_BASE } from '../constants';
 
@@ -19,7 +19,8 @@ interface MessageComposerProps {
   onMessageSent?: () => void;
 }
 
-export default function MessageComposer({ onMessageSent }: MessageComposerProps) {
+// 메시지 작성 영역 — 사이드바의 다른 패널 전환 시 불필요한 리렌더 방지
+const MessageComposer = memo(function MessageComposer({ onMessageSent }: MessageComposerProps) {
   const [msgFrom, setMsgFrom] = useState('claude');
   const [msgTo, setMsgTo] = useState('all');
   const [msgType, setMsgType] = useState('info');
@@ -129,4 +130,6 @@ export default function MessageComposer({ onMessageSent }: MessageComposerProps)
       </div>
     </div>
   );
-}
+});
+
+export default MessageComposer;

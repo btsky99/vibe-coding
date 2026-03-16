@@ -5,6 +5,7 @@
  *          드래그 이동, 좌하단 리사이즈 핸들, 최대화/최소화 토글,
  *          이미지 미리보기 vs VibeEditor 코드 뷰어 분기를 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-16 Claude: 5MB 초과 파일 로딩 방지 — 콘텐츠 길이 체크 후 경고 메시지 표시.
  * - 2026-03-01 Claude: App.tsx에서 독립 컴포넌트로 분리. constants.ts의 공유 상수 사용.
  * ------------------------------------------------------------------------
  */
@@ -13,6 +14,10 @@ import { useState, useRef } from 'react';
 import { X, Maximize2, Minimize2, Minus, Plus, Save } from 'lucide-react';
 import VibeEditor from './VibeEditor';
 import { API_BASE, getFileIcon, OpenFile } from '../constants';
+
+// 파일 콘텐츠 최대 허용 길이 (5MB = 5,000,000 문자)
+// 이를 초과하는 파일은 에디터 성능 저하 방지를 위해 잘라서 경고와 함께 표시
+const MAX_FILE_SIZE = 5_000_000;
 
 interface FloatingWindowProps {
   file: OpenFile;
@@ -176,6 +181,18 @@ export default function FloatingWindow({
                 src={`${API_BASE}/api/image-file?path=${encodeURIComponent(file.path)}`}
                 alt={file.name}
                 className="max-w-full max-h-full object-contain shadow-2xl rounded-sm"
+              />
+            </div>
+          ) : file.content && file.content.length > MAX_FILE_SIZE ? (
+            /* 5MB 초과 파일: 에디터 렌더링 성능 문제를 방지하기 위해 잘린 내용과 경고 표시 */
+            <div className="absolute inset-0 flex flex-col overflow-hidden">
+              <div className="bg-yellow-900/60 border-b border-yellow-500/40 px-4 py-2 text-yellow-300 text-sm font-mono shrink-0">
+                [파일이 너무 큽니다 (5MB 초과)] — {(file.content.length / 1_000_000).toFixed(1)}MB / 처음 일부만 표시됩니다.
+              </div>
+              <VibeEditor
+                path={file.path}
+                content={file.content.slice(0, MAX_FILE_SIZE)}
+                onChange={(val) => updateFileContent(file.id, val)}
               />
             </div>
           ) : (

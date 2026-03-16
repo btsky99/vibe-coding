@@ -12,6 +12,7 @@
  * ------------------------------------------------------------------------
  */
 
+import { memo } from 'react';
 import {
   Search, Settings, Files,
   MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
@@ -44,7 +45,8 @@ interface ActivityBarProps {
   isHealingActive?: boolean;
 }
 
-export default function ActivityBar({
+// 좌측 액티비티 바 — 무관한 상태 변경(에디터, 터미널 등)에 의한 불필요한 리렌더 방지
+const ActivityBar = memo(function ActivityBar({
   activeTab, onTabChange,
   onOpenSettings,
   onOpenDiscordNewWindow,
@@ -209,4 +211,6 @@ export default function ActivityBar({
 
     </div>
   );
-}
+});
+
+export default ActivityBar;

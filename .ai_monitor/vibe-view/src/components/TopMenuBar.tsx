@@ -10,6 +10,7 @@
  * ------------------------------------------------------------------------
  */
 
+import { memo } from 'react';
 import {
   Menu, Terminal, RotateCw,
   X, Zap, Cpu, Info,
@@ -47,7 +48,8 @@ interface TopMenuBarProps {
   onOpenMissionControl: () => void;
 }
 
-export default function TopMenuBar({
+// 상단 메뉴 바 — 메뉴가 닫힌 상태에서 다른 상태 변경 시 리렌더 방지
+const TopMenuBar = memo(function TopMenuBar({
   activeMenu, setActiveMenu,
   isSidebarOpen, setIsSidebarOpen,
   setLayoutMode,
@@ -256,4 +258,6 @@ export default function TopMenuBar({
 
     </div>
   );
-}
+});
+
+export default TopMenuBar;

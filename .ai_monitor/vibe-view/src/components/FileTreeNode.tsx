@@ -9,6 +9,7 @@
  * ------------------------------------------------------------------------
  */
 
+import { memo } from 'react';
 import { ChevronRight, ChevronDown, Plus, Trash2, Edit3, ClipboardList } from 'lucide-react';
 import { VscFolder, VscFolderOpened, VscNewFolder } from 'react-icons/vsc';
 import { API_BASE, getFileIcon, TreeItem } from '../constants';
@@ -31,7 +32,8 @@ interface FileTreeNodeProps {
   setEditValue: (val: string) => void;
 }
 
-export default function FileTreeNode({
+// 재귀 트리 구조 — 부모 리렌더 시 전체 트리가 불필요하게 재렌더링되는 것을 memo로 방지
+const FileTreeNode = memo(function FileTreeNode({
   item, depth, expanded, treeChildren,
   onToggle, onFileOpen, onContextMenu,
   onRename, onDelete, onCreateFile, onCreateFolder,
@@ -158,4 +160,6 @@ export default function FileTreeNode({
       )}
     </div>
   );
-}
+});
+
+export default FileTreeNode;

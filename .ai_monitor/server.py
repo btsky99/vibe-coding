@@ -5,6 +5,11 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-16] - Claude (PostgreSQL 커넥션 풀 추가)
+#   - 매 쿼리마다 psycopg2.connect() 호출하던 방식 → 모듈 레벨 커넥션 풀(최대 5개) 재사용
+#   - _get_pg_conn() / _return_pg_conn(): 스레드 안전 풀 관리 (threading.Lock)
+#   - 끊어진 연결(OperationalError) 자동 감지 후 폐기 → 다음 호출 시 새 커넥션 생성
+#   - run_pg_sql, run_pg_sql_csv 양쪽 모두 풀 적용
 # [2026-03-16] - Claude (포트 충돌 근본 수정 v3.7.78)
 #   - HTTP/WS 포트: 슬롯 기반 고정값 → 바인딩 테스트 후 실패 시 _find_free_port 대체 탐색
 #   - 원인: 서로 다른 프로젝트(dev/installer)가 각자 slot 0 → 둘 다 HTTP:9000 충돌
@@ -154,6 +159,53 @@ PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
 INITDB_BIN = _PG_DIR / "bin" / "initdb.exe"
 PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 
+# ── PostgreSQL 커넥션 풀 (최대 5개, 스레드 안전) ──
+# 매 쿼리마다 psycopg2.connect()를 호출하면 ~1ms의 오버헤드가 쿼리당 발생.
+# 풀을 사용하면 이미 열린 연결을 재사용하여 connect 비용을 제거.
+_pg_pool = []           # 사용 가능한 커넥션 리스트 (db별 (conn, db) 튜플)
+_pg_pool_lock = threading.Lock()  # 풀 접근 동기화 락
+_PG_POOL_MAX = 5        # 풀에 보관할 최대 커넥션 수
+
+def _get_pg_conn(db: str = "postgres"):
+    """풀에서 커넥션을 꺼내거나, 풀이 비었으면 새로 생성하여 반환.
+
+    같은 db 이름의 커넥션만 재사용. 다른 db의 커넥션은 풀에 그대로 둠.
+    연결이 끊어졌으면(OperationalError) 버리고 새로 생성.
+    """
+    import psycopg2
+    with _pg_pool_lock:
+        # 풀에서 같은 db의 커넥션 탐색
+        for i, (conn, conn_db) in enumerate(_pg_pool):
+            if conn_db == db:
+                _pg_pool.pop(i)
+                # 커넥션 유효성 검증 (끊어진 연결 감지)
+                try:
+                    conn.cursor().execute("SELECT 1")
+                    return conn
+                except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                    # 끊어진 커넥션 — 조용히 폐기하고 새로 생성
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    break
+    # 풀에 적합한 커넥션 없음 → 새로 생성
+    conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
+    conn.autocommit = True
+    return conn
+
+def _return_pg_conn(conn, db: str = "postgres"):
+    """사용 완료된 커넥션을 풀에 반환. 풀이 가득 차면 연결을 닫고 폐기."""
+    with _pg_pool_lock:
+        if len(_pg_pool) < _PG_POOL_MAX:
+            _pg_pool.append((conn, db))
+        else:
+            # 풀 용량 초과 — 연결 닫기
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 # 배포 버전 DB 데이터 디렉터리: %APPDATA%\VibeCoding\pgdata
 # 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/data
 if getattr(sys, 'frozen', False):
@@ -292,19 +344,35 @@ def run_pg_sql(sql: str, params: tuple = None, db: str = "postgres"):
     params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
     psycopg2: %s placeholder, psql 폴백: params가 있으면 psycopg2.sql.SQL로 렌더링 후 전달.
     """
-    # psycopg2 직접 연결 (쿼리당 ~1ms vs subprocess ~80ms)
+    # psycopg2 커넥션 풀 사용 (매번 connect 대신 재사용하여 오버헤드 제거)
     try:
         import psycopg2
-        conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
+        conn = _get_pg_conn(db)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                try:
+                    rows = cur.fetchall()
+                    # psql 텍스트 출력과 호환되는 형식으로 반환 (RETURNING id 등)
+                    result = '\n'.join(str(row[0]) for row in rows)
+                    _return_pg_conn(conn, db)
+                    return result
+                except Exception as e:
+                    _return_pg_conn(conn, db)
+                    return ''  # 결과 없음 허용 (INSERT/UPDATE 등 반환값 없는 SQL)
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            # 커넥션 끊김 — 폐기하고 에러로 처리 (다음 호출 시 새 커넥션 생성됨)
             try:
-                rows = cur.fetchall()
-                # psql 텍스트 출력과 호환되는 형식으로 반환 (RETURNING id 등)
-                return '\n'.join(str(row[0]) for row in rows)
-            except Exception as e:
-                return ''  # 결과 없음 허용 (INSERT/UPDATE 등 반환값 없는 SQL)
+                conn.close()
+            except Exception:
+                pass
+            print(f"[Postgres psycopg2 ERROR] 커넥션 끊김, 폐기 후 재시도 필요")
+            return None
+        except Exception as e:
+            # 쿼리 에러 — 커넥션 자체는 살아있을 수 있으므로 풀에 반환
+            _return_pg_conn(conn, db)
+            print(f"[Postgres psycopg2 ERROR] {e}")
+            return None
     except ImportError:
         pass  # psycopg2 없으면 subprocess 폴백
     except Exception as e:
@@ -401,15 +469,29 @@ def run_pg_sql_csv(sql: str, params: tuple = None, db: str = "postgres") -> list
 
     params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
     """
-    # psycopg2 직접 연결 (RealDictCursor로 dict 반환)
+    # psycopg2 커넥션 풀 사용 (RealDictCursor로 dict 반환)
     try:
         import psycopg2
         import psycopg2.extras
-        conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
-        conn.autocommit = True
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return [dict(row) for row in cur.fetchall()]
+        conn = _get_pg_conn(db)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, params)
+                result = [dict(row) for row in cur.fetchall()]
+                _return_pg_conn(conn, db)
+                return result
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            # 커넥션 끊김 — 폐기 (다음 호출 시 새 커넥션 생성됨)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            print(f"[Postgres psycopg2 CSV ERROR] 커넥션 끊김, 폐기")
+            return []
+        except Exception as e:
+            _return_pg_conn(conn, db)
+            print(f"[Postgres psycopg2 CSV ERROR] {e}")
+            return []
     except ImportError:
         pass
     except Exception as e:

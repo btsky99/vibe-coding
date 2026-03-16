@@ -28,7 +28,7 @@
  * ------------------------------------------------------------------------
  */
 
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { Menu, ChevronRight, ChevronDown, RotateCw, X, Minimize2, Maximize2, ExternalLink } from 'lucide-react';
 /* ── 공유 상수/타입 ── */
@@ -178,7 +178,8 @@ function App() {
     return () => sse.close();
   }, []);
 
-  // 파일 락 폴링 (3초) — TerminalSlot 파일 편집 충돌 방지용
+  // 파일 락 폴링 (5초) — TerminalSlot 파일 편집 충돌 방지용
+  // [P2 최적화] 3초 → 5초 (락 변경은 드뭄)
   useEffect(() => {
     const fetchLocks = () => {
       fetch(`${API_BASE}/api/locks`)
@@ -188,11 +189,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchLocks();
-    const interval = setInterval(fetchLocks, 3000);
+    const interval = setInterval(fetchLocks, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // 에이전트 간 메시지 폴링 (3초) — TerminalSlot 활성 메시지 표시용
+  // 에이전트 간 메시지 폴링 (5초) — TerminalSlot 활성 메시지 표시용
+  // [P2 최적화] 3초 → 5초 (메시지 빈도 낮음)
   useEffect(() => {
     const fetchMessages = () => {
       fetch(`${API_BASE}/api/messages`)
@@ -201,11 +203,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchMessages();
-    const interval = setInterval(fetchMessages, 3000);
+    const interval = setInterval(fetchMessages, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // 공유 메모리 폴링 (5초) — Activity Bar 배지(memory.length)용
+  // 공유 메모리 폴링 (10초) — Activity Bar 배지(memory.length)용
+  // [P2 최적화] 5초 → 10초 (메모리 변경은 드뭄)
   useEffect(() => {
     const fetchMemory = () => {
       fetch(`${API_BASE}/api/memory`)
@@ -214,11 +217,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchMemory();
-    const interval = setInterval(fetchMemory, 5000);
+    const interval = setInterval(fetchMemory, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // 스킬 체인 상태 폴링 (3초) — Activity Bar 오케스트레이터 탭 펄스 배지용
+  // 스킬 체인 상태 폴링 (5초) — Activity Bar 오케스트레이터 탭 펄스 배지용
+  // [P2 최적화] 3초 → 5초 (스킬 실행 주기 > 5초)
   useEffect(() => {
     const fetchChain = () => {
       fetch(`${API_BASE}/api/orchestrator/skill-chain`)
@@ -228,11 +232,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchChain();
-    const interval = setInterval(fetchChain, 3000);
+    const interval = setInterval(fetchChain, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // MCP 설치 현황 폴링 (5초) — Activity Bar 배지(mcpInstalled.length)용
+  // MCP 설치 현황 폴링 (30초) — Activity Bar 배지(mcpInstalled.length)용
+  // [P2 최적화] 5초 → 30초 (MCP 설치/제거는 매우 드뭄)
   useEffect(() => {
     const fetchInstalled = () => {
       fetch(`${API_BASE}/api/mcp/installed?tool=claude&scope=global`)
@@ -241,11 +246,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchInstalled();
-    const interval = setInterval(fetchInstalled, 5000);
+    const interval = setInterval(fetchInstalled, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  // 터미널별 에이전트 파이프라인 상태 폴링 (3초) — TerminalSlot 모니터링 뷰 단계 표시용
+  // 터미널별 에이전트 파이프라인 상태 폴링 (5초) — TerminalSlot 모니터링 뷰 단계 표시용
+  // [P2 최적화] 3초 → 5초 (에이전트 상태 변경 주기 > 5초)
   useEffect(() => {
     const fetchTerminals = () => {
       fetch(`${API_BASE}/api/agent/terminals`)
@@ -254,11 +260,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchTerminals();
-    const interval = setInterval(fetchTerminals, 3000);
+    const interval = setInterval(fetchTerminals, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // 하이브 엔진 헬스 상태 폴링 (5초) — ActivityBar 엔진 라이브 표시용
+  // 하이브 엔진 헬스 상태 폴링 (10초) — ActivityBar 엔진 라이브 표시용
+  // [P2 최적화] 5초 → 10초 (헬스 체크 부하 경감)
   useEffect(() => {
     const fetchHealth = () => {
       fetch(`${API_BASE}/api/hive/health`)
@@ -267,11 +274,12 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
+    const interval = setInterval(fetchHealth, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // 하이브 활동 이벤트 폴링 (5초) — TerminalSlot 모니터링 패널 하이브 저장 상태 표시용
+  // 하이브 활동 이벤트 폴링 (10초) — TerminalSlot 모니터링 패널 하이브 저장 상태 표시용
+  // [P2 최적화] 5초 → 10초 (활동 로그는 비실시간 데이터)
   useEffect(() => {
     const fetchActivity = () => {
       fetch(`${API_BASE}/api/hive/activity`)
@@ -280,19 +288,19 @@ function App() {
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchActivity();
-    const interval = setInterval(fetchActivity, 5000);
+    const interval = setInterval(fetchActivity, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // 글로벌 파이프라인 단계 계산 — 모든 터미널 중 가장 '전진된' 단계를 표시
-  const globalPipelineStage = (() => {
+  // 글로벌 파이프라인 단계 계산 — agentTerminals가 변경될 때만 재계산 (useMemo로 최적화)
+  const globalPipelineStage = useMemo(() => {
     const stages = Object.values(agentTerminals).map(t => t.pipeline_stage);
     if (stages.includes('modifying')) return 'modifying';
     if (stages.includes('verifying')) return 'verifying';
     if (stages.includes('analyzing')) return 'analyzing';
     if (stages.includes('done')) return 'done';
     return 'idle';
-  })();
+  }, [agentTerminals]);
 
   // Gemini 컨텍스트 사용량 폴링 (10초) — TerminalSlot 게이지용
   useEffect(() => {
@@ -570,8 +578,8 @@ function App() {
     openFileWindow(normalizedPath);
   };
 
-  // 터미널 슬롯 인덱스 배열
-  const slots = Array.from({ length: terminalCount }, (_, i) => i);
+  // 터미널 슬롯 인덱스 배열 — terminalCount가 변경될 때만 배열 재생성 (useMemo로 최적화)
+  const slots = useMemo(() => Array.from({ length: terminalCount }, (_, i) => i), [terminalCount]);
 
   // 사이드바 탭 제목 매핑
   const sidebarTitle = {
