@@ -8,6 +8,7 @@
 import sys
 import os
 import json
+import shutil
 import time
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu)

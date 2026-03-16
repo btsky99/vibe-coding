@@ -700,10 +700,27 @@ def list_tasks(project_id: str = None) -> list[dict]:
 
 
 def get_task(task_id: str) -> dict | None:
-    for task in list_tasks():
-        if task.get('id') == task_id:
-            return task
-    return None
+    """단건 태스크 조회 — WHERE id = 로 직접 조회 (O(1), 기존 list_tasks 전체 스캔 제거)"""
+    rows = query_rows(
+        f"""
+        SELECT id, timestamp, updated_at, title, description, status, assigned_to, priority,
+               created_by, kanban_status, role, claimed_by, tags::text AS tags, extra::text AS extra,
+               project_id
+        FROM hive_tasks
+        WHERE id = {_sql_text(task_id)}
+        LIMIT 1;
+        """
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    task = {k: row.get(k) for k in (
+        'id', 'timestamp', 'updated_at', 'title', 'description', 'status', 'assigned_to',
+        'priority', 'created_by', 'kanban_status', 'role', 'claimed_by', 'project_id'
+    )}
+    task['tags'] = _parse_json_text(row.get('tags'), [])
+    task.update(_parse_json_text(row.get('extra'), {}))
+    return task
 
 
 def update_task(task_id: str, updates: dict) -> dict | None:

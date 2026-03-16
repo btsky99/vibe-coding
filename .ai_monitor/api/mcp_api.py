@@ -127,7 +127,7 @@ def handle_get(handler, path: str, params: dict, _smithery_api_key, _mcp_config_
     if path == '/api/mcp/catalog':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         handler.wfile.write(json.dumps(_catalog(), ensure_ascii=False).encode('utf-8'))
         return True
@@ -135,7 +135,7 @@ def handle_get(handler, path: str, params: dict, _smithery_api_key, _mcp_config_
     if path == '/api/mcp/apikey':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         key = _smithery_api_key()
         masked = (key[:6] + '...' + key[-4:]) if len(key) > 12 else ('*' * len(key) if key else '')
@@ -147,7 +147,7 @@ def handle_get(handler, path: str, params: dict, _smithery_api_key, _mcp_config_
     if path == '/api/mcp/search':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         q = params.get('q', [''])[0].strip()
         page = int(params.get('page', ['1'])[0])
@@ -193,7 +193,7 @@ def handle_get(handler, path: str, params: dict, _smithery_api_key, _mcp_config_
     if path == '/api/mcp/installed':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         tool = params.get('tool', ['claude'])[0]
         scope = params.get('scope', ['global'])[0]
@@ -223,7 +223,7 @@ def handle_post(handler, path: str, data: dict, _smithery_api_key_setter, _mcp_c
     if path == '/api/mcp/apikey':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             api_key = str(data.get('api_key') or data.get('apikey') or '').strip()
@@ -242,7 +242,7 @@ def handle_post(handler, path: str, data: dict, _smithery_api_key_setter, _mcp_c
     if path == '/api/mcp/install':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             tool = str(data.get('tool', 'claude'))
@@ -321,7 +321,7 @@ def handle_post(handler, path: str, data: dict, _smithery_api_key_setter, _mcp_c
     if path == '/api/mcp/uninstall':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             tool = str(data.get('tool', 'claude'))

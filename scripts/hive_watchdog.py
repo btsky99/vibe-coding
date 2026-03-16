@@ -80,6 +80,7 @@ class HiveWatchdog:
         self._restart_fail_count = 0  # 서버 재시작 연속 실패 횟수 (3회 초과 시 쿨다운)
         self._restart_fail_time: datetime | None = None  # 3회 실패 시점 (30분 후 재시도 허용)
         self._last_memory_sync_time: datetime | None = None  # 마지막 메모리 동기화 성공 시각 (쿨다운용)
+        self._last_inactive_log_time: datetime | None = None  # "장시간 활동 없음" 로그 스팸 방지 (1시간 쿨다운)
         self.status = {
             "last_check": None,
             "db_ok": False,
@@ -193,32 +194,61 @@ class HiveWatchdog:
     def check_agent_activity(self):
         """최근 에이전트 활동 로그 확인 (8시간 이내 활동 여부)
 
-        임계값을 8시간으로 설정한 이유:
-        - 에이전트는 사용자 요청이 있을 때만 활동하므로 짧은 유휴 상태는 정상임
-        - 1시간 임계값은 오탐(false alarm)을 과다 발생시켜 불필요한 복구 루프 유발
+        [데이터 소스 우선순위]
+        1. PostgreSQL pg_logs 테이블 (Postgres-First 정책)
+        2. task_logs.jsonl 파일 (폴백 — PG 미연결 시)
+
+        [근본 원인 수정] 2026-03-17 Claude
+        - 기존: task_logs.jsonl만 확인 → PG로 로깅 이전 후 파일이 갱신되지 않아
+          영구적으로 "8h+ 활동 없음" 오탐 발생 (마지막 파일 기록: 2026-03-01)
+        - 수정: pg_logs에서 최신 created_at 조회 → 실시간 활동 반영
+
+        [스팸 억제]
+        - "장시간 활동 없음" 경고를 매 60초 → 1시간 1회로 제한
+        - 헬스체크 UI에 반복 경고가 20줄 모두 채워지는 문제 해소
         """
-        if not LOG_FILE.exists():
+        last_time = None
+
+        # 1차: PostgreSQL pg_logs에서 최신 활동 시각 조회
+        try:
+            from src.pg_store import query_rows as _qr
+            rows = _qr("SELECT MAX(created_at) AS last_active FROM pg_logs LIMIT 1;")
+            if rows and rows[0].get('last_active'):
+                val = rows[0]['last_active']
+                # psycopg2는 datetime 객체 반환, psql CSV는 문자열 반환
+                if isinstance(val, datetime):
+                    last_time = val.replace(tzinfo=None)  # naive datetime으로 통일
+                else:
+                    last_time = datetime.fromisoformat(str(val).replace('+00:00', '').replace('Z', ''))
+        except Exception:
+            pass  # PG 미연결 시 파일 폴백
+
+        # 2차 폴백: task_logs.jsonl 파일
+        if last_time is None and LOG_FILE.exists():
+            try:
+                with open(LOG_FILE, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                if lines:
+                    last_line = json.loads(lines[-1])
+                    last_time = datetime.fromisoformat(last_line["timestamp"])
+            except Exception as e:
+                self._add_log(f"⚠️ 로그 파일 파싱 실패: {e}")
+
+        if last_time is None:
             self.status["agent_active"] = False
             return False
 
-        try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                if not lines:
-                    return False
-
-                last_line = json.loads(lines[-1])
-                last_time = datetime.fromisoformat(last_line["timestamp"])
-
-                if datetime.now() - last_time < timedelta(hours=8):
-                    self.status["agent_active"] = True
-                    return True
-                else:
-                    self._add_log("⚠️ 장시간(8h+) 에이전트 활동 없음")
-                    self.status["agent_active"] = False
-                    return False
-        except Exception as e:
-            self._add_log(f"⚠️ 로그 분석 실패: {e}")
+        if datetime.now() - last_time < timedelta(hours=8):
+            self.status["agent_active"] = True
+            return True
+        else:
+            # 스팸 억제: 1시간에 1회만 경고 로그 출력
+            now = datetime.now()
+            if (self._last_inactive_log_time is None or
+                    (now - self._last_inactive_log_time).total_seconds() > 3600):
+                self._add_log("⚠️ 장시간(8h+) 에이전트 활동 없음")
+                self._last_inactive_log_time = now
+            self.status["agent_active"] = False
             return False
 
     def check_skill_gaps(self):

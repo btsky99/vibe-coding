@@ -114,7 +114,10 @@ def cmd_list(args) -> None:
     print("\n--- Hive Memory ---")
     for entry in entries:
         summary = str(entry.get("content", "")).replace("\n", " ")[:100]
-        print(f"[{entry['key']}] by {entry.get('author', 'unknown')} | {entry.get('updated_at', '')[:19]}")
+        updated = entry.get('updated_at', '')
+        # psycopg2는 datetime 객체를 반환하므로 str()로 변환 후 슬라이싱
+        updated_str = str(updated)[:19] if updated else ''
+        print(f"[{entry['key']}] by {entry.get('author', 'unknown')} | {updated_str}")
         print(f"  {summary}...")
     print("-------------------\n")
 
@@ -129,7 +132,9 @@ def cmd_get(args) -> None:
         print(f"not found: {args.key}")
         return
 
-    print(f"[{entry['key']}] by {entry.get('author', 'unknown')} | {entry.get('updated_at', '')[:19]}")
+    updated = entry.get('updated_at', '')
+    updated_str = str(updated)[:19] if updated else ''
+    print(f"[{entry['key']}] by {entry.get('author', 'unknown')} | {updated_str}")
     print(entry.get("content", ""))
 
 

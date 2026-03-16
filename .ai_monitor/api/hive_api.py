@@ -42,7 +42,7 @@ def _json_response(handler, data: dict | list, status: int = 200) -> None:
     """
     handler.send_response(status)
     handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', '*')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
     handler.end_headers()
     handler.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
 
@@ -221,7 +221,7 @@ def handle_get(handler, path: str, params: dict,
     if path == '/api/install-skills':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         target_path = params.get('path', [''])[0]
         result = {"status": "error", "message": "Invalid path"}
@@ -270,7 +270,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/hive/skill-analysis':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         ensure_schema(DATA_DIR)
         analysis_data = load_state('skill_analysis', {"proposals": []}) or {"proposals": []}
@@ -281,7 +281,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/hive/health/repair':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
@@ -309,7 +309,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/hive/activity':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             import re as _re
@@ -365,7 +365,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/hive/logs':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             ensure_schema(DATA_DIR)
@@ -378,7 +378,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/hive/health':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
 
         def check_exists(p):
@@ -430,7 +430,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/orchestrator/skill-chain':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             import sys as _sys
@@ -453,7 +453,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/orchestrator/status':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             KNOWN_AGENTS = ['claude', 'gemini', 'codex']
@@ -577,7 +577,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/superpowers/status':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         # Skills 2.0: .claude/skills/<name>/SKILL.md 구조로 감지
         # 구 시스템(.claude/commands/) 설치 여부도 함께 확인하여 마이그레이션 필요 판단
@@ -608,7 +608,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/skill-results':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             results_file = DATA_DIR / 'skill_results.jsonl'
@@ -631,7 +631,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/skill-ab-test':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             scripts_dir = str(Path(SCRIPTS_DIR))
@@ -649,7 +649,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/skill/predict':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             scripts_dir = str(Path(SCRIPTS_DIR))
@@ -671,7 +671,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/context-usage':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             claude_proj_dir = Path.home() / '.claude' / 'projects' / PROJECT_ID
@@ -714,7 +714,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/gemini-context-usage':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             gemini_chat_dir = Path.home() / '.gemini' / 'tmp' / PROJECT_ROOT.name / 'chats'
@@ -759,7 +759,7 @@ def handle_get(handler, path: str, params: dict,
     elif path == '/api/local-models':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         import urllib.request as _urllib
         result = {"hardware": {"ram_gb": 0, "gpus": []}, "models": [], "ollama_available": False, "error": None}
@@ -837,7 +837,7 @@ def handle_post(handler, path: str, data: dict,
     if path == '/api/hive/approve-skill':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             skill_name = data.get('skill_name')
@@ -878,7 +878,7 @@ def handle_post(handler, path: str, data: dict,
     elif path == '/api/orchestrator/skill-chain/update':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             import sys as _sys
@@ -900,7 +900,7 @@ def handle_post(handler, path: str, data: dict,
     elif path == '/api/orchestrator/run':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
@@ -922,7 +922,7 @@ def handle_post(handler, path: str, data: dict,
     elif path == '/api/superpowers/install':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         import shutil as _shutil
         try:
@@ -993,7 +993,7 @@ def handle_post(handler, path: str, data: dict,
     elif path == '/api/superpowers/uninstall':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         import shutil as _shutil
         try:

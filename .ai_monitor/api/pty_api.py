@@ -27,7 +27,7 @@ def set_pty_output_getter(getter) -> None:
 def _json_response(handler, payload, status=200) -> None:
     handler.send_response(status)
     handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', '*')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
     handler.end_headers()
     handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
 

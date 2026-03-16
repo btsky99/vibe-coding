@@ -23,7 +23,7 @@ def handle_get(handler, path: str, params: dict,
     if path == '/api/memory':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         q = params.get('q', [''])[0].strip()
         top_k = int(params.get('top', ['20'])[0])
@@ -40,7 +40,7 @@ def handle_get(handler, path: str, params: dict,
     if path == '/api/project-info':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         handler.wfile.write(json.dumps({
             'project_id': PROJECT_ID,
@@ -59,7 +59,7 @@ def handle_post(handler, path: str, data: dict,
     if path == '/api/memory/set':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             key = str(data.get('key', '')).strip()[:200]
@@ -98,7 +98,7 @@ def handle_post(handler, path: str, data: dict,
     if path == '/api/memory/delete':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             ensure_schema(DATA_DIR)
@@ -112,7 +112,7 @@ def handle_post(handler, path: str, data: dict,
         # 크로스 프로젝트 지식 공유 — 현재 프로젝트 메모리를 글로벌로 승격
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             key = str(data.get('key', '')).strip()
@@ -152,7 +152,7 @@ def handle_post(handler, path: str, data: dict,
     if path == '/api/memory/sync':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             ensure_schema(DATA_DIR)

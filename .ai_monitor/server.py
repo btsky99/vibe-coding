@@ -600,7 +600,7 @@ except ImportError:
 
 # 전역 상태 관리
 THOUGHT_LOGS = [] # AI 사고 과정 로그 (최근 50개 유지)
-THOUGHT_CLIENTS = set() # SSE 클라이언트 연결 리스트
+# THOUGHT_CLIENTS는 아래(라인 658 근처)에서 한 번만 선언 — 중복 선언 제거
 
 def _load_task_logs_into_thoughts():
     """서버 시작 시 task_logs.jsonl의 최근 20개 항목을 THOUGHT_LOGS에 미리 로드합니다.
@@ -1580,6 +1580,22 @@ AGENT_STATUS_LOCK = threading.Lock()
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
+    def _cors_origin(self) -> str:
+        """CORS Origin을 localhost/127.0.0.1만 허용하도록 반환합니다.
+
+        [보안 수정] 2026-03-17 Claude
+        - 기존: Access-Control-Allow-Origin: * (모든 도메인 허용)
+        - 수정: 요청의 Origin 헤더가 localhost/127.0.0.1일 때만 해당 Origin 반환
+        - 악성 웹페이지에서 localhost API로 fetch하는 CSRF 공격 차단
+        """
+        origin = self.headers.get('Origin', '')
+        if origin and any(origin.startswith(p) for p in (
+            'http://localhost', 'http://127.0.0.1',
+            'https://localhost', 'https://127.0.0.1',
+        )):
+            return origin
+        return f'http://localhost:{HTTP_PORT}'
+
     def do_GET(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
@@ -1601,7 +1617,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/events/thoughts':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
@@ -1634,7 +1650,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/events/agent':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
@@ -1670,7 +1686,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/events/fs':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
@@ -1695,7 +1711,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if parsed_path.path == '/stream':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'keep-alive')
             self.end_headers()
@@ -1766,13 +1782,13 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/heartbeat':
             # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
             self.send_response(200)
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             self.wfile.write(b"OK")
         elif parsed_path.path == '/api/projects':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             projects = []
             if PROJECTS_FILE.exists():
@@ -1787,14 +1803,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 실시간 에이전트 상태 목록 반환 (오케스트레이터용)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             with AGENT_STATUS_LOCK:
                 self.wfile.write(json.dumps(AGENT_STATUS, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/browse-folder':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 # PowerShell을 사용하여 폴더 선택창 띄우기
@@ -1817,7 +1833,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/config':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             config = {}
             if CONFIG_FILE.exists():
@@ -1829,7 +1845,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/drives':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             drives = []
             if os.name == 'nt':
@@ -1843,7 +1859,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/install-gemini-cli':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 # Gemini CLI 설치 (전역)
@@ -1855,7 +1871,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/install-claude-code':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 # Claude Code 설치 (전역)
@@ -1867,7 +1883,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/install-codex-cli':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 subprocess.Popen('cmd.exe /k "echo Installing Codex CLI... && npm install -g @openai/codex"', shell=True)
@@ -1878,7 +1894,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/register-codex-to-ai':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 python_cmds = _python_runner_cmds()
@@ -1952,14 +1968,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             body = json.dumps(items).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
         elif parsed_path.path == '/api/install-skills':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             query = parse_qs(parsed_path.query)
             target_path = query.get('path', [''])[0]
@@ -2177,7 +2193,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/hive/health/repair':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
@@ -2200,7 +2216,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/dirs':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             query = parse_qs(parsed_path.query)
             target_path = query.get('path', [''])[0]
@@ -2222,7 +2238,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/help':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             query = parse_qs(parsed_path.query)
             topic = query.get('topic', [''])[0]
@@ -2242,7 +2258,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 target_path = _validate_file_path(raw_path)
             except ValueError:
                 self.send_response(403)
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
                 self.end_headers()
                 return
             IMAGE_MIME = {
@@ -2258,7 +2274,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header('Content-Type', mime)
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             with open(target_path, 'rb') as f:
                 self.wfile.write(f.read())
@@ -2266,7 +2282,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/read-file':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             query = parse_qs(parsed_path.query)
             raw_path = query.get('path', [''])[0]
@@ -2295,7 +2311,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/check-update-ready':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             update_file = DATA_DIR / "update_ready.json"
             if update_file.exists():
@@ -2336,7 +2352,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/trigger-update-check':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             if not getattr(sys, 'frozen', False):
                 self.wfile.write(json.dumps({"started": False, "reason": "dev build"}).encode('utf-8'))
@@ -2351,7 +2367,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             query = parse_qs(parsed_path.query)
             target_path = query.get('path', [''])[0]
@@ -2372,7 +2388,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 에이전트 간 메시지 채널 목록 반환 (최신 100개, SQLite 연동)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 msgs = get_messages(100)
@@ -2383,7 +2399,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 공유 작업 큐 전체 목록 반환 — 현재 프로젝트 태스크만
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 tasks = list_tasks(project_id=_current_project_id())
@@ -2396,7 +2412,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # kanban_status 필드 우선, 없으면 status에서 매핑 (pending→todo 하위 호환)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 tasks = list_tasks(project_id=_current_project_id())
@@ -2425,7 +2441,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # SSE 스트림과 달리 JSONL 파일을 직접 읽어 즉시 반환합니다.
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             params    = parse_qs(parsed_path.query)
             _agent_f  = params.get('agent',       [''])[0].lower()
@@ -2459,7 +2475,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 응답: { "T1": [{agent, task, status, ts}, ...], "T2": [...], ... }
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 rows = run_pg_sql_csv(
@@ -2488,7 +2504,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 대시보드가 3초마다 폴링하여 터미널별 스킬 실행 흐름을 실시간 표시
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 _orch_dir = str(SCRIPTS_DIR)
@@ -2506,7 +2522,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 오케스트레이터 현황 — 에이전트 활동 상태, 태스크 분배, 최근 액션 로그 반환
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 KNOWN_AGENTS = ['claude', 'gemini', 'codex']
@@ -2642,7 +2658,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 배포 버전에서 어떤 DB를 바라보고 있는지 UI에서 확인할 수 있게 함
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 ensure_schema(DATA_DIR)
@@ -2706,7 +2722,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Origin', self._cors_origin())
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
@@ -2721,7 +2737,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/dashboard/launch':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 tab = 'agent'
@@ -2766,7 +2782,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 동일한 API(/api/orchestrator/skill-chain 등)를 통해 데이터 일관성 확보.
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
@@ -2801,7 +2817,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/graph/launch':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
@@ -2837,7 +2853,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/hive/log/pg':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -2856,7 +2872,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/hive/thought/pg':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -2876,7 +2892,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         if path == '/api/thoughts/add':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -2948,7 +2964,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # [파일 저장] 프론트엔드 VibeEditor/App.tsx 에서 POST로 호출
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -2975,7 +2991,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # [이름 변경] src -> dest — 경로 순회 방지 적용
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -2993,7 +3009,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # [생성] path, is_dir — 경로 순회 방지 적용
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3018,7 +3034,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # [삭제] path — 경로 순회 방지 적용
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3044,7 +3060,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # [업데이트 적용] — 응답 전송 후 비동기로 exe 교체 실행
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
 
             update_file = DATA_DIR / "update_ready.json"
@@ -3103,7 +3119,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 에이전트 실시간 상태 보고 수신
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3126,7 +3142,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 업데이트 확인 트리거 — do_GET과 동일 로직 (프론트엔드가 POST로 호출)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             if not getattr(sys, 'frozen', False):
                 self.wfile.write(json.dumps({"started": False, "reason": "dev build"}).encode('utf-8'))
@@ -3142,7 +3158,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3170,7 +3186,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/git/diff':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             query = parse_qs(parsed_path.query)
             target_file = query.get('path', [''])[0]
@@ -3189,7 +3205,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/projects':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
@@ -3278,7 +3294,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/hive/approve-skill':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3320,7 +3336,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/config/update':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3360,7 +3376,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/select-folder':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 import webview
@@ -3428,18 +3444,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                 
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json;charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "launched", "agent": agent}).encode('utf-8'))
             except Exception as e:
                 self.send_response(500)
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/send-command':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3463,7 +3479,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/locks':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3519,7 +3535,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 에이전트 간 메시지 전송 (SQLite 기반)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3588,7 +3604,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 메시지 채널 전체 삭제 (대시보드 UI 초기화용)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             ok = clear_messages()
             self.wfile.write(json.dumps({'status': 'ok' if ok else 'error'}).encode('utf-8'))
@@ -3596,7 +3612,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 새 작업 생성 — tasks.json 배열에 추가
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3649,7 +3665,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 기존 작업 상태/담당자 등 업데이트
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3677,7 +3693,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 작업 삭제 (id 기준 필터링)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3694,7 +3710,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 터미널이 태스크를 Claim — kanban_status=claimed, claimed_by=terminal_id로 업데이트
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3715,7 +3731,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 배포 버전에서 APPDATA DB에 있는 항목을 로컬 DB로 가져옴 (updated_at 기준 최신 우선)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 src_data_dir = DATA_DIR
@@ -3740,7 +3756,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 멀티모달 버그 감지 — 스크린샷을 Gemini Vision API로 분석
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3762,7 +3778,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (file store)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3797,7 +3813,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 공유 메모리 항목 삭제 (key 기준)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3812,7 +3828,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # Smithery API 키 저장
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3830,7 +3846,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # MCP 설치 — config 파일의 mcpServers 키에 엔트리 추가
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3878,7 +3894,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # MCP 제거 — config 파일의 mcpServers 에서 해당 키 삭제
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3917,7 +3933,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # Gemini: BASE_DIR 내장 → PROJECT_ROOT/.gemini/skills/ (프로젝트별)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -3976,7 +3992,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # Superpowers 제거 — tool: 'claude' | 'gemini'
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers['Content-Length'])
@@ -4007,7 +4023,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # body: {"step": 0, "status": "done", "summary": "...", "terminal_id": 1}
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 content_length = int(self.headers.get('Content-Length', 0))
@@ -4029,7 +4045,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 # scripts/orchestrator.py를 subprocess로 실행

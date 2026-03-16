@@ -26,7 +26,7 @@ def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
     if path == '/api/git/status':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         # ?path= 쿼리 파라미터로 대상 저장소 경로 지정, 없으면 프로젝트 루트
         git_path = params.get('path', [''])[0].strip() or str(BASE_DIR.parent)
@@ -98,7 +98,7 @@ def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
     elif path == '/api/git/log':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         git_path = params.get('path', [''])[0].strip() or str(BASE_DIR.parent)
         n = min(int(params.get('n', ['10'])[0]), 50)  # 최대 50개 제한
@@ -131,7 +131,7 @@ def handle_post(handler, path: str, data: dict, BASE_DIR: Path) -> bool:
     if path == '/api/git/rollback':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             file_path = data.get('file')
@@ -158,7 +158,7 @@ def handle_post(handler, path: str, data: dict, BASE_DIR: Path) -> bool:
     elif path == '/api/git/diff':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
             target_file = data.get('path', [''])[0] if isinstance(data, dict) and 'path' in data else ''
