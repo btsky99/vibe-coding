@@ -46,7 +46,7 @@ export default function MessageComposer({ onMessageSent }: MessageComposerProps)
         setMsgContent('');
         onMessageSent?.();
       })
-      .catch(() => {});
+      .catch((err) => console.error('[MessageComposer] fetch error:', err));
   };
 
   return (

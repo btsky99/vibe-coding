@@ -12,13 +12,14 @@ from datetime import datetime
 
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
+PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
 def run_query(sql: str):
     """psql을 통해 쿼리를 실행하고 결과를 반환합니다."""
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         res = subprocess.run(
-            [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
+            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )

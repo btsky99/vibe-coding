@@ -29,7 +29,7 @@ from src.pg_store import ensure_schema, get_memory, list_memory, migrate_legacy_
 
 
 PG_BIN = MONITOR_DIR / "bin" / "pgsql" / "bin" / "psql.exe"
-PG_PORT = 5433
+PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 DATA_DIR = MONITOR_DIR / "data"
 
 

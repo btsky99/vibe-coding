@@ -12,9 +12,7 @@
 import { useState, useEffect } from 'react';
 import { ClipboardList, Plus } from 'lucide-react';
 import { Task } from '../../types';
-
-// ─── API 기본 URL (포트를 동적으로 결정하여 개발/배포 환경 모두 대응) ──────────
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // ─── Props 타입 정의 ───────────────────────────────────────────────────────────
 interface TasksPanelProps {
@@ -61,7 +59,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
           const activeCount = list.filter(t => t.status !== 'done').length;
           onActiveCount(activeCount);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[TasksPanel] fetch error:', err));
     };
 
     fetchTasks();
@@ -96,7 +94,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
       })
       .then(res => res.json())
       .then((data: Task[]) => setTasks(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch((err) => console.error('[TasksPanel] fetch error:', err));
   };
 
   // ─── 작업 상태/필드 업데이트 ──────────────────────────────────────────────────
@@ -110,7 +108,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
       .then(() => fetch(`${API_BASE}/api/tasks`))
       .then(res => res.json())
       .then((data: Task[]) => setTasks(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch((err) => console.error('[TasksPanel] fetch error:', err));
   };
 
   // ─── 작업 삭제 ────────────────────────────────────────────────────────────────
@@ -124,7 +122,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
       .then(() => fetch(`${API_BASE}/api/tasks`))
       .then(res => res.json())
       .then((data: Task[]) => setTasks(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch((err) => console.error('[TasksPanel] fetch error:', err));
   };
 
   // ─── 필터 탭 메타 정보 ────────────────────────────────────────────────────────

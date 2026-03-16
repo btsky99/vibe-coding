@@ -196,7 +196,7 @@ def _ensure_postgres() -> None:
             return
         no_window = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         result = subprocess.run(
-            [str(_pg_bin), "-p", "5433", "-U", "postgres", "-d", "postgres",
+            [str(_pg_bin), "-p", str(os.environ.get('VIBE_PG_PORT', '5433')), "-U", "postgres", "-d", "postgres",
              "-c", "SELECT 1;", "--tuples-only"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=2, creationflags=no_window,

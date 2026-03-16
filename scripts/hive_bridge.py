@@ -35,6 +35,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 SERVER_URL = "http://localhost:9000"
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
+PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
 # 에이전트별 마지막 삽입된 thought id — reflect_to_pg parent_id 체인에 사용
 # (프로세스 수명 동안 인메모리 유지, 재시작 시 리셋됨)
@@ -53,18 +54,27 @@ def _call_api(path: str, data: dict) -> bool:
     except Exception:
         return False
 
-def _run_psql(sql: str) -> str:
+def _run_psql(sql: str, params: tuple = None) -> str:
     """psql.exe를 직접 호출하여 SQL을 실행하고 stdout을 반환합니다 (서버 미가동 시 폴백).
+
+    params를 지정하면 %s placeholder를 수동 이스케이프하여 SQL 인젝션 방지.
 
     Returns:
         str: psql stdout 출력 (RETURNING id 파싱 등에 활용), 실패 시 빈 문자열
     """
+    if params:
+        def _pg_escape(v):
+            if v is None:
+                return 'NULL'
+            s = str(v).replace("'", "''")
+            return f"'{s}'"
+        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
     if not os.path.exists(PG_BIN):
         return ''
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         res = subprocess.run(
-            [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql],
+            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", sql],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )
@@ -87,10 +97,11 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success"):
         print(f"[POSTGRES] Task logged via API: {task_summary[:50]}...")
         return
 
-    # 2. 서버 미가동 시 psql 직접 호출 폴백
-    safe_task = task_summary.replace("'", "''")
-    sql = f"INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES ('{agent_name}', '{_tid}', '{safe_task}', '{status}');"
-    if _run_psql(sql):
+    # 2. 서버 미가동 시 psql 직접 호출 폴백 — parameterized query로 인젝션 방지
+    if _run_psql(
+        "INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES (%s, %s, %s, %s);",
+        (agent_name, _tid, task_summary, status)
+    ):
         print(f"[POSTGRES] Task logged via PSQL: {task_summary[:50]}...")
     else:
         print(f"[ERROR] Failed to log task to Postgres.")
@@ -131,15 +142,20 @@ def log_thought(agent_name: str, skill: str, thought_dict: dict,
     except Exception:
         pass
 
-    # 2. 서버 미가동 시 psql 직접 호출 폴백
-    safe_thought = json.dumps(thought_dict, ensure_ascii=False).replace("'", "''")
+    # 2. 서버 미가동 시 psql 직접 호출 폴백 — parameterized query로 인젝션 방지
+    safe_thought = json.dumps(thought_dict, ensure_ascii=False)
     if parent_id:
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
-               f"VALUES ('{agent_name}', '{skill}', '{safe_thought}'::jsonb, {int(parent_id)}) RETURNING id;")
+        output = _run_psql(
+            "INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
+            "VALUES (%s, %s, %s::jsonb, %s) RETURNING id;",
+            (agent_name, skill, safe_thought, int(parent_id))
+        )
     else:
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought) "
-               f"VALUES ('{agent_name}', '{skill}', '{safe_thought}'::jsonb) RETURNING id;")
-    output = _run_psql(sql)
+        output = _run_psql(
+            "INSERT INTO pg_thoughts (agent, skill, thought) "
+            "VALUES (%s, %s, %s::jsonb) RETURNING id;",
+            (agent_name, skill, safe_thought)
+        )
     # RETURNING id 파싱 (psql 기본 출력: " id\n----\n 42\n(1 row)")
     for line in output.splitlines():
         line = line.strip()
@@ -206,7 +222,7 @@ def get_active_debate_context():
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         res = subprocess.run(
-            [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
+            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )

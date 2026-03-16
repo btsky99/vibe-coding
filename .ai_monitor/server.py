@@ -152,7 +152,7 @@ else:
 PG_BIN     = _PG_DIR / "bin" / "psql.exe"
 PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
 INITDB_BIN = _PG_DIR / "bin" / "initdb.exe"
-PG_PORT = 5433
+PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 
 # 배포 버전 DB 데이터 디렉터리: %APPDATA%\VibeCoding\pgdata
 # 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/data
@@ -217,8 +217,8 @@ def ensure_postgres_running():
         if "server is running" in status_res.stdout:
             print("[PG] 이미 실행 중")
             return
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[PG ERROR] pg_ctl status 확인: {e}")
 
     # 3) pg_ctl start
     print(f"[PG] PostgreSQL 시작 중 (port={PG_PORT})...")
@@ -245,8 +245,8 @@ def ensure_postgres_running():
                 if "server is running" in _chk.stdout:
                     _pg_ready = True
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # PG ready 폴링 중 일시적 실패 허용
         print(f"[PG] PostgreSQL 시작 완료 ({(_i+1)*100}ms 소요)")
 
         # 4) pgvector 확장 설치 시도
@@ -286,27 +286,38 @@ def ensure_postgres_running():
     except Exception as e:
         print(f"[PG] 시작 오류: {e}")
 
-def run_pg_sql(sql: str, db: str = "postgres"):
-    """PostgreSQL SQL 실행. psycopg2 우선, 미설치 시 psql.exe subprocess 폴백."""
+def run_pg_sql(sql: str, params: tuple = None, db: str = "postgres"):
+    """PostgreSQL SQL 실행. psycopg2 우선, 미설치 시 psql.exe subprocess 폴백.
+
+    params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
+    psycopg2: %s placeholder, psql 폴백: params가 있으면 psycopg2.sql.SQL로 렌더링 후 전달.
+    """
     # psycopg2 직접 연결 (쿼리당 ~1ms vs subprocess ~80ms)
     try:
         import psycopg2
         conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(sql, params)
             try:
                 rows = cur.fetchall()
                 # psql 텍스트 출력과 호환되는 형식으로 반환 (RETURNING id 등)
                 return '\n'.join(str(row[0]) for row in rows)
-            except Exception:
-                return ''
+            except Exception as e:
+                return ''  # 결과 없음 허용 (INSERT/UPDATE 등 반환값 없는 SQL)
     except ImportError:
         pass  # psycopg2 없으면 subprocess 폴백
     except Exception as e:
         print(f"[Postgres psycopg2 ERROR] {e}")
         return None
-    # psql.exe subprocess 폴백
+    # psql.exe subprocess 폴백 — params가 있으면 수동 이스케이프 (psql은 parameterized 미지원)
+    if params:
+        def _pg_escape(v):
+            if v is None:
+                return 'NULL'
+            s = str(v).replace("'", "''")
+            return f"'{s}'"
+        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
     if not PG_BIN.exists():
         return None
     try:
@@ -322,18 +333,14 @@ def run_pg_sql(sql: str, db: str = "postgres"):
         return None
 
 def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
-    """pg_logs 테이블에 로그 기록"""
-    # 모든 파라미터 SQL 이스케이프 — 인젝션 방지
-    safe_agent = agent.replace("'", "''")
-    safe_tid = terminal_id.replace("'", "''")
-    safe_task = task.replace("'", "''")
-    safe_status = status.replace("'", "''")
-    safe_proj = PROJECT_ID.replace("'", "''")
-    sql = f"INSERT INTO pg_logs (agent, terminal_id, task, status, project_id) VALUES ('{safe_agent}', '{safe_tid}', '{safe_task}', '{safe_status}', '{safe_proj}');"
-    run_pg_sql(sql)
+    """pg_logs 테이블에 로그 기록 — parameterized query로 SQL 인젝션 방지"""
+    run_pg_sql(
+        "INSERT INTO pg_logs (agent, terminal_id, task, status, project_id) VALUES (%s, %s, %s, %s, %s);",
+        (agent, terminal_id, task, status, PROJECT_ID)
+    )
     # PGMQ에도 동시에 쌓기 (실시간 큐)
-    mq_msg = json.dumps({"agent": safe_agent, "tid": safe_tid, "task": task, "status": status}, ensure_ascii=False).replace("'", "''")
-    run_pg_sql(f"SELECT pgmq.send('hive_queue', '{mq_msg}');")
+    mq_msg = json.dumps({"agent": agent, "tid": terminal_id, "task": task, "status": status}, ensure_ascii=False)
+    run_pg_sql("SELECT pgmq.send('hive_queue', %s::jsonb);", (mq_msg,))
 
 def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, project_id: str = None) -> int:
     """pg_thoughts 테이블에 사고 과정 기록 (JSONB).
@@ -347,18 +354,16 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, 
     Returns:
         int: 삽입된 행의 id (RETURNING id), 실패 시 0
     """
-    safe_thought = json.dumps(thought, ensure_ascii=True).replace("'", "''")
-    # 모든 파라미터 SQL 이스케이프 — 인젝션 방지
-    safe_agent = agent.replace("'", "''")
-    safe_skill = skill.replace("'", "''")
+    safe_thought = json.dumps(thought, ensure_ascii=True)
     # project_id 미지정 시 전역 PROJECT_ID 사용
-    _proj_id = (project_id or PROJECT_ID).replace("'", "''")
+    _proj_id = project_id or PROJECT_ID
 
     # parent_id 미지정 시 같은 에이전트+프로젝트의 직전 thought를 자동으로 부모로 설정
     # 이 덕분에 hive_bridge.py가 매번 새 프로세스로 호출되어도 연결선이 끊기지 않음
     if not parent_id:
         prev_result = run_pg_sql(
-            f"SELECT id FROM pg_thoughts WHERE agent='{safe_agent}' AND project_id='{_proj_id}' ORDER BY id DESC LIMIT 1;"
+            "SELECT id FROM pg_thoughts WHERE agent=%s AND project_id=%s ORDER BY id DESC LIMIT 1;",
+            (agent, _proj_id)
         )
         try:
             for line in (prev_result or '').splitlines():
@@ -366,28 +371,36 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, 
                 if line.isdigit():
                     parent_id = int(line)
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            pass  # parent_id 파싱 실패 허용 — 부모 없이 삽입 진행
 
     if parent_id:
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, parent_id, project_id) "
-               f"VALUES ('{safe_agent}', '{safe_skill}', '{safe_thought}'::jsonb, {int(parent_id)}, '{_proj_id}') RETURNING id;")
+        result = run_pg_sql(
+            "INSERT INTO pg_thoughts (agent, skill, thought, parent_id, project_id) "
+            "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id;",
+            (agent, skill, safe_thought, int(parent_id), _proj_id)
+        )
     else:
-        sql = (f"INSERT INTO pg_thoughts (agent, skill, thought, project_id) "
-               f"VALUES ('{safe_agent}', '{safe_skill}', '{safe_thought}'::jsonb, '{_proj_id}') RETURNING id;")
-    result = run_pg_sql(sql)
+        result = run_pg_sql(
+            "INSERT INTO pg_thoughts (agent, skill, thought, project_id) "
+            "VALUES (%s, %s, %s::jsonb, %s) RETURNING id;",
+            (agent, skill, safe_thought, _proj_id)
+        )
     # RETURNING id 출력 파싱: psql --csv가 아닌 기본 출력 형식 → " id\n----\n 42\n(1 row)" 형태
     try:
         for line in (result or '').splitlines():
             line = line.strip()
             if line.isdigit():
                 return int(line)
-    except Exception:
-        pass
+    except Exception as e:
+        pass  # RETURNING id 파싱 실패 — 0 반환
     return 0
 
-def run_pg_sql_csv(sql: str, db: str = "postgres") -> list:
-    """Postgres 쿼리 결과를 dict 리스트로 반환. psycopg2 우선, 없으면 psql --csv 폴백."""
+def run_pg_sql_csv(sql: str, params: tuple = None, db: str = "postgres") -> list:
+    """Postgres 쿼리 결과를 dict 리스트로 반환. psycopg2 우선, 없으면 psql --csv 폴백.
+
+    params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
+    """
     # psycopg2 직접 연결 (RealDictCursor로 dict 반환)
     try:
         import psycopg2
@@ -395,14 +408,21 @@ def run_pg_sql_csv(sql: str, db: str = "postgres") -> list:
         conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
         conn.autocommit = True
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql)
+            cur.execute(sql, params)
             return [dict(row) for row in cur.fetchall()]
     except ImportError:
         pass
     except Exception as e:
         print(f"[Postgres psycopg2 CSV ERROR] {e}")
         return []
-    # psql.exe --csv 폴백
+    # psql.exe --csv 폴백 — params가 있으면 수동 이스케이프
+    if params:
+        def _pg_escape(v):
+            if v is None:
+                return 'NULL'
+            s = str(v).replace("'", "''")
+            return f"'{s}'"
+        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
     if not PG_BIN.exists():
         return []
     try:
@@ -435,8 +455,8 @@ if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() not in ("u
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+    except Exception as e:
+        pass  # stdout/stderr UTF-8 래핑 실패 — 원본 스트림 유지
 
 # [수정] pythonw.exe로 실행 시(터미널 없음) 에러 로그를 파일로 기록하도록 개선
 if sys.stdout is None or sys.stderr is None:
@@ -447,8 +467,8 @@ if sys.stdout is None or sys.stderr is None:
         sys.stdout = _f
         sys.stderr = _f
         print(f"\n--- Server Started (Log Redirected) at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
-    except Exception:
-        pass
+    except Exception as e:
+        pass  # stdout/stderr 리다이렉트 실패 — 터미널 없는 환경에서 로깅 불가
 
 # 전역 소켓 타임아웃 제거 (SSE 등 장기 연결 방해 요소)
 # socket.setdefaulttimeout(60)  <-- 제거됨
@@ -534,8 +554,8 @@ def _load_task_logs_into_thoughts():
                     'timestamp': obj.get('timestamp', ''),
                     'level':     'info',
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # 개별 task_log 항목 파싱 실패 허용
         print(f"[*] ThoughtTrace: {len(recent)}개 task_logs 항목 사전 로드 완료")
     except Exception as e:
         print(f"[!] ThoughtTrace 사전 로드 실패: {e}")
@@ -586,11 +606,11 @@ def _agent_broadcast_worker():
             for cq in cq_snapshot:
                 try:
                     cq.put_nowait(msg)
-                except Exception:
+                except Exception as e:
                     pass  # 클라이언트 큐 가득 참 등 무시
         except _Empty:
             pass  # 1초 타임아웃 — 정상, 계속 대기
-        except Exception:
+        except Exception as e:
             pass  # 기타 오류 무시 후 재시도
 
 class FSChangeHandler(FileSystemEventHandler):
@@ -621,8 +641,8 @@ class FSChangeHandler(FileSystemEventHandler):
                 client.connection.settimeout(1.0)
                 client.wfile.write(msg.encode('utf-8'))
                 client.wfile.flush()
-            except Exception:
-                disconnected.append(client)
+            except Exception as e:
+                disconnected.append(client)  # SSE FS 클라이언트 연결 끊김
         if disconnected:
             with _SSE_LOCK:
                 for d in disconnected:
@@ -722,8 +742,8 @@ if getattr(sys, 'frozen', False):
                     _first = Path(str(_saved_projs[0]).replace('/', os.sep))
                     if _first.exists():
                         _root_candidate = _first
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[FILE ERROR] projects.json 로드: {e}")
     PROJECT_ROOT = _root_candidate
     # PROJECT_ROOT 확정 후 DATA_DIR 재설정
     # 프로젝트 로컬에 .ai_monitor/data가 있으면 그걸 쓰고(개발 클론 등), 없으면 APPDATA 공유 디렉토리 사용
@@ -823,8 +843,8 @@ def _backfill_thought_parent_ids():
             "  AND t.parent_id IS NULL;"
         )
         run_pg_sql(backfill_sql)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[PG ERROR] backfill_thought_parent_ids: {e}")
 
 # [성능] 모듈 로드 시 동기 실행 시 psql.exe subprocess 생성 ~400ms 소요
 # → 백그라운드 스레드로 지연 실행하여 서버 기동 시간 단축
@@ -841,8 +861,8 @@ def _legacy_memory_data_dir() -> Path:
                 if local_dir.exists():
                     ensure_legacy_store(local_dir)
                     return local_dir
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[FILE ERROR] legacy_memory_data_dir 탐색: {e}")
     return DATA_DIR
 
 
@@ -898,8 +918,8 @@ def _cosine_sim(a_bytes: bytes, b_bytes: bytes) -> float:
         b = np.frombuffer(b_bytes, dtype=np.float32)
         denom = np.linalg.norm(a) * np.linalg.norm(b)
         return float(np.dot(a, b) / denom) if denom > 1e-10 else 0.0
-    except Exception:
-        return 0.0
+    except Exception as e:
+        return 0.0  # 벡터 유사도 계산 실패 — 0.0 반환
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── 에이전트 메모리 워처 ──────────────────────────────────────────────────────
@@ -1214,9 +1234,33 @@ def _current_project_root() -> Path:
             lp = cfg.get('last_path', '')
             if lp and Path(lp).is_dir():
                 return Path(lp)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[FILE ERROR] _current_project_root config 로드: {e}")
     return PROJECT_ROOT
+
+
+def _validate_file_path(raw_path: str) -> Path:
+    """파일 경로 검증 — 경로 순회(../) 방지.
+
+    resolve()로 심볼릭 링크/상대경로를 정규화한 후,
+    현재 프로젝트 루트 또는 허용된 시스템 경로 하위인지 확인합니다.
+    검증 실패 시 ValueError를 발생시킵니다.
+
+    Returns:
+        Path: 검증 완료된 절대 경로
+    """
+    if not raw_path:
+        raise ValueError("Path is required")
+    resolved = Path(raw_path).resolve()
+    project_root = _current_project_root().resolve()
+    # 프로젝트 루트 하위 또는 APPDATA(설정 파일) 경로 허용
+    _allowed_roots = [project_root]
+    _appdata = os.environ.get('APPDATA')
+    if _appdata:
+        _allowed_roots.append(Path(_appdata).resolve())
+    if not any(str(resolved).startswith(str(r)) for r in _allowed_roots):
+        raise ValueError(f"Access denied: path outside allowed directories: {resolved}")
+    return resolved
 
 
 def _current_project_id() -> str:
@@ -1246,8 +1290,8 @@ def _codex_main_model() -> str:
             legacy = cfg.get('codex_main_model', '')
             if isinstance(legacy, str) and legacy.strip():
                 return legacy.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[FILE ERROR] _codex_main_model config 로드: {e}")
 
     return ''
 
@@ -1292,8 +1336,8 @@ def _smithery_api_key() -> str:
     if _SMITHERY_CFG.exists():
         try:
             return json.loads(_SMITHERY_CFG.read_text(encoding='utf-8')).get('api_key', '')
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[FILE ERROR] smithery_config.json 로드: {e}")
     return ''
 
 
@@ -1322,8 +1366,8 @@ def _parse_session_tail(path: Path):
         for line in reversed(lines):
             try:
                 obj = json.loads(line)
-            except Exception:
-                continue
+            except Exception as e:
+                continue  # JSONL 개별 행 파싱 실패 허용
 
             # 세션 메타 수집 (처음 발견 시만 기록)
             if not session_id and obj.get('sessionId'):
@@ -1363,7 +1407,8 @@ def _parse_session_tail(path: Path):
             'last_ts':      last_ts,
             'cwd':          str(cwd).replace('\\', '/'),
         }
-    except Exception:
+    except Exception as e:
+        print(f"[FILE ERROR] _parse_session_tail: {e}")
         return None
 
 
@@ -1410,7 +1455,8 @@ def _parse_gemini_session(path: Path):
             'last_ts':      last_updated,
             'cwd':          '',
         }
-    except Exception:
+    except Exception as e:
+        print(f"[FILE ERROR] _parse_gemini_session: {e}")
         return None
 
 
@@ -1493,8 +1539,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                     time.sleep(30) # 하트비트 주기를 30초로 완화
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # SSE thought 클라이언트 연결 끊김
             finally:
                 with _SSE_LOCK:
                     THOUGHT_CLIENTS.discard(self)
@@ -1522,17 +1568,17 @@ class SSEHandler(BaseHTTPRequestHandler):
                         try:
                             self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
                             self.wfile.flush()
-                        except Exception:
+                        except Exception as e:
                             break  # 클라이언트 연결 끊김
                     except _QEmpty:
                         # 큐 비어있으면 하트비트 전송 (연결 유지)
                         try:
                             self.wfile.write(b": heartbeat\n\n")
                             self.wfile.flush()
-                        except Exception:
+                        except Exception as e:
                             break  # 클라이언트 연결 끊김
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # SSE agent 클라이언트 연결 끊김
             finally:
                 with _SSE_LOCK:
                     AGENT_CLIENTS.discard(client_q)
@@ -1557,8 +1603,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                     time.sleep(30) # 하트비트 주기를 30초로 완화
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # SSE FS 클라이언트 연결 끊김
             finally:
                 with _SSE_LOCK:
                     FS_CLIENTS.discard(self)
@@ -1818,8 +1864,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             # 폴더 우선 정렬
             try:
                 items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[ERROR] /api/files 정렬 실패: {e}")
 
             body = json.dumps(items).encode('utf-8')
             self.send_response(200)
@@ -1900,7 +1946,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                                 if 'next' in deps: tech_hints.append('Next.js')
                                 if 'vite' in deps or 'vite' in str(pkg.get('devDependencies', {})): tech_hints.append('Vite')
                                 if 'typescript' in str(pkg.get('devDependencies', {})): tech_hints.append('TypeScript')
-                            except Exception: pass
+                            except Exception as e: pass  # package.json 파싱 실패 허용
                             if not tech_hints: tech_hints.append('Node.js')
                         if (proj_root / 'requirements.txt').exists() or (proj_root / 'pyproject.toml').exists():
                             tech_hints.append('Python')
@@ -2083,8 +2129,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                         # .으로 시작하는 숨김 폴더 중 주요 설정 폴더는 허용
                         if entry.is_dir() and (not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github')):
                             dirs.append({"name": entry.name, "path": entry.path.replace('\\', '/')})
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[FILE ERROR] /api/dirs scandir: {e}")
             dirs.sort(key=lambda x: x['name'].lower())
             try:
                 self.wfile.write(json.dumps(dirs).encode('utf-8'))
@@ -2109,15 +2155,22 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         elif parsed_path.path == '/api/image-file':
             query = parse_qs(parsed_path.query)
-            target_path = query.get('path', [''])[0]
+            raw_path = query.get('path', [''])[0]
+            try:
+                target_path = _validate_file_path(raw_path)
+            except ValueError:
+                self.send_response(403)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                return
             IMAGE_MIME = {
                 'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
                 'gif': 'image/gif', 'webp': 'image/webp', 'svg': 'image/svg+xml',
                 'bmp': 'image/bmp', 'ico': 'image/x-icon',
             }
-            ext = target_path.rsplit('.', 1)[-1].lower() if '.' in target_path else ''
+            ext = str(target_path).rsplit('.', 1)[-1].lower() if '.' in str(target_path) else ''
             mime = IMAGE_MIME.get(ext, 'application/octet-stream')
-            if not target_path or not os.path.exists(target_path) or not os.path.isfile(target_path):
+            if not target_path.exists() or not target_path.is_file():
                 self.send_response(404)
                 self.end_headers()
                 return
@@ -2134,9 +2187,16 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             query = parse_qs(parsed_path.query)
-            target_path = query.get('path', [''])[0]
+            raw_path = query.get('path', [''])[0]
 
-            if not target_path or not os.path.exists(target_path) or not os.path.isfile(target_path):
+            # 경로 순회 방지 — resolve() 후 프로젝트 루트 하위인지 검증
+            try:
+                target_path = _validate_file_path(raw_path)
+            except ValueError as e:
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+
+            if not target_path.exists() or not target_path.is_file():
                 self.wfile.write(json.dumps({"error": "File not found or invalid path"}).encode('utf-8'))
                 return
 
@@ -2245,7 +2305,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 tasks = list_tasks(project_id=_current_project_id())
-            except Exception:
+            except Exception as e:
+                print(f"[PG ERROR] /api/tasks list_tasks: {e}")
                 tasks = []
             self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/tasks/kanban':
@@ -2257,7 +2318,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 tasks = list_tasks(project_id=_current_project_id())
-            except Exception:
+            except Exception as e:
+                print(f"[PG ERROR] /api/tasks/kanban list_tasks: {e}")
                 tasks = []
             columns: dict = {'todo': [], 'claimed': [], 'in_progress': [], 'review': [], 'done': []}
             for t in tasks:
@@ -2306,8 +2368,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                         _results.append(_entry)
                         if len(_results) >= _limit:
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        pass  # JSONL 개별 행 파싱 실패 허용
             # 시간순으로 정렬하여 반환 (최신 순 → 오래된 순)
             self.wfile.write(json.dumps(_results, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/kanban/pg-activity':
@@ -2318,13 +2380,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             try:
-                _safe_proj = _current_project_id().replace("'", "''")
                 rows = run_pg_sql_csv(
                     "SELECT terminal_id, agent, task, status, "
                     "to_char(ts, 'HH24:MI:SS') AS ts "
                     "FROM pg_logs "
-                    f"WHERE ts > NOW() - INTERVAL '8 hours' AND (project_id='{_safe_proj}' OR project_id='') "
-                    "ORDER BY ts DESC LIMIT 300"
+                    "WHERE ts > NOW() - INTERVAL '8 hours' AND (project_id=%s OR project_id='') "
+                    "ORDER BY ts DESC LIMIT 300",
+                    (_current_project_id(),)
                 )
                 # 터미널별 그룹화 (최대 15개/터미널)
                 by_terminal: dict = {}
@@ -2431,7 +2493,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                                 'state': 'idle' if idle > IDLE_SEC else 'active',
                                 'last_seen': seen, 'idle_sec': idle
                             }
-                        except Exception:
+                        except Exception as e:
                             agent_status[agent] = {'state': 'unknown', 'last_seen': seen, 'idle_sec': None}
 
                 # 태스크 분배 현황
@@ -2454,8 +2516,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                     for line in reversed(orch_log.read_text(encoding='utf-8').strip().splitlines()[-20:]):
                         try:
                             recent_actions.append(json.loads(line))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            pass  # orchestrator_log JSONL 개별 행 파싱 실패 허용
                 if not recent_actions:
                     # task_logs.jsonl에서 최근 20개 폴백 — 에이전트 활동 이력으로 표시
                     task_log_file = DATA_DIR / 'task_logs.jsonl'
@@ -2469,8 +2531,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                                     'detail': entry.get('task', ''),
                                     'timestamp': entry.get('timestamp', ''),
                                 })
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                pass  # task_logs JSONL 개별 행 파싱 실패 허용
 
                 # 현재 경고
                 warnings: list = []
@@ -2811,25 +2873,24 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(self.rfile.read(content_length).decode('utf-8'))
                 raw_path = data.get('path')
                 content = data.get('content', '')
-                
-                if not raw_path:
-                    self.wfile.write(json.dumps({"status": "error", "message": "Path is required"}).encode('utf-8'))
-                    return
-                
-                target_path = Path(raw_path).resolve()
+
+                # 경로 순회 방지 — resolve() 후 허용된 디렉터리 하위인지 검증
+                target_path = _validate_file_path(raw_path)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 with open(target_path, 'w', encoding='utf-8') as f:
                     f.write(content)
-                
+
                 print(f"💾 [File Saved] {target_path}")
                 self.wfile.write(json.dumps({"status": "success", "path": str(target_path)}).encode('utf-8'))
+            except ValueError as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             except Exception as e:
                 print(f"❌ [Save Error] {e}")
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/file-rename':
-            # [이름 변경] src -> dest
+            # [이름 변경] src -> dest — 경로 순회 방지 적용
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2837,19 +2898,17 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 content_length = int(self.headers['Content-Length'])
                 data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                src = data.get('src')
-                dest = data.get('dest')
-                if not src or not dest:
-                    self.wfile.write(json.dumps({"status": "error", "message": "src and dest are required"}).encode('utf-8'))
-                    return
-                # 경로 정규화 및 이름 변경
-                os.rename(Path(src), Path(dest))
+                src = _validate_file_path(data.get('src', ''))
+                dest = _validate_file_path(data.get('dest', ''))
+                os.rename(src, dest)
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except ValueError as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/files/create':
-            # [생성] path, is_dir
+            # [생성] path, is_dir — 경로 순회 방지 적용
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2857,27 +2916,24 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 content_length = int(self.headers['Content-Length'])
                 data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                target_path = data.get('path')
+                p = _validate_file_path(data.get('path', ''))
                 is_dir = data.get('is_dir', False)
-                
-                if not target_path:
-                    self.wfile.write(json.dumps({"status": "error", "message": "Path is required"}).encode('utf-8'))
-                    return
-                
-                p = Path(target_path)
+
                 if is_dir:
                     p.mkdir(parents=True, exist_ok=True)
                 else:
                     p.parent.mkdir(parents=True, exist_ok=True)
                     if not p.exists():
                         p.write_text("", encoding="utf-8")
-                
+
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except ValueError as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/files/delete':
-            # [삭제] path
+            # [삭제] path — 경로 순회 방지 적용
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2885,18 +2941,20 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 content_length = int(self.headers['Content-Length'])
                 data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                target_path = data.get('path')
-                
-                if not target_path or not os.path.exists(target_path):
+                target_path = _validate_file_path(data.get('path', ''))
+
+                if not target_path.exists():
                     self.wfile.write(json.dumps({"status": "error", "message": "Path not found"}).encode('utf-8'))
                     return
-                
-                if os.path.isdir(target_path):
+
+                if target_path.is_dir():
                     shutil.rmtree(target_path)
                 else:
                     os.remove(target_path)
-                
+
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+            except ValueError as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
@@ -3256,21 +3314,34 @@ class SSEHandler(BaseHTTPRequestHandler):
                 agent = data.get('agent')
                 target_dir = data.get('path', 'C:\\')
                 is_yolo = data.get('yolo', False)
-                
+
+                # 경로 검증 — 커맨드 인젝션 방지: 실제 존재하는 디렉터리만 허용
+                _resolved_dir = Path(target_dir).resolve()
+                if not _resolved_dir.is_dir():
+                    raise ValueError(f"Invalid directory: {target_dir}")
+                _safe_dir = str(_resolved_dir)
+                # 셸 메타 문자 차단 (& | ; ` $ 등)
+                import re as _re_launch
+                if _re_launch.search(r'[&|;`$<>!]', _safe_dir):
+                    raise ValueError(f"Directory path contains invalid characters: {_safe_dir}")
+
                 if agent == 'claude':
                     yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
-                    cmd = f'start "Claude Code" cmd.exe /k "cd /d {target_dir} && title [Claude Code] && echo Launching Claude Code... && claude{yolo_flag}"'
+                    cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title [Claude Code] && echo Launching Claude Code... && claude{yolo_flag}"'
                 elif agent == 'gemini':
                     yolo_flag = " --yolo" if is_yolo else ""
-                    cmd = f'start "Gemini CLI" cmd.exe /k "cd /d {target_dir} && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
+                    cmd = f'start "Gemini CLI" cmd.exe /k "cd /d "{_safe_dir}" && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
                     model_name = _codex_main_model()
+                    # 모델명도 안전 문자만 허용 (영문, 숫자, -, _, /, :, .)
+                    if model_name and not _re_launch.match(r'^[a-zA-Z0-9\-_/:.]+$', model_name):
+                        model_name = None
                     model_flag = f' --model {model_name}' if model_name else ""
-                    cmd = f'start "Codex CLI" cmd.exe /k "cd /d {target_dir} && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}{model_flag}"'
+                    cmd = f'start "Codex CLI" cmd.exe /k "cd /d "{_safe_dir}" && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}{model_flag}"'
                 else:
-                    cmd = f'start "Terminal" cmd.exe /k "cd /d {target_dir}"'
-                
+                    cmd = f'start "Terminal" cmd.exe /k "cd /d "{_safe_dir}""'
+
                 subprocess.Popen(cmd, shell=True)
                 
                 self.send_response(200)

@@ -57,12 +57,12 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
     fetch(`${API_BASE}/api/drives`)
       .then(res => res.json())
       .then(data => setDrives(data))
-      .catch(() => {});
+      .catch((err) => console.error('[FileExplorer] fetch error:', err));
 
     fetch(`${API_BASE}/api/projects`)
       .then(res => res.json())
       .then(data => { if (Array.isArray(data)) setRecentProjects(data); })
-      .catch(() => {});
+      .catch((err) => console.error('[FileExplorer] fetch error:', err));
 
     fetch(`${API_BASE}/api/config`)
       .then(res => res.json())
@@ -82,7 +82,7 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ last_path: currentPath })
-    }).catch(() => {});
+    }).catch((err) => console.error('[FileExplorer] fetch error:', err));
 
     // 드라이브 루트가 아닌 실제 프로젝트 경로만 최근 목록에 저장
     const isDriveRoot = /^[A-Za-z]:\/+$/.test(currentPath);
@@ -94,7 +94,7 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
       })
         .then(res => res.json())
         .then(data => { if (Array.isArray(data.projects)) setRecentProjects(data.projects); })
-        .catch(() => {});
+        .catch((err) => console.error('[FileExplorer] fetch error:', err));
     }
 
     // 경로 변경 시 트리 접힘 초기화
@@ -117,7 +117,7 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
       .then(data => {
         if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [parentPath]: data }));
       })
-      .catch(() => {});
+      .catch((err) => console.error('[FileExplorer] fetch error:', err));
   };
 
   // currentPath 변경 또는 외부 refreshKey 증가 시 항목 목록 재요청
@@ -156,7 +156,7 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
           .then(data => {
             if (Array.isArray(data)) setTreeChildren(prev => ({ ...prev, [path]: data }));
           })
-          .catch(() => {});
+          .catch((err) => console.error('[FileExplorer] fetch error:', err));
       }
     }
   };

@@ -1,88 +1,60 @@
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: 하이브 마인드 고도화 및 신규 기능 구현 로드맵
+DESCRIPTION: 프로젝트 전체 보안/성능/품질 고도화 로드맵
 REVISION HISTORY:
-- 2026-03-13 Claude: Skills 2.0 전체 마이그레이션 + vibe-security 신규 추가 계획으로 교체
-- 2026-03-13 Claude: [오케스트레이터] 전체 태스크 완료 상태 확인 및 계획 동기화
+- 2026-03-16 Claude: P0 보안 5건 + P1 성능/안정성 5건 전부 완료
+- 2026-03-16 Claude: P0 보안 + P1 성능/안정성 + P2 코드품질 고도화 계획 수립
 -->
 
-# 📋 Skills 2.0 전체 마이그레이션 + vibe-security 신규 추가
+# 📋 프로젝트 보안/성능/품질 고도화 (v3.7.79)
 
-**작성일:** 2026-03-13
-**목표:** .claude/commands/*.md → .claude/skills/<name>/SKILL.md 전환 (10개) + 오케스트레이터 레지스트리 갱신
-
----
-
-## 태스크 목록
-
-[x] Task 1: vibe-debug 마이그레이션
-    파일: .claude/skills/vibe-debug/SKILL.md
-    방법: .claude/commands/vibe-debug.md 내용 복사 + 프론트매터 allowed-tools 완전판(Read,Bash,Grep,Glob,Edit) 추가
-    검증: .claude/skills/vibe-debug/SKILL.md 존재 확인
-
-[x] Task 2: vibe-tdd 마이그레이션
-    파일: .claude/skills/vibe-tdd/SKILL.md
-    방법: .claude/commands/vibe-tdd.md 복사 + 프론트매터 갱신(allowed-tools: Read,Write,Bash,Edit)
-    검증: .claude/skills/vibe-tdd/SKILL.md 존재 확인
-
-[x] Task 3: vibe-brainstorm 마이그레이션
-    파일: .claude/skills/vibe-brainstorm/SKILL.md
-    방법: .claude/commands/vibe-brainstorm.md 복사 + 프론트매터 갱신(allowed-tools: Read,Write,Bash,Glob)
-    검증: .claude/skills/vibe-brainstorm/SKILL.md 존재 확인
-
-[x] Task 4: vibe-write-plan 마이그레이션
-    파일: .claude/skills/vibe-write-plan/SKILL.md
-    방법: .claude/commands/vibe-write-plan.md 복사 + 프론트매터 갱신(allowed-tools: Read,Write)
-    검증: .claude/skills/vibe-write-plan/SKILL.md 존재 확인
-
-[x] Task 5: vibe-execute-plan 마이그레이션
-    파일: .claude/skills/vibe-execute-plan/SKILL.md
-    방법: .claude/commands/vibe-execute-plan.md 복사 + 프론트매터 갱신(allowed-tools: Read,Write,Bash,Edit,Glob,Grep)
-    검증: .claude/skills/vibe-execute-plan/SKILL.md 존재 확인
-
-[x] Task 6: vibe-code-review 마이그레이션
-    파일: .claude/skills/vibe-code-review/SKILL.md
-    방법: .claude/commands/vibe-code-review.md 복사 + 프론트매터 갱신(allowed-tools: Read,Bash,Grep,Glob)
-    검증: .claude/skills/vibe-code-review/SKILL.md 존재 확인
-
-[x] Task 7: vibe-release 마이그레이션
-    파일: .claude/skills/vibe-release/SKILL.md
-    방법: .claude/commands/vibe-release.md 복사 + 프론트매터 갱신(allowed-tools: Bash,Read,Edit)
-    검증: .claude/skills/vibe-release/SKILL.md 존재 확인
-
-[x] Task 8: vibe-heal 마이그레이션 (context: fork 적용)
-    파일: .claude/skills/vibe-heal/SKILL.md, .claude/skills/vibe-heal/known-patterns.md
-    방법: .claude/commands/vibe-heal.md 복사 + context: fork + agent: general-purpose 추가
-          known-patterns.md에 현재까지 알려진 반복 패턴 목록 작성
-    검증: 프론트매터에 context: fork 포함 확인
-
-[x] Task 9: vibe-orchestrate 마이그레이션
-    파일: .claude/skills/vibe-orchestrate/SKILL.md, .claude/skills/vibe-orchestrate/skill-chain-guide.md
-    방법: .claude/commands/vibe-orchestrate.md 복사 + 프론트매터 갱신
-          skill-chain-guide.md에 plan/update/done 명령 레퍼런스 작성
-    검증: .claude/skills/vibe-orchestrate/SKILL.md 존재 확인
-
-[x] Task 10: vibe-security 신규 스킬 생성 (OWASP 보안 점검)
-    파일: .claude/skills/vibe-security/SKILL.md, .claude/skills/vibe-security/owasp-checklist.md
-    방법: OWASP Top 10 기반 4단계 보안 점검 스킬 신규 작성
-          Use when: "보안 점검", "취약점", "OWASP", 배포 전 보안 검토 요청 시
-    검증: /vibe-security 호출 가능 확인
-
-[x] Task 11: skill_orchestrator.py 레지스트리에 vibe-security 추가
-    파일: scripts/skill_orchestrator.py
-    방법: SKILL_REGISTRY에 {"num": 9, "name": "vibe-security", "short": "security"} 추가
-    의존성: Task 10 완료 후
-    검증: python scripts/skill_orchestrator.py status 출력에 vibe-security 포함 확인
-
-[x] Task 12: .claude/commands/ 폴더 삭제
-    파일: .claude/commands/ (폴더 전체 삭제)
-    방법: Task 1~9 모두 완료 확인 후 .claude/commands/ 폴더 삭제
-    의존성: Task 1~9 완료 후
-    검증: .claude/commands/ 없음, .claude/skills/ 10개 폴더 존재
+**작성일:** 2026-03-16
+**목표:** P0 보안 취약점 수정 → P1 성능/안정성 개선 → P2 코드 품질 향상
 
 ---
 
-## 의존성
-- Task 1~10: 병렬 실행 가능
-- Task 11: Task 10 완료 후
-- Task 12: Task 1~9 완료 후
+## 🔴 P0: 보안 수정 (Critical) — ✅ 전부 완료
+
+[x] Task 1: SQL 인젝션 수정 — server.py parameterized query 전환
+    run_pg_sql() / run_pg_sql_csv()에 params 인자 추가, log_to_pg() / thought_to_pg() 전환
+
+[x] Task 2: SQL 인젝션 수정 — hive_bridge.py parameterized query 전환
+    _run_psql()에 params 인자 추가, log_task() / log_thought() 전환
+
+[x] Task 3: 커맨드 인젝션 수정 — /api/launch
+    경로 검증(is_dir) + 셸 메타문자 차단 + 모델명 안전문자 검증 추가
+
+[x] Task 4: 경로 순회 수정 — 파일 접근 API 보안 강화
+    _validate_file_path() 헬퍼 추가 — 6개 API 엔드포인트 적용
+    (/api/read-file, /api/image-file, /api/save-file, /api/files/delete, /api/file-rename, /api/files/create)
+
+[x] Task 5: psycopg2 의존성 등록
+    requirements.txt에 psycopg2-binary==2.9.9 추가
+
+## 🟡 P1: 성능/안정성 개선 — ✅ 전부 완료
+
+[x] Task 6: 프론트엔드 에러 핸들링 — .catch(() => {}) 제거
+    15개 파일, 57개 인스턴스 → console.error 로깅 교체
+
+[x] Task 7: API_BASE 중복 제거 — constants.ts 통일
+    9개 파일의 로컬 API_BASE 정의 삭제, constants.tsx import로 통일
+
+[x] Task 8: server.py bare except 정리
+    34개 bare except → 에러 로깅 추가 (PG/FILE/일반 카테고리별)
+
+[x] Task 9: PG 포트 하드코딩 통합 — 환경변수 VIBE_PG_PORT
+    13개 파일의 5433 하드코딩 → os.environ.get('VIBE_PG_PORT', '5433') 통일
+
+[x] Task 10: ISS 파일 통합 — 중복 제거
+    .ai_monitor/installer.iss 삭제, CI → vibe-coding-setup.iss 통일, #ifndef 파라미터 지원
+
+---
+
+## 변경 요약
+- **server.py**: parameterized SQL, 경로 검증, bare except 로깅, PG_PORT 환경변수
+- **hive_bridge.py**: parameterized SQL, PG_PORT 환경변수
+- **scripts/ 11개 파일**: PG_PORT 환경변수 통일
+- **프론트엔드 15개 파일**: 에러 핸들링 + API_BASE 통일
+- **requirements.txt**: psycopg2-binary 추가
+- **vibe-coding-setup.iss**: CI 파라미터 오버라이드 지원
+- **.github/workflows/build-release.yml**: ISS 경로 통일

@@ -186,7 +186,7 @@ jobs:
 
       - name: Build installer
         run: |
-          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" ".ai_monitor/installer.iss" /DMyAppVersion="${{ steps.version.outputs.ver }}" /DMyAppExeName="vibe-coding-update-${{ steps.version.outputs.ver }}.exe"
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "vibe-coding-setup.iss" /DMyAppVersion="${{ steps.version.outputs.ver }}" /DMyAppSrcExe="vibe-coding-update-${{ steps.version.outputs.ver }}.exe"
         shell: cmd
 
       - name: Create Release

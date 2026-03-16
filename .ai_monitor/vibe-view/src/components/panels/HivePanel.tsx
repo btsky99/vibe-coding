@@ -10,9 +10,7 @@
 import { useState, useEffect } from 'react';
 import { Bot, AlertTriangle, Cpu, RotateCw, CheckCircle2, Zap } from 'lucide-react';
 import { HiveHealth, OrchestratorStatus } from '../../types';
-
-// 현재 접속 포트 기반으로 API 주소 자동 결정 (App.tsx와 동일한 패턴)
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 /**
  * HivePanel
@@ -42,7 +40,7 @@ export default function HivePanel() {
       fetch(`${API_BASE}/api/orchestrator/status`)
         .then(res => res.json())
         .then((data: OrchestratorStatus) => setOrchStatus(data))
-        .catch(() => {});
+        .catch((err) => console.error('[HivePanel] fetch error:', err));
     };
     fetchOrch();
     const interval = setInterval(fetchOrch, 3000);
@@ -54,7 +52,7 @@ export default function HivePanel() {
     fetch(`${API_BASE}/api/hive/health`)
       .then(res => res.json())
       .then(data => setHiveHealth(data))
-      .catch(() => {});
+      .catch((err) => console.error('[HivePanel] fetch error:', err));
   };
 
   // ── 하이브 헬스 폴링 — 마운트 시 1회 + 30초 간격 자동 갱신 ─────────────
@@ -70,7 +68,7 @@ export default function HivePanel() {
     fetch(`${API_BASE}/api/config`)
       .then(res => res.json())
       .then(data => { if (data.path) setCurrentPath(data.path); })
-      .catch(() => {});
+      .catch((err) => console.error('[HivePanel] fetch error:', err));
   }, []);
 
   return (

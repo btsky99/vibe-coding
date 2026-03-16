@@ -112,7 +112,7 @@ export default function SkillResultsPanel() {
           }
           setLiveChains(active);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[SkillResultsPanel] fetch error:', err));
     };
     fetchLive();
     const interval = setInterval(fetchLive, 3000);
@@ -125,7 +125,7 @@ export default function SkillResultsPanel() {
       fetch(`${API_BASE}/api/skill-results`)
         .then(res => res.json())
         .then(data => setSessions(Array.isArray(data) ? data : []))
-        .catch(() => {});
+        .catch((err) => console.error('[SkillResultsPanel] fetch error:', err));
     };
     fetchResults();
     const interval = setInterval(fetchResults, 10000);

@@ -33,7 +33,7 @@ else:
     DATA_DIR = PG_DIR / "data"
 
 BIN_DIR = PG_DIR / "bin"
-PORT = 5433
+PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 
 def run_pg_ctl(cmd_args):
     pg_ctl = BIN_DIR / "pg_ctl.exe"

@@ -89,9 +89,7 @@ import {
   Save, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import FilePathText from '../FilePathText';
-
-// 현재 접속 포트 기반으로 API 주소 자동 결정
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
@@ -730,7 +728,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tab: 'agent' }),
-    }).catch(() => {});
+    }).catch((err) => console.error('[AgentPanel] fetch error:', err));
   }, []);
 
   // ── 상황판 탭: 워크플로우 상태 머신 ────────────────────────────────────────
@@ -777,12 +775,12 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
           // Array.isArray()로 배열임을 보장한 데이터만 상태에 반영
           if (Array.isArray(data?.skill_registry)) setOrchChainData(data);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[AgentPanel] fetch error:', err));
       // 터미널 에이전트 매핑 (orchTerminalAgents)
       fetch(`${API_BASE}/api/orchestrator/status`)
         .then(res => res.json())
         .then(data => { if (data.terminal_agents) setOrchTerminalAgents(data.terminal_agents); })
-        .catch(() => {});
+        .catch((err) => console.error('[AgentPanel] fetch error:', err));
     };
     fetchOrch();
     const iv = setInterval(fetchOrch, 3000);
@@ -797,7 +795,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       fetch(`${API_BASE}/api/hive/activity`)
         .then(res => res.json())
         .then((data: HiveEvent[]) => { if (Array.isArray(data)) setHiveEvents(data); })
-        .catch(() => {});
+        .catch((err) => console.error('[AgentPanel] fetch error:', err));
     };
     fetchHive();
     const iv = setInterval(fetchHive, 5000);
@@ -814,7 +812,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
     })
       .then(res => res.json())
       .then(() => setOrchLastRun(new Date().toLocaleTimeString()))
-      .catch(() => {})
+      .catch((err) => console.error('[AgentPanel] fetch error:', err))
       .finally(() => setOrchRunning(false));
   };
 

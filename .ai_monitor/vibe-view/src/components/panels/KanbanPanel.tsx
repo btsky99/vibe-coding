@@ -118,7 +118,7 @@ export default function KanbanPanel() {
           }
           setLiveChains(result);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[KanbanPanel] fetch error:', err));
     load();
     const id = setInterval(load, 3000);
     return () => clearInterval(id);
@@ -130,7 +130,7 @@ export default function KanbanPanel() {
       fetch(`${API_BASE}/api/skill-results`)
         .then(r => r.json())
         .then(data => setSessions(Array.isArray(data) ? data.slice(-5) : []))
-        .catch(() => {});
+        .catch((err) => console.error('[KanbanPanel] fetch error:', err));
     load();
     const id = setInterval(load, 10000);
     return () => clearInterval(id);
@@ -144,7 +144,7 @@ export default function KanbanPanel() {
         .then(data => {
           if (data && !data.error) setPgActivity(data as Record<string, PgLogRow[]>);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[KanbanPanel] fetch error:', err));
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);

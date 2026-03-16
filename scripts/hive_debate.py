@@ -21,7 +21,7 @@ from scripts.hive_bridge import post_message, log_task
 class DebateEngine:
     """하이브 마인드 토론 엔진. 여러 에이전트의 의견을 모아 최적의 결정을 도출합니다."""
 
-    def __init__(self, port=5433):
+    def __init__(self, port=int(os.environ.get('VIBE_PG_PORT', '5433'))):
         self.db_params = {
             "host": "localhost",
             "port": port,

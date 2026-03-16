@@ -17,9 +17,7 @@
 import { useState, useEffect } from 'react';
 import { Play } from 'lucide-react';
 import { OrchestratorStatus } from '../../types';
-
-// 현재 접속 포트 기반으로 API 주소 자동 결정
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // 원형 숫자 유니코드 ①②③… (1~7)
 const CIRCLE_NUMS = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦'];
@@ -102,7 +100,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
           setOrchStatus(data);
           onWarningCount(data.warnings?.length ?? 0);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[OrchestratorPanel] fetch error:', err));
     };
     fetchOrch();
     const interval = setInterval(fetchOrch, 3000);
@@ -120,7 +118,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
             setChainData(data);
           }
         })
-        .catch(() => {});
+        .catch((err) => console.error('[OrchestratorPanel] fetch error:', err));
     };
     fetchChain();
     const interval = setInterval(fetchChain, 3000);
@@ -145,7 +143,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
         setOrchStatus(data);
         onWarningCount(data.warnings?.length ?? 0);
       })
-      .catch(() => {})
+      .catch((err) => console.error('[OrchestratorPanel] fetch error:', err))
       .finally(() => setOrchRunning(false));
   };
 

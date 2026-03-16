@@ -52,7 +52,7 @@ _PG_CTL = _PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "pg_ctl.exe"
 _PG_DATA = _PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "data"
 _PG_LOG = _PROJECT_ROOT / ".ai_monitor" / "data" / "pgsql.log"
 
-PG_PORT = "5433"
+PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = "postgres"
 PG_DB = "postgres"
 

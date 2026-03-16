@@ -335,7 +335,7 @@ export default function TerminalSlot({
       fetch(`${API_BASE}/api/git/status`)
         .then(res => res.json())
         .then(data => { if (data.branch) setGitBranch(data.branch); })
-        .catch(() => {});
+        .catch((err) => console.error('[TerminalSlot] fetch error:', err));
     };
     fetchBranch();
     const iv = setInterval(fetchBranch, 5000);

@@ -10,9 +10,7 @@
 import { useState, useEffect } from 'react';
 import { Search, Brain, Plus, RefreshCw, Database } from 'lucide-react';
 import { MemoryEntry } from '../../types';
-
-// 현재 접속 포트 기반으로 API 주소 자동 결정 (App.tsx와 동일한 방식)
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // ─── Props 타입 ─────────────────────────────────────────────────────────────
 interface MemoryPanelProps {
@@ -51,7 +49,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
     fetch(url)
       .then(res => res.json())
       .then(data => setMemory(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
   // 컴포넌트 마운트 시 초기 로드 + 5초 폴링 시작 (공유 메모리는 변경 빈도 낮음)
@@ -74,7 +72,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
     fetch(`${API_BASE}/api/memory/db-info`)
       .then(res => res.json())
       .then(data => setDbInfo(data))
-      .catch(() => {});
+      .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   }, [memory]); // memory 갱신 시마다 DB 정보도 갱신
 
   // APPDATA→로컬 DB 동기화 핸들러
@@ -119,7 +117,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         setMemTags(''); setShowMemForm(false); setEditingMemKey(null);
         fetchMemory(memSearch);
       })
-      .catch(() => {});
+      .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
   // 항목 삭제 — key를 서버에 전달하여 SQLite 레코드 제거
@@ -128,7 +126,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key }),
-    }).then(() => fetchMemory(memSearch)).catch(() => {});
+    }).then(() => fetchMemory(memSearch)).catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
   // 수정 폼 열기 — 기존 항목 데이터를 상태에 주입하여 편집 가능하게 함

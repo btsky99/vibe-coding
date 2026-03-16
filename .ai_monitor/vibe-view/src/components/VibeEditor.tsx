@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
+import { API_BASE } from '../constants';
 
 /**
  * 🎨 VibeEditor: Monaco Editor 기반의 코드 편집기 컴포넌트
@@ -19,8 +20,6 @@ interface VibeEditorProps {
 
 const VibeEditor: React.FC<VibeEditorProps> = ({ path, content, onChange, isReadOnly = false }) => {
   const [internalContent, setInternalContent] = useState(content);
-  const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
-
   useEffect(() => {
     setInternalContent(content);
   }, [content]);

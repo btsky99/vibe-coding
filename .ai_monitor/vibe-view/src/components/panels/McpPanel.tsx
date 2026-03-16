@@ -11,9 +11,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Package, CheckCircle2, Circle, Search } from 'lucide-react';
 import { McpEntry, SmitheryServer } from '../../types';
-
-// 현재 접속 포트 기반으로 API 주소 자동 결정
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // Props 없음 — 완전 독립 패널 컴포넌트
 export default function McpPanel() {
@@ -43,7 +41,7 @@ export default function McpPanel() {
     fetch(`${API_BASE}/api/mcp/catalog`)
       .then(res => res.json())
       .then((data: McpEntry[]) => setMcpCatalog(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch((err) => console.error('[McpPanel] fetch error:', err));
   }, []);
 
   // Smithery API 키 로드
@@ -54,7 +52,7 @@ export default function McpPanel() {
         setSmitheryHasApiKey(Boolean(data.has_key));
         setSmitheryApiKeyMasked(data.masked ?? '');
       })
-      .catch(() => {});
+      .catch((err) => console.error('[McpPanel] fetch error:', err));
   }, []);
 
   // 설치 현황 폴링 (5초 간격 — 도구·범위 변경 시 즉시 재조회)
@@ -62,7 +60,7 @@ export default function McpPanel() {
     fetch(`${API_BASE}/api/mcp/installed?tool=${tool}&scope=${scope}`)
       .then(res => res.json())
       .then(data => setMcpInstalled(data.installed ?? []))
-      .catch(() => {});
+      .catch((err) => console.error('[McpPanel] fetch error:', err));
   }, [mcpScope, mcpTool]);
 
   useEffect(() => {
@@ -163,7 +161,7 @@ export default function McpPanel() {
         setSmitheryResults(Array.isArray(data.servers) ? data.servers : []);
         setSmitheryPage(page);
       })
-      .catch(() => {})
+      .catch((err) => console.error('[McpPanel] fetch error:', err))
       .finally(() => setSmitheryLoading(false));
   };
 

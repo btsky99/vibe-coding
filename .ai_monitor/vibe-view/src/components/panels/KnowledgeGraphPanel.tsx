@@ -12,9 +12,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { Network, RefreshCw, ZoomIn, ZoomOut, Maximize2, Info } from 'lucide-react';
-
-// 현재 포트 기반 API 주소
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // ── 타입 정의 ───────────────────────────────────────────────────────────────
 interface GraphNode {

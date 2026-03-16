@@ -160,7 +160,7 @@ function App() {
 
   // 좀비 서버 방지 하트비트 — 창이 닫히면 서버 5초 뒤 자동 종료
   useEffect(() => {
-    const sendHeartbeat = () => fetch(`${API_BASE}/api/heartbeat`).catch(() => {});
+    const sendHeartbeat = () => fetch(`${API_BASE}/api/heartbeat`).catch((err) => console.error('[App] fetch error:', err));
     sendHeartbeat();
     const interval = setInterval(sendHeartbeat, 2000);
     return () => clearInterval(interval);
@@ -185,7 +185,7 @@ function App() {
         .then(res => res.json())
         // null/배열 방어: locks는 Record<string,string> 객체여야 함
         .then(data => setLocks(data && typeof data === 'object' && !Array.isArray(data) ? data : {}))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchLocks();
     const interval = setInterval(fetchLocks, 3000);
@@ -198,7 +198,7 @@ function App() {
       fetch(`${API_BASE}/api/messages`)
         .then(res => res.json())
         .then(data => setMessages(Array.isArray(data) ? data : []))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchMessages();
     const interval = setInterval(fetchMessages, 3000);
@@ -211,7 +211,7 @@ function App() {
       fetch(`${API_BASE}/api/memory`)
         .then(res => res.json())
         .then(data => setMemory(Array.isArray(data) ? data : []))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchMemory();
     const interval = setInterval(fetchMemory, 5000);
@@ -225,7 +225,7 @@ function App() {
         .then(res => res.json())
         // [버그수정] API가 null 반환 시 setSkillChain(null) → skillChain.status 접근 TypeError
         .then(data => { if (data && typeof data === 'object') setSkillChain(data); })
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchChain();
     const interval = setInterval(fetchChain, 3000);
@@ -238,7 +238,7 @@ function App() {
       fetch(`${API_BASE}/api/mcp/installed?tool=claude&scope=global`)
         .then(res => res.json())
         .then(data => setMcpInstalled(data.installed ?? []))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchInstalled();
     const interval = setInterval(fetchInstalled, 5000);
@@ -251,7 +251,7 @@ function App() {
       fetch(`${API_BASE}/api/agent/terminals`)
         .then(res => res.json())
         .then(data => setAgentTerminals(typeof data === 'object' && data !== null ? data : {}))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchTerminals();
     const interval = setInterval(fetchTerminals, 3000);
@@ -264,7 +264,7 @@ function App() {
       fetch(`${API_BASE}/api/hive/health`)
         .then(res => res.json())
         .then(data => setHiveHealth(data))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchHealth();
     const interval = setInterval(fetchHealth, 5000);
@@ -277,7 +277,7 @@ function App() {
       fetch(`${API_BASE}/api/hive/activity`)
         .then(res => res.json())
         .then(data => setHiveActivity(Array.isArray(data) ? data : []))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchActivity();
     const interval = setInterval(fetchActivity, 5000);
@@ -300,7 +300,7 @@ function App() {
       fetch(`${API_BASE}/api/gemini-context-usage`)
         .then(res => res.json())
         .then(data => { if (!data.error) setGeminiUsage(data); })
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchUsage();
     const interval = setInterval(fetchUsage, 10000);
@@ -312,7 +312,7 @@ function App() {
     fetch(`${API_BASE}/api/project-info`)
       .then(res => res.json())
       .then(data => { if (data.version) setAppVersion(data.version); })
-      .catch(() => {});
+      .catch((err) => console.error('[App] fetch error:', err));
   }, []);
 
   // 업데이트 준비 여부 폴링 (30초) — updateReady 상태 갱신
@@ -321,7 +321,7 @@ function App() {
       fetch(`${API_BASE}/api/check-update-ready`)
         .then(res => res.json())
         .then(data => setUpdateReady(data?.ready ? { version: data.version } : null))
-        .catch(() => {});
+        .catch((err) => console.error('[App] fetch error:', err));
     };
     check();
     const interval = setInterval(check, 30000);
@@ -396,7 +396,7 @@ function App() {
     fetch(`${API_BASE}/api/apply-update`, { method: 'POST' })
       .then(res => res.json())
       .then(() => setUpdateReady(null))
-      .catch(() => {})
+      .catch((err) => console.error('[App] fetch error:', err))
       .finally(() => setUpdateApplying(false));
   };
 
@@ -868,7 +868,7 @@ function App() {
               <button
                 onPointerDown={e => e.stopPropagation()}
                 onClick={() => {
-                  fetch(`${API_BASE}/api/graph/launch`, { method: 'POST' }).catch(() => {});
+                  fetch(`${API_BASE}/api/graph/launch`, { method: 'POST' }).catch((err) => console.error('[App] fetch error:', err));
                 }}
                 className="hover:bg-white/10 p-1 rounded transition-colors"
                 title="독립 창으로 열기 (다른 모니터 이동 가능)"
@@ -984,7 +984,7 @@ function App() {
                 onClick={() => {
                   // window.open() 대신 백엔드 API로 PySide6 kanban_board.py 실행
                   // — window.open은 인터넷 브라우저 창으로 열리는 문제 해결
-                  fetch(`${API_BASE}/api/kanban/launch`, { method: 'POST' }).catch(() => {});
+                  fetch(`${API_BASE}/api/kanban/launch`, { method: 'POST' }).catch((err) => console.error('[App] fetch error:', err));
                 }}
                 className="hover:bg-white/10 p-1 rounded transition-colors"
                 title="네이티브 창으로 열기"

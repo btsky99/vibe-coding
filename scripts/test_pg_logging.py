@@ -16,9 +16,11 @@ os.environ["PYTHONPATH"] = str(ROOT) + ";" + str(ROOT / ".ai_monitor")
 
 from src.db_helper import insert_log
 
+PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
+
 def listener():
     print("👂 Listener: Starting...")
-    conn = psycopg2.connect(host="localhost", port=5433, user="postgres", database="postgres")
+    conn = psycopg2.connect(host="localhost", port=PG_PORT, user="postgres", database="postgres")
     conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
     cursor = conn.cursor()
     cursor.execute("LISTEN hive_log_channel;")

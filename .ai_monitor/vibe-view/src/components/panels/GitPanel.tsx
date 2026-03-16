@@ -14,9 +14,7 @@ import {
   ArrowDown,
 } from 'lucide-react';
 import { GitStatus, GitCommit } from '../../types';
-
-// 현재 접속 포트 기반으로 API 주소 자동 결정 (App.tsx와 동일한 방식)
-const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
+import { API_BASE } from '../../constants';
 
 // ─── Props 타입 ─────────────────────────────────────────────────────────────
 interface GitPanelProps {
@@ -76,13 +74,13 @@ export default function GitPanel({ currentPath, onChangesCount }: GitPanelProps)
           const total = safe.staged.length + safe.unstaged.length + safe.untracked.length;
           onChangesCount(total, safe.conflicts.length);
         })
-        .catch(() => {});
+        .catch((err) => console.error('[GitPanel] fetch error:', err));
 
       // git log: 최근 15개 커밋 (표시는 8개만, 나머지는 여유분)
       fetch(`${API_BASE}/api/git/log?path=${encodedPath}&n=15`)
         .then(res => res.json())
         .then((data: GitCommit[]) => setGitLog(Array.isArray(data) ? data : []))
-        .catch(() => {});
+        .catch((err) => console.error('[GitPanel] fetch error:', err));
     };
 
     fetchGit(); // 마운트 또는 경로 변경 시 즉시 실행

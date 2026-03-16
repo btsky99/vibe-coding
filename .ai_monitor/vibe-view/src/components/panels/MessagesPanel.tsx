@@ -217,7 +217,7 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
           });
         }
       })
-      .catch(() => {});
+      .catch((err) => console.error('[MessagesPanel] fetch error:', err));
   }, [onUnreadCount]);
 
   useEffect(() => {
@@ -263,7 +263,7 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
         setSeenCount(list.length);
         onUnreadCount(0);
       })
-      .catch(() => {});
+      .catch((err) => console.error('[MessagesPanel] fetch error:', err));
   };
 
   // 전체 메시지 삭제 (서버 API 호출)
@@ -275,7 +275,7 @@ export default function MessagesPanel({ onUnreadCount, onOpenFilePath }: Message
         setSeenCount(0);
         onUnreadCount(0);
       })
-      .catch(() => {});
+      .catch((err) => console.error('[MessagesPanel] fetch error:', err));
   };
 
   // 발신자 스타일 결정 (알 수 없는 에이전트 → system 스타일)

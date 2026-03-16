@@ -21,12 +21,17 @@
 
 #define MyAppName      "VibeCoding"
 #define MyAppDisplayName "바이브코딩"
-#define MyAppVersion   "3.7.77"
+; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
+#ifndef MyAppVersion
+  #define MyAppVersion   "3.7.79"
+#endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
 #define MyAppExeName   "vibe-coding.exe"
-; CI는 vibe-coding-update-{ver}.exe로 빌드 → 로컬도 동일 이름 사용
-#define MyAppSrcExe    "vibe-coding-v" + MyAppVersion + ".exe"
+; CI에서 /DMyAppExeName=... 으로 소스 EXE 파일명 오버라이드 가능
+#ifndef MyAppSrcExe
+  #define MyAppSrcExe    "vibe-coding-v" + MyAppVersion + ".exe"
+#endif
 #define MySetupName    "vibe-coding-setup-" + MyAppVersion
 
 [Setup]

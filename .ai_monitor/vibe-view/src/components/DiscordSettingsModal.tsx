@@ -128,7 +128,7 @@ export default function DiscordSettingsModal({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tab: 'discord' }),
-              }).catch(() => {});
+              }).catch((err) => console.error('[DiscordSettingsModal] fetch error:', err));
             }}
             className="p-1.5 hover:bg-white/10 rounded-md text-slate-400 hover:text-indigo-400 transition-all active:scale-90"
             title="전체 화면(새 창)으로 보기"

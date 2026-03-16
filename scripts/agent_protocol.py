@@ -96,7 +96,7 @@ class DebateParticipant:
     생성·게시하는 프롬프트 체인을 제공합니다.
 
     사용 흐름:
-        participant = DebateParticipant(agent_name="claude", port=5433)
+        participant = DebateParticipant(agent_name="claude")
         prompt = participant.build_prompt(debate_id)   # 프롬프트 확인
         participant.respond(debate_id, content, msg_type="critique")  # 응답 게시
     """
@@ -118,7 +118,7 @@ class DebateParticipant:
     # 라운드별 기본 의견 유형 매핑 (라운드 1=proposal, 2=critique, 3+=synthesis)
     ROUND_TYPE_MAP = {1: "proposal", 2: "critique", 3: "synthesis"}
 
-    def __init__(self, agent_name: str = "claude", port: int = 5433):
+    def __init__(self, agent_name: str = "claude", port: int = int(os.environ.get('VIBE_PG_PORT', '5433'))):
         self.agent_name = agent_name.lower()
         self.db_params = {
             "host": "localhost",

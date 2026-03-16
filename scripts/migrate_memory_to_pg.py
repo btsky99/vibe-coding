@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SQLITE_DB = PROJECT_ROOT / ".ai_monitor" / "data" / "shared_memory.db"
 PSQL_EXE = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
 TEMP_SQL = PROJECT_ROOT / ".ai_monitor" / "data" / "migrate_temp.sql"
-PORT = 5433
+PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
 def migrate():
     if not SQLITE_DB.exists():

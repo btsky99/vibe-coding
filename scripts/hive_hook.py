@@ -622,7 +622,7 @@ def main():
                 if _osr.path.exists(_pg_bin):
                     _no_win = getattr(_sp_r, 'CREATE_NO_WINDOW', 0x08000000)
                     _res = _sp_r.run(
-                        [_pg_bin, "-p", "5433", "-U", "postgres", "-d", "postgres",
+                        [_pg_bin, "-p", str(_osr.environ.get('VIBE_PG_PORT', '5433')), "-U", "postgres", "-d", "postgres",
                          "--csv", "-c", _reflect_sql],
                         capture_output=True, text=True, encoding='utf-8', errors='replace',
                         creationflags=_no_win

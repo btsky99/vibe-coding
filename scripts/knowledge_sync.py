@@ -21,7 +21,7 @@ if hasattr(sys.stdout, "reconfigure"):
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MEMORY_MD = PROJECT_ROOT / "memory.md"
 PG_BIN = PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
-PG_PORT = 5433
+PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
 def run_sql(sql: str):
     """임시 파일을 생성하여 SQL 실행 (인코딩 오류 방지 및 순수 값 추출)"""

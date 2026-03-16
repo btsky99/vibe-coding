@@ -38,7 +38,7 @@ else:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / '.ai_monitor' / 'data'
 PG_BIN = _PG_DIR / 'bin' / 'psql.exe'
-PG_PORT = '5433'
+PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = 'postgres'
 PG_DB = 'postgres'
 

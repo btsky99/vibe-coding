@@ -17,6 +17,7 @@ from datetime import datetime
 # 하이브 브릿지 및 Postgres 정보 로드
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
+PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 try:
     sys.path.append(PROJECT_ROOT)
     import scripts.hive_bridge as hive_bridge
@@ -28,7 +29,7 @@ def run_query(sql: str):
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         res = subprocess.run(
-            [PG_BIN, "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
+            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )
