@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-16] - Claude (포트 충돌 근본 수정 v3.7.78)
+#   - HTTP/WS 포트: 슬롯 기반 고정값 → 바인딩 테스트 후 실패 시 _find_free_port 대체 탐색
+#   - 원인: 서로 다른 프로젝트(dev/installer)가 각자 slot 0 → 둘 다 HTTP:9000 충돌
+#   - 인스턴스 락 포트(_BASE_PORT)는 프로젝트 해시별 고유라 교차 방지 안 됨
 # [2026-03-12] - Claude (지식 그래프 연결선 자동 생성)
 #   - thought_to_pg(): parent_id 미지정 시 같은 에이전트 직전 thought를 자동 부모로 연결
 #     → hive_bridge.py 새 프로세스 호출마다 체인이 끊기던 근본 원인 수정
@@ -4435,17 +4439,47 @@ if __name__ == '__main__':
 
     print(f"[*] 인스턴스 락 확보 (슬롯 {_instance_slot}, 포트 {_BASE_PORT + _instance_slot})")
 
-    # ── 포트 확정: 슬롯 기반으로 HTTP/WS 포트 충돌 없이 배정 ────────────────────
-    # [수정 2026-03-15 v3.7.68] _find_free_port를 __main__ 이전에 호출하면 두 인스턴스가
-    # 동시에 "빈 포트"를 확인할 때 둘 다 동일 포트를 선택하는 레이스컨디션 발생.
-    # 인스턴스 슬롯(0~3)은 소켓 락으로 이미 배타 점유가 보장되므로,
-    # 슬롯 번호로 포트를 계산하면 충돌이 구조적으로 불가능.
-    # 슬롯 0 → HTTP:9000 WS:9001
-    # 슬롯 1 → HTTP:9002 WS:9003
-    # 슬롯 2 → HTTP:9004 WS:9005
-    # 슬롯 3 → HTTP:9006 WS:9007
-    HTTP_PORT = 9000 + _instance_slot * 2  # noqa: F811
-    WS_PORT   = HTTP_PORT + 1              # noqa: F811
+    # ── 포트 확정: 슬롯 기반 + 실제 바인딩 확인 ─────────────────────────────────
+    # [수정 2026-03-16 v3.7.78] 서로 다른 프로젝트(dev/installer 등)가 각자 slot 0을 받으면
+    # 둘 다 HTTP:9000을 시도하여 충돌. 인스턴스 락 포트(_BASE_PORT)는 프로젝트 해시별 고유이므로
+    # 다른 프로젝트 간에는 중복 방지가 안 됨. 해결: 슬롯 기반 포트를 먼저 시도하되,
+    # 이미 사용 중이면 _find_free_port로 빈 포트 탐색.
+    _preferred_http = 9000 + _instance_slot * 2
+    _http_ok = False
+    try:
+        _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        _test_sock.bind(('127.0.0.1', _preferred_http))
+        _test_sock.close()
+        _http_ok = True
+    except OSError:
+        _http_ok = False
+
+    if _http_ok:
+        HTTP_PORT = _preferred_http  # noqa: F811
+    else:
+        # 슬롯 기반 포트가 점유됨 → 9010부터 빈 포트 탐색 (기본 범위 밖)
+        HTTP_PORT = _find_free_port(9010, max_tries=40)  # noqa: F811
+        print(f"[!] 슬롯 기반 포트 {_preferred_http} 사용 중 → 대체 포트 {HTTP_PORT} 사용")
+
+    # WS 포트: HTTP + 1, 마찬가지로 바인딩 확인
+    _preferred_ws = HTTP_PORT + 1
+    _ws_ok = False
+    try:
+        _test_sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _test_sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        _test_sock2.bind(('127.0.0.1', _preferred_ws))
+        _test_sock2.close()
+        _ws_ok = True
+    except OSError:
+        _ws_ok = False
+
+    if _ws_ok:
+        WS_PORT = _preferred_ws  # noqa: F811
+    else:
+        WS_PORT = _find_free_port(_preferred_ws + 1, max_tries=40)  # noqa: F811
+        print(f"[!] WS 포트 {_preferred_ws} 사용 중 → 대체 포트 {WS_PORT} 사용")
+
     print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
 
     # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 (락 획득 이후) ─────────────────

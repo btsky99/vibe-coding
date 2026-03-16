@@ -6,6 +6,9 @@
 #          출력 파일명: vibe-coding-vX.Y.Z.exe (버전 자동 포함)
 #
 # 🕒 변경 이력:
+# [2026-03-16] Claude — runtime_tmpdir 설정: None→%APPDATA%\VibeCoding\runtime
+#   - None이면 Windows Temp에 추출 → 백신이 삭제하여 "Not Found" 에러 발생
+#   - APPDATA 고정 경로로 변경하여 안정적 추출 보장
 # [2026-03-01] Claude — EXE 파일명에 버전 자동 포함
 #   - _version.py에서 버전 읽어 name='vibe-coding-vX.Y.Z'로 설정
 #   - 이전 버전과 동시에 보관 가능 / 다운로드 시 버전 식별 용이
@@ -99,7 +102,7 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    runtime_tmpdir='%APPDATA%\\VibeCoding\\runtime',
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,

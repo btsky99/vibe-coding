@@ -11,13 +11,16 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-03-16] Claude — 설치 폴더 영문화 (바이브코딩→VibeCoding), 아이콘/표시명만 한글 유지 (v3.7.78)
+;              MyAppName="VibeCoding"(폴더용), MyAppDisplayName="바이브코딩"(UI표시용) 분리
 ; [2026-03-11] Claude — PostgreSQL 포터블 바이너리 자동 설치 추가 (v3.7.48)
 ;              {app}\pgsql\ 에 bin/lib/share 포함. initdb 및 포트 설정은 server.py가 최초 기동 시 수행.
 ; [2026-03-08] Claude — 설치 EXE 고정 파일명(vibe-coding.exe)으로 변경. 버전 업 시 자동 덮어쓰기
 ; [2026-03-01] Claude — 최초 생성. 포터블 EXE → 설치버전 파이프라인 구축
 ; ────────────────────────────────────────────────────────────────────────────
 
-#define MyAppName      "바이브코딩"
+#define MyAppName      "VibeCoding"
+#define MyAppDisplayName "바이브코딩"
 #define MyAppVersion   "3.7.77"
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -29,7 +32,7 @@
 [Setup]
 ; 앱 기본 정보
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
-AppName={#MyAppName}
+AppName={#MyAppDisplayName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
@@ -38,7 +41,7 @@ AppUpdatesURL={#MyAppURL}
 
 ; 설치 경로 (기본: C:\Program Files\Vibe Coding)
 DefaultDirName={autopf}\{#MyAppName}
-DefaultGroupName={#MyAppName}
+DefaultGroupName={#MyAppDisplayName}
 AllowNoIcons=yes
 
 ; 출력 설정
@@ -90,20 +93,20 @@ Source: ".ai_monitor\bin\pgsql\lib\*"; DestDir: "{app}\pgsql\lib"; Flags: ignore
 Source: ".ai_monitor\bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-; 시작 메뉴 — IconFilename 명시로 EXE 교체 후에도 아이콘 유지
-Name: "{group}\{#MyAppName}";             Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"
-Name: "{group}\{#MyAppName} 제거";        Filename: "{uninstallexe}"
-; 바탕화면 (선택)
-Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: desktopicon
-; 시작프로그램 (선택)
-Name: "{userstartup}\{#MyAppName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startupicon
+; 시작 메뉴 — 폴더는 영문(MyAppName), 아이콘 표시명은 한글(MyAppDisplayName)
+Name: "{group}\{#MyAppDisplayName}";             Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"
+Name: "{group}\{#MyAppDisplayName} 제거";        Filename: "{uninstallexe}"
+; 바탕화면 (선택) — 아이콘 이름만 한글
+Name: "{autodesktop}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: desktopicon
+; 시작프로그램 (선택) — 아이콘 이름만 한글
+Name: "{userstartup}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startupicon
 
 [Run]
 ; 설치 완료 후 바로 실행 (선택)
 ; Claude Code settings.json에 statusLine 자동 설정
 ; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
-Filename: "{app}\{#MyAppExeName}"; Description: "바이브코딩 시작"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppDisplayName} 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 제거 전 실행 중인 프로세스 종료 (고정 파일명 사용)
