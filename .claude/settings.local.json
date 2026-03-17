@@ -48,7 +48,8 @@
       "Bash(cmd:*)",
       "Bash(powershell:*)",
       "Bash(cd /d/vibe-coding/.ai_monitor/nexus-view && npm run build 2>&1)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(ISCC_PATH=\"C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe\" && \"$ISCC_PATH\" D:/vibe-coding/vibe-coding-setup.iss 2>&1)"
     ]
   }
 }

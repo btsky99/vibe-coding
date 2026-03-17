@@ -17,6 +17,9 @@ DESCRIPTION: Claude Code 전용 자동 훅 핸들러.
                               "session_id": "...", "stop_reason": "..." }
 
 REVISION HISTORY:
+- 2026-03-17 Claude: UserPromptSubmit 이벤트 추가 — 작업 시작 시 하이브에 자동 기록
+  - 사용자 지시를 받으면 즉시 pg_logs + pg_thoughts에 "[작업 시작] T{N}: {내용}" 기록
+  - 모든 에이전트가 서로 뭘 하는지 알 수 있도록 하이브 마인드 핵심 원칙 강제
 - 2026-03-10 Claude: 최초 구현 — pg_logs + pg_thoughts 자동 기록 (지식 그래프 연동)
 """
 
@@ -82,14 +85,35 @@ def main():
 
     event = data.get('hook_event_name', '')
 
+    # ── 터미널 ID 감지 (환경변수 TERMINAL_ID, 기본 T0) ────────────────────
+    terminal_id = os.environ.get('TERMINAL_ID', 'T0')
+    agent_name  = os.environ.get('HIVE_AGENT', 'claude')
+    agent_label = f'{agent_name}:{terminal_id}'
+
     # ── hive_bridge import ──────────────────────────────────────────────
     try:
         from hive_bridge import log_task, log_thought
     except ImportError:
         sys.exit(0)
 
+    # ── UserPromptSubmit: 작업 시작 시 하이브에 자동 기록 ─────────────────
+    #    핵심: 다른 에이전트가 "이 터미널이 뭘 하고 있는지" 볼 수 있게 하는 것
+    if event == 'UserPromptSubmit':
+        user_prompt = (data.get('prompt') or data.get('user_prompt') or data.get('content') or data.get('message') or '').strip()
+        if user_prompt:
+            short_prompt = _short(user_prompt, 120)
+            # pg_logs에 작업 시작 기록
+            log_task(agent_label, f'[작업 시작] {short_prompt}')
+            # pg_thoughts에 사고 과정 기록 — 지식 그래프에 표시됨
+            log_thought(agent_name, 'task-start', {
+                'type': 'intent',
+                'title': f'[{terminal_id}] 새 작업 수신',
+                'content': short_prompt,
+                'terminal': terminal_id
+            })
+
     # ── PostToolUse: 파일 수정·실행 완료 후 pg_logs + pg_thoughts 기록 ────
-    if event == 'PostToolUse':
+    elif event == 'PostToolUse':
         tool_name  = data.get('tool_name', '')
         tool_input = data.get('tool_input') or {}
 

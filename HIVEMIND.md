@@ -1,21 +1,19 @@
 # HiveMind Status
 
-Updated: `2026-03-17 19:32:06`
+Updated: `2026-03-17 23:09:24`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/bin/mcp_server.py, .ai_monitor/data/messages.jsonl, .ai_monitor/data/skill_results.jsonl, .claude/settings.local.json, hivemind.md (+9 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/data/messages.jsonl, .ai_monitor/data/skill_results.jsonl, .claude/settings.local.json, hivemind.md, scripts/claude_hook.py (+2 more). Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- .ai_monitor/bin/mcp_server.py
 - .ai_monitor/data/messages.jsonl
 - .ai_monitor/data/skill_results.jsonl
 - .claude/settings.local.json
 - hivemind.md
-- scripts/agent_shell.py
-- scripts/auto_dispatcher.py
-- scripts/cli_agent.py
-- ... and 6 more
+- scripts/claude_hook.py
+- scripts/gemini_hook.py
+- scripts/gemini_hook.py-fix.py
 
 ## Agent Flow
 ```mermaid
@@ -27,13 +25,15 @@ graph LR
     codex -->|4 msgs| claude
     dispatcher["dispatcher"]
     all["all"]
-    dispatcher -->|3 msgs| all
+    dispatcher -->|4 msgs| all
+    claude -->|3 msgs| codex
     gemini -->|3 msgs| claude
-    claude -->|2 msgs| codex
+    dispatcher -->|2 msgs| claude
+    dispatcher -->|2 msgs| codex
     claude -->|1 msgs| all
+    claude -->|1 msgs| dispatcher
     codex -->|1 msgs| all
-    dispatcher -->|1 msgs| claude
-    dispatcher -->|1 msgs| codex
+    codex -->|1 msgs| dispatcher
     dispatcher -->|1 msgs| gemini
     gemini -->|1 msgs| all
     Gemini["Gemini"]
@@ -49,14 +49,14 @@ graph LR
 ```
 
 ## Recent Thought Stream
-- claude [file-edit]: 파일 수정: scripts\hive_hook.py
-- claude [file-write]: 파일 생성: MEMORY.md
-- gemini [file-edit]: File edited: .ai_monitor/bin/mcp_server.py
-- claude [file-write]: 파일 생성: feedback_use_release_skill.md
-- claude [session]: 세션 종료 [92c8e04f]
-- gemini [file-edit]: File edited: vibe-coding/scripts/gemini_hook.py
-- gemini [file-edit]: File edited: vibe-coding/scripts/itcp.py
-- codex [debug,build,session]: ITCP hardening and Codex inbox injection
+- claude [session]: 세션 종료 [5c573f53]
+- claude [session]: 세션 종료 [1c288613]
+- claude [task-start]: [1] 새 작업 수신
+- claude [session]: 세션 종료 [1c288613]
+- claude [task-start]: [T0] 새 작업 수신
+- claude [task-start]: [1] 새 작업 수신
+- claude [session]: 세션 종료 [1c288613]
+- claude [session]: 세션 종료 [5de3c3a0]
 
 ## Debate Ledger
 - #8 [closed] round=1: codex smoke test 2 decision=smoke final decision

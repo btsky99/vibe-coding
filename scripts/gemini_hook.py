@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Gemini CLI hook integration.
+FILE: scripts/gemini_hook.py
+DESCRIPTION: Gemini CLI hook integration.
+             대시보드 유지, 하이브 로그 기록, HIVEMIND.md 갱신, JSON 훅 응답 반환.
 
-Responsibilities:
-- keep the dashboard alive without launching duplicate processes on every hook
-- record tool activity into the hive log
-- refresh HIVEMIND.md in the background with debounce
-- return valid JSON hook responses on stdout
+REVISION HISTORY:
+- 2026-03-17 Claude: BeforeAgent에서 작업 시작 시 pg_logs + pg_thoughts 자동 기록 추가
+  - 다른 에이전트가 Gemini가 뭘 하는지 하이브에서 볼 수 있도록 강제
+  - 하이브 마인드 핵심 원칙: 모든 에이전트 활동은 공유되어야 함
 """
 
 from __future__ import annotations
@@ -516,6 +517,23 @@ def main() -> None:
         SESSION_REVIEW_REQUESTS = []
         additional_context = _build_additional_context(prompt)
         _register_prompt_task(prompt)
+
+        # ── 하이브 자동 기록: 작업 시작 시 pg_logs + pg_thoughts에 기록 ──
+        # 핵심: 다른 에이전트가 "Gemini가 뭘 하고 있는지" 볼 수 있게 하는 것
+        if prompt.strip():
+            terminal_id = os.environ.get('TERMINAL_ID', 'T2')
+            try:
+                from hive_bridge import log_task as _lt, log_thought as _lth
+                _lt(f'gemini:{terminal_id}', f'[작업 시작] {_snippet(prompt, 120)}')
+                _lth('gemini', 'task-start', {
+                    'type': 'intent',
+                    'title': f'[{terminal_id}] 새 작업 수신',
+                    'content': _snippet(prompt, 120),
+                    'terminal': terminal_id
+                })
+            except Exception:
+                pass
+
         if additional_context:
             _hook_response(decision="allow", context=additional_context)
         else:

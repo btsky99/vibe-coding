@@ -54,3 +54,7 @@
 {"id": "1773506901887", "timestamp": "2026-03-15T01:48:21", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 update EXE 경로 버그 수정 + 커밋 + 푸시 + 빌드 | vibe-debug -> vibe-release", "read": false}
 {"id": "1773506950000", "timestamp": "2026-03-15T01:49:10", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-release]", "read": false}
 {"id": "1773507049484", "timestamp": "2026-03-15T01:50:49", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-release] | [수정 완료] installer.iss [Icons]/[Run] 섹션 MyAppExeName→MyInstalledExeName 교체. 근본 원인: CI 빌드 소스명(vibe-coding-update-X.Y.Z.exe)을 참조했으나 실제 설치 파일은 DestName:vibe-coding.exe로 고정됨", "read": false}
+{"id": "1773660157416", "timestamp": "2026-03-16T20:22:37", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 P0 보안수정 + P1 성능개선 고도화 | vibe-security -> vibe-code-review -> vibe-execute-plan", "read": false}
+{"id": "1773661925679", "timestamp": "2026-03-16T20:52:05", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-code-review] | P0 보안 5건 + P1 성능/안정성 5건 전부 완료", "read": false}
+{"id": "1773671353418", "timestamp": "2026-03-16T23:29:13", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 P2 코드품질 고도화 6건 전부 수정 | vibe-execute-plan -> vibe-code-review", "read": false}
+{"id": "1773671775612", "timestamp": "2026-03-16T23:36:15", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-code-review] | P2 코드품질 6건 전부 완료", "read": false}
