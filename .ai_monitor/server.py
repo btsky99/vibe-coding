@@ -1751,7 +1751,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 
             # 2. 실시간 LISTEN 루프
             try:
-                pg_conn = psycopg2.connect(host="localhost", port=5433, user="postgres", database="postgres")
+                pg_conn = psycopg2.connect(host="localhost", port=PG_PORT, user="postgres", database="postgres")
                 pg_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
                 cursor = pg_conn.cursor()
                 cursor.execute("LISTEN hive_log_channel;")
@@ -2739,7 +2739,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 rows = query_rows("SELECT COUNT(*) AS count FROM hive_memory;")
                 count = int(rows[0].get('count', 0)) if rows else 0
                 self.wfile.write(json.dumps({
-                    'db_path': 'postgres://localhost:5433/postgres',
+                    'db_path': f'postgres://localhost:{PG_PORT}/postgres',
                     'is_local': False,
                     'backend': 'postgres',
                     'count': count,
@@ -4744,7 +4744,9 @@ if __name__ == '__main__':
     _http_ok = False
     try:
         _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # [수정 2026-03-18] SO_REUSEADDR=0 — Windows에서 SO_REUSEADDR=1이면
+        # 이미 점유된 포트에도 bind 성공하여 포트 충돌이 발생했음
+        _test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         _test_sock.bind(('127.0.0.1', _preferred_http))
         _test_sock.close()
         _http_ok = True
@@ -4763,7 +4765,8 @@ if __name__ == '__main__':
     _ws_ok = False
     try:
         _test_sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _test_sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # [수정 2026-03-18] SO_REUSEADDR=0 — HTTP 포트와 동일한 이유
+        _test_sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         _test_sock2.bind(('127.0.0.1', _preferred_ws))
         _test_sock2.close()
         _ws_ok = True
