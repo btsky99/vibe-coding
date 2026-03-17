@@ -95,6 +95,25 @@ jobs:
           copy assets\vibe_coding_icon.ico .ai_monitor\bin\vibe_final.ico /y
         shell: cmd
 
+      - name: Download PostgreSQL portable
+        # 설치버전에 포함할 PostgreSQL 포터블 바이너리 (bin/lib/share만 추출)
+        run: |
+          $pgUrl = "https://get.enterprisedb.com/postgresql/postgresql-17.4-1-windows-x64-binaries.zip"
+          $zipPath = "$env:TEMP\pgsql.zip"
+          Write-Host "Downloading PostgreSQL portable..."
+          Invoke-WebRequest -Uri $pgUrl -OutFile $zipPath -UseBasicParsing
+          Write-Host "Extracting..."
+          Expand-Archive -Path $zipPath -DestinationPath "$env:TEMP\pgsql_extract" -Force
+          # bin, lib, share 만 복사 (pgAdmin, doc 등 제외)
+          $dest = ".ai_monitor\bin\pgsql"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          Copy-Item -Path "$env:TEMP\pgsql_extract\pgsql\bin" -Destination "$dest\bin" -Recurse -Force
+          Copy-Item -Path "$env:TEMP\pgsql_extract\pgsql\lib" -Destination "$dest\lib" -Recurse -Force
+          Copy-Item -Path "$env:TEMP\pgsql_extract\pgsql\share" -Destination "$dest\share" -Recurse -Force
+          Write-Host "PostgreSQL portable ready at $dest"
+          Remove-Item $zipPath -Force
+        shell: pwsh
+
       - name: Bundle skills into .ai_monitor
         run: |
           xcopy .gemini\skills .ai_monitor\skills /E /I /Y
