@@ -38,6 +38,7 @@ REVISION HISTORY:
 import os
 import sys
 import json
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -97,7 +98,8 @@ def _run_psql(sql: str, timeout: int = 5) -> tuple[bool, str]:
             creationflags=no_window,
             env=env,
         )
-        return result.returncode == 0, result.stdout.strip()
+        stdout = result.stdout if result.stdout is not None else ""
+        return result.returncode == 0, stdout.strip()
     except subprocess.TimeoutExpired:
         return False, "timeout"
     except Exception as e:
@@ -216,7 +218,9 @@ def receive(terminal_name: str, mark_read: bool = True) -> list[dict]:
 
     # 미읽음 메시지 조회 (내게 온 것 + 전체 브로드캐스트)
     sql = (
-        f"SELECT id, from_agent, to_agent, channel, msg_type, content, ts::text "
+        f"SELECT id, from_agent, to_agent, channel, msg_type, content, "
+        f"COALESCE(metadata::text, '{{}}') AS metadata, "
+        f"COALESCE(terminal_id, '') AS terminal_id, ts::text "
         f"FROM pg_messages "
         f"WHERE (to_agent = '{terminal_name}' OR to_agent = 'all') "
         f"AND is_read = false "
@@ -231,9 +235,14 @@ def receive(terminal_name: str, mark_read: bool = True) -> list[dict]:
     import csv, io
     reader = csv.DictReader(
         io.StringIO(result),
-        fieldnames=["id", "from_agent", "to_agent", "channel", "msg_type", "content", "ts"]
+        fieldnames=["id", "from_agent", "to_agent", "channel", "msg_type", "content", "metadata", "terminal_id", "ts"]
     )
     for row in reader:
+        meta_raw = row.get("metadata", "") or "{}"
+        try:
+            row["metadata"] = json.loads(meta_raw)
+        except Exception:
+            row["metadata"] = {}
         messages.append(dict(row))
 
     if not messages:
@@ -267,7 +276,9 @@ def history(limit: int = 20, channel: Optional[str] = None) -> list[dict]:
 
     channel_filter = f"AND channel = '{channel}'" if channel else ""
     sql = (
-        f"SELECT id, from_agent, to_agent, channel, msg_type, content, is_read, ts::text "
+        f"SELECT id, from_agent, to_agent, channel, msg_type, content, is_read, "
+        f"COALESCE(metadata::text, '{{}}') AS metadata, "
+        f"COALESCE(terminal_id, '') AS terminal_id, ts::text "
         f"FROM pg_messages "
         f"WHERE 1=1 {channel_filter} "
         f"ORDER BY ts DESC LIMIT {limit};"
@@ -280,11 +291,122 @@ def history(limit: int = 20, channel: Optional[str] = None) -> list[dict]:
     import csv, io
     reader = csv.DictReader(
         io.StringIO(result),
-        fieldnames=["id", "from_agent", "to_agent", "channel", "msg_type", "content", "is_read", "ts"]
+        fieldnames=["id", "from_agent", "to_agent", "channel", "msg_type", "content", "is_read", "metadata", "terminal_id", "ts"]
     )
     for row in reader:
+        meta_raw = row.get("metadata", "") or "{}"
+        try:
+            row["metadata"] = json.loads(meta_raw)
+        except Exception:
+            row["metadata"] = {}
         messages.append(dict(row))
     return messages
+
+
+def build_agent_context(
+    agent_name: str,
+    *,
+    include_unread: bool = True,
+    include_debate: bool = True,
+    mark_read: bool = True,
+    max_messages: int = 5,
+) -> str:
+    """Build extra prompt context for agents without native inbox hooks.
+
+    This is primarily used by Codex launches, because Claude/Gemini already
+    inject ITCP inbox state through their own hook systems.
+    """
+    sections: list[str] = []
+
+    if include_unread:
+        unread = receive(agent_name, mark_read=mark_read)
+        if unread:
+            lines = []
+            for message in unread[:max_messages]:
+                sender = message.get("from_agent") or message.get("from") or "?"
+                channel_name = message.get("channel") or "general"
+                content = str(message.get("content") or "").strip()
+                lines.append(f"- [{sender} -> {agent_name}] ({channel_name}) {content}")
+            sections.append("[ITCP inbox]\n" + "\n".join(lines))
+
+    if include_debate:
+        debate_json = os.environ.get("HIVE_DEBATE_CONTEXT", "").strip()
+        if debate_json:
+            sections.append("[Hive debate context]\n" + debate_json)
+
+    return "\n\n".join(section for section in sections if section)
+
+
+def inject_agent_context(
+    task: str,
+    agent_name: str,
+    *,
+    include_unread: bool = True,
+    include_debate: bool = True,
+    mark_read: bool = True,
+    max_messages: int = 5,
+) -> str:
+    """Prepend agent inbox/debate context to a task prompt when available."""
+    extra = build_agent_context(
+        agent_name,
+        include_unread=include_unread,
+        include_debate=include_debate,
+        mark_read=mark_read,
+        max_messages=max_messages,
+    )
+    if not extra:
+        return task
+    return f"{extra}\n\n[Assigned task]\n{task}"
+
+
+_TASK_ID_RE = re.compile(r"TASK-\d{8,14}-[A-Za-z0-9]+")
+_AUTHOR_RE = re.compile(r"작성자:\s*([A-Za-z0-9_-]+)")
+
+
+def parse_task_reference(message: dict) -> dict:
+    """Extract dispatch/review identifiers from an ITCP message."""
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    content = str(message.get("content") or "")
+    channel = str(message.get("channel") or "")
+
+    task_id = str(metadata.get("task_id") or "")
+    if not task_id:
+        match = _TASK_ID_RE.search(content)
+        if match:
+            task_id = match.group(0)
+
+    author = str(metadata.get("author") or "")
+    if not author:
+        match = _AUTHOR_RE.search(content)
+        if match:
+            author = match.group(1)
+
+    verifier = str(metadata.get("verifier") or "")
+    assigned_to = str(metadata.get("assigned_to") or "")
+    parent_task_id = str(metadata.get("parent_task_id") or "")
+
+    kind = ""
+    if "[CROSS-VERIFY]" in content or channel == "review":
+        kind = "review"
+    elif "[AUTO-DISPATCH]" in content or channel == "task":
+        kind = "task"
+
+    return {
+        "kind": kind,
+        "task_id": task_id,
+        "author": author,
+        "verifier": verifier,
+        "assigned_to": assigned_to,
+        "parent_task_id": parent_task_id,
+        "content": content,
+        "channel": channel,
+        "from_agent": str(message.get("from_agent") or message.get("from") or ""),
+        "to_agent": str(message.get("to_agent") or ""),
+        "terminal_id": str(message.get("terminal_id") or ""),
+        "metadata": metadata,
+    }
 
 
 def clear_old(days: int = 7) -> int:

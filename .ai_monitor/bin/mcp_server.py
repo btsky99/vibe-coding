@@ -326,7 +326,9 @@ def handle_tool_call(name: str, args: dict) -> str:
                 cwd=str(PROJECT_ROOT),
                 env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
             )
-            return result.stdout.strip() or result.stderr.strip() or "전송 완료"
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
+            return stdout.strip() or stderr.strip() or "전송 완료"
         except Exception as exc:
             return f"[error] {exc}"
 
@@ -340,7 +342,8 @@ def handle_tool_call(name: str, args: dict) -> str:
                 cwd=str(PROJECT_ROOT),
                 env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
             )
-            return result.stdout.strip() or "(미읽음 메시지 없음)"
+            stdout = result.stdout or ""
+            return stdout.strip() or "(미읽음 메시지 없음)"
         except Exception as exc:
             return f"[error] {exc}"
 
@@ -355,7 +358,8 @@ def handle_tool_call(name: str, args: dict) -> str:
                 cwd=str(PROJECT_ROOT),
                 env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
             )
-            output = result.stdout.strip()
+            stdout = result.stdout or ""
+            output = stdout.strip()
             if channel_filter:
                 lines = [l for l in output.splitlines() if channel_filter in l or l.startswith("📜")]
                 return "\n".join(lines) or f"({channel_filter} 채널 메시지 없음)"

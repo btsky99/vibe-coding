@@ -6,7 +6,7 @@ DESCRIPTION: 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저.
 REVISION HISTORY:
 - 2026-03-06 Gemini: 최초 작성. 시작/중지/상태체크 및 확장 기능 활성화 로직 구현.
 - 2026-03-10 Gemini: Task 17 강화 - pg_logs/pg_thoughts 스키마 통합 및 지식 그래프 기반 마련.
-- 2026-03-11 Claude: frozen(배포) 모드 경로 추가 — {exe dir}\pgsql + %APPDATA%\VibeCoding\pgdata
+- 2026-03-11 Claude: frozen(배포) 모드 경로 추가 — {exe dir}\\pgsql + %APPDATA%\\VibeCoding\\pgdata
 """
 
 import os
@@ -161,8 +161,25 @@ def init_log_schema():
         to_agent VARCHAR(50),
         msg_type VARCHAR(20) DEFAULT 'info',
         content TEXT,
-        is_read BOOLEAN DEFAULT FALSE
+        is_read BOOLEAN DEFAULT FALSE,
+        channel VARCHAR(20) DEFAULT 'general',
+        metadata JSONB DEFAULT '{}'::jsonb,
+        terminal_id VARCHAR(50) DEFAULT ''
     );
+
+    -- Migration: keep pg_messages aligned with ITCP v2 schema.
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_messages' AND column_name='channel') THEN
+            ALTER TABLE pg_messages ADD COLUMN channel VARCHAR(20) DEFAULT 'general';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_messages' AND column_name='metadata') THEN
+            ALTER TABLE pg_messages ADD COLUMN metadata JSONB DEFAULT '{}'::jsonb;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_messages' AND column_name='terminal_id') THEN
+            ALTER TABLE pg_messages ADD COLUMN terminal_id VARCHAR(50) DEFAULT '';
+        END IF;
+    END $$;
 
     -- 4. Hive Debates Table
     CREATE TABLE IF NOT EXISTS hive_debates (

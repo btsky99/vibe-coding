@@ -79,6 +79,13 @@ INTENT_RULES = [
 ]
 
 
+SESSION_MODIFIED_FILES: list[str] = []
+SESSION_LAST_TASK: str = ""
+SESSION_HAD_ERROR: bool = False
+SESSION_ASSIGNED_TASKS: list[dict] = []
+SESSION_REVIEW_REQUESTS: list[dict] = []
+
+
 def _stamp_path(name: str) -> Path:
     STAMP_DIR.mkdir(parents=True, exist_ok=True)
     return STAMP_DIR / f"{name}.stamp"
@@ -184,6 +191,62 @@ def _read_gemini_messages(agent_name: str) -> list[dict]:
         return []
 
 
+def _remember_itcp_work_items(messages: list[dict]) -> None:
+    global SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
+    try:
+        from itcp import parse_task_reference
+    except Exception:
+        return
+
+    for message in messages:
+        ref = parse_task_reference(message)
+        task_id = ref.get("task_id", "")
+        if not task_id:
+            continue
+        if ref.get("kind") == "review":
+            if not any(item.get("task_id") == task_id for item in SESSION_REVIEW_REQUESTS):
+                SESSION_REVIEW_REQUESTS.append(ref)
+        elif ref.get("kind") == "task":
+            if not any(item.get("task_id") == task_id for item in SESSION_ASSIGNED_TASKS):
+                SESSION_ASSIGNED_TASKS.append(ref)
+
+
+def _report_completed_itcp_work(agent_name: str) -> None:
+    global SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
+    if SESSION_HAD_ERROR:
+        return
+
+    summary_bits = []
+    if SESSION_LAST_TASK:
+        summary_bits.append(_snippet(SESSION_LAST_TASK, 120))
+    if SESSION_MODIFIED_FILES:
+        summary_bits.append("files=" + ", ".join(SESSION_MODIFIED_FILES[-5:]))
+    summary = " | ".join(summary_bits) if summary_bits else "session completed"
+
+    try:
+        from auto_dispatcher import report_task_completion, report_verification_result
+    except Exception:
+        return
+
+    while SESSION_ASSIGNED_TASKS:
+        ref = SESSION_ASSIGNED_TASKS.pop(0)
+        task_id = ref.get("task_id", "")
+        if task_id:
+            report_task_completion(task_id=task_id, author=agent_name, result_summary=summary)
+
+    while SESSION_REVIEW_REQUESTS:
+        ref = SESSION_REVIEW_REQUESTS.pop(0)
+        task_id = ref.get("task_id", "")
+        if task_id:
+            report_verification_result(
+                task_id=task_id,
+                reviewer=agent_name,
+                summary=summary,
+                verdict="approved",
+                author=ref.get("author", ""),
+            )
+
+
 def _send_session_summary() -> None:
     logs_file = DATA_DIR / "task_logs.jsonl"
     if not logs_file.exists():
@@ -284,7 +347,8 @@ def _extract_result_text(tool_result) -> str:
     if isinstance(tool_result, str):
         return _snippet(tool_result)
     if isinstance(tool_result, dict):
-        for key in ("output", "content", "message", "result"):
+        # Gemini CLI의 run_shell_command 결과는 stdout, stderr, output 등을 포함할 수 있음
+        for key in ("stdout", "output", "content", "message", "result", "stderr"):
             value = tool_result.get(key)
             if value:
                 return _snippet(str(value))
@@ -318,10 +382,11 @@ def _build_additional_context(prompt: str) -> str:
 
     unread = _read_gemini_messages("gemini")
     if unread:
+        _remember_itcp_work_items(unread)
         lines = []
         for message in unread:
-            sender = message.get("from", "?")
-            msg_type = message.get("type", "info")
+            sender = message.get("from_agent") or message.get("from") or "?"
+            msg_type = message.get("channel") or message.get("msg_type") or message.get("type") or "info"
             content = message.get("content", "")
             lines.append(f"- [{sender} -> gemini] ({msg_type}) {content}")
         sections.append("[Claude messages]\n" + "\n".join(lines))
@@ -361,6 +426,7 @@ def _log_tool_start(log_task, tool_name: str, tool_input) -> None:
 
 
 def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_result) -> None:
+    global SESSION_MODIFIED_FILES
     result_text = _extract_result_text(tool_result)
 
     if tool_name in ("write_file", "create_file", "overwrite_file"):
@@ -377,6 +443,9 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
                 "content": f"lines={line_count} preview={_snippet(content, 80)}",
             },
         )
+        short_path = _short_path(file_path)
+        if short_path not in SESSION_MODIFIED_FILES:
+            SESSION_MODIFIED_FILES.append(short_path)
         return
 
     if tool_name in ("replace", "edit_file", "str_replace"):
@@ -392,6 +461,9 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
                 "content": result_text or "success",
             },
         )
+        short_path = _short_path(file_path)
+        if short_path not in SESSION_MODIFIED_FILES:
+            SESSION_MODIFIED_FILES.append(short_path)
         return
 
     if tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
@@ -415,6 +487,10 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
 
 
 def main() -> None:
+    # Windows 환경에서 PAGER=cat으로 인해 psql/git 등이 먹통되는 문제 방지
+    if sys.platform == "win32":
+        os.environ["PAGER"] = ""
+
     _ensure_dashboard_running()
     _send_heartbeat()
 
@@ -431,7 +507,13 @@ def main() -> None:
     event = str(payload.get("hook_event_name") or "")
 
     if event == "BeforeAgent":
+        global SESSION_LAST_TASK, SESSION_MODIFIED_FILES, SESSION_HAD_ERROR, SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
         prompt = str(payload.get("prompt") or "")
+        SESSION_LAST_TASK = prompt.strip()
+        SESSION_MODIFIED_FILES = []
+        SESSION_HAD_ERROR = False
+        SESSION_ASSIGNED_TASKS = []
+        SESSION_REVIEW_REQUESTS = []
         additional_context = _build_additional_context(prompt)
         _register_prompt_task(prompt)
         if additional_context:
@@ -463,6 +545,10 @@ def main() -> None:
             from src.pg_store import bulk_update_tasks
 
             bulk_update_tasks("gemini", ["pending", "in_progress"], "done")
+        except Exception:
+            pass
+        try:
+            _report_completed_itcp_work("gemini")
         except Exception:
             pass
         _send_session_summary()

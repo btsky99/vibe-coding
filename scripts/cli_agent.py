@@ -214,6 +214,86 @@ def _select_codex_model(task: str) -> tuple[str, str]:
     return selected, reason
 
 
+def _prepare_codex_task_context(task: str) -> tuple[str, list[dict], list[dict]]:
+    """Codex does not have repo-managed hooks, so prepare inbox context here."""
+    try:
+        from itcp import receive, parse_task_reference
+    except Exception:
+        return task, [], []
+
+    unread = receive("codex", mark_read=True)
+    task_refs: list[dict] = []
+    review_refs: list[dict] = []
+    lines: list[str] = []
+
+    for message in unread[:5]:
+        sender = message.get("from_agent") or message.get("from") or "?"
+        channel = message.get("channel") or "general"
+        content = str(message.get("content") or "").strip()
+        lines.append(f"- [{sender} -> codex] ({channel}) {content}")
+
+        ref = parse_task_reference(message)
+        if ref.get("task_id"):
+            if ref.get("kind") == "review":
+                review_refs.append(ref)
+            elif ref.get("kind") == "task":
+                task_refs.append(ref)
+
+    sections: list[str] = []
+    if lines:
+        sections.append("[ITCP inbox]\n" + "\n".join(lines))
+
+    debate_json = os.environ.get("HIVE_DEBATE_CONTEXT", "").strip()
+    if debate_json:
+        sections.append("[Hive debate context]\n" + debate_json)
+
+    if not sections:
+        return task, task_refs, review_refs
+    prompt = "\n\n".join(sections) + "\n\n[Assigned task]\n" + task
+    return prompt, task_refs, review_refs
+
+
+def _report_codex_work(status: str, task: str, output_lines: list[str], task_refs: list[dict], review_refs: list[dict]) -> None:
+    """Codex lacks hooks, so report completion/verification after process exit."""
+    if status != "done":
+        return
+    try:
+        from auto_dispatcher import report_task_completion, report_verification_result
+    except Exception:
+        return
+
+    def _clip(text: str, limit: int = 120) -> str:
+        compact = " ".join(str(text).split())
+        return compact if len(compact) <= limit else compact[: limit - 3] + "..."
+
+    tail = ""
+    for line in reversed(output_lines[-10:]):
+        if str(line).strip():
+            tail = _clip(str(line), 120)
+            break
+
+    summary_parts = [_clip(task, 120)]
+    if tail:
+        summary_parts.append(f"last_output={tail}")
+    summary = " | ".join(summary_parts)
+
+    for ref in task_refs:
+        task_id = ref.get("task_id", "")
+        if task_id:
+            report_task_completion(task_id=task_id, author="codex", result_summary=summary)
+
+    for ref in review_refs:
+        task_id = ref.get("task_id", "")
+        if task_id:
+            report_verification_result(
+                task_id=task_id,
+                reviewer="codex",
+                summary=summary,
+                verdict="approved",
+                author=ref.get("author", ""),
+            )
+
+
 # ─── 전역 상태 (모듈 레벨 — agent_api.py에서 직접 접근) ──────────────────────
 
 _current_process: subprocess.Popen | None = None  # 현재 실행 중인 subprocess
@@ -421,6 +501,12 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         selected_model, codex_reason = _select_codex_model(task)
         routing_reason = (routing_reason or 'Codex 실행') + f' ({codex_reason})'
 
+    codex_task_refs: list[dict] = []
+    codex_review_refs: list[dict] = []
+    prepared_task = task
+    if cli == 'codex':
+        prepared_task, codex_task_refs, codex_review_refs = _prepare_codex_task_context(task)
+
     # 전역 상태 업데이트 (단일 실행 추적용 — 하위 호환)
     now_ts = datetime.now().isoformat()
     with _status_lock:
@@ -457,17 +543,17 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         # ── CLI별 명령어 구성 ─────────────────────────────────────────────
         if cli == 'claude':
             # Claude Code CLI: -p 플래그로 비대화형(print) 모드 실행
-            cmd = [_CLAUDE_CMD, '-p', task, '--dangerously-skip-permissions']
+            cmd = [_CLAUDE_CMD, '-p', prepared_task, '--dangerously-skip-permissions']
         elif cli == 'gemini':
             cmd = [_GEMINI_CMD]
             if selected_model:
                 cmd.extend(['-m', selected_model])
-            cmd.extend(['-p', task])
+            cmd.extend(['-p', prepared_task])
         elif cli == 'codex':
             cmd = [_CODEX_CMD, 'exec', '--dangerously-bypass-approvals-and-sandbox']
             if selected_model:
                 cmd.extend(['-m', selected_model])
-            cmd.append(task)
+            cmd.append(prepared_task)
         else:
             raise ValueError(f'알 수 없는 CLI: {cli} (지원: claude | gemini | codex)')
 
@@ -630,6 +716,9 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
                 pass
 
         # 히스토리 저장 (중단된 경우도 'stopped' 상태로 기록)
+        if cli == 'codex':
+            _report_codex_work(final_status, task, output_lines, codex_task_refs, codex_review_refs)
+
         result = {
             'id': run_id,
             'task': task,

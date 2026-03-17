@@ -110,6 +110,42 @@ FORCE_ORCHESTRATION = True
 _dashboard_opened = False
 
 
+def _prepare_codex_context(task: str) -> tuple[str, list[dict], list[dict]]:
+    """Codex launches from agent_shell need explicit ITCP inbox injection."""
+    try:
+        from itcp import receive, parse_task_reference
+    except Exception:
+        return task, [], []
+
+    unread = receive("codex", mark_read=True)
+    task_refs: list[dict] = []
+    review_refs: list[dict] = []
+    lines: list[str] = []
+
+    for message in unread[:5]:
+        sender = message.get("from_agent") or message.get("from") or "?"
+        channel = message.get("channel") or "general"
+        content = str(message.get("content") or "").strip()
+        lines.append(f"- [{sender} -> codex] ({channel}) {content}")
+        ref = parse_task_reference(message)
+        if ref.get("task_id"):
+            if ref.get("kind") == "review":
+                review_refs.append(ref)
+            elif ref.get("kind") == "task":
+                task_refs.append(ref)
+
+    sections: list[str] = []
+    if lines:
+        sections.append("[ITCP inbox]\n" + "\n".join(lines))
+    debate_json = os.environ.get("HIVE_DEBATE_CONTEXT", "").strip()
+    if debate_json:
+        sections.append("[Hive debate context]\n" + debate_json)
+
+    if not sections:
+        return task, task_refs, review_refs
+    return "\n\n".join(sections) + "\n\n[Assigned task]\n" + task, task_refs, review_refs
+
+
 def _wrap_orchestrator_task(task: str) -> str:
     if task.lstrip().startswith('/vibe-orchestrate'):
         return task
@@ -174,6 +210,10 @@ def run_agent(task, cli='auto', terminal_id='T?'):
 
     chosen = 'orchestrator' if FORCE_ORCHESTRATION else (_route(task) if cli == 'auto' else cli)
     direct_task = _wrap_orchestrator_task(task) if chosen == 'orchestrator' else task
+    codex_task_refs: list[dict] = []
+    codex_review_refs: list[dict] = []
+    if chosen == 'codex':
+        direct_task, codex_task_refs, codex_review_refs = _prepare_codex_context(direct_task)
     ts = datetime.now().isoformat()
     # run_id: handle_live_runs가 이벤트를 묶을 때 필요 (없으면 이벤트 전부 무시됨)
     run_id = str(uuid.uuid4())[:8]
@@ -264,6 +304,28 @@ def run_agent(task, cli='auto', terminal_id='T?'):
         rc = 1
     finally:
         _active_proc = None
+
+    if chosen == 'codex' and rc == 0:
+        try:
+            from auto_dispatcher import report_task_completion, report_verification_result
+
+            summary = task[:120]
+            for ref in codex_task_refs:
+                task_id = ref.get("task_id", "")
+                if task_id:
+                    report_task_completion(task_id=task_id, author="codex", result_summary=summary)
+            for ref in codex_review_refs:
+                task_id = ref.get("task_id", "")
+                if task_id:
+                    report_verification_result(
+                        task_id=task_id,
+                        reviewer="codex",
+                        summary=summary,
+                        verdict="approved",
+                        author=ref.get("author", ""),
+                    )
+        except Exception:
+            pass
 
     status = 'done' if rc == 0 else ('stopped' if rc < 0 else 'error')
     icon = 'OK' if status == 'done' else ('STOP' if status == 'stopped' else 'ERR')
