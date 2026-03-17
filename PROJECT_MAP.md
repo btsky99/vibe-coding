@@ -28,6 +28,11 @@
 - **`scripts/analyze_hive.py`**: Postgres 데이터를 분석하여 하이브 상태 분석 보고서 생성.
 - **`scripts/pg_manager.py`**: PostgreSQL 18 서버 관리 및 확장 기능 제어.
 - **`scripts/gemini_hook.py`**: Gemini CLI 전용 훅 핸들러 (로깅, 메시지 폴링, 대시보드 자동 실행 보장).
+- **`scripts/auto_dispatcher.py`**: [P4] 자율 멀티-LLM 태스크 디스패처 — 에이전트 역량 프로필 기반 자동 분배 + 크로스 검증.
+- **`scripts/itcp.py`**: Inter-Terminal Communication Protocol — PostgreSQL pg_messages 기반 비동기 에이전트 간 통신.
+- **`scripts/drift_detector.py`**: 계획 이탈 감지 — ai_monitor_plan.md와 실제 작업의 정합성 실시간 감시.
+- **`scripts/generate_hivemind_doc.py`**: HIVEMIND.md 자동 생성기 — Mermaid 다이어그램 포함 실시간 하이브 상태 문서.
+- **`scripts/skill_orchestrator.py`**: 스킬 체인 상태 추적 — PostgreSQL hive_skill_chains 테이블 기반.
 
 ## 🏗️ 빌드 및 설치 (Build & Installer)
 - **`vibe-coding.spec`**: PyInstaller 실행 파일 빌드 설정.

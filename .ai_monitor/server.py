@@ -259,7 +259,7 @@ def ensure_postgres_running():
             print(f"[PG] initdb 예외: {e}")
             return
 
-    # 2) 실행 여부 확인
+    # 2) 실행 여부 확인 — pg_ctl status + 포트 바인딩 이중 검증
     try:
         status_res = subprocess.run(
             [str(PG_CTL_BIN), "status", "-D", str(_PG_DATA_DIR)],
@@ -271,6 +271,21 @@ def ensure_postgres_running():
             return
     except Exception as e:
         print(f"[PG ERROR] pg_ctl status 확인: {e}")
+
+    # 2-1) 포트 점유 확인 — 다른 프로세스가 PG_PORT를 이미 사용 중이면 스킵
+    # [설계 의도] 다른 PC에 기존 PostgreSQL이 설치되어 있거나, 앱을 빠르게 재시작하여
+    # 이전 PG 프로세스가 아직 종료되지 않은 경우 포트 충돌을 방지합니다.
+    try:
+        import socket as _pg_sock
+        _pg_test = _pg_sock.socket(_pg_sock.AF_INET, _pg_sock.SOCK_STREAM)
+        _pg_result = _pg_test.connect_ex(('127.0.0.1', PG_PORT))
+        _pg_test.close()
+        if _pg_result == 0:
+            # 포트가 이미 열려 있음 — 다른 PG나 프로세스가 사용 중
+            print(f"[PG] 포트 {PG_PORT}이 이미 사용 중 → PG 시작 스킵 (기존 프로세스 활용)")
+            return
+    except Exception:
+        pass  # 소켓 테스트 실패 시 그냥 시작 시도
 
     # 3) pg_ctl start
     print(f"[PG] PostgreSQL 시작 중 (port={PG_PORT})...")
@@ -1782,9 +1797,10 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/heartbeat':
             # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
             self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
-            self.wfile.write(b"OK")
+            self.wfile.write(json.dumps({"status": "ok", "ts": datetime.now().isoformat()}).encode('utf-8'))
         elif parsed_path.path == '/api/projects':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1921,12 +1937,27 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/shutdown-disabled':
-            # 24시간 가동을 위해 셧다운 기능 비활성화
-            self.send_response(403)
+        elif parsed_path.path == '/api/shutdown':
+            # 안전한 셧다운: 서버와 자식 프로세스를 정리한 뒤 종료
+            # [설계 의도] 프론트엔드 TopMenuBar에서 호출. 확인 다이얼로그를 거친 후에만 도달.
+            # 좀비 프로세스 방지를 위해 PTY 세션 정리 후 os._exit() 호출.
+            self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "error", "message": "Shutdown is disabled for 24/7 operation."}).encode('utf-8'))
+            self.wfile.write(json.dumps({"status": "ok", "message": "서버 종료 중..."}).encode('utf-8'))
+            # 비동기로 0.5초 후 종료 (응답 전송 완료 대기)
+            import threading
+            def _delayed_shutdown():
+                time.sleep(0.5)
+                # PTY 세션 정리
+                for slot_id, info in list(pty_sessions.items()):
+                    proc = info.get('process')
+                    if proc:
+                        try: proc.terminate()
+                        except Exception: pass
+                os._exit(0)
+            threading.Thread(target=_delayed_shutdown, daemon=True).start()
         elif parsed_path.path == '/api/files':
             # [수정] Windows 경로(드라이브 루트 등) 처리 및 응답 안정성 강화.
             # 1. 경로 구분자 표준화 및 드라이브 루트(/) 유효성 보정.
@@ -2651,6 +2682,49 @@ class SSEHandler(BaseHTTPRequestHandler):
                     'terminal_agents': terminal_agents,  # 슬롯별 실시간 에이전트
                     'timestamp': now_dt.strftime('%Y-%m-%dT%H:%M:%S'),
                 }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/dispatcher/score':
+            # 디스패처 — 에이전트별 태스크 적합도 점수 조회
+            # [쿼리 파라미터] desc: 태스크 설명, type: 태스크 유형(선택)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                qs = urllib.parse.parse_qs(parsed_path.query)
+                desc = qs.get('desc', [''])[0]
+                task_type = qs.get('type', [None])[0]
+
+                sys.path.insert(0, str(SCRIPTS_DIR))
+                import auto_dispatcher as _ad
+                if not task_type:
+                    task_type = _ad.detect_task_type(desc)
+                scores = {name: _ad.score_agent(name, task_type) for name in _ad.AGENT_CAPABILITIES}
+                best = _ad.select_best_agent(task_type)
+                self.wfile.write(json.dumps({
+                    'task_type': task_type,
+                    'description': desc,
+                    'scores': scores,
+                    'best_agent': best,
+                    'capabilities': {
+                        name: cap['strengths']
+                        for name, cap in _ad.AGENT_CAPABILITIES.items()
+                    },
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/dispatcher/status':
+            # 디스패처 — 현재 분배 현황 조회
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                sys.path.insert(0, str(SCRIPTS_DIR))
+                import auto_dispatcher as _ad2
+                stat = _ad2.status()
+                self.wfile.write(json.dumps(stat, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/memory/db-info':
@@ -4062,6 +4136,59 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/dispatcher/dispatch':
+            # 디스패처 — 태스크를 최적 에이전트에 자동 분배 (POST)
+            # [Body] {"description": "...", "type": "bug_fix", "to": "claude", "priority": "high"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                sys.path.insert(0, str(SCRIPTS_DIR))
+                import auto_dispatcher as _ad3
+                result = _ad3.dispatch(
+                    description=data.get('description', ''),
+                    task_type=data.get('type'),
+                    assigned_to=data.get('to'),
+                    priority=data.get('priority', 'medium'),
+                    require_verification=data.get('verify', True),
+                )
+                self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/dispatcher/fan-out':
+            # 디스패처 — 여러 태스크 병렬 분배 (POST)
+            # [Body] {"tasks": ["태스크1", "태스크2", ...], "type": "auto"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                sys.path.insert(0, str(SCRIPTS_DIR))
+                import auto_dispatcher as _ad4
+                tasks = data.get('tasks', [])
+                results = _ad4.fan_out(*tasks, task_type=data.get('type'))
+                self.wfile.write(json.dumps(results, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/dispatcher/verify':
+            # 디스패처 — 크로스 검증 요청 (POST)
+            # [Body] {"task_id": "TASK-...", "summary": "...", "author": "claude"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                sys.path.insert(0, str(SCRIPTS_DIR))
+                import auto_dispatcher as _ad5
+                result = _ad5.request_verification(
+                    task_id=data.get('task_id', ''),
+                    result_summary=data.get('summary', ''),
+                    author=data.get('author', 'unknown'),
+                )
+                self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
@@ -4828,6 +4955,24 @@ if __name__ == '__main__':
         threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
                          name='ThoughtPreload').start()
         # 브로드캐스트 워커는 HTTP 서버 시작 전(4097~4099)에서 이미 시작됨 — 중복 시작 금지
+    except OSError as e:
+        if 'already in use' in str(e).lower() or '10048' in str(e):
+            print(f"[!] 포트 {HTTP_PORT} 충돌 — 이미 다른 프로세스가 사용 중입니다.")
+            print(f"    대안 포트를 탐색합니다...")
+            try:
+                alt_port = _find_free_port(HTTP_PORT + 10, max_tries=50)
+                HTTP_PORT = alt_port
+                server = ThreadedHTTPServer(('127.0.0.1', HTTP_PORT), SSEHandler)
+                print(f"[*] 대안 포트로 서버 시작: http://localhost:{HTTP_PORT}")
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+                threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
+                                 name='ThoughtPreload').start()
+            except Exception as e2:
+                print(f"[!] 대안 포트에서도 실패: {e2}")
+                import sys as _sys; _sys.exit(1)
+        else:
+            print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
+            import sys as _sys; _sys.exit(1)
     except Exception as e:
         print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
         import sys as _sys; _sys.exit(1)

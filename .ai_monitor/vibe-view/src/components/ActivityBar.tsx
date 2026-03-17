@@ -16,7 +16,7 @@ import { memo } from 'react';
 import {
   Search, Settings, Files,
   MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
-  ExternalLink, LayoutDashboard, Activity, Network
+  ExternalLink, LayoutDashboard, Activity, Network, Target
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -177,6 +177,10 @@ const ActivityBar = memo(function ActivityBar({
         {mcpCount > 0 && (
           <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-purple-500 rounded-full" />
         )}
+      </button>
+
+      <button onClick={() => onTabChange('dispatcher')} className={tabCls('dispatcher')} title="멀티-LLM 디스패처">
+        <Target className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('hive')} className={tabCls('hive')} title="하이브 진단 / 스킬">

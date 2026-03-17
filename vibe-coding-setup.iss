@@ -23,7 +23,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.80"
+  #define MyAppVersion   "3.7.82"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -46,7 +46,7 @@ AppUpdatesURL={#MyAppURL}
 
 ; 설치 경로 (기본: C:\Program Files\Vibe Coding)
 DefaultDirName={autopf}\{#MyAppName}
-DefaultGroupName={#MyAppDisplayName}
+DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 
 ; 출력 설정

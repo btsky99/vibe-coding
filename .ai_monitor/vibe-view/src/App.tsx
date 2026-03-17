@@ -50,6 +50,7 @@ import MessagesPanel from './components/panels/MessagesPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import HivePanel from './components/panels/HivePanel';
+import DispatcherPanel from './components/panels/DispatcherPanel';
 import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
@@ -710,6 +711,9 @@ function App() {
             ) : activeTab === 'memory' ? (
               /* 공유 메모리 패널 */
               <MemoryPanel currentProjectName={currentPath.split(/[/\\]/).filter(Boolean).pop()} />
+            ) : activeTab === 'dispatcher' ? (
+              /* 멀티-LLM 디스패처 패널 — 에이전트 역량 기반 자동 분배 UI */
+              <DispatcherPanel />
             ) : activeTab === 'hive' ? (
               /* 하이브 진단 패널 */
               <HivePanel />

@@ -53,6 +53,7 @@ import sys
 import json
 import os
 import io
+import time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -96,6 +97,40 @@ _SKIP_BASH_PREFIXES = (
 # 우선순위: 리스트 순서 (앞이 높음)
 # [중요] orchestrate가 항상 0번 (최고 우선순위) — 복잡한 요청은 여기서 처리
 _INTENT_MAP = [
+    {
+        "name": "multi_dispatch",
+        # 멀티-LLM 협업 분배 감지 — 여러 터미널/에이전트에 작업을 분배하는 지시
+        # [2026-03-17 Claude] auto_dispatcher.py 연동으로 역량 기반 자동 분배
+        "keywords": [
+            "분담", "나눠", "분배", "T1", "T2", "T3", "터미널",
+            "제미나이", "제미나아", "gemini", "codex", "코덱스",
+            "클로드가", "제미나이가", "코덱스가",
+            "각자", "각각", "나눠서", "분담해서",
+            "지시해", "시켜", "맡겨", "delegate",
+        ],
+        "context": (
+            "═══════════════════════════════════════════════════════\n"
+            "🤖  [자동 감지] 멀티-LLM 협업 분배 모드\n"
+            "═══════════════════════════════════════════════════════\n"
+            "⚡ auto_dispatcher.py로 에이전트별 역량 기반 자동 분배를 실행합니다.\n"
+            "\n"
+            "【디스패처 동작 순서】\n"
+            "1) 사용자 요청에서 태스크 목록 추출\n"
+            "2) 각 태스크의 유형 자동 감지 (bug_fix/feature/security/...)\n"
+            "3) 에이전트 역량 프로필 기반 최적 매칭\n"
+            "   python scripts/auto_dispatcher.py fan-out \"태스크1\" \"태스크2\" ...\n"
+            "4) ITCP로 각 에이전트에 작업 지시 전송\n"
+            "5) 크로스 검증 루프 자동 설정\n"
+            "\n"
+            "【에이전트 역량 요약】\n"
+            "- Claude (T1): 코드 리뷰, 보안 분석, 정밀 로직 구현\n"
+            "- Gemini (T2): 웹 검색, 아키텍처 설계, 문서화\n"
+            "- Codex (T3): 빠른 코드 생성, 테스트 작성, 샌드박스 실행\n"
+            "\n"
+            "⚠️  반드시 auto_dispatcher.py를 통해 분배하세요 (수동 ITCP 금지)\n"
+            "═══════════════════════════════════════════════════════"
+        ),
+    },
     {
         "name": "orchestrate",
         # 복잡한 요청 감지 — 여러 작업이 복합된 경우 오케스트레이터로 위임
@@ -863,6 +898,21 @@ def main():
             )
         except Exception:
             pass
+
+        # ── [P4] 자동 피드백 루프: 작업 완료 시 크로스 검증 자동 요청 ─────────
+        # 수정된 파일이 있고, 에러가 아닌 정상 완료일 때만 크로스 검증 요청
+        # auto_dispatcher.request_verification()을 호출하여 다른 에이전트에 검증 위임
+        try:
+            if _SESSION_MODIFIED_FILES and not _SESSION_HAD_ERROR and _SESSION_LAST_TASK:
+                from auto_dispatcher import request_verification as _rv
+                _task_summary = f"{_SESSION_LAST_TASK[:100]} | 수정 파일: {', '.join(_SESSION_MODIFIED_FILES[-5:])}"
+                _rv(
+                    task_id=f"AUTO-{_TERMINAL_ID}-{int(time.time())}",
+                    result_summary=_task_summary,
+                    author="claude",
+                )
+        except Exception:
+            pass  # 디스패처 미설치 등 예외는 조용히 무시
 
         # 오늘의 사용자 지시 + 완료 액션을 shared_memory.db에 갱신
         # → 다음 세션 시작 시 "이전에 뭘 했지?"를 바로 파악 가능
