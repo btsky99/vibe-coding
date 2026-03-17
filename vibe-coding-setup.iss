@@ -23,7 +23,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.85"
+  #define MyAppVersion   "3.7.86"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -50,7 +50,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 
 ; 출력 설정
-OutputDir=dist
+OutputDir=.ai_monitor\dist
 OutputBaseFilename={#MySetupName}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -78,7 +78,7 @@ Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDe
 
 [Files]
 ; PyInstaller로 생성된 EXE (단일 파일) — 고정 파일명(vibe-coding.exe)으로 설치
-Source: "dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: ".ai_monitor\dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 ; 아이콘 파일 — 자동 업데이트 후에도 바로가기 아이콘이 유지되도록 별도 배포
 Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Claude Code 상태줄 스크립트 — 설치 PC의 %USERPROFILE%\.claude\ 에 복사
