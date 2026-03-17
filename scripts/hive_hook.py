@@ -84,6 +84,9 @@ _SESSION_LAST_TASK: str = ""         # UserPromptSubmit에서 마지막 지시 �
 _SESSION_HAD_ERROR: bool = False     # Stop reason이 error이면 True
 
 # 단순 조회 명령어 스킵 목록
+_SESSION_ASSIGNED_TASKS: list = []
+_SESSION_REVIEW_REQUESTS: list = []
+
 _SKIP_BASH_PREFIXES = (
     "ls ", "ls\n", "cat ", "head ", "tail ", "echo ",
     "pwd", "git status", "git log", "git diff",
@@ -177,32 +180,14 @@ _INTENT_MAP = [
         ],
         "context": (
             "═══════════════════════════════════════════════════════\n"
-            "🏗️  [자동 감지] 빌드 워크플로 — Windows EXE + 설치버전 + Git 배포\n"
+            "🏗️  [자동 감지] 빌드 워크플로 → /vibe-release 스킬 사용\n"
             "═══════════════════════════════════════════════════════\n"
-            "🚨 중요: 사용자 확인 없이 모든 Step을 순서대로 즉시 실행하세요.\n"
+            "⚡ 즉시 `/vibe-release` 스킬을 실행하세요.\n"
             "\n"
-            "【빌드 순서 — 전부 자동 실행, 중간에 묻지 말 것】\n"
-            "Step 1) 프론트엔드 빌드 (React/Vite)\n"
-            "  cd D:/vibe-coding/.ai_monitor/vibe-view && npm run build\n"
-            "\n"
-            "Step 2) Windows EXE 패키징 (PyInstaller)\n"
-            "  cd D:/vibe-coding && pyinstaller vibe-coding.spec --noconfirm\n"
-            "  → dist/vibe-coding-vX.Y.Z.exe 생성 (버전은 _version.py에서 자동)\n"
-            "\n"
-            "Step 3) 설치버전 빌드 (Inno Setup)\n"
-            "  ISCC_PATH=\"C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe\"\n"
-            "  \"$ISCC_PATH\" D:/vibe-coding/vibe-coding-setup.iss\n"
-            "  → dist/vibe-coding-setup-X.Y.Z.exe 생성\n"
-            "\n"
-            "Step 4) Git 커밋 + 푸시 (빌드 결과 GitHub에 반영)\n"
-            "  cd D:/vibe-coding\n"
-            "  git add .ai_monitor/vibe-view/dist/ vibe-coding.spec vibe-coding-setup.iss\n"
-            "  git add -f .ai_monitor/vibe-view/dist/\n"
-            "  git commit -m 'build: EXE+설치버전 빌드 및 프론트엔드 업데이트'\n"
-            "  git push origin main\n"
-            "\n"
-            "⚠️  Step 1→2→3→4 순서 필수. 각 Step 완료 확인 후 다음 진행.\n"
-            "⚠️  빌드 완료 = 깃 푸시까지 완료. 중간에 사용자에게 묻지 말 것.\n"
+            "🚨 절대 규칙: 수동으로 빌드 단계를 실행하지 마세요!\n"
+            "   - _version.py 수동 편집 금지 → auto_version.py 사용\n"
+            "   - npm build / pyinstaller / ISCC 직접 실행 금지\n"
+            "   - /vibe-release 스킬이 모든 단계를 자동 처리합니다\n"
             "═══════════════════════════════════════════════════════"
         ),
     },
@@ -486,6 +471,67 @@ def _read_messages(agent_name: str) -> list[dict]:
         return []
 
 
+def _remember_itcp_work_items(messages: list[dict]) -> None:
+    """Track real dispatch/review work items seen in the Claude inbox."""
+    global _SESSION_ASSIGNED_TASKS, _SESSION_REVIEW_REQUESTS
+    try:
+        from itcp import parse_task_reference as _parse_task_reference
+    except Exception:
+        return
+
+    for message in messages:
+        ref = _parse_task_reference(message)
+        task_id = ref.get("task_id", "")
+        if not task_id:
+            continue
+        if ref.get("kind") == "review":
+            if not any(item.get("task_id") == task_id for item in _SESSION_REVIEW_REQUESTS):
+                _SESSION_REVIEW_REQUESTS.append(ref)
+        elif ref.get("kind") == "task":
+            if not any(item.get("task_id") == task_id for item in _SESSION_ASSIGNED_TASKS):
+                _SESSION_ASSIGNED_TASKS.append(ref)
+
+
+def _report_completed_itcp_work(agent_name: str) -> None:
+    """Emit task result / verify result messages for actual assigned work."""
+    global _SESSION_ASSIGNED_TASKS, _SESSION_REVIEW_REQUESTS
+    if _SESSION_HAD_ERROR:
+        return
+
+    summary_bits = []
+    if _SESSION_LAST_TASK:
+        summary_bits.append(_SESSION_LAST_TASK[:120])
+    if _SESSION_MODIFIED_FILES:
+        summary_bits.append("files=" + ", ".join(_SESSION_MODIFIED_FILES[-5:]))
+    summary = " | ".join(summary_bits) if summary_bits else "session completed"
+
+    try:
+        from auto_dispatcher import (
+            report_task_completion as _report_task_completion,
+            report_verification_result as _report_verification_result,
+        )
+    except Exception:
+        return
+
+    while _SESSION_ASSIGNED_TASKS:
+        ref = _SESSION_ASSIGNED_TASKS.pop(0)
+        task_id = ref.get("task_id", "")
+        if task_id:
+            _report_task_completion(task_id=task_id, author=agent_name, result_summary=summary)
+
+    while _SESSION_REVIEW_REQUESTS:
+        ref = _SESSION_REVIEW_REQUESTS.pop(0)
+        task_id = ref.get("task_id", "")
+        if task_id:
+            _report_verification_result(
+                task_id=task_id,
+                reviewer=agent_name,
+                summary=summary,
+                verdict="approved",
+                author=ref.get("author", ""),
+            )
+
+
 def _check_and_install_skills() -> list[str]:
     """Claude Code 스킬 자동 설치 — UserPromptSubmit마다 실행.
 
@@ -680,6 +726,7 @@ def main():
         # [2026-03-08] ITCP(itcp.py) 기반으로 전환 — PostgreSQL pg_messages FIRST
         unread = _read_messages("claude")
         if unread:
+            _remember_itcp_work_items(unread)
             # 채널별 이모지 매핑 — 메시지 유형을 시각적으로 구분
             _CHANNEL_EMOJI = {
                 "debug": "🐛", "task": "📋", "review": "🔍",
@@ -707,10 +754,12 @@ def main():
                 log_task("사용자", f"[지시] {short}", _TERMINAL_ID)
 
             # self-reflect: 새 지시 시작 시 마지막 지시 + 파일 목록 리셋
-            global _SESSION_LAST_TASK, _SESSION_MODIFIED_FILES, _SESSION_HAD_ERROR
+            global _SESSION_LAST_TASK, _SESSION_MODIFIED_FILES, _SESSION_HAD_ERROR, _SESSION_ASSIGNED_TASKS, _SESSION_REVIEW_REQUESTS
             _SESSION_LAST_TASK = short
             _SESSION_MODIFIED_FILES = []
             _SESSION_HAD_ERROR = False
+            _SESSION_ASSIGNED_TASKS = []
+            _SESSION_REVIEW_REQUESTS = []
 
             # [파이프라인 단계 업데이트] 사용자 지시 수신 → "분석" 단계 표시
             _update_pipeline_stage('analyzing', short)
@@ -916,6 +965,10 @@ def main():
 
         # 오늘의 사용자 지시 + 완료 액션을 shared_memory.db에 갱신
         # → 다음 세션 시작 시 "이전에 뭘 했지?"를 바로 파악 가능
+        try:
+            _report_completed_itcp_work("claude")
+        except Exception:
+            pass
         _save_session_snapshot()
 
         # [current-work 자동 업데이트] 오늘 완료된 항목을 하이브 메모리에 자동 반영

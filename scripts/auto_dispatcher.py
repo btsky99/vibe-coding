@@ -389,6 +389,9 @@ def request_verification(task_id: str, result_summary: str, author: str) -> dict
     2. ITCP review 채널로 검증 요청 전송
     3. 검증 메타데이터 반환
     """
+    if str(task_id).startswith("AUTO-"):
+        return {"task_id": task_id, "verifier": "", "author": author, "status": "ignored"}
+
     verifier = select_best_agent("review", exclude=[author])
 
     verify_msg = (
@@ -421,6 +424,93 @@ def request_verification(task_id: str, result_summary: str, author: str) -> dict
     return {"task_id": task_id, "verifier": verifier, "author": author, "status": "verification_requested"}
 
 
+def report_task_completion(
+    task_id: str,
+    author: str,
+    result_summary: str,
+    *,
+    request_verify: bool = True,
+) -> dict:
+    """Report a task result and optionally trigger cross-verification."""
+    message = (
+        f"[TASK-RESULT] 작업 완료\n"
+        f"🆔 Task: {task_id}\n"
+        f"✍️ 작성자: {author}\n"
+        f"📝 결과 요약:\n{result_summary}"
+    )
+    itcp.send(
+        from_terminal=author,
+        to_terminal="dispatcher",
+        content=message,
+        channel="task",
+        msg_type="response",
+        metadata={
+            "task_id": task_id,
+            "author": author,
+            "type": "task_result",
+        },
+    )
+
+    verification = None
+    if request_verify:
+        verification = request_verification(task_id=task_id, result_summary=result_summary, author=author)
+
+    return {
+        "task_id": task_id,
+        "author": author,
+        "status": "completed",
+        "verification": verification,
+    }
+
+
+def report_verification_result(
+    task_id: str,
+    reviewer: str,
+    summary: str,
+    *,
+    verdict: str = "approved",
+    author: str = "",
+) -> dict:
+    """Report a verification result back to dispatcher and the original author."""
+    message = (
+        f"[VERIFY-RESULT] 검증 완료\n"
+        f"🆔 Task: {task_id}\n"
+        f"🧪 Reviewer: {reviewer}\n"
+        f"✅ Verdict: {verdict}\n"
+        f"📝 Summary:\n{summary}"
+    )
+    metadata = {
+        "task_id": task_id,
+        "reviewer": reviewer,
+        "author": author,
+        "verdict": verdict,
+        "type": "verify_result",
+    }
+    itcp.send(
+        from_terminal=reviewer,
+        to_terminal="dispatcher",
+        content=message,
+        channel="review",
+        msg_type="response",
+        metadata=metadata,
+    )
+    if author and author != reviewer:
+        itcp.send(
+            from_terminal=reviewer,
+            to_terminal=author,
+            content=message,
+            channel="review",
+            msg_type="response",
+            metadata=metadata,
+        )
+    return {
+        "task_id": task_id,
+        "reviewer": reviewer,
+        "verdict": verdict,
+        "status": "verified",
+    }
+
+
 def status() -> dict:
     """현재 디스패치 현황을 조회합니다.
 
@@ -435,6 +525,7 @@ def status() -> dict:
     # 통계 집계
     stats = {
         "dispatched": 0,
+        "completed": 0,
         "verified": 0,
         "pending_verification": 0,
         "agent_load": {name: 0 for name in AGENT_CAPABILITIES},
@@ -447,12 +538,16 @@ def status() -> dict:
             stats["dispatched"] += 1
             if to in stats["agent_load"]:
                 stats["agent_load"][to] += 1
+        if "[TASK-RESULT]" in content:
+            stats["completed"] += 1
         if "[VERIFY-RESULT]" in content:
             stats["verified"] += 1
 
     for msg in review_msgs:
         if "[CROSS-VERIFY]" in msg.get("content", ""):
             stats["pending_verification"] += 1
+        if "[VERIFY-RESULT]" in msg.get("content", "") and stats["pending_verification"] > 0:
+            stats["pending_verification"] -= 1
 
     print(f"\n📊 디스패처 현황")
     print(f"   전체 디스패치: {stats['dispatched']}건")
