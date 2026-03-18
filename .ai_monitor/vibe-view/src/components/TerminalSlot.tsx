@@ -189,7 +189,13 @@ export default function TerminalSlot({
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.loadAddon(new WebLinksAddon((_event, uri) => {
-        window.open(uri, '_blank');
+        fetch(`${API_BASE}/api/open-external`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: uri }),
+        }).catch(() => {
+          window.open(uri, '_blank', 'noopener,noreferrer');
+        });
       }));
       term.open(xtermRef.current);
       fitAddon.fit();
