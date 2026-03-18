@@ -2,6 +2,7 @@
 FILE: ai_monitor_plan.md
 DESCRIPTION: 프로젝트 전체 보안/성능/품질 고도화 + 멀티-LLM 자율 협업 로드맵
 REVISION HISTORY:
+- 2026-03-18 Claude: P5 cmux 기반 vibe CLI + 알림 시스템 고도화 계획 추가
 - 2026-03-17 Claude: P4 멀티-LLM 자율 협업 시스템 구축 계획 추가
 - 2026-03-16 Claude: P0 보안 5건 + P1 성능/안정성 5건 전부 완료
 - 2026-03-16 Claude: P0 보안 + P1 성능/안정성 + P2 코드품질 고도화 계획 수립
@@ -79,7 +80,104 @@ REVISION HISTORY:
 
 ---
 
+## 🟢 P5: cmux 기반 vibe CLI + 알림 시스템 고도화 (v3.7.89~)
+
+**목표:** cmux의 CLI/알림/IPC 설계를 기존 server.py + PostgreSQL 위에 구현
+**접근:** API 확장형 MVP (Named Pipe는 추후)
+
+### Phase 1: 백엔드 인프라
+
+[x] Task 23: PostgreSQL에 vibe 알림/상태/로그 스키마 생성
+    파일: .ai_monitor/server.py (ensure_postgres_running 내 스키마 섹션)
+    방법: vibe_notifications, vibe_agent_state, vibe_agent_logs 3개 테이블 CREATE IF NOT EXISTS
+          + NOTIFY 트리거 함수 생성 (vibe_notification 채널)
+    검증: psql로 테이블 존재 확인 + INSERT 시 NOTIFY 발생 확인
+    의존: 없음
+
+[x] Task 24: api/vibe_api.py 신규 생성 — /api/vibe/* REST 핸들러
+    파일: .ai_monitor/api/vibe_api.py (신규)
+    방법: handle_notify, handle_progress, handle_status, handle_log, handle_sidebar_state
+          각 핸들러가 PostgreSQL에 CRUD 수행. 기존 api/agent_api.py 패턴 참고.
+          - POST /api/vibe/notify → INSERT vibe_notifications + pg_notify
+          - POST /api/vibe/progress → UPSERT vibe_agent_state (key='_progress')
+          - POST /api/vibe/status → UPSERT vibe_agent_state
+          - POST /api/vibe/log → INSERT vibe_agent_logs
+          - DELETE /api/vibe/progress, status, log → DELETE
+          - GET /api/vibe/sidebar → SELECT 전체 상태 조회
+    검증: curl로 각 엔드포인트 호출 후 PG 데이터 확인
+    의존: Task 23 완료 후
+
+[x] Task 25: server.py에 vibe_api 라우팅 추가
+    파일: .ai_monitor/server.py
+    방법: import api.vibe_api + do_GET/do_POST/do_DELETE에 /api/vibe/* elif 추가
+    검증: server.py 기동 후 /api/vibe/notify POST 성공 확인
+    의존: Task 24 완료 후
+
+### Phase 2: CLI 도구
+
+[x] Task 26: scripts/vibe_cli.py 신규 생성 — cmux 호환 CLI
+    파일: scripts/vibe_cli.py (신규)
+    방법: argparse 기반 8개 서브커맨드 (notify, set-progress, clear-progress,
+          set-status, clear-status, log, clear-log, sidebar-state)
+          내부: urllib.request → server.py API / 폴백: psql 직접 INSERT
+    검증: python scripts/vibe_cli.py notify --title "테스트" --body "완료"
+    의존: Task 25 완료 후
+
+### Phase 3: OSC 파서 + 에이전트 감지
+
+[x] Task 27: scripts/osc_parser.py 신규 생성 — OSC 시퀀스 파서
+    파일: scripts/osc_parser.py (신규)
+    방법: 정규식 기반 OSC 9/99/777/133 추출 + strip()
+    검증: 단위 테스트 — 각 OSC 타입별 파싱 결과 검증
+    의존: 없음 (독립)
+
+[x] Task 28: scripts/agent_detector.py 신규 생성 — 에이전트 프로세스 감지
+    파일: scripts/agent_detector.py (신규)
+    방법: psutil 기반 프로세스 트리 탐색 + 환경변수 TERMINAL_ID 병행
+    검증: Claude Code 실행 중 detect_all_agents() 호출 시 감지 확인
+    의존: 없음 (독립)
+
+[x] Task 29: cli_agent.py에 OSC 파서 통합
+    파일: scripts/cli_agent.py
+    방법: _ANSI_ESCAPE 필터 전에 osc_parser.parse()로 알림 추출 → API 전송
+    검증: Claude CLI가 OSC 777 알림 출력 시 vibe_notifications에 기록 확인
+    의존: Task 25, Task 27 완료 후
+
+### Phase 4: Mission Control UI 알림
+
+[x] Task 30: mission_control.py에 vibe_notification 채널 구독 추가
+    파일: .ai_monitor/mission_control.py
+    방법: PgListenerThread에 LISTEN vibe_notification + 시그널 emit
+          + QSystemTrayIcon.showMessage()로 Windows 토스트
+    검증: vibe notify CLI → 시스템 트레이 알림 팝업 확인
+    의존: Task 23 완료 후
+
+[x] Task 31: mission_control_ui.py에 링 플래시 + 배지 + 진행률 호 추가
+    파일: .ai_monitor/mission_control_ui.py
+    방법: AgentRing 확장 — flash_ring(), badge_count, progress_arc
+    검증: vibe notify → AgentRing 파란 깜빡임 + 배지 숫자 표시 확인
+    의존: Task 30 완료 후
+
+### 의존성 그래프
+```
+Task 23 (PG) ──→ Task 24 (API) ──→ Task 25 (라우팅) ──→ Task 26 (CLI)
+    │                                      │
+    └──→ Task 30 (MC 구독) ──→ Task 31 (UI)│
+                                            ↓
+Task 27 (OSC) ──→ Task 29 (cli_agent 통합) ←┘
+Task 28 (감지) — 독립
+```
+
+### 실행 순서
+1. **동시 시작:** Task 23 + Task 27 + Task 28
+2. **Task 23 완료 후:** Task 24 → Task 25 → Task 26
+3. **Task 23 완료 후 (병렬):** Task 30 → Task 31
+4. **Task 25 + Task 27 완료 후:** Task 29
+
+---
+
 ## 변경 요약
 - **P0~P3 완료**: 보안/성능/하이브 인텔리전스 전부 완료.
 - **P4 완료**: 멀티-LLM 자율 협업 시스템 전부 완료 (Task 15~22).
   - 디스패처 코어 + 서버 API + ITCP 통합 + 대시보드 UI + 자동 피드백 루프
+- **P5 진행중**: cmux 기반 vibe CLI + 알림 시스템 고도화 (Task 23~31)

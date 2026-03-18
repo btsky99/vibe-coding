@@ -304,7 +304,13 @@ class KnowledgeGraphHUD(QFrame):
         self.stat_label.setText(f"{len(nodes)}노드 {len(edges)}엣지")
 
 class AgentRing(QWidget):
-    """CMUX 스타일의 에이전트 상태 링 위젯"""
+    """CMUX 스타일의 에이전트 상태 링 위젯.
+
+    [2026-03-18] Claude: cmux 3중 알림 체계 구현
+    - flash_ring(): 파란색 테두리 2회 깜빡임 (200ms 간격) — cmux trigger-flash 미러
+    - badge_count: 미읽음 알림 수 → 빨간 원형 배지 표시
+    - progress_arc: 진행률 호(arc) 오버레이 — cmux set-progress 미러
+    """
     def __init__(self, name, color, parent=None):
         super().__init__(parent)
         self.name = name
@@ -313,14 +319,53 @@ class AgentRing(QWidget):
         self.angle = 0
         self.pulse = 0
         self.is_active = False
-        
+
+        # P5: cmux 호환 알림 상태
+        self._badge_count = 0        # 미읽음 알림 수
+        self._progress_arc = -1.0    # 진행률 (0.0~1.0, -1이면 비표시)
+        self._flash_alpha = 0        # 링 플래시 투명도 (0~255, 애니메이션용)
+        self._flash_count = 0        # 남은 플래시 횟수
+
         # 애니메이션용 타이머
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_animation)
         self.timer.start(30)
 
+        # P5: 링 플래시 타이머 (200ms 간격)
+        self._flash_timer = QTimer(self)
+        self._flash_timer.timeout.connect(self._do_flash_step)
+
     def set_active(self, active):
         self.is_active = active
+
+    def flash_ring(self):
+        """파란색 테두리 2회 깜빡임 — cmux trigger-flash 미러.
+        200ms on → 200ms off → 200ms on → 200ms off (총 800ms)
+        """
+        self._flash_count = 4  # 4 스텝 (on-off-on-off)
+        self._flash_alpha = 255
+        self._flash_timer.start(200)
+
+    def _do_flash_step(self):
+        """플래시 애니메이션의 한 스텝을 실행합니다."""
+        self._flash_count -= 1
+        if self._flash_count <= 0:
+            self._flash_alpha = 0
+            self._flash_timer.stop()
+        else:
+            # 홀수 스텝: on(255), 짝수 스텝: off(0)
+            self._flash_alpha = 255 if (self._flash_count % 2 == 1) else 0
+        self.update()
+
+    def set_badge_count(self, count: int):
+        """미읽음 알림 배지 수를 설정합니다."""
+        self._badge_count = max(0, count)
+        self.update()
+
+    def set_progress(self, value: float):
+        """진행률 호를 설정합니다. -1이면 비표시, 0.0~1.0이면 호 표시."""
+        self._progress_arc = value
+        self.update()
 
     def update_animation(self):
         if self.is_active:
@@ -333,17 +378,29 @@ class AgentRing(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        
+
         center = self.rect().center()
         radius = 35 + (3 * math.sin(self.pulse) if self.is_active else 0)
-        
+
         # 배경 원 (그림자/글로우 효과)
         glow_color = QColor(self.color)
         glow_color.setAlpha(50 if self.is_active else 20)
         painter.setBrush(QBrush(glow_color))
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(center, radius + 5, radius + 5)
-        
+
+        # P5: 진행률 호 (progress arc) — 에이전트 링 바깥에 얇은 호로 표시
+        if 0.0 <= self._progress_arc <= 1.0:
+            progress_pen = QPen(QColor(46, 204, 113, 200))  # 초록색 반투명
+            progress_pen.setWidth(3)
+            painter.setPen(progress_pen)
+            painter.setBrush(Qt.NoBrush)
+            # 호 각도: 12시 방향(90°)에서 시계방향으로 진행률만큼
+            span_angle = int(self._progress_arc * 360 * 16)
+            start_angle = 90 * 16  # 12시 방향
+            arc_rect = self.rect().adjusted(10, 10, -10, -10)
+            painter.drawArc(arc_rect, start_angle, -span_angle)
+
         # 메인 링
         pen = QPen(self.color)
         pen.setWidth(4)
@@ -352,16 +409,40 @@ class AgentRing(QWidget):
             pen.setColor(QColor(100, 100, 100, 100))
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        
+
         if self.is_active:
             painter.drawArc(self.rect().adjusted(15, 15, -15, -15), self.angle * 16, 300 * 16)
         else:
             painter.drawEllipse(center, radius, radius)
-            
+
+        # P5: 링 플래시 오버레이 — 파란색 링이 깜빡이는 효과
+        if self._flash_alpha > 0:
+            flash_pen = QPen(QColor(52, 152, 219, self._flash_alpha))  # 파란색
+            flash_pen.setWidth(6)
+            painter.setPen(flash_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(center, radius + 2, radius + 2)
+
         # 이름 텍스트
         painter.setPen(QColor(255, 255, 255))
         painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
         painter.drawText(self.rect(), Qt.AlignCenter, self.name.upper())
+
+        # P5: 미읽음 알림 배지 — 우상단 빨간 원 + 숫자
+        if self._badge_count > 0:
+            badge_x = self.width() - 22
+            badge_y = 5
+            badge_r = 10
+            # 빨간 원
+            painter.setBrush(QBrush(QColor(231, 76, 60)))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(badge_x, badge_y, badge_r * 2, badge_r * 2)
+            # 숫자
+            painter.setPen(QColor(255, 255, 255))
+            painter.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            badge_text = str(self._badge_count) if self._badge_count < 100 else "99+"
+            painter.drawText(badge_x, badge_y, badge_r * 2, badge_r * 2,
+                             Qt.AlignCenter, badge_text)
 
 class DebateHUD(QFrame):
     """현재 진행 중인 하이브 토론 상태를 보여주는 HUD 위젯"""
@@ -624,6 +705,41 @@ class MissionControlSidebar(QWidget):
             item = self.log_layout.takeAt(self.log_layout.count() - 1)
             if item.widget():
                 item.widget().deleteLater()
+
+    def _get_ring(self, agent: str):
+        """에이전트 이름으로 AgentRing 위젯을 반환합니다."""
+        name = agent.lower().split(':')[0].split('-')[0]
+        if 'gemini' in name:
+            return self.gemini_ring
+        elif 'claude' in name:
+            return self.claude_ring
+        elif 'codex' in name:
+            return self.codex_ring
+        return None
+
+    def flash_agent_ring(self, agent: str):
+        """에이전트 링에 파란색 깜빡임 효과를 트리거합니다.
+        cmux trigger-flash 미러.
+        """
+        ring = self._get_ring(agent)
+        if ring:
+            ring.flash_ring()
+            # 배지 카운트 증가
+            ring.set_badge_count(ring._badge_count + 1)
+
+    def update_agent_progress(self, agent: str, value: float):
+        """에이전트 링에 진행률 호를 표시합니다.
+        cmux set-progress 미러. value=-1이면 비표시.
+        """
+        ring = self._get_ring(agent)
+        if ring:
+            ring.set_progress(value)
+
+    def update_agent_status_field(self, agent: str, key: str, value: str):
+        """에이전트 사이드바 상태 필드를 업데이트합니다.
+        cmux set-status 미러. 현재는 로그로 표시.
+        """
+        self.add_log(agent, f"📊 {key}: {value}", "info")
 
     def update_status(self, status):
         """에이전트 상태 업데이트 (링 애니메이션).

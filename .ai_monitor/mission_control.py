@@ -88,10 +88,18 @@ def _python_runner_cmds() -> list[str]:
     return candidates or ['python']
 
 class PgListenerThread(QThread):
-    """PostgreSQL LISTEN 채널을 감시하는 백그라운드 스레드"""
+    """PostgreSQL LISTEN 채널을 감시하는 백그라운드 스레드.
+
+    [2026-03-18] Claude: vibe_notification 채널 추가 — cmux 알림 시스템 연동
+    - hive_log_channel: 기존 하이브 로그/상태 이벤트
+    - vibe_notification: vibe CLI 알림/진행률/상태 변경 이벤트 (신규)
+    """
     log_received = Signal(dict)
     status_changed = Signal(dict)
-    debate_received = Signal(dict) # 토론 이벤트 신규
+    debate_received = Signal(dict)
+    # P5: vibe 알림/상태 시그널 (cmux 호환)
+    vibe_notification_received = Signal(dict)  # vibe_notifications INSERT 시
+    vibe_state_changed = Signal(dict)          # vibe_agent_state UPSERT 시
 
     def __init__(self):
         super().__init__()
@@ -103,11 +111,12 @@ class PgListenerThread(QThread):
             conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             cursor = conn.cursor()
             cursor.execute("LISTEN hive_log_channel;")
-            
+            cursor.execute("LISTEN vibe_notification;")
+
             while self.running:
                 if select.select([conn], [], [], 2) == ([], [], []):
                     continue
-                
+
                 conn.poll()
                 while conn.notifies:
                     notify = conn.notifies.pop(0)
@@ -115,11 +124,11 @@ class PgListenerThread(QThread):
                         ev = json.loads(notify.payload)
                         table = ev.get("table")
                         data = ev.get("data", {})
-                        
-                        # 1. 로그 데이터 처리
+
+                        # 1. 로그 데이터 처리 (기존)
                         if table == "hive_logs":
                             self.log_received.emit(data)
-                            
+
                             # 상태 데이터 처리
                             meta = data.get("metadata", {})
                             if isinstance(meta, str): meta = json.loads(meta)
@@ -130,12 +139,20 @@ class PgListenerThread(QThread):
                                     "status": status,
                                     "terminal_id": meta.get("terminal_id")
                                 })
-                        
-                        # 2. 토론 데이터 처리 (신규)
+
+                        # 2. 토론 데이터 처리
                         elif table in ("hive_debates", "hive_debate_messages"):
                             self.debate_received.emit({"table": table, "data": data})
-                            
-                    except Exception as e: 
+
+                        # 3. vibe 알림 처리 (신규 — cmux 호환)
+                        elif table == "vibe_notifications":
+                            self.vibe_notification_received.emit(data)
+
+                        # 4. vibe 상태/진행률 변경 처리 (신규)
+                        elif table == "vibe_agent_state":
+                            self.vibe_state_changed.emit(data)
+
+                    except Exception as e:
                         print(f"[PgListener] Parse Error: {e}")
             conn.close()
         except Exception as e:
@@ -174,7 +191,10 @@ class MissionControlApp(QObject):
         self.pg_thread = PgListenerThread()
         self.pg_thread.log_received.connect(self.on_pg_log)
         self.pg_thread.status_changed.connect(self.on_pg_status)
-        self.pg_thread.debate_received.connect(self.on_pg_debate) # 토론 연동
+        self.pg_thread.debate_received.connect(self.on_pg_debate)
+        # P5: vibe 알림/상태 시그널 연결 (cmux 호환)
+        self.pg_thread.vibe_notification_received.connect(self.on_vibe_notification)
+        self.pg_thread.vibe_state_changed.connect(self.on_vibe_state)
         self.pg_thread.start()
         
         # 펄스 애니메이션 타이머 (50ms 간격)
@@ -220,6 +240,55 @@ class MissionControlApp(QObject):
             msg_type = data.get("type", "proposal")
             content = data.get("content")
             self.sidebar.add_log(agent, content, msg_type)
+
+    def on_vibe_notification(self, data):
+        """vibe 알림 수신 시 시스템 트레이 토스트 + 사이드바 링 플래시.
+
+        [2026-03-18] Claude: cmux 3중 알림 체계 구현
+        1. 시스템 트레이 토스트 (QSystemTrayIcon.showMessage)
+        2. 사이드바 에이전트 링 플래시
+        3. 사이드바 로그에 알림 추가
+        """
+        agent = data.get("agent", "unknown")
+        title = data.get("title", "알림")
+        body = data.get("body", "")
+
+        # 1. Windows 시스템 트레이 토스트 알림
+        try:
+            self.tray_icon.showMessage(
+                f"[{agent.upper()}] {title}",
+                body,
+                QSystemTrayIcon.Information,
+                5000  # 5초 표시
+            )
+        except Exception as e:
+            print(f"[MC] 토스트 알림 오류: {e}")
+
+        # 2. 사이드바 에이전트 링 플래시 + 배지 업데이트
+        self.sidebar.flash_agent_ring(agent)
+
+        # 3. 사이드바 로그에 알림 추가
+        self.sidebar.add_log(agent, f"🔔 {title}: {body}", "info")
+
+    def on_vibe_state(self, data):
+        """vibe 에이전트 상태/진행률 변경 수신 시 사이드바 UI 업데이트.
+
+        [2026-03-18] Claude: cmux set-progress / set-status 미러
+        """
+        agent = data.get("agent", "unknown")
+        key = data.get("key", "")
+
+        if key == "_progress":
+            # 진행률 변경 → AgentRing progress_arc 업데이트
+            try:
+                progress_data = json.loads(data.get("value", "{}"))
+                value = float(progress_data.get("value", 0))
+                self.sidebar.update_agent_progress(agent, value)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+        else:
+            # 일반 상태 변경 → 사이드바 상태 표시 갱신
+            self.sidebar.update_agent_status_field(agent, key, data.get("value", ""))
 
     def on_pg_status(self, ev):
         """PG 리스너로부터 상태 변경 수신 시 트레이 아이콘 업데이트"""

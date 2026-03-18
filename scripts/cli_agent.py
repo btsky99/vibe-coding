@@ -424,10 +424,36 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
     try:
         for raw_line in iter(process.stdout.readline, b''):
             if raw_line:
-                # UTF-8 디코딩 후 ANSI/OSC 이스케이프 시퀀스 제거
+                # UTF-8 디코딩 후 OSC 알림 추출 → 그 뒤 ANSI/OSC 이스케이프 시퀀스 제거
+                # [2026-03-18] Claude: OSC 파서 통합 — 알림 추출 후 제거 패턴
                 # Claude CLI가 파이프 환경에서도 ]11;rgb:... 등 터미널 색상 코드를
                 # 출력하는 문제가 있어 UI에 노이즈가 생기므로 필터링합니다.
-                line = _ANSI_ESCAPE.sub('', raw_line.decode('utf-8', errors='replace')).rstrip()
+                _raw_text = raw_line.decode('utf-8', errors='replace')
+                # OSC 알림 추출 (제거 전에 먼저 파싱하여 vibe 알림 시스템에 전달)
+                try:
+                    from osc_parser import parse as _osc_parse
+                    _osc_events = _osc_parse(_raw_text)
+                    for _osc_ev in _osc_events:
+                        if _osc_ev.get('type') == 'notification':
+                            # vibe 알림 API로 전달 (비동기 — 실패해도 무시)
+                            try:
+                                import urllib.request as _ur
+                                _notify_data = json.dumps({
+                                    'agent': terminal_id or 'unknown',
+                                    'title': _osc_ev.get('title', 'Terminal'),
+                                    'body': _osc_ev.get('body', ''),
+                                    'subtitle': _osc_ev.get('subtitle'),
+                                    'source': _osc_ev.get('source', 'osc'),
+                                }, ensure_ascii=False).encode('utf-8')
+                                _req = _ur.Request('http://localhost:9000/api/vibe/notify',
+                                                   data=_notify_data, method='POST')
+                                _req.add_header('Content-Type', 'application/json')
+                                _ur.urlopen(_req, timeout=2)
+                            except Exception:
+                                pass  # API 미기동 시 무시
+                except ImportError:
+                    pass  # osc_parser 없으면 스킵
+                line = _ANSI_ESCAPE.sub('', _raw_text).rstrip()
                 all_lines.append(line)
                 # 터미널별 마지막 출력 줄 + 파이프라인 단계 업데이트
                 if line.strip():

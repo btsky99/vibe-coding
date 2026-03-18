@@ -118,6 +118,7 @@ import api.memory_api as memory_api
 import api.agent_api as agent_api
 import api.pty_api as pty_api
 import api.config_api as config_api
+import api.vibe_api as vibe_api
 import string
 import socket
 from collections import deque
@@ -349,7 +350,92 @@ def ensure_postgres_running():
         # 기존 pg_logs 테이블에 project_id 컬럼 없으면 추가 (마이그레이션)
         run_pg_sql("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
         run_pg_sql("CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs(project_id);")
-        print("[PG] 스키마 및 확장 초기화 완료")
+        # ── P5: vibe CLI 알림/상태/로그 테이블 (cmux 호환) ──────────────────
+        # [2026-03-18] Claude: cmux 분석 기반 vibe 알림 시스템 스키마 추가
+        # vibe_notifications: 에이전트 알림 (cmux notification.create 미러)
+        run_pg_sql("""
+            CREATE TABLE IF NOT EXISTS vibe_notifications (
+                id BIGSERIAL PRIMARY KEY,
+                agent TEXT NOT NULL DEFAULT 'unknown',
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                body TEXT NOT NULL,
+                source TEXT DEFAULT 'cli',
+                is_read BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+        # vibe_agent_state: 에이전트 상태 (progress + status 통합, UPSERT 패턴)
+        run_pg_sql("""
+            CREATE TABLE IF NOT EXISTS vibe_agent_state (
+                agent TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                icon TEXT,
+                color TEXT,
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (agent, key)
+            );
+        """)
+        # vibe_agent_logs: 에이전트 로그 (cmux log 미러)
+        run_pg_sql("""
+            CREATE TABLE IF NOT EXISTS vibe_agent_logs (
+                id BIGSERIAL PRIMARY KEY,
+                agent TEXT NOT NULL DEFAULT 'unknown',
+                message TEXT NOT NULL,
+                level TEXT DEFAULT 'info',
+                source TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+        # NOTIFY 트리거: vibe_notifications INSERT 시 vibe_notification 채널로 알림 전파
+        # Mission Control UI가 LISTEN vibe_notification으로 실시간 수신
+        run_pg_sql("""
+            CREATE OR REPLACE FUNCTION notify_vibe_notification() RETURNS trigger AS $$
+            BEGIN
+                PERFORM pg_notify('vibe_notification', json_build_object(
+                    'table', 'vibe_notifications',
+                    'data', row_to_json(NEW)
+                )::text);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        run_pg_sql("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vibe_notification'
+                ) THEN
+                    CREATE TRIGGER trg_vibe_notification
+                        AFTER INSERT ON vibe_notifications
+                        FOR EACH ROW EXECUTE FUNCTION notify_vibe_notification();
+                END IF;
+            END $$;
+        """)
+        # vibe_agent_state 변경 시에도 알림 (진행률/상태 실시간 반영용)
+        run_pg_sql("""
+            CREATE OR REPLACE FUNCTION notify_vibe_state_change() RETURNS trigger AS $$
+            BEGIN
+                PERFORM pg_notify('vibe_notification', json_build_object(
+                    'table', 'vibe_agent_state',
+                    'data', row_to_json(NEW)
+                )::text);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        run_pg_sql("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vibe_state_change'
+                ) THEN
+                    CREATE TRIGGER trg_vibe_state_change
+                        AFTER INSERT OR UPDATE ON vibe_agent_state
+                        FOR EACH ROW EXECUTE FUNCTION notify_vibe_state_change();
+                END IF;
+            END $$;
+        """)
+        print("[PG] 스키마 및 확장 초기화 완료 (vibe 테이블 포함)")
     except Exception as e:
         print(f"[PG] 시작 오류: {e}")
 
@@ -2203,6 +2289,12 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _mcp_config_path=_mcp_config_path,
             )
 
+        # ── [모듈 위임] vibe_api — /api/vibe/* (cmux 호환 CLI API) ────────
+        elif parsed_path.path == '/api/vibe/sidebar':
+            vibe_api.handle_sidebar_state(self)
+        elif parsed_path.path == '/api/vibe/notifications':
+            vibe_api.handle_notifications(self)
+
         # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
         elif parsed_path.path.startswith('/api/agent/'):
             agent_api.handle_get(self, parsed_path.path)
@@ -2850,6 +2942,36 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
+        if path == '/api/open-external':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                payload = {}
+                if content_length > 0:
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    payload = json.loads(body or '{}')
+
+                url = str(payload.get('url', '')).strip()
+                parsed_url = urlparse(url)
+                if not url or parsed_url.scheme not in ('http', 'https'):
+                    raise ValueError('Only http/https URLs can be opened externally')
+
+                opened = webbrowser.open(url)
+                self.wfile.write(json.dumps({
+                    "status": "ok",
+                    "opened": bool(opened),
+                    "url": url,
+                }).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "message": str(e),
+                }).encode('utf-8'))
+            return
+
         if path == '/api/kanban/launch':
             # B안 통합: kanban_board.py(PySide6 네이티브) 제거 →
             # dashboard_window.py + React TaskBoardPanel(?kanban=1)으로 일원화.
@@ -3346,6 +3468,22 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _mcp_config_path=_mcp_config_path,
                 DATA_DIR=DATA_DIR
             )
+
+        # ── [모듈 위임 - POST] vibe_api — /api/vibe/* (cmux 호환 CLI API) ─
+        elif parsed_path.path == '/api/vibe/notify':
+            vibe_api.handle_notify(self)
+        elif parsed_path.path == '/api/vibe/progress':
+            vibe_api.handle_progress(self, method='POST')
+        elif parsed_path.path == '/api/vibe/progress/clear':
+            vibe_api.handle_progress(self, method='DELETE')
+        elif parsed_path.path == '/api/vibe/status':
+            vibe_api.handle_status(self, method='POST')
+        elif parsed_path.path == '/api/vibe/status/clear':
+            vibe_api.handle_status(self, method='DELETE')
+        elif parsed_path.path == '/api/vibe/log':
+            vibe_api.handle_log(self, method='POST')
+        elif parsed_path.path == '/api/vibe/log/clear':
+            vibe_api.handle_log(self, method='DELETE')
 
         # ── [모듈 위임 - POST] agent_api — /api/agent/run, /api/agent/stop ─
         elif parsed_path.path.startswith('/api/agent/'):
