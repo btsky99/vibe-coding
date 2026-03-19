@@ -22,30 +22,6 @@
         ]
       }
     ],
-    "BeforeTool": [
-      {
-        "matcher": "write_file|create_file|overwrite_file|replace|edit_file|str_replace|run_shell_command|shell|bash|execute_command",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python D:/vibe-coding/scripts/gemini_hook.py",
-            "timeout": 5000
-          }
-        ]
-      }
-    ],
-    "AfterTool": [
-      {
-        "matcher": "write_file|create_file|overwrite_file|replace|edit_file|str_replace|run_shell_command|shell|bash|execute_command",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python D:/vibe-coding/scripts/gemini_hook.py",
-            "timeout": 5000
-          }
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [
@@ -72,6 +48,15 @@
         "--db-path",
         "D:/vibe-coding/.ai_monitor/data/hive_mind.db"
       ]
+    },
+    "vibe-coding": {
+      "command": "D:/vibe-coding/.ai_monitor/venv/Scripts/python.exe",
+      "args": [
+        "D:/vibe-coding/.ai_monitor/bin/mcp_server.py"
+      ],
+      "env": {
+        "PROJECT_ROOT": "D:/vibe-coding"
+      }
     }
   },
   "ui": {
