@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Set Review - vibe-dispatcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Lora', Georgia, serif; background: #faf9f5; padding: 2rem; color: #141413; }
+    h1 { font-family: 'Poppins', sans-serif; margin-bottom: 0.5rem; font-size: 1.5rem; }
+    .description { color: #b0aea5; margin-bottom: 1.5rem; font-style: italic; max-width: 900px; }
+    .controls { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+    .btn { font-family: 'Poppins', sans-serif; padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+    .btn-add { background: #6a9bcc; color: white; }
+    .btn-add:hover { background: #5889b8; }
+    .btn-export { background: #d97757; color: white; }
+    .btn-export:hover { background: #c4613f; }
+    table { width: 100%; max-width: 1100px; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    th { font-family: 'Poppins', sans-serif; background: #141413; color: #faf9f5; padding: 0.75rem 1rem; text-align: left; font-size: 0.875rem; }
+    td { padding: 0.75rem 1rem; border-bottom: 1px solid #e8e6dc; vertical-align: top; }
+    tr:nth-child(even) td { background: #faf9f5; }
+    tr:hover td { background: #f3f1ea; }
+    .section-header td { background: #e8e6dc; font-family: 'Poppins', sans-serif; font-weight: 500; font-size: 0.8rem; color: #141413; text-transform: uppercase; letter-spacing: 0.05em; }
+    .query-input { width: 100%; padding: 0.4rem; border: 1px solid #e8e6dc; border-radius: 4px; font-size: 0.875rem; font-family: 'Lora', Georgia, serif; resize: vertical; min-height: 60px; }
+    .query-input:focus { outline: none; border-color: #d97757; box-shadow: 0 0 0 2px rgba(217,119,87,0.15); }
+    .toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider { position: absolute; inset: 0; background: #b0aea5; border-radius: 24px; cursor: pointer; transition: 0.2s; }
+    .toggle .slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s; }
+    .toggle input:checked + .slider { background: #d97757; }
+    .toggle input:checked + .slider::before { transform: translateX(20px); }
+    .btn-delete { background: #c44; color: white; padding: 0.3rem 0.6rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-family: 'Poppins', sans-serif; }
+    .btn-delete:hover { background: #a33; }
+    .summary { margin-top: 1rem; color: #b0aea5; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <h1>Eval Set Review: <span id="skill-name">vibe-dispatcher</span></h1>
+  <p class="description">Current description: <span id="skill-desc">멀티 LLM 디스패처 관리 스킬. 에이전트 간 태스크 분배, 상태 모니터링, 크로스 검증을 수행합니다.</span></p>
+
+  <div class="controls">
+    <button class="btn btn-add" onclick="addRow()">+ Add Query</button>
+    <button class="btn btn-export" onclick="exportEvalSet()">Export Eval Set</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:65%">Query</th>
+        <th style="width:18%">Should Trigger</th>
+        <th style="width:10%">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="eval-body"></tbody>
+  </table>
+
+  <p class="summary" id="summary"></p>
+
+  <script>
+    const EVAL_DATA = [
+  {
+    "query": "이 보안 점검 작업 Gemini한테 보내줘, 나는 프론트엔드 리팩토링 할게",
+    "should_trigger": true
+  },
+  {
+    "query": "지금 T2랑 T3 뭐 하고 있어? 에이전트 상태 좀 보여줘",
+    "should_trigger": true
+  },
+  {
+    "query": "API 문서 업데이트, 단위 테스트 추가, 성능 프로파일링 이 세 개를 각각 최적 에이전트한테 병렬로 분배해줘",
+    "should_trigger": true
+  },
+  {
+    "query": "Codex한테 이 함수 테스트 코드 작성하라고 시켜줄래? test_api_handler.py에 대해서",
+    "should_trigger": true
+  },
+  {
+    "query": "아까 TASK-20260319-abc123 작업 끝났는데 크로스 검증 요청 좀 보내줘",
+    "should_trigger": true
+  },
+  {
+    "query": "이 CSS 버그 수정이랑 백엔드 API 리팩토링 두 개 있는데, 누가 더 잘할지 점수 확인 먼저 해봐",
+    "should_trigger": true
+  },
+  {
+    "query": "하이브 전체 상태 요약해줘, 디스패치 현황이랑 에이전트별 부하 보고 싶어",
+    "should_trigger": true
+  },
+  {
+    "query": "지금 pending인 검증 요청 몇 개야? 내가 검증해야 할 것 있으면 알려줘",
+    "should_trigger": true
+  },
+  {
+    "query": "React 트렌드 조사 작업을 급하게 처리해야 해, 우선순위 critical로 적절한 에이전트한테 보내줘",
+    "should_trigger": true
+  },
+  {
+    "query": "server.py 245번째 줄에서 TypeError 나는데 NoneType has no attribute len이래, 고쳐줘",
+    "should_trigger": false
+  },
+  {
+    "query": "이 코드 보안 취약점 있는지 OWASP 기준으로 직접 점검해줘",
+    "should_trigger": false
+  },
+  {
+    "query": "vibe-release로 빌드하고 v3.8.0 릴리즈 해줘",
+    "should_trigger": false
+  },
+  {
+    "query": "pg_store.py에서 save_task 함수 리팩토링해줘, 중복 코드가 너무 많아",
+    "should_trigger": false
+  },
+  {
+    "query": "이 함수에 대한 단위 테스트를 TDD로 작성해줘, RED-GREEN-REFACTOR 사이클로",
+    "should_trigger": false
+  },
+  {
+    "query": "scripts/auto_dispatcher.py 코드 리뷰해줘, 성능 개선할 곳 있는지 봐줘",
+    "should_trigger": false
+  },
+  {
+    "query": "새로운 알림 기능을 브레인스토밍 하고 싶어, 어떤 방식이 좋을지 설계해줘",
+    "should_trigger": false
+  },
+  {
+    "query": "ai_monitor_plan.md에 있는 계획대로 실행해줘, 3단계부터 이어서",
+    "should_trigger": false
+  },
+  {
+    "query": "이 에러가 세 번째 반복이야, 자꾸 같은 ImportError 터져서 미치겠어",
+    "should_trigger": false
+  },
+  {
+    "query": "git log 확인하고 어제 Gemini가 뭘 커밋했는지 알려줘",
+    "should_trigger": false
+  }
+]
+;
+
+    let evalItems = [...EVAL_DATA];
+
+    function render() {
+      const tbody = document.getElementById('eval-body');
+      tbody.innerHTML = '';
+
+      // Sort: should-trigger first, then should-not-trigger
+      const sorted = evalItems
+        .map((item, origIdx) => ({ ...item, origIdx }))
+        .sort((a, b) => (b.should_trigger ? 1 : 0) - (a.should_trigger ? 1 : 0));
+
+      let lastGroup = null;
+      sorted.forEach(item => {
+        const group = item.should_trigger ? 'trigger' : 'no-trigger';
+        if (group !== lastGroup) {
+          const headerRow = document.createElement('tr');
+          headerRow.className = 'section-header';
+          headerRow.innerHTML = `<td colspan="3">${item.should_trigger ? 'Should Trigger' : 'Should NOT Trigger'}</td>`;
+          tbody.appendChild(headerRow);
+          lastGroup = group;
+        }
+
+        const idx = item.origIdx;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><textarea class="query-input" onchange="updateQuery(${idx}, this.value)">${escapeHtml(item.query)}</textarea></td>
+          <td>
+            <label class="toggle">
+              <input type="checkbox" ${item.should_trigger ? 'checked' : ''} onchange="updateTrigger(${idx}, this.checked)">
+              <span class="slider"></span>
+            </label>
+            <span style="margin-left:8px;font-size:0.8rem;color:#b0aea5">${item.should_trigger ? 'Yes' : 'No'}</span>
+          </td>
+          <td><button class="btn-delete" onclick="deleteRow(${idx})">Delete</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+      updateSummary();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function updateQuery(idx, value) { evalItems[idx].query = value; updateSummary(); }
+    function updateTrigger(idx, value) { evalItems[idx].should_trigger = value; render(); }
+    function deleteRow(idx) { evalItems.splice(idx, 1); render(); }
+
+    function addRow() {
+      evalItems.push({ query: '', should_trigger: true });
+      render();
+      const inputs = document.querySelectorAll('.query-input');
+      inputs[inputs.length - 1].focus();
+    }
+
+    function updateSummary() {
+      const trigger = evalItems.filter(i => i.should_trigger).length;
+      const noTrigger = evalItems.filter(i => !i.should_trigger).length;
+      document.getElementById('summary').textContent =
+        `${evalItems.length} queries total: ${trigger} should trigger, ${noTrigger} should not trigger`;
+    }
+
+    function exportEvalSet() {
+      const valid = evalItems.filter(i => i.query.trim() !== '');
+      const data = valid.map(i => ({ query: i.query.trim(), should_trigger: i.should_trigger }));
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'eval_set.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    render();
+  </script>
+</body>
+</html>
