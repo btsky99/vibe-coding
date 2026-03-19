@@ -5,6 +5,8 @@
 ## 🧠 프로젝트 인프라 (Infrastructure)
 - **`PROJECT_MAP.md`**: (필독) 프로젝트 전체 지도 및 파일 역할 가이드.
 - **`RULES.md`**: (필독) 에이전트 행동 수칙, 한글 주석/커밋 표준, 하이브 마인드 운영 원칙.
+- **`docs/VIBE_PROJECT_GUIDE.md`**: 하이브 마인드 운영 및 아키텍처 통합 가이드 (v5.0).
+- **`docs/API_SPEC.md`**: REST API 엔드포인트 및 통신 규격 상세 명세.
 - **`ai_monitor_plan.md`**: 하이브 마인드 고도화 및 신규 기능 구현 로드맵.
 - **`ActivityBar.tsx`**: 좌측 액티비티 바 — HiveEngineStatus(3단계 LED 링 + 자가 치유 dot) 최상단 통합. globalPipelineStage/hiveHealth 수신.
 - **`App.tsx`**: 최상위 레이아웃 — globalPipelineStage(agentTerminals 파생) + isHealingActive(hiveHealth 파생) + onNavigateToAgent를 ActivityBar에 전달.
