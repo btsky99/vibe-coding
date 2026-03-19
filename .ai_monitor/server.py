@@ -3151,7 +3151,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                         eval_html = max(candidates, key=lambda p: p.stat().st_mtime)
                     else:
                         raise RuntimeError('eval_review.html 없음. 먼저 /skill-creator로 평가 쿼리셋을 생성하세요.')
-                import webbrowser
                 webbrowser.open(eval_html.as_uri())
                 self.wfile.write(json.dumps({"status": "launched", "path": str(eval_html)}).encode('utf-8'))
             except Exception as e:
