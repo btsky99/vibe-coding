@@ -5,12 +5,16 @@
  *
  * REVISION HISTORY:
  * - 2026-03-17 Claude: 최초 구현 — 역량 프로필 + 분배 현황 + 디스패치 UI
+ * - 2026-03-19 Claude: hive_tasks에서 디스패치 히스토리 로드 기능 추가
+ *   - 기존: React 상태에만 저장 → 새로고침 시 유실, CLI 디스패치 미표시
+ *   - 수정: /api/dispatcher/history에서 DB 기록을 로드 + 세션 내 디스패치도 병합
+ *   - 대시보드 "최근 디스패치" 패널이 비어있던 근본 원인 해결
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../../constants';
 import {
-  Send, Target, Shield, Zap, Brain, CheckCircle, XCircle,
+  Send, Target, Shield, Zap, CheckCircle,
   RefreshCw, ChevronDown, ChevronUp, Users
 } from 'lucide-react';
 
@@ -35,6 +39,8 @@ interface DispatchResult {
   verifier: string | null;
   status: string;
   scores: AgentScore;
+  description?: string;
+  dispatched_at?: string;
 }
 
 interface DispatcherStatus {
@@ -125,6 +131,17 @@ export default function DispatcherPanel() {
   const [targetAgent, setTargetAgent] = useState('auto');
   const [priority, setPriority] = useState('medium');
 
+  const mergeHistory = useCallback((current: DispatchResult[], incoming: DispatchResult[]) => {
+    const merged = new Map(current.map(item => [item.task_id, item]));
+    incoming.forEach(item => {
+      const prev = merged.get(item.task_id);
+      merged.set(item.task_id, { ...prev, ...item });
+    });
+    return Array.from(merged.values())
+      .sort((a, b) => (b.dispatched_at || '').localeCompare(a.dispatched_at || ''))
+      .slice(0, 30);
+  }, []);
+
   // ── 데이터 로드 ──────────────────────────────────────────────────────────
   const fetchStatus = useCallback(() => {
     fetch(`${API_BASE}/api/dispatcher/status`)
@@ -132,6 +149,19 @@ export default function DispatcherPanel() {
       .then(d => setStatus(d))
       .catch(err => console.error('[DispatcherPanel] status fetch:', err));
   }, []);
+
+  // [2026-03-19 추가] hive_tasks에서 디스패치 히스토리 로드
+  // DB에 영속 저장된 디스패치 레코드를 가져와서 세션 내 신규 디스패치와 병합합니다.
+  const fetchHistory = useCallback(() => {
+    fetch(`${API_BASE}/api/dispatcher/history`)
+      .then(r => r.json())
+      .then((data: DispatchResult[]) => {
+        if (Array.isArray(data)) {
+          setDispatchHistory(prev => mergeHistory(prev, data));
+        }
+      })
+      .catch(err => console.error('[DispatcherPanel] history fetch:', err));
+  }, [mergeHistory]);
 
   const fetchScore = useCallback((desc: string) => {
     if (!desc.trim()) return;
@@ -143,12 +173,13 @@ export default function DispatcherPanel() {
       .catch(err => console.error('[DispatcherPanel] score fetch:', err));
   }, [taskType]);
 
-  // 5초 폴링
+  // 5초 폴링 — 상태 + 히스토리 모두 갱신
   useEffect(() => {
     fetchStatus();
-    const iv = setInterval(fetchStatus, 5000);
+    fetchHistory();
+    const iv = setInterval(() => { fetchStatus(); fetchHistory(); }, 5000);
     return () => clearInterval(iv);
-  }, [fetchStatus]);
+  }, [fetchStatus, fetchHistory]);
 
   // 입력 변경 시 점수 미리보기 (디바운스 500ms)
   useEffect(() => {
@@ -174,7 +205,11 @@ export default function DispatcherPanel() {
     })
       .then(r => r.json())
       .then(result => {
-        setDispatchHistory(prev => [result, ...prev].slice(0, 20));
+        setDispatchHistory(prev => mergeHistory(prev, [{
+          ...result,
+          description: taskDesc,
+          dispatched_at: new Date().toISOString(),
+        }]));
         setTaskDesc('');
         fetchStatus();
       })
@@ -356,8 +391,8 @@ export default function DispatcherPanel() {
           </div>
         )}
 
-        {dispatchHistory.map((item, i) => (
-          <div key={i} className="bg-white/5 rounded px-2 py-1.5 space-y-0.5">
+        {dispatchHistory.map(item => (
+          <div key={item.task_id} className="bg-white/5 rounded px-2 py-1.5 space-y-0.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono text-white/30">{item.task_id}</span>
               <span className={`text-[10px] px-1.5 rounded-full ${

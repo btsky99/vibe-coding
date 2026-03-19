@@ -49,7 +49,11 @@
       "Bash(powershell:*)",
       "Bash(cd /d/vibe-coding/.ai_monitor/nexus-view && npm run build 2>&1)",
       "Bash(npm run:*)",
-      "Bash(ISCC_PATH=\"C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe\" && \"$ISCC_PATH\" D:/vibe-coding/vibe-coding-setup.iss 2>&1)"
+      "Bash(ISCC_PATH=\"C:/Users/com/AppData/Local/Programs/Inno Setup 6/ISCC.exe\" && \"$ISCC_PATH\" D:/vibe-coding/vibe-coding-setup.iss 2>&1)",
+      "Bash(where psql:*)",
+      "Read(//c/Program Files/PostgreSQL/**)",
+      "Bash(\"D:/vibe-coding/.ai_monitor/bin/pgsql/bin/pg_ctl.exe\" -D \"D:/vibe-coding/.ai_monitor/bin/pgsql/data\" -l \"D:/vibe-coding/.ai_monitor/bin/pgsql/pg.log\" start 2>&1)",
+      "Skill(vibe-release)"
     ]
   }
 }

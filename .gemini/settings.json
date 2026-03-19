@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "python D:/vibe-coding/scripts/gemini_hook.py",
-            "timeout": 5000
+            "timeout": 10000
           }
         ]
       }

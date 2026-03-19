@@ -5,6 +5,10 @@
 #          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
 #
 # 🕒 변경 이력 (History):
+# [2026-03-19] - Claude (디스패치 히스토리 API 추가 — "최근 디스패치" 패널 빈 화면 수정)
+#   - GET /api/dispatcher/history: hive_tasks에서 created_by='dispatcher' 레코드 조회
+#   - DispatcherPanel.tsx의 DispatchResult 인터페이스 형식으로 변환하여 반환
+#   - auto_dispatcher.py의 hive_tasks 기록 기능과 연동하여 대시보드 표시 완성
 # [2026-03-16] - Claude (PostgreSQL 커넥션 풀 추가)
 #   - 매 쿼리마다 psycopg2.connect() 호출하던 방식 → 모듈 레벨 커넥션 풀(최대 5개) 재사용
 #   - _get_pg_conn() / _return_pg_conn(): 스레드 안전 풀 관리 (threading.Lock)
@@ -1678,6 +1682,84 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 # 구조: { "agent_name": { "status": "active|idle|error", "task": "task_id", "last_seen": timestamp } }
 AGENT_STATUS = {}
 AGENT_STATUS_LOCK = threading.Lock()
+
+
+# ── MUX API 핸들러 — cmux-style 터미널 멀티플렉서 REST 인터페이스 ────────────
+# [2026-03-18] Claude: P6 Task 34 — vibe_mux Named Pipe 서버에 대한 HTTP 래퍼.
+# 대시보드(프론트엔드)가 REST API로 MUX 명령을 보내면, 여기서 Named Pipe를 통해
+# vibe_mux 서버에 전달합니다. MUX 서버 미실행 시 에러를 반환합니다.
+
+def _handle_mux_terminals_get(handler):
+    """GET /api/mux/terminals — 활성 터미널 목록 조회."""
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / 'scripts'))
+        from vibe_mux import list_terminals
+        result = list_terminals()
+        _send_json_response(handler, result)
+    except Exception as e:
+        _send_json_response(handler, {'ok': False, 'error': f'MUX 서버 연결 실패: {e}'}, status=503)
+
+
+def _handle_mux_send_text(handler, body):
+    """POST /api/mux/send-text — 터미널에 텍스트 전송.
+
+    [요청 본문] {"terminal": "T2", "text": "보안 점검해줘"}
+    [응답] {"ok": true, "result": {"terminal": "T2", "sent": true}}
+    """
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / 'scripts'))
+        from vibe_mux import send_text
+        terminal = body.get('terminal', '')
+        text = body.get('text', '')
+        from_agent = body.get('from', 'mux')
+        metadata = body.get('metadata', {})
+        if not terminal or not text:
+            _send_json_response(handler, {'ok': False, 'error': 'terminal과 text 필수'}, status=400)
+            return
+        result = send_text(
+            terminal,
+            text,
+            from_agent=str(from_agent or 'mux'),
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
+        _send_json_response(handler, result)
+    except Exception as e:
+        _send_json_response(handler, {'ok': False, 'error': f'MUX 전송 실패: {e}'}, status=503)
+
+
+def _handle_mux_send_key(handler, body):
+    """POST /api/mux/send-key — 터미널에 특수 키 전송.
+
+    [요청 본문] {"terminal": "T2", "key": "enter"}
+    """
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / 'scripts'))
+        from vibe_mux import _send_to_mux
+        terminal = body.get('terminal', '')
+        key = body.get('key', '')
+        if not terminal or not key:
+            _send_json_response(handler, {'ok': False, 'error': 'terminal과 key 필수'}, status=400)
+            return
+        result = _send_to_mux({
+            'id': f'api-mux-key',
+            'method': 'surface.send_key',
+            'params': {'terminal': terminal, 'key': key},
+        })
+        _send_json_response(handler, result)
+    except Exception as e:
+        _send_json_response(handler, {'ok': False, 'error': f'MUX 키 전송 실패: {e}'}, status=503)
+
+
+def _send_json_response(handler, data, status=200):
+    """JSON 응답을 전송하는 헬퍼."""
+    body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+    handler.send_response(status)
+    handler.send_header('Content-Type', 'application/json; charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin() if hasattr(handler, '_cors_origin') else '*')
+    handler.send_header('Content-Length', str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
@@ -2295,6 +2377,10 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/vibe/notifications':
             vibe_api.handle_notifications(self)
 
+        # ── [모듈 위임] MUX API — /api/mux/* (cmux-style 터미널 멀티플렉서) ──
+        elif parsed_path.path == '/api/mux/terminals':
+            _handle_mux_terminals_get(self)
+
         # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
         elif parsed_path.path.startswith('/api/agent/'):
             agent_api.handle_get(self, parsed_path.path)
@@ -2819,6 +2905,42 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(stat, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        elif parsed_path.path == '/api/dispatcher/history':
+            # ── [2026-03-19 추가] 디스패치 히스토리 조회 ──────────────────────────
+            # [설계 의도] 대시보드 "최근 디스패치" 패널이 hive_tasks에서 디스패치 레코드를
+            # 조회할 수 있도록 전용 엔드포인트를 제공합니다.
+            # hive_tasks 테이블에서 created_by='dispatcher' 이고 tags에 'dispatch'가 포함된
+            # 레코드를 최신순으로 반환합니다.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                tasks = list_tasks(project_id=_current_project_id())
+                # 디스패치 태스크만 필터링 (created_by='dispatcher' 또는 tags에 'dispatch' 포함)
+                dispatch_tasks = [
+                    t for t in tasks
+                    if t.get('created_by') == 'dispatcher'
+                    or 'dispatch' in (t.get('tags') or [])
+                ]
+                # DispatcherPanel.tsx의 DispatchResult 인터페이스에 맞춰 변환
+                history = []
+                for t in dispatch_tasks[:30]:  # 최근 30개만
+                    history.append({
+                        'task_id': t.get('id', ''),
+                        'assigned_to': t.get('assigned_to', ''),
+                        'task_type': t.get('role', '') or (t.get('tags', [''])[1] if len(t.get('tags', [])) > 1 else ''),
+                        'score': t.get('scores', {}).get(t.get('assigned_to', ''), 0) if isinstance(t.get('scores'), dict) else 0,
+                        'verifier': t.get('verifier', None),
+                        'status': t.get('status', 'dispatched'),
+                        'scores': t.get('scores', {}),
+                        'description': t.get('description', ''),
+                        'dispatched_at': t.get('timestamp', ''),
+                    })
+                self.wfile.write(json.dumps(history, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                print(f"[PG ERROR] /api/dispatcher/history: {e}")
+                self.wfile.write(json.dumps([], ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/memory/db-info':
             # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
             # 배포 버전에서 어떤 DB를 바라보고 있는지 UI에서 확인할 수 있게 함
@@ -3484,6 +3606,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             vibe_api.handle_log(self, method='POST')
         elif parsed_path.path == '/api/vibe/log/clear':
             vibe_api.handle_log(self, method='DELETE')
+
+        # ── [모듈 위임 - POST] MUX API — /api/mux/* (cmux-style 텍스트 주입) ──
+        elif parsed_path.path == '/api/mux/send-text':
+            _handle_mux_send_text(self, _body)
+        elif parsed_path.path == '/api/mux/send-key':
+            _handle_mux_send_key(self, _body)
 
         # ── [모듈 위임 - POST] agent_api — /api/agent/run, /api/agent/stop ─
         elif parsed_path.path.startswith('/api/agent/'):
@@ -5086,6 +5214,28 @@ if __name__ == '__main__':
             _child_procs.append(proc)
             print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
     threading.Thread(target=run_heal_daemon, daemon=True).start()
+
+    # MUX 서버 자동 시작: cmux-style 터미널 멀티플렉서 (Named Pipe)
+    # [2026-03-18] Claude: P6 — 에이전트 간 텍스트 직접 주입을 위한 MUX 데몬.
+    # 바이브 코딩 서버 시작 시 자동 기동, 종료 시 자동 정리.
+    def run_mux_server():
+        mux_script = SCRIPTS_DIR / "vibe_mux.py"
+        if mux_script.exists():
+            _python_cmds = _python_runner_cmds()
+            if not _python_cmds:
+                print("[!] run_mux_server: Python 인터프리터를 찾을 수 없어 MUX 서버 스킵")
+                return
+            python_exe = _python_cmds[0]
+            proc = subprocess.Popen(
+                [python_exe, str(mux_script), "server"],
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+            )
+            _child_procs.append(proc)
+            print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
+    threading.Thread(target=run_mux_server, daemon=True).start()
 
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:

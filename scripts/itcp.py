@@ -199,13 +199,18 @@ def send(
     return False
 
 
-def receive(terminal_name: str, mark_read: bool = True) -> list[dict]:
+def receive(terminal_name: str, mark_read: bool = True, my_terminal_id: str = "") -> list[dict]:
     """나(terminal_name)에게 온 미읽음 메시지를 가져옵니다.
 
     [동작]
     1. pg_messages에서 to_agent = terminal_name OR 'all' AND is_read = false 조회
     2. mark_read=True면 조회한 메시지를 is_read=true로 업데이트
     3. 메시지 목록 반환
+
+    [터미널 ID 기반 필터링 — 2026-03-18 추가]
+    같은 에이전트(예: Claude)가 여러 터미널에서 실행될 때 구분하기 위해
+    my_terminal_id를 지정하면 자기 자신이 보낸 메시지를 제외합니다.
+    예: T1에서 receive("claude", my_terminal_id="T1") → T1이 보낸 메시지 제외
 
     [훅에서의 활용]
     hive_hook.py의 UserPromptSubmit 이벤트에서 호출되어
@@ -216,6 +221,15 @@ def receive(terminal_name: str, mark_read: bool = True) -> list[dict]:
     if not _ensure_pg_running():
         return _fallback_file_receive(terminal_name, mark_read)
 
+    # [2026-03-18 Claude] 터미널 ID 기반 자기 메시지 제외 필터
+    # 같은 에이전트(claude↔claude)가 여러 터미널에서 실행될 때
+    # 자기가 보낸 메시지를 자기가 읽는 문제 방지
+    self_filter = ""
+    if my_terminal_id:
+        safe_tid = my_terminal_id.replace("'", "''")
+        # 내 터미널 ID로 보낸 메시지는 제외 (from_agent가 나이고 terminal_id가 내 터미널)
+        self_filter = f"AND NOT (from_agent = '{terminal_name}' AND terminal_id = '{safe_tid}') "
+
     # 미읽음 메시지 조회 (내게 온 것 + 전체 브로드캐스트)
     sql = (
         f"SELECT id, from_agent, to_agent, channel, msg_type, content, "
@@ -224,6 +238,7 @@ def receive(terminal_name: str, mark_read: bool = True) -> list[dict]:
         f"FROM pg_messages "
         f"WHERE (to_agent = '{terminal_name}' OR to_agent = 'all') "
         f"AND is_read = false "
+        f"{self_filter}"
         f"ORDER BY ts ASC "
         f"LIMIT 20;"
     )

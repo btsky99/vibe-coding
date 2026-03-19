@@ -176,8 +176,83 @@ Task 28 (감지) — 독립
 
 ---
 
+## 🔵 P6: cmux-style 터미널 MUX — 에이전트 간 텍스트 직접 주입 (v3.7.90~)
+
+**목표:** cmux `surface.send_text` 모방 — Claude 터미널에서 Gemini/Codex 터미널에 직접 명령 주입
+**핵심:** Named Pipe (Windows) 기반 IPC + 에이전트 자동 수신/실행 루프
+
+### Phase 1: MUX 코어
+
+[x] Task 32: scripts/vibe_mux.py — Named Pipe MUX 서버 + CLI
+    파일: scripts/vibe_mux.py (신규)
+    방법: Windows Named Pipe `\\.\pipe\vibe-mux` 서버
+          - JSON 프로토콜 (cmux 호환): {"method":"surface.send_text","params":{"terminal":"T2","text":"..."}}
+          - terminal.register / terminal.list / surface.send_text / surface.send_key
+          - 터미널 레지스트리: 어떤 에이전트가 어떤 파이프에 연결되어 있는지 추적
+          - CLI 모드: python vibe_mux.py send-text T2 "분석해줘" / list / send-key T2 enter
+    검증: 파이프 서버 기동 후 CLI로 send-text 시 해당 터미널에 텍스트 도달 확인
+    의존: 없음
+
+[x] Task 33: scripts/vibe_mux_agent.py — 터미널별 MUX 에이전트 (수신/실행 루프)
+    파일: scripts/vibe_mux_agent.py (신규)
+    방법: 각 에이전트 터미널에서 백그라운드 스레드로 실행
+          - Named Pipe `\\.\pipe\vibe-mux-T{n}` 생성 + MUX 서버에 등록
+          - 파이프에서 명령 수신 → cli_agent.run() 호출로 자동 실행
+          - PostgreSQL LISTEN 병행: ITCP 메시지도 자동 수신/실행
+          - 결과를 ITCP로 반환 (auto_dispatcher.report_task_completion)
+    검증: T2 에이전트 루프 기동 → T1에서 send-text → T2가 자동 실행 → 결과 ITCP 반환
+    의존: Task 32
+
+### Phase 2: 서버 API + 대시보드 통합
+
+[x] Task 34: server.py에 /api/mux/* REST 엔드포인트 추가
+    파일: .ai_monitor/server.py
+    방법: POST /api/mux/send-text (터미널에 텍스트 전송)
+          GET /api/mux/terminals (활성 터미널 목록)
+          POST /api/mux/send-key (특수 키 전송)
+          내부: vibe_mux.py의 Named Pipe 클라이언트로 명령 전달
+    검증: curl POST /api/mux/send-text → 해당 터미널에서 실행 확인
+    의존: Task 32, Task 33
+
+[x] Task 35: cli_agent.py에 MUX 에이전트 자동 등록
+    파일: scripts/cli_agent.py
+    방법: run() 시작 시 vibe_mux_agent 백그라운드 스레드 자동 기동
+          - 현재 터미널 ID(T1~T8)를 MUX에 자동 등록
+          - stdin=subprocess.PIPE로 변경 (DEVNULL → PIPE)
+          - 외부에서 주입된 텍스트를 stdin에 write
+    검증: 대시보드에서 에이전트 실행 시 MUX 자동 등록 + send-text 수신 가능 확인
+    의존: Task 32, Task 33
+
+### Phase 3: 자동 오케스트레이션
+
+[x] Task 36: auto_dispatcher.py를 MUX 기반으로 업그레이드
+    파일: scripts/auto_dispatcher.py
+    방법: dispatch() → ITCP send() 대신 vibe_mux send_text() 사용
+          - 에이전트가 실행 중이면 MUX로 직접 명령 주입 (즉시)
+          - 에이전트가 미실행이면 기존 ITCP 폴백 (다음 실행 시 수신)
+          - fan_out()도 MUX 경유로 병렬 주입
+    검증: dispatch "보안 점검" → T2 Gemini가 즉시 실행 시작 확인
+    의존: Task 34, Task 35
+
+### 의존성 그래프
+```
+Task 32 (MUX 서버) ──→ Task 33 (에이전트 루프) ──→ Task 35 (cli_agent 통합)
+    │                       │                            │
+    └──→ Task 34 (서버 API) ←┘                           ↓
+                                                    Task 36 (디스패처 업그레이드)
+```
+
+### 실행 순서
+1. Task 32 (MUX 코어)
+2. Task 33 (에이전트 루프) — Task 32 완료 후
+3. Task 34 + Task 35 — 병렬 (Task 32, 33 완료 후)
+4. Task 36 — 전부 완료 후
+
+---
+
 ## 변경 요약
 - **P0~P3 완료**: 보안/성능/하이브 인텔리전스 전부 완료.
 - **P4 완료**: 멀티-LLM 자율 협업 시스템 전부 완료 (Task 15~22).
   - 디스패처 코어 + 서버 API + ITCP 통합 + 대시보드 UI + 자동 피드백 루프
-- **P5 진행중**: cmux 기반 vibe CLI + 알림 시스템 고도화 (Task 23~31)
+- **P5 완료**: cmux 기반 vibe CLI + 알림 시스템 고도화 (Task 23~31)
+- **P6 진행중**: cmux-style 터미널 MUX — 에이전트 간 텍스트 직접 주입 (Task 32~36)

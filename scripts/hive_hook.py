@@ -466,7 +466,9 @@ def _read_messages(agent_name: str) -> list[dict]:
         if _scripts_dir not in _sys_itcp.path:
             _sys_itcp.path.insert(0, _scripts_dir)
         from itcp import receive as _itcp_receive
-        return _itcp_receive(agent_name, mark_read=True)
+        # [2026-03-18 Claude] 터미널 ID 전달 — 같은 에이전트 간 자기 메시지 제외
+        # T1의 Claude가 보낸 메시지를 T1이 다시 읽는 문제 방지
+        return _itcp_receive(agent_name, mark_read=True, my_terminal_id=_TERMINAL_ID)
     except Exception:
         return []
 

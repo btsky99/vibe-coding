@@ -42,6 +42,10 @@ REVISION HISTORY:
   - Fan-Out/Fan-In 병렬 분배 패턴 지원
   - ITCP 통합으로 실시간 비동기 태스크 전달
   - 크로스 검증 루프: 작성자 ≠ 검증자 강제
+- 2026-03-19 Claude: hive_tasks 테이블 기록 누락 버그 수정
+  - dispatch() 호출 시 hive_tasks에 레코드를 INSERT하도록 _save_dispatch_to_hive_tasks() 추가
+  - 대시보드 "최근 디스패치" 패널이 비어있던 근본 원인 해결
+  - pg_store.save_task()를 통해 PostgreSQL에 직접 기록 (ITCP만으로는 대시보드 조회 불가)
 """
 
 from __future__ import annotations
@@ -167,6 +171,72 @@ def _generate_task_id() -> str:
     return f"TASK-{ts}-{h}"
 
 
+def _save_dispatch_to_hive_tasks(task_payload: dict) -> None:
+    """디스패치된 태스크를 hive_tasks 테이블에 기록합니다.
+
+    [설계 의도]
+    기존에는 ITCP(pg_messages)에만 기록하고 hive_tasks에는 기록하지 않았기 때문에
+    대시보드 "최근 디스패치" 패널이 항상 비어있었습니다.
+    pg_store.save_task()를 호출하여 hive_tasks 테이블에 직접 INSERT합니다.
+
+    [데이터 매핑]
+    auto_dispatcher의 task_payload 필드 → hive_tasks 컬럼:
+      task_id       → id
+      description   → title, description
+      type          → tags (리스트 형태)
+      assigned_to   → assigned_to
+      priority      → priority
+      status        → status (dispatched)
+      dispatched_at → timestamp
+      verifier      → extra.verifier (JSON 확장 필드)
+      scores        → extra.scores (JSON 확장 필드)
+      parent_task_id→ extra.parent_task_id (JSON 확장 필드)
+
+    [에러 처리]
+    pg_store 임포트 실패 또는 DB 연결 불가 시에도 dispatch() 자체는 실패하지 않습니다.
+    (ITCP 전송은 이미 완료된 상태이므로, hive_tasks 기록은 "최선 노력" 정책)
+    """
+    try:
+        sys.path.insert(0, str(_MONITOR_DIR))
+        from src.pg_store import save_task, ensure_schema
+
+        # DB 스키마가 준비되었는지 확인 (최초 1회)
+        ensure_schema()
+
+        now_iso = task_payload.get("dispatched_at", datetime.now().isoformat(timespec="seconds"))
+
+        # PROJECT_ID 결정: 서버와 동일한 인코딩 규칙 적용
+        # (드라이브 문자 + 경로를 '--'로 치환, 예: D--vibe-coding)
+        proj_id = str(_PROJECT_ROOT).replace("\\", "/").replace(":", "").replace("/", "--").lstrip("-") or "default"
+
+        task_record = {
+            "id": task_payload["task_id"],
+            "timestamp": now_iso,
+            "updated_at": now_iso,
+            "title": f"[DISPATCH] {task_payload.get('description', '')[:80]}",
+            "description": task_payload.get("description", ""),
+            "status": "dispatched",
+            "assigned_to": task_payload.get("assigned_to", "all"),
+            "priority": task_payload.get("priority", "medium"),
+            "created_by": "dispatcher",
+            "kanban_status": "claimed",  # 디스패치됨 = 에이전트가 claim한 상태
+            "role": task_payload.get("type", ""),
+            "claimed_by": task_payload.get("assigned_to", ""),
+            "tags": ["dispatch", task_payload.get("type", "general")],
+            # extra 필드에 디스패치 고유 메타데이터 저장
+            "verifier": task_payload.get("verifier", ""),
+            "scores": task_payload.get("scores", {}),
+            "parent_task_id": task_payload.get("parent_task_id", ""),
+            "dispatch_source": "auto_dispatcher",
+        }
+        save_task(task_record, project_id=proj_id)
+        print(f"   💾 hive_tasks 기록 완료: {task_payload['task_id']}")
+    except Exception as e:
+        # hive_tasks 기록 실패해도 dispatch 자체는 성공으로 처리
+        # (ITCP 전송은 이미 완료됨 — "최선 노력" 정책)
+        print(f"   ⚠️ hive_tasks 기록 실패 (dispatch는 정상 수행됨): {e}")
+
+
 def detect_task_type(description: str) -> str:
     """태스크 설명에서 유형을 자동 감지합니다.
 
@@ -287,7 +357,31 @@ def dispatch(
         "scores": all_scores,
     }
 
+    # ── [P6 MUX 우선] 에이전트가 MUX에 등록되어 있으면 Named Pipe로 직접 주입 ──
+    # [설계 의도] 기존 ITCP는 "다음 호출 시 수신"이라는 딜레이가 있지만,
+    # MUX send_text는 Named Pipe를 통해 즉시 전달됩니다.
+    # MUX 서버가 미실행이거나 대상 터미널이 미등록이면 기존 ITCP 폴백.
+    mux_sent = False
+    try:
+        from vibe_mux import send_text as mux_send_text, is_server_running as mux_running
+        if mux_running():
+            # 에이전트 이름 → 터미널 ID 매핑 (역량 프로필에서 조회)
+            target_terminal = AGENT_CAPABILITIES.get(agent, {}).get("terminal", "")
+            if target_terminal:
+                mux_result = mux_send_text(
+                    target_terminal,
+                    description,
+                    from_agent='dispatcher',
+                    metadata=task_payload,
+                )
+                if mux_result.get("ok"):
+                    mux_sent = True
+                    print(f"   📡 MUX 직접 주입 성공 → {target_terminal} ({agent})")
+    except Exception as mux_err:
+        pass  # MUX 실패 시 ITCP 폴백
+
     # ITCP 메시지 전송 — task 채널로 에이전트에게 작업 지시
+    # MUX로 이미 전송한 경우에도 ITCP는 기록용으로 전송 (히스토리 추적)
     message_content = (
         f"[AUTO-DISPATCH] 새 작업이 할당되었습니다.\n"
         f"🆔 Task: {task_id}\n"
@@ -295,6 +389,8 @@ def dispatch(
         f"📝 내용: {description}\n"
         f"⚡ 우선순위: {priority}\n"
     )
+    if mux_sent:
+        message_content += f"📡 전달: MUX Named Pipe 직접 주입 완료\n"
     if verifier:
         message_content += f"🔍 검증: 완료 후 {verifier}가 크로스 검증 예정\n"
     if parent_task_id:
@@ -315,6 +411,11 @@ def dispatch(
         content=f"[DISPATCH] {task_id} → {agent} ({task_type}, 우선순위:{priority})",
         channel="hive",
     )
+
+    # ── [2026-03-19 수정] hive_tasks 테이블에 디스패치 레코드 저장 ──
+    # [근본 원인] 기존에는 ITCP(pg_messages)에만 기록하고 hive_tasks에는 미기록.
+    # 대시보드의 "최근 디스패치" 패널은 hive_tasks를 조회하므로 항상 빈 화면이었음.
+    _save_dispatch_to_hive_tasks(task_payload)
 
     result = {
         "task_id": task_id,

@@ -34,14 +34,21 @@ for path in (MONITOR_DIR, SCRIPT_DIR):
         sys.path.insert(0, str(path))
 
 
-_real_stdout = sys.stdout
-sys.stdout = sys.stderr
+# [2026-03-18 Claude] stdout/stderr 분리 순서 수정
+# Gemini CLI 훅 프로토콜: stdout에 JSON 응답만 출력해야 함
+# 기존 문제: sys.stdout = sys.stderr 후 stderr를 교체하면 stdout이 stale 참조를 가리킴
+# 수정: stderr를 먼저 래핑한 뒤 stdout을 리다이렉트
 
+# 1) stderr UTF-8 래핑 (먼저!)
 if sys.stderr.encoding and sys.stderr.encoding.lower() not in ("utf-8", "utf8"):
     try:
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+# 2) 원본 stdout 보존 (JSON 응답용) → 이후 print()는 stderr로 감
+_real_stdout = sys.stdout
+sys.stdout = sys.stderr
 
 
 SKIP_SHELL_PREFIXES = (
@@ -186,8 +193,9 @@ def _refresh_hivemind_doc(force: bool = False) -> None:
 def _read_gemini_messages(agent_name: str) -> list[dict]:
     try:
         from itcp import receive as itcp_receive
-
-        return itcp_receive(agent_name, mark_read=True)
+        # [2026-03-18 Claude] 터미널 ID 전달 — 같은 에이전트 간 자기 메시지 제외
+        _tid = os.environ.get('TERMINAL_ID', 'T2')
+        return itcp_receive(agent_name, mark_read=True, my_terminal_id=_tid)
     except Exception:
         return []
 
@@ -492,9 +500,6 @@ def main() -> None:
     if sys.platform == "win32":
         os.environ["PAGER"] = ""
 
-    _ensure_dashboard_running()
-    _send_heartbeat()
-
     try:
         raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
         if not raw.strip():
@@ -508,6 +513,9 @@ def main() -> None:
     event = str(payload.get("hook_event_name") or "")
 
     if event == "BeforeAgent":
+        # [2026-03-18 Claude] BeforeAgent는 최대한 빠르게 JSON만 반환해야 함
+        # 무거운 작업(대시보드 체크, DB 기록, 하트비트)은 전부 제거 — 타임아웃 유발 원인
+        # 이 작업들은 AfterTool/SessionEnd에서 수행
         global SESSION_LAST_TASK, SESSION_MODIFIED_FILES, SESSION_HAD_ERROR, SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
         prompt = str(payload.get("prompt") or "")
         SESSION_LAST_TASK = prompt.strip()
@@ -515,24 +523,9 @@ def main() -> None:
         SESSION_HAD_ERROR = False
         SESSION_ASSIGNED_TASKS = []
         SESSION_REVIEW_REQUESTS = []
-        additional_context = _build_additional_context(prompt)
-        _register_prompt_task(prompt)
 
-        # ── 하이브 자동 기록: 작업 시작 시 pg_logs + pg_thoughts에 기록 ──
-        # 핵심: 다른 에이전트가 "Gemini가 뭘 하고 있는지" 볼 수 있게 하는 것
-        if prompt.strip():
-            terminal_id = os.environ.get('TERMINAL_ID', 'T2')
-            try:
-                from hive_bridge import log_task as _lt, log_thought as _lth
-                _lt(f'gemini:{terminal_id}', f'[작업 시작] {_snippet(prompt, 120)}')
-                _lth('gemini', 'task-start', {
-                    'type': 'intent',
-                    'title': f'[{terminal_id}] 새 작업 수신',
-                    'content': _snippet(prompt, 120),
-                    'terminal': terminal_id
-                })
-            except Exception:
-                pass
+        # ITCP 수신 + 의도 감지만 수행 (가벼움)
+        additional_context = _build_additional_context(prompt)
 
         if additional_context:
             _hook_response(decision="allow", context=additional_context)
@@ -576,4 +569,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # [2026-03-18 Claude] 어떤 예외든 훅이 유효한 JSON 응답을 반환해야 함
+        # Gemini CLI는 훅이 비정상 종료하면 "hook failed" 경고를 표시함
+        try:
+            _real_stdout.write("{}\n")
+            _real_stdout.flush()
+        except Exception:
+            pass

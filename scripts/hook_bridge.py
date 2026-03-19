@@ -23,6 +23,11 @@
 #   - _start_server(): 서버 미실행 시 server.py를 백그라운드 자동 기동 (최대 5초 대기)
 #   - fallback 순서: 서버 API → 서버 자동시작 후 재시도 → 직접 subprocess
 #   - 각 터미널 지시 입력 시 서버 없어도 자동으로 에이전트 연결됨
+# [2026-03-18] Claude: [버그수정] 프로세스 중복 생성 방지 — PID 락 파일 기반 가드
+#   - 원인: 매 UserPromptSubmit마다 서버/에이전트를 새로 생성하면서 기존 프로세스 미종료
+#   - 수정: _is_process_alive() + PID 락 파일로 서버·에이전트 중복 생성 차단
+#   - _start_server(): PID 파일 확인 → 이미 실행 중이면 스킵
+#   - _fallback_subprocess(): PID 파일 확인 → 이미 실행 중이면 스킵
 # ------------------------------------------------------------------------
 """
 
@@ -30,6 +35,7 @@ import sys
 import json
 import subprocess
 import os
+import time
 from pathlib import Path
 from urllib import request as urllib_request
 from urllib.error import URLError
@@ -64,6 +70,157 @@ HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 #   Terminal 2: set TERMINAL_ID=T2 && claude
 # 미지정 시 "T0" 사용
 TERMINAL_ID   = os.environ.get('TERMINAL_ID', 'T0')
+
+# --- PID 락 파일 경로 (중복 프로세스 생성 방지) ---
+# [2026-03-18 Claude] 서버·에이전트 프로세스가 매 프롬프트마다 누적 생성되는 버그 수정
+# 각 프로세스 유형별 PID를 파일에 기록하고, 해당 PID가 살아있으면 새로 생성하지 않음
+_LOCK_DIR     = CWD / '.ai_monitor' / 'data'
+_SERVER_PID   = _LOCK_DIR / '.server.pid'
+_AGENT_PID    = _LOCK_DIR / '.agent.pid'
+
+
+def _is_process_alive(pid: int) -> bool:
+    """주어진 PID의 프로세스가 아직 실행 중인지 확인합니다 (Windows/Unix 호환).
+
+    [2026-03-18 T3 코드리뷰 반영] 5개 버그/리스크 수정:
+    - BUG#1: Unix PermissionError → True 반환 (살아있는 프로세스임)
+    - BUG#2: Windows OpenProcess 실패 시 GetLastError로 접근거부 구분
+    - BUG#3: ctypes restype 설정 → 64bit 핸들 절삭 방지
+    """
+    if pid <= 0:
+        return False
+    try:
+        if os.name == 'nt':
+            import ctypes
+            import ctypes.wintypes
+            kernel32 = ctypes.windll.kernel32
+            # [BUG#3 수정] restype 설정 — 64bit Windows에서 핸들 포인터 절삭 방지
+            kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+            kernel32.OpenProcess.argtypes = [ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.DWORD]
+            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            # [BUG#2 수정] GetLastError로 "접근 거부"(=프로세스 존재) vs "프로세스 없음" 구분
+            # ERROR_ACCESS_DENIED = 5 → 프로세스는 살아있지만 권한 부족
+            # ERROR_INVALID_PARAMETER = 87 → PID가 존재하지 않음
+            error_code = ctypes.get_last_error() or kernel32.GetLastError()
+            if error_code == 5:  # ERROR_ACCESS_DENIED → 프로세스 존재함
+                return True
+            return False
+        else:
+            os.kill(pid, 0)
+            return True
+    except PermissionError:
+        # [BUG#1 수정] PermissionError = 프로세스가 살아있지만 권한 부족 → True
+        return True
+    except OSError:
+        # OSError (ESRCH 등) = 프로세스가 존재하지 않음
+        return False
+
+
+def _read_pid_file(pid_path: Path) -> tuple[int, float]:
+    """PID 파일에서 PID와 기록 시각을 읽어 반환합니다.
+
+    [RISK#4 수정] PID 재사용 방지를 위해 기록 시각도 함께 저장/반환.
+    PID 파일 형식: "PID TIMESTAMP" (예: "12345 1710777600.0")
+    하위 호환: 숫자만 있으면 시각=0으로 처리.
+    """
+    try:
+        if pid_path.exists():
+            parts = pid_path.read_text().strip().split()
+            pid = int(parts[0]) if parts and parts[0].isdigit() else 0
+            ts = float(parts[1]) if len(parts) > 1 else 0.0
+            return pid, ts
+    except Exception:
+        pass
+    return 0, 0.0
+
+
+def _write_pid_file(pid_path: Path, pid: int) -> None:
+    """PID 파일에 PID와 현재 시각을 기록합니다."""
+    try:
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(f"{pid} {time.time()}")
+    except Exception:
+        pass
+
+
+# [RISK#5 수정] 파일 기반 간이 락 — 동시 훅 호출 시 레이스 컨디션 방지
+def _try_lock(pid_path: Path, timeout: float = 2.0) -> bool:
+    """PID 파일에 대한 간이 파일 락을 시도합니다.
+    .lock 파일을 생성하여 동시 접근을 방지합니다.
+    """
+    lock_path = pid_path.with_suffix('.lock')
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            # O_CREAT | O_EXCL → 파일이 이미 있으면 실패 (원자적)
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return True
+        except FileExistsError:
+            # 락 파일이 10초 이상 오래되었으면 stale로 간주하고 삭제
+            try:
+                if lock_path.exists() and time.time() - lock_path.stat().st_mtime > 10:
+                    lock_path.unlink()
+            except Exception:
+                pass
+            time.sleep(0.1)
+        except Exception:
+            return False
+    return False
+
+
+def _release_lock(pid_path: Path) -> None:
+    """간이 파일 락을 해제합니다."""
+    lock_path = pid_path.with_suffix('.lock')
+    try:
+        if lock_path.exists():
+            lock_path.unlink()
+    except Exception:
+        pass
+
+
+# [RISK#4 수정] PID 재사용 방지 — 최대 유효 시간 (초)
+_PID_MAX_AGE = 3600  # 1시간 이상 된 PID 파일은 stale로 간주
+
+
+def _is_already_running(pid_path: Path) -> bool:
+    """PID 파일을 확인하여 해당 프로세스가 이미 실행 중인지 판별합니다.
+
+    [개선 사항]
+    - 파일 락으로 동시 호출 시 레이스 컨디션 방지 (RISK#5)
+    - PID 기록 시각 확인으로 PID 재사용 감지 (RISK#4)
+    """
+    # [RISK#5] 파일 락 획득
+    if not _try_lock(pid_path):
+        # 락 획득 실패 → 다른 훅이 이미 처리 중 → 중복 생성 차단
+        return True
+
+    try:
+        pid, ts = _read_pid_file(pid_path)
+        if pid and _is_process_alive(pid):
+            # [RISK#4] PID 재사용 감지: 기록 시각이 너무 오래되면 stale
+            if ts > 0 and (time.time() - ts) > _PID_MAX_AGE:
+                # 1시간 이상 → PID가 재사용됐을 가능성 높음 → stale 처리
+                try:
+                    pid_path.unlink()
+                except Exception:
+                    pass
+                return False
+            return True
+        # PID 파일이 stale하면 삭제
+        try:
+            if pid_path.exists():
+                pid_path.unlink()
+        except Exception:
+            pass
+        return False
+    finally:
+        _release_lock(pid_path)
+
 
 # --- 무시할 접두사 (무한루프 방지) ---
 SKIP_PREFIXES = ['[지시]', '[오류]', '[완료]', '[INFO]', '[OK]', '[🤖', 'python ', 'git ']
@@ -125,10 +282,21 @@ def _is_server_alive() -> bool:
 def _start_server() -> bool:
     """서버가 꺼져있으면 백그라운드로 자동 시작합니다.
 
+    [중복 방지] PID 파일(_SERVER_PID)로 이미 실행 중인 서버가 있으면 새로 생성하지 않음.
     최대 5초 대기 후 서버가 응답하면 True 반환.
     서버 프로세스는 현재 터미널 세션과 독립적으로 유지됩니다.
     """
     if not SERVER_PY.exists():
+        return False
+
+    # [2026-03-18] PID 파일 기반 중복 방지 — 이미 서버가 실행 중이면 스킵
+    if _is_already_running(_SERVER_PID):
+        # 서버 프로세스는 살아있지만 아직 HTTP 응답이 안 될 수 있음 → 대기
+        import time
+        for _ in range(10):
+            time.sleep(0.5)
+            if _is_server_alive():
+                return True
         return False
 
     # Windows: 새 콘솔 없이 백그라운드 실행
@@ -137,14 +305,16 @@ def _start_server() -> bool:
         creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
 
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [sys.executable, str(SERVER_PY)],
             cwd=str(CWD),
             creationflags=creationflags,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env={**os.environ, 'VIBE_AGENT_MODE': '1'},  # 서버 자체가 훅을 재트리거하지 않도록
+            env={**os.environ, 'VIBE_AGENT_MODE': '1'},
         )
+        # PID 기록 — 다음 훅 호출 시 중복 생성 방지
+        _write_pid_file(_SERVER_PID, proc.pid)
     except Exception:
         return False
 
@@ -161,14 +331,20 @@ def _start_server() -> bool:
 def _fallback_subprocess(prompt: str) -> None:
     """서버 완전 오프라인 시 cli_agent.py를 백그라운드로 실행 (창 점유 없음).
 
+    [중복 방지] PID 파일(_AGENT_PID)로 이미 에이전트가 실행 중이면 새로 생성하지 않음.
     서버가 정상 동작하면 이 함수는 호출되지 않음.
     결과는 agent_runs.jsonl / agent_live.jsonl에 저장됨.
     """
+    # [2026-03-18] PID 파일 기반 중복 방지 — 이미 에이전트가 실행 중이면 스킵
+    if _is_already_running(_AGENT_PID):
+        _notify(f'[🤖 {TERMINAL_ID}] 에이전트 이미 실행 중 — 중복 생성 차단됨')
+        return
+
     creationflags = 0
     if os.name == 'nt':
         creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
 
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, str(CLI_AGENT), prompt, 'auto'],
         cwd=str(CWD),
         creationflags=creationflags,
@@ -176,6 +352,8 @@ def _fallback_subprocess(prompt: str) -> None:
         stderr=subprocess.DEVNULL,
         env={**os.environ, 'VIBE_CHILD_AGENT': '1'},
     )
+    # PID 기록 — 다음 훅 호출 시 중복 생성 방지
+    _write_pid_file(_AGENT_PID, proc.pid)
 
 
 def _ensure_postgres() -> None:
@@ -204,16 +382,20 @@ def _ensure_postgres() -> None:
         if result.returncode == 0:
             return  # 이미 실행 중
 
-        # pg_manager.py로 백그라운드 시작
+        # pg_manager.py로 백그라운드 시작 (PID 락으로 중복 방지)
+        _pg_pid_file = _LOCK_DIR / '.postgres.pid'
+        if _is_already_running(_pg_pid_file):
+            return  # 이미 pg_manager가 실행 중
         pg_manager = SCRIPT_DIR / "pg_manager.py"
         if pg_manager.exists():
-            subprocess.Popen(
+            pg_proc = subprocess.Popen(
                 [sys.executable, str(pg_manager), "start"],
                 cwd=str(CWD),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS if os.name == 'nt' else 0,
             )
+            _write_pid_file(_pg_pid_file, pg_proc.pid)
     except Exception:
         pass
 
