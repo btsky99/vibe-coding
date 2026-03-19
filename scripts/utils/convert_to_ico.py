@@ -1,3 +1,10 @@
+"""
+FILE: scripts/utils/convert_to_ico.py
+DESCRIPTION: PNG → ICO 변환 유틸리티 (일회용 도구).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 from PIL import Image
 import sys
 

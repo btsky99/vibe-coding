@@ -1,3 +1,10 @@
+"""
+FILE: .ai_monitor/test_winpty.py
+DESCRIPTION: winpty 비동기 PTY 통합 테스트 (개발용).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import asyncio
 import threading
 

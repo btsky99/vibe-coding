@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Generate HIVEMIND.md from the current plan state and hive database signals.
+FILE: scripts/generate_hivemind_doc.py
+DESCRIPTION: HIVEMIND.md 자동 생성기 — 하이브 DB 신호로부터 문서를 재구성.
 
-Design goals:
-- tolerate missing database access while making failures visible
-- avoid concurrent writers when hooks trigger multiple refreshes
-- keep the document concise and operationally useful
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
-
 from __future__ import annotations
 
 import csv

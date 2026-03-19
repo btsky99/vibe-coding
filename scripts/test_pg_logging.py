@@ -1,3 +1,10 @@
+"""
+FILE: scripts/test_pg_logging.py
+DESCRIPTION: PostgreSQL 로깅 통합 테스트 스크립트.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import time
 import threading
 import psycopg2

@@ -1,16 +1,14 @@
-# ------------------------------------------------------------------------
-# 📄 파일명: mission_control_ui.py
-# 🗺️ 메인 프로젝트 맵: PROJECT_MAP.md
-# 📝 설명: 미션 컨트롤의 사이드바 HUD UI 컴포넌트.
-#          에이전트 상태 링 및 실시간 로그를 시각화합니다.
-#          Codex 에이전트 링 및 NORMAL/YOLO 글로벌 모드 토글 포함.
-#
-# REVISION HISTORY:
-# - 2026-03-07 Claude Sonnet 4.6: Codex 링, 모드 토글 위젯 추가 — Phase 5 Task 12
-# - 2026-03-10 Claude Sonnet 4.6: KnowledgeGraphHUD 추가 — Phase 6 Task 17
-#              shared_memory.db의 memory 테이블을 읽어 에이전트별 기억 노드를
-#              태그 기반 연결선으로 이어주는 미니 지식 그래프 QPainter 렌더링.
-# ------------------------------------------------------------------------
+"""
+FILE: .ai_monitor/mission_control_ui.py
+DESCRIPTION: 미션 컨트롤 사이드바 HUD UI 컴포넌트 — 에이전트 상태 링 및 실시간 로그 시각화.
+
+REVISION HISTORY:
+- 2026-03-07 Claude Sonnet 4.6: Codex 링, 모드 토글 위젯 추가 — Phase 5 Task 12
+- 2026-03-10 Claude Sonnet 4.6: KnowledgeGraphHUD 추가 — Phase 6 Task 17
+             PostgreSQL hive_memory 테이블을 읽어 에이전트별 기억 노드를
+             태그 기반 연결선으로 이어주는 미니 지식 그래프 QPainter 렌더링.
+- 2026-03-19 Claude: 표준 헤더 형식 적용 + 레거시 shared_memory.db 주석 수정
+"""
 
 import sys
 import json
@@ -43,7 +41,7 @@ _DEFAULT_NODE_COLOR = "#95a5a6"  # 회색 (미분류)
 
 
 def _load_graph_data() -> tuple[list, list]:
-    """shared_memory.db의 memory 테이블에서 지식 그래프 데이터를 로드합니다.
+    """PostgreSQL hive_memory 테이블에서 지식 그래프 데이터를 로드합니다.
 
     [설계 의도] Task 17 — 하이브 기억 지식 그래프 시각화
     - 최신 24개 메모리 항목을 읽어 에이전트별로 클러스터링합니다.
@@ -236,7 +234,7 @@ class KnowledgeGraphHUD(QFrame):
     """하이브 기억 지식 그래프 시각화 HUD 위젯.
 
     [설계 의도] Task 17 — 대시보드 사이드바에 에이전트 기억 관계망을 시각화.
-    shared_memory.db의 최신 24개 memory 항목을 읽어:
+    PostgreSQL hive_memory의 최신 24개 memory 항목을 읽어:
       - 에이전트별 클러스터(Gemini=파랑, Claude=초록, user=빨강)로 노드를 구성
       - 동일 태그를 가진 노드 사이에 연결선(엣지)을 그어 지식 계보를 표현
     30초마다 자동 갱신됩니다.

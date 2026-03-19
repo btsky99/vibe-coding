@@ -1,3 +1,10 @@
+"""
+FILE: scripts/task.py
+DESCRIPTION: 하이브 태스크 CLI — 태스크 생성, 조회, 상태 변경을 위한 명령줄 도구.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import argparse
 import json
 import sys

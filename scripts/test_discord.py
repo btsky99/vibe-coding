@@ -1,3 +1,10 @@
+"""
+FILE: scripts/test_discord.py
+DESCRIPTION: Discord 봇 연결 테스트 스크립트.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import discord
 from dotenv import load_dotenv

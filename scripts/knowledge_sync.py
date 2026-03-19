@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/knowledge_sync.py
-# 📑 설명: memory.md의 장기 기억을 PostgreSQL pg_thoughts 테이블로 동기화.
-#          지식 그래프 시각화를 위한 데이터 계보(Lineage)를 형성합니다.
-#
+"""
+FILE: scripts/knowledge_sync.py
+DESCRIPTION: memory.md 장기 기억을 PostgreSQL pg_thoughts 테이블로 동기화 — 지식 그래프 데이터 계보.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # 🕒 변경 이력 (History):
 # [2026-03-10] Gemini: 최초 생성 및 동기화 로직 구현 (Task 17)
 # ------------------------------------------------------------------------

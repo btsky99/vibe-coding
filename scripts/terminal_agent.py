@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+FILE: scripts/terminal_agent.py
+DESCRIPTION: 멀티터미널 자율 에이전트 디스패처 (REPL 모드).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
+"""
 # ------------------------------------------------------------------------
 # 파일명: scripts/terminal_agent.py
 # 설명: 멀티터미널 자율 에이전트 디스패처 (REPL 모드).

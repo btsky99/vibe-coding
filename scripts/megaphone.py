@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+"""
+FILE: scripts/megaphone.py
+DESCRIPTION: 하이브 마인드 브로드캐스트 메시지 전송 유틸리티.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import sys
 import json
 import urllib.request

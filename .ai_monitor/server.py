@@ -1,9 +1,10 @@
-# ------------------------------------------------------------------------
-# 📄 파일명: server.py
-# 🗺️ 메인 프로젝트 맵: PROJECT_MAP.md
-# 📝 설명: 하이브 마인드(Gemini & Claude)의 중앙 통제 서버.
-#          에이전트 간의 통신 중계, 상태 모니터링, 데이터 영속성을 관리합니다.
-#
+"""
+FILE: .ai_monitor/server.py
+DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # 🕒 변경 이력 (History):
 # [2026-03-19] - Claude (디스패치 히스토리 API 추가 — "최근 디스패치" 패널 빈 화면 수정)
 #   - GET /api/dispatcher/history: hive_tasks에서 created_by='dispatcher' 레코드 조회
@@ -1113,7 +1114,7 @@ def _cosine_sim(a_bytes: bytes, b_bytes: bytes) -> float:
 class MemoryWatcher(threading.Thread):
     """
     Claude Code / Gemini CLI 의 메모리 파일을 감시하여
-    변경 발생 시 shared_memory.db 에 자동 동기화하는 백그라운드 워처.
+    변경 발생 시 PostgreSQL hive_memory 테이블에 자동 동기화하는 백그라운드 워처.
 
     - Claude Code : ~/.claude/projects/*/memory/*.md
     - Gemini CLI  : ~/.gemini/tmp/{프로젝트명}/logs.json
@@ -1139,7 +1140,7 @@ class MemoryWatcher(threading.Thread):
                 self._scan_claude_memories()
                 self._scan_gemini_logs()
                 self._scan_gemini_chats()
-                # 10분마다 shared_memory.db → MEMORY.md 역방향 동기화 실행
+                # 10분마다 PostgreSQL hive_memory → MEMORY.md 역방향 동기화 실행
                 _sync_tick += 1
                 if _sync_tick >= 40:
                     self._sync_to_claude_memory()
@@ -1148,7 +1149,7 @@ class MemoryWatcher(threading.Thread):
                 print(f"[MemoryWatcher] 스캔 오류: {e}")
             time.sleep(self.POLL_INTERVAL)
 
-    # ── 내부: 역방향 동기화 (shared_memory.db → MEMORY.md) ──────────────────
+    # ── 내부: 역방향 동기화 (PostgreSQL hive_memory → MEMORY.md) ────────────
     def _sync_to_claude_memory(self) -> None:
         """
         Gemini·외부 에이전트가 DB에 쓴 항목을 Claude Code auto-memory 파일에
@@ -5121,7 +5122,7 @@ if __name__ == '__main__':
     # 실시간 파일 감시 시작
     start_fs_watcher(PROJECT_ROOT)
 
-    MemoryWatcher().start()  # 에이전트 메모리 파일 → shared_memory.db 자동 동기화
+    MemoryWatcher().start()  # 에이전트 메모리 파일 → PostgreSQL hive_memory 자동 동기화
     
     # 하이브 워치독(Watchdog) 엔진 실행
     # --data-dir 인자로 실제 DATA_DIR 전달 — 설치 버전에서 경로 오탐 방지

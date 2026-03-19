@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/completion_guard.py
-# 📝 설명: 서브에이전트 완료 신호 자동 감지기 — Harness `{"continue": false}` 패턴 구현.
-#
-#          에이전트가 할당된 작업을 마쳤을 때 무한히 새 작업을 요청하는 대신
-#          `{"continue": false}` 신호를 출력/기록하고 루프를 자동 종료합니다.
-#
+"""
+FILE: scripts/completion_guard.py
+DESCRIPTION: 서브에이전트 완료 신호 자동 감지기 — Harness continue:false 패턴.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # 두 가지 사용 방식:
 #   (A) 에이전트 출력 감시 모드 — 다른 프로세스의 출력을 파이프로 받아 신호 감지
 #       echo '{"continue": false}' | python scripts/completion_guard.py watch

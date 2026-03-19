@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Discord Multi-Terminal Bridge.
+FILE: scripts/discord_bridge.py
+DESCRIPTION: Discord 멀티 터미널 브릿지 — 에이전트 상태를 Discord 채널로 중계.
 
-Revision history:
-- 2026-03-12 Claude: PTY-first remote control with server API integration
-- 2026-03-04 Gemini/Claude: Initial Discord channel mapping and relay server
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
-
 from __future__ import annotations
 
 import asyncio

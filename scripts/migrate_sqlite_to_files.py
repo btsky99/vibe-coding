@@ -1,3 +1,10 @@
+"""
+FILE: scripts/migrate_sqlite_to_files.py
+DESCRIPTION: SQLite → 파일 기반 마이그레이션 스크립트 (레거시, 완료됨).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import argparse
 import json
 import sqlite3

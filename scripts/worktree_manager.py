@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/worktree_manager.py
-# 📝 설명: Git Worktree 격리 관리자 — Harness 방식 병렬 에이전트 격리 구현.
-#          각 터미널 에이전트(T1~T8)가 독립된 Git worktree에서 작업하여
-#          파일 충돌을 구조적으로 0%로 만드는 핵심 인프라.
-#
+"""
+FILE: scripts/worktree_manager.py
+DESCRIPTION: Git Worktree 격리 관리자 — 병렬 에이전트 격리 구현.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # 사용법:
 #   python scripts/worktree_manager.py setup T1          # T1 worktree 생성
 #   python scripts/worktree_manager.py setup --all       # T1~T8 전체 생성

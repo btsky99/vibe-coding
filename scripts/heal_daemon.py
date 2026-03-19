@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/heal_daemon.py
-# 📝 설명: 하이브 마인드 자가 치유(Self-Healing) 엔진.
-#          PostgreSQL 18의 pg_logs를 감시하여 에러 발생 시 자동 수리를 시도합니다.
-#
+"""
+FILE: scripts/heal_daemon.py
+DESCRIPTION: 하이브 마인드 자가 치유(Self-Healing) 엔진 — pg_logs 감시 및 에러 자동 수리.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # REVISION HISTORY:
 # - 2026-03-06 Gemini-1: 최초 작성 및 자가 치유 로직 구현.
 # ------------------------------------------------------------------------

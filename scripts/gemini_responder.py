@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+"""
+FILE: scripts/gemini_responder.py
+DESCRIPTION: Gemini CLI 자동 응답기 — ITCP 메시지를 수신하여 Gemini에게 전달.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import time
 import json

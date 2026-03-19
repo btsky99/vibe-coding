@@ -1,9 +1,10 @@
-# ------------------------------------------------------------------------
-# 📄 파일명: terminal_status.py
-# 🗺️ 메인 프로젝트 맵: PROJECT_MAP.md
-# 📝 설명: 터미널 내부에 상주하며 에이전트의 현재 상태를 요약 표시합니다.
-# ------------------------------------------------------------------------
+"""
+FILE: scripts/terminal_status.py
+DESCRIPTION: 터미널 내부 상주 에이전트 상태 요약 표시기.
 
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import json
 import time

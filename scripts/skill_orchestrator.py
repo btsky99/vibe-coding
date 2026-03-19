@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Postgres-backed skill chain tracker.
-"""
+FILE: scripts/skill_orchestrator.py
+DESCRIPTION: PostgreSQL 기반 스킬 체인 트래커 — 스킬 실행 순서 및 성과 기록.
 
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import json
 import os
 import sys

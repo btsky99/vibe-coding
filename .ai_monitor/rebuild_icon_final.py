@@ -1,3 +1,10 @@
+"""
+FILE: .ai_monitor/rebuild_icon_final.py
+DESCRIPTION: 아이콘 재빌드 및 바로가기 갱신 유틸리티 (일회용 도구).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import shutil
 from pathlib import Path

@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/analyze_hive.py
-# 📝 설명: PostgreSQL 18 기반 하이브 마인드 고도화 분석 도구.
-#          에이전트들의 작업 패턴, 사고 연쇄, 협업 효율성을 정밀 분석합니다.
-# ------------------------------------------------------------------------
+"""
+FILE: scripts/analyze_hive.py
+DESCRIPTION: PostgreSQL 18 기반 하이브 마인드 고도화 분석 도구 — 에이전트 작업 패턴, 사고 연쇄, 협업 효율성 분석.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import sys
 import subprocess

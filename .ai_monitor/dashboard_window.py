@@ -1,10 +1,10 @@
-# ------------------------------------------------------------------------
-# 파일명: dashboard_window.py
-# 설명: 대시보드 독립 창 — PySide6 QWebEngineView 기반.
-#       배포 버전: vibe-dashboard.exe 로 PyInstaller 빌드되어 {app}\ 에 설치됨.
-#       메인 앱(server.py frozen 모드)이 vibe-dashboard.exe <port> <tab> 으로 직접 실행.
-#       개발 버전: python dashboard_window.py <port> <tab> 으로 직접 실행.
-#
+"""
+FILE: .ai_monitor/dashboard_window.py
+DESCRIPTION: 대시보드 독립 창 — PySide6 QWebEngineView 기반. 배포 시 vibe-dashboard.exe로 빌드.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # REVISION HISTORY:
 # - 2026-03-13 Claude: kanban 탭 추가 — B안 통합. kanban_board.py(PySide6 네이티브) 제거하고
 #                      React TaskBoardPanel(?kanban=1)으로 일원화. 동일 API 데이터 사용으로

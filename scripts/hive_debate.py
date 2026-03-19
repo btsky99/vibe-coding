@@ -1,21 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Consensus and debate workflow helpers for the hive database.
+FILE: scripts/hive_debate.py
+DESCRIPTION: 하이브 합의 및 토론 워크플로우 헬퍼 — 에이전트 간 의견 조율.
 
-This script now provides a real CLI instead of the old demo-only behavior.
-Supported commands:
-
-  python scripts/hive_debate.py create "topic"
-  python scripts/hive_debate.py post 12 1 gemini "proposal body" proposal
-  python scripts/hive_debate.py post 12 1 claude "critique body" critique -vote -1
-  python scripts/hive_debate.py close 12 "final decision"
-  python scripts/hive_debate.py show 12
-  python scripts/hive_debate.py list --status open
-
-For backward compatibility, calling the script with plain text still creates
-one new debate using the provided text as the topic.
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
-
 from __future__ import annotations
 
 import json

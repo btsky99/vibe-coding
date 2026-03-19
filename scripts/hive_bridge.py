@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/hive_bridge.py
-# 📝 설명: PostgreSQL 18 기반 하이브 마인드 통합 로깅 및 협업 브릿지. (Postgres-First)
-#          기존의 JSONL 및 SQLite 레거시를 대체합니다.
-#
+"""
+FILE: scripts/hive_bridge.py
+DESCRIPTION: PostgreSQL 18 기반 하이브 마인드 통합 로깅 및 협업 브릿지 (Postgres-First).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # 🕒 변경 이력 (History):
 # [2026-03-11] - Claude (지식 그래프 연결선 수정)
 #   - log_thought: parent_id 파라미터 추가 → API/psql 양쪽 경로에 parent_id 전달

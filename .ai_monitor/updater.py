@@ -1,6 +1,9 @@
 """
-Auto-update module for vibe-coding.exe.
-Checks GitHub Releases API and performs self-update on Windows.
+FILE: .ai_monitor/updater.py
+DESCRIPTION: 자동 업데이트 모듈 — GitHub Releases API로 셀프 업데이트 수행 (Windows).
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 import json
 import os

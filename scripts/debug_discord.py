@@ -1,3 +1,10 @@
+"""
+FILE: scripts/debug_discord.py
+DESCRIPTION: Discord 봇 디버그 스크립트.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import discord
 from dotenv import load_dotenv

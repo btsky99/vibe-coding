@@ -1,3 +1,10 @@
+"""
+FILE: scripts/auto_version.py
+DESCRIPTION: 버전 자동 증가 유틸리티 — _version.py의 패치 버전을 자동으로 올림.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import re
 

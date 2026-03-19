@@ -97,8 +97,10 @@ jobs:
 
       - name: Download PostgreSQL portable
         # 설치버전에 포함할 PostgreSQL 포터블 바이너리 (bin/lib/share만 추출)
+        # PG_VERSION 환경변수로 버전 관리 — 보안 패치 시 이 값만 변경하면 됨
         run: |
-          $pgUrl = "https://get.enterprisedb.com/postgresql/postgresql-17.4-1-windows-x64-binaries.zip"
+          $pgVersion = if ($env:PG_PORTABLE_VERSION) { $env:PG_PORTABLE_VERSION } else { "17.4-1" }
+          $pgUrl = "https://get.enterprisedb.com/postgresql/postgresql-$pgVersion-windows-x64-binaries.zip"
           $zipPath = "$env:TEMP\pgsql.zip"
           Write-Host "Downloading PostgreSQL portable..."
           Invoke-WebRequest -Uri $pgUrl -OutFile $zipPath -UseBasicParsing

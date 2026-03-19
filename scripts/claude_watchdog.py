@@ -1,22 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/claude_watchdog.py
-# 📝 설명: Claude 자율 에이전트 워치독.
-#          messages.jsonl을 실시간으로 감시하여 터미널(Claude Code / Gemini)에서
-#          보낸 지시를 감지하고, cli_agent.py를 통해 자율 에이전트를 자동 실행합니다.
-#          "터미널에서 지시 → 에이전트 자동 동작" 루프의 핵심 연결 고리입니다.
-#
-# 🕒 변경 이력 (REVISION HISTORY):
-# [2026-03-04] Claude: 최초 구현
-#   - messages.jsonl 실시간 감시 (1초 폴링)
-#   - to: claude / to: agent / to: orchestrator 메시지 자동 감지
-#   - cli_agent.run()을 백그라운드 스레드로 실행 (블로킹 방지)
-#   - 실행 결과를 messages.jsonl에 응답으로 기록
-#   - 중복 실행 방지: 이미 실행 중이면 큐에 대기
-# ------------------------------------------------------------------------
-"""
+FILE: scripts/claude_watchdog.py
+DESCRIPTION: Claude 자율 에이전트 워치독 — 행 오류 감지 및 자동 재시작.
 
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import sys
 import json

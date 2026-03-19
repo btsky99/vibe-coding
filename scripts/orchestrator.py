@@ -1,18 +1,10 @@
 """
-# ------------------------------------------------------------------------
-# 📄 파일명: orchestrator.py
-# 📂 메인 문서 링크: docs/README.md
-# 📝 설명: 하이브 마인드 자동 조율 오케스트레이터.
-#          에이전트 활동 현황을 감시하고, 미할당 태스크 자동 배정,
-#          유휴 에이전트 감지, 충돌 경고 등을 수행합니다.
-# ------------------------------------------------------------------------
+FILE: scripts/orchestrator.py
+DESCRIPTION: 하이브 마인드 자동 조율 오케스트레이터 — 태스크 스케줄링, 에이전트 감시, 자동 배분.
 
-사용법:
-  python scripts/orchestrator.py            # 단발 실행 (1회 조율 후 종료)
-  python scripts/orchestrator.py --daemon   # 데몬 모드 (30초 주기 반복)
-  python scripts/orchestrator.py --daemon --interval 60
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
-
 import sys
 import os
 import time

@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-프로젝트: Vibe Coding (하이브 마인드)
-파일: scripts/skill_manager.py
-설명: Gemini CLI 및 Claude용 스킬 통합 관리자.
-      로컬 스킬 목록 조회, 외부 저장소(Gallery, GitHub) 검색 및 설치 기능을 제공합니다.
-      이 스크립트는 Vibe-View 대시보드와 연동되어 시각적인 스킬 관리를 지원합니다.
-버전: v1.0.0 - [Gemini] 생성
-참조: docs/skill_manager.py.md
-"""
+FILE: scripts/skill_manager.py
+DESCRIPTION: Gemini CLI 및 Claude용 스킬 통합 관리자.
 
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import os
 import json
 import sys

@@ -1,32 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-# ------------------------------------------------------------------------
-# 파일명: scripts/plan_validator.py
-# 설명: Harness 패턴 계획 검증 엔진 (V1-V5).
-#       ai_monitor_plan.md를 파싱하여 실행 전 계획 품질을 자동 검사합니다.
-#       Claude Code Harness의 Task Validation 시스템을 Vibe Coding에 이식.
-#
-# 검증 규칙:
-#   V1: 파일 경로 명시 여부 — 범위 명확성 (파일: 필드)
-#   V2: 방법 필드 존재 여부 — 모호성 제거 (방법: 필드)
-#   V3: 같은 파일이 2개 이상 태스크에 중복 등장 여부 — 겹침 검사
-#   V4: 의존성 태스크가 실제 존재하는지 — 순서 검증
-#   V5: 완료 조건 필드 존재 여부 — Done When 명시
-#
-# 사용법:
-#   python scripts/plan_validator.py                     # ai_monitor_plan.md 검사
-#   python scripts/plan_validator.py path/to/plan.md    # 특정 파일 검사
-#
-# 종료 코드:
-#   0 = 모든 검증 통과
-#   1 = 경고(비치명적 실패) — 계속 진행 가능하지만 주의 필요
-#   2 = 오류(치명적 실패) — 계획 수정 없이 실행 금지
-#
-# 변경 이력:
-# [2026-03-07] Claude: 최초 구현 — Harness V1-V5 검증 패턴 이식
-# ------------------------------------------------------------------------
-"""
+FILE: scripts/plan_validator.py
+DESCRIPTION: Harness 패턴 계획 검증 엔진 (V1-V5).
 
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 import sys
 import re
 from pathlib import Path

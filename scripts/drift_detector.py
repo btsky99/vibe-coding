@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Detect whether current workspace changes still align with ai_monitor_plan.md.
+FILE: scripts/drift_detector.py
+DESCRIPTION: 계획 이탈 감지기 — 현재 작업이 ai_monitor_plan.md와 일치하는지 검증.
 
-The old implementation only compared task keywords with file names from
-`git diff --name-only HEAD`, which was too noisy and produced false "all clear"
-results once every task was checked off. This version:
-
-- parses open plan tasks and their indented detail lines
-- considers tracked, modified, staged, and untracked files
-- scores changed files against explicit path hints and token overlap
-- reports unplanned work when the plan has no open tasks but the workspace changed
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
-
 from __future__ import annotations
 
 import json

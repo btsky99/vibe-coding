@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-# ------------------------------------------------------------------------
-# 📄 파일명: scripts/auto_release.py
-# 📝 설명: 하이브 마인드 자율 배포(Autonomous Release) 엔진.
-#          프로젝트 구성을 감지하여 빌드 및 인스톨러 생성을 자동화합니다.
-#
+"""
+FILE: scripts/auto_release.py
+DESCRIPTION: 하이브 마인드 자율 배포(Autonomous Release) 엔진 — 빌드 및 인스톨러 자동화.
+
+REVISION HISTORY:
+- 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+"""
 # REVISION HISTORY:
 # - 2026-03-06 Gemini-1: 최초 작성 및 자율 빌드/배포 로직 구현.
 # ------------------------------------------------------------------------
