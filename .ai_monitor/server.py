@@ -3132,6 +3132,32 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
+        # ── 스킬 평가 리뷰어 실행 — 브라우저에서 eval_review.html 열기 ──
+        # [설계 의도] skill-creator의 description 최적화 평가 쿼리셋을 리뷰하는 HTML 뷰어.
+        # vibe-dispatcher-workspace/eval_review.html 파일을 기본 브라우저로 열어줍니다.
+        if path == '/api/eval-review/launch':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                # 프로젝트 루트의 workspace 디렉토리에서 eval_review.html 탐색
+                project_root = BASE_DIR.parent
+                eval_html = project_root / 'vibe-dispatcher-workspace' / 'eval_review.html'
+                if not eval_html.exists():
+                    # 범용 탐색: *-workspace/eval_review.html 패턴
+                    candidates = list(project_root.glob('*-workspace/eval_review.html'))
+                    if candidates:
+                        eval_html = max(candidates, key=lambda p: p.stat().st_mtime)
+                    else:
+                        raise RuntimeError('eval_review.html 없음. 먼저 /skill-creator로 평가 쿼리셋을 생성하세요.')
+                import webbrowser
+                webbrowser.open(eval_html.as_uri())
+                self.wfile.write(json.dumps({"status": "launched", "path": str(eval_html)}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
         # ── 지식 그래프 독립 창 실행 — PySide6 QWebEngineView (?graph=1 모드) ──
         if path == '/api/graph/launch':
             self.send_response(200)

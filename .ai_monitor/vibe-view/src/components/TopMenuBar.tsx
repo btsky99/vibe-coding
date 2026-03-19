@@ -14,7 +14,7 @@ import { memo } from 'react';
 import {
   Menu, Terminal, RotateCw,
   X, Zap, Cpu, Info,
-  Trash2, LayoutDashboard
+  Trash2, LayoutDashboard, ClipboardCheck
 } from 'lucide-react';
 import { API_BASE } from '../constants';
 import { VscFolderOpened } from 'react-icons/vsc';
@@ -178,6 +178,21 @@ const TopMenuBar = memo(function TopMenuBar({
               >
                 <Terminal className="w-3.5 h-3.5 text-[#f0a500]" />
                 <span>Codex CLI 설치 (npm -g)</span>
+              </button>
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">스킬 관리</div>
+              <button
+                onClick={() => {
+                  fetch(`${API_BASE}/api/eval-review/launch`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(d => { if (d.status === 'error') alert(d.message); })
+                    .catch(err => console.error('[TopMenuBar] eval-review launch error:', err));
+                  setActiveMenu(null);
+                }}
+                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2"
+              >
+                <ClipboardCheck className="w-3.5 h-3.5 text-[#a78bfa]" />
+                <span>스킬 평가 리뷰어 열기</span>
               </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <button
