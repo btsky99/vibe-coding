@@ -25,4 +25,10 @@ user-invocable: true
 - `git commit` (Conventional Commits 형식)
 - 완료된 태스크 목록 + 변경 파일 목록 최종 보고
 
+## 🔗 다음 단계 안내
+계획 실행 완료 후 사용자에게 제안:
+- `/vibe-code-review` — 변경된 코드 품질 검토
+- `/vibe-security` — 배포 전 보안 점검
+- `/vibe-release` — 빌드 및 배포
+
 어떤 계획 파일을 실행할까요?

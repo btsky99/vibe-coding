@@ -1,8 +1,8 @@
 ---
 name: vibe-code-review
 description: >
-  코드 품질, 보안(OWASP), 성능을 4가지 관점에서 검토합니다.
-  Use when: "코드 리뷰", "리팩터링", "최적화", "보안 점검", 배포 전 검토, PR 리뷰 요청 시.
+  코드 품질, 성능, 가독성을 3가지 관점에서 검토합니다. 보안 심층 점검은 /vibe-security를 사용하세요.
+  Use when: "코드 리뷰", "리팩터링", "최적화", 배포 전 검토, PR 리뷰 요청 시.
 allowed-tools: Read, Bash, Grep, Glob
 user-invocable: true
 ---
@@ -11,12 +11,9 @@ user-invocable: true
 
 # 🧐 코드 리뷰 프로토콜
 
-## 4가지 검토 관점
+## 3가지 검토 관점
 
-### 🔒 보안 (OWASP Top 10)
-- SQL Injection, XSS 취약점 여부
-- 민감 정보 (API키, 비밀번호) 노출 여부
-- 인증/인가 처리 적절성
+> 💡 보안 심층 점검(OWASP Top 10)은 `/vibe-security` 스킬이 전담합니다. 배포 전에는 반드시 별도로 실행하세요.
 
 ### ⚡ 성능
 - N+1 쿼리, 불필요한 루프
