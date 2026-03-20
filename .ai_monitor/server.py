@@ -4964,7 +4964,10 @@ WS_PORT   = 9001  # 실제 값은 __main__에서 슬롯 기반으로 재설정�
 
 async def run_ws_server():
     try:
-        async with websockets.serve(pty_handler, "127.0.0.1", WS_PORT):
+        # [버그수정 2026-03-20] 장시간 idle 시 OS/프록시가 TCP 연결을 끊는 문제 방지
+        # ping_interval=30: 30초마다 ping 프레임 전송하여 연결 활성 상태 유지
+        # ping_timeout=10: 10초 내 pong 응답 없으면 연결 종료 (좀비 연결 정리)
+        async with websockets.serve(pty_handler, "127.0.0.1", WS_PORT, ping_interval=30, ping_timeout=10):
             print(f"WebSocket PTY Server started on port {WS_PORT}")
             await asyncio.Future()
     except OSError:

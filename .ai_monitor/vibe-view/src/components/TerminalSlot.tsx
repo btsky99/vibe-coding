@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-20 Claude: 장시간 idle 시 WS 끊김 → 자동 재연결 + 서버 ping/pong keepalive.
+ *                      onclose에서 지수 백오프(1s~30s, 최대 10회)로 자동 재연결. 서버에 ping_interval=30s 추가.
  * - 2026-03-15 Claude: 절전/노트북 덮개 복귀 시 WebSocket 자동 재연결 — visibilitychange 이벤트 감지.
  *                      isTerminalMode=true && hasAttachedTerminal=false 상태에서 화면 복귀 시 launchAgent 자동 호출.
  *                      근본 원인: ws.onclose가 hasAttachedTerminal=false로 하지만 isTerminalMode는 유지 → 팝업 무한 표시 버그.
@@ -67,6 +69,9 @@ export default function TerminalSlot({
   const fitAddonRef = useRef<FitAddon | null>(null);
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  // [버그수정 2026-03-20] WebSocket 자동 재연결 타이머 참조
+  const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsReconnectAttemptRef = useRef(0);
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [hasAttachedTerminal, setHasAttachedTerminal] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
@@ -157,12 +162,17 @@ export default function TerminalSlot({
   const launchAgent = (agent: string, yolo: boolean = false) => {
     // 기존 터미널이 살아있으면 먼저 정리 — dispose 없이 덮어쓰면
     // 이전 xterm 캔버스가 DOM에 남아 잔상(이중 삼중 출력) 현상 발생
+    // [버그수정 2026-03-20] 재연결 타이머 정리 (새 연결 시작 전)
+    if (wsReconnectTimerRef.current) {
+      clearTimeout(wsReconnectTimerRef.current);
+      wsReconnectTimerRef.current = null;
+    }
     if (termRef.current) {
       termRef.current.dispose();
       termRef.current = null;
     }
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000);
       wsRef.current = null;
     }
     resizeObserverRef.current?.disconnect();
@@ -237,13 +247,36 @@ export default function TerminalSlot({
       wsRef.current = ws;
       ws.onopen = () => {
         setHasAttachedTerminal(true);
+        // 재연결 성공 시 카운터 리셋
+        wsReconnectAttemptRef.current = 0;
         const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
         term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
         // WS 연결 직후 현재 터미널 크기를 PTY에 전달
         // ResizeObserver가 WS 연결 전에 fire됐을 경우 누락된 resize를 보정
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       };
-      ws.onclose = () => setHasAttachedTerminal(false);
+      // [버그수정 2026-03-20] 장시간 idle 시 WS 끊김 → 자동 재연결
+      // 원인: OS TCP keepalive 타임아웃 또는 네트워크 일시 단절로 WS가 닫힘.
+      // 해결: onclose에서 지수 백오프(1s→2s→4s...최대30s)로 자동 재연결 시도.
+      //       사용자가 명시적으로 터미널을 닫은 경우(cleanupTerminal)는 재연결하지 않음.
+      ws.onclose = (event) => {
+        setHasAttachedTerminal(false);
+        // code 1000(정상종료) 또는 터미널 모드가 꺼진 경우 재연결하지 않음
+        if (event.code === 1000) return;
+        // 지수 백오프: 1s, 2s, 4s, 8s, 16s, 30s (최대)
+        const attempt = wsReconnectAttemptRef.current;
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        wsReconnectAttemptRef.current = attempt + 1;
+        if (attempt < 10) {
+          term.write(`\r\n\x1b[38;5;208m[HIVE] 연결 끊김 — ${delay / 1000}초 후 자동 재연결 (${attempt + 1}/10)\x1b[0m\r\n`);
+          wsReconnectTimerRef.current = setTimeout(() => {
+            // 재연결 시점에도 터미널 모드가 유지 중인지 확인
+            if (termRef.current && !hasAttachedTerminal) {
+              launchAgent(agent, false);
+            }
+          }, delay);
+        }
+      };
       ws.onmessage = async (e) => {
         const data = e.data instanceof Blob ? await e.data.text() : e.data;
         term.write(data);
@@ -293,13 +326,19 @@ export default function TerminalSlot({
 
 
   const closeTerminal = () => {
+    // [버그수정 2026-03-20] 명시적 종료 시 재연결 타이머 정리
+    if (wsReconnectTimerRef.current) {
+      clearTimeout(wsReconnectTimerRef.current);
+      wsReconnectTimerRef.current = null;
+    }
+    wsReconnectAttemptRef.current = 0;
     setIsTerminalMode(false);
     setHasAttachedTerminal(false);
     fitAddonRef.current = null;
     // ResizeObserver 해제 (메모리 누수 방지)
     resizeObserverRef.current?.disconnect();
     resizeObserverRef.current = null;
-    if (wsRef.current) wsRef.current.close();
+    if (wsRef.current) wsRef.current.close(1000);  // 1000=정상종료 → onclose에서 재연결 안 함
     if (termRef.current) termRef.current.dispose();
   };
 
