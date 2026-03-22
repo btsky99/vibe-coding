@@ -23,7 +23,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.112"
+  #define MyAppVersion   "3.7.113"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -136,12 +136,68 @@ begin
   Result := sUnInstallString;
 end;
 
+// ── PyInstaller _MEI* 잔여 디렉터리 정리 ──────────────────────────────
+// PyInstaller --onefile 모드는 실행 시 Temp\_MEI* 폴더에 DLL을 추출.
+// 앱 비정상 종료 시 이 폴더가 남아 다음 실행 시 python311.dll 로드 실패 유발.
+// 설치/업데이트 전에 모든 _MEI* 잔여 폴더를 삭제하여 충돌 방지.
+// [2026-03-22 Claude: 업데이트 시 python311.dll 로드 실패 완전 해결]
+procedure CleanupMEIDirectories();
+var
+  TempDir: String;
+  RuntimeDir: String;
+  FindRec: TFindRec;
+  FullPath: String;
+begin
+  // 1. %TEMP%\_MEI* 잔여 폴더 정리
+  TempDir := ExpandConstant('{tmp}\..'); // %TEMP% 디렉터리
+  if FindFirst(TempDir + '\_MEI*', FindRec) then begin
+    try
+      repeat
+        if FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then begin
+          FullPath := TempDir + '\' + FindRec.Name;
+          DelTree(FullPath, True, True, True);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+
+  // 2. runtime-tmpdir 경로 생성 (%APPDATA%\VibeCoding\runtime)
+  RuntimeDir := ExpandConstant('{userappdata}\VibeCoding\runtime');
+  if not DirExists(RuntimeDir) then
+    ForceDirectories(RuntimeDir);
+
+  // 3. runtime-tmpdir 내 _MEI* 잔여 폴더도 정리
+  if FindFirst(RuntimeDir + '\_MEI*', FindRec) then begin
+    try
+      repeat
+        if FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then begin
+          FullPath := RuntimeDir + '\' + FindRec.Name;
+          DelTree(FullPath, True, True, True);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
 function InitializeSetup(): Boolean;
 var
   iResultCode: Integer;
   sUnInstallString: String;
 begin
   Result := True;
+
+  // 실행 중인 vibe-coding 프로세스 강제 종료 (DLL 잠금 방지)
+  Exec('taskkill.exe', '/F /IM vibe-coding.exe', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+  // 잠시 대기하여 프로세스 종료 및 파일 잠금 해제 완료 대기
+  Sleep(1500);
+
+  // PyInstaller _MEI* 잔여 폴더 정리 (python311.dll 로드 실패 방지)
+  CleanupMEIDirectories();
+
   sUnInstallString := GetUninstallString();
   if sUnInstallString <> '' then begin
     // 구버전 언인스톨러 실행 (사일런트 모드 — 사용자 질문 없이 자동 제거)
