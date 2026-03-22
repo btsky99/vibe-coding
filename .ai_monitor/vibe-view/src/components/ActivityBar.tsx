@@ -16,7 +16,7 @@ import { memo } from 'react';
 import {
   Search, Settings, Files,
   MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
-  ExternalLink, LayoutDashboard, Activity, Network, Target
+  ExternalLink, LayoutDashboard, Activity, Target
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -188,11 +188,6 @@ const ActivityBar = memo(function ActivityBar({
         {orchWarningCount > 0 && (
           <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-orange-500 rounded-full" />
         )}
-      </button>
-
-      {/* 🕸️ 지식 그래프 — pg_thoughts 계보 시각화 */}
-      <button onClick={() => onTabChange('graph')} className={tabCls('graph')} title="지식 그래프">
-        <Network className="w-5 h-5" />
       </button>
 
       {/* ⚙️ 하단 고정 버튼 */}

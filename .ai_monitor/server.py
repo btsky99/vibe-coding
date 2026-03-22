@@ -332,21 +332,7 @@ def ensure_postgres_running():
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;")
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;")
-        run_pg_sql("""
-            CREATE TABLE IF NOT EXISTS pg_thoughts (
-                id BIGSERIAL PRIMARY KEY,
-                agent TEXT NOT NULL,
-                terminal_id TEXT DEFAULT '',
-                skill TEXT DEFAULT '',
-                thought JSONB NOT NULL DEFAULT '{}',
-                parent_id BIGINT REFERENCES pg_thoughts(id),
-                project_id TEXT DEFAULT '',
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-        """)
-        # 기존 테이블에 project_id 컬럼이 없으면 추가 (마이그레이션)
-        run_pg_sql("ALTER TABLE pg_thoughts ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
-        run_pg_sql("CREATE INDEX IF NOT EXISTS idx_pg_thoughts_project_id ON pg_thoughts(project_id);")
+        # [2026-03-22] pg_thoughts 테이블 제거 (지식그래프 기능 삭제)
         run_pg_sql("""
             CREATE TABLE IF NOT EXISTS pg_logs (
                 id BIGSERIAL PRIMARY KEY,
@@ -580,57 +566,7 @@ def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
     run_pg_sql("SELECT pgmq.send('hive_queue', %s::jsonb);", (mq_msg,))
 
 def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, project_id: str = None) -> int:
-    """pg_thoughts 테이블에 사고 과정 기록 (JSONB).
-
-    parent_id를 지정하면 이전 thought와 연결선이 생성되어 지식 그래프에 계보 표시.
-    parent_id가 없으면 같은 에이전트의 마지막 thought를 자동으로 부모로 연결
-    → hive_bridge.py가 매 호출마다 새 프로세스로 실행되어 인메모리 체인이 깨지는 문제 해결.
-    ensure_ascii=True: 한글을 \\uXXXX 이스케이프로 변환하여 psql.exe -c 인수 인코딩 오류 방지.
-    JSONB는 유니코드 이스케이프를 정상 처리하므로 조회 시 한글이 정상 표시됩니다.
-
-    Returns:
-        int: 삽입된 행의 id (RETURNING id), 실패 시 0
-    """
-    safe_thought = json.dumps(thought, ensure_ascii=True)
-    # project_id 미지정 시 전역 PROJECT_ID 사용
-    _proj_id = project_id or PROJECT_ID
-
-    # parent_id 미지정 시 같은 에이전트+프로젝트의 직전 thought를 자동으로 부모로 설정
-    # 이 덕분에 hive_bridge.py가 매번 새 프로세스로 호출되어도 연결선이 끊기지 않음
-    if not parent_id:
-        prev_result = run_pg_sql(
-            "SELECT id FROM pg_thoughts WHERE agent=%s AND project_id=%s ORDER BY id DESC LIMIT 1;",
-            (agent, _proj_id)
-        )
-        try:
-            for line in (prev_result or '').splitlines():
-                line = line.strip()
-                if line.isdigit():
-                    parent_id = int(line)
-                    break
-        except Exception as e:
-            pass  # parent_id 파싱 실패 허용 — 부모 없이 삽입 진행
-
-    if parent_id:
-        result = run_pg_sql(
-            "INSERT INTO pg_thoughts (agent, skill, thought, parent_id, project_id) "
-            "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id;",
-            (agent, skill, safe_thought, int(parent_id), _proj_id)
-        )
-    else:
-        result = run_pg_sql(
-            "INSERT INTO pg_thoughts (agent, skill, thought, project_id) "
-            "VALUES (%s, %s, %s::jsonb, %s) RETURNING id;",
-            (agent, skill, safe_thought, _proj_id)
-        )
-    # RETURNING id 출력 파싱: psql --csv가 아닌 기본 출력 형식 → " id\n----\n 42\n(1 row)" 형태
-    try:
-        for line in (result or '').splitlines():
-            line = line.strip()
-            if line.isdigit():
-                return int(line)
-    except Exception as e:
-        pass  # RETURNING id 파싱 실패 — 0 반환
+    """[2026-03-22] 지식그래프 제거됨 — 호출부 호환을 위해 no-op 스텁 유지."""
     return 0
 
 def run_pg_sql_csv(sql: str, params: tuple = None, db: str = None) -> list:
@@ -1080,34 +1016,7 @@ if not getattr(sys, 'frozen', False):
     # (frozen 모드는 __main__에서 _init_project_db 후 호출)
     ensure_schema(DATA_DIR)
 
-# ── 지식 그래프: 기존 고아 노드 parent_id 소급 연결 (서버 기동 시 1회) ────────
-# hive_bridge.py가 새 프로세스로 호출될 때마다 인메모리 체인이 끊겨
-# parent_id 없이 삽입된 고아 노드들을 동일 에이전트의 이전 thought와 연결.
-def _backfill_thought_parent_ids():
-    """pg_thoughts에서 parent_id가 NULL인 노드를 같은 에이전트의 직전 id로 소급 연결."""
-    try:
-        # PARTITION BY (agent, project_id): 프로젝트 간 노드 연결 방지
-        # 이전에 agent만으로 분할하면 프로젝트 A의 마지막 노드가
-        # 프로젝트 B의 첫 노드의 부모로 잘못 연결됨
-        backfill_sql = (
-            "UPDATE pg_thoughts t "
-            "SET parent_id = prev.id "
-            "FROM ("
-            "  SELECT id, agent, project_id, "
-            "         LAG(id) OVER (PARTITION BY agent, project_id ORDER BY id) AS prev_id "
-            "  FROM pg_thoughts"
-            ") prev "
-            "WHERE t.id = prev.id "
-            "  AND prev.prev_id IS NOT NULL "
-            "  AND t.parent_id IS NULL;"
-        )
-        run_pg_sql(backfill_sql)
-    except Exception as e:
-        print(f"[PG ERROR] backfill_thought_parent_ids: {e}")
-
-# [성능] 모듈 로드 시 동기 실행 시 psql.exe subprocess 생성 ~400ms 소요
-# → 백그라운드 스레드로 지연 실행하여 서버 기동 시간 단축
-threading.Thread(target=_backfill_thought_parent_ids, daemon=True, name='BackfillParentIds').start()
+# [2026-03-22] 지식그래프 관련 _backfill_thought_parent_ids() 제거
 
 # ── 파일 기반 레거시 메모리 저장소 초기화 ─────────────────────────────────────
 def _legacy_memory_data_dir() -> Path:
@@ -3261,40 +3170,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
-        # ── 지식 그래프 독립 창 실행 — PySide6 QWebEngineView (?graph=1 모드) ──
-        if path == '/api/graph/launch':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                if getattr(sys, 'frozen', False):
-                    # 배포(frozen) 모드: vibe-coding.exe 옆의 vibe-graph.exe 직접 실행
-                    exe_dir = Path(sys.executable).resolve().parent
-                    launch_exe = exe_dir / 'vibe-graph.exe'
-                    if not launch_exe.exists():
-                        raise RuntimeError(f'vibe-graph.exe 없음: {launch_exe}')
-                    subprocess.Popen(
-                        [str(launch_exe), str(HTTP_PORT)],
-                        creationflags=_no_window,
-                        close_fds=True,
-                    )
-                else:
-                    # 개발(dev) 모드: Python 스크립트 서브프로세스로 실행
-                    graph_script = BASE_DIR / 'knowledge_graph_window.py'
-                    python_cmds = _python_runner_cmds()
-                    if not python_cmds:
-                        raise RuntimeError('Python interpreter not found for graph launch')
-                    subprocess.Popen(
-                        [python_cmds[0], str(graph_script), str(HTTP_PORT)],
-                        creationflags=_no_window,
-                        close_fds=True,
-                    )
-                self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
+        # [2026-03-22] /api/graph/launch 제거 (지식그래프 삭제)
 
         # ─── 신규: 사고 과정 로그 추가 (v5.0) ───
         # ─── 신규: PostgreSQL 통합 로깅 API (v5.0) ───

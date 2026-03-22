@@ -3,10 +3,7 @@
 FILE: scripts/claude_hook.py
 DESCRIPTION: Claude Code 전용 자동 훅 핸들러.
              PostToolUse / Stop 이벤트를 stdin JSON으로 수신하여
-             hive_bridge.log_task() → pg_logs,
-             hive_bridge.log_thought() → pg_thoughts 에 자동 기록합니다.
-             지식 그래프(KnowledgeGraphPanel)에 Claude 노드가 표시되려면
-             pg_thoughts에 데이터가 쌓여야 합니다.
+             hive_bridge.log_task() → pg_logs 에 자동 기록합니다.
 
              [Claude Code 훅 이벤트 스키마]
              stdin으로 JSON 수신:

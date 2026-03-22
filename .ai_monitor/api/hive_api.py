@@ -9,10 +9,7 @@ DESCRIPTION: /api/hive/*, /api/orchestrator/*, /api/install-skills,
 
 REVISION HISTORY:
 - 2026-03-01 Claude: server.py에서 분리 — hive/orchestrator/superpowers API 담당
-- 2026-03-10 Gemini: /api/hive/knowledge-graph 추가 (Task 17)
-- 2026-03-11 Claude: knowledge-graph SQL 수정 — thought->>'title' 단독 조회 시
-                     MCP 경유 삽입 외 대부분 레코드가 NULL 반환되는 문제 수정.
-                     COALESCE(title, task, text) + skill 필드 dict 포함 추가.
+- 2026-03-22 Claude: 지식그래프(/api/hive/knowledge-graph) 제거 — 실사용 가치 미흡
 """
 
 import json
@@ -153,69 +150,6 @@ def handle_get(handler, path: str, params: dict,
     반환값: 경로가 처리됐으면 True, 해당 없으면 False.
     caller(server.py의 do_GET)는 False를 받으면 다른 핸들러를 시도합니다.
     """
-
-    # ── /api/hive/knowledge-graph (Task 17) ─────────────────────────────
-    if path == '/api/hive/knowledge-graph':
-        if not run_pg_sql_csv:
-            _json_response(handler, {"error": "Postgres helper not provided"}, status=500)
-            return True
-        
-        try:
-            # 현재 활성 프로젝트 ID 계산 — _current_project_root()로 동적 참조
-            # 폴더 전환 시 config.json last_path 기반으로 즉시 반영됨
-            _curr_root = _current_project_root()
-            _proj_id_filter = str(_curr_root).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
-            _safe_proj_id = _proj_id_filter.replace("'", "''")
-
-            # 1. 노드 수집 — 현재 프로젝트 데이터만 표시 (project_id 필터)
-            # thought 구조가 삽입 경로마다 다름:
-            #   - mcp_server: {"title": ..., "type": ..., "content": ...}
-            #   - hive_bridge.reflect_to_pg: {"type": "reflect", "task": ..., ...}
-            #   - claude_hook/hive_hook: {"text": ..., "context": ...}
-            # → COALESCE로 title > task > text 순서로 fallback하여 레이블 확보
-            # project_id = '' 인 구버전 레코드도 포함 (마이그레이션 전 데이터 호환)
-            nodes_sql = (
-                "SELECT id, agent, skill, "
-                "COALESCE(thought->>'title', thought->>'task', thought->>'text', 'Node '||id) as label, "
-                "COALESCE(thought->>'type', 'log') as type "
-                f"FROM pg_thoughts WHERE project_id='{_safe_proj_id}' OR project_id='' ORDER BY id"
-            )
-            nodes_raw = run_pg_sql_csv(nodes_sql)
-
-            # 2. 링크(Edge) 수집 — 현재 프로젝트 레코드만 연결선 생성
-            links_sql = (
-                "SELECT parent_id as source, id as target FROM pg_thoughts "
-                f"WHERE parent_id IS NOT NULL AND (project_id='{_safe_proj_id}' OR project_id='')"
-            )
-            links_raw = run_pg_sql_csv(links_sql)
-
-            # 3. 데이터 정제
-            nodes = []
-            if nodes_raw:
-                for n in nodes_raw:
-                    nodes.append({
-                        "id": int(n.get('id', 0)),
-                        "label": n.get('label') or f"Node {n.get('id')}",
-                        "agent": n.get('agent', 'unknown'),
-                        "skill": n.get('skill') or '',  # 프론트 GraphNode.skill 필드 누락 수정
-                        "type": n.get('type') or "log"
-                    })
-                
-            links = []
-            if links_raw:
-                for l in links_raw:
-                    try:
-                        links.append({
-                            "source": int(l.get('source')),
-                            "target": int(l.get('target'))
-                        })
-                    except (TypeError, ValueError):
-                        continue
-                
-            _json_response(handler, {"nodes": nodes, "links": links})
-        except Exception as e:
-            _json_response(handler, {"error": str(e)}, status=500)
-        return True
 
     # ── /api/install-skills ────────────────────────────────────────────────
     if path == '/api/install-skills':

@@ -23,7 +23,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.104"
+  #define MyAppVersion   "3.7.105"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -86,7 +86,6 @@ Source: "statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignoreversion
 
 ; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
 ; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
-Source: ".ai_monitor\dist\vibe-graph.exe";     DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: ".ai_monitor\dist\vibe-dashboard.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; vibe-kanban.exe 제거됨 — B안 통합: vibe-dashboard.exe kanban 탭으로 실행
 
