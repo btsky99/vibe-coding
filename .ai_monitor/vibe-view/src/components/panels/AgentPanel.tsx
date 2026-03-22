@@ -258,6 +258,76 @@ function stripPreviewPath(rawPath: string): string {
   return colonIndex > lastSlashIndex ? withoutHashLine.slice(0, colonIndex) : withoutHashLine;
 }
 
+function basenameLike(value: string): string {
+  const normalized = stripPreviewPath(value).replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || normalized;
+}
+
+function compactCommandPreview(command: string): string {
+  const singleLine = command.replace(/\s+/g, ' ').trim();
+  if (!singleLine) return '';
+  return singleLine.length > 72 ? `${singleLine.slice(0, 69)}...` : singleLine;
+}
+
+function summarizeOutputText(raw: string): string {
+  const line = raw.replace(/\s+/g, ' ').trim();
+  if (!line) return '';
+
+  if (/^[-_=~.]{6,}$/.test(line) || /^[─━]{6,}$/.test(line)) return '';
+  if (/^(thinking|working|processing)\.{0,3}$/i.test(line)) return '';
+
+  const inspectMatch = line.match(/(?:Read|Glob|Grep|Search)\(([^)]+)\)/i);
+  if (inspectMatch) {
+    return `Inspect ${basenameLike(inspectMatch[1])}`;
+  }
+
+  const updateMatch = line.match(/(?:Edit|Write|Create)\(([^)]+)\)/i);
+  if (updateMatch) {
+    return `Update ${basenameLike(updateMatch[1])}`;
+  }
+
+  const commandMatch = line.match(/(?:Bash|Shell)\(([^)]+)\)/i);
+  if (commandMatch) {
+    return `Run ${compactCommandPreview(commandMatch[1])}`;
+  }
+
+  const patchMatch = line.match(/apply_patch/i);
+  if (patchMatch) {
+    return 'Apply patch';
+  }
+
+  const openPathMatch = line.match(/([A-Za-z]:[\\/][^\s"'`()<>]+|\/[^\s"'`()<>]+)/);
+  if (/^(opening|reading|checking|reviewing|inspecting)\b/i.test(line) && openPathMatch) {
+    return `Inspect ${basenameLike(openPathMatch[1])}`;
+  }
+
+  return line;
+}
+
+function buildVisibleOutputLines(lines: OutputLine[], compact: boolean): OutputLine[] {
+  if (!compact) return lines;
+
+  const visible: OutputLine[] = [];
+  let lastOutputText = '';
+
+  for (const line of lines) {
+    const nextText = line.type === 'output' ? summarizeOutputText(line.text) : line.text.trim();
+    if (!nextText) continue;
+
+    if (line.type === 'output') {
+      if (nextText === lastOutputText) continue;
+      lastOutputText = nextText;
+    } else {
+      lastOutputText = '';
+    }
+
+    visible.push({ ...line, text: nextText });
+  }
+
+  return visible;
+}
+
 function extractAutoPreviewPath(line: string): string | null {
   const toolPathMatch = line.match(/(?:Read|Edit|Write|Create)\s*\(([^)\n]{1,260})\)/i);
   if (toolPathMatch) {
@@ -419,6 +489,7 @@ function TerminalCard({
   onClick: () => void;
 }) {
   const { status, task, cli, ts, last_line, pipeline_stage } = state;
+  const previewLine = summarizeOutputText(last_line);
 
   // 카드 테두리: 선택 > running > 기본
   const cardBorder = selected
@@ -459,7 +530,7 @@ function TerminalCard({
   //      클라이언트에서 last_line을 재파싱할 필요 없음. 단, SSE로만 실행한 경우
   //      서버 stage가 없을 수 있어 fallback을 유지함.
   const serverStage = pipeline_stage && pipeline_stage !== 'idle' ? pipeline_stage : null;
-  const detectedStage = serverStage ?? (last_line ? detectStage(last_line) : null);
+  const detectedStage = serverStage ?? (previewLine ? detectStage(previewLine) : null);
 
   // 파이프라인 단계 목록 — 각 단계별 고유 아이콘/색상으로 한눈에 구분
   const PIPELINE = [
@@ -635,10 +706,10 @@ function TerminalCard({
       </div>
 
       {/* ── 마지막 출력 줄 (running 중에만 표시) ────────────────────────────── */}
-      {last_line && status === 'running' && (
+      {previewLine && status === 'running' && (
         <div className="px-2.5 pb-1.5">
           <div className="text-[8px] text-white/25 font-mono truncate bg-black/30 rounded px-1.5 py-0.5 border border-white/5">
-            {last_line}
+            {previewLine}
           </div>
         </div>
       )}
@@ -658,6 +729,8 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
 
   // 터미널 탭 데이터
   const [outputLines, setOutputLines] = useState<OutputLine[]>([]);
+  const [compactOutput, setCompactOutput] = useState(true);
+  const visibleOutputLines = buildVisibleOutputLines(outputLines, compactOutput);
 
   // 사고 흐름 탭 데이터
   const [thoughts, setThoughts]       = useState<ThoughtEntry[]>([]);
@@ -1040,11 +1113,12 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
 
           // 사고 흐름: Thought 엔트리로 추가
           if (line) {
+            const thoughtText = summarizeOutputText(line) || line;
             const id = ++thoughtIdRef.current;
             setThoughts(prev => [...prev.slice(-99), {
               id, time,
               agent: type === 'error' ? 'ERROR' : 'AGENT',
-              text: line,
+              text: thoughtText,
             }]);
           }
 
@@ -1581,11 +1655,22 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
               >
                 <RotateCw className="w-3 h-3" />
               </button>
+              <button
+                onClick={() => setCompactOutput(prev => !prev)}
+                className={`ml-1 rounded border px-1.5 py-0.5 text-[9px] font-mono transition ${
+                  compactOutput
+                    ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-300'
+                    : 'border-white/10 text-white/35 hover:border-white/20 hover:text-white/60'
+                }`}
+                title={compactOutput ? 'Show raw output' : 'Show compact output'}
+              >
+                {compactOutput ? 'Compact' : 'Raw'}
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2 font-mono text-[10px] leading-relaxed">
-              {outputLines.length === 0
+              {visibleOutputLines.length === 0
                 ? <div className="text-white/15 italic">실행 결과가 여기에 표시됩니다...</div>
-                : outputLines.map((line, i) => (
+                : visibleOutputLines.map((line, i) => (
                     <div key={i} className={`${getLineColor(line)} whitespace-pre-wrap break-all`}>
                       <FilePathText
                         text={line.text}
