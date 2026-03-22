@@ -10,11 +10,11 @@
  * ------------------------------------------------------------------------
  */
 
-import { memo } from 'react';
+import { memo, useState, useRef, useEffect } from 'react';
 import {
   Menu, Terminal, RotateCw,
   X, Zap, Cpu, Info,
-  Trash2, LayoutDashboard, ClipboardCheck
+  Trash2, LayoutDashboard, ClipboardCheck, FileText, Copy, Check, RefreshCw
 } from 'lucide-react';
 import { API_BASE } from '../constants';
 import { VscFolderOpened } from 'react-icons/vsc';
@@ -48,6 +48,126 @@ interface TopMenuBarProps {
   onOpenMissionControl: () => void;
 }
 
+// ── 서버 로그 뷰어 모달 — 서버/PG/태스크 로그를 탭으로 전환하며 확인 + 클립보드 복사 ──
+function LogViewerModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [logType, setLogType] = useState<'server' | 'pgsql' | 'task'>('server');
+  const [lines, setLines] = useState<string[]>([]);
+  const [logPath, setLogPath] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const fetchLogs = () => {
+    setLoading(true);
+    fetch(`${API_BASE}/api/server-logs?type=${logType}&lines=300`)
+      .then(r => r.json())
+      .then(d => {
+        setLines(d.lines || []);
+        setLogPath(d.path || '');
+        // 스크롤을 맨 아래로 이동 (최신 로그 확인)
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      })
+      .catch(() => setLines(['(로그 로드 실패)']))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    if (isOpen) fetchLogs();
+  }, [isOpen, logType]);
+
+  // 5초 자동 갱신
+  useEffect(() => {
+    if (!isOpen) return;
+    const iv = setInterval(fetchLogs, 5000);
+    return () => clearInterval(iv);
+  }, [isOpen, logType]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (!isOpen) return null;
+
+  const tabs: { key: 'server' | 'pgsql' | 'task'; label: string }[] = [
+    { key: 'server', label: '서버 로그' },
+    { key: 'pgsql', label: 'PostgreSQL' },
+    { key: 'task', label: '태스크 로그' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="w-[85vw] max-w-[1200px] h-[75vh] bg-[#1e1e1e] border border-white/10 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        {/* 헤더 */}
+        <div className="h-10 bg-[#252526] border-b border-white/5 flex items-center justify-between px-4 shrink-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-white/80">
+            <FileText className="w-4 h-4 text-primary" />
+            서버 로그 뷰어
+            {logPath && <span className="text-[10px] text-white/30 font-mono ml-2">{logPath}</span>}
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={fetchLogs} className="p-1.5 hover:bg-white/10 rounded text-white/40 hover:text-white/80" title="새로고침">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button onClick={handleCopy} className="p-1.5 hover:bg-white/10 rounded text-white/40 hover:text-green-400 flex items-center gap-1" title="전체 복사">
+              {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+              <span className="text-[10px]">{copied ? '복사됨!' : '복사'}</span>
+            </button>
+            <div className="w-px h-4 bg-white/10 mx-1" />
+            <button onClick={onClose} className="p-1.5 hover:bg-red-500/20 rounded text-white/40 hover:text-red-400">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        {/* 탭 바 */}
+        <div className="flex border-b border-white/5 bg-[#2d2d2d] px-2 gap-0.5">
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setLogType(tab.key)}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-t ${
+                logType === tab.key
+                  ? 'bg-[#1e1e1e] text-primary border-t-2 border-primary'
+                  : 'text-white/40 hover:text-white/70 hover:bg-white/5'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          <span className="ml-auto text-[10px] text-white/20 self-center">{lines.length}줄 | 5초 자동 갱신</span>
+        </div>
+        {/* 로그 내용 */}
+        <div className="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed custom-scrollbar">
+          {lines.length === 0 ? (
+            <div className="text-white/20 text-center py-10">로그가 비어있습니다</div>
+          ) : (
+            lines.map((line, i) => (
+              <div
+                key={i}
+                className={`px-2 py-0.5 rounded hover:bg-white/5 whitespace-pre-wrap break-all ${
+                  line.includes('ERROR') || line.includes('error') || line.includes('FATAL')
+                    ? 'text-red-400 bg-red-500/5'
+                    : line.includes('WARNING') || line.includes('warning')
+                    ? 'text-yellow-400'
+                    : line.includes('INFO') || line.includes('info')
+                    ? 'text-white/60'
+                    : 'text-white/40'
+                }`}
+              >
+                <span className="text-white/15 mr-2 select-none">{(i + 1).toString().padStart(4)}</span>
+                {line}
+              </div>
+            ))
+          )}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 상단 메뉴 바 — 메뉴가 닫힌 상태에서 다른 상태 변경 시 리렌더 방지
 const TopMenuBar = memo(function TopMenuBar({
   activeMenu, setActiveMenu,
@@ -59,6 +179,7 @@ const TopMenuBar = memo(function TopMenuBar({
   onOpenFolder, onInstallSkills, onInstallTool, onOpenHelpDoc, onClearLogs,
   onOpenMissionControl,
 }: TopMenuBarProps) {
+  const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
   // 메뉴 항목 목록 — 순서가 곧 표시 순서
   const menus = ['파일', '편집', '보기', 'AI 도구', '도움말'];
@@ -138,6 +259,14 @@ const TopMenuBar = memo(function TopMenuBar({
                    mode === '6' ? '6 분할 (3×2 격자)' : '8 분할 (4×2 격자)'}
                 </button>
               ))}
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">진단</div>
+              <button
+                onClick={() => { setIsLogViewerOpen(true); setActiveMenu(null); }}
+                className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
+              >
+                <FileText className="w-3.5 h-3.5 text-[#e8a87c]" /> 서버 로그 보기
+              </button>
             </div>
           )}
 
@@ -271,6 +400,8 @@ const TopMenuBar = memo(function TopMenuBar({
         </span>
       </div>
 
+      {/* 로그 뷰어 모달 — 보기 메뉴에서 열림 */}
+      <LogViewerModal isOpen={isLogViewerOpen} onClose={() => setIsLogViewerOpen(false)} />
     </div>
   );
 });

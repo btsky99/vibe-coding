@@ -2518,6 +2518,39 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
         
+        # [2026-03-22 추가] 서버 로그 뷰어 API — server_error.log + pgsql.log 내용 반환
+        # 환경설정(보기 메뉴)에서 로그를 실시간으로 확인하고 클립보드 복사 가능
+        elif parsed_path.path == '/api/server-logs':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            # tail 줄 수 (기본 200줄)
+            tail_n = int(query.get('lines', ['200'])[0])
+            log_type = query.get('type', ['server'])[0]  # server | pgsql | task
+            logs_data: dict = {"type": log_type, "lines": [], "path": ""}
+            try:
+                if log_type == 'pgsql':
+                    log_path = DATA_DIR.parent / "pgsql.log" if not getattr(sys, 'frozen', False) else Path(sys.executable).resolve().parent / "pgsql.log"
+                    # frozen 모드에서 pgsql.log는 %APPDATA%\VibeCoding\pgsql.log
+                    if not log_path.exists():
+                        log_path = DATA_DIR / "pgsql.log"
+                elif log_type == 'task':
+                    log_path = DATA_DIR / "task_logs.jsonl"
+                else:
+                    log_path = DATA_DIR / "server_error.log"
+                logs_data["path"] = str(log_path)
+                if log_path.exists():
+                    all_lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines()
+                    logs_data["lines"] = all_lines[-tail_n:]
+                else:
+                    logs_data["lines"] = [f"(로그 파일 없음: {log_path})"]
+            except Exception as e:
+                logs_data["lines"] = [f"(로그 읽기 오류: {e})"]
+            body = json.dumps(logs_data, ensure_ascii=False).encode('utf-8')
+            self.wfile.write(body)
+
         elif parsed_path.path == '/api/check-update-ready':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
