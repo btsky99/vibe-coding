@@ -130,66 +130,68 @@ jobs:
       - name: Build exe
         # [2026-03-21 Claude] 경로 수정: server.py가 _MEIPASS/vibe-view/dist/ 에서 프론트엔드를 찾으므로
         # --add-data 대상도 vibe-view/dist로 맞춰야 함. 이전: dist → "Not Found" 에러 발생.
-        # api 모듈, PROJECT_MAP.md, AGENTS.md 누락분 추가.
+        # [2026-03-22 Claude] shell: bash 사용 — cmd에서 %APPDATA%가 CI 러너 경로로
+        # 확장되어 runtime-tmpdir이 무효화되는 문제 방지. bash는 %VAR%를 확장하지 않음.
+        shell: bash
         run: |
           cd .ai_monitor
-          set WINPTY=${{ steps.winpty.outputs.path }}
-          pyinstaller --onefile --noconsole ^
-            --name vibe-coding-update-${{ steps.version.outputs.ver }} ^
-            --icon bin/vibe_final.ico ^
-            --runtime-tmpdir "%%APPDATA%%\VibeCoding\runtime" ^
-            --add-data "src;src" ^
-            --add-data "bin;bin" ^
-            --add-data "vibe-view\dist;vibe-view/dist" ^
-            --add-data "api;api" ^
-            --add-data "skills;skills" ^
-            --add-data ".gemini\skills;.gemini/skills" ^
-            --add-data ".claude\skills;.claude/skills" ^
-            --add-data "scripts;scripts" ^
-            --add-data "GEMINI.md;." ^
-            --add-data "CLAUDE.md;." ^
-            --add-data "RULES.md;." ^
-            --add-data "..\PROJECT_MAP.md;." ^
-            --add-data "..\AGENTS.md;." ^
-            --add-binary "%WINPTY%\winpty.dll;winpty" ^
-            --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
-            --add-binary "%WINPTY%\conpty.dll;winpty" ^
-            --add-binary "%WINPTY%\OpenConsole.exe;winpty" ^
-            --hidden-import websockets ^
-            --hidden-import winpty ^
+          WINPTY="${{ steps.winpty.outputs.path }}"
+          pyinstaller --onefile --noconsole \
+            --name "vibe-coding-update-${{ steps.version.outputs.ver }}" \
+            --icon bin/vibe_final.ico \
+            --runtime-tmpdir '%APPDATA%\VibeCoding\runtime' \
+            --add-data "src;src" \
+            --add-data "bin;bin" \
+            --add-data "vibe-view/dist;vibe-view/dist" \
+            --add-data "api;api" \
+            --add-data "skills;skills" \
+            --add-data ".gemini/skills;.gemini/skills" \
+            --add-data ".claude/skills;.claude/skills" \
+            --add-data "scripts;scripts" \
+            --add-data "GEMINI.md;." \
+            --add-data "CLAUDE.md;." \
+            --add-data "RULES.md;." \
+            --add-data "../PROJECT_MAP.md;." \
+            --add-data "../AGENTS.md;." \
+            --add-binary "$WINPTY/winpty.dll;winpty" \
+            --add-binary "$WINPTY/winpty-agent.exe;winpty" \
+            --add-binary "$WINPTY/conpty.dll;winpty" \
+            --add-binary "$WINPTY/OpenConsole.exe;winpty" \
+            --hidden-import websockets \
+            --hidden-import winpty \
             server.py
-        shell: cmd
 
       - name: Build exe (console)
         # [2026-03-21 Claude] noconsole 빌드와 동일한 경로 수정 적용
+        # [2026-03-22 Claude] shell: bash — %APPDATA% 리터럴 보존을 위해 cmd → bash 변경
+        shell: bash
         run: |
           cd .ai_monitor
-          set WINPTY=${{ steps.winpty.outputs.path }}
-          pyinstaller --onefile --console ^
-            --name vibe-coding-console-${{ steps.version.outputs.ver }} ^
-            --icon bin/vibe_final.ico ^
-            --runtime-tmpdir "%%APPDATA%%\VibeCoding\runtime" ^
-            --add-data "src;src" ^
-            --add-data "bin;bin" ^
-            --add-data "vibe-view\dist;vibe-view/dist" ^
-            --add-data "api;api" ^
-            --add-data "skills;skills" ^
-            --add-data ".gemini\skills;.gemini/skills" ^
-            --add-data ".claude\skills;.claude/skills" ^
-            --add-data "scripts;scripts" ^
-            --add-data "GEMINI.md;." ^
-            --add-data "CLAUDE.md;." ^
-            --add-data "RULES.md;." ^
-            --add-data "..\PROJECT_MAP.md;." ^
-            --add-data "..\AGENTS.md;." ^
-            --add-binary "%WINPTY%\winpty.dll;winpty" ^
-            --add-binary "%WINPTY%\winpty-agent.exe;winpty" ^
-            --add-binary "%WINPTY%\conpty.dll;winpty" ^
-            --add-binary "%WINPTY%\OpenConsole.exe;winpty" ^
-            --hidden-import websockets ^
-            --hidden-import winpty ^
+          WINPTY="${{ steps.winpty.outputs.path }}"
+          pyinstaller --onefile --console \
+            --name "vibe-coding-console-${{ steps.version.outputs.ver }}" \
+            --icon bin/vibe_final.ico \
+            --runtime-tmpdir '%APPDATA%\VibeCoding\runtime' \
+            --add-data "src;src" \
+            --add-data "bin;bin" \
+            --add-data "vibe-view/dist;vibe-view/dist" \
+            --add-data "api;api" \
+            --add-data "skills;skills" \
+            --add-data ".gemini/skills;.gemini/skills" \
+            --add-data ".claude/skills;.claude/skills" \
+            --add-data "scripts;scripts" \
+            --add-data "GEMINI.md;." \
+            --add-data "CLAUDE.md;." \
+            --add-data "RULES.md;." \
+            --add-data "../PROJECT_MAP.md;." \
+            --add-data "../AGENTS.md;." \
+            --add-binary "$WINPTY/winpty.dll;winpty" \
+            --add-binary "$WINPTY/winpty-agent.exe;winpty" \
+            --add-binary "$WINPTY/conpty.dll;winpty" \
+            --add-binary "$WINPTY/OpenConsole.exe;winpty" \
+            --hidden-import websockets \
+            --hidden-import winpty \
             server.py
-        shell: cmd
 
       - name: Build sub-window EXEs
         # server.py frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
