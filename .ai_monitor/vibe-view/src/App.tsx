@@ -7,6 +7,7 @@
  *          각 기능 영역은 독립 컴포넌트(TopMenuBar, ActivityBar, FileExplorer,
  *          MessageComposer, 각 패널)로 분리되어 있습니다.
  * REVISION HISTORY:
+ * - 2026-03-22 Codex: 기본 터미널 레이아웃을 2분할에서 3분할로 변경.
  * - 2026-03-07 Claude: ActivityBar HiveEngineStatus 통합 — globalEngineStage 계산 + hive_health 폴링 추가.
  *                      agentTerminals에서 최고 우선순위 파이프라인 단계를 추출, ActivityBar LED 링에 연동.
  * - 2026-03-02 Claude: TopMenuBar, ActivityBar, FileExplorer, MessageComposer 분리.
@@ -90,9 +91,9 @@ function App() {
   const sidebarResizeStartX = useRef(0);
   const sidebarResizeStartWidth = useRef(260);
   // 터미널 레이아웃 모드 — '2x2'는 parseInt 불가, 직접 매핑
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('2');
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('3');
   const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8, '9':9 };
-  const terminalCount = terminalCountMap[layoutMode] ?? 2;
+  const terminalCount = terminalCountMap[layoutMode] ?? 3;
 
   // ─── 앱 버전 + 업데이트 상태 ─────────────────────────────────────────
   const [appVersion, setAppVersion] = useState<string>('...');
