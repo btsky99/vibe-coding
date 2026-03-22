@@ -5092,6 +5092,35 @@ def open_app_window(url):
 if __name__ == '__main__':
     print(f"Vibe Coding {__version__}")
 
+    # ── PyInstaller 임시 폴더(_MEI*) 자동 정리 ─────────────────────────────────
+    # [2026-03-22 Claude] 이전 버전(runtime_tmpdir=None)이 %TEMP%에 남긴 _MEI* 폴더를
+    # 앱 시작 시 자동 삭제. 현재 프로세스가 사용 중인 폴더는 제외.
+    # 이 폴더들이 남아있으면 python311.dll 로드 실패 에러 발생.
+    if getattr(sys, 'frozen', False):
+        try:
+            import tempfile, shutil
+            _temp_dir = Path(tempfile.gettempdir())
+            # 현재 프로세스의 _MEIPASS (사용 중이므로 삭제하면 안 됨)
+            _current_mei = getattr(sys, '_MEIPASS', '')
+            _cleaned = 0
+            for _mei in _temp_dir.iterdir():
+                if not _mei.name.startswith('_MEI'):
+                    continue
+                if not _mei.is_dir():
+                    continue
+                # 현재 프로세스가 사용 중인 폴더는 건너뜀
+                if str(_mei) == _current_mei:
+                    continue
+                try:
+                    shutil.rmtree(str(_mei), ignore_errors=True)
+                    _cleaned += 1
+                except Exception:
+                    pass  # 다른 프로세스가 사용 중이면 무시
+            if _cleaned:
+                print(f"[cleanup] 이전 _MEI 임시 폴더 {_cleaned}개 정리 완료")
+        except Exception as _e:
+            print(f"[cleanup] _MEI 정리 중 오류 (무시): {_e}")
+
     # ── 다중 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
     # [버그 수정 2026-03-14 v3.7.60] 소켓 락을 ensure_postgres_running() 이전에
     # 먼저 획득해야 한다. 이전 코드는 postgres 초기화(수 초 소요) 이후에 락을

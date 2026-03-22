@@ -105,6 +105,7 @@ gemini --non-interactive --yolo --output-format json -p "테스트 실행 후 �
 | `--model <이름>` | `-m` | 사용할 모델 지정 |
 | `--prompt <텍스트>` | `-p` | 비대화형 모드 (답변 후 종료) |
 | `--prompt-interactive <텍스트>` | `-i` | 초기 질문과 함께 대화형 시작 |
+| `--thinking` | `-t` | 사고 모드(Thinking Mode) 활성화 |
 | `--sandbox` | `-s` | 샌드박스 실행 (Docker/Podman) |
 | `--yolo` | `-y` | 모든 도구 호출 자동 승인 (주의!) |
 | `--checkpointing` | | 파일 수정 전 스냅샷 저장 |
@@ -122,6 +123,7 @@ gemini --non-interactive --yolo --output-format json -p "테스트 실행 후 �
 | `/help` (별칭 `/?`) | 명령어 도움말 표시 |
 | `/quit` (별칭 `/exit`) | Gemini CLI 종료 |
 | `/clear` | 터미널 화면 지우기 |
+| `/think` | 사고 모드(Thinking Mode) 토글 |
 | `/about` | 버전 정보 표시 |
 
 ### 대화 관리
@@ -254,7 +256,36 @@ gemini --non-interactive --yolo --output-format json -p "테스트 실행 후 �
 
 ---
 
-## 10. 설정 & 구성
+## 10. 하이브 마인드 & 오케스트레이션 (Hive Mind)
+
+Vibe Coding의 핵심인 협업 및 자동화 시스템입니다.
+
+### 오케스트레이션 (Orchestration)
+복잡한 요청을 분석하여 자동으로 스킬 체인을 구성하고 실행하는 통합 관제 시스템입니다.
+- **실행**: `/orchestrate "요청 내용"`
+- **프로토콜 (5단계)**:
+    1. **컨텍스트 로드**: `memory.md`, 하이브 메모리, Git 상태 분석
+    2. **계획 수립**: 요청 분석 후 `skill_orchestrator.py`에 계획 저장
+    3. **자동 실행**: 각 단계별 스킬 실행 + 파일 잠금(Lock) 관리
+    4. **자기치유**: 에러 발생 시 `vibe-heal` 스킬로 자동 복구 시도
+    5. **완료 보고**: `rules_validator.py` 검증 후 대시보드 및 하이브 공지
+
+### 하이브 통신 (ITCP)
+에이전트 간(`Gemini` ↔ `Claude` ↔ `Codex`) 메시지를 주고받는 프로토콜입니다.
+- **메시지 전송**: `!python scripts/itcp.py send <발신> <수신> "<내용>" [채널]`
+- **메시지 수신**: `!python scripts/itcp.py receive <에이전트명>`
+- **브로드캐스트**: `!python scripts/itcp.py broadcast <발신> "<내용>"`
+- **채널 종류**: `general`, `task`, `debug`, `review`, `broadcast`, `hive`
+
+### 코덱스 (Codex) 터미널
+제미나이나 클로드 세션 없이도 일반 터미널에서 에이전트를 실행하는 독립 모드입니다.
+- **실행 (REPL)**: `set TERMINAL_ID=T1 && python scripts/terminal_agent.py`
+- **단발 실행**: `python scripts/terminal_agent.py "지시 내용" [auto|claude|gemini]`
+- **특징**: `TERMINAL_ID`를 다르게 설정하여 여러 터미널에서 병렬 작업 가능
+
+---
+
+## 11. 설정 & 구성
 
 ### 설정 파일 위치 (우선순위 높음 → 낮음)
 1. **시스템**: `/etc/gemini-cli/settings.json`
