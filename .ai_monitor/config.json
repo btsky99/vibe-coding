@@ -7,7 +7,7 @@
     "vibe-coding": "D:/vibe-coding",
     "shop": "D:/shop"
   },
-  "agent_mode": "yolo",
+  "agent_mode": "normal",
   "gemini_models": {
     "main": "gemini-2.0-flash",
     "background": "gemini-1.5-flash"

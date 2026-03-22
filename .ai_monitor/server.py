@@ -3520,8 +3520,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
                     cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title [Claude Code] && echo Launching Claude Code... && claude{yolo_flag}"'
                 elif agent == 'gemini':
-                    yolo_flag = " --yolo" if is_yolo else ""
-                    cmd = f'start "Gemini CLI" cmd.exe /k "cd /d "{_safe_dir}" && title [Gemini CLI] && echo Launching Gemini CLI... && gemini{yolo_flag}"'
+                    gemini_mode = "yolo" if is_yolo else "normal"
+                    gemini_bat = str(PROJECT_ROOT / 'run_gemini.bat')
+                    cmd = f'start "Gemini CLI" cmd.exe /k ""{gemini_bat}" {gemini_mode} --cwd "{_safe_dir}""'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
                     model_name = _codex_main_model()

@@ -8,6 +8,8 @@ DESCRIPTION: 통합 에이전트 런처.
 
 REVISION HISTORY:
 - 2026-03-07 Claude Sonnet 4.6: 최초 생성 — Phase 5 Task 11
+- 2026-03-22 Codex: Gemini 런처 경로 추가
+  - 프로젝트 내부 Gemini 직접 실행을 공통 래퍼(run_gemini_clean.py)로 통일
 """
 
 import argparse
@@ -20,6 +22,7 @@ from pathlib import Path
 # 프로젝트 루트 = 이 파일 부모의 부모
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / ".ai_monitor" / "config.json"
+LAUNCHER_PYTHON = sys.executable or "python"
 
 # 에이전트별 실행 명령 정의
 # Why: 각 에이전트마다 YOLO(자율) 모드 플래그가 다르므로 매핑 테이블로 관리합니다.
@@ -27,6 +30,10 @@ AGENT_CMDS: dict[str, dict[str, list[str]]] = {
     "claude": {
         "normal": ["claude"],
         "yolo": ["claude", "--dangerously-skip-permissions"],
+    },
+    "gemini": {
+        "normal": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_gemini_clean.py")],
+        "yolo": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_gemini_clean.py"), "--yolo"],
     },
     "codex": {
         "normal": ["codex"],
@@ -98,7 +105,7 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     """지정된 에이전트를 해당 모드로 실행.
 
     Args:
-        agent: 'claude' | 'codex' | 'vibe'
+        agent: 'claude' | 'gemini' | 'codex' | 'vibe'
         mode:  'normal' | 'yolo'
         extra_args: 명령줄에서 추가로 전달된 인자
     """
@@ -150,6 +157,10 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
         os.system("mode con cols=220")
         os.environ["COLUMNS"] = "220"
 
+    if agent == "gemini":
+        completed = subprocess.run(cmd, check=False)
+        raise SystemExit(completed.returncode)
+
     # 에이전트 프로세스 실행 (현재 터미널에서 대화형)
     os.execvp(cmd[0], cmd)  # execvp: 현재 프로세스를 대체하여 실행
 
@@ -162,6 +173,7 @@ def main():
 예시:
   python agent_launcher.py claude normal
   python agent_launcher.py claude yolo
+  python agent_launcher.py gemini normal
   python agent_launcher.py codex yolo
   python agent_launcher.py vibe normal
   python agent_launcher.py --set-mode yolo   # 모드만 저장
@@ -172,7 +184,7 @@ def main():
         "agent",
         nargs="?",
         choices=list(AGENT_CMDS.keys()),
-        help="실행할 에이전트 (claude | codex | vibe)",
+        help="실행할 에이전트 (claude | gemini | codex | vibe)",
     )
     parser.add_argument(
         "mode",

@@ -1,21 +1,21 @@
 # HiveMind Status
 
-Updated: `2026-03-22 19:58:34`
+Updated: `2026-03-22 23:40:19`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/docs/help-codex.md, .ai_monitor/server.py, .ai_monitor/vibe-view/dist/index.html, .ai_monitor/vibe-view/src/components/panels/agentpanel.tsx, .ai_monitor/vibe-view/src/components/topmenubar.tsx (+13 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/config.json, .ai_monitor/server.py, .geminiignore, hivemind.md, run_gemini.bat (+5 more). Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- .ai_monitor/docs/help-codex.md
+- .ai_monitor/config.json
 - .ai_monitor/server.py
-- .ai_monitor/vibe-view/dist/index.html
-- .ai_monitor/vibe-view/src/components/panels/agentpanel.tsx
-- .ai_monitor/vibe-view/src/components/topmenubar.tsx
-- agents.md
-- ai_monitor_plan.md
-- codex_guide.md
-- ... and 10 more
+- .geminiignore
+- hivemind.md
+- run_gemini.bat
+- scripts/agent_launcher.py
+- scripts/agent_shell.py
+- scripts/gemini_output_filter.py
+- ... and 2 more
 
 ## Agent Flow
 ```mermaid
@@ -23,12 +23,12 @@ graph LR
     claude["claude"]
     gemini["gemini"]
     claude -->|12 msgs| gemini
-    claude -->|8 msgs| claude
     dispatcher["dispatcher"]
+    claude -->|9 msgs| dispatcher
+    dispatcher -->|9 msgs| gemini
+    claude -->|8 msgs| claude
     all["all"]
     dispatcher -->|8 msgs| all
-    claude -->|6 msgs| dispatcher
-    dispatcher -->|6 msgs| gemini
     codex["codex"]
     codex -->|5 msgs| claude
     claude -->|4 msgs| codex

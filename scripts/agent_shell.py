@@ -5,6 +5,8 @@ DESCRIPTION: 터미널 전용 자율 에이전트 인터랙티브 쉘.
 
 REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+- 2026-03-22 Codex: Gemini stderr 노이즈 필터 추가
+  - MCP/훅/텔레메트리 상태 로그가 사용자 출력에 섞이지 않도록 정리
 """
 """
 # ------------------------------------------------------------------------
@@ -53,6 +55,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib import request as _urllib_req
 from urllib.error import URLError
+
+from gemini_output_filter import GeminiCliNoiseFilter
 
 # ANSI/OSC 이스케이프 시퀀스 필터 — cli_agent.py와 동일한 패턴
 # live 파일에 ANSI 코드가 저장되면 대시보드 파싱 노이즈가 생기므로 제거
@@ -277,6 +281,7 @@ def run_agent(task, cli='auto', terminal_id='T?'):
         cmd = subprocess.list2cmdline(cmd)
 
     rc = 1
+    gemini_filter = GeminiCliNoiseFilter() if chosen == 'gemini' else None
     try:
         proc = subprocess.Popen(
             cmd,
@@ -295,6 +300,10 @@ def run_agent(task, cli='auto', terminal_id='T?'):
             if raw:
                 # ANSI/OSC 이스케이프 제거 후 live 파일 기록 (대시보드 파싱 노이즈 방지)
                 line = _ANSI_ESCAPE.sub('', raw.decode('utf-8', errors='replace')).rstrip()
+                if gemini_filter is not None:
+                    line = gemini_filter.filter_line(line)
+                    if line is None:
+                        continue
                 print(line)
                 _write_live({'type': 'output', 'line': line,
                              'cli': chosen, 'terminal_id': terminal_id,

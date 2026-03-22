@@ -250,6 +250,13 @@ const EMPTY_CODEX_SETUP: CodexSetupState = {
   lastPath: '',
 };
 
+// Claude/Gemini 설정도 동일 구조 재사용
+const EMPTY_AGENT_SETUP: CodexSetupState = {
+  enabled: true,
+  bootPrompt: '',
+  lastPath: '',
+};
+
 const EMPTY_TOOL_STATUS: ToolStatusInfo = {
   installed: false,
   path: '',
@@ -281,6 +288,24 @@ function readCodexSetup(config: unknown): CodexSetupState {
     bootPrompt,
     lastPath,
   };
+}
+
+// Claude 런타임 설정 리더 — config.json에서 claude_enabled, claude_boot_prompt 로드
+function readClaudeSetup(config: unknown): CodexSetupState {
+  const source = (config && typeof config === 'object') ? config as Record<string, unknown> : {};
+  const enabled = typeof source.claude_enabled === 'boolean' ? source.claude_enabled : true;
+  const bootPrompt = typeof source.claude_boot_prompt === 'string' ? source.claude_boot_prompt : '';
+  const lastPath = typeof source.last_path === 'string' ? source.last_path : '';
+  return { enabled, bootPrompt, lastPath };
+}
+
+// Gemini 런타임 설정 리더 — config.json에서 gemini_enabled, gemini_boot_prompt 로드
+function readGeminiSetup(config: unknown): CodexSetupState {
+  const source = (config && typeof config === 'object') ? config as Record<string, unknown> : {};
+  const enabled = typeof source.gemini_enabled === 'boolean' ? source.gemini_enabled : true;
+  const bootPrompt = typeof source.gemini_boot_prompt === 'string' ? source.gemini_boot_prompt : '';
+  const lastPath = typeof source.last_path === 'string' ? source.last_path : '';
+  return { enabled, bootPrompt, lastPath };
 }
 
 function stripPreviewPath(rawPath: string): string {
@@ -789,6 +814,26 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
   const [codexSetupNotice, setCodexSetupNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [codexToolStatus, setCodexToolStatus] = useState<ToolStatusInfo>(EMPTY_TOOL_STATUS);
   const [codexToolLoading, setCodexToolLoading] = useState(false);
+
+  // ── Claude 런타임 설정 상태 ─────────────────────────────────────────────────
+  const [claudeSetup, setClaudeSetup] = useState<CodexSetupState>(EMPTY_AGENT_SETUP);
+  const [savedClaudeSetup, setSavedClaudeSetup] = useState<CodexSetupState>(EMPTY_AGENT_SETUP);
+  const [claudeSetupOpen, setClaudeSetupOpen] = useState(false);
+  const [claudeSetupLoading, setClaudeSetupLoading] = useState(true);
+  const [claudeSetupSaving, setClaudeSetupSaving] = useState(false);
+  const [claudeSetupNotice, setClaudeSetupNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [claudeToolStatus, setClaudeToolStatus] = useState<ToolStatusInfo>(EMPTY_TOOL_STATUS);
+  const [claudeToolLoading, setClaudeToolLoading] = useState(false);
+
+  // ── Gemini 런타임 설정 상태 ─────────────────────────────────────────────────
+  const [geminiSetup, setGeminiSetup] = useState<CodexSetupState>(EMPTY_AGENT_SETUP);
+  const [savedGeminiSetup, setSavedGeminiSetup] = useState<CodexSetupState>(EMPTY_AGENT_SETUP);
+  const [geminiSetupOpen, setGeminiSetupOpen] = useState(false);
+  const [geminiSetupLoading, setGeminiSetupLoading] = useState(true);
+  const [geminiSetupSaving, setGeminiSetupSaving] = useState(false);
+  const [geminiSetupNotice, setGeminiSetupNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [geminiToolStatus, setGeminiToolStatus] = useState<ToolStatusInfo>(EMPTY_TOOL_STATUS);
+  const [geminiToolLoading, setGeminiToolLoading] = useState(false);
   const [codexPolicy, setCodexPolicy] = useState<CodexModelPolicy>(EMPTY_CODEX_MODEL_POLICY);
   const [savedCodexPolicy, setSavedCodexPolicy] = useState<CodexModelPolicy>(EMPTY_CODEX_MODEL_POLICY);
   const [codexPolicyOpen, setCodexPolicyOpen] = useState(false);
@@ -840,6 +885,12 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
   });
   // 실행할 터미널 선택 (카드 클릭으로 변경, 기본: T1)
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>('T1');
+  const claudeSetupDirty =
+    claudeSetup.enabled !== savedClaudeSetup.enabled ||
+    claudeSetup.bootPrompt !== savedClaudeSetup.bootPrompt;
+  const geminiSetupDirty =
+    geminiSetup.enabled !== savedGeminiSetup.enabled ||
+    geminiSetup.bootPrompt !== savedGeminiSetup.bootPrompt;
   const codexSetupDirty =
     codexSetup.enabled !== savedCodexSetup.enabled ||
     codexSetup.bootPrompt !== savedCodexSetup.bootPrompt;
@@ -985,6 +1036,187 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
     }
   }, []);
 
+  // ─── Claude 런타임 설정 API ──────────────────────────────────────────────
+  const loadClaudeSetup = useCallback(async () => {
+    setClaudeSetupLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/config`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const nextSetup = readClaudeSetup(data);
+      setClaudeSetup(nextSetup);
+      setSavedClaudeSetup(nextSetup);
+    } catch {
+      setClaudeSetupNotice({ type: 'error', text: 'Claude 런타임 설정을 불러오지 못했습니다.' });
+    } finally {
+      setClaudeSetupLoading(false);
+    }
+  }, []);
+
+  const loadClaudeToolStatus = useCallback(async () => {
+    setClaudeToolLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/tool-status?name=claude`);
+      if (!res.ok) return;
+      const data: ToolStatusInfo = await res.json();
+      setClaudeToolStatus(data);
+    } catch {
+      setClaudeSetupNotice({ type: 'error', text: 'Claude CLI 상태 확인 실패.' });
+    } finally {
+      setClaudeToolLoading(false);
+    }
+  }, []);
+
+  const saveClaudeSetup = useCallback(async () => {
+    setClaudeSetupSaving(true);
+    setClaudeSetupNotice(null);
+    const normalized = {
+      enabled: claudeSetup.enabled,
+      bootPrompt: claudeSetup.bootPrompt.trim(),
+      lastPath: claudeSetup.lastPath,
+    };
+    try {
+      const res = await fetch(`${API_BASE}/api/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claude_enabled: normalized.enabled,
+          claude_boot_prompt: normalized.bootPrompt,
+        }),
+      });
+      if (!res.ok) throw new Error('save_failed');
+      setClaudeSetup(normalized);
+      setSavedClaudeSetup(normalized);
+      setClaudeSetupNotice({ type: 'success', text: 'Claude 런타임 설정을 저장했습니다.' });
+    } catch {
+      setClaudeSetupNotice({ type: 'error', text: 'Claude 런타임 설정 저장 실패.' });
+    } finally {
+      setClaudeSetupSaving(false);
+    }
+  }, [claudeSetup]);
+
+  const installClaudeCli = useCallback(async () => {
+    setClaudeToolLoading(true);
+    setClaudeSetupNotice(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/install-claude-code`);
+      const data = await res.json();
+      if (!res.ok || data.status !== 'success') throw new Error(data.message || 'install_failed');
+      setClaudeSetupNotice({ type: 'success', text: 'Claude Code 설치가 새 창에서 시작됩니다.' });
+    } catch {
+      setClaudeSetupNotice({ type: 'error', text: 'Claude Code 설치를 시작하지 못했습니다.' });
+    } finally {
+      setClaudeToolLoading(false);
+    }
+  }, []);
+
+  const openClaudeTerminal = useCallback(async (yolo: boolean) => {
+    setClaudeSetupNotice(null);
+    const targetPath = claudeSetup.lastPath?.trim() || 'C:\\';
+    try {
+      const res = await fetch(`${API_BASE}/api/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'claude', path: targetPath, yolo }),
+      });
+      if (!res.ok) throw new Error('launch_failed');
+      setClaudeSetupNotice({ type: 'success', text: yolo ? 'Claude YOLO 터미널이 열렸습니다.' : 'Claude 터미널이 열렸습니다.' });
+    } catch {
+      setClaudeSetupNotice({ type: 'error', text: 'Claude 터미널을 열 수 없습니다.' });
+    }
+  }, [claudeSetup.lastPath]);
+
+  // ─── Gemini 런타임 설정 API ──────────────────────────────────────────────
+  const loadGeminiSetup = useCallback(async () => {
+    setGeminiSetupLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/config`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const nextSetup = readGeminiSetup(data);
+      setGeminiSetup(nextSetup);
+      setSavedGeminiSetup(nextSetup);
+    } catch {
+      setGeminiSetupNotice({ type: 'error', text: 'Gemini 런타임 설정을 불러오지 못했습니다.' });
+    } finally {
+      setGeminiSetupLoading(false);
+    }
+  }, []);
+
+  const loadGeminiToolStatus = useCallback(async () => {
+    setGeminiToolLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/tool-status?name=gemini`);
+      if (!res.ok) return;
+      const data: ToolStatusInfo = await res.json();
+      setGeminiToolStatus(data);
+    } catch {
+      setGeminiSetupNotice({ type: 'error', text: 'Gemini CLI 상태 확인 실패.' });
+    } finally {
+      setGeminiToolLoading(false);
+    }
+  }, []);
+
+  const saveGeminiSetup = useCallback(async () => {
+    setGeminiSetupSaving(true);
+    setGeminiSetupNotice(null);
+    const normalized = {
+      enabled: geminiSetup.enabled,
+      bootPrompt: geminiSetup.bootPrompt.trim(),
+      lastPath: geminiSetup.lastPath,
+    };
+    try {
+      const res = await fetch(`${API_BASE}/api/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gemini_enabled: normalized.enabled,
+          gemini_boot_prompt: normalized.bootPrompt,
+        }),
+      });
+      if (!res.ok) throw new Error('save_failed');
+      setGeminiSetup(normalized);
+      setSavedGeminiSetup(normalized);
+      setGeminiSetupNotice({ type: 'success', text: 'Gemini 런타임 설정을 저장했습니다.' });
+    } catch {
+      setGeminiSetupNotice({ type: 'error', text: 'Gemini 런타임 설정 저장 실패.' });
+    } finally {
+      setGeminiSetupSaving(false);
+    }
+  }, [geminiSetup]);
+
+  const installGeminiCli = useCallback(async () => {
+    setGeminiToolLoading(true);
+    setGeminiSetupNotice(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/install-gemini-cli`);
+      const data = await res.json();
+      if (!res.ok || data.status !== 'success') throw new Error(data.message || 'install_failed');
+      setGeminiSetupNotice({ type: 'success', text: 'Gemini CLI 설치가 새 창에서 시작됩니다.' });
+    } catch {
+      setGeminiSetupNotice({ type: 'error', text: 'Gemini CLI 설치를 시작하지 못했습니다.' });
+    } finally {
+      setGeminiToolLoading(false);
+    }
+  }, []);
+
+  const openGeminiTerminal = useCallback(async (yolo: boolean) => {
+    setGeminiSetupNotice(null);
+    const targetPath = geminiSetup.lastPath?.trim() || 'C:\\';
+    try {
+      const res = await fetch(`${API_BASE}/api/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'gemini', path: targetPath, yolo }),
+      });
+      if (!res.ok) throw new Error('launch_failed');
+      setGeminiSetupNotice({ type: 'success', text: yolo ? 'Gemini YOLO 터미널이 열렸습니다.' : 'Gemini 터미널이 열렸습니다.' });
+    } catch {
+      setGeminiSetupNotice({ type: 'error', text: 'Gemini 터미널을 열 수 없습니다.' });
+    }
+  }, [geminiSetup.lastPath]);
+
+  // ─── Codex 런타임 설정 API ──────────────────────────────────────────────
   const loadCodexSetup = useCallback(async () => {
     setCodexSetupLoading(true);
     try {
@@ -1329,6 +1561,10 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
     loadStatus();
     loadHistory();
     loadTerminals();
+    loadClaudeSetup();
+    loadClaudeToolStatus();
+    loadGeminiSetup();
+    loadGeminiToolStatus();
     loadCodexSetup();
     loadCodexToolStatus();
     loadCodexPolicy();
@@ -1356,7 +1592,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       sseRef.current = null;
       es?.close();
     };
-  }, [loadStatus, loadHistory, loadTerminals, loadCodexSetup, loadCodexToolStatus, loadCodexPolicy, connectSSE]);
+  }, [loadStatus, loadHistory, loadTerminals, loadClaudeSetup, loadClaudeToolStatus, loadGeminiSetup, loadGeminiToolStatus, loadCodexSetup, loadCodexToolStatus, loadCodexPolicy, connectSSE]);
 
   // ─── 양방향 상태 동기화: 3초마다 서버 폴링 ─────────────────────────────────
   // 케이스 A: UI=running, 서버!=running → done 이벤트 유실 복구 (running 고착 해소)
@@ -1614,6 +1850,309 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
         </div>
       </div>
 
+      {/* ── Claude 런타임 설정 패널 ─────────────────────────────────────────── */}
+      <div className="shrink-0 rounded border border-white/5 bg-black/10 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setClaudeSetupOpen(open => !open)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition"
+        >
+          <Terminal className="w-3.5 h-3.5 text-purple-300" />
+          <span className="text-[11px] font-semibold text-white/80">Claude 런타임 설정</span>
+          <span className={`text-[10px] font-mono ${claudeToolStatus.installed ? 'text-emerald-300/80' : 'text-red-300/80'}`}>
+            {claudeToolStatus.installed ? '설치됨' : '미설치'}
+          </span>
+          <div className="flex-1" />
+          {(claudeSetupLoading || claudeToolLoading) && <RefreshCw className="w-3 h-3 text-white/30 animate-spin" />}
+          {claudeSetupOpen ? (
+            <ChevronUp className="w-3.5 h-3.5 text-white/40" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-white/40" />
+          )}
+        </button>
+
+        {claudeSetupOpen && (
+          <div className="border-t border-white/5 px-3 py-3 bg-black/20 flex flex-col gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">CLI 상태</div>
+                <div className={claudeToolStatus.installed ? 'text-emerald-300' : 'text-red-300'}>
+                  {claudeToolStatus.installed ? '설치됨' : '미설치'}
+                </div>
+                <div className="mt-1 text-white/45 break-all">{claudeToolStatus.path || '-'}</div>
+                <div className="mt-1 text-white/30 break-all">{claudeToolStatus.version || '버전 정보 없음'}</div>
+              </div>
+
+              <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">프로젝트 경로</div>
+                <div className="text-white/70 break-all">{claudeSetup.lastPath || '선택 안 됨'}</div>
+                <div className="mt-2 text-white/35">
+                  자동 디스패치: {savedClaudeSetup.enabled ? '활성' : '비활성'}
+                </div>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-[11px] text-white/75">
+              <input
+                type="checkbox"
+                checked={claudeSetup.enabled}
+                onChange={(e) => {
+                  setClaudeSetupNotice(null);
+                  setClaudeSetup(prev => ({ ...prev, enabled: e.target.checked }));
+                }}
+                disabled={claudeSetupSaving}
+                className="rounded border-white/20 bg-black/40"
+              />
+              이 PC에서 자동 디스패치에 Claude 포함
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">로컬 운영 지침</span>
+              <textarea
+                value={claudeSetup.bootPrompt}
+                onChange={(e) => {
+                  setClaudeSetupNotice(null);
+                  setClaudeSetup(prev => ({ ...prev, bootPrompt: e.target.value }));
+                }}
+                rows={4}
+                disabled={claudeSetupSaving}
+                placeholder="Claude에게 줄 로컬 지침을 입력하세요. 예: RULES.md 먼저 읽기, 한글 주석 필수"
+                className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-purple-400/50 resize-y"
+              />
+            </label>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={saveClaudeSetup}
+                disabled={claudeSetupSaving || claudeSetupLoading || !claudeSetupDirty}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {claudeSetupSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                저장
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setClaudeSetupNotice(null);
+                  setClaudeSetup(savedClaudeSetup);
+                }}
+                disabled={claudeSetupSaving || !claudeSetupDirty}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                되돌리기
+              </button>
+
+              <button
+                type="button"
+                onClick={loadClaudeSetup}
+                disabled={claudeSetupSaving || claudeSetupLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                설정 새로고침
+              </button>
+
+              <button
+                type="button"
+                onClick={loadClaudeToolStatus}
+                disabled={claudeToolLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                CLI 확인
+              </button>
+
+              <button
+                type="button"
+                onClick={installClaudeCli}
+                disabled={claudeToolLoading}
+                className="px-2.5 py-1.5 rounded border border-purple-400/30 text-[10px] text-purple-200 hover:bg-purple-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                CLI 설치
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openClaudeTerminal(false)}
+                disabled={!claudeSetup.lastPath}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/65 hover:text-white/85 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Claude 열기
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openClaudeTerminal(true)}
+                disabled={!claudeSetup.lastPath}
+                className="px-2.5 py-1.5 rounded border border-amber-400/30 text-[10px] text-amber-200 hover:bg-amber-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                YOLO 열기
+              </button>
+
+              {claudeSetupNotice && (
+                <span className={`text-[10px] ${
+                  claudeSetupNotice.type === 'success' ? 'text-emerald-300' : 'text-red-300'
+                }`}>
+                  {claudeSetupNotice.text}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Gemini 런타임 설정 패널 ─────────────────────────────────────────── */}
+      <div className="shrink-0 rounded border border-white/5 bg-black/10 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setGeminiSetupOpen(open => !open)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition"
+        >
+          <Terminal className="w-3.5 h-3.5 text-blue-300" />
+          <span className="text-[11px] font-semibold text-white/80">Gemini 런타임 설정</span>
+          <span className={`text-[10px] font-mono ${geminiToolStatus.installed ? 'text-emerald-300/80' : 'text-red-300/80'}`}>
+            {geminiToolStatus.installed ? '설치됨' : '미설치'}
+          </span>
+          <div className="flex-1" />
+          {(geminiSetupLoading || geminiToolLoading) && <RefreshCw className="w-3 h-3 text-white/30 animate-spin" />}
+          {geminiSetupOpen ? (
+            <ChevronUp className="w-3.5 h-3.5 text-white/40" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-white/40" />
+          )}
+        </button>
+
+        {geminiSetupOpen && (
+          <div className="border-t border-white/5 px-3 py-3 bg-black/20 flex flex-col gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">CLI 상태</div>
+                <div className={geminiToolStatus.installed ? 'text-emerald-300' : 'text-red-300'}>
+                  {geminiToolStatus.installed ? '설치됨' : '미설치'}
+                </div>
+                <div className="mt-1 text-white/45 break-all">{geminiToolStatus.path || '-'}</div>
+                <div className="mt-1 text-white/30 break-all">{geminiToolStatus.version || '버전 정보 없음'}</div>
+              </div>
+
+              <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">프로젝트 경로</div>
+                <div className="text-white/70 break-all">{geminiSetup.lastPath || '선택 안 됨'}</div>
+                <div className="mt-2 text-white/35">
+                  자동 디스패치: {savedGeminiSetup.enabled ? '활성' : '비활성'}
+                </div>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-[11px] text-white/75">
+              <input
+                type="checkbox"
+                checked={geminiSetup.enabled}
+                onChange={(e) => {
+                  setGeminiSetupNotice(null);
+                  setGeminiSetup(prev => ({ ...prev, enabled: e.target.checked }));
+                }}
+                disabled={geminiSetupSaving}
+                className="rounded border-white/20 bg-black/40"
+              />
+              이 PC에서 자동 디스패치에 Gemini 포함
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">로컬 운영 지침</span>
+              <textarea
+                value={geminiSetup.bootPrompt}
+                onChange={(e) => {
+                  setGeminiSetupNotice(null);
+                  setGeminiSetup(prev => ({ ...prev, bootPrompt: e.target.value }));
+                }}
+                rows={4}
+                disabled={geminiSetupSaving}
+                placeholder="Gemini에게 줄 로컬 지침을 입력하세요. 예: RULES.md 먼저 읽기, 한글 주석 필수"
+                className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-blue-400/50 resize-y"
+              />
+            </label>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={saveGeminiSetup}
+                disabled={geminiSetupSaving || geminiSetupLoading || !geminiSetupDirty}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {geminiSetupSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                저장
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setGeminiSetupNotice(null);
+                  setGeminiSetup(savedGeminiSetup);
+                }}
+                disabled={geminiSetupSaving || !geminiSetupDirty}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                되돌리기
+              </button>
+
+              <button
+                type="button"
+                onClick={loadGeminiSetup}
+                disabled={geminiSetupSaving || geminiSetupLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                설정 새로고침
+              </button>
+
+              <button
+                type="button"
+                onClick={loadGeminiToolStatus}
+                disabled={geminiToolLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                CLI 확인
+              </button>
+
+              <button
+                type="button"
+                onClick={installGeminiCli}
+                disabled={geminiToolLoading}
+                className="px-2.5 py-1.5 rounded border border-blue-400/30 text-[10px] text-blue-200 hover:bg-blue-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                CLI 설치
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openGeminiTerminal(false)}
+                disabled={!geminiSetup.lastPath}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/65 hover:text-white/85 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Gemini 열기
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openGeminiTerminal(true)}
+                disabled={!geminiSetup.lastPath}
+                className="px-2.5 py-1.5 rounded border border-amber-400/30 text-[10px] text-amber-200 hover:bg-amber-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                YOLO 열기
+              </button>
+
+              {geminiSetupNotice && (
+                <span className={`text-[10px] ${
+                  geminiSetupNotice.type === 'success' ? 'text-emerald-300' : 'text-red-300'
+                }`}>
+                  {geminiSetupNotice.text}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Codex 런타임 설정 패널 ──────────────────────────────────────────── */}
       <div className="shrink-0 rounded border border-white/5 bg-black/10 overflow-hidden">
         <button
           type="button"
@@ -1621,9 +2160,9 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
           className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition"
         >
           <Terminal className="w-3.5 h-3.5 text-sky-300" />
-          <span className="text-[11px] font-semibold text-white/80">Codex Runtime Setup</span>
+          <span className="text-[11px] font-semibold text-white/80">Codex 런타임 설정</span>
           <span className={`text-[10px] font-mono ${codexToolStatus.installed ? 'text-emerald-300/80' : 'text-red-300/80'}`}>
-            {codexToolStatus.installed ? 'installed' : 'not-installed'}
+            {codexToolStatus.installed ? '설치됨' : '미설치'}
           </span>
           <div className="flex-1" />
           {(codexSetupLoading || codexToolLoading) && <RefreshCw className="w-3 h-3 text-white/30 animate-spin" />}
@@ -1638,19 +2177,19 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
           <div className="border-t border-white/5 px-3 py-3 bg-black/20 flex flex-col gap-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
               <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
-                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">CLI Status</div>
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">CLI 상태</div>
                 <div className={codexToolStatus.installed ? 'text-emerald-300' : 'text-red-300'}>
-                  {codexToolStatus.installed ? 'Installed' : 'Not installed'}
+                  {codexToolStatus.installed ? '설치됨' : '미설치'}
                 </div>
                 <div className="mt-1 text-white/45 break-all">{codexToolStatus.path || '-'}</div>
-                <div className="mt-1 text-white/30 break-all">{codexToolStatus.version || 'version unavailable'}</div>
+                <div className="mt-1 text-white/30 break-all">{codexToolStatus.version || '버전 정보 없음'}</div>
               </div>
 
               <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
-                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">Project Path</div>
-                <div className="text-white/70 break-all">{codexSetup.lastPath || 'Not selected'}</div>
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">프로젝트 경로</div>
+                <div className="text-white/70 break-all">{codexSetup.lastPath || '선택 안 됨'}</div>
                 <div className="mt-2 text-white/35">
-                  Auto dispatch: {savedCodexSetup.enabled ? 'enabled' : 'disabled'}
+                  자동 디스패치: {savedCodexSetup.enabled ? '활성' : '비활성'}
                 </div>
               </div>
             </div>
@@ -1666,11 +2205,11 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={codexSetupSaving}
                 className="rounded border-white/20 bg-black/40"
               />
-              Include Codex in automatic dispatch on this PC
+              이 PC에서 자동 디스패치에 Codex 포함
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">Local Operator Prompt</span>
+              <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">로컬 운영 지침</span>
               <textarea
                 value={codexSetup.bootPrompt}
                 onChange={(e) => {
@@ -1679,7 +2218,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 }}
                 rows={4}
                 disabled={codexSetupSaving}
-                placeholder="Add PC-local guidance for Codex. Example: follow local repo conventions, avoid broad refactors, validate Python first."
+                placeholder="Codex에게 줄 로컬 지침을 입력하세요. 예: 로컬 레포 규칙 따르기, 대규모 리팩터 금지, Python 먼저 검증"
                 className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-sky-400/50 resize-y"
               />
             </label>
@@ -1692,7 +2231,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
                 {codexSetupSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                Save
+                저장
               </button>
 
               <button
@@ -1704,7 +2243,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={codexSetupSaving || !codexSetupDirty}
                 className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                Revert
+                되돌리기
               </button>
 
               <button
@@ -1713,7 +2252,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={codexSetupSaving || codexSetupLoading}
                 className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                Reload settings
+                설정 새로고침
               </button>
 
               <button
@@ -1722,7 +2261,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={codexToolLoading}
                 className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                Check CLI
+                CLI 확인
               </button>
 
               <button
@@ -1731,7 +2270,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={codexToolLoading}
                 className="px-2.5 py-1.5 rounded border border-sky-400/30 text-[10px] text-sky-200 hover:bg-sky-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                Install CLI
+                CLI 설치
               </button>
 
               <button
@@ -1740,7 +2279,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={!codexSetup.lastPath}
                 className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/65 hover:text-white/85 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                Open Codex
+                Codex 열기
               </button>
 
               <button
@@ -1749,7 +2288,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                 disabled={!codexSetup.lastPath}
                 className="px-2.5 py-1.5 rounded border border-amber-400/30 text-[10px] text-amber-200 hover:bg-amber-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                Open YOLO
+                YOLO 열기
               </button>
 
               {codexSetupNotice && (
@@ -1771,7 +2310,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
           className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition"
         >
           <ShieldCheck className="w-3.5 h-3.5 text-amber-300" />
-          <span className="text-[11px] font-semibold text-white/80">Codex Model Policy</span>
+          <span className="text-[11px] font-semibold text-white/80">Codex 모델 정책</span>
           <span className="text-[10px] text-white/35 font-mono">
             main={savedCodexPolicy.main || 'default'} / bg={savedCodexPolicy.background || 'default'}
           </span>
@@ -1792,7 +2331,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">Main Lane</span>
+                <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">메인 레인</span>
                 <input
                   type="text"
                   value={codexPolicy.main}
@@ -1801,13 +2340,13 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                     setCodexPolicy(prev => ({ ...prev, main: e.target.value }));
                   }}
                   disabled={codexPolicySaving}
-                  placeholder="Codex default"
+                  placeholder="Codex 기본값"
                   className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-amber-400/50"
                 />
               </label>
 
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">Background Lane</span>
+                <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">백그라운드 레인</span>
                 <input
                   type="text"
                   value={codexPolicy.background}
@@ -1816,7 +2355,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                     setCodexPolicy(prev => ({ ...prev, background: e.target.value }));
                   }}
                   disabled={codexPolicySaving}
-                  placeholder="Codex default"
+                  placeholder="Codex 기본값"
                   className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-amber-400/50"
                 />
               </label>

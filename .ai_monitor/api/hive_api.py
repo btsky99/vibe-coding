@@ -329,6 +329,11 @@ def handle_get(handler, path: str, params: dict,
 
         # 현재 활성 프로젝트 경로 동적 조회 (배포 버전 호환)
         _proj = _current_project_root()
+        gui_ok = any([
+            check_exists(_proj / ".ai_monitor" / "mission_control_ui.py"),
+            check_exists(_proj / ".ai_monitor" / "vibe-view" / "src" / "components" / "panels" / "HivePanel.tsx"),
+            check_exists(_proj / ".ai_monitor" / "vibe-view" / "dist" / "index.html"),
+        ])
         health = {
             **engine_data,
             "constitution": {
@@ -342,7 +347,7 @@ def handle_get(handler, path: str, params: dict,
                 "master":        check_exists(_proj / ".gemini/skills/master/SKILL.md"),
                 "brainstorm":    check_exists(_proj / ".gemini/skills/brainstorming/SKILL.md"),
                 "memory_script": check_exists(SCRIPTS_DIR / "memory.py"),
-                "gui":           check_exists(_proj / ".gemini/skills/pattern-view/SKILL.md")
+                "gui":           gui_ok
             },
             "agents": {
                 "claude_config": check_exists(_proj / ".claude/commands/vibe-orchestrate.md"),

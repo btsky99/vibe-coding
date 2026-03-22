@@ -1,0 +1,8 @@
+.git/
+.worktrees/
+node_modules/
+dist/
+build/
+.ai_monitor/data/
+.pytest_cache/
+.ruff_cache/

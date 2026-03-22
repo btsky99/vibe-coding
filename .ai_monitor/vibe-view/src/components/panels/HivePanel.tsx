@@ -86,12 +86,12 @@ export default function HivePanel() {
 
           {/* 경고 배너 — 경고가 있을 때만 표시 */}
           {orchStatus.warnings && orchStatus.warnings.length > 0 && (
-            <div className="p-2 rounded border border-red-500/40 bg-red-500/5">
-              <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-red-400">
+            <div className="p-2 rounded border border-yellow-500/40 bg-yellow-500/5">
+              <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-yellow-300">
                 <AlertTriangle className="w-3.5 h-3.5" /> 경고 ({orchStatus.warnings.length})
               </div>
               {orchStatus.warnings.map((w, i) => (
-                <div key={i} className="text-[9px] text-red-300 pl-3 py-0.5">⚠ {w}</div>
+                <div key={i} className="text-[9px] text-yellow-200 pl-3 py-0.5">⚠ {w}</div>
               ))}
             </div>
           )}

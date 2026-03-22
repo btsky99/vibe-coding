@@ -5,6 +5,8 @@ DESCRIPTION: 멀티터미널 자율 에이전트 디스패처 (REPL 모드).
 
 REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
+- 2026-03-22 Codex: Gemini stderr 노이즈 필터 추가
+  - 내부 MCP/훅 상태 로그는 숨기고 실제 응답만 표시
 """
 """
 # ------------------------------------------------------------------------
@@ -49,6 +51,8 @@ import time
 from pathlib import Path
 from urllib import request as urllib_request
 from urllib.error import URLError
+
+from gemini_output_filter import GeminiCliNoiseFilter
 
 # ── 경로 설정 ─────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = Path(__file__).parent
@@ -198,12 +202,17 @@ def _run_direct(task: str, cli: str = 'auto') -> None:
         bufsize=0,
         creationflags=creationflags,
     )
+    gemini_filter = GeminiCliNoiseFilter() if cli == 'gemini' else None
 
     # 실시간 출력 스트리밍
     try:
         for raw_line in iter(proc.stdout.readline, b''):
             if raw_line:
                 line_data = raw_line.decode('utf-8', errors='replace').rstrip()
+                if gemini_filter is not None:
+                    line_data = gemini_filter.filter_line(line_data)
+                    if line_data is None:
+                        continue
                 # agent_live.jsonl 형식이면 파싱, 아니면 그대로 출력
                 try:
                     evt = json.loads(line_data)
