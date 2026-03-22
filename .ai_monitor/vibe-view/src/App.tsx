@@ -729,15 +729,18 @@ function App() {
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} onOpenFilePath={handleOpenFilePath} />
-            ) : (
-              /* 파일 탐색기 — FileExplorer 컴포넌트로 분리 */
+            ) : null}
+            {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
+                API 재호출(drives, projects, config, files) 지연을 방지.
+                다른 탭 활성 시 display:none으로 숨김 처리하여 DOM 유지 + 상태 보존 */}
+            <div className={`flex-1 overflow-hidden flex flex-col ${activeTab === 'explorer' ? '' : 'hidden'}`}>
               <FileExplorer
                 currentPath={currentPath}
                 onPathChange={setCurrentPath}
                 onOpenFile={handleOpenFile}
                 refreshKey={fileRefreshKey}
               />
-            )}
+            </div>
 
             {/* 에이전트 간 메시지 작성 — messages 탭은 MessagesPanel 내부 폼 사용, 나머지 탭 공통 */}
             {activeTab !== 'messages' && <MessageComposer />}
