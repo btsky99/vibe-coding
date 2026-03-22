@@ -65,7 +65,8 @@ export default function TerminalCard({
     return `${ts.slice(5, 7)}/${ts.slice(8, 10)}`;
   })();
 
-  // 파이프라인 단계: 서버 pipeline_stage 우선, 없으면 last_line 키워드 fallback
+  // 파이프라인 단계: 서버 pipeline_stage가 정확한 소스 (hive_hook.py가 도구 이벤트 기반으로 전송)
+  // last_line 키워드 fallback은 훅이 없는 외부 CLI(Gemini 등)에서만 동작
   const serverStage = pipeline_stage && pipeline_stage !== 'idle' ? pipeline_stage : null;
   const detectedStage = serverStage ?? (previewLine ? detectStage(previewLine) : null);
 

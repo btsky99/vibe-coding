@@ -661,10 +661,11 @@ def handle_stage_update(handler) -> None:
     """POST /api/agent/stage — 대화형 Claude 세션의 파이프라인 단계 실시간 업데이트.
 
     hive_hook.py의 훅 이벤트마다 호출되어 모니터링 패널에 현재 작업 단계를 표시합니다.
-    - UserPromptSubmit → stage: "analyzing"
-    - PreToolUse (Edit/Write) → stage: "modifying"
-    - PostToolUse → stage: "verifying"
-    - Stop → stage: "done"
+    - UserPromptSubmit → stage: "analyzing" (지시 수신)
+    - PreToolUse (Read/Glob/Grep/Search/Agent) → stage: "analyzing" (파일 분석)
+    - PreToolUse (Edit/Write) → stage: "modifying" (코드 수정)
+    - PreToolUse (Bash) → stage: "verifying" (명령 실행/테스트/빌드)
+    - Stop → stage: "done" (응답 완료)
 
     요청 본문:
         {"terminal_id": "T2", "stage": "analyzing", "task": "사용자 메시지"}

@@ -34,6 +34,8 @@
 #   - 단순 조회/요약 작업은 저비용 모델(`codex_background_model`)로 자동 라우팅
 #   - 복잡 코딩 작업은 메인 모델(`codex_main_model`) 또는 Codex CLI 기본 모델 유지
 #   - 구형 `--yolo` 대신 `codex exec --dangerously-bypass-approvals-and-sandbox` 사용
+# [2026-03-22] Codex: Gemini stderr 노이즈 필터 추가
+#   - Gemini CLI 내부 MCP/훅/텔레메트리 로그가 대시보드/터미널 출력에 섞이지 않도록 정리
 # ------------------------------------------------------------------------
 """
 
@@ -47,6 +49,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
+
+from gemini_output_filter import GeminiCliNoiseFilter
 
 # ANSI/OSC 이스케이프 시퀀스 필터 — Claude CLI가 파이프 환경에서도 출력하는
 # OSC 배경색 쿼리(\x1b]11;rgb:...)와 CSI 색상 코드(\x1b[...m)를 제거합니다.
@@ -558,6 +562,7 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
     """
     global _output_queue
     all_lines = []
+    gemini_filter = GeminiCliNoiseFilter() if cli == 'gemini' else None
 
     def _write_live(event: dict):
         """agent_live.jsonl에 이벤트를 기록합니다 (포트 9000 UI용)."""
@@ -625,22 +630,23 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
                 except ImportError:
                     pass  # osc_parser 없으면 스킵
                 line = _ANSI_ESCAPE.sub('', _raw_text).rstrip()
+                if gemini_filter is not None:
+                    line = gemini_filter.filter_line(line)
+                    if line is None:
+                        continue
                 all_lines.append(line)
-                # 터미널별 마지막 출력 줄 + 파이프라인 단계 업데이트
+                # 터미널별 마지막 출력 줄 업데이트
+                # [2026-03-22] stdout 키워드 기반 파이프라인 단계 감지 제거
+                # 이유: hive_hook.py가 정확한 도구 이벤트(PreToolUse/PostToolUse/Stop)로
+                # POST /api/agent/stage를 호출하여 단계를 업데이트함.
+                # stdout 파싱은 키워드 오탐(running, check, done 등)이 빈번하고
+                # forward-only 제한으로 수정→분석 역행이 불가능하여 부정확했음.
+                # 대화형 세션: hive_hook.py가 단계를 관리 → agent_api._interactive_stages
+                # 외부 실행(Gemini CLI): stdout 파싱 없이 idle/done만 표시
                 if line.strip():
                     with _terminals_lock:
                         if terminal_id in _terminals:
                             _terminals[terminal_id]['last_line'] = line[:120]
-                            # 단계 감지: 단계 순서(analyzing→modifying→verifying→done)는
-                            # 역행하지 않도록 현재 단계보다 높은 경우만 업데이트
-                            detected = _detect_pipeline_stage(line)
-                            if detected:
-                                _STAGE_ORDER = ['idle', 'analyzing', 'modifying', 'verifying', 'done', 'error']
-                                cur = _terminals[terminal_id].get('pipeline_stage', 'idle')
-                                cur_idx = _STAGE_ORDER.index(cur) if cur in _STAGE_ORDER else 0
-                                det_idx = _STAGE_ORDER.index(detected) if detected in _STAGE_ORDER else 0
-                                if det_idx > cur_idx:
-                                    _terminals[terminal_id]['pipeline_stage'] = detected
                 # 큐에 출력 이벤트 Push + 라이브 파일 기록
                 out_event = {
                     'type': 'output',

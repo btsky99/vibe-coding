@@ -812,10 +812,20 @@ def main():
             # [파이프라인 단계] 파일 생성 시작 → "수정" 단계 표시
             _update_pipeline_stage('modifying', f'생성 중: {_short_path(fp)}')
 
+        elif tool_name in ("Read", "Glob", "Grep", "Search", "Agent"):
+            # [파이프라인 단계] 파일 읽기/검색 → "분석" 단계 표시
+            # 수정 후 다시 파일을 읽는 경우에도 정확히 "분석"으로 돌아감
+            fp = tool_input.get("file_path") or tool_input.get("pattern") or tool_input.get("path") or ""
+            _update_pipeline_stage('analyzing', f'분석 중: {_short_path(fp)}' if fp else '분석 중')
+
         elif tool_name == "Bash":
             cmd = tool_input.get("command", "").strip()
             if any(cmd.startswith(p) for p in _SKIP_BASH_PREFIXES):
                 return
+
+            # [파이프라인 단계] 명령 실행 → "검증" 단계 표시
+            # Bash 도구는 테스트/빌드/검증 목적으로 사용되므로 verifying 단계로 전환
+            _update_pipeline_stage('verifying', f'검증 중: {_short_cmd(cmd, 40)}')
 
             # ── Bounded Autonomy: 위험 명령 사전 차단 ────────────────────
             try:
