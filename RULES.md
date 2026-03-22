@@ -16,9 +16,8 @@ REVISION HISTORY:
    - **`memory.md` (필독)**: 프로젝트의 장기 기억 및 기술적 결정 사항입니다.
    - **`python scripts/analyze_hive.py`**: PostgreSQL 18에 기록된 실시간 하이브 상태 및 에이전트 활동 분석 보고서를 확인합니다.
    - **`python scripts/orchestrator.py --summary`**: 하이브의 실시간 상태(태스크 부하 등)를 브리핑받습니다.
-2. **PostgreSQL 18 기반 통합 로깅**: 더 이상 `.jsonl` 파일이나 `SQLite`를 로깅용으로 사용하지 않습니다. 모든 활동은 반드시 `scripts/hive_bridge.py`를 통해 **PostgreSQL 18 (Port 5433)**의 `pg_logs`, `pg_thoughts` 테이블에 기록해야 합니다.
+2. **PostgreSQL 18 기반 통합 로깅**: 더 이상 `.jsonl` 파일이나 `SQLite`를 로깅용으로 사용하지 않습니다. 모든 활동은 반드시 `scripts/hive_bridge.py`를 통해 **PostgreSQL 18 (Port 5433)**의 `pg_logs` 테이블에 기록해야 합니다. (pg_thoughts 테이블은 2026-03-22 삭제됨 — 지식그래프 기능 제거)
 3. **독립된 작업 공간 강제 (Git Worktrees)**: 새로운 기능 구현 시 반드시 `using-git-worktrees`를 사용하여 격리된 환경에서 작업합니다.
-4. **사고 과정 기록 (Thought Stream)**: 에이전트는 자신의 내부 추론 과정을 `hive_bridge.log_thought()`를 통해 `pg_thoughts` 테이블에 JSONB 구조로 기록하여, 다른 에이전트와 사고의 연쇄를 공유해야 합니다.
 
 ## 📝 2. 한글 주석 및 중앙 프로젝트 맵 (Code-as-Doc & Project Map)
 1. **코드 내 상세 주석 (Mandatory)**: 소스 코드를 수정하거나 파일을 생성할 때, **코드 내 주석은 반드시 한글로 아주 상세하게** 작성해야 합니다. 이는 배포 버전 소스 및 각종 빌드 스크립트 전반에 동일하게 적용됩니다.

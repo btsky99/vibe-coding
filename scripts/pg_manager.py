@@ -121,37 +121,7 @@ def init_log_schema():
         metadata JSONB
     );
 
-    -- 2. Thought Trace Table (pg_thoughts)
-    CREATE TABLE IF NOT EXISTS pg_thoughts (
-        id SERIAL PRIMARY KEY,
-        ts TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        agent VARCHAR(50),
-        skill VARCHAR(100),
-        thought JSONB,
-        parent_id INTEGER,
-        project_id VARCHAR(100)
-    );
-
-    -- Migration: Add missing columns if they don't exist
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='parent_id') THEN
-            ALTER TABLE pg_thoughts ADD COLUMN parent_id INTEGER REFERENCES pg_thoughts(id) ON DELETE SET NULL;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='project_id') THEN
-            ALTER TABLE pg_thoughts ADD COLUMN project_id VARCHAR(100);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='ts') THEN
-            -- Renaming if someone named it timestamp
-            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pg_thoughts' AND column_name='timestamp') THEN
-                ALTER TABLE pg_thoughts RENAME COLUMN "timestamp" TO ts;
-            ELSE
-                ALTER TABLE pg_thoughts ADD COLUMN ts TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-            END IF;
-        END IF;
-    END $$;
-
-    CREATE INDEX IF NOT EXISTS idx_thoughts_parent ON pg_thoughts(parent_id);
+    -- [2026-03-22] pg_thoughts 테이블 제거 (지식그래프 삭제)
 
     -- 3. Agent Messaging Table (pg_messages)
     CREATE TABLE IF NOT EXISTS pg_messages (

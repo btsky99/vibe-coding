@@ -155,23 +155,8 @@ def query_rows(sql: str) -> list[dict]:
 
 
 def get_recent_thoughts(limit: int = 8) -> list[str]:
-    rows = query_rows(
-        f"""
-        SELECT agent, skill,
-               COALESCE(thought->>'title', '') AS title,
-               COALESCE(thought->>'content', '') AS content,
-               COALESCE(thought->>'text', '') AS text
-        FROM pg_thoughts
-        ORDER BY ts DESC
-        LIMIT {int(limit)}
-        """
-    )
-    items: list[str] = []
-    for row in rows:
-        text = row.get("title") or row.get("text") or row.get("content") or ""
-        text = " ".join(text.split())[:120]
-        items.append(f"- {row.get('agent', '?')} [{row.get('skill', '?')}]: {text}")
-    return items
+    """[2026-03-22] pg_thoughts 제거됨 — 빈 리스트 반환."""
+    return []
 
 
 def _safe_mermaid_id(label: str) -> str:

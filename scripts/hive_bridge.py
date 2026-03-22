@@ -110,61 +110,7 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success"):
 
 def log_thought(agent_name: str, skill: str, thought_dict: dict,
                 parent_id: int = None) -> int:
-    """AI의 사고 과정을 PostgreSQL에 기록합니다 (JSONB).
-
-    parent_id를 전달하면 지식 그래프에서 이전 thought와 연결선이 생성됩니다.
-    삽입 완료 후 새로 생성된 thought id를 _LAST_THOUGHT_ID[agent_name]에 저장합니다.
-
-    Returns:
-        int: 삽입된 thought의 id, 실패 시 0
-    """
-    data = {
-        "agent": agent_name,
-        "skill": skill,
-        "thought": thought_dict,
-    }
-    if parent_id:
-        data["parent_id"] = int(parent_id)
-
-    # 1. 서버 API 우선 호출 — 응답 body에서 id 파싱
-    try:
-        req = __import__('urllib.request', fromlist=['Request']).Request(
-            f"{SERVER_URL}/api/hive/thought/pg",
-            data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
-            headers={'Content-Type': 'application/json'}
-        )
-        import urllib.request as _ur
-        with _ur.urlopen(req, timeout=2) as res:
-            if res.status == 200:
-                body = json.loads(res.read().decode('utf-8'))
-                new_id = int(body.get('id', 0))
-                if new_id:
-                    _LAST_THOUGHT_ID[agent_name] = new_id
-                return new_id
-    except Exception:
-        pass
-
-    # 2. 서버 미가동 시 psql 직접 호출 폴백 — parameterized query로 인젝션 방지
-    safe_thought = json.dumps(thought_dict, ensure_ascii=False)
-    if parent_id:
-        output = _run_psql(
-            "INSERT INTO pg_thoughts (agent, skill, thought, parent_id) "
-            "VALUES (%s, %s, %s::jsonb, %s) RETURNING id;",
-            (agent_name, skill, safe_thought, int(parent_id))
-        )
-    else:
-        output = _run_psql(
-            "INSERT INTO pg_thoughts (agent, skill, thought) "
-            "VALUES (%s, %s, %s::jsonb) RETURNING id;",
-            (agent_name, skill, safe_thought)
-        )
-    # RETURNING id 파싱 (psql 기본 출력: " id\n----\n 42\n(1 row)")
-    for line in output.splitlines():
-        line = line.strip()
-        if line.isdigit():
-            new_id = int(line)
-            _LAST_THOUGHT_ID[agent_name] = new_id
-            return new_id
+    """[2026-03-22] 지식그래프 제거됨 — 호출부 호환을 위해 no-op 스텁 유지."""
     return 0
 
 def post_message(from_agent, to_agent, content, msg_type="info"):
@@ -179,32 +125,8 @@ def post_message(from_agent, to_agent, content, msg_type="info"):
 
 def reflect_to_pg(agent_name: str, task_summary: str, learned: list, failed: list,
                   files_changed: list, terminal_id: str = None):
-    """작업 완료 후 자기반성(self-reflect) 내용을 pg_thoughts에 기록합니다.
-
-    에이전트가 매 작업 후 무엇을 배웠고 무엇이 실패했는지 구조화하여 저장합니다.
-    다음 유사 작업 시 컨텍스트로 자동 주입됩니다 (UserPromptSubmit 훅 연동).
-
-    Args:
-        agent_name:    기록 주체 에이전트 이름 (예: "claude", "gemini")
-        task_summary:  완료된 작업 요약 (지시 내용 앞 50자)
-        learned:       잘 된 것 / 배운 점 목록 (예: ["pg_logs 쿼리 패턴 확인"])
-        failed:        실패하거나 막혔던 점 목록 (예: ["psql CSV 출력 파싱 오류"])
-        files_changed: 수정된 파일 경로 목록
-        terminal_id:   터미널 ID (없으면 환경변수 TERMINAL_ID 사용)
-    """
-    _tid = terminal_id or os.environ.get('TERMINAL_ID', 'T0')
-    thought_dict = {
-        "type": "reflect",
-        "title": task_summary[:60],   # 지식 그래프 레이블용 title 추가
-        "task": task_summary[:100],
-        "learned": learned,
-        "failed": failed,
-        "files": files_changed,
-        "terminal": _tid
-    }
-    # 동일 에이전트의 직전 thought를 parent로 연결 → 지식 그래프에 연결선 생성
-    _prev_id = _LAST_THOUGHT_ID.get(agent_name)
-    log_thought(agent_name, "self-reflect", thought_dict, parent_id=_prev_id)
+    """[2026-03-22] 지식그래프 제거됨 — 호출부 호환을 위해 no-op 스텁 유지."""
+    pass
 
 def get_active_debate_context():
     """현재 진행 중인(open/debating) 토론이 있다면 그 내용과 메시지들을 가져옵니다."""

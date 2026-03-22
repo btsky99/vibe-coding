@@ -681,46 +681,8 @@ def main():
             if log_task:
                 log_task("Hive", "[하이브 컨텍스트] 자동 주입 완료 — current-work + 오늘 활동", _TERMINAL_ID)
 
-        # [Self-Reflect 주입] 과거 유사 작업 반성 자동 주입
-        # pg_thoughts에서 keyword 매칭 반성 2건을 컨텍스트로 출력합니다.
+        # [2026-03-22] Self-Reflect 주입 제거 (pg_thoughts 삭제됨)
         try:
-            _prompt_for_reflect = (
-                data.get("prompt") or data.get("content") or data.get("message", "")
-            )
-            if _prompt_for_reflect and _prompt_for_reflect.strip():
-                _kw = _prompt_for_reflect.strip()[:50].replace("'", "''")
-                _reflect_sql = (
-                    f"SELECT thought->>'task' AS task, thought->>'learned' AS learned, "
-                    f"thought->>'failed' AS failed "
-                    f"FROM pg_thoughts "
-                    f"WHERE skill = 'self-reflect' "
-                    f"AND thought::text ILIKE '%{_kw[:20]}%' "
-                    f"ORDER BY ts DESC LIMIT 2;"
-                )
-                import subprocess as _sp_r, os as _osr
-                _pg_bin = _osr.path.join(
-                    _osr.path.dirname(_osr.path.abspath(__file__)),
-                    '..', '.ai_monitor', 'bin', 'pgsql', 'bin', 'psql.exe'
-                )
-                if _osr.path.exists(_pg_bin):
-                    _no_win = getattr(_sp_r, 'CREATE_NO_WINDOW', 0x08000000)
-                    _res = _sp_r.run(
-                        [_pg_bin, "-p", str(_osr.environ.get('VIBE_PG_PORT', '5433')), "-U", "postgres", "-d", "postgres",
-                         "--csv", "-c", _reflect_sql],
-                        capture_output=True, text=True, encoding='utf-8', errors='replace',
-                        creationflags=_no_win
-                    )
-                    import csv as _csv_r, io as _io_r
-                    _rows = list(_csv_r.DictReader(_io_r.StringIO(_res.stdout.strip())))
-                    if _rows:
-                        _lines_r = ["[과거 유사 작업 경험]"]
-                        for _row in _rows:
-                            _lines_r.append(f"  작업: {_row.get('task','')}")
-                            _lines_r.append(f"  배운점: {_row.get('learned','')}")
-                            if _row.get('failed'):
-                                _lines_r.append(f"  실패: {_row.get('failed','')}")
-                        print("\n".join(_lines_r), flush=True)
-        except Exception:
             pass
 
         # [ITCP 메시지 폴링] PostgreSQL pg_messages에서 Claude에게 온 미읽음 메시지 수신

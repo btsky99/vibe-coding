@@ -1,6 +1,6 @@
 # ────────────────────────────────────────────────────────────────────────────
 # 📄 파일명: src/pg_store.py
-# 📝 설명: PostgreSQL 저장소 — pg_thoughts, session_logs, skill_chain 등 관리
+# 📝 설명: PostgreSQL 저장소 — session_logs, skill_chain 등 관리
 # 🕒 변경 이력:
 # [2026-03-11] Claude — frozen(EXE) 모드 PG_BIN 경로 수정
 #   - 기존: PROJECT_ROOT / '.ai_monitor' / 'bin' / 'pgsql' (개발 경로 하드코딩)

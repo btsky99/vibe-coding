@@ -39,10 +39,7 @@ def print_report():
     sql_contrib = "SELECT agent, COUNT(*) as count FROM pg_logs WHERE ts > NOW() - INTERVAL '24 hours' GROUP BY agent ORDER BY count DESC;"
     print(run_query(sql_contrib))
 
-    # 2. 최근 주요 사고 과정 (Thought Stream)
-    print("\n[2] 최근 주요 사고 과정 (Thought Stream)")
-    sql_thoughts = "SELECT agent, skill, thought->>'text' as thought_text FROM pg_thoughts ORDER BY ts DESC LIMIT 5;"
-    print(run_query(sql_thoughts))
+    # [2026-03-22] pg_thoughts 제거됨 (지식그래프 삭제)
 
     # 3. 에이전트 간 메시지 통계
     print("\n[3] 에이전트 간 메시지 교환 통계")
@@ -55,8 +52,6 @@ def print_report():
     print(run_query(sql_version))
     
     print("\n" + "="*60)
-    print("💡 팁: 'pg_thoughts'의 JSONB 데이터를 활용하여 사고 연쇄 분석이 가능합니다.")
-    print("="*60)
 
 if __name__ == "__main__":
     if not os.path.exists(PG_BIN):
