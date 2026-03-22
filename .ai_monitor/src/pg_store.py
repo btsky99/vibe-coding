@@ -40,7 +40,24 @@ DATA_DIR = PROJECT_ROOT / '.ai_monitor' / 'data'
 PG_BIN = _PG_DIR / 'bin' / 'psql.exe'
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = 'postgres'
-PG_DB = 'postgres'
+PG_DB = 'postgres'  # 초기값 — set_project_db()로 프로젝트별 DB로 갱신됨
+
+
+def set_project_db(db_name: str):
+    """server.py의 _init_project_db()에서 호출하여 프로젝트별 DB 이름을 설정합니다.
+
+    [2026-03-22] 단일 PG + 프로젝트별 DB 분리 지원.
+    기존 커넥션은 폐기하여 새 DB로 재연결되도록 합니다.
+    """
+    global PG_DB, _pg_conn
+    PG_DB = db_name
+    # 기존 커넥션 폐기 (새 DB로 재연결 유도)
+    if _pg_conn is not None:
+        try:
+            _pg_conn.close()
+        except Exception:
+            pass
+        _pg_conn = None
 
 # ── psycopg2 직접 연결 (psql.exe subprocess 대비 ~50x 빠름) ─────────────────
 # psycopg2-binary가 설치되어 있으면 직접 연결, 없으면 psql.exe subprocess 폴백

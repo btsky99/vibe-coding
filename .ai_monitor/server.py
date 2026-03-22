@@ -165,6 +165,12 @@ PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
 INITDB_BIN = _PG_DIR / "bin" / "initdb.exe"
 PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 
+# ── 프로젝트별 PostgreSQL 데이터베이스 이름 ──
+# [2026-03-22] 프로젝트별 DB 분리: 하나의 PG 인스턴스에서 프로젝트마다 별도 DB를 사용.
+# PROJECT_ID가 확정된 뒤 _init_project_db()에서 실제 DB를 생성하고 PG_PROJECT_DB를 갱신.
+# 초기값은 'postgres' (DB 생성 전 ensure_postgres_running 등에서 사용).
+PG_PROJECT_DB: str = "postgres"
+
 # ── PostgreSQL 커넥션 풀 (최대 5개, 스레드 안전) ──
 # 매 쿼리마다 psycopg2.connect()를 호출하면 ~1ms의 오버헤드가 쿼리당 발생.
 # 풀을 사용하면 이미 열린 연결을 재사용하여 connect 비용을 제거.
@@ -444,12 +450,69 @@ def ensure_postgres_running():
     except Exception as e:
         print(f"[PG] 시작 오류: {e}")
 
-def run_pg_sql(sql: str, params: tuple = None, db: str = "postgres"):
+
+def _init_project_db(project_id: str):
+    """프로젝트별 PostgreSQL 데이터베이스를 생성하고 PG_PROJECT_DB를 갱신합니다.
+
+    [2026-03-22] 하나의 PG 인스턴스에서 프로젝트별 DB 분리 — 포트 충돌 없이 다중 프로젝트 지원.
+    DB 이름 규칙: vibe_{project_id} (소문자, 하이픈→언더스코어, 최대 63자)
+    예: PROJECT_ID="D--vibe-coding" → DB="vibe_d__vibe_coding"
+    """
+    global PG_PROJECT_DB
+    # DB 이름 생성: PostgreSQL 식별자 규칙 (소문자, _ 허용, 63자 제한)
+    safe_id = project_id.lower().replace('-', '_').replace(' ', '_')
+    # 알파벳/숫자/밑줄만 허용
+    safe_id = ''.join(c for c in safe_id if c.isalnum() or c == '_')
+    db_name = f"vibe_{safe_id}"[:63]
+
+    if not db_name or db_name == "vibe_":
+        db_name = "vibe_default"
+
+    # postgres DB에 연결하여 프로젝트 DB 존재 여부 확인 후 생성
+    try:
+        result = run_pg_sql(
+            "SELECT 1 FROM pg_database WHERE datname = %s;",
+            (db_name,), db="postgres"
+        )
+        if not result or not result.strip():
+            # DB가 없으면 생성 (CREATE DATABASE는 parameterized 불가 → 안전한 이름 직접 삽입)
+            run_pg_sql(f'CREATE DATABASE "{db_name}";', db="postgres")
+            print(f"[PG] 프로젝트 DB 생성 완료: {db_name}")
+        else:
+            print(f"[PG] 프로젝트 DB 확인: {db_name} (이미 존재)")
+
+        PG_PROJECT_DB = db_name
+        print(f"[PG] PG_PROJECT_DB = {PG_PROJECT_DB}")
+
+        # pg_store 모듈에도 프로젝트 DB 이름 전파
+        try:
+            from src.pg_store import set_project_db
+            set_project_db(db_name)
+        except Exception as e:
+            print(f"[PG] pg_store.set_project_db 전파 실패 (무시): {e}")
+
+        # 환경변수로도 전파 — mission_control.py, mcp_server.py 등 하위 프로세스용
+        os.environ['VIBE_PG_DB'] = db_name
+
+        # 프로젝트 DB에 확장 설치
+        run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;", db=PG_PROJECT_DB)
+        run_pg_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;", db=PG_PROJECT_DB)
+        run_pg_sql("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;", db=PG_PROJECT_DB)
+
+    except Exception as e:
+        print(f"[PG] 프로젝트 DB 생성 실패 (postgres DB 폴백): {e}")
+        PG_PROJECT_DB = "postgres"
+
+
+def run_pg_sql(sql: str, params: tuple = None, db: str = None):
     """PostgreSQL SQL 실행. psycopg2 우선, 미설치 시 psql.exe subprocess 폴백.
 
     params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
     psycopg2: %s placeholder, psql 폴백: params가 있으면 psycopg2.sql.SQL로 렌더링 후 전달.
+    db=None이면 PG_PROJECT_DB(프로젝트별 DB)를 사용.
     """
+    if db is None:
+        db = PG_PROJECT_DB
     # psycopg2 커넥션 풀 사용 (매번 connect 대신 재사용하여 오버헤드 제거)
     try:
         import psycopg2
@@ -570,11 +633,14 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, 
         pass  # RETURNING id 파싱 실패 — 0 반환
     return 0
 
-def run_pg_sql_csv(sql: str, params: tuple = None, db: str = "postgres") -> list:
+def run_pg_sql_csv(sql: str, params: tuple = None, db: str = None) -> list:
     """Postgres 쿼리 결과를 dict 리스트로 반환. psycopg2 우선, 없으면 psql --csv 폴백.
 
     params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
+    db=None이면 PG_PROJECT_DB(프로젝트별 DB)를 사용.
     """
+    if db is None:
+        db = PG_PROJECT_DB
     # psycopg2 커넥션 풀 사용 (RealDictCursor로 dict 반환)
     try:
         import psycopg2
@@ -1006,8 +1072,13 @@ if not MESSAGES_FILE.exists():
 
 ensure_legacy_store(DATA_DIR)
 
-# Postgres-backed state schema 초기화
-ensure_schema(DATA_DIR)
+# [2026-03-22] Postgres-backed state schema 초기화는 _init_project_db() 이후로 이동.
+# 모듈 로드 시점에서는 프로젝트 DB가 아직 확정되지 않았으므로, __main__ 블록에서 호출.
+# 개발 모드에서는 아래 _try_ensure_schema_dev()에서 처리.
+if not getattr(sys, 'frozen', False):
+    # 개발 모드: PG가 이미 떠있으면 바로 스키마 초기화
+    # (frozen 모드는 __main__에서 _init_project_db 후 호출)
+    ensure_schema(DATA_DIR)
 
 # ── 지식 그래프: 기존 고아 노드 parent_id 소급 연결 (서버 기동 시 1회) ────────
 # hive_bridge.py가 새 프로세스로 호출될 때마다 인메모리 체인이 끊겨
@@ -1920,7 +1991,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 
             # 2. 실시간 LISTEN 루프
             try:
-                pg_conn = psycopg2.connect(host="localhost", port=PG_PORT, user="postgres", database="postgres")
+                pg_conn = psycopg2.connect(host="localhost", port=PG_PORT, user="postgres", database=PG_PROJECT_DB)
                 pg_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
                 cursor = pg_conn.cursor()
                 cursor.execute("LISTEN hive_log_channel;")
@@ -2987,7 +3058,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 rows = query_rows("SELECT COUNT(*) AS count FROM hive_memory;")
                 count = int(rows[0].get('count', 0)) if rows else 0
                 self.wfile.write(json.dumps({
-                    'db_path': f'postgres://localhost:{PG_PORT}/postgres',
+                    'db_path': f'postgres://localhost:{PG_PORT}/{PG_PROJECT_DB}',
                     'is_local': False,
                     'backend': 'postgres',
                     'count': count,
@@ -5115,6 +5186,24 @@ if __name__ == '__main__':
     # installer가 {app}\pgsql\ 에 설치한 바이너리를 사용하여 pgdata 초기화 + 서버 기동.
     if getattr(sys, 'frozen', False):
         ensure_postgres_running()
+
+    # ── 프로젝트별 DB 초기화 (PG 시작 후) ────────────────────────────────────
+    # [2026-03-22] 단일 PG 인스턴스 + 프로젝트별 DB 분리
+    # ensure_postgres_running()이 PG를 기동한 뒤, PROJECT_ID 기반 DB를 생성.
+    # 개발 모드에서도 기존 PG가 떠 있으면 프로젝트 DB를 사용.
+    _init_project_db(PROJECT_ID)
+
+    # ── 프로젝트 DB 스키마 초기화 (프로젝트 DB 생성 후) ─────────────────────
+    # [2026-03-22] frozen 모드: _init_project_db()가 PG_PROJECT_DB를 설정한 뒤
+    # pg_store.ensure_schema()를 호출하여 프로젝트 DB에 테이블 생성.
+    # _SCHEMA_READY를 리셋하여 프로젝트 DB에 새로 스키마를 적용.
+    # frozen/개발 모두: 프로젝트 DB에 스키마 생성
+    try:
+        import src.pg_store as _pg_mod
+        _pg_mod._SCHEMA_READY = False  # 프로젝트 DB용 스키마 재실행 허용
+        _pg_mod.ensure_schema(DATA_DIR)
+    except Exception as e:
+        print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
 
     # ── 개발 모드 PID 파일 기록 ─────────────────────────────────────────────
     # run_vibe.bat이 더블클릭 중복 실행 방지를 위해 이 PID 파일을 확인함.

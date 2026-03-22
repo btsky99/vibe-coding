@@ -395,8 +395,11 @@ def handle_tool_call(name: str, args: dict) -> str:
             pg_bin = AI_MONITOR_DIR / "bin" / "pgsql" / "bin" / "psql.exe"
             if not pg_bin.exists():
                 pg_bin = Path("psql")
+            # [2026-03-22] 프로젝트별 DB 지원
+            _pg_port = os.environ.get('VIBE_PG_PORT', '5433')
+            _pg_db = os.environ.get('VIBE_PG_DB', 'postgres')
             result = subprocess.run(
-                [str(pg_bin), "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", sql],
+                [str(pg_bin), "-p", _pg_port, "-U", "postgres", "-d", _pg_db, "-c", sql],
                 capture_output=True, text=True, timeout=10,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )

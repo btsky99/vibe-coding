@@ -107,7 +107,10 @@ class PgListenerThread(QThread):
 
     def run(self):
         try:
-            conn = psycopg2.connect(host="localhost", port=5433, user="postgres", database="postgres")
+            # [2026-03-22] 프로젝트별 DB 지원: PG_PROJECT_DB 환경변수 또는 기본 postgres
+            _pg_db = os.environ.get('VIBE_PG_DB', 'postgres')
+            _pg_port = int(os.environ.get('VIBE_PG_PORT', '5433'))
+            conn = psycopg2.connect(host="localhost", port=_pg_port, user="postgres", database=_pg_db)
             conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             cursor = conn.cursor()
             cursor.execute("LISTEN hive_log_channel;")
