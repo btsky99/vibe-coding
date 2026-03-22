@@ -11,7 +11,7 @@
  *   - 대시보드 "최근 디스패치" 패널이 비어있던 근본 원인 해결
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '../../constants';
 import {
   Send, Target, Shield, Zap, CheckCircle,
@@ -131,7 +131,10 @@ export default function DispatcherPanel() {
   const [targetAgent, setTargetAgent] = useState('auto');
   const [priority, setPriority] = useState('medium');
 
-  const mergeHistory = useCallback((current: DispatchResult[], incoming: DispatchResult[]) => {
+  // [성능 수정 2026-03-22] useRef로 함수 참조 안정화 — useEffect 의존성 순환 제거.
+  // 이전 코드: fetchStatus/fetchHistory가 useCallback 의존성에 포함 → 매 렌더링마다
+  // useEffect 재실행 → 상태 업데이트 → 무한 순환으로 카드 중복 렌더링 발생.
+  const mergeHistoryRef = useRef((current: DispatchResult[], incoming: DispatchResult[]) => {
     const merged = new Map(current.map(item => [item.task_id, item]));
     incoming.forEach(item => {
       const prev = merged.get(item.task_id);
@@ -140,7 +143,7 @@ export default function DispatcherPanel() {
     return Array.from(merged.values())
       .sort((a, b) => (b.dispatched_at || '').localeCompare(a.dispatched_at || ''))
       .slice(0, 30);
-  }, []);
+  });
 
   // ── 데이터 로드 ──────────────────────────────────────────────────────────
   const fetchStatus = useCallback(() => {
@@ -157,23 +160,26 @@ export default function DispatcherPanel() {
       .then(r => r.json())
       .then((data: DispatchResult[]) => {
         if (Array.isArray(data)) {
-          setDispatchHistory(prev => mergeHistory(prev, data));
+          setDispatchHistory(prev => mergeHistoryRef.current(prev, data));
         }
       })
       .catch(err => console.error('[DispatcherPanel] history fetch:', err));
-  }, [mergeHistory]);
+  }, []);
+
+  const taskTypeRef = useRef(taskType);
+  taskTypeRef.current = taskType;
 
   const fetchScore = useCallback((desc: string) => {
     if (!desc.trim()) return;
     const params = new URLSearchParams({ desc });
-    if (taskType !== 'auto') params.set('type', taskType);
+    if (taskTypeRef.current !== 'auto') params.set('type', taskTypeRef.current);
     fetch(`${API_BASE}/api/dispatcher/score?${params}`)
       .then(r => r.json())
       .then(d => setScoreResult(d))
       .catch(err => console.error('[DispatcherPanel] score fetch:', err));
-  }, [taskType]);
+  }, []);
 
-  // 5초 폴링 — 상태 + 히스토리 모두 갱신
+  // 5초 폴링 — 상태 + 히스토리 모두 갱신 (의존성 없이 마운트 시 1회만 등록)
   useEffect(() => {
     fetchStatus();
     fetchHistory();
@@ -205,7 +211,7 @@ export default function DispatcherPanel() {
     })
       .then(r => r.json())
       .then(result => {
-        setDispatchHistory(prev => mergeHistory(prev, [{
+        setDispatchHistory(prev => mergeHistoryRef.current(prev, [{
           ...result,
           description: taskDesc,
           dispatched_at: new Date().toISOString(),
