@@ -77,7 +77,8 @@ else:
 RUNS_FILE = DATA_DIR / "agent_runs.jsonl"
 # 포트 9000 자율 에이전트 UI가 tail하는 실시간 라이브 로그 파일
 LIVE_FILE = DATA_DIR / "agent_live.jsonl"
-CONFIG_FILE = _PROJECT_ROOT / ".ai_monitor" / "config.json"
+CONFIG_FILE = DATA_DIR / "config.json"
+LEGACY_CONFIG_FILE = _PROJECT_ROOT / ".ai_monitor" / "config.json"
 
 # ─── CLI 실행 파일 전체 경로 탐색 ────────────────────────────────────────────
 # 배경: hook_bridge.py → cli_agent.py 흐름에서 subprocess가 DETACHED_PROCESS로
@@ -151,16 +152,25 @@ CODEX_COMPLEX_KEYWORDS = [
     '설계', '분석', '검토', '아키텍처', '계획',
     'design', 'analyze', 'review', 'architecture', 'plan',
 ]
+_TASK_FILE_RE = re.compile(
+    r'(?<![\w./-])'
+    r'('
+    r'(?:[A-Za-z]:[\\/])?'
+    r'[\w./\\-]+'
+    r'\.(?:py|ts|tsx|js|jsx|json|md|css|html|bat|ps1|ya?ml|spec|iss)'
+    r')'
+)
 
 
 def _load_runtime_config() -> dict:
-    """`.ai_monitor/config.json`을 읽어 런타임 모델 설정을 반환합니다."""
-    try:
-        if CONFIG_FILE.exists():
-            with CONFIG_FILE.open('r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception:
-        pass
+    """런타임 설정을 읽습니다. data/config.json을 우선하고 legacy 경로를 fallback합니다."""
+    for candidate in (CONFIG_FILE, LEGACY_CONFIG_FILE):
+        try:
+            if candidate.exists():
+                with candidate.open('r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            continue
     return {}
 
 
@@ -217,21 +227,15 @@ def _select_codex_model(task: str) -> tuple[str, str]:
 def _prepare_codex_task_context(task: str) -> tuple[str, list[dict], list[dict]]:
     """Codex does not have repo-managed hooks, so prepare inbox context here."""
     try:
-        from itcp import receive, parse_task_reference
+        from itcp import receive, parse_task_reference, build_agent_context
     except Exception:
         return task, [], []
 
     unread = receive("codex", mark_read=True)
     task_refs: list[dict] = []
     review_refs: list[dict] = []
-    lines: list[str] = []
 
     for message in unread[:5]:
-        sender = message.get("from_agent") or message.get("from") or "?"
-        channel = message.get("channel") or "general"
-        content = str(message.get("content") or "").strip()
-        lines.append(f"- [{sender} -> codex] ({channel}) {content}")
-
         ref = parse_task_reference(message)
         if ref.get("task_id"):
             if ref.get("kind") == "review":
@@ -239,17 +243,17 @@ def _prepare_codex_task_context(task: str) -> tuple[str, list[dict], list[dict]]
             elif ref.get("kind") == "task":
                 task_refs.append(ref)
 
-    sections: list[str] = []
-    if lines:
-        sections.append("[ITCP inbox]\n" + "\n".join(lines))
-
-    debate_json = os.environ.get("HIVE_DEBATE_CONTEXT", "").strip()
-    if debate_json:
-        sections.append("[Hive debate context]\n" + debate_json)
-
-    if not sections:
+    extra = build_agent_context(
+        "codex",
+        include_unread=True,
+        include_debate=True,
+        include_project_bootstrap=True,
+        mark_read=False,
+        unread_messages=unread,
+    )
+    if not extra:
         return task, task_refs, review_refs
-    prompt = "\n\n".join(sections) + "\n\n[Assigned task]\n" + task
+    prompt = f"{extra}\n\n[Assigned task]\n{task}"
     return prompt, task_refs, review_refs
 
 
@@ -292,6 +296,168 @@ def _report_codex_work(status: str, task: str, output_lines: list[str], task_ref
                 verdict="approved",
                 author=ref.get("author", ""),
             )
+
+
+def _extract_task_file_paths(task: str, cwd: str) -> list[Path]:
+    """Extract likely file references from the task prompt for scoped locks/validation."""
+    seen: set[str] = set()
+    resolved: list[Path] = []
+    search_roots = [Path(cwd).resolve(), _PROJECT_ROOT.resolve()]
+
+    for raw in _TASK_FILE_RE.findall(task):
+        candidate = raw.strip().strip('`"\'')
+        if not candidate:
+            continue
+        raw_path = Path(candidate)
+        candidates: list[Path] = []
+        if raw_path.is_absolute():
+            candidates.append(raw_path)
+        else:
+            for root in search_roots:
+                candidates.append(root / raw_path)
+        for item in candidates:
+            try:
+                resolved_path = item.resolve()
+            except Exception:
+                continue
+            if not resolved_path.exists():
+                continue
+            if str(resolved_path) in seen:
+                continue
+            seen.add(str(resolved_path))
+            resolved.append(resolved_path)
+            break
+    return resolved
+
+
+def _run_local_check(args: list[str], cwd: str, timeout: int = 60) -> tuple[bool, str]:
+    """Run a local validation command and return clipped combined output."""
+    try:
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        proc = subprocess.run(
+            args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            creationflags=no_window,
+        )
+    except Exception as exc:
+        return False, str(exc)
+
+    combined = "\n".join(part for part in [(proc.stdout or "").strip(), (proc.stderr or "").strip()] if part).strip()
+    if len(combined) > 1200:
+        combined = combined[:1197].rstrip() + "..."
+    return proc.returncode == 0, combined
+
+
+def _acquire_codex_locks(paths: list[Path]) -> tuple[list[Path], list[str]]:
+    """Acquire file locks for Codex-scoped target files when possible."""
+    if not paths:
+        return [], []
+    try:
+        import lock_manager
+    except Exception as exc:
+        return [], [f"[codex-guard] lock_manager unavailable: {exc}"]
+
+    previous = os.environ.get("HIVE_AGENT")
+    os.environ["HIVE_AGENT"] = "codex"
+    acquired: list[Path] = []
+    messages: list[str] = []
+    try:
+        for path in paths:
+            try:
+                ok = lock_manager.acquire(str(path))
+            except Exception as exc:
+                ok = False
+                messages.append(f"[codex-guard] lock acquire failed: {path} ({exc})")
+            if ok:
+                acquired.append(path)
+            else:
+                messages.append(f"[codex-guard] lock not acquired: {path}")
+    finally:
+        if previous is None:
+            os.environ.pop("HIVE_AGENT", None)
+        else:
+            os.environ["HIVE_AGENT"] = previous
+    return acquired, messages
+
+
+def _release_codex_locks(paths: list[Path]) -> None:
+    """Release file locks previously acquired for Codex."""
+    if not paths:
+        return
+    try:
+        import lock_manager
+    except Exception:
+        return
+
+    previous = os.environ.get("HIVE_AGENT")
+    os.environ["HIVE_AGENT"] = "codex"
+    try:
+        for path in paths:
+            try:
+                lock_manager.release(str(path))
+            except Exception:
+                pass
+    finally:
+        if previous is None:
+            os.environ.pop("HIVE_AGENT", None)
+        else:
+            os.environ["HIVE_AGENT"] = previous
+
+
+def _validate_codex_run(cwd: str, target_files: list[Path]) -> tuple[bool, list[str]]:
+    """Run lightweight post-run validation for Codex-scoped files."""
+    lines: list[str] = []
+    if not target_files:
+        return True, lines
+
+    root = _PROJECT_ROOT.resolve()
+    rel_targets = []
+    for path in target_files:
+        try:
+            rel_targets.append(str(path.resolve().relative_to(root)).replace("\\", "/"))
+        except Exception:
+            rel_targets.append(str(path))
+
+    rules_args = [sys.executable, str(_SCRIPTS_DIR / "rules_validator.py"), *rel_targets]
+    ok, output = _run_local_check(rules_args, cwd=str(root), timeout=60)
+    lines.append(f"[codex-guard] rules_validator: {'ok' if ok else 'failed'}")
+    if output:
+        lines.append(output)
+    if not ok:
+        return False, lines
+
+    python_files = [str(path) for path in target_files if path.suffix == ".py"]
+    if python_files:
+        ok, output = _run_local_check([sys.executable, "-m", "py_compile", *python_files], cwd=cwd, timeout=60)
+        lines.append(f"[codex-guard] py_compile: {'ok' if ok else 'failed'}")
+        if output:
+            lines.append(output)
+        if not ok:
+            return False, lines
+
+    frontend_paths = [path for path in target_files if ".ai_monitor\\vibe-view\\" in str(path).lower().replace("/", "\\")]
+    if frontend_paths:
+        frontend_dir = _PROJECT_ROOT / ".ai_monitor" / "vibe-view"
+        ok, output = _run_local_check(["npm", "run", "lint"], cwd=str(frontend_dir), timeout=180)
+        lines.append(f"[codex-guard] frontend lint: {'ok' if ok else 'failed'}")
+        if output:
+            lines.append(output)
+        if not ok:
+            return False, lines
+
+        ok, output = _run_local_check(["npm", "run", "build"], cwd=str(frontend_dir), timeout=240)
+        lines.append(f"[codex-guard] frontend build: {'ok' if ok else 'failed'}")
+        if output:
+            lines.append(output)
+        if not ok:
+            return False, lines
+
+    return True, lines
 
 
 # ─── 전역 상태 (모듈 레벨 — agent_api.py에서 직접 접근) ──────────────────────
@@ -534,9 +700,23 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
 
     codex_task_refs: list[dict] = []
     codex_review_refs: list[dict] = []
+    codex_locked_files: list[Path] = []
+    codex_target_files: list[Path] = []
+    codex_guard_lines: list[str] = []
     prepared_task = task
     if cli == 'codex':
+        codex_target_files = _extract_task_file_paths(task, cwd)
         prepared_task, codex_task_refs, codex_review_refs = _prepare_codex_task_context(task)
+        if codex_target_files:
+            rel_targets = []
+            for path in codex_target_files:
+                try:
+                    rel_targets.append(str(path.resolve().relative_to(Path(cwd).resolve())).replace("\\", "/"))
+                except Exception:
+                    rel_targets.append(str(path))
+            prepared_task += "\n\n[Likely target files]\n" + "\n".join(f"- {item}" for item in rel_targets)
+        codex_locked_files, lock_messages = _acquire_codex_locks(codex_target_files)
+        codex_guard_lines.extend(lock_messages)
 
     # ── MUX 에이전트 자동 등록 (P6 Task 35) ────────────────────────────────
     # [설계 의도] 터미널별로 한 번만 MUX에 등록하여, 외부에서 send_text로
@@ -630,6 +810,8 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         child_env.pop('CLAUDE_CODE_ENTRYPOINT', None)
         child_env.pop('CLAUDE_CODE_SSE_PORT', None)
         child_env['VIBE_CHILD_AGENT'] = '1'  # hook_bridge.py 루프 방지 전용 마커
+        if cli == 'codex':
+            child_env['HIVE_AGENT'] = 'codex'
 
         proc = subprocess.Popen(
             cmd,
@@ -762,6 +944,15 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
 
         # 히스토리 저장 (중단된 경우도 'stopped' 상태로 기록)
         if cli == 'codex':
+            if final_status == 'done':
+                validation_ok, validation_lines = _validate_codex_run(cwd, codex_target_files or codex_locked_files)
+                output_lines.extend(codex_guard_lines)
+                output_lines.extend(validation_lines)
+                if not validation_ok:
+                    final_status = 'error'
+            else:
+                output_lines.extend(codex_guard_lines)
+            _release_codex_locks(codex_locked_files)
             _report_codex_work(final_status, task, output_lines, codex_task_refs, codex_review_refs)
 
         result = {

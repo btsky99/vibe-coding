@@ -63,6 +63,12 @@ from typing import Optional
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
 _MONITOR_DIR = _PROJECT_ROOT / ".ai_monitor"
+if getattr(sys, 'frozen', False):
+    _DATA_DIR = Path(os.environ.get('APPDATA', Path.home())) / "VibeCoding"
+else:
+    _DATA_DIR = _PROJECT_ROOT / ".ai_monitor" / "data"
+_CONFIG_FILE = _DATA_DIR / "config.json"
+_LEGACY_CONFIG_FILE = _PROJECT_ROOT / ".ai_monitor" / "config.json"
 
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
@@ -147,6 +153,7 @@ TASK_TYPE_REQUIREMENTS = {
     "review": {"code_review": 0.4, "security": 0.3, "precision_logic": 0.2, "testing": 0.1},
     "architecture": {"architecture": 0.4, "research": 0.2, "documentation": 0.2, "precision_logic": 0.2},
 }
+HIGH_CONTEXT_TASK_TYPES = {"architecture", "research", "docs", "review", "security"}
 
 # ── 키워드 → 태스크 유형 자동 감지 ──────────────────────────────────────────────
 _TYPE_KEYWORDS = {
@@ -162,6 +169,23 @@ _TYPE_KEYWORDS = {
     "review": ["리뷰", "검토", "점검", "review", "audit", "inspect"],
     "architecture": ["아키텍처", "설계", "구조", "architecture", "design", "structure"],
 }
+
+
+def _load_runtime_config() -> dict:
+    """Load per-PC runtime config with legacy fallback."""
+    for candidate in (_CONFIG_FILE, _LEGACY_CONFIG_FILE):
+        try:
+            if candidate.exists():
+                return json.loads(candidate.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+    return {}
+
+
+def is_codex_enabled() -> bool:
+    """Return whether Codex should be eligible for automatic dispatch on this PC."""
+    config = _load_runtime_config()
+    return bool(config.get("codex_enabled", True))
 
 
 def _generate_task_id() -> str:
@@ -289,7 +313,9 @@ def select_best_agent(task_type: str, exclude: Optional[list[str]] = None) -> st
     작성자와 검증자는 반드시 다른 에이전트여야 합니다.
     exclude=["claude"]로 호출하면 claude를 제외하고 최적 검증자를 선택합니다.
     """
-    exclude = exclude or []
+    exclude = list(exclude or [])
+    if not is_codex_enabled() and "codex" not in exclude:
+        exclude.append("codex")
     candidates = {
         name: score_agent(name, task_type)
         for name in AGENT_CAPABILITIES
@@ -300,6 +326,11 @@ def select_best_agent(task_type: str, exclude: Optional[list[str]] = None) -> st
         return "claude"  # fallback
 
     return max(candidates, key=candidates.get)
+
+
+def should_avoid_codex(task_type: str) -> bool:
+    """Return True for tasks that need stronger repo context than Codex usually gets."""
+    return task_type in HIGH_CONTEXT_TASK_TYPES
 
 
 def dispatch(
@@ -334,12 +365,16 @@ def dispatch(
     if assigned_to and assigned_to in AGENT_CAPABILITIES:
         agent = assigned_to
     else:
-        agent = select_best_agent(task_type)
+        exclude_agents = ["codex"] if should_avoid_codex(task_type) else []
+        agent = select_best_agent(task_type, exclude=exclude_agents)
 
     # 4. 크로스 검증 담당 선택 (작성자 제외)
     verifier = None
     if require_verification:
-        verifier = select_best_agent(task_type, exclude=[agent])
+        verifier_exclude = [agent]
+        if should_avoid_codex(task_type):
+            verifier_exclude.append("codex")
+        verifier = select_best_agent(task_type, exclude=verifier_exclude)
 
     # 5. 태스크 ID 생성
     task_id = _generate_task_id()
@@ -458,6 +493,8 @@ def fan_out(*descriptions: str, task_type: Optional[str] = None) -> list[dict]:
         # 부하 고려한 에이전트 선택: 점수에 부하 패널티 적용
         adjusted_scores = {}
         for name in AGENT_CAPABILITIES:
+            if name == "codex" and not is_codex_enabled():
+                continue
             base_score = score_agent(name, t_type)
             # 이미 할당된 태스크가 많으면 패널티 (max_concurrent 대비)
             load_ratio = agent_load[name] / AGENT_CAPABILITIES[name]["max_concurrent"]

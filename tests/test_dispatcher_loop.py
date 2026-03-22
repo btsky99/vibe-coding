@@ -71,3 +71,31 @@ def test_report_verification_result_sends_dispatcher_and_author(monkeypatch):
     assert len(sent) == 2
     assert sent[0]["to_terminal"] == "dispatcher"
     assert sent[1]["to_terminal"] == "codex"
+
+
+def test_select_best_agent_excludes_codex_for_high_context_work():
+    agent = auto_dispatcher.select_best_agent("architecture", exclude=["codex"])
+    assert agent != "codex"
+
+
+def test_select_best_agent_respects_local_codex_disable(monkeypatch):
+    monkeypatch.setattr(auto_dispatcher, "is_codex_enabled", lambda: False)
+
+    agent = auto_dispatcher.select_best_agent("test")
+
+    assert agent != "codex"
+
+
+def test_dispatch_avoids_codex_for_review_tasks(monkeypatch):
+    sent = []
+    broadcasts = []
+
+    monkeypatch.setattr(auto_dispatcher.itcp, "send", lambda **kwargs: sent.append(kwargs) or True)
+    monkeypatch.setattr(auto_dispatcher.itcp, "broadcast", lambda **kwargs: broadcasts.append(kwargs) or True)
+    monkeypatch.setattr(auto_dispatcher, "_save_dispatch_to_hive_tasks", lambda payload: None)
+    monkeypatch.setattr(auto_dispatcher, "is_codex_enabled", lambda: True)
+
+    result = auto_dispatcher.dispatch("이 변경 리뷰해줘", task_type="review")
+
+    assert result["assigned_to"] != "codex"
+    assert result["verifier"] != "codex"

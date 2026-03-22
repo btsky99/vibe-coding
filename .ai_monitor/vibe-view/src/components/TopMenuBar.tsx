@@ -350,6 +350,12 @@ const TopMenuBar = memo(function TopMenuBar({
               >
                 <Terminal className="w-3.5 h-3.5 text-accent" /> Gemini CLI 사용법
               </button>
+              <button
+                onClick={() => onOpenHelpDoc('codex', '코덱스(Codex) 사용 설명서')}
+                className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
+              >
+                <Zap className="w-3.5 h-3.5 text-yellow-400" /> 코덱스(Codex) 사용법
+              </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <button
                 onClick={() => { alert("바이브 코딩(Vibe Coding)\n하이브 마인드 중앙 지휘소"); setActiveMenu(null); }}

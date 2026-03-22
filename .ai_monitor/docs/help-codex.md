@@ -40,9 +40,9 @@ $env:TERMINAL_ID="T1"; python scripts/terminal_agent.py
 
 ### 단발 실행 모드 (Non-interactive)
 ```bash
-python scripts/terminal_agent.py "이 파일의 버그를 찾아줘" [auto|claude|gemini]
+python scripts/terminal_agent.py "이 파일의 버그를 찾아줘" [auto|claude|gemini|codex]
 ```
-- 특정 에이전트(Claude 또는 Gemini)를 지정하여 작업을 위임할 수 있습니다.
+- 특정 에이전트(Claude, Gemini, Codex)를 지정하여 작업을 위임할 수 있습니다.
 - `auto` 모드에서는 지시 내용의 복잡도에 따라 자동으로 라우팅됩니다.
 
 ---
@@ -75,3 +75,4 @@ python scripts/terminal_agent.py "이 파일의 버그를 찾아줘" [auto|claud
 1. **병렬 작업**: 여러 터미널을 열고 각각 `TERMINAL_ID=T1`, `TERMINAL_ID=T2`로 설정하여 서로 다른 작업을 동시에 시킬 수 있습니다.
 2. **실시간 모니터링**: 에이전트의 사고 과정과 출력은 `.ai_monitor/data/agent_live.jsonl`에 실시간으로 기록되며, 대시보드(Mission Control)에서 시각화됩니다.
 3. **자동 라우팅**: 간단한 코드 수정은 클로드에게, 문서나 복잡한 분석은 제미나이에게 자동으로 할당되도록 설계되어 있습니다.
+4. **운영 가드레일**: Codex는 고문맥 작업보다 좁은 구현, 테스트, 리팩터링에 적합합니다. 상세 운영 기준은 `docs/CODEX_HARDENING.md`를 참조하세요.

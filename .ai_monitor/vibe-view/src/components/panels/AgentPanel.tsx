@@ -174,6 +174,18 @@ interface CodexModelPolicy {
   background: string;
 }
 
+interface CodexSetupState {
+  enabled: boolean;
+  bootPrompt: string;
+  lastPath: string;
+}
+
+interface ToolStatusInfo {
+  installed: boolean;
+  path: string;
+  version: string;
+}
+
 interface AgentRun {
   id: string;
   task: string;
@@ -231,6 +243,18 @@ const EMPTY_CODEX_MODEL_POLICY: CodexModelPolicy = {
   background: '',
 };
 
+const EMPTY_CODEX_SETUP: CodexSetupState = {
+  enabled: true,
+  bootPrompt: '',
+  lastPath: '',
+};
+
+const EMPTY_TOOL_STATUS: ToolStatusInfo = {
+  installed: false,
+  path: '',
+  version: '',
+};
+
 function readCodexModelPolicy(config: unknown): CodexModelPolicy {
   const source = (config && typeof config === 'object') ? config as Record<string, unknown> : {};
   const nested = (source.codex_models && typeof source.codex_models === 'object')
@@ -242,6 +266,19 @@ function readCodexModelPolicy(config: unknown): CodexModelPolicy {
   return {
     main: typeof nested.main === 'string' ? nested.main : legacyMain,
     background: typeof nested.background === 'string' ? nested.background : legacyBackground,
+  };
+}
+
+function readCodexSetup(config: unknown): CodexSetupState {
+  const source = (config && typeof config === 'object') ? config as Record<string, unknown> : {};
+  const enabled = typeof source.codex_enabled === 'boolean' ? source.codex_enabled : true;
+  const bootPrompt = typeof source.codex_boot_prompt === 'string' ? source.codex_boot_prompt : '';
+  const lastPath = typeof source.last_path === 'string' ? source.last_path : '';
+
+  return {
+    enabled,
+    bootPrompt,
+    lastPath,
   };
 }
 
@@ -739,6 +776,14 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
 
   // 히스토리 탭 데이터
   const [history, setHistory]         = useState<AgentRun[]>([]);
+  const [codexSetup, setCodexSetup] = useState<CodexSetupState>(EMPTY_CODEX_SETUP);
+  const [savedCodexSetup, setSavedCodexSetup] = useState<CodexSetupState>(EMPTY_CODEX_SETUP);
+  const [codexSetupOpen, setCodexSetupOpen] = useState(true);
+  const [codexSetupLoading, setCodexSetupLoading] = useState(true);
+  const [codexSetupSaving, setCodexSetupSaving] = useState(false);
+  const [codexSetupNotice, setCodexSetupNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [codexToolStatus, setCodexToolStatus] = useState<ToolStatusInfo>(EMPTY_TOOL_STATUS);
+  const [codexToolLoading, setCodexToolLoading] = useState(false);
   const [codexPolicy, setCodexPolicy] = useState<CodexModelPolicy>(EMPTY_CODEX_MODEL_POLICY);
   const [savedCodexPolicy, setSavedCodexPolicy] = useState<CodexModelPolicy>(EMPTY_CODEX_MODEL_POLICY);
   const [codexPolicyOpen, setCodexPolicyOpen] = useState(false);
@@ -790,6 +835,9 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
   });
   // 실행할 터미널 선택 (카드 클릭으로 변경, 기본: T1)
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>('T1');
+  const codexSetupDirty =
+    codexSetup.enabled !== savedCodexSetup.enabled ||
+    codexSetup.bootPrompt !== savedCodexSetup.bootPrompt;
   const codexPolicyDirty =
     codexPolicy.main !== savedCodexPolicy.main ||
     codexPolicy.background !== savedCodexPolicy.background;
@@ -931,6 +979,105 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       // 서버 미실행 시 무시
     }
   }, []);
+
+  const loadCodexSetup = useCallback(async () => {
+    setCodexSetupLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/config`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const nextSetup = readCodexSetup(data);
+      setCodexSetup(nextSetup);
+      setSavedCodexSetup(nextSetup);
+    } catch {
+      setCodexSetupNotice({ type: 'error', text: 'Codex runtime settings could not be loaded.' });
+    } finally {
+      setCodexSetupLoading(false);
+    }
+  }, []);
+
+  const loadCodexToolStatus = useCallback(async () => {
+    setCodexToolLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/tool-status?name=codex`);
+      if (!res.ok) return;
+      const data: ToolStatusInfo = await res.json();
+      setCodexToolStatus(data);
+    } catch {
+      setCodexSetupNotice({ type: 'error', text: 'Codex CLI status check failed.' });
+    } finally {
+      setCodexToolLoading(false);
+    }
+  }, []);
+
+  const saveCodexSetup = useCallback(async () => {
+    setCodexSetupSaving(true);
+    setCodexSetupNotice(null);
+    const normalized = {
+      enabled: codexSetup.enabled,
+      bootPrompt: codexSetup.bootPrompt.trim(),
+      lastPath: codexSetup.lastPath,
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/config/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codex_enabled: normalized.enabled,
+          codex_boot_prompt: normalized.bootPrompt,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('save_failed');
+      }
+
+      setCodexSetup(normalized);
+      setSavedCodexSetup(normalized);
+      setCodexSetupNotice({ type: 'success', text: 'Codex runtime settings saved.' });
+    } catch {
+      setCodexSetupNotice({ type: 'error', text: 'Failed to save Codex runtime settings.' });
+    } finally {
+      setCodexSetupSaving(false);
+    }
+  }, [codexSetup]);
+
+  const installCodexCli = useCallback(async () => {
+    setCodexToolLoading(true);
+    setCodexSetupNotice(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/install-codex-cli`);
+      const data = await res.json();
+      if (!res.ok || data.status !== 'success') {
+        throw new Error(data.message || 'install_failed');
+      }
+      setCodexSetupNotice({ type: 'success', text: 'Codex CLI installer was launched in a new window.' });
+    } catch {
+      setCodexSetupNotice({ type: 'error', text: 'Could not start Codex CLI installation.' });
+    } finally {
+      setCodexToolLoading(false);
+    }
+  }, []);
+
+  const openCodexTerminal = useCallback(async (yolo: boolean) => {
+    setCodexSetupNotice(null);
+    const targetPath = codexSetup.lastPath?.trim() || 'C:\\';
+
+    try {
+      const res = await fetch(`${API_BASE}/api/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'codex', path: targetPath, yolo }),
+      });
+      if (!res.ok) {
+        throw new Error('launch_failed');
+      }
+      setCodexSetupNotice({ type: 'success', text: yolo ? 'Codex YOLO terminal opened.' : 'Codex terminal opened.' });
+    } catch {
+      setCodexSetupNotice({ type: 'error', text: 'Could not open Codex terminal.' });
+    }
+  }, [codexSetup.lastPath]);
 
   const loadCodexPolicy = useCallback(async () => {
     setCodexPolicyLoading(true);
@@ -1177,6 +1324,8 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
     loadStatus();
     loadHistory();
     loadTerminals();
+    loadCodexSetup();
+    loadCodexToolStatus();
     loadCodexPolicy();
     connectSSE();
 
@@ -1202,7 +1351,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
       sseRef.current = null;
       es?.close();
     };
-  }, [loadStatus, loadHistory, loadTerminals, loadCodexPolicy, connectSSE]);
+  }, [loadStatus, loadHistory, loadTerminals, loadCodexSetup, loadCodexToolStatus, loadCodexPolicy, connectSSE]);
 
   // ─── 양방향 상태 동기화: 3초마다 서버 폴링 ─────────────────────────────────
   // 케이스 A: UI=running, 서버!=running → done 이벤트 유실 복구 (running 고착 해소)
@@ -1458,6 +1607,156 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
             실행
           </button>
         </div>
+      </div>
+
+      <div className="shrink-0 rounded border border-white/5 bg-black/10 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setCodexSetupOpen(open => !open)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition"
+        >
+          <Terminal className="w-3.5 h-3.5 text-sky-300" />
+          <span className="text-[11px] font-semibold text-white/80">Codex Runtime Setup</span>
+          <span className={`text-[10px] font-mono ${codexToolStatus.installed ? 'text-emerald-300/80' : 'text-red-300/80'}`}>
+            {codexToolStatus.installed ? 'installed' : 'not-installed'}
+          </span>
+          <div className="flex-1" />
+          {(codexSetupLoading || codexToolLoading) && <RefreshCw className="w-3 h-3 text-white/30 animate-spin" />}
+          {codexSetupOpen ? (
+            <ChevronUp className="w-3.5 h-3.5 text-white/40" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5 text-white/40" />
+          )}
+        </button>
+
+        {codexSetupOpen && (
+          <div className="border-t border-white/5 px-3 py-3 bg-black/20 flex flex-col gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">CLI Status</div>
+                <div className={codexToolStatus.installed ? 'text-emerald-300' : 'text-red-300'}>
+                  {codexToolStatus.installed ? 'Installed' : 'Not installed'}
+                </div>
+                <div className="mt-1 text-white/45 break-all">{codexToolStatus.path || '-'}</div>
+                <div className="mt-1 text-white/30 break-all">{codexToolStatus.version || 'version unavailable'}</div>
+              </div>
+
+              <div className="rounded border border-white/5 bg-black/30 px-2.5 py-2">
+                <div className="text-white/35 uppercase tracking-[0.18em] mb-1">Project Path</div>
+                <div className="text-white/70 break-all">{codexSetup.lastPath || 'Not selected'}</div>
+                <div className="mt-2 text-white/35">
+                  Auto dispatch: {savedCodexSetup.enabled ? 'enabled' : 'disabled'}
+                </div>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-[11px] text-white/75">
+              <input
+                type="checkbox"
+                checked={codexSetup.enabled}
+                onChange={(e) => {
+                  setCodexSetupNotice(null);
+                  setCodexSetup(prev => ({ ...prev, enabled: e.target.checked }));
+                }}
+                disabled={codexSetupSaving}
+                className="rounded border-white/20 bg-black/40"
+              />
+              Include Codex in automatic dispatch on this PC
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.18em] text-white/35">Local Operator Prompt</span>
+              <textarea
+                value={codexSetup.bootPrompt}
+                onChange={(e) => {
+                  setCodexSetupNotice(null);
+                  setCodexSetup(prev => ({ ...prev, bootPrompt: e.target.value }));
+                }}
+                rows={4}
+                disabled={codexSetupSaving}
+                placeholder="Add PC-local guidance for Codex. Example: follow local repo conventions, avoid broad refactors, validate Python first."
+                className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-2 text-[11px] text-white/85 placeholder-white/20 outline-none focus:border-sky-400/50 resize-y"
+              />
+            </label>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={saveCodexSetup}
+                disabled={codexSetupSaving || codexSetupLoading || !codexSetupDirty}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {codexSetupSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                Save
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCodexSetupNotice(null);
+                  setCodexSetup(savedCodexSetup);
+                }}
+                disabled={codexSetupSaving || !codexSetupDirty}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Revert
+              </button>
+
+              <button
+                type="button"
+                onClick={loadCodexSetup}
+                disabled={codexSetupSaving || codexSetupLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Reload settings
+              </button>
+
+              <button
+                type="button"
+                onClick={loadCodexToolStatus}
+                disabled={codexToolLoading}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/55 hover:text-white/80 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Check CLI
+              </button>
+
+              <button
+                type="button"
+                onClick={installCodexCli}
+                disabled={codexToolLoading}
+                className="px-2.5 py-1.5 rounded border border-sky-400/30 text-[10px] text-sky-200 hover:bg-sky-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Install CLI
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openCodexTerminal(false)}
+                disabled={!codexSetup.lastPath}
+                className="px-2.5 py-1.5 rounded border border-white/10 text-[10px] text-white/65 hover:text-white/85 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Open Codex
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openCodexTerminal(true)}
+                disabled={!codexSetup.lastPath}
+                className="px-2.5 py-1.5 rounded border border-amber-400/30 text-[10px] text-amber-200 hover:bg-amber-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Open YOLO
+              </button>
+
+              {codexSetupNotice && (
+                <span className={`text-[10px] ${
+                  codexSetupNotice.type === 'success' ? 'text-emerald-300' : 'text-red-300'
+                }`}>
+                  {codexSetupNotice.text}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 rounded border border-white/5 bg-black/10 overflow-hidden">

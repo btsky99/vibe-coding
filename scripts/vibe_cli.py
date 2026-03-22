@@ -9,22 +9,11 @@
 #          [사용법]
 #          python scripts/vibe_cli.py notify --title "빌드 완료" --body "테스트 통과"
 #          python scripts/vibe_cli.py set-progress 0.75 --label "Building..."
-#          python scripts/vibe_cli.py clear-progress
-#          python scripts/vibe_cli.py set-status build "running" --color "#2ecc71"
-#          python scripts/vibe_cli.py clear-status build
-#          python scripts/vibe_cli.py log "Task complete" --level success
-#          python scripts/vibe_cli.py clear-log
-#          python scripts/vibe_cli.py sidebar-state
-#
-#          [통신 경로]
-#          1차: HTTP POST → server.py /api/vibe/* (로컬 9000번 포트)
-#          폴백: psql.exe 직접 INSERT (server.py 미기동 시)
+#          python scripts/vibe_cli.py codex status
 #
 # REVISION HISTORY:
+# [2026-03-22] Gemini: Codex 명령어 통합 (status, start, msg, guide)
 # [2026-03-18] Claude: 최초 구현 — cmux CLI 미러링
-#   - argparse 기반 8개 서브커맨드
-#   - server.py API 호출 + psql 폴백 이중 경로
-#   - 포트 자동 탐색 (config.json → 9000 기본값)
 # ------------------------------------------------------------------------
 """
 
@@ -46,9 +35,7 @@ _PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
 
 def _get_server_url() -> str:
-    """server.py의 HTTP 포트를 config.json에서 읽어 URL을 반환합니다.
-    config.json이 없거나 포트 정보가 없으면 기본값 9000 사용.
-    """
+    """server.py의 HTTP 포트를 config.json에서 읽어 URL을 반환합니다."""
     port = 9000
     if _CONFIG_FILE.exists():
         try:
@@ -61,11 +48,7 @@ def _get_server_url() -> str:
 
 
 def _api_call(path: str, data: dict = None, method: str = 'POST') -> dict:
-    """server.py API를 호출합니다. 실패 시 빈 dict 반환.
-
-    [설계 의도] hive_bridge.py의 _call_api 패턴을 재사용.
-    urllib.request로 외부 의존성 없이 HTTP 호출.
-    """
+    """server.py API를 호출합니다. 실패 시 빈 dict 반환."""
     url = f"{_get_server_url()}{path}"
     try:
         if data is not None:
@@ -82,17 +65,11 @@ def _api_call(path: str, data: dict = None, method: str = 'POST') -> dict:
 
 
 def _psql_fallback(sql: str) -> bool:
-    """server.py 미기동 시 psql.exe로 직접 SQL 실행합니다.
-
-    [설계 의도] hive_bridge.py의 psql 폴백 패턴을 재사용.
-    server.py가 꺼져 있어도 CLI가 동작하도록 보장합니다.
-    """
+    """server.py 미기동 시 psql.exe로 직접 SQL 실행합니다."""
     if not _PG_BIN.exists():
-        print(f"[vibe] psql 미발견: {_PG_BIN}", file=sys.stderr)
         return False
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        # PGCLIENTENCODING=UTF8: Windows CP949 환경에서 한글 인코딩 충돌 방지
         env = os.environ.copy()
         env['PGCLIENTENCODING'] = 'UTF8'
         result = subprocess.run(
@@ -102,20 +79,16 @@ def _psql_fallback(sql: str) -> bool:
             creationflags=_no_window, timeout=10, env=env
         )
         return result.returncode == 0
-    except Exception as e:
-        print(f"[vibe] psql 오류: {e}", file=sys.stderr)
+    except Exception:
         return False
 
 
 def _detect_agent() -> str:
     """현재 환경에서 에이전트 이름을 자동 감지합니다."""
     terminal_id = os.environ.get('TERMINAL_ID', '')
-    if 'claude' in terminal_id.lower():
-        return 'claude'
-    if 'gemini' in terminal_id.lower():
-        return 'gemini'
-    if 'codex' in terminal_id.lower():
-        return 'codex'
+    for name in ['claude', 'gemini', 'codex']:
+        if name in terminal_id.lower():
+            return name
     return 'unknown'
 
 
@@ -124,18 +97,10 @@ def _detect_agent() -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_notify(args):
-    """알림 전송 — cmux notify 미러"""
     agent = args.agent or _detect_agent()
-    data = {
-        'agent': agent,
-        'title': args.title,
-        'body': args.body,
-        'subtitle': getattr(args, 'subtitle', None),
-        'source': 'cli',
-    }
+    data = {'agent': agent, 'title': args.title, 'body': args.body, 'subtitle': getattr(args, 'subtitle', None), 'source': 'cli'}
     result = _api_call('/api/vibe/notify', data)
     if '_error' in result:
-        # 폴백: psql 직접 INSERT
         subtitle_val = f"'{args.subtitle}'" if args.subtitle else 'NULL'
         sql = f"INSERT INTO vibe_notifications (agent, title, subtitle, body, source) VALUES ('{agent}', '{args.title}', {subtitle_val}, '{args.body}', 'cli');"
         if _psql_fallback(sql):
@@ -149,42 +114,28 @@ def cmd_notify(args):
 
 
 def cmd_set_progress(args):
-    """진행률 설정 — cmux set-progress 미러"""
     agent = args.agent or _detect_agent()
-    data = {
-        'agent': agent,
-        'value': args.value,
-        'label': args.label or '',
-    }
+    data = {'agent': agent, 'value': args.value, 'label': args.label or ''}
     result = _api_call('/api/vibe/progress', data)
     if '_error' in result:
-        progress_json = json.dumps({'value': args.value, 'label': args.label or ''})
-        sql = f"INSERT INTO vibe_agent_state (agent, key, value) VALUES ('{agent}', '_progress', '{progress_json}') ON CONFLICT (agent, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();"
+        val_json = json.dumps({'value': args.value, 'label': args.label or ''})
+        sql = f"INSERT INTO vibe_agent_state (agent, key, value) VALUES ('{agent}', '_progress', '{val_json}') ON CONFLICT (agent, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();"
         _psql_fallback(sql)
     print(f"[vibe] 진행률 설정: {agent} → {args.value}")
     return 0
 
 
 def cmd_clear_progress(args):
-    """진행률 제거 — cmux clear-progress 미러"""
     agent = args.agent or _detect_agent()
-    result = _api_call('/api/vibe/progress/clear', {'agent': agent})
-    if '_error' in result:
-        _psql_fallback(f"DELETE FROM vibe_agent_state WHERE agent = '{agent}' AND key = '_progress';")
+    _api_call('/api/vibe/progress/clear', {'agent': agent})
+    _psql_fallback(f"DELETE FROM vibe_agent_state WHERE agent = '{agent}' AND key = '_progress';")
     print(f"[vibe] 진행률 제거: {agent}")
     return 0
 
 
 def cmd_set_status(args):
-    """사이드바 상태 설정 — cmux set-status 미러"""
     agent = args.agent or _detect_agent()
-    data = {
-        'agent': agent,
-        'key': args.key,
-        'value': args.value,
-        'icon': args.icon,
-        'color': args.color,
-    }
+    data = {'agent': agent, 'key': args.key, 'value': args.value, 'icon': args.icon, 'color': args.color}
     result = _api_call('/api/vibe/status', data)
     if '_error' in result:
         sql = f"INSERT INTO vibe_agent_state (agent, key, value, icon, color) VALUES ('{agent}', '{args.key}', '{args.value}', NULL, NULL) ON CONFLICT (agent, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();"
@@ -194,25 +145,16 @@ def cmd_set_status(args):
 
 
 def cmd_clear_status(args):
-    """사이드바 상태 제거 — cmux clear-status 미러"""
     agent = args.agent or _detect_agent()
-    data = {'agent': agent, 'key': args.key}
-    result = _api_call('/api/vibe/status/clear', data)
-    if '_error' in result:
-        _psql_fallback(f"DELETE FROM vibe_agent_state WHERE agent = '{agent}' AND key = '{args.key}';")
+    _api_call('/api/vibe/status/clear', {'agent': agent, 'key': args.key})
+    _psql_fallback(f"DELETE FROM vibe_agent_state WHERE agent = '{agent}' AND key = '{args.key}';")
     print(f"[vibe] 상태 제거: {agent}.{args.key}")
     return 0
 
 
 def cmd_log(args):
-    """로그 추가 — cmux log 미러"""
     agent = args.agent or _detect_agent()
-    data = {
-        'agent': agent,
-        'message': args.message,
-        'level': args.level,
-        'source': args.source,
-    }
+    data = {'agent': agent, 'message': args.message, 'level': args.level, 'source': args.source}
     result = _api_call('/api/vibe/log', data)
     if '_error' in result:
         sql = f"INSERT INTO vibe_agent_logs (agent, message, level, source) VALUES ('{agent}', '{args.message}', '{args.level}', NULL);"
@@ -222,17 +164,14 @@ def cmd_log(args):
 
 
 def cmd_clear_log(args):
-    """로그 전체 삭제 — cmux clear-log 미러"""
     agent = args.agent or _detect_agent()
-    result = _api_call('/api/vibe/log/clear', {'agent': agent})
-    if '_error' in result:
-        _psql_fallback(f"DELETE FROM vibe_agent_logs WHERE agent = '{agent}';")
+    _api_call('/api/vibe/log/clear', {'agent': agent})
+    _psql_fallback(f"DELETE FROM vibe_agent_logs WHERE agent = '{agent}';")
     print(f"[vibe] 로그 삭제: {agent}")
     return 0
 
 
 def cmd_sidebar_state(args):
-    """전체 사이드바 상태 조회 — cmux sidebar-state 미러"""
     result = _api_call('/api/vibe/sidebar', method='GET')
     if '_error' in result:
         print(f"[vibe] 조회 실패: {result['_error']}", file=sys.stderr)
@@ -241,81 +180,128 @@ def cmd_sidebar_state(args):
     return 0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# argparse 메인
-# ═══════════════════════════════════════════════════════════════════════════
+# ── 코덱스(Codex) 전용 명령어 ──────────────────────────────────────────────
+
+def _check_codex_install():
+    status = {"node": False, "codex": False}
+    try:
+        subprocess.run(["node", "--version"], capture_output=True, check=True)
+        status["node"] = True
+    except Exception: pass
+    
+    codex_path = _PROJECT_ROOT / "node_modules" / "@openai" / "codex"
+    status["codex"] = codex_path.exists()
+    return status
+
+
+def cmd_codex(args):
+    action = args.codex_action
+
+    if action == 'status':
+        print("\n🔍 [Codex] 시스템 상태 점검")
+        st = _check_codex_install()
+        print(f"  - Node.js: {'✅ 설치됨' if st['node'] else '❌ 미설치'}")
+        print(f"  - Codex CLI: {'✅ 확인됨' if st['codex'] else '🟡 미확인 (scripts/install_codex.py 실행 권장)'}")
+        
+        sidebar = _api_call('/api/vibe/sidebar', method='GET')
+        active = [agent for agent in sidebar.keys() if agent.startswith('T') or 'codex' in agent.lower()] if not '_error' in sidebar else []
+        print(f"  - 활성 터미널: {', '.join(active) if active else '없음'}\n")
+
+    elif action == 'guide':
+        guide_path = _PROJECT_ROOT / "CODEX_GUIDE.md"
+        if guide_path.exists():
+            with open(guide_path, 'r', encoding='utf-8') as f:
+                print("\n" + f.read())
+        else:
+            print("[vibe] CODEX_GUIDE.md 미발견.")
+
+    elif action == 'start':
+        tid = args.id or "T1"
+        print(f"🚀 [Codex] 에이전트 시작 중... (ID: {tid})")
+        script = _PROJECT_ROOT / "scripts" / "terminal_agent.py"
+        if not script.exists():
+            print(f"[vibe] 에러: 스크립트 미발견: {script}")
+            return 1
+            
+        env = os.environ.copy()
+        env['TERMINAL_ID'] = tid
+        try:
+            subprocess.Popen(f'start "{tid} - Codex Agent" python {script}', shell=True, env=env)
+            print(f"✅ 새 터미널 창에서 {tid} 실행됨.")
+        except Exception as e:
+            print(f"❌ 실행 실패: {e}")
+            return 1
+
+    elif action == 'msg':
+        itcp = _PROJECT_ROOT / "scripts" / "itcp.py"
+        try:
+            subprocess.run([sys.executable, str(itcp), "send", "codex", args.to, args.text], check=True)
+            print("✅ ITCP 전송 완료.")
+        except Exception as e:
+            print(f"❌ 전송 실패: {e}")
+            return 1
+    return 0
+
 
 def main():
     parser = argparse.ArgumentParser(
-        prog='vibe',
-        description='cmux 호환 vibe CLI — 에이전트 알림/진행률/상태/로그 제어'
+        prog='vibe', 
+        description='🐝 Vibe Coding Hive Mind CLI - 에이전트 상태 및 코덱스(Codex) 제어 도구',
+        epilog='자세한 코덱스 사용법은 "vibe codex guide" 명령어를 실행하거나 CODEX_GUIDE.md를 참조하세요.'
     )
-    parser.add_argument('--agent', '-a', help='에이전트 이름 (기본: 자동 감지)')
-    subparsers = parser.add_subparsers(dest='command', help='사용 가능한 명령어')
+    parser.add_argument('--agent', '-a', help='에이전트 이름')
+    subparsers = parser.add_subparsers(dest='command', help='명령어')
 
-    # notify
+    # notify, set-progress, clear-progress, set-status, clear-status, log, clear-log, sidebar-state
     p_notify = subparsers.add_parser('notify', help='알림 전송')
-    p_notify.add_argument('--title', '-t', required=True, help='알림 제목')
-    p_notify.add_argument('--body', '-b', required=True, help='알림 본문')
-    p_notify.add_argument('--subtitle', '-s', help='부제목')
+    p_notify.add_argument('--title', '-t', required=True)
+    p_notify.add_argument('--body', '-b', required=True)
+    p_notify.add_argument('--subtitle', '-s')
 
-    # set-progress
-    p_progress = subparsers.add_parser('set-progress', help='진행률 설정 (0.0~1.0)')
-    p_progress.add_argument('value', type=float, help='진행률 값 (0.0~1.0)')
-    p_progress.add_argument('--label', '-l', help='진행률 레이블')
+    p_prog = subparsers.add_parser('set-progress', help='진행률 설정')
+    p_prog.add_argument('value', type=float)
+    p_prog.add_argument('--label', '-l')
 
-    # clear-progress
     subparsers.add_parser('clear-progress', help='진행률 제거')
 
-    # set-status
-    p_status = subparsers.add_parser('set-status', help='사이드바 상태 설정')
-    p_status.add_argument('key', help='상태 키 (예: build, deploy)')
-    p_status.add_argument('value', help='상태 값 (예: running, done)')
-    p_status.add_argument('--icon', '-i', help='아이콘 이름')
-    p_status.add_argument('--color', '-c', help='색상 (예: #2ecc71)')
+    p_stat = subparsers.add_parser('set-status', help='상태 설정')
+    p_stat.add_argument('key')
+    p_stat.add_argument('value')
+    p_stat.add_argument('--icon', '-i')
+    p_stat.add_argument('--color', '-c')
 
-    # clear-status
-    p_clear_status = subparsers.add_parser('clear-status', help='사이드바 상태 제거')
-    p_clear_status.add_argument('key', help='제거할 상태 키')
+    p_cstat = subparsers.add_parser('clear-status', help='상태 제거')
+    p_cstat.add_argument('key')
 
-    # log
     p_log = subparsers.add_parser('log', help='로그 추가')
-    p_log.add_argument('message', help='로그 메시지')
-    p_log.add_argument('--level', '-l', default='info',
-                       choices=['info', 'progress', 'success', 'warning', 'error'],
-                       help='로그 레벨 (기본: info)')
-    p_log.add_argument('--source', '-s', help='소스 이름')
+    p_log.add_argument('message')
+    p_log.add_argument('--level', '-l', default='info', choices=['info', 'progress', 'success', 'warning', 'error'])
+    p_log.add_argument('--source', '-s')
 
-    # clear-log
-    subparsers.add_parser('clear-log', help='로그 전체 삭제')
+    subparsers.add_parser('clear-log', help='로그 제거')
+    subparsers.add_parser('sidebar-state', help='상태 조회')
 
-    # sidebar-state
-    subparsers.add_parser('sidebar-state', help='전체 사이드바 상태 조회')
+    # codex
+    p_cdx = subparsers.add_parser('codex', help='코덱스 관리')
+    cdx_s = p_cdx.add_subparsers(dest='codex_action')
+    cdx_s.add_parser('status')
+    cdx_s.add_parser('guide')
+    p_start = cdx_s.add_parser('start'); p_start.add_argument('--id')
+    p_msg = cdx_s.add_parser('msg'); p_msg.add_argument('--to', required=True); p_msg.add_argument('--text', required=True)
 
     args = parser.parse_args()
-
     if not args.command:
         parser.print_help()
         return 1
 
-    # 커맨드 디스패치
-    commands = {
-        'notify': cmd_notify,
-        'set-progress': cmd_set_progress,
-        'clear-progress': cmd_clear_progress,
-        'set-status': cmd_set_status,
-        'clear-status': cmd_clear_status,
-        'log': cmd_log,
-        'clear-log': cmd_clear_log,
-        'sidebar-state': cmd_sidebar_state,
+    cmds = {
+        'notify': cmd_notify, 'set-progress': cmd_set_progress, 'clear-progress': cmd_clear_progress,
+        'set-status': cmd_set_status, 'clear-status': cmd_clear_status, 'log': cmd_log,
+        'clear-log': cmd_clear_log, 'sidebar-state': cmd_sidebar_state, 'codex': cmd_codex
     }
 
-    handler = commands.get(args.command)
-    if handler:
-        return handler(args)
-    else:
-        parser.print_help()
-        return 1
+    handler = cmds.get(args.command)
+    return handler(args) if handler else 1
 
 
 if __name__ == '__main__':

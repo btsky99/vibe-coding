@@ -52,6 +52,12 @@ _PG_BIN = _PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "psql.exe"
 _PG_CTL = _PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "bin" / "pg_ctl.exe"
 _PG_DATA = _PROJECT_ROOT / ".ai_monitor" / "bin" / "pgsql" / "data"
 _PG_LOG = _PROJECT_ROOT / ".ai_monitor" / "data" / "pgsql.log"
+if getattr(sys, 'frozen', False):
+    _DATA_DIR = Path(os.environ.get('APPDATA', Path.home())) / "VibeCoding"
+else:
+    _DATA_DIR = _PROJECT_ROOT / ".ai_monitor" / "data"
+_CONFIG_FILE = _DATA_DIR / "config.json"
+_LEGACY_CONFIG_FILE = _PROJECT_ROOT / ".ai_monitor" / "config.json"
 
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = "postgres"
@@ -318,13 +324,105 @@ def history(limit: int = 20, channel: Optional[str] = None) -> list[dict]:
     return messages
 
 
+def _read_context_file(path: Path, max_chars: int = 1200) -> str:
+    """Read a UTF-8 text file and clip it for prompt-safe bootstrap context."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    if len(text) > max_chars:
+        text = text[: max_chars - 3].rstrip() + "..."
+    return text
+
+
+def _run_context_command(args: list[str], timeout: int = 5, max_chars: int = 1200) -> str:
+    """Run a short local helper command and clip stdout for prompt bootstrap."""
+    try:
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        result = subprocess.run(
+            args,
+            cwd=str(_PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            creationflags=no_window,
+        )
+    except Exception:
+        return ""
+
+    output = (result.stdout or "").strip()
+    if not output:
+        return ""
+    if len(output) > max_chars:
+        output = output[: max_chars - 3].rstrip() + "..."
+    return output
+
+
+def _load_runtime_config() -> dict:
+    """Load per-PC runtime configuration with legacy fallback."""
+    for candidate in (_CONFIG_FILE, _LEGACY_CONFIG_FILE):
+        try:
+            if candidate.exists():
+                return json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    return {}
+
+
+def _build_project_bootstrap(agent_name: str) -> str:
+    """Build a compact project bootstrap block for agents without repo hooks."""
+    if agent_name != "codex":
+        return ""
+
+    sections: list[str] = [
+        "[Execution guardrails]\n"
+        "- Follow RULES.md before making changes.\n"
+        "- Use PROJECT_MAP.md and memory.md to stay aligned with repo direction.\n"
+        "- Keep scope narrow to the assigned task and referenced files.\n"
+        "- Prefer targeted edits plus validation over broad refactors."
+    ]
+
+    docs = [
+        ("Core rules", _PROJECT_ROOT / "RULES.md", 1000),
+        ("Project map", _PROJECT_ROOT / "PROJECT_MAP.md", 1200),
+        ("Long-term memory", _PROJECT_ROOT / "memory.md", 900),
+    ]
+    for label, path, limit in docs:
+        excerpt = _read_context_file(path, max_chars=limit)
+        if excerpt:
+            sections.append(f"[{label}: {path.name}]\n{excerpt}")
+
+    py = sys.executable
+    runtime_commands = [
+        ("Hive summary", [py, str(_SCRIPT_DIR / "orchestrator.py"), "--summary"], 6, 1000),
+        ("Hive analysis", [py, str(_SCRIPT_DIR / "analyze_hive.py")], 6, 1000),
+    ]
+    for label, args, timeout, limit in runtime_commands:
+        output = _run_context_command(args, timeout=timeout, max_chars=limit)
+        if output:
+            sections.append(f"[{label}]\n{output}")
+
+    runtime_config = _load_runtime_config()
+    local_prompt = str(runtime_config.get("codex_boot_prompt") or "").strip()
+    if local_prompt:
+        sections.append(f"[Local codex operator prompt]\n{local_prompt}")
+
+    return "\n\n".join(section for section in sections if section)
+
+
 def build_agent_context(
     agent_name: str,
     *,
     include_unread: bool = True,
     include_debate: bool = True,
+    include_project_bootstrap: bool = False,
     mark_read: bool = True,
     max_messages: int = 5,
+    unread_messages: Optional[list[dict]] = None,
 ) -> str:
     """Build extra prompt context for agents without native inbox hooks.
 
@@ -334,7 +432,7 @@ def build_agent_context(
     sections: list[str] = []
 
     if include_unread:
-        unread = receive(agent_name, mark_read=mark_read)
+        unread = unread_messages if unread_messages is not None else receive(agent_name, mark_read=mark_read)
         if unread:
             lines = []
             for message in unread[:max_messages]:
@@ -349,6 +447,11 @@ def build_agent_context(
         if debate_json:
             sections.append("[Hive debate context]\n" + debate_json)
 
+    if include_project_bootstrap:
+        bootstrap = _build_project_bootstrap(agent_name)
+        if bootstrap:
+            sections.append("[Project bootstrap]\n" + bootstrap)
+
     return "\n\n".join(section for section in sections if section)
 
 
@@ -358,16 +461,20 @@ def inject_agent_context(
     *,
     include_unread: bool = True,
     include_debate: bool = True,
+    include_project_bootstrap: bool = False,
     mark_read: bool = True,
     max_messages: int = 5,
+    unread_messages: Optional[list[dict]] = None,
 ) -> str:
     """Prepend agent inbox/debate context to a task prompt when available."""
     extra = build_agent_context(
         agent_name,
         include_unread=include_unread,
         include_debate=include_debate,
+        include_project_bootstrap=include_project_bootstrap,
         mark_read=mark_read,
         max_messages=max_messages,
+        unread_messages=unread_messages,
     )
     if not extra:
         return task
