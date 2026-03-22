@@ -95,8 +95,13 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success"):
     }
     
     # 1. 서버 API 호출 시도
+    # [2026-03-22] print → sys.stderr로 변경: Gemini CLI가 stdout을 JSON-RPC 통신에
+    # 사용하므로, print가 stdout에 출력되면 function call/response 쌍이 깨져
+    # "number of function response parts" 에러가 발생함.
+    import sys as _sys
+    _log = _sys.stderr.write
     if _call_api('/api/hive/log/pg', data):
-        print(f"[POSTGRES] Task logged via API: {task_summary[:50]}...")
+        _log(f"[POSTGRES] Task logged via API: {task_summary[:50]}...\n")
         return
 
     # 2. 서버 미가동 시 psql 직접 호출 폴백 — parameterized query로 인젝션 방지
@@ -104,9 +109,9 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success"):
         "INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES (%s, %s, %s, %s);",
         (agent_name, _tid, task_summary, status)
     ):
-        print(f"[POSTGRES] Task logged via PSQL: {task_summary[:50]}...")
+        _log(f"[POSTGRES] Task logged via PSQL: {task_summary[:50]}...\n")
     else:
-        print(f"[ERROR] Failed to log task to Postgres.")
+        _log(f"[ERROR] Failed to log task to Postgres.\n")
 
 def log_thought(agent_name: str, skill: str, thought_dict: dict,
                 parent_id: int = None) -> int:
