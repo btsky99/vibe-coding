@@ -124,6 +124,9 @@ import api.agent_api as agent_api
 import api.pty_api as pty_api
 import api.config_api as config_api
 import api.vibe_api as vibe_api
+import api.dispatcher_api as dispatcher_api
+import api.tasks_api as tasks_api
+import api.files_api as files_api
 import string
 import socket
 from collections import deque
@@ -2129,51 +2132,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 # PTY 세션 정리 — Node PTY 서버가 _child_procs에 포함되어 자동 종료됨
                 os._exit(0)
             threading.Thread(target=_delayed_shutdown, daemon=True).start()
-        elif parsed_path.path == '/api/files':
-            # [수정] Windows 경로(드라이브 루트 등) 처리 및 응답 안정성 강화.
-            # 1. 경로 구분자 표준화 및 드라이브 루트(/) 유효성 보정.
-            # 2. 예외 발생 시 빈 배열([])을 안전하게 반환하여 연결 끊김 방지.
-            query = parse_qs(parsed_path.query)
-            target_path = query.get('path', [''])[0].replace('\\', '/')
-
-            # [핵심] 경로가 비어있을 경우 기본값으로 PROJECT_ROOT(문자열) 사용
-            if not target_path:
-                target_path = str(PROJECT_ROOT).replace('\\', '/')
-
-            # 드라이브 루트(예: D:) 처리 보정
-            if target_path and len(target_path) == 2 and target_path[1] == ':':
-                target_path += '/'
-
-            items = []
-            try:
-                # 실제 경로 존재 여부 및 디렉터리 여부 재검증
-                p = Path(target_path)
-                if p.exists() and p.is_dir():
-                    for entry in os.scandir(target_path):
-                        # 숨김 항목 필터링 (주요 설정 파일 제외)
-                        if not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github', '.gitignore', '.env'):
-                            items.append({
-                                "name": entry.name,
-                                "path": entry.path.replace('\\', '/'),
-                                "isDir": entry.is_dir()
-                            })
-            except Exception as e:
-                # 권한 문제 등으로 인한 실패 시 로그 기록 후 빈 목록 반환 (서버 중단 방지)
-                print(f"[ERROR] /api/files failed for {target_path}: {e}")
-
-            # 폴더 우선 정렬
-            try:
-                items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
-            except Exception as e:
-                print(f"[ERROR] /api/files 정렬 실패: {e}")
-
-            body = json.dumps(items).encode('utf-8')
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+        # [2026-03-22] /api/files → files_api.py로 위임됨 (상단 모듈 위임 섹션)
         elif parsed_path.path == '/api/install-skills':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2402,6 +2361,35 @@ class SSEHandler(BaseHTTPRequestHandler):
                 __version__=__version__,
             )
 
+        # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
+        elif parsed_path.path.startswith('/api/dispatcher/'):
+            _params = parse_qs(parsed_path.query)
+            dispatcher_api.handle_get(
+                self, parsed_path.path, _params,
+                SCRIPTS_DIR=SCRIPTS_DIR,
+                list_tasks=list_tasks,
+                current_project_id=_current_project_id(),
+            )
+
+        # ── [모듈 위임] tasks_api — /api/tasks, /api/task-logs ─────────
+        elif parsed_path.path in ('/api/tasks', '/api/tasks/kanban', '/api/task-logs'):
+            _params = parse_qs(parsed_path.query)
+            tasks_api.handle_get(
+                self, parsed_path.path, _params,
+                DATA_DIR=DATA_DIR,
+                list_tasks=list_tasks,
+                current_project_id=_current_project_id(),
+            )
+
+        # ── [모듈 위임] files_api — /api/files, /api/read-file ────────
+        elif parsed_path.path in ('/api/files', '/api/read-file'):
+            _params = parse_qs(parsed_path.query)
+            files_api.handle_get(
+                self, parsed_path.path, _params,
+                PROJECT_ROOT=_current_project_root(),
+                validate_file_path=_validate_file_path,
+            )
+
         elif parsed_path.path == '/api/hive/health/repair':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2491,35 +2479,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             with open(target_path, 'rb') as f:
                 self.wfile.write(f.read())
 
-        elif parsed_path.path == '/api/read-file':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            raw_path = query.get('path', [''])[0]
+        # [2026-03-22] /api/read-file → files_api.py로 위임됨 (상단 모듈 위임 섹션)
 
-            # 경로 순회 방지 — resolve() 후 프로젝트 루트 하위인지 검증
-            try:
-                target_path = _validate_file_path(raw_path)
-            except ValueError as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-                return
-
-            if not target_path.exists() or not target_path.is_file():
-                self.wfile.write(json.dumps({"error": "File not found or invalid path"}).encode('utf-8'))
-                return
-
-            try:
-                # Try reading as UTF-8
-                with open(target_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                self.wfile.write(json.dumps({"content": content}).encode('utf-8'))
-            except UnicodeDecodeError:
-                self.wfile.write(json.dumps({"error": "Binary file cannot be displayed."}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-        
         # [2026-03-22 추가] 서버 로그 뷰어 API — server_error.log + pgsql.log 내용 반환
         # 환경설정(보기 메뉴)에서 로그를 실시간으로 확인하고 클립보드 복사 가능
         elif parsed_path.path == '/api/server-logs':
@@ -2640,81 +2601,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(msgs, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/tasks':
-            # 공유 작업 큐 전체 목록 반환 — 현재 프로젝트 태스크만
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                tasks = list_tasks(project_id=_current_project_id())
-            except Exception as e:
-                print(f"[PG ERROR] /api/tasks list_tasks: {e}")
-                tasks = []
-            self.wfile.write(json.dumps(tasks, ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/tasks/kanban':
-            # 칸반 보드 데이터 — 태스크를 5컬럼으로 그룹화하여 반환
-            # kanban_status 필드 우선, 없으면 status에서 매핑 (pending→todo 하위 호환)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                tasks = list_tasks(project_id=_current_project_id())
-            except Exception as e:
-                print(f"[PG ERROR] /api/tasks/kanban list_tasks: {e}")
-                tasks = []
-            columns: dict = {'todo': [], 'claimed': [], 'in_progress': [], 'review': [], 'done': []}
-            for t in tasks:
-                # kanban_status 우선 적용, 없으면 status 필드에서 변환
-                st = t.get('kanban_status') or t.get('status', 'todo')
-                if st == 'pending':
-                    st = 'todo'
-                if st in columns:
-                    columns[st].append(t)
-                else:
-                    columns['todo'].append(t)
-            total = len(tasks)
-            done_cnt = len(columns['done'])
-            active = total - done_cnt
-            rate = round(done_cnt / total * 100) if total > 0 else 0
-            result = {**columns, 'stats': {'total': total, 'active': active, 'done': done_cnt, 'rate': rate}}
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/task-logs':
-            # task_logs.jsonl에서 최근 로그 반환 — 모니터링 뷰 직접 폴링용
-            # ?agent=claude  ?terminal_id=T1  ?limit=20
-            # SSE 스트림과 달리 JSONL 파일을 직접 읽어 즉시 반환합니다.
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            params    = parse_qs(parsed_path.query)
-            _agent_f  = params.get('agent',       [''])[0].lower()
-            _tid_f    = params.get('terminal_id', [''])[0].upper()
-            _limit    = int(params.get('limit',   ['20'])[0])
-            _log_file = DATA_DIR / 'task_logs.jsonl'
-            _results: list = []
-            if _log_file.exists():
-                _lines = _log_file.read_text(encoding='utf-8').strip().splitlines()
-                for _ln in reversed(_lines[-500:]):
-                    try:
-                        _entry = json.loads(_ln)
-                        # 에이전트 필터 (대소문자 무시)
-                        if _agent_f and _entry.get('agent', '').lower() != _agent_f:
-                            continue
-                        # 터미널 ID 필터 (T1/1 모두 허용)
-                        if _tid_f:
-                            _raw_tid = _entry.get('terminal_id', '')
-                            _norm = f'T{_raw_tid}' if _raw_tid.isdigit() else _raw_tid.upper()
-                            if _norm != _tid_f and _raw_tid.upper() != _tid_f:
-                                continue
-                        _results.append(_entry)
-                        if len(_results) >= _limit:
-                            break
-                    except Exception as e:
-                        pass  # JSONL 개별 행 파싱 실패 허용
-            # 시간순으로 정렬하여 반환 (최신 순 → 오래된 순)
-            self.wfile.write(json.dumps(_results, ensure_ascii=False).encode('utf-8'))
+        # [2026-03-22] /api/tasks, /api/tasks/kanban, /api/task-logs → tasks_api.py로 위임됨
+
         elif parsed_path.path == '/api/kanban/pg-activity':
             # Postgres-First 칸반 데이터: pg_logs에서 최근 8시간 터미널별 활동 조회
             # 응답: { "T1": [{agent, task, status, ts}, ...], "T2": [...], ... }
@@ -2899,85 +2787,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/dispatcher/score':
-            # 디스패처 — 에이전트별 태스크 적합도 점수 조회
-            # [쿼리 파라미터] desc: 태스크 설명, type: 태스크 유형(선택)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                qs = urllib.parse.parse_qs(parsed_path.query)
-                desc = qs.get('desc', [''])[0]
-                task_type = qs.get('type', [None])[0]
+        # [2026-03-22] /api/dispatcher/* → dispatcher_api.py로 위임됨
 
-                sys.path.insert(0, str(SCRIPTS_DIR))
-                import auto_dispatcher as _ad
-                if not task_type:
-                    task_type = _ad.detect_task_type(desc)
-                scores = {name: _ad.score_agent(name, task_type) for name in _ad.AGENT_CAPABILITIES}
-                best = _ad.select_best_agent(task_type)
-                self.wfile.write(json.dumps({
-                    'task_type': task_type,
-                    'description': desc,
-                    'scores': scores,
-                    'best_agent': best,
-                    'capabilities': {
-                        name: cap['strengths']
-                        for name, cap in _ad.AGENT_CAPABILITIES.items()
-                    },
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/dispatcher/status':
-            # 디스패처 — 현재 분배 현황 조회
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                sys.path.insert(0, str(SCRIPTS_DIR))
-                import auto_dispatcher as _ad2
-                stat = _ad2.status()
-                self.wfile.write(json.dumps(stat, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/dispatcher/history':
-            # ── [2026-03-19 추가] 디스패치 히스토리 조회 ──────────────────────────
-            # [설계 의도] 대시보드 "최근 디스패치" 패널이 hive_tasks에서 디스패치 레코드를
-            # 조회할 수 있도록 전용 엔드포인트를 제공합니다.
-            # hive_tasks 테이블에서 created_by='dispatcher' 이고 tags에 'dispatch'가 포함된
-            # 레코드를 최신순으로 반환합니다.
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                tasks = list_tasks(project_id=_current_project_id())
-                # 디스패치 태스크만 필터링 (created_by='dispatcher' 또는 tags에 'dispatch' 포함)
-                dispatch_tasks = [
-                    t for t in tasks
-                    if t.get('created_by') == 'dispatcher'
-                    or 'dispatch' in (t.get('tags') or [])
-                ]
-                # DispatcherPanel.tsx의 DispatchResult 인터페이스에 맞춰 변환
-                history = []
-                for t in dispatch_tasks[:30]:  # 최근 30개만
-                    history.append({
-                        'task_id': t.get('id', ''),
-                        'assigned_to': t.get('assigned_to', ''),
-                        'task_type': t.get('role', '') or (t.get('tags', [''])[1] if len(t.get('tags', [])) > 1 else ''),
-                        'score': t.get('scores', {}).get(t.get('assigned_to', ''), 0) if isinstance(t.get('scores'), dict) else 0,
-                        'verifier': t.get('verifier', None),
-                        'status': t.get('status', 'dispatched'),
-                        'scores': t.get('scores', {}),
-                        'description': t.get('description', ''),
-                        'dispatched_at': t.get('timestamp', ''),
-                    })
-                self.wfile.write(json.dumps(history, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                print(f"[PG ERROR] /api/dispatcher/history: {e}")
-                self.wfile.write(json.dumps([], ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/memory/db-info':
             # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
             # 배포 버전에서 어떤 DB를 바라보고 있는지 UI에서 확인할 수 있게 함
@@ -3307,101 +3118,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
-        if parsed_path.path == '/api/save-file':
-            # [파일 저장] 프론트엔드 VibeEditor/App.tsx 에서 POST로 호출
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                raw_path = data.get('path')
-                content = data.get('content', '')
-
-                # 경로 순회 방지 — resolve() 후 허용된 디렉터리 하위인지 검증
-                target_path = _validate_file_path(raw_path)
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-
-                with open(target_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-
-                print(f"💾 [File Saved] {target_path}")
-                self.wfile.write(json.dumps({"status": "success", "path": str(target_path)}).encode('utf-8'))
-            except ValueError as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            except Exception as e:
-                print(f"❌ [Save Error] {e}")
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/file-rename':
-            # [이름 변경] src -> dest — 경로 순회 방지 적용
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                src = _validate_file_path(data.get('src', ''))
-                dest = _validate_file_path(data.get('dest', ''))
-                os.rename(src, dest)
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except ValueError as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/files/create':
-            # [생성] path, is_dir — 경로 순회 방지 적용
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                p = _validate_file_path(data.get('path', ''))
-                is_dir = data.get('is_dir', False)
-
-                if is_dir:
-                    p.mkdir(parents=True, exist_ok=True)
-                else:
-                    p.parent.mkdir(parents=True, exist_ok=True)
-                    if not p.exists():
-                        p.write_text("", encoding="utf-8")
-
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except ValueError as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/files/delete':
-            # [삭제] path — 경로 순회 방지 적용
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                target_path = _validate_file_path(data.get('path', ''))
-
-                if not target_path.exists():
-                    self.wfile.write(json.dumps({"status": "error", "message": "Path not found"}).encode('utf-8'))
-                    return
-
-                if target_path.is_dir():
-                    shutil.rmtree(target_path)
-                else:
-                    os.remove(target_path)
-
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except ValueError as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+        # ── [모듈 위임 - POST] files_api — /api/save-file, /api/file-rename, /api/files/* ─
+        if parsed_path.path in ('/api/save-file', '/api/file-rename', '/api/files/create', '/api/files/delete'):
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            files_api.handle_post(
+                self, parsed_path.path, _body,
+                validate_file_path=_validate_file_path,
+            )
 
         elif parsed_path.path == '/api/apply-update':
             # [업데이트 적용] — 응답 전송 후 비동기로 exe 교체 실행
@@ -3986,124 +3710,25 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             ok = clear_messages()
             self.wfile.write(json.dumps({'status': 'ok' if ok else 'error'}).encode('utf-8'))
-        elif parsed_path.path == '/api/tasks':
-            # 새 작업 생성 — tasks.json 배열에 추가
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
+        # ── [모듈 위임 - POST] tasks_api — /api/tasks, /api/tasks/update, delete, claim ─
+        elif parsed_path.path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim'):
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            tasks_api.handle_post(
+                self, parsed_path.path, _body,
+                SESSIONS_FILE=SESSIONS_FILE,
+                save_task=save_task, update_task=update_task, delete_task=delete_task,
+                current_project_id=_current_project_id(),
+                PROJECT_ID=PROJECT_ID,
+            )
 
-                now = time.strftime('%Y-%m-%dT%H:%M:%S')
-                # tags 필드 — 리스트 타입 검증 (문자열이면 쉼표 분리)
-                raw_tags = data.get('tags', [])
-                if isinstance(raw_tags, str):
-                    raw_tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
-                task = {
-                    'id': str(int(time.time() * 1000)),
-                    'timestamp': now,
-                    'updated_at': now,
-                    'title': str(data.get('title', '제목 없음')),
-                    'description': str(data.get('description', '')),
-                    'status': 'pending',
-                    'assigned_to': str(data.get('assigned_to', 'all')),
-                    'priority': str(data.get('priority', 'medium')),
-                    'created_by': str(data.get('created_by', 'user')),
-                    # ── 칸반 확장 필드 ──
-                    'kanban_status': str(data.get('kanban_status', 'todo')),
-                    'role': str(data.get('role', '')),
-                    'claimed_by': str(data.get('claimed_by', '')),
-                    'tags': raw_tags,
-                }
-                save_task(task, project_id=PROJECT_ID)
+        # ── [모듈 위임 - POST] dispatcher_api — /api/dispatcher/* ──────
+        elif parsed_path.path.startswith('/api/dispatcher/'):
+            dispatcher_api.handle_post(
+                self, parsed_path.path, data,
+                SCRIPTS_DIR=SCRIPTS_DIR,
+            )
 
-                # SSE 로그에도 반영 (태스크 보드 알림)
-                try:
-                    log_entry = {
-                        'timestamp': now,
-                        'agent': task['created_by'],
-                        'terminal_id': 'TASK_BOARD',
-                        'project': 'hive',
-                        'status': 'success',
-                        'trigger': f"[새 작업] {task['title']} → {task['assigned_to']}",
-                        'ts_start': now,
-                    }
-                    with open(SESSIONS_FILE, 'a', encoding='utf-8') as lf:
-                        lf.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-                except Exception:
-                    pass
-
-                self.wfile.write(json.dumps({'status': 'success', 'task': task}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/tasks/update':
-            # 기존 작업 상태/담당자 등 업데이트
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-
-                task_id = str(data.get('id', ''))
-                updates = {}
-                for key in ('status', 'assigned_to', 'priority', 'title',
-                            'description', 'kanban_status', 'role', 'claimed_by'):
-                    if key in data:
-                        updates[key] = str(data[key])
-                if 'tags' in data:
-                    raw_tags = data['tags']
-                    if isinstance(raw_tags, str):
-                        raw_tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
-                    updates['tags'] = list(raw_tags) if isinstance(raw_tags, list) else []
-                updates['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-                updated_task = update_task(task_id, updates)
-
-                self.wfile.write(json.dumps({'status': 'success', 'task': updated_task}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/tasks/delete':
-            # 작업 삭제 (id 기준 필터링)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-
-                task_id = str(data.get('id', ''))
-                delete_task(task_id)
-
-                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/tasks/claim':
-            # 터미널이 태스크를 Claim — kanban_status=claimed, claimed_by=terminal_id로 업데이트
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-                task_id = str(data.get('id', ''))
-                terminal_id = str(data.get('terminal_id', ''))
-                claimed_task = update_task(task_id, {
-                    'kanban_status': 'claimed',
-                    'claimed_by': terminal_id,
-                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                })
-                self.wfile.write(json.dumps({'status': 'success', 'task': claimed_task}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/memory/sync':
             # APPDATA DB → 현재 프로젝트 로컬 DB 동기화
             # 배포 버전에서 APPDATA DB에 있는 항목을 로컬 DB로 가져옴 (updated_at 기준 최신 우선)
@@ -4440,59 +4065,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/dispatcher/dispatch':
-            # 디스패처 — 태스크를 최적 에이전트에 자동 분배 (POST)
-            # [Body] {"description": "...", "type": "bug_fix", "to": "claude", "priority": "high"}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                sys.path.insert(0, str(SCRIPTS_DIR))
-                import auto_dispatcher as _ad3
-                result = _ad3.dispatch(
-                    description=data.get('description', ''),
-                    task_type=data.get('type'),
-                    assigned_to=data.get('to'),
-                    priority=data.get('priority', 'medium'),
-                    require_verification=data.get('verify', True),
-                )
-                self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/dispatcher/fan-out':
-            # 디스패처 — 여러 태스크 병렬 분배 (POST)
-            # [Body] {"tasks": ["태스크1", "태스크2", ...], "type": "auto"}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                sys.path.insert(0, str(SCRIPTS_DIR))
-                import auto_dispatcher as _ad4
-                tasks = data.get('tasks', [])
-                results = _ad4.fan_out(*tasks, task_type=data.get('type'))
-                self.wfile.write(json.dumps(results, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/dispatcher/verify':
-            # 디스패처 — 크로스 검증 요청 (POST)
-            # [Body] {"task_id": "TASK-...", "summary": "...", "author": "claude"}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                sys.path.insert(0, str(SCRIPTS_DIR))
-                import auto_dispatcher as _ad5
-                result = _ad5.request_verification(
-                    task_id=data.get('task_id', ''),
-                    result_summary=data.get('summary', ''),
-                    author=data.get('author', 'unknown'),
-                )
-                self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        # [2026-03-22] /api/dispatcher/* POST → dispatcher_api.py로 위임됨
         else:
             self.send_response(404)
             self.end_headers()
@@ -4818,11 +4391,45 @@ if __name__ == '__main__':
         except ImportError:
             print("[!] Updater module not found, skipping update check.")
 
-    # 1. Node.js PTY 서버 시작 (node-pty 기반 — pywinpty 대체)
+    # 1. Node.js PTY 서버 시작 + 자동 복구 워치독 (node-pty 기반 — pywinpty 대체)
     # node-pty가 VS Code에서 사용하는 Microsoft 공식 PTY 라이브러리로,
     # ConPTY 기반 Windows 터미널 안정성이 pywinpty보다 우수합니다.
     # 개발 모드: node pty-server.js / 배포 모드: pty-server.exe 자동 감지
+    # [2026-03-22] Claude: 헬스체크 워치독 추가 — PTY 서버 행/크래시 시 자동 재시작
+    _pty_server_state = {'proc': None}  # 현재 PTY 서버 프로세스 핸들 (워치독이 참조, 리스트/딕셔너리로 클로저 우회)
+
+    def _kill_orphan_pty_servers():
+        """시작 전 기존 좀비 PTY 서버 프로세스를 정리합니다.
+        이전 서버가 비정상 종료되면 node pty-server.js 프로세스가 포트를 잡고 남아
+        새 PTY 서버가 다른 포트로 밀려나는 문제를 방지합니다."""
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        try:
+            result = subprocess.run(
+                ['wmic', 'process', 'where',
+                 "CommandLine like '%pty-server.js%' and Name='node.exe'",
+                 'get', 'ProcessId'],
+                capture_output=True, text=True, encoding='utf-8',
+                errors='replace', creationflags=_no_window, timeout=5
+            )
+            for line in result.stdout.strip().splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pid = int(line)
+                    try:
+                        subprocess.run(
+                            ['taskkill', '/F', '/T', '/PID', str(pid)],
+                            capture_output=True, creationflags=_no_window, timeout=5
+                        )
+                        print(f"[PTY Cleanup] 기존 좀비 PTY 서버(PID {pid}) 정리 완료")
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[PTY Cleanup] 좀비 정리 실패 (무시): {e}")
+        # 포트 해제 대기
+        time.sleep(1)
+
     def _start_node_pty_server():
+        """PTY 서버를 시작하고 프로세스 핸들을 반환합니다."""
         pty_server_dir = BASE_DIR / 'pty-server'
         pty_server_exe = pty_server_dir / 'pty-server.exe'
         pty_server_js = pty_server_dir / 'pty-server.js'
@@ -4840,7 +4447,7 @@ if __name__ == '__main__':
             cmd = ['node', str(pty_server_js)]
         else:
             print("[!] PTY 서버 파일을 찾을 수 없습니다. 터미널 기능이 비활성화됩니다.")
-            return
+            return None
 
         try:
             proc = subprocess.Popen(
@@ -4855,6 +4462,7 @@ if __name__ == '__main__':
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
             )
             _child_procs.append(proc)
+            _pty_server_state['proc'] = proc
             print(f"[*] Node PTY Server started (PID {proc.pid}) on port {WS_PORT}")
 
             # PTY 서버 stdout을 백그라운드로 읽어서 로그 출력
@@ -4867,13 +4475,105 @@ if __name__ == '__main__':
                 except Exception:
                     pass
             threading.Thread(target=_read_pty_stdout, daemon=True).start()
+            return proc
 
         except FileNotFoundError:
             print("[!] Node.js가 설치되지 않았습니다. 터미널 기능이 비활성화됩니다.")
+            return None
         except Exception as e:
             print(f"[!] Node PTY Server 시작 실패: {e}")
+            return None
 
+    def _pty_health_check() -> bool:
+        """PTY 서버 /health 엔드포인트에 GET 요청 — 2초 내 응답하면 True."""
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{WS_PORT}/health")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                return data.get('status') == 'ok'
+        except Exception:
+            return False
+
+    def _kill_pty_proc(proc):
+        """행 상태 PTY 프로세스를 강제 종료합니다 (taskkill /T 로 프로세스 트리 전체)."""
+        if proc is None:
+            return
+        try:
+            pid = proc.pid
+            # Windows: 프로세스 트리 전체 강제 종료
+            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            subprocess.run(
+                ['taskkill', '/F', '/T', '/PID', str(pid)],
+                capture_output=True, creationflags=_no_window
+            )
+            print(f"[PTY Watchdog] 행 상태 PTY 서버(PID {pid}) 강제 종료 완료")
+        except Exception as e:
+            print(f"[PTY Watchdog] PTY 프로세스 종료 실패: {e}")
+        # _child_procs 목록에서 제거 (중복 kill 방지)
+        try:
+            _child_procs.remove(proc)
+        except ValueError:
+            pass
+
+    def _pty_watchdog_loop():
+        """30초 간격으로 PTY 서버 헬스체크 — 3회 연속 실패 시 자동 재시작.
+
+        전략:
+        - 30초마다 /health 호출
+        - 3회 연속 실패(90초 무응답) → 프로세스 강제 종료 + 재시작
+        - 재시작 후 10초 대기 (기동 시간 확보)
+        - 재시작 5회 연속 실패 시 간격을 60초로 늘려 리소스 낭비 방지
+        """
+        consecutive_fails = 0
+        restart_fails = 0
+        MAX_FAIL_BEFORE_RESTART = 3
+        MAX_RESTART_FAILS = 5
+
+        # 최초 기동 대기 — PTY 서버가 포트 바인딩할 시간 확보
+        time.sleep(5)
+
+        while True:
+            interval = 60 if restart_fails >= MAX_RESTART_FAILS else 30
+
+            # 1) 프로세스 자체가 죽었는지 확인
+            proc_dead = (_pty_server_state['proc'] is not None and
+                         _pty_server_state['proc'].poll() is not None)
+
+            # 2) 헬스체크
+            if proc_dead:
+                healthy = False
+            else:
+                healthy = _pty_health_check()
+
+            if healthy:
+                consecutive_fails = 0
+                restart_fails = 0  # 정상 응답 → 재시작 실패 카운터 리셋
+            else:
+                consecutive_fails += 1
+                reason = "프로세스 종료됨" if proc_dead else "헬스체크 타임아웃"
+                print(f"[PTY Watchdog] {reason} ({consecutive_fails}/{MAX_FAIL_BEFORE_RESTART})")
+
+                if consecutive_fails >= MAX_FAIL_BEFORE_RESTART:
+                    print(f"[PTY Watchdog] {MAX_FAIL_BEFORE_RESTART}회 연속 실패 → PTY 서버 자동 재시작")
+                    _kill_pty_proc(_pty_server_state['proc'])
+                    _kill_orphan_pty_servers()  # 좀비 PTY도 정리하여 포트 충돌 방지
+                    new_proc = _start_node_pty_server()
+                    if new_proc:
+                        consecutive_fails = 0
+                        restart_fails = 0
+                        time.sleep(10)  # 기동 대기
+                        continue
+                    else:
+                        restart_fails += 1
+                        print(f"[PTY Watchdog] 재시작 실패 ({restart_fails}/{MAX_RESTART_FAILS})")
+
+            time.sleep(interval)
+
+    _kill_orphan_pty_servers()  # 좀비 PTY 프로세스 정리 후 시작
     _start_node_pty_server()
+    # PTY 헬스체크 워치독 데몬 스레드 시작
+    threading.Thread(target=_pty_watchdog_loop, daemon=True,
+                     name='PTY-Watchdog').start()
 
     # Node PTY REST URL 설정 — _get_node_pty_sessions()가 사용
     _NODE_PTY_REST_URL = f"http://127.0.0.1:{WS_PORT}"

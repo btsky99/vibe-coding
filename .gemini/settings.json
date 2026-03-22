@@ -11,17 +11,6 @@
         ]
       }
     ],
-    "AfterAgent": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python D:/vibe-coding/gemini_statusline.py",
-            "timeout": 5000
-          }
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [
@@ -34,31 +23,7 @@
       }
     ]
   },
-  "mcpServers": {
-    "fetch": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-fetch"
-      ]
-    },
-    "sqlite": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-sqlite",
-        "--db-path",
-        "D:/vibe-coding/.ai_monitor/data/hive_mind.db"
-      ]
-    },
-    "vibe-coding": {
-      "command": "D:/vibe-coding/.ai_monitor/venv/Scripts/python.exe",
-      "args": [
-        "D:/vibe-coding/.ai_monitor/bin/mcp_server.py"
-      ],
-      "env": {
-        "PROJECT_ROOT": "D:/vibe-coding"
-      }
-    }
-  },
+  "mcpServers": {},
   "ui": {
     "hideContextSummary": true,
     "footer": {

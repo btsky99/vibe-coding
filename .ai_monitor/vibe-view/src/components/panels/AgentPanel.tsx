@@ -90,6 +90,7 @@ import {
 } from 'lucide-react';
 import FilePathText from '../FilePathText';
 import { API_BASE } from '../../constants';
+import TerminalCardExtracted from './AgentTerminalCard';
 
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
@@ -517,7 +518,11 @@ export function _WorkflowPipeline({
 /** T1~T8 각각의 상태를 TerminalSlot 상단 모니터링 뷰와 동일한 형식으로 표시.
  *  파이프라인 단계 + 현재 작업 + 마지막 출력을 터미널별로 독립 표시합니다.
  *  클릭 시 해당 터미널을 '선택 상태'로 강조합니다. */
-function TerminalCard({
+// [2026-03-22] TerminalCard → AgentTerminalCard.tsx로 분리됨
+// 하위 호환을 위해 래퍼를 유지합니다.
+const TerminalCard = TerminalCardExtracted;
+
+function _TerminalCard_REMOVED({
   id, state, selected, onClick,
 }: {
   id: string;

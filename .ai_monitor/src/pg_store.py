@@ -239,6 +239,34 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         schema_sql = """
         CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+        CREATE TABLE IF NOT EXISTS pg_logs (
+            id BIGSERIAL PRIMARY KEY,
+            ts TIMESTAMPTZ DEFAULT NOW(),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            agent TEXT NOT NULL DEFAULT 'unknown',
+            terminal_id TEXT DEFAULT '',
+            task TEXT NOT NULL DEFAULT '',
+            status TEXT DEFAULT 'success',
+            project_id TEXT DEFAULT '',
+            metadata JSONB DEFAULT '{}'::jsonb
+        );
+        CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs (project_id);
+        CREATE INDEX IF NOT EXISTS idx_pg_logs_ts ON pg_logs (ts DESC);
+        CREATE TABLE IF NOT EXISTS pg_messages (
+            id BIGSERIAL PRIMARY KEY,
+            ts TIMESTAMPTZ DEFAULT NOW(),
+            from_agent TEXT DEFAULT '',
+            to_agent TEXT DEFAULT '',
+            msg_type TEXT DEFAULT 'info',
+            content TEXT DEFAULT '',
+            is_read BOOLEAN DEFAULT FALSE,
+            channel TEXT DEFAULT 'general',
+            metadata JSONB DEFAULT '{}'::jsonb,
+            terminal_id TEXT DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_pg_messages_unread
+            ON pg_messages (to_agent, is_read, ts DESC);
+
         CREATE TABLE IF NOT EXISTS hive_memory (
             key TEXT PRIMARY KEY,
             title TEXT NOT NULL DEFAULT '',
@@ -326,6 +354,29 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         """
         if not execute_raw(schema_sql, timeout=30):
             return False
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS ts TIMESTAMPTZ DEFAULT NOW();")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS agent TEXT NOT NULL DEFAULT 'unknown';")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS terminal_id TEXT DEFAULT '';")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS task TEXT NOT NULL DEFAULT '';")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'success';")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
+        execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;")
+        execute_raw("UPDATE pg_logs SET created_at = COALESCE(created_at, ts, NOW()) WHERE created_at IS NULL;")
+        execute_raw("UPDATE pg_logs SET ts = COALESCE(ts, created_at, NOW()) WHERE ts IS NULL;")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs (project_id);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_pg_logs_ts ON pg_logs (ts DESC);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_pg_logs_created_at ON pg_logs (created_at DESC);")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS ts TIMESTAMPTZ DEFAULT NOW();")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS from_agent TEXT DEFAULT '';")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS to_agent TEXT DEFAULT '';")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS msg_type TEXT DEFAULT 'info';")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS content TEXT DEFAULT '';")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS channel TEXT DEFAULT 'general';")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;")
+        execute_raw("ALTER TABLE pg_messages ADD COLUMN IF NOT EXISTS terminal_id TEXT DEFAULT '';")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_pg_messages_unread ON pg_messages (to_agent, is_read, ts DESC);")
         # 기존 테이블에 project_id 컬럼 없으면 추가 (마이그레이션)
         execute_raw("ALTER TABLE hive_tasks ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';")
         execute_raw("CREATE INDEX IF NOT EXISTS idx_hive_tasks_project ON hive_tasks (project_id);")

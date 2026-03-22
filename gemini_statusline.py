@@ -3,6 +3,13 @@
 # FILE: gemini_statusline.py
 # DESCRIPTION: Gemini CLI 전용 커스텀 상태줄 (Claude 스타일 그리드 완벽 재현)
 # AUTHOR: Gemini (Statusline Architect)
+#
+# REVISION HISTORY:
+# - 2026-03-22 Codex: Gemini 안전모드 적용
+#   - AfterAgent 훅이 stdout에 상태줄을 직접 출력하면 Gemini 디버그 콘솔에
+#     불필요한 Hook system message가 누적되어 실제 API 오류 원인 파악을 방해함.
+#   - 기본 동작을 "무출력"으로 변경하고, 필요할 때만 환경변수로 명시 활성화.
+#   - 활성화 시에도 stdout 대신 stderr로만 기록하여 function/tool 응답 프로토콜을 오염시키지 않음.
 # =============================================================================
 
 import sys
@@ -56,6 +63,14 @@ def format_tokens(n: int) -> str:
     return str(n)
 
 def main():
+    # [안전모드 기본값]
+    # Gemini CLI는 함수/툴 호출 턴에서 stdout 프로토콜이 매우 민감하므로,
+    # 상태줄은 기본적으로 비활성화합니다.
+    # 필요 시 GEMINI_STATUSLINE_MODE=stderr 로 설정하면 stderr에만 출력합니다.
+    mode = os.environ.get("GEMINI_STATUSLINE_MODE", "").strip().lower()
+    if mode not in {"stderr", "legacy"}:
+        return
+
     # 1. 컨텍스트 데이터 로드 (실제 Gemini 세션 정보를 읽어오거나 시뮬레이션)
     # Gemini CLI는 세션 정보를 환경 변수나 특정 파일에 저장할 수 있습니다.
     used_tokens = int(os.environ.get("GEMINI_USED_TOKENS", 12000)) # 예시값
@@ -93,8 +108,11 @@ def main():
     line2 = f"{grid2_colored}   {sep.join(parts)}"
 
     # 최종 출력
-    print(f"\n{line1}")
-    print(f"{line2}\n")
+    # legacy 모드는 과거 동작 호환용(stdout), stderr 모드는 안전모드용입니다.
+    stream = sys.stdout if mode == "legacy" else sys.stderr
+    stream.write(f"\n{line1}\n")
+    stream.write(f"{line2}\n\n")
+    stream.flush()
 
 if __name__ == "__main__":
     main()
