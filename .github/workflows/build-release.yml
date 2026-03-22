@@ -116,6 +116,19 @@ jobs:
           Remove-Item $zipPath -Force
         shell: pwsh
 
+      - name: Build PTY server (node-pty)
+        # [2026-03-22 Claude] node-pty 마이크로서비스 빌드
+        # 1. npm ci로 네이티브 모듈(node-pty) 빌드
+        # 2. 포터블 Node.js 런타임을 함께 번들하여 사용자 PC의 Node 버전 불일치 방지
+        #    CI의 Node 20으로 빌드된 네이티브 모듈은 같은 Node 20 런타임이 필요하므로
+        #    node.exe를 pty-server/ 디렉터리에 복사하여 server.py가 이를 사용하도록 함
+        run: |
+          cd .ai_monitor/pty-server
+          npm ci
+          # 현재 CI Node.js 런타임을 pty-server에 복사 (네이티브 모듈 ABI 호환 보장)
+          cp "$(which node)" ./node.exe
+        shell: bash
+
       - name: Bundle skills into .ai_monitor
         run: |
           xcopy .gemini\skills .ai_monitor\skills /E /I /Y
@@ -144,6 +157,7 @@ jobs:
             --add-data "bin;bin" \
             --add-data "vibe-view/dist;vibe-view/dist" \
             --add-data "api;api" \
+            --add-data "pty-server;pty-server" \
             --add-data "skills;skills" \
             --add-data ".gemini/skills;.gemini/skills" \
             --add-data ".claude/skills;.claude/skills" \
@@ -176,6 +190,7 @@ jobs:
             --add-data "bin;bin" \
             --add-data "vibe-view/dist;vibe-view/dist" \
             --add-data "api;api" \
+            --add-data "pty-server;pty-server" \
             --add-data "skills;skills" \
             --add-data ".gemini/skills;.gemini/skills" \
             --add-data ".claude/skills;.claude/skills" \

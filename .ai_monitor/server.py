@@ -4439,11 +4439,17 @@ if __name__ == '__main__':
         pty_env['HTTP_PORT'] = str(HTTP_PORT)
         pty_env['PROJECT_ROOT'] = str(PROJECT_ROOT)
 
+        # 번들된 node.exe 경로 — CI에서 같은 Node 버전으로 빌드된 런타임 (ABI 호환 보장)
+        bundled_node = pty_server_dir / 'node.exe'
+
         if pty_server_exe.exists():
             # 배포 모드: pkg로 빌드된 단독 실행 파일
             cmd = [str(pty_server_exe)]
+        elif pty_server_js.exists() and bundled_node.exists():
+            # 배포 모드: 번들된 Node.js 런타임으로 실행 (네이티브 모듈 ABI 호환)
+            cmd = [str(bundled_node), str(pty_server_js)]
         elif pty_server_js.exists():
-            # 개발 모드: Node.js로 직접 실행
+            # 개발 모드: 시스템 Node.js로 직접 실행
             cmd = ['node', str(pty_server_js)]
         else:
             print("[!] PTY 서버 파일을 찾을 수 없습니다. 터미널 기능이 비활성화됩니다.")
