@@ -399,13 +399,19 @@ function App() {
       .catch(() => setUpdateChecking(false));
   };
 
-  // 업데이트 적용
+  // 업데이트 적용 — 에러 발생 시 사용자에게 알림 메시지 표시
   const applyUpdate = () => {
     setUpdateApplying(true);
     fetch(`${API_BASE}/api/apply-update`, { method: 'POST' })
       .then(res => res.json())
-      .then(() => setUpdateReady(null))
-      .catch((err) => console.error('[App] fetch error:', err))
+      .then(data => {
+        if (data.success) {
+          setUpdateReady(null);
+        } else {
+          alert(`업데이트 적용 실패: ${data.error || '알 수 없는 오류'}\n경로: ${data.path || '(없음)'}`);
+        }
+      })
+      .catch((err) => alert(`업데이트 요청 실패: ${err}`))
       .finally(() => setUpdateApplying(false));
   };
 

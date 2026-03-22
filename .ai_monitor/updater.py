@@ -274,9 +274,11 @@ def check_and_update(data_dir):
     with open(data_dir / "update_ready.json", "w", encoding="utf-8") as f:
         json.dump(update_info, f)
 
-    # Download to a temp file in the same directory (same filesystem for rename)
-    exe_dir = Path(sys.executable).resolve().parent
-    tmp_path = exe_dir / "vibe-coding.exe.new"
+    # [버그수정 2026-03-22] 다운로드 경로를 DATA_DIR(%APPDATA%\VibeCoding)로 변경.
+    # 이전: exe_dir(설치 폴더, 예: C:\Program Files\VibeCoding)에 저장 시도
+    # → Program Files 폴더는 관리자 권한 없이 쓰기 불가 → PermissionError 발생.
+    # DATA_DIR은 사용자 폴더이므로 항상 쓰기 가능.
+    tmp_path = data_dir / "vibe-coding.exe.new"
 
     if not _download_asset(asset_url, tmp_path, token):
         if tmp_path.exists():
