@@ -1,0 +1,15 @@
+{
+  "name": "vibe-pty-server",
+  "version": "1.0.0",
+  "description": "node-pty 기반 PTY 마이크로서비스 — Vibe Coding 터미널 백엔드",
+  "main": "pty-server.js",
+  "scripts": {
+    "start": "node pty-server.js",
+    "dev": "node --watch pty-server.js"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0",
+    "express": "^4.21.0"
+  }
+}

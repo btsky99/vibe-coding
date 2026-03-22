@@ -85,16 +85,38 @@ _interactive_stages: dict = {}
 # 모든 사용자 지시는 항상 오케스트레이션으로 시작합니다.
 FORCE_ORCHESTRATION = True
 
-# ── PTY 세션 getter (server.py에서 주입) ─────────────────────────────────────
-# server.py의 pty_sessions dict를 직접 임포트하면 순환 의존성이 생기므로,
-# server.py 초기화 시 set_pty_sessions_getter()로 콜백을 주입받아 사용합니다.
-_pty_sessions_getter = None  # callable: () -> dict
+# ── PTY 세션 조회 (Node PTY 서버 REST API) ─────────────────────────────────────
+# [변경 2026-03-22] Python pywinpty 직접 접근 → Node PTY 서버 REST 프록시로 전환.
+# server.py 초기화 시 set_pty_rest_url()로 Node PTY 서버 URL을 주입받습니다.
+import urllib.request
+import urllib.error
+
+_node_pty_url = None  # Node PTY 서버 REST URL (예: http://127.0.0.1:9001)
+
+
+def set_pty_rest_url(url: str) -> None:
+    """Node PTY 서버의 REST 기본 URL을 설정합니다."""
+    global _node_pty_url
+    _node_pty_url = url
 
 
 def set_pty_sessions_getter(getter) -> None:
-    """server.py 초기화 시 호출 — pty_sessions 딕셔너리 접근 콜백을 등록합니다."""
-    global _pty_sessions_getter
-    _pty_sessions_getter = getter
+    """[Deprecated] 하위 호환용 — Node PTY 전환으로 사용하지 않음."""
+    pass
+
+
+def _get_pty_sessions_from_node() -> dict:
+    """Node PTY 서버에서 세션 스냅샷을 REST로 조회합니다.
+    반환 형식: {'T1': {running, agent, ...}, 'T2': {...}, ...}
+    """
+    if not _node_pty_url:
+        return {}
+    try:
+        req = urllib.request.Request(f"{_node_pty_url}/api/pty/sessions")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception:
+        return {}
 
 
 def _json_response(handler, data: dict | list, status: int = 200) -> None:
@@ -558,17 +580,17 @@ def handle_terminals(handler) -> None:
                 terminals[tid]['task'] = task
 
     # ── PTY 세션 병합 — TerminalSlot에서 직접 실행한 Claude/Gemini/Codex 반영 ────
-    # server.py의 pty_sessions는 슬롯 번호(string "1"~"8")를 키로 사용합니다.
+    # [변경 2026-03-22] Node PTY 서버의 REST API에서 세션 스냅샷을 조회합니다.
     # cli_agent._terminals이 idle 상태인 슬롯에 한해, PTY에서 에이전트가 실행 중이면
     # status='running'으로 오버라이드하여 상황판 카드가 표시되도록 합니다.
-    if _pty_sessions_getter is not None:
+    _pty_snap = _get_pty_sessions_from_node()
+    if _pty_snap:
         try:
             import datetime as _dt
-            pty_sessions = _pty_sessions_getter()
             for slot_num in range(1, 9):
                 tid = f'T{slot_num}'
-                info = pty_sessions.get(str(slot_num))
-                if not info:
+                info = _pty_snap.get(tid)
+                if not info or not info.get('running'):
                     continue
                 agent = info.get('agent', '') or ''
                 if not agent:

@@ -250,7 +250,7 @@ export default function TerminalSlot({
         // 재연결 성공 시 카운터 리셋
         wsReconnectAttemptRef.current = 0;
         const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
-        term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+        term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공 \x1b[38;5;245m[node-pty]\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
         // WS 연결 직후 현재 터미널 크기를 PTY에 전달
         // ResizeObserver가 WS 연결 전에 fire됐을 경우 누락된 resize를 보정
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
