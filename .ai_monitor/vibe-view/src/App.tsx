@@ -316,11 +316,17 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 앱 버전 로드 — 서버 project-info에서 동적 로드 (하드코딩 금지)
+  // 앱 버전 + 프로젝트명 로드 — 서버 project-info에서 동적 로드 (하드코딩 금지)
   useEffect(() => {
     fetch(`${API_BASE}/api/project-info`)
       .then(res => res.json())
-      .then(data => { if (data.version) setAppVersion(data.version); })
+      .then(data => {
+        if (data.version) setAppVersion(data.version);
+        // 프로젝트명을 document.title에 반영 — 프로젝트 전환 시 타이틀 갱신
+        if (data.project_name) {
+          document.title = `바이브 코딩 [${data.project_name}]`;
+        }
+      })
       .catch((err) => console.error('[App] fetch error:', err));
   }, []);
 

@@ -14,10 +14,12 @@ REVISION HISTORY:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 from urllib.parse import quote
+from urllib.request import urlopen
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QIcon
@@ -60,10 +62,24 @@ else:
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=dashboard&tab={quote(TAB)}"
 
 
+def _fetch_project_name() -> str:
+    """서버 API에서 현재 프로젝트명을 가져온다. 실패 시 빈 문자열 반환."""
+    try:
+        with urlopen(f"http://localhost:{HTTP_PORT}/api/project-info", timeout=2) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            return data.get('project_name', '')
+    except Exception:
+        return ''
+
+
 class DashboardWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle(TITLE_MAP.get(TAB, TITLE_MAP['agent']))
+        # 프로젝트명을 서버에서 동적으로 가져와 타이틀에 반영
+        base_title = TITLE_MAP.get(TAB, TITLE_MAP['agent'])
+        project_name = _fetch_project_name()
+        title = f"{base_title} [{project_name}]" if project_name else base_title
+        self.setWindowTitle(title)
         # kanban(오케스트레이션 보드)은 기존 kanban_board.py와 동일한 크기로 시작
         w, h = (1440, 860) if TAB == 'kanban' else (1400, 900)
         self.resize(w, h)

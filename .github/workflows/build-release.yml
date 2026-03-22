@@ -137,6 +137,7 @@ jobs:
           pyinstaller --onefile --noconsole ^
             --name vibe-coding-update-${{ steps.version.outputs.ver }} ^
             --icon bin/vibe_final.ico ^
+            --runtime-tmpdir "%%APPDATA%%\VibeCoding\runtime" ^
             --add-data "src;src" ^
             --add-data "bin;bin" ^
             --add-data "vibe-view\dist;vibe-view/dist" ^
@@ -167,6 +168,7 @@ jobs:
           pyinstaller --onefile --console ^
             --name vibe-coding-console-${{ steps.version.outputs.ver }} ^
             --icon bin/vibe_final.ico ^
+            --runtime-tmpdir "%%APPDATA%%\VibeCoding\runtime" ^
             --add-data "src;src" ^
             --add-data "bin;bin" ^
             --add-data "vibe-view\dist;vibe-view/dist" ^
