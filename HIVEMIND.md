@@ -1,21 +1,33 @@
 # HiveMind Status
 
-Updated: `2026-03-22 23:40:19`
+Updated: `2026-03-24 22:14:03`
 
 ## Current Focus
-No open plan tasks remain.
+Open plan tasks:
+- Task 2: 채팅 세션 관리 모듈
+  파일: `.ai_monitor/api/agent_api.py` (기존 파일에 추가)
+  방법: _chat_sessions dict — 터미널별 session_id, 프로세스 핸들, 히스토리 관리.
+- Task 3: ChatSlot.tsx 생성 — 메신저 스타일 채팅 UI
+  파일: `.ai_monitor/vibe-view/src/components/ChatSlot.tsx` (신규)
+  방법: - 헤더: 에이전트 이름 + 모델 선택 드롭다운 + YOLO 토글
+- Task 4: TerminalSlot에 채팅/터미널 모드 토글 추가
+  파일: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx`
+  방법: - 에이전트 선택 카드에 "채팅 모드" / "터미널 모드" 토글 추가
+- Task 5: Vite 빌드 + 동작 테스트
+  파일: `.ai_monitor/vibe-view/`
+  방법: npm run build → dist 생성 → 대시보드에서 채팅 모드 테스트
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/config.json, .ai_monitor/server.py, .geminiignore, hivemind.md, run_gemini.bat (+5 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Current work aligns best with Task 3: ChatSlot.tsx 생성 — 메신저 스타일 채팅 UI. Matched files: .ai_monitor/api/agent_api.py, .ai_monitor/api/config_api.py, .ai_monitor/api/pty_api.py, .ai_monitor/dashboard_window.py, .ai_monitor/pty-server/pty-server.js. Unmatched changes still present: %temp%/, .claude/settings.local.json, docs/terminal3_scroll_issue.md, hivemind.md, run_gemini.bat (+4 more).
 Changed files:
-- .ai_monitor/config.json
+- %temp%/
+- .ai_monitor/api/agent_api.py
+- .ai_monitor/api/config_api.py
+- .ai_monitor/api/pty_api.py
+- .ai_monitor/dashboard_window.py
+- .ai_monitor/pty-server/pty-server.js
+- .ai_monitor/requirements.txt
 - .ai_monitor/server.py
-- .geminiignore
-- hivemind.md
-- run_gemini.bat
-- scripts/agent_launcher.py
-- scripts/agent_shell.py
-- scripts/gemini_output_filter.py
-- ... and 2 more
+- ... and 18 more
 
 ## Agent Flow
 ```mermaid
@@ -29,13 +41,18 @@ graph LR
     claude -->|8 msgs| claude
     all["all"]
     dispatcher -->|8 msgs| all
+    user["user"]
+    user -->|7 msgs| gemini
     codex["codex"]
     codex -->|5 msgs| claude
     claude -->|4 msgs| codex
+    claude -->|4 msgs| user
     dispatcher -->|4 msgs| claude
+    user -->|4 msgs| claude
     dispatcher -->|3 msgs| codex
     gemini -->|3 msgs| claude
     claude -->|2 msgs| all
+    user -->|2 msgs| codex
     claude_T3["claude:T3"]
     claude -->|1 msgs| claude_T3
     T1["T1"]

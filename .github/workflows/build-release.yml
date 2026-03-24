@@ -129,16 +129,9 @@ jobs:
           cp "$(which node)" ./node.exe
         shell: bash
 
-      - name: Bundle skills into .ai_monitor
-        run: |
-          xcopy .gemini\skills .ai_monitor\skills /E /I /Y
-          xcopy .gemini\skills .ai_monitor\.gemini\skills /E /I /Y
-          xcopy .claude\skills .ai_monitor\.claude\skills /E /I /Y
-          xcopy scripts .ai_monitor\scripts /E /I /Y
-          copy GEMINI.md .ai_monitor\GEMINI.md /Y
-          copy CLAUDE.md .ai_monitor\CLAUDE.md /Y
-          copy RULES.md .ai_monitor\RULES.md /Y
-        shell: cmd
+      # [2026-03-24] 배포 범용화: 개발 전용 파일 번들 제거
+      # 제거됨: .gemini/skills, .claude/skills, scripts, GEMINI.md, CLAUDE.md, RULES.md
+      # 설치 버전은 대시보드 GUI + 터미널 + PostgreSQL만 포함
 
       - name: Build exe
         # [2026-03-21 Claude] 경로 수정: server.py가 _MEIPASS/vibe-view/dist/ 에서 프론트엔드를 찾으므로
@@ -149,6 +142,7 @@ jobs:
         run: |
           cd .ai_monitor
           WINPTY="${{ steps.winpty.outputs.path }}"
+          # [2026-03-24] 배포 범용화: 개발 전용 파일 제거 (skills, scripts, .md 지침서)
           pyinstaller --onefile --noconsole \
             --name "vibe-coding-update-${{ steps.version.outputs.ver }}" \
             --icon bin/vibe_final.ico \
@@ -158,21 +152,13 @@ jobs:
             --add-data "vibe-view/dist;vibe-view/dist" \
             --add-data "api;api" \
             --add-data "pty-server;pty-server" \
-            --add-data "skills;skills" \
-            --add-data ".gemini/skills;.gemini/skills" \
-            --add-data ".claude/skills;.claude/skills" \
-            --add-data "scripts;scripts" \
-            --add-data "GEMINI.md;." \
-            --add-data "CLAUDE.md;." \
-            --add-data "RULES.md;." \
-            --add-data "../PROJECT_MAP.md;." \
-            --add-data "../AGENTS.md;." \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
             --add-binary "$WINPTY/OpenConsole.exe;winpty" \
             --hidden-import websockets \
             --hidden-import winpty \
+            --hidden-import psycopg2 \
             server.py
 
       - name: Build exe (console)
@@ -182,6 +168,7 @@ jobs:
         run: |
           cd .ai_monitor
           WINPTY="${{ steps.winpty.outputs.path }}"
+          # [2026-03-24] 배포 범용화: noconsole 빌드와 동일하게 개발 전용 파일 제거
           pyinstaller --onefile --console \
             --name "vibe-coding-console-${{ steps.version.outputs.ver }}" \
             --icon bin/vibe_final.ico \
@@ -191,21 +178,13 @@ jobs:
             --add-data "vibe-view/dist;vibe-view/dist" \
             --add-data "api;api" \
             --add-data "pty-server;pty-server" \
-            --add-data "skills;skills" \
-            --add-data ".gemini/skills;.gemini/skills" \
-            --add-data ".claude/skills;.claude/skills" \
-            --add-data "scripts;scripts" \
-            --add-data "GEMINI.md;." \
-            --add-data "CLAUDE.md;." \
-            --add-data "RULES.md;." \
-            --add-data "../PROJECT_MAP.md;." \
-            --add-data "../AGENTS.md;." \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
             --add-binary "$WINPTY/OpenConsole.exe;winpty" \
             --hidden-import websockets \
             --hidden-import winpty \
+            --hidden-import psycopg2 \
             server.py
 
       - name: Build sub-window EXEs

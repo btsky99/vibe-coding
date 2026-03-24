@@ -682,8 +682,6 @@ def main():
                 log_task("Hive", "[하이브 컨텍스트] 자동 주입 완료 — current-work + 오늘 활동", _TERMINAL_ID)
 
         # [2026-03-22] Self-Reflect 주입 제거 (pg_thoughts 삭제됨)
-        try:
-            pass
 
         # [ITCP 메시지 폴링] PostgreSQL pg_messages에서 Claude에게 온 미읽음 메시지 수신
         # Gemini, Codex 등 다른 터미널 에이전트가 보낸 메시지를 자동으로 컨텍스트에 주입

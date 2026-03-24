@@ -54,8 +54,7 @@ import GitPanel from './components/panels/GitPanel';
 import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
-import DiscordConfigPanel from './components/panels/DiscordConfigPanel';
-import DiscordSettingsModal from './components/DiscordSettingsModal';
+import TelegramPanel from './components/panels/TelegramPanel';
 /* ── 공유 타입 ── */
 import { LogRecord, AgentMessage, MemoryEntry } from './types';
 
@@ -486,12 +485,6 @@ function App() {
     setIsSettingsOpen(true);
   };
 
-  // 디스코드 설정: 새 창(window.open) 대신 앱 내부 모달로 열기
-  // — 새 창이 메인 창 위를 덮어버리는 문제 해결
-  const openDiscordNewWindow = () => {
-    bringSettingsToFront();
-  };
-
   const closeFile = (id: string) => setOpenFiles(prev => prev.filter(f => f.id !== id));
 
   const updateFileContent = (id: string, newContent: string) =>
@@ -595,7 +588,7 @@ function App() {
 
   return (
     <div
-      className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden select-none font-sans flex-col"
+      className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans flex-col"
       onClick={() => setActiveMenu(null)}
     >
       {/* ── 업데이트 알림 배너 (updateReady 상태일 때만 표시) ── */}
@@ -657,7 +650,6 @@ function App() {
             setIsSidebarOpen(true);
           }}
           onOpenSettings={bringSettingsToFront}
-          onOpenDiscordNewWindow={openDiscordNewWindow}
           skillChainStatus={skillChain.status}
           orchWarningCount={orchWarningCount}
           unreadMsgCount={unreadMsgCount}
@@ -722,6 +714,9 @@ function App() {
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} onOpenFilePath={handleOpenFilePath} />
+            ) : activeTab === 'telegram' ? (
+              /* 텔레그램 브릿지 설정 패널 — 봇 토큰 + T1~T8 채팅 ID 관리 */
+              <TelegramPanel />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.
@@ -968,14 +963,6 @@ function App() {
         ))}
       </Suspense>
 
-      {/* ── 디스코드 설정 팝업 (메인 창 내부) ── */}
-      <DiscordSettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        zIndex={settingsZIndex}
-        bringToFront={bringSettingsToFront}
-      />
-
     </div>
   );
 }
@@ -1012,19 +999,17 @@ function DashboardOnlyApp() {
 
   const titleMap: Record<string, string> = {
     agent: 'Vibe Coding Master',
-    discord: 'Discord Bridge Settings',
     messages: 'Messages',
     tasks: 'Tasks',
     memory: 'Shared Memory',
     git: 'Git',
     mcp: 'MCP',
     hive: 'Hive',
+    telegram: 'Telegram Bridge',
   };
 
   const renderPanel = () => {
     switch (tab) {
-      case 'discord':
-        return <DiscordConfigPanel />;
       case 'messages':
         return <MessagesPanel onUnreadCount={() => {}} />;
       case 'tasks':
@@ -1037,6 +1022,8 @@ function DashboardOnlyApp() {
         return <McpPanel />;
       case 'hive':
         return <HivePanel />;
+      case 'telegram':
+        return <TelegramPanel />;
       case 'agent':
       default:
         return <AgentPanel onStatusChange={() => {}} />;

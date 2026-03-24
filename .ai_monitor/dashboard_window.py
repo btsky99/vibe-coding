@@ -44,7 +44,6 @@ except ValueError:
 TAB = (sys.argv[2] if len(sys.argv) > 2 else 'agent').strip().lower() or 'agent'
 TITLE_MAP = {
     'agent': '바이브 코딩',
-    'discord': '바이브 코딩 - Discord 브릿지',
     'messages': '바이브 코딩 - 메시지',
     'tasks': '바이브 코딩 - 태스크',
     'memory': '바이브 코딩 - 공유 메모리',

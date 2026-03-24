@@ -24,6 +24,7 @@ import sys
 import json
 import os
 import io
+import subprocess
 from pathlib import Path
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────
@@ -72,36 +73,27 @@ def _get_path(tool_input: dict) -> str:
             tool_input.get('filename') or '')
 
 
-def main():
-    # stdin에서 이벤트 JSON 수신
-    try:
-        raw = sys.stdin.read()
-        data = json.loads(raw) if raw.strip() else {}
-    except Exception:
-        sys.exit(0)
-
+def _do_log(data: dict):
+    """실제 로깅 로직 — 백그라운드 워커(_bg_worker)에서 호출됩니다."""
     event = data.get('hook_event_name', '')
 
     # ── 터미널 ID 감지 (환경변수 TERMINAL_ID, 기본 T0) ────────────────────
-    terminal_id = os.environ.get('TERMINAL_ID', 'T0')
-    agent_name  = os.environ.get('HIVE_AGENT', 'claude')
+    terminal_id = data.get('_terminal_id', 'T0')
+    agent_name  = data.get('_agent_name', 'claude')
     agent_label = f'{agent_name}:{terminal_id}'
 
     # ── hive_bridge import ──────────────────────────────────────────────
     try:
         from hive_bridge import log_task, log_thought
     except ImportError:
-        sys.exit(0)
+        return
 
     # ── UserPromptSubmit: 작업 시작 시 하이브에 자동 기록 ─────────────────
-    #    핵심: 다른 에이전트가 "이 터미널이 뭘 하고 있는지" 볼 수 있게 하는 것
     if event == 'UserPromptSubmit':
         user_prompt = (data.get('prompt') or data.get('user_prompt') or data.get('content') or data.get('message') or '').strip()
         if user_prompt:
             short_prompt = _short(user_prompt, 120)
-            # pg_logs에 작업 시작 기록
             log_task(agent_label, f'[작업 시작] {short_prompt}')
-            # pg_thoughts에 사고 과정 기록 — 지식 그래프에 표시됨
             log_thought(agent_name, 'task-start', {
                 'type': 'intent',
                 'title': f'[{terminal_id}] 새 작업 수신',
@@ -114,7 +106,6 @@ def main():
         tool_name  = data.get('tool_name', '')
         tool_input = data.get('tool_input') or {}
 
-        # 파일 생성/수정
         if tool_name in ('Write', 'Edit', 'MultiEdit', 'NotebookEdit'):
             fp = _get_path(tool_input)
             rel = _short_path(fp)
@@ -138,7 +129,6 @@ def main():
                     'content': f'변경 전: {old} → 변경 후: {new}'
                 })
 
-        # Bash 명령 실행
         elif tool_name == 'Bash':
             cmd = tool_input.get('command', '').strip()
             if not any(cmd.startswith(p) for p in _SKIP_PREFIXES):
@@ -170,6 +160,48 @@ def main():
             'title': f'세션 종료 [{session_id}]',
             'content': f'stop_reason: {stop_reason}'
         })
+
+
+def main():
+    """stdin에서 이벤트를 읽고, 로깅은 백그라운드 프로세스로 넘긴 뒤 즉시 종료합니다.
+    이렇게 하면 Claude Code UI의 전송 버튼이 hook 완료를 기다리지 않아도 됩니다."""
+    # stdin에서 이벤트 JSON 수신
+    try:
+        raw = sys.stdin.read()
+        data = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        sys.exit(0)
+
+    if not data.get('hook_event_name'):
+        sys.exit(0)
+
+    # ── 환경변수를 data에 주입 (백그라운드 프로세스에서도 사용하기 위해) ────
+    data['_terminal_id'] = os.environ.get('TERMINAL_ID', 'T0')
+    data['_agent_name']  = os.environ.get('HIVE_AGENT', 'claude')
+
+    # ── --bg-worker 모드: 백그라운드에서 실제 로깅 수행 ─────────────────────
+    if '--bg-worker' in sys.argv:
+        _do_log(data)
+        return
+
+    # ── 기본 모드: 백그라운드 프로세스를 spawn하고 즉시 종료 ─────────────────
+    #    Windows에서 CREATE_NO_WINDOW로 detach하여 UI를 블로킹하지 않음
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, __file__, '--bg-worker'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_no_window,
+        )
+        # stdin으로 원본 JSON 전달 후 즉시 닫기
+        proc.stdin.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        proc.stdin.close()
+        # 프로세스 완료를 기다리지 않음 — 즉시 종료
+    except Exception:
+        # spawn 실패 시 동기 폴백 (최소한 로그는 남기기)
+        _do_log(data)
 
 
 if __name__ == '__main__':

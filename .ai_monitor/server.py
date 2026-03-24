@@ -40,7 +40,7 @@ REVISION HISTORY:
 #   - ensure_postgres_running(): 배포 버전 최초 실행 시 initdb + pg_ctl start 자동 수행
 #   - 서버 기동 시 ensure_postgres_running() 호출하여 PG 자동 초기화/시작
 # [2026-03-11] - Claude (frozen EXE 무한 창 생성 버그 수정 v3.7.47)
-#   - run_watchdog/run_discord_bridge/run_heal_daemon: sys.executable → _python_runner_cmds()[0]
+#   - run_watchdog/run_telegram_bridge/run_heal_daemon: sys.executable → _python_runner_cmds()[0]
 #   - frozen 모드에서 sys.executable = EXE 자신이므로 subprocess 실행 시 EXE가 무한 재귀 생성되던 버그
 #   - Python 인터프리터 미탐색 시 해당 데몬 스킵(경고 출력)
 # [2026-03-08] - Claude (칸반 네이티브 창 실행 API 추가)
@@ -122,7 +122,6 @@ import api.git_api as git_api
 import api.memory_api as memory_api
 import api.agent_api as agent_api
 import api.pty_api as pty_api
-import api.config_api as config_api
 import api.vibe_api as vibe_api
 import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
@@ -930,7 +929,9 @@ else:
     PROJECT_ROOT = BASE_DIR.parent
 
 # [추가] 내부 스크립트 경로 결정 (개발 vs 배포)
-SCRIPTS_DIR = (BASE_DIR / 'scripts') if getattr(sys, 'frozen', False) else (PROJECT_ROOT / 'scripts')
+# [2026-03-24] 배포 범용화: frozen 모드에서 scripts 폴더가 없을 수 있음 (개발 전용)
+_scripts_candidate = (BASE_DIR / 'scripts') if getattr(sys, 'frozen', False) else (PROJECT_ROOT / 'scripts')
+SCRIPTS_DIR = _scripts_candidate if _scripts_candidate.exists() else None
 # Claude Code 프로젝트 디렉터리 명명 규칙(: 제거, /·\ → --) 과 동일하게 인코딩
 _proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
 PROJECT_ID: str = _proj_raw.lstrip('-') or 'default'   # e.g. "D--vibe-coding"
@@ -1766,6 +1767,181 @@ def _send_json_response(handler, data, status=200):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
+    # ── Telegram 설정 API 핸들러 ──────────────────────────────────────
+
+    def _handle_telegram_config_get(self):
+        """GET /api/config/telegram — .env에서 멀티봇 텔레그램 설정 읽기.
+
+        [반환 형식]
+        {
+          "tokens": {"T1": "123...", "T2": "456..."},  // 마스킹된 봇 토큰
+          "group_chat_id": "-100123...",
+          "bot_statuses": {"T1": "online", "T2": "offline"}  // 브릿지 실행 시
+        }
+        """
+        env_file = PROJECT_ROOT / ".env"
+        config = {"tokens": {}, "group_chat_id": "", "bot_statuses": {}}
+        try:
+            if env_file.exists():
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("TELEGRAM_BOT_T") and "=" in line:
+                        # TELEGRAM_BOT_T1=token → tokens["T1"] = "token..."(마스킹)
+                        key = line.split("=", 1)[0].replace("TELEGRAM_BOT_", "")
+                        val = line.split("=", 1)[1].strip()
+                        if val:
+                            config["tokens"][key] = val[:8] + "..." if len(val) > 8 else val
+                    elif line.startswith("TELEGRAM_GROUP_CHAT_ID="):
+                        val = line.split("=", 1)[1].strip()
+                        config["group_chat_id"] = val
+            # 브릿지 프로세스 실행 여부 확인
+            bridge_running = False
+            for proc in _child_procs:
+                try:
+                    if proc.poll() is None and hasattr(proc, 'args'):
+                        args_str = str(getattr(proc, 'args', ''))
+                        if 'telegram_bridge' in args_str:
+                            bridge_running = True
+                            break
+                except Exception:
+                    pass
+            # 브릿지 실행 중이면 토큰이 있는 봇은 online 표시
+            if bridge_running:
+                for key in config["tokens"]:
+                    config["bot_statuses"][key] = "online"
+        except Exception:
+            pass
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json;charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+        self.end_headers()
+        self.wfile.write(json.dumps(config, ensure_ascii=False).encode('utf-8'))
+
+    def _handle_telegram_config_post(self):
+        """POST /api/config/telegram — .env에 멀티봇 텔레그램 설정 저장.
+
+        [요청 형식]
+        {
+          "tokens": {"T1": "full_token_1", "T2": "full_token_2"},
+          "group_chat_id": "-100123456789"
+        }
+
+        [동작]
+        .env에서 TELEGRAM_ 접두사 라인을 모두 제거 후 새로운 멀티봇 형식으로 재작성.
+        마스킹된 토큰("123...") 값은 무시하고 기존 값 유지.
+        """
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length > 0 else {}
+            tokens = body.get("tokens", {})
+            group_chat_id = body.get("group_chat_id", "").strip()
+
+            env_file = PROJECT_ROOT / ".env"
+
+            # 기존 .env에서 현재 토큰값 로드 (마스킹 값 복원용)
+            existing_tokens = {}
+            existing_group = ""
+            existing_lines = []
+            if env_file.exists():
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
+                        key = stripped.split("=", 1)[0].replace("TELEGRAM_BOT_", "")
+                        val = stripped.split("=", 1)[1].strip()
+                        existing_tokens[key] = val
+                    elif stripped.startswith("TELEGRAM_GROUP_CHAT_ID="):
+                        existing_group = stripped.split("=", 1)[1].strip()
+                    elif not stripped.startswith("TELEGRAM_"):
+                        existing_lines.append(line)
+
+            # 텔레그램 멀티봇 설정 추가
+            existing_lines.append("")
+            existing_lines.append("# Telegram Multi-Bot Bridge")
+            for tid in range(1, 9):
+                key = f"T{tid}"
+                new_val = tokens.get(key, "").strip()
+                # 마스킹된 값("123...")이면 기존 값 유지
+                if new_val.endswith("..."):
+                    new_val = existing_tokens.get(key, "")
+                existing_lines.append(f"TELEGRAM_BOT_{key}={new_val}")
+            # 그룹 채팅 ID
+            final_group = group_chat_id if group_chat_id else existing_group
+            existing_lines.append(f"TELEGRAM_GROUP_CHAT_ID={final_group}")
+
+            env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "saved"}).encode('utf-8'))
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
+    def _handle_telegram_test(self):
+        """POST /api/telegram/test — 멀티봇 텔레그램 테스트 메시지 전송.
+
+        [동작]
+        .env에서 첫 번째 유효한 봇 토큰을 찾아 getMe API로 봇 이름 확인.
+        그룹 채팅이 있으면 그룹에, 없으면 봇 자체 API로 연결 테스트.
+        """
+        try:
+            env_file = PROJECT_ROOT / ".env"
+            # 첫 번째 유효한 봇 토큰 찾기
+            first_token = ""
+            first_tid = ""
+            group_id = ""
+            if env_file.exists():
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
+                        key = stripped.split("=", 1)[0].replace("TELEGRAM_BOT_", "")
+                        val = stripped.split("=", 1)[1].strip()
+                        if val and not first_token:
+                            first_token = val
+                            first_tid = key
+                    elif stripped.startswith("TELEGRAM_GROUP_CHAT_ID="):
+                        group_id = stripped.split("=", 1)[1].strip()
+
+            if not first_token:
+                raise ValueError("봇 토큰이 하나도 설정되지 않았습니다")
+
+            import urllib.request
+            # getMe로 봇 이름 확인
+            url = f"https://api.telegram.org/bot{first_token}/getMe"
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                me = json.loads(resp.read().decode("utf-8"))
+
+            bot_name = me.get("result", {}).get("first_name", first_tid)
+            results = {"bot_name": bot_name, "tid": first_tid}
+
+            # 그룹 채팅이 있으면 테스트 메시지 전송
+            if group_id:
+                test_msg = f"🐝 {bot_name} ({first_tid}) 연결 테스트 성공!"
+                send_url = f"https://api.telegram.org/bot{first_token}/sendMessage"
+                data = json.dumps({"chat_id": group_id, "text": test_msg}).encode("utf-8")
+                req = urllib.request.Request(send_url, data=data, method="POST")
+                req.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    send_result = json.loads(resp.read().decode("utf-8"))
+                results["group_sent"] = send_result.get("ok", False)
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "sent", **results}).encode('utf-8'))
+        except Exception as e:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "failed", "error": str(e)}).encode('utf-8'))
+
     def _cors_origin(self) -> str:
         """CORS Origin을 localhost/127.0.0.1만 허용하도록 반환합니다.
 
@@ -2153,9 +2329,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if gemini_src.exists():
                         shutil.copytree(gemini_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
                     
-                    # scripts 복사
+                    # scripts 복사 — 배포 범용화: SCRIPTS_DIR이 None이면 skip
                     scripts_src = SCRIPTS_DIR
-                    if scripts_src.exists():
+                    if scripts_src and scripts_src.exists():
                         shutil.copytree(scripts_src, Path(target_path) / "scripts", dirs_exist_ok=True)
                         
                     # GEMINI.md 복사
@@ -2348,8 +2524,10 @@ class SSEHandler(BaseHTTPRequestHandler):
             agent_api.handle_get(self, parsed_path.path)
         elif parsed_path.path.startswith('/api/pty/'):
             pty_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
-        elif parsed_path.path == '/api/config/discord':
-            config_api.handle_get_config(self)
+
+        # ── Telegram 설정 API ──────────────────────────────────────────
+        elif parsed_path.path == '/api/config/telegram':
+            self._handle_telegram_config_get()
 
         # ── [모듈 위임] memory_api — /api/memory, /api/project-info ──────
         elif parsed_path.path in ('/api/memory', '/api/project-info'):
@@ -2396,6 +2574,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
+                if not SCRIPTS_DIR:
+                    raise Exception('설치 버전에서는 워치독 기능을 사용할 수 없습니다')
                 watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
                 # CREATE_NO_WINDOW: Python 서브프로세스 콘솔 창 방지
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
@@ -2640,6 +2820,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
+                if not SCRIPTS_DIR:
+                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
                 _orch_dir = str(SCRIPTS_DIR)
                 if _orch_dir not in sys.path:
                     sys.path.insert(0, _orch_dir)
@@ -2866,6 +3048,14 @@ class SSEHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+
+        # ─── Telegram 설정 저장 + 테스트 ───────────────────────────────────
+        if path == '/api/config/telegram':
+            self._handle_telegram_config_post()
+            return
+        elif path == '/api/telegram/test':
+            self._handle_telegram_test()
+            return
 
         # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
         # window.open() 대신 PySide6 네이티브 프로세스를 직접 실행하여
@@ -3520,9 +3710,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
                     cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title [Claude Code] && echo Launching Claude Code... && claude{yolo_flag}"'
                 elif agent == 'gemini':
-                    gemini_mode = "yolo" if is_yolo else "normal"
+                    yolo_flag = " --yolo" if is_yolo else ""
                     gemini_bat = str(PROJECT_ROOT / 'run_gemini.bat')
-                    cmd = f'start "Gemini CLI" cmd.exe /k ""{gemini_bat}" {gemini_mode} --cwd "{_safe_dir}""'
+                    cmd = f'start "Gemini CLI" cmd.exe /k ""{gemini_bat}"{yolo_flag} --cwd "{_safe_dir}""'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
                     model_name = _codex_main_model()
@@ -3768,6 +3958,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 image_b64 = data.get('image', '')
                 if not image_b64:
                     self.wfile.write(json.dumps({'error': 'image (base64) is required'}).encode('utf-8'))
+                elif not SCRIPTS_DIR:
+                    self.wfile.write(json.dumps({'error': '설치 버전에서는 스크린샷 분석 기능을 사용할 수 없습니다'}).encode('utf-8'))
                 else:
                     scripts_dir = str(SCRIPTS_DIR)
                     if scripts_dir not in sys.path:
@@ -3977,7 +4169,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     if not gemini_skills_src.exists():
                         gemini_skills_src = _proj / '.gemini' / 'skills'
                     if not gemini_skills_src.exists():
-                        raise Exception('내장 Gemini 스킬을 찾을 수 없습니다 (.gemini/skills/)')
+                        raise Exception('설치 버전에서는 Gemini 스킬이 포함되지 않습니다. 소스 개발 환경에서 사용하세요.')
                     target_dir = _proj / '.gemini' / 'skills'
                     # 소스와 대상이 다를 때만 복사 (설치 버전에서 실제 파일 배포)
                     if gemini_skills_src.resolve() != target_dir.resolve():
@@ -4036,6 +4228,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 status = body.get('status', 'done')
                 summary = body.get('summary', '')
                 terminal_id = int(body.get('terminal_id', 0))
+                if not SCRIPTS_DIR:
+                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
                 _orch_dir = str(SCRIPTS_DIR)
                 if _orch_dir not in sys.path:
                     sys.path.insert(0, _orch_dir)
@@ -4052,6 +4246,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
+                if not SCRIPTS_DIR:
+                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
                 # scripts/orchestrator.py를 subprocess로 실행
                 orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
                 result = subprocess.run(
@@ -4105,7 +4301,7 @@ def _get_node_pty_sessions() -> dict:
 # _child_procs를 통해 종료 시 자동 kill됩니다.
 _REMOVED_PTY_HANDLER = True  # 마커 — 참조 점검용
 
-# 워치독/Discord/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
+# 워치독/Telegram/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
 # — X 버튼 종료 시 이 목록을 순회하여 모두 taskkill로 강제 종료
 _child_procs: list = []
 
@@ -4114,7 +4310,7 @@ def _cleanup_child_procs():
     """_child_procs 목록에 등록된 모든 서브프로세스를 강제 종료합니다.
 
     Windows 환경에서 부모 프로세스가 os._exit(0)으로 종료돼도
-    자식 프로세스(hive_watchdog, heal_daemon, discord_bridge 등)는
+    자식 프로세스(hive_watchdog, heal_daemon, telegram_bridge 등)는
     자동으로 죽지 않아 좀비로 남습니다.
     'taskkill /F /T /PID'로 프로세스 트리 전체를 강제 종료합니다.
     """
@@ -4601,6 +4797,8 @@ if __name__ == '__main__':
     # 하이브 워치독(Watchdog) 엔진 실행
     # --data-dir 인자로 실제 DATA_DIR 전달 — 설치 버전에서 경로 오탐 방지
     def run_watchdog():
+        if not SCRIPTS_DIR:
+            return
         watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
             # [버그수정] frozen(EXE) 모드에서 sys.executable = EXE 자신 → subprocess로 실행 시
@@ -4625,34 +4823,71 @@ if __name__ == '__main__':
             _child_procs.append(proc)
     threading.Thread(target=run_watchdog, daemon=True).start()
 
-    # Discord 브릿지 자동 시작: .env에 DISCORD_BOT_TOKEN이 설정된 경우에만 실행
-    # 터미널 #1~8 Discord 채널에서 지시 입력 → cli_agent.py 자동 실행 (원격 자율 에이전트)
-    def run_discord_bridge():
-        discord_script = SCRIPTS_DIR / "discord_bridge.py"
-        env_file = PROJECT_ROOT / ".env"
-        discord_log = DATA_DIR / "discord_bridge.log"
-        if not discord_script.exists():
+    # Telegram 브릿지 자동 시작: .env에 TELEGRAM_BOT_T{N} 토큰이 1개 이상 설정된 경우 실행
+    # 에이전트 간 대화를 텔레그램 그룹 채팅으로 미러링 + 사용자 원격 개입 지원
+    _tg_bridge_launched = [False]  # 서버 인스턴스 내 1회만 실행 보장 (mutable 리스트로 closure 회피)
+    def run_telegram_bridge():
+        if _tg_bridge_launched[0]:
             return
-        # .env 파일에 DISCORD_BOT_TOKEN이 있을 때만 시작
+        _tg_bridge_launched[0] = True
+        if not SCRIPTS_DIR:
+            return
+        tg_script = SCRIPTS_DIR / "telegram_bridge.py"
+        env_file = PROJECT_ROOT / ".env"
+        tg_log = DATA_DIR / "telegram_bridge.log"
+        if not tg_script.exists():
+            return
+        # 중복 실행 방지: telegram_bridge.py 자체에 PID lock이 있으므로
+        # 서버에서는 PID 파일 존재 + 프로세스 생존만 빠르게 체크
+        tg_pid_file = DATA_DIR / "telegram_bridge.pid"
+        if tg_pid_file.exists():
+            try:
+                old_pid = int(tg_pid_file.read_text().strip())
+                check = subprocess.run(
+                    ['tasklist', '/FI', f'PID eq {old_pid}', '/NH'],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=0x08000000,
+                )
+                if str(old_pid) in check.stdout and 'python' in check.stdout.lower():
+                    print(f"[*] Telegram Bridge 이미 실행 중 (PID={old_pid}) — 스킵")
+                    return
+                else:
+                    tg_pid_file.unlink(missing_ok=True)
+            except Exception:
+                tg_pid_file.unlink(missing_ok=True)
         try:
             env_content = env_file.read_text(encoding='utf-8') if env_file.exists() else ""
-            if 'DISCORD_BOT_TOKEN' not in env_content:
+            # 멀티봇 형식(TELEGRAM_BOT_T1~T8) 또는 레거시(TELEGRAM_BOT_TOKEN) 확인
+            has_token = False
+            for line in env_content.splitlines():
+                stripped = line.strip()
+                # 멀티봇: TELEGRAM_BOT_T1=xxx ~ TELEGRAM_BOT_T8=xxx
+                if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
+                    token_val = stripped.split("=", 1)[1].strip()
+                    if token_val:
+                        has_token = True
+                        break
+                # 레거시 호환: TELEGRAM_BOT_TOKEN=xxx
+                elif stripped.startswith("TELEGRAM_BOT_TOKEN="):
+                    token_val = stripped.split("=", 1)[1].strip()
+                    if token_val:
+                        has_token = True
+                        break
+            if not has_token:
                 return
         except Exception:
             return
-        # [버그수정] frozen 모드에서 sys.executable = EXE → 실제 Python 인터프리터 탐색
         _python_cmds = _python_runner_cmds()
         if not _python_cmds:
-            print("[!] run_discord_bridge: Python 인터프리터를 찾을 수 없어 Discord 브릿지 스킵")
+            print("[!] run_telegram_bridge: Python 인터프리터를 찾을 수 없어 Telegram 브릿지 스킵")
             return
         python_exe = _python_cmds[0]
         child_env = os.environ.copy()
         child_env['VIBE_SERVER_PORT'] = str(HTTP_PORT)
-        discord_log.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = open(discord_log, 'a', encoding='utf-8')
-        # Discord 브릿지 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
+        tg_log.parent.mkdir(parents=True, exist_ok=True)
+        log_handle = open(tg_log, 'a', encoding='utf-8')
         proc = subprocess.Popen(
-            [python_exe, str(discord_script)],
+            [python_exe, str(tg_script)],
             cwd=str(PROJECT_ROOT),
             stdout=log_handle,
             stderr=log_handle,
@@ -4663,11 +4898,18 @@ if __name__ == '__main__':
         )
         proc._vibe_log_handle = log_handle
         _child_procs.append(proc)
-        print("[*] Discord Bridge 자동 시작됨")
-    threading.Thread(target=run_discord_bridge, daemon=True).start()
+        # PID 파일 저장 (중복 실행 방지용)
+        try:
+            tg_pid_file.write_text(str(proc.pid))
+        except Exception:
+            pass
+        print(f"[*] Telegram Bridge 자동 시작됨 (PID={proc.pid})")
+    threading.Thread(target=run_telegram_bridge, daemon=True).start()
 
     # 자기치유 데몬 자동 시작: 5분마다 task_logs 패턴 분석 → 반복 오류 자동 치유
     def run_heal_daemon():
+        if not SCRIPTS_DIR:
+            return
         heal_script = SCRIPTS_DIR / "heal_daemon.py"
         if heal_script.exists():
             # [버그수정] frozen 모드에서 sys.executable = EXE → 실제 Python 인터프리터 탐색
@@ -4694,6 +4936,8 @@ if __name__ == '__main__':
     # [2026-03-18] Claude: P6 — 에이전트 간 텍스트 직접 주입을 위한 MUX 데몬.
     # 바이브 코딩 서버 시작 시 자동 기동, 종료 시 자동 정리.
     def run_mux_server():
+        if not SCRIPTS_DIR:
+            return
         mux_script = SCRIPTS_DIR / "vibe_mux.py"
         if mux_script.exists():
             _python_cmds = _python_runner_cmds()
@@ -4845,7 +5089,7 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
         # X 버튼으로 창이 닫힘 → PTY 자식 프로세스 먼저 kill → HTTP 서버 소켓 해제 → 프로세스 종료
         print("[*] GUI 창이 닫혔습니다. 좀비 프로세스 방지 — 모든 자식 프로세스 정리 중...")
         # [제거됨] PTY 세션 정리는 Node PTY 서버 자체 처리
-        _cleanup_child_procs()               # hive_watchdog / heal_daemon / discord_bridge 종료
+        _cleanup_child_procs()               # hive_watchdog / heal_daemon / telegram_bridge 종료
         try:
             server.shutdown()                # HTTP 요청 처리 스레드 정지
             server.server_close()            # 포트 소켓 해제 (TIME_WAIT 방지)
@@ -4869,7 +5113,7 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
         except KeyboardInterrupt:
             print("[*] Ctrl+C 감지 — PTY 세션 및 서버 정리 후 종료합니다.")
             pass  # [제거됨] PTY 세션 정리는 Node PTY 서버 자체 처리
-            _cleanup_child_procs()           # 좀비 방지: watchdog/heal/discord 종료
+            _cleanup_child_procs()           # 좀비 방지: watchdog/heal/telegram 종료
             try:
                 server.shutdown()
                 server.server_close()

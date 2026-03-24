@@ -37,6 +37,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { API_BASE, WS_PORT, Shortcut, defaultShortcuts, SLASH_COMMANDS } from '../constants';
 import { LogRecord, AgentMessage, Task } from '../types';
+import ChatSlot from './ChatSlot';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
 
@@ -85,6 +86,11 @@ export default function TerminalSlot({
   const [showShortcutEditor, setShowShortcutEditor] = useState(false);
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+
+  // 채팅 모드 — true이면 ChatSlot 렌더링, false이면 기존 PTY 터미널
+  const [isChatMode, setIsChatMode] = useState<boolean>(() => {
+    return localStorage.getItem('chat_mode_T' + (slotId + 1)) === 'true';
+  });
 
   // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
   // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
@@ -863,6 +869,16 @@ export default function TerminalSlot({
             </div>
           </div>
         </div>
+      ) : isChatMode ? (
+        /* ── 채팅 모드: ChatSlot 렌더링 ── */
+        <ChatSlot
+          slotId={slotId}
+          currentPath={currentPath}
+          onSwitchToTerminal={() => {
+            setIsChatMode(false);
+            localStorage.setItem('chat_mode_' + terminalId, 'false');
+          }}
+        />
       ) : (
         <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
           {/* 중앙 에이전트 선택 카드 UI */}
@@ -986,6 +1002,20 @@ export default function TerminalSlot({
                 </div>
               </motion.div>
 
+              {/* 채팅 모드 전환 버튼 — 에이전트 카드 하단 (flex row 안) */}
+              <motion.button
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                onClick={() => {
+                  setIsChatMode(true);
+                  localStorage.setItem('chat_mode_' + terminalId, 'true');
+                }}
+                className="flex items-center justify-center gap-2 px-4 py-6 bg-blue-600/10 hover:bg-blue-600/30 text-blue-400 rounded-2xl text-xs font-black transition-all border border-blue-500/20 shadow-lg shadow-blue-500/10 min-w-[80px]"
+              >
+                <MessageSquare className="w-5 h-5" />
+                <span>채팅<br/>모드</span>
+              </motion.button>
             </div>
           </div>
 

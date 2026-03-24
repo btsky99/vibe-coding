@@ -51,7 +51,6 @@ FILE_DESCRIPTIONS = {
     "api/git_api.py": "Git 저장소 관리 API (/api/git/*)",
     "api/memory_api.py": "메모리/지식 저장소 API (/api/memory/*)",
     "api/pty_api.py": "PTY 터미널 제어 API (/api/pty/*)",
-    "api/config_api.py": "Discord 설정 관리 API",
     "api/dispatcher_api.py": "디스패처 API (/api/dispatcher/*) — server.py에서 분리",
     "api/tasks_api.py": "태스크 API (/api/tasks/*) — server.py에서 분리",
     "api/files_api.py": "파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리",

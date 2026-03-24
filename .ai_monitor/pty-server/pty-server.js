@@ -569,6 +569,35 @@ app.post('/api/pty/terminate/:id', (req, res) => {
 });
 
 /**
+ * POST /api/pty/write/:id
+ * 특정 세션의 PTY에 텍스트를 직접 입력합니다.
+ * body: { "text": "입력할 텍스트" }
+ * 텔레그램 브릿지에서 기존 터미널의 Claude Code에 메시지를 주입하는 데 사용.
+ */
+app.post('/api/pty/write/:id', (req, res) => {
+  let target = req.params.id.toUpperCase();
+  if (target.startsWith('T')) target = target.substring(1);
+
+  const info = ptySessions.get(target);
+  if (!info || !info.pty) {
+    return res.status(404).json({ error: 'not_running', terminal_id: `T${target}` });
+  }
+
+  const text = req.body && req.body.text;
+  if (!text) {
+    return res.status(400).json({ error: 'missing_text' });
+  }
+
+  try {
+    // 텍스트 + Enter 키 전송 (Claude Code 프롬프트에 입력)
+    info.pty.write(text + '\r\n');
+    res.json({ status: 'written', terminal_id: `T${target}`, length: text.length });
+  } catch (err) {
+    res.status(500).json({ error: 'write_failed', detail: err.message });
+  }
+});
+
+/**
  * GET /health
  * 헬스체크 엔드포인트 — Python 서버가 Node PTY 서버 생존 확인용
  */

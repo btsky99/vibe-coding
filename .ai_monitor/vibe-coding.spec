@@ -14,18 +14,18 @@ a = Analysis(
     ['server.py'],
     pathex=[],
     binaries=winpty_binaries,
+    # [2026-03-24] 배포 범용화: 개발 전용 파일 제거
+    # 제거됨: .gemini/skills, GEMINI.md, CLAUDE.md, RULES.md, PROJECT_MAP.md, scripts
+    # 설치 버전은 대시보드 GUI + 터미널 + PostgreSQL만 포함
     datas=[
         ('src', 'src'),
         ('bin', 'bin'),
-        ('vibe-view/dist', 'dist'),
-        ('../.gemini/skills', '.gemini/skills'),
-        ('../GEMINI.md', '.'),
-        ('../CLAUDE.md', '.'),
-        ('../RULES.md', '.'),
-        ('../PROJECT_MAP.md', '.'),
-        ('../scripts', 'scripts'),
+        ('vibe-view/dist', 'vibe-view/dist'),
+        ('api', 'api'),
+        ('pty-server', 'pty-server'),
     ],
-    hiddenimports=['websockets', 'winpty', 'chromadb', 'pysqlite3', 'psycopg2'],
+    # [2026-03-24] chromadb, pysqlite3 제거 (미사용)
+    hiddenimports=['websockets', 'winpty', 'psycopg2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

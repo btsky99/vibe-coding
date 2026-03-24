@@ -16,7 +16,7 @@ import { memo } from 'react';
 import {
   Search, Settings, Files,
   MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
-  ExternalLink, LayoutDashboard, Activity, Target
+  ExternalLink, LayoutDashboard, Activity, Target, Smartphone
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -25,8 +25,6 @@ interface ActivityBarProps {
   onTabChange: (tab: string) => void;
   // 설정 팝업 오픈 콜백
   onOpenSettings: () => void;
-  // 디스코드 새 창 열기 콜백 (분리된 기능)
-  onOpenDiscordNewWindow: () => void;
   // 배지 카운트들 — 대시보드 버튼 통합 배지 표시용
   skillChainStatus: string;
   orchWarningCount: number;
@@ -49,7 +47,6 @@ interface ActivityBarProps {
 const ActivityBar = memo(function ActivityBar({
   activeTab, onTabChange,
   onOpenSettings,
-  onOpenDiscordNewWindow,
   skillChainStatus, orchWarningCount,
   unreadMsgCount, activeTaskCount,
   memoryCount, conflictCount, totalGitChanges, mcpCount,
@@ -190,15 +187,12 @@ const ActivityBar = memo(function ActivityBar({
         )}
       </button>
 
+      <button onClick={() => onTabChange('telegram')} className={tabCls('telegram')} title="Telegram Bridge">
+        <Smartphone className="w-5 h-5" />
+      </button>
+
       {/* ⚙️ 하단 고정 버튼 */}
       <div className="mt-auto flex flex-col gap-4">
-        <button
-          onClick={onOpenDiscordNewWindow}
-          className="p-2 text-indigo-400 hover:text-indigo-300 transition-colors group"
-          title="디스코드 설정 (전체 화면 새 창)"
-        >
-          <ExternalLink className="w-6 h-6 group-hover:scale-110 transition-transform" />
-        </button>
         <button
           onClick={onOpenSettings}
           className="p-2 text-[#858585] hover:text-white transition-colors group"

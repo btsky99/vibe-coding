@@ -177,7 +177,7 @@ def handle_get(handler, path: str, params: dict,
                     installed_targets.append(".claude")
 
                 scripts_src = SCRIPTS_DIR
-                if scripts_src.exists():
+                if scripts_src and scripts_src.exists():
                     shutil.copytree(scripts_src, target_root / "scripts", dirs_exist_ok=True)
                     installed_targets.append("scripts")
 
@@ -218,6 +218,8 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 워치독 기능을 사용할 수 없습니다')
             watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
             # CREATE_NO_WINDOW: Python 서브프로세스 콘솔 창 방지
             _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
@@ -346,7 +348,7 @@ def handle_get(handler, path: str, params: dict,
             "skills": {
                 "master":        check_exists(_proj / ".gemini/skills/master/SKILL.md"),
                 "brainstorm":    check_exists(_proj / ".gemini/skills/brainstorming/SKILL.md"),
-                "memory_script": check_exists(SCRIPTS_DIR / "memory.py"),
+                "memory_script": check_exists(SCRIPTS_DIR / "memory.py") if SCRIPTS_DIR else False,
                 "gui":           gui_ok
             },
             "agents": {
@@ -573,6 +575,8 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 스킬 A/B 테스트 기능을 사용할 수 없습니다')
             scripts_dir = str(Path(SCRIPTS_DIR))
             if scripts_dir not in sys.path:
                 sys.path.insert(0, scripts_dir)
@@ -591,6 +595,8 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 스킬 예측 기능을 사용할 수 없습니다')
             scripts_dir = str(Path(SCRIPTS_DIR))
             if scripts_dir not in sys.path:
                 sys.path.insert(0, scripts_dir)
@@ -842,6 +848,8 @@ def handle_post(handler, path: str, data: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
             orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
             result = subprocess.run(
                 [sys.executable, orch_script],

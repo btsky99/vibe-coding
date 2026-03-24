@@ -971,6 +971,28 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         }
         _save_run(result)
 
+        # 텔레그램 원격제어: 에이전트 응답을 ITCP에 기록하여 telegram_bridge가 폴링 → 전달
+        # source=telegram인 요청에 대해서만 ITCP 응답을 보냄 (대시보드 요청은 SSE로 이미 전달됨)
+        _source = _current_run.get('source', '')
+        if _source == 'telegram' and output_lines:
+            try:
+                import sys as _sys
+                _sys.path.insert(0, str(_SCRIPTS_DIR))
+                import itcp as _itcp
+                # 출력에서 의미있는 줄만 추출 (빈 줄, 시스템 메시지 제외)
+                meaningful = [l for l in output_lines if l.strip() and not l.startswith('[')]
+                summary = "\n".join(meaningful[-20:]) if meaningful else "(응답 없음)"
+                _itcp.send(
+                    from_terminal=cli,
+                    to_terminal="user",
+                    content=summary[:3000],
+                    channel="telegram_response",
+                    msg_type="response",
+                    terminal_id=terminal_id,
+                )
+            except Exception:
+                pass  # ITCP 전송 실패 시 무시
+
     return result  # type: ignore[return-value]
 
 

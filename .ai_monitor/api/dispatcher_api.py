@@ -34,6 +34,8 @@ def handle_get(handler, path: str, params: dict, *,
             desc = qs.get('desc', [''])[0] if isinstance(qs.get('desc'), list) else qs.get('desc', '')
             task_type = qs.get('type', [None])[0] if isinstance(qs.get('type'), list) else qs.get('type')
 
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 디스패처 기능을 사용할 수 없습니다')
             sys.path.insert(0, str(SCRIPTS_DIR))
             import auto_dispatcher as _ad
             if not task_type:
@@ -62,6 +64,8 @@ def handle_get(handler, path: str, params: dict, *,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 디스패처 기능을 사용할 수 없습니다')
             sys.path.insert(0, str(SCRIPTS_DIR))
             import auto_dispatcher as _ad2
             stat = _ad2.status()
@@ -128,6 +132,8 @@ def handle_post(handler, path: str, data: dict, *,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 디스패처 기능을 사용할 수 없습니다')
             sys.path.insert(0, str(SCRIPTS_DIR))
             import auto_dispatcher as _ad3
             result = _ad3.dispatch(
@@ -151,6 +157,8 @@ def handle_post(handler, path: str, data: dict, *,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 디스패처 기능을 사용할 수 없습니다')
             sys.path.insert(0, str(SCRIPTS_DIR))
             import auto_dispatcher as _ad4
             tasks = data.get('tasks', [])
@@ -169,6 +177,8 @@ def handle_post(handler, path: str, data: dict, *,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
+            if not SCRIPTS_DIR:
+                raise Exception('설치 버전에서는 디스패처 기능을 사용할 수 없습니다')
             sys.path.insert(0, str(SCRIPTS_DIR))
             import auto_dispatcher as _ad5
             result = _ad5.request_verification(

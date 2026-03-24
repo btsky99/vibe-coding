@@ -137,7 +137,7 @@ def handle_get(handler, path: str, params: dict | None = None) -> None:
 def handle_post(handler, path: str) -> None:
     """프론트엔드/Discord 브릿지의 POST 요청을 Node PTY 서버로 프록시합니다."""
 
-    if path not in ('/api/pty/interrupt', '/api/pty/terminate'):
+    if path not in ('/api/pty/interrupt', '/api/pty/terminate', '/api/pty/write'):
         _json_response(handler, {'error': 'not_found', 'path': path}, 404)
         return
 
@@ -153,8 +153,12 @@ def handle_post(handler, path: str) -> None:
         return
 
     # Node PTY 서버의 해당 엔드포인트로 프록시
-    action = 'interrupt' if path == '/api/pty/interrupt' else 'terminate'
-    result = _node_post(f'/api/pty/{action}/{target}')
+    if path == '/api/pty/write':
+        # PTY write: 텔레그램 → 기존 터미널에 텍스트 주입
+        result = _node_post(f'/api/pty/write/{target}', data)
+    else:
+        action = 'interrupt' if path == '/api/pty/interrupt' else 'terminate'
+        result = _node_post(f'/api/pty/{action}/{target}')
 
     if result is None:
         _json_response(handler, {'error': 'node_pty_unreachable'}, 502)
