@@ -3352,18 +3352,27 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 def _do_apply():
                     """응답 전송 완료 후 실행되는 업데이트 스레드.
-                    오류 발생 시 update_error.json에 기록 — UI가 폴링으로 확인 가능.
+                    오류 발생 시 update_ready.json + update_error.log에 기록.
                     """
                     # 소켓 버퍼 플러시 대기 (0.3s) — 응답이 클라이언트에 도달할 시간 확보
                     time.sleep(0.3)
                     try:
                         apply_update_from_temp(_exe)
                     except Exception as ex:
-                        print(f"[!] apply_update_from_temp 실패: {ex}")
-                        # 실패 시 update_ready.json 복원 — UI에 버튼 다시 표시
+                        import traceback
+                        err_detail = traceback.format_exc()
+                        print(f"[!] apply_update_from_temp 실패: {ex}\n{err_detail}")
+                        # 에러 로그 파일에 기록 — 디버깅용
                         try:
+                            with open(DATA_DIR / "update_error.log", "w", encoding="utf-8") as lf:
+                                lf.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {err_detail}\n")
+                        except OSError:
+                            pass
+                        # 실패 시 update_ready.json 복원 — UI에 에러 메시지 표시
+                        try:
+                            _ver = update_data.get("version", _exe.stem)
                             _update_info = {"ready": True, "downloading": False,
-                                            "version": _exe.stem, "exe_path": str(_exe),
+                                            "version": _ver, "exe_path": str(_exe),
                                             "error": str(ex)}
                             with open(DATA_DIR / "update_ready.json", "w", encoding="utf-8") as ef:
                                 json.dump(_update_info, ef)

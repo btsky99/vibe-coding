@@ -320,7 +320,15 @@ function App() {
     const check = () => {
       fetch(`${API_BASE}/api/check-update-ready`)
         .then(res => res.json())
-        .then(data => setUpdateReady(data?.ready ? { version: data.version } : null))
+        .then(data => {
+          if (data?.ready) {
+            setUpdateReady({ version: data.version });
+            // 업데이트 적용 실패 에러가 있으면 즉시 알림
+            if (data.error) alert(`이전 업데이트 적용 실패: ${data.error}`);
+          } else {
+            setUpdateReady(null);
+          }
+        })
         .catch((err) => console.error('[App] fetch error:', err));
     };
     check();

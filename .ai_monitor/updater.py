@@ -83,19 +83,29 @@ def _is_newer(latest_tag, current):
 
 
 def _find_asset_url(release):
-    """릴리스 에셋에서 포터블 exe(설치 불필요) URL을 찾습니다.
-    GitHub 릴리스 에셋명 패턴: vibe-coding-v3.6.x.exe (setup 제외)
+    """릴리스 에셋에서 업데이트용 exe URL을 찾습니다.
+    CI 빌드 에셋명: vibe-coding-update-X.Y.Z.exe (setup 제외)
     browser_download_url 사용 → Public 리포에서 인증 없이 직접 다운로드 가능.
     """
     assets = release.get("assets", [])
 
-    # 1순위: 정확히 ASSET_NAME과 일치하는 것 (하위 호환)
+    # 1순위: vibe-coding-update-*.exe (현재 CI 표준 네이밍)
+    for asset in assets:
+        name = asset.get("name", "")
+        if (
+            name.startswith("vibe-coding-update-")
+            and name.endswith(".exe")
+        ):
+            logger.info("에셋 발견(update): %s", name)
+            return asset.get("browser_download_url") or asset.get("url")
+
+    # 2순위: 정확히 ASSET_NAME(vibe-coding.exe)과 일치 (하위 호환)
     for asset in assets:
         name = asset.get("name", "")
         if name == ASSET_NAME:
             return asset.get("browser_download_url") or asset.get("url")
 
-    # 2순위: vibe-coding-v*.exe 패턴 (setup 제외)
+    # 3순위: vibe-coding-v*.exe 패턴 (구 네이밍 하위 호환, setup 제외)
     for asset in assets:
         name = asset.get("name", "")
         if (
@@ -103,20 +113,22 @@ def _find_asset_url(release):
             and name.endswith(".exe")
             and "setup" not in name.lower()
         ):
-            logger.info("에셋 발견: %s", name)
+            logger.info("에셋 발견(legacy): %s", name)
             return asset.get("browser_download_url") or asset.get("url")
 
-    # 3순위: vibe-coding*.exe 중 setup 아닌 것
+    # 4순위: vibe-coding*.exe 중 setup/console 아닌 것 (최후 폴백)
     for asset in assets:
         name = asset.get("name", "")
         if (
             name.startswith("vibe-coding")
             and name.endswith(".exe")
             and "setup" not in name.lower()
+            and "console" not in name.lower()
         ):
-            logger.info("에셋 발견(3순위): %s", name)
+            logger.info("에셋 발견(fallback): %s", name)
             return asset.get("browser_download_url") or asset.get("url")
 
+    logger.warning("업데이트 에셋 없음. 에셋 목록: %s", [a.get("name") for a in assets])
     return None
 
 
@@ -125,6 +137,7 @@ def _download_asset(url, dest, token):
     browser_download_url은 Public 리포에서 인증 없이 직접 다운로드 가능.
     API URL(api.github.com)인 경우 Accept: application/octet-stream 추가.
     """
+    logger.info("다운로드 시작: %s → %s", url, dest)
     req = Request(url)
     req.add_header("User-Agent", "vibe-coding-updater")
     # API URL인 경우에만 octet-stream 헤더 필요
@@ -134,12 +147,19 @@ def _download_asset(url, dest, token):
             req.add_header("Authorization", f"token {token}")
     try:
         with urlopen(req, timeout=120) as resp:
+            total = 0
             with open(dest, "wb") as f:
                 while True:
                     chunk = resp.read(65536)
                     if not chunk:
                         break
                     f.write(chunk)
+                    total += len(chunk)
+        # 다운로드 무결성 검증: EXE는 최소 1MB 이상이어야 정상
+        if total < 1_000_000:
+            logger.error("다운로드 파일 너무 작음 (%d bytes) — 손상 가능성", total)
+            return False
+        logger.info("다운로드 완료: %d bytes", total)
         return True
     except Exception as e:
         logger.error("Download failed: %s", e)
@@ -166,6 +186,13 @@ def apply_update_from_temp(new_exe):
     old_path = exe_path.with_suffix(".exe.old")
 
     logger.info("업데이트 적용 시작: %s → %s", new_exe, exe_path)
+    logger.info("새 exe 크기: %d bytes", new_exe.stat().st_size if new_exe.exists() else -1)
+
+    # Step 0: 새 exe 존재 여부 + 최소 크기 검증 (손상된 파일 방지)
+    if not new_exe.exists():
+        raise FileNotFoundError(f"새 exe 파일 없음: {new_exe}")
+    if new_exe.stat().st_size < 1_000_000:
+        raise ValueError(f"새 exe 파일 너무 작음 ({new_exe.stat().st_size} bytes) — 손상 의심")
 
     # Step 1: 이전 .old 파일이 있으면 먼저 정리
     if old_path.exists():
@@ -174,7 +201,7 @@ def apply_update_from_temp(new_exe):
         except OSError as e:
             logger.warning(".old 파일 삭제 실패 (배치 스크립트에서 정리 예정): %s", e)
 
-    # Step 1: 실행 중인 exe → .old 로 이름 변경 (Windows는 실행 중 이름 변경 허용)
+    # Step 2: 실행 중인 exe → .old 로 이름 변경 (Windows는 실행 중 이름 변경 허용)
     os.rename(exe_path, old_path)
     logger.info("exe 이름 변경 완료: %s → %s", exe_path, old_path)
 
