@@ -7,6 +7,7 @@
  *          /api/agent/chat SSE로 실시간 스트리밍 수신.
  *          텔레그램과 동일한 백엔드를 공유하여 같은 세션 컨텍스트 유지.
  * REVISION HISTORY:
+ * - 2026-03-25 Claude: 우클릭 컨텍스트 메뉴 추가 — 복사/붙여넣기 (pywebview 환경 지원)
  * - 2026-03-24 Claude: 최초 생성 — cokacdir 패턴 채팅 UI
  * ------------------------------------------------------------------------
  */
@@ -78,10 +79,37 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
   const [showCliMenu, setShowCliMenu] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
+  // ── 우클릭 컨텍스트 메뉴 상태 (pywebview에서 브라우저 기본 메뉴 차단되므로 커스텀 구현) ──
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
+
   // ── refs ──
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 컨텍스트 메뉴 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [ctxMenu]);
+
+  // 클립보드 복사 헬퍼 — navigator.clipboard API 실패 시 execCommand 폴백
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  }, []);
 
   // localStorage 동기화
   useEffect(() => { localStorage.setItem(`chat_cli_${terminalId}`, cli); }, [cli, terminalId]);
@@ -409,10 +437,16 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
         )}
       </div>
 
-      {/* ── 채팅 영역 — select-text로 텍스트 드래그/복사 허용 ── */}
+      {/* ── 채팅 영역 — select-text로 텍스트 드래그/복사 허용 + 우클릭 커스텀 메뉴 ── */}
       <div
-        className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar select-text"
+        className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar select-text relative"
         onClick={() => { setShowCliMenu(false); setShowRoleMenu(false); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const selection = window.getSelection();
+          const hasSelection = !!(selection && selection.toString().trim());
+          setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection });
+        }}
       >
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-white/20 gap-3">
@@ -469,6 +503,55 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
           </div>
         ))}
         <div ref={chatEndRef} />
+
+        {/* 우클릭 컨텍스트 메뉴 — 복사(선택 있을 때) / 붙여넣기(입력창에 삽입) */}
+        {ctxMenu && (
+          <div
+            className="fixed z-[9999] bg-[#2d2d2d] border border-white/20 rounded shadow-xl text-xs text-white min-w-[120px] py-1"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+            onMouseLeave={() => setCtxMenu(null)}
+          >
+            {ctxMenu.hasSelection && (
+              <button
+                className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+                onClick={async () => {
+                  const sel = window.getSelection()?.toString() || '';
+                  if (sel) await copyToClipboard(sel);
+                  setCtxMenu(null);
+                }}
+              >
+                복사
+              </button>
+            )}
+            <button
+              className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+              onClick={async () => {
+                try {
+                  const text = await navigator.clipboard.readText();
+                  if (text && inputRef.current) {
+                    // 입력창에 붙여넣기 — 현재 커서 위치에 삽입
+                    const start = inputRef.current.selectionStart;
+                    const end = inputRef.current.selectionEnd;
+                    const current = inputValue;
+                    const newValue = current.slice(0, start) + text + current.slice(end);
+                    setInputValue(newValue);
+                    // 포커스 및 커서 위치 복원
+                    requestAnimationFrame(() => {
+                      if (inputRef.current) {
+                        inputRef.current.focus();
+                        const pos = start + text.length;
+                        inputRef.current.setSelectionRange(pos, pos);
+                      }
+                    });
+                  }
+                } catch (err) { console.error('붙여넣기 실패:', err); }
+                setCtxMenu(null);
+              }}
+            >
+              붙여넣기
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── 입력 영역 ── */}

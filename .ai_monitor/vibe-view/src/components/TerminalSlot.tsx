@@ -217,10 +217,27 @@ export default function TerminalSlot({
       fitAddon.fit();
       termRef.current = term;
 
+      // 클립보드 복사 헬퍼 — navigator.clipboard API 실패 시 execCommand 폴백
+      const copyToClipboard = async (text: string) => {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          // pywebview 등 Clipboard API 미지원 환경 폴백
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+      };
+
       // 텍스트 드래그(선택) 시 자동 클립보드 복사
       term.onSelectionChange(() => {
         if (term.hasSelection()) {
-          navigator.clipboard.writeText(term.getSelection());
+          copyToClipboard(term.getSelection());
         }
       });
 
@@ -751,7 +768,20 @@ export default function TerminalSlot({
                   onClick={async () => {
                     try {
                       if (termRef.current) {
-                        await navigator.clipboard.writeText(termRef.current.getSelection());
+                        const sel = termRef.current.getSelection();
+                        // navigator.clipboard 실패 시 execCommand 폴백
+                        try {
+                          await navigator.clipboard.writeText(sel);
+                        } catch {
+                          const ta = document.createElement('textarea');
+                          ta.value = sel;
+                          ta.style.position = 'fixed';
+                          ta.style.left = '-9999px';
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(ta);
+                        }
                         termRef.current.clearSelection();
                       }
                     } catch (err) { console.error(err); }
