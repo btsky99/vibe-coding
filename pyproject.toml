@@ -1,0 +1,68 @@
+# FILE: pyproject.toml
+# DESCRIPTION: pip install 기반 배포를 위한 패키지 정의.
+#   `pip install git+https://github.com/btsky99/vibe-coding.git` 으로 설치.
+#   `vibe-coding` 명령으로 실행. 기존 EXE 빌드와 공존.
+#
+# REVISION HISTORY:
+# - 2026-03-25 Claude: 신규 생성 — pip install 배포 전환
+
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibe-coding"
+dynamic = ["version"]
+description = "Vibe Coding — AI 멀티 에이전트 하이브 마인드 대시보드"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "btsky99"}]
+
+dependencies = [
+    "pywebview>=6.1",
+    "websockets>=16.0",
+    "aiohttp>=3.12",
+    "psycopg2-binary>=2.9",
+    "watchdog>=6.0",
+    "python-dotenv>=1.2",
+    "pycryptodome>=3.20",
+    "rich>=14.0",
+    "python-telegram-bot>=22.0",
+]
+
+[project.optional-dependencies]
+# 무거운 의존성은 선택 설치 (벡터 검색 등)
+ai = [
+    "fastembed",
+    "numpy",
+    "chromadb",
+]
+# 개발용 (빌드/테스트)
+dev = [
+    "pyinstaller>=6.0,<7.0",
+    "PySide6>=6.8",
+]
+
+[project.scripts]
+vibe-coding = "ai_monitor.server:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "ai_monitor._version.__version__"}
+
+[tool.setuptools]
+# .ai_monitor → ai_monitor 매핑 (디렉토리명에 점 접두사가 있으므로)
+package-dir = {"ai_monitor" = ".ai_monitor"}
+# 패키지 목록 명시적 지정 — find는 .으로 시작하는 디렉토리를 무시하므로 수동 나열
+packages = ["ai_monitor", "ai_monitor.api", "ai_monitor.src"]
+
+[tool.setuptools.package-data]
+ai_monitor = [
+    "vibe-view/dist/**/*",
+    "pty-server/*.js",
+    "pty-server/package.json",
+    "pty-server/node_modules/**/*",
+    "bin/*.ico",
+    "data/.gitkeep",
+    "_version.py",
+]

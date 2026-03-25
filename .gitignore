@@ -1,8 +1,8 @@
 node_modules/
 dist/
+!.ai_monitor/vibe-view/dist/
 build/
 .ai_monitor/data/
-.ai_monitor/vibe-view/dist/
 __pycache__/
 *.pyc
 .env

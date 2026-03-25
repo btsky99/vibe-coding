@@ -4395,7 +4395,19 @@ def open_app_window(url):
     print(f"[*] GUI 창을 띄울 수 없어 브라우저로 연결합니다: {url}")
     webbrowser.open(url)
 
-if __name__ == '__main__':
+def main():
+    """메인 엔트리포인트 — pip install 시 `vibe-coding` 명령으로 호출됨.
+    기존 `python server.py` 직접 실행도 동일하게 동작.
+    """
+    # --create-shortcut 인자 처리: 바탕화면 바로가기 생성 후 종료
+    if len(sys.argv) > 1 and sys.argv[1] == '--create-shortcut':
+        try:
+            from .create_shortcut import create_shortcut
+        except ImportError:
+            from create_shortcut import create_shortcut
+        create_shortcut()
+        return
+
     print(f"Vibe Coding {__version__}")
 
     # ── PyInstaller 임시 폴더(_MEI*) 자동 정리 ─────────────────────────────────
@@ -4570,32 +4582,37 @@ if __name__ == '__main__':
         pass
 
     # --- Auto-update check (non-blocking) ---
-    if getattr(sys, 'frozen', False):
+    # frozen(EXE) 모드: EXE 다운로드+교체, pip 모드: pip install --upgrade
+    # 둘 다 check_and_update()가 내부에서 분기 처리
+    try:
         try:
             from updater import check_and_update
-            # 시작 즉시 1회 체크 + 이후 1시간마다 반복
-            # → 앱 사용 중에도 새 버전 배포되면 배너로 알림
-            def _update_loop():
-                while True:
-                    try:
-                        # 이미 다운로드 완료 상태면 재다운로드 건너뜀
-                        ready_file = DATA_DIR / "update_ready.json"
-                        already_ready = False
-                        if ready_file.exists():
-                            try:
-                                info = json.loads(ready_file.read_text(encoding="utf-8"))
-                                already_ready = info.get("ready", False)
-                            except Exception:
-                                pass
-                        if not already_ready:
-                            check_and_update(DATA_DIR)
-                    except Exception as e:
-                        print(f"[!] Update check error: {e}")
-                    time.sleep(600)  # 10분 간격
-
-            threading.Thread(target=_update_loop, daemon=True).start()
         except ImportError:
-            print("[!] Updater module not found, skipping update check.")
+            from .updater import check_and_update
+
+        # 시작 즉시 1회 체크 + 이후 10분마다 반복
+        # → 앱 사용 중에도 새 버전 배포되면 배너로 알림
+        def _update_loop():
+            while True:
+                try:
+                    # 이미 다운로드 완료 상태면 재다운로드 건너뜀
+                    ready_file = DATA_DIR / "update_ready.json"
+                    already_ready = False
+                    if ready_file.exists():
+                        try:
+                            info = json.loads(ready_file.read_text(encoding="utf-8"))
+                            already_ready = info.get("ready", False)
+                        except Exception:
+                            pass
+                    if not already_ready:
+                        check_and_update(DATA_DIR)
+                except Exception as e:
+                    print(f"[!] Update check error: {e}")
+                time.sleep(600)  # 10분 간격
+
+        threading.Thread(target=_update_loop, daemon=True).start()
+    except ImportError:
+        print("[!] Updater module not found, skipping update check.")
 
     # 1. Node.js PTY 서버 시작 + 자동 복구 워치독 (node-pty 기반 — pywinpty 대체)
     # node-pty가 VS Code에서 사용하는 Microsoft 공식 PTY 라이브러리로,
@@ -5129,3 +5146,7 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             except Exception:
                 pass
             os._exit(0)
+
+
+if __name__ == '__main__':
+    main()

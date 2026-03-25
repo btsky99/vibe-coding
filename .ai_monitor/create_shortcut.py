@@ -1,59 +1,111 @@
 """
 FILE: .ai_monitor/create_shortcut.py
-DESCRIPTION: Windows 바탕화면 바로가기 생성 유틸리티 (일회용 도구).
+DESCRIPTION: Windows 바탕화면 바로가기 생성 유틸리티.
+  pip install 모드: vibe-coding.exe entry point 또는 pythonw -m ai_monitor 사용.
+  개발 모드: run_vibe.bat 사용 (기존 방식).
+  EXE 모드: 현재 실행 파일 사용.
 
 REVISION HISTORY:
+- 2026-03-25 Claude: pip install 모드 대응 — entry point 자동 탐색 + winshell 의존성 제거
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 import os
-import winshell
-from win32com.client import Dispatch
+import sys
+import shutil
 from pathlib import Path
 
+
 def create_shortcut():
-    base_dir = Path("D:/vibe-coding")
-    bat_path = base_dir / "run_vibe.bat"
-    
-    if not bat_path.exists():
-        print(f"Error: {bat_path} 파일을 찾을 수 없습니다.")
+    """Windows 바탕화면에 '바이브코딩' 바로가기를 생성합니다.
+    실행 모드(pip/dev/EXE)를 자동 감지하여 적절한 타겟을 설정합니다.
+    """
+    if os.name != 'nt':
+        print("바탕화면 바로가기는 Windows에서만 지원됩니다.")
         return
 
-    # 바탕화면 경로 가져오기
-    desktop = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Desktop')
-    shortcut_path = os.path.join(desktop, "바이브코딩.lnk")
-    
-    # 💥 기존 단축어 강제 삭제 (아이콘 캐시 갱신 유도)
-    if os.path.exists(shortcut_path):
+    try:
+        from win32com.client import Dispatch
+    except ImportError:
+        print("pywin32가 필요합니다: pip install pywin32")
+        return
+
+    # ── 바탕화면 경로 ──
+    desktop = Path(os.environ.get('USERPROFILE', '')) / 'Desktop'
+    shortcut_path = desktop / "바이브코딩.lnk"
+
+    # ── 기존 바로가기 삭제 (아이콘 캐시 갱신) ──
+    if shortcut_path.exists():
         try:
-            os.remove(shortcut_path)
+            shortcut_path.unlink()
             print("기존 아이콘을 삭제했습니다. 새로 생성합니다.")
-        except: pass
-    
+        except Exception:
+            pass
+
+    # ── 실행 대상 결정: pip entry point → run_vibe.bat → EXE 순서로 탐색 ──
+    target_path = None
+    arguments = ""
+    working_dir = ""
+
+    # 1순위: pip install로 설치된 vibe-coding 명령 (Scripts/vibe-coding.exe)
+    vibe_cmd = shutil.which('vibe-coding')
+    if vibe_cmd:
+        # pip entry point가 설치됨 — 콘솔 없이 실행하기 위해 pythonw 사용
+        pythonw = Path(sys.executable).parent / 'pythonw.exe'
+        if pythonw.exists():
+            target_path = str(pythonw)
+            arguments = "-m ai_monitor"
+        else:
+            target_path = str(vibe_cmd)
+        working_dir = str(Path.home())
+        print(f"[pip 모드] entry point 감지: {vibe_cmd}")
+
+    # 2순위: 개발 모드 — run_vibe.bat
+    if not target_path:
+        # server.py 기준으로 프로젝트 루트 탐색
+        base_dir = Path(__file__).resolve().parent.parent
+        bat_path = base_dir / "run_vibe.bat"
+        if bat_path.exists():
+            target_path = "cmd.exe"
+            arguments = f'/c "cd /d {base_dir} && {bat_path}"'
+            working_dir = str(base_dir)
+            print(f"[개발 모드] bat 감지: {bat_path}")
+
+    # 3순위: frozen EXE 모드
+    if not target_path and getattr(sys, 'frozen', False):
+        target_path = sys.executable
+        working_dir = str(Path(sys.executable).parent)
+        print(f"[EXE 모드] 실행 파일: {target_path}")
+
+    if not target_path:
+        print("실행 대상을 찾을 수 없습니다. pip install 또는 개발 환경을 확인하세요.")
+        return
+
+    # ── 바로가기 생성 ──
     try:
         shell = Dispatch('WScript.Shell')
-        shortcut = shell.CreateShortCut(shortcut_path)
-        
-        # 🟢 cmd /k 를 사용하여 실행 실패 시에도 창이 사라지지 않고 에러를 보여줌
-        shortcut.Targetpath = "cmd.exe"
-        shortcut.Arguments = f'/k "cd /d {str(base_dir)} && {str(bat_path)}"'
-        
-        shortcut.WorkingDirectory = str(base_dir)
+        shortcut = shell.CreateShortCut(str(shortcut_path))
+        shortcut.Targetpath = target_path
+        if arguments:
+            shortcut.Arguments = arguments
+        shortcut.WorkingDirectory = working_dir
         shortcut.Description = "바이브코딩 - AI 멀티 에이전트 하이브 마인드 대시보드"
-        
-        # 🎨 아이콘 설정 (새로 생성한 네온 아이콘 연결)
-        ico_path = base_dir / ".ai_monitor" / "bin" / "app_icon.ico"
-        if ico_path.exists():
-            # 아이콘 인덱스뿐만 아니라 캐시 무효화를 위해 경로를 다시 고정
-            shortcut.IconLocation = f"{str(ico_path)},0"
-        
+        # 창 최소화 상태로 시작 (콘솔 창 숨김 효과)
+        shortcut.WindowStyle = 7  # SW_SHOWMINNOACTIVE
+
+        # 아이콘 설정 — pip 설치 시 패키지 내부, 개발 모드 시 프로젝트 내부
+        for ico_candidate in [
+            Path(__file__).resolve().parent / "bin" / "app_icon.ico",
+            Path(__file__).resolve().parent.parent / ".ai_monitor" / "bin" / "app_icon.ico",
+        ]:
+            if ico_candidate.exists():
+                shortcut.IconLocation = f"{ico_candidate},0"
+                break
+
         shortcut.save()
-        print(f"✨ 바탕화면 아이콘(v2.3.0)이 성공적으로 생성되었습니다: {shortcut_path}")
-    except Exception as e:
-        print(f"❌ 바로가기 생성 중 오류 발생: {e}")
-    except Exception as e:
-        print(f"❌ 바로가기 생성 중 오류 발생: {e}")
+        print(f"바탕화면 바로가기가 생성되었습니다: {shortcut_path}")
     except Exception as e:
         print(f"바로가기 생성 중 오류 발생: {e}")
+
 
 if __name__ == "__main__":
     create_shortcut()

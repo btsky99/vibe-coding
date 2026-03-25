@@ -254,11 +254,71 @@ def apply_update_from_temp(new_exe):
     os._exit(0)
 
 
+def check_and_update_pip(data_dir):
+    """pip install 모드용 자동 업데이트.
+    GitHub API로 최신 태그 확인 → 새 버전이면 pip install --upgrade 실행.
+    Claude Code / Gemini CLI처럼 실행 시 자동 업데이트 체크.
+    """
+    if APP_VERSION == "dev":
+        logger.info("Dev build detected, skipping pip update check.")
+        return
+
+    # 체크 시작 상태 기록
+    ready_file = data_dir / "update_ready.json"
+    with open(ready_file, "w", encoding="utf-8") as f:
+        json.dump({"ready": False, "downloading": False, "checking": True, "pip_mode": True}, f)
+
+    token = _get_token(data_dir)
+    release = _fetch_latest_release(token)
+    if release is None:
+        try: ready_file.unlink()
+        except: pass
+        return
+
+    latest_tag = release.get("tag_name", "")
+    if not _is_newer(latest_tag, APP_VERSION):
+        logger.info("Already up to date (%s).", APP_VERSION)
+        try: ready_file.unlink()
+        except: pass
+        return
+
+    logger.info("[pip] New version available: %s (current: %s)", latest_tag, APP_VERSION)
+
+    # pip install --upgrade 실행 (백그라운드, 논블로킹)
+    repo_url = f"git+https://github.com/{REPO}.git@{latest_tag}"
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet", repo_url],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            logger.info("[pip] 업데이트 완료: %s → %s. 재시작 시 적용됩니다.", APP_VERSION, latest_tag)
+            with open(ready_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "version": latest_tag, "ready": True, "downloading": False,
+                    "pip_mode": True, "message": f"v{latest_tag.lstrip('v')} 업데이트 완료. 재시작하면 적용됩니다."
+                }, f)
+        else:
+            logger.warning("[pip] 업데이트 실패: %s", result.stderr[:500])
+            try: ready_file.unlink()
+            except: pass
+    except Exception as e:
+        logger.error("[pip] 업데이트 중 에러: %s", e)
+        try: ready_file.unlink()
+        except: pass
+
+
 def check_and_update(data_dir):
     """
     Main entry point. Called from a background thread.
     Checks for updates, downloads if available, and applies.
+    frozen(EXE) 모드: EXE 다운로드+교체, pip 모드: pip install --upgrade.
     """
+    # pip 모드 분기 — frozen이 아니면 pip upgrade 방식 사용
+    if not getattr(sys, "frozen", False):
+        check_and_update_pip(data_dir)
+        return
+
     # 체크 시작 상태 기록
     with open(data_dir / "update_ready.json", "w", encoding="utf-8") as f:
         json.dump({"ready": False, "downloading": False, "checking": True}, f)
@@ -267,10 +327,6 @@ def check_and_update(data_dir):
         logger.info("Dev build detected, skipping update check.")
         try: (data_dir / "update_ready.json").unlink()
         except: pass
-        return
-
-    if not getattr(sys, "frozen", False):
-        logger.info("Not running as frozen exe, skipping update check.")
         return
 
     # Public 리포이므로 토큰 없이도 동작 (token=None 이어도 계속 진행)
