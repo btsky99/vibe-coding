@@ -23,12 +23,8 @@ except ImportError:
     KanbanBoardWindow = None
 
 # 경로 설정
-if getattr(sys, 'frozen', False):
-    BASE_DIR = Path(sys._MEIPASS)
-    PROJECT_ROOT = Path(sys.executable).resolve().parent
-else:
-    BASE_DIR = Path(__file__).resolve().parent
-    PROJECT_ROOT = BASE_DIR.parent
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
 
 # 데이터 디렉토리 결정 로직 (프로젝트 로컬 우선)
 # Why: agent_shell.py와 server.py가 프로젝트 로컬 .ai_monitor/data를 사용하므로
@@ -36,11 +32,6 @@ else:
 _local_data = PROJECT_ROOT / ".ai_monitor" / "data"
 if _local_data.exists():
     DATA_DIR = _local_data
-elif getattr(sys, 'frozen', False):
-    if os.name == 'nt':
-        DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
-    else:
-        DATA_DIR = Path.home() / ".vibe-coding"
 else:
     # 개발 모드 폴백
     DATA_DIR = BASE_DIR / "data"

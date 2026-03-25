@@ -162,7 +162,7 @@ def handle_get(handler, path: str, params: dict,
         if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
             try:
                 # 배포(frozen) 여부에 따라 소스 경로 결정
-                source_base = BASE_DIR if getattr(sys, 'frozen', False) else BASE_DIR.parent
+                source_base = BASE_DIR.parent
                 target_root = Path(target_path)
                 installed_targets = []
 
@@ -877,10 +877,7 @@ def handle_post(handler, path: str, data: dict,
             _proj = _current_project_root()
             if tool == 'claude':
                 # Skills 2.0: claude_skills/<name>/SKILL.md → .claude/skills/<name>/
-                # 소스 탐색: frozen(sys._MEIPASS/claude_skills/) → dev(.claude/skills/) 순서
-                skills_src = BASE_DIR / 'claude_skills'
-                if not skills_src.exists():
-                    skills_src = _proj / '.claude' / 'skills'
+                skills_src = _proj / '.claude' / 'skills'
                 if not skills_src.exists():
                     raise Exception('내장 스킬 파일을 찾을 수 없습니다 (claude_skills/)')
 

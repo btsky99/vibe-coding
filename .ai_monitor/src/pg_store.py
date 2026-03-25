@@ -28,12 +28,8 @@ from src.file_store import (
 # ── PostgreSQL 바이너리 경로 — frozen(EXE) / 개발 모드 분기 ───────────────────
 # frozen 모드: installer가 {app}\pgsql\ 에 설치한 바이너리 사용
 # 개발 모드:   소스 트리 내 .ai_monitor/bin/pgsql/ 사용
-if getattr(sys, 'frozen', False):
-    # 배포 버전: vibe-coding.exe 옆의 pgsql\ 폴더
-    _PG_DIR = Path(sys.executable).resolve().parent / "pgsql"
-else:
-    # 개발 버전: 소스 트리 경로
-    _PG_DIR = Path(__file__).resolve().parents[2] / '.ai_monitor' / 'bin' / 'pgsql'
+# 개발 버전: 소스 트리 경로
+_PG_DIR = Path(__file__).resolve().parents[2] / '.ai_monitor' / 'bin' / 'pgsql'
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / '.ai_monitor' / 'data'

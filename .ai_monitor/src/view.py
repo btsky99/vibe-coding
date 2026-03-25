@@ -12,13 +12,8 @@ from textual.containers import Grid, Vertical, Horizontal
 from textual.widget import Widget
 from textual.events import MouseDown, MouseMove, MouseUp
 
-if getattr(sys, 'frozen', False):
-    # PyInstaller exe: data 폴더는 exe와 같은 위치
-    AI_MONITOR_DIR = Path(sys.executable).resolve().parent
-    DATA_DIR = AI_MONITOR_DIR / "data"
-else:
-    AI_MONITOR_DIR = Path(__file__).resolve().parent.parent
-    DATA_DIR = AI_MONITOR_DIR / "data"
+AI_MONITOR_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = AI_MONITOR_DIR / "data"
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 CONFIG_FILE = AI_MONITOR_DIR / "config.json"
 

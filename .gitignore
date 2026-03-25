@@ -21,3 +21,5 @@ worktrees/
 .ai_monitor/bin/vector*.zip
 .ai_monitor/ARCHIVE/
 nul
+vibe_coding.egg-info/
+%TEMP%/

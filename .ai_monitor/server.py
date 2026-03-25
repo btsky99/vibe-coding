@@ -152,15 +152,8 @@ from src.pg_store import (
 )
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
-# [수정] frozen(배포) 모드에서는 exe 옆의 pgsql\ 폴더를 사용하고,
-#        개발 모드에서는 .ai_monitor/bin/pgsql/ 을 사용합니다.
-#        installer가 {app}\pgsql\ 에 바이너리를 설치하므로 frozen 시 exe 옆 경로 우선.
-if getattr(sys, 'frozen', False):
-    # 배포 버전: vibe-coding.exe 옆에 installer가 설치한 pgsql\ 폴더
-    _PG_DIR = Path(sys.executable).resolve().parent / "pgsql"
-else:
-    # 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/
-    _PG_DIR = Path(__file__).resolve().parent / "bin" / "pgsql"
+# 소스 트리 내 .ai_monitor/bin/pgsql/ 사용
+_PG_DIR = Path(__file__).resolve().parent / "bin" / "pgsql"
 
 PG_BIN     = _PG_DIR / "bin" / "psql.exe"
 PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
@@ -220,12 +213,8 @@ def _return_pg_conn(conn, db: str = "postgres"):
             except Exception:
                 pass
 
-# 배포 버전 DB 데이터 디렉터리: %APPDATA%\VibeCoding\pgdata
-# 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/data
-if getattr(sys, 'frozen', False):
-    _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
-else:
-    _PG_DATA_DIR = _PG_DIR / "data"
+# DB 데이터 디렉터리: 소스 트리 내 .ai_monitor/bin/pgsql/data
+_PG_DATA_DIR = _PG_DIR / "data"
 
 
 def ensure_postgres_running():
@@ -665,14 +654,10 @@ if sys.stdout is None or sys.stderr is None:
 # 전역 소켓 타임아웃 제거 (SSE 등 장기 연결 방해 요소)
 # socket.setdefaulttimeout(60)  <-- 제거됨
 
-# BASE_DIR: 개발 모드에선 server.py 위치, 배포(frozen) 모드에선 PyInstaller 임시 압축 해제 폴더(sys._MEIPASS)
-# 이 상수는 winpty DLL 경로 등 초기화 코드보다 반드시 먼저 정의되어야 함
-if getattr(sys, 'frozen', False):
-    BASE_DIR = Path(sys._MEIPASS)
-    PROJECT_ROOT = Path(sys.executable).resolve().parent
-else:
-    BASE_DIR = Path(__file__).resolve().parent
-    PROJECT_ROOT = BASE_DIR.parent
+# BASE_DIR: server.py가 위치한 .ai_monitor 디렉토리
+# PROJECT_ROOT: 프로젝트 루트 (BASE_DIR의 부모)
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
 
 
 def _python_runner_cmds() -> list[str]:
@@ -720,14 +705,7 @@ def _load_task_logs_into_thoughts():
     - 개발 모드 : server.py 위치 기준 ./data/
     """
     _self = Path(__file__).resolve()
-    if getattr(sys, 'frozen', False):
-        # PyInstaller 배포 버전: __file__ = sys._MEIPASS/server.py → 데이터는 APPDATA에 있음
-        if os.name == 'nt':
-            _early_data_dir = Path(os.getenv('APPDATA', '')) / "VibeCoding"
-        else:
-            _early_data_dir = Path.home() / ".vibe-coding"
-    else:
-        _early_data_dir = _self.parent / 'data'
+    _early_data_dir = _self.parent / 'data'
     log_path = _early_data_dir / 'task_logs.jsonl'
     if not log_path.exists():
         return
@@ -861,92 +839,19 @@ from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
 from _version import __version__
 
-# 데이터 디렉토리 설정 — PROJECT_ROOT 확정 후(아래 frozen 블록 이후) 재설정됨
-# 이 초기값은 _find_project_root 전에 DATA_DIR을 참조하는 코드(early-init 등)용 임시값
-if getattr(sys, 'frozen', False):
-    if os.name == 'nt':
-        DATA_DIR = Path(os.getenv('APPDATA')) / "VibeCoding"
-    else:
-        DATA_DIR = Path.home() / ".vibe-coding"
-else:
-    DATA_DIR = BASE_DIR / "data"
+# 데이터 디렉토리: .ai_monitor/data
+DATA_DIR = BASE_DIR / "data"
+os.makedirs(DATA_DIR, exist_ok=True)
 
-if not DATA_DIR.exists():
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-    except Exception as e:
-        # 마지막 보루: 현재 실행 위치 옆 (하지만 권한 에러 가능성 있음)
-        DATA_DIR = Path(sys.executable).resolve().parent / "data"
-        os.makedirs(DATA_DIR, exist_ok=True)
-
-# 현재 서버가 서비스하는 프로젝트 루트 + 식별자
-def _find_project_root(start: Path) -> Path:
-    """배포 모드에서 실제 프로젝트 루트를 탐색합니다.
-
-    실행 파일 위치에서 위로 올라가며 .git / CLAUDE.md / GEMINI.md 중
-    하나라도 존재하는 디렉터리를 프로젝트 루트로 판단합니다.
-    exe 가 dist/ 또는 .ai_monitor/dist/ 서브폴더에 있어도 올바른 루트를 반환합니다.
-    """
-    markers = ['.git', 'CLAUDE.md', 'GEMINI.md']
-    for p in [start, *start.parents]:
-        if any((p / m).exists() for m in markers):
-            return p
-    return start  # 마커를 찾지 못하면 exe 위치 그대로 사용
-
-if getattr(sys, 'frozen', False):
-    # [버그수정] exe 설치 경로 대신 현재 작업 디렉토리(cwd)를 먼저 탐색
-    # 사용자가 C:/ons 에서 EXE를 실행하면 cwd=C:/ons → .git 마커 발견 → PROJECT_ROOT=C:/ons
-    # 이전 방식(exe 경로 기준)은 설치 폴더에서 마커 못 찾고 projects.json[0]=D:/vibe-coding을
-    # 사용해 DB가 vibe-coding과 공유되는 버그 발생
-    _cwd_candidate = _find_project_root(Path.cwd())
-    _cwd_has_marker = any((_cwd_candidate / m).exists() for m in ['.git', 'CLAUDE.md', 'GEMINI.md'])
-    if _cwd_has_marker:
-        _root_candidate = _cwd_candidate
-    else:
-        # cwd에 마커 없으면 exe 위치 탐색 → 그래도 없으면 projects.json 폴백
-        _exe_parent = Path(sys.executable).resolve().parent
-        _root_candidate = _find_project_root(_exe_parent)
-        _no_marker = not any((_root_candidate / m).exists() for m in ['.git', 'CLAUDE.md', 'GEMINI.md'])
-        if _no_marker:
-            _projs_file = DATA_DIR / 'projects.json'
-            try:
-                _saved_projs = json.loads(_projs_file.read_text(encoding='utf-8'))
-                if _saved_projs and isinstance(_saved_projs, list):
-                    _first = Path(str(_saved_projs[0]).replace('/', os.sep))
-                    if _first.exists():
-                        _root_candidate = _first
-            except Exception as e:
-                print(f"[FILE ERROR] projects.json 로드: {e}")
-    PROJECT_ROOT = _root_candidate
-    # PROJECT_ROOT 확정 후 DATA_DIR 재설정
-    # 프로젝트 로컬에 .ai_monitor/data가 있으면 그걸 쓰고(개발 클론 등), 없으면 APPDATA 공유 디렉토리 사용
-    _local_data = PROJECT_ROOT / ".ai_monitor" / "data"
-    if _local_data.exists():
-        DATA_DIR = _local_data
-        print(f"[*] Local project data: {DATA_DIR}")
-    # else: DATA_DIR은 위 초기값(%APPDATA%/VibeCoding) 유지
-    print(f"[*] PROJECT_ROOT={PROJECT_ROOT}  PROJECT_ID 예정='{str(PROJECT_ROOT).replace(chr(92),'/').replace(':','').replace('/','--').lstrip('-')}'")
-else:
-    PROJECT_ROOT = BASE_DIR.parent
-
-# [추가] 내부 스크립트 경로 결정 (개발 vs 배포)
-# [2026-03-24] 배포 범용화: frozen 모드에서 scripts 폴더가 없을 수 있음 (개발 전용)
-_scripts_candidate = (BASE_DIR / 'scripts') if getattr(sys, 'frozen', False) else (PROJECT_ROOT / 'scripts')
+# 스크립트 디렉토리
+_scripts_candidate = PROJECT_ROOT / 'scripts'
 SCRIPTS_DIR = _scripts_candidate if _scripts_candidate.exists() else None
 # Claude Code 프로젝트 디렉터리 명명 규칙(: 제거, /·\ → --) 과 동일하게 인코딩
 _proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
 PROJECT_ID: str = _proj_raw.lstrip('-') or 'default'   # e.g. "D--vibe-coding"
 
-# 배포 버전에서 크래시 발생 시 에러 로그 기록 (os.devnull 대신 파일 사용)
-if getattr(sys, 'frozen', False) and sys.stdout is None:
-    error_log = open(DATA_DIR / "server_error.log", "a", encoding="utf-8")
-    sys.stdout = error_log
-    sys.stderr = error_log
-    print(f"\n--- Server Started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
-
 sys.path.append(str(BASE_DIR / 'src'))
-# api 모듈 패키지 경로 등록 — frozen(PyInstaller) 및 개발 모드 모두 대응
-# BASE_DIR = _MEIPASS(frozen) 또는 server.py 위치(개발) → api/ 패키지가 동일 위치에 있음
+# api 모듈 패키지 경로 등록
 sys.path.insert(0, str(BASE_DIR))
 try:
     from db import init_db
@@ -996,10 +901,8 @@ ensure_legacy_store(DATA_DIR)
 # [2026-03-22] Postgres-backed state schema 초기화는 _init_project_db() 이후로 이동.
 # 모듈 로드 시점에서는 프로젝트 DB가 아직 확정되지 않았으므로, __main__ 블록에서 호출.
 # 개발 모드에서는 아래 _try_ensure_schema_dev()에서 처리.
-if not getattr(sys, 'frozen', False):
-    # 개발 모드: PG가 이미 떠있으면 바로 스키마 초기화
-    # (frozen 모드는 __main__에서 _init_project_db 후 호출)
-    ensure_schema(DATA_DIR)
+# PG가 이미 떠있으면 바로 스키마 초기화
+ensure_schema(DATA_DIR)
 
 # [2026-03-22] 지식그래프 관련 _backfill_thought_parent_ids() 제거
 
@@ -1656,16 +1559,8 @@ def _parse_gemini_session(path: Path):
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-# 정적 파일 경로 결정 (PyInstaller 배포 환경 대응 최적화)
-if getattr(sys, 'frozen', False):
-    # [수정] spec에서 'vibe-view/dist'로 패키징하므로 _MEIPASS/vibe-view/dist가 실제 경로
-    # 이전: BASE_DIR / "dist" → _MEIPASS/dist 존재하지 않아 exe_dir/dist(빌드 산출물)로 오탐
-    STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
-else:
-    # 개발 환경: 최신 UI인 vibe-view를 우선 확인
-    STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
-    if not STATIC_DIR.exists():
-        STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
+# 정적 파일 경로
+STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
 
 print(f"[*] Static files directory: {STATIC_DIR}")
 if not STATIC_DIR.exists():
@@ -2321,9 +2216,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             result = {"status": "error", "message": "Invalid path"}
             if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
                 try:
-                    # [수정] 배포 여부에 따라 소스 경로 결정
                     # .gemini, scripts, GEMINI.md 등을 복사
-                    source_base = BASE_DIR if getattr(sys, 'frozen', False) else BASE_DIR.parent
+                    source_base = BASE_DIR.parent
                     
                     # .gemini 복사
                     gemini_src = source_base / ".gemini"
@@ -2676,8 +2570,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             logs_data: dict = {"type": log_type, "lines": [], "path": ""}
             try:
                 if log_type == 'pgsql':
-                    log_path = DATA_DIR.parent / "pgsql.log" if not getattr(sys, 'frozen', False) else Path(sys.executable).resolve().parent / "pgsql.log"
-                    # frozen 모드에서 pgsql.log는 %APPDATA%\VibeCoding\pgsql.log
+                    log_path = DATA_DIR.parent / "pgsql.log"
                     if not log_path.exists():
                         log_path = DATA_DIR / "pgsql.log"
                 elif log_type == 'task':
@@ -2741,9 +2634,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
-            if not getattr(sys, 'frozen', False):
-                self.wfile.write(json.dumps({"started": False, "reason": "dev build"}).encode('utf-8'))
-                return
             try:
                 from updater import check_and_update
                 threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
@@ -3076,28 +2966,16 @@ class SSEHandler(BaseHTTPRequestHandler):
                         tab = str(payload.get('tab', 'agent')).strip().lower() or 'agent'
 
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                if getattr(sys, 'frozen', False):
-                    # 배포(frozen) 모드: vibe-coding.exe 옆의 vibe-dashboard.exe 직접 실행
-                    exe_dir = Path(sys.executable).resolve().parent
-                    launch_exe = exe_dir / 'vibe-dashboard.exe'
-                    if not launch_exe.exists():
-                        raise RuntimeError(f'vibe-dashboard.exe 없음: {launch_exe}')
-                    subprocess.Popen(
-                        [str(launch_exe), str(HTTP_PORT), tab],
-                        creationflags=_no_window,
-                        close_fds=True,
-                    )
-                else:
-                    # 개발(dev) 모드: Python 스크립트 서브프로세스로 실행
-                    dashboard_script = BASE_DIR / 'dashboard_window.py'
-                    python_cmds = _python_runner_cmds()
-                    if not python_cmds:
-                        raise RuntimeError('Python interpreter not found for dashboard launch')
-                    subprocess.Popen(
-                        [python_cmds[0], str(dashboard_script), str(HTTP_PORT), tab],
-                        creationflags=_no_window,
-                        close_fds=True,
-                    )
+                # Python 스크립트로 대시보드 창 실행
+                dashboard_script = BASE_DIR / 'dashboard_window.py'
+                python_cmds = _python_runner_cmds()
+                if not python_cmds:
+                    raise RuntimeError('Python interpreter not found for dashboard launch')
+                subprocess.Popen(
+                    [python_cmds[0], str(dashboard_script), str(HTTP_PORT), tab],
+                    creationflags=_no_window,
+                    close_fds=True,
+                )
                 self.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -3143,28 +3021,16 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                if getattr(sys, 'frozen', False):
-                    # 배포(frozen) 모드: vibe-dashboard.exe를 kanban 탭으로 실행
-                    exe_dir = Path(sys.executable).resolve().parent
-                    launch_exe = exe_dir / 'vibe-dashboard.exe'
-                    if not launch_exe.exists():
-                        raise RuntimeError(f'vibe-dashboard.exe 없음: {launch_exe}')
-                    subprocess.Popen(
-                        [str(launch_exe), str(HTTP_PORT), 'kanban'],
-                        creationflags=_no_window,
-                        close_fds=True,
-                    )
-                else:
-                    # 개발(dev) 모드: dashboard_window.py kanban 탭으로 실행
-                    dashboard_script = BASE_DIR / 'dashboard_window.py'
-                    python_cmds = _python_runner_cmds()
-                    if not python_cmds:
-                        raise RuntimeError('Python interpreter not found for kanban launch')
-                    subprocess.Popen(
-                        [python_cmds[0], str(dashboard_script), str(HTTP_PORT), 'kanban'],
-                        creationflags=_no_window,
-                        close_fds=True,
-                    )
+                # dashboard_window.py kanban 탭으로 실행
+                dashboard_script = BASE_DIR / 'dashboard_window.py'
+                python_cmds = _python_runner_cmds()
+                if not python_cmds:
+                    raise RuntimeError('Python interpreter not found for kanban launch')
+                subprocess.Popen(
+                    [python_cmds[0], str(dashboard_script), str(HTTP_PORT), 'kanban'],
+                    creationflags=_no_window,
+                    close_fds=True,
+                )
                 self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -3415,15 +3281,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
-            if not getattr(sys, 'frozen', False):
-                self.wfile.write(json.dumps({"started": False, "reason": "dev build"}).encode('utf-8'))
-            else:
-                try:
-                    from updater import check_and_update
-                    threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
-                    self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
-                except Exception as e:
-                    self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
+            try:
+                from updater import check_and_update
+                threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
+                self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/git/rollback':
             # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
@@ -4172,8 +4035,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     }, ensure_ascii=False).encode('utf-8'))
 
                 elif tool == 'gemini':
-                    # 빌드 버전: BASE_DIR(sys._MEIPASS)에 내장된 스킬을 현재 프로젝트에 복사
-                    # 개발 버전: _proj/.gemini/skills/ 가 이미 존재하므로 소스=대상
+                    # .gemini/skills 를 프로젝트에 복사
                     import shutil as _shutil
                     gemini_skills_src = BASE_DIR / '.gemini' / 'skills'
                     if not gemini_skills_src.exists():
@@ -4411,35 +4273,6 @@ def main():
 
     print(f"Vibe Coding {__version__}")
 
-    # ── PyInstaller 임시 폴더(_MEI*) 자동 정리 ─────────────────────────────────
-    # [2026-03-22 Claude] 이전 버전(runtime_tmpdir=None)이 %TEMP%에 남긴 _MEI* 폴더를
-    # 앱 시작 시 자동 삭제. 현재 프로세스가 사용 중인 폴더는 제외.
-    # 이 폴더들이 남아있으면 python311.dll 로드 실패 에러 발생.
-    if getattr(sys, 'frozen', False):
-        try:
-            import tempfile, shutil
-            _temp_dir = Path(tempfile.gettempdir())
-            # 현재 프로세스의 _MEIPASS (사용 중이므로 삭제하면 안 됨)
-            _current_mei = getattr(sys, '_MEIPASS', '')
-            _cleaned = 0
-            for _mei in _temp_dir.iterdir():
-                if not _mei.name.startswith('_MEI'):
-                    continue
-                if not _mei.is_dir():
-                    continue
-                # 현재 프로세스가 사용 중인 폴더는 건너뜀
-                if str(_mei) == _current_mei:
-                    continue
-                try:
-                    shutil.rmtree(str(_mei), ignore_errors=True)
-                    _cleaned += 1
-                except Exception:
-                    pass  # 다른 프로세스가 사용 중이면 무시
-            if _cleaned:
-                print(f"[cleanup] 이전 _MEI 임시 폴더 {_cleaned}개 정리 완료")
-        except Exception as _e:
-            print(f"[cleanup] _MEI 정리 중 오류 (무시): {_e}")
-
     # ── 다중 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
     # [버그 수정 2026-03-14 v3.7.60] 소켓 락을 ensure_postgres_running() 이전에
     # 먼저 획득해야 한다. 이전 코드는 postgres 초기화(수 초 소요) 이후에 락을
@@ -4528,12 +4361,8 @@ def main():
 
     print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
 
-    # ── 배포 버전: PostgreSQL 자동 초기화 및 시작 (락 획득 이후) ─────────────────
-    # 소켓 락을 먼저 확보한 뒤 postgres를 기동함.
-    # [이전 버그] postgres 초기화(수 초)가 락 이전에 있어 타이밍 레이스 발생.
-    # installer가 {app}\pgsql\ 에 설치한 바이너리를 사용하여 pgdata 초기화 + 서버 기동.
-    if getattr(sys, 'frozen', False):
-        ensure_postgres_running()
+    # ── PostgreSQL 자동 초기화 및 시작 (PG 바이너리가 있는 경우에만) ──
+    ensure_postgres_running()
 
     # ── 프로젝트별 DB 초기화 (PG 시작 후) ────────────────────────────────────
     # [2026-03-22] 단일 PG 인스턴스 + 프로젝트별 DB 분리
@@ -4553,16 +4382,13 @@ def main():
     except Exception as e:
         print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
 
-    # ── 개발 모드 PID 파일 기록 ─────────────────────────────────────────────
-    # run_vibe.bat이 더블클릭 중복 실행 방지를 위해 이 PID 파일을 확인함.
-    # frozen(EXE) 모드는 소켓 락으로 방지되므로 개발 모드에서만 사용.
-    if not getattr(sys, 'frozen', False):
-        try:
-            _pid_file = DATA_DIR / '.dev_server.pid'
-            _pid_file.parent.mkdir(parents=True, exist_ok=True)
-            _pid_file.write_text(str(os.getpid()), encoding='utf-8')
-        except Exception:
-            pass
+    # ── PID 파일 기록 (중복 실행 방지) ─────────────────────────────────────
+    try:
+        _pid_file = DATA_DIR / '.dev_server.pid'
+        _pid_file.parent.mkdir(parents=True, exist_ok=True)
+        _pid_file.write_text(str(os.getpid()), encoding='utf-8')
+    except Exception:
+        pass
 
     if os.name == 'nt':
         try:
@@ -5017,17 +4843,10 @@ def main():
     # 3. GUI 창 띄우기 (최우선 순위)
     try:
         import webview
-        # 아이콘 경로를 실행 환경에 맞게 동적으로 결정 (D: 하드코딩 제거)
-        if getattr(sys, 'frozen', False):
-            # PyInstaller 빌드 시 내부 리소스 경로
-            official_icon = os.path.join(sys._MEIPASS, "bin", "app_icon.ico")
-            if not os.path.exists(official_icon):
-                official_icon = os.path.join(sys._MEIPASS, "bin", "vibe_final.ico")
-        else:
-            # 개발 환경 경로
-            official_icon = os.path.join(os.path.dirname(__file__), "bin", "vibe_final.ico")
-            if not os.path.exists(official_icon):
-                 official_icon = os.path.join(os.path.dirname(__file__), "bin", "app_icon.ico")
+        # 아이콘 경로 결정
+        official_icon = os.path.join(os.path.dirname(__file__), "bin", "vibe_final.ico")
+        if not os.path.exists(official_icon):
+            official_icon = os.path.join(os.path.dirname(__file__), "bin", "app_icon.ico")
         
         # 윈도우 하단바 아이콘 강제 교체 함수 (Win32 API)
         def force_win32_icon():
