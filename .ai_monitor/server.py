@@ -706,6 +706,7 @@ def _python_runner_cmds() -> list[str]:
 # [제거됨 2026-03-22] websockets import → Node.js ws 라이브러리로 대체
 
 # 전역 상태 관리
+main_window = None  # pywebview 창 핸들 — main()에서 초기화, SSEHandler에서 참조
 THOUGHT_LOGS = [] # AI 사고 과정 로그 (최근 50개 유지)
 # THOUGHT_CLIENTS는 아래(라인 658 근처)에서 한 번만 선언 — 중복 선언 제거
 
@@ -5100,6 +5101,7 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
         print(f"[*] Launching Desktop Window with Official Icon...")
         # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
         # html= 파라미터로 스플래시 먼저 표시 → webview.start() 직후 창 즉시 가시화
+        global main_window  # SSEHandler에서 폴더 다이얼로그 등에 사용
         main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
                               html=_SPLASH_HTML, width=1400, height=900)
 
