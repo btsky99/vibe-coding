@@ -357,19 +357,19 @@ class AgentBot:
         self._stream_msg_id = placeholder_msg_id
 
         # ── 에이전트별 CLI 명령 구성 (cokacdir 패턴) ──
-        # [핵심] create_subprocess_exec 사용 (shell=True 아님!)
-        #   → 인자가 개별 전달되므로 공백/특수문자 쿼팅 문제 완전 회피
-        #   → agent_api.py의 subprocess.Popen(cmd_list) 방식과 동일
-        #   → shell=True는 cmd.exe가 인자를 재해석하여 --resume + -p 조합 시 깨짐
+        # [핵심] shell=True + subprocess.list2cmdline()으로 안전 쿼팅
+        #   → Windows에서 claude.CMD 등 .cmd 파일은 cmd.exe 경유 필수
+        #   → list2cmdline()은 Python 표준 라이브러리가 제공하는 Windows 전용 안전 쿼팅
+        #   → 공백/특수문자/따옴표 포함 인자도 올바르게 이스케이프
         # Claude: -p 인자로 메시지 직접 전달, stdin=DEVNULL
         # Gemini/Codex: stdin=PIPE로 메시지 전달
+        import subprocess as _sp_mod
         cli = self.cli or "claude"
         use_stdin = (cli != "claude")
         if cli == "claude":
             cmd_parts = ["claude", "--verbose", "--output-format", "stream-json"]
             if self._session_id:
                 cmd_parts += ["--resume", self._session_id]
-            # -p와 메시지를 연속 배치 — exec 모드이므로 쿼팅 불필요 (인자 개별 전달)
             cmd_parts += ["-p", prompt]
         elif cli == "gemini":
             cmd_parts = ["gemini", "-m", "gemini-2.5-pro"]
@@ -382,13 +382,15 @@ class AgentBot:
         else:
             cmd_parts = [cli]
 
-        log.info(f"[{self.label}] cli exec: {' '.join(cmd_parts[:6])}...")
+        # subprocess.list2cmdline(): Windows cmd.exe용 안전 쿼팅 (공백/따옴표 자동 이스케이프)
+        shell_cmd = _sp_mod.list2cmdline(cmd_parts)
+        log.info(f"[{self.label}] cli spawn: {shell_cmd[:120]}...")
 
         try:
-            # create_subprocess_exec: 인자 개별 전달 → shell 쿼팅 이슈 근절
+            # shell=True 필수 — Windows .CMD 파일 실행에 cmd.exe 경유 필요
             # stderr=DEVNULL: 버퍼 풀 데드락 방지
-            proc = await asyncio.create_subprocess_exec(
-                *cmd_parts,
+            proc = await asyncio.create_subprocess_shell(
+                shell_cmd,
                 stdin=asyncio.subprocess.PIPE if use_stdin else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,

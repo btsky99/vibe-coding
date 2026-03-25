@@ -53,7 +53,8 @@
       "Bash(where psql:*)",
       "Read(//c/Program Files/PostgreSQL/**)",
       "Bash(\"D:/vibe-coding/.ai_monitor/bin/pgsql/bin/pg_ctl.exe\" -D \"D:/vibe-coding/.ai_monitor/bin/pgsql/data\" -l \"D:/vibe-coding/.ai_monitor/bin/pgsql/pg.log\" start 2>&1)",
-      "Skill(vibe-release)"
+      "Skill(vibe-release)",
+      "Bash(findstr /i python)"
     ]
   }
 }

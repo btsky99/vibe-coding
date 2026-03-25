@@ -982,12 +982,14 @@ def handle_chat(handler) -> None:
         use_stdin_pipe = (cli != 'claude')
         # stderr=DEVNULL로 변경 — stderr 버퍼 데드락 방지
         # (stderr가 꽉 차면 자식 프로세스가 block → stdout 읽기도 멈춤)
+        # shell=True 필수 — Windows에서 claude.CMD 등 .cmd 파일은 cmd.exe 경유 필요
         proc = _sp.Popen(
             cmd,
             stdin=_sp.PIPE if use_stdin_pipe else _sp.DEVNULL,
             stdout=_sp.PIPE,
             stderr=_sp.DEVNULL,
             cwd=_project_root,
+            shell=True,
             encoding=None,  # 바이너리 모드
         )
 

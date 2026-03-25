@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-25 Claude: 터미널 실행 중 채팅 모드 전환 버튼 추가 — 터미널 유지한 채 채팅 전환 가능.
+ *                      isTerminalMode/isChatMode 독립 관리. 터미널 div를 CSS hidden으로 보존 (unmount 안 함).
  * - 2026-03-25 Claude: 채팅↔터미널 전환 시 LLM 세션 유지 — ChatSlot unmount 방지.
  *                      조건부 렌더링 → CSS hidden 전환. chatMounted 상태로 한번 마운트된 ChatSlot 보존.
  *                      SSE 끊김 + 실행 중 LLM 세션 유실 + 409 already_streaming 오류 근절.
@@ -572,6 +574,19 @@ export default function TerminalSlot({
               </div>
             )}
 
+            {/* 채팅 모드 전환 버튼 — 터미널 실행 중에도 채팅으로 전환 가능 (터미널은 hidden으로 유지) */}
+            <button
+              onClick={() => {
+                setIsChatMode(true);
+                setChatMounted(true);
+                localStorage.setItem('chat_mode_' + terminalId, 'true');
+              }}
+              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${isChatMode ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+              title="채팅 모드로 전환 (터미널 유지)"
+            >
+              <MessageSquare className="w-2.5 h-2.5" />
+              채팅
+            </button>
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
               onClick={() => { const next = !showMonitor; setShowMonitor(next); localStorage.setItem('hive_monitor_enabled', String(next)); }}
@@ -586,8 +601,9 @@ export default function TerminalSlot({
         )}
       </div>
 
-      {isTerminalMode ? (
-        <div className="flex-1 flex flex-col min-h-0 bg-[#1e1e1e]">
+      {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
+      {isTerminalMode && (
+        <div className={`flex-1 flex flex-col min-h-0 bg-[#1e1e1e] ${isChatMode ? 'hidden' : ''}`}>
 
           {/* ── 자율 에이전트 모니터링 뷰 (상단 영역, 구 파일뷰어 자리) ── */}
           {showMonitor && (
@@ -907,24 +923,26 @@ export default function TerminalSlot({
             </div>
           </div>
         </div>
-      ) : (
-        <>
-        {/* ── 채팅 모드: ChatSlot은 한번 마운트되면 hidden으로 유지 (unmount 안 함) ── */}
-        {/* unmount 시 SSE 끊김 + 실행 중 LLM 세션 유실 → display:none으로 세션 보존 */}
-        {chatMounted && (
-          <div className={`flex-1 flex flex-col ${isChatMode ? '' : 'hidden'}`}>
-            <ChatSlot
-              slotId={slotId}
-              currentPath={currentPath}
-              onSwitchToTerminal={() => {
-                setIsChatMode(false);
-                localStorage.setItem('chat_mode_' + terminalId, 'false');
-              }}
-            />
-          </div>
-        )}
-        {/* ── 에이전트 선택 카드 UI (채팅 모드가 아닐 때만 표시) ── */}
-        {!isChatMode && (
+      )}
+
+      {/* ── 채팅 모드: ChatSlot은 한번 마운트되면 hidden으로 유지 (unmount 안 함) ── */}
+      {/* unmount 시 SSE 끊김 + 실행 중 LLM 세션 유실 → display:none으로 세션 보존 */}
+      {/* 터미널 실행 중에도 채팅 전환 가능 — 터미널은 위 블록에서 hidden으로 유지됨 */}
+      {chatMounted && (
+        <div className={`flex-1 flex flex-col ${isChatMode ? '' : 'hidden'}`}>
+          <ChatSlot
+            slotId={slotId}
+            currentPath={currentPath}
+            onSwitchToTerminal={() => {
+              setIsChatMode(false);
+              localStorage.setItem('chat_mode_' + terminalId, 'false');
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── 에이전트 선택 카드 UI (터미널 미실행 + 채팅 모드 아닐 때만 표시) ── */}
+      {!isTerminalMode && !isChatMode && (
         <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
           {/* 중앙 에이전트 선택 카드 UI */}
           <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px]">
@@ -1075,8 +1093,6 @@ export default function TerminalSlot({
             ))}
           </div>
         </div>
-        )}
-        </>
       )}
 
       {/* 단축어 편집 모달 팝업 */}
