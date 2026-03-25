@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-25 Claude: 채팅↔터미널 전환 시 LLM 세션 유지 — ChatSlot unmount 방지.
+ *                      조건부 렌더링 → CSS hidden 전환. chatMounted 상태로 한번 마운트된 ChatSlot 보존.
+ *                      SSE 끊김 + 실행 중 LLM 세션 유실 + 409 already_streaming 오류 근절.
  * - 2026-03-20 Claude: 장시간 idle 시 WS 끊김 → 자동 재연결 + 서버 ping/pong keepalive.
  *                      onclose에서 지수 백오프(1s~30s, 최대 10회)로 자동 재연결. 서버에 ping_interval=30s 추가.
  * - 2026-03-15 Claude: 절전/노트북 덮개 복귀 시 WebSocket 자동 재연결 — visibilitychange 이벤트 감지.
@@ -87,8 +90,13 @@ export default function TerminalSlot({
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
 
-  // 채팅 모드 — true이면 ChatSlot 렌더링, false이면 기존 PTY 터미널
+  // 채팅 모드 — true이면 ChatSlot 표시, false이면 기존 PTY 터미널
   const [isChatMode, setIsChatMode] = useState<boolean>(() => {
+    return localStorage.getItem('chat_mode_T' + (slotId + 1)) === 'true';
+  });
+  // ChatSlot 마운트 이력 — 한번이라도 채팅 모드 진입하면 true → 이후 hidden으로 유지 (unmount 안 함)
+  // unmount 시 SSE 연결 끊김 + 실행 중인 LLM 세션 유실 방지
+  const [chatMounted, setChatMounted] = useState<boolean>(() => {
     return localStorage.getItem('chat_mode_T' + (slotId + 1)) === 'true';
   });
 
@@ -899,17 +907,24 @@ export default function TerminalSlot({
             </div>
           </div>
         </div>
-      ) : isChatMode ? (
-        /* ── 채팅 모드: ChatSlot 렌더링 ── */
-        <ChatSlot
-          slotId={slotId}
-          currentPath={currentPath}
-          onSwitchToTerminal={() => {
-            setIsChatMode(false);
-            localStorage.setItem('chat_mode_' + terminalId, 'false');
-          }}
-        />
       ) : (
+        <>
+        {/* ── 채팅 모드: ChatSlot은 한번 마운트되면 hidden으로 유지 (unmount 안 함) ── */}
+        {/* unmount 시 SSE 끊김 + 실행 중 LLM 세션 유실 → display:none으로 세션 보존 */}
+        {chatMounted && (
+          <div className={`flex-1 flex flex-col ${isChatMode ? '' : 'hidden'}`}>
+            <ChatSlot
+              slotId={slotId}
+              currentPath={currentPath}
+              onSwitchToTerminal={() => {
+                setIsChatMode(false);
+                localStorage.setItem('chat_mode_' + terminalId, 'false');
+              }}
+            />
+          </div>
+        )}
+        {/* ── 에이전트 선택 카드 UI (채팅 모드가 아닐 때만 표시) ── */}
+        {!isChatMode && (
         <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
           {/* 중앙 에이전트 선택 카드 UI */}
           <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px]">
@@ -1039,6 +1054,7 @@ export default function TerminalSlot({
                 transition={{ delay: 0.3 }}
                 onClick={() => {
                   setIsChatMode(true);
+                  setChatMounted(true);
                   localStorage.setItem('chat_mode_' + terminalId, 'true');
                 }}
                 className="flex items-center justify-center gap-2 px-4 py-6 bg-blue-600/10 hover:bg-blue-600/30 text-blue-400 rounded-2xl text-xs font-black transition-all border border-blue-500/20 shadow-lg shadow-blue-500/10 min-w-[80px]"
@@ -1059,6 +1075,8 @@ export default function TerminalSlot({
             ))}
           </div>
         </div>
+        )}
+        </>
       )}
 
       {/* 단축어 편집 모달 팝업 */}

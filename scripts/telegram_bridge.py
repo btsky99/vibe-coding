@@ -357,41 +357,38 @@ class AgentBot:
         self._stream_msg_id = placeholder_msg_id
 
         # ── 에이전트별 CLI 명령 구성 (cokacdir 패턴) ──
-        # Claude: -p 인자로 메시지를 직접 전달 (stdin 파이프 불필요)
-        #   stdin=PIPE 사용 시 "stdin is not a terminal" 에러 발생하므로 반드시 positional arg 사용
-        # Gemini/Codex: stdin=PIPE로 메시지 전달 (기존 방식 유지)
+        # [핵심] create_subprocess_exec 사용 (shell=True 아님!)
+        #   → 인자가 개별 전달되므로 공백/특수문자 쿼팅 문제 완전 회피
+        #   → agent_api.py의 subprocess.Popen(cmd_list) 방식과 동일
+        #   → shell=True는 cmd.exe가 인자를 재해석하여 --resume + -p 조합 시 깨짐
+        # Claude: -p 인자로 메시지 직접 전달, stdin=DEVNULL
+        # Gemini/Codex: stdin=PIPE로 메시지 전달
         cli = self.cli or "claude"
         use_stdin = (cli != "claude")
         if cli == "claude":
-            # -p는 프롬프트 텍스트를 인자로 받으므로 다른 플래그 먼저, -p message 마지막
             cmd_parts = ["claude", "--verbose", "--output-format", "stream-json"]
             if self._session_id:
                 cmd_parts += ["--resume", self._session_id]
-            # -p와 메시지를 연속 배치 — shell=True이므로 공백 포함 시 쌍따옴표
-            cmd_parts += ["-p", f'"{prompt}"' if ' ' in prompt else prompt]
+            # -p와 메시지를 연속 배치 — exec 모드이므로 쿼팅 불필요 (인자 개별 전달)
+            cmd_parts += ["-p", prompt]
         elif cli == "gemini":
-            # gemini-cli: stdin으로 프롬프트 전달, stdout으로 응답
             cmd_parts = ["gemini", "-m", "gemini-2.5-pro"]
             if self._session_id:
                 cmd_parts += ["--resume", self._session_id]
         elif cli == "codex":
-            # codex-cli: OpenAI Codex CLI
             cmd_parts = ["codex", "--full-auto"]
             if self._session_id:
                 cmd_parts += ["--resume", self._session_id]
         else:
             cmd_parts = [cli]
 
-        shell_cmd = " ".join(cmd_parts)
-
-        log.info(f"[{self.label}] cli spawn: {shell_cmd[:80]}...")
+        log.info(f"[{self.label}] cli exec: {' '.join(cmd_parts[:6])}...")
 
         try:
-            # 자식 프로세스 spawn — shell=True로 .cmd 파일 실행 (Windows 필수)
-            # stderr=PIPE 대신 DEVNULL → stdout만 읽으면서 stderr 버퍼 데드락 완전 방지
-            # (stderr가 꽉 차면 자식 프로세스가 block → stdout도 멈춤 → 이벤트 루프 교착)
-            proc = await asyncio.create_subprocess_shell(
-                shell_cmd,
+            # create_subprocess_exec: 인자 개별 전달 → shell 쿼팅 이슈 근절
+            # stderr=DEVNULL: 버퍼 풀 데드락 방지
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_parts,
                 stdin=asyncio.subprocess.PIPE if use_stdin else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
