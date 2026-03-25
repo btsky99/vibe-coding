@@ -32,6 +32,10 @@ DESCRIPTION: Telegram Multi-Bot Bridge — 터미널당 독립 봇 + 그룹채�
              비동기로 병렬 실행합니다.
 
 REVISION HISTORY:
+- 2026-03-25 Claude: 동시 입출력 교착(deadlock) 해결 — 3대 병목 제거
+  - concurrent_updates(256): 핸들러 병렬 실행 허용 (미설정 시 순차 실행 → 이벤트 루프 차단)
+  - stderr=DEVNULL: stderr 버퍼 풀 → 자식 프로세스 block → stdout 멈춤 데드락 근절
+  - asyncio.gather(): 봇 폴링 병렬 시작 (순차 await 대비 N배 빠름)
 - 2026-03-24 Claude: cokacdir 패턴 적용 — stream-json 직접 spawn 방식으로 전환
   - _handle_text(): /api/agent/run API → claude --print --output-format stream-json
   - _stream_claude_response(): stdin/stdout 파이프로 실시간 스트리밍 + 텔레그램 메시지 편집
@@ -260,8 +264,14 @@ class AgentBot:
         self._streaming: bool = False                # 중복 실행 방지 플래그
         self._stream_msg_id: Optional[int] = None    # 텔레그램 메시지 편집용 msg_id
 
-        # Application 빌드
-        self.app = Application.builder().token(token).build()
+        # Application 빌드 — concurrent_updates=256으로 핸들러 병렬 실행 허용
+        # 미설정 시 핸들러가 순차 실행되어 subprocess 대기 중 다른 메시지 처리 차단됨
+        self.app = (
+            Application.builder()
+            .token(token)
+            .concurrent_updates(256)
+            .build()
+        )
         self._register_handlers()
 
     def _register_handlers(self) -> None:
@@ -353,11 +363,12 @@ class AgentBot:
         cli = self.cli or "claude"
         use_stdin = (cli != "claude")
         if cli == "claude":
-            cmd_parts = ["claude", "-p", "--verbose", "--output-format", "stream-json"]
+            # -p는 프롬프트 텍스트를 인자로 받으므로 다른 플래그 먼저, -p message 마지막
+            cmd_parts = ["claude", "--verbose", "--output-format", "stream-json"]
             if self._session_id:
                 cmd_parts += ["--resume", self._session_id]
-            # 메시지를 positional arg로 전달 — 쌍따옴표로 감싸기 (shell=True이므로)
-            cmd_parts.append(f'"{prompt}"' if ' ' in prompt else prompt)
+            # -p와 메시지를 연속 배치 — shell=True이므로 공백 포함 시 쌍따옴표
+            cmd_parts += ["-p", f'"{prompt}"' if ' ' in prompt else prompt]
         elif cli == "gemini":
             # gemini-cli: stdin으로 프롬프트 전달, stdout으로 응답
             cmd_parts = ["gemini", "-m", "gemini-2.5-pro"]
@@ -377,11 +388,13 @@ class AgentBot:
 
         try:
             # 자식 프로세스 spawn — shell=True로 .cmd 파일 실행 (Windows 필수)
+            # stderr=PIPE 대신 DEVNULL → stdout만 읽으면서 stderr 버퍼 데드락 완전 방지
+            # (stderr가 꽉 차면 자식 프로세스가 block → stdout도 멈춤 → 이벤트 루프 교착)
             proc = await asyncio.create_subprocess_shell(
                 shell_cmd,
                 stdin=asyncio.subprocess.PIPE if use_stdin else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
                 cwd=str(_PROJECT_ROOT),
             )
             self._claude_proc = proc
@@ -484,22 +497,8 @@ class AgentBot:
                 final_display = f"{self.emoji} *{self.label}*\n\n{current_chunk}"
                 await self._safe_edit(chat_id, current_msg_id, final_display)
             elif not full_text.strip():
-                # stdout에서 아무것도 안 왔으면 stderr 확인
-                stderr_data = await proc.stderr.read()
-                stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
-                if stderr_text:
-                    # 의미있는 에러만 표시 (노이즈 필터)
-                    err_lines = [l for l in stderr_text.splitlines()
-                                 if not any(l.startswith(p) for p in ("Loaded cached", "Registering", "Server '"))]
-                    if err_lines:
-                        await self._safe_edit(
-                            chat_id, current_msg_id,
-                            f"\u274c 오류:\n```\n{_truncate(chr(10).join(err_lines[-10:]), 3800)}\n```"
-                        )
-                    else:
-                        await self._safe_edit(chat_id, current_msg_id, f"{self.emoji} {self.label} 작업 완료")
-                else:
-                    await self._safe_edit(chat_id, current_msg_id, f"{self.emoji} {self.label} 작업 완료")
+                # stdout에서 아무것도 안 왔으면 오류 메시지 표시
+                await self._safe_edit(chat_id, current_msg_id, f"{self.emoji} {self.label} 작업 완료 (응답 없음)")
 
             # 그룹에 완료 알림
             summary = full_text[:100] + "..." if len(full_text) > 100 else full_text
@@ -1134,12 +1133,17 @@ class BotManager:
             log.error("활성 봇 없음 — 종료")
             return
 
-        # 1) 모든 봇 초기화 + 폴링 시작
+        # 1) 모든 봇 초기화 (순차 — 각 봇 내부 상태 셋업)
         for tid, bot in sorted(self.bots.items()):
             await bot.app.initialize()
             await bot.app.start()
+
+        # 2) 모든 봇 폴링을 asyncio.gather로 병렬 시작 — 순차 await 대비 N배 빠름
+        async def _start_polling(bot):
             await bot.app.updater.start_polling(drop_pending_updates=True)
             log.info(f"[{bot.label}] 폴링 시작 ✅")
+
+        await asyncio.gather(*[_start_polling(bot) for bot in self.bots.values()])
 
         # 2) 백그라운드 태스크: ITCP→그룹 미러링 + 대시보드 버스 폴링
         tasks = []

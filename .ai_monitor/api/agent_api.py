@@ -8,6 +8,8 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-03-25] Claude: stderr 데드락 수정 — handle_chat() subprocess stderr=DEVNULL
+#   - stderr 버퍼 풀 → 자식 프로세스 block → stdout 멈춤 교착 방지
 # [2026-03-08] Claude: Gemini 세션 실제 작업 표시 — PTY Gemini 현재 지시 내용 보완
 #   - _get_gemini_last_task(): Gemini 세션 JSON에서 마지막 사용자 메시지 추출
 #   - server.py pty_sessions에 cwd 필드 추가 → 프로젝트별 세션 파일 정확 매핑
@@ -862,9 +864,9 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
     """에이전트별 CLI 명령 구성 (cokacdir 패턴).
 
     [에이전트별 명령]
-    - claude: claude -p "메시지" --verbose --output-format stream-json [--resume SID] [--dangerously-skip-permissions]
-      → -p (--print) + positional arg로 메시지를 전달하면 stdin 파이프 불필요.
-        stdin=PIPE 사용 시 "stdin is not a terminal" 에러 발생하므로 반드시 -p 인자 사용.
+    - claude: claude --verbose --output-format stream-json [--resume SID] [--dangerously-skip-permissions] -p "메시지"
+      → -p는 프롬프트 텍스트를 인자로 받으므로 반드시 -p message 순서로 배치.
+        stdin=DEVNULL 사용 (stdin 파이프 불필요).
     - gemini: gemini -m gemini-2.5-pro [--resume SID] [-y]
     - codex:  codex --full-auto [--resume SID]
 
@@ -875,14 +877,18 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
         message: 전달할 메시지 (claude -p 인자로 직접 전달)
     """
     if cli == 'claude':
-        cmd = ['claude', '-p', '--verbose', '--output-format', 'stream-json']
+        # -p는 프롬프트 텍스트를 인자로 받으므로 다른 플래그를 먼저 배치하고
+        # -p message를 마지막에 추가해야 함.
+        # 잘못된 순서: claude -p --verbose ... message → -p가 --verbose를 프롬프트로 해석
+        # 올바른 순서: claude --verbose ... -p message → -p가 실제 메시지를 받음
+        cmd = ['claude', '--verbose', '--output-format', 'stream-json']
         if session_id:
             cmd += ['--resume', session_id]
         if yolo:
             cmd.append('--dangerously-skip-permissions')
-        # 메시지를 positional arg로 전달 (stdin 파이프 대신)
+        # -p 플래그와 메시지를 연속 배치 (-p는 프롬프트를 인자로 받음)
         if message:
-            cmd.append(message)
+            cmd += ['-p', message]
     elif cli == 'gemini':
         cmd = ['gemini', '-m', 'gemini-2.5-pro']
         if session_id:
@@ -974,11 +980,13 @@ def handle_chat(handler) -> None:
         #   → "stdin is not a terminal" 에러 방지
         # Gemini/Codex: stdin=PIPE로 메시지 전달 (기존 방식 유지)
         use_stdin_pipe = (cli != 'claude')
+        # stderr=DEVNULL로 변경 — stderr 버퍼 데드락 방지
+        # (stderr가 꽉 차면 자식 프로세스가 block → stdout 읽기도 멈춤)
         proc = _sp.Popen(
             cmd,
             stdin=_sp.PIPE if use_stdin_pipe else _sp.DEVNULL,
             stdout=_sp.PIPE,
-            stderr=_sp.PIPE,
+            stderr=_sp.DEVNULL,
             cwd=_project_root,
             encoding=None,  # 바이너리 모드
         )
