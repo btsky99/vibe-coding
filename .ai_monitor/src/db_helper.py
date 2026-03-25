@@ -4,11 +4,16 @@ from pathlib import Path
 
 from src.pg_store import ensure_schema, list_session_logs, upsert_session_log, execute, query_rows
 
-_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / 'scripts'
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-
-from itcp import send as itcp_send
+# itcp 모듈은 scripts/ 디렉토리에 위치 — pip 설치 환경에서는 없을 수 있음
+try:
+    _SCRIPTS_DIR = Path(__file__).resolve().parents[2] / 'scripts'
+    if str(_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_DIR))
+    from itcp import send as itcp_send
+except ImportError:
+    # pip 설치 환경: itcp 없이 동작 (메시지 전송 비활성화)
+    def itcp_send(**kwargs):
+        return False
 
 
 def insert_log(session_id, terminal_id, agent, trigger_msg, project="hive", status="running"):
