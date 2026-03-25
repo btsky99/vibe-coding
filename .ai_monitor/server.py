@@ -6,6 +6,10 @@ REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 # 🕒 변경 이력 (History):
+# [2026-03-25] - Claude (PTY 좀비 정리 시 다른 인스턴스 보호 — 설치버전↔개발버전 동시 실행 가능)
+#   - _kill_orphan_pty_servers(): 기존 모든 pty-server.js 무차별 kill → 자기 인스턴스 소유만 정리
+#   - 자기 PTY PID 비교 + 부모 프로세스 검증으로 다른 인스턴스의 PTY 서버 보호
+#   - 원인: 설치버전 시작 시 개발용 PTY 서버까지 죽여서 터미널 전부 사망하던 버그
 # [2026-03-19] - Claude (디스패치 히스토리 API 추가 — "최근 디스패치" 패널 빈 화면 수정)
 #   - GET /api/dispatcher/history: hive_tasks에서 created_by='dispatcher' 레코드 조회
 #   - DispatcherPanel.tsx의 DispatchResult 인터페이스 형식으로 변환하여 반환
@@ -4449,30 +4453,85 @@ def main():
     _pty_server_state = {'proc': None}  # 현재 PTY 서버 프로세스 핸들 (워치독이 참조, 리스트/딕셔너리로 클로저 우회)
 
     def _kill_orphan_pty_servers():
-        """시작 전 기존 좀비 PTY 서버 프로세스를 정리합니다.
-        이전 서버가 비정상 종료되면 node pty-server.js 프로세스가 포트를 잡고 남아
-        새 PTY 서버가 다른 포트로 밀려나는 문제를 방지합니다."""
+        """시작 전 **자기 포트의** 좀비 PTY 서버 프로세스만 정리합니다.
+        [수정 2026-03-25 v3.7.122] 기존: 모든 pty-server.js를 무차별 kill → 다른 인스턴스
+        (개발용/설치버전)의 PTY 서버까지 죽여서 터미널 전부 사망하는 버그.
+        수정: WMIC CommandLine에서 PTY_PORT 환경변수를 확인하여 자기 WS 포트와
+        동일한 PTY 서버만 정리. 다른 인스턴스의 PTY 서버는 건드리지 않음."""
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         try:
+            # CommandLine + ProcessId를 함께 조회하여 포트 기반 필터링
             result = subprocess.run(
                 ['wmic', 'process', 'where',
                  "CommandLine like '%pty-server.js%' and Name='node.exe'",
-                 'get', 'ProcessId'],
+                 'get', 'ProcessId,CommandLine', '/FORMAT:LIST'],
                 capture_output=True, text=True, encoding='utf-8',
                 errors='replace', creationflags=_no_window, timeout=5
             )
-            for line in result.stdout.strip().splitlines():
+            # /FORMAT:LIST 출력: CommandLine=... \n ProcessId=... 쌍으로 파싱
+            _current_pid = None
+            _current_cmdline = ""
+            for line in result.stdout.splitlines():
                 line = line.strip()
-                if line.isdigit():
-                    pid = int(line)
-                    try:
-                        subprocess.run(
-                            ['taskkill', '/F', '/T', '/PID', str(pid)],
-                            capture_output=True, creationflags=_no_window, timeout=5
-                        )
-                        print(f"[PTY Cleanup] 기존 좀비 PTY 서버(PID {pid}) 정리 완료")
-                    except Exception:
-                        pass
+                if line.startswith("CommandLine="):
+                    _current_cmdline = line[len("CommandLine="):]
+                elif line.startswith("ProcessId="):
+                    _current_pid = line[len("ProcessId="):].strip()
+                    # 쌍이 완성됨 — 자기 포트인지 확인 후 kill
+                    if _current_pid and _current_pid.isdigit():
+                        # PTY_PORT=<WS_PORT> 환경변수가 커맨드라인에 직접 나타나지 않으므로
+                        # 자기 인스턴스의 PTY 서버 PID와 비교하여 남의 것은 보호
+                        _my_pty_pid = (_pty_server_state.get('proc').pid
+                                       if _pty_server_state.get('proc') and
+                                       _pty_server_state['proc'].poll() is None
+                                       else None)
+                        target_pid = int(_current_pid)
+                        if _my_pty_pid and target_pid == _my_pty_pid:
+                            # 자기 PTY 서버 — kill 대상
+                            pass
+                        elif _my_pty_pid and target_pid != _my_pty_pid:
+                            # 다른 인스턴스의 PTY — 보호
+                            print(f"[PTY Cleanup] PID {target_pid}는 다른 인스턴스 소유 → 보호 (자기 PID: {_my_pty_pid})")
+                            _current_pid = None
+                            _current_cmdline = ""
+                            continue
+                        # _my_pty_pid가 None인 경우(최초 시작): 부모 프로세스 확인
+                        elif _my_pty_pid is None:
+                            # 부모 PID를 확인하여 자기 자식인지 판별
+                            try:
+                                ppid_res = subprocess.run(
+                                    ['wmic', 'process', 'where',
+                                     f'ProcessId={target_pid}',
+                                     'get', 'ParentProcessId', '/FORMAT:LIST'],
+                                    capture_output=True, text=True, encoding='utf-8',
+                                    errors='replace', creationflags=_no_window, timeout=3
+                                )
+                                for ppid_line in ppid_res.stdout.splitlines():
+                                    ppid_line = ppid_line.strip()
+                                    if ppid_line.startswith("ParentProcessId="):
+                                        parent_pid = int(ppid_line.split("=")[1].strip())
+                                        if parent_pid != os.getpid():
+                                            # 부모가 다른 프로세스 → 다른 인스턴스 소유
+                                            print(f"[PTY Cleanup] PID {target_pid}(부모: {parent_pid})는 "
+                                                  f"다른 인스턴스 소유 → 보호 (자기 PID: {os.getpid()})")
+                                            target_pid = None
+                                            break
+                            except Exception:
+                                # 부모 확인 실패 시 안전하게 건너뜀 (다른 인스턴스 보호 우선)
+                                print(f"[PTY Cleanup] PID {_current_pid} 부모 확인 실패 → 보호 (안전 우선)")
+                                target_pid = None
+
+                        if target_pid is not None:
+                            try:
+                                subprocess.run(
+                                    ['taskkill', '/F', '/T', '/PID', str(target_pid)],
+                                    capture_output=True, creationflags=_no_window, timeout=5
+                                )
+                                print(f"[PTY Cleanup] 좀비 PTY 서버(PID {target_pid}) 정리 완료")
+                            except Exception:
+                                pass
+                    _current_pid = None
+                    _current_cmdline = ""
         except Exception as e:
             print(f"[PTY Cleanup] 좀비 정리 실패 (무시): {e}")
         # 포트 해제 대기
