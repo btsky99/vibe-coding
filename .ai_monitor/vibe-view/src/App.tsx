@@ -424,19 +424,20 @@ function App() {
   };
 
   // 폴더 열기 — TopMenuBar "파일 → 폴더 열기" 전용 (FileExplorer 자체 버튼과 별개)
-  // pywebview JS API를 우선 사용 (올바른 UI 스레드에서 .NET 다이얼로그 실행)
   const openFolder = async () => {
     try {
       if ((window as any).pywebview?.api?.select_folder) {
         const data = await (window as any).pywebview.api.select_folder();
         if (data.status === 'success' && data.path) setCurrentPath(data.path);
-      } else {
-        const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'success' && data.path) setCurrentPath(data.path);
+        return;
       }
-    } catch (err) {
-      alert('폴더 선택 오류: ' + err);
+      const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success' && data.path) setCurrentPath(data.path);
+    } catch {
+      // 다이얼로그 실패 시 prompt 폴백
+      const path = prompt('프로젝트 폴더 경로를 입력하세요:', currentPath);
+      if (path) setCurrentPath(path.trim().replace(/\\/g, '/'));
     }
   };
 

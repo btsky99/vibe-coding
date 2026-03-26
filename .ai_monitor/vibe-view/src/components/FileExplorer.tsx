@@ -125,21 +125,43 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
 
   // ─── 파일/폴더 조작 함수들 ────────────────────────────────────────────
 
+  // ─── 경로 직접 입력 상태 ─────────────────────────────────────────────
+  const [pathInput, setPathInput] = useState('');
+  const [showPathInput, setShowPathInput] = useState(false);
+
   // 시스템 폴더 선택 대화상자 열기
-  // pywebview JS API를 우선 사용 (올바른 UI 스레드에서 .NET 다이얼로그 실행)
-  // pywebview가 없는 환경(브라우저 직접 접속)에서는 HTTP API로 폴백
+  // 1순위: pywebview JS API (네이티브 윈도우에서만 동작)
+  // 2순위: HTTP API (pywebview 네이티브 환경에서 HTTP 스레드 다이얼로그)
+  // 3순위: 경로 직접 입력 (브라우저 모드 — 항상 동작)
   const openFolder = async () => {
     try {
+      // pywebview 네이티브 API 시도
       if ((window as any).pywebview?.api?.select_folder) {
         const data = await (window as any).pywebview.api.select_folder();
-        if (data.status === 'success' && data.path) onPathChange(data.path);
-      } else {
-        const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'success' && data.path) onPathChange(data.path);
+        if (data.status === 'success' && data.path) { onPathChange(data.path); return; }
+        if (data.status === 'cancelled') return;
       }
-    } catch (err) {
-      alert('폴더 선택 오류: ' + err);
+      // HTTP API 시도
+      const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success' && data.path) { onPathChange(data.path); return; }
+      if (data.status === 'cancelled') return;
+      // 둘 다 실패하면 경로 입력 필드 표시
+      setPathInput(currentPath);
+      setShowPathInput(true);
+    } catch {
+      // 에러 시 경로 입력 필드로 폴백
+      setPathInput(currentPath);
+      setShowPathInput(true);
+    }
+  };
+
+  // 경로 직접 입력 확인
+  const applyPathInput = () => {
+    const trimmed = pathInput.trim().replace(/\\/g, '/');
+    if (trimmed) {
+      onPathChange(trimmed);
+      setShowPathInput(false);
     }
   };
 
@@ -282,6 +304,23 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
           {treeMode ? '≡' : '⊞'}
         </button>
       </div>
+
+      {/* 경로 직접 입력 필드 (다이얼로그 실패 시 폴백) */}
+      {showPathInput && (
+        <div className="flex items-center gap-1 mb-2">
+          <input
+            type="text"
+            value={pathInput}
+            onChange={e => setPathInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') applyPathInput(); if (e.key === 'Escape') setShowPathInput(false); }}
+            className="flex-1 bg-[#1e1e1e] border border-primary/40 rounded px-2 py-1 text-xs focus:outline-none focus:border-primary"
+            placeholder="C:/Users/프로젝트/경로"
+            autoFocus
+          />
+          <button onClick={applyPathInput} className="px-2 py-1 bg-primary/20 border border-primary/40 rounded text-xs text-primary hover:bg-primary/30">열기</button>
+          <button onClick={() => setShowPathInput(false)} className="px-2 py-1 bg-[#3c3c3c] border border-white/10 rounded text-xs text-[#858585] hover:text-white">✕</button>
+        </div>
+      )}
 
       {/* 파일 목록 컨테이너 — 상하/좌우 스크롤 허용 */}
       <div className="flex-1 overflow-auto custom-scrollbar border-t border-white/5 pt-2">

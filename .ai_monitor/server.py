@@ -5133,19 +5133,32 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
                     _t.sleep(0.1)
             window.load_url(_target)
 
-        # ── pythonnet / pywebview 백엔드 진단 ──
+        # ── pythonnet / pywebview 백엔드 진단 + 자동 수리 ──
         # pythonnet이 없으면 pywebview가 브라우저로 폴백하여
         # 네이티브 윈도우/파일 다이얼로그 등이 동작하지 않음
+        _pythonnet_ok = False
         try:
             import clr
+            _pythonnet_ok = True
             print(f"[*] pythonnet: OK (clr 모듈 로드됨)")
-        except ImportError:
-            print("[!] ⚠️  pythonnet이 설치되지 않았습니다!")
-            print("[!]    → pywebview가 브라우저 모드로 폴백됩니다 (네이티브 기능 제한)")
-            print("[!]    → 수정: pip install pythonnet>=3.0.5")
-        except Exception as _clr_err:
+        except (ImportError, Exception) as _clr_err:
             print(f"[!] ⚠️  pythonnet 로드 실패: {_clr_err}")
-            print("[!]    → pip install --upgrade pythonnet 으로 업그레이드하세요")
+            print("[!]    → 자동 설치를 시도합니다...")
+            # pythonnet 자동 설치 시도
+            _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            try:
+                _pip_result = subprocess.run(
+                    [sys.executable, '-m', 'pip', 'install', '--upgrade', 'pythonnet>=3.0.5'],
+                    capture_output=True, text=True, timeout=120,
+                    creationflags=_no_win,
+                )
+                if _pip_result.returncode == 0:
+                    print("[*] pythonnet 설치 완료! 앱을 재시작하면 네이티브 모드로 전환됩니다.")
+                else:
+                    print(f"[!] pythonnet 설치 실패: {_pip_result.stderr[:200]}")
+            except Exception as _pip_err:
+                print(f"[!] pythonnet 자동 설치 중 에러: {_pip_err}")
+            print("[!]    → 이번 실행에서는 브라우저 모드로 동작합니다. 재시작하면 네이티브 모드 전환.")
 
         print(f"[*] Launching Desktop Window with Official Icon...")
 
