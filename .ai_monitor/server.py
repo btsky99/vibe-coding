@@ -2091,25 +2091,27 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 selected_path = ""
-                # tkinter 폴더 다이얼로그 사용 (Python 내장, 스레드 안전, 항상 최상위)
-                # pywebview의 create_file_dialog는 GUI 스레드에서만 동작하여 HTTP 핸들러에서 호출 불가
-                # PowerShell BrowseForFolder는 pywebview 창 뒤에 숨어 보이지 않는 문제
-                try:
-                    import tkinter as tk
-                    from tkinter import filedialog
-                    root = tk.Tk()
-                    root.withdraw()  # 빈 창 숨김
-                    root.attributes('-topmost', True)  # 다이얼로그를 최상위로 — pywebview 창 위에 표시
-                    folder = filedialog.askdirectory(
-                        title='프로젝트 폴더를 선택하세요',
-                        parent=root
-                    )
-                    root.destroy()
-                    if folder:
-                        selected_path = folder.replace('\\', '/')
-                except Exception as _tk_err:
-                    print(f"[!] tkinter 폴더 다이얼로그 실패: {_tk_err}")
-
+                # tkinter 폴더 다이얼로그를 별도 Python 프로세스로 실행
+                # pywebview + pythonw 환경에서는 같은 프로세스 내 tkinter가 충돌하므로
+                # 독립 프로세스로 분리하여 안정적으로 동작
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                _tk_script = (
+                    "import tkinter as tk; "
+                    "from tkinter import filedialog; "
+                    "r=tk.Tk(); r.withdraw(); r.attributes('-topmost',True); "
+                    "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
+                    "r.destroy(); print(f or '')"
+                )
+                # pythonw.exe에서는 print()가 동작하지 않으므로 python.exe를 사용
+                _py_exe = sys.executable
+                if _py_exe.lower().endswith('pythonw.exe'):
+                    _py_exe = _py_exe[:-len('pythonw.exe')] + 'python.exe'
+                res = subprocess.run(
+                    [_py_exe, '-c', _tk_script],
+                    capture_output=True, text=True, encoding='utf-8',
+                    timeout=120,  # 사용자가 폴더를 선택할 시간
+                )
+                selected_path = res.stdout.strip().replace('\\', '/')
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
