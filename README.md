@@ -2,11 +2,15 @@
 
 AI 멀티 에이전트 하이브 마인드 대시보드. Claude, Gemini, Codex 등 여러 AI 에이전트를 하나의 터미널 UI에서 동시 관리합니다.
 
-## 설치
+## 원스톱 설치
 
 ```bash
-pip install git+https://github.com/btsky99/vibe-coding.git
+pip install git+https://github.com/btsky99/vibe-coding.git && vibe-coding --install
 ```
+
+이 한 줄로 모든 의존성 설치 + 바탕화면 바로가기까지 자동 생성됩니다.
+
+> `--install` 없이 `vibe-coding`만 실행해도 첫 실행 시 바탕화면 아이콘이 자동 생성됩니다.
 
 > 캐시 문제 발생 시: `pip install --no-cache-dir git+https://github.com/btsky99/vibe-coding.git`
 
@@ -22,12 +26,6 @@ pip install git+https://github.com/btsky99/vibe-coding.git
 vibe-coding
 ```
 
-## 바탕화면 바로가기
-
-```bash
-vibe-coding --create-shortcut
-```
-
 ## 업데이트
 
 실행 시 자동으로 최신 버전을 확인합니다. 수동 업데이트:
@@ -35,6 +33,15 @@ vibe-coding --create-shortcut
 ```bash
 pip install --upgrade git+https://github.com/btsky99/vibe-coding.git
 ```
+
+## 언인스톨
+
+```bash
+vibe-coding --uninstall
+pip uninstall vibe-coding -y
+```
+
+첫 번째 명령으로 바탕화면 바로가기를 삭제하고, 두 번째 명령으로 패키지를 제거합니다.
 
 ## 주요 기능
 

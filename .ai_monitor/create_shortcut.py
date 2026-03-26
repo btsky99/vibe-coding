@@ -6,6 +6,7 @@ DESCRIPTION: Windows 바탕화면 바로가기 생성 유틸리티.
   EXE 모드: 현재 실행 파일 사용.
 
 REVISION HISTORY:
+- 2026-03-26 Claude: remove_shortcut() 추가 — 언인스톨 시 바탕화면 바로가기 삭제
 - 2026-03-25 Claude: pip install 모드 대응 — entry point 자동 탐색 + winshell 의존성 제거
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
@@ -105,6 +106,35 @@ def create_shortcut():
         print(f"바탕화면 바로가기가 생성되었습니다: {shortcut_path}")
     except Exception as e:
         print(f"바로가기 생성 중 오류 발생: {e}")
+
+
+def remove_shortcut():
+    """Windows 바탕화면의 '바이브코딩' 바로가기를 삭제합니다.
+    언인스톨 시 호출됩니다.
+    """
+    if os.name != 'nt':
+        print("바탕화면 바로가기 삭제는 Windows에서만 지원됩니다.")
+        return
+
+    desktop = Path(os.environ.get('USERPROFILE', '')) / 'Desktop'
+    shortcut_path = desktop / "바이브코딩.lnk"
+
+    if shortcut_path.exists():
+        try:
+            shortcut_path.unlink()
+            print(f"바탕화면 바로가기를 삭제했습니다: {shortcut_path}")
+        except Exception as e:
+            print(f"바로가기 삭제 실패: {e}")
+    else:
+        print("바탕화면에 바로가기가 없습니다.")
+
+
+def shortcut_exists():
+    """바탕화면에 '바이브코딩' 바로가기가 존재하는지 확인합니다."""
+    if os.name != 'nt':
+        return False
+    desktop = Path(os.environ.get('USERPROFILE', '')) / 'Desktop'
+    return (desktop / "바이브코딩.lnk").exists()
 
 
 if __name__ == "__main__":

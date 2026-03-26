@@ -4,6 +4,7 @@
 #   `vibe-coding` 명령으로 실행. 기존 EXE 빌드와 공존.
 #
 # REVISION HISTORY:
+# - 2026-03-26 Claude: 의존성 버전 범위 완화 + pywin32 추가 + 불필요 의존성 제거
 # - 2026-03-25 Claude: 신규 생성 — pip install 배포 전환
 
 [build-system]
@@ -20,15 +21,14 @@ license = {text = "MIT"}
 authors = [{name = "btsky99"}]
 
 dependencies = [
-    "pywebview>=6.1",
-    "websockets>=16.0",
-    "aiohttp>=3.12",
+    "pywebview>=5.0",
     "psycopg2-binary>=2.9",
-    "watchdog>=6.0",
-    "python-dotenv>=1.2",
-    "pycryptodome>=3.20",
-    "rich>=14.0",
-    "python-telegram-bot>=22.0",
+    "watchdog>=4.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+    "python-telegram-bot>=21.0",
+    # Windows 바탕화면 바로가기 생성용 (COM 자동화)
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

@@ -6,6 +6,12 @@ REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 # 🕒 변경 이력 (History):
+# [2026-03-26] - Claude (원스톱 설치 + 언인스톨 + PTY 자동 빌드)
+#   - --install: 바탕화면 바로가기 + PTY node-pty 네이티브 모듈 자동 npm install
+#   - --uninstall: 바탕화면 바로가기 삭제 + pip uninstall 안내
+#   - 첫 실행 시 바탕화면 바로가기 자동 생성 (바이브코딩.lnk 없으면)
+#   - _ensure_pty_node_modules(): 서버 시작 시 node-pty 네이티브 바이너리 없으면 npm install 자동 실행
+#   - 원인: pip install로 다른 PC에 설치하면 node-pty C++ 바이너리가 호환 안 되어 터미널 연결 실패
 # [2026-03-25] - Claude (PTY 좀비 정리 시 다른 인스턴스 보호 — 설치버전↔개발버전 동시 실행 가능)
 #   - _kill_orphan_pty_servers(): 기존 모든 pty-server.js 무차별 kill → 자기 인스턴스 소유만 정리
 #   - 자기 PTY PID 비교 + 부모 프로세스 검증으로 다른 인스턴스의 PTY 서버 보호
@@ -4266,16 +4272,59 @@ def main():
     """메인 엔트리포인트 — pip install 시 `vibe-coding` 명령으로 호출됨.
     기존 `python server.py` 직접 실행도 동일하게 동작.
     """
-    # --create-shortcut 인자 처리: 바탕화면 바로가기 생성 후 종료
-    if len(sys.argv) > 1 and sys.argv[1] == '--create-shortcut':
+    # ── CLI 인자 처리: --install / --uninstall / --create-shortcut ──
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
         try:
-            from .create_shortcut import create_shortcut
+            from .create_shortcut import create_shortcut, remove_shortcut
         except ImportError:
-            from create_shortcut import create_shortcut
-        create_shortcut()
-        return
+            from create_shortcut import create_shortcut, remove_shortcut
+
+        # --install: 바탕화면 바로가기 생성 + PTY 네이티브 모듈 빌드 (원스톱 설치)
+        if cmd in ('--install', '--create-shortcut'):
+            # PTY 서버 네이티브 모듈 빌드 (node-pty — 터미널 기능 핵심)
+            if cmd == '--install':
+                import shutil as _shutil
+                pty_dir = Path(__file__).resolve().parent / 'pty-server'
+                if (pty_dir / 'package.json').exists() and _shutil.which('npm'):
+                    print("[*] 터미널 네이티브 모듈 빌드 중... (1~2분 소요)")
+                    _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                    r = subprocess.run(['npm', 'install'], cwd=str(pty_dir),
+                                       capture_output=True, text=True, encoding='utf-8',
+                                       errors='replace', timeout=300, creationflags=_no_win)
+                    if r.returncode == 0:
+                        print("[*] 터미널 네이티브 모듈 빌드 완료!")
+                    else:
+                        print(f"[!] npm install 실패: {r.stderr[:300]}")
+                elif not _shutil.which('npm'):
+                    print("[!] Node.js가 설치되지 않았습니다. 터미널 기능에 필요합니다.")
+            create_shortcut()
+            if cmd == '--install':
+                print("\n✅ Vibe Coding 설치가 완료되었습니다!")
+                print("   실행: vibe-coding")
+                print("   제거: vibe-coding --uninstall")
+            return
+
+        # --uninstall: 바탕화면 바로가기 삭제 + pip uninstall 안내
+        if cmd == '--uninstall':
+            remove_shortcut()
+            print("\n🗑️  바로가기를 삭제했습니다.")
+            print("   패키지 완전 제거: pip uninstall vibe-coding -y")
+            return
 
     print(f"Vibe Coding {__version__}")
+
+    # ── 첫 실행 시 바탕화면 바로가기 자동 생성 ──
+    try:
+        try:
+            from .create_shortcut import create_shortcut, shortcut_exists
+        except ImportError:
+            from create_shortcut import create_shortcut, shortcut_exists
+        if not shortcut_exists():
+            print("첫 실행 감지 — 바탕화면 바로가기를 자동 생성합니다...")
+            create_shortcut()
+    except Exception:
+        pass  # 바로가기 생성 실패해도 서버 시작에는 지장 없음
 
     # ── 다중 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
     # [버그 수정 2026-03-14 v3.7.60] 소켓 락을 ensure_postgres_running() 이전에
@@ -4537,8 +4586,49 @@ def main():
         # 포트 해제 대기
         time.sleep(1)
 
+    def _ensure_pty_node_modules():
+        """PTY 서버의 node_modules가 현재 PC에서 유효한지 확인하고, 필요하면 npm install을 실행합니다.
+        node-pty는 C++ 네이티브 모듈이라 빌드한 PC의 OS/Node 버전에 종속됩니다.
+        pip install로 다른 PC에 설치하면 바이너리 호환이 안 되므로 재빌드가 필수입니다.
+        """
+        pty_server_dir = BASE_DIR / 'pty-server'
+        if not (pty_server_dir / 'package.json').exists():
+            return  # pty-server 자체가 없으면 스킵
+
+        # node-pty 네이티브 바이너리 존재 여부로 빌드 상태 판단
+        # node-pty의 빌드 산출물은 node_modules/node-pty/build/Release/ 에 위치
+        pty_binding = pty_server_dir / 'node_modules' / 'node-pty' / 'build' / 'Release' / 'pty.node'
+        if pty_binding.exists():
+            return  # 이미 빌드된 네이티브 모듈이 존재 → 재빌드 불필요
+
+        # npm이 설치되어 있는지 확인
+        import shutil as _shutil
+        if not _shutil.which('npm'):
+            print("[!] npm이 설치되지 않았습니다. 터미널 기능을 위해 Node.js를 설치하세요.")
+            return
+
+        print("[*] PTY 서버 네이티브 모듈 빌드 중... (최초 1회, 1~2분 소요)")
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        try:
+            result = subprocess.run(
+                ['npm', 'install'],
+                cwd=str(pty_server_dir),
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                timeout=300,  # 5분 타임아웃
+                creationflags=_no_window,
+            )
+            if result.returncode == 0:
+                print("[*] PTY 서버 네이티브 모듈 빌드 완료!")
+            else:
+                print(f"[!] npm install 실패 (코드 {result.returncode}): {result.stderr[:500]}")
+        except subprocess.TimeoutExpired:
+            print("[!] npm install 타임아웃 (5분 초과)")
+        except Exception as e:
+            print(f"[!] npm install 실행 오류: {e}")
+
     def _start_node_pty_server():
         """PTY 서버를 시작하고 프로세스 핸들을 반환합니다."""
+        _ensure_pty_node_modules()  # 네이티브 모듈 빌드 확인/실행
         pty_server_dir = BASE_DIR / 'pty-server'
         pty_server_exe = pty_server_dir / 'pty-server.exe'
         pty_server_js = pty_server_dir / 'pty-server.js'
