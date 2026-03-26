@@ -2,40 +2,26 @@
 
 AI 멀티 에이전트 하이브 마인드 대시보드. Claude, Gemini, Codex 등 여러 AI 에이전트를 하나의 터미널 UI에서 동시 관리합니다.
 
-## 설치 (최초 1회)
+## 설치
 
-```bash
-pip install --no-cache-dir git+https://github.com/btsky99/vibe-coding.git && vibe-coding --install
-```
+[GitHub Releases](https://github.com/btsky99/vibe-coding/releases)에서 최신 설치파일을 다운로드하세요:
 
-이 한 줄로: 패키지 설치 + 터미널 모듈 빌드 + 바탕화면 바로가기 생성까지 완료됩니다.
+- **`vibe-coding-setup-X.Y.Z.exe`** — 올인원 설치버전 (권장)
+- **`vibe-coding-update-X.Y.Z.exe`** — GUI 모드 (수동 업데이트)
 
 ### 전제조건
 
-- Python 3.11+
+- Windows 10/11
 - Node.js 18+ (터미널 기능)
-- PostgreSQL 15+ (데이터 저장)
+- PostgreSQL 15+ (데이터 저장, 설치버전에 포함)
 
 ## 실행
 
-```bash
-vibe-coding
-```
+설치 후 바탕화면의 **바이브 코딩** 바로가기를 클릭하세요.
 
 ## 업데이트
 
-실행 시 자동으로 최신 버전을 확인합니다. 수동 업데이트:
-
-```bash
-pip install --no-cache-dir --upgrade git+https://github.com/btsky99/vibe-coding.git
-```
-
-## 언인스톨
-
-```bash
-vibe-coding --uninstall
-pip uninstall vibe-coding -y
-```
+실행 시 자동으로 최신 버전을 확인합니다. 새 버전이 있으면 자동 다운로드 + 교체됩니다.
 
 ## 주요 기능
 
@@ -43,7 +29,7 @@ pip uninstall vibe-coding -y
 - **채팅 모드**: 터미널 실행 중 채팅 UI로 전환 가능
 - **하이브 마인드**: 에이전트 간 공유 메모리, 태스크 분배, 크로스 검증
 - **지식 그래프**: PostgreSQL 기반 AI 사고 과정 시각화
-- **자동 업데이트**: 실행 시 GitHub에서 최신 버전 자동 체크
+- **자동 업데이트**: 실행 시 GitHub에서 최신 EXE 자동 체크
 
 ## 개발 모드
 
