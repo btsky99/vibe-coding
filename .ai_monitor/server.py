@@ -4356,14 +4356,19 @@ def main():
 
     print(f"Vibe Coding {__version__}")
 
-    # ── 첫 실행 시 바탕화면 바로가기 자동 생성 ──
+    # ── 바탕화면 바로가기 자동 생성/갱신 ──
+    # 첫 실행이면 생성, 기존 바로가기가 콘솔(vibe-coding.exe)을 가리키면
+    # GUI(vibe-coding-gui.exe)로 자동 갱신
     try:
         try:
-            from .create_shortcut import create_shortcut, shortcut_exists
+            from .create_shortcut import create_shortcut, shortcut_exists, _shortcut_needs_update
         except ImportError:
-            from create_shortcut import create_shortcut, shortcut_exists
+            from create_shortcut import create_shortcut, shortcut_exists, _shortcut_needs_update
         if not shortcut_exists():
             print("첫 실행 감지 — 바탕화면 바로가기를 자동 생성합니다...")
+            create_shortcut()
+        elif _shortcut_needs_update():
+            print("바로가기 갱신 — GUI 모드(콘솔 없음)로 업데이트합니다...")
             create_shortcut()
     except Exception:
         pass  # 바로가기 생성 실패해도 서버 시작에는 지장 없음

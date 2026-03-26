@@ -139,5 +139,37 @@ def shortcut_exists():
     return (desktop / "바이브코딩.lnk").exists()
 
 
+def _shortcut_needs_update():
+    """기존 바로가기가 콘솔 버전(vibe-coding.exe)을 가리키는데
+    GUI 버전(vibe-coding-gui.exe)이 사용 가능한 경우 True 반환.
+    pip upgrade 후 바로가기가 자동으로 GUI 모드로 갱신되어야 함.
+    """
+    if os.name != 'nt':
+        return False
+    desktop = Path(os.environ.get('USERPROFILE', '')) / 'Desktop'
+    lnk = desktop / "바이브코딩.lnk"
+    if not lnk.exists():
+        return False
+    # GUI 버전이 사용 가능한지 확인
+    gui_cmd = shutil.which('vibe-coding-gui')
+    if not gui_cmd:
+        return False
+    # 현재 바로가기의 타겟 읽기
+    try:
+        from win32com.client import Dispatch
+        shell = Dispatch('WScript.Shell')
+        shortcut = shell.CreateShortCut(str(lnk))
+        target = shortcut.Targetpath.lower()
+        # 콘솔 버전을 가리키고 있으면 갱신 필요
+        if 'vibe-coding-gui' not in target and 'vibe-coding' in target:
+            return True
+        # run_vibe.bat이나 cmd.exe를 가리키는 경우에도 갱신
+        if 'cmd.exe' in target or 'run_vibe' in target:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 if __name__ == "__main__":
     create_shortcut()

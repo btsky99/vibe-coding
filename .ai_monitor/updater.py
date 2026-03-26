@@ -119,6 +119,18 @@ def check_and_update(data_dir):
             msg = f"v{latest_ver} 업데이트 완료. 재시작하면 적용됩니다."
             logger.info("[pip] %s", msg)
             print(f"[*] {msg}")
+            # 업데이트 후 바탕화면 바로가기를 자동 재생성
+            # — 이전 버전이 콘솔(vibe-coding.exe)을 가리키고 있을 수 있으므로
+            #   GUI(vibe-coding-gui.exe)로 갱신
+            try:
+                try:
+                    from .create_shortcut import create_shortcut
+                except ImportError:
+                    from create_shortcut import create_shortcut
+                create_shortcut()
+                logger.info("[pip] 바로가기 재생성 완료")
+            except Exception as e:
+                logger.warning("[pip] 바로가기 재생성 실패: %s", e)
             with open(ready_file, "w", encoding="utf-8") as f:
                 json.dump({
                     "version": latest_ver, "ready": True, "downloading": False,
