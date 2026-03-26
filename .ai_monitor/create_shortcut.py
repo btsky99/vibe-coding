@@ -6,6 +6,7 @@ DESCRIPTION: Windows 바탕화면 바로가기 생성 유틸리티.
   EXE 모드: 현재 실행 파일 사용.
 
 REVISION HISTORY:
+- 2026-03-26 Claude: pythonw → vibe-coding.exe 직접 실행으로 변경 (pythonw는 에러 무시)
 - 2026-03-26 Claude: remove_shortcut() 추가 — 언인스톨 시 바탕화면 바로가기 삭제
 - 2026-03-25 Claude: pip install 모드 대응 — entry point 자동 탐색 + winshell 의존성 제거
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
@@ -48,15 +49,11 @@ def create_shortcut():
     working_dir = ""
 
     # 1순위: pip install로 설치된 vibe-coding 명령 (Scripts/vibe-coding.exe)
+    # pythonw 사용 금지: 에러 발생 시 콘솔이 없어 아무것도 표시 안 되고 무응답으로 보임
+    # vibe-coding.exe를 직접 실행 — 콘솔 창은 WindowStyle=7(최소화)로 숨김 처리
     vibe_cmd = shutil.which('vibe-coding')
     if vibe_cmd:
-        # pip entry point가 설치됨 — 콘솔 없이 실행하기 위해 pythonw 사용
-        pythonw = Path(sys.executable).parent / 'pythonw.exe'
-        if pythonw.exists():
-            target_path = str(pythonw)
-            arguments = "-m ai_monitor"
-        else:
-            target_path = str(vibe_cmd)
+        target_path = str(vibe_cmd)
         working_dir = str(Path.home())
         print(f"[pip 모드] entry point 감지: {vibe_cmd}")
 
