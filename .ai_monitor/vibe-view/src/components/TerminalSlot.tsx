@@ -55,6 +55,11 @@ interface TerminalSlotProps {
   messages: AgentMessage[];
   tasks: Task[];
   geminiUsage: any;
+  // Claude Code 세션 컨텍스트 사용량 — 컬러 블록 바 표시용
+  claudeUsage: {
+    input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
+    model: string; context_window: number; percentage: number; last_ts: string;
+  } | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
   // 오케스트레이터 스킬 체인 데이터 — /api/orchestrator/skill-chain 폴링
@@ -64,7 +69,7 @@ interface TerminalSlotProps {
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, agentTerminals, orchestratorData, hiveActivity
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity
 }: TerminalSlotProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
@@ -105,6 +110,9 @@ export default function TerminalSlot({
   // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
   // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
+
+  // Claude 컨텍스트 바 상세 토글 (클릭 시 In/Out/Cache 2행 표시)
+  const [showCtxDetail, setShowCtxDetail] = useState(false);
 
   // 자율 에이전트 모니터링 뷰 표시 여부 — localStorage에서 마지막 상태 복원 (기본값: false)
   // 기본값 false: 터미널 화면 최대 확보, 필요 시 버튼으로 토글
@@ -600,6 +608,146 @@ export default function TerminalSlot({
           </div>
         )}
       </div>
+
+      {/* ── Claude 컨텍스트 컬러 블록 바 — 클릭 시 상세 팝업 (리팩토링 복원 2026-03-26) ── */}
+      {isTerminalMode && agentType === 'claude' && (() => {
+        const ctx = claudeUsage;
+        const CTX_MAX = ctx?.context_window ?? 200000;
+        const inputTok = ctx?.input_tokens ?? 0;
+        const outputTok = ctx?.output_tokens ?? 0;
+        const cacheRead = ctx?.cache_read ?? 0;
+        const cacheWrite = ctx?.cache_write ?? 0;
+        const ctxPct = ctx ? Math.round((inputTok / CTX_MAX) * 100) : 0;
+        const freeTok = Math.max(0, CTX_MAX - inputTok);
+
+        // 각 토큰 타입의 컨텍스트 점유 %
+        const cacheReadPct = Math.min(100, (cacheRead / CTX_MAX) * 100);
+        const cacheWritePct = Math.min(100, (cacheWrite / CTX_MAX) * 100);
+        const inputOnlyPct = Math.max(0, ctxPct - cacheReadPct - cacheWritePct);
+        const freePct = Math.max(0, 100 - ctxPct);
+
+        // 배경 & 경고 색
+        const dangerBg = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
+          : ctxPct >= 60 ? 'bg-yellow-950/30 border-yellow-500/15'
+          : 'bg-[#0d1117] border-white/5';
+        const modelColor = ctxPct >= 80 ? '#f87171' : ctxPct >= 60 ? '#facc15' : '#a3e635';
+
+        // 모델명 단축
+        const modelShort = ctx?.model
+          ? ctx.model.replace(/^claude-/, '').replace(/-(\d)/, ' $1').replace(/-latest$/, '').replace(/-\d{8}$/, '').replace(/\b\w/g, c => c.toUpperCase())
+          : 'Claude';
+        const maxLabel = CTX_MAX >= 1_000_000 ? `${CTX_MAX / 1_000_000}M` : `${CTX_MAX / 1000}k`;
+        const usedLabel = `${Math.round(inputTok / 1000)}k`;
+
+        // 블록 그리드 색상 결정 (100개 블록, 각 1%)
+        const getBlockColor = (idx: number) => {
+          const p = idx + 1;
+          if (p <= cacheReadPct) return '#22d3ee';
+          if (p <= cacheReadPct + cacheWritePct) return '#4ade80';
+          if (p <= cacheReadPct + cacheWritePct + inputOnlyPct) return '#fbbf24';
+          return '#1e2130';
+        };
+
+        // 상대 시간
+        const ctxRelTime = (() => {
+          if (!ctx?.last_ts) return '';
+          const diff = Math.floor((Date.now() - new Date(ctx.last_ts).getTime()) / 1000);
+          if (diff < 60) return `${diff}초 전`;
+          if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+          if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+          return `${Math.floor(diff / 86400)}일 전`;
+        })();
+
+        // 카테고리 목록
+        const pureInput = Math.max(0, inputTok - cacheRead - cacheWrite);
+        const categories = [
+          { label: '입력 토큰', tok: pureInput, pct: inputOnlyPct, color: '#fbbf24' },
+          ...(cacheWrite > 0 ? [{ label: '캐시 쓰기', tok: cacheWrite, pct: cacheWritePct, color: '#4ade80' }] : []),
+          ...(cacheRead > 0 ? [{ label: '캐시 읽기', tok: cacheRead, pct: cacheReadPct, color: '#22d3ee' }] : []),
+          { label: '출력 누적', tok: outputTok, pct: Math.round((outputTok / CTX_MAX) * 100), color: '#888' },
+          { label: '여유 공간', tok: freeTok, pct: freePct, color: '#2a2d3a' },
+        ];
+        const fmtTok = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`;
+
+        return (
+          <div className="relative shrink-0">
+            {/* 단일 행 바 (항상 표시) */}
+            <div
+              className={`border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
+              onClick={() => setShowCtxDetail(p => !p)}
+              title="클릭하여 컨텍스트 상세 보기"
+            >
+              {/* 컬러 블록 바: 20개 █, 각 5% */}
+              <div className="flex shrink-0 leading-none">
+                {Array.from({ length: 20 }, (_, idx) => {
+                  const p = (idx + 1) * 5;
+                  const color = p <= cacheReadPct ? '#22d3ee'
+                    : p <= cacheReadPct + cacheWritePct ? '#4ade80'
+                    : p <= ctxPct ? '#fbbf24'
+                    : '#2a2d3a';
+                  return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
+                })}
+              </div>
+              {/* 텍스트: 모델명 · 사용량 */}
+              <div className="flex items-center gap-0 whitespace-nowrap flex-1 min-w-0">
+                <span className="font-semibold" style={{ color: modelColor }}>{modelShort}</span>
+                <span className="text-[#444] mx-1.5">·</span>
+                <span className="text-[#ccc]">{usedLabel}/{maxLabel} tokens ({ctxPct}%)</span>
+                {ctx && ctxRelTime && <span className="text-[#333] ml-2 text-[9px]">{ctxRelTime}</span>}
+                <span className="ml-auto text-[#333] text-[8px]">{showCtxDetail ? '▲' : '▼'}</span>
+              </div>
+              {!ctx && <span className="text-[9px] text-[#333] italic">Claude Code 세션 대기 중...</span>}
+            </div>
+            {/* 데이터 없을 때 2행: No usage data yet */}
+            {!ctx && (
+              <div className="border-b border-white/5 bg-[#0d1117] px-3 py-[2px] font-mono text-[9px] text-[#444] italic">
+                No usage data yet
+              </div>
+            )}
+            {/* 데이터 있을 때 2행: In / Out / Cache+ / Cache~ 상세 */}
+            {ctx && (
+              <div className="border-b border-white/5 bg-[#0d1117] px-3 py-[2px] font-mono text-[9px] text-[#888] flex items-center gap-3">
+                <span>In: <span className="text-[#fbbf24]">{fmtTok(inputTok)}</span></span>
+                <span>Out: <span className="text-[#ccc]">{fmtTok(outputTok)}</span></span>
+                {cacheWrite > 0 && <span>Cache+: <span className="text-[#4ade80]">{fmtTok(cacheWrite)}</span></span>}
+                {cacheRead > 0 && <span>Cache~: <span className="text-[#22d3ee]">{fmtTok(cacheRead)}</span></span>}
+              </div>
+            )}
+
+            {/* 상세 팝업: /context 스타일 블록 그리드 + 카테고리 (클릭 토글) */}
+            {showCtxDetail && ctx && (
+              <div className="absolute top-full left-0 right-0 z-50 bg-[#0d1117] border-b border-x border-white/10 shadow-2xl font-mono text-[10px] px-3 pt-2 pb-3 space-y-2">
+                <div className="text-[#ccc] font-bold text-[11px]">컨텍스트 사용량</div>
+                {/* 블록 그리드 10×10 */}
+                <div className="flex flex-col gap-[2px]">
+                  {Array.from({ length: 10 }, (_, row) => (
+                    <div key={row} className="flex gap-[2px]">
+                      {Array.from({ length: 10 }, (_, col) => (
+                        <span key={col} style={{ color: getBlockColor(row * 10 + col), fontSize: 11, lineHeight: 1 }}>█</span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                {/* 카테고리별 사용량 */}
+                <div className="pt-1 space-y-[3px]">
+                  <div className="text-[#444] text-[9px] mb-1">카테고리별 사용량</div>
+                  {categories.map(cat => (
+                    <div key={cat.label} className="flex items-center gap-1">
+                      <span style={{ color: cat.color, fontSize: 9 }}>█</span>
+                      <span className="text-[#999] w-14">{cat.label}</span>
+                      <span className="text-[#ccc] w-10 text-right">{fmtTok(cat.tok)}</span>
+                      <div className="flex-1 h-1 bg-[#1a1a2e] rounded-full overflow-hidden ml-1">
+                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, cat.pct)}%`, backgroundColor: cat.color }} />
+                      </div>
+                      <span className="text-[#555] w-8 text-right">{Math.round(cat.pct)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
