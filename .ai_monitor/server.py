@@ -2091,32 +2091,24 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 selected_path = ""
-                # 1순위: pywebview 네이티브 폴더 다이얼로그 (포커스 문제 없음)
+                # tkinter 폴더 다이얼로그 사용 (Python 내장, 스레드 안전, 항상 최상위)
+                # pywebview의 create_file_dialog는 GUI 스레드에서만 동작하여 HTTP 핸들러에서 호출 불가
+                # PowerShell BrowseForFolder는 pywebview 창 뒤에 숨어 보이지 않는 문제
                 try:
-                    import webview
-                    if main_window:
-                        result = main_window.create_file_dialog(
-                            webview.FOLDER_DIALOG
-                        )
-                        if result and len(result) > 0:
-                            selected_path = str(result[0]).replace('\\', '/')
-                except Exception:
-                    pass  # pywebview 실패 시 PowerShell 폴백
-
-                # 2순위: PowerShell COM 폴더 다이얼로그 (폴백)
-                if not selected_path:
-                    ps_cmd = (
-                        "$app = New-Object -ComObject Shell.Application; "
-                        "$folder = $app.BrowseForFolder(0, '프로젝트 폴더를 선택하세요', 0, 0); "
-                        "if ($folder) { $folder.Self.Path } else { '' }"
+                    import tkinter as tk
+                    from tkinter import filedialog
+                    root = tk.Tk()
+                    root.withdraw()  # 빈 창 숨김
+                    root.attributes('-topmost', True)  # 다이얼로그를 최상위로 — pywebview 창 위에 표시
+                    folder = filedialog.askdirectory(
+                        title='프로젝트 폴더를 선택하세요',
+                        parent=root
                     )
-                    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                    res = subprocess.run(
-                        ['powershell', '-WindowStyle', 'Hidden', '-Command', ps_cmd],
-                        capture_output=True, text=True, encoding='utf-8',
-                        creationflags=_no_window
-                    )
-                    selected_path = res.stdout.strip().replace('\\', '/')
+                    root.destroy()
+                    if folder:
+                        selected_path = folder.replace('\\', '/')
+                except Exception as _tk_err:
+                    print(f"[!] tkinter 폴더 다이얼로그 실패: {_tk_err}")
 
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
