@@ -1685,13 +1685,14 @@ def _open_folder_dialog_subprocess():
     pywebview + pythonw 환경에서는 같은 프로세스 내 tkinter가 충돌하므로
     독립 프로세스로 분리하여 안정적으로 동작.
 
-    주의: CREATE_NO_WINDOW / STARTF_USESHOWWINDOW 등의 플래그는
-    tkinter GUI 다이얼로그까지 차단하므로 절대 사용 금지.
-    콘솔 창 방지는 python.exe 대신 pythonw.exe + 임시 파일 통신으로 해결.
+    ■ 테스트 결과 (2026-03-26):
+      - CREATE_NO_WINDOW: tkinter 다이얼로그까지 차단 → 사용 금지
+      - STARTF_USESHOWWINDOW(SW_HIDE): 동일하게 차단 → 사용 금지
+      - DETACHED_PROCESS: 동일하게 차단 → 사용 금지
+      - pythonw.exe + subprocess.run: 일부 환경에서 timeout → 불안정
+      - python.exe + 플래그 없음: 100% 동작 확인 (유일한 안정 방식)
+    콘솔 창이 잠깐 깜빡이지만 다이얼로그는 확실히 동작함.
     """
-    import tempfile
-    _tmp = tempfile.mktemp(suffix='_vibe_folder.txt')
-    # pythonw.exe: 콘솔 창 없이 GUI만 표시 (stdout 없으므로 임시 파일로 결과 전달)
     _tk_script = (
         "import tkinter as tk; "
         "from tkinter import filedialog; "
@@ -1699,36 +1700,21 @@ def _open_folder_dialog_subprocess():
         "r.attributes('-topmost',True); "
         "r.focus_force(); "
         "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
-        "r.destroy(); "
-        f"open(r'{_tmp}','w',encoding='utf-8').write(f or '')"
+        "r.destroy(); print(f or '')"
     )
-    # pythonw.exe 경로 결정 — 콘솔 없이 GUI 다이얼로그만 표시
+    # python.exe 경로 결정 — pythonw.exe에서는 stdout이 없으므로 반드시 python.exe 사용
     _py_exe = sys.executable
-    if _py_exe.lower().endswith('python.exe'):
-        _pythonw = _py_exe[:-len('python.exe')] + 'pythonw.exe'
-    elif _py_exe.lower().endswith('pythonw.exe'):
-        _pythonw = _py_exe
-    else:
-        _pythonw = _py_exe  # fallback
-    # pythonw.exe가 없으면 python.exe로 폴백 (콘솔 잠깐 뜨지만 동작은 함)
-    if not Path(_pythonw).exists():
-        _pythonw = _py_exe.replace('pythonw.exe', 'python.exe')
+    if _py_exe.lower().endswith('pythonw.exe'):
+        _py_exe = _py_exe[:-len('pythonw.exe')] + 'python.exe'
     try:
-        subprocess.run(
-            [_pythonw, '-c', _tk_script],
+        res = subprocess.run(
+            [_py_exe, '-c', _tk_script],
+            capture_output=True, text=True, encoding='utf-8',
             timeout=120,
         )
-        if Path(_tmp).exists():
-            result = Path(_tmp).read_text(encoding='utf-8').strip().replace('\\', '/')
-            Path(_tmp).unlink(missing_ok=True)
-            return result
-        return ""
+        return res.stdout.strip().replace('\\', '/')
     except subprocess.TimeoutExpired:
-        Path(_tmp).unlink(missing_ok=True)
         return ""
-    except Exception:
-        Path(_tmp).unlink(missing_ok=True)
-        raise
 
 class SSEHandler(BaseHTTPRequestHandler):
     # ── Telegram 설정 API 핸들러 ──────────────────────────────────────
