@@ -137,7 +137,14 @@ function handlePtyConnection(ws, req) {
     // ── URL 파싱 ──────────────────────────────────────────────────────
     const url = new URL(req.url, `http://127.0.0.1:${PTY_PORT}`);
     const agent = url.searchParams.get('agent') || '';
-    const cwd = url.searchParams.get('cwd') || PROJECT_ROOT;
+    // CWD 결정: 프론트엔드가 보낸 경로 → PROJECT_ROOT → 사용자 홈 순으로 폴백
+    // pip 설치 환경에서 PROJECT_ROOT가 site-packages 하위라 유효하지 않을 수 있음
+    // 에러 267 (ERROR_DIRECTORY) 방지를 위해 실제 존재하는 디렉토리인지 검증
+    let cwd = url.searchParams.get('cwd') || PROJECT_ROOT;
+    if (!fs.existsSync(cwd)) {
+      console.log(`[PTY] CWD 유효하지 않음: ${cwd} → 사용자 홈으로 폴백`);
+      cwd = os.homedir();
+    }
     const cols = parseInt(url.searchParams.get('cols') || '80', 10);
     const rows = parseInt(url.searchParams.get('rows') || '24', 10);
     const isYolo = url.searchParams.get('yolo') === 'true';
