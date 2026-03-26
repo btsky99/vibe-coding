@@ -391,14 +391,47 @@ def _build_additional_context(prompt: str) -> str:
 
     unread = _read_gemini_messages("gemini")
     if unread:
-        _remember_itcp_work_items(unread)
-        lines = []
+        # [2026-03-27 Claude] 무한루프 방지: 자기참조/중복 메시지 필터링
+        # 1) Gemini 자신이 보낸 메시지 (session_summary, task_result 등) 제외
+        # 2) dispatcher broadcast 중 Gemini에게 이미 직접 전달된 태스크 중복 제외
+        # 3) 검증 결과(verify_result)로 인한 재진입 방지
+        _SELF_MSG_TYPES = {"session_summary", "response"}
+        _SELF_CONTENT_MARKERS = {"[TASK-RESULT]", "[VERIFY-RESULT]", "[Gemini session summary"}
+        filtered = []
         for message in unread:
+            sender = message.get("from_agent") or message.get("from") or "?"
+            msg_type = message.get("msg_type") or message.get("type") or ""
+            content = message.get("content", "")
+
+            # 자기가 보낸 메시지 무시
+            if sender.lower() == "gemini":
+                continue
+
+            # 결과/응답 메시지 무시 (재진입 루프 방지)
+            if msg_type in _SELF_MSG_TYPES:
+                continue
+
+            # 태스크 결과/검증 결과 메시지 무시
+            if any(marker in content for marker in _SELF_CONTENT_MARKERS):
+                continue
+
+            # dispatcher broadcast 중 이미 직접 수신된 태스크 중복 제거
+            # (broadcast to_agent='all' + 직접 send to_agent='gemini' 이중 수신 방지)
+            to_agent = message.get("to_agent", "")
+            if sender == "dispatcher" and to_agent == "all" and "[DISPATCH]" in content:
+                continue
+
+            filtered.append(message)
+
+        _remember_itcp_work_items(filtered)
+        lines = []
+        for message in filtered:
             sender = message.get("from_agent") or message.get("from") or "?"
             msg_type = message.get("channel") or message.get("msg_type") or message.get("type") or "info"
             content = message.get("content", "")
             lines.append(f"- [{sender} -> gemini] ({msg_type}) {content}")
-        sections.append("[Claude messages]\n" + "\n".join(lines))
+        if lines:
+            sections.append("[Claude messages]\n" + "\n".join(lines))
 
     lowered_prompt = prompt.lower()
     for rule in INTENT_RULES:

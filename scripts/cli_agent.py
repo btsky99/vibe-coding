@@ -147,6 +147,20 @@ GEMINI_COMPLEX_KEYWORDS = [
 ]
 
 # Codex CLI: 단순 백그라운드 작업은 저비용 모델로, 복잡 작업은 메인 모델로 라우팅
+CODEX_ROUTING_PRIMARY_KEYWORDS = [
+    '테스트', 'tdd', 'assert', 'coverage', '검증', 'validate',
+    '리팩터', '리팩토링', 'refactor', 'lint', 'build', 'py_compile',
+]
+CODEX_ROUTING_SECONDARY_KEYWORDS = [
+    '버그', '에러', '오류', '수정', 'fix', 'bug', 'error', 'debug', '고쳐',
+]
+HIGH_CONTEXT_ROUTING_KEYWORDS = [
+    '설계', '분석', '검토', '브레인', '아키텍처', '계획', '문서',
+    '리뷰', '평가', '조사', '요약', '검색', '찾아봐', '알아봐',
+    'design', 'analyze', 'review', 'plan', 'architecture',
+    'document', 'research', 'summary', 'evaluate', 'explain',
+    'search', 'find', 'what', 'how', 'why', 'describe',
+]
 CODEX_BACKGROUND_KEYWORDS = [
     '정리', '요약', '검색', '찾아봐', '알아봐', '설명', '알려줘',
     'summary', 'summarize', 'search', 'find', 'explain', 'describe',
@@ -176,6 +190,12 @@ def _load_runtime_config() -> dict:
         except Exception:
             continue
     return {}
+
+
+def _is_codex_enabled() -> bool:
+    """자동 라우팅/배정에서 Codex 사용 가능 여부를 반환합니다."""
+    config = _load_runtime_config()
+    return bool(config.get("codex_enabled", True))
 
 
 def _config_model(agent_type: str, model_type: str, env_name: str, default: str = '') -> str:
@@ -484,7 +504,7 @@ _terminals: dict = {
     f'T{i}': {
         'status': 'idle',         # idle | running | done | error
         'task': '',               # 마지막 실행 지시 내용
-        'cli': '',                # claude | gemini
+        'cli': '',                # claude | gemini | codex
         'run_id': '',             # 실행 ID
         'ts': '',                 # 마지막 실행 시각 (ISO 형식)
         'last_line': '',          # 마지막 출력 줄 (워크플로우 단계 감지용)
@@ -519,9 +539,10 @@ def route_task(task: str) -> str:
     """키워드 분석으로 최적 CLI를 자동 선택합니다.
 
     판단 기준:
-    - Gemini 키워드 수 > Claude 키워드 수 → gemini (분석/조회 작업)
-    - 그 외 모든 경우 → claude (코딩/수정 작업 기본)
-    반환값: 'claude' | 'gemini'
+    - 분석/조회 성격이 강하면 → gemini
+    - 좁은 범위의 테스트/리팩터/검증 작업이면 → codex
+    - 그 외 모든 경우 → claude
+    반환값: 'claude' | 'gemini' | 'codex'
     """
     cli, _ = route_task_with_reason(task)
     return cli
@@ -531,25 +552,56 @@ def route_task_with_reason(task: str) -> tuple[str, str]:
     """키워드 분석으로 최적 CLI + 선택 이유를 반환합니다.
 
     Returns:
-        (cli, reason): ('claude'|'gemini', 선택 이유 문자열)
+        (cli, reason): ('claude'|'gemini'|'codex', 선택 이유 문자열)
     """
     task_lower = task.lower()
 
     # 매칭된 키워드 수집 (점수 + 근거 동시)
     matched_claude  = [kw for kw in CLAUDE_KEYWORDS  if kw in task_lower]
     matched_gemini  = [kw for kw in GEMINI_KEYWORDS  if kw in task_lower]
+    matched_codex_primary = [kw for kw in CODEX_ROUTING_PRIMARY_KEYWORDS if kw in task_lower]
+    matched_codex_secondary = [kw for kw in CODEX_ROUTING_SECONDARY_KEYWORDS if kw in task_lower]
+    matched_high_context = [kw for kw in HIGH_CONTEXT_ROUTING_KEYWORDS if kw in task_lower]
     claude_score    = len(matched_claude)
     gemini_score    = len(matched_gemini)
+    codex_score     = len(matched_codex_primary) * 2 + len(matched_codex_secondary)
+    has_explicit_files = bool(_TASK_FILE_RE.search(task))
 
     if gemini_score > claude_score:
         reason = f"분석/조회 감지 ({', '.join(matched_gemini[:3])})"
         return 'gemini', reason
+
+    codex_enabled = _is_codex_enabled()
+    if codex_enabled and not matched_high_context:
+        if matched_codex_primary and codex_score >= max(claude_score, gemini_score):
+            reason = f"Codex 좁은 실행 작업 감지 ({', '.join((matched_codex_primary + matched_codex_secondary)[:3])})"
+            return 'codex', reason
+        if has_explicit_files and matched_codex_secondary:
+            reason = f"Codex 파일 범위 버그 작업 감지 ({', '.join(matched_codex_secondary[:3])})"
+            return 'codex', reason
 
     if matched_claude:
         reason = f"코드 작업 감지 ({', '.join(matched_claude[:3])})"
     else:
         reason = "기본값 (코드 작업 우선)"
     return 'claude', reason
+
+
+def _resolve_working_dir(working_dir: str | None, terminal_id: str) -> str:
+    """명시된 경로가 없으면 터미널 슬롯의 worktree를 우선 사용합니다."""
+    if working_dir:
+        return working_dir
+
+    if terminal_id:
+        try:
+            import worktree_manager
+            worktree_path = worktree_manager.get_path(terminal_id)
+        except Exception:
+            worktree_path = None
+        if worktree_path:
+            return worktree_path
+
+    return str(_PROJECT_ROOT)
 
 
 def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
@@ -687,7 +739,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
     global _current_process, _run_status, _current_run, _output_queue
 
     run_id = str(uuid.uuid4())[:8]
-    cwd = working_dir or str(_PROJECT_ROOT)
+    cwd = _resolve_working_dir(working_dir, terminal_id)
 
     # CLI 자동 선택
     # [2026-03-14] routing_reason 기본값 초기화: cli가 명시적으로 전달될 때도 안전하게 참조 가능

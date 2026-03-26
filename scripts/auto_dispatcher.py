@@ -441,11 +441,17 @@ def dispatch(
     )
 
     # 전체 브로드캐스트 (다른 에이전트도 진행 상황 인지)
-    itcp.broadcast(
-        from_terminal="dispatcher",
-        content=f"[DISPATCH] {task_id} → {agent} ({task_type}, 우선순위:{priority})",
-        channel="hive",
-    )
+    # [2026-03-27 Claude] 할당 대상 에이전트는 이미 직접 send로 수신했으므로
+    # broadcast에서 제외하여 중복 수신 → 무한루프 방지
+    _other_agents = [a for a in AGENT_CAPABILITIES if a != agent]
+    for _other in _other_agents:
+        itcp.send(
+            from_terminal="dispatcher",
+            to_terminal=_other,
+            content=f"[DISPATCH] {task_id} → {agent} ({task_type}, 우선순위:{priority})",
+            channel="hive",
+            msg_type="info",
+        )
 
     # ── [2026-03-19 수정] hive_tasks 테이블에 디스패치 레코드 저장 ──
     # [근본 원인] 기존에는 ITCP(pg_messages)에만 기록하고 hive_tasks에는 미기록.

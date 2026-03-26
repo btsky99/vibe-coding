@@ -22,10 +22,14 @@ if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
 from src.pg_store import get_agent_last_seen as pg_get_agent_last_seen, list_tasks, save_task
+try:
+    import auto_dispatcher as _dispatcher
+except Exception:
+    _dispatcher = None
 
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
 DEFAULT_PORTS = [8005, 8000]
-KNOWN_AGENTS  = ['claude', 'gemini']    # 알려진 에이전트 목록
+BASE_AGENTS = ['claude', 'gemini']
 IDLE_THRESHOLD_SEC = 300                # 유휴 판정 기준: 5분 (300초)
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data')
 LOG_FILE = os.path.join(DATA_DIR, 'orchestrator_log.jsonl')
@@ -57,6 +61,39 @@ def _write_thought(agent: str, thought: str, skill: str = None) -> None:
     # [백업] 콘솔 출력 (디버깅용)
     ts = datetime.now().strftime('%H:%M:%S')
     # print(f"[{ts}][THOUGHT][{agent}] {thought[:60]}...")
+
+
+def _load_runtime_config() -> dict:
+    """런타임 설정을 읽습니다."""
+    candidates = [
+        ROOT_DIR / '.ai_monitor' / 'data' / 'config.json',
+        ROOT_DIR / '.ai_monitor' / 'config.json',
+    ]
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                with open(candidate, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            continue
+    return {}
+
+
+def _known_agents() -> list[str]:
+    """현재 PC 설정을 반영한 활성 에이전트 목록을 반환합니다."""
+    agents = list(BASE_AGENTS)
+    codex_enabled = True
+    if _dispatcher is not None:
+        try:
+            codex_enabled = bool(_dispatcher.is_codex_enabled())
+        except Exception:
+            codex_enabled = bool(_load_runtime_config().get('codex_enabled', True))
+    else:
+        codex_enabled = bool(_load_runtime_config().get('codex_enabled', True))
+
+    if codex_enabled:
+        agents.append('codex')
+    return agents
 
 def open_mission_control() -> None:
     """대시보드(Mission Control)를 자동으로 브라우저에 띄움"""
@@ -124,15 +161,16 @@ def get_agent_last_seen() -> dict:
     Postgres 세션 로그에서 에이전트별 마지막 활동 시각 조회.
     반환: {'claude': '2026-02-23T12:00:00', 'gemini': None, ...}
     """
+    agents = _known_agents()
     try:
-        return pg_get_agent_last_seen(KNOWN_AGENTS)
+        return pg_get_agent_last_seen(agents)
     except Exception:
-        return {agent: None for agent in KNOWN_AGENTS}
+        return {agent: None for agent in agents}
 
 
 def get_agent_task_count(tasks: list) -> dict:
     """에이전트별 미완료 태스크 수 집계"""
-    count = {agent: 0 for agent in KNOWN_AGENTS}
+    count = {agent: 0 for agent in _known_agents()}
     count['all'] = 0
     for t in tasks:
         if t.get('status') == 'done':
@@ -145,27 +183,55 @@ def get_agent_task_count(tasks: list) -> dict:
     return count
 
 
-def pick_best_agent(last_seen: dict, task_count: dict) -> str:
+def _infer_task_type(task: dict) -> str:
+    """태스크 텍스트에서 auto_dispatcher용 task_type 힌트를 구성합니다."""
+    if _dispatcher is None:
+        return ''
+
+    text = ' '.join(
+        str(task.get(key, '')).strip()
+        for key in ('title', 'description', 'role')
+        if str(task.get(key, '')).strip()
+    )
+    if not text:
+        return ''
+
+    try:
+        return str(_dispatcher.detect_task_type(text))
+    except Exception:
+        return ''
+
+
+def pick_best_agent(last_seen: dict, task_count: dict, task: dict | None = None) -> str:
     """
     가장 적합한 에이전트 선택 (미할당 태스크 자동 배정용).
-    기준: 1) 최근 활동한 에이전트 우선, 2) 태스크 부하 적은 쪽 우선
+    기준: 1) 작업 유형과 에이전트 역량 일치도, 2) 최근 활동성, 3) 태스크 부하
     """
     now = datetime.now()
+    agents = _known_agents()
+    task_type = _infer_task_type(task or {})
     scores = {}
-    for agent in KNOWN_AGENTS:
+    for agent in agents:
         seen_str = last_seen.get(agent)
         if seen_str:
             try:
                 seen_dt = datetime.fromisoformat(seen_str.replace('Z', ''))
-                # 최근 활동일수록 높은 점수 (초 단위 역수)
-                recency = 1.0 / max(1, (now - seen_dt).total_seconds())
+                idle_sec = max(0.0, (now - seen_dt).total_seconds())
+                recency_bonus = max(0.0, 0.12 - min(idle_sec, IDLE_THRESHOLD_SEC * 4) / (IDLE_THRESHOLD_SEC * 40))
             except Exception:
-                recency = 0.0
+                recency_bonus = 0.0
         else:
-            recency = 0.0
-        # 태스크 부하 패널티 (많을수록 낮은 점수)
-        load_penalty = task_count.get(agent, 0) * 0.01
-        scores[agent] = recency - load_penalty
+            recency_bonus = 0.0
+
+        capability_score = 0.0
+        if _dispatcher is not None and task_type:
+            try:
+                capability_score = float(_dispatcher.score_agent(agent, task_type))
+            except Exception:
+                capability_score = 0.0
+
+        load_penalty = task_count.get(agent, 0) * 0.05
+        scores[agent] = capability_score + recency_bonus - load_penalty
 
     # 점수 높은 에이전트 선택 (동점이면 첫 번째)
     best = max(scores, key=lambda a: scores[a])
@@ -209,7 +275,7 @@ def auto_assign_tasks(tasks: list, last_seen: dict, task_count: dict,
 
     for t in tasks:
         if t.get('assigned_to') == 'all' and t.get('status') == 'pending':
-            best = pick_best_agent(last_seen, task_count)
+            best = pick_best_agent(last_seen, task_count, task=t)
             t['assigned_to'] = best
             t['updated_at'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
             task_count[best] = task_count.get(best, 0) + 1
