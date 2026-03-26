@@ -4302,7 +4302,8 @@ def main():
 
                 if _need_build and (pty_dir / 'package.json').exists() and _shutil.which('npm'):
                     print("[*] 터미널 네이티브 모듈 빌드 중... (1~2분 소요)")
-                    r = subprocess.run(['npm', 'install'], cwd=str(pty_dir),
+                    # shell=True: Windows에서 npm은 npm.cmd이므로 shell 경유 필요
+                    r = subprocess.run('npm install', cwd=str(pty_dir), shell=True,
                                        capture_output=True, text=True, encoding='utf-8',
                                        errors='replace', timeout=300, creationflags=_no_win)
                     if r.returncode == 0:
@@ -4633,9 +4634,10 @@ def main():
         print("[*] PTY 서버 네이티브 모듈 빌드 중... (최초 1회, 1~2분 소요)")
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         try:
+            # shell=True: Windows에서 npm은 npm.cmd이므로 shell 경유 필요
             result = subprocess.run(
-                ['npm', 'install'],
-                cwd=str(pty_server_dir),
+                'npm install',
+                cwd=str(pty_server_dir), shell=True,
                 capture_output=True, text=True, encoding='utf-8', errors='replace',
                 timeout=300,  # 5분 타임아웃
                 creationflags=_no_window,
