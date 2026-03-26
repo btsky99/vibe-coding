@@ -48,14 +48,19 @@ def create_shortcut():
     arguments = ""
     working_dir = ""
 
-    # 1순위: pip install로 설치된 vibe-coding 명령 (Scripts/vibe-coding.exe)
-    # pythonw 사용 금지: 에러 발생 시 콘솔이 없어 아무것도 표시 안 되고 무응답으로 보임
-    # vibe-coding.exe를 직접 실행 — 콘솔 창은 WindowStyle=7(최소화)로 숨김 처리
-    vibe_cmd = shutil.which('vibe-coding')
-    if vibe_cmd:
-        target_path = str(vibe_cmd)
+    # 1순위: vibe-coding-gui (pythonw 기반 — 콘솔 창 없음)
+    # gui_scripts로 생성된 EXE는 내부적으로 pythonw를 사용하여 콘솔 창이 뜨지 않음
+    # 2순위: vibe-coding (콘솔 EXE — gui가 없으면 폴백)
+    gui_cmd = shutil.which('vibe-coding-gui')
+    cli_cmd = shutil.which('vibe-coding')
+    if gui_cmd:
+        target_path = str(gui_cmd)
         working_dir = str(Path.home())
-        print(f"[pip 모드] entry point 감지: {vibe_cmd}")
+        print(f"[pip 모드] GUI entry point 감지: {gui_cmd}")
+    elif cli_cmd:
+        target_path = str(cli_cmd)
+        working_dir = str(Path.home())
+        print(f"[pip 모드] CLI entry point 감지: {cli_cmd}")
 
     # 2순위: 개발 모드 — run_vibe.bat
     if not target_path:

@@ -48,7 +48,12 @@ dev = [
 ]
 
 [project.scripts]
+# CLI용 (디버깅, --install, --uninstall 시 콘솔 출력 확인 가능)
 vibe-coding = "ai_monitor.server:main"
+
+[project.gui-scripts]
+# GUI용 (바탕화면 바로가기에서 사용 — 콘솔 창 없이 실행)
+vibe-coding-gui = "ai_monitor.server:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "ai_monitor._version.__version__"}

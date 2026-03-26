@@ -2090,20 +2090,34 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                # PowerShell을 사용하여 폴더 선택창 띄우기
-                ps_cmd = (
-                    "$app = New-Object -ComObject Shell.Application; "
-                    "$folder = $app.BrowseForFolder(0, '프로젝트 폴더를 선택하세요', 0, 0); "
-                    "if ($folder) { $folder.Self.Path } else { '' }"
-                )
-                # CREATE_NO_WINDOW: PowerShell 콘솔 창이 화면에 잠깐 뜨는 문제 방지
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                res = subprocess.run(
-                    ['powershell', '-WindowStyle', 'Hidden', '-Command', ps_cmd],
-                    capture_output=True, text=True, encoding='utf-8',
-                    creationflags=_no_window
-                )
-                selected_path = res.stdout.strip().replace('\\', '/')
+                selected_path = ""
+                # 1순위: pywebview 네이티브 폴더 다이얼로그 (포커스 문제 없음)
+                try:
+                    import webview
+                    if main_window:
+                        result = main_window.create_file_dialog(
+                            webview.FOLDER_DIALOG
+                        )
+                        if result and len(result) > 0:
+                            selected_path = str(result[0]).replace('\\', '/')
+                except Exception:
+                    pass  # pywebview 실패 시 PowerShell 폴백
+
+                # 2순위: PowerShell COM 폴더 다이얼로그 (폴백)
+                if not selected_path:
+                    ps_cmd = (
+                        "$app = New-Object -ComObject Shell.Application; "
+                        "$folder = $app.BrowseForFolder(0, '프로젝트 폴더를 선택하세요', 0, 0); "
+                        "if ($folder) { $folder.Self.Path } else { '' }"
+                    )
+                    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                    res = subprocess.run(
+                        ['powershell', '-WindowStyle', 'Hidden', '-Command', ps_cmd],
+                        capture_output=True, text=True, encoding='utf-8',
+                        creationflags=_no_window
+                    )
+                    selected_path = res.stdout.strip().replace('\\', '/')
+
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
