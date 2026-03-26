@@ -2110,6 +2110,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     [_py_exe, '-c', _tk_script],
                     capture_output=True, text=True, encoding='utf-8',
                     timeout=120,  # 사용자가 폴더를 선택할 시간
+                    creationflags=_no_window,
                 )
                 selected_path = res.stdout.strip().replace('\\', '/')
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
@@ -3556,32 +3557,46 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/select-folder':
+            # 폴더 선택 다이얼로그 — tkinter 별도 프로세스 방식
+            # pywebview의 create_file_dialog()는 GUI 스레드 제한으로 HTTP 핸들러에서 호출 불가
+            # 독립 Python 프로세스로 tkinter를 실행하여 안정적으로 동작
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                import webview
-                # main_window가 활성화된 상태에서만 다이얼로그 가능
-                if main_window:
-                    selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
-                    if selected and len(selected) > 0:
-                        path = selected[0].replace('\\', '/')
-                        # 선택된 경로를 설정에도 즉시 저장
-                        config = {}
-                        if CONFIG_FILE.exists():
-                            try:
-                                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                                    config = json.load(f)
-                            except: pass
-                        config['last_path'] = path
-                        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                            json.dump(config, f, ensure_ascii=False, indent=2)
-                        self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
-                    else:
-                        self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                _tk_script = (
+                    "import tkinter as tk; "
+                    "from tkinter import filedialog; "
+                    "r=tk.Tk(); r.withdraw(); r.attributes('-topmost',True); "
+                    "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
+                    "r.destroy(); print(f or '')"
+                )
+                _py_exe = sys.executable
+                if _py_exe.lower().endswith('pythonw.exe'):
+                    _py_exe = _py_exe[:-len('pythonw.exe')] + 'python.exe'
+                res = subprocess.run(
+                    [_py_exe, '-c', _tk_script],
+                    capture_output=True, text=True, encoding='utf-8',
+                    timeout=120,
+                    creationflags=_no_window,
+                )
+                path = res.stdout.strip().replace('\\', '/')
+                if path:
+                    # 선택된 경로를 설정에도 즉시 저장
+                    config = {}
+                    if CONFIG_FILE.exists():
+                        try:
+                            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                        except: pass
+                    config['last_path'] = path
+                    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=2)
+                    self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
                 else:
-                    self.wfile.write(json.dumps({"status": "error", "message": "Window not ready"}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
