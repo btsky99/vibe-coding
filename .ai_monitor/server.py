@@ -1680,6 +1680,56 @@ def _send_json_response(handler, data, status=200):
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _open_folder_dialog_subprocess():
+    """tkinter 폴더 선택 다이얼로그를 별도 Python 프로세스로 실행.
+    pywebview + pythonw 환경에서는 같은 프로세스 내 tkinter가 충돌하므로
+    독립 프로세스로 분리하여 안정적으로 동작.
+
+    주의: CREATE_NO_WINDOW / STARTF_USESHOWWINDOW 등의 플래그는
+    tkinter GUI 다이얼로그까지 차단하므로 절대 사용 금지.
+    콘솔 창 방지는 python.exe 대신 pythonw.exe + 임시 파일 통신으로 해결.
+    """
+    import tempfile
+    _tmp = tempfile.mktemp(suffix='_vibe_folder.txt')
+    # pythonw.exe: 콘솔 창 없이 GUI만 표시 (stdout 없으므로 임시 파일로 결과 전달)
+    _tk_script = (
+        "import tkinter as tk; "
+        "from tkinter import filedialog; "
+        "r=tk.Tk(); r.withdraw(); "
+        "r.attributes('-topmost',True); "
+        "r.focus_force(); "
+        "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
+        "r.destroy(); "
+        f"open(r'{_tmp}','w',encoding='utf-8').write(f or '')"
+    )
+    # pythonw.exe 경로 결정 — 콘솔 없이 GUI 다이얼로그만 표시
+    _py_exe = sys.executable
+    if _py_exe.lower().endswith('python.exe'):
+        _pythonw = _py_exe[:-len('python.exe')] + 'pythonw.exe'
+    elif _py_exe.lower().endswith('pythonw.exe'):
+        _pythonw = _py_exe
+    else:
+        _pythonw = _py_exe  # fallback
+    # pythonw.exe가 없으면 python.exe로 폴백 (콘솔 잠깐 뜨지만 동작은 함)
+    if not Path(_pythonw).exists():
+        _pythonw = _py_exe.replace('pythonw.exe', 'python.exe')
+    try:
+        subprocess.run(
+            [_pythonw, '-c', _tk_script],
+            timeout=120,
+        )
+        if Path(_tmp).exists():
+            result = Path(_tmp).read_text(encoding='utf-8').strip().replace('\\', '/')
+            Path(_tmp).unlink(missing_ok=True)
+            return result
+        return ""
+    except subprocess.TimeoutExpired:
+        Path(_tmp).unlink(missing_ok=True)
+        return ""
+    except Exception:
+        Path(_tmp).unlink(missing_ok=True)
+        raise
+
 class SSEHandler(BaseHTTPRequestHandler):
     # ── Telegram 설정 API 핸들러 ──────────────────────────────────────
 
@@ -2090,29 +2140,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                selected_path = ""
-                # tkinter 폴더 다이얼로그를 별도 Python 프로세스로 실행
-                # pywebview + pythonw 환경에서는 같은 프로세스 내 tkinter가 충돌하므로
-                # 독립 프로세스로 분리하여 안정적으로 동작
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                _tk_script = (
-                    "import tkinter as tk; "
-                    "from tkinter import filedialog; "
-                    "r=tk.Tk(); r.withdraw(); r.attributes('-topmost',True); "
-                    "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
-                    "r.destroy(); print(f or '')"
-                )
-                # pythonw.exe에서는 print()가 동작하지 않으므로 python.exe를 사용
-                _py_exe = sys.executable
-                if _py_exe.lower().endswith('pythonw.exe'):
-                    _py_exe = _py_exe[:-len('pythonw.exe')] + 'python.exe'
-                res = subprocess.run(
-                    [_py_exe, '-c', _tk_script],
-                    capture_output=True, text=True, encoding='utf-8',
-                    timeout=120,  # 사용자가 폴더를 선택할 시간
-                    creationflags=_no_window,
-                )
-                selected_path = res.stdout.strip().replace('\\', '/')
+                selected_path = _open_folder_dialog_subprocess()
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
@@ -3565,24 +3593,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                _tk_script = (
-                    "import tkinter as tk; "
-                    "from tkinter import filedialog; "
-                    "r=tk.Tk(); r.withdraw(); r.attributes('-topmost',True); "
-                    "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
-                    "r.destroy(); print(f or '')"
-                )
-                _py_exe = sys.executable
-                if _py_exe.lower().endswith('pythonw.exe'):
-                    _py_exe = _py_exe[:-len('pythonw.exe')] + 'python.exe'
-                res = subprocess.run(
-                    [_py_exe, '-c', _tk_script],
-                    capture_output=True, text=True, encoding='utf-8',
-                    timeout=120,
-                    creationflags=_no_window,
-                )
-                path = res.stdout.strip().replace('\\', '/')
+                path = _open_folder_dialog_subprocess()
                 if path:
                     # 선택된 경로를 설정에도 즉시 저장
                     config = {}
