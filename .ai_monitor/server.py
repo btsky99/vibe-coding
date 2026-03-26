@@ -4384,7 +4384,37 @@ def main():
             continue  # 이미 사용 중인 슬롯 → 다음 슬롯 시도
 
     if _instance_slot == -1:
-        # 4개 슬롯 전부 사용 중 — 5번째 실행 시도 시 종료
+        # 모든 슬롯이 사용 중 — 좀비 프로세스(크래시 잔류)인지 확인 후 강제 회수
+        # [2026-03-26] 이전 실행이 크래시/강제종료되면 소켓이 TIME_WAIT로 남아
+        # 새 실행을 차단하는 문제 → vibe-coding 프로세스가 실제로 살아있는지 확인
+        print(f"[*] 인스턴스 슬롯 부족 — 좀비 프로세스 정리 시도 중...")
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        try:
+            # vibe-coding / ai_monitor 관련 프로세스만 강제 종료
+            subprocess.run(
+                'wmic process where "CommandLine like \'%ai_monitor.server%\' or CommandLine like \'%vibe-coding%\'" delete',
+                shell=True, capture_output=True, timeout=10,
+                creationflags=_no_window,
+            )
+        except Exception:
+            pass
+        time.sleep(2)  # 소켓 해제 대기
+
+        # 재시도
+        for _slot in range(_MAX_INSTANCES):
+            _try_port = _BASE_PORT + _slot
+            try:
+                _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+                _sock.bind(('127.0.0.1', _try_port))
+                _lock_sock = _sock
+                _instance_slot = _slot
+                print(f"[*] 좀비 정리 후 슬롯 {_slot} 확보 성공!")
+                break
+            except OSError:
+                continue
+
+    if _instance_slot == -1:
         print(f"[!] 최대 인스턴스({_MAX_INSTANCES}개) 초과 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
         os._exit(0)
 
