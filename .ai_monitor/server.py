@@ -664,10 +664,18 @@ if sys.stdout is None or sys.stderr is None:
 # 전역 소켓 타임아웃 제거 (SSE 등 장기 연결 방해 요소)
 # socket.setdefaulttimeout(60)  <-- 제거됨
 
-# BASE_DIR: server.py가 위치한 .ai_monitor 디렉토리
-# PROJECT_ROOT: 프로젝트 루트 (BASE_DIR의 부모)
+# BASE_DIR: server.py가 위치한 .ai_monitor(또는 ai_monitor) 디렉토리
+# PROJECT_ROOT: 프로젝트 루트.
+#   - 개발 모드: BASE_DIR의 부모 (git 저장소 루트)
+#   - pip 설치 모드: 사용자 홈 디렉토리 (site-packages는 의미 없으므로)
+#     site-packages를 PROJECT_ROOT로 쓰면 인스턴스 락 해시가 모든 실행에서 동일 → 충돌
 BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
+_parent = BASE_DIR.parent
+if 'site-packages' in str(_parent):
+    # pip install 환경 — 사용자 홈을 기본 프로젝트 루트로 설정
+    PROJECT_ROOT = Path.home()
+else:
+    PROJECT_ROOT = _parent
 
 
 def _python_runner_cmds() -> list[str]:
