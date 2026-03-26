@@ -1,14 +1,27 @@
 # HiveMind Status
 
-Updated: `2026-03-25 21:56:21`
+Updated: `2026-03-26 22:42:14`
 
 ## Current Focus
-No open plan tasks remain.
+Open plan tasks:
+- Task 1: pyproject.toml에 pywin32 의존성 추가
+  파일: pyproject.toml
+  방법: dependencies에 `pywin32>=310; sys_platform == "win32"` 추가
+- Task 2: create_shortcut.py에 remove_shortcut() 함수 추가
+  파일: .ai_monitor/create_shortcut.py
+  방법: 바탕화면 "바이브코딩.lnk" 삭제 함수
+- Task 3: server.py main()에 --install / --uninstall 명령어 추가
+  파일: .ai_monitor/server.py
+  방법:
+- Task 4: 첫 실행 시 바탕화면 바로가기 자동 생성
+  파일: .ai_monitor/server.py
+  방법: 서버 시작 시 "바이브코딩.lnk" 없으면 자동 create_shortcut()
+- Task 5: README.md 원스톱 설치/언인스톨 문서화
+  파일: README.md
+  방법: 설치 원스톱 명령어 + 언인스톨 섹션 추가
 
-Alignment: Plan has no open tasks, but the workspace still has changes: %temp%/, .claude/settings.local.json, docs/terminal3_scroll_issue.md, hivemind.md. Update ai_monitor_plan.md if this work is intentional.
+Alignment: Changed files do not map to any open plan task. Current changes: docs/terminal3_scroll_issue.md, hivemind.md.
 Changed files:
-- %temp%/
-- .claude/settings.local.json
 - docs/terminal3_scroll_issue.md
 - hivemind.md
 

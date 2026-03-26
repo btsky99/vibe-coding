@@ -503,7 +503,7 @@ export default function TerminalSlot({
 
   return (
     // h-full: 그리드 셀 높이를 명시적으로 채워야 flex 자식들이 올바른 높이를 전달받음
-    <div className={`h-full bg-[#252526] ${ringClass} rounded-md flex flex-col overflow-hidden shadow-inner relative transition-all duration-700`}>
+    <div className={`h-full min-w-0 min-h-0 bg-[#252526] ${ringClass} rounded-md flex flex-col overflow-hidden shadow-inner relative transition-all duration-700`}>
       {/* 터미널 헤더 — 슬롯 번호, 에이전트명, 락/작업/메시지 배지 */}
       <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
         <div className="flex items-center gap-2 max-w-[60%] overflow-hidden">
@@ -751,7 +751,7 @@ export default function TerminalSlot({
 
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
-        <div className={`flex-1 flex flex-col min-h-0 bg-[#1e1e1e] ${isChatMode ? 'hidden' : ''}`}>
+        <div className={`flex-1 min-w-0 flex flex-col min-h-0 bg-[#1e1e1e] ${isChatMode ? 'hidden' : ''}`}>
 
           {/* ── 자율 에이전트 모니터링 뷰 (상단 영역, 구 파일뷰어 자리) ── */}
           {showMonitor && (
@@ -897,7 +897,7 @@ export default function TerminalSlot({
           )}
 
           {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
-          <div className="flex-1 relative min-h-0 overflow-hidden">
+          <div className="flex-1 relative min-w-0 min-h-0 overflow-hidden">
             <div className="absolute inset-0 overflow-hidden p-2">
               <div ref={xtermRef} className="h-full w-full" />
             </div>

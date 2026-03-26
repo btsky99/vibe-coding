@@ -818,8 +818,8 @@ function App() {
           </header>
 
           {/* 터미널 그리드 — layoutMode에 따른 열/행 분할 */}
-          <main className="flex-1 p-2 bg-[#1e1e1e] overflow-hidden">
-            <div className={`h-full w-full gap-2 grid ${
+          <main className="flex-1 min-w-0 min-h-0 p-2 bg-[#1e1e1e] overflow-x-auto overflow-y-hidden">
+            <div className={`h-full min-w-0 min-h-0 w-full gap-2 grid ${
               layoutMode === '1' ? 'grid-cols-1' :
               layoutMode === '2' ? 'grid-cols-2' :
               layoutMode === '3' ? 'grid-cols-3' :
