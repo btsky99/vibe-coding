@@ -1680,42 +1680,6 @@ def _send_json_response(handler, data, status=200):
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _open_folder_dialog_subprocess():
-    """tkinter 폴더 선택 다이얼로그를 별도 Python 프로세스로 실행.
-    pywebview + pythonw 환경에서는 같은 프로세스 내 tkinter가 충돌하므로
-    독립 프로세스로 분리하여 안정적으로 동작.
-
-    ■ 테스트 결과 (2026-03-26):
-      - CREATE_NO_WINDOW: tkinter 다이얼로그까지 차단 → 사용 금지
-      - STARTF_USESHOWWINDOW(SW_HIDE): 동일하게 차단 → 사용 금지
-      - DETACHED_PROCESS: 동일하게 차단 → 사용 금지
-      - pythonw.exe + subprocess.run: 일부 환경에서 timeout → 불안정
-      - python.exe + 플래그 없음: 100% 동작 확인 (유일한 안정 방식)
-    콘솔 창이 잠깐 깜빡이지만 다이얼로그는 확실히 동작함.
-    """
-    _tk_script = (
-        "import tkinter as tk; "
-        "from tkinter import filedialog; "
-        "r=tk.Tk(); r.withdraw(); "
-        "r.attributes('-topmost',True); "
-        "r.focus_force(); "
-        "f=filedialog.askdirectory(title='프로젝트 폴더를 선택하세요',parent=r); "
-        "r.destroy(); print(f or '')"
-    )
-    # python.exe 경로 결정 — pythonw.exe에서는 stdout이 없으므로 반드시 python.exe 사용
-    _py_exe = sys.executable
-    if _py_exe.lower().endswith('pythonw.exe'):
-        _py_exe = _py_exe[:-len('pythonw.exe')] + 'python.exe'
-    try:
-        res = subprocess.run(
-            [_py_exe, '-c', _tk_script],
-            capture_output=True, text=True, encoding='utf-8',
-            timeout=120,
-        )
-        return res.stdout.strip().replace('\\', '/')
-    except subprocess.TimeoutExpired:
-        return ""
-
 class SSEHandler(BaseHTTPRequestHandler):
     # ── Telegram 설정 API 핸들러 ──────────────────────────────────────
 
@@ -2126,7 +2090,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                selected_path = _open_folder_dialog_subprocess()
+                import webview
+                selected_path = ""
+                if main_window:
+                    selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
+                    if selected and len(selected) > 0:
+                        selected_path = selected[0].replace('\\', '/')
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
@@ -3571,29 +3540,34 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/select-folder':
-            # 폴더 선택 다이얼로그 — tkinter 별도 프로세스 방식
-            # pywebview의 create_file_dialog()는 GUI 스레드 제한으로 HTTP 핸들러에서 호출 불가
-            # 독립 Python 프로세스로 tkinter를 실행하여 안정적으로 동작
+            # 폴더 선택 다이얼로그 — pywebview 네이티브 방식 (EXE 배포에서 검증됨)
+            # pywebview의 create_file_dialog()는 내부적으로 .NET WinForms 다이얼로그를 사용
+            # subprocess/tkinter 방식은 콘솔 깜빡임+환경 호환성 문제로 폐기 (v3.7.134~138)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                path = _open_folder_dialog_subprocess()
-                if path:
-                    # 선택된 경로를 설정에도 즉시 저장
-                    config = {}
-                    if CONFIG_FILE.exists():
-                        try:
-                            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                                config = json.load(f)
-                        except: pass
-                    config['last_path'] = path
-                    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, ensure_ascii=False, indent=2)
-                    self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
+                import webview
+                if main_window:
+                    selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
+                    if selected and len(selected) > 0:
+                        path = selected[0].replace('\\', '/')
+                        # 선택된 경로를 설정에도 즉시 저장
+                        config = {}
+                        if CONFIG_FILE.exists():
+                            try:
+                                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                                    config = json.load(f)
+                            except: pass
+                        config['last_path'] = path
+                        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(config, f, ensure_ascii=False, indent=2)
+                        self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
+                    else:
+                        self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
                 else:
-                    self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"status": "error", "message": "Window not ready"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
