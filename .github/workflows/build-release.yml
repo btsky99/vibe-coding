@@ -1,0 +1,226 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # 수동 트리거 허용 (긴급 빌드 또는 테스트용)
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r .ai_monitor/requirements.txt
+
+      - name: Lint & syntax check (Python)
+        run: |
+          pip install ruff
+          python -m py_compile .ai_monitor/server.py
+          ruff check .ai_monitor/server.py --select E9,F821,F823
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build frontend
+        run: |
+          cd .ai_monitor/vibe-view
+          npm ci
+          npm run build
+
+      - name: Resolve version (auto-bump patch if tag already exists)
+        id: version
+        run: |
+          # _version.py에서 기준 버전 읽기
+          $base = python -c "exec(open('.ai_monitor/_version.py', encoding='utf-8').read()); print(__version__)"
+          $parts = $base -split "\."
+          $major = $parts[0]; $minor = $parts[1]; $patch = [int]$parts[2]
+
+          # 동일 태그가 이미 GitHub에 존재하면 패치 버전을 자동 증가
+          # (버전 미변경 커밋이 push 됐을 때 릴리스 중복 방지)
+          $ver = $base
+          while ($true) {
+            $checkTag = "v$ver"
+            gh release view $checkTag > $null 2>&1
+            if ($LASTEXITCODE -ne 0) { break }   # 이 태그가 없으면 사용 확정
+            $patch++
+            $ver = "$major.$minor.$patch"
+          }
+
+          # 버전이 변경된 경우 → _version.py 업데이트 후 main에 커밋 (무한 루프 방지: [skip ci])
+          if ($ver -ne $base) {
+            Set-Content -Path ".ai_monitor/_version.py" -Value "__version__ = `"$ver`""
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git add .ai_monitor/_version.py
+            git commit -m "chore(release): auto-bump version to v$ver [skip ci]"
+            git push
+            Write-Host "Auto-bumped: $base -> $ver"
+          }
+
+          echo "tag=v$ver" >> $env:GITHUB_OUTPUT
+          echo "ver=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Final version: v$ver"
+          exit 0  # gh release view가 non-zero 반환해도 스텝 성공 처리
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Find winpty binaries path
+        id: winpty
+        run: |
+          import winpty, os
+          wp = os.path.dirname(winpty.__file__)
+          print(f"path={wp}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"path={wp}\n")
+        shell: python
+
+      - name: Sync icons and assets
+        run: |
+          copy assets\vibe_coding_icon.ico .ai_monitor\bin\app_icon.ico /y
+          copy assets\vibe_coding_icon.ico .ai_monitor\bin\vibe_final.ico /y
+        shell: cmd
+
+      - name: Download PostgreSQL portable
+        # 설치버전에 포함할 PostgreSQL 포터블 바이너리 (bin/lib/share만 추출)
+        # PG_VERSION 환경변수로 버전 관리 — 보안 패치 시 이 값만 변경하면 됨
+        run: |
+          $pgVersion = if ($env:PG_PORTABLE_VERSION) { $env:PG_PORTABLE_VERSION } else { "17.4-1" }
+          $pgUrl = "https://get.enterprisedb.com/postgresql/postgresql-$pgVersion-windows-x64-binaries.zip"
+          $zipPath = "$env:TEMP\pgsql.zip"
+          Write-Host "Downloading PostgreSQL portable..."
+          Invoke-WebRequest -Uri $pgUrl -OutFile $zipPath -UseBasicParsing
+          Write-Host "Extracting..."
+          Expand-Archive -Path $zipPath -DestinationPath "$env:TEMP\pgsql_extract" -Force
+          # bin, lib, share 만 복사 (pgAdmin, doc 등 제외)
+          $dest = ".ai_monitor\bin\pgsql"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          Copy-Item -Path "$env:TEMP\pgsql_extract\pgsql\bin" -Destination "$dest\bin" -Recurse -Force
+          Copy-Item -Path "$env:TEMP\pgsql_extract\pgsql\lib" -Destination "$dest\lib" -Recurse -Force
+          Copy-Item -Path "$env:TEMP\pgsql_extract\pgsql\share" -Destination "$dest\share" -Recurse -Force
+          Write-Host "PostgreSQL portable ready at $dest"
+          Remove-Item $zipPath -Force
+        shell: pwsh
+
+      - name: Build PTY server (node-pty)
+        # [2026-03-22 Claude] node-pty 마이크로서비스 빌드
+        # 1. npm ci로 네이티브 모듈(node-pty) 빌드
+        # 2. 포터블 Node.js 런타임을 함께 번들하여 사용자 PC의 Node 버전 불일치 방지
+        #    CI의 Node 20으로 빌드된 네이티브 모듈은 같은 Node 20 런타임이 필요하므로
+        #    node.exe를 pty-server/ 디렉터리에 복사하여 server.py가 이를 사용하도록 함
+        run: |
+          cd .ai_monitor/pty-server
+          npm ci
+          # 현재 CI Node.js 런타임을 pty-server에 복사 (네이티브 모듈 ABI 호환 보장)
+          cp "$(which node)" ./node.exe
+        shell: bash
+
+      # [2026-03-24] 배포 범용화: 개발 전용 파일 번들 제거
+      # 제거됨: .gemini/skills, .claude/skills, scripts, GEMINI.md, CLAUDE.md, RULES.md
+      # 설치 버전은 대시보드 GUI + 터미널 + PostgreSQL만 포함
+
+      - name: Build exe
+        # [2026-03-21 Claude] 경로 수정: server.py가 _MEIPASS/vibe-view/dist/ 에서 프론트엔드를 찾으므로
+        # --add-data 대상도 vibe-view/dist로 맞춰야 함. 이전: dist → "Not Found" 에러 발생.
+        # [2026-03-22 Claude] shell: bash 사용 — cmd에서 %APPDATA%가 CI 러너 경로로
+        # 확장되어 runtime-tmpdir이 무효화되는 문제 방지. bash는 %VAR%를 확장하지 않음.
+        shell: bash
+        run: |
+          cd .ai_monitor
+          WINPTY="${{ steps.winpty.outputs.path }}"
+          # [2026-03-24] 배포 범용화: 개발 전용 파일 제거 (skills, scripts, .md 지침서)
+          pyinstaller --onefile --noconsole \
+            --name "vibe-coding-update-${{ steps.version.outputs.ver }}" \
+            --icon bin/vibe_final.ico \
+            --runtime-tmpdir '%APPDATA%\VibeCoding\runtime' \
+            --add-data "src;src" \
+            --add-data "bin;bin" \
+            --add-data "vibe-view/dist;vibe-view/dist" \
+            --add-data "api;api" \
+            --add-data "pty-server;pty-server" \
+            --add-binary "$WINPTY/winpty.dll;winpty" \
+            --add-binary "$WINPTY/winpty-agent.exe;winpty" \
+            --add-binary "$WINPTY/conpty.dll;winpty" \
+            --add-binary "$WINPTY/OpenConsole.exe;winpty" \
+            --hidden-import websockets \
+            --hidden-import winpty \
+            --hidden-import psycopg2 \
+            server.py
+
+      - name: Build exe (console)
+        # [2026-03-21 Claude] noconsole 빌드와 동일한 경로 수정 적용
+        # [2026-03-22 Claude] shell: bash — %APPDATA% 리터럴 보존을 위해 cmd → bash 변경
+        shell: bash
+        run: |
+          cd .ai_monitor
+          WINPTY="${{ steps.winpty.outputs.path }}"
+          # [2026-03-24] 배포 범용화: noconsole 빌드와 동일하게 개발 전용 파일 제거
+          pyinstaller --onefile --console \
+            --name "vibe-coding-console-${{ steps.version.outputs.ver }}" \
+            --icon bin/vibe_final.ico \
+            --runtime-tmpdir '%APPDATA%\VibeCoding\runtime' \
+            --add-data "src;src" \
+            --add-data "bin;bin" \
+            --add-data "vibe-view/dist;vibe-view/dist" \
+            --add-data "api;api" \
+            --add-data "pty-server;pty-server" \
+            --add-binary "$WINPTY/winpty.dll;winpty" \
+            --add-binary "$WINPTY/winpty-agent.exe;winpty" \
+            --add-binary "$WINPTY/conpty.dll;winpty" \
+            --add-binary "$WINPTY/OpenConsole.exe;winpty" \
+            --hidden-import websockets \
+            --hidden-import winpty \
+            --hidden-import psycopg2 \
+            server.py
+
+      - name: Build sub-window EXEs
+        # server.py frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
+        # vibe-dashboard.exe → {app}\ 에 설치됨.
+        # [2026-03-22] vibe-graph.exe 제거 (지식그래프 삭제)
+        run: |
+          cd .ai_monitor
+          pyinstaller --onefile --noconsole ^
+            --name vibe-dashboard ^
+            --icon bin/vibe_final.ico ^
+            --add-data "bin;bin" ^
+            --hidden-import PySide6.QtWebEngineWidgets ^
+            --hidden-import PySide6.QtWebEngineCore ^
+            dashboard_window.py
+          REM vibe-kanban.exe 제거됨 — B안 통합: kanban은 vibe-dashboard.exe kanban 탭으로 실행
+        shell: cmd
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+        shell: cmd
+
+      - name: Build installer
+        run: |
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "vibe-coding-setup.iss" /DMyAppVersion="${{ steps.version.outputs.ver }}" /DMyAppSrcExe="vibe-coding-update-${{ steps.version.outputs.ver }}.exe"
+        shell: cmd
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Vibe Coding ${{ steps.version.outputs.tag }}"
+          body: |
+            자동 빌드 릴리스
+            - Commit: ${{ github.sha }}
+            - 빌드 시간: ${{ github.event.head_commit.timestamp }}
+          files: |
+            .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.ver }}.exe
+            .ai_monitor/dist/vibe-coding-update-${{ steps.version.outputs.ver }}.exe

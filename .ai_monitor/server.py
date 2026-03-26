@@ -162,8 +162,12 @@ from src.pg_store import (
 )
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
-# 소스 트리 내 .ai_monitor/bin/pgsql/ 사용
-_PG_DIR = Path(__file__).resolve().parent / "bin" / "pgsql"
+# frozen(배포) 모드: exe 옆의 pgsql\ 폴더 (installer가 설치)
+# 개발 모드: 소스 트리 내 .ai_monitor/bin/pgsql/
+if getattr(sys, 'frozen', False):
+    _PG_DIR = Path(sys.executable).resolve().parent / "pgsql"
+else:
+    _PG_DIR = Path(__file__).resolve().parent / "bin" / "pgsql"
 
 PG_BIN     = _PG_DIR / "bin" / "psql.exe"
 PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
@@ -223,8 +227,12 @@ def _return_pg_conn(conn, db: str = "postgres"):
             except Exception:
                 pass
 
-# DB 데이터 디렉터리: 소스 트리 내 .ai_monitor/bin/pgsql/data
-_PG_DATA_DIR = _PG_DIR / "data"
+# 배포 버전 DB 데이터: %APPDATA%\VibeCoding\pgdata
+# 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/data
+if getattr(sys, 'frozen', False):
+    _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
+else:
+    _PG_DATA_DIR = _PG_DIR / "data"
 
 
 def ensure_postgres_running():
@@ -664,18 +672,18 @@ if sys.stdout is None or sys.stderr is None:
 # 전역 소켓 타임아웃 제거 (SSE 등 장기 연결 방해 요소)
 # socket.setdefaulttimeout(60)  <-- 제거됨
 
-# BASE_DIR: server.py가 위치한 .ai_monitor(또는 ai_monitor) 디렉토리
-# PROJECT_ROOT: 프로젝트 루트.
-#   - 개발 모드: BASE_DIR의 부모 (git 저장소 루트)
-#   - pip 설치 모드: 사용자 홈 디렉토리 (site-packages는 의미 없으므로)
-#     site-packages를 PROJECT_ROOT로 쓰면 인스턴스 락 해시가 모든 실행에서 동일 → 충돌
-BASE_DIR = Path(__file__).resolve().parent
-_parent = BASE_DIR.parent
-if 'site-packages' in str(_parent):
-    # pip install 환경 — 사용자 홈을 기본 프로젝트 루트로 설정
-    PROJECT_ROOT = Path.home()
+# BASE_DIR: 개발 모드 → server.py 위치, 배포(frozen) 모드 → sys._MEIPASS
+# PROJECT_ROOT: 개발 모드 → git 루트, 배포 모드 → exe 옆, pip → 사용자 홈
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys._MEIPASS)
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
 else:
-    PROJECT_ROOT = _parent
+    BASE_DIR = Path(__file__).resolve().parent
+    _parent = BASE_DIR.parent
+    if 'site-packages' in str(_parent):
+        PROJECT_ROOT = Path.home()
+    else:
+        PROJECT_ROOT = _parent
 
 
 def _python_runner_cmds() -> list[str]:
@@ -857,8 +865,14 @@ from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
 from _version import __version__
 
-# 데이터 디렉토리: .ai_monitor/data
-DATA_DIR = BASE_DIR / "data"
+# 데이터 디렉토리: 배포 모드 → %APPDATA%\VibeCoding, 개발 모드 → .ai_monitor/data
+if getattr(sys, 'frozen', False):
+    if os.name == 'nt':
+        DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
+    else:
+        DATA_DIR = Path.home() / ".vibe-coding"
+else:
+    DATA_DIR = BASE_DIR / "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # 스크립트 디렉토리
