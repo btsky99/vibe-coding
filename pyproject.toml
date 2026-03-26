@@ -22,6 +22,9 @@ authors = [{name = "btsky99"}]
 
 dependencies = [
     "pywebview>=5.0",
+    # pywebview EdgeChromium 백엔드 필수 의존성 (Windows)
+    # pythonnet 없으면 네이티브 창 대신 브라우저로 폴백됨
+    "pythonnet>=3.0; sys_platform == 'win32'",
     "psycopg2-binary>=2.9",
     "watchdog>=4.0",
     "python-dotenv>=1.0",
