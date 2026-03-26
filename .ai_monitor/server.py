@@ -3542,15 +3542,17 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/select-folder':
             # 폴더 선택 다이얼로그 — pywebview 네이티브 방식 (EXE 배포에서 검증됨)
             # pywebview의 create_file_dialog()는 내부적으로 .NET WinForms 다이얼로그를 사용
-            # subprocess/tkinter 방식은 콘솔 깜빡임+환경 호환성 문제로 폐기 (v3.7.134~138)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
                 import webview
+                print(f"[select-folder] main_window={main_window}, type={type(main_window)}")
                 if main_window:
+                    print(f"[select-folder] calling create_file_dialog...")
                     selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
+                    print(f"[select-folder] result: {selected}")
                     if selected and len(selected) > 0:
                         path = selected[0].replace('\\', '/')
                         # 선택된 경로를 설정에도 즉시 저장
@@ -3567,8 +3569,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                     else:
                         self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
                 else:
+                    print("[select-folder] ERROR: main_window is None!")
                     self.wfile.write(json.dumps({"status": "error", "message": "Window not ready"}).encode('utf-8'))
             except Exception as e:
+                print(f"[select-folder] EXCEPTION: {e}")
+                import traceback; traceback.print_exc()
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/launch':
