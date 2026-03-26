@@ -4283,12 +4283,25 @@ def main():
         # --install: 바탕화면 바로가기 생성 + PTY 네이티브 모듈 빌드 (원스톱 설치)
         if cmd in ('--install', '--create-shortcut'):
             # PTY 서버 네이티브 모듈 빌드 (node-pty — 터미널 기능 핵심)
+            # node -e "require('node-pty')"로 실제 로드 가능 여부 검증 후 필요시만 빌드
             if cmd == '--install':
                 import shutil as _shutil
                 pty_dir = Path(__file__).resolve().parent / 'pty-server'
-                if (pty_dir / 'package.json').exists() and _shutil.which('npm'):
+                _need_build = True
+                _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                if (pty_dir / 'package.json').exists() and _shutil.which('node'):
+                    try:
+                        chk = subprocess.run(['node', '-e', "require('node-pty')"],
+                                             cwd=str(pty_dir), capture_output=True, timeout=10,
+                                             creationflags=_no_win)
+                        if chk.returncode == 0:
+                            _need_build = False
+                            print("[*] 터미널 네이티브 모듈 정상 확인!")
+                    except Exception:
+                        pass
+
+                if _need_build and (pty_dir / 'package.json').exists() and _shutil.which('npm'):
                     print("[*] 터미널 네이티브 모듈 빌드 중... (1~2분 소요)")
-                    _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
                     r = subprocess.run(['npm', 'install'], cwd=str(pty_dir),
                                        capture_output=True, text=True, encoding='utf-8',
                                        errors='replace', timeout=300, creationflags=_no_win)
@@ -4296,7 +4309,7 @@ def main():
                         print("[*] 터미널 네이티브 모듈 빌드 완료!")
                     else:
                         print(f"[!] npm install 실패: {r.stderr[:300]}")
-                elif not _shutil.which('npm'):
+                elif _need_build and not _shutil.which('npm'):
                     print("[!] Node.js가 설치되지 않았습니다. 터미널 기능에 필요합니다.")
             create_shortcut()
             if cmd == '--install':
@@ -4587,25 +4600,35 @@ def main():
         time.sleep(1)
 
     def _ensure_pty_node_modules():
-        """PTY 서버의 node_modules가 현재 PC에서 유효한지 확인하고, 필요하면 npm install을 실행합니다.
-        node-pty는 C++ 네이티브 모듈이라 빌드한 PC의 OS/Node 버전에 종속됩니다.
-        pip install로 다른 PC에 설치하면 바이너리 호환이 안 되므로 재빌드가 필수입니다.
+        """PTY 서버의 node_modules가 현재 PC에서 유효한지 확인하고, 필요하면 npm rebuild를 실행합니다.
+        node-pty는 C++ 네이티브 모듈이라 빌드한 PC의 Node ABI 버전에 종속됩니다.
+        pip install로 다른 PC에 설치하면 pty.node 파일이 존재하더라도 Node 버전이 달라
+        로드 실패하므로, 실제로 require('node-pty')가 성공하는지 검증해야 합니다.
         """
         pty_server_dir = BASE_DIR / 'pty-server'
         if not (pty_server_dir / 'package.json').exists():
             return  # pty-server 자체가 없으면 스킵
 
-        # node-pty 네이티브 바이너리 존재 여부로 빌드 상태 판단
-        # node-pty의 빌드 산출물은 node_modules/node-pty/build/Release/ 에 위치
-        pty_binding = pty_server_dir / 'node_modules' / 'node-pty' / 'build' / 'Release' / 'pty.node'
-        if pty_binding.exists():
-            return  # 이미 빌드된 네이티브 모듈이 존재 → 재빌드 불필요
-
-        # npm이 설치되어 있는지 확인
+        # npm / node가 설치되어 있는지 확인
         import shutil as _shutil
-        if not _shutil.which('npm'):
-            print("[!] npm이 설치되지 않았습니다. 터미널 기능을 위해 Node.js를 설치하세요.")
+        if not _shutil.which('node') or not _shutil.which('npm'):
+            print("[!] Node.js가 설치되지 않았습니다. 터미널 기능을 위해 Node.js를 설치하세요.")
             return
+
+        # node-pty 네이티브 모듈이 현재 Node.js에서 실제로 로드 가능한지 검증
+        # 파일 존재만 확인하면 안 됨: pip install로 복사된 바이너리는 빌드 PC의 Node ABI라 호환 안 됨
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        try:
+            check = subprocess.run(
+                ['node', '-e', "require('node-pty')"],
+                cwd=str(pty_server_dir),
+                capture_output=True, text=True, timeout=10,
+                creationflags=_no_window,
+            )
+            if check.returncode == 0:
+                return  # 네이티브 모듈이 현재 Node에서 정상 로드됨
+        except Exception:
+            pass  # 검증 실패 → 재빌드 필요
 
         print("[*] PTY 서버 네이티브 모듈 빌드 중... (최초 1회, 1~2분 소요)")
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
