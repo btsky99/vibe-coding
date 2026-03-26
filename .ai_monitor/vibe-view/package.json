@@ -1,7 +1,7 @@
 {
   "name": "vibe-coding",
   "private": true,
-  "version": "3.7.126",
+  "version": "3.7.127",
   "type": "module",
   "scripts": {
     "dev": "vite",
