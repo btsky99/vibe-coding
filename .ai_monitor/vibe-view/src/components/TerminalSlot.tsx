@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-03-26 Claude: xterm.js 스크롤 전면 수정 — scrollback 10000줄, smoothScrollDuration 100ms,
+ *                      scrollOnUserInput true 추가. 컨테이너 overflow-hidden 제거로 xterm 내장 스크롤바 활성화.
+ *                      Gemini/Codex 긴 출력 시 이전 내용 확인 불가 문제 해결.
  * - 2026-03-25 Claude: 터미널 실행 중 채팅 모드 전환 버튼 추가 — 터미널 유지한 채 채팅 전환 가능.
  *                      isTerminalMode/isChatMode 독립 관리. 터미널 div를 CSS hidden으로 보존 (unmount 안 함).
  * - 2026-03-25 Claude: 채팅↔터미널 전환 시 LLM 세션 유지 — ChatSlot unmount 방지.
@@ -218,7 +221,11 @@ export default function TerminalSlot({
         theme: { background: '#1e1e1e', foreground: '#cccccc', cursor: '#3794ef', selectionBackground: '#3794ef55' },
         fontFamily: "'Fira Code', 'Consolas', monospace",
         fontSize: 13,
-        cursorBlink: true
+        cursorBlink: true,
+        // 스크롤 설정 — 이전 출력 확인 가능하도록 충분한 버퍼 확보
+        scrollback: 10000,
+        smoothScrollDuration: 100,
+        scrollOnUserInput: true
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
@@ -896,9 +903,9 @@ export default function TerminalSlot({
             </div>
           )}
 
-          {/* overflow-hidden: fit() 재조정 전 xterm이 컨테이너를 넘치는 시각적 오버플로우 차단 */}
-          <div className="flex-1 relative min-w-0 min-h-0 overflow-hidden">
-            <div className="absolute inset-0 overflow-hidden p-2">
+          {/* xterm.js v6 내장 스크롤바 사용 — 외부 overflow-hidden 제거하여 스크롤 활성화 */}
+          <div className="flex-1 relative min-w-0 min-h-0">
+            <div className="absolute inset-0 p-2">
               <div ref={xtermRef} className="h-full w-full" />
             </div>
             {!hasAttachedTerminal && (
