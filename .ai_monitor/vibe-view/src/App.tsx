@@ -126,6 +126,11 @@ function App() {
   const [geminiUsage, setGeminiUsage] = useState<{
     total_tokens: number; context_window: number; percentage: number
   } | null>(null);
+  // Claude Code 세션별 컨텍스트 사용량 — TerminalSlot 컨텍스트 바용
+  const [claudeUsage, setClaudeUsage] = useState<{
+    input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
+    model: string; context_window: number; percentage: number; last_ts: string;
+  } | null>(null);
   const [locks, setLocks] = useState<Record<string, string>>({});
 
   // ─── 현재 탐색 경로 — FileExplorer/GitPanel/TerminalSlot/MemoryPanel 공유 ──
@@ -288,12 +293,16 @@ function App() {
     return 'idle';
   }, [agentTerminals]);
 
-  // Gemini 컨텍스트 사용량 폴링 (10초) — TerminalSlot 게이지용
+  // Gemini + Claude 컨텍스트 사용량 동시 폴링 (10초) — TerminalSlot 게이지용
   useEffect(() => {
     const fetchUsage = () => {
       fetch(`${API_BASE}/api/gemini-context-usage`)
         .then(res => res.json())
         .then(data => { if (!data.error) setGeminiUsage(data); })
+        .catch((err) => console.error('[App] fetch error:', err));
+      fetch(`${API_BASE}/api/context-usage`)
+        .then(res => res.json())
+        .then(data => { if (!data.error) setClaudeUsage(data); })
         .catch((err) => console.error('[App] fetch error:', err));
     };
     fetchUsage();
@@ -415,11 +424,20 @@ function App() {
   };
 
   // 폴더 열기 — TopMenuBar "파일 → 폴더 열기" 전용 (FileExplorer 자체 버튼과 별개)
-  const openFolder = () => {
-    fetch(`${API_BASE}/api/select-folder`, { method: 'POST' })
-      .then(res => res.json())
-      .then(data => { if (data.status === 'success' && data.path) setCurrentPath(data.path); })
-      .catch(err => alert('폴더 선택 오류: ' + err));
+  // pywebview JS API를 우선 사용 (올바른 UI 스레드에서 .NET 다이얼로그 실행)
+  const openFolder = async () => {
+    try {
+      if ((window as any).pywebview?.api?.select_folder) {
+        const data = await (window as any).pywebview.api.select_folder();
+        if (data.status === 'success' && data.path) setCurrentPath(data.path);
+      } else {
+        const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success' && data.path) setCurrentPath(data.path);
+      }
+    } catch (err) {
+      alert('폴더 선택 오류: ' + err);
+    }
   };
 
   // 스킬 설치 — 현재 프로젝트에 하이브 마인드 스킬 설치
@@ -821,6 +839,7 @@ function App() {
                   messages={messages}
                   tasks={[]}
                   geminiUsage={geminiUsage}
+                  claudeUsage={claudeUsage}
                   agentTerminals={agentTerminals}
                   orchestratorData={skillChain}
                   hiveActivity={hiveActivity}

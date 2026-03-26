@@ -5148,11 +5148,48 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             print("[!]    → pip install --upgrade pythonnet 으로 업그레이드하세요")
 
         print(f"[*] Launching Desktop Window with Official Icon...")
+
+        # ── pywebview JS API 클래스 — HTTP 핸들러 대신 네이티브 스레드에서 실행 ──
+        # HTTP 핸들러 스레드에서 create_file_dialog()를 호출하면 .NET UI 스레드가 아니라
+        # WinForms 다이얼로그가 동작하지 않음. pywebview의 js_api를 사용하면
+        # pywebview가 올바른 스레드에서 함수를 실행해줌.
+        class WebViewApi:
+            def __init__(self):
+                self._window = None
+
+            def select_folder(self):
+                """프론트엔드에서 window.pywebview.api.select_folder()로 호출.
+                pywebview가 올바른 스레드에서 실행하므로 .NET 다이얼로그 정상 동작."""
+                try:
+                    if self._window:
+                        selected = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+                        if selected and len(selected) > 0:
+                            path = selected[0].replace('\\', '/')
+                            # 선택된 경로를 설정에도 즉시 저장
+                            config = {}
+                            if CONFIG_FILE.exists():
+                                try:
+                                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                                        config = json.load(f)
+                                except: pass
+                            config['last_path'] = path
+                            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                                json.dump(config, f, ensure_ascii=False, indent=2)
+                            return {"status": "success", "path": path}
+                        return {"status": "cancelled"}
+                    return {"status": "error", "message": "Window not ready"}
+                except Exception as e:
+                    return {"status": "error", "message": str(e)}
+
+        _js_api = WebViewApi()
+
         # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
         # html= 파라미터로 스플래시 먼저 표시 → webview.start() 직후 창 즉시 가시화
         global main_window  # SSEHandler에서 폴더 다이얼로그 등에 사용
         main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
-                              html=_SPLASH_HTML, width=1400, height=900)
+                              html=_SPLASH_HTML, width=1400, height=900,
+                              js_api=_js_api)
+        _js_api._window = main_window
 
         # 아이콘 교체 스레드 별도 실행
         threading.Thread(target=force_win32_icon, daemon=True).start()

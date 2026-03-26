@@ -126,11 +126,21 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
   // ─── 파일/폴더 조작 함수들 ────────────────────────────────────────────
 
   // 시스템 폴더 선택 대화상자 열기
-  const openFolder = () => {
-    fetch(`${API_BASE}/api/select-folder`, { method: 'POST' })
-      .then(res => res.json())
-      .then(data => { if (data.status === 'success' && data.path) onPathChange(data.path); })
-      .catch(err => alert('폴더 선택 오류: ' + err));
+  // pywebview JS API를 우선 사용 (올바른 UI 스레드에서 .NET 다이얼로그 실행)
+  // pywebview가 없는 환경(브라우저 직접 접속)에서는 HTTP API로 폴백
+  const openFolder = async () => {
+    try {
+      if ((window as any).pywebview?.api?.select_folder) {
+        const data = await (window as any).pywebview.api.select_folder();
+        if (data.status === 'success' && data.path) onPathChange(data.path);
+      } else {
+        const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success' && data.path) onPathChange(data.path);
+      }
+    } catch (err) {
+      alert('폴더 선택 오류: ' + err);
+    }
   };
 
   // 상위 폴더로 이동
