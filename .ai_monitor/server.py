@@ -5133,6 +5133,20 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
                     _t.sleep(0.1)
             window.load_url(_target)
 
+        # ── pythonnet / pywebview 백엔드 진단 ──
+        # pythonnet이 없으면 pywebview가 브라우저로 폴백하여
+        # 네이티브 윈도우/파일 다이얼로그 등이 동작하지 않음
+        try:
+            import clr
+            print(f"[*] pythonnet: OK (clr 모듈 로드됨)")
+        except ImportError:
+            print("[!] ⚠️  pythonnet이 설치되지 않았습니다!")
+            print("[!]    → pywebview가 브라우저 모드로 폴백됩니다 (네이티브 기능 제한)")
+            print("[!]    → 수정: pip install pythonnet>=3.0.5")
+        except Exception as _clr_err:
+            print(f"[!] ⚠️  pythonnet 로드 실패: {_clr_err}")
+            print("[!]    → pip install --upgrade pythonnet 으로 업그레이드하세요")
+
         print(f"[*] Launching Desktop Window with Official Icon...")
         # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
         # html= 파라미터로 스플래시 먼저 표시 → webview.start() 직후 창 즉시 가시화
