@@ -353,6 +353,7 @@ class AgentBot:
         self.cli = TERMINAL_CLI_MAP.get(tid, "claude")
         self.emoji = _get_emoji(self.cli)
         self.label = f"T{tid}({self.cli})"
+        self._bot_username: Optional[str] = None
 
         # 개인 채팅 ID — /start 시 자동 저장
         self.private_chat_id: Optional[int] = None
@@ -403,6 +404,8 @@ class AgentBot:
         self.app.add_handler(CommandHandler("history", self._cmd_history))
         self.app.add_handler(CommandHandler("send", self._cmd_send))
         self.app.add_handler(CommandHandler("broadcast", self._cmd_broadcast))
+        for slot in range(1, 9):
+            self.app.add_handler(CommandHandler(f"t{slot}", self._cmd_direct_slot))
         self.app.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self._handle_text,
@@ -434,6 +437,85 @@ class AgentBot:
             await self._safe_send(self.private_chat_id, text)
 
     # ── stream-json 방식: claude CLI 직접 spawn + 실시간 스트리밍 ──
+
+    def _publish_shared_message(
+        self,
+        from_agent: str,
+        to_agent: str,
+        msg_type: str,
+        content: str,
+        *,
+        source: str = "telegram",
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Mirror a Telegram-visible group message into the shared dashboard channel."""
+        text = (content or "").strip()
+        if not text:
+            return
+        merged_metadata = {
+            "source": source,
+            "telegram_chat": "group",
+        }
+        if metadata:
+            merged_metadata.update(metadata)
+        _api_post("/api/message", {
+            "from": from_agent,
+            "to": to_agent,
+            "type": msg_type,
+            "content": text,
+            "source": source,
+            "terminal_id": f"T{self.tid}",
+            "metadata": merged_metadata,
+        })
+
+    async def _extract_group_target_text(self, update: Update, raw_text: str) -> Optional[str]:
+        """Return cleaned text when a group message explicitly targets this bot."""
+        message = update.message
+        if not message:
+            return None
+
+        text = (raw_text or "").strip()
+        if not text:
+            return None
+
+        bot_username = self._bot_username or getattr(self.app.bot, "username", None)
+        if not bot_username:
+            try:
+                me = await self.app.bot.get_me()
+                bot_username = me.username
+                self._bot_username = bot_username
+            except Exception:
+                bot_username = None
+
+        is_reply_to_me = False
+        reply = getattr(message, "reply_to_message", None)
+        if reply and getattr(reply, "from_user", None):
+            reply_user = reply.from_user
+            bot_id = getattr(self.app.bot, "id", None)
+            if bot_id and reply_user.id == bot_id:
+                is_reply_to_me = True
+
+        cleaned = text
+        is_mentioned = False
+        if bot_username:
+            mention_pattern = rf'@{re.escape(bot_username)}\b'
+            if re.search(mention_pattern, cleaned, flags=re.IGNORECASE):
+                is_mentioned = True
+                cleaned = re.sub(mention_pattern, '', cleaned, flags=re.IGNORECASE).strip()
+
+        slot_prefix_re = re.compile(
+            rf'^\s*(?:T{self.tid}|{re.escape(self.label)}|{re.escape(self.cli)})\s*[:>\-]\s*',
+            re.IGNORECASE,
+        )
+        if slot_prefix_re.match(cleaned):
+            cleaned = slot_prefix_re.sub('', cleaned).strip()
+            return cleaned or None
+
+        if is_reply_to_me or is_mentioned:
+            cleaned = cleaned.lstrip(",:>- ").strip()
+            return cleaned or None
+
+        return None
 
     async def _safe_edit(self, chat_id: int, msg_id: int, text: str) -> bool:
         """텔레그램 메시지 편집 (변경 없으면 무시, Markdown 실패 시 plain 폴백)"""
@@ -631,6 +713,14 @@ class AgentBot:
                     "terminal_id": f"T{self.tid}", "source": "telegram",
                     "role": "assistant", "content": full_text,
                 })
+                if GROUP_CHAT_ID and chat_id == GROUP_CHAT_ID:
+                    self._publish_shared_message(
+                        self.cli,
+                        "all",
+                        "info",
+                        full_text,
+                        metadata={"via": "stream_reply"},
+                    )
 
             log.info(f"[{self.label}] 스트리밍 완료: {len(full_text)}자, session={self._session_id and self._session_id[:12]}")
 
@@ -847,6 +937,7 @@ class AgentBot:
                 channel="task",
                 msg_type="request",
                 terminal_id=f"T{self.tid}",
+                metadata={"source": "telegram", "telegram_chat": "private_command"},
             )
             if success:
                 await update.message.reply_text(
@@ -865,12 +956,49 @@ class AgentBot:
             return
         content = " ".join(args)
         if itcp:
-            success = itcp.broadcast(from_terminal="user", content=content, channel="broadcast")
+            success = itcp.broadcast(
+                from_terminal="user",
+                content=content,
+                channel="broadcast",
+                terminal_id=f"T{self.tid}",
+                metadata={"source": "telegram", "telegram_chat": "private_command"},
+            )
             await update.message.reply_text(
                 "\U0001f4e2 브로드캐스트 완료" if success else "\u274c 실패"
             )
         else:
             await update.message.reply_text("\u274c ITCP 없음")
+
+    async def _cmd_direct_slot(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/tN <msg> — 그룹에서 특정 슬롯을 직접 실행."""
+        message = update.message
+        if not message:
+            return
+
+        text = (message.text or "").strip()
+        match = re.match(r"^/t(\d+)(?:@\w+)?\s*(.*)$", text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return
+
+        target_tid = int(match.group(1))
+        payload = (match.group(2) or "").strip()
+
+        if target_tid != self.tid:
+            return
+        if not payload:
+            await update.message.reply_text(f"사용법: /t{self.tid} <메시지>")
+            return
+
+        self._sync_live_cli()
+        chat = update.effective_chat
+        user = update.effective_user
+        user_label = user.first_name if user else "User"
+
+        if self._is_terminal_alive():
+            relayed = await self._relay_to_live_pty(payload, chat.id, user_label)
+            if relayed:
+                return
+        await self._stream_agent_response(payload, chat.id, user_label)
 
     # ── 일반 텍스트 → claude CLI stream-json 직접 실행 ──
 
@@ -901,8 +1029,32 @@ class AgentBot:
             await self._stream_agent_response(text, chat.id, user_label)
             return
 
-        # ── 그룹 채팅: ITCP로 전달 (기존 유지) ──
+        # ── 그룹 채팅:
+        #   1) mention/reply/prefix로 명시되면 해당 봇이 즉시 실행
+        #   2) 그 외 일반 메시지는 기본 그룹 봇(T1)만 즉시 실행
+        #      다른 봇은 무시하여 중복 실행을 방지
         if chat.type != ChatType.PRIVATE:
+            direct_text = await self._extract_group_target_text(update, text)
+            if not direct_text and GROUP_CHAT_ID and chat.id == GROUP_CHAT_ID and self.tid == 1:
+                direct_text = text
+            if direct_text:
+                self._publish_shared_message(
+                    "user",
+                    "all",
+                    "request",
+                    direct_text,
+                    metadata={"tg_user": user_label, "via": "direct_group"},
+                )
+                if self._is_terminal_alive():
+                    relayed = await self._relay_to_live_pty(direct_text, chat.id, user_label)
+                    if relayed:
+                        return
+                await self._stream_agent_response(direct_text, chat.id, user_label)
+                return
+
+            if self.tid != 1:
+                return
+
             if itcp:
                 itcp.send(
                     from_terminal="user",
@@ -911,10 +1063,13 @@ class AgentBot:
                     channel="task",
                     msg_type="request",
                     terminal_id=f"T{self.tid}",
+                    metadata={"source": "telegram", "telegram_chat": "group", "tg_user": user_label},
                 )
                 await update.message.reply_text(
-                    f"\U0001f4e8 {self.emoji} T{self.tid}에게 전달됨"
+                    f"\U0001f4e8 {self.emoji} T{self.tid} inbox에 전달됨"
                 )
+            else:
+                await update.message.reply_text("\u274c ITCP 없음")
 
     # ── 터미널 생존 확인 ──
 
@@ -1042,6 +1197,7 @@ class AgentBot:
             quiet_time = 0
             sent_count = 0
             buffer = ""
+            full_output = ""
 
             while elapsed < max_wait:
                 await asyncio.sleep(3)
@@ -1064,16 +1220,34 @@ class AgentBot:
                     filtered = _filter_noise(buffer)
                     if filtered.strip():
                         await self._safe_send(chat_id, f"{self.emoji} *{self.label}:*\n{_truncate(filtered, 3900)}")
+                        full_output += (("\n\n" if full_output else "") + filtered.strip())
                         sent_count += 1
                     buffer = ""
 
                 if quiet_time >= 10 and sent_count > 0:
+                    if GROUP_CHAT_ID and chat_id == GROUP_CHAT_ID:
+                        self._publish_shared_message(
+                            self.cli,
+                            "all",
+                            "info",
+                            full_output,
+                            metadata={"via": "pty_reply"},
+                        )
                     return True
 
             if buffer.strip():
                 filtered = _filter_noise(buffer)
                 if filtered.strip():
                     await self._safe_send(chat_id, f"{self.emoji} *{self.label}:*\n{_truncate(filtered, 3900)}")
+                    full_output += (("\n\n" if full_output else "") + filtered.strip())
+                    if GROUP_CHAT_ID and chat_id == GROUP_CHAT_ID:
+                        self._publish_shared_message(
+                            self.cli,
+                            "all",
+                            "info",
+                            full_output,
+                            metadata={"via": "pty_reply"},
+                        )
                     return True
 
             await self._safe_send(chat_id, f"\u23f0 {self.label} 응답 대기 시간 초과")
@@ -1280,7 +1454,10 @@ class BotManager:
 
                     from_agent = msg.get("from_agent", msg.get("from", ""))
                     # 텔레그램 브릿지 자체 메시지는 스킵 (무한 루프 방지)
-                    if from_agent == "telegram_bridge" or from_agent == "user":
+                    metadata = msg.get("metadata", {}) or {}
+                    if from_agent == "telegram_bridge":
+                        continue
+                    if metadata.get("source") == "telegram":
                         continue
 
                     to_agent = msg.get("to_agent", "all")

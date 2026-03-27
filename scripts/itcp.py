@@ -277,13 +277,27 @@ def receive(terminal_name: str, mark_read: bool = True, my_terminal_id: str = ""
     return messages
 
 
-def broadcast(from_terminal: str, content: str, channel: str = "broadcast") -> bool:
+def broadcast(
+    from_terminal: str,
+    content: str,
+    channel: str = "broadcast",
+    terminal_id: str = "",
+    metadata: Optional[dict] = None,
+) -> bool:
     """모든 터미널에 브로드캐스트 메시지를 전송합니다.
 
     [사용 예]
     itcp.broadcast("claude", "빌드 완료 v3.7.5 — 전체 확인 요청")
     """
-    return send(from_terminal, "all", content, channel=channel, msg_type="broadcast")
+    return send(
+        from_terminal,
+        "all",
+        content,
+        channel=channel,
+        msg_type="broadcast",
+        terminal_id=terminal_id,
+        metadata=metadata,
+    )
 
 
 def history(limit: int = 20, channel: Optional[str] = None) -> list[dict]:

@@ -22,11 +22,14 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-# pip 설치 환경/개발 환경 양쪽에서 import 가능하도록 try/except
+# 버전 로드: 패키지/개발/PyInstaller 빌드 환경 모두 대응
 try:
     from ._version import __version__ as APP_VERSION
 except ImportError:
-    from _version import __version__ as APP_VERSION
+    try:
+        from _version import __version__ as APP_VERSION
+    except ImportError:
+        APP_VERSION = "0.0.0-unknown"
 
 REPO = "btsky99/vibe-coding"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"

@@ -40,14 +40,25 @@ def get_recent_logs(limit=50):
         return []
 
 
-def send_message(msg_id, from_agent, to_agent, msg_type, content):
+def send_message(
+    msg_id,
+    from_agent,
+    to_agent,
+    msg_type,
+    content,
+    channel="general",
+    terminal_id="",
+    metadata=None,
+):
     try:
         return itcp_send(
             from_terminal=from_agent,
             to_terminal=to_agent,
             content=content,
-            channel='general',
+            channel=channel,
             msg_type=msg_type,
+            terminal_id=terminal_id,
+            metadata=metadata,
         )
     except Exception:
         return False
@@ -66,6 +77,7 @@ def get_messages(limit=50):
                 is_read::text AS is_read,
                 ts::text AS timestamp
             FROM pg_messages
+            WHERE channel <> 'telegram_response'
             ORDER BY ts DESC
             LIMIT {int(limit)};
             """

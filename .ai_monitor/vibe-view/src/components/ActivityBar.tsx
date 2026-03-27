@@ -16,7 +16,7 @@ import { memo } from 'react';
 import {
   Search, Settings, Files,
   MessageSquare, ClipboardList, Brain, GitBranch, Package, Bot, Zap,
-  ExternalLink, LayoutDashboard, Activity, Target, Smartphone
+  ExternalLink, LayoutDashboard, Activity, Target, Smartphone, Users
 } from 'lucide-react';
 
 interface ActivityBarProps {
@@ -128,6 +128,10 @@ const ActivityBar = memo(function ActivityBar({
         {unreadMsgCount > 0 && (
           <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full" />
         )}
+      </button>
+
+      <button onClick={() => onTabChange('group-chat')} className={tabCls('group-chat')} title="Internal Group Chat">
+        <Users className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('tasks')} className={tabCls('tasks')} title="태스크보드 (리스트)">

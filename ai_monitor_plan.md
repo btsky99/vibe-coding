@@ -15,10 +15,9 @@ REVISION HISTORY:
 
 ## 태스크 목록
 
-[ ] Task 1: pyproject.toml에 pywin32 의존성 추가
-    파일: pyproject.toml
-    방법: dependencies에 `pywin32>=310; sys_platform == "win32"` 추가
-    검증: pip install 시 pywin32 자동 설치
+[x] Task 1: pyproject.toml에 pywin32 의존성 추가
+    - 상태: 완료
+    - 내용: dependencies에 `pywin32>=306; sys_platform == "win32"` 추가됨 (2026-03-27)
 
 [ ] Task 2: create_shortcut.py에 remove_shortcut() 함수 추가
     파일: .ai_monitor/create_shortcut.py

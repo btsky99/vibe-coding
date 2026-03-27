@@ -864,7 +864,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
-from _version import __version__
+# 버전 로드: PyInstaller 빌드 환경에서 _version 모듈 누락 방지용 이중 안전장치
+try:
+    from _version import __version__
+except ImportError:
+    __version__ = "0.0.0-unknown"
 
 # 데이터 디렉토리: 배포 모드 → %APPDATA%\VibeCoding, 개발 모드 → .ai_monitor/data
 if getattr(sys, 'frozen', False):
@@ -3750,6 +3754,13 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
 
                 # 메시지 객체 생성 (ID: 밀리초 타임스탬프)
+                source = str(data.get('source', 'dashboard') or 'dashboard')
+                channel = str(data.get('channel', 'general') or 'general')
+                terminal_id = str(data.get('terminal_id', '') or '')
+                raw_metadata = data.get('metadata', {})
+                metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+                metadata.setdefault('source', source)
+
                 msg = {
                     'id': str(int(time.time() * 1000)),
                     'timestamp': time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -3761,7 +3772,16 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }
 
                 # SQLite 에 삽입
-                send_message(msg['id'], msg['from'], msg['to'], msg['type'], msg['content'])
+                send_message(
+                    msg['id'],
+                    msg['from'],
+                    msg['to'],
+                    msg['type'],
+                    msg['content'],
+                    channel=channel,
+                    terminal_id=terminal_id,
+                    metadata=metadata,
+                )
 
                 # 활성화된 모든 PTY 세션에 메시지 전송 (터미널 화면에 출력)
                 # 터미널은 \r\n (CRLF)을 필요로 하므로 변환하여 전송합니다.

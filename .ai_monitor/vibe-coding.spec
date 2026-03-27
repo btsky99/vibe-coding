@@ -25,7 +25,7 @@ a = Analysis(
         ('pty-server', 'pty-server'),
     ],
     # [2026-03-24] chromadb, pysqlite3 제거 (미사용)
-    hiddenimports=['websockets', 'winpty', 'psycopg2'],
+    hiddenimports=['websockets', 'winpty', 'psycopg2', '_version'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

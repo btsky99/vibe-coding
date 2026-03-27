@@ -62,6 +62,27 @@ _ANSI_ESCAPE = re.compile(
     r')'
 )
 
+_CODEX_NOISE_PATTERNS = (
+    re.compile(r'^\d+;\s*vibe-coding\s*$', re.IGNORECASE),
+    re.compile(r'^Working(?:\s*\(\d+s\s+esc to interrupt\))?\s*$', re.IGNORECASE),
+    re.compile(r'^Wor(?:k(?:i(?:n(?:g\d*)?)?)?)?\s*$', re.IGNORECASE),
+    re.compile(r'^gpt-[\w.\-]+\s+\w+\s+\d+%\s+left\s+.+$', re.IGNORECASE),
+)
+
+_CODEX_NOISE_EXACT = {
+    "Find and fix a bug in @filename",
+}
+
+
+def _is_codex_noise_line(line: str) -> bool:
+    """Return True for Codex terminal UI/status artifacts that should not be forwarded."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped in _CODEX_NOISE_EXACT:
+        return True
+    return any(pattern.match(stripped) for pattern in _CODEX_NOISE_PATTERNS)
+
 # ─── 경로 설정 ────────────────────────────────────────────────────────────────
 # [2026-03-08] Claude: [버그수정] EXE(frozen) 환경에서 DATA_DIR 오류 수정
 #   - 개발 환경: __file__ = scripts/cli_agent.py → DATA_DIR = root/.ai_monitor/data (정상)
@@ -686,6 +707,8 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
                     line = gemini_filter.filter_line(line)
                     if line is None:
                         continue
+                if cli == 'codex' and _is_codex_noise_line(line):
+                    continue
                 all_lines.append(line)
                 # 터미널별 마지막 출력 줄 업데이트
                 # [2026-03-22] stdout 키워드 기반 파이프라인 단계 감지 제거
@@ -1032,7 +1055,12 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
                 _sys.path.insert(0, str(_SCRIPTS_DIR))
                 import itcp as _itcp
                 # 출력에서 의미있는 줄만 추출 (빈 줄, 시스템 메시지 제외)
-                meaningful = [l for l in output_lines if l.strip() and not l.startswith('[')]
+                meaningful = [
+                    l for l in output_lines
+                    if l.strip()
+                    and not l.startswith('[')
+                    and not (cli == 'codex' and _is_codex_noise_line(l))
+                ]
                 summary = "\n".join(meaningful[-20:]) if meaningful else "(응답 없음)"
                 _itcp.send(
                     from_terminal=cli,
