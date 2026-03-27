@@ -960,7 +960,9 @@ app.post('/api/pty/write/:id', (req, res) => {
 
   try {
     // 텍스트 + Enter 키 전송 (Claude Code 프롬프트에 입력)
-    info.pty.write(text + '\r\n');
+    const enterStr = (info.agent === 'gemini' || info.agent === 'codex') ? '\r\r' : '\r';
+    info.pty.write(text);
+    info.pty.write(enterStr);
     res.json({ status: 'written', terminal_id: `T${target}`, length: text.length });
   } catch (err) {
     res.status(500).json({ error: 'write_failed', detail: err.message });

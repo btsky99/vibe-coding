@@ -110,7 +110,7 @@ PTY_PORT: int = int(os.environ.get("PTY_PORT", "9001"))  # Node PTY 서버 포�
 
 # ── 터미널별 기본 CLI 매핑 (서버에서 실제 정보 가져오기 실패 시 폴백) ──
 _DEFAULT_CLI_MAP = {
-    1: "claude", 2: "gemini", 3: "claude", 4: "gemini",
+    1: "claude", 2: "gemini", 3: "codex", 4: "gemini",
     5: "codex", 6: "claude", 7: "gemini", 8: "codex",
 }
 
@@ -135,6 +135,11 @@ def _get_terminal_cli_map() -> dict[int, str]:
         if tid not in cli_map:
             cli_map[tid] = _DEFAULT_CLI_MAP.get(tid, "claude")
     return cli_map
+
+
+def _get_terminal_cli(tid: int) -> str:
+    """Fetch the current CLI bound to one terminal slot."""
+    return _get_terminal_cli_map().get(tid, _DEFAULT_CLI_MAP.get(tid, "claude"))
 
 TERMINAL_CLI_MAP = _DEFAULT_CLI_MAP  # 초기값 (BotManager.load_bots()에서 동적 업데이트)
 
@@ -195,6 +200,31 @@ def _api_post(path: str, data: dict) -> Optional[dict]:
     import urllib.request
     try:
         url = f"http://127.0.0.1:{SERVER_PORT}{path}"
+        body = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _pty_get(path: str) -> Optional[dict]:
+    """Node PTY server API GET."""
+    import urllib.request
+    try:
+        url = f"http://127.0.0.1:{PTY_PORT}{path}"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _pty_post(path: str, data: dict) -> Optional[dict]:
+    """Node PTY server API POST."""
+    import urllib.request
+    try:
+        url = f"http://127.0.0.1:{PTY_PORT}{path}"
         body = json.dumps(data).encode("utf-8")
         req = urllib.request.Request(url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
@@ -273,6 +303,25 @@ class AgentBot:
             .build()
         )
         self._register_handlers()
+
+    def _apply_cli_binding(self, cli: str) -> bool:
+        """Update local bot metadata when the terminal slot's CLI changed."""
+        cli = (cli or "").strip().lower() or _DEFAULT_CLI_MAP.get(self.tid, "claude")
+        if cli == self.cli:
+            return False
+        old_label = self.label
+        self.cli = cli
+        self.emoji = _get_emoji(cli)
+        self.label = f"T{self.tid}({cli})"
+        log.info(f"[TG] slot remap: {old_label} -> {self.label}")
+        return True
+
+    def _sync_live_cli(self) -> None:
+        """Refresh this bot's CLI binding from the live terminal server."""
+        try:
+            self._apply_cli_binding(_get_terminal_cli(self.tid))
+        except Exception as e:
+            log.debug(f"[{self.label}] live CLI sync skipped: {e}")
 
     def _register_handlers(self) -> None:
         """명령어 + 텍스트 핸들러 등록"""
@@ -533,6 +582,7 @@ class AgentBot:
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/start — 봇 활성화 + 개인 채팅 ID 자동 저장"""
+        self._sync_live_cli()
         log.info(f"[{self.label}] /start 수신 (chat_id={update.effective_chat.id}, type={update.effective_chat.type})")
         chat = update.effective_chat
         chat_id = chat.id
@@ -564,6 +614,7 @@ class AgentBot:
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/status — 에이전트 상태 조회"""
+        self._sync_live_cli()
         chat = update.effective_chat
 
         if chat.type == ChatType.PRIVATE:
@@ -607,6 +658,7 @@ class AgentBot:
 
     async def _cmd_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/run <task> — 이 터미널에서 작업 시작"""
+        self._sync_live_cli()
         args = context.args or []
         if not args:
             await update.message.reply_text("사용법: /run <작업 내용>")
@@ -629,6 +681,7 @@ class AgentBot:
 
     async def _cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/stop — 진행 중인 claude 프로세스 종료 + PTY 인터럽트"""
+        self._sync_live_cli()
         stopped = False
 
         # stream-json 프로세스 종료
@@ -758,6 +811,7 @@ class AgentBot:
         개인채팅: claude CLI를 직접 spawn → stdin/stdout 파이프 → 실시간 스트리밍
         그룹채팅: ITCP로 전달 (기존 유지)
         """
+        self._sync_live_cli()
         log.info(f"[{self.label}] 텍스트 수신: chat_id={update.effective_chat.id}, type={update.effective_chat.type}, text={update.message.text[:50]!r}")
         text = update.message.text.strip()
         if not text:
@@ -770,6 +824,10 @@ class AgentBot:
         if chat.type == ChatType.PRIVATE:
             # ── 개인 채팅: 모든 에이전트 cokacdir 패턴으로 직접 spawn ──
             # claude/gemini/codex 모두 CLI를 직접 spawn + --resume으로 세션 유지
+            if self._is_terminal_alive():
+                relayed = await self._relay_to_live_pty(text, chat.id, user_label)
+                if relayed:
+                    return
             await self._stream_agent_response(text, chat.id, user_label)
             return
 
@@ -884,6 +942,74 @@ class AgentBot:
             await self._safe_send(chat_id, f"\u23f0 {self.label} 응답 대기 시간 초과")
 
     # ── stream-json 폴백 (터미널 미실행 시) ──
+
+    async def _relay_to_live_pty(self, text: str, chat_id: int, user_label: str) -> bool:
+        """Write Telegram text into the live PTY slot and forward fresh PTY output back."""
+        if self._streaming:
+            await self._safe_send(
+                chat_id,
+                f"\u23f3 {self.emoji} {self.label} 이전 작업 전달 중입니다.\n/stop 으로 취소"
+            )
+            return True
+
+        _api_post("/api/agent/chat/bus", {
+            "terminal_id": f"T{self.tid}", "source": "telegram",
+            "role": "user", "content": text, "tg_user": user_label,
+        })
+
+        baseline = _pty_get(f"/api/pty/output/T{self.tid}?since=0&limit=1") or {}
+        last_seq = baseline.get("latest_seq", 0)
+        write_result = _pty_post(f"/api/pty/write/T{self.tid}", {"text": text})
+        if not write_result or write_result.get("status") != "written":
+            return False
+
+        self._streaming = True
+        try:
+            await self._safe_send(chat_id, f"{self.emoji} {self.label} 전달됨. PTY 응답 대기 중...")
+
+            max_wait = 300
+            elapsed = 0
+            quiet_time = 0
+            sent_count = 0
+            buffer = ""
+
+            while elapsed < max_wait:
+                await asyncio.sleep(3)
+                elapsed += 3
+                quiet_time += 3
+
+                data = _pty_get(f"/api/pty/output/T{self.tid}?since={last_seq}&limit=80") or {}
+                new_seq = data.get("latest_seq", last_seq)
+                entries = data.get("entries", [])
+
+                if entries:
+                    quiet_time = 0
+                    for entry in entries:
+                        txt = entry.get("text", "")
+                        if txt.strip():
+                            buffer += txt + "\n"
+                    last_seq = new_seq
+
+                if buffer.strip() and quiet_time >= 3:
+                    filtered = _filter_noise(buffer)
+                    if filtered.strip():
+                        await self._safe_send(chat_id, f"{self.emoji} *{self.label}:*\n{_truncate(filtered, 3900)}")
+                        sent_count += 1
+                    buffer = ""
+
+                if quiet_time >= 10 and sent_count > 0:
+                    return True
+
+            if buffer.strip():
+                filtered = _filter_noise(buffer)
+                if filtered.strip():
+                    await self._safe_send(chat_id, f"{self.emoji} *{self.label}:*\n{_truncate(filtered, 3900)}")
+                    return True
+
+            await self._safe_send(chat_id, f"\u23f0 {self.label} 응답 대기 시간 초과")
+            return True
+        finally:
+            self._streaming = False
 
     async def _stream_agent_response(self, text: str, chat_id: int, user_label: str) -> None:
         """cokacdir 패턴: 모든 에이전트(claude/gemini/codex)를 CLI spawn + 실시간 스트리밍."""
@@ -1011,6 +1137,15 @@ class BotManager:
                 log.debug(f"  T{tid} 토큰 미설정 — 스킵")
         return count
 
+    def _refresh_bot_bindings(self) -> None:
+        """Refresh bot labels and lookup indexes from the live terminal map."""
+        global TERMINAL_CLI_MAP
+        TERMINAL_CLI_MAP = _get_terminal_cli_map()
+        self._cli_to_bots = defaultdict(list)
+        for tid, bot in self.bots.items():
+            bot._apply_cli_binding(TERMINAL_CLI_MAP.get(tid, bot.cli))
+            self._cli_to_bots[bot.cli].append(bot)
+
     def _find_bot_for_agent(self, agent_name: str, terminal_id: str = "") -> Optional[AgentBot]:
         """ITCP 메시지 발신자에 매핑되는 봇 찾기.
 
@@ -1020,6 +1155,7 @@ class BotManager:
         3. 없으면 None
         """
         # terminal_id로 직접 매핑
+        self._refresh_bot_bindings()
         if terminal_id:
             try:
                 tid_num = int(terminal_id.replace("T", "").replace("t", ""))
