@@ -270,6 +270,44 @@ def check_telegram() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  6. Sub-agent 설정 확인
+# ═══════════════════════════════════════════════════════════════════════
+
+def check_subagents() -> dict:
+    """Claude Code Sub-agent 정의 파일(.claude/agents/*.md)과
+    Agent Teams 활성화 설정을 확인한다."""
+    agents_dir = _PROJECT_ROOT / ".claude" / "agents"
+    settings_path = _PROJECT_ROOT / ".claude" / "settings.json"
+
+    agent_files = list(agents_dir.glob("*.md")) if agents_dir.exists() else []
+
+    teams_enabled = False
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding='utf-8'))
+            env = settings.get("env", {})
+            teams_enabled = env.get("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS") == "1"
+        except Exception:
+            pass
+
+    agent_names = [f.stem for f in agent_files]
+    parts = []
+    if agent_names:
+        parts.append(f"Sub-agent {len(agent_names)}개 ({', '.join(agent_names)})")
+    else:
+        parts.append("Sub-agent 없음")
+    parts.append("Agent Teams " + ("활성" if teams_enabled else "비활성"))
+
+    if agent_files and teams_enabled:
+        return _make_result(STATUS_OK, " / ".join(parts))
+    elif agent_files:
+        return _make_result(STATUS_OK, " / ".join(parts))
+    else:
+        return _make_result(STATUS_MISSING, " / ".join(parts),
+                            action="create_subagents")
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  통합 진단 실행
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -296,6 +334,7 @@ def run_all() -> dict[str, Any]:
         "hooks": check_hooks(),
         "cli_agents": check_cli_agents(),
         "telegram": check_telegram(),
+        "subagents": check_subagents(),
     }
 
     auto_fixed = [k for k, v in checks.items() if v.get("auto_fixed")]
