@@ -557,6 +557,21 @@ def main() -> None:
         SESSION_ASSIGNED_TASKS = []
         SESSION_REVIEW_REQUESTS = []
 
+        # [2026-03-27 Claude] 세션 히스토리 자동 수리 (백그라운드)
+        # Gemini CLI가 이미지 파일 read_file 시 result에 inlineData + functionResponse
+        # 2개 파트를 넣어 API 400 에러 유발 → 세션 시작 시 자동 정리
+        _repair_script = SCRIPT_DIR / "gemini_session_repair.py"
+        if _repair_script.exists():
+            try:
+                subprocess.Popen(
+                    [sys.executable, str(_repair_script)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception:
+                pass
+
         # ITCP 수신 + 의도 감지만 수행 (가벼움)
         additional_context = _build_additional_context(prompt)
 

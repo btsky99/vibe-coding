@@ -30,6 +30,11 @@ jobs:
           python -m py_compile .ai_monitor/server.py
           ruff check .ai_monitor/server.py --select E9,F821,F823
 
+      - name: Pre-build verification (Phase 1 - source check)
+        # [2026-03-27 Claude] 빌드 전 검증 Phase 1 — Python 의존성, 버전, 구문, import 사전 확인
+        # 프론트엔드/PTY 빌드(~5분) 전에 Python 측 문제를 먼저 잡아 빌드 시간 낭비 방지
+        run: python scripts/build_verify.py --ci --phase pre
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -132,6 +137,11 @@ jobs:
       # [2026-03-24] 배포 범용화: 개발 전용 파일 번들 제거
       # 제거됨: .gemini/skills, .claude/skills, scripts, GEMINI.md, CLAUDE.md, RULES.md
       # 설치 버전은 대시보드 GUI + 터미널 + PostgreSQL만 포함
+
+      - name: Pre-build verification (Phase 2 - final gate)
+        # [2026-03-27 Claude] 최종 빌드 게이트 — 프론트엔드, PTY, winpty, 에셋 전부 검증
+        # 이 단계를 통과해야만 PyInstaller EXE 빌드가 시작됨
+        run: python scripts/build_verify.py --ci --phase post
 
       - name: Build exe
         # [2026-03-21 Claude] 경로 수정: server.py가 _MEIPASS/vibe-view/dist/ 에서 프론트엔드를 찾으므로

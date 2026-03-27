@@ -31,7 +31,7 @@ const fs = require('fs');
 const BASH_AVAILABLE = fs.existsSync(BASH_EXE);
 
 // ── 세션 저장소 ───────────────────────────────────────────────────────────
-// Map<sessionId, { pty, agent, yolo, started, cwd, lastLine, mainModel, bgModel }>
+// Map<sessionId, { pty, socket, agent, yolo, started, cwd, lastLine, mainModel, bgModel, attached, detachedAt, detachTimer }>
 const ptySessions = new Map();
 // Map<sessionId, Array<{seq, text}>> — 최근 출력 버퍼 (최대 400줄)
 const ptyOutputBuffers = new Map();
@@ -39,6 +39,8 @@ const ptyOutputBuffers = new Map();
 const ptyOutputSeq = new Map();
 
 const OUTPUT_BUFFER_MAX = 400;
+const REPLAY_LINES_ON_ATTACH = 200;
+const DETACH_GRACE_MS = parseInt(process.env.PTY_DETACH_GRACE_MS || String(30 * 60 * 1000), 10);
 
 // ANSI 이스케이프 코드 제거용 정규식
 const ANSI_ESCAPE = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
@@ -77,6 +79,188 @@ function appendPtyOutput(sessionId, rawData) {
  */
 function normalizeCodexStream(data) {
   return data.replace(/\r\r\n/g, '\r\n');
+}
+
+function clearDetachTimer(session) {
+  if (!session || !session.detachTimer) return;
+  clearTimeout(session.detachTimer);
+  session.detachTimer = null;
+}
+
+function clearSessionState(sessionId) {
+  const session = ptySessions.get(sessionId);
+  if (session) {
+    clearDetachTimer(session);
+  }
+  ptySessions.delete(sessionId);
+  ptyOutputBuffers.delete(sessionId);
+  ptyOutputSeq.delete(sessionId);
+}
+
+function killSessionPty(sessionId, reason = 'terminated') {
+  const session = ptySessions.get(sessionId);
+  if (!session || !session.pty) return false;
+
+  clearDetachTimer(session);
+  console.log(`[PTY] 세션 종료 요청: T${sessionId} reason=${reason}`);
+
+  try {
+    session.pty.kill();
+    return true;
+  } catch (err) {
+    console.log(`[PTY] PTY 종료 실패: T${sessionId} ${err.message}`);
+    clearSessionState(sessionId);
+    return false;
+  }
+}
+
+function scheduleDetachedCleanup(sessionId) {
+  const session = ptySessions.get(sessionId);
+  if (!session) return;
+
+  clearDetachTimer(session);
+  session.attached = false;
+  session.detachedAt = new Date().toISOString();
+  session.detachTimer = setTimeout(() => {
+    const current = ptySessions.get(sessionId);
+    if (!current || current.attached) return;
+    console.log(`[PTY] 재연결 유예시간 만료: T${sessionId} -> PTY 종료`);
+    killSessionPty(sessionId, 'detach_timeout');
+  }, DETACH_GRACE_MS);
+}
+
+function replayBufferedOutput(sessionId, ws) {
+  const buffer = ptyOutputBuffers.get(sessionId) || [];
+  if (!buffer.length || ws.readyState !== WebSocket.OPEN) return;
+
+  const replay = buffer
+    .slice(-REPLAY_LINES_ON_ATTACH)
+    .map(entry => entry.text)
+    .join('\r\n');
+
+  if (!replay) return;
+
+  ws.send(
+    `\r\n\x1b[38;5;39m[HIVE] 기존 PTY 세션 T${sessionId}에 재부착했습니다.\x1b[0m\r\n` +
+    `\x1b[38;5;244m최근 출력 ${Math.min(buffer.length, REPLAY_LINES_ON_ATTACH)}줄을 복원합니다.\x1b[0m\r\n` +
+    `${replay}\r\n`
+  );
+}
+
+function attachSocketToSession(ws, sessionId, agent) {
+  const session = ptySessions.get(sessionId);
+  if (!session || !session.pty) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close(1011, 'PTY session missing');
+    }
+    return;
+  }
+
+  const ptyProcess = session.pty;
+  let wsInputBuf = [];
+  let wsInitDone = false;
+
+  session.socket = ws;
+  session.attached = true;
+  session.detachedAt = '';
+  clearDetachTimer(session);
+
+  setTimeout(() => { wsInitDone = true; }, 1500);
+
+  ws.on('message', (message) => {
+    try {
+      const msgStr = typeof message === 'string' ? message : message.toString('utf-8');
+
+      if (msgStr.startsWith('{') && msgStr.endsWith('}')) {
+        try {
+          const data = JSON.parse(msgStr);
+          if (data.type === 'resize') {
+            const newCols = parseInt(data.cols, 10) || 80;
+            const newRows = parseInt(data.rows, 10) || 24;
+            ptyProcess.resize(newCols, newRows);
+            return;
+          }
+        } catch (_) {
+          // JSON 파싱 실패 시 일반 입력으로 처리
+        }
+      }
+
+      const processed = msgStr.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+
+      if (processed.includes('\r')) {
+        const segments = processed.split('\r');
+        for (let idx = 0; idx < segments.length; idx++) {
+          const segment = segments[idx];
+          if (segment) {
+            if (wsInitDone) {
+              if ((segment === '\x7f' || segment === '\x08') && wsInputBuf.length > 0) {
+                wsInputBuf.pop();
+              } else {
+                wsInputBuf.push(segment);
+              }
+            }
+            ptyProcess.write(segment);
+          }
+
+          if (idx < segments.length - 1) {
+            if (wsInitDone && wsInputBuf.length > 0) {
+              const completedLine = wsInputBuf.join('');
+              wsInputBuf = [];
+              const cleaned = completedLine.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim();
+              if (cleaned.length >= 4 && !agent) {
+                dispatchToAgent(cleaned, ptyProcess);
+              }
+            }
+
+            const enterStr = (agent === 'gemini' || agent === 'codex') ? '\r\r' : '\r';
+            ptyProcess.write(enterStr);
+          }
+        }
+      } else {
+        if (wsInitDone) {
+          if ((msgStr === '\x7f' || msgStr === '\x08') && wsInputBuf.length > 0) {
+            wsInputBuf.pop();
+          } else if (!processed.includes('\r')) {
+            wsInputBuf.push(msgStr);
+          }
+        }
+        ptyProcess.write(processed);
+      }
+    } catch (err) {
+      console.error(`[WS ERROR] ${err.message}`);
+    }
+  });
+
+  ws.on('close', (code) => {
+    console.log(`[PTY] WebSocket 닫힘: T${sessionId} code=${code}`);
+
+    const current = ptySessions.get(sessionId);
+    if (!current || current.socket !== ws) {
+      return;
+    }
+
+    current.socket = null;
+
+    if (code === 1000) {
+      if (agent) {
+        const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+        sendSessionLog(
+          `pty_end_${sessionId}_${ts}`,
+          agent,
+          `─── ${agent.toUpperCase()} 연결 종료 (정상 종료) ───`,
+          'success'
+        );
+      }
+      killSessionPty(sessionId, 'client_close');
+      return;
+    }
+
+    scheduleDetachedCleanup(sessionId);
+  });
+
+  ws.on('error', (err) => {
+    console.error(`[WS ERROR] T${sessionId}: ${err.message}`);
+  });
 }
 
 // ── Python 서버에 세션 로그 전송 ──────────────────────────────────────────
@@ -129,7 +313,7 @@ function getCodexMainModel() {
  *   Client → Server: 일반 텍스트(키 입력) 또는 JSON({type:'resize',cols,rows})
  *   Server → Client: 일반 텍스트(PTY 출력, ANSI 포함)
  */
-function handlePtyConnection(ws, req) {
+function handlePtyConnectionLegacy(ws, req) {
   let ptyProcess = null;
   let sessionId = null;
 
@@ -421,6 +605,187 @@ function handlePtyConnection(ws, req) {
  * 사용자 입력을 cli_agent.py로 자동 라우팅합니다.
  * 에이전트가 이미 실행 중인 경우 라우팅하지 않습니다.
  */
+function handlePersistentPtyConnection(ws, req) {
+  let ptyProcess = null;
+  let sessionId = null;
+
+  try {
+    const url = new URL(req.url, `http://127.0.0.1:${PTY_PORT}`);
+    const agent = url.searchParams.get('agent') || '';
+    let cwd = url.searchParams.get('cwd') || PROJECT_ROOT;
+    if (!fs.existsSync(cwd)) {
+      console.log(`[PTY] CWD invalid: ${cwd} -> fallback to home`);
+      cwd = os.homedir();
+    }
+    const cols = parseInt(url.searchParams.get('cols') || '80', 10);
+    const rows = parseInt(url.searchParams.get('rows') || '24', 10);
+    const isYolo = url.searchParams.get('yolo') === 'true';
+
+    const slotMatch = req.url.match(/\/pty\/slot(\d+)/);
+    sessionId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
+
+    const existingSession = ptySessions.get(sessionId);
+    if (existingSession && existingSession.pty) {
+      if (existingSession.agent && agent && existingSession.agent !== agent) {
+        ws.close(1013, `Slot busy with ${existingSession.agent}`);
+        return;
+      }
+
+      if (existingSession.socket && existingSession.socket !== ws && existingSession.socket.readyState === WebSocket.OPEN) {
+        try {
+          existingSession.socket.close(1012, 'Replaced by newer attachment');
+        } catch (_) {}
+      }
+
+      attachSocketToSession(ws, sessionId, existingSession.agent || agent);
+      try {
+        existingSession.pty.resize(cols, rows);
+      } catch (_) {}
+      console.log(`[PTY] existing session reattached: T${sessionId} agent=${existingSession.agent}`);
+      replayBufferedOutput(sessionId, ws);
+      return;
+    }
+
+    const env = Object.assign({}, process.env, {
+      PYTHONIOENCODING: 'utf-8',
+      LANG: 'ko_KR.UTF-8',
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      PYTHONLEGACYWINDOWSSTDIO: '0',
+      TERMINAL_ID: sessionId,
+    });
+
+    if (agent) {
+      env.HIVE_AGENT = agent;
+    }
+
+    if (agent === 'claude' && !process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+    }
+
+    let shell, shellArgs;
+    if ((agent === 'gemini' || agent === 'codex') && BASH_AVAILABLE) {
+      shell = BASH_EXE;
+      shellArgs = ['--login'];
+    } else {
+      shell = 'cmd.exe';
+      shellArgs = [];
+    }
+
+    ptyProcess = pty.spawn(shell, shellArgs, {
+      name: 'xterm-256color',
+      cols: cols,
+      rows: rows,
+      cwd: cwd,
+      env: env,
+      useConpty: true,
+    });
+
+    console.log(`[PTY] session started: T${sessionId} agent=${agent} shell=${path.basename(shell)} pid=${ptyProcess.pid}`);
+
+    if (agent === 'claude') {
+      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
+      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
+    } else if (agent === 'gemini') {
+      const yoloFlag = isYolo ? ' -y' : '';
+      ptyProcess.write(`gemini${yoloFlag}\n`);
+    } else if (agent === 'codex') {
+      const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
+      const modelName = getCodexMainModel();
+      const modelFlag = modelName ? ` --model ${modelName}` : '';
+      ptyProcess.write(`codex${yoloFlag}${modelFlag}\n`);
+    }
+
+    const mainModel = agent === 'claude'
+      ? (process.env.ANTHROPIC_MODEL || 'sonnet-4-6')
+      : '';
+    const bgModel = agent === 'claude'
+      ? (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || '')
+      : '';
+
+    ptySessions.set(sessionId, {
+      pty: ptyProcess,
+      socket: ws,
+      agent: agent,
+      yolo: isYolo,
+      started: new Date().toISOString(),
+      cwd: cwd,
+      lastLine: '',
+      mainModel: mainModel,
+      bgModel: bgModel,
+      attached: true,
+      detachedAt: '',
+      detachTimer: null,
+    });
+    ptyOutputBuffers.set(sessionId, []);
+    ptyOutputSeq.set(sessionId, 0);
+
+    if (agent) {
+      const modeTag = isYolo ? '[YOLO]' : '[NORMAL]';
+      const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+      sendSessionLog(
+        `pty_start_${sessionId}_${ts}`,
+        agent,
+        `─── ${agent.toUpperCase()} session started ${modeTag} ───`,
+        'running'
+      );
+    }
+
+    ptyProcess.onData((data) => {
+      const streamData = agent === 'codex' ? normalizeCodexStream(data) : data;
+      if (!streamData) return;
+
+      const activeSession = ptySessions.get(sessionId);
+      const activeSocket = activeSession && activeSession.socket;
+      if (activeSocket && activeSocket.readyState === WebSocket.OPEN) {
+        activeSocket.send(streamData);
+      }
+
+      appendPtyOutput(sessionId, streamData);
+
+      const session = ptySessions.get(sessionId);
+      if (session) {
+        try {
+          const clean = streamData.replace(ANSI_ESCAPE, '').replace(/\r/g, '\n');
+          const lines = clean.split('\n').filter(l => l.trim().length > 2);
+          if (lines.length > 0) {
+            session.lastLine = lines[lines.length - 1].trim().substring(0, 120);
+          }
+        } catch (_) {}
+      }
+    });
+
+    ptyProcess.onExit(({ exitCode, signal }) => {
+      console.log(`[PTY] process exit: T${sessionId} code=${exitCode} signal=${signal}`);
+
+      if (agent) {
+        const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+        sendSessionLog(
+          `pty_end_${sessionId}_${ts}`,
+          agent,
+          `─── ${agent.toUpperCase()} process exited (exit=${exitCode}) ───`,
+          'success'
+        );
+      }
+
+      const activeSession = ptySessions.get(sessionId);
+      const activeSocket = activeSession && activeSession.socket;
+      clearSessionState(sessionId);
+
+      if (activeSocket && activeSocket.readyState === WebSocket.OPEN) {
+        activeSocket.close(1000, 'PTY process exited');
+      }
+    });
+
+    attachSocketToSession(ws, sessionId, agent);
+  } catch (err) {
+    console.error(`[PTY] Init Error: ${err.message}`);
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close(1011, `PTY Init Error: ${err.message}`);
+    }
+  }
+}
+
 function dispatchToAgent(instruction, ptyProcess) {
   if (instruction.length < 4) return;
 
@@ -492,6 +857,7 @@ app.get('/api/pty/sessions', (req, res) => {
     const info = ptySessions.get(String(slot));
     terminals[`T${slot}`] = {
       running: !!info,
+      attached: info ? !!info.attached : false,
       agent: info ? info.agent : '',
       yolo: info ? info.yolo : false,
       started: info ? info.started : '',
@@ -499,6 +865,7 @@ app.get('/api/pty/sessions', (req, res) => {
       last_line: info ? info.lastLine : '',
       main_model: info ? info.mainModel : '',
       bg_model: info ? info.bgModel : '',
+      detached_at: info ? info.detachedAt : '',
     };
   }
   res.json(terminals);
@@ -519,12 +886,14 @@ app.get('/api/pty/output/:id', (req, res) => {
   const buffer = ptyOutputBuffers.get(target) || [];
   const filtered = buffer.filter(entry => entry.seq > since).slice(0, limit);
   const latestSeq = buffer.length > 0 ? buffer[buffer.length - 1].seq : 0;
+  const info = ptySessions.get(target);
 
   res.json({
     terminal_id: `T${target}`,
     entries: filtered,
     latest_seq: latestSeq,
     running: ptySessions.has(target),
+    attached: !!(info && info.attached),
   });
 });
 
@@ -562,15 +931,9 @@ app.post('/api/pty/terminate/:id', (req, res) => {
     return res.status(404).json({ error: 'not_running', terminal_id: `T${target}` });
   }
 
-  try {
-    info.pty.kill();
-  } catch (err) {
-    return res.status(500).json({ error: 'terminate_failed', detail: err.message });
+  if (!killSessionPty(target, 'api_terminate')) {
+    return res.status(500).json({ error: 'terminate_failed', detail: 'killSessionPty failed' });
   }
-
-  ptySessions.delete(target);
-  ptyOutputBuffers.delete(target);
-  ptyOutputSeq.delete(target);
 
   res.json({ status: 'terminated', terminal_id: `T${target}` });
 });
@@ -649,23 +1012,16 @@ setInterval(() => {
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  handlePtyConnection(ws, req);
+  handlePersistentPtyConnection(ws, req);
 });
 
 // ── 프로세스 종료 시 모든 PTY 세션 정리 ───────────────────────────────────
 function cleanupAllSessions() {
   console.log(`[PTY] 서버 종료 — ${ptySessions.size}개 세션 정리 중...`);
-  for (const [sid, info] of ptySessions.entries()) {
-    try {
-      info.pty.kill();
-      console.log(`[cleanup] PTY 세션 종료: T${sid}`);
-    } catch (err) {
-      console.log(`[cleanup] PTY 종료 실패 (T${sid}): ${err.message}`);
-    }
+  for (const [sid] of ptySessions.entries()) {
+    killSessionPty(sid, 'server_shutdown');
+    console.log(`[cleanup] PTY 세션 종료: T${sid}`);
   }
-  ptySessions.clear();
-  ptyOutputBuffers.clear();
-  ptyOutputSeq.clear();
 }
 
 process.on('SIGTERM', () => { cleanupAllSessions(); process.exit(0); });
