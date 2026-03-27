@@ -21,7 +21,8 @@ REVISION HISTORY:
 - **오케스트레이션**: `skill_orchestrator.py`가 상태를 총괄하며, `lock_manager.py`로 파일 충돌을 방지함.
 - **Git 전략**: `git_visualizer.py`를 통해 워크트리 상태를 상시 확인하며, 메인 브랜치 직접 수정 금지.
 - **주석 표준**: 모든 파일 상단에 `FILE:`, `DESCRIPTION:`, `REVISION HISTORY:` 템플릿이 필수임.
-- **데이터 저장**: 실시간 로그는 `.ai_monitor/data/` 하위의 `.jsonl` 및 `.db` 파일에 저장됨.
+- **데이터 저장**: PostgreSQL 18 (Port 5433) `vibe_d__vibe_coding` DB에 통합 저장. `.jsonl` 레거시 사용 중지.
+- **DB 자동 결정**: `pg_store.py`가 PROJECT_ROOT 경로 기반으로 프로젝트별 DB를 자동 선택 (CLI/훅/서버 통일).
 
 ## ⚠️ 3. 자주 발생하는 실수 및 방어책 (Common Mistakes & Guardrails)
 - **[실수]** Python `re.findall`에서 전역 플래그(`(?s)`)를 중간에 사용하는 오류.
@@ -38,5 +39,8 @@ REVISION HISTORY:
 - `server.py` → `데이터 저장` (PostgreSQL 연동)
 
 ---
-**마지막 업데이트**: 2026-03-06
+> **동적 메모리는 DB로 이관됨**: `python scripts/memory.py list`로 최신 공유 지식을 확인하세요.
+> 이 파일은 정적 규칙/원칙만 유지합니다. 동적 기술 결정은 `hive_memory` 테이블에 기록하세요.
+
+**마지막 업데이트**: 2026-03-27
 **관리 에이전트**: Gemini (Hive Mind System Architect)

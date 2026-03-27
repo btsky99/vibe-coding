@@ -235,10 +235,63 @@ def _pty_post(path: str, data: dict) -> Optional[dict]:
 
 
 def _filter_noise(text: str) -> str:
-    """PTY 출력에서 노이즈 패턴 제거"""
+    """PTY 출력에서 노이즈 패턴 제거.
+
+    Claude Code 스피너/상태 표시줄, MCP 로그, 디버그 메시지 등
+    텔레그램에 전달할 필요 없는 터미널 아티팩트를 모두 제거한다.
+    """
+    import re
+
+    # Claude Code 스피너 단어 목록 (상태 표시줄에 랜덤으로 표시되는 단어들)
+    _SPINNER_WORDS = (
+        "Gallivanting", "Thinking", "Pondering", "Reasoning",
+        "Considering", "Analyzing", "Processing", "Computing",
+        "Reflecting", "Cogitating", "Deliberating", "Contemplating",
+        "Musing", "Ruminating", "Brainstorming", "Evaluating",
+        "Synthesizing", "Formulating", "Deducing", "Inferring",
+    )
+
+    # 유니코드 스피너 문자 + 단어 + "…" 패턴
+    _spinner_re = re.compile(
+        r'^[\s\u00b7\u2022\u2726\u2727\u273b\u273c\u273d\u2736\u25cf\u25cb\u2735\u2733\u2734]*'
+        r'(?:' + '|'.join(_SPINNER_WORDS) + r')\u2026'
+    )
+
+    # Claude Code 하단 상태 표시줄 관련 패턴
+    _statusbar_re = re.compile(
+        r'(?:Opus|Sonnet|Haiku|Claude)\s*\d[\d.]*.*tokens|'   # "Opus 4.6 … tokens"
+        r'bypass\s+permissions|'                                # "bypass permissions on"
+        r'\u26f6|'                                              # ⛶
+        r'\u23f5\u23f5|'                                        # ⏵⏵
+        r'^\s*\d{1,5}\s*$|'                                     # 단독 숫자 (시퀀스 번호)
+        r'^\s*[\u2500-\u257f]{10,}'                             # 긴 구분선 (────…)
+    )
+
+    # 터미널 제목 시퀀스 (0;…)
+    _title_re = re.compile(r'^0;')
+    _ansi_escape_re = re.compile(
+        r'\x1b(?:'
+        r'\[[0-?]*[ -/]*[@-~]'
+        r'|\][^\x07\x1b]*(?:\x07|\x1b\\)'
+        r'|[@-Z\\-_]'
+        r')'
+    )
+    _codex_noise_re = re.compile(
+        r'^(?:'
+        r'Working(?:\s*\(\d+s\s+esc to interrupt\))?'
+        r'|Wor(?:k(?:i(?:n(?:g\d*)?)?)?)?'
+        r'|gpt-[\w.\-]+\s+\w+\s+\d+%\s+left\s+.+'
+        r'|\d+;\s*vibe-coding'
+        r')\s*$',
+        re.IGNORECASE,
+    )
+
     lines = []
     for line in text.splitlines():
-        stripped = line.strip()
+        stripped = _ansi_escape_re.sub('', line).strip()
+        if not stripped:
+            continue
+        # 기존 prefix 필터
         if any(stripped.startswith(p) for p in (
             "Loaded cached credentials",
             "Registering notification handlers",
@@ -250,9 +303,26 @@ def _filter_noise(text: str) -> str:
             "ClearcutLogger:", "Error flushing log events",
             "Session ID:", "Loading extension:",
             "[DEBUG]",
+            "(running stop hooks",
+            "(running start hooks",
         )):
             continue
-        lines.append(line)
+        # 스피너 패턴 (Gallivanting…, Thinking… 등)
+        if _spinner_re.match(stripped):
+            continue
+        # 상태 표시줄 패턴 (토큰 정보, bypass, 구분선 등)
+        if _statusbar_re.search(stripped):
+            continue
+        # 터미널 제목 시퀀스 (0;⠂ Korean greeting conversation 등)
+        if _title_re.match(stripped):
+            continue
+        if stripped == "Find and fix a bug in @filename" or _codex_noise_re.match(stripped):
+            continue
+        # ANSI 이스케이프 제거 후 빈 줄이면 스킵
+        clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', stripped)
+        if not clean.strip():
+            continue
+        lines.append(clean)
     return "\n".join(lines)
 
 

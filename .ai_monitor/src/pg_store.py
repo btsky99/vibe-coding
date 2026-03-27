@@ -36,7 +36,42 @@ DATA_DIR = PROJECT_ROOT / '.ai_monitor' / 'data'
 PG_BIN = _PG_DIR / 'bin' / 'psql.exe'
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = 'postgres'
-PG_DB = 'postgres'  # 초기값 — set_project_db()로 프로젝트별 DB로 갱신됨
+def _resolve_project_db() -> str:
+    """프로젝트별 DB 이름을 자동 결정한다.
+
+    server.py의 _init_project_db()와 동일한 변환 로직을 사용하여
+    CLI 도구(hive_hook.py, memory.py 등)도 서버와 같은 DB에 접속한다.
+
+    우선순위:
+    1. 환경변수 VIBE_PG_DB (server.py가 실행 시 설정)
+    2. PROJECT_ROOT 기반 자동 생성 (server.py PROJECT_ID 변환 로직과 동일)
+    3. 폴백: 'postgres'
+
+    변환 예: D:\\vibe-coding → D--vibe-coding → d__vibe_coding → vibe_d__vibe_coding
+    """
+    # 1. 환경변수 — server.py가 이미 설정한 경우
+    env_db = os.environ.get('VIBE_PG_DB', '').strip()
+    if env_db:
+        return env_db
+
+    # 2. PROJECT_ROOT 기반 — server.py의 PROJECT_ID 생성 로직 재현
+    try:
+        # server.py와 동일: \\→/ , :제거, /→-- , 선행 - 제거
+        proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
+        project_id = proj_raw.lstrip('-') or 'default'
+        # _init_project_db()와 동일: 소문자, -→_, 영숫자+_ 만 허용
+        safe_id = project_id.lower().replace('-', '_').replace(' ', '_')
+        safe_id = ''.join(c for c in safe_id if c.isalnum() or c == '_')
+        db_name = f"vibe_{safe_id}"[:63]
+        if db_name and db_name != "vibe_":
+            return db_name
+    except Exception:
+        pass
+
+    return 'postgres'
+
+
+PG_DB = _resolve_project_db()  # CLI/훅에서도 서버와 동일한 프로젝트 DB 자동 사용
 
 
 def set_project_db(db_name: str):
@@ -82,13 +117,23 @@ def _get_pg_conn():
             except Exception:
                 pass
             _pg_conn = None
-    _pg_conn = psycopg2.connect(
-        host='127.0.0.1',
-        port=int(PG_PORT),
-        user=PG_USER,
-        dbname=PG_DB,
-    )
-    _pg_conn.autocommit = True
+    try:
+        _pg_conn = psycopg2.connect(
+            host='127.0.0.1',
+            port=int(PG_PORT),
+            user=PG_USER,
+            dbname=PG_DB,
+            options='-c lc_messages=C',  # 에러 메시지 영문 강제 (CP949 디코딩 방지)
+        )
+        _pg_conn.autocommit = True
+    except UnicodeDecodeError:
+        # PostgreSQL이 CP949/EUC-KR 에러 메시지를 반환할 때 psycopg2가 UTF-8 디코딩 실패
+        # lc_messages=C 옵션이 적용되기 전에 연결 자체가 실패하는 경우 (DB 없음 등)
+        # → psql subprocess 폴백으로 전환
+        print("[pg_store] psycopg2 UnicodeDecodeError — CP949 에러 메시지 감지. subprocess 폴백 사용.")
+        _HAS_PSYCOPG2 = False
+        _pg_conn = None
+        return None
     return _pg_conn
 
 
