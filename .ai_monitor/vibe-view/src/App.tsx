@@ -55,6 +55,7 @@ import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
+import SetupBanner from './components/SetupBanner';
 /* ── 공유 타입 ── */
 import { LogRecord, AgentMessage, MemoryEntry } from './types';
 
@@ -662,6 +663,9 @@ function App() {
         onClearLogs={() => setLogs([])}
         onOpenMissionControl={() => setActiveTab('agent')}
       />
+
+      {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}
+      <SetupBanner onNavigate={(tab) => setActiveTab(tab)} />
 
       <div className="flex flex-1 overflow-hidden">
         {/* ── 좌측 액티비티 바 컴포넌트 ── */}

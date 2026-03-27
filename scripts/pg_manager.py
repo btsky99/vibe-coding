@@ -50,13 +50,41 @@ def run_pg_ctl(cmd_args):
     except Exception as e:
         return f"Error: {str(e)}"
 
+def _fix_lc_messages():
+    """postgresql.conf의 lc_messages를 'C'로 설정한다.
+
+    [2026-03-27] Windows 한글 환경에서 PostgreSQL이 CP949 에러 메시지를 반환하면
+    psycopg2가 UTF-8 디코딩에 실패. lc_messages=C로 강제하여 영문 출력.
+    """
+    pg_conf = DATA_DIR / "postgresql.conf"
+    if not pg_conf.exists():
+        return
+    try:
+        import re
+        text = pg_conf.read_text(encoding='utf-8')
+        match = re.search(r"^lc_messages\s*=\s*'([^']*)'", text, re.MULTILINE)
+        if match and match.group(1) != 'C':
+            new_text = re.sub(
+                r"^(lc_messages\s*=\s*)'[^']*'",
+                r"\g<1>'C'\t\t\t# 영문 에러 메시지 강제 (setup_doctor 자동 적용)",
+                text, count=1, flags=re.MULTILINE
+            )
+            pg_conf.write_text(new_text, encoding='utf-8')
+            print("🔧 lc_messages=C 자동 적용 완료")
+    except Exception as e:
+        print(f"⚠️ lc_messages 설정 실패: {e}")
+
+
 def start():
     print(f"🚀 PostgreSQL 시작 중 (Port: {PORT})...")
+    # 시작 전 lc_messages=C 자동 적용
+    _fix_lc_messages()
+
     # 이미 실행 중인지 확인
     if "server is running" in run_pg_ctl(["status"]):
         print("✨ 이미 실행 중입니다.")
         return
-    
+
     res = run_pg_ctl(["start"])
     print(res)
     time.sleep(2)

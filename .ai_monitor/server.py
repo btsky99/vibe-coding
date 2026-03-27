@@ -136,6 +136,7 @@ import api.vibe_api as vibe_api
 import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
+import api.setup_api as setup_api
 import string
 import socket
 from collections import deque
@@ -2444,6 +2445,10 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path.startswith('/api/pty/'):
             pty_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
 
+        # ── [모듈 위임] setup_api — /api/setup/* ─────────────────────
+        elif parsed_path.path.startswith('/api/setup/'):
+            setup_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
+
         # ── Telegram 설정 API ──────────────────────────────────────────
         elif parsed_path.path == '/api/config/telegram':
             self._handle_telegram_config_get()
@@ -4504,6 +4509,21 @@ def main():
         _pg_mod.ensure_schema(DATA_DIR)
     except Exception as e:
         print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
+
+    # ── Setup Doctor: 초기 설정 자동 진단 + 수리 ──────────────────────────
+    # [2026-03-27] 서버 시작 시 환경을 자동 점검하고 수리 가능한 항목은 즉시 수정.
+    # 사용자 조치가 필요한 항목은 대시보드 배너(GET /api/setup/status)로 안내.
+    try:
+        from setup_doctor import run_all as _setup_run_all
+        _setup_result = _setup_run_all()
+        if _setup_result.get("auto_fixed"):
+            print(f"[Setup Doctor] 🔧 자동 수리: {', '.join(_setup_result['auto_fixed'])}")
+        if _setup_result.get("needs_action"):
+            print(f"[Setup Doctor] ⚠️  조치 필요: {', '.join(_setup_result['needs_action'])}")
+        if _setup_result.get("ready"):
+            print("[Setup Doctor] ✅ 시스템 준비 완료")
+    except Exception as e:
+        print(f"[Setup Doctor] 진단 실패 (무시): {e}")
 
     # ── PID 파일 기록 (중복 실행 방지) ─────────────────────────────────────
     try:

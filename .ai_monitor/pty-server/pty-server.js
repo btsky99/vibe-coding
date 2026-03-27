@@ -81,6 +81,13 @@ function normalizeCodexStream(data) {
   return data.replace(/\r\r\n/g, '\r\n');
 }
 
+function getSubmitEnterSequence(_agent) {
+  // Telegram/REST injection should mirror the frontend terminal path:
+  // a single Enter submits once. The old double-CR path could leave Codex/Gemini
+  // waiting for one more manual Enter on subsequent prompts.
+  return '\r';
+}
+
 function clearDetachTimer(session) {
   if (!session || !session.detachTimer) return;
   clearTimeout(session.detachTimer);
@@ -212,7 +219,7 @@ function attachSocketToSession(ws, sessionId, agent) {
               }
             }
 
-            const enterStr = (agent === 'gemini' || agent === 'codex') ? '\r\r' : '\r';
+            const enterStr = getSubmitEnterSequence(agent);
             ptyProcess.write(enterStr);
           }
         }
@@ -541,8 +548,7 @@ function handlePtyConnectionLegacy(ws, req) {
                   dispatchToAgent(cleaned, ptyProcess);
                 }
               }
-              // Gemini/Codex TUI는 더블엔터 필요
-              const enterStr = (agent === 'gemini' || agent === 'codex') ? '\r\r' : '\r';
+              const enterStr = getSubmitEnterSequence(agent);
               ptyProcess.write(enterStr);
             }
           }
@@ -959,8 +965,8 @@ app.post('/api/pty/write/:id', (req, res) => {
   }
 
   try {
-    // 텍스트 + Enter 키 전송 (Claude Code 프롬프트에 입력)
-    const enterStr = (info.agent === 'gemini' || info.agent === 'codex') ? '\r\r' : '\r';
+    // 텍스트 + Enter 키 전송
+    const enterStr = getSubmitEnterSequence(info.agent);
     info.pty.write(text);
     info.pty.write(enterStr);
     res.json({ status: 'written', terminal_id: `T${target}`, length: text.length });
