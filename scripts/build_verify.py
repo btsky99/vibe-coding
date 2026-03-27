@@ -23,6 +23,12 @@ import importlib
 import shutil
 from pathlib import Path
 
+# CI 환경(cp1252 등)에서 한글 출력 시 UnicodeEncodeError 방지
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # ── 프로젝트 루트 / 기준 경로 ────────────────────────────────────────────────
 # 이 스크립트는 항상 프로젝트 루트(D:\vibe-coding)에서 실행된다고 가정
 SCRIPT_DIR = Path(__file__).resolve().parent
