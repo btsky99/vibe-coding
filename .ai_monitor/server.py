@@ -4121,10 +4121,6 @@ def main():
     # ── CLI 인자 처리: --install / --uninstall / --create-shortcut ──
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
-        try:
-            from .create_shortcut import create_shortcut, remove_shortcut
-        except ImportError:
-            from create_shortcut import create_shortcut, remove_shortcut
 
         # --install: 바탕화면 바로가기 생성 + PTY 네이티브 모듈 빌드 (원스톱 설치)
         if cmd in ('--install', '--create-shortcut'):
@@ -4158,6 +4154,10 @@ def main():
                         print(f"[!] npm install 실패: {r.stderr[:300]}")
                 elif _need_build and not _shutil.which('npm'):
                     print("[!] Node.js가 설치되지 않았습니다. 터미널 기능에 필요합니다.")
+            try:
+                from .create_shortcut import create_shortcut
+            except ImportError:
+                from create_shortcut import create_shortcut
             create_shortcut()
             if cmd == '--install':
                 print("\n✅ Vibe Coding 설치가 완료되었습니다!")
@@ -4167,6 +4167,10 @@ def main():
 
         # --uninstall: 바탕화면 바로가기 삭제 + pip uninstall 안내
         if cmd == '--uninstall':
+            try:
+                from .create_shortcut import remove_shortcut
+            except ImportError:
+                from create_shortcut import remove_shortcut
             remove_shortcut()
             print("\n🗑️  바로가기를 삭제했습니다.")
             print("   패키지 완전 제거: pip uninstall vibe-coding -y")
