@@ -402,6 +402,11 @@ function handlePtyConnectionLegacy(ws, req) {
       const modelName = getCodexMainModel();
       const modelFlag = modelName ? ` --model ${modelName}` : '';
       ptyProcess.write(`codex${yoloFlag}${modelFlag}\n`);
+    } else if (agent.startsWith('groupchat-')) {
+      // 그룹챗 터미널 — LLM + 그룹 채팅 통합 모드
+      const cli = agent.replace('groupchat-', '');
+      const termName = `T${sessionId}-${cli}`;
+      ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
 
     // ── 세션 등록 ─────────────────────────────────────────────────────
@@ -700,6 +705,10 @@ function handlePersistentPtyConnection(ws, req) {
       const modelName = getCodexMainModel();
       const modelFlag = modelName ? ` --model ${modelName}` : '';
       ptyProcess.write(`codex${yoloFlag}${modelFlag}\n`);
+    } else if (agent.startsWith('groupchat-')) {
+      const cli = agent.replace('groupchat-', '');
+      const termName = `T${sessionId}-${cli}`;
+      ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
 
     const mainModel = agent === 'claude'

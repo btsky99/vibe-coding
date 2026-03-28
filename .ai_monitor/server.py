@@ -739,6 +739,43 @@ def _python_runner_cmds() -> list[str]:
 
     return candidates or ['python']
 
+
+def _project_python_runner_cmds(project_root: Path | None = None) -> list[str]:
+    """현재 프로젝트 가상환경을 우선하는 Python 인터프리터 후보 목록."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    if project_root is not None:
+        for path in (
+            project_root / '.venv' / 'Scripts' / 'python.exe',
+            project_root / 'venv' / 'Scripts' / 'python.exe',
+            project_root / '.ai_monitor' / 'venv' / 'Scripts' / 'python.exe',
+        ):
+            path_str = str(path)
+            if path.exists() and path_str not in seen:
+                candidates.append(path_str)
+                seen.add(path_str)
+
+    for cmd in _python_runner_cmds():
+        if cmd not in seen:
+            candidates.append(cmd)
+            seen.add(cmd)
+
+    return candidates or ['python']
+
+
+def _resolve_playwright_install_script() -> Path | None:
+    """Playwright 설치 스크립트 위치를 탐색합니다."""
+    candidates = (
+        PROJECT_ROOT / 'scripts' / 'install_playwright_cli.py',
+        BASE_DIR.parent / 'scripts' / 'install_playwright_cli.py',
+        Path.cwd() / 'scripts' / 'install_playwright_cli.py',
+    )
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
 # [제거됨 2026-03-22] websockets import → Node.js ws 라이브러리로 대체
 
 # 전역 상태 관리
@@ -2993,6 +3030,59 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }).encode('utf-8'))
             return
 
+        if path == '/api/install-playwright-cli':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                payload = {}
+                if content_length > 0:
+                    payload = json.loads(self.rfile.read(content_length).decode('utf-8') or '{}')
+
+                project_root = _current_project_root()
+                requested_root = str(payload.get('project_path', '')).strip()
+                if requested_root:
+                    requested_path = Path(requested_root).expanduser()
+                    if requested_path.is_dir():
+                        project_root = requested_path.resolve()
+
+                script_path = _resolve_playwright_install_script()
+                if not script_path:
+                    raise RuntimeError('install_playwright_cli.py not found')
+
+                python_cmd = _project_python_runner_cmds(project_root)[0]
+                install_cmd = subprocess.list2cmdline([python_cmd, str(script_path)])
+                cmdline = (
+                    'title Vibe Coding - Playwright Installer && '
+                    'echo Working directory: %CD% && '
+                    'echo. && '
+                    'echo Installing Playwright CLI and Chromium browser... && '
+                    f'{install_cmd} && '
+                    'echo. && echo Playwright installation completed. You can close this window. || '
+                    'echo. && echo Playwright installation failed. Review the log above before closing this window.'
+                )
+                create_new_console = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
+                subprocess.Popen(
+                    ['cmd.exe', '/k', cmdline],
+                    cwd=str(project_root),
+                    close_fds=True,
+                    creationflags=create_new_console,
+                )
+                self.wfile.write(json.dumps({
+                    "status": "success",
+                    "message": f"Playwright installation started for {project_root}. A console window was opened so you can inspect the result.",
+                    "project_path": str(project_root),
+                    "python": python_cmd,
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "message": str(e),
+                }, ensure_ascii=False).encode('utf-8'))
+            return
+
         if path == '/api/kanban/launch':
             # B안 통합: kanban_board.py(PySide6 네이티브) 제거 →
             # dashboard_window.py + React TaskBoardPanel(?kanban=1)으로 일원화.
@@ -4869,6 +4959,46 @@ def main():
             _child_procs.append(proc)
             print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
     threading.Thread(target=run_mux_server, daemon=True).start()
+
+    # [2026-03-28] Claude: LLM 그룹챗 WebSocket 서버 자동 시작 (포트 8765)
+    # 터미널 간 LLM 실시간 채팅을 위한 WebSocket 브로커
+    def run_group_chat_server():
+        """llm_group_chat WebSocket 서버를 별도 스레드에서 실행"""
+        try:
+            import sys as _s
+            # llm_group_chat 패키지 경로 추가 (프로젝트 루트)
+            if str(PROJECT_ROOT) not in _s.path:
+                _s.path.insert(0, str(PROJECT_ROOT))
+            from llm_group_chat.server import run_server
+            run_server(host="localhost", port=8765)
+        except ImportError as e:
+            print(f"[!] 그룹챗 서버 시작 실패 — llm_group_chat 모듈 없음: {e}")
+        except OSError as e:
+            if '10048' in str(e) or 'already in use' in str(e).lower():
+                print("[!] 그룹챗 서버 포트(8765) 이미 사용 중 — 스킵")
+            else:
+                print(f"[!] 그룹챗 서버 오류: {e}")
+        except Exception as e:
+            print(f"[!] 그룹챗 서버 오류: {e}")
+    threading.Thread(target=run_group_chat_server, daemon=True, name='GroupChatWS').start()
+
+    # [2026-03-28] Claude: 그룹챗 브릿지 — 채팅 메시지 → PTY 터미널 주입 + 에이전트 응답 → 채팅
+    # WS 서버 시작 후 2초 대기 → 브릿지 연결 (서버가 준비될 시간 확보)
+    def init_group_chat_bridge():
+        import time as _t
+        _t.sleep(2)  # WS 서버 기동 대기
+        try:
+            import sys as _s
+            if str(PROJECT_ROOT) not in _s.path:
+                _s.path.insert(0, str(PROJECT_ROOT))
+            from llm_group_chat.bridge import init_bridge
+
+            # 브릿지 시작 (대시보드 UI ↔ WS 서버 연결)
+            init_bridge()
+            print("[*] 그룹챗 초기화 완료 — 터미널에서 'groupchat-claude' 등 선택하여 참여")
+        except Exception as e:
+            print(f"[!] 그룹챗 브릿지 초기화 실패: {e}")
+    threading.Thread(target=init_group_chat_bridge, daemon=True, name='GroupChatBridge').start()
 
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:

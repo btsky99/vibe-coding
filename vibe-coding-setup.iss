@@ -23,7 +23,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.158"
+  #define MyAppVersion   "3.7.159"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -75,7 +75,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon";    Description: "바탕화면 바로가기 만들기"; GroupDescription: "추가 아이콘:"; Flags: unchecked
 Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDescription: "추가 옵션:";  Flags: unchecked
-Name: "playwright";     Description: "Playwright CLI 설치 (Python/인터넷 필요)"; GroupDescription: "추가 옵션:"; Flags: checkedonce
 
 [Files]
 ; PyInstaller로 생성된 EXE (단일 파일) — 고정 파일명(vibe-coding.exe)으로 설치
@@ -84,7 +83,7 @@ Source: ".ai_monitor\dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppE
 Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Claude Code 상태줄 스크립트 — 설치 PC의 %USERPROFILE%\.claude\ 에 복사
 Source: "statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignoreversion
-; Playwright CLI 설치 스크립트
+; Playwright CLI 설치 스크립트 (앱 내부 AI 도구 메뉴에서 수동 실행용)
 Source: "scripts\install_playwright_cli.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 
 ; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
@@ -113,7 +112,6 @@ Name: "{userstartup}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName
 ; Claude Code settings.json에 statusLine 자동 설정
 ; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$script = Join-Path '{app}' 'scripts\install_playwright_cli.py'; $log = Join-Path '{app}' 'playwright-install.log'; $python = $null; $cmd = Get-Command python -ErrorAction SilentlyContinue; if ($cmd) {{ $python = $cmd.Source }}; if (-not $python) {{ $cmd = Get-Command py -ErrorAction SilentlyContinue; if ($cmd) {{ $python = $cmd.Source }} }}; if ($python) {{ if ($python.ToLower().EndsWith('py.exe')) {{ & $python -3 $script *>> $log }} else {{ & $python $script *>> $log }}; exit $LASTEXITCODE }} else {{ 'Python not found. Skipping Playwright CLI installation.' | Set-Content -Encoding UTF8 $log; exit 0 }}"""; Flags: runhidden waituntilterminated; Tasks: playwright; StatusMsg: "Installing Playwright CLI..."
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppDisplayName} 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

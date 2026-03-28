@@ -1136,6 +1136,12 @@ export default function TerminalSlot({
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Claude 욜로(YOLO)
                   </button>
+                  <button
+                    onClick={() => launchAgent('groupchat-claude', false)}
+                    className="w-full py-2.5 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-500/30 flex items-center justify-center gap-2"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" /> Claude 그룹챗
+                  </button>
                 </div>
               </motion.div>
 
@@ -1173,6 +1179,12 @@ export default function TerminalSlot({
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Gemini 욜로(YOLO)
                   </button>
+                  <button
+                    onClick={() => launchAgent('groupchat-gemini', false)}
+                    className="w-full py-2.5 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-500/30 flex items-center justify-center gap-2"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" /> Gemini 그룹챗
+                  </button>
                 </div>
               </motion.div>
 
@@ -1209,6 +1221,12 @@ export default function TerminalSlot({
                     className="w-full py-2.5 bg-orange-400/20 hover:bg-orange-400/40 text-orange-400 rounded-xl text-[11px] font-black transition-all border border-orange-400/30 flex items-center justify-center gap-2 shadow-lg shadow-orange-400/10"
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Codex 욜로(YOLO)
+                  </button>
+                  <button
+                    onClick={() => launchAgent('groupchat-codex', false)}
+                    className="w-full py-2.5 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-500/30 flex items-center justify-center gap-2"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" /> Codex 그룹챗
                   </button>
                   {/* Codex CLI 미설치 시 npm 전역 설치 버튼 */}
                   <button
