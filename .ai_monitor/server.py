@@ -87,7 +87,6 @@ REVISION HISTORY:
 # [2026-03-01] - Claude (배포 버전 경로 버그 수정 — 스킬/MCP 인식 안 됨)
 #   - _current_project_root() 헬퍼 추가: config.json last_path 우선 참조
 #     → 배포 버전에서 PROJECT_ROOT가 exe 폴더/임시폴더로 잘못 설정되던 문제 해소
-#   - _mcp_config_path(): BASE_DIR.parent(임시폴더) → _current_project_root() 교체
 #   - /api/hive/health: PROJECT_ROOT → _current_project_root() 교체
 #   - /api/superpowers/status: PROJECT_ROOT → _current_project_root() 교체
 #   - /api/superpowers/install|uninstall: PROJECT_ROOT → _current_project_root() 교체
@@ -134,7 +133,6 @@ import api.vibe_api as vibe_api
 import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
-import api.setup_api as setup_api
 import string
 import socket
 from collections import deque
@@ -683,6 +681,27 @@ else:
         PROJECT_ROOT = Path.home()
     else:
         PROJECT_ROOT = _parent
+
+
+def _open_folder_dialog_subprocess() -> str:
+    """tkinter 폴더 선택 다이얼로그를 별도 프로세스에서 실행.
+
+    pywebview GUI 스레드에서 tkinter를 직접 호출하면 충돌하므로,
+    독립 Python 프로세스로 실행하여 선택된 경로 문자열을 반환합니다.
+    사용자가 취소하면 빈 문자열 반환.
+    """
+    import subprocess as _sp
+    script = (
+        "import tkinter as tk; from tkinter import filedialog; "
+        "root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True); "
+        "path = filedialog.askdirectory(title='프로젝트 폴더 선택'); "
+        "print(path if path else '')"
+    )
+    result = _sp.run(
+        [sys.executable, '-c', script],
+        capture_output=True, text=True, timeout=60
+    )
+    return result.stdout.strip()
 
 
 def _python_runner_cmds() -> list[str]:
@@ -1426,11 +1445,54 @@ def _tool_status(name: str) -> dict:
     return {"installed": True, "path": exe_path, "version": version}
 
 
+def _parse_session_tail(path: Path):
+    """Claude Code 세션 JSONL 파일 꼬리에서 마지막 토큰 usage 정보 추출.
+
+    대형 파일(수천 줄)의 불필요한 전체 읽기를 피하기 위해 파일 끝 8KB만 읽어
+    마지막 assistant 메시지의 usage 필드를 파싱합니다.
+    발견 못하면 None 반환.
+    """
+    try:
+        TAIL_BYTES = 8192  # 끝 8KB면 최근 메시지 수십 개 충분히 커버
+        with open(path, 'rb') as f:
+            f.seek(0, 2)                      # 파일 끝으로 이동
+            size = f.tell()
+            f.seek(max(0, size - TAIL_BYTES)) # 끝 8KB 위치로
+            raw = f.read().decode('utf-8', errors='ignore')
+
+        # 완전한 줄만 추출 (첫 줄은 잘릴 수 있으므로 제외)
+        lines = [l.strip() for l in raw.splitlines() if l.strip()]
+
+        session_id = slug = model = cwd = last_ts = ''
+        input_tokens = output_tokens = cache_read = cache_write = 0
+
+        # 역순으로 탐색 → 가장 최신 데이터 우선
+        for line in reversed(lines):
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue  # JSONL 개별 행 파싱 실패 허용
+
+            # 세션 메타 수집 (처음 발견 시만 기록)
+            if not session_id and obj.get('sessionId'):
+                session_id = obj['sessionId']
+            if not slug and obj.get('slug'):
+                slug = obj['slug']
+            if not cwd and obj.get('cwd'):
+                cwd = obj['cwd']
+            if not last_ts and obj.get('timestamp'):
+                last_ts = obj['timestamp']
+
+            # assistant 메시지에서 usage 추출
+            if obj.get('type') == 'assistant' and isinstance(obj.get('message'), dict):
+                usage = obj['message'].get('usage', {})
+                if usage.get('input_tokens'):
+                    if not model:
                         model = obj['message'].get('model', '')
-                    input_tokens  = usage.get('input_tokens', 0)
+                    input_tokens = usage.get('input_tokens', 0)
                     output_tokens = usage.get('output_tokens', 0)
-                    cache_read    = usage.get('cache_read_input_tokens', 0)
-                    cache_write   = usage.get('cache_creation_input_tokens', 0)
+                    cache_read = usage.get('cache_read_input_tokens', 0)
+                    cache_write = usage.get('cache_creation_input_tokens', 0)
                     if not last_ts:
                         last_ts = obj.get('timestamp', '')
                     break  # 가장 최신 usage 찾으면 즉시 종료
@@ -1439,15 +1501,15 @@ def _tool_status(name: str) -> dict:
             return None  # 유효한 세션 파일 아님
 
         return {
-            'session_id':   session_id,
-            'slug':         slug or path.stem[:12],   # slug 없으면 파일명 앞 12자
-            'model':        model or 'unknown',
+            'session_id': session_id,
+            'slug': slug or path.stem[:12],   # slug 없으면 파일명 앞 12자
+            'model': model or 'unknown',
             'input_tokens': input_tokens,
             'output_tokens': output_tokens,
-            'cache_read':   cache_read,
-            'cache_write':  cache_write,
-            'last_ts':      last_ts,
-            'cwd':          str(cwd).replace('\\', '/'),
+            'cache_read': cache_read,
+            'cache_write': cache_write,
+            'last_ts': last_ts,
+            'cwd': str(cwd).replace('\\', '/'),
         }
     except Exception as e:
         print(f"[FILE ERROR] _parse_session_tail: {e}")
@@ -1805,7 +1867,6 @@ class SSEHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
 
-        
         # ─── 신규: 사고 과정 실시간 스트리밍 ───
         if path == '/api/events/thoughts':
             self.send_response(200)
@@ -1850,6 +1911,18 @@ class SSEHandler(BaseHTTPRequestHandler):
             from queue import Queue as _ClientQueue, Empty as _QEmpty
             client_q = _ClientQueue(maxsize=0)  # 클라이언트별 전용 큐 (무제한 — done 이벤트 드롭 방지)
             with _SSE_LOCK:
+                AGENT_CLIENTS.add(client_q)
+            try:
+                self.connection.settimeout(None)
+                while True:
+                    try:
+                        msg = client_q.get(timeout=1.0)
+                        try:
+                            self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
+                            self.wfile.flush()
+                        except Exception as e:
+                            break  # 클라이언트 연결 끊김
+                    except _QEmpty:
                         # 큐 비어있으면 하트비트 전송 (연결 유지)
                         try:
                             self.wfile.write(b": heartbeat\n\n")
@@ -1995,12 +2068,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                import webview
-                selected_path = ""
-                if main_window:
-                    selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
-                    if selected and len(selected) > 0:
-                        selected_path = selected[0].replace('\\', '/')
+                selected_path = _open_folder_dialog_subprocess()
                 self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
@@ -2070,17 +2138,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 subprocess.Popen('cmd.exe /k "echo Installing Codex CLI... && npm install -g @openai/codex"', shell=True)
                 result = {"status": "success", "message": "Codex CLI installation started in a new window."}
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            self.wfile.write(json.dumps(result).encode('utf-8'))
-        elif parsed_path.path == '/api/install-playwright-cli':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                subprocess.Popen('cmd.exe /k "echo Installing Playwright CLI... && python -m pip install -U playwright && python -m playwright install chromium"', shell=True)
-                result = {"status": "success", "message": "Playwright CLI installation started in a new window."}
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
             self.wfile.write(json.dumps(result).encode('utf-8'))
@@ -2304,6 +2361,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                                    '/api/context-usage', '/api/gemini-context-usage',
                                    '/api/local-models')):
             _params = parse_qs(parsed_path.query)
+            from api import hive_api
             hive_api.handle_get(
                 self, parsed_path.path, _params,
                 DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
@@ -2321,7 +2379,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             _params = parse_qs(parsed_path.query)
             git_api.handle_get(self, parsed_path.path, _params, BASE_DIR=BASE_DIR)
 
-
         # ── [모듈 위임] vibe_api — /api/vibe/* (cmux 호환 CLI API) ────────
         elif parsed_path.path == '/api/vibe/sidebar':
             vibe_api.handle_sidebar_state(self)
@@ -2337,10 +2394,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             agent_api.handle_get(self, parsed_path.path)
         elif parsed_path.path.startswith('/api/pty/'):
             pty_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
-
-        # ── [모듈 위임] setup_api — /api/setup/* ─────────────────────
-        elif parsed_path.path.startswith('/api/setup/'):
-            setup_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
 
         # ── Telegram 설정 API ──────────────────────────────────────────
         elif parsed_path.path == '/api/config/telegram':
@@ -2378,6 +2431,14 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         # ── [모듈 위임] files_api — /api/files, /api/read-file ────────
         elif parsed_path.path in ('/api/files', '/api/read-file'):
+            _params = parse_qs(parsed_path.query)
+            files_api.handle_get(
+                self, parsed_path.path, _params,
+                PROJECT_ROOT=_current_project_root(),
+                validate_file_path=_validate_file_path,
+            )
+
+        elif parsed_path.path == '/api/hive/health/repair':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3308,7 +3369,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
                 git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
 
-
         # ── [모듈 위임 - POST] vibe_api — /api/vibe/* (cmux 호환 CLI API) ─
         elif parsed_path.path == '/api/vibe/notify':
             vibe_api.handle_notify(self)
@@ -3373,6 +3433,18 @@ class SSEHandler(BaseHTTPRequestHandler):
 이 스킬은 '{keyword}' 관련 작업을 최적화하기 위해 자동으로 제안된 스킬입니다.
 
 ## 🏁 사용 시점
+- '{keyword}' 키워드가 포함된 작업 요청 시
+- 반복적인 {keyword} 관련 파일 수정이 필요할 때
+
+## 🛠️ 핵심 패턴
+1. 관련 파일 분석
+2. {keyword} 표준 가이드라인 적용
+3. 변경 사항 검증
+
+---
+**생성일**: {datetime.now().strftime("%Y-%m-%d")}
+**상태**: 초안 (Draft)
+"""
                 with open(skill_file, "w", encoding="utf-8") as f:
                     f.write(template)
                 
@@ -3420,40 +3492,30 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/select-folder':
-            # 폴더 선택 다이얼로그 — pywebview 네이티브 방식 (EXE 배포에서 검증됨)
-            # pywebview의 create_file_dialog()는 내부적으로 .NET WinForms 다이얼로그를 사용
+            # 폴더 선택 다이얼로그 — tkinter 별도 프로세스 방식
+            # pywebview의 create_file_dialog()는 GUI 스레드 제한으로 HTTP 핸들러에서 호출 불가
+            # 독립 Python 프로세스로 tkinter를 실행하여 안정적으로 동작
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                import webview
-                print(f"[select-folder] main_window={main_window}, type={type(main_window)}")
-                if main_window:
-                    print(f"[select-folder] calling create_file_dialog...")
-                    selected = main_window.create_file_dialog(webview.FOLDER_DIALOG)
-                    print(f"[select-folder] result: {selected}")
-                    if selected and len(selected) > 0:
-                        path = selected[0].replace('\\', '/')
-                        # 선택된 경로를 설정에도 즉시 저장
-                        config = {}
-                        if CONFIG_FILE.exists():
-                            try:
-                                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                                    config = json.load(f)
-                            except: pass
-                        config['last_path'] = path
-                        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                            json.dump(config, f, ensure_ascii=False, indent=2)
-                        self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
-                    else:
-                        self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
+                path = _open_folder_dialog_subprocess()
+                if path:
+                    # 선택된 경로를 설정에도 즉시 저장
+                    config = {}
+                    if CONFIG_FILE.exists():
+                        try:
+                            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                        except: pass
+                    config['last_path'] = path
+                    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=2)
+                    self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
                 else:
-                    print("[select-folder] ERROR: main_window is None!")
-                    self.wfile.write(json.dumps({"status": "error", "message": "Window not ready"}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
             except Exception as e:
-                print(f"[select-folder] EXCEPTION: {e}")
-                import traceback; traceback.print_exc()
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/launch':
@@ -3611,13 +3673,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
 
                 # 메시지 객체 생성 (ID: 밀리초 타임스탬프)
-                source = str(data.get('source', 'dashboard') or 'dashboard')
-                channel = str(data.get('channel', 'general') or 'general')
-                terminal_id = str(data.get('terminal_id', '') or '')
-                raw_metadata = data.get('metadata', {})
-                metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
-                metadata.setdefault('source', source)
-
                 msg = {
                     'id': str(int(time.time() * 1000)),
                     'timestamp': time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -3629,16 +3684,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }
 
                 # SQLite 에 삽입
-                send_message(
-                    msg['id'],
-                    msg['from'],
-                    msg['to'],
-                    msg['type'],
-                    msg['content'],
-                    channel=channel,
-                    terminal_id=terminal_id,
-                    metadata=metadata,
-                )
+                send_message(msg['id'], msg['from'], msg['to'], msg['type'], msg['content'])
 
                 # 활성화된 모든 PTY 세션에 메시지 전송 (터미널 화면에 출력)
                 # 터미널은 \r\n (CRLF)을 필요로 하므로 변환하여 전송합니다.
@@ -3806,7 +3852,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-
         elif parsed_path.path == '/api/superpowers/install':
             # Vibe Coding 자체 스킬 설치 — 외부 GitHub 의존 없이 내장 파일 복사
             # Claude: skills/claude/vibe-*.md → PROJECT_ROOT/.claude/commands/ (프로젝트별)
@@ -3883,6 +3928,108 @@ class SSEHandler(BaseHTTPRequestHandler):
                     # 프로젝트별 설치 경로에서 제거 (배포 버전 호환)
                     cmd_dir = _proj / '.claude' / 'commands'
                     removed = []
+                    for md in cmd_dir.glob('vibe-*.md'):
+                        md.unlink()
+                        removed.append(md.name)
+                    msg = f"제거 완료: {', '.join(removed)}" if removed else '삭제할 파일 없음'
+                    self.wfile.write(json.dumps({'status': 'success', 'message': msg}, ensure_ascii=False).encode('utf-8'))
+
+                elif tool == 'gemini':
+                    # Gemini 스킬은 프로젝트 내에 있어 실제 삭제하지 않고 상태만 반환
+                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini 스킬은 프로젝트 내장형입니다 (삭제 불필요)'}, ensure_ascii=False).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
+
+        elif parsed_path.path == '/api/orchestrator/skill-chain/update':
+            # 스킬 체인 단계 상태 갱신 — skill_chain.db에 직접 UPDATE
+            # body: {"step": 0, "status": "done", "summary": "...", "terminal_id": 1}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                step = int(body.get('step', 0))
+                status = body.get('status', 'done')
+                summary = body.get('summary', '')
+                terminal_id = int(body.get('terminal_id', 0))
+                if not SCRIPTS_DIR:
+                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
+                _orch_dir = str(SCRIPTS_DIR)
+                if _orch_dir not in sys.path:
+                    sys.path.insert(0, _orch_dir)
+                from skill_orchestrator import cmd_update as _orch_update
+                _orch_update(terminal_id, step, status, summary)
+                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/orchestrator/run':
+            # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                if not SCRIPTS_DIR:
+                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
+                # scripts/orchestrator.py를 subprocess로 실행
+                orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
+                result = subprocess.run(
+                    [sys.executable, orch_script],
+                    capture_output=True, text=True, timeout=15, encoding='utf-8',
+                    creationflags=0x08000000
+                )
+                output = (result.stdout + result.stderr).strip()
+                self.wfile.write(json.dumps({
+                    'status': 'success',
+                    'output': output or '이상 없음',
+                }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        # [2026-03-22] /api/dispatcher/* POST → dispatcher_api.py로 위임됨
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # 불필요한 콘솔 로그 제거하여 터미널 깔끔하게 유지
+        pass
+
+# [제거됨 2026-03-22] pty_sessions, pty_output_buffers, pty_output_seq 글로벌 → Node PTY 서버로 이전
+# Python 서버에서 PTY 세션 정보가 필요한 경우 Node PTY 서버의 REST API를 호출합니다.
+# URL: http://127.0.0.1:{WS_PORT}/api/pty/sessions
+_NODE_PTY_REST_URL = None  # __main__에서 설정됨
+
+def _get_node_pty_sessions() -> dict:
+    """Node PTY 서버에서 세션 정보를 REST로 조회합니다."""
+    if not _NODE_PTY_REST_URL:
+        return {}
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"{_NODE_PTY_REST_URL}/api/pty/sessions")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception:
+        return {}
+
+
+# [제거됨 2026-03-22] _append_pty_output, getter 주입 → Node PTY 서버로 이전
+# agent_api와 pty_api는 이제 Node PTY 서버의 REST API를 직접 호출합니다.
+
+# [제거됨 2026-03-22] pty_handler 함수 전체 → Node.js pty-server.js로 이전
+# 아래의 기존 코드는 모두 제거되었습니다:
+# - pty_handler(): WebSocket PTY 핸들러 (~340줄)
+# - _cleanup_all_pty_sessions(): PTY 세션 정리
+# 대신 Node PTY 서버가 이 역할을 수행합니다.
+# Python 서버는 Node PTY 서버를 subprocess로 관리하고,
+# _child_procs를 통해 종료 시 자동 kill됩니다.
+_REMOVED_PTY_HANDLER = True  # 마커 — 참조 점검용
+
+# 워치독/Telegram/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
 # — X 버튼 종료 시 이 목록을 순회하여 모두 taskkill로 강제 종료
 _child_procs: list = []
 
@@ -4027,19 +4174,14 @@ def main():
 
     print(f"Vibe Coding {__version__}")
 
-    # ── 바탕화면 바로가기 자동 생성/갱신 ──
-    # 첫 실행이면 생성, 기존 바로가기가 콘솔(vibe-coding.exe)을 가리키면
-    # GUI(vibe-coding-gui.exe)로 자동 갱신
+    # ── 첫 실행 시 바탕화면 바로가기 자동 생성 ──
     try:
         try:
-            from .create_shortcut import create_shortcut, shortcut_exists, _shortcut_needs_update
+            from .create_shortcut import create_shortcut, shortcut_exists
         except ImportError:
-            from create_shortcut import create_shortcut, shortcut_exists, _shortcut_needs_update
+            from create_shortcut import create_shortcut, shortcut_exists
         if not shortcut_exists():
             print("첫 실행 감지 — 바탕화면 바로가기를 자동 생성합니다...")
-            create_shortcut()
-        elif _shortcut_needs_update():
-            print("바로가기 갱신 — GUI 모드(콘솔 없음)로 업데이트합니다...")
             create_shortcut()
     except Exception:
         pass  # 바로가기 생성 실패해도 서버 시작에는 지장 없음
@@ -4182,21 +4324,6 @@ def main():
         _pg_mod.ensure_schema(DATA_DIR)
     except Exception as e:
         print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
-
-    # ── Setup Doctor: 초기 설정 자동 진단 + 수리 ──────────────────────────
-    # [2026-03-27] 서버 시작 시 환경을 자동 점검하고 수리 가능한 항목은 즉시 수정.
-    # 사용자 조치가 필요한 항목은 대시보드 배너(GET /api/setup/status)로 안내.
-    try:
-        from setup_doctor import run_all as _setup_run_all
-        _setup_result = _setup_run_all()
-        if _setup_result.get("auto_fixed"):
-            print(f"[Setup Doctor] 🔧 자동 수리: {', '.join(_setup_result['auto_fixed'])}")
-        if _setup_result.get("needs_action"):
-            print(f"[Setup Doctor] ⚠️  조치 필요: {', '.join(_setup_result['needs_action'])}")
-        if _setup_result.get("ready"):
-            print("[Setup Doctor] ✅ 시스템 준비 완료")
-    except Exception as e:
-        print(f"[Setup Doctor] 진단 실패 (무시): {e}")
 
     # ── PID 파일 기록 (중복 실행 방지) ─────────────────────────────────────
     try:
@@ -4840,76 +4967,12 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
                     _t.sleep(0.1)
             window.load_url(_target)
 
-        # ── pythonnet / pywebview 백엔드 진단 + 자동 수리 ──
-        # pythonnet이 없으면 pywebview가 브라우저로 폴백하여
-        # 네이티브 윈도우/파일 다이얼로그 등이 동작하지 않음
-        _pythonnet_ok = False
-        try:
-            import clr
-            _pythonnet_ok = True
-            print(f"[*] pythonnet: OK (clr 모듈 로드됨)")
-        except (ImportError, Exception) as _clr_err:
-            print(f"[!] ⚠️  pythonnet 로드 실패: {_clr_err}")
-            print("[!]    → 자동 설치를 시도합니다...")
-            # pythonnet 자동 설치 시도
-            _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            try:
-                _pip_result = subprocess.run(
-                    [sys.executable, '-m', 'pip', 'install', '--upgrade', 'pythonnet>=3.0.5'],
-                    capture_output=True, text=True, timeout=120,
-                    creationflags=_no_win,
-                )
-                if _pip_result.returncode == 0:
-                    print("[*] pythonnet 설치 완료! 앱을 재시작하면 네이티브 모드로 전환됩니다.")
-                else:
-                    print(f"[!] pythonnet 설치 실패: {_pip_result.stderr[:200]}")
-            except Exception as _pip_err:
-                print(f"[!] pythonnet 자동 설치 중 에러: {_pip_err}")
-            print("[!]    → 이번 실행에서는 브라우저 모드로 동작합니다. 재시작하면 네이티브 모드 전환.")
-
         print(f"[*] Launching Desktop Window with Official Icon...")
-
-        # ── pywebview JS API 클래스 — HTTP 핸들러 대신 네이티브 스레드에서 실행 ──
-        # HTTP 핸들러 스레드에서 create_file_dialog()를 호출하면 .NET UI 스레드가 아니라
-        # WinForms 다이얼로그가 동작하지 않음. pywebview의 js_api를 사용하면
-        # pywebview가 올바른 스레드에서 함수를 실행해줌.
-        class WebViewApi:
-            def __init__(self):
-                self._window = None
-
-            def select_folder(self):
-                """프론트엔드에서 window.pywebview.api.select_folder()로 호출.
-                pywebview가 올바른 스레드에서 실행하므로 .NET 다이얼로그 정상 동작."""
-                try:
-                    if self._window:
-                        selected = self._window.create_file_dialog(webview.FOLDER_DIALOG)
-                        if selected and len(selected) > 0:
-                            path = selected[0].replace('\\', '/')
-                            # 선택된 경로를 설정에도 즉시 저장
-                            config = {}
-                            if CONFIG_FILE.exists():
-                                try:
-                                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                                        config = json.load(f)
-                                except: pass
-                            config['last_path'] = path
-                            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                                json.dump(config, f, ensure_ascii=False, indent=2)
-                            return {"status": "success", "path": path}
-                        return {"status": "cancelled"}
-                    return {"status": "error", "message": "Window not ready"}
-                except Exception as e:
-                    return {"status": "error", "message": str(e)}
-
-        _js_api = WebViewApi()
-
         # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
         # html= 파라미터로 스플래시 먼저 표시 → webview.start() 직후 창 즉시 가시화
         global main_window  # SSEHandler에서 폴더 다이얼로그 등에 사용
         main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
-                              html=_SPLASH_HTML, width=1400, height=900,
-                              js_api=_js_api)
-        _js_api._window = main_window
+                              html=_SPLASH_HTML, width=1400, height=900)
 
         # 아이콘 교체 스레드 별도 실행
         threading.Thread(target=force_win32_icon, daemon=True).start()
