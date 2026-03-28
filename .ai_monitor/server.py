@@ -689,6 +689,9 @@ def _open_folder_dialog_subprocess() -> str:
     pywebview GUI 스레드에서 tkinter를 직접 호출하면 충돌하므로,
     독립 Python 프로세스로 실행하여 선택된 경로 문자열을 반환합니다.
     사용자가 취소하면 빈 문자열 반환.
+
+    주의: EXE 빌드에서는 sys.executable이 vibe-coding.exe를 가리키므로,
+    _python_runner_cmds()로 실제 Python 인터프리터를 찾아야 합니다.
     """
     import subprocess as _sp
     script = (
@@ -697,9 +700,13 @@ def _open_folder_dialog_subprocess() -> str:
         "path = filedialog.askdirectory(title='프로젝트 폴더 선택'); "
         "print(path if path else '')"
     )
+    # EXE 빌드에서 sys.executable은 vibe-coding.exe → 실제 Python을 찾아서 사용
+    python_cmd = _python_runner_cmds()[0]
+    _no_win = getattr(_sp, 'CREATE_NO_WINDOW', 0x08000000)
     result = _sp.run(
-        [sys.executable, '-c', script],
-        capture_output=True, text=True, timeout=60
+        [python_cmd, '-c', script],
+        capture_output=True, text=True, timeout=60,
+        creationflags=_no_win
     )
     return result.stdout.strip()
 
