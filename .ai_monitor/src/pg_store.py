@@ -423,6 +423,40 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("CREATE INDEX IF NOT EXISTS idx_hive_tasks_project ON hive_tasks (project_id);")
         # 기존 hive_memory 테이블에 expires_at 컬럼 없으면 추가 (TTL 만료 정책)
         execute_raw("ALTER TABLE hive_memory ADD COLUMN IF NOT EXISTS expires_at TEXT DEFAULT NULL;")
+
+        # [2026-03-29] 하이브 메모리 실시간 채팅 통합 — LISTEN/NOTIFY 트리거
+        # hive_memory에 INSERT/UPDATE 시 'hive_realtime' 채널로 NOTIFY 발생
+        # 그룹챗 브릿지와 대시보드가 LISTEN으로 실시간 수신
+        execute_raw("""
+            CREATE OR REPLACE FUNCTION notify_hive_realtime()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                PERFORM pg_notify('hive_realtime',
+                    json_build_object(
+                        'key', NEW.key,
+                        'title', NEW.title,
+                        'content', NEW.content,
+                        'tags', NEW.tags,
+                        'author', NEW.author,
+                        'updated_at', NEW.updated_at
+                    )::text
+                );
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        execute_raw("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_hive_realtime') THEN
+                    CREATE TRIGGER trg_hive_realtime
+                    AFTER INSERT OR UPDATE ON hive_memory
+                    FOR EACH ROW EXECUTE FUNCTION notify_hive_realtime();
+                END IF;
+            END;
+            $$;
+        """)
+
         _SCHEMA_READY = True
         if not _MIGRATION_DONE:
             # DB에 마이그레이션 완료 플래그 확인 — 프로세스 재시작 시 재실행 방지
@@ -929,3 +963,53 @@ def list_skill_chain_rows() -> list[dict]:
         ORDER BY updated_at DESC, id DESC;
         """
     )
+
+
+# ── 실시간 채팅 (hive_memory 기반) ────────────────────────────────────────────
+# 채팅 메시지를 hive_memory에 저장 (tag: ["chat"])
+# key 형식: chat:{timestamp}:{sender}
+# LISTEN/NOTIFY 트리거가 자동으로 'hive_realtime' 채널에 알림
+
+def send_chat(sender: str, content: str, project: str = '') -> dict | None:
+    """실시간 채팅 메시지 전송 — hive_memory에 저장 + NOTIFY 자동 발생."""
+    import time as _t
+    key = f"chat:{_t.strftime('%Y%m%d-%H%M%S')}:{sender}:{id(_t)}"
+    return set_memory(
+        key=key,
+        title=f"[{sender}] {content[:50]}",
+        content=content[:2000],
+        tags=["chat"],
+        author=sender,
+        project=project,
+        ttl_days=7,  # 채팅 메시지는 7일 후 자동 삭제
+    )
+
+
+def get_chat_history(limit: int = 20) -> list[dict]:
+    """최근 채팅 메시지 조회 (오래된 순)."""
+    rows = query_rows(
+        f"""
+        SELECT key, content, author, updated_at
+        FROM hive_memory
+        WHERE tags @> '["chat"]'::jsonb
+        ORDER BY updated_at DESC
+        LIMIT {limit};
+        """
+    )
+    # 오래된 순으로 뒤집기
+    messages = []
+    for row in reversed(rows):
+        messages.append({
+            "sender": row.get("author", ""),
+            "content": row.get("content", ""),
+            "ts": row.get("updated_at", ""),
+        })
+    return messages
+
+
+def get_chat_context(limit: int = 10) -> str:
+    """에이전트용 채팅 컨텍스트 프롬프트 생성."""
+    messages = get_chat_history(limit)
+    if not messages:
+        return "(대화 없음)"
+    return "\n".join(f"[{m['sender']}] {m['content']}" for m in messages)
