@@ -1,133 +1,151 @@
-"""그룹챗 MCP 서버 — Claude Code/Gemini CLI가 터미널에서 직접 그룹 채팅 참여.
+"""그룹챗 MCP 서버 — PostgreSQL LISTEN/NOTIFY 기반 실시간 통신.
 
-이 MCP 서버를 Claude Code에 등록하면:
-- claude 터미널에서 send_group_message("안녕") → 그룹챗에 전송
-- read_group_messages() → 최근 그룹챗 메시지 조회
-- 다른 에이전트의 메시지를 실시간으로 확인 가능
+Claude Code / Gemini CLI 터미널에서 직접 그룹 채팅 참여.
+새 메시지가 DB에 INSERT되면 NOTIFY → 이 서버가 감지 → 에이전트에 알림.
 
-설정 (claude config에 추가):
+MCP 도구:
+  - send_group_message: 그룹챗에 메시지 전송
+  - read_group_messages: 최근 메시지 조회
+  - check_new_messages: 마지막 확인 이후 새 메시지 조회
+  - group_chat_status: 연결 상태 확인
+
+MCP 리소스:
+  - groupchat://inbox: 읽지 않은 새 메시지 (자동 업데이트)
+
+설정 (claude config.json):
 {
   "mcpServers": {
     "groupchat": {
       "command": "python",
       "args": ["-m", "llm_group_chat.mcp_server"],
-      "cwd": "D:/vibe-coding"
+      "cwd": "D:/vibe-coding",
+      "env": { "MCP_AGENT_NAME": "T1-claude" }
     }
   }
 }
-
-이러면 진짜 터미널에서:
-- 파일 편집하면서 동시에 그룹챗 메시지를 보내고 받을 수 있음
-- PTY 해킹 없이, MCP 프로토콜로 깔끔하게 통신
 """
-import asyncio
 import json
 import sys
+import os
 import threading
 import time
-import os
 
-# MCP 프로토콜 — JSON-RPC over stdin/stdout
-# https://modelcontextprotocol.io/specification
+_AGENT_NAME = os.environ.get("MCP_AGENT_NAME", f"mcp-{os.getpid()}")
 
-# 그룹챗 WebSocket 연결 (백그라운드)
-_ws_connection = None
-_ws_connected = False
-_ws_loop = None
-_received_messages: list[dict] = []
-_MAX_MESSAGES = 100
-_AGENT_NAME = os.environ.get("MCP_AGENT_NAME", "mcp-agent")
+# 새 메시지 큐 (LISTEN으로 수신된 메시지)
+_inbox: list[dict] = []
+_inbox_lock = threading.Lock()
+_MAX_INBOX = 50
 
-WS_HOST = "127.0.0.1"
-WS_PORT = 8765
+# 마지막으로 읽은 메시지 ID
+_last_read_id = 0
 
 
-def _make_chat_msg(sender: str, content: str, msg_type: str = "message") -> str:
-    return json.dumps({
-        "type": msg_type, "sender": sender, "content": content,
-        "room": "default",
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
-    }, ensure_ascii=False)
-
-
-async def _ws_receiver():
-    """WebSocket 수신 루프 — 백그라운드에서 그룹챗 메시지 수집."""
-    global _ws_connection, _ws_connected
-    import websockets
-
-    while True:
-        try:
-            async with websockets.connect(f"ws://{WS_HOST}:{WS_PORT}") as ws:
-                _ws_connection = ws
-                _ws_connected = True
-
-                # 입장
-                await ws.send(_make_chat_msg(_AGENT_NAME, "", "join"))
-
-                async for raw in ws:
-                    try:
-                        msg = json.loads(raw)
-                        if msg.get("sender") != _AGENT_NAME:
-                            _received_messages.append({
-                                "sender": msg.get("sender", ""),
-                                "content": msg.get("content", ""),
-                                "type": msg.get("type", "message"),
-                                "timestamp": msg.get("timestamp", ""),
-                            })
-                            # 오래된 메시지 정리
-                            if len(_received_messages) > _MAX_MESSAGES:
-                                del _received_messages[:len(_received_messages) - _MAX_MESSAGES]
-                    except Exception:
-                        pass
-
-        except Exception:
-            _ws_connected = False
-            _ws_connection = None
-            await asyncio.sleep(3)
-
-
-def _start_ws_thread():
-    """WebSocket 수신을 별도 스레드에서 실행."""
-    global _ws_loop
-    _ws_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(_ws_loop)
-    _ws_loop.run_until_complete(_ws_receiver())
-
-
-def _send_message(content: str) -> bool:
-    """그룹챗에 메시지 전송."""
-    if not _ws_connected or not _ws_connection or not _ws_loop:
-        return False
+def _setup_listener():
+    """PostgreSQL LISTEN 시작 — 새 메시지 자동 감지."""
     try:
-        msg = _make_chat_msg(_AGENT_NAME, content)
-        asyncio.run_coroutine_threadsafe(
-            _ws_connection.send(msg), _ws_loop
-        ).result(timeout=5)
+        from llm_group_chat.shared_history import add_listener, _ensure_table
+        _ensure_table()
 
-        # DB에도 저장
-        try:
-            from llm_group_chat.shared_history import save_message
-            save_message(_AGENT_NAME, content)
-        except Exception:
-            pass
+        def on_new_message(msg: dict):
+            """새 메시지 도착 콜백."""
+            sender = msg.get("sender", "")
+            # 자기 메시지는 무시
+            if sender == _AGENT_NAME:
+                return
 
-        return True
-    except Exception:
-        return False
+            with _inbox_lock:
+                _inbox.append(msg)
+                if len(_inbox) > _MAX_INBOX:
+                    del _inbox[:len(_inbox) - _MAX_INBOX]
+
+            # stderr로 알림 (에이전트가 볼 수 있음)
+            content = msg.get("content", "")[:100]
+            sys.stderr.write(f"\n[그룹챗] {sender}: {content}\n")
+            sys.stderr.flush()
+
+        add_listener(on_new_message)
+        sys.stderr.write(f"[그룹챗 MCP] LISTEN 시작됨 — {_AGENT_NAME}\n")
+        sys.stderr.flush()
+    except Exception as e:
+        sys.stderr.write(f"[그룹챗 MCP] LISTEN 실패: {e}\n")
+        sys.stderr.flush()
 
 
-def _read_messages(count: int = 10) -> list[dict]:
-    """최근 그룹챗 메시지 조회."""
-    # DB에서도 읽기
+def _send_message(content: str) -> dict:
+    """그룹챗에 메시지 전송 (PostgreSQL INSERT → NOTIFY)."""
     try:
-        from llm_group_chat.shared_history import get_recent
-        db_msgs = get_recent(count)
-        if db_msgs:
-            return db_msgs[-count:]
+        from llm_group_chat.shared_history import save_message
+        msg_id = save_message(_AGENT_NAME, content)
+
+        # WebSocket 서버에도 전달 (대시보드 UI 연동)
+        _relay_to_ws(content)
+
+        return {"status": "sent", "id": msg_id, "sender": _AGENT_NAME}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _relay_to_ws(content: str):
+    """WebSocket 그룹챗 서버에 메시지 전달 (대시보드 UI 표시용)."""
+    try:
+        import asyncio
+        import websockets
+
+        msg = json.dumps({
+            "type": "message", "sender": _AGENT_NAME, "content": content,
+            "room": "default",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        }, ensure_ascii=False)
+
+        async def _send():
+            try:
+                async with websockets.connect("ws://127.0.0.1:8765") as ws:
+                    await ws.send(msg)
+            except Exception:
+                pass
+
+        # 새 이벤트 루프에서 실행
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_send())
+        loop.close()
     except Exception:
         pass
 
-    return _received_messages[-count:]
+
+def _read_messages(count: int = 10) -> list[dict]:
+    """최근 메시지 조회."""
+    try:
+        from llm_group_chat.shared_history import get_recent
+        return get_recent(count)
+    except Exception as e:
+        return [{"error": str(e)}]
+
+
+def _check_new() -> list[dict]:
+    """읽지 않은 새 메시지 가져오기 + 인박스 비우기."""
+    global _last_read_id
+    with _inbox_lock:
+        new_msgs = list(_inbox)
+        _inbox.clear()
+
+    # DB에서도 확인 (LISTEN 놓친 메시지 보완)
+    try:
+        from llm_group_chat.shared_history import get_new_since
+        db_msgs, new_id = get_new_since(_last_read_id, exclude_sender=_AGENT_NAME, limit=20)
+        if new_id > _last_read_id:
+            _last_read_id = new_id
+
+        # inbox + DB 메시지 병합 (중복 제거)
+        seen_ids = {m.get("id") for m in new_msgs if m.get("id")}
+        for m in db_msgs:
+            if m.get("id") not in seen_ids:
+                new_msgs.append(m)
+
+    except Exception:
+        pass
+
+    return new_msgs
 
 
 # ── MCP JSON-RPC 핸들러 ──
@@ -135,132 +153,162 @@ def _read_messages(count: int = 10) -> list[dict]:
 def _handle_initialize(params: dict) -> dict:
     return {
         "protocolVersion": "2024-11-05",
-        "capabilities": {"tools": {}},
-        "serverInfo": {
-            "name": "groupchat",
-            "version": "1.0.0",
+        "capabilities": {
+            "tools": {},
+            "resources": {"subscribe": True},
         },
+        "serverInfo": {"name": "groupchat", "version": "2.0.0"},
     }
 
 
 def _handle_tools_list(params: dict) -> dict:
-    return {
-        "tools": [
-            {
-                "name": "send_group_message",
-                "description": "그룹 채팅에 메시지를 전송합니다. 다른 터미널의 에이전트들이 볼 수 있습니다.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "message": {
-                            "type": "string",
-                            "description": "보낼 메시지 내용",
-                        },
-                    },
-                    "required": ["message"],
+    return {"tools": [
+        {
+            "name": "send_group_message",
+            "description": "그룹 채팅에 메시지를 전송합니다. 다른 터미널의 에이전트(Claude/Gemini/Codex)가 실시간으로 수신합니다. PostgreSQL NOTIFY로 즉시 전달됩니다.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "보낼 메시지"},
+                },
+                "required": ["message"],
+            },
+        },
+        {
+            "name": "read_group_messages",
+            "description": "그룹 채팅의 최근 대화를 읽습니다. 모든 에이전트의 메시지가 포함됩니다.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "description": "읽을 메시지 수 (기본: 10)", "default": 10},
                 },
             },
-            {
-                "name": "read_group_messages",
-                "description": "그룹 채팅의 최근 메시지를 읽습니다. 다른 에이전트들이 뭘 말했는지 확인할 수 있습니다.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "count": {
-                            "type": "integer",
-                            "description": "읽을 메시지 수 (기본: 10)",
-                            "default": 10,
-                        },
-                    },
-                },
+        },
+        {
+            "name": "check_new_messages",
+            "description": "마지막 확인 이후 새로 도착한 메시지를 확인합니다. 새 메시지가 있으면 반환하고, 없으면 빈 배열을 반환합니다. 주기적으로 호출하면 실시간 대화가 가능합니다.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
             },
-            {
-                "name": "group_chat_status",
-                "description": "그룹 채팅 연결 상태를 확인합니다.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                },
+        },
+        {
+            "name": "group_chat_status",
+            "description": "그룹 채팅 연결 상태와 참여 정보를 확인합니다.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
             },
-        ],
-    }
+        },
+    ]}
+
+
+def _handle_resources_list(params: dict) -> dict:
+    return {"resources": [
+        {
+            "uri": "groupchat://inbox",
+            "name": "그룹챗 인박스",
+            "description": "읽지 않은 새 그룹챗 메시지. 새 메시지가 도착하면 자동 업데이트됩니다.",
+            "mimeType": "application/json",
+        },
+    ]}
+
+
+def _handle_resources_read(params: dict) -> dict:
+    uri = params.get("uri", "")
+    if uri == "groupchat://inbox":
+        new_msgs = _check_new()
+        content = json.dumps(new_msgs, ensure_ascii=False, indent=2) if new_msgs else "새 메시지 없음"
+        return {"contents": [{"uri": uri, "mimeType": "application/json", "text": content}]}
+    return {"contents": []}
 
 
 def _handle_tools_call(params: dict) -> dict:
-    tool_name = params.get("name", "")
+    tool = params.get("name", "")
     args = params.get("arguments", {})
 
-    if tool_name == "send_group_message":
-        message = args.get("message", "")
-        if not message:
+    if tool == "send_group_message":
+        msg = args.get("message", "")
+        if not msg:
             return {"content": [{"type": "text", "text": "메시지가 비어있습니다."}]}
+        result = _send_message(msg)
+        if "error" in result:
+            return {"content": [{"type": "text", "text": f"전송 실패: {result['error']}"}], "isError": True}
+        return {"content": [{"type": "text", "text": f"그룹챗 전송 완료: {msg}"}]}
 
-        ok = _send_message(message)
-        if ok:
-            return {"content": [{"type": "text", "text": f"그룹챗에 전송 완료: {message}"}]}
-        else:
-            return {"content": [{"type": "text", "text": "전송 실패 — 그룹챗 서버에 연결되지 않았습니다."}], "isError": True}
-
-    elif tool_name == "read_group_messages":
+    elif tool == "read_group_messages":
         count = args.get("count", 10)
-        messages = _read_messages(count)
-
-        if not messages:
+        msgs = _read_messages(count)
+        if not msgs:
             return {"content": [{"type": "text", "text": "(그룹챗 메시지 없음)"}]}
-
-        lines = []
-        for m in messages:
-            sender = m.get("sender", "?")
-            content = m.get("content", "")
-            ts = m.get("ts", m.get("timestamp", ""))
-            lines.append(f"[{ts}] {sender}: {content}")
-
+        lines = [f"[{m.get('ts','')}] {m['sender']}: {m['content']}" for m in msgs]
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
-    elif tool_name == "group_chat_status":
+    elif tool == "check_new_messages":
+        new_msgs = _check_new()
+        if not new_msgs:
+            return {"content": [{"type": "text", "text": "(새 메시지 없음)"}]}
+        lines = [f"[{m.get('ts','')}] {m.get('sender','?')}: {m.get('content','')}" for m in new_msgs]
+        return {"content": [{"type": "text", "text": f"새 메시지 {len(new_msgs)}개:\n" + "\n".join(lines)}]}
+
+    elif tool == "group_chat_status":
         return {"content": [{"type": "text", "text": json.dumps({
-            "connected": _ws_connected,
             "agent_name": _AGENT_NAME,
-            "buffered_messages": len(_received_messages),
-            "ws_url": f"ws://{WS_HOST}:{WS_PORT}",
+            "inbox_count": len(_inbox),
+            "last_read_id": _last_read_id,
+            "listener_active": True,
         }, indent=2, ensure_ascii=False)}]}
 
-    else:
-        return {"content": [{"type": "text", "text": f"알 수 없는 도구: {tool_name}"}], "isError": True}
+    return {"content": [{"type": "text", "text": f"알 수 없는 도구: {tool}"}], "isError": True}
 
 
 def _handle_request(method: str, params: dict) -> dict:
-    """JSON-RPC 요청 처리."""
-    if method == "initialize":
-        return _handle_initialize(params)
-    elif method == "tools/list":
-        return _handle_tools_list(params)
-    elif method == "tools/call":
-        return _handle_tools_call(params)
-    elif method == "notifications/initialized":
-        return None  # 알림은 응답 불필요
-    elif method == "ping":
-        return {}
-    else:
+    handlers = {
+        "initialize": _handle_initialize,
+        "tools/list": _handle_tools_list,
+        "tools/call": _handle_tools_call,
+        "resources/list": _handle_resources_list,
+        "resources/read": _handle_resources_read,
+        "ping": lambda p: {},
+    }
+    handler = handlers.get(method)
+    if handler:
+        return handler(params)
+    # 알림(notifications)은 None 반환
+    if method.startswith("notifications/"):
         return None
+    return None
 
 
 def main():
-    """MCP 서버 메인 루프 — stdin/stdout JSON-RPC."""
-    global _AGENT_NAME
-
-    # 에이전트 이름 설정 (환경 변수 또는 기본값)
+    """MCP 서버 메인 — stdin/stdout JSON-RPC + PostgreSQL LISTEN."""
+    global _AGENT_NAME, _last_read_id
     _AGENT_NAME = os.environ.get("MCP_AGENT_NAME", f"mcp-{os.getpid()}")
 
-    # WebSocket 수신 스레드 시작
-    ws_thread = threading.Thread(target=_start_ws_thread, daemon=True)
-    ws_thread.start()
+    # 마지막 메시지 ID 초기화 (이전 메시지는 무시)
+    try:
+        from llm_group_chat.shared_history import get_recent, _ensure_table
+        _ensure_table()
+        recent = get_recent(1)
+        if recent:
+            from llm_group_chat.shared_history import _get_conn
+            conn = _get_conn()
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(id) FROM groupchat_messages")
+            row = cur.fetchone()
+            if row and row[0]:
+                _last_read_id = row[0]
+            conn.close()
+    except Exception:
+        pass
 
-    # 서버 시작 로그 (stderr로 — stdout은 MCP 프로토콜 전용)
-    sys.stderr.write(f"[그룹챗 MCP] 서버 시작됨 — {_AGENT_NAME}\n")
+    # LISTEN 시작 (백그라운드 스레드)
+    threading.Thread(target=_setup_listener, daemon=True).start()
+
+    sys.stderr.write(f"[그룹챗 MCP] 서버 시작 — {_AGENT_NAME} (LISTEN/NOTIFY 모드)\n")
     sys.stderr.flush()
 
-    # stdin/stdout JSON-RPC 루프
+    # stdin JSON-RPC 루프
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -277,22 +325,14 @@ def main():
 
         result = _handle_request(method, params)
 
-        # 알림(id 없음)이면 응답 안 함
         if req_id is None:
             continue
 
         if result is not None:
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": result,
-            }
+            response = {"jsonrpc": "2.0", "id": req_id, "result": result}
         else:
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-            }
+            response = {"jsonrpc": "2.0", "id": req_id,
+                         "error": {"code": -32601, "message": f"Method not found: {method}"}}
 
         sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
         sys.stdout.flush()

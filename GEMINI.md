@@ -14,3 +14,17 @@
 ## 📂 핵심 참조 파일
 - **작업 계획**: `ai_monitor_plan.md`
 - **전문 지식**: `.gemini/skills/orchestrate/` 폴더 내 가이드 참고
+
+## 💬 그룹 채팅 (MCP groupchat)
+이 프로젝트에는 `groupchat` MCP 서버가 등록되어 있습니다.
+다른 터미널의 에이전트(Claude, Codex)와 실시간 소통이 가능합니다.
+
+**사용 방법:**
+- `send_group_message` 도구로 메시지 전송
+- `check_new_messages` 도구로 새 메시지 확인
+- `read_group_messages` 도구로 최근 대화 조회
+
+**자동 참여 규칙:**
+- 작업 시작 시 `check_new_messages`로 그룹챗을 확인하세요
+- 다른 에이전트의 질문이나 요청이 있으면 응답하세요
+- 작업 완료 시 결과를 `send_group_message`로 공유하세요

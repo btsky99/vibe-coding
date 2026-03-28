@@ -1,7 +1,10 @@
-"""그룹챗 브릿지 — 대시보드 라이브 채팅 ↔ WebSocket 서버 연결만 담당.
+"""그룹챗 브릿지 — PostgreSQL NOTIFY → WebSocket (대시보드 UI 실시간 연동).
 
-에이전트 응답은 agents.py의 squad가 별도 프로세스로 처리합니다.
-이 브릿지는 오직 대시보드 UI ↔ WS 서버 연결만 합니다.
+PostgreSQL의 LISTEN으로 새 메시지를 감지하고,
+WebSocket 서버에 전달하여 대시보드 실시간 채팅 UI에 표시합니다.
+
+동시에 WebSocket에서 대시보드 UI 메시지를 수신하면
+PostgreSQL에 INSERT (→ NOTIFY → 다른 에이전트 MCP 서버가 감지).
 """
 import asyncio
 import json
@@ -24,7 +27,27 @@ def _make_msg(msg_type: str, sender: str, content: str = "") -> str:
     }, ensure_ascii=False)
 
 
+def _on_db_notify(msg: dict):
+    """PostgreSQL NOTIFY 콜백 — 새 메시지를 WebSocket으로 전달."""
+    if not _bridge_connected or not _bridge_ws or not _bridge_loop:
+        return
+
+    sender = msg.get("sender", "")
+    content = msg.get("content", "")
+    if not content or sender == "dashboard":
+        return
+
+    ws_msg = _make_msg("message", sender, content)
+    try:
+        asyncio.run_coroutine_threadsafe(
+            _bridge_ws.send(ws_msg), _bridge_loop
+        )
+    except Exception:
+        pass
+
+
 async def _bridge_loop_async():
+    """WebSocket 연결 + 대시보드 메시지 수신 → PostgreSQL INSERT."""
     global _bridge_ws, _bridge_connected
     import websockets
 
@@ -33,11 +56,35 @@ async def _bridge_loop_async():
             async with websockets.connect(f"ws://{WS_HOST}:{WS_PORT}") as ws:
                 _bridge_ws = ws
                 _bridge_connected = True
-                print("[브릿지] 그룹챗 서버 연결됨")
+                print("[브릿지] WS + PG LISTEN 연결됨")
+
                 await ws.send(_make_msg("join", "bridge"))
 
                 async for raw in ws:
-                    pass  # 수신만 유지 (연결 keep-alive)
+                    try:
+                        msg = json.loads(raw)
+                        sender = msg.get("sender", "")
+                        msg_type = msg.get("type", "")
+
+                        # bridge 자신이 보낸 건 무시
+                        if sender == "bridge":
+                            continue
+                        # 에이전트(MCP)가 보낸 건 이미 DB에 있으므로 무시
+                        if sender.startswith("T") or sender.startswith("mcp"):
+                            continue
+
+                        # 대시보드 사용자 메시지 → PostgreSQL INSERT (→ NOTIFY → 에이전트 MCP 감지)
+                        if msg_type == "message":
+                            content = msg.get("content", "").strip()
+                            if content:
+                                try:
+                                    from llm_group_chat.shared_history import save_message
+                                    save_message(sender, content)
+                                except Exception:
+                                    pass
+
+                    except (json.JSONDecodeError, KeyError):
+                        pass
 
         except Exception as e:
             _bridge_connected = False
@@ -54,13 +101,23 @@ def _run_bridge_thread():
 
 
 def init_bridge():
-    """브릿지 초기화 — WS 연결만."""
-    threading.Thread(target=_run_bridge_thread, daemon=True, name="GroupChatBridge").start()
+    """브릿지 초기화 — WS 연결 + PostgreSQL LISTEN."""
+    # WS 브릿지 스레드
+    threading.Thread(target=_run_bridge_thread, daemon=True, name="GroupChatBridge-WS").start()
+
+    # PostgreSQL LISTEN → WS 전달
+    try:
+        from llm_group_chat.shared_history import add_listener
+        add_listener(_on_db_notify)
+        print("[브릿지] PostgreSQL LISTEN 등록됨 — DB 메시지 → 대시보드 자동 전달")
+    except Exception as e:
+        print(f"[브릿지] LISTEN 등록 실패: {e}")
+
     print("[브릿지] 그룹챗 브릿지 시작됨")
 
 
 def set_pty_url(url: str):
-    """하위 호환용 — 더 이상 사용하지 않음."""
+    """하위 호환용."""
     pass
 
 
