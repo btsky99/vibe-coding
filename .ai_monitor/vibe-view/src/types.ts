@@ -1,4 +1,4 @@
-export interface LogRecord {
+﻿export interface LogRecord {
     session_id: string;
     terminal_id: string;
     project: string;
@@ -87,27 +87,6 @@ export interface Task {
     tags?: string[];
 }
 
-// MCP 카탈로그 항목 — 설치 가능한 MCP 서버 정보
-export interface McpEntry {
-    name: string;          // 식별 이름 (예: context7)
-    package: string;       // npm 패키지 경로 (예: @upstash/context7-mcp) — 로컬이면 "__local__"
-    description: string;   // 기능 설명
-    category: string;      // 카테고리 (문서 / 개발 / 검색 / AI / 브라우저 / DB)
-    requiresEnv?: string[]; // 필수 환경변수 목록 (있으면 플레이스홀더로 설치)
-    args?: string[];        // 실행 시 추가 인수
-    command?: string;       // 커스텀 실행 명령어 (없으면 npx 기본값 사용)
-}
-
-// Smithery 레지스트리 검색 결과 항목
-export interface SmitheryServer {
-    qualifiedName: string;   // @scope/package 형태의 고유 이름
-    displayName: string;     // 표시명
-    description: string;     // 설명
-    iconUrl: string | null;  // 아이콘 URL
-    verified: boolean;       // 공식 검증 여부
-    useCount: number;        // 사용 횟수
-    homepage: string;        // Smithery 페이지 URL
-}
 
 // 에이전트 간 직접 메시지 채널 데이터 구조
 export interface AgentMessage {
@@ -175,3 +154,4 @@ export interface ThoughtLog {
   level?: 'info' | 'plan' | 'action' | 'verification';
   step?: number;
 }
+

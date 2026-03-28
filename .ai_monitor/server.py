@@ -1,4 +1,4 @@
-"""
+﻿"""
 FILE: .ai_monitor/server.py
 DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
 
@@ -126,8 +126,6 @@ import re
 import threading
 import sys
 import asyncio
-import api.mcp_api as mcp_api
-import api.hive_api as hive_api
 import api.git_api as git_api
 import api.memory_api as memory_api
 import api.agent_api as agent_api
@@ -1427,95 +1425,7 @@ def _tool_status(name: str) -> dict:
 
     return {"installed": True, "path": exe_path, "version": version}
 
-# ── MCP 설정 파일 경로 헬퍼 ──────────────────────────────────────────────────
-def _mcp_config_path(tool: str, scope: str) -> Path:
-    """
-    도구(tool)와 범위(scope)에 따른 MCP 설정 파일 경로를 반환합니다.
-    - claude / global  → ~/.claude/settings.json
-    - claude / project → {현재프로젝트루트}/.claude/settings.local.json
-    - gemini / global  → ~/.gemini/settings.json
-    - gemini / project → {현재프로젝트루트}/.gemini/settings.json
-    - codex  / global  → ~/.codex/config.toml
-    - codex  / project → {현재프로젝트루트}/.codex/config.toml
 
-    [수정] BASE_DIR.parent 대신 _current_project_root() 사용.
-    배포 버전에서 BASE_DIR = sys._MEIPASS(임시 폴더)라서 project_root가 잘못 지정되던 버그 수정.
-    """
-    home = Path.home()
-    project_root = _current_project_root()  # config.json last_path 우선 참조
-    if tool == 'claude':
-        if scope == 'global':
-            return home / '.claude' / 'settings.json'
-        else:
-            return project_root / '.claude' / 'settings.local.json'
-    elif tool == 'codex':
-        # OpenAI Codex CLI — mcpServers 포맷 동일 (JSON)
-        if scope == 'global':
-            return home / '.codex' / 'config.toml'
-        else:
-            return project_root / '.codex' / 'config.toml'
-    else:  # gemini
-        if scope == 'global':
-            return home / '.gemini' / 'settings.json'
-        else:
-            return project_root / '.gemini' / 'settings.json'
-
-# ── Smithery API 키 설정 파일 경로 ──────────────────────────────────────────
-_SMITHERY_CFG = DATA_DIR / 'smithery_config.json'
-
-def _smithery_api_key() -> str:
-    """저장된 Smithery API 키를 반환합니다. 없으면 빈 문자열."""
-    if _SMITHERY_CFG.exists():
-        try:
-            return json.loads(_SMITHERY_CFG.read_text(encoding='utf-8')).get('api_key', '')
-        except Exception as e:
-            print(f"[FILE ERROR] smithery_config.json 로드: {e}")
-    return ''
-
-
-def _parse_session_tail(path: Path):
-    """Claude Code 세션 JSONL 파일 꼬리에서 마지막 토큰 usage 정보 추출.
-
-    대형 파일(수천 줄)의 불필요한 전체 읽기를 피하기 위해 파일 끝 8KB만 읽어
-    마지막 assistant 메시지의 usage 필드를 파싱합니다.
-    발견 못하면 None 반환.
-    """
-    try:
-        TAIL_BYTES = 8192  # 끝 8KB면 최근 메시지 수십 개 충분히 커버
-        with open(path, 'rb') as f:
-            f.seek(0, 2)                      # 파일 끝으로 이동
-            size = f.tell()
-            f.seek(max(0, size - TAIL_BYTES)) # 끝 8KB 위치로
-            raw = f.read().decode('utf-8', errors='ignore')
-
-        # 완전한 줄만 추출 (첫 줄은 잘릴 수 있으므로 제외)
-        lines = [l.strip() for l in raw.splitlines() if l.strip()]
-
-        session_id = slug = model = cwd = last_ts = ''
-        input_tokens = output_tokens = cache_read = cache_write = 0
-
-        # 역순으로 탐색 → 가장 최신 데이터 우선
-        for line in reversed(lines):
-            try:
-                obj = json.loads(line)
-            except Exception as e:
-                continue  # JSONL 개별 행 파싱 실패 허용
-
-            # 세션 메타 수집 (처음 발견 시만 기록)
-            if not session_id and obj.get('sessionId'):
-                session_id = obj['sessionId']
-            if not slug and obj.get('slug'):
-                slug = obj['slug']
-            if not cwd and obj.get('cwd'):
-                cwd = obj['cwd']
-            if not last_ts and obj.get('timestamp'):
-                last_ts = obj['timestamp']
-
-            # assistant 메시지에서 usage 추출
-            if obj.get('type') == 'assistant' and isinstance(obj.get('message'), dict):
-                usage = obj['message'].get('usage', {})
-                if usage.get('input_tokens'):
-                    if not model:
                         model = obj['message'].get('model', '')
                     input_tokens  = usage.get('input_tokens', 0)
                     output_tokens = usage.get('output_tokens', 0)
@@ -1895,18 +1805,6 @@ class SSEHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
 
-        # MCP API 연동 (POST)
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
-            data = json.loads(post_data)
-            if mcp_api.handle_post(self, path, data, _smithery_api_key_setter=_SMITHERY_CFG, _mcp_config_path=_mcp_config_path):
-                return
-        except Exception as e: print(f'[MCP Router Error] {e}')
-
-        # MCP API 연동 (GET)
-        if mcp_api.handle_get(self, path, urllib.parse.parse_qs(parsed_path.query), _smithery_api_key=_smithery_api_key, _mcp_config_path=_mcp_config_path):
-            return
         
         # ─── 신규: 사고 과정 실시간 스트리밍 ───
         if path == '/api/events/thoughts':
@@ -1952,18 +1850,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             from queue import Queue as _ClientQueue, Empty as _QEmpty
             client_q = _ClientQueue(maxsize=0)  # 클라이언트별 전용 큐 (무제한 — done 이벤트 드롭 방지)
             with _SSE_LOCK:
-                AGENT_CLIENTS.add(client_q)
-            try:
-                self.connection.settimeout(None)
-                while True:
-                    try:
-                        msg = client_q.get(timeout=1.0)
-                        try:
-                            self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
-                            self.wfile.flush()
-                        except Exception as e:
-                            break  # 클라이언트 연결 끊김
-                    except _QEmpty:
                         # 큐 비어있으면 하트비트 전송 (연결 유지)
                         try:
                             self.wfile.write(b": heartbeat\n\n")
@@ -2184,6 +2070,17 @@ class SSEHandler(BaseHTTPRequestHandler):
             try:
                 subprocess.Popen('cmd.exe /k "echo Installing Codex CLI... && npm install -g @openai/codex"', shell=True)
                 result = {"status": "success", "message": "Codex CLI installation started in a new window."}
+            except Exception as e:
+                result = {"status": "error", "message": str(e)}
+            self.wfile.write(json.dumps(result).encode('utf-8'))
+        elif parsed_path.path == '/api/install-playwright-cli':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                subprocess.Popen('cmd.exe /k "echo Installing Playwright CLI... && python -m pip install -U playwright && python -m playwright install chromium"', shell=True)
+                result = {"status": "success", "message": "Playwright CLI installation started in a new window."}
             except Exception as e:
                 result = {"status": "error", "message": str(e)}
             self.wfile.write(json.dumps(result).encode('utf-8'))
@@ -2424,14 +2321,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             _params = parse_qs(parsed_path.query)
             git_api.handle_get(self, parsed_path.path, _params, BASE_DIR=BASE_DIR)
 
-        # ── [모듈 위임] mcp_api — /api/mcp/* ─────────────────────────────
-        elif parsed_path.path.startswith('/api/mcp/'):
-            _params = parse_qs(parsed_path.query)
-            mcp_api.handle_get(
-                self, parsed_path.path, _params,
-                _smithery_api_key=_smithery_api_key,
-                _mcp_config_path=_mcp_config_path,
-            )
 
         # ── [모듈 위임] vibe_api — /api/vibe/* (cmux 호환 CLI API) ────────
         elif parsed_path.path == '/api/vibe/sidebar':
@@ -2489,14 +2378,6 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         # ── [모듈 위임] files_api — /api/files, /api/read-file ────────
         elif parsed_path.path in ('/api/files', '/api/read-file'):
-            _params = parse_qs(parsed_path.query)
-            files_api.handle_get(
-                self, parsed_path.path, _params,
-                PROJECT_ROOT=_current_project_root(),
-                validate_file_path=_validate_file_path,
-            )
-
-        elif parsed_path.path == '/api/hive/health/repair':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3427,18 +3308,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
                 git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
 
-        # ── [모듈 위임 - POST] mcp_api ────────────────────────────────────
-        # /api/mcp/apikey, /api/mcp/install, /api/mcp/uninstall, /api/mcp/rpc
-        elif parsed_path.path.startswith('/api/mcp/'):
-            from api import mcp_api
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            mcp_api.handle_post(
-                self, parsed_path.path, _body,
-                _smithery_api_key_setter=_SMITHERY_CFG,
-                _mcp_config_path=_mcp_config_path,
-                DATA_DIR=DATA_DIR
-            )
 
         # ── [모듈 위임 - POST] vibe_api — /api/vibe/* (cmux 호환 CLI API) ─
         elif parsed_path.path == '/api/vibe/notify':
@@ -3504,18 +3373,6 @@ class SSEHandler(BaseHTTPRequestHandler):
 이 스킬은 '{keyword}' 관련 작업을 최적화하기 위해 자동으로 제안된 스킬입니다.
 
 ## 🏁 사용 시점
-- '{keyword}' 키워드가 포함된 작업 요청 시
-- 반복적인 {keyword} 관련 파일 수정이 필요할 때
-
-## 🛠️ 핵심 패턴
-1. 관련 파일 분석
-2. {keyword} 표준 가이드라인 적용
-3. 변경 사항 검증
-
----
-**생성일**: {datetime.now().strftime("%Y-%m-%d")}
-**상태**: 초안 (Draft)
-"""
                 with open(skill_file, "w", encoding="utf-8") as f:
                     f.write(template)
                 
@@ -3949,108 +3806,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/mcp/apikey':
-            # Smithery API 키 저장
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                api_key = str(body.get('api_key', '')).strip()
-                _SMITHERY_CFG.write_text(
-                    json.dumps({'api_key': api_key}, ensure_ascii=False, indent=2),
-                    encoding='utf-8'
-                )
-                self.wfile.write(json.dumps({'status': 'success'}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/mcp/install':
-            # MCP 설치 — config 파일의 mcpServers 키에 엔트리 추가
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                tool    = str(body.get('tool',  'claude'))
-                scope   = str(body.get('scope', 'global'))
-                name    = str(body.get('name',  ''))
-                package = str(body.get('package', ''))
-                req_env = body.get('requiresEnv', [])  # 필수 환경변수 목록
-
-                if not name or not package:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': 'name·package 필수'}).encode('utf-8'))
-                    return
-
-                config_path = _mcp_config_path(tool, scope)
-                # 디렉토리 없으면 생성
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-                # 기존 설정 읽기 (없으면 빈 객체)
-                if config_path.exists():
-                    config = json.loads(config_path.read_text(encoding='utf-8'))
-                else:
-                    config = {}
-                if 'mcpServers' not in config:
-                    config['mcpServers'] = {}
-
-                # mcpServers 엔트리 구성 (환경변수가 필요하면 플레이스홀더 삽입)
-                entry: dict = {"command": "npx", "args": ["-y", package]}
-                if req_env:
-                    entry["env"] = {k: f"<YOUR_{k}>" for k in req_env}
-                config['mcpServers'][name] = entry
-
-                # JSON 쓰기 (들여쓰기 2칸, 한글 깨짐 방지)
-                config_path.write_text(
-                    json.dumps(config, ensure_ascii=False, indent=2),
-                    encoding='utf-8'
-                )
-                msg = f"MCP '{name}' 설치 완료 → {config_path}"
-                if req_env:
-                    msg += f" | 환경변수 필요: {', '.join(req_env)}"
-                self.wfile.write(json.dumps({'status': 'success', 'message': msg}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/mcp/uninstall':
-            # MCP 제거 — config 파일의 mcpServers 에서 해당 키 삭제
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                tool  = str(body.get('tool',  'claude'))
-                scope = str(body.get('scope', 'global'))
-                name  = str(body.get('name',  ''))
-
-                if not name:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': 'name 필수'}).encode('utf-8'))
-                    return
-
-                config_path = _mcp_config_path(tool, scope)
-                if not config_path.exists():
-                    self.wfile.write(json.dumps({'status': 'error', 'message': '설정 파일 없음'}).encode('utf-8'))
-                    return
-
-                config = json.loads(config_path.read_text(encoding='utf-8'))
-                servers = config.get('mcpServers', {})
-                if name in servers:
-                    del servers[name]
-                    config['mcpServers'] = servers
-                    config_path.write_text(
-                        json.dumps(config, ensure_ascii=False, indent=2),
-                        encoding='utf-8'
-                    )
-                    self.wfile.write(json.dumps({'status': 'success', 'message': f"MCP '{name}' 제거 완료"}).encode('utf-8'))
-                else:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': f"'{name}' 항목 없음"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/superpowers/install':
             # Vibe Coding 자체 스킬 설치 — 외부 GitHub 의존 없이 내장 파일 복사
@@ -4128,108 +3883,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                     # 프로젝트별 설치 경로에서 제거 (배포 버전 호환)
                     cmd_dir = _proj / '.claude' / 'commands'
                     removed = []
-                    for md in cmd_dir.glob('vibe-*.md'):
-                        md.unlink()
-                        removed.append(md.name)
-                    msg = f"제거 완료: {', '.join(removed)}" if removed else '삭제할 파일 없음'
-                    self.wfile.write(json.dumps({'status': 'success', 'message': msg}, ensure_ascii=False).encode('utf-8'))
-
-                elif tool == 'gemini':
-                    # Gemini 스킬은 프로젝트 내에 있어 실제 삭제하지 않고 상태만 반환
-                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini 스킬은 프로젝트 내장형입니다 (삭제 불필요)'}, ensure_ascii=False).encode('utf-8'))
-                else:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
-
-        elif parsed_path.path == '/api/orchestrator/skill-chain/update':
-            # 스킬 체인 단계 상태 갱신 — skill_chain.db에 직접 UPDATE
-            # body: {"step": 0, "status": "done", "summary": "...", "terminal_id": 1}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                step = int(body.get('step', 0))
-                status = body.get('status', 'done')
-                summary = body.get('summary', '')
-                terminal_id = int(body.get('terminal_id', 0))
-                if not SCRIPTS_DIR:
-                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
-                _orch_dir = str(SCRIPTS_DIR)
-                if _orch_dir not in sys.path:
-                    sys.path.insert(0, _orch_dir)
-                from skill_orchestrator import cmd_update as _orch_update
-                _orch_update(terminal_id, step, status, summary)
-                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/orchestrator/run':
-            # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                if not SCRIPTS_DIR:
-                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
-                # scripts/orchestrator.py를 subprocess로 실행
-                orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
-                result = subprocess.run(
-                    [sys.executable, orch_script],
-                    capture_output=True, text=True, timeout=15, encoding='utf-8',
-                    creationflags=0x08000000
-                )
-                output = (result.stdout + result.stderr).strip()
-                self.wfile.write(json.dumps({
-                    'status': 'success',
-                    'output': output or '이상 없음',
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        # [2026-03-22] /api/dispatcher/* POST → dispatcher_api.py로 위임됨
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        # 불필요한 콘솔 로그 제거하여 터미널 깔끔하게 유지
-        pass
-
-# [제거됨 2026-03-22] pty_sessions, pty_output_buffers, pty_output_seq 글로벌 → Node PTY 서버로 이전
-# Python 서버에서 PTY 세션 정보가 필요한 경우 Node PTY 서버의 REST API를 호출합니다.
-# URL: http://127.0.0.1:{WS_PORT}/api/pty/sessions
-_NODE_PTY_REST_URL = None  # __main__에서 설정됨
-
-def _get_node_pty_sessions() -> dict:
-    """Node PTY 서버에서 세션 정보를 REST로 조회합니다."""
-    if not _NODE_PTY_REST_URL:
-        return {}
-    try:
-        import urllib.request
-        req = urllib.request.Request(f"{_NODE_PTY_REST_URL}/api/pty/sessions")
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            return json.loads(resp.read().decode('utf-8'))
-    except Exception:
-        return {}
-
-
-# [제거됨 2026-03-22] _append_pty_output, getter 주입 → Node PTY 서버로 이전
-# agent_api와 pty_api는 이제 Node PTY 서버의 REST API를 직접 호출합니다.
-
-# [제거됨 2026-03-22] pty_handler 함수 전체 → Node.js pty-server.js로 이전
-# 아래의 기존 코드는 모두 제거되었습니다:
-# - pty_handler(): WebSocket PTY 핸들러 (~340줄)
-# - _cleanup_all_pty_sessions(): PTY 세션 정리
-# 대신 Node PTY 서버가 이 역할을 수행합니다.
-# Python 서버는 Node PTY 서버를 subprocess로 관리하고,
-# _child_procs를 통해 종료 시 자동 kill됩니다.
-_REMOVED_PTY_HANDLER = True  # 마커 — 참조 점검용
-
-# 워치독/Telegram/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
 # — X 버튼 종료 시 이 목록을 순회하여 모두 taskkill로 강제 종료
 _child_procs: list = []
 

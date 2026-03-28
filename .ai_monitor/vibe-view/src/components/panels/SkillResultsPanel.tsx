@@ -222,7 +222,7 @@ export default function SkillResultsPanel() {
                 )}
                 {/* 지시 대상 스킬 목록 */}
                 <div className="flex flex-col gap-0.5 mt-auto pt-1">
-                  {chain.steps.map((step, i) => {
+                  {(chain.steps ?? []).map((step, i) => {
                     const rawKey = step.skill_name.replace(/^vibe-/, '');
                     const label = SKILL_LABELS[rawKey] ?? rawKey;
                     return (
@@ -235,7 +235,7 @@ export default function SkillResultsPanel() {
               </div>
 
               {/* ── 레인 2~N: 각 스킬이 뭘 하는지 ── */}
-              {chain.steps.map((step, i) => {
+              {(chain.steps ?? []).map((step, i) => {
                 const rawKey = step.skill_name.replace(/^vibe-/, '');
                 const label = SKILL_LABELS[rawKey] ?? rawKey;
                 const s = step.status;
@@ -347,8 +347,8 @@ export default function SkillResultsPanel() {
         ) : (
           filteredSessions.map(session => {
             const isExpanded = expandedId === session.session_id;
-            const doneCount = session.results.filter(r => r.status === 'done').length;
-            const totalCount = session.results.length;
+            const doneCount = (session.results ?? []).filter(r => r.status === 'done').length;
+            const totalCount = (session.results ?? []).length;
 
             return (
               <div

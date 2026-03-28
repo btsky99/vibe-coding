@@ -1,4 +1,4 @@
-"""
+﻿"""
 FILE: scripts/generate_project_map.py
 DESCRIPTION: PROJECT_MAP.md 자동 생성 스크립트.
              실제 파일 구조를 스캔하여 PROJECT_MAP.md를 자동 갱신합니다.
@@ -46,7 +46,6 @@ FILE_DESCRIPTIONS = {
     # ── .ai_monitor/api/ ──
     "api/hive_api.py": "하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*)",
     "api/agent_api.py": "CLI 에이전트 관리 API (/api/agent/*)",
-    "api/mcp_api.py": "MCP 서버 관리 API (/api/mcp/*)",
     "api/vibe_api.py": "Vibe CLI 상태 관리 API (/api/vibe/*)",
     "api/git_api.py": "Git 저장소 관리 API (/api/git/*)",
     "api/memory_api.py": "메모리/지식 저장소 API (/api/memory/*)",
@@ -161,7 +160,6 @@ FILE_DESCRIPTIONS = {
     "KanbanPanel.tsx": "오케스트레이션 수평 파이프라인 뷰",
     "SkillResultsPanel.tsx": "스킬 실행 결과 (라이브 + 기록)",
     "GitPanel.tsx": "Git 통합 (브랜치, 스테이징, 커밋)",
-    "McpPanel.tsx": "MCP 관리자 (카탈로그 + Smithery 검색)",
     "DiscordConfigPanel.tsx": "Discord 설정 패널",
 }
 
@@ -425,3 +423,4 @@ def generate():
 
 if __name__ == '__main__':
     generate()
+

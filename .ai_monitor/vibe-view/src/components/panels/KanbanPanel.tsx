@@ -157,7 +157,7 @@ export default function KanbanPanel() {
 
   // ── 통계 ─────────────────────────────────────────────────────────────────
   const runningCount = Object.values(liveChains)
-    .flatMap(c => c.steps).filter(s => s.status === 'running').length;
+    .flatMap(c => c.steps ?? []).filter(s => s.status === 'running').length;
   const hasLive = chainEntries.length > 0;
 
   // ── 완료 세션에서 스킬별 요약 찾기 헬퍼 ──────────────────────────────────
@@ -303,7 +303,7 @@ export default function KanbanPanel() {
           {/* ════ 3번~: 실행 중인 스킬 컬럼들 ══════════════════════════════ */}
           {hasLive ? (
             chainEntries.flatMap(([tid, chain]) =>
-              chain.steps.map((step, stepIdx) => {
+              (chain.steps ?? []).map((step, stepIdx) => {
                 const s = step.status;
                 const isRunning = s === 'running';
                 const isDone    = s === 'done';

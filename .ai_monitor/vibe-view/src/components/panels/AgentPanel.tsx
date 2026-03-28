@@ -2649,7 +2649,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
           // 스킬번호 → 사용 터미널+스텝 매핑
           const skillUsage: Record<number, { termId: string; step: typeof activeOrchTerminals[0][1]['steps'][0] }[]> = {};
           activeOrchTerminals.forEach(([termId, chain]) => {
-            chain.steps.forEach(step => {
+            (chain.steps ?? []).forEach(step => {
               if (!skillUsage[step.skill_num]) skillUsage[step.skill_num] = [];
               skillUsage[step.skill_num].push({ termId, step });
             });
@@ -2767,7 +2767,7 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                             </div>
                           )}
                           <div className="flex items-center gap-1 flex-wrap">
-                            {chain.steps.map((step, i) => {
+                            {(chain.steps ?? []).map((step, i) => {
                               const circleNum = CIRCLE_NUMS[step.skill_num] ?? step.skill_num;
                               return (
                                 <div key={i} className="flex items-center gap-1">
@@ -2785,8 +2785,8 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
                             })}
                           </div>
                           {(() => {
-                            const running = chain.steps.find(s => s.status === 'running');
-                            const lastDone = [...chain.steps].reverse().find(s => s.status === 'done');
+                            const running = (chain.steps ?? []).find(s => s.status === 'running');
+                            const lastDone = [...(chain.steps ?? [])].reverse().find(s => s.status === 'done');
                             if (running) return (
                               <div className="mt-1.5 text-[7px] text-primary truncate">
                                 ⚡ {running.skill_name} 실행 중...

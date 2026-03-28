@@ -1,4 +1,4 @@
-# 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
+﻿# 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
 > 자동 생성: `python scripts/generate_project_map.py` | 2026-03-22 21:19
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
@@ -39,7 +39,6 @@
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
 | `git_api.py` | 176 | Git 저장소 관리 API (/api/git/*) |
 | `hive_api.py` | 970 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
-| `mcp_api.py` | 386 | MCP 서버 관리 API (/api/mcp/*) |
 | `memory_api.py` | 168 | 메모리/지식 저장소 API (/api/memory/*) |
 | `pty_api.py` | 165 | PTY 터미널 제어 API (/api/pty/*) |
 | `tasks_api.py` | 235 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
@@ -190,7 +189,6 @@
 | `GitPanel.tsx` | 250 | Git 통합 (브랜치, 스테이징, 커밋) |
 | `HivePanel.tsx` | 275 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
 | `KanbanPanel.tsx` | 446 | 오케스트레이션 수평 파이프라인 뷰 |
-| `McpPanel.tsx` | 393 | MCP 관리자 (카탈로그 + Smithery 검색) |
 | `MemoryPanel.tsx` | 374 | 공유 지식 베이스 (PostgreSQL) |
 | `MessagesPanel.tsx` | 466 | 에이전트 간 메시지 채널 (채팅 버블 스타일) |
 | `OrchestratorPanel.tsx` | 394 | 스킬 체인 현황판 |
@@ -217,3 +215,4 @@
 
 ---
 > 자동 생성 완료: 2026-03-22 21:19
+

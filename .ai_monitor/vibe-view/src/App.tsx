@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ------------------------------------------------------------------------
  * 📄 파일명: App.tsx
  * 📂 메인 문서 링크: docs/README.md
@@ -16,7 +16,7 @@
  *                      공유 상수(API_BASE, getFileIcon 등)는 constants.ts로 이동.
  *                      App.tsx 2200→~1360줄로 감소.
  * - 2026-03-01 Claude: 각 패널 JSX를 독립 컴포넌트(MessagesPanel, TasksPanel, MemoryPanel,
- *                      OrchestratorPanel, HivePanel, GitPanel, McpPanel, SkillResultsPanel)로 교체.
+ *                      OrchestratorPanel, HivePanel, GitPanel, SkillResultsPanel)로 교체.
  *                      배지 카운트는 콜백(onUnreadCount, onActiveCount 등)으로 수신하는 방식으로 전환.
  *                      skills 탭 및 Activity Bar 버튼 추가. App.tsx 3289→2197줄으로 대폭 감소.
  * - 2026-03-01 Claude: 파일 탐색기 가로 스크롤 추가 (overflow-auto + min-w-max 래퍼),
@@ -52,7 +52,6 @@ import MemoryPanel from './components/panels/MemoryPanel';
 import HivePanel from './components/panels/HivePanel';
 import DispatcherPanel from './components/panels/DispatcherPanel';
 import GitPanel from './components/panels/GitPanel';
-import McpPanel from './components/panels/McpPanel';
 import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
@@ -124,7 +123,6 @@ function App() {
   const [memory, setMemory] = useState<MemoryEntry[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [skillChain, setSkillChain] = useState<any>({ status: 'idle' });
-  const [mcpInstalled, setMcpInstalled] = useState<string[]>([]);
   const [geminiUsage, setGeminiUsage] = useState<{
     total_tokens: number; context_window: number; percentage: number
   } | null>(null);
@@ -229,20 +227,7 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // MCP 설치 현황 폴링 (30초) — Activity Bar 배지(mcpInstalled.length)용
   // [P2 최적화] 5초 → 30초 (MCP 설치/제거는 매우 드뭄)
-  useEffect(() => {
-    const fetchInstalled = () => {
-      fetch(`${API_BASE}/api/mcp/installed?tool=claude&scope=global`)
-        .then(res => res.json())
-        .then(data => setMcpInstalled(data.installed ?? []))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchInstalled();
-    const interval = setInterval(fetchInstalled, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
   // 터미널별 에이전트 파이프라인 상태 폴링 (5초) — TerminalSlot 모니터링 뷰 단계 표시용
   // [P2 최적화] 3초 → 5초 (에이전트 상태 변경 주기 > 5초)
   useEffect(() => {
@@ -612,7 +597,6 @@ function App() {
     memory: '공유 메모리',
     hive: '하이브 진단 / 스킬',
     git: 'Git 감시',
-    mcp: 'MCP 관리자',
     agent: '자율 에이전트',
   }[activeTab] ?? activeTab;
 
@@ -690,7 +674,6 @@ function App() {
           memoryCount={memory.length}
           conflictCount={conflictCount}
           totalGitChanges={totalGitChanges}
-          mcpCount={mcpInstalled.length}
           isAgentRunning={isAgentRunning}
           globalPipelineStage={globalPipelineStage}
           hiveHealth={hiveHealth}
@@ -744,9 +727,6 @@ function App() {
                 currentPath={currentPath}
                 onChangesCount={(c, conf) => { setTotalGitChanges(c); setConflictCount(conf); }}
               />
-            ) : activeTab === 'mcp' ? (
-              /* MCP 관리자 패널 */
-              <McpPanel />
             ) : activeTab === 'agent' ? (
               /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
               <AgentPanel onStatusChange={setIsAgentRunning} onOpenFilePath={handleOpenFilePath} />
@@ -1041,7 +1021,6 @@ function DashboardOnlyApp() {
     tasks: 'Tasks',
     memory: 'Shared Memory',
     git: 'Git',
-    mcp: 'MCP',
     hive: 'Hive',
     telegram: 'Telegram Bridge',
   };
@@ -1058,8 +1037,6 @@ function DashboardOnlyApp() {
         return <MemoryPanel />;
       case 'git':
         return <GitPanel currentPath="" onChangesCount={() => {}} />;
-      case 'mcp':
-        return <McpPanel />;
       case 'hive':
         return <HivePanel />;
       case 'telegram':
@@ -1093,3 +1070,5 @@ function Root() {
 }
 
 export default Root;
+
+

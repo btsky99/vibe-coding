@@ -18,8 +18,13 @@
         ]
       },
       {
-        "type": "command",
-        "command": "python \"D:\\vibe-coding\\scripts\\hook_bridge.py\" \"$PROMPT\""
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"D:\\vibe-coding\\scripts\\hook_bridge.py\" \"$PROMPT\""
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -55,8 +60,13 @@
         ]
       },
       {
-        "type": "command",
-        "command": "python \"D:\\vibe-coding\\scripts\\claude_hook.py\" stop"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"D:\\vibe-coding\\scripts\\claude_hook.py\" stop"
+          }
+        ]
       }
     ]
   }

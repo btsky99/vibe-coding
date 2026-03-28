@@ -162,7 +162,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
   // 예: skillUsage[3] = [{termId:"1", step:{...}}, {termId:"2", step:{...}}]
   const skillUsage: Record<number, { termId: string; step: TerminalStep }[]> = {};
   activeTerminals.forEach(([termId, chain]) => {
-    chain.steps.forEach(step => {
+    (chain.steps ?? []).forEach(step => {
       if (!skillUsage[step.skill_num]) skillUsage[step.skill_num] = [];
       skillUsage[step.skill_num].push({ termId, step });
     });
@@ -317,7 +317,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
                   </div>
 
                   {/* 스킬 카드들 (파이프라인 2번째 이후) */}
-                  {chain.steps.map((step, i) => {
+                  {(chain.steps ?? []).map((step, i) => {
                     const shortName = step.skill_name.replace(/^vibe-/, '');
                     const isRunning = step.status === 'running';
                     const isDone    = step.status === 'done';

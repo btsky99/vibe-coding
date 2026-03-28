@@ -1,4 +1,4 @@
-# FILE: pyproject.toml
+﻿# FILE: pyproject.toml
 # DESCRIPTION: pip install 기반 배포를 위한 패키지 정의.
 #   `pip install git+https://github.com/btsky99/vibe-coding.git` 으로 설치.
 #   `vibe-coding` 명령으로 실행. 기존 EXE 빌드와 공존.
@@ -75,3 +75,4 @@ ai_monitor = [
     "data/.gitkeep",
     "_version.py",
 ]
+

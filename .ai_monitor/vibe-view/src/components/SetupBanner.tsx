@@ -69,7 +69,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       .then((data: SetupStatus) => {
         setStatus(data);
         /* 자동 수리 항목은 5초 후 숨김 */
-        if (data.auto_fixed.length > 0 && data.needs_action.length === 0) {
+        if ((data.auto_fixed?.length ?? 0) > 0 && (data.needs_action?.length ?? 0) === 0) {
           setTimeout(() => setShowFixed(false), 5000);
         }
       })
@@ -79,11 +79,11 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   /* 렌더링 조건 */
   if (dismissed || !status) return null;
   if (status.ready && !showFixed) return null;
-  if (status.ready && status.auto_fixed.length === 0) return null;
+  if (status.ready && (status.auto_fixed?.length ?? 0) === 0) return null;
 
   const handleDismiss = () => {
     setDismissed(true);
-    if (status.needs_action.length === 0) {
+    if ((status.needs_action?.length ?? 0) === 0) {
       localStorage.setItem(DISMISS_KEY, 'true');
     }
   };
@@ -95,7 +95,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   };
 
   /* 배너 색상 결정 */
-  const hasIssues = status.needs_action.length > 0;
+  const hasIssues = (status.needs_action?.length ?? 0) > 0;
   const bgColor = hasIssues
     ? 'bg-amber-900/80 border-amber-600/50'
     : 'bg-emerald-900/60 border-emerald-600/40';

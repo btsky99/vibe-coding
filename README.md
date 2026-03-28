@@ -40,6 +40,20 @@ pip install -e .
 vibe-coding
 ```
 
+## Playwright CLI
+
+```bash
+python scripts/install_playwright_cli.py
+python -m playwright --version
+```
+
+브라우저 다운로드만 나중에 하고 싶으면:
+
+```bash
+python scripts/install_playwright_cli.py --skip-browser-install
+python -m playwright install chromium
+```
+
 ## 라이선스
 
 MIT

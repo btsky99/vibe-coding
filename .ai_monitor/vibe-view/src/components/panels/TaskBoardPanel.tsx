@@ -293,7 +293,7 @@ export default function TaskBoardPanel() {
     (entry) => entry.terminal?.status === 'running' || entry.chain?.isLive,
   ).length;
   const runningStepCount = Object.values(liveChains)
-    .flatMap((chain) => chain.steps)
+    .flatMap((chain) => chain.steps ?? [])
     .filter((step) => step.status === 'running').length;
   const serverOffline = !hasApiSignal && fetchFailures > 0;
 
@@ -355,7 +355,7 @@ export default function TaskBoardPanel() {
             ) : (
               activeTerminals.map(({ rawId, terminalId, terminal, chain }) => {
                 const request = chain?.request || terminal?.task || '작업 설명 없음';
-                const currentStep = chain?.steps.find((step) => step.status === 'running') ?? null;
+                const currentStep = chain?.steps?.find((step) => step.status === 'running') ?? null;
                 const isChainDone = chain && !chain.isLive;  // 체인 있지만 완료 상태
                 const statusTone =
                   terminal?.status === 'error'
