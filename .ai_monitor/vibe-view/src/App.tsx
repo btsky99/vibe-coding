@@ -46,7 +46,7 @@ const FloatingWindow = lazy(() => import('./components/FloatingWindow'));
 import TerminalSlot from './components/TerminalSlot';
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import MessagesPanel from './components/panels/MessagesPanel';
-import GroupChatPanel from './components/panels/GroupChatPanel';
+import AgentMonitorPanel from './components/panels/AgentMonitorPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import HivePanel from './components/panels/HivePanel';
@@ -645,7 +645,7 @@ function App() {
     explorer: '파일 탐색기',
     search: '파일 검색',
     messages: '메시지 채널',
-    'group-chat': 'Internal Group Chat',
+    'group-chat': '에이전트 모니터',
     tasks: '태스크보드',
     memory: '공유 메모리',
     hive: '하이브 진단 / 스킬',
@@ -761,7 +761,7 @@ function App() {
               <MessagesPanel onUnreadCount={setUnreadMsgCount} onOpenFilePath={handleOpenFilePath} />
             ) : activeTab === 'group-chat' ? (
               /* 내부 그룹 채팅 패널 */
-              <GroupChatPanel />
+              <AgentMonitorPanel />
             ) : activeTab === 'tasks' ? (
               /* 태스크 보드 패널 (리스트 뷰) */
               <TasksPanel onActiveCount={setActiveTaskCount} />
@@ -1070,7 +1070,7 @@ function DashboardOnlyApp() {
   const titleMap: Record<string, string> = {
     agent: 'Vibe Coding Master',
     messages: 'Messages',
-    'group-chat': 'Internal Group Chat',
+    'group-chat': '에이전트 모니터',
     tasks: 'Tasks',
     memory: 'Shared Memory',
     git: 'Git',
@@ -1083,7 +1083,7 @@ function DashboardOnlyApp() {
       case 'messages':
         return <MessagesPanel onUnreadCount={() => {}} />;
       case 'group-chat':
-        return <GroupChatPanel />;
+        return <AgentMonitorPanel />;
       case 'tasks':
         return <TasksPanel onActiveCount={() => {}} />;
       case 'memory':

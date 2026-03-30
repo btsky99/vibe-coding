@@ -481,6 +481,72 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             $$;
         """)
 
+        # ── [2026-03-30] Paperclip 스타일 오케스트레이션 전환 ──────────────
+        # Task 1: hive_tasks 확장 — 계층 구조 + 원자적 체크아웃 + 결과 기록
+        execute_raw("ALTER TABLE hive_tasks ADD COLUMN IF NOT EXISTS parent_id TEXT DEFAULT NULL;")
+        execute_raw("ALTER TABLE hive_tasks ADD COLUMN IF NOT EXISTS checkout_by TEXT DEFAULT NULL;")
+        execute_raw("ALTER TABLE hive_tasks ADD COLUMN IF NOT EXISTS checkout_at TIMESTAMPTZ DEFAULT NULL;")
+        execute_raw("ALTER TABLE hive_tasks ADD COLUMN IF NOT EXISTS result TEXT DEFAULT '';")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_hive_tasks_parent ON hive_tasks (parent_id);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_hive_tasks_checkout ON hive_tasks (checkout_by);")
+
+        # Task 2: 태스크 코멘트 — 에이전트 간 비동기 통신 (그룹 채팅 대체)
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS task_comments (
+                id SERIAL PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                author TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments (task_id, created_at);")
+
+        # Task 3: 에이전트 하트비트 상태 — 자율 실행 모니터링
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS agent_heartbeats (
+                agent_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'offline',
+                last_beat TIMESTAMPTZ DEFAULT now(),
+                current_task TEXT DEFAULT NULL,
+                beat_count INT NOT NULL DEFAULT 0,
+                config JSONB NOT NULL DEFAULT '{}'::jsonb
+            );
+        """)
+
+        # Task 4: NOTIFY 트리거 — 태스크 할당 시 에이전트 자동 깨우기
+        execute_raw("""
+            CREATE OR REPLACE FUNCTION notify_task_assigned()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.assigned_to IS DISTINCT FROM OLD.assigned_to
+                   AND NEW.assigned_to IS NOT NULL
+                   AND NEW.assigned_to != '' THEN
+                    PERFORM pg_notify('task_assigned',
+                        json_build_object(
+                            'task_id', NEW.id,
+                            'agent', NEW.assigned_to,
+                            'title', NEW.title,
+                            'priority', NEW.priority
+                        )::text
+                    );
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        execute_raw("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_task_assigned') THEN
+                    CREATE TRIGGER trg_task_assigned
+                    AFTER UPDATE ON hive_tasks
+                    FOR EACH ROW EXECUTE FUNCTION notify_task_assigned();
+                END IF;
+            END;
+            $$;
+        """)
+
         _SCHEMA_READY = True
         if not _MIGRATION_DONE:
             # DB에 마이그레이션 완료 플래그 확인 — 프로세스 재시작 시 재실행 방지
@@ -1049,3 +1115,134 @@ def get_chat_context(limit: int = 10) -> str:
     if not messages:
         return "(대화 없음)"
     return "\n".join(f"[{m['sender']}] {m['content']}" for m in messages)
+
+
+# ── Paperclip 스타일 오케스트레이션 ──────────────────────────────────────────
+# [2026-03-30] 그룹 채팅 대체 — 원자적 체크아웃 + 태스크 코멘트 + 에이전트 하트비트
+
+def atomic_checkout(agent_id: str, task_id: str) -> dict | None:
+    """원자적 태스크 체크아웃 — 이미 체크아웃된 태스크는 None 반환.
+
+    SELECT ... FOR UPDATE SKIP LOCKED 패턴으로 동시 접근 시 하나만 성공.
+    """
+    conn = _get_pg_conn()
+    if not conn:
+        return None
+    try:
+        with conn.cursor() as cur:
+            # 트랜잭션 내에서 잠금 획득 시도
+            cur.execute(
+                "SELECT id, title, description, assigned_to, status, priority "
+                "FROM hive_tasks WHERE id = %s "
+                "AND (checkout_by IS NULL OR checkout_by = '') "
+                "FOR UPDATE SKIP LOCKED;",
+                (task_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return None  # 이미 체크아웃됨 또는 존재하지 않음
+            # 체크아웃 마킹
+            cur.execute(
+                "UPDATE hive_tasks SET checkout_by = %s, checkout_at = now(), "
+                "kanban_status = 'working', status = 'in_progress', "
+                "updated_at = %s WHERE id = %s;",
+                (agent_id, _now_iso(), task_id)
+            )
+            conn.commit()
+            cols = ('id', 'title', 'description', 'assigned_to', 'status', 'priority')
+            return dict(zip(cols, row))
+    except Exception as e:
+        conn.rollback()
+        print(f"[pg_store] atomic_checkout 실패: {e}")
+        return None
+
+
+def release_checkout(task_id: str, new_status: str = 'done', result: str = '') -> bool:
+    """체크아웃 해제 — 작업 완료 또는 실패 시 호출."""
+    return execute(
+        f"UPDATE hive_tasks SET checkout_by = NULL, checkout_at = NULL, "
+        f"status = {_sql_text(new_status)}, kanban_status = {_sql_text(new_status)}, "
+        f"result = {_sql_text(result)}, updated_at = {_sql_text(_now_iso())} "
+        f"WHERE id = {_sql_text(task_id)};"
+    )
+
+
+def find_tasks_for_agent(agent_id: str, project_id: str = '') -> list[dict]:
+    """에이전트에게 할당된 미처리 태스크 조회 (체크아웃 안 된 것만)."""
+    where_parts = [
+        f"assigned_to = {_sql_text(agent_id)}",
+        "(checkout_by IS NULL OR checkout_by = '')",
+        "status NOT IN ('done', 'cancelled', 'blocked')"
+    ]
+    if project_id:
+        where_parts.append(f"(project_id = {_sql_text(project_id)} OR project_id = '')")
+    where = " AND ".join(where_parts)
+    return query_rows(
+        f"SELECT id, title, description, priority, status, kanban_status "
+        f"FROM hive_tasks WHERE {where} "
+        f"ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+        f"WHEN 'medium' THEN 2 ELSE 3 END, updated_at ASC;"
+    )
+
+
+# ── 태스크 코멘트 CRUD ──────────────────────────────────────────────────────
+
+def add_task_comment(task_id: str, author: str, content: str) -> bool:
+    """태스크에 코멘트 추가 — 에이전트 간 비동기 통신 채널."""
+    return execute(
+        f"INSERT INTO task_comments (task_id, author, content) "
+        f"VALUES ({_sql_text(task_id)}, {_sql_text(author)}, {_sql_text(content)});"
+    )
+
+
+def list_task_comments(task_id: str, limit: int = 50) -> list[dict]:
+    """태스크의 코멘트 목록 조회 (오래된 순)."""
+    return query_rows(
+        f"SELECT id, task_id, author, content, "
+        f"to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS created_at "
+        f"FROM task_comments WHERE task_id = {_sql_text(task_id)} "
+        f"ORDER BY created_at ASC LIMIT {int(limit)};"
+    )
+
+
+# ── 에이전트 하트비트 ────────────────────────────────────────────────────────
+
+def record_heartbeat(agent_id: str, status: str = 'idle',
+                     current_task: str = None) -> bool:
+    """에이전트 하트비트 기록 — 상태 갱신 + 카운터 증가."""
+    task_val = _sql_text(current_task) if current_task else 'NULL'
+    return execute(
+        f"INSERT INTO agent_heartbeats (agent_id, status, last_beat, current_task, beat_count) "
+        f"VALUES ({_sql_text(agent_id)}, {_sql_text(status)}, now(), {task_val}, 1) "
+        f"ON CONFLICT (agent_id) DO UPDATE SET "
+        f"status = {_sql_text(status)}, last_beat = now(), "
+        f"current_task = {task_val}, "
+        f"beat_count = agent_heartbeats.beat_count + 1;"
+    )
+
+
+def list_agent_status() -> list[dict]:
+    """전체 에이전트 하트비트 상태 조회."""
+    return query_rows(
+        "SELECT agent_id, status, "
+        "to_char(last_beat, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS last_beat, "
+        "current_task, beat_count, config::text AS config "
+        "FROM agent_heartbeats ORDER BY agent_id;"
+    )
+
+
+def trigger_agent(agent_id: str) -> bool:
+    """에이전트에게 NOTIFY 전송 — 수동 하트비트 트리거."""
+    conn = _get_pg_conn()
+    if not conn:
+        return False
+    try:
+        import json as _json
+        payload = _json.dumps({'agent': agent_id, 'trigger': 'manual'})
+        with conn.cursor() as cur:
+            cur.execute(f"NOTIFY task_assigned, '{payload}';")
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[pg_store] trigger_agent 실패: {e}")
+        return False

@@ -156,6 +156,13 @@ from src.pg_store import (
     set_memory,
     update_task,
     delete_task,
+    # Paperclip 스타일 오케스트레이션 함수
+    add_task_comment,
+    list_task_comments,
+    atomic_checkout,
+    release_checkout,
+    list_agent_status,
+    trigger_agent,
 )
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
@@ -2481,13 +2488,17 @@ class SSEHandler(BaseHTTPRequestHandler):
             )
 
         # ── [모듈 위임] tasks_api — /api/tasks, /api/task-logs ─────────
-        elif parsed_path.path in ('/api/tasks', '/api/tasks/kanban', '/api/task-logs'):
+        elif (parsed_path.path in ('/api/tasks', '/api/tasks/kanban', '/api/task-logs',
+                                    '/api/agents/status')
+              or parsed_path.path.startswith('/api/tasks/') and parsed_path.path.endswith('/comments')):
             _params = parse_qs(parsed_path.query)
             tasks_api.handle_get(
                 self, parsed_path.path, _params,
                 DATA_DIR=DATA_DIR,
                 list_tasks=list_tasks,
                 current_project_id=_current_project_id(),
+                list_task_comments=list_task_comments,
+                list_agent_status=list_agent_status,
             )
 
         # ── [모듈 위임] files_api — /api/files, /api/read-file ────────
@@ -3911,8 +3922,11 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             ok = clear_messages()
             self.wfile.write(json.dumps({'status': 'ok' if ok else 'error'}).encode('utf-8'))
-        # ── [모듈 위임 - POST] tasks_api — /api/tasks, /api/tasks/update, delete, claim ─
-        elif parsed_path.path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim'):
+        # ── [모듈 위임 - POST] tasks_api — /api/tasks, update, delete, claim, comments, checkout, trigger ─
+        elif (parsed_path.path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim')
+              or (parsed_path.path.startswith('/api/tasks/') and
+                  (parsed_path.path.endswith('/comments') or parsed_path.path.endswith('/checkout')))
+              or (parsed_path.path.startswith('/api/agents/') and parsed_path.path.endswith('/trigger'))):
             content_length = int(self.headers.get('Content-Length', 0))
             _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
             tasks_api.handle_post(
@@ -3921,6 +3935,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                 save_task=save_task, update_task=update_task, delete_task=delete_task,
                 current_project_id=_current_project_id(),
                 PROJECT_ID=PROJECT_ID,
+                add_task_comment=add_task_comment,
+                atomic_checkout=atomic_checkout,
+                release_checkout=release_checkout,
+                trigger_agent=trigger_agent,
             )
 
         # ── [모듈 위임 - POST] dispatcher_api — /api/dispatcher/* ──────
@@ -5067,45 +5085,8 @@ def main():
             print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
     threading.Thread(target=run_mux_server, daemon=True).start()
 
-    # [2026-03-28] Claude: LLM 그룹챗 WebSocket 서버 자동 시작 (포트 8765)
-    # 터미널 간 LLM 실시간 채팅을 위한 WebSocket 브로커
-    def run_group_chat_server():
-        """llm_group_chat WebSocket 서버를 별도 스레드에서 실행"""
-        try:
-            import sys as _s
-            # llm_group_chat 패키지 경로 추가 (프로젝트 루트)
-            if str(PROJECT_ROOT) not in _s.path:
-                _s.path.insert(0, str(PROJECT_ROOT))
-            from llm_group_chat.server import run_server
-            run_server(host="localhost", port=8765)
-        except ImportError as e:
-            print(f"[!] 그룹챗 서버 시작 실패 — llm_group_chat 모듈 없음: {e}")
-        except OSError as e:
-            if '10048' in str(e) or 'already in use' in str(e).lower():
-                print("[!] 그룹챗 서버 포트(8765) 이미 사용 중 — 스킵")
-            else:
-                print(f"[!] 그룹챗 서버 오류: {e}")
-        except Exception as e:
-            print(f"[!] 그룹챗 서버 오류: {e}")
-    threading.Thread(target=run_group_chat_server, daemon=True, name='GroupChatWS').start()
-
-    # [2026-03-28] Claude: 그룹챗 브릿지 — 채팅 메시지 → PTY 터미널 주입 + 에이전트 응답 → 채팅
-    # WS 서버 시작 후 2초 대기 → 브릿지 연결 (서버가 준비될 시간 확보)
-    def init_group_chat_bridge():
-        import time as _t
-        _t.sleep(2)  # WS 서버 기동 대기
-        try:
-            import sys as _s
-            if str(PROJECT_ROOT) not in _s.path:
-                _s.path.insert(0, str(PROJECT_ROOT))
-            from llm_group_chat.bridge import init_bridge
-
-            # 브릿지 시작 (대시보드 UI ↔ WS 서버 연결)
-            init_bridge()
-            print("[*] 그룹챗 초기화 완료 — 터미널에서 'groupchat-claude' 등 선택하여 참여")
-        except Exception as e:
-            print(f"[!] 그룹챗 브릿지 초기화 실패: {e}")
-    threading.Thread(target=init_group_chat_bridge, daemon=True, name='GroupChatBridge').start()
+    # [2026-03-30] 그룹챗 WebSocket/브릿지 제거됨 — Paperclip 스타일 하트비트로 전환
+    # 에이전트 간 통신은 task_comments + PostgreSQL NOTIFY로 대체
 
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:

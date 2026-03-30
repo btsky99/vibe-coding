@@ -3,20 +3,24 @@ FILE: api/tasks_api.py
 DESCRIPTION: /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈.
              공유 작업 큐 전체 목록, 칸반 보드, 태스크 로그 조회(GET),
              새 작업 생성, 상태 업데이트, 삭제, Claim(POST) 기능을 제공합니다.
+             Paperclip 스타일 코멘트/체크아웃/에이전트 상태 API 포함.
              server.py에서 분리하여 태스크 관련 로직을 단일 파일로 관리합니다.
 
 REVISION HISTORY:
+- 2026-03-30 Claude: 하트비트/체크아웃/코멘트 엔드포인트 추가 (Paperclip 전환)
 - 2026-03-22 Claude: server.py에서 분리 — tasks API 핸들러 담당
 """
 
 import json
+import re
 import time
 from pathlib import Path
 from urllib.parse import parse_qs
 
 
 def handle_get(handler, path: str, params: dict, *,
-               DATA_DIR: Path, list_tasks, current_project_id: str) -> bool:
+               DATA_DIR: Path, list_tasks, current_project_id: str,
+               list_task_comments=None, list_agent_status=None) -> bool:
     """GET 요청 처리 — /api/tasks, /api/tasks/kanban, /api/task-logs 담당.
 
     반환값: 경로가 처리됐으면 True, 해당 없으면 False.
@@ -106,12 +110,46 @@ def handle_get(handler, path: str, params: dict, *,
         handler.wfile.write(json.dumps(_results, ensure_ascii=False).encode('utf-8'))
         return True
 
+    # ── GET /api/tasks/<id>/comments ──────────────────────────────────
+    # 태스크 코멘트 조회 — Paperclip 스타일 비동기 통신
+    m = re.match(r'^/api/tasks/([^/]+)/comments$', path)
+    if m and list_task_comments:
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        task_id = m.group(1)
+        try:
+            comments = list_task_comments(task_id)
+        except Exception as e:
+            print(f"[PG ERROR] /api/tasks/comments: {e}")
+            comments = []
+        handler.wfile.write(json.dumps(comments, ensure_ascii=False).encode('utf-8'))
+        return True
+
+    # ── GET /api/agents/status ────────────────────────────────────────
+    # 전체 에이전트 하트비트 상태 조회
+    if path == '/api/agents/status' and list_agent_status:
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            agents = list_agent_status()
+        except Exception as e:
+            print(f"[PG ERROR] /api/agents/status: {e}")
+            agents = []
+        handler.wfile.write(json.dumps(agents, ensure_ascii=False).encode('utf-8'))
+        return True
+
     return False
 
 
 def handle_post(handler, path: str, data: dict, *,
                 SESSIONS_FILE: Path, save_task, update_task, delete_task,
-                current_project_id: str, PROJECT_ID: str) -> bool:
+                current_project_id: str, PROJECT_ID: str,
+                add_task_comment=None, atomic_checkout=None,
+                release_checkout=None, trigger_agent=None) -> bool:
     """POST 요청 처리 — /api/tasks 생성, /api/tasks/update, delete, claim 담당.
 
     반환값: 경로가 처리됐으면 True, 해당 없으면 False.
@@ -228,6 +266,63 @@ def handle_post(handler, path: str, data: dict, *,
                 'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
             })
             handler.wfile.write(json.dumps({'status': 'success', 'task': claimed_task}, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
+
+    # ── POST /api/tasks/<id>/comments ─────────────────────────────────
+    # 태스크에 코멘트 추가 — Paperclip 스타일 비동기 통신
+    m = re.match(r'^/api/tasks/([^/]+)/comments$', path)
+    if m and add_task_comment:
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            task_id = m.group(1)
+            author = str(data.get('author', 'user'))
+            content = str(data.get('content', ''))
+            add_task_comment(task_id, author, content)
+            handler.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
+
+    # ── POST /api/tasks/<id>/checkout ─────────────────────────────────
+    # 원자적 태스크 체크아웃
+    m = re.match(r'^/api/tasks/([^/]+)/checkout$', path)
+    if m and atomic_checkout:
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            task_id = m.group(1)
+            agent_id = str(data.get('agent_id', ''))
+            result = atomic_checkout(agent_id, task_id)
+            if result:
+                handler.wfile.write(json.dumps({'status': 'success', 'task': result}, ensure_ascii=False).encode('utf-8'))
+            else:
+                handler.wfile.write(json.dumps({'status': 'conflict', 'message': '이미 체크아웃된 태스크입니다'}).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
+
+    # ── POST /api/agents/<id>/trigger ─────────────────────────────────
+    # 수동 하트비트 트리거 — NOTIFY로 에이전트 깨우기
+    m = re.match(r'^/api/agents/([^/]+)/trigger$', path)
+    if m and trigger_agent:
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            agent_id = m.group(1)
+            ok = trigger_agent(agent_id)
+            handler.wfile.write(json.dumps({
+                'status': 'success' if ok else 'error',
+                'message': f'{agent_id} 트리거 전송' if ok else 'NOTIFY 전송 실패'
+            }).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True

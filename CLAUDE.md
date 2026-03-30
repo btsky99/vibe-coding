@@ -40,20 +40,25 @@
 - **Claude**: 정밀 로직 구현 및 프론트엔드 최적화 담당.
 - 서로의 작업 영역을 존중하며, `task_logs.jsonl`을 통해 현재 진행 상황을 공유합니다.
 
-## 💬 그룹 채팅 (MCP groupchat)
-이 프로젝트에는 `groupchat` MCP 서버가 등록되어 있습니다.
-다른 터미널의 에이전트(Gemini, Codex)와 실시간 소통이 가능합니다.
+## 🤖 에이전트 오케스트레이션 (Paperclip 스타일)
+에이전트 간 통신은 **태스크 코멘트** 기반 비동기 방식입니다 (그룹 채팅 대체).
 
-**사용 방법:**
-- `send_group_message` 도구로 메시지 전송
-- `check_new_messages` 도구로 새 메시지 확인
-- `read_group_messages` 도구로 최근 대화 조회
+**핵심 구조:**
+- `hive_tasks` 테이블: 태스크 할당 + 원자적 체크아웃 (동시 작업 방지)
+- `task_comments` 테이블: 태스크별 코멘트로 에이전트 간 소통
+- `agent_heartbeats` 테이블: 에이전트 상태 추적 (working/idle/offline)
+- PostgreSQL NOTIFY: 태스크 할당 시 에이전트 자동 깨우기
 
-**자동 참여 규칙:**
-- 작업 시작 시 `check_new_messages`로 그룹챗을 확인하세요
-- 다른 에이전트의 질문이나 요청이 있으면 응답하세요
-- 작업 완료 시 결과를 `send_group_message`로 공유하세요
-- stderr에 `[그룹챗]` 알림이 뜨면 새 메시지가 도착한 것입니다
+**하트비트 러너 실행:**
+```bash
+python scripts/hive_heartbeat.py --agent claude-T1 --interval 300
+```
+
+**에이전트 협업 흐름:**
+1. 디스패처가 태스크 생성 + assigned_to 설정 → NOTIFY 자동 발생
+2. 해당 에이전트의 하트비트 러너가 깨어남 → 원자적 체크아웃
+3. CLI로 태스크 실행 → 결과를 task_comments에 기록
+4. 태스크 완료/실패 상태 업데이트 → 다음 태스크로 이동
 
 ---
 **작성일:** 2026-02-25

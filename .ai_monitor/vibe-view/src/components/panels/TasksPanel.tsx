@@ -2,17 +2,26 @@
  * FILE: TasksPanel.tsx
  * DESCRIPTION: 에이전트 간 태스크 보드 패널 컴포넌트.
  *              태스크 목록 폴링, 상태 필터(전체/할 일/진행/완료), 새 작업 추가 폼을 담당합니다.
- *              App.tsx에서 분리되어 독립 컴포넌트로 동작하며, 활성 작업 수(done 제외)를
- *              부모에게 콜백으로 전달합니다.
+ *              Paperclip 스타일 코멘트 인라인 뷰 — 태스크 클릭 시 코멘트 로드/작성 가능.
  *
  * REVISION HISTORY:
+ * - 2026-03-31 Claude: 코멘트 인라인 뷰 추가 (Paperclip 스타일 비동기 통신)
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화
  */
 
-import { useState, useEffect } from 'react';
-import { ClipboardList, Plus } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { ClipboardList, Plus, MessageSquare, Send } from 'lucide-react';
 import { Task } from '../../types';
 import { API_BASE } from '../../constants';
+
+// ─── 코멘트 타입 ──────────────────────────────────────────────────────────────
+interface TaskComment {
+  id: number;
+  task_id: string;
+  author: string;
+  content: string;
+  created_at: string;
+}
 
 // ─── Props 타입 정의 ───────────────────────────────────────────────────────────
 interface TasksPanelProps {
@@ -38,6 +47,50 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
 
   // ─── 필터 상태 ───────────────────────────────────────────────────────────────
   const [taskFilter, setTaskFilter] = useState<TaskFilterType>('all');
+
+  // ─── 코멘트 인라인 뷰 상태 ───────────────────────────────────────────────────
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [loadingComments, setLoadingComments] = useState(false);
+
+  // 코멘트 로드
+  const loadComments = useCallback(async (taskId: string) => {
+    setLoadingComments(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/tasks/${taskId}/comments`);
+      if (res.ok) {
+        const data = await res.json();
+        setComments(Array.isArray(data) ? data : []);
+      }
+    } catch { /* 무시 */ }
+    setLoadingComments(false);
+  }, []);
+
+  // 태스크 클릭 → 코멘트 토글
+  const toggleComments = (taskId: string) => {
+    if (expandedTaskId === taskId) {
+      setExpandedTaskId(null);
+      setComments([]);
+    } else {
+      setExpandedTaskId(taskId);
+      loadComments(taskId);
+    }
+  };
+
+  // 코멘트 추가
+  const addComment = async (taskId: string) => {
+    if (!newComment.trim()) return;
+    try {
+      await fetch(`${API_BASE}/api/tasks/${taskId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author: 'user', content: newComment.trim() }),
+      });
+      setNewComment('');
+      loadComments(taskId);
+    } catch { /* 무시 */ }
+  };
 
   // ─── 새 작업 추가 폼 상태 ────────────────────────────────────────────────────
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -279,6 +332,19 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
                     </button>
                   )}
 
+                  {/* 코멘트 토글 버튼 */}
+                  <button
+                    onClick={() => toggleComments(task.id)}
+                    className={`px-1.5 py-0.5 rounded text-[9px] transition-colors flex items-center gap-0.5 ${
+                      expandedTaskId === task.id
+                        ? 'bg-primary/20 text-primary'
+                        : 'bg-white/5 hover:bg-white/10 text-[#858585]'
+                    }`}
+                    title="코멘트"
+                  >
+                    <MessageSquare className="w-2.5 h-2.5" />
+                  </button>
+
                   {/* 삭제 버튼 (항상 표시) */}
                   <button
                     onClick={() => deleteTask(task.id)}
@@ -288,6 +354,56 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
                     🗑️
                   </button>
                 </div>
+
+                {/* 코멘트 인라인 뷰 */}
+                {expandedTaskId === task.id && (
+                  <div className="mt-2 ml-4 border-l-2 border-primary/20 pl-2">
+                    {loadingComments ? (
+                      <p className="text-[9px] text-white/30 py-1">로딩...</p>
+                    ) : comments.length === 0 ? (
+                      <p className="text-[9px] text-white/25 py-1 italic">코멘트 없음</p>
+                    ) : (
+                      <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                        {comments.map(c => (
+                          <div key={c.id} className="text-[9px]">
+                            <span className={`font-bold ${
+                              c.author.includes('claude') ? 'text-green-400' :
+                              c.author.includes('gemini') ? 'text-blue-400' :
+                              c.author.includes('codex') ? 'text-orange-400' :
+                              'text-primary'
+                            }`}>
+                              {c.author}
+                            </span>
+                            <span className="text-white/20 ml-1">
+                              {c.created_at?.split('T')[1]?.substring(0, 5) ?? ''}
+                            </span>
+                            <p className="text-white/60 leading-snug mt-0.5 whitespace-pre-wrap">
+                              {c.content}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* 코멘트 작성 */}
+                    <div className="flex gap-1 mt-1">
+                      <input
+                        type="text"
+                        value={newComment}
+                        onChange={e => setNewComment(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') addComment(task.id); }}
+                        placeholder="코멘트 작성..."
+                        className="flex-1 bg-[#1e1e1e] border border-white/10 rounded px-1.5 py-0.5 text-[9px] focus:outline-none focus:border-primary text-white"
+                      />
+                      <button
+                        onClick={() => addComment(task.id)}
+                        disabled={!newComment.trim()}
+                        className="px-1.5 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[9px] disabled:opacity-30 transition-colors"
+                      >
+                        <Send className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })
