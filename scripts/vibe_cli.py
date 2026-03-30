@@ -20,6 +20,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -183,14 +184,34 @@ def cmd_sidebar_state(args):
 # ── 코덱스(Codex) 전용 명령어 ──────────────────────────────────────────────
 
 def _check_codex_install():
-    status = {"node": False, "codex": False}
+    status = {"node": False, "codex": False, "path": "", "version": ""}
     try:
         subprocess.run(["node", "--version"], capture_output=True, check=True)
         status["node"] = True
     except Exception: pass
-    
-    codex_path = _PROJECT_ROOT / "node_modules" / "@openai" / "codex"
-    status["codex"] = codex_path.exists()
+
+    codex_path = shutil.which("codex") or shutil.which("codex.cmd")
+    if not codex_path:
+        local_cmd = _PROJECT_ROOT / "node_modules" / ".bin" / ("codex.cmd" if os.name == "nt" else "codex")
+        if local_cmd.exists():
+            codex_path = str(local_cmd)
+
+    if codex_path:
+        status["codex"] = True
+        status["path"] = codex_path
+        try:
+            result = subprocess.run(
+                [codex_path, "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            )
+            if result.returncode == 0:
+                status["version"] = (result.stdout or result.stderr).strip()
+        except Exception:
+            pass
     return status
 
 
@@ -200,9 +221,16 @@ def cmd_codex(args):
     if action == 'status':
         print("\n🔍 [Codex] 시스템 상태 점검")
         st = _check_codex_install()
+        codex_path = st.get('path', '')
+        codex_version = st.get('version', '')
         print(f"  - Node.js: {'✅ 설치됨' if st['node'] else '❌ 미설치'}")
         print(f"  - Codex CLI: {'✅ 확인됨' if st['codex'] else '🟡 미확인 (scripts/install_codex.py 실행 권장)'}")
         
+        if codex_path:
+            print(f"  - Codex Path: {codex_path}")
+        if codex_version:
+            print(f"  - Codex Version: {codex_version}")
+
         sidebar = _api_call('/api/vibe/sidebar', method='GET')
         active = [agent for agent in sidebar.keys() if agent.startswith('T') or 'codex' in agent.lower()] if not '_error' in sidebar else []
         print(f"  - 활성 터미널: {', '.join(active) if active else '없음'}\n")
@@ -218,15 +246,20 @@ def cmd_codex(args):
     elif action == 'start':
         tid = args.id or "T1"
         print(f"🚀 [Codex] 에이전트 시작 중... (ID: {tid})")
-        script = _PROJECT_ROOT / "scripts" / "terminal_agent.py"
+        script = _PROJECT_ROOT / "scripts" / "agent_shell.py"
         if not script.exists():
             print(f"[vibe] 에러: 스크립트 미발견: {script}")
             return 1
             
         env = os.environ.copy()
         env['TERMINAL_ID'] = tid
+        env['VIBE_CLI_TYPE'] = 'codex'
         try:
-            subprocess.Popen(f'start "{tid} - Codex Agent" python {script}', shell=True, env=env)
+            subprocess.Popen(
+                f'start "{tid} - Codex Agent" python {script} --cli codex --terminal {tid}',
+                shell=True,
+                env=env,
+            )
             print(f"✅ 새 터미널 창에서 {tid} 실행됨.")
         except Exception as e:
             print(f"❌ 실행 실패: {e}")

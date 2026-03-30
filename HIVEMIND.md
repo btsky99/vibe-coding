@@ -1,53 +1,63 @@
 # HiveMind Status
 
-Updated: `2026-03-27 19:25:10`
+Updated: `2026-03-31 00:09:06`
 
 ## Current Focus
 Open plan tasks:
-- Task 1: pyproject.toml에 pywin32 의존성 추가
-  파일: pyproject.toml
-  방법: dependencies에 `pywin32>=310; sys_platform == "win32"` 추가
-- Task 2: create_shortcut.py에 remove_shortcut() 함수 추가
-  파일: .ai_monitor/create_shortcut.py
-  방법: 바탕화면 "바이브코딩.lnk" 삭제 함수
-- Task 3: server.py main()에 --install / --uninstall 명령어 추가
-  파일: .ai_monitor/server.py
-  방법:
-- Task 4: 첫 실행 시 바탕화면 바로가기 자동 생성
-  파일: .ai_monitor/server.py
-  방법: 서버 시작 시 "바이브코딩.lnk" 없으면 자동 create_shortcut()
-- Task 5: README.md 원스톱 설치/언인스톨 문서화
-  파일: README.md
-  방법: 설치 원스톱 명령어 + 언인스톨 섹션 추가
+- Task 1: hive_tasks 테이블에 하트비트/체크아웃 컬럼 추가
+  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수, ~line 369)
+  방법: ALTER TABLE로 parent_id, checkout_by, checkout_at, result 컬럼 추가
+- Task 2: task_comments 테이블 생성
+  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수)
+  방법: CREATE TABLE task_comments (id SERIAL, task_id TEXT REFERENCES hive_tasks,
+- Task 3: agent_heartbeats 테이블 생성
+  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수)
+  방법: CREATE TABLE agent_heartbeats (agent_id TEXT PK, status TEXT, last_beat TIMESTAMPTZ,
+- Task 4: NOTIFY 트리거 생성
+  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수)
+  방법: CREATE FUNCTION notify_task_assigned() — hive_tasks의 assigned_to 변경 시
+- Task 5: pg_store.py에 원자적 체크아웃 함수 추가
+  파일: .ai_monitor/src/pg_store.py
+  방법: atomic_checkout(agent_id, task_id) — SELECT ... FOR UPDATE SKIP LOCKED로
 
-Alignment: Changed files do not map to any open plan task. Current changes: hivemind.md, scripts/telegram_bridge.py.
+Alignment: Current work aligns best with Task 14: AgentMonitorPanel 신규 작성. Matched files: .ai_monitor/api/tasks_api.py, .ai_monitor/bin/codex_wrapper.py, .ai_monitor/server.py, .ai_monitor/src/pg_store.py, .ai_monitor/vibe-view/dist/index.html. Unmatched changes still present: .claude/agent-memory/, .mcp.json, chat.jsonl, hivemind.md, last_python_cmd.txt (+20 more).
 Changed files:
-- hivemind.md
-- scripts/telegram_bridge.py
+- .ai_monitor/api/tasks_api.py
+- .ai_monitor/bin/codex_wrapper.py
+- .ai_monitor/server.py
+- .ai_monitor/src/pg_store.py
+- .ai_monitor/vibe-view/dist/index.html
+- .ai_monitor/vibe-view/src/app.tsx
+- .ai_monitor/vibe-view/src/components/panels/agentmonitorpanel.tsx
+- .ai_monitor/vibe-view/src/components/panels/groupchatpanel.tsx
+- ... and 29 more
 
 ## Agent Flow
 ```mermaid
 graph LR
     claude["claude"]
     gemini["gemini"]
-    claude -->|12 msgs| gemini
+    claude -->|13 msgs| gemini
     dispatcher["dispatcher"]
+    dispatcher -->|10 msgs| gemini
     claude -->|9 msgs| dispatcher
-    dispatcher -->|9 msgs| gemini
     claude -->|8 msgs| claude
     all["all"]
     dispatcher -->|8 msgs| all
     user["user"]
     user -->|7 msgs| gemini
+    claude -->|6 msgs| all
     codex["codex"]
     codex -->|5 msgs| claude
+    dispatcher -->|5 msgs| claude
     claude -->|4 msgs| codex
     claude -->|4 msgs| user
-    dispatcher -->|4 msgs| claude
+    dispatcher -->|4 msgs| codex
     user -->|4 msgs| claude
-    dispatcher -->|3 msgs| codex
     gemini -->|3 msgs| claude
-    claude -->|2 msgs| all
+    Gemini["Gemini"]
+    Claude["Claude"]
+    Gemini -->|2 msgs| Claude
     user -->|2 msgs| codex
     claude_T3["claude:T3"]
     claude -->|1 msgs| claude_T3
@@ -56,9 +66,8 @@ graph LR
     codex -->|1 msgs| all
     codex -->|1 msgs| dispatcher
     gemini -->|1 msgs| all
-    Gemini["Gemini"]
-    Claude["Claude"]
-    Gemini -->|1 msgs| Claude
+    probe["probe"]
+    probe -->|1 msgs| codex
     T1 -->|1 msgs| all
     T1 -->|1 msgs| codex
     T1 -->|1 msgs| T1

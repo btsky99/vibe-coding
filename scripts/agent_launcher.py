@@ -36,8 +36,8 @@ AGENT_CMDS: dict[str, dict[str, list[str]]] = {
         "yolo": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_gemini_clean.py"), "--yolo"],
     },
     "codex": {
-        "normal": ["codex"],
-        "yolo": ["codex", "--dangerously-bypass-approvals-and-sandbox"],
+        "normal": ["codex", "--no-alt-screen"],
+        "yolo": ["codex", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"],
     },
     "vibe": {
         # vibe-coding은 pythonw로 서버를 백그라운드에 띄우는 방식

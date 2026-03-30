@@ -74,6 +74,8 @@ def main() -> int:
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     env.pop("CLAUDE_CODE_SSE_PORT", None)
     env.setdefault("PYTHONUTF8", "1")
+    # instructor 패키지가 deprecated google.generativeai를 import할 때 FutureWarning 억제
+    env.setdefault("PYTHONWARNINGS", "ignore::FutureWarning")
 
     run_cwd, gemini_args = _extract_cwd(sys.argv[1:])
     filter_stdout = _use_stdout_filter(gemini_args)

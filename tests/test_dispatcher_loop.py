@@ -86,6 +86,27 @@ def test_select_best_agent_respects_local_codex_disable(monkeypatch):
     assert agent != "codex"
 
 
+def test_select_best_agent_prefers_codex_for_test_work(monkeypatch):
+    monkeypatch.setattr(auto_dispatcher, "is_codex_enabled", lambda: True)
+
+    agent = auto_dispatcher.select_best_agent("test")
+
+    assert agent == "codex"
+
+
+def test_dispatch_prefers_codex_for_test_tasks(monkeypatch):
+    sent = []
+
+    monkeypatch.setattr(auto_dispatcher.itcp, "send", lambda **kwargs: sent.append(kwargs) or True)
+    monkeypatch.setattr(auto_dispatcher, "_save_dispatch_to_hive_tasks", lambda payload: None)
+    monkeypatch.setattr(auto_dispatcher, "is_codex_enabled", lambda: True)
+
+    result = auto_dispatcher.dispatch("회귀 테스트 추가", task_type="test")
+
+    assert result["assigned_to"] == "codex"
+    assert result["verifier"] != "codex"
+
+
 def test_dispatch_avoids_codex_for_review_tasks(monkeypatch):
     sent = []
     broadcasts = []

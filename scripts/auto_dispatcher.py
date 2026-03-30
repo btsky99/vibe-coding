@@ -46,6 +46,9 @@ REVISION HISTORY:
   - dispatch() 호출 시 hive_tasks에 레코드를 INSERT하도록 _save_dispatch_to_hive_tasks() 추가
   - 대시보드 "최근 디스패치" 패널이 비어있던 근본 원인 해결
   - pg_store.save_task()를 통해 PostgreSQL에 직접 기록 (ITCP만으로는 대시보드 조회 불가)
+- 2026-03-30 Codex: Codex 테스트 작업 우선 배정 보정 추가
+  - auto_dispatcher 점수 체계에서 test 유형이 Claude로 치우치던 문제 수정
+  - 좁은 실행 작업은 Codex 샌드박스 강점을 반영하도록 소폭 가산점 적용
 """
 
 from __future__ import annotations
@@ -154,6 +157,9 @@ TASK_TYPE_REQUIREMENTS = {
     "architecture": {"architecture": 0.4, "research": 0.2, "documentation": 0.2, "precision_logic": 0.2},
 }
 HIGH_CONTEXT_TASK_TYPES = {"architecture", "research", "docs", "review", "security"}
+CODEX_EXECUTION_TASK_BONUS = {
+    "test": 0.05,
+}
 
 # ── 키워드 → 태스크 유형 자동 감지 ──────────────────────────────────────────────
 _TYPE_KEYWORDS = {
@@ -297,6 +303,11 @@ def score_agent(agent_name: str, task_type: str) -> float:
     for capability, weight in requirements.items():
         agent_score = agent["strengths"].get(capability, 0.0)
         score += weight * agent_score
+
+    # Codex는 좁은 실행형 테스트 작업에서 샌드박스 검증까지 한 번에 처리할 수 있으므로
+    # 순수 역량 가중합만으로는 드러나지 않는 운영상 강점을 소폭 반영합니다.
+    if agent_name == "codex":
+        score += CODEX_EXECUTION_TASK_BONUS.get(task_type, 0.0)
 
     return round(score, 4)
 

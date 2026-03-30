@@ -13,6 +13,7 @@ DESCRIPTION: Vibe Coding EXE 릴리즈 스킬.
   /vibe-release 명령으로 호출. 버전 증가 → 커밋 → 푸시하면 CI가 EXE 빌드.
 
 REVISION HISTORY:
+- 2026-03-28 Claude: Step 4에 CI 빌드 완료 대기 + 검증 단계 추가. EXE 빌드 주의사항 섹션 신설
 - 2026-03-27 Claude: EXE 빌드 방식으로 전면 재작성 — pip 전용 내용 제거
 - 2026-03-26 Claude: pip 전용으로 재작성 (실패 — v3.7.146에서 EXE로 복원)
 - 2026-03-21 Claude: CI 빌드 검증 단계 추가
@@ -88,17 +89,37 @@ EOF
 - 무엇을 왜 변경했는지 (한글)
 - 버전 번호
 
-### Step 4: 푸시
+### Step 4: 푸시 + CI 빌드 검증 (필수)
 
 ```bash
 git push origin main
 ```
 
-푸시 성공 후 사용자에게 보고:
-- 새 버전 번호
-- 주요 변경 사항 요약
-- CI 빌드 상태 확인 명령: `gh run list --limit 1`
-- CI가 완료되면 GitHub Releases에 EXE가 자동 업로드됨
+**푸시 후 반드시 CI 빌드 완료를 확인해야 합니다.** 확인 없이 끝내지 마세요.
+
+```bash
+# 1. 빌드 시작 확인
+gh run list --limit 1
+
+# 2. 빌드 완료까지 주기적 확인 (보통 10~15분 소요)
+gh run view <RUN_ID>
+gh run view --job <JOB_ID> | grep -E "✓|✗|\*"
+
+# 3. 실패 시 즉시 원인 확인
+gh run view <RUN_ID> --log-failed | tail -30
+```
+
+**CI 검증 체크리스트:**
+- [ ] `✓ Lint & syntax check (Python)` — ruff 통과 여부
+- [ ] `✓ Pre-build verification (Phase 1 + 2)` — import/구문 검증
+- [ ] `✓ Build exe` + `Build exe (console)` — PyInstaller 빌드
+- [ ] `✓ Build installer` — Inno Setup 패키징
+- [ ] `✓ Create Release` — GitHub Releases 업로드
+
+CI 실패 시:
+1. `--log-failed`로 에러 원인 확인
+2. 수정 후 다시 Step 1부터 재실행
+3. **절대 실패한 채로 방치하지 않기**
 
 ---
 
@@ -110,6 +131,39 @@ git push origin main
 | `vibe-coding-console-X.Y.Z.exe` | 콘솔 모드 (디버깅용) |
 | `vibe-dashboard.exe` | 대시보드 서브창 |
 | `vibe-coding-setup-X.Y.Z.exe` | Inno Setup 설치버전 (올인원) |
+
+---
+
+## EXE 빌드 주의사항 (과거 사고 사례)
+
+설치 버전(PyInstaller EXE)에서는 개발 환경과 다르게 동작하는 부분이 많습니다.
+**코드 수정 후 반드시 아래 사항을 체크하세요.**
+
+### 1. `sys.executable` 주의
+- **개발 모드**: `sys.executable` = `python.exe`
+- **EXE 빌드**: `sys.executable` = `vibe-coding.exe`
+- subprocess로 Python 스크립트 실행 시 `sys.executable` 대신 `_python_runner_cmds()` 사용
+
+### 2. 상대/절대 import 주의
+- `from .module import func` → EXE에서 `ImportError` 발생 가능
+- 반드시 `try/except ImportError` 패턴으로 감싸서 양쪽 호환
+- **조건부 import**: 해당 기능이 실제 필요한 시점에서만 import (top-level 금지)
+
+### 3. API 응답 null 방어 (프론트엔드)
+- 서버 API가 null/undefined 반환할 수 있음 → `.length`, `.map()`, `.filter()` 등 호출 전 방어 필수
+- 패턴: `(data.items ?? []).map(...)` 또는 `data.items?.length ?? 0`
+
+### 4. 푸시 전 로컬 검증
+```bash
+# Python 구문 검사
+python -c "import py_compile; py_compile.compile('.ai_monitor/server.py', doraise=True)"
+
+# ruff 린트 (CI와 동일한 규칙)
+ruff check .ai_monitor/server.py --select E9,F821,F823
+
+# 프론트엔드 빌드 (타입 에러 확인)
+cd .ai_monitor/vibe-view && npx vite build
+```
 
 ---
 

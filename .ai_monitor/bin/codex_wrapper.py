@@ -35,6 +35,7 @@ SCRIPTS_DIR     = PROJECT_ROOT / "scripts"
 
 TERMINAL_AGENT  = SCRIPTS_DIR / "terminal_agent.py"
 CLI_AGENT       = SCRIPTS_DIR / "cli_agent.py"
+AGENT_SHELL     = SCRIPTS_DIR / "agent_shell.py"
 PYTHON_BIN      = AI_MONITOR_DIR / "venv" / "Scripts" / "python.exe"
 
 console = Console()
@@ -77,6 +78,36 @@ def _itcp_auto_receive() -> None:
 
 
 # ── 로고 및 시각 효과 ──────────────────────────────────────────────────────────
+def _print_harness_v2_snapshot() -> None:
+    """Render the Codex Harness V2 bootstrap snapshot at session start."""
+    try:
+        if str(SCRIPTS_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS_DIR))
+        import itcp
+    except Exception:
+        return
+
+    try:
+        bootstrap = itcp.build_agent_context(
+            "codex",
+            include_unread=False,
+            include_debate=True,
+            include_project_bootstrap=True,
+            mark_read=False,
+        )
+    except Exception:
+        return
+
+    if not bootstrap:
+        return
+
+    console.print(Panel(
+        bootstrap,
+        title="[bold green]Harness V2 Snapshot[/bold green]",
+        border_style="green",
+    ))
+
+
 def print_logo():
     logo_text = """
     [bold cyan]
@@ -234,7 +265,8 @@ def run_agent(task, yolo_mode=False, cli="auto"):
     
     if not task:
         # 대화형 모드
-        cmd = [str(PYTHON_BIN), str(TERMINAL_AGENT)]
+        terminal_id = env.get("TERMINAL_ID", "T3")
+        cmd = [str(PYTHON_BIN), str(AGENT_SHELL), "--cli", "codex", "--terminal", terminal_id]
     elif yolo_mode:
         cmd = [str(PYTHON_BIN), str(CLI_AGENT), task, cli]
     else:
@@ -258,6 +290,7 @@ def main():
     # 세션 시작 시 ITCP 미읽음 메시지 자동 수신
     # Claude/Gemini는 훅으로 자동 처리되지만 Codex는 여기서 직접 호출
     _itcp_auto_receive()
+    _print_harness_v2_snapshot()
 
     if args.install:
         install_to_ai()

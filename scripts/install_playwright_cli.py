@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 
@@ -42,6 +43,11 @@ def main() -> None:
 
     print("[playwright] verifying CLI...")
     run([python, "-m", "playwright", "--version"])
+    cli_path = shutil.which("playwright")
+    if cli_path:
+        print(f"[playwright] playwright command detected: {cli_path}")
+    else:
+        print("[playwright] playwright command not found on PATH. Use: python -m playwright")
 
     if args.skip_browser_install:
         print("[playwright] browser install skipped.")

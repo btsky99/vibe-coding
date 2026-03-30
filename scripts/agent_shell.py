@@ -124,20 +124,15 @@ _dashboard_opened = False
 def _prepare_codex_context(task: str) -> tuple[str, list[dict], list[dict]]:
     """Codex launches from agent_shell need explicit ITCP inbox injection."""
     try:
-        from itcp import receive, parse_task_reference
+        from itcp import receive, parse_task_reference, build_agent_context
     except Exception:
         return task, [], []
 
     unread = receive("codex", mark_read=True)
     task_refs: list[dict] = []
     review_refs: list[dict] = []
-    lines: list[str] = []
 
     for message in unread[:5]:
-        sender = message.get("from_agent") or message.get("from") or "?"
-        channel = message.get("channel") or "general"
-        content = str(message.get("content") or "").strip()
-        lines.append(f"- [{sender} -> codex] ({channel}) {content}")
         ref = parse_task_reference(message)
         if ref.get("task_id"):
             if ref.get("kind") == "review":
@@ -145,16 +140,17 @@ def _prepare_codex_context(task: str) -> tuple[str, list[dict], list[dict]]:
             elif ref.get("kind") == "task":
                 task_refs.append(ref)
 
-    sections: list[str] = []
-    if lines:
-        sections.append("[ITCP inbox]\n" + "\n".join(lines))
-    debate_json = os.environ.get("HIVE_DEBATE_CONTEXT", "").strip()
-    if debate_json:
-        sections.append("[Hive debate context]\n" + debate_json)
-
-    if not sections:
+    extra = build_agent_context(
+        "codex",
+        include_unread=True,
+        include_debate=True,
+        include_project_bootstrap=True,
+        mark_read=False,
+        unread_messages=unread,
+    )
+    if not extra:
         return task, task_refs, review_refs
-    return "\n\n".join(sections) + "\n\n[Assigned task]\n" + task, task_refs, review_refs
+    return f"{extra}\n\n[Assigned task]\n{task}", task_refs, review_refs
 
 
 def _wrap_orchestrator_task(task: str) -> str:
@@ -219,7 +215,10 @@ def _write_live(event):
 def run_agent(task, cli='auto', terminal_id='T?'):
     global _active_proc
 
-    chosen = 'orchestrator' if FORCE_ORCHESTRATION else (_route(task) if cli == 'auto' else cli)
+    if cli != 'auto':
+        chosen = cli
+    else:
+        chosen = 'orchestrator' if FORCE_ORCHESTRATION else _route(task)
     direct_task = _wrap_orchestrator_task(task) if chosen == 'orchestrator' else task
     codex_task_refs: list[dict] = []
     codex_review_refs: list[dict] = []
@@ -398,7 +397,7 @@ def main():
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    cli_label = 'ORCHESTRATION'
+    cli_label = cli_mode.upper()
     print('=' * 60)
     print(f' Agent Shell [{terminal_id}]  CLI: {cli_label}')
     print(f' 프로젝트: {_ROOT.name}')

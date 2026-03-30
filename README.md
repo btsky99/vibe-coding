@@ -42,6 +42,9 @@ vibe-coding
 
 ## Playwright CLI
 
+권장 방식: 앱에서 프로젝트 폴더를 먼저 선택한 뒤 `AI 도구 -> Playwright 설치 (현재 프로젝트)`를 사용하세요.
+수동 설치가 필요할 때만 아래 스크립트를 직접 실행하면 됩니다.
+
 ```bash
 python scripts/install_playwright_cli.py
 python -m playwright --version
@@ -53,6 +56,16 @@ python -m playwright --version
 python scripts/install_playwright_cli.py --skip-browser-install
 python -m playwright install chromium
 ```
+
+다른 PC에서도 이 프로젝트만 있으면 같은 방식으로 설치할 수 있습니다.
+
+```bash
+git clone https://github.com/btsky99/vibe-coding.git
+cd vibe-coding
+python scripts/install_playwright_cli.py
+```
+
+프로젝트 전체를 설치할 필요는 없고, Python과 인터넷 연결만 있으면 됩니다. 브라우저 바이너리는 PC마다 다시 설치해야 하므로, 복사본을 옮기기보다 이 스크립트를 다시 실행하는 방식이 안전합니다.
 
 ## 라이선스
 
