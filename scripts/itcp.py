@@ -185,22 +185,34 @@ def send(
         # PostgreSQL 불가 시 파일 fallback
         return _fallback_file_send(from_terminal, to_terminal, content, channel, msg_type)
 
-    meta_json = json.dumps(metadata or {}, ensure_ascii=False).replace("'", "''")
-    content_safe = content.replace("'", "''")
-    tid = terminal_id.replace("'", "''")
+    # [2026-03-30 Claude] SQL 인젝션 방지 — 모든 파라미터에 싱글쿼트 이스케이프 적용
+    # psql subprocess 방식에서는 parameterized query를 사용할 수 없으므로
+    # 모든 문자열 값을 _sql_escape()로 처리하여 SQL 인젝션을 방지한다.
+    def _sql_escape(val: str) -> str:
+        """싱글쿼트를 이스케이프하고, 허용되지 않는 제어문자를 제거한다."""
+        return str(val).replace("'", "''").replace("\x00", "")
+
+    from_safe = _sql_escape(from_terminal)
+    to_safe = _sql_escape(to_terminal)
+    type_safe = _sql_escape(msg_type)
+    channel_safe = _sql_escape(channel)
+    content_safe = _sql_escape(content)
+    tid_safe = _sql_escape(terminal_id)
+    meta_json = json.dumps(metadata or {}, ensure_ascii=False).replace("'", "''").replace("\x00", "")
 
     sql = (
         f"INSERT INTO pg_messages "
         f"(from_agent, to_agent, msg_type, content, channel, terminal_id, metadata, is_read) "
         f"VALUES "
-        f"('{from_terminal}', '{to_terminal}', '{msg_type}', '{content_safe}', "
-        f"'{channel}', '{tid}', '{meta_json}'::jsonb, false) "
+        f"('{from_safe}', '{to_safe}', '{type_safe}', '{content_safe}', "
+        f"'{channel_safe}', '{tid_safe}', '{meta_json}'::jsonb, false) "
         f"RETURNING id;"
     )
     ok, result = _run_psql(sql)
     if ok and result:
         # NOTIFY로 수신 측에 즉시 알림 전송 (LISTEN 중인 프로세스가 있으면 즉시 수신)
-        _run_psql(f"NOTIFY hive_messages, '{to_terminal}';")
+        # NOTIFY payload도 이스케이프 적용
+        _run_psql(f"NOTIFY hive_messages, '{to_safe}';")
         return True
     return False
 
@@ -230,11 +242,16 @@ def receive(terminal_name: str, mark_read: bool = True, my_terminal_id: str = ""
     # [2026-03-18 Claude] 터미널 ID 기반 자기 메시지 제외 필터
     # 같은 에이전트(claude↔claude)가 여러 터미널에서 실행될 때
     # 자기가 보낸 메시지를 자기가 읽는 문제 방지
+    # [2026-03-30 Claude] SQL 인젝션 방지 — 모든 파라미터 이스케이프 적용
+    def _esc(val: str) -> str:
+        return str(val).replace("'", "''").replace("\x00", "")
+
+    safe_name = _esc(terminal_name)
     self_filter = ""
     if my_terminal_id:
-        safe_tid = my_terminal_id.replace("'", "''")
+        safe_tid = _esc(my_terminal_id)
         # 내 터미널 ID로 보낸 메시지는 제외 (from_agent가 나이고 terminal_id가 내 터미널)
-        self_filter = f"AND NOT (from_agent = '{terminal_name}' AND terminal_id = '{safe_tid}') "
+        self_filter = f"AND NOT (from_agent = '{safe_name}' AND terminal_id = '{safe_tid}') "
 
     # 미읽음 메시지 조회 (내게 온 것 + 전체 브로드캐스트)
     sql = (
@@ -242,7 +259,7 @@ def receive(terminal_name: str, mark_read: bool = True, my_terminal_id: str = ""
         f"COALESCE(metadata::text, '{{}}') AS metadata, "
         f"COALESCE(terminal_id, '') AS terminal_id, ts::text "
         f"FROM pg_messages "
-        f"WHERE (to_agent = '{terminal_name}' OR to_agent = 'all') "
+        f"WHERE (to_agent = '{safe_name}' OR to_agent = 'all') "
         f"AND is_read = false "
         f"{self_filter}"
         f"ORDER BY ts ASC "
@@ -309,7 +326,8 @@ def history(limit: int = 20, channel: Optional[str] = None) -> list[dict]:
     if not _ensure_pg_running():
         return []
 
-    channel_filter = f"AND channel = '{channel}'" if channel else ""
+    # [2026-03-30 Claude] SQL 인젝션 방지 — channel 파라미터 이스케이프
+    channel_filter = f"AND channel = '{str(channel).replace(chr(39), chr(39)*2)}'" if channel else ""
     sql = (
         f"SELECT id, from_agent, to_agent, channel, msg_type, content, is_read, "
         f"COALESCE(metadata::text, '{{}}') AS metadata, "
@@ -387,18 +405,140 @@ def _load_runtime_config() -> dict:
     return {}
 
 
+def _summarize_feature_list(max_items: int = 4) -> str:
+    """Summarize current feature pass/fail state for Codex bootstrap."""
+    feature_path = _PROJECT_ROOT / "feature_list.json"
+    try:
+        payload = json.loads(feature_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+
+    features = payload.get("features")
+    if not isinstance(features, list) or not features:
+        return ""
+
+    pending: list[str] = []
+    completed = 0
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        fid = str(feature.get("id") or "?")
+        description = str(feature.get("description") or "").strip()
+        if feature.get("passes") is True:
+            completed += 1
+            continue
+        label = f"{fid} {description}".strip()
+        pending.append(label)
+
+    lines = [f"- completed: {completed}/{len(features)}"]
+    if pending:
+        lines.append("- pending:")
+        for item in pending[:max_items]:
+            lines.append(f"  - {item}")
+    else:
+        lines.append("- pending: none")
+    return "\n".join(lines)
+
+
+def _summarize_progress(max_items: int = 3) -> str:
+    """Summarize the most recent progress.md state for Codex bootstrap."""
+    progress_path = _PROJECT_ROOT / "progress.md"
+    try:
+        text = progress_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    updated_line = next((line.strip() for line in lines if line.startswith("## ")), "")
+
+    active_items: list[str] = []
+    in_progress = False
+    section_index = 0
+    for raw in lines:
+        stripped = raw.strip()
+        if stripped.startswith("### "):
+            section_index += 1
+            in_progress = section_index == 2
+            continue
+        if in_progress and stripped.startswith("- "):
+            active_items.append(stripped)
+            if len(active_items) >= max_items:
+                break
+
+    if not updated_line and not active_items:
+        return ""
+
+    result: list[str] = []
+    if updated_line:
+        result.append(updated_line)
+    if active_items:
+        result.append("In progress:")
+        result.extend(active_items)
+    return "\n".join(result)
+
+
+def _summarize_harness_status() -> str:
+    """Run harness_verify and return a compact status summary."""
+    harness_script = _SCRIPT_DIR / "harness_verify.py"
+    if not harness_script.exists():
+        return ""
+
+    raw = _run_context_command(
+        [sys.executable, str(harness_script), "--json"],
+        timeout=8,
+        max_chars=4000,
+    )
+    if not raw:
+        return ""
+
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return raw
+
+    summary = payload.get("summary") or {}
+    warnings = payload.get("details", {}).get("warnings") or []
+    lines = [
+        f"- status: {payload.get('status', 'unknown')}",
+        f"- passes: {summary.get('passes', 0)}",
+        f"- warnings: {summary.get('warnings', 0)}",
+        f"- errors: {summary.get('errors', 0)}",
+    ]
+    if warnings:
+        lines.append(f"- first warning: {warnings[0]}")
+    return "\n".join(lines)
+
+
 def _build_project_bootstrap(agent_name: str) -> str:
     """Build a compact project bootstrap block for agents without repo hooks."""
     if agent_name != "codex":
         return ""
 
     sections: list[str] = [
+        "[Session init]\n"
+        f"- cwd: {_PROJECT_ROOT}\n"
+        "- protocol: pwd -> memory.py list -> analyze_hive.py -> feature_list.json -> git log -> harness_verify.py"
+    ]
+
+    feature_summary = _summarize_feature_list()
+    if feature_summary:
+        sections.append(f"[Feature status]\n{feature_summary}")
+
+    progress_summary = _summarize_progress()
+    if progress_summary:
+        sections.append(f"[Progress snapshot]\n{progress_summary}")
+
+    harness_summary = _summarize_harness_status()
+    if harness_summary:
+        sections.append(f"[Harness status]\n{harness_summary}")
+
+    sections.append(
         "[Execution guardrails]\n"
         "- Follow RULES.md before making changes.\n"
         "- Use PROJECT_MAP.md and memory.md to stay aligned with repo direction.\n"
         "- Keep scope narrow to the assigned task and referenced files.\n"
         "- Prefer targeted edits plus validation over broad refactors."
-    ]
+    )
 
     docs = [
         ("Core rules", _PROJECT_ROOT / "RULES.md", 1000),
@@ -412,8 +552,10 @@ def _build_project_bootstrap(agent_name: str) -> str:
 
     py = sys.executable
     runtime_commands = [
+        ("Hive memory", [py, str(_SCRIPT_DIR / "memory.py"), "list"], 6, 1000),
         ("Hive summary", [py, str(_SCRIPT_DIR / "orchestrator.py"), "--summary"], 6, 1000),
         ("Hive analysis", [py, str(_SCRIPT_DIR / "analyze_hive.py")], 6, 1000),
+        ("Recent commits", ["git", "log", "--oneline", "-5"], 6, 800),
     ]
     for label, args, timeout, limit in runtime_commands:
         output = _run_context_command(args, timeout=timeout, max_chars=limit)

@@ -58,8 +58,9 @@ def get_context_prompt(my_name: str = "", limit: int = 10) -> str:
 # ── LISTEN/NOTIFY 리스너 (hive_realtime 채널) ──
 
 def add_listener(callback: Callable):
-    """새 하이브 메시지(채팅 포함) 도착 시 콜백 등록."""
-    _listeners.append(callback)
+    """새 하이브 메시지(채팅 포함) 도착 시 콜백 등록. 중복 등록 방지."""
+    if callback not in _listeners:
+        _listeners.append(callback)
     _ensure_listener_running()
 
 
@@ -119,6 +120,81 @@ def _listen_loop():
         except Exception as e:
             print(f"[LISTEN] 연결 오류, 3초 후 재시도: {e}")
             time.sleep(3)
+
+
+def _ensure_table():
+    """hive_memory 테이블 + LISTEN/NOTIFY 트리거 존재 확인.
+
+    [2026-03-29 추가] MCP 서버 초기화 시 호출하여
+    테이블과 트리거가 확실히 존재하도록 보장합니다.
+    """
+    try:
+        from src.pg_store import ensure_schema
+        ensure_schema()
+    except Exception as e:
+        print(f"[공유히스토리] 테이블 확인 실패: {e}")
+
+
+def get_new_since(last_ts: str, exclude_sender: str = "", limit: int = 20) -> tuple[list[dict], str]:
+    """last_ts(updated_at) 이후의 새 채팅 메시지를 조회합니다.
+
+    [2026-03-29 추가] MCP 서버의 _check_new()에서 LISTEN 누락 메시지 보완용.
+    hive_memory에 id 컬럼이 없으므로 updated_at(TEXT, ISO형식) 기준으로 조회합니다.
+
+    Args:
+        last_ts: 마지막으로 읽은 메시지의 updated_at 값 (빈 문자열이면 전체)
+        exclude_sender: 이 sender(author)의 메시지는 제외
+        limit: 최대 조회 수
+
+    Returns:
+        (messages, new_last_ts) — 새 메시지 리스트와 마지막 timestamp
+    """
+    try:
+        from src.pg_store import query_rows
+        # updated_at은 TEXT(ISO format)이므로 문자열 비교로 시간순 필터 가능
+        # [2026-03-30 Claude] SQL 인젝션 방지 강화 — 타임스탬프 형식 엄격 검증
+        # 기존 화이트리스트 필터 + ISO 8601 형식 정규식 검증 추가
+        import re
+        safe_ts = "".join(c for c in str(last_ts) if c in "0123456789-T:+. ")
+        # ISO 8601 형식만 허용: YYYY-MM-DDTHH:MM:SS 또는 유사 패턴
+        if safe_ts and not re.match(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}', safe_ts):
+            safe_ts = ""  # 형식 불일치 시 무시 (전체 조회로 폴백)
+        if safe_ts:
+            # 싱글쿼트 이스케이프도 적용 (이중 방어)
+            safe_ts = safe_ts.replace("'", "''")
+            where_ts = f"AND updated_at > '{safe_ts}'"
+        else:
+            where_ts = ""
+        safe_limit = max(1, min(int(limit), 200))  # limit도 범위 제한
+        rows = query_rows(
+            f"""
+            SELECT key, content, author, updated_at
+            FROM hive_memory
+            WHERE tags @> '["chat"]'::jsonb
+              {where_ts}
+            ORDER BY updated_at ASC
+            LIMIT {safe_limit};
+            """
+        )
+        messages = []
+        new_last_ts = last_ts
+        for row in rows:
+            author = row.get("author", "")
+            if author == exclude_sender:
+                continue
+            ts = row.get("updated_at", "")
+            messages.append({
+                "id": row.get("key", ""),
+                "sender": author,
+                "content": row.get("content", ""),
+                "ts": ts,
+            })
+            if ts > new_last_ts:
+                new_last_ts = ts
+        return messages, new_last_ts
+    except Exception as e:
+        print(f"[공유히스토리] get_new_since 실패: {e}")
+        return [], last_ts
 
 
 def cleanup_old(keep_count: int = 200):

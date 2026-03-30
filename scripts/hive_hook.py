@@ -673,6 +673,52 @@ def main():
         if newly_installed and log_task:
             log_task("Hive", f"[자기치유] 스킬 자동 설치: {', '.join(newly_installed)}", _TERMINAL_ID)
 
+        # [하네스 V2 자동 검증] 매 세션 시작 시 하네스 상태를 자동 체크
+        # harness_verify.py를 실행하여 에러/경고를 Claude 컨텍스트에 주입
+        # → "규칙서만 있고 심판이 없는" 상태 방지 (HARNESS_V2 세션 프로토콜 강제)
+        try:
+            import subprocess as _sp_harness
+            _harness_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'harness_verify.py')
+            if os.path.exists(_harness_script):
+                _no_win_h = getattr(_sp_harness, 'CREATE_NO_WINDOW', 0x08000000)
+                _harness_r = _sp_harness.run(
+                    [sys.executable, _harness_script, '--json'],
+                    capture_output=True, text=True,
+                    encoding='utf-8', errors='replace',
+                    timeout=10,
+                    creationflags=_no_win_h
+                )
+                if _harness_r.returncode == 0:
+                    # 하네스 정상 — 간결한 상태만 표시
+                    try:
+                        _h_data = json.loads(_harness_r.stdout)
+                        _h_summary = _h_data.get("summary", {})
+                        _h_warns = _h_data.get("details", {}).get("warnings", [])
+                        _h_msg = f"[HARNESS V2] status=ok ({_h_summary.get('passes', 0)} checks passed"
+                        if _h_warns:
+                            _h_msg += f", {len(_h_warns)} warnings)"
+                        else:
+                            _h_msg += ")"
+                        print(_h_msg, flush=True)
+                    except json.JSONDecodeError:
+                        pass
+                else:
+                    # 하네스 실패 — 에러 상세를 Claude에게 전달
+                    try:
+                        _h_data = json.loads(_harness_r.stdout)
+                        _h_errors = _h_data.get("details", {}).get("errors", [])
+                        _h_warns = _h_data.get("details", {}).get("warnings", [])
+                        _h_lines = ["⚠️ [HARNESS V2] status=FAIL — 작업 전 하네스 수정 필요:"]
+                        for e in _h_errors:
+                            _h_lines.append(f"  FAIL {e}")
+                        for w in _h_warns[:3]:  # 경고는 최대 3개만
+                            _h_lines.append(f"  WARN {w}")
+                        print("\n".join(_h_lines), flush=True)
+                    except json.JSONDecodeError:
+                        print(f"⚠️ [HARNESS V2] 검증 실패 (파싱 오류)", flush=True)
+        except Exception:
+            pass  # 하네스 검증 실패는 훅 전체를 중단하지 않음
+
         # [하이브 컨텍스트 자동 주입] 작업 시작 전 current-work + 오늘 활동 자동 로드
         # → Claude가 매번 수동으로 memory.py list를 실행하지 않아도 항상 컨텍스트 보유
         hive_ctx = _inject_hive_context()

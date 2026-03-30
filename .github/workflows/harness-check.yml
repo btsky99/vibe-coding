@@ -1,0 +1,76 @@
+# FILE: .github/workflows/harness-check.yml
+# DESCRIPTION: 하네스 V2 자동 검증 CI 게이트.
+#              PR/푸시 시 harness_verify.py --ci를 실행하여 하네스 위반을 차단한다.
+#
+# REVISION HISTORY:
+# - 2026-03-29 Codex: 최초 생성 — V1 하네스 검증
+# - 2026-03-30 Claude: V2 업그레이드 — 트리거 경로 확장, feature_list.json/progress.md 포함
+
+name: Harness V2 Check
+
+on:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "GEMINI.md"
+      - "CODEX_GUIDE.md"
+      - "RULES.md"
+      - "PROJECT_MAP.md"
+      - "docs/**"
+      - "scripts/harness_verify.py"
+      - "feature_list.json"
+      - "progress.md"
+      - "sprint_contracts/**"
+      - "tests/pytest-harness.ini"
+      - "tests/test_harness_verify.py"
+      - ".github/workflows/harness-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "GEMINI.md"
+      - "CODEX_GUIDE.md"
+      - "RULES.md"
+      - "PROJECT_MAP.md"
+      - "docs/**"
+      - "scripts/harness_verify.py"
+      - "feature_list.json"
+      - "progress.md"
+      - "sprint_contracts/**"
+      - "tests/pytest-harness.ini"
+      - "tests/test_harness_verify.py"
+      - ".github/workflows/harness-check.yml"
+
+jobs:
+  harness:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependency
+        run: pip install pytest
+
+      - name: Run harness V2 verifier
+        run: python scripts/harness_verify.py --ci
+
+      - name: Run harness V2 verifier (JSON output for artifacts)
+        if: always()
+        run: python scripts/harness_verify.py --json > harness-result.json
+
+      - name: Upload harness result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-result
+          path: harness-result.json
+
+      - name: Run harness tests
+        run: python -m pytest -c tests/pytest-harness.ini tests/test_harness_verify.py

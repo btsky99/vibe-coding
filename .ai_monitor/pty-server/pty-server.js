@@ -353,6 +353,8 @@ function handlePtyConnectionLegacy(ws, req) {
       COLORTERM: 'truecolor',
       PYTHONLEGACYWINDOWSSTDIO: '0',
       TERMINAL_ID: sessionId,
+      // instructor 패키지의 deprecated google.generativeai FutureWarning 억제
+      PYTHONWARNINGS: 'ignore::FutureWarning',
     });
 
     // 에이전트별 HIVE_AGENT 환경변수
@@ -367,9 +369,9 @@ function handlePtyConnectionLegacy(ws, req) {
 
     // ── 셸 선택 ───────────────────────────────────────────────────────
     // Claude: cmd.exe (정상 동작)
-    // Gemini/Codex: Git Bash (CMD에서 실행 시 셸 호환성 에러 발생)
+    // Gemini/Codex/Shell(개발용): Git Bash (CMD에서 실행 시 셸 호환성 에러 발생)
     let shell, shellArgs;
-    if ((agent === 'gemini' || agent === 'codex') && BASH_AVAILABLE) {
+    if ((agent === 'gemini' || agent === 'codex' || agent === 'shell') && BASH_AVAILABLE) {
       shell = BASH_EXE;
       shellArgs = ['--login'];
     } else {
@@ -401,11 +403,15 @@ function handlePtyConnectionLegacy(ws, req) {
       const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       const modelName = getCodexMainModel();
       const modelFlag = modelName ? ` --model ${modelName}` : '';
-      ptyProcess.write(`codex${yoloFlag}${modelFlag}\n`);
+      // Preserve xterm scrollback for Codex's interactive TUI.
+      ptyProcess.write(`codex --no-alt-screen${yoloFlag}${modelFlag}\n`);
     } else if (agent.startsWith('groupchat-')) {
       // 그룹챗 터미널 — LLM + 그룹 채팅 통합 모드
       const cli = agent.replace('groupchat-', '');
-      const termName = `T${sessionId}-${cli}`;
+      // 원래 슬롯 번호 사용: sessionId는 slotId+100 기반이므로 -100하여 원래 번호 복원
+      // 예: slot101 → sessionId=102 → slotNum=2 → T2-gemini
+      const slotNum = parseInt(sessionId, 10) - 100;
+      const termName = `T${slotNum}-${cli}`;
       ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
 
@@ -664,6 +670,8 @@ function handlePersistentPtyConnection(ws, req) {
       COLORTERM: 'truecolor',
       PYTHONLEGACYWINDOWSSTDIO: '0',
       TERMINAL_ID: sessionId,
+      // instructor 패키지의 deprecated google.generativeai FutureWarning 억제
+      PYTHONWARNINGS: 'ignore::FutureWarning',
     });
 
     if (agent) {
@@ -704,10 +712,13 @@ function handlePersistentPtyConnection(ws, req) {
       const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       const modelName = getCodexMainModel();
       const modelFlag = modelName ? ` --model ${modelName}` : '';
-      ptyProcess.write(`codex${yoloFlag}${modelFlag}\n`);
+      // Preserve xterm scrollback for Codex's interactive TUI.
+      ptyProcess.write(`codex --no-alt-screen${yoloFlag}${modelFlag}\n`);
     } else if (agent.startsWith('groupchat-')) {
       const cli = agent.replace('groupchat-', '');
-      const termName = `T${sessionId}-${cli}`;
+      // 원래 슬롯 번호 사용: sessionId는 slotId+100 기반이므로 -100하여 원래 번호 복원
+      const slotNum = parseInt(sessionId, 10) - 100;
+      const termName = `T${slotNum}-${cli}`;
       ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
 

@@ -37,7 +37,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Terminal, X, Zap, ClipboardList, MessageSquare, Cpu, Trash2, Activity, CheckCircle2, Clock, Code2
+  Terminal, TerminalSquare, X, Zap, ClipboardList, MessageSquare, Cpu, Trash2, Activity, CheckCircle2, Clock, Code2
 } from 'lucide-react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -86,6 +86,19 @@ export default function TerminalSlot({
   // [버그수정 2026-03-20] WebSocket 자동 재연결 타이머 참조
   const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsReconnectAttemptRef = useRef(0);
+
+  // ── 그룹 채팅 전용 두 번째 PTY 터미널 refs ──
+  // 일반 터미널과 독립적으로 동작하며, 버튼 전환해도 서로 안 끊김
+  // PTY 세션 ID는 slot{slotId + 100}을 사용하여 일반 터미널과 충돌 방지
+  const groupXtermRef = useRef<HTMLDivElement>(null);
+  const groupTermRef = useRef<XTerm | null>(null);
+  const groupWsRef = useRef<WebSocket | null>(null);
+  const groupFitAddonRef = useRef<FitAddon | null>(null);
+  const groupResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const groupWsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const groupWsReconnectAttemptRef = useRef(0);
+  const [isGroupChatRunning, setIsGroupChatRunning] = useState(false);
+
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [hasAttachedTerminal, setHasAttachedTerminal] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
@@ -100,15 +113,12 @@ export default function TerminalSlot({
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
 
-  // 채팅 모드 — true이면 ChatSlot 표시, false이면 기존 PTY 터미널
-  const [isChatMode, setIsChatMode] = useState<boolean>(() => {
-    return localStorage.getItem('chat_mode_T' + (slotId + 1)) === 'true';
-  });
-  // ChatSlot 마운트 이력 — 한번이라도 채팅 모드 진입하면 true → 이후 hidden으로 유지 (unmount 안 함)
-  // unmount 시 SSE 연결 끊김 + 실행 중인 LLM 세션 유실 방지
-  const [chatMounted, setChatMounted] = useState<boolean>(() => {
-    return localStorage.getItem('chat_mode_T' + (slotId + 1)) === 'true';
-  });
+  // 채팅 모드 — true이면 그룹 채팅 PTY 표시, false이면 기존 PTY 터미널
+  // [버그수정 2026-03-29] localStorage 복원 제거 — 그룹 채팅은 명시적으로 버튼 클릭 시에만 시작.
+  // 이전 ChatSlot 방식에서 그룹 채팅 PTY로 전환되면서, 앱 시작 시 isChatMode=true인데
+  // groupChat PTY가 없으면 빈 화면 + 에이전트 선택 카드 숨김 → 터미널 안 열리는 버그 발생.
+  const [isChatMode, setIsChatMode] = useState(false);
+  const [chatMounted, setChatMounted] = useState(false);
 
   // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
   // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
@@ -307,6 +317,10 @@ export default function TerminalSlot({
       // 원인: OS TCP keepalive 타임아웃 또는 네트워크 일시 단절로 WS가 닫힘.
       // 해결: onclose에서 지수 백오프(1s→2s→4s...최대30s)로 자동 재연결 시도.
       //       사용자가 명시적으로 터미널을 닫은 경우(cleanupTerminal)는 재연결하지 않음.
+      // [2026-03-30 Claude] Stale closure 버그 수정 — hasAttachedTerminal 대신 ref 사용
+      // 기존: onclose 콜백이 클로저 시점의 hasAttachedTerminal(항상 false)을 캡처
+      // → 정상 연결 중에도 재연결 시도 가능 (무한 재연결 루프 위험)
+      // 수정: wsRef.current?.readyState로 실제 연결 상태를 직접 확인
       ws.onclose = (event) => {
         setHasAttachedTerminal(false);
         // code 1000(정상종료) 또는 터미널 모드가 꺼진 경우 재연결하지 않음
@@ -318,8 +332,10 @@ export default function TerminalSlot({
         if (attempt < 10) {
           term.write(`\r\n\x1b[38;5;208m[HIVE] 연결 끊김 — ${delay / 1000}초 후 자동 재연결 (${attempt + 1}/10)\x1b[0m\r\n`);
           wsReconnectTimerRef.current = setTimeout(() => {
-            // 재연결 시점에도 터미널 모드가 유지 중인지 확인
-            if (termRef.current && !hasAttachedTerminal) {
+            // ref 기반으로 실제 상태 확인 — stale closure 방지
+            const currentWs = wsRef.current;
+            const isAlreadyConnected = currentWs && currentWs.readyState === WebSocket.OPEN;
+            if (termRef.current && !isAlreadyConnected) {
               launchAgent(agent, false);
             }
           }, delay);
@@ -373,6 +389,16 @@ export default function TerminalSlot({
   }, [showMonitor]);
 
 
+  // 터미널 ↔ 그룹채팅 전환 시 표시되는 쪽의 xterm fit() 재조정
+  useEffect(() => {
+    const targetFit = isChatMode ? groupFitAddonRef.current : fitAddonRef.current;
+    if (!targetFit) return;
+    const doFit = () => targetFit.fit();
+    const raf = requestAnimationFrame(doFit);
+    const t = setTimeout(doFit, 100);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [isChatMode]);
+
   const closeTerminal = () => {
     // [버그수정 2026-03-20] 명시적 종료 시 재연결 타이머 정리
     if (wsReconnectTimerRef.current) {
@@ -388,6 +414,162 @@ export default function TerminalSlot({
     resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close(1000);  // 1000=정상종료 → onclose에서 재연결 안 함
     if (termRef.current) termRef.current.dispose();
+    // [버그수정 2026-03-29] 그룹 채팅 PTY도 함께 정리 — X 버튼으로 종료 안 되던 문제 해결
+    if (groupWsReconnectTimerRef.current) { clearTimeout(groupWsReconnectTimerRef.current); groupWsReconnectTimerRef.current = null; }
+    groupWsReconnectAttemptRef.current = 0;
+    setIsGroupChatRunning(false);
+    setIsChatMode(false);
+    setChatMounted(false);
+    localStorage.setItem('chat_mode_' + terminalId, 'false');
+    groupFitAddonRef.current = null;
+    groupResizeObserverRef.current?.disconnect();
+    groupResizeObserverRef.current = null;
+    if (groupWsRef.current) { groupWsRef.current.close(1000); groupWsRef.current = null; }
+    if (groupTermRef.current) { groupTermRef.current.dispose(); groupTermRef.current = null; }
+  };
+
+  // ── 그룹 채팅 PTY 실행 — 일반 터미널과 독립된 두 번째 xterm + WebSocket ──
+  // PTY 세션 ID: slot{slotId + 100}으로 일반 터미널(slot{slotId})과 충돌 방지
+  const launchGroupChat = (agent: string) => {
+    // 이미 실행 중이면 전환만
+    if (isGroupChatRunning) {
+      setIsChatMode(true);
+      localStorage.setItem('chat_mode_' + terminalId, 'true');
+      return;
+    }
+    // 기존 그룹챗 터미널 정리
+    if (groupWsReconnectTimerRef.current) {
+      clearTimeout(groupWsReconnectTimerRef.current);
+      groupWsReconnectTimerRef.current = null;
+    }
+    if (groupTermRef.current) { groupTermRef.current.dispose(); groupTermRef.current = null; }
+    if (groupWsRef.current) { groupWsRef.current.close(1000); groupWsRef.current = null; }
+    groupResizeObserverRef.current?.disconnect();
+    groupResizeObserverRef.current = null;
+    if (groupXtermRef.current) groupXtermRef.current.innerHTML = '';
+
+    setIsGroupChatRunning(true);
+    setChatMounted(true);
+    setIsChatMode(true);
+    localStorage.setItem('chat_mode_' + terminalId, 'true');
+
+    setTimeout(() => {
+      if (!groupXtermRef.current) return;
+      const term = new XTerm({
+        theme: { background: '#1a1a2e', foreground: '#cccccc', cursor: '#00d4ff', selectionBackground: '#00d4ff55' },
+        fontFamily: "'Fira Code', 'Consolas', monospace",
+        fontSize: 13,
+        cursorBlink: true,
+        scrollback: 10000,
+        smoothScrollDuration: 100,
+        scrollOnUserInput: true
+      });
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.loadAddon(new WebLinksAddon((_event, uri) => {
+        fetch(`${API_BASE}/api/open-external`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: uri }),
+        }).catch(() => window.open(uri, '_blank', 'noopener,noreferrer'));
+      }));
+      term.open(groupXtermRef.current);
+      fitAddon.fit();
+      groupTermRef.current = term;
+      groupFitAddonRef.current = fitAddon;
+
+      // 텍스트 드래그 시 자동 복사
+      term.onSelectionChange(() => {
+        if (term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection()).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = term.getSelection();
+            ta.style.position = 'fixed'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select();
+            document.execCommand('copy'); document.body.removeChild(ta);
+          });
+        }
+      });
+
+      // [버그수정 2026-03-29] 그룹 채팅 xterm 우클릭 컨텍스트 메뉴
+      // 일반 터미널(284줄)과 100% 동일한 패턴 사용
+      groupXtermRef.current.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() });
+      });
+
+      // ResizeObserver — 컨테이너 크기 변화 시 자동 fit
+      const container = groupXtermRef.current;
+      if (container) {
+        const ro = new ResizeObserver(() => fitAddon.fit());
+        ro.observe(container);
+        groupResizeObserverRef.current = ro;
+      }
+
+      // WebSocket — PTY 세션 ID는 slot{slotId + 100}으로 일반 터미널과 분리
+      const groupAgent = `groupchat-${agent}`;
+      const wsParams = new URLSearchParams({
+        agent: groupAgent,
+        cwd: currentPath,
+        cols: term.cols.toString(),
+        rows: term.rows.toString(),
+        yolo: 'true',
+      });
+      const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId + 100}?${wsParams.toString()}`);
+      groupWsRef.current = ws;
+
+      ws.onopen = () => {
+        groupWsReconnectAttemptRef.current = 0;
+        term.write(`\r\n\x1b[38;5;51m[HIVE] ${groupAgent.toUpperCase()} \x1b[38;5;196m[YOLO MODE]\x1b[0m \x1b[38;5;51m그룹 채팅 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      };
+      ws.onclose = (event) => {
+        if (event.code === 1000) return;
+        const attempt = groupWsReconnectAttemptRef.current;
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        groupWsReconnectAttemptRef.current = attempt + 1;
+        if (attempt < 10) {
+          term.write(`\r\n\x1b[38;5;208m[HIVE] 그룹채팅 연결 끊김 — ${delay / 1000}초 후 재연결 (${attempt + 1}/10)\x1b[0m\r\n`);
+          groupWsReconnectTimerRef.current = setTimeout(() => {
+            if (groupTermRef.current) launchGroupChat(agent);
+          }, delay);
+        }
+      };
+      ws.onmessage = async (e) => {
+        const data = e.data instanceof Blob ? await e.data.text() : e.data;
+        term.write(data);
+      };
+      term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      });
+      // [2026-03-30 Claude] 메모리 누수 수정 — resize 리스너를 ref에 저장하여 cleanup 시 제거
+      // 기존: addEventListener만 하고 removeEventListener 없음 → 슬롯 열고 닫을 때마다 누적
+      const handleResize = () => fitAddon.fit();
+      window.addEventListener('resize', handleResize);
+      // cleanup 시 제거할 수 있도록 ref에 저장
+      (groupTermRef.current as any).__resizeHandler = handleResize;
+    }, 50);
+  };
+
+  // 그룹 채팅 터미널 종료
+  const closeGroupChat = () => {
+    if (groupWsReconnectTimerRef.current) { clearTimeout(groupWsReconnectTimerRef.current); groupWsReconnectTimerRef.current = null; }
+    groupWsReconnectAttemptRef.current = 0;
+    setIsGroupChatRunning(false);
+    setIsChatMode(false);
+    setChatMounted(false);
+    localStorage.setItem('chat_mode_' + terminalId, 'false');
+    groupFitAddonRef.current = null;
+    groupResizeObserverRef.current?.disconnect();
+    groupResizeObserverRef.current = null;
+    if (groupWsRef.current) groupWsRef.current.close(1000);
+    // [2026-03-30 Claude] 메모리 누수 수정 — window.resize 리스너 제거
+    if (groupTermRef.current) {
+      const handler = (groupTermRef.current as any).__resizeHandler;
+      if (handler) window.removeEventListener('resize', handler);
+      groupTermRef.current.dispose();
+    }
   };
 
   const handleSend = (text: string) => {
@@ -589,18 +771,29 @@ export default function TerminalSlot({
               </div>
             )}
 
-            {/* 채팅 모드 전환 버튼 — 터미널 실행 중에도 채팅으로 전환 가능 (터미널은 hidden으로 유지) */}
+            {/* 터미널 / 그룹 채팅 전환 버튼 — 둘 다 동시에 살아있고 왔다갔다 전환 */}
             <button
               onClick={() => {
-                setIsChatMode(true);
-                setChatMounted(true);
-                localStorage.setItem('chat_mode_' + terminalId, 'true');
+                setIsChatMode(false);
+                localStorage.setItem('chat_mode_' + terminalId, 'false');
               }}
-              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${isChatMode ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-              title="채팅 모드로 전환 (터미널 유지)"
+              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${!isChatMode ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+              title="터미널 보기"
+            >
+              <Terminal className="w-2.5 h-2.5" />
+              터미널
+            </button>
+            <button
+              onClick={() => {
+                // 현재 에이전트 기반으로 그룹챗 PTY 실행 (이미 실행 중이면 전환만)
+                const baseAgent = activeAgent.replace(/^groupchat-/, '');
+                launchGroupChat(baseAgent || 'claude');
+              }}
+              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${isChatMode ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+              title="그룹 채팅 PTY 터미널 (일반 터미널과 독립 동작)"
             >
               <MessageSquare className="w-2.5 h-2.5" />
-              채팅
+              그룹 채팅
             </button>
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
@@ -934,59 +1127,6 @@ export default function TerminalSlot({
             )}
           </div>
 
-          {/* 터미널 우클릭 컨텍스트 메뉴 — 복사(선택 있을 때) / 붙여넣기(선택 없을 때) */}
-          {ctxMenu && (
-            <div
-              className="fixed z-[9999] bg-[#2d2d2d] border border-white/20 rounded shadow-xl text-xs text-white min-w-[120px] py-1"
-              style={{ left: ctxMenu.x, top: ctxMenu.y }}
-              onMouseLeave={() => setCtxMenu(null)}
-            >
-              {ctxMenu.hasSelection && (
-                <button
-                  className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
-                  onClick={async () => {
-                    try {
-                      if (termRef.current) {
-                        const sel = termRef.current.getSelection();
-                        // navigator.clipboard 실패 시 execCommand 폴백
-                        try {
-                          await navigator.clipboard.writeText(sel);
-                        } catch {
-                          const ta = document.createElement('textarea');
-                          ta.value = sel;
-                          ta.style.position = 'fixed';
-                          ta.style.left = '-9999px';
-                          document.body.appendChild(ta);
-                          ta.select();
-                          document.execCommand('copy');
-                          document.body.removeChild(ta);
-                        }
-                        termRef.current.clearSelection();
-                      }
-                    } catch (err) { console.error(err); }
-                    setCtxMenu(null);
-                  }}
-                >
-                  복사
-                </button>
-              )}
-              <button
-                className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
-                onClick={async () => {
-                  try {
-                    const text = await navigator.clipboard.readText();
-                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                      wsRef.current.send(text);
-                    }
-                  } catch (err) { console.error(err); }
-                  setCtxMenu(null);
-                }}
-              >
-                붙여넣기
-              </button>
-            </div>
-          )}
-
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
             <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 opacity-80 hover:opacity-100 transition-opacity items-center">
@@ -1080,19 +1220,64 @@ export default function TerminalSlot({
         </div>
       )}
 
-      {/* ── 채팅 모드: ChatSlot은 한번 마운트되면 hidden으로 유지 (unmount 안 함) ── */}
-      {/* unmount 시 SSE 끊김 + 실행 중 LLM 세션 유실 → display:none으로 세션 보존 */}
-      {/* 터미널 실행 중에도 채팅 전환 가능 — 터미널은 위 블록에서 hidden으로 유지됨 */}
+      {/* ── 그룹 채팅 PTY 터미널 — 일반 터미널과 독립 동작, 전환해도 안 끊김 ── */}
       {chatMounted && (
-        <div className={`flex-1 flex flex-col ${isChatMode ? '' : 'hidden'}`}>
-          <ChatSlot
-            slotId={slotId}
-            currentPath={currentPath}
-            onSwitchToTerminal={() => {
-              setIsChatMode(false);
-              localStorage.setItem('chat_mode_' + terminalId, 'false');
+        <div className={`flex-1 flex flex-col min-h-0 ${isChatMode ? '' : 'hidden'}`}>
+          <div ref={groupXtermRef} className="flex-1 min-h-0" />
+        </div>
+      )}
+
+      {/* 터미널/그룹채팅 우클릭 컨텍스트 메뉴 — isTerminalMode 블록 밖에 배치하여 그룹 채팅 모드에서도 렌더링 */}
+      {ctxMenu && (
+        <div
+          className="fixed z-[9999] bg-[#2d2d2d] border border-white/20 rounded shadow-xl text-xs text-white min-w-[120px] py-1"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onMouseLeave={() => setCtxMenu(null)}
+        >
+          {ctxMenu.hasSelection && (
+            <button
+              className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+              onClick={async () => {
+                try {
+                  const activeTerm = isChatMode ? groupTermRef.current : termRef.current;
+                  if (activeTerm) {
+                    const sel = activeTerm.getSelection();
+                    try {
+                      await navigator.clipboard.writeText(sel);
+                    } catch {
+                      const ta = document.createElement('textarea');
+                      ta.value = sel;
+                      ta.style.position = 'fixed';
+                      ta.style.left = '-9999px';
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(ta);
+                    }
+                    activeTerm.clearSelection();
+                  }
+                } catch (err) { console.error(err); }
+                setCtxMenu(null);
+              }}
+            >
+              복사
+            </button>
+          )}
+          <button
+            className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+            onClick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                const activeWs = isChatMode ? groupWsRef.current : wsRef.current;
+                if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+                  activeWs.send(text);
+                }
+              } catch (err) { console.error(err); }
+              setCtxMenu(null);
             }}
-          />
+          >
+            붙여넣기
+          </button>
         </div>
       )}
 
@@ -1136,12 +1321,6 @@ export default function TerminalSlot({
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Claude 욜로(YOLO)
                   </button>
-                  <button
-                    onClick={() => launchAgent('groupchat-claude', false)}
-                    className="w-full py-2.5 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-500/30 flex items-center justify-center gap-2"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" /> Claude 그룹챗
-                  </button>
                 </div>
               </motion.div>
 
@@ -1178,12 +1357,6 @@ export default function TerminalSlot({
                     className="w-full py-2.5 bg-primary/20 hover:bg-primary/40 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2 shadow-lg shadow-primary/10"
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Gemini 욜로(YOLO)
-                  </button>
-                  <button
-                    onClick={() => launchAgent('groupchat-gemini', false)}
-                    className="w-full py-2.5 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-500/30 flex items-center justify-center gap-2"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" /> Gemini 그룹챗
                   </button>
                 </div>
               </motion.div>
@@ -1222,12 +1395,6 @@ export default function TerminalSlot({
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Codex 욜로(YOLO)
                   </button>
-                  <button
-                    onClick={() => launchAgent('groupchat-codex', false)}
-                    className="w-full py-2.5 bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-500/30 flex items-center justify-center gap-2"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" /> Codex 그룹챗
-                  </button>
                   {/* Codex CLI 미설치 시 npm 전역 설치 버튼 */}
                   <button
                     onClick={() => fetch(`${API_BASE}/api/install-codex-cli`, { method: 'POST' })}
@@ -1238,21 +1405,37 @@ export default function TerminalSlot({
                 </div>
               </motion.div>
 
-              {/* 채팅 모드 전환 버튼 — 에이전트 카드 하단 (flex row 안) */}
-              <motion.button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+              {/* Dev Terminal Card — LLM 없이 순수 셸만 여는 개발용 터미널 */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                onClick={() => {
-                  setIsChatMode(true);
-                  setChatMounted(true);
-                  localStorage.setItem('chat_mode_' + terminalId, 'true');
-                }}
-                className="flex items-center justify-center gap-2 px-4 py-6 bg-blue-600/10 hover:bg-blue-600/30 text-blue-400 rounded-2xl text-xs font-black transition-all border border-blue-500/20 shadow-lg shadow-blue-500/10 min-w-[80px]"
+                whileHover={{ scale: 1.02, translateY: -5 }}
+                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-cyan-400/50 group relative overflow-hidden"
               >
-                <MessageSquare className="w-5 h-5" />
-                <span>채팅<br/>모드</span>
-              </motion.button>
+                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <TerminalSquare className="w-12 h-12 text-cyan-400" />
+                </div>
+                <div className="w-16 h-16 rounded-2xl bg-cyan-400/10 flex items-center justify-center mb-2 group-hover:bg-cyan-400/20 transition-colors shadow-inner">
+                  <TerminalSquare className="w-8 h-8 text-cyan-400" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">DEV TERMINAL</h3>
+                  <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest opacity-60">Plain Shell</p>
+                </div>
+                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
+                  LLM 에이전트 없이 순수 셸을 엽니다.<br/>npm, git, python 등 개발 명령어 실행용.
+                </p>
+                <div className="flex flex-col w-full gap-2 mt-4">
+                  <button
+                    onClick={() => launchAgent('shell', false)}
+                    className="w-full py-2.5 bg-cyan-400/20 hover:bg-cyan-400/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-400/30 flex items-center justify-center gap-2 shadow-lg shadow-cyan-400/10"
+                  >
+                    <TerminalSquare className="w-3.5 h-3.5" /> 터미널 열기
+                  </button>
+                </div>
+              </motion.div>
+
             </div>
           </div>
 

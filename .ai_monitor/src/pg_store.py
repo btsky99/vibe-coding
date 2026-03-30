@@ -105,7 +105,7 @@ _pg_conn_lock = threading.Lock()
 
 def _get_pg_conn():
     """psycopg2 커넥션을 반환합니다. 끊겼으면 재연결합니다."""
-    global _pg_conn
+    global _pg_conn, _HAS_PSYCOPG2  # [2026-03-30 Claude] _HAS_PSYCOPG2도 global 선언 — 폴백 전환 버그 수정
     if _pg_conn is not None:
         try:
             with _pg_conn.cursor() as cur:
@@ -236,11 +236,17 @@ def query_rows(sql: str, timeout: int = 15) -> list[dict]:
         return []
     if _HAS_PSYCOPG2:
         try:
+            # [2026-03-30 Claude] 락 범위 최소화 — 커넥션 획득만 락으로 보호
+            # 기존: 쿼리 실행 + fetchall() 전체를 락 안에서 수행 → 다른 DB 호출 전부 블로킹
+            # 변경: 커넥션 획득 후 즉시 락 해제 → 쿼리는 락 밖에서 실행
+            # autocommit=True이므로 커넥션 객체를 락 밖에서 사용해도 트랜잭션 충돌 없음
             with _pg_conn_lock:
                 conn = _get_pg_conn()
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute(sql)
-                    return [dict(row) for row in cur.fetchall()]
+            if conn is None:
+                return []
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql)
+                return [dict(row) for row in cur.fetchall()]
         except Exception as e:
             print(f"[pg_store] query_rows 오류 (psycopg2): {e}")
             return []
@@ -255,15 +261,25 @@ def execute(sql: str, timeout: int = 15) -> bool:
     if not ensure_schema():
         return False
     if _HAS_PSYCOPG2:
-        try:
-            with _pg_conn_lock:
-                conn = _get_pg_conn()
+        # 최대 2회 재시도 — "tuple concurrently updated" 등 일시적 충돌 대비
+        for attempt in range(3):
+            try:
+                # [2026-03-30 Claude] 락 범위 최소화 — 커넥션 획득만 락으로 보호
+                with _pg_conn_lock:
+                    conn = _get_pg_conn()
+                if conn is None:
+                    return False
                 with conn.cursor() as cur:
                     cur.execute(sql)
                 return True
-        except Exception as e:
-            print(f"[pg_store] execute 오류 (psycopg2): {e}")
-            return False
+            except Exception as e:
+                err_msg = str(e)
+                if 'tuple concurrently updated' in err_msg and attempt < 2:
+                    import time
+                    time.sleep(0.05 * (attempt + 1))  # 50~100ms 대기 후 재시도
+                    continue
+                print(f"[pg_store] execute 오류 (psycopg2): {e}")
+                return False
     ok, _ = _run_psql(sql, csv_output=False, timeout=timeout)
     return ok
 
@@ -474,15 +490,23 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
 
 def execute_raw(sql: str, timeout: int = 15) -> bool:
     if _HAS_PSYCOPG2:
-        try:
-            with _pg_conn_lock:
-                conn = _get_pg_conn()
-                with conn.cursor() as cur:
-                    cur.execute(sql)
-                return True
-        except Exception as e:
-            print(f"[pg_store] execute_raw 오류 (psycopg2): {e}")
-            # psycopg2 실패 시 psql.exe 폴백 시도
+        # 최대 2회 재시도 — "tuple concurrently updated" 등 일시적 충돌 대비
+        for attempt in range(3):
+            try:
+                with _pg_conn_lock:
+                    conn = _get_pg_conn()
+                    with conn.cursor() as cur:
+                        cur.execute(sql)
+                    return True
+            except Exception as e:
+                err_msg = str(e)
+                if 'tuple concurrently updated' in err_msg and attempt < 2:
+                    import time
+                    time.sleep(0.05 * (attempt + 1))  # 50~100ms 대기 후 재시도
+                    continue
+                print(f"[pg_store] execute_raw 오류 (psycopg2): {e}")
+                break
+        # psycopg2 실패 시 psql.exe 폴백 시도
     ok, _ = _run_psql(sql, csv_output=False, timeout=timeout)
     return ok
 
@@ -866,16 +890,20 @@ def get_task(task_id: str) -> dict | None:
     return task
 
 
+_task_update_lock = threading.Lock()
+
 def update_task(task_id: str, updates: dict) -> dict | None:
-    existing = get_task(task_id)
-    if not existing:
-        return None
-    merged = {**existing, **updates}
-    merged['id'] = task_id
-    merged['updated_at'] = str(updates.get('updated_at', _now_iso()))
-    if 'tags' in merged and isinstance(merged['tags'], str):
-        merged['tags'] = [tag.strip() for tag in merged['tags'].split(',') if tag.strip()]
-    return save_task(merged)
+    # READ-MODIFY-WRITE 전체를 락으로 보호하여 concurrent update 방지
+    with _task_update_lock:
+        existing = get_task(task_id)
+        if not existing:
+            return None
+        merged = {**existing, **updates}
+        merged['id'] = task_id
+        merged['updated_at'] = str(updates.get('updated_at', _now_iso()))
+        if 'tags' in merged and isinstance(merged['tags'], str):
+            merged['tags'] = [tag.strip() for tag in merged['tags'].split(',') if tag.strip()]
+        return save_task(merged)
 
 
 def delete_task(task_id: str) -> bool:

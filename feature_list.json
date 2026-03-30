@@ -1,0 +1,133 @@
+{
+  "version": "2.0",
+  "last_updated": "2026-03-30",
+  "last_updated_by": "human",
+  "description": "Vibe Coding 프로젝트 기능 목록. 에이전트는 항목 삭제 금지. passes 변경은 Evaluator만 가능.",
+  "features": [
+    {
+      "id": "F001",
+      "category": "functional",
+      "priority": "P0",
+      "description": "터미널 실시간 모니터링 — PTY 서버를 통한 다중 터미널 출력 스트리밍",
+      "acceptance_criteria": [
+        "대시보드에서 터미널 출력이 실시간으로 표시된다",
+        "최소 4개 터미널 슬롯을 동시에 모니터링할 수 있다",
+        "터미널 연결 해제 시 자동 재연결을 시도한다"
+      ],
+      "assigned_to": "claude",
+      "evaluated_by": null,
+      "passes": true,
+      "notes": "v3.5부터 안정적 동작 확인됨"
+    },
+    {
+      "id": "F002",
+      "category": "functional",
+      "priority": "P0",
+      "description": "에이전트 상태 패널 — 하이브 에이전트 활동 실시간 표시",
+      "acceptance_criteria": [
+        "각 에이전트(Claude, Gemini, Codex)의 활성 상태가 표시된다",
+        "최근 사고(thought) 로그가 실시간 갱신된다",
+        "에이전트 간 ITCP 메시지 흐름이 시각화된다"
+      ],
+      "assigned_to": "claude",
+      "evaluated_by": null,
+      "passes": true,
+      "notes": "v3.6에서 PostgreSQL 연동 완료"
+    },
+    {
+      "id": "F003",
+      "category": "functional",
+      "priority": "P1",
+      "description": "LLM 그룹 채팅 — 에이전트 간 실시간 대화 인터페이스",
+      "acceptance_criteria": [
+        "메시지 전송/수신이 실시간으로 동작한다",
+        "에이전트별 아바타/색상으로 구분된다",
+        "PostgreSQL LISTEN/NOTIFY 기반 실시간 업데이트",
+        "컨텍스트 메뉴(복사, 삭제)가 동작한다"
+      ],
+      "assigned_to": "claude",
+      "evaluated_by": null,
+      "passes": false,
+      "notes": "v3.7.160에서 기본 구현. 컨텍스트 메뉴 검증 필요."
+    },
+    {
+      "id": "F004",
+      "category": "functional",
+      "priority": "P0",
+      "description": "하네스 검증 시스템 — 에이전트 작업의 기계적 품질 검증",
+      "acceptance_criteria": [
+        "harness_verify.py가 V2 검사 항목 10개를 모두 수행한다",
+        "CI(GitHub Actions)에서 자동 실행된다",
+        "feature_list.json 스키마 검증이 포함된다",
+        "Generator-Evaluator 분리 위반을 탐지한다"
+      ],
+      "assigned_to": null,
+      "evaluated_by": null,
+      "passes": false,
+      "notes": "V2 업그레이드 진행 중"
+    },
+    {
+      "id": "F005",
+      "category": "functional",
+      "priority": "P1",
+      "description": "Generator-Evaluator 파이프라인 — 에이전트 간 독립 평가 체계",
+      "acceptance_criteria": [
+        "스프린트 계약 템플릿이 존재한다",
+        "Generator가 자신의 passes를 true로 변경할 수 없다",
+        "ITCP review 채널로 평가 요청/결과가 전달된다",
+        "auto_dispatcher.py가 역할 매칭 매트릭스를 참조한다"
+      ],
+      "assigned_to": null,
+      "evaluated_by": null,
+      "passes": false,
+      "notes": "HARNESS_V2 설계 완료. 구현 필요."
+    },
+    {
+      "id": "F006",
+      "category": "functional",
+      "priority": "P1",
+      "description": "세션 시작 프로토콜 — 모든 에이전트의 표준 초기화 절차",
+      "acceptance_criteria": [
+        "세션 시작 시 feature_list.json을 자동 로드한다",
+        "harness_verify.py를 자동 실행한다",
+        "progress.md에서 마지막 상태를 읽는다",
+        "에이전트별 추가 프로토콜이 실행된다"
+      ],
+      "assigned_to": null,
+      "evaluated_by": null,
+      "passes": false,
+      "notes": "Claude는 UserPromptSubmit 훅으로 부분 구현. Gemini/Codex 미구현."
+    },
+    {
+      "id": "F007",
+      "category": "performance",
+      "priority": "P2",
+      "description": "EXE 빌드 파이프라인 — GitHub Actions를 통한 자동 빌드 및 릴리즈",
+      "acceptance_criteria": [
+        "vibe-release 스킬로 버전 증가 + 커밋 + 푸시가 자동화된다",
+        "GitHub Actions가 EXE를 빌드하고 Release를 생성한다",
+        "빌드 실패 시 알림이 전달된다"
+      ],
+      "assigned_to": "claude",
+      "evaluated_by": null,
+      "passes": true,
+      "notes": "v3.6부터 안정 동작"
+    },
+    {
+      "id": "F008",
+      "category": "functional",
+      "priority": "P1",
+      "description": "하이브 마인드 통합 — PostgreSQL 기반 에이전트 협업 인프라",
+      "acceptance_criteria": [
+        "ITCP(pg_messages)로 에이전트 간 비동기 통신이 가능하다",
+        "auto_dispatcher.py로 역량 기반 태스크 분배가 동작한다",
+        "hive_bridge.py로 활동 로그가 PostgreSQL에 기록된다",
+        "memory.py로 하이브 공유 메모리가 관리된다"
+      ],
+      "assigned_to": "claude",
+      "evaluated_by": null,
+      "passes": true,
+      "notes": "v3.7에서 PostgreSQL 전면 이관 완료"
+    }
+  ]
+}
