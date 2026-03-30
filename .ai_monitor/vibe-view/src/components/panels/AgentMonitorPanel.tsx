@@ -4,19 +4,20 @@
  * 설명: Paperclip 스타일 에이전트 오케스트레이션 조직도 뷰.
  *       Dispatcher(사용자)를 루트로 각 에이전트가 트리 구조로 연결되며,
  *       실시간 상태(working/idle/offline), 현재 태스크, 하트비트를 표시.
- *       SVG 연결선으로 계층 관계를 시각화.
+ *       HTML/CSS 기반 카드형 조직도로 Paperclip UI를 충실히 재현.
  *
  * REVISION HISTORY:
+ * - 2026-03-31 Claude: Paperclip 정식 UI 모방 — HTML/CSS 카드형 조직도로 전면 재작성
+ *   - SVG 기반 → HTML div + CSS tree connector로 전환
+ *   - 카드 디자인: 아이콘 + 역할명 + 설명 + 상태 dot + 에이전트명 (Paperclip 동일)
+ *   - 계층 연결선: CSS ::before/::after 수직/수평선
  * - 2026-03-31 Claude: Paperclip 스타일 조직도(org chart) UI로 전면 리디자인
- *   - 카드 나열 → SVG 연결선 + 트리 계층 구조로 변경
- *   - Dispatcher 루트 노드 + 에이전트 자식 노드 레이아웃
- *   - 상태별 글로우 효과 + 애니메이션 펄스 추가
  * - 2026-03-30 Claude: 최초 작성 — Paperclip 오케스트레이션 전환
  * ------------------------------------------------------------------------
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Zap, Loader2, PowerOff } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Zap, Loader2, PowerOff, Code2, Globe, Wrench, Home } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
 // 에이전트 하트비트 데이터 타입
@@ -30,71 +31,259 @@ interface AgentBeat {
 }
 
 // 에이전트 역할 정의 — Paperclip 스타일 조직도 노드에 표시
-const AGENT_ROLES: Record<string, { label: string; role: string; icon: string }> = {
-  'claude-T1': { label: 'Claude', role: '정밀 로직 · 프론트엔드', icon: '⚡' },
-  'gemini-T2': { label: 'Gemini', role: '설계 · 오케스트레이션', icon: '🌐' },
-  'codex-T3':  { label: 'Codex',  role: '샌드박스 · 테스트',     icon: '🔧' },
-  claude:      { label: 'Claude', role: '정밀 로직',             icon: '⚡' },
-  gemini:      { label: 'Gemini', role: '설계 · 연구',           icon: '🌐' },
-  codex:       { label: 'Codex',  role: '실행 · 검증',           icon: '🔧' },
+const AGENT_ROLES: Record<string, {
+  label: string;
+  title: string;
+  description: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}> = {
+  'claude-T1': {
+    label: 'Claude',
+    title: 'Engineer',
+    description: 'Founding Full-Stack Engineer',
+    Icon: Code2,
+  },
+  'gemini-T2': {
+    label: 'Gemini',
+    title: 'Architect',
+    description: 'Design & Orchestration',
+    Icon: Globe,
+  },
+  'codex-T3': {
+    label: 'Codex',
+    title: 'QA Engineer',
+    description: 'Sandbox & Validation',
+    Icon: Wrench,
+  },
+  claude: {
+    label: 'Claude',
+    title: 'Engineer',
+    description: 'Precision Logic',
+    Icon: Code2,
+  },
+  gemini: {
+    label: 'Gemini',
+    title: 'Architect',
+    description: 'Research & Design',
+    Icon: Globe,
+  },
+  codex: {
+    label: 'Codex',
+    title: 'QA Engineer',
+    description: 'Execution & Verify',
+    Icon: Wrench,
+  },
 };
 
-// 상태별 색상
-const STATUS_COLORS: Record<string, { dot: string; glow: string; border: string; text: string }> = {
+// 상태별 색상 — Paperclip 스타일 (노란 dot이 기본)
+const STATUS_COLORS: Record<string, { dot: string; glow: string; border: string }> = {
   working: {
     dot: '#22c55e',
-    glow: 'rgba(34, 197, 94, 0.4)',
-    border: 'rgba(34, 197, 94, 0.35)',
-    text: '#4ade80',
+    glow: '0 0 8px rgba(34, 197, 94, 0.6)',
+    border: 'rgba(34, 197, 94, 0.3)',
   },
   idle: {
     dot: '#eab308',
-    glow: 'rgba(234, 179, 8, 0.25)',
-    border: 'rgba(234, 179, 8, 0.25)',
-    text: '#facc15',
+    glow: '0 0 6px rgba(234, 179, 8, 0.4)',
+    border: 'rgba(234, 179, 8, 0.2)',
   },
   offline: {
-    dot: '#ef4444',
-    glow: 'rgba(239, 68, 68, 0.15)',
-    border: 'rgba(255, 255, 255, 0.08)',
-    text: '#f87171',
+    dot: '#6b7280',
+    glow: 'none',
+    border: 'rgba(255, 255, 255, 0.06)',
   },
 };
 
 function relativeTime(iso?: string): string {
-  if (!iso) return '—';
+  if (!iso) return '';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (!isFinite(diff) || diff < 0) return '방금';
-  if (diff < 60) return `${Math.max(1, Math.floor(diff))}초 전`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
-  return `${Math.floor(diff / 86400)}일 전`;
+  if (!isFinite(diff) || diff < 0) return 'now';
+  if (diff < 60) return `${Math.max(1, Math.floor(diff))}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
 }
 
-// 터미널 ID 추출 (claude-T1 → T1)
-function terminalId(agentId: string): string {
-  const m = agentId.match(/T(\d+)/i);
-  return m ? `T${m[1]}` : '';
+// ── Paperclip 스타일 개별 에이전트 카드 ──
+function AgentCard({
+  agent,
+  onTrigger,
+  isTriggering,
+}: {
+  agent: AgentBeat;
+  onTrigger: (id: string) => void;
+  isTriggering: boolean;
+}) {
+  const role = AGENT_ROLES[agent.agent_id] ?? {
+    label: agent.agent_id,
+    title: 'Agent',
+    description: '',
+    Icon: Wrench,
+  };
+  const colors = STATUS_COLORS[agent.status] ?? STATUS_COLORS.offline;
+  const { Icon } = role;
+
+  return (
+    <div
+      className="org-card"
+      style={{
+        background: 'rgba(255, 255, 255, 0.04)',
+        border: `1px solid ${colors.border}`,
+        borderRadius: 12,
+        padding: '16px 18px 14px',
+        minWidth: 180,
+        maxWidth: 210,
+        cursor: 'pointer',
+        transition: 'border-color 0.3s, box-shadow 0.3s',
+        position: 'relative',
+      }}
+      onClick={() => onTrigger(agent.agent_id)}
+      title={`클릭하여 하트비트 트리거 (${agent.agent_id})`}
+    >
+      {/* 트리거 로딩 오버레이 */}
+      {isTriggering && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 12,
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2,
+        }}>
+          <Loader2 className="w-5 h-5 animate-spin text-white/60" />
+        </div>
+      )}
+
+      {/* 아이콘 + 역할명 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <Icon className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} />
+        <span style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: 'white',
+          letterSpacing: '-0.01em',
+        }}>
+          {role.title}
+        </span>
+      </div>
+
+      {/* 설명 */}
+      <div style={{
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.35)',
+        marginBottom: 6,
+        lineHeight: 1.3,
+      }}>
+        {role.description}
+      </div>
+
+      {/* 상태 dot + 에이전트명 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: colors.dot,
+            boxShadow: colors.glow,
+            display: 'inline-block',
+            flexShrink: 0,
+            animation: agent.status === 'working' ? 'pulse-dot 2s ease-in-out infinite' : 'none',
+          }}
+        />
+        <span style={{
+          fontSize: 11,
+          color: 'rgba(255,255,255,0.45)',
+        }}>
+          {role.label}
+        </span>
+        {agent.last_beat && (
+          <span style={{
+            fontSize: 9,
+            color: 'rgba(255,255,255,0.2)',
+            marginLeft: 'auto',
+          }}>
+            {relativeTime(agent.last_beat)}
+          </span>
+        )}
+      </div>
+
+      {/* 현재 태스크 표시 */}
+      {agent.current_task && (
+        <div style={{
+          marginTop: 8,
+          padding: '4px 8px',
+          borderRadius: 6,
+          background: 'rgba(255,255,255,0.04)',
+          fontSize: 9,
+          color: 'rgba(255,255,255,0.3)',
+          lineHeight: 1.4,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {agent.current_task}
+        </div>
+      )}
+    </div>
+  );
 }
 
+// ── Paperclip 스타일 Dispatcher (루트) 카드 ──
+function DispatcherCard() {
+  return (
+    <div
+      style={{
+        background: 'rgba(255, 255, 255, 0.05)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: 12,
+        padding: '14px 20px 12px',
+        minWidth: 160,
+        display: 'inline-block',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+        <Home className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} />
+        <span style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: 'white',
+          letterSpacing: '-0.01em',
+        }}>
+          Dispatcher
+        </span>
+      </div>
+      <div style={{
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.35)',
+        marginBottom: 4,
+      }}>
+        Task Orchestrator
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{
+          width: 7,
+          height: 7,
+          borderRadius: '50%',
+          background: '#22c55e',
+          boxShadow: '0 0 6px rgba(34, 197, 94, 0.5)',
+          display: 'inline-block',
+        }} />
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+          User
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── 메인 컴포넌트: Paperclip 스타일 조직도 ──
 export default function AgentMonitorPanel() {
   const [agents, setAgents] = useState<AgentBeat[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-
-  // 컨테이너 너비 감지 — 반응형 레이아웃
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
 
   // 에이전트 상태 폴링 (5초)
   useEffect(() => {
@@ -157,299 +346,165 @@ export default function AgentMonitorPanel() {
 
   const workingCount = agents.filter(a => a.status === 'working').length;
 
-  // ── 레이아웃 계산 ──
-  // 사이드바 폭이 좁으면(< 350px) 세로 레이아웃으로 전환
-  const isNarrow = containerWidth > 0 && containerWidth < 350;
-
-  // 루트(Dispatcher) 노드 위치
-  const rootW = 140, rootH = 56;
-  // 자식 노드 크기
-  const nodeW = 150, nodeH = 90;
-  // 간격
-  const gapX = 16;
-  const totalChildrenWidth = agents.length * nodeW + (agents.length - 1) * gapX;
-  const svgWidth = Math.max(totalChildrenWidth + 40, rootW + 40);
-  // 좁은 모드에서는 세로 배치
-  const svgHeight = isNarrow
-    ? 80 + agents.length * (nodeH + 50) + 20
-    : 80 + nodeH + 40;
-
-  // 루트 노드 중앙
-  const rootX = svgWidth / 2 - rootW / 2;
-  const rootY = 10;
-  const rootCenterX = rootX + rootW / 2;
-  const rootBottomY = rootY + rootH;
-
-  // 자식 노드 좌표 계산
-  const childStartX = svgWidth / 2 - totalChildrenWidth / 2;
-  const childY = isNarrow ? 0 : rootBottomY + 50;
-
   return (
-    <div ref={containerRef} className="flex flex-col gap-2 p-2 overflow-auto">
+    <div className="flex flex-col gap-3 p-3 overflow-auto">
+      {/* 글로벌 스타일 — 펄스 애니메이션 + 트리 연결선 */}
+      <style>{`
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+        .org-card:hover {
+          border-color: rgba(255, 255, 255, 0.2) !important;
+          box-shadow: 0 0 20px rgba(255, 255, 255, 0.03);
+        }
+        /* Paperclip 스타일 트리 연결선 */
+        .org-tree {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0;
+        }
+        /* 루트 → 중간 수직선 */
+        .org-tree-trunk {
+          width: 1px;
+          height: 32px;
+          background: rgba(255, 255, 255, 0.1);
+        }
+        /* 자식 노드 행 — 수평 연결 */
+        .org-children {
+          display: flex;
+          justify-content: center;
+          gap: 16px;
+          position: relative;
+          padding-top: 32px;
+        }
+        /* 수평 연결 바 (자식 노드들 위) */
+        .org-children::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 50%;
+          transform: translateX(-50%);
+          height: 1px;
+          background: rgba(255, 255, 255, 0.1);
+          /* 너비는 JS로 계산 */
+        }
+        /* 각 자식에서 위로 올라가는 수직선 */
+        .org-child-wrapper {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        .org-child-stem {
+          width: 1px;
+          height: 32px;
+          background: rgba(255, 255, 255, 0.1);
+        }
+      `}</style>
+
       {/* 헤더 */}
-      <div className="flex items-center justify-between px-1 mb-1">
-        <span className="text-[11px] font-bold text-white/80">에이전트 오케스트레이션</span>
-        <span className="text-[10px] text-white/30">
-          {workingCount}/{agents.length} 활성
+      <div className="flex items-center justify-between px-1">
+        <span style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: 'rgba(255, 255, 255, 0.7)',
+          letterSpacing: '0.02em',
+        }}>
+          Agent Orchestration
+        </span>
+        <span style={{
+          fontSize: 10,
+          color: 'rgba(255, 255, 255, 0.25)',
+        }}>
+          {workingCount}/{agents.length} active
         </span>
       </div>
 
-      {/* 조직도 SVG */}
-      <div className="flex justify-center overflow-x-auto">
-        <svg
-          width={isNarrow ? '100%' : svgWidth}
-          height={svgHeight}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="flex-shrink-0"
-        >
-          {/* 그라디언트 정의 */}
-          <defs>
-            <filter id="glow-green">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
-            <filter id="glow-yellow">
-              <feGaussianBlur stdDeviation="2" result="blur" />
-              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-            </filter>
-          </defs>
+      {/* 조직도 트리 */}
+      <div className="org-tree">
+        {/* 루트: Dispatcher */}
+        <DispatcherCard />
 
-          {/* ── 루트 노드: Dispatcher ── */}
-          <g>
-            <rect
-              x={rootX} y={rootY}
-              width={rootW} height={rootH}
-              rx={10}
-              fill="rgba(255,255,255,0.06)"
-              stroke="rgba(255,255,255,0.15)"
-              strokeWidth={1.5}
-            />
-            {/* 아이콘 */}
-            <text
-              x={rootCenterX - 28} y={rootY + 33}
-              fontSize={16}
-              textAnchor="middle"
-            >🏠</text>
-            {/* 타이틀 */}
-            <text
-              x={rootCenterX} y={rootY + 24}
-              textAnchor="middle"
-              fill="white"
-              fontSize={12}
-              fontWeight="bold"
-            >Dispatcher</text>
-            <text
-              x={rootCenterX} y={rootY + 42}
-              textAnchor="middle"
-              fill="rgba(255,255,255,0.4)"
-              fontSize={9}
-            >태스크 분배 · 관제</text>
-          </g>
+        {/* 수직 줄기 */}
+        <div className="org-tree-trunk" />
 
-          {/* ── 연결선 + 자식 노드 ── */}
-          {agents.map((agent, i) => {
-            const role = AGENT_ROLES[agent.agent_id] ?? { label: agent.agent_id, role: '', icon: '🤖' };
-            const colors = STATUS_COLORS[agent.status] ?? STATUS_COLORS.offline;
-            const tid = terminalId(agent.agent_id);
-            const isTriggering = triggeringId === agent.agent_id;
+        {/* 자식 에이전트들 — 수평 배치 + 연결선 */}
+        <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
+          {/* 수평 연결 바 */}
+          {agents.length > 1 && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              height: 1,
+              background: 'rgba(255, 255, 255, 0.1)',
+              // 첫 자식 중앙 ~ 마지막 자식 중앙까지
+              width: `calc(100% - 180px)`,
+            }} />
+          )}
 
-            // 좁은 모드: 세로 배치
-            const cx = isNarrow
-              ? svgWidth / 2 - nodeW / 2
-              : childStartX + i * (nodeW + gapX);
-            const cy = isNarrow
-              ? rootBottomY + 50 + i * (nodeH + 50)
-              : childY;
-            const nodeCenterX = cx + nodeW / 2;
-            const nodeTopY = cy;
-
-            return (
-              <g key={agent.agent_id}>
-                {/* 연결선: 루트 → 자식 */}
-                <path
-                  d={isNarrow
-                    ? `M ${rootCenterX} ${rootBottomY}
-                       L ${rootCenterX} ${rootBottomY + 20}
-                       L ${nodeCenterX} ${rootBottomY + 20}
-                       L ${nodeCenterX} ${nodeTopY}`
-                    : `M ${rootCenterX} ${rootBottomY}
-                       L ${rootCenterX} ${rootBottomY + 25}
-                       L ${nodeCenterX} ${rootBottomY + 25}
-                       L ${nodeCenterX} ${nodeTopY}`
-                  }
-                  fill="none"
-                  stroke={colors.border}
-                  strokeWidth={1.5}
-                  strokeDasharray={agent.status === 'offline' ? '4 3' : 'none'}
+          <div style={{
+            display: 'flex',
+            gap: 16,
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+          }}>
+            {agents.map((agent) => (
+              <div key={agent.agent_id} className="org-child-wrapper">
+                {/* 수직 줄기: 수평 바 → 카드 */}
+                <div className="org-child-stem" />
+                <AgentCard
+                  agent={agent}
+                  onTrigger={handleTrigger}
+                  isTriggering={triggeringId === agent.agent_id}
                 />
-
-                {/* 에이전트 카드 배경 */}
-                <rect
-                  x={cx} y={cy}
-                  width={nodeW} height={nodeH}
-                  rx={10}
-                  fill="rgba(255,255,255,0.04)"
-                  stroke={colors.border}
-                  strokeWidth={1.5}
-                  className="cursor-pointer"
-                />
-                {/* 상태 글로우 상단 바 */}
-                <rect
-                  x={cx} y={cy}
-                  width={nodeW} height={3}
-                  rx={1}
-                  fill={colors.dot}
-                  opacity={agent.status === 'working' ? 0.8 : 0.3}
-                />
-
-                {/* 터미널 ID 배지 */}
-                {tid && (
-                  <>
-                    <rect
-                      x={cx + 6} y={cy + 10}
-                      width={22} height={14}
-                      rx={3}
-                      fill="rgba(255,255,255,0.08)"
-                    />
-                    <text
-                      x={cx + 17} y={cy + 20}
-                      textAnchor="middle"
-                      fill="rgba(255,255,255,0.5)"
-                      fontSize={8}
-                      fontWeight="bold"
-                    >{tid}</text>
-                  </>
-                )}
-
-                {/* 아이콘 */}
-                <text
-                  x={cx + nodeW - 20} y={cy + 22}
-                  fontSize={14}
-                  textAnchor="middle"
-                >{role.icon}</text>
-
-                {/* 에이전트 이름 */}
-                <text
-                  x={cx + nodeW / 2} y={cy + 38}
-                  textAnchor="middle"
-                  fill="white"
-                  fontSize={12}
-                  fontWeight="bold"
-                >{role.label}</text>
-
-                {/* 역할 */}
-                <text
-                  x={cx + nodeW / 2} y={cy + 52}
-                  textAnchor="middle"
-                  fill="rgba(255,255,255,0.35)"
-                  fontSize={8}
-                >{role.role}</text>
-
-                {/* 상태 표시등 + 텍스트 */}
-                <circle
-                  cx={cx + 14} cy={cy + 68}
-                  r={3.5}
-                  fill={colors.dot}
-                  filter={agent.status === 'working' ? 'url(#glow-green)' : undefined}
-                >
-                  {agent.status === 'working' && (
-                    <animate
-                      attributeName="opacity"
-                      values="1;0.4;1"
-                      dur="2s"
-                      repeatCount="indefinite"
-                    />
-                  )}
-                </circle>
-                <text
-                  x={cx + 22} y={cy + 71}
-                  fill={colors.text}
-                  fontSize={8}
-                  fontWeight="600"
-                >{agent.status.toUpperCase()}</text>
-
-                {/* 마지막 하트비트 시간 */}
-                <text
-                  x={cx + nodeW - 8} y={cy + 71}
-                  textAnchor="end"
-                  fill="rgba(255,255,255,0.2)"
-                  fontSize={7}
-                >{relativeTime(agent.last_beat)}</text>
-
-                {/* 현재 태스크 — 카드 아래에 작게 표시 */}
-                {agent.current_task && (
-                  <text
-                    x={cx + nodeW / 2} y={cy + nodeH + 12}
-                    textAnchor="middle"
-                    fill="rgba(255,255,255,0.3)"
-                    fontSize={7}
-                  >
-                    {agent.current_task.length > 25
-                      ? agent.current_task.slice(0, 25) + '…'
-                      : agent.current_task}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* 하단: 카드 리스트 (상세 정보 + 트리거 버튼) */}
-      <div className="flex flex-col gap-1.5 mt-1">
-        {agents.map((agent) => {
-          const role = AGENT_ROLES[agent.agent_id] ?? { label: agent.agent_id, role: '', icon: '🤖' };
-          const colors = STATUS_COLORS[agent.status] ?? STATUS_COLORS.offline;
-          const isTriggering = triggeringId === agent.agent_id;
-          const tid = terminalId(agent.agent_id);
-
-          return (
-            <div
-              key={agent.agent_id}
-              className="flex items-center justify-between rounded-md px-2.5 py-1.5 transition-colors"
-              style={{
-                background: 'rgba(255,255,255,0.03)',
-                borderLeft: `3px solid ${colors.dot}`,
-              }}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xs">{role.icon}</span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-bold text-white/85">{role.label}</span>
-                    {tid && (
-                      <span className="text-[8px] text-white/30 bg-white/5 px-1 rounded">{tid}</span>
-                    )}
-                    <span className="text-[9px] font-semibold" style={{ color: colors.text }}>
-                      {agent.status.toUpperCase()}
-                    </span>
-                  </div>
-                  {agent.current_task && (
-                    <p className="text-[9px] text-white/35 truncate max-w-[180px]">
-                      {agent.current_task}
-                    </p>
-                  )}
+      {/* 하단: 현재 태스크 요약 (working 에이전트만) */}
+      {agents.some(a => a.status === 'working' && a.current_task) && (
+        <div style={{
+          marginTop: 4,
+          padding: '8px 10px',
+          borderRadius: 8,
+          background: 'rgba(34, 197, 94, 0.06)',
+          border: '1px solid rgba(34, 197, 94, 0.1)',
+        }}>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>
+            ACTIVE TASKS
+          </div>
+          {agents
+            .filter(a => a.status === 'working' && a.current_task)
+            .map(a => {
+              const role = AGENT_ROLES[a.agent_id];
+              return (
+                <div key={a.agent_id} style={{
+                  fontSize: 10,
+                  color: 'rgba(255,255,255,0.5)',
+                  display: 'flex',
+                  gap: 6,
+                  alignItems: 'baseline',
+                  marginBottom: 2,
+                }}>
+                  <span style={{ color: '#4ade80', fontWeight: 600 }}>
+                    {role?.label ?? a.agent_id}
+                  </span>
+                  <span style={{ color: 'rgba(255,255,255,0.3)' }}>
+                    {a.current_task && a.current_task.length > 40
+                      ? a.current_task.slice(0, 40) + '…'
+                      : a.current_task}
+                  </span>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-[8px] text-white/20">{relativeTime(agent.last_beat)}</span>
-                <button
-                  onClick={() => handleTrigger(agent.agent_id)}
-                  disabled={isTriggering}
-                  className="rounded p-1 hover:bg-white/10 transition-colors disabled:opacity-30"
-                  title="하트비트 트리거"
-                >
-                  {isTriggering ? (
-                    <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                  ) : (
-                    <Zap className="w-3 h-3 text-white/40 hover:text-primary" />
-                  )}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+              );
+            })
+          }
+        </div>
+      )}
     </div>
   );
 }
