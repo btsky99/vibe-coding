@@ -28,11 +28,19 @@ from src.file_store import (
 # ── PostgreSQL 바이너리 경로 — frozen(EXE) / 개발 모드 분기 ───────────────────
 # frozen 모드: installer가 {app}\pgsql\ 에 설치한 바이너리 사용
 # 개발 모드:   소스 트리 내 .ai_monitor/bin/pgsql/ 사용
-# 개발 버전: 소스 트리 경로
-_PG_DIR = Path(__file__).resolve().parents[2] / '.ai_monitor' / 'bin' / 'pgsql'
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / '.ai_monitor' / 'data'
+if getattr(sys, 'frozen', False):
+    # EXE 빌드: 설치 디렉토리 기준 (installer가 {app}\pgsql\ 에 배치)
+    _PG_DIR = Path(sys.executable).resolve().parent / 'pgsql'
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    if os.name == 'nt':
+        DATA_DIR = Path(os.getenv('APPDATA', '')) / 'VibeCoding'
+    else:
+        DATA_DIR = Path.home() / '.vibe-coding'
+else:
+    # 개발 모드: 소스 트리 경로
+    _PG_DIR = Path(__file__).resolve().parents[2] / '.ai_monitor' / 'bin' / 'pgsql'
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
+    DATA_DIR = PROJECT_ROOT / '.ai_monitor' / 'data'
 PG_BIN = _PG_DIR / 'bin' / 'psql.exe'
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = 'postgres'

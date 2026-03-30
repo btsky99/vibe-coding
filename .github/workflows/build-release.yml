@@ -35,6 +35,9 @@ jobs:
         # 프론트엔드/PTY 빌드(~5분) 전에 Python 측 문제를 먼저 잡아 빌드 시간 낭비 방지
         run: python scripts/build_verify.py --ci --phase pre
 
+      - name: Harness verification
+        run: python scripts/harness_verify.py --ci
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -169,6 +172,7 @@ jobs:
             --hidden-import websockets \
             --hidden-import winpty \
             --hidden-import psycopg2 \
+            --hidden-import _version \
             server.py
 
       - name: Build exe (console)
@@ -195,6 +199,7 @@ jobs:
             --hidden-import websockets \
             --hidden-import winpty \
             --hidden-import psycopg2 \
+            --hidden-import _version \
             server.py
 
       - name: Build sub-window EXEs

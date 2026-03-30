@@ -459,7 +459,14 @@ function App() {
           body: JSON.stringify({ script, project_path: currentPath || null }),
         });
         const data = await res.json();
-        if (data.status === 'ok') {
+        if (data.status === 'prompt') {
+          // EXE(설치) 모드: Claude Code 프롬프트 안내 — 복사 가능하게 표시
+          const msg = data.output || '';
+          const doCopy = confirm(`${label}\n\n${msg}\n\n[확인]을 누르면 명령어를 클립보드에 복사합니다.`);
+          if (doCopy) {
+            try { await navigator.clipboard.writeText(msg); } catch { /* 무시 */ }
+          }
+        } else if (data.status === 'ok') {
           alert(`${label} 완료:\n${data.output?.substring(0, 500) || '성공'}`);
         } else {
           alert(`${label} 실패:\n${data.message || data.error || '알 수 없는 오류'}`);

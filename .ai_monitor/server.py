@@ -3111,30 +3111,42 @@ class SSEHandler(BaseHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 payload = json.loads(self.rfile.read(content_length).decode('utf-8') or '{}') if content_length > 0 else {}
                 script_name = payload.get('script', '')
-                # 허용된 스크립트만 실행 (보안: 임의 스크립트 실행 방지)
+                # 허용된 스크립트 목록 및 Claude Code 프롬프트 매핑
                 _ALLOWED_SCRIPTS = {
-                    'harness_verify': 'scripts/harness_verify.py',
-                    'session_init': 'scripts/session_init.py',
-                    'harness_init': None,  # 설치 스킬은 안내 메시지만 반환
+                    'harness_verify': {
+                        'script': 'scripts/harness_verify.py',
+                        'args': ['--json'],
+                        'prompt': '해당 프로젝트 폴더에서 Claude Code를 실행한 뒤 다음을 입력하세요:\n\npython scripts/harness_verify.py --json',
+                    },
+                    'session_init': {
+                        'script': 'scripts/session_init.py',
+                        'args': ['--agent', 'claude'],
+                        'prompt': '해당 프로젝트 폴더에서 Claude Code를 실행한 뒤 다음을 입력하세요:\n\npython scripts/session_init.py --agent claude',
+                    },
+                    'harness_init': {
+                        'script': None,
+                        'prompt': '해당 프로젝트 폴더에서 Claude Code를 실행한 뒤 /vibe-harness-init 명령을 입력하세요.',
+                    },
                 }
                 if script_name not in _ALLOWED_SCRIPTS:
                     raise ValueError(f'허용되지 않은 스크립트: {script_name}')
-                script_rel = _ALLOWED_SCRIPTS[script_name]
-                project_root = _current_project_root()
-                if script_rel is None:
-                    # harness_init은 Claude Code 스킬이므로 안내 메시지 반환
+                info = _ALLOWED_SCRIPTS[script_name]
+                script_rel = info['script']
+                # EXE(설치) 모드: 스크립트 실행 대신 Claude Code 프롬프트 안내
+                if getattr(sys, 'frozen', False) or script_rel is None:
                     self.wfile.write(json.dumps({
-                        "status": "ok",
-                        "output": "하네스 V2 설치를 시작하려면 Claude Code에서 /vibe-harness-init 명령을 실행하세요.",
+                        "status": "prompt",
+                        "output": info['prompt'],
                     }, ensure_ascii=False).encode('utf-8'))
                 else:
+                    # 개발 모드: 직접 스크립트 실행
+                    project_root = _current_project_root()
                     script_path = project_root / script_rel
                     if not script_path.exists():
                         raise FileNotFoundError(f'{script_rel} not found')
                     no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                    args = ['--json'] if 'harness_verify' in script_name else ['--agent', 'claude']
                     result = subprocess.run(
-                        [sys.executable, str(script_path)] + args,
+                        [sys.executable, str(script_path)] + info.get('args', []),
                         capture_output=True, text=True,
                         encoding='utf-8', errors='replace',
                         timeout=15, cwd=str(project_root),
