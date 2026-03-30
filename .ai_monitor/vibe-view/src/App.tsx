@@ -440,15 +440,61 @@ function App() {
     setActiveMenu(null);
   };
 
-  // AI 도구 글로벌 설치 (Gemini CLI / Claude Code / Codex CLI)
-  const installTool = (tool: string) => {
-    const url = tool === 'gemini'
-      ? `${API_BASE}/api/install-gemini-cli`
-      : tool === 'codex'
-      ? `${API_BASE}/api/install-codex-cli`
-      : `${API_BASE}/api/install-claude-code`;
-    fetch(url).then(res => res.json()).then(data => alert(data.message)).catch(err => alert(err));
+  // AI 도구 설치 (글로벌 CLI + 현재 프로젝트 Playwright + 하네스 V2)
+  const installTool = async (tool: string) => {
     setActiveMenu(null);
+
+    try {
+      // [2026-03-30 Claude] 하네스 V2 도구 — 서버 API로 실행
+      if (tool === 'harness-init' || tool === 'harness-verify' || tool === 'session-init') {
+        const scriptMap: Record<string, { script: string; label: string }> = {
+          'harness-init': { script: 'harness_init', label: '하네스 V2 설치' },
+          'harness-verify': { script: 'harness_verify', label: '하네스 검증' },
+          'session-init': { script: 'session_init', label: '세션 프로토콜' },
+        };
+        const { script, label } = scriptMap[tool];
+        const res = await fetch(`${API_BASE}/api/run-script`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ script, project_path: currentPath || null }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          alert(`${label} 완료:\n${data.output?.substring(0, 500) || '성공'}`);
+        } else {
+          alert(`${label} 실패:\n${data.message || data.error || '알 수 없는 오류'}`);
+        }
+        return;
+      }
+
+      if (tool === 'playwright') {
+        const projectLabel = currentPath || '현재 기본 환경';
+        const confirmed = confirm(
+          `Playwright를 ${projectLabel} 기준 Python 환경에 설치하시겠습니까?\n\n설치 로그를 확인할 수 있도록 별도 콘솔 창이 열립니다.`
+        );
+        if (!confirmed) return;
+
+        const res = await fetch(`${API_BASE}/api/install-playwright-cli`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_path: currentPath || null }),
+        });
+        const data = await res.json();
+        alert(data.message);
+        return;
+      }
+
+      const url = tool === 'gemini'
+        ? `${API_BASE}/api/install-gemini-cli`
+        : tool === 'codex'
+        ? `${API_BASE}/api/install-codex-cli`
+        : `${API_BASE}/api/install-claude-code`;
+      const res = await fetch(url);
+      const data = await res.json();
+      alert(data.message);
+    } catch (err) {
+      alert(String(err));
+    }
   };
 
   // 도움말 문서 — 플로팅 윈도우로 열기 (이미 열린 경우 앞으로 가져오기)

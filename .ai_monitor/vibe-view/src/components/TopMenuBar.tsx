@@ -13,7 +13,7 @@
 import { memo, useState, useRef, useEffect } from 'react';
 import {
   Menu, Terminal, RotateCw,
-  X, Zap, Cpu, Info,
+  X, Zap, Cpu, Info, ShieldCheck,
   Trash2, LayoutDashboard, ClipboardCheck, FileText, Copy, Check, RefreshCw
 } from 'lucide-react';
 import { API_BASE } from '../constants';
@@ -283,6 +283,50 @@ const TopMenuBar = memo(function TopMenuBar({
                   <span>하이브 스킬 설치 (현재 프로젝트)</span>
                 </div>
                 <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">Recommended</span>
+              </button>
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">하네스 V2</div>
+              <button
+                onClick={() => onInstallTool('harness-init')}
+                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#4ade80]" />
+                  <span>하네스 V2 설치 (현재 프로젝트)</span>
+                </div>
+                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">/vibe-harness-init</span>
+              </button>
+              <button
+                onClick={() => onInstallTool('harness-verify')}
+                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-2">
+                  <ClipboardCheck className="w-3.5 h-3.5 text-[#60a5fa]" />
+                  <span>하네스 검증 실행</span>
+                </div>
+                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">harness_verify.py</span>
+              </button>
+              <button
+                onClick={() => onInstallTool('session-init')}
+                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-2">
+                  <RotateCw className="w-3.5 h-3.5 text-[#c084fc]" />
+                  <span>세션 프로토콜 실행</span>
+                </div>
+                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">session_init.py</span>
+              </button>
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">프로젝트 런타임</div>
+              <button
+                onClick={() => onInstallTool('playwright')}
+                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-3.5 h-3.5 text-[#7dd3fc]" />
+                  <span>Playwright 설치 (현재 프로젝트)</span>
+                </div>
+                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">Python</span>
               </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">글로벌 CLI 도구</div>

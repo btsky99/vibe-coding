@@ -561,13 +561,25 @@ def run_pg_sql(sql: str, params: tuple = None, db: str = None):
         print(f"[Postgres ERROR] {e}")
         return None
 
+_pgmq_available: bool | None = None  # pgmq 확장 존재 여부 캐시 — 한 번 확인 후 재확인 안 함
+
 def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
     """pg_logs 테이블에 로그 기록 — parameterized query로 SQL 인젝션 방지"""
     run_pg_sql(
         "INSERT INTO pg_logs (agent, terminal_id, task, status, project_id) VALUES (%s, %s, %s, %s, %s);",
         (agent, terminal_id, task, status, PROJECT_ID)
     )
-    # PGMQ에도 동시에 쌓기 (실시간 큐)
+    # PGMQ 확장이 설치된 경우에만 큐 전송 — 없으면 무시 (무한 에러 방지)
+    global _pgmq_available
+    if _pgmq_available is False:
+        return
+    if _pgmq_available is None:
+        # 최초 1회만 pgmq 스키마 존재 확인
+        check = run_pg_sql("SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq';")
+        _pgmq_available = bool(check and check.strip())
+        if not _pgmq_available:
+            print("[log_to_pg] pgmq 확장 미설치 — PGMQ 큐 전송 비활성화")
+            return
     mq_msg = json.dumps({"agent": agent, "tid": terminal_id, "task": task, "status": status}, ensure_ascii=False)
     run_pg_sql("SELECT pgmq.send('hive_queue', %s::jsonb);", (mq_msg,))
 
@@ -2228,7 +2240,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             import threading
             def _delayed_shutdown():
                 time.sleep(0.5)
-                # PTY 세션 정리 — Node PTY 서버가 _child_procs에 포함되어 자동 종료됨
+                # 자식 프로세스(PTY 서버, 워치독 등) 먼저 종료 — os._exit()는 atexit 핸들러를 실행하지 않으므로
+                # 여기서 명시적으로 호출해야 node.exe 등이 _MEI 임시 폴더를 해제하여 정리 가능
+                _cleanup_child_procs()
+                time.sleep(1)  # 자식 프로세스 종료 대기 — 파일 핸들 해제 시간 확보
+                # PyInstaller 임시 디렉터리(_MEI*) 잔여물 정리
+                _cleanup_pyinstaller_temp()
                 os._exit(0)
             threading.Thread(target=_delayed_shutdown, daemon=True).start()
         # [2026-03-22] /api/files → files_api.py로 위임됨 (상단 모듈 위임 섹션)
@@ -3076,6 +3093,58 @@ class SSEHandler(BaseHTTPRequestHandler):
                     "project_path": str(project_root),
                     "python": python_cmd,
                 }, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "message": str(e),
+                }, ensure_ascii=False).encode('utf-8'))
+            return
+
+        # [2026-03-30 Claude] 하네스 V2 스크립트 실행 API
+        # AI 도구 메뉴에서 harness_verify.py, session_init.py 등을 실행
+        if path == '/api/run-script':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                payload = json.loads(self.rfile.read(content_length).decode('utf-8') or '{}') if content_length > 0 else {}
+                script_name = payload.get('script', '')
+                # 허용된 스크립트만 실행 (보안: 임의 스크립트 실행 방지)
+                _ALLOWED_SCRIPTS = {
+                    'harness_verify': 'scripts/harness_verify.py',
+                    'session_init': 'scripts/session_init.py',
+                    'harness_init': None,  # 설치 스킬은 안내 메시지만 반환
+                }
+                if script_name not in _ALLOWED_SCRIPTS:
+                    raise ValueError(f'허용되지 않은 스크립트: {script_name}')
+                script_rel = _ALLOWED_SCRIPTS[script_name]
+                project_root = _current_project_root()
+                if script_rel is None:
+                    # harness_init은 Claude Code 스킬이므로 안내 메시지 반환
+                    self.wfile.write(json.dumps({
+                        "status": "ok",
+                        "output": "하네스 V2 설치를 시작하려면 Claude Code에서 /vibe-harness-init 명령을 실행하세요.",
+                    }, ensure_ascii=False).encode('utf-8'))
+                else:
+                    script_path = project_root / script_rel
+                    if not script_path.exists():
+                        raise FileNotFoundError(f'{script_rel} not found')
+                    no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                    args = ['--json'] if 'harness_verify' in script_name else ['--agent', 'claude']
+                    result = subprocess.run(
+                        [sys.executable, str(script_path)] + args,
+                        capture_output=True, text=True,
+                        encoding='utf-8', errors='replace',
+                        timeout=15, cwd=str(project_root),
+                        creationflags=no_win,
+                    )
+                    self.wfile.write(json.dumps({
+                        "status": "ok" if result.returncode == 0 else "fail",
+                        "output": result.stdout[:2000],
+                        "error": result.stderr[:500] if result.returncode != 0 else "",
+                    }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({
                     "status": "error",
@@ -4164,6 +4233,30 @@ def _cleanup_child_procs():
     _child_procs.clear()
 
 
+def _cleanup_pyinstaller_temp():
+    """PyInstaller EXE 종료 시 남은 _MEI* 임시 디렉터리를 정리합니다.
+    자식 프로세스(node.exe 등)가 파일을 잡고 있으면 삭제 실패 → 다음 실행 시 Warning 팝업 발생.
+    _cleanup_child_procs() 호출 후 실행해야 파일 핸들이 해제된 상태에서 삭제 가능."""
+    if not getattr(sys, 'frozen', False):
+        return  # 개발 모드에서는 스킵
+    try:
+        import shutil
+        # PyInstaller _MEIPASS: 현재 실행 중인 임시 디렉터리
+        current_mei = getattr(sys, '_MEIPASS', '')
+        runtime_dir = Path(current_mei).parent if current_mei else None
+        if not runtime_dir or not runtime_dir.exists():
+            return
+        for item in runtime_dir.iterdir():
+            if item.name.startswith('_MEI') and item.is_dir() and str(item) != current_mei:
+                try:
+                    shutil.rmtree(str(item), ignore_errors=True)
+                    print(f"[cleanup] PyInstaller 임시 디렉터리 삭제: {item.name}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 # ── atexit 등록 — 정상 종료(sys.exit, return from __main__)에도 PTY + 자식 프로세스 정리 보장 ──
 import atexit, signal as _signal
 # [제거됨] PTY 세션 정리는 Node PTY 서버가 자체 처리 + _child_procs로 프로세스 kill
@@ -4173,6 +4266,8 @@ def _signal_exit_handler(sig, frame):
     """SIGTERM / SIGBREAK(Ctrl+Break) 수신 시 PTY + 자식 프로세스 정리 후 즉시 종료."""
     print(f"[*] 시그널 {sig} 수신 — PTY 및 자식 프로세스 정리 후 종료합니다.")
     _cleanup_child_procs()  # Node PTY 서버도 _child_procs에 포함되어 자동 종료됨
+    time.sleep(1)  # 자식 프로세스 파일 핸들 해제 대기
+    _cleanup_pyinstaller_temp()
     os._exit(0)
 
 _signal.signal(_signal.SIGTERM, _signal_exit_handler)
