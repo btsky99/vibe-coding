@@ -9,8 +9,8 @@
  * ------------------------------------------------------------------------
  */
 
-import { useState } from 'react';
-import { Monitor, LayoutGrid, MessageSquare, ClipboardList, Database, GitBranch } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Monitor, LayoutGrid, MessageSquare, ClipboardList, Database, GitBranch, X } from 'lucide-react';
 import { useVibeData } from '../../hooks/useVibeData';
 import OfficeWorld from './OfficeWorld';
 /* ── 기존 패널 컴포넌트 재활용 ── */
@@ -35,13 +35,79 @@ interface OfficeAppProps {
   onSwitchToClassic?: () => void;
 }
 
+// 토스트 알림 타입
+interface Toast {
+  id: number;
+  text: string;
+  type: 'info' | 'success' | 'warning';
+  createdAt: number;
+}
+
+// 말풍선 타입 (OfficeWorld와 공유)
+interface SpeechBubble {
+  deskId: number;
+  text: string;
+  createdAt: number;
+  duration: number;
+}
+
 export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   const vibe = useVibeData();
   const [hudTab, setHudTab] = useState<HudTab>('terminal');
-  // 오피스에서 선택된 책상(터미널 슬롯) — 클릭 시 HUD에 해당 터미널 표시
   const [selectedDesk, setSelectedDesk] = useState(0);
 
-  // 책상 클릭 핸들러 — 오피스 월드에서 호출
+  // ── 인월드 이벤트 시스템 ──
+  const [speechBubbles, setSpeechBubbles] = useState<SpeechBubble[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const prevAgentStates = useRef<Record<string, string>>({});
+  const toastIdRef = useRef(0);
+
+  // 말풍선 추가 헬퍼
+  const addBubble = useCallback((deskId: number, text: string, duration = 4000) => {
+    setSpeechBubbles(prev => [...prev, { deskId, text, createdAt: Date.now(), duration }]);
+  }, []);
+
+  // 토스트 추가 헬퍼
+  const addToast = useCallback((text: string, type: Toast['type'] = 'info') => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev.slice(-4), { id, text, type, createdAt: Date.now() }]);
+    // 5초 후 자동 제거
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+  }, []);
+
+  // 에이전트 상태 변화 감지 → 인월드 이벤트 발생
+  useEffect(() => {
+    const prev = prevAgentStates.current;
+    for (const [tid, data] of Object.entries(vibe.agentTerminals) as [string, any][]) {
+      const slotNum = parseInt(tid.replace('terminal_', '')) - 1;
+      const curStatus = data.status || 'idle';
+      const prevStatus = prev[tid] || 'idle';
+      const cli = (data.cli || 'agent').toLowerCase();
+
+      // idle → running: 작업 시작 말풍선
+      if (prevStatus !== 'running' && prevStatus !== 'started' && (curStatus === 'running' || curStatus === 'started')) {
+        addBubble(slotNum, '작업 시작! 💪');
+        addToast(`${cli} (T${slotNum + 1}) 작업 시작`, 'info');
+      }
+      // running → idle/done: 작업 완료 말풍선
+      if ((prevStatus === 'running' || prevStatus === 'started') && curStatus !== 'running' && curStatus !== 'started') {
+        addBubble(slotNum, '완료했어요! ✅', 5000);
+        addToast(`${cli} (T${slotNum + 1}) 작업 완료`, 'success');
+      }
+      prev[tid] = curStatus;
+    }
+  }, [vibe.agentTerminals, addBubble, addToast]);
+
+  // 만료된 말풍선 정리 (10초마다)
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const now = Date.now();
+      setSpeechBubbles(prev => prev.filter(b => now - b.createdAt < b.duration));
+    }, 10000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // 책상 클릭 핸들러
   const handleDeskClick = (slotId: number) => {
     setSelectedDesk(slotId);
     setHudTab('terminal');
@@ -91,7 +157,32 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             agentTerminals={vibe.agentTerminals}
             selectedDesk={selectedDesk}
             onDeskClick={handleDeskClick}
+            speechBubbles={speechBubbles}
           />
+          {/* ── 토스트 알림 (좌하단) ── */}
+          {toasts.length > 0 && (
+            <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-10 pointer-events-none">
+              {toasts.map(toast => (
+                <div
+                  key={toast.id}
+                  className={`pointer-events-auto flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium shadow-lg backdrop-blur-sm animate-in slide-in-from-left duration-300 ${
+                    toast.type === 'success' ? 'bg-green-500/20 border border-green-500/30 text-green-300' :
+                    toast.type === 'warning' ? 'bg-yellow-500/20 border border-yellow-500/30 text-yellow-300' :
+                    'bg-blue-500/20 border border-blue-500/30 text-blue-300'
+                  }`}
+                >
+                  <span>{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                  <span>{toast.text}</span>
+                  <button
+                    onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                    className="ml-1 opacity-50 hover:opacity-100"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ── HUD 패널 (우측) ── */}
