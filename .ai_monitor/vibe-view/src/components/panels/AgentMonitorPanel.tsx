@@ -2,82 +2,62 @@
  * ------------------------------------------------------------------------
  * 파일명: AgentMonitorPanel.tsx
  * 설명: Paperclip 스타일 에이전트 오케스트레이션 조직도 뷰.
- *       Dispatcher(사용자)를 루트로 각 에이전트가 트리 구조로 연결되며,
- *       실시간 상태(working/idle/offline), 현재 태스크, 하트비트를 표시.
- *       HTML/CSS 기반 카드형 조직도로 Paperclip UI를 충실히 재현.
+ *       Dispatcher(사용자)를 루트로 실제 활성 터미널이 트리 구조로 연결되며,
+ *       실시간 상태(running/idle/done/error), 현재 태스크, CLI 정보를 표시.
+ *       터미널 API(/api/agent/terminals) 기반으로 동적 렌더링 — 하드코딩 없음.
  *
  * REVISION HISTORY:
+ * - 2026-03-31 Claude: 터미널 API 기반 동적 조직도로 전면 재작성
+ *   - 하드코딩된 3개 에이전트 → /api/agent/terminals에서 실제 터미널 동적 로드
+ *   - 하트비트 API(/api/agents/status)를 보조로 병합 (beat_count, config 표시)
+ *   - 터미널 수에 따라 조직도 자동 확장/축소
  * - 2026-03-31 Claude: Paperclip 정식 UI 모방 — HTML/CSS 카드형 조직도로 전면 재작성
- *   - SVG 기반 → HTML div + CSS tree connector로 전환
- *   - 카드 디자인: 아이콘 + 역할명 + 설명 + 상태 dot + 에이전트명 (Paperclip 동일)
- *   - 계층 연결선: CSS ::before/::after 수직/수평선
  * - 2026-03-31 Claude: Paperclip 스타일 조직도(org chart) UI로 전면 리디자인
  * - 2026-03-30 Claude: 최초 작성 — Paperclip 오케스트레이션 전환
  * ------------------------------------------------------------------------
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { Zap, Loader2, PowerOff, Code2, Globe, Wrench, Home } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Zap, Loader2, PowerOff, Code2, Globe, Wrench, Home, Terminal, Cpu } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
-// 에이전트 하트비트 데이터 타입
+// ── 터미널 데이터 타입 (TaskBoardPanel과 동일) ──
+interface TerminalStatus {
+  status: 'running' | 'idle' | 'done' | 'error';
+  task: string;
+  cli: string;          // claude | gemini | codex 등
+  run_id?: string;
+  ts?: string;
+  last_line?: string;
+  pipeline_stage?: 'analyzing' | 'modifying' | 'verifying' | 'done' | 'idle';
+  external?: boolean;
+  interactive?: boolean;
+}
+
+// 에이전트 하트비트 데이터 타입 (보조 정보용)
 interface AgentBeat {
   agent_id: string;
-  status: string;     // working | idle | offline
-  last_beat: string;  // ISO timestamp
+  status: string;
+  last_beat: string;
   current_task: string | null;
   beat_count: number;
   config?: string;
 }
 
-// 에이전트 역할 정의 — Paperclip 스타일 조직도 노드에 표시
-const AGENT_ROLES: Record<string, {
+// CLI별 아이콘/색상 매핑 — 새 CLI가 추가되면 자동으로 기본값 사용
+const CLI_META: Record<string, {
   label: string;
-  title: string;
-  description: string;
   Icon: React.ComponentType<{ className?: string }>;
+  color: string;
 }> = {
-  'claude-T1': {
-    label: 'Claude',
-    title: 'Engineer',
-    description: 'Founding Full-Stack Engineer',
-    Icon: Code2,
-  },
-  'gemini-T2': {
-    label: 'Gemini',
-    title: 'Architect',
-    description: 'Design & Orchestration',
-    Icon: Globe,
-  },
-  'codex-T3': {
-    label: 'Codex',
-    title: 'QA Engineer',
-    description: 'Sandbox & Validation',
-    Icon: Wrench,
-  },
-  claude: {
-    label: 'Claude',
-    title: 'Engineer',
-    description: 'Precision Logic',
-    Icon: Code2,
-  },
-  gemini: {
-    label: 'Gemini',
-    title: 'Architect',
-    description: 'Research & Design',
-    Icon: Globe,
-  },
-  codex: {
-    label: 'Codex',
-    title: 'QA Engineer',
-    description: 'Execution & Verify',
-    Icon: Wrench,
-  },
+  claude: { label: 'Claude', Icon: Code2, color: '#8b5cf6' },
+  gemini: { label: 'Gemini', Icon: Globe, color: '#eab308' },
+  codex:  { label: 'Codex',  Icon: Wrench, color: '#3b82f6' },
 };
 
-// 상태별 색상 — Paperclip 스타일 (노란 dot이 기본)
+// 터미널 상태별 색상
 const STATUS_COLORS: Record<string, { dot: string; glow: string; border: string }> = {
-  working: {
+  running: {
     dot: '#22c55e',
     glow: '0 0 8px rgba(34, 197, 94, 0.6)',
     border: 'rgba(34, 197, 94, 0.3)',
@@ -87,41 +67,58 @@ const STATUS_COLORS: Record<string, { dot: string; glow: string; border: string 
     glow: '0 0 6px rgba(234, 179, 8, 0.4)',
     border: 'rgba(234, 179, 8, 0.2)',
   },
-  offline: {
+  done: {
     dot: '#6b7280',
     glow: 'none',
     border: 'rgba(255, 255, 255, 0.06)',
   },
+  error: {
+    dot: '#ef4444',
+    glow: '0 0 8px rgba(239, 68, 68, 0.5)',
+    border: 'rgba(239, 68, 68, 0.2)',
+  },
+};
+
+// 파이프라인 스테이지 한글 표시
+const STAGE_LABELS: Record<string, string> = {
+  analyzing: '분석 중',
+  modifying: '수정 중',
+  verifying: '검증 중',
+  done: '완료',
+  idle: '대기',
 };
 
 function relativeTime(iso?: string): string {
   if (!iso) return '';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
   if (!isFinite(diff) || diff < 0) return 'now';
-  if (diff < 60) return `${Math.max(1, Math.floor(diff))}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return `${Math.floor(diff / 86400)}d`;
+  if (diff < 60) return `${Math.max(1, Math.floor(diff))}초 전`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+  return `${Math.floor(diff / 86400)}일 전`;
 }
 
-// ── Paperclip 스타일 개별 에이전트 카드 ──
-function AgentCard({
-  agent,
+// ── 터미널 카드 (조직도 노드) ──
+function TerminalCard({
+  terminalId,
+  terminal,
+  heartbeat,
   onTrigger,
   isTriggering,
 }: {
-  agent: AgentBeat;
+  terminalId: string;
+  terminal: TerminalStatus;
+  heartbeat?: AgentBeat;
   onTrigger: (id: string) => void;
   isTriggering: boolean;
 }) {
-  const role = AGENT_ROLES[agent.agent_id] ?? {
-    label: agent.agent_id,
-    title: 'Agent',
-    description: '',
-    Icon: Wrench,
-  };
-  const colors = STATUS_COLORS[agent.status] ?? STATUS_COLORS.offline;
-  const { Icon } = role;
+  const cli = terminal.cli?.toLowerCase() ?? 'unknown';
+  const meta = CLI_META[cli] ?? { label: cli, Icon: Terminal, color: '#9ca3af' };
+  const colors = STATUS_COLORS[terminal.status] ?? STATUS_COLORS.done;
+  const { Icon } = meta;
+
+  // 하트비트에서 에이전트 ID 추출 (있으면)
+  const agentId = heartbeat?.agent_id ?? `${cli}-${terminalId}`;
 
   return (
     <div
@@ -130,15 +127,15 @@ function AgentCard({
         background: 'rgba(255, 255, 255, 0.04)',
         border: `1px solid ${colors.border}`,
         borderRadius: 12,
-        padding: '16px 18px 14px',
-        minWidth: 180,
-        maxWidth: 210,
+        padding: '14px 16px 12px',
+        minWidth: 170,
+        maxWidth: 220,
         cursor: 'pointer',
         transition: 'border-color 0.3s, box-shadow 0.3s',
         position: 'relative',
       }}
-      onClick={() => onTrigger(agent.agent_id)}
-      title={`클릭하여 하트비트 트리거 (${agent.agent_id})`}
+      onClick={() => onTrigger(agentId)}
+      title={`${terminalId} — ${meta.label} (${terminal.status})`}
     >
       {/* 트리거 로딩 오버레이 */}
       {isTriggering && (
@@ -156,30 +153,47 @@ function AgentCard({
         </div>
       )}
 
-      {/* 아이콘 + 역할명 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <Icon className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} />
+      {/* 터미널 ID 배지 + CLI 배지 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={{
-          fontSize: 15,
+          fontSize: 11,
+          fontWeight: 700,
+          color: 'white',
+          background: 'rgba(255,255,255,0.08)',
+          padding: '2px 6px',
+          borderRadius: 4,
+          letterSpacing: '0.02em',
+        }}>
+          {terminalId}
+        </span>
+        <span style={{
+          fontSize: 10,
+          fontWeight: 600,
+          color: meta.color,
+          background: `${meta.color}15`,
+          padding: '2px 6px',
+          borderRadius: 4,
+        }}>
+          {meta.label}
+        </span>
+      </div>
+
+      {/* 아이콘 + 역할/태스크 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <Icon className="w-3.5 h-3.5" style={{ color: meta.color, opacity: 0.7 }} />
+        <span style={{
+          fontSize: 13,
           fontWeight: 700,
           color: 'white',
           letterSpacing: '-0.01em',
         }}>
-          {role.title}
+          {terminal.task
+            ? (terminal.task.length > 25 ? terminal.task.slice(0, 25) + '…' : terminal.task)
+            : `${meta.label} 세션`}
         </span>
       </div>
 
-      {/* 설명 */}
-      <div style={{
-        fontSize: 11,
-        color: 'rgba(255,255,255,0.35)',
-        marginBottom: 6,
-        lineHeight: 1.3,
-      }}>
-        {role.description}
-      </div>
-
-      {/* 상태 dot + 에이전트명 */}
+      {/* 상태 dot + 상태 텍스트 + 시간 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span
           style={{
@@ -190,48 +204,73 @@ function AgentCard({
             boxShadow: colors.glow,
             display: 'inline-block',
             flexShrink: 0,
-            animation: agent.status === 'working' ? 'pulse-dot 2s ease-in-out infinite' : 'none',
+            animation: terminal.status === 'running' ? 'pulse-dot 2s ease-in-out infinite' : 'none',
           }}
         />
-        <span style={{
-          fontSize: 11,
-          color: 'rgba(255,255,255,0.45)',
-        }}>
-          {role.label}
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase' }}>
+          {terminal.status}
         </span>
-        {agent.last_beat && (
+        {/* 파이프라인 스테이지 */}
+        {terminal.pipeline_stage && terminal.pipeline_stage !== 'idle' && (
+          <span style={{
+            fontSize: 9,
+            color: 'rgba(255,255,255,0.3)',
+            background: 'rgba(255,255,255,0.05)',
+            padding: '1px 5px',
+            borderRadius: 3,
+          }}>
+            {STAGE_LABELS[terminal.pipeline_stage] ?? terminal.pipeline_stage}
+          </span>
+        )}
+        {terminal.ts && (
           <span style={{
             fontSize: 9,
             color: 'rgba(255,255,255,0.2)',
             marginLeft: 'auto',
           }}>
-            {relativeTime(agent.last_beat)}
+            {relativeTime(terminal.ts)}
           </span>
         )}
       </div>
 
-      {/* 현재 태스크 표시 */}
-      {agent.current_task && (
+      {/* last_line 표시 (있으면) */}
+      {terminal.last_line && (
         <div style={{
-          marginTop: 8,
-          padding: '4px 8px',
-          borderRadius: 6,
-          background: 'rgba(255,255,255,0.04)',
+          marginTop: 6,
+          padding: '3px 7px',
+          borderRadius: 5,
+          background: 'rgba(255,255,255,0.03)',
           fontSize: 9,
-          color: 'rgba(255,255,255,0.3)',
-          lineHeight: 1.4,
+          color: 'rgba(255,255,255,0.25)',
+          lineHeight: 1.3,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
+          fontFamily: 'monospace',
         }}>
-          {agent.current_task}
+          {terminal.last_line.length > 50 ? terminal.last_line.slice(0, 50) + '…' : terminal.last_line}
+        </div>
+      )}
+
+      {/* 하트비트 beat_count (보조 정보) */}
+      {heartbeat && heartbeat.beat_count > 0 && (
+        <div style={{
+          marginTop: 4,
+          fontSize: 8,
+          color: 'rgba(255,255,255,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 3,
+        }}>
+          <Zap className="w-2.5 h-2.5" />
+          beats: {heartbeat.beat_count}
         </div>
       )}
     </div>
   );
 }
 
-// ── Paperclip 스타일 Dispatcher (루트) 카드 ──
+// ── Dispatcher (루트) 카드 ──
 function DispatcherCard() {
   return (
     <div
@@ -245,7 +284,7 @@ function DispatcherCard() {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-        <Home className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} />
+        <Home className="w-4 h-4 text-white/50" />
         <span style={{
           fontSize: 15,
           fontWeight: 700,
@@ -279,21 +318,24 @@ function DispatcherCard() {
   );
 }
 
-// ── 메인 컴포넌트: Paperclip 스타일 조직도 ──
+// ── 메인 컴포넌트: 터미널 기반 동적 조직도 ──
 export default function AgentMonitorPanel() {
-  const [agents, setAgents] = useState<AgentBeat[]>([]);
+  const [terminals, setTerminals] = useState<Record<string, TerminalStatus>>({});
+  const [heartbeats, setHeartbeats] = useState<AgentBeat[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
 
-  // 에이전트 상태 폴링 (5초)
+  // 터미널 상태 폴링 (3초) — 주 데이터 소스
   useEffect(() => {
     let active = true;
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/agents/status`);
+        const res = await fetch(`${API_BASE}/api/agent/terminals`);
         if (res.ok && active) {
           const data = await res.json();
-          setAgents(Array.isArray(data) ? data : []);
+          if (data && typeof data === 'object') {
+            setTerminals(data);
+          }
         }
       } catch {
         // 연결 실패 시 무시
@@ -302,9 +344,53 @@ export default function AgentMonitorPanel() {
       }
     };
     poll();
-    const id = setInterval(poll, 5000);
+    const id = setInterval(poll, 3000);
     return () => { active = false; clearInterval(id); };
   }, []);
+
+  // 하트비트 보조 폴링 (10초) — beat_count 등 보조 정보
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/agents/status`);
+        if (res.ok && active) {
+          const data = await res.json();
+          setHeartbeats(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        // 무시
+      }
+    };
+    poll();
+    const id = setInterval(poll, 10000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  // 터미널 → 하트비트 매핑 (T1 → claude-T1 등)
+  const heartbeatMap = useMemo(() => {
+    const map: Record<string, AgentBeat> = {};
+    for (const hb of heartbeats) {
+      map[hb.agent_id] = hb;
+    }
+    return map;
+  }, [heartbeats]);
+
+  // 하트비트 키에서 터미널 ID에 매칭되는 것 찾기 (claude-T1 → T1)
+  const getHeartbeat = useCallback((terminalId: string, cli: string): AgentBeat | undefined => {
+    // 정확한 매칭: "claude-T1", "gemini-T2" 등
+    const exact = heartbeatMap[`${cli}-${terminalId}`];
+    if (exact) return exact;
+    // CLI 이름만으로 매칭 (하트비트가 "claude", "gemini" 등으로 등록된 경우)
+    return heartbeatMap[cli];
+  }, [heartbeatMap]);
+
+  // 활성 터미널만 필터 (external 제외, 실제 세션이 있는 것만)
+  const activeTerminals = useMemo(() => {
+    return Object.entries(terminals)
+      .filter(([_, t]) => !t.external && (t.status === 'running' || t.status === 'idle'))
+      .sort(([a], [b]) => a.localeCompare(b));
+  }, [terminals]);
 
   // 수동 하트비트 트리거
   const handleTrigger = useCallback(async (agentId: string) => {
@@ -326,25 +412,24 @@ export default function AgentMonitorPanel() {
     return (
       <div className="flex items-center justify-center h-32 text-white/30">
         <Loader2 className="w-4 h-4 animate-spin mr-2" />
-        <span className="text-xs">에이전트 상태 로딩...</span>
+        <span className="text-xs">터미널 상태 로딩...</span>
       </div>
     );
   }
 
-  if (agents.length === 0) {
+  if (activeTerminals.length === 0) {
     return (
       <div className="p-4 text-center">
         <PowerOff className="w-8 h-8 mx-auto text-white/20 mb-2" />
-        <p className="text-xs text-white/40">등록된 에이전트 없음</p>
+        <p className="text-xs text-white/40">활성 터미널 없음</p>
         <p className="text-[10px] text-white/25 mt-1">
-          하트비트 러너를 시작하세요:<br />
-          <code className="text-primary/60">python scripts/hive_heartbeat.py --agent claude-T1</code>
+          터미널을 시작하면 조직도에 자동으로 표시됩니다.
         </p>
       </div>
     );
   }
 
-  const workingCount = agents.filter(a => a.status === 'working').length;
+  const runningCount = activeTerminals.filter(([_, t]) => t.status === 'running').length;
 
   return (
     <div className="flex flex-col gap-3 p-3 overflow-auto">
@@ -358,39 +443,17 @@ export default function AgentMonitorPanel() {
           border-color: rgba(255, 255, 255, 0.2) !important;
           box-shadow: 0 0 20px rgba(255, 255, 255, 0.03);
         }
-        /* Paperclip 스타일 트리 연결선 */
         .org-tree {
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 0;
         }
-        /* 루트 → 중간 수직선 */
         .org-tree-trunk {
           width: 1px;
-          height: 32px;
+          height: 28px;
           background: rgba(255, 255, 255, 0.1);
         }
-        /* 자식 노드 행 — 수평 연결 */
-        .org-children {
-          display: flex;
-          justify-content: center;
-          gap: 16px;
-          position: relative;
-          padding-top: 32px;
-        }
-        /* 수평 연결 바 (자식 노드들 위) */
-        .org-children::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 50%;
-          transform: translateX(-50%);
-          height: 1px;
-          background: rgba(255, 255, 255, 0.1);
-          /* 너비는 JS로 계산 */
-        }
-        /* 각 자식에서 위로 올라가는 수직선 */
         .org-child-wrapper {
           display: flex;
           flex-direction: column;
@@ -398,7 +461,7 @@ export default function AgentMonitorPanel() {
         }
         .org-child-stem {
           width: 1px;
-          height: 32px;
+          height: 28px;
           background: rgba(255, 255, 255, 0.1);
         }
       `}</style>
@@ -417,7 +480,7 @@ export default function AgentMonitorPanel() {
           fontSize: 10,
           color: 'rgba(255, 255, 255, 0.25)',
         }}>
-          {workingCount}/{agents.length} active
+          {runningCount}/{activeTerminals.length} active
         </span>
       </div>
 
@@ -429,10 +492,10 @@ export default function AgentMonitorPanel() {
         {/* 수직 줄기 */}
         <div className="org-tree-trunk" />
 
-        {/* 자식 에이전트들 — 수평 배치 + 연결선 */}
+        {/* 자식 터미널들 — 수평 배치 + 연결선 */}
         <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
           {/* 수평 연결 바 */}
-          {agents.length > 1 && (
+          {activeTerminals.length > 1 && (
             <div style={{
               position: 'absolute',
               top: 0,
@@ -440,34 +503,39 @@ export default function AgentMonitorPanel() {
               transform: 'translateX(-50%)',
               height: 1,
               background: 'rgba(255, 255, 255, 0.1)',
-              // 첫 자식 중앙 ~ 마지막 자식 중앙까지
-              width: `calc(100% - 180px)`,
+              width: `calc(100% - 170px)`,
             }} />
           )}
 
           <div style={{
             display: 'flex',
-            gap: 16,
+            gap: 14,
             justifyContent: 'center',
             flexWrap: 'wrap',
           }}>
-            {agents.map((agent) => (
-              <div key={agent.agent_id} className="org-child-wrapper">
-                {/* 수직 줄기: 수평 바 → 카드 */}
-                <div className="org-child-stem" />
-                <AgentCard
-                  agent={agent}
-                  onTrigger={handleTrigger}
-                  isTriggering={triggeringId === agent.agent_id}
-                />
-              </div>
-            ))}
+            {activeTerminals.map(([id, terminal]) => {
+              const cli = terminal.cli?.toLowerCase() ?? 'unknown';
+              const hb = getHeartbeat(id, cli);
+              const agentId = hb?.agent_id ?? `${cli}-${id}`;
+              return (
+                <div key={id} className="org-child-wrapper">
+                  <div className="org-child-stem" />
+                  <TerminalCard
+                    terminalId={id}
+                    terminal={terminal}
+                    heartbeat={hb}
+                    onTrigger={handleTrigger}
+                    isTriggering={triggeringId === agentId}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* 하단: 현재 태스크 요약 (working 에이전트만) */}
-      {agents.some(a => a.status === 'working' && a.current_task) && (
+      {/* 하단: running 터미널 태스크 요약 */}
+      {activeTerminals.some(([_, t]) => t.status === 'running' && t.task) && (
         <div style={{
           marginTop: 4,
           padding: '8px 10px',
@@ -478,12 +546,13 @@ export default function AgentMonitorPanel() {
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>
             ACTIVE TASKS
           </div>
-          {agents
-            .filter(a => a.status === 'working' && a.current_task)
-            .map(a => {
-              const role = AGENT_ROLES[a.agent_id];
+          {activeTerminals
+            .filter(([_, t]) => t.status === 'running' && t.task)
+            .map(([id, t]) => {
+              const cli = t.cli?.toLowerCase() ?? 'unknown';
+              const meta = CLI_META[cli];
               return (
-                <div key={a.agent_id} style={{
+                <div key={id} style={{
                   fontSize: 10,
                   color: 'rgba(255,255,255,0.5)',
                   display: 'flex',
@@ -491,13 +560,21 @@ export default function AgentMonitorPanel() {
                   alignItems: 'baseline',
                   marginBottom: 2,
                 }}>
-                  <span style={{ color: '#4ade80', fontWeight: 600 }}>
-                    {role?.label ?? a.agent_id}
+                  <span style={{
+                    fontWeight: 700,
+                    color: 'white',
+                    background: 'rgba(255,255,255,0.08)',
+                    padding: '1px 4px',
+                    borderRadius: 3,
+                    fontSize: 9,
+                  }}>
+                    {id}
+                  </span>
+                  <span style={{ color: meta?.color ?? '#9ca3af', fontWeight: 600 }}>
+                    {meta?.label ?? cli}
                   </span>
                   <span style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    {a.current_task && a.current_task.length > 40
-                      ? a.current_task.slice(0, 40) + '…'
-                      : a.current_task}
+                    {t.task.length > 40 ? t.task.slice(0, 40) + '…' : t.task}
                   </span>
                 </div>
               );

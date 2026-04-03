@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Save, RefreshCw, CheckCircle2, AlertCircle, Smartphone, Users, Bot } from 'lucide-react';
+import { Save, RefreshCw, CheckCircle2, AlertCircle, Smartphone, Bot } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
 // 에이전트 이모지 + 색상 + 이름
@@ -29,12 +29,11 @@ const TERMINAL_INFO: Record<number, { emoji: string; agent: string; color: strin
 
 interface TelegramConfig {
   tokens: Record<string, string>; // T1~T8 → bot token
-  group_chat_id: string;
   bot_statuses?: Record<string, string>; // T1~T8 → "online"|"offline"
 }
 
 export default function TelegramPanel() {
-  const [config, setConfig] = useState<TelegramConfig>({ tokens: {}, group_chat_id: '' });
+  const [config, setConfig] = useState<TelegramConfig>({ tokens: {} });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'success' | 'error'>('success');
@@ -46,7 +45,6 @@ export default function TelegramPanel() {
       .then(data => {
         setConfig({
           tokens: data.tokens || {},
-          group_chat_id: data.group_chat_id || '',
           bot_statuses: data.bot_statuses || {},
         });
       })
@@ -59,11 +57,6 @@ export default function TelegramPanel() {
       ...prev,
       tokens: { ...prev.tokens, [`T${tid}`]: val },
     }));
-  };
-
-  // 그룹 채팅 ID 변경
-  const handleGroupChange = (val: string) => {
-    setConfig(prev => ({ ...prev, group_chat_id: val }));
   };
 
   // 저장
@@ -106,27 +99,8 @@ export default function TelegramPanel() {
       </div>
 
       <p className="text-sm text-gray-400">
-        각 터미널이 독립된 텔레그램 봇으로 존재합니다. 개인 채팅에서 1:1 모니터링, 그룹 채팅에서 봇끼리 협업합니다.
+        각 터미널이 독립된 텔레그램 봇으로 존재합니다. 개인 채팅에서 1:1 모니터링합니다.
       </p>
-
-      {/* 그룹 채팅 ID */}
-      <div className="p-3 bg-[#1a1a2e] rounded border border-blue-500/20 space-y-2">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-blue-400" />
-          <label className="text-sm font-medium text-blue-300">그룹 채팅 ID</label>
-        </div>
-        <p className="text-xs text-gray-500">
-          모든 봇을 초대한 그룹의 ID. 봇끼리 대화하고 사용자가 관전/개입하는 공간입니다.
-        </p>
-        <input
-          type="text"
-          value={config.group_chat_id}
-          onChange={e => handleGroupChange(e.target.value)}
-          placeholder="-100123456789"
-          className="w-full px-3 py-2 bg-[#2d2d2d] border border-[#404040] rounded text-sm text-white
-                     placeholder-gray-600 focus:border-blue-500 focus:outline-none font-mono"
-        />
-      </div>
 
       {/* T1~T8 봇 토큰 */}
       <div className="space-y-2">
@@ -216,26 +190,13 @@ export default function TelegramPanel() {
         <p>3. 채팅에 텍스트를 보내면 해당 터미널에 명령이 입력됩니다</p>
       </div>
 
-      {/* 도움말: 그룹 채팅 */}
-      <div className="p-3 bg-[#1a1a2e] rounded border border-[#333] text-xs text-gray-400 space-y-1">
-        <p className="font-medium text-gray-300">📌 Step 3: 그룹 채팅 ID 얻기 (봇 협업)</p>
-        <p>1. 텔레그램에서 <span className="text-white">새 그룹</span> 생성 (이름 예: Vibe Hive)</p>
-        <p>2. 생성한 봇들을 <span className="text-white">전부 그룹에 초대</span></p>
-        <p className="mt-1 font-medium text-yellow-400">그룹 ID 확인 방법 (택 1):</p>
-        <p>  <span className="text-blue-400">방법 A:</span> 그룹에 <span className="text-white">@raw_data_bot</span> 초대 → 자동 출력되는 JSON에서 <span className="text-white font-mono">"chat":{'{'}  "id": -100xxx  {'}'}</span> 확인 → 확인 후 퇴장</p>
-        <p>  <span className="text-blue-400">방법 B:</span> 브라우저에서 <span className="text-white font-mono">https://api.telegram.org/bot봇토큰/getUpdates</span> 접속 → 그룹에 메시지 1개 보낸 후 새로고침 → JSON에서 <span className="text-white font-mono">"chat":{"{"}"id": -100xxx{"}"}</span> 확인</p>
-        <p className="mt-1">3. 확인한 ID (예: <span className="text-white font-mono">-1001234567890</span>)를 위 그룹 채팅 ID 필드에 입력</p>
-        <p className="text-gray-500">※ 그룹 ID는 항상 <span className="text-white">마이너스(-)</span>로 시작합니다</p>
-      </div>
-
       {/* 도움말: 저장 및 실행 */}
       <div className="p-3 bg-[#1a1a2e] rounded border border-[#333] text-xs text-gray-400 space-y-1">
         <p className="font-medium text-gray-300">📌 Step 4: 저장 및 실행</p>
         <p>1. 위 내용 모두 입력 후 <span className="text-white">저장</span> 클릭 → .env에 자동 기록</p>
         <p>2. 서버 재시작하면 봇들이 자동 연결됩니다</p>
         <p className="mt-2 text-gray-500 border-t border-[#333] pt-2">
-          <span className="text-blue-400">개인 채팅:</span> 각 봇에게 /start → 해당 터미널의 PTY 출력을 실시간 수신<br/>
-          <span className="text-blue-400">그룹 채팅:</span> 봇끼리 ITCP 메시지를 자기 이름으로 발화 → 에이전트 협업 시각화
+          <span className="text-blue-400">개인 채팅:</span> 각 봇에게 /start → 해당 터미널의 PTY 출력을 실시간 수신
         </p>
       </div>
     </div>

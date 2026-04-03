@@ -1,15 +1,134 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   Activity,
   AlertCircle,
   CheckCircle2,
   Clock3,
+  Code2,
+  Globe,
+  Home,
   Loader2,
+  PowerOff,
   Radio,
   ServerCrash,
   TerminalSquare,
+  Wrench,
 } from 'lucide-react';
 import { API_BASE } from '../../constants';
+
+// ── 에이전트 조직도 관련 타입/상수 ──
+
+interface AgentBeat {
+  agent_id: string;
+  status: string;
+  last_beat: string;
+  current_task: string | null;
+  beat_count: number;
+  config?: string;
+}
+
+const AGENT_ROLES: Record<string, {
+  label: string;
+  title: string;
+  description: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}> = {
+  'claude-T1': { label: 'Claude', title: 'Engineer', description: 'Founding Full-Stack Engineer', Icon: Code2 },
+  'gemini-T2': { label: 'Gemini', title: 'Architect', description: 'Design & Orchestration', Icon: Globe },
+  'codex-T3': { label: 'Codex', title: 'QA Engineer', description: 'Sandbox & Validation', Icon: Wrench },
+  claude: { label: 'Claude', title: 'Engineer', description: 'Precision Logic', Icon: Code2 },
+  gemini: { label: 'Gemini', title: 'Architect', description: 'Research & Design', Icon: Globe },
+  codex: { label: 'Codex', title: 'QA Engineer', description: 'Execution & Verify', Icon: Wrench },
+};
+
+const STATUS_COLORS: Record<string, { dot: string; glow: string; border: string }> = {
+  working: { dot: '#22c55e', glow: '0 0 8px rgba(34, 197, 94, 0.6)', border: 'rgba(34, 197, 94, 0.3)' },
+  idle: { dot: '#eab308', glow: '0 0 6px rgba(234, 179, 8, 0.4)', border: 'rgba(234, 179, 8, 0.2)' },
+  offline: { dot: '#6b7280', glow: 'none', border: 'rgba(255, 255, 255, 0.06)' },
+};
+
+function agentRelativeTime(iso?: string): string {
+  if (!iso) return '';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!isFinite(diff) || diff < 0) return 'now';
+  if (diff < 60) return `${Math.max(1, Math.floor(diff))}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
+}
+
+// ── 조직도 카드 컴포넌트들 ──
+
+function OrgAgentCard({ agent, onTrigger, isTriggering }: {
+  agent: AgentBeat; onTrigger: (id: string) => void; isTriggering: boolean;
+}) {
+  const role = AGENT_ROLES[agent.agent_id] ?? { label: agent.agent_id, title: 'Agent', description: '', Icon: Wrench };
+  const colors = STATUS_COLORS[agent.status] ?? STATUS_COLORS.offline;
+  const { Icon } = role;
+  return (
+    <div
+      className="org-card"
+      style={{
+        background: 'rgba(255,255,255,0.04)', border: `1px solid ${colors.border}`,
+        borderRadius: 12, padding: '14px 16px 12px', minWidth: 160, maxWidth: 190,
+        cursor: 'pointer', transition: 'border-color 0.3s, box-shadow 0.3s', position: 'relative',
+      }}
+      onClick={() => onTrigger(agent.agent_id)}
+      title={`클릭하여 하트비트 트리거 (${agent.agent_id})`}
+    >
+      {isTriggering && (
+        <div style={{ position: 'absolute', inset: 0, borderRadius: 12, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2 }}>
+          <Loader2 className="w-4 h-4 animate-spin text-white/60" />
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+        <Icon className="w-3.5 h-3.5 text-white/50" />
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>{role.title}</span>
+      </div>
+      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 5, lineHeight: 1.3 }}>{role.description}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%', background: colors.dot,
+          boxShadow: colors.glow, display: 'inline-block', flexShrink: 0,
+          animation: agent.status === 'working' ? 'pulse-dot 2s ease-in-out infinite' : 'none',
+        }} />
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)' }}>{role.label}</span>
+        {agent.last_beat && (
+          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', marginLeft: 'auto' }}>
+            {agentRelativeTime(agent.last_beat)}
+          </span>
+        )}
+      </div>
+      {agent.current_task && (
+        <div style={{
+          marginTop: 6, padding: '3px 6px', borderRadius: 5, background: 'rgba(255,255,255,0.04)',
+          fontSize: 9, color: 'rgba(255,255,255,0.3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {agent.current_task}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrgDispatcherCard() {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 12, padding: '12px 18px 10px', display: 'inline-block',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+        <Home className="w-3.5 h-3.5 text-white/50" />
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>Dispatcher</span>
+      </div>
+      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 3 }}>Task Orchestrator</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px rgba(34,197,94,0.5)', display: 'inline-block' }} />
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)' }}>User</span>
+      </div>
+    </div>
+  );
+}
 
 interface LiveStep {
   skill_name: string;
@@ -180,6 +299,39 @@ export default function TaskBoardPanel() {
   const [hasApiSignal, setHasApiSignal] = useState(false);
   const [fetchFailures, setFetchFailures] = useState(0);
 
+  // ── 에이전트 조직도 상태 ──
+  const [agents, setAgents] = useState<AgentBeat[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [triggeringId, setTriggeringId] = useState<string | null>(null);
+
+  // 에이전트 상태 폴링 (5초)
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/agents/status`);
+        if (res.ok && active) {
+          const data = await res.json();
+          setAgents(Array.isArray(data) ? data : []);
+        }
+      } catch { /* 연결 실패 시 무시 */ }
+      finally { if (active) setAgentsLoading(false); }
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  const handleAgentTrigger = useCallback(async (agentId: string) => {
+    setTriggeringId(agentId);
+    try {
+      await fetch(`${API_BASE}/api/agents/${agentId}/trigger`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+    } catch { /* 무시 */ }
+    finally { setTimeout(() => setTriggeringId(null), 1500); }
+  }, []);
+
   useEffect(() => {
     const load = () => {
       fetch(`${API_BASE}/api/orchestrator/skill-chain`)
@@ -334,6 +486,70 @@ export default function TaskBoardPanel() {
           </div>
         )}
       </div>
+
+      {/* ── 에이전트 조직도 (Paperclip 스타일) ── */}
+      {!agentsLoading && agents.length > 0 && (
+        <div className="rounded-2xl border border-white/10 bg-[#111315] p-4">
+          <style>{`
+            @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+            .org-card:hover { border-color: rgba(255,255,255,0.2) !important; box-shadow: 0 0 20px rgba(255,255,255,0.03); }
+          `}</style>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Wrench className="h-4 w-4 text-amber-300" />
+              <h3 className="text-sm font-bold text-white">에이전트 조직도</h3>
+            </div>
+            <span className="text-[10px] text-white/25">
+              {agents.filter(a => a.status === 'working').length}/{agents.length} active
+            </span>
+          </div>
+
+          {/* 트리 구조: Dispatcher → 에이전트들 */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+            <OrgDispatcherCard />
+            {/* 수직 줄기 */}
+            <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />
+            {/* 자식 에이전트들 */}
+            <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
+              {agents.length > 1 && (
+                <div style={{
+                  position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
+                  height: 1, background: 'rgba(255,255,255,0.1)', width: 'calc(100% - 160px)',
+                }} />
+              )}
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                {agents.map((agent) => (
+                  <div key={agent.agent_id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />
+                    <OrgAgentCard agent={agent} onTrigger={handleAgentTrigger} isTriggering={triggeringId === agent.agent_id} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 현재 작업 중인 에이전트 태스크 요약 */}
+          {agents.some(a => a.status === 'working' && a.current_task) && (
+            <div style={{
+              marginTop: 10, padding: '6px 10px', borderRadius: 8,
+              background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.1)',
+            }}>
+              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginBottom: 3 }}>ACTIVE TASKS</div>
+              {agents.filter(a => a.status === 'working' && a.current_task).map(a => {
+                const role = AGENT_ROLES[a.agent_id];
+                return (
+                  <div key={a.agent_id} style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 2 }}>
+                    <span style={{ color: '#4ade80', fontWeight: 600 }}>{role?.label ?? a.agent_id}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      {a.current_task && a.current_task.length > 60 ? a.current_task.slice(0, 60) + '…' : a.current_task}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#111315]">

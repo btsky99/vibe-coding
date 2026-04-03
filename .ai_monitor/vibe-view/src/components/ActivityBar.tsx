@@ -12,7 +12,6 @@ import {
   Settings,
   Smartphone,
   Target,
-  Users,
   Zap,
 } from 'lucide-react';
 
@@ -123,10 +122,6 @@ const ActivityBar = memo(function ActivityBar({
       <button onClick={() => onTabChange('messages')} className={tabCls('messages')} title="Messages">
         <MessageSquare className="w-5 h-5" />
         {unreadMsgCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full" />}
-      </button>
-
-      <button onClick={() => onTabChange('group-chat')} className={tabCls('group-chat')} title="Internal Group Chat">
-        <Users className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('tasks')} className={tabCls('tasks')} title="Tasks">

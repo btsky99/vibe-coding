@@ -34,6 +34,8 @@ import { motion } from 'framer-motion';
 import { Menu, ChevronRight, ChevronDown, RotateCw, X, Minimize2, Maximize2, ExternalLink } from 'lucide-react';
 /* ── 공유 상수/타입 ── */
 import { API_BASE, OpenFile, TreeItem } from './constants';
+/* ── 데이터 폴링 커스텀 훅 — ClassicApp/OfficeApp 공유 ── */
+import { useVibeData } from './hooks/useVibeData';
 /* ── 레이아웃 컴포넌트 — App.tsx 2차 분리에서 추출 ── */
 import TopMenuBar from './components/TopMenuBar';
 import ActivityBar from './components/ActivityBar';
@@ -44,9 +46,10 @@ import MessageComposer from './components/MessageComposer';
 // 파일을 열 때만 로드되므로 초기 번들에서 제외 → 첫 화면 렌더링 대폭 단축
 const FloatingWindow = lazy(() => import('./components/FloatingWindow'));
 import TerminalSlot from './components/TerminalSlot';
+/* ── 오피스 모드 컴포넌트 ── */
+const OfficeApp = lazy(() => import('./components/office/OfficeApp'));
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import MessagesPanel from './components/panels/MessagesPanel';
-import AgentMonitorPanel from './components/panels/AgentMonitorPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import HivePanel from './components/panels/HivePanel';
@@ -56,18 +59,32 @@ import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
 import SetupBanner from './components/SetupBanner';
-/* ── 공유 타입 ── */
-import { LogRecord, AgentMessage, MemoryEntry } from './types';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
 type LayoutMode = '1' | '2' | '3' | '4' | '2x2' | '6' | '8' | '9';
 
-function App() {
+function App({ onSwitchToOffice }: { onSwitchToOffice?: () => void }) {
+
+  // ─── 공유 데이터 훅 — 모든 폴링/SSE/상태를 useVibeData로 통합 ──────
+  const vibe = useVibeData();
+  const {
+    logs, setLogs, messages, memory, locks,
+    agentTerminals, globalPipelineStage, skillChain,
+    geminiUsage, claudeUsage,
+    hiveHealth, hiveActivity, isHealingActive,
+    appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
+    updateChecking, setUpdateChecking,
+    unreadMsgCount, setUnreadMsgCount,
+    activeTaskCount, setActiveTaskCount,
+    totalGitChanges, setTotalGitChanges,
+    conflictCount, setConflictCount,
+    isAgentRunning, setIsAgentRunning,
+    currentPath, setCurrentPath,
+  } = vibe;
 
   // ─── 레이아웃 상태 ────────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
-  // isAutoMode 제거 — 자율 주행 버튼은 agent 탭(자율 에이전트)으로 포커스 전환
   // activeMenu: 상단 메뉴 드롭다운 활성 상태 — 루트 div 클릭으로 닫기 위해 App에서 관리
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   // 칸반 보드 팝아웃 모드 — 드래그 가능한 플로팅 윈도우로 표시
@@ -94,47 +111,7 @@ function App() {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('3');
   const terminalCountMap: Record<string, number> = { '1':1, '2':2, '3':3, '4':4, '2x2':4, '6':6, '8':8, '9':9 };
   const terminalCount = terminalCountMap[layoutMode] ?? 3;
-
-  // ─── 앱 버전 + 업데이트 상태 ─────────────────────────────────────────
-  const [appVersion, setAppVersion] = useState<string>('...');
-  const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
-  const [updateApplying, setUpdateApplying] = useState(false);
-  const [updateChecking, setUpdateChecking] = useState(false);
-
-  // ─── 패널 배지 카운트 — 각 패널 콜백으로 수신 ────────────────────────
-  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
-  const [activeTaskCount, setActiveTaskCount] = useState(0);
-  const [totalGitChanges, setTotalGitChanges] = useState(0);
-  const [conflictCount, setConflictCount] = useState(0);
-  const orchWarningCount = 0; // OrchestratorPanel 통합 후 미사용 — hive 탭 배지는 항상 0
-  const [isAgentRunning, setIsAgentRunning] = useState(false);
-  // 터미널별 에이전트 파이프라인 상태 — TerminalSlot 모니터링 뷰에 표시
-  const [agentTerminals, setAgentTerminals] = useState<Record<string, any>>({});
-  // 하이브 엔진 상태 (자가 치유 등) — /api/hive/health 폴링으로 수신
-  const [hiveHealth, setHiveHealth] = useState<any>(null);
-  // 하이브 활동 이벤트 — /api/hive/activity 폴링 (memory_write/orchestrate 여부 TerminalSlot에 전달)
-  const [hiveActivity, setHiveActivity] = useState<any[]>([]);
-  // 자가 치유 활성 여부 — hiveHealth에서 파생 (별도 폴링 불필요)
-  const isHealingActive = hiveHealth?.healing_active === true || hiveHealth?.status === 'healing';
-
-  // ─── 데이터 스트림 (TerminalSlot + Activity Bar 배지용) ───────────────
-  const [logs, setLogs] = useState<LogRecord[]>([]);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [memory, setMemory] = useState<MemoryEntry[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [skillChain, setSkillChain] = useState<any>({ status: 'idle' });
-  const [geminiUsage, setGeminiUsage] = useState<{
-    total_tokens: number; context_window: number; percentage: number
-  } | null>(null);
-  // Claude Code 세션별 컨텍스트 사용량 — TerminalSlot 컨텍스트 바용
-  const [claudeUsage, setClaudeUsage] = useState<{
-    input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
-    model: string; context_window: number; percentage: number; last_ts: string;
-  } | null>(null);
-  const [locks, setLocks] = useState<Record<string, string>>({});
-
-  // ─── 현재 탐색 경로 — FileExplorer/GitPanel/TerminalSlot/MemoryPanel 공유 ──
-  const [currentPath, setCurrentPath] = useState('');
+  const orchWarningCount = 0; // OrchestratorPanel 통합 후 미사용
 
   // ─── 플로팅 윈도우 상태 (파일 퀵 뷰) ─────────────────────────────────
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
@@ -146,191 +123,6 @@ function App() {
 
   // ─── 파일 목록 강제 새로고침 트리거 (헤더 새로고침 버튼 → FileExplorer) ──
   const [fileRefreshKey, setFileRefreshKey] = useState(0);
-
-  // ═══ useEffects — 데이터 폴링 및 시스템 유지 ═══════════════════════════
-
-  // 좀비 서버 방지 하트비트 — 창이 닫히면 서버 5초 뒤 자동 종료
-  useEffect(() => {
-    const sendHeartbeat = () => fetch(`${API_BASE}/api/heartbeat`).catch((err) => console.error('[App] fetch error:', err));
-    sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // SSE 로그 스트림 — 터미널별 실행 이벤트 실시간 수신 (최대 200개 유지)
-  useEffect(() => {
-    const sse = new EventSource(`${API_BASE}/stream`);
-    sse.onmessage = (e) => {
-      try {
-        const data: LogRecord = JSON.parse(e.data);
-        setLogs(prev => [...prev.slice(-199), data]);
-      } catch {}
-    };
-    return () => sse.close();
-  }, []);
-
-  // 파일 락 폴링 (5초) — TerminalSlot 파일 편집 충돌 방지용
-  // [P2 최적화] 3초 → 5초 (락 변경은 드뭄)
-  useEffect(() => {
-    const fetchLocks = () => {
-      fetch(`${API_BASE}/api/locks`)
-        .then(res => res.json())
-        // null/배열 방어: locks는 Record<string,string> 객체여야 함
-        .then(data => setLocks(data && typeof data === 'object' && !Array.isArray(data) ? data : {}))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchLocks();
-    const interval = setInterval(fetchLocks, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 에이전트 간 메시지 폴링 (5초) — TerminalSlot 활성 메시지 표시용
-  // [P2 최적화] 3초 → 5초 (메시지 빈도 낮음)
-  useEffect(() => {
-    const fetchMessages = () => {
-      fetch(`${API_BASE}/api/messages`)
-        .then(res => res.json())
-        .then(data => setMessages(Array.isArray(data) ? data : []))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchMessages();
-    const interval = setInterval(fetchMessages, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 공유 메모리 폴링 (10초) — Activity Bar 배지(memory.length)용
-  // [P2 최적화] 5초 → 10초 (메모리 변경은 드뭄)
-  useEffect(() => {
-    const fetchMemory = () => {
-      fetch(`${API_BASE}/api/memory`)
-        .then(res => res.json())
-        .then(data => setMemory(Array.isArray(data) ? data : []))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchMemory();
-    const interval = setInterval(fetchMemory, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 스킬 체인 상태 폴링 (5초) — Activity Bar 오케스트레이터 탭 펄스 배지용
-  // [P2 최적화] 3초 → 5초 (스킬 실행 주기 > 5초)
-  useEffect(() => {
-    const fetchChain = () => {
-      fetch(`${API_BASE}/api/orchestrator/skill-chain`)
-        .then(res => res.json())
-        // [버그수정] API가 null 반환 시 setSkillChain(null) → skillChain.status 접근 TypeError
-        .then(data => { if (data && typeof data === 'object') setSkillChain(data); })
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchChain();
-    const interval = setInterval(fetchChain, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // [P2 최적화] 5초 → 30초 (MCP 설치/제거는 매우 드뭄)
-  // 터미널별 에이전트 파이프라인 상태 폴링 (5초) — TerminalSlot 모니터링 뷰 단계 표시용
-  // [P2 최적화] 3초 → 5초 (에이전트 상태 변경 주기 > 5초)
-  useEffect(() => {
-    const fetchTerminals = () => {
-      fetch(`${API_BASE}/api/agent/terminals`)
-        .then(res => res.json())
-        .then(data => setAgentTerminals(typeof data === 'object' && data !== null ? data : {}))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchTerminals();
-    const interval = setInterval(fetchTerminals, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 하이브 엔진 헬스 상태 폴링 (10초) — ActivityBar 엔진 라이브 표시용
-  // [P2 최적화] 5초 → 10초 (헬스 체크 부하 경감)
-  useEffect(() => {
-    const fetchHealth = () => {
-      fetch(`${API_BASE}/api/hive/health`)
-        .then(res => res.json())
-        .then(data => setHiveHealth(data))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 하이브 활동 이벤트 폴링 (10초) — TerminalSlot 모니터링 패널 하이브 저장 상태 표시용
-  // [P2 최적화] 5초 → 10초 (활동 로그는 비실시간 데이터)
-  useEffect(() => {
-    const fetchActivity = () => {
-      fetch(`${API_BASE}/api/hive/activity`)
-        .then(res => res.json())
-        .then(data => setHiveActivity(Array.isArray(data) ? data : []))
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchActivity();
-    const interval = setInterval(fetchActivity, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 글로벌 파이프라인 단계 계산 — agentTerminals가 변경될 때만 재계산 (useMemo로 최적화)
-  const globalPipelineStage = useMemo(() => {
-    const stages = Object.values(agentTerminals).map(t => t.pipeline_stage);
-    if (stages.includes('modifying')) return 'modifying';
-    if (stages.includes('verifying')) return 'verifying';
-    if (stages.includes('analyzing')) return 'analyzing';
-    if (stages.includes('done')) return 'done';
-    return 'idle';
-  }, [agentTerminals]);
-
-  // Gemini + Claude 컨텍스트 사용량 동시 폴링 (10초) — TerminalSlot 게이지용
-  useEffect(() => {
-    const fetchUsage = () => {
-      fetch(`${API_BASE}/api/gemini-context-usage`)
-        .then(res => res.json())
-        .then(data => { if (!data.error) setGeminiUsage(data); })
-        .catch((err) => console.error('[App] fetch error:', err));
-      fetch(`${API_BASE}/api/context-usage`)
-        .then(res => res.json())
-        .then(data => { if (!data.error) setClaudeUsage(data); })
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    fetchUsage();
-    const interval = setInterval(fetchUsage, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 앱 버전 + 프로젝트명 로드 — 서버 project-info에서 동적 로드 (하드코딩 금지)
-  useEffect(() => {
-    fetch(`${API_BASE}/api/project-info`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.version) setAppVersion(data.version);
-        // 프로젝트명을 document.title에 반영 — 프로젝트 전환 시 타이틀 갱신
-        if (data.project_name) {
-          document.title = `바이브 코딩 [${data.project_name}]`;
-        }
-      })
-      .catch((err) => console.error('[App] fetch error:', err));
-  }, []);
-
-  // 업데이트 준비 여부 폴링 (30초) — updateReady 상태 갱신
-  useEffect(() => {
-    const check = () => {
-      fetch(`${API_BASE}/api/check-update-ready`)
-        .then(res => res.json())
-        .then(data => {
-          if (data?.ready) {
-            setUpdateReady({ version: data.version });
-            // 업데이트 적용 실패 에러가 있으면 즉시 알림
-            if (data.error) alert(`이전 업데이트 적용 실패: ${data.error}`);
-          } else {
-            setUpdateReady(null);
-          }
-        })
-        .catch((err) => console.error('[App] fetch error:', err));
-    };
-    check();
-    const interval = setInterval(check, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   // 사이드바 드래그 리사이즈 — document 전역 이벤트로 처리
   useEffect(() => {
@@ -645,7 +437,6 @@ function App() {
     explorer: '파일 탐색기',
     search: '파일 검색',
     messages: '메시지 채널',
-    'group-chat': '에이전트 모니터',
     tasks: '태스크보드',
     memory: '공유 메모리',
     hive: '하이브 진단 / 스킬',
@@ -701,6 +492,7 @@ function App() {
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
         onOpenMissionControl={() => setActiveTab('agent')}
+        onSwitchToOffice={onSwitchToOffice}
       />
 
       {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}
@@ -759,9 +551,6 @@ function App() {
             {activeTab === 'messages' ? (
               /* 메시지 채널 패널 */
               <MessagesPanel onUnreadCount={setUnreadMsgCount} onOpenFilePath={handleOpenFilePath} />
-            ) : activeTab === 'group-chat' ? (
-              /* 내부 그룹 채팅 패널 */
-              <AgentMonitorPanel />
             ) : activeTab === 'tasks' ? (
               /* 태스크 보드 패널 (리스트 뷰) */
               <TasksPanel onActiveCount={setActiveTaskCount} />
@@ -800,7 +589,7 @@ function App() {
             </div>
 
             {/* 에이전트 간 메시지 작성 — messages 탭은 MessagesPanel 내부 폼 사용, 나머지 탭 공통 */}
-            {activeTab !== 'messages' && activeTab !== 'group-chat' && <MessageComposer />}
+            {activeTab !== 'messages' && <MessageComposer />}
           </div>
         </motion.div>
 
@@ -1070,7 +859,6 @@ function DashboardOnlyApp() {
   const titleMap: Record<string, string> = {
     agent: 'Vibe Coding Master',
     messages: 'Messages',
-    'group-chat': '에이전트 모니터',
     tasks: 'Tasks',
     memory: 'Shared Memory',
     git: 'Git',
@@ -1082,8 +870,6 @@ function DashboardOnlyApp() {
     switch (tab) {
       case 'messages':
         return <MessagesPanel onUnreadCount={() => {}} />;
-      case 'group-chat':
-        return <AgentMonitorPanel />;
       case 'tasks':
         return <TasksPanel onActiveCount={() => {}} />;
       case 'memory':
@@ -1119,7 +905,33 @@ function Root() {
   const params = new URLSearchParams(window.location.search);
   if (params.has('kanban')) return <KanbanOnlyApp />;
   if (params.get('page') === 'dashboard') return <DashboardOnlyApp />;
-  return <App />;
+  if (params.get('page') === 'office') return (
+    <Suspense fallback={<div className="w-screen h-screen bg-[#0a0a0f] flex items-center justify-center text-white">Loading Office...</div>}>
+      <OfficeApp />
+    </Suspense>
+  );
+  // viewMode: localStorage로 마지막 선택 모드 복원
+  return <AppWithModeToggle />;
+}
+
+// viewMode 전환 래퍼 — classic(기존) ↔ office(가상 오피스) 토글
+function AppWithModeToggle() {
+  const [viewMode, setViewMode] = useState<'classic' | 'office'>(() => {
+    return (localStorage.getItem('vibe_view_mode') as 'classic' | 'office') || 'classic';
+  });
+  const toggleMode = () => {
+    const next = viewMode === 'classic' ? 'office' : 'classic';
+    localStorage.setItem('vibe_view_mode', next);
+    setViewMode(next);
+  };
+  if (viewMode === 'office') {
+    return (
+      <Suspense fallback={<div className="w-screen h-screen bg-[#0a0a0f] flex items-center justify-center text-white">Loading Office...</div>}>
+        <OfficeApp onSwitchToClassic={toggleMode} />
+      </Suspense>
+    );
+  }
+  return <App onSwitchToOffice={toggleMode} />;
 }
 
 export default Root;

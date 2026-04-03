@@ -8,11 +8,6 @@
  * - 2026-03-26 Claude: xterm.js 스크롤 전면 수정 — scrollback 10000줄, smoothScrollDuration 100ms,
  *                      scrollOnUserInput true 추가. 컨테이너 overflow-hidden 제거로 xterm 내장 스크롤바 활성화.
  *                      Gemini/Codex 긴 출력 시 이전 내용 확인 불가 문제 해결.
- * - 2026-03-25 Claude: 터미널 실행 중 채팅 모드 전환 버튼 추가 — 터미널 유지한 채 채팅 전환 가능.
- *                      isTerminalMode/isChatMode 독립 관리. 터미널 div를 CSS hidden으로 보존 (unmount 안 함).
- * - 2026-03-25 Claude: 채팅↔터미널 전환 시 LLM 세션 유지 — ChatSlot unmount 방지.
- *                      조건부 렌더링 → CSS hidden 전환. chatMounted 상태로 한번 마운트된 ChatSlot 보존.
- *                      SSE 끊김 + 실행 중 LLM 세션 유실 + 409 already_streaming 오류 근절.
  * - 2026-03-20 Claude: 장시간 idle 시 WS 끊김 → 자동 재연결 + 서버 ping/pong keepalive.
  *                      onclose에서 지수 백오프(1s~30s, 최대 10회)로 자동 재연결. 서버에 ping_interval=30s 추가.
  * - 2026-03-15 Claude: 절전/노트북 덮개 복귀 시 WebSocket 자동 재연결 — visibilitychange 이벤트 감지.
@@ -87,18 +82,6 @@ export default function TerminalSlot({
   const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsReconnectAttemptRef = useRef(0);
 
-  // ── 그룹 채팅 전용 두 번째 PTY 터미널 refs ──
-  // 일반 터미널과 독립적으로 동작하며, 버튼 전환해도 서로 안 끊김
-  // PTY 세션 ID는 slot{slotId + 100}을 사용하여 일반 터미널과 충돌 방지
-  const groupXtermRef = useRef<HTMLDivElement>(null);
-  const groupTermRef = useRef<XTerm | null>(null);
-  const groupWsRef = useRef<WebSocket | null>(null);
-  const groupFitAddonRef = useRef<FitAddon | null>(null);
-  const groupResizeObserverRef = useRef<ResizeObserver | null>(null);
-  const groupWsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const groupWsReconnectAttemptRef = useRef(0);
-  const [isGroupChatRunning, setIsGroupChatRunning] = useState(false);
-
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [hasAttachedTerminal, setHasAttachedTerminal] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
@@ -112,13 +95,6 @@ export default function TerminalSlot({
   const [showShortcutEditor, setShowShortcutEditor] = useState(false);
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
-
-  // 채팅 모드 — true이면 그룹 채팅 PTY 표시, false이면 기존 PTY 터미널
-  // [버그수정 2026-03-29] localStorage 복원 제거 — 그룹 채팅은 명시적으로 버튼 클릭 시에만 시작.
-  // 이전 ChatSlot 방식에서 그룹 채팅 PTY로 전환되면서, 앱 시작 시 isChatMode=true인데
-  // groupChat PTY가 없으면 빈 화면 + 에이전트 선택 카드 숨김 → 터미널 안 열리는 버그 발생.
-  const [isChatMode, setIsChatMode] = useState(false);
-  const [chatMounted, setChatMounted] = useState(false);
 
   // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
   // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
@@ -389,16 +365,6 @@ export default function TerminalSlot({
   }, [showMonitor]);
 
 
-  // 터미널 ↔ 그룹채팅 전환 시 표시되는 쪽의 xterm fit() 재조정
-  useEffect(() => {
-    const targetFit = isChatMode ? groupFitAddonRef.current : fitAddonRef.current;
-    if (!targetFit) return;
-    const doFit = () => targetFit.fit();
-    const raf = requestAnimationFrame(doFit);
-    const t = setTimeout(doFit, 100);
-    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
-  }, [isChatMode]);
-
   const closeTerminal = () => {
     // [버그수정 2026-03-20] 명시적 종료 시 재연결 타이머 정리
     if (wsReconnectTimerRef.current) {
@@ -414,162 +380,6 @@ export default function TerminalSlot({
     resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close(1000);  // 1000=정상종료 → onclose에서 재연결 안 함
     if (termRef.current) termRef.current.dispose();
-    // [버그수정 2026-03-29] 그룹 채팅 PTY도 함께 정리 — X 버튼으로 종료 안 되던 문제 해결
-    if (groupWsReconnectTimerRef.current) { clearTimeout(groupWsReconnectTimerRef.current); groupWsReconnectTimerRef.current = null; }
-    groupWsReconnectAttemptRef.current = 0;
-    setIsGroupChatRunning(false);
-    setIsChatMode(false);
-    setChatMounted(false);
-    localStorage.setItem('chat_mode_' + terminalId, 'false');
-    groupFitAddonRef.current = null;
-    groupResizeObserverRef.current?.disconnect();
-    groupResizeObserverRef.current = null;
-    if (groupWsRef.current) { groupWsRef.current.close(1000); groupWsRef.current = null; }
-    if (groupTermRef.current) { groupTermRef.current.dispose(); groupTermRef.current = null; }
-  };
-
-  // ── 그룹 채팅 PTY 실행 — 일반 터미널과 독립된 두 번째 xterm + WebSocket ──
-  // PTY 세션 ID: slot{slotId + 100}으로 일반 터미널(slot{slotId})과 충돌 방지
-  const launchGroupChat = (agent: string) => {
-    // 이미 실행 중이면 전환만
-    if (isGroupChatRunning) {
-      setIsChatMode(true);
-      localStorage.setItem('chat_mode_' + terminalId, 'true');
-      return;
-    }
-    // 기존 그룹챗 터미널 정리
-    if (groupWsReconnectTimerRef.current) {
-      clearTimeout(groupWsReconnectTimerRef.current);
-      groupWsReconnectTimerRef.current = null;
-    }
-    if (groupTermRef.current) { groupTermRef.current.dispose(); groupTermRef.current = null; }
-    if (groupWsRef.current) { groupWsRef.current.close(1000); groupWsRef.current = null; }
-    groupResizeObserverRef.current?.disconnect();
-    groupResizeObserverRef.current = null;
-    if (groupXtermRef.current) groupXtermRef.current.innerHTML = '';
-
-    setIsGroupChatRunning(true);
-    setChatMounted(true);
-    setIsChatMode(true);
-    localStorage.setItem('chat_mode_' + terminalId, 'true');
-
-    setTimeout(() => {
-      if (!groupXtermRef.current) return;
-      const term = new XTerm({
-        theme: { background: '#1a1a2e', foreground: '#cccccc', cursor: '#00d4ff', selectionBackground: '#00d4ff55' },
-        fontFamily: "'Fira Code', 'Consolas', monospace",
-        fontSize: 13,
-        cursorBlink: true,
-        scrollback: 10000,
-        smoothScrollDuration: 100,
-        scrollOnUserInput: true
-      });
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.loadAddon(new WebLinksAddon((_event, uri) => {
-        fetch(`${API_BASE}/api/open-external`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: uri }),
-        }).catch(() => window.open(uri, '_blank', 'noopener,noreferrer'));
-      }));
-      term.open(groupXtermRef.current);
-      fitAddon.fit();
-      groupTermRef.current = term;
-      groupFitAddonRef.current = fitAddon;
-
-      // 텍스트 드래그 시 자동 복사
-      term.onSelectionChange(() => {
-        if (term.hasSelection()) {
-          navigator.clipboard.writeText(term.getSelection()).catch(() => {
-            const ta = document.createElement('textarea');
-            ta.value = term.getSelection();
-            ta.style.position = 'fixed'; ta.style.left = '-9999px';
-            document.body.appendChild(ta); ta.select();
-            document.execCommand('copy'); document.body.removeChild(ta);
-          });
-        }
-      });
-
-      // [버그수정 2026-03-29] 그룹 채팅 xterm 우클릭 컨텍스트 메뉴
-      // 일반 터미널(284줄)과 100% 동일한 패턴 사용
-      groupXtermRef.current.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() });
-      });
-
-      // ResizeObserver — 컨테이너 크기 변화 시 자동 fit
-      const container = groupXtermRef.current;
-      if (container) {
-        const ro = new ResizeObserver(() => fitAddon.fit());
-        ro.observe(container);
-        groupResizeObserverRef.current = ro;
-      }
-
-      // WebSocket — PTY 세션 ID는 slot{slotId + 100}으로 일반 터미널과 분리
-      const groupAgent = `groupchat-${agent}`;
-      const wsParams = new URLSearchParams({
-        agent: groupAgent,
-        cwd: currentPath,
-        cols: term.cols.toString(),
-        rows: term.rows.toString(),
-        yolo: 'true',
-      });
-      const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId + 100}?${wsParams.toString()}`);
-      groupWsRef.current = ws;
-
-      ws.onopen = () => {
-        groupWsReconnectAttemptRef.current = 0;
-        term.write(`\r\n\x1b[38;5;51m[HIVE] ${groupAgent.toUpperCase()} \x1b[38;5;196m[YOLO MODE]\x1b[0m \x1b[38;5;51m그룹 채팅 터미널 연결 성공\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      };
-      ws.onclose = (event) => {
-        if (event.code === 1000) return;
-        const attempt = groupWsReconnectAttemptRef.current;
-        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-        groupWsReconnectAttemptRef.current = attempt + 1;
-        if (attempt < 10) {
-          term.write(`\r\n\x1b[38;5;208m[HIVE] 그룹채팅 연결 끊김 — ${delay / 1000}초 후 재연결 (${attempt + 1}/10)\x1b[0m\r\n`);
-          groupWsReconnectTimerRef.current = setTimeout(() => {
-            if (groupTermRef.current) launchGroupChat(agent);
-          }, delay);
-        }
-      };
-      ws.onmessage = async (e) => {
-        const data = e.data instanceof Blob ? await e.data.text() : e.data;
-        term.write(data);
-      };
-      term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
-      term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-      });
-      // [2026-03-30 Claude] 메모리 누수 수정 — resize 리스너를 ref에 저장하여 cleanup 시 제거
-      // 기존: addEventListener만 하고 removeEventListener 없음 → 슬롯 열고 닫을 때마다 누적
-      const handleResize = () => fitAddon.fit();
-      window.addEventListener('resize', handleResize);
-      // cleanup 시 제거할 수 있도록 ref에 저장
-      (groupTermRef.current as any).__resizeHandler = handleResize;
-    }, 50);
-  };
-
-  // 그룹 채팅 터미널 종료
-  const closeGroupChat = () => {
-    if (groupWsReconnectTimerRef.current) { clearTimeout(groupWsReconnectTimerRef.current); groupWsReconnectTimerRef.current = null; }
-    groupWsReconnectAttemptRef.current = 0;
-    setIsGroupChatRunning(false);
-    setIsChatMode(false);
-    setChatMounted(false);
-    localStorage.setItem('chat_mode_' + terminalId, 'false');
-    groupFitAddonRef.current = null;
-    groupResizeObserverRef.current?.disconnect();
-    groupResizeObserverRef.current = null;
-    if (groupWsRef.current) groupWsRef.current.close(1000);
-    // [2026-03-30 Claude] 메모리 누수 수정 — window.resize 리스너 제거
-    if (groupTermRef.current) {
-      const handler = (groupTermRef.current as any).__resizeHandler;
-      if (handler) window.removeEventListener('resize', handler);
-      groupTermRef.current.dispose();
-    }
   };
 
   const handleSend = (text: string) => {
@@ -771,30 +581,6 @@ export default function TerminalSlot({
               </div>
             )}
 
-            {/* 터미널 / 그룹 채팅 전환 버튼 — 둘 다 동시에 살아있고 왔다갔다 전환 */}
-            <button
-              onClick={() => {
-                setIsChatMode(false);
-                localStorage.setItem('chat_mode_' + terminalId, 'false');
-              }}
-              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${!isChatMode ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-              title="터미널 보기"
-            >
-              <Terminal className="w-2.5 h-2.5" />
-              터미널
-            </button>
-            <button
-              onClick={() => {
-                // 현재 에이전트 기반으로 그룹챗 PTY 실행 (이미 실행 중이면 전환만)
-                const baseAgent = activeAgent.replace(/^groupchat-/, '');
-                launchGroupChat(baseAgent || 'claude');
-              }}
-              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${isChatMode ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-              title="그룹 채팅 PTY 터미널 (일반 터미널과 독립 동작)"
-            >
-              <MessageSquare className="w-2.5 h-2.5" />
-              그룹 채팅
-            </button>
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
               onClick={() => { const next = !showMonitor; setShowMonitor(next); localStorage.setItem('hive_monitor_enabled', String(next)); }}
@@ -951,7 +737,7 @@ export default function TerminalSlot({
 
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
-        <div className={`flex-1 min-w-0 flex flex-col min-h-0 bg-[#1e1e1e] ${isChatMode ? 'hidden' : ''}`}>
+        <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-[#1e1e1e]">
 
           {/* ── 자율 에이전트 모니터링 뷰 (상단 영역, 구 파일뷰어 자리) ── */}
           {showMonitor && (
@@ -1220,14 +1006,7 @@ export default function TerminalSlot({
         </div>
       )}
 
-      {/* ── 그룹 채팅 PTY 터미널 — 일반 터미널과 독립 동작, 전환해도 안 끊김 ── */}
-      {chatMounted && (
-        <div className={`flex-1 flex flex-col min-h-0 ${isChatMode ? '' : 'hidden'}`}>
-          <div ref={groupXtermRef} className="flex-1 min-h-0" />
-        </div>
-      )}
-
-      {/* 터미널/그룹채팅 우클릭 컨텍스트 메뉴 — isTerminalMode 블록 밖에 배치하여 그룹 채팅 모드에서도 렌더링 */}
+      {/* 터미널 우클릭 컨텍스트 메뉴 */}
       {ctxMenu && (
         <div
           className="fixed z-[9999] bg-[#2d2d2d] border border-white/20 rounded shadow-xl text-xs text-white min-w-[120px] py-1"
@@ -1239,7 +1018,7 @@ export default function TerminalSlot({
               className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
               onClick={async () => {
                 try {
-                  const activeTerm = isChatMode ? groupTermRef.current : termRef.current;
+                  const activeTerm = termRef.current;
                   if (activeTerm) {
                     const sel = activeTerm.getSelection();
                     try {
@@ -1268,7 +1047,7 @@ export default function TerminalSlot({
             onClick={async () => {
               try {
                 const text = await navigator.clipboard.readText();
-                const activeWs = isChatMode ? groupWsRef.current : wsRef.current;
+                const activeWs = wsRef.current;
                 if (activeWs && activeWs.readyState === WebSocket.OPEN) {
                   activeWs.send(text);
                 }
@@ -1282,7 +1061,7 @@ export default function TerminalSlot({
       )}
 
       {/* ── 에이전트 선택 카드 UI (터미널 미실행 + 채팅 모드 아닐 때만 표시) ── */}
-      {!isTerminalMode && !isChatMode && (
+      {!isTerminalMode && (
         <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
           {/* 중앙 에이전트 선택 카드 UI */}
           <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px]">

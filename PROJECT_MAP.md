@@ -214,13 +214,9 @@
 | `test_agent_api.py` | 383 | api/agent_api.py |
 | `test_codex_orchestration.py` | 77 |  |
 | `test_dispatcher_loop.py` | 101 | scripts/auto_dispatcher.py + scripts/itcp.py |
-| `test_group_chat_bridge.py` | 75 |  |
-| `test_groupchat_contextmenu.py` | 171 |  |
 | `test_harness_verify.py` | 80 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 225 | scripts/itcp.py 폴백 경로 |
-| `test_llm_group_chat.py` | 71 |  |
-| `test_llm_group_chat_integration.py` | 120 |  |
 | `test_new_api_modules.py` | 467 |  |
 | `FileExplorer.test.tsx` | 128 | FileExplorer 컴포넌트 |
 

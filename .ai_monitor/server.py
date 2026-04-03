@@ -1743,12 +1743,11 @@ class SSEHandler(BaseHTTPRequestHandler):
         [반환 형식]
         {
           "tokens": {"T1": "123...", "T2": "456..."},  // 마스킹된 봇 토큰
-          "group_chat_id": "-100123...",
           "bot_statuses": {"T1": "online", "T2": "offline"}  // 브릿지 실행 시
         }
         """
         env_file = PROJECT_ROOT / ".env"
-        config = {"tokens": {}, "group_chat_id": "", "bot_statuses": {}}
+        config = {"tokens": {}, "bot_statuses": {}}
         try:
             if env_file.exists():
                 for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -1759,9 +1758,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                         val = line.split("=", 1)[1].strip()
                         if val:
                             config["tokens"][key] = val[:8] + "..." if len(val) > 8 else val
-                    elif line.startswith("TELEGRAM_GROUP_CHAT_ID="):
-                        val = line.split("=", 1)[1].strip()
-                        config["group_chat_id"] = val
             # 브릿지 프로세스 실행 여부 확인
             bridge_running = False
             for proc in _child_procs:
@@ -1790,8 +1786,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         [요청 형식]
         {
-          "tokens": {"T1": "full_token_1", "T2": "full_token_2"},
-          "group_chat_id": "-100123456789"
+          "tokens": {"T1": "full_token_1", "T2": "full_token_2"}
         }
 
         [동작]
@@ -1802,13 +1797,11 @@ class SSEHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length > 0 else {}
             tokens = body.get("tokens", {})
-            group_chat_id = body.get("group_chat_id", "").strip()
 
             env_file = PROJECT_ROOT / ".env"
 
             # 기존 .env에서 현재 토큰값 로드 (마스킹 값 복원용)
             existing_tokens = {}
-            existing_group = ""
             existing_lines = []
             if env_file.exists():
                 for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -1817,8 +1810,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                         key = stripped.split("=", 1)[0].replace("TELEGRAM_BOT_", "")
                         val = stripped.split("=", 1)[1].strip()
                         existing_tokens[key] = val
-                    elif stripped.startswith("TELEGRAM_GROUP_CHAT_ID="):
-                        existing_group = stripped.split("=", 1)[1].strip()
                     elif not stripped.startswith("TELEGRAM_"):
                         existing_lines.append(line)
 
@@ -1832,9 +1823,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if new_val.endswith("..."):
                     new_val = existing_tokens.get(key, "")
                 existing_lines.append(f"TELEGRAM_BOT_{key}={new_val}")
-            # 그룹 채팅 ID
-            final_group = group_chat_id if group_chat_id else existing_group
-            existing_lines.append(f"TELEGRAM_GROUP_CHAT_ID={final_group}")
 
             env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
 
@@ -1855,14 +1843,12 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         [동작]
         .env에서 첫 번째 유효한 봇 토큰을 찾아 getMe API로 봇 이름 확인.
-        그룹 채팅이 있으면 그룹에, 없으면 봇 자체 API로 연결 테스트.
         """
         try:
             env_file = PROJECT_ROOT / ".env"
             # 첫 번째 유효한 봇 토큰 찾기
             first_token = ""
             first_tid = ""
-            group_id = ""
             if env_file.exists():
                 for line in env_file.read_text(encoding="utf-8").splitlines():
                     stripped = line.strip()
@@ -1872,8 +1858,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                         if val and not first_token:
                             first_token = val
                             first_tid = key
-                    elif stripped.startswith("TELEGRAM_GROUP_CHAT_ID="):
-                        group_id = stripped.split("=", 1)[1].strip()
 
             if not first_token:
                 raise ValueError("봇 토큰이 하나도 설정되지 않았습니다")
@@ -1886,17 +1870,6 @@ class SSEHandler(BaseHTTPRequestHandler):
 
             bot_name = me.get("result", {}).get("first_name", first_tid)
             results = {"bot_name": bot_name, "tid": first_tid}
-
-            # 그룹 채팅이 있으면 테스트 메시지 전송
-            if group_id:
-                test_msg = f"🐝 {bot_name} ({first_tid}) 연결 테스트 성공!"
-                send_url = f"https://api.telegram.org/bot{first_token}/sendMessage"
-                data = json.dumps({"chat_id": group_id, "text": test_msg}).encode("utf-8")
-                req = urllib.request.Request(send_url, data=data, method="POST")
-                req.add_header("Content-Type", "application/json")
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    send_result = json.loads(resp.read().decode("utf-8"))
-                results["group_sent"] = send_result.get("ok", False)
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
