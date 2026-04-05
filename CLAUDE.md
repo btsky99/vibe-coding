@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Vibe Coding**은 AI 멀티 에이전트 하이브 마인드 대시보드입니다. Claude, Gemini, Codex 등 여러 AI 에이전트를 통합 터미널 UI에서 오케스트레이션하며, PostgreSQL 18 기반 실시간 협업 시스템입니다. Windows 자체 호스팅(PyWebView) 방식으로 동작합니다.
 
+- **공통 하네스 계약**: [docs/HARNESS_V2.md](./docs/HARNESS_V2.md)
+
 ## 최우선 준수 사항
 
 **반드시 `RULES.md`를 먼저 읽고 모든 규칙을 절대적으로 준수할 것.** 핵심 요약:
