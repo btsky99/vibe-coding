@@ -235,12 +235,10 @@ def _return_pg_conn(conn, db: str = "postgres"):
             except Exception:
                 pass
 
-# 배포 버전 DB 데이터: %APPDATA%\VibeCoding\pgdata
-# 개발 버전: 소스 트리 내 .ai_monitor/bin/pgsql/data
-if getattr(sys, 'frozen', False):
-    _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
-else:
-    _PG_DATA_DIR = _PG_DIR / "data"
+# DB 데이터: %APPDATA%\VibeCoding\pgdata (배포/개발 모두 동일)
+# [2026-04-05 Claude] 개발 모드에서 소스 트리 내 data/ 사용 시 PG 버전 불일치 문제 발생
+# → 배포/개발 모두 %APPDATA% 경로로 통일하여 바이너리 업그레이드 시 충돌 방지
+_PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
 
 
 def ensure_postgres_running():
@@ -327,7 +325,13 @@ def ensure_postgres_running():
                     if pg_conf.exists():
                         conf_text = pg_conf.read_text(encoding='utf-8')
                         import re as _pg_re
-                        conf_text = _pg_re.sub(r'^\s*port\s*=\s*\d+', f'port = {PG_PORT}', conf_text, flags=_pg_re.MULTILINE)
+                        # 활성 설정(port = XXXX) 또는 주석(#port = XXXX) 모두 대응
+                        if _pg_re.search(r'^\s*port\s*=', conf_text, flags=_pg_re.MULTILINE):
+                            conf_text = _pg_re.sub(r'^\s*port\s*=\s*\d+', f'port = {PG_PORT}', conf_text, flags=_pg_re.MULTILINE)
+                        elif _pg_re.search(r'^\s*#\s*port\s*=', conf_text, flags=_pg_re.MULTILINE):
+                            conf_text = _pg_re.sub(r'^\s*#\s*port\s*=\s*\d+', f'port = {PG_PORT}', conf_text, flags=_pg_re.MULTILINE)
+                        else:
+                            conf_text += f'\nport = {PG_PORT}\n'
                         pg_conf.write_text(conf_text, encoding='utf-8')
                     # 환경변수도 갱신하여 pg_store.py 등 다른 모듈이 새 포트를 인식
                     os.environ['VIBE_PG_PORT'] = str(PG_PORT)

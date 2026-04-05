@@ -94,7 +94,16 @@ function OrgAgentCard({ agent, onTrigger, isTriggering }: {
         }} />
         <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)' }}>{role.label}</span>
         {agent.last_beat && (
-          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', marginLeft: 'auto' }}>
+          <span style={{
+            fontSize: 10, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 3,
+            color: (() => {
+              const age = (Date.now() - new Date(agent.last_beat).getTime()) / 1000;
+              if (age > 300) return '#ef4444';  // 5분 초과: 빨강
+              if (age > 60) return '#eab308';   // 1분 초과: 노랑
+              return 'rgba(255,255,255,0.4)';   // 정상: 흰색
+            })(),
+          }}>
+            <Clock3 className="w-3 h-3" style={{ opacity: 0.6 }} />
             {agentRelativeTime(agent.last_beat)}
           </span>
         )}
@@ -503,6 +512,24 @@ export default function TaskBoardPanel() {
               {agents.filter(a => a.status === 'working').length}/{agents.length} active
             </span>
           </div>
+
+          {/* 오프라인 에이전트 경고 */}
+          {agents.some(a => {
+            if (!a.last_beat) return true;
+            return (Date.now() - new Date(a.last_beat).getTime()) / 1000 > 300;
+          }) && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
+              <PowerOff className="h-3.5 w-3.5 shrink-0 text-red-400" />
+              <span className="text-[10px] text-red-300">
+                오프라인 에이전트 감지 —{' '}
+                {agents.filter(a => {
+                  if (!a.last_beat) return true;
+                  return (Date.now() - new Date(a.last_beat).getTime()) / 1000 > 300;
+                }).map(a => a.agent_id).join(', ')}
+                {' '}(카드 클릭으로 재시도)
+              </span>
+            </div>
+          )}
 
           {/* 트리 구조: Dispatcher → 에이전트들 */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>

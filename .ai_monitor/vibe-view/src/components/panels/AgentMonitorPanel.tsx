@@ -252,18 +252,35 @@ function TerminalCard({
         </div>
       )}
 
-      {/* 하트비트 beat_count (보조 정보) */}
-      {heartbeat && heartbeat.beat_count > 0 && (
+      {/* 하트비트 정보: last_beat + beat_count */}
+      {heartbeat && (
         <div style={{
-          marginTop: 4,
-          fontSize: 8,
-          color: 'rgba(255,255,255,0.15)',
+          marginTop: 6,
           display: 'flex',
           alignItems: 'center',
-          gap: 3,
+          gap: 6,
+          fontSize: 10,
+          color: 'rgba(255,255,255,0.4)',
         }}>
-          <Zap className="w-2.5 h-2.5" />
-          beats: {heartbeat.beat_count}
+          {heartbeat.last_beat && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <Cpu className="w-3 h-3" style={{ opacity: 0.5 }} />
+              {relativeTime(heartbeat.last_beat)}
+            </span>
+          )}
+          {heartbeat.beat_count > 0 && (
+            <span style={{
+              marginLeft: 'auto',
+              fontSize: 9,
+              color: 'rgba(255,255,255,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+            }}>
+              <Zap className="w-2.5 h-2.5" />
+              {heartbeat.beat_count}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -318,12 +335,22 @@ function DispatcherCard() {
   );
 }
 
+// 활동 로그 항목 타입
+interface ActivityLogEntry {
+  agent: string;
+  task: string;
+  status: string;
+  ts: string;
+  terminal_id?: string;
+}
+
 // ── 메인 컴포넌트: 터미널 기반 동적 조직도 ──
 export default function AgentMonitorPanel() {
   const [terminals, setTerminals] = useState<Record<string, TerminalStatus>>({});
   const [heartbeats, setHeartbeats] = useState<AgentBeat[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
+  const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
 
   // 터미널 상태 폴링 (3초) — 주 데이터 소스
   useEffect(() => {
@@ -364,6 +391,33 @@ export default function AgentMonitorPanel() {
     };
     poll();
     const id = setInterval(poll, 10000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  // pg_logs 활동 로그 폴링 (15초)
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/kanban/pg-activity`);
+        if (res.ok && active) {
+          const data = await res.json();
+          // 전체 터미널의 로그를 합쳐서 시간순 정렬, 최근 10개만
+          const all: ActivityLogEntry[] = [];
+          for (const entries of Object.values(data)) {
+            if (Array.isArray(entries)) {
+              for (const e of entries as ActivityLogEntry[]) {
+                all.push(e);
+              }
+            }
+          }
+          all.sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
+          setActivityLogs(all.slice(0, 10));
+        }
+      } catch { /* 무시 */ }
+    };
+    poll();
+    const id = setInterval(poll, 15000);
     return () => { active = false; clearInterval(id); };
   }, []);
 
@@ -431,8 +485,40 @@ export default function AgentMonitorPanel() {
 
   const runningCount = activeTerminals.filter(([_, t]) => t.status === 'running').length;
 
+  // 오프라인 에이전트 감지 (5분 이상 heartbeat 없음)
+  const offlineAgents = useMemo(() => {
+    return heartbeats.filter(hb => {
+      if (!hb.last_beat) return true;
+      const age = (Date.now() - new Date(hb.last_beat).getTime()) / 1000;
+      return age > 300; // 5분
+    });
+  }, [heartbeats]);
+
   return (
     <div className="flex flex-col gap-3 p-3 overflow-auto">
+      {/* 오프라인 에이전트 경고 배너 */}
+      {offlineAgents.length > 0 && (
+        <div style={{
+          padding: '8px 12px',
+          borderRadius: 8,
+          background: 'rgba(239, 68, 68, 0.08)',
+          border: '1px solid rgba(239, 68, 68, 0.2)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <PowerOff className="w-3.5 h-3.5" style={{ color: '#ef4444', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#fca5a5' }}>
+              오프라인 에이전트 {offlineAgents.length}개
+            </div>
+            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>
+              {offlineAgents.map(a => a.agent_id).join(', ')} — 클릭하여 트리거 재시도
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 글로벌 스타일 — 펄스 애니메이션 + 트리 연결선 */}
       <style>{`
         @keyframes pulse-dot {
@@ -533,6 +619,62 @@ export default function AgentMonitorPanel() {
           </div>
         </div>
       </div>
+
+      {/* 하단: 최근 에이전트 활동 로그 (pg_logs) */}
+      {activityLogs.length > 0 && (
+        <div style={{
+          marginTop: 4,
+          padding: '8px 10px',
+          borderRadius: 8,
+          background: 'rgba(59, 130, 246, 0.05)',
+          border: '1px solid rgba(59, 130, 246, 0.1)',
+        }}>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginBottom: 6, letterSpacing: '0.05em' }}>
+            RECENT ACTIVITY
+          </div>
+          {activityLogs.slice(0, 6).map((log, i) => {
+            const cli = log.agent?.toLowerCase() ?? '';
+            const meta = CLI_META[cli];
+            return (
+              <div key={`log-${i}`} style={{
+                fontSize: 10,
+                color: 'rgba(255,255,255,0.4)',
+                display: 'flex',
+                gap: 6,
+                alignItems: 'center',
+                marginBottom: 3,
+                lineHeight: 1.4,
+              }}>
+                <span style={{
+                  fontSize: 9,
+                  color: 'rgba(255,255,255,0.2)',
+                  fontFamily: 'monospace',
+                  minWidth: 48,
+                  flexShrink: 0,
+                }}>
+                  {log.ts}
+                </span>
+                <span style={{
+                  fontWeight: 600,
+                  color: meta?.color ?? '#9ca3af',
+                  minWidth: 48,
+                  flexShrink: 0,
+                }}>
+                  {meta?.label ?? log.agent}
+                </span>
+                <span style={{
+                  color: log.status === 'error' ? '#ef4444' : 'rgba(255,255,255,0.3)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {log.task ? (log.task.length > 35 ? log.task.slice(0, 35) + '…' : log.task) : log.status}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* 하단: running 터미널 태스크 요약 */}
       {activeTerminals.some(([_, t]) => t.status === 'running' && t.task) && (
