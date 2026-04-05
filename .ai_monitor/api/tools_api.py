@@ -114,9 +114,9 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "17", "bin", "psql.exe"),
             os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "16", "bin", "psql.exe"),
         ],
-        "install_script": None,
+        "install_script": "install_psql.py",
         "install_url": "https://www.postgresql.org/download/",
-        "install_hint": "이 프로젝트는 내장 PostgreSQL을 사용합니다. .ai_monitor/bin/pgsql/bin/psql.exe를 PATH에 추가하세요.",
+        "install_hint": "내장 PostgreSQL의 psql.exe를 사용자 PATH에 자동 등록합니다.",
         "category": "database",
     },
     # ── Python 개발 도구 (Gemini 추천) ────────────────────────────────
