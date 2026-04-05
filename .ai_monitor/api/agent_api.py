@@ -307,12 +307,20 @@ def handle_stop(handler) -> None:
         _json_response(handler, {'error': 'cli_agent_unavailable'}, 503)
         return
 
+    # 중지 전 현재 실행 중인 CLI 이름 캡처 (로그 기록용)
+    stopped_cli = 'unknown'
+    try:
+        current = cli_agent._current_run
+        if current and current.get('cli'):
+            stopped_cli = current['cli']
+    except Exception:
+        pass
     cli_agent.stop()
     # PostgreSQL에 에이전트 중지 기록
     if _PG_LOG_AVAILABLE:
         try:
-            record_heartbeat('cli_agent', status='idle')
-            insert_pg_log(agent='cli_agent', task='', status='stopped',
+            record_heartbeat(stopped_cli, status='idle')
+            insert_pg_log(agent=stopped_cli, task='', status='stopped',
                           metadata={'source': 'manual_stop'})
         except Exception:
             pass

@@ -133,6 +133,7 @@ import api.vibe_api as vibe_api
 import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
+import api.zettel_api as zettel_api
 import string
 import socket
 from collections import deque
@@ -1942,8 +1943,8 @@ def _restore_agent_status_from_db():
         print(f"[!] 에이전트 상태 복구 실패 (무시): {e}")
 
 
-# 모듈 로드 시 즉시 복구 시도
-_restore_agent_status_from_db()
+# 에이전트 상태 복구는 main()에서 ensure_schema 이후에 호출
+# (모듈 로드 시점에는 PostgreSQL이 아직 기동 중일 수 있음)
 
 
 # ── MUX API 핸들러 — cmux-style 터미널 멀티플렉서 REST 인터페이스 ────────────
@@ -2759,6 +2760,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID, PROJECT_ROOT=PROJECT_ROOT,
                 _memory_conn=_memory_conn, _embed=_embed, _cosine_sim=_cosine_sim,
                 __version__=__version__,
+            )
+
+        # ── [모듈 위임] zettel_api — /api/zettel/* ────────────────────
+        elif parsed_path.path.startswith('/api/zettel/'):
+            _params = parse_qs(parsed_path.query)
+            zettel_api.handle_get(
+                self, parsed_path.path, _params,
+                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
         # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
@@ -3738,13 +3747,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                     }
                 # PostgreSQL에도 영구 기록 (재시작 시 복구용)
                 try:
+                    # heartbeat UPSERT는 항상 실행 (상태 갱신)
                     record_heartbeat(agent_name, status=agent_status,
                                      current_task=agent_task)
-                    insert_pg_log(
-                        agent=agent_name, task=agent_task or '',
-                        status=agent_status,
-                        metadata={'source': 'heartbeat', 'beat_ts': now_ts},
-                    )
+                    # pg_logs는 상태 변경 시에만 기록 (무제한 증가 방지)
+                    prev = AGENT_STATUS.get(agent_name, {})
+                    prev_status = prev.get('status')
+                    if prev_status != agent_status:
+                        insert_pg_log(
+                            agent=agent_name, task=agent_task or '',
+                            status=agent_status,
+                            metadata={'source': 'heartbeat', 'prev': prev_status},
+                        )
                 except Exception:
                     pass  # DB 실패해도 인메모리는 유지
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
@@ -3896,6 +3910,15 @@ class SSEHandler(BaseHTTPRequestHandler):
             agent_api.handle_post(self, parsed_path.path)
         elif parsed_path.path.startswith('/api/pty/'):
             pty_api.handle_post(self, parsed_path.path)
+
+        # ── [모듈 위임 - POST] zettel_api — /api/zettel/* ─────────────
+        elif parsed_path.path.startswith('/api/zettel/'):
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            zettel_api.handle_post(
+                self, parsed_path.path, _body,
+                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
+            )
 
         # ── [모듈 위임 - POST] memory_api ────────────────────────────────
         # /api/memory/set, /api/memory/delete
@@ -5462,7 +5485,7 @@ def main():
                 except Exception:
                     pass
             except Exception:
-                time.sleep(60)
+                pass  # 다음 루프 시작 시 sleep(60)에서 대기
     threading.Thread(target=_agent_sync_daemon, daemon=True, name='AgentSyncDaemon').start()
     print("[*] 에이전트 상태 동기화 데몬 시작됨 (60초 주기)")
 
@@ -5492,6 +5515,9 @@ def main():
 
     # [2026-03-30] 그룹챗 WebSocket/브릿지 제거됨 — Paperclip 스타일 하트비트로 전환
     # 에이전트 간 통신은 task_comments + PostgreSQL NOTIFY로 대체
+
+    # 1.5. PostgreSQL 기동 완료 후 에이전트 상태 복구
+    _restore_agent_status_from_db()
 
     # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
     try:
