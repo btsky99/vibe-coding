@@ -58,6 +58,7 @@ import GitPanel from './components/panels/GitPanel';
 import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
+import ToolsPanel from './components/panels/ToolsPanel';
 import SetupBanner from './components/SetupBanner';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
@@ -575,6 +576,9 @@ function App({ onSwitchToOffice }: { onSwitchToOffice?: () => void }) {
             ) : activeTab === 'telegram' ? (
               /* 텔레그램 브릿지 설정 패널 — 봇 토큰 + T1~T8 채팅 ID 관리 */
               <TelegramPanel />
+            ) : activeTab === 'tools' ? (
+              /* 개발 도구 설치 관리 패널 — TOOL_REGISTRY 연동 */
+              <ToolsPanel />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.

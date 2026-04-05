@@ -8,6 +8,7 @@ import {
   GitBranch,
   LayoutDashboard,
   MessageSquare,
+  Package,
   Search,
   Settings,
   Smartphone,
@@ -172,6 +173,10 @@ const ActivityBar = memo(function ActivityBar({
 
       <button onClick={() => onTabChange('telegram')} className={tabCls('telegram')} title="Telegram Bridge">
         <Smartphone className="w-5 h-5" />
+      </button>
+
+      <button onClick={() => onTabChange('tools')} className={tabCls('tools')} title="개발 도구">
+        <Package className="w-5 h-5" />
       </button>
 
       <div className="mt-auto flex flex-col gap-4">
