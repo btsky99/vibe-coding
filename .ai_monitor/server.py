@@ -2696,6 +2696,12 @@ class SSEHandler(BaseHTTPRequestHandler):
                 list_agent_status=list_agent_status,
             )
 
+        # ── [모듈 위임] tools_api — /api/tools/* (도구 설치 상태) ──────
+        elif parsed_path.path.startswith('/api/tools/'):
+            from api import tools_api
+            _params = parse_qs(parsed_path.query)
+            tools_api.handle_get(self, parsed_path.path, _params)
+
         # ── [모듈 위임] files_api — /api/files, /api/read-file ────────
         elif parsed_path.path in ('/api/files', '/api/read-file'):
             _params = parse_qs(parsed_path.query)
@@ -3534,8 +3540,15 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
+        # ── [모듈 위임 - POST] tools_api — /api/tools/install (도구 설치 실행) ─
+        if parsed_path.path.startswith('/api/tools/'):
+            from api import tools_api
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            tools_api.handle_post(self, parsed_path.path, _body)
+
         # ── [모듈 위임 - POST] files_api — /api/save-file, /api/file-rename, /api/files/* ─
-        if parsed_path.path in ('/api/save-file', '/api/file-rename', '/api/files/create', '/api/files/delete'):
+        elif parsed_path.path in ('/api/save-file', '/api/file-rename', '/api/files/create', '/api/files/delete'):
             content_length = int(self.headers.get('Content-Length', 0))
             _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
             files_api.handle_post(
