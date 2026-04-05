@@ -331,6 +331,14 @@ export default function TaskBoardPanel() {
     return () => { active = false; clearInterval(id); };
   }, []);
 
+  // 오프라인 에이전트 목록 (5분 이상 heartbeat 없음) — 렌더 내 중복 계산 방지
+  const offlineAgentIds = useMemo(() => {
+    return agents.filter(a => {
+      if (!a.last_beat) return true;
+      return (Date.now() - new Date(a.last_beat).getTime()) / 1000 > 300;
+    }).map(a => a.agent_id);
+  }, [agents]);
+
   const handleAgentTrigger = useCallback(async (agentId: string) => {
     setTriggeringId(agentId);
     try {
@@ -514,19 +522,11 @@ export default function TaskBoardPanel() {
           </div>
 
           {/* 오프라인 에이전트 경고 */}
-          {agents.some(a => {
-            if (!a.last_beat) return true;
-            return (Date.now() - new Date(a.last_beat).getTime()) / 1000 > 300;
-          }) && (
+          {offlineAgentIds.length > 0 && (
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
               <PowerOff className="h-3.5 w-3.5 shrink-0 text-red-400" />
               <span className="text-[10px] text-red-300">
-                오프라인 에이전트 감지 —{' '}
-                {agents.filter(a => {
-                  if (!a.last_beat) return true;
-                  return (Date.now() - new Date(a.last_beat).getTime()) / 1000 > 300;
-                }).map(a => a.agent_id).join(', ')}
-                {' '}(카드 클릭으로 재시도)
+                오프라인 에이전트 감지 — {offlineAgentIds.join(', ')} (카드 클릭으로 재시도)
               </span>
             </div>
           )}

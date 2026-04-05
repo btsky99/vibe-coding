@@ -412,7 +412,7 @@ export default function AgentMonitorPanel() {
             }
           }
           all.sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
-          setActivityLogs(all.slice(0, 10));
+          setActivityLogs(all.slice(0, 6));
         }
       } catch { /* 무시 */ }
     };
@@ -445,6 +445,15 @@ export default function AgentMonitorPanel() {
       .filter(([_, t]) => !t.external && (t.status === 'running' || t.status === 'idle'))
       .sort(([a], [b]) => a.localeCompare(b));
   }, [terminals]);
+
+  // 오프라인 에이전트 감지 (5분 이상 heartbeat 없음) — 얼리 리턴 전에 선언 (Hooks 규칙)
+  const offlineAgents = useMemo(() => {
+    return heartbeats.filter(hb => {
+      if (!hb.last_beat) return true;
+      const age = (Date.now() - new Date(hb.last_beat).getTime()) / 1000;
+      return age > 300;
+    });
+  }, [heartbeats]);
 
   // 수동 하트비트 트리거
   const handleTrigger = useCallback(async (agentId: string) => {
@@ -485,15 +494,6 @@ export default function AgentMonitorPanel() {
 
   const runningCount = activeTerminals.filter(([_, t]) => t.status === 'running').length;
 
-  // 오프라인 에이전트 감지 (5분 이상 heartbeat 없음)
-  const offlineAgents = useMemo(() => {
-    return heartbeats.filter(hb => {
-      if (!hb.last_beat) return true;
-      const age = (Date.now() - new Date(hb.last_beat).getTime()) / 1000;
-      return age > 300; // 5분
-    });
-  }, [heartbeats]);
-
   return (
     <div className="flex flex-col gap-3 p-3 overflow-auto">
       {/* 오프라인 에이전트 경고 배너 */}
@@ -513,7 +513,7 @@ export default function AgentMonitorPanel() {
               오프라인 에이전트 {offlineAgents.length}개
             </div>
             <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>
-              {offlineAgents.map(a => a.agent_id).join(', ')} — 클릭하여 트리거 재시도
+              {offlineAgents.map(a => a.agent_id).join(', ')} — 에이전트 카드 클릭으로 재시도
             </div>
           </div>
         </div>
@@ -632,7 +632,7 @@ export default function AgentMonitorPanel() {
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginBottom: 6, letterSpacing: '0.05em' }}>
             RECENT ACTIVITY
           </div>
-          {activityLogs.slice(0, 6).map((log, i) => {
+          {activityLogs.map((log, i) => {
             const cli = log.agent?.toLowerCase() ?? '';
             const meta = CLI_META[cli];
             return (

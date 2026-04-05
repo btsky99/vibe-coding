@@ -547,6 +547,77 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             $$;
         """)
 
+        # ── [2026-04-05] Hive Zettelkasten — 카파시 + 루만 메모 시스템 ──────
+        # 원자 노트 테이블: 하나의 노트 = 하나의 아이디어
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS zettel_notes (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                note_type TEXT NOT NULL DEFAULT 'fleeting',
+                author TEXT NOT NULL DEFAULT 'unknown',
+                project TEXT NOT NULL DEFAULT '',
+                tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+                source_ref TEXT DEFAULT '',
+                access_count INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_rescued_at TIMESTAMPTZ,
+                archived BOOLEAN NOT NULL DEFAULT FALSE
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_type ON zettel_notes (note_type);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_author ON zettel_notes (author);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_project ON zettel_notes (project);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_updated ON zettel_notes (updated_at DESC);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_rescued ON zettel_notes (last_rescued_at DESC NULLS LAST);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_archived ON zettel_notes (archived, updated_at DESC);")
+
+        # 백링크 테이블: 노트 간 양방향 연결
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS zettel_links (
+                id SERIAL PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES zettel_notes(id) ON DELETE CASCADE,
+                target_id TEXT NOT NULL REFERENCES zettel_notes(id) ON DELETE CASCADE,
+                link_type TEXT NOT NULL DEFAULT 'relates_to',
+                created_by TEXT NOT NULL DEFAULT 'system',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(source_id, target_id, link_type)
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_links_source ON zettel_links (source_id);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_links_target ON zettel_links (target_id);")
+
+        # NOTIFY 트리거 — 노트 변경 시 실시간 알림
+        execute_raw("""
+            CREATE OR REPLACE FUNCTION notify_zettel_change()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                PERFORM pg_notify('zettel_change',
+                    json_build_object(
+                        'id', NEW.id,
+                        'title', NEW.title,
+                        'note_type', NEW.note_type,
+                        'author', NEW.author,
+                        'updated_at', NEW.updated_at
+                    )::text
+                );
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        execute_raw("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_zettel_change') THEN
+                    CREATE TRIGGER trg_zettel_change
+                    AFTER INSERT OR UPDATE ON zettel_notes
+                    FOR EACH ROW EXECUTE FUNCTION notify_zettel_change();
+                END IF;
+            END;
+            $$;
+        """)
+
         _SCHEMA_READY = True
         if not _MIGRATION_DONE:
             # DB에 마이그레이션 완료 플래그 확인 — 프로세스 재시작 시 재실행 방지
@@ -1264,5 +1335,5 @@ def insert_pg_log(agent: str, task: str = '', status: str = 'success',
         f"INSERT INTO pg_logs (agent, task, status, terminal_id, project_id, metadata) "
         f"VALUES ({_sql_text(agent)}, {_sql_text(task)}, {_sql_text(status)}, "
         f"{_sql_text(terminal_id)}, {_sql_text(project_id)}, "
-        f"'{meta_json}'::jsonb);"
+        f"{_sql_text(meta_json)}::jsonb);"
     )
