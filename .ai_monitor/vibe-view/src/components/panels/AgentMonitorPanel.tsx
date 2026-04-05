@@ -180,7 +180,7 @@ function TerminalCard({
 
       {/* 아이콘 + 역할/태스크 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <Icon className="w-3.5 h-3.5" style={{ color: meta.color, opacity: 0.7 }} />
+        <Icon className="w-3.5 h-3.5" />
         <span style={{
           fontSize: 13,
           fontWeight: 700,
