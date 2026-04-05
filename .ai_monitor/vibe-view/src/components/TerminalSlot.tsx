@@ -1184,36 +1184,7 @@ export default function TerminalSlot({
                 </div>
               </motion.div>
 
-              {/* Dev Terminal Card — LLM 없이 순수 셸만 여는 개발용 터미널 */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                whileHover={{ scale: 1.02, translateY: -5 }}
-                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-cyan-400/50 group relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <TerminalSquare className="w-12 h-12 text-cyan-400" />
-                </div>
-                <div className="w-16 h-16 rounded-2xl bg-cyan-400/10 flex items-center justify-center mb-2 group-hover:bg-cyan-400/20 transition-colors shadow-inner">
-                  <TerminalSquare className="w-8 h-8 text-cyan-400" />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">DEV TERMINAL</h3>
-                  <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest opacity-60">Plain Shell</p>
-                </div>
-                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
-                  LLM 에이전트 없이 순수 셸을 엽니다.<br/>npm, git, python 등 개발 명령어 실행용.
-                </p>
-                <div className="flex flex-col w-full gap-2 mt-4">
-                  <button
-                    onClick={() => launchAgent('shell', false)}
-                    className="w-full py-2.5 bg-cyan-400/20 hover:bg-cyan-400/40 text-cyan-400 rounded-xl text-[11px] font-black transition-all border border-cyan-400/30 flex items-center justify-center gap-2 shadow-lg shadow-cyan-400/10"
-                  >
-                    <TerminalSquare className="w-3.5 h-3.5" /> 터미널 열기
-                  </button>
-                </div>
-              </motion.div>
+
 
             </div>
           </div>
