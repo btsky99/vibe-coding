@@ -40,6 +40,12 @@ TOOLS: dict[str, dict] = {
         "command": "pyinstaller",
         "description": "Python → Windows EXE 빌드 도구",
     },
+    "pillow": {
+        "package": "Pillow",
+        "command": None,  # CLI 없음, import 체크
+        "description": "Python 이미지 처리 라이브러리 (PNG→ICO 변환 등)",
+        "check_import": "PIL",
+    },
 }
 
 
@@ -55,9 +61,21 @@ def check_installed(tool_id: str) -> str | None:
     if not tool:
         return None
 
-    cmd_name = tool["command"]
+    cmd_name = tool.get("command")
+
+    # import 체크 방식 (Pillow 등 CLI 없는 라이브러리)
+    check_import = tool.get("check_import")
+    if check_import:
+        code, out, _ = _run([
+            sys.executable, "-c",
+            f"import {check_import}; print({check_import}.__version__)",
+        ])
+        if code == 0:
+            return out.split("\n")[0]
+        return None
+
     # shutil.which로 PATH 확인
-    if shutil.which(cmd_name):
+    if cmd_name and shutil.which(cmd_name):
         code, out, _ = _run([cmd_name, "--version"])
         if code == 0:
             return out.split("\n")[0]

@@ -10,6 +10,7 @@ DESCRIPTION: AI 도구 CLI 설치 관리 API.
 REVISION HISTORY:
 - 2026-04-05 Claude Opus 4.6: 최초 ���성 — 도�� 설치 통합 API
 - 2026-04-05 Claude Opus 4.6: psql, ruff, uv, pytest, pyinstaller 도구 추가 (Gemini 추천 반영)
+- 2026-04-05 Claude Opus 4.6: 전체 도구 install_hint 추가 + Git, Python, TypeScript, Vite, ESLint, Tailwind CSS, Inno Setup, Pillow, Claude/Gemini/Node.js 자동 설치 지원
 """
 
 import json
@@ -42,6 +43,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         ],
         "install_script": "install_gh_cli.py",
         "install_url": "https://cli.github.com/",
+        "install_hint": "winget install --id GitHub.cli",
         "category": "git",
     },
     {
@@ -55,6 +57,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "check_paths": [],
         "install_script": "install_playwright_cli.py",
         "install_url": "https://playwright.dev/python/",
+        "install_hint": "pip install playwright && playwright install",
         "category": "testing",
     },
     {
@@ -65,6 +68,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "check_paths": [],
         "install_script": "install_codex.py",
         "install_url": "https://github.com/openai/codex",
+        "install_hint": "npm install -g @openai/codex",
         "category": "ai-agent",
     },
     {
@@ -73,7 +77,8 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "description": "Anthropic Claude Code — AI 코딩 에이전트",
         "check_commands": [["claude", "--version"]],
         "check_paths": [],
-        "install_script": None,  # npm install -g @anthropic-ai/claude-code
+        "install_script": "install_npm_tool.py",
+        "install_args": ["--package", "@anthropic-ai/claude-code", "--name", "Claude CLI"],
         "install_url": "https://docs.anthropic.com/en/docs/claude-code",
         "install_hint": "npm install -g @anthropic-ai/claude-code",
         "category": "ai-agent",
@@ -84,9 +89,10 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "description": "Google Gemini AI 코딩 에이전트",
         "check_commands": [["gemini", "--version"]],
         "check_paths": [],
-        "install_script": None,  # npm install -g @anthropic-ai/claude-code
+        "install_script": "install_npm_tool.py",
+        "install_args": ["--package", "@google/gemini-cli", "--name", "Gemini CLI"],
         "install_url": "https://github.com/google-gemini/gemini-cli",
-        "install_hint": "npm install -g @anthropic-ai/gemini-cli",
+        "install_hint": "npm install -g @google/gemini-cli",
         "category": "ai-agent",
     },
     {
@@ -95,9 +101,9 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "description": "JavaScript 런타임 — Codex, Gemini CLI 등의 사전 요구사항",
         "check_commands": [["node", "--version"]],
         "check_paths": [],
-        "install_script": None,
+        "install_script": "install_nodejs.py",
         "install_url": "https://nodejs.org/",
-        "install_hint": "https://nodejs.org 에서 LTS 버전 다운로드",
+        "install_hint": "winget install --id OpenJS.NodeJS.LTS",
         "category": "runtime",
     },
     # ── 데이터베이스 도구 ─────────────────────────────────────────────
@@ -129,6 +135,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_script": "install_dev_tools.py",
         "install_args": ["--tool", "ruff"],
         "install_url": "https://docs.astral.sh/ruff/",
+        "install_hint": "pip install ruff",
         "category": "code-quality",
     },
     {
@@ -140,6 +147,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_script": "install_dev_tools.py",
         "install_args": ["--tool", "uv"],
         "install_url": "https://docs.astral.sh/uv/",
+        "install_hint": "pip install uv",
         "category": "package-manager",
     },
     {
@@ -151,6 +159,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_script": "install_dev_tools.py",
         "install_args": ["--tool", "pytest"],
         "install_url": "https://docs.pytest.org/",
+        "install_hint": "pip install pytest",
         "category": "testing",
     },
     {
@@ -162,7 +171,112 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_script": "install_dev_tools.py",
         "install_args": ["--tool", "pyinstaller"],
         "install_url": "https://pyinstaller.org/",
+        "install_hint": "pip install pyinstaller",
         "category": "build",
+    },
+    # ── 기본 런타임 / VCS ─────────────────────────────────────────────
+    {
+        "id": "git",
+        "name": "Git",
+        "description": "분산 버전 관리 시스템 — 모든 개발의 기반",
+        "check_commands": [["git", "--version"]],
+        "check_paths": [
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Git", "cmd", "git.exe"),
+        ],
+        "install_script": "install_system_tool.py",
+        "install_args": ["--tool", "git"],
+        "install_url": "https://git-scm.com/",
+        "install_hint": "winget install --id Git.Git",
+        "category": "vcs",
+    },
+    {
+        "id": "python",
+        "name": "Python",
+        "description": "Python 인터프리터 — 서버 및 스크립트 실행 런타임",
+        "check_commands": [["python", "--version"]],
+        "check_paths": [],
+        "install_script": None,
+        "install_url": "https://www.python.org/downloads/",
+        "install_hint": "winget install --id Python.Python.3.13",
+        "category": "runtime",
+    },
+    # ── 프론트엔드 빌드 도구 ──────────────────────────────────────────
+    {
+        "id": "typescript",
+        "name": "TypeScript",
+        "description": "JavaScript 타입 체크 — React 프론트엔드 필수",
+        "check_commands": [["npx", "tsc", "--version"]],
+        "check_paths": [],
+        "install_script": "install_frontend_deps.py",
+        "install_args": ["--tool", "typescript"],
+        "install_url": "https://www.typescriptlang.org/",
+        "install_hint": "cd .ai_monitor/vibe-view && npm install",
+        "category": "frontend",
+    },
+    {
+        "id": "vite",
+        "name": "Vite",
+        "description": "초고속 프론트엔드 빌드 번들러 — React 앱 빌드/개발 서버",
+        "check_commands": [["npx", "vite", "--version"]],
+        "check_paths": [],
+        "install_script": "install_frontend_deps.py",
+        "install_args": ["--tool", "vite"],
+        "install_url": "https://vite.dev/",
+        "install_hint": "cd .ai_monitor/vibe-view && npm install",
+        "category": "frontend",
+    },
+    {
+        "id": "eslint",
+        "name": "ESLint",
+        "description": "JavaScript/TypeScript 린팅 도구 — 코드 품질 유지",
+        "check_commands": [["npx", "eslint", "--version"]],
+        "check_paths": [],
+        "install_script": "install_frontend_deps.py",
+        "install_args": ["--tool", "eslint"],
+        "install_url": "https://eslint.org/",
+        "install_hint": "cd .ai_monitor/vibe-view && npm install",
+        "category": "code-quality",
+    },
+    {
+        "id": "tailwindcss",
+        "name": "Tailwind CSS",
+        "description": "유틸리티 기반 CSS 프레임워크 — 대시보드 다크 테마 UI",
+        "check_commands": [["npx", "tailwindcss", "--help"]],
+        "check_paths": [],
+        "install_script": "install_frontend_deps.py",
+        "install_args": ["--tool", "tailwindcss"],
+        "install_url": "https://tailwindcss.com/",
+        "install_hint": "cd .ai_monitor/vibe-view && npm install",
+        "category": "frontend",
+    },
+    # ── Windows 빌드 도구 ─────────────────────────────────────────────
+    {
+        "id": "iscc",
+        "name": "Inno Setup (ISCC)",
+        "description": "Windows 인스톨러 빌드 도구 — EXE 설치 파일 생성",
+        "check_commands": [["ISCC.exe", "/?"]],
+        "check_paths": [
+            os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "Inno Setup 6", "ISCC.exe"),
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Inno Setup 6", "ISCC.exe"),
+        ],
+        "install_script": "install_system_tool.py",
+        "install_args": ["--tool", "iscc"],
+        "install_url": "https://jrsoftware.org/isinfo.php",
+        "install_hint": "winget install --id JRSoftware.InnoSetup",
+        "category": "build",
+    },
+    # ── Python 추가 도구 ──────────────────────────────────────────────
+    {
+        "id": "pillow",
+        "name": "Pillow",
+        "description": "Python 이미지 처리 라이브러리 — 아이콘 PNG→ICO 변환 등",
+        "check_commands": [[sys.executable, "-c", "import PIL; print(PIL.__version__)"]],
+        "check_paths": [],
+        "install_script": "install_dev_tools.py",
+        "install_args": ["--tool", "pillow"],
+        "install_url": "https://python-pillow.org/",
+        "install_hint": "pip install Pillow",
+        "category": "image",
     },
 ]
 
