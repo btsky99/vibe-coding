@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import {
   Activity,
+  BookOpen,
   Bot,
   Brain,
   ClipboardList,
@@ -138,6 +139,10 @@ const ActivityBar = memo(function ActivityBar({
       <button onClick={() => onTabChange('memory')} className={tabCls('memory')} title="Shared Memory">
         <Brain className={`w-5 h-5 ${isThinking ? 'text-cyan-400 animate-pulse' : ''}`} />
         {memoryCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-cyan-500 rounded-full" />}
+      </button>
+
+      <button onClick={() => onTabChange('zettel')} className={tabCls('zettel')} title="Zettelkasten">
+        <BookOpen className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('git')} className={tabCls('git')} title="Git">

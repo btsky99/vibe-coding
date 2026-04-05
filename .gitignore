@@ -1,3 +1,4 @@
+.zettel-vault/
 node_modules/
 dist/
 !.ai_monitor/vibe-view/dist/

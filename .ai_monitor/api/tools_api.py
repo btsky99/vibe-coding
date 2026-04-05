@@ -278,6 +278,21 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_hint": "pip install Pillow",
         "category": "image",
     },
+    # ── Zettelkasten 도구 ─────────────────────────────────────────────
+    {
+        "id": "obsidian",
+        "name": "Obsidian",
+        "description": "마크다운 지식 관리 앱 — Zettelkasten 그래프 뷰어 + 편집기",
+        "check_commands": [["obsidian", "--version"]],
+        "check_paths": [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Obsidian", "Obsidian.exe"),
+        ],
+        "install_script": "install_system_tool.py",
+        "install_args": ["--tool", "obsidian"],
+        "install_url": "https://obsidian.md/",
+        "install_hint": "winget install --id Obsidian.Obsidian",
+        "category": "knowledge",
+    },
 ]
 
 
@@ -385,14 +400,86 @@ def _json_response(handler, data: Any, status: int = 200) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  프로젝트 규칙 설정 프롬프트 템플릿
+#  [2026-04-05 Claude] 각 AI 에이전트에게 보낼 프롬프트를 클립보드로 복사
+# ═══════════════════════════════════════════════════════════════════════
+
+RULE_SETUP_PROMPTS: list[dict[str, str]] = [
+    {
+        "id": "claude-rules",
+        "agent": "Claude Code",
+        "description": "CLAUDE.md + .claude/rules/ 자동 생성",
+        "prompt": (
+            "이 프로젝트를 분석하고 Claude Code용 규칙 파일을 생성해줘.\n\n"
+            "【작업 순서】\n"
+            "1. 프로젝트의 언어, 프레임워크, 빌드 도구, 디렉토리 구조를 파악\n"
+            "2. CLAUDE.md를 50줄 이하로 간결하게 작성 (핵심 규칙 + 빌드 명령어만)\n"
+            "3. .claude/rules/ 디렉토리에 상세 규칙을 분리:\n"
+            "   - architecture.md — 아키텍처 개요, 주요 모듈, 데이터 흐름\n"
+            "   - coding-style.md — 코딩 컨벤션, 네이밍, 포맷\n"
+            "   - commit-rules.md — 커밋 메시지 형식\n"
+            "4. 기존 README.md, package.json, pyproject.toml 등을 참고\n\n"
+            "【원칙】\n"
+            "- 한글로 작성\n"
+            "- CLAUDE.md는 원칙만, 상세는 .claude/rules/로 분리\n"
+            "- 프로젝트에 실제로 사용되는 기술만 포함 (추측 금지)"
+        ),
+    },
+    {
+        "id": "gemini-rules",
+        "agent": "Gemini CLI",
+        "description": "GEMINI.md 자동 생성",
+        "prompt": (
+            "이 프로젝트를 분석하고 Gemini CLI용 규칙 파일(GEMINI.md)을 생성해줘.\n\n"
+            "【작업 순서】\n"
+            "1. 프로젝트의 언어, 프레임워크, 빌드 도구, 디렉토리 구조를 파악\n"
+            "2. GEMINI.md를 작성:\n"
+            "   - 프로젝트 한 줄 소개\n"
+            "   - 핵심 규칙 (코딩 스타일, 언어, DB 정책 등)\n"
+            "   - 빌드 및 실행 명령어\n"
+            "   - 아키텍처 개요\n"
+            "3. 기존 README.md, package.json, pyproject.toml 등을 참고\n\n"
+            "【원칙】\n"
+            "- 한글로 작성\n"
+            "- 100줄 이하로 간결하게\n"
+            "- 프로젝트에 실제로 사용되는 기술만 포함 (추측 금지)"
+        ),
+    },
+    {
+        "id": "codex-rules",
+        "agent": "Codex CLI",
+        "description": "AGENTS.md 자동 생성",
+        "prompt": (
+            "이 프로젝트를 분석하고 Codex CLI용 규칙 파일(AGENTS.md)을 생성해줘.\n\n"
+            "【작업 순서】\n"
+            "1. 프로젝트의 언어, 프레임워크, 빌드 도구, 디렉토리 구조를 파악\n"
+            "2. AGENTS.md를 작성:\n"
+            "   - 프로젝트 한 줄 소개\n"
+            "   - 핵심 규칙 (코딩 스타일, 언어, DB 정책 등)\n"
+            "   - 빌드 및 실행 명령어\n"
+            "   - 아키텍처 개요\n"
+            "3. 기존 README.md, package.json, pyproject.toml 등을 참고\n\n"
+            "【원칙】\n"
+            "- 한글로 작성\n"
+            "- 100줄 이하로 간결하게\n"
+            "- 프로젝트에 실제로 사용되는 기술만 포함 (추측 금지)"
+        ),
+    },
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  HTTP 핸들러
 # ═══════════════════════════════════════════════════════════════════════
 
 def handle_get(handler, path: str, params: dict = None, **kwargs) -> bool:
-    """GET /api/tools/status — 전체 도구 설치 상태 조회.
+    """GET /api/tools/status, /api/tools/rule-prompts — 도구 상태 및 규칙 프롬프트 조회.
 
     Returns: True if path handled, False otherwise.
     """
+    if path == "/api/tools/rule-prompts":
+        _json_response(handler, {"prompts": RULE_SETUP_PROMPTS})
+        return True
     if path == "/api/tools/status":
         try:
             result = _get_all_status()

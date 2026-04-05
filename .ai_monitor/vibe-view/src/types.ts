@@ -66,6 +66,43 @@ export interface MemoryEntry {
     project: string;     // 출처 프로젝트 (예: D--vibe-coding)
 }
 
+// 제텔카스텐 원자 노트
+export interface ZettelNote {
+    id: string;                 // 분기 번호 (1, 1a, 1a1)
+    title: string;
+    content: string;
+    note_type: 'fleeting' | 'literature' | 'permanent';
+    author: string;
+    project: string;
+    tags: string[];
+    source_ref: string;
+    access_count: number;
+    created_at: string;
+    updated_at: string;
+    last_rescued_at: string | null;
+    archived: boolean;
+    links?: ZettelLink[];
+    backlinks?: ZettelLink[];
+}
+
+export interface ZettelLink {
+    id: string;
+    title: string;
+    link_type: string;
+}
+
+export interface ZettelGraph {
+    nodes: ZettelNote[];
+    edges: Array<{ source_id: string; target_id: string; link_type: string; created_by: string }>;
+}
+
+export interface ZettelStats {
+    total_notes: number;
+    total_links: number;
+    by_type: Array<{ note_type: string; cnt: number }>;
+    top_hubs: Array<{ id: string; title: string; link_cnt: number }>;
+}
+
 // 에이전트 간 작업 큐 — 태스크 보드 데이터 구조
 export interface Task {
     id: string;                        // 고유 ID (timestamp 기반)

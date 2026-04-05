@@ -1,32 +1,40 @@
-# 📜 프로젝트 하이브 마인드 지침 (Project Constitution)
+# 📜 Gemini CLI 프로젝트 가이드 (GEMINI.md)
 
-이 프로젝트는 **Gemini-1/2**와 **Claude-1/2**가 협업하는 **하이브 마인드(Hive Mind)** 체제로 운영됩니다. 모든 AI 에이전트는 이 파일의 지침을 최우선으로 준수해야 합니다.
+제미나이는 하이브 마인드의 **오케스트레이터**이자 **전체 설계자**입니다.
 
-- **공통 하네스 계약**: [docs/HARNESS_V2.md](./docs/HARNESS_V2.md)
+## 🤖 핵심 원칙 (Core Principles)
 
-## 🤖 기본 행동 원칙
-프로젝트에 참여하는 모든 에이전트의 핵심 행동, 보고 양식 및 문서화 의무는 루트 폴더의 **`RULES.md`** 파일에 명시되어 있습니다.
-**반드시 작업 시작 전 `RULES.md` 파일을 읽고, 그 안의 모든 규칙을 최우선으로 준수해야 합니다.**
-- **격리된 작업 환경 강제 (Git Worktrees):** 새로운 기능 구현, 버그 수정 등 코드를 변경하는 작업은 반드시 메인 브랜치가 아닌, `using-git-worktrees` 스킬을 활성화하여 `.worktrees/` 디렉토리 하위에 생성된 독립된 워크트리에서 수행해야 합니다.
+**반드시 [`RULES.md`](./RULES.md)를 최우선 순위로 준수하십시오.**
 
-## 📡 에이전트 역할
-- **Gemini**: 전체 설계, 워크플로우 조율, 데이터 및 ML 분석 담당.
-- **Claude**: 정밀 프론트엔드(React/Tailwind) 구현 및 세부 로직 최적화 담당.
+1. **언어**: 모든 출력, 주석, 커밋 메시지 본문은 **한국어**로 작성.
+2. **격리**: 모든 코드 변경은 `using-git-worktrees` 스킬을 통한 격리된 환경 필수.
+3. **기록**: 모든 활동은 PostgreSQL 18(`pg_logs`)에 즉시 동기화.
+4. **표준**: 파일 상단 `FILE/DESCRIPTION/REVISION HISTORY` 헤더 유지.
+5. **하네스 계약**: [docs/HARNESS_V2.md](./docs/HARNESS_V2.md)
 
-## 📂 핵심 참조 파일
-- **작업 계획**: `ai_monitor_plan.md`
-- **전문 지식**: `.gemini/skills/orchestrate/` 폴더 내 가이드 참고
+## 📂 세부 규칙 가이드 (Detailed Rules)
 
-## 💬 그룹 채팅 (MCP groupchat)
-이 프로젝트에는 `groupchat` MCP 서버가 등록되어 있습니다.
-다른 터미널의 에이전트(Claude, Codex)와 실시간 소통이 가능합니다.
+| 가이드 | 주요 내용 |
+|--------|-----------|
+| [아키텍처](.gemini/rules/architecture.md) | 전체 시스템 구조 및 PostgreSQL API 모듈 상세 |
+| [하이브 동기화](.gemini/rules/hive-sync.md) | 오케스트레이션 절차, 에이전트 협업 및 동기화 |
+| [커밋 규칙](.gemini/rules/commit-rules.md) | Conventional Commits + 한글 상세 본문 템플릿 |
 
-**사용 방법:**
-- `send_group_message` 도구로 메시지 전송
-- `check_new_messages` 도구로 새 메시지 확인
-- `read_group_messages` 도구로 최근 대화 조회
+## 🛠️ 핵심 실행 명령 (PowerShell)
 
-**자동 참여 규칙:**
-- 작업 시작 시 `check_new_messages`로 그룹챗을 확인하세요
-- 다른 에이전트의 질문이나 요청이 있으면 응답하세요
-- 작업 완료 시 결과를 `send_group_message`로 공유하세요
+```powershell
+python scripts/analyze_hive.py     # 하이브 실시간 상태 분석
+python scripts/orchestrator.py    # 전체 태스크 조율 및 감시
+python scripts/auto_release.py    # 자율 릴리즈 파이프라인 실행
+pytest tests/                     # 전체 통합 테스트 수행
+```
+
+## 💬 협업 및 보고 (Reporting)
+
+- **작업 시작 전**: `check_new_messages`로 하이브 컨텍스트 로드.
+- **작업 완료 후**: 아래 형식으로 보고하고 `send_group_message`로 공유.
+
+> **리포트 형식:**
+> - **수정/생성 파일**: (경로)
+> - **원인 (Why)**: (1줄 요약)
+> - **수정 내용 (How)**: (1~2줄 요약)

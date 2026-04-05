@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Package, CheckCircle, XCircle, Download, ExternalLink,
-  RefreshCw, Filter,
+  RefreshCw, Filter, ClipboardCopy, FileText, Check,
 } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
@@ -32,6 +32,13 @@ interface ToolsSummary {
   installed: number;
   total: number;
   all_ready: boolean;
+}
+
+interface RulePrompt {
+  id: string;
+  agent: string;
+  description: string;
+  prompt: string;
 }
 
 /* ── 카테고리 라벨 매핑 ─────────────────────────────────────────────── */
@@ -59,6 +66,8 @@ const ToolsPanel = () => {
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [rulePrompts, setRulePrompts] = useState<RulePrompt[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   /* ── 데이터 조회 ── */
   const fetchTools = useCallback(() => {
@@ -75,7 +84,20 @@ const ToolsPanel = () => {
 
   useEffect(() => {
     fetchTools();
+    // 규칙 프롬프트 목록 로드
+    fetch(`${API_BASE}/api/tools/rule-prompts`)
+      .then(res => res.json())
+      .then(data => setRulePrompts(data.prompts || []))
+      .catch(() => {});
   }, [fetchTools]);
+
+  /* ── 프롬프트 클립보드 복사 ── */
+  const handleCopyPrompt = (prompt: RulePrompt) => {
+    navigator.clipboard.writeText(prompt.prompt).then(() => {
+      setCopiedId(prompt.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
 
   /* ── 도구 설치 ── */
   const handleInstall = (toolId: string) => {
@@ -182,6 +204,7 @@ const ToolsPanel = () => {
             등록된 도구가 없습니다
           </div>
         ) : (
+          <>
           <div className="divide-y divide-white/5">
             {filtered.map(tool => (
               <div
@@ -261,6 +284,55 @@ const ToolsPanel = () => {
               </div>
             ))}
           </div>
+
+          {/* ── 프로젝트 규칙 설정 섹션 ── */}
+          {rulePrompts.length > 0 && (
+            <div className="border-t border-white/10 mt-2">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
+                <FileText className="w-4 h-4 text-blue-400" />
+                <span className="font-semibold text-[#cccccc] uppercase text-[11px] tracking-wide">
+                  프로젝트 규칙 설정
+                </span>
+                <span className="text-[10px] text-[#969696]">
+                  프롬프트를 복사하여 에이전트에 붙여넣기
+                </span>
+              </div>
+              <div className="divide-y divide-white/5">
+                {rulePrompts.map(rp => (
+                  <div
+                    key={rp.id}
+                    className="px-3 py-2 hover:bg-white/[0.03] transition-colors group"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <FileText className="w-4 h-4 text-blue-400/60 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-medium text-[#cccccc]">{rp.agent}</span>
+                          <p className="text-[11px] text-[#969696] leading-snug">{rp.description}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCopyPrompt(rp)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors shrink-0 ${
+                          copiedId === rp.id
+                            ? 'bg-green-500/20 text-green-400'
+                            : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 opacity-0 group-hover:opacity-100'
+                        }`}
+                        title="프롬프트 복사"
+                      >
+                        {copiedId === rp.id ? (
+                          <><Check className="w-3 h-3" /> 복사됨</>
+                        ) : (
+                          <><ClipboardCopy className="w-3 h-3" /> 복사</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

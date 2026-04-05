@@ -1,47 +1,37 @@
-# 🤖 하이브 에이전트 구성 (AGENTS.md)
+<!--
+FILE: AGENTS.md
+DESCRIPTION: Hive agent entrypoint with principles only
+REVISION HISTORY:
+- 2026-04-05 Codex: Reduced AGENTS.md to a short index of core principles and source-of-truth docs
+-->
 
-이 파일은 하이브 마인드의 짧은 진입점입니다. 세부 규칙은 아래 문서를 source of truth로 사용합니다.
+# Hive Agents
 
-## 1. 공통 Source of Truth
-- [RULES.md](./RULES.md): 모든 에이전트의 공통 행동 규칙
-- [docs/HARNESS_V2.md](./docs/HARNESS_V2.md): Claude, Gemini, Codex 공통 하네스 계약 (V2 — Generator-Evaluator, 세션 프로토콜, Feature List)
-- [docs/HARNESS_CHECKS.md](./docs/HARNESS_CHECKS.md): 저장소가 하네스를 계속 지키는지 확인하는 기계적 검사
+이 파일은 요약 진입점이다. 상세 설명은 넣지 않고 원문 문서를 source of truth로 사용한다.
+
+## Read First
+- [RULES.md](./RULES.md): 공통 규칙, 실행 원칙, 커밋 규칙
+- [docs/HARNESS_V2.md](./docs/HARNESS_V2.md): 하네스 계약, 세션 프로토콜, 기능 범위
+- [docs/HARNESS_CHECKS.md](./docs/HARNESS_CHECKS.md): 하네스 준수 검사
 - [PROJECT_MAP.md](./PROJECT_MAP.md): 코드베이스 지도
+- [CODEX_GUIDE.md](./CODEX_GUIDE.md): Codex 전용 가이드
 - [CLAUDE.md](./CLAUDE.md): Claude 전용 가이드
 - [GEMINI.md](./GEMINI.md): Gemini 전용 가이드
-- [CODEX_GUIDE.md](./CODEX_GUIDE.md): Codex 전용 가이드
 - [ai_monitor_plan.md](./ai_monitor_plan.md): 현재 활성 계획과 작업 순서
+- [docs/API_SPEC.md](./docs/API_SPEC.md): API 목록과 계약
 
-## 2. 공통 실행 계약
-1. 작업 시작 전 `RULES.md`, 관련 계획 문서, 관련 코드 경로를 먼저 읽습니다.
-2. 코드 변경은 가능한 한 격리된 worktree에서 수행하고, worktree가 없으면 생성 가능한지 먼저 확인합니다.
-3. 에이전트 간 지시와 결과 공유는 ITCP(`pg_messages`)를 우선 사용합니다.
-4. 작업 완료 전에는 변경 범위에 맞는 최소 검증을 직접 실행합니다.
-5. 반복되는 실패나 지침은 대화에만 남기지 말고 문서, 테스트, 스크립트, lint 규칙으로 승격합니다.
+## Core Principles
+1. 작업 전에는 `RULES.md`, 관련 계획, 관련 코드 경로를 먼저 읽는다.
+2. `AGENTS.md`는 짧게 유지하고 세부 지식은 개별 문서에 둔다.
+3. 코드 변경은 가능한 한 격리된 git worktree에서 수행한다.
+4. 에이전트 간 협업과 결과 공유는 ITCP(`pg_messages`)를 우선 사용한다.
+5. 로그, 메모리, 상태 저장은 프로젝트의 PostgreSQL 중심 흐름을 따른다.
+6. 아키텍처 상세와 API 계약은 이 파일에 복제하지 않고 원문 문서를 따른다.
+7. 역할 분담은 Gemini=설계/조율, Claude=정밀 구현/UI, Codex=터미널/테스트/자동화로 본다.
+8. 작업 완료 전에는 변경 범위에 맞는 최소 검증을 직접 실행한다.
+9. 반복 실패와 운영 규칙은 대화에만 남기지 말고 문서, 테스트, 스크립트, lint로 승격한다.
+10. 커밋 규칙은 `RULES.md`의 Conventional Commits + 상세 본문 요구사항을 따른다.
 
-## 3. 역할
-
-### 🔵 Gemini
-- 역할: 전체 설계, 오케스트레이션, 계획 승인, 데이터/ML 전략
-- 강점: 아키텍처 판단, 작업 분해, 흐름 조율
-- 주 가이드: [GEMINI.md](./GEMINI.md)
-
-### 🟠 Claude
-- 역할: 정밀 구현, 프론트엔드 품질, UX, 고난도 로직 리팩터링
-- 강점: UI/상호작용 품질, 시각적 완성도, 복잡한 구현 정리
-- 주 가이드: [CLAUDE.md](./CLAUDE.md)
-
-### 🟢 Codex
-- 역할: 터미널 작업, 테스트 작성, 반복 리팩터링, 백그라운드 실행
-- 강점: 빠른 수정, 검증 자동화, 스크립트/테스트 보강
-- 주 가이드: [CODEX_GUIDE.md](./CODEX_GUIDE.md)
-
-## 4. 하이브 오케스트레이션
-1. ITCP: PostgreSQL `pg_messages` 기반 비동기 메시징
-2. Auto Dispatcher: 작업 성격에 맞는 에이전트 자동 배정
-3. Thought Logging: `vibe_agent_thoughts`에 사고 흐름 기록
-
-## 5. 문서 원칙
-- `AGENTS.md`는 길게 키우지 않습니다. 이 파일은 목차 역할만 합니다.
-- 세부 지식은 `docs/`와 역할별 가이드에 둡니다.
-- 새 규칙이 생기면 가능한 한 검증 스크립트나 테스트로 같이 고정합니다.
+## Document Rule
+- 프로젝트 소개, 규칙, 아키텍처 상세, API 목록, 하이브 절차, 커밋 규칙을 이 파일 하나에 장문으로 합치지 않는다.
+- 이 파일은 "어디를 읽어야 하는지"만 알려주는 1차 인덱스 역할을 한다.
