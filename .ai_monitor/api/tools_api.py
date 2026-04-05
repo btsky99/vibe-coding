@@ -8,7 +8,8 @@ DESCRIPTION: AI 도구 CLI 설치 관리 API.
              POST /api/tools/install  — 특정 도구 설치 실행 (새 콘솔 창)
 
 REVISION HISTORY:
-- 2026-04-05 Claude Opus 4.6: 최초 생성 — 도구 설치 통합 API
+- 2026-04-05 Claude Opus 4.6: 최초 ���성 — 도�� 설치 통합 API
+- 2026-04-05 Claude Opus 4.6: psql, ruff, uv, pytest, pyinstaller 도구 추가 (Gemini 추천 반영)
 """
 
 import json
@@ -98,6 +99,70 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_url": "https://nodejs.org/",
         "install_hint": "https://nodejs.org 에서 LTS 버전 다운로드",
         "category": "runtime",
+    },
+    # ── 데이터베이스 도구 ─────────────────────────────────────────────
+    {
+        "id": "psql",
+        "name": "psql (PostgreSQL CLI)",
+        "description": "PostgreSQL 직접 쿼리 및 디버깅 — 내장 PG 또는 시스템 PG 자동 감지",
+        "check_commands": [["psql", "--version"]],
+        "check_paths": [
+            # 내장 포터블 PostgreSQL 경로 (개발 모드)
+            str(Path(__file__).resolve().parent.parent / "bin" / "pgsql" / "bin" / "psql.exe"),
+            # 시스템 PostgreSQL 기본 경로
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "18", "bin", "psql.exe"),
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "17", "bin", "psql.exe"),
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "16", "bin", "psql.exe"),
+        ],
+        "install_script": None,
+        "install_url": "https://www.postgresql.org/download/",
+        "install_hint": "이 프로젝트는 내장 PostgreSQL을 사용합니다. .ai_monitor/bin/pgsql/bin/psql.exe를 PATH에 추가하세요.",
+        "category": "database",
+    },
+    # ── Python 개발 도구 (Gemini 추천) ────────────────────────────────
+    {
+        "id": "ruff",
+        "name": "Ruff",
+        "description": "Python 린팅 + 포맷팅 (Rust 기반, 초고속) — Gemini 추천",
+        "check_commands": [["ruff", "--version"], [sys.executable, "-m", "ruff", "--version"]],
+        "check_paths": [],
+        "install_script": "install_dev_tools.py",
+        "install_args": ["--tool", "ruff"],
+        "install_url": "https://docs.astral.sh/ruff/",
+        "category": "code-quality",
+    },
+    {
+        "id": "uv",
+        "name": "uv",
+        "description": "초고속 Python 패키지 관리자 (pip 대체) — Gemini 추천",
+        "check_commands": [["uv", "--version"]],
+        "check_paths": [],
+        "install_script": "install_dev_tools.py",
+        "install_args": ["--tool", "uv"],
+        "install_url": "https://docs.astral.sh/uv/",
+        "category": "package-manager",
+    },
+    {
+        "id": "pytest",
+        "name": "pytest",
+        "description": "Python 단위 테스트 프레임워크 — Gemini 추천",
+        "check_commands": [["pytest", "--version"], [sys.executable, "-m", "pytest", "--version"]],
+        "check_paths": [],
+        "install_script": "install_dev_tools.py",
+        "install_args": ["--tool", "pytest"],
+        "install_url": "https://docs.pytest.org/",
+        "category": "testing",
+    },
+    {
+        "id": "pyinstaller",
+        "name": "PyInstaller",
+        "description": "Python → Windows EXE 빌드 도구 — 릴리스 빌드용",
+        "check_commands": [["pyinstaller", "--version"], [sys.executable, "-m", "PyInstaller", "--version"]],
+        "check_paths": [],
+        "install_script": "install_dev_tools.py",
+        "install_args": ["--tool", "pyinstaller"],
+        "install_url": "https://pyinstaller.org/",
+        "category": "build",
     },
 ]
 
@@ -274,7 +339,10 @@ def handle_post(handler, path: str, data: dict, **kwargs) -> bool:
     # 새 콘솔 창에서 설치 스크립트 실행
     try:
         python_cmd = _get_python_cmd()
-        install_cmd = subprocess.list2cmdline([python_cmd, str(script_path)])
+        # install_args가 있으면 스크립트 뒤에 추가 (예: --tool ruff)
+        cmd_parts = [python_cmd, str(script_path)]
+        cmd_parts.extend(tool_def.get("install_args", []))
+        install_cmd = subprocess.list2cmdline(cmd_parts)
         tool_name = tool_def["name"]
 
         cmdline = (
