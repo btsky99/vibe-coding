@@ -163,6 +163,8 @@ from src.pg_store import (
     release_checkout,
     list_agent_status,
     trigger_agent,
+    record_heartbeat,
+    insert_pg_log,
 )
 
 # ── PostgreSQL 18 연동 헬퍼 (Postgres-First 고도화) ─────────────────────────
@@ -249,6 +251,7 @@ def ensure_postgres_running():
     3) pg_ctl status로 실행 여부 확인 후, 미실행 시 pg_ctl start
     4) 확장(vector, pg_trgm) 활성화 SQL 실행
     """
+    global PG_PORT
     if not PG_CTL_BIN.exists():
         print(f"[PG] pg_ctl.exe 없음 → PG 자동시작 스킵 ({PG_CTL_BIN})")
         return
@@ -299,18 +302,40 @@ def ensure_postgres_running():
     except Exception as e:
         print(f"[PG ERROR] pg_ctl status 확인: {e}")
 
-    # 2-1) 포트 점유 확인 — 다른 프로세스가 PG_PORT를 이미 사용 중이면 스킵
-    # [설계 의도] 다른 PC에 기존 PostgreSQL이 설치되어 있거나, 앱을 빠르게 재시작하여
-    # 이전 PG 프로세스가 아직 종료되지 않은 경우 포트 충돌을 방지합니다.
+    # 2-1) 포트 점유 확인 — 다른 PostgreSQL(예: 시스템 서비스)이 포트를 선점한 경우 자동 회피
+    # [2026-04-05 Claude] 기존: 포트 점유 시 스킵 → 기존 PG에 우리 DB가 없어 에러 발생
+    # 변경: 우리 pgdata의 PG가 아닌 외부 프로세스가 포트를 점유하면 빈 포트를 자동 탐색
+    import socket as _pg_sock
     try:
-        import socket as _pg_sock
         _pg_test = _pg_sock.socket(_pg_sock.AF_INET, _pg_sock.SOCK_STREAM)
         _pg_result = _pg_test.connect_ex(('127.0.0.1', PG_PORT))
         _pg_test.close()
         if _pg_result == 0:
-            # 포트가 이미 열려 있음 — 다른 PG나 프로세스가 사용 중
-            print(f"[PG] 포트 {PG_PORT}이 이미 사용 중 → PG 시작 스킵 (기존 프로세스 활용)")
-            return
+            # 포트가 열려 있음 — 우리 PG인지 확인 (pgdata로 판별)
+            # pg_ctl status가 "not running"이면 외부 프로세스가 점유 중
+            print(f"[PG] 포트 {PG_PORT}이 이미 사용 중 (외부 프로세스) → 빈 포트 탐색")
+            _found_port = False
+            for _try_port in range(PG_PORT + 1, PG_PORT + 20):
+                _s = _pg_sock.socket(_pg_sock.AF_INET, _pg_sock.SOCK_STREAM)
+                _r = _s.connect_ex(('127.0.0.1', _try_port))
+                _s.close()
+                if _r != 0:  # 포트가 비어있음
+                    PG_PORT = _try_port
+                    print(f"[PG] 빈 포트 발견: {PG_PORT}")
+                    # postgresql.conf 포트도 갱신
+                    pg_conf = _PG_DATA_DIR / "postgresql.conf"
+                    if pg_conf.exists():
+                        conf_text = pg_conf.read_text(encoding='utf-8')
+                        import re as _pg_re
+                        conf_text = _pg_re.sub(r'^\s*port\s*=\s*\d+', f'port = {PG_PORT}', conf_text, flags=_pg_re.MULTILINE)
+                        pg_conf.write_text(conf_text, encoding='utf-8')
+                    # 환경변수도 갱신하여 pg_store.py 등 다른 모듈이 새 포트를 인식
+                    os.environ['VIBE_PG_PORT'] = str(PG_PORT)
+                    _found_port = True
+                    break
+            if not _found_port:
+                print(f"[PG ERROR] 포트 {PG_PORT-19}~{PG_PORT} 범위에서 빈 포트를 찾지 못함")
+                return
     except Exception:
         pass  # 소켓 테스트 실패 시 그냥 시작 시도
 
@@ -1872,6 +1897,51 @@ AGENT_STATUS = {}
 AGENT_STATUS_LOCK = threading.Lock()
 
 
+def _restore_agent_status_from_db():
+    """서버 시작 시 PostgreSQL agent_heartbeats에서 에이전트 상태를 복구한다.
+
+    재시작해도 이전 에이전트 상태를 유지하여 대시보드가 즉시 현황을 보여준다.
+    5분 이상 heartbeat가 없으면 offline으로 표시한다.
+    """
+    try:
+        rows = list_agent_status()
+        if not rows:
+            return
+        now_ts = time.time()
+        with AGENT_STATUS_LOCK:
+            for row in rows:
+                agent_id = row.get('agent_id', '')
+                if not agent_id:
+                    continue
+                # last_beat ISO 문자열 → timestamp 변환
+                last_beat_str = row.get('last_beat', '')
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(last_beat_str)
+                    last_seen_ts = dt.timestamp()
+                except Exception:
+                    last_seen_ts = now_ts - 600  # 파싱 실패 시 10분 전으로 설정
+                # 5분 이상 지났으면 offline
+                age_sec = now_ts - last_seen_ts
+                if age_sec > 300:
+                    status = 'offline'
+                else:
+                    status = row.get('status', 'idle')
+                AGENT_STATUS[agent_id] = {
+                    'status': status,
+                    'task': row.get('current_task'),
+                    'last_seen': last_seen_ts,
+                    'beat_count': row.get('beat_count', 0),
+                }
+        print(f"[*] 에이전트 상태 복구 완료: {len(rows)}개 에이전트 (DB → 메모리)")
+    except Exception as e:
+        print(f"[!] 에이전트 상태 복구 실패 (무시): {e}")
+
+
+# 모듈 로드 시 즉시 복구 시도
+_restore_agent_status_from_db()
+
+
 # ── MUX API 핸들러 — cmux-style 터미널 멀티플렉서 REST 인터페이스 ────────────
 # [2026-03-18] Claude: P6 Task 34 — vibe_mux Named Pipe 서버에 대한 HTTP 래퍼.
 # 대시보드(프론트엔드)가 REST API로 MUX 명령을 보내면, 여기서 Named Pipe를 통해
@@ -2308,12 +2378,27 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(projects).encode('utf-8'))
         elif parsed_path.path == '/api/agents':
             # 실시간 에이전트 상태 목록 반환 (오케스트레이터용)
+            # 인메모리 + PostgreSQL DB 데이터 병합하여 반환
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             with AGENT_STATUS_LOCK:
-                self.wfile.write(json.dumps(AGENT_STATUS, ensure_ascii=False).encode('utf-8'))
+                result = dict(AGENT_STATUS)
+            # DB에만 있는 에이전트도 포함 (다른 프로세스가 기록한 경우)
+            try:
+                for row in list_agent_status():
+                    aid = row.get('agent_id', '')
+                    if aid and aid not in result:
+                        result[aid] = {
+                            'status': row.get('status', 'offline'),
+                            'task': row.get('current_task'),
+                            'last_beat': row.get('last_beat'),
+                            'beat_count': row.get('beat_count', 0),
+                        }
+            except Exception:
+                pass
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/browse-folder':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -3638,12 +3723,26 @@ class SSEHandler(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({"status": "error", "message": "Agent name is required"}).encode('utf-8'))
                     return
                 
+                agent_status = data.get("status", "active")
+                agent_task = data.get("task")
+                now_ts = time.time()
                 with AGENT_STATUS_LOCK:
                     AGENT_STATUS[agent_name] = {
-                        "status": data.get("status", "active"),
-                        "task": data.get("task"),
-                        "last_seen": time.time()
+                        "status": agent_status,
+                        "task": agent_task,
+                        "last_seen": now_ts,
                     }
+                # PostgreSQL에도 영구 기록 (재시작 시 복구용)
+                try:
+                    record_heartbeat(agent_name, status=agent_status,
+                                     current_task=agent_task)
+                    insert_pg_log(
+                        agent=agent_name, task=agent_task or '',
+                        status=agent_status,
+                        metadata={'source': 'heartbeat', 'beat_ts': now_ts},
+                    )
+                except Exception:
+                    pass  # DB 실패해도 인메모리는 유지
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
@@ -5307,6 +5406,61 @@ def main():
             _child_procs.append(proc)
             print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
     threading.Thread(target=run_heal_daemon, daemon=True).start()
+
+    # ── 에이전트 상태 자동 동기화 데몬 (60초 주기) ─────────────────────────
+    # 인메모리 AGENT_STATUS ↔ PostgreSQL agent_heartbeats 양방향 동기화.
+    # - 인메모리에 있는 활성 에이전트 → DB에 heartbeat 기록
+    # - 5분 이상 heartbeat 없는 에이전트 → offline 자동 전환
+    # - DB에만 있는 에이전트 → 인메모리에 복구 (다른 프로세스가 기록한 경우)
+    def _agent_sync_daemon():
+        while True:
+            try:
+                time.sleep(60)
+                now_ts = time.time()
+                # 1) 인메모리 → DB 동기화 (활성 에이전트 heartbeat 갱신)
+                with AGENT_STATUS_LOCK:
+                    snapshot = dict(AGENT_STATUS)
+                for agent_name, info in snapshot.items():
+                    status = info.get('status', 'idle')
+                    if status in ('active', 'running', 'working'):
+                        try:
+                            record_heartbeat(agent_name, status=status,
+                                             current_task=info.get('task'))
+                        except Exception:
+                            pass
+                # 2) DB → 인메모리 동기화 (다른 프로세스가 기록한 에이전트 반영)
+                try:
+                    db_rows = list_agent_status()
+                    with AGENT_STATUS_LOCK:
+                        for row in db_rows:
+                            aid = row.get('agent_id', '')
+                            if not aid:
+                                continue
+                            # 인메모리에 없는 에이전트는 DB에서 복구
+                            if aid not in AGENT_STATUS:
+                                try:
+                                    from datetime import datetime as _dt
+                                    lb = _dt.fromisoformat(row.get('last_beat', '')).timestamp()
+                                except Exception:
+                                    lb = now_ts - 600
+                                age = now_ts - lb
+                                AGENT_STATUS[aid] = {
+                                    'status': 'offline' if age > 300 else row.get('status', 'idle'),
+                                    'task': row.get('current_task'),
+                                    'last_seen': lb,
+                                    'beat_count': row.get('beat_count', 0),
+                                }
+                        # 3) 5분 이상 heartbeat 없는 에이전트 → offline 전환
+                        for aid, info in AGENT_STATUS.items():
+                            last = info.get('last_seen', 0)
+                            if now_ts - last > 300 and info.get('status') not in ('offline',):
+                                AGENT_STATUS[aid]['status'] = 'offline'
+                except Exception:
+                    pass
+            except Exception:
+                time.sleep(60)
+    threading.Thread(target=_agent_sync_daemon, daemon=True, name='AgentSyncDaemon').start()
+    print("[*] 에이전트 상태 동기화 데몬 시작됨 (60초 주기)")
 
     # MUX 서버 자동 시작: cmux-style 터미널 멀티플렉서 (Named Pipe)
     # [2026-03-18] Claude: P6 — 에이전트 간 텍스트 직접 주입을 위한 MUX 데몬.

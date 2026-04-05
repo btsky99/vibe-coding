@@ -1246,3 +1246,23 @@ def trigger_agent(agent_id: str) -> bool:
     except Exception as e:
         print(f"[pg_store] trigger_agent 실패: {e}")
         return False
+
+
+# ── pg_logs 활동 기록 ────────────────────────────────────────────────────────
+
+def insert_pg_log(agent: str, task: str = '', status: str = 'success',
+                  terminal_id: str = '', project_id: str = '',
+                  metadata: dict | None = None) -> bool:
+    """에이전트 활동을 pg_logs 테이블에 기록한다.
+
+    서버 API 호출, heartbeat 갱신, 태스크 상태 변경 등
+    모든 에이전트 활동의 영구 로그를 남긴다.
+    """
+    import json as _json
+    meta_json = _json.dumps(metadata or {}, ensure_ascii=False)
+    return execute(
+        f"INSERT INTO pg_logs (agent, task, status, terminal_id, project_id, metadata) "
+        f"VALUES ({_sql_text(agent)}, {_sql_text(task)}, {_sql_text(status)}, "
+        f"{_sql_text(terminal_id)}, {_sql_text(project_id)}, "
+        f"'{meta_json}'::jsonb);"
+    )

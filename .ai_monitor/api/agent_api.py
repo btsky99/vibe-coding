@@ -73,6 +73,13 @@ except ImportError as e:
     _CLI_AGENT_AVAILABLE = False
     _CLI_AGENT_ERROR = str(e)
 
+# pg_store 활동 로깅 — 에이전트 시작/중지를 pg_logs에 영구 기록
+try:
+    from src.pg_store import insert_pg_log, record_heartbeat
+    _PG_LOG_AVAILABLE = True
+except ImportError:
+    _PG_LOG_AVAILABLE = False
+
 
 # ── 대화형 세션 파이프라인 단계 인메모리 저장소 ─────────────────────────────────
 # hive_hook.py가 UserPromptSubmit/PreToolUse/Stop 훅에서 POST /api/agent/stage로 업데이트.
@@ -270,6 +277,16 @@ def handle_run(handler) -> None:
     )
     t.start()
 
+    # PostgreSQL에 에이전트 시작 기록 (영구 로그 + heartbeat)
+    if _PG_LOG_AVAILABLE:
+        try:
+            record_heartbeat(chosen_cli, status='running', current_task=task[:200])
+            insert_pg_log(agent=chosen_cli, task=task[:200], status='started',
+                          terminal_id=terminal_id,
+                          metadata={'source': source, 'routing': _routing_reason})
+        except Exception:
+            pass
+
     _json_response(handler, {
         'status': 'started',
         'cli': chosen_cli,
@@ -291,6 +308,14 @@ def handle_stop(handler) -> None:
         return
 
     cli_agent.stop()
+    # PostgreSQL에 에이전트 중지 기록
+    if _PG_LOG_AVAILABLE:
+        try:
+            record_heartbeat('cli_agent', status='idle')
+            insert_pg_log(agent='cli_agent', task='', status='stopped',
+                          metadata={'source': 'manual_stop'})
+        except Exception:
+            pass
     _json_response(handler, {'status': 'stopped'})
 
 
