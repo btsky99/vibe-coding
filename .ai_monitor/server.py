@@ -190,6 +190,8 @@ PG_PROJECT_DB: str = "postgres"
 _pg_pool = []           # 사용 가능한 커넥션 리스트 (db별 (conn, db) 튜플)
 _pg_pool_lock = threading.Lock()  # 풀 접근 동기화 락
 _PG_POOL_MAX = 5        # 풀에 보관할 최대 커넥션 수
+_tool_install_lock = threading.Lock()
+_tool_install_state: dict[str, dict] = {}
 
 def _get_pg_conn(db: str = "postgres"):
     """풀에서 커넥션을 꺼내거나, 풀이 비었으면 새로 생성하여 반환.
@@ -984,7 +986,7 @@ except ImportError as e:
 init_db()
 
 # 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
-STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
+STATIC_DIR = (BASE_DIR / "dist").resolve()
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 LOCKS_FILE = DATA_DIR / "locks.json"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -1508,6 +1510,220 @@ def _tool_status(name: str) -> dict:
     return {"installed": True, "path": exe_path, "version": version}
 
 
+_TOOL_INSTALL_TARGETS = {
+    'gemini': {
+        'package': '@google/gemini-cli',
+        'display': 'Gemini CLI',
+        'command': 'gemini',
+    },
+    'claude': {
+        'package': '@anthropic-ai/claude-code',
+        'display': 'Claude Code',
+        'command': 'claude',
+    },
+    'codex': {
+        'package': '@openai/codex',
+        'display': 'Codex CLI',
+        'command': 'codex',
+    },
+}
+
+
+def _tool_install_now() -> str:
+    """Return a compact local timestamp for tool install progress snapshots."""
+    return time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())
+
+
+def _default_tool_install_state(name: str) -> dict:
+    """Return the default install state payload for a supported tool."""
+    tool_meta = _TOOL_INSTALL_TARGETS.get(name, {})
+    return {
+        'tool': name,
+        'display': tool_meta.get('display', name),
+        'status': 'idle',
+        'message': '',
+        'last_line': '',
+        'logs': [],
+        'started_at': '',
+        'finished_at': '',
+        'pid': None,
+        'exit_code': None,
+    }
+
+
+def _get_npm_executable() -> str:
+    """Resolve npm executable with Windows-first lookup for background installs."""
+    candidates = ['npm']
+    if os.name == 'nt':
+        candidates = ['npm.cmd', 'npm.exe', 'npm']
+
+    for candidate in candidates:
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return ''
+
+
+def _get_tool_install_state(name: str) -> dict:
+    """Return a thread-safe snapshot of the current install state."""
+    base = _default_tool_install_state(name)
+    with _tool_install_lock:
+        current = _tool_install_state.get(name, {})
+        snapshot = dict(base)
+        snapshot.update(current)
+        logs = snapshot.get('logs') or []
+        snapshot['logs'] = list(logs[-20:])
+        return snapshot
+
+
+def _set_tool_install_state(name: str, **updates) -> dict:
+    """Update a tool install snapshot and return the merged state."""
+    with _tool_install_lock:
+        current = _tool_install_state.get(name, _default_tool_install_state(name))
+        next_state = dict(current)
+        next_state.update(updates)
+        logs = next_state.get('logs') or []
+        next_state['logs'] = list(logs[-20:])
+        _tool_install_state[name] = next_state
+        return dict(next_state)
+
+
+def _watch_tool_install(name: str, proc: subprocess.Popen, command_name: str, display_name: str):
+    """Capture npm install output so the UI can poll live progress lines."""
+    logs: list[str] = []
+    last_line = ''
+
+    try:
+        if proc.stdout is not None:
+            for raw_line in proc.stdout:
+                line = (raw_line or '').strip()
+                if not line:
+                    continue
+                last_line = line
+                logs.append(line)
+                _set_tool_install_state(name, last_line=line, logs=logs)
+
+        exit_code = proc.wait()
+        tool_info = _tool_status(command_name)
+        installed = bool(tool_info.get('installed'))
+
+        if exit_code == 0 and installed:
+            message = f'{display_name} installation completed.'
+            status = 'completed'
+        else:
+            fallback = last_line or f'npm exited with code {exit_code}.'
+            message = f'{display_name} installation failed: {fallback}'
+            status = 'failed'
+
+        _set_tool_install_state(
+            name,
+            status=status,
+            message=message,
+            last_line=last_line,
+            logs=logs,
+            finished_at=_tool_install_now(),
+            exit_code=exit_code,
+            pid=None,
+        )
+    except Exception as exc:
+        failure_line = str(exc)
+        if failure_line:
+            logs.append(failure_line)
+        _set_tool_install_state(
+            name,
+            status='failed',
+            message=f'{display_name} installation failed: {failure_line or "unknown error"}',
+            last_line=failure_line,
+            logs=logs,
+            finished_at=_tool_install_now(),
+            pid=None,
+        )
+
+
+def _start_tool_install(name: str) -> dict:
+    """Start a background npm install and expose pollable progress for the UI."""
+    tool_meta = _TOOL_INSTALL_TARGETS.get(name)
+    if not tool_meta:
+        return {'status': 'error', 'message': f'Unsupported tool: {name}'}
+
+    current = _get_tool_install_state(name)
+    if current.get('status') == 'running':
+        return {
+            'status': 'success',
+            'message': f'{tool_meta["display"]} installation is already running.',
+            'install': current,
+        }
+
+    npm_exe = _get_npm_executable()
+    if not npm_exe:
+        failed = _set_tool_install_state(
+            name,
+            status='failed',
+            message='npm executable was not found.',
+            last_line='npm executable was not found.',
+            logs=['npm executable was not found.'],
+            finished_at=_tool_install_now(),
+            pid=None,
+            exit_code=None,
+        )
+        return {'status': 'error', 'message': failed['message'], 'install': failed}
+
+    display_name = tool_meta['display']
+    package_name = tool_meta['package']
+    command_name = tool_meta['command']
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000) if os.name == 'nt' else 0
+
+    try:
+        proc = subprocess.Popen(
+            [npm_exe, 'install', '-g', package_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            creationflags=creationflags,
+        )
+    except Exception as exc:
+        failed = _set_tool_install_state(
+            name,
+            status='failed',
+            message=f'Could not start {display_name} installation: {exc}',
+            last_line=str(exc),
+            logs=[str(exc)],
+            finished_at=_tool_install_now(),
+            pid=None,
+            exit_code=None,
+        )
+        return {'status': 'error', 'message': failed['message'], 'install': failed}
+
+    initial = _set_tool_install_state(
+        name,
+        display=display_name,
+        status='running',
+        message=f'{display_name} installation is in progress.',
+        last_line=f'Running npm install -g {package_name}',
+        logs=[f'Running npm install -g {package_name}'],
+        started_at=_tool_install_now(),
+        finished_at='',
+        pid=proc.pid,
+        exit_code=None,
+    )
+
+    watcher = threading.Thread(
+        target=_watch_tool_install,
+        args=(name, proc, command_name, display_name),
+        daemon=True,
+    )
+    watcher.start()
+
+    return {
+        'status': 'success',
+        'message': f'{display_name} installation started.',
+        'install': initial,
+    }
+
+
 def _parse_session_tail(path: Path):
     """Claude Code 세션 JSONL 파일 꼬리에서 마지막 토큰 usage 정보 추출.
 
@@ -1632,7 +1848,7 @@ def _parse_gemini_session(path: Path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 정적 파일 경로
-STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
+STATIC_DIR = (BASE_DIR / "dist").resolve()
 
 print(f"[*] Static files directory: {STATIC_DIR}")
 if not STATIC_DIR.exists():
@@ -2128,6 +2344,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed_path.query)
             tool_name = (query.get('name') or [''])[0].strip().lower()
             self.wfile.write(json.dumps(_tool_status(tool_name), ensure_ascii=False).encode('utf-8'))
+        elif parsed_path.path == '/api/install-tool-status':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            query = parse_qs(parsed_path.query)
+            tool_name = (query.get('name') or [''])[0].strip().lower()
+            self.wfile.write(json.dumps(_get_tool_install_state(tool_name), ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/drives':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2142,41 +2366,39 @@ class SSEHandler(BaseHTTPRequestHandler):
             else:
                 drives = ['/']
             self.wfile.write(json.dumps(drives).encode('utf-8'))
-        elif parsed_path.path == '/api/install-gemini-cli':
+        elif parsed_path.path in ('/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli'):
+            # 터미널 창을 띄워서 npm install -g 실행 — 사용자가 진행 상황을 직접 확인
+            _install_map = {
+                '/api/install-gemini-cli': ('gemini', '@google/gemini-cli', 'Gemini CLI'),
+                '/api/install-claude-code': ('claude', '@anthropic-ai/claude-code', 'Claude Code'),
+                '/api/install-codex-cli': ('codex', '@openai/codex', 'Codex CLI'),
+            }
+            _tool_key, _pkg, _display = _install_map[parsed_path.path]
+            try:
+                _npm = _get_npm_executable()
+                if not _npm:
+                    raise FileNotFoundError('npm 실행 파일을 찾을 수 없습니다. Node.js가 설치되어 있는지 확인하세요.')
+                _title = f"[{_display} 설치]"
+                _cmd = (
+                    f'start "{_title}" cmd.exe /k "'
+                    f'title {_title} && '
+                    f'echo ========================================= && '
+                    f'echo   {_display} 설치를 시작합니다... && '
+                    f'echo ========================================= && '
+                    f'echo. && '
+                    f'"{_npm}" install -g {_pkg} && '
+                    f'echo. && echo ✅ {_display} 설치가 완료되었습니다! || '
+                    f'echo. && echo ❌ {_display} 설치에 실패했습니다."'
+                )
+                subprocess.Popen(_cmd, shell=True)
+                result = {'status': 'success', 'message': f'{_display} 설치 터미널이 열렸습니다.'}
+            except Exception as exc:
+                result = {'status': 'error', 'message': str(exc)}
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
-            try:
-                # Gemini CLI 설치 (전역)
-                subprocess.Popen('cmd.exe /k "echo Installing Gemini CLI... && npm install -g @google/gemini-cli"', shell=True)
-                result = {"status": "success", "message": "Gemini CLI installation started in a new window."}
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            self.wfile.write(json.dumps(result).encode('utf-8'))
-        elif parsed_path.path == '/api/install-claude-code':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                # Claude Code 설치 (전역)
-                subprocess.Popen('cmd.exe /k "echo Installing Claude Code... && npm install -g @anthropic-ai/claude-code"', shell=True)
-                result = {"status": "success", "message": "Claude Code installation started in a new window."}
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            self.wfile.write(json.dumps(result).encode('utf-8'))
-        elif parsed_path.path == '/api/install-codex-cli':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                subprocess.Popen('cmd.exe /k "echo Installing Codex CLI... && npm install -g @openai/codex"', shell=True)
-                result = {"status": "success", "message": "Codex CLI installation started in a new window."}
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            self.wfile.write(json.dumps(result).encode('utf-8'))
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/register-codex-to-ai':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -3685,10 +3907,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 content_length = int(self.headers['Content-Length'])
                 post_data = self.rfile.read(content_length)
                 data = json.loads(post_data.decode('utf-8'))
-                
+
                 agent = data.get('agent')
                 target_dir = data.get('path', 'C:\\')
                 is_yolo = data.get('yolo', False)
+                # ── 오피스 모드 확장 파라미터: 모델, 역할, 슬롯 ──
+                req_model = data.get('model', '')
+                req_role = data.get('role', '')
+                req_slot = data.get('slot', 0)
 
                 # 경로 검증 — 커맨드 인젝션 방지: 실제 존재하는 디렉터리만 허용
                 _resolved_dir = Path(target_dir).resolve()
@@ -3700,31 +3926,66 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if _re_launch.search(r'[&|;`$<>!]', _safe_dir):
                     raise ValueError(f"Directory path contains invalid characters: {_safe_dir}")
 
+                # 모델/역할 파라미터 안전 문자 검증
+                if req_model and not _re_launch.match(r'^[a-zA-Z0-9\-_.]+$', req_model):
+                    req_model = ''
+                if req_role and not _re_launch.match(r'^[a-zA-Z0-9_]+$', req_role):
+                    req_role = ''
+
+                # ── 역할별 초기 프롬프트 매핑 ──
+                # Claude/Gemini에 --prompt 또는 초기 입력으로 역할 지시를 전달
+                _role_prompts = {
+                    'developer': '코드 구현과 기능 개발에 집중해줘. 버그 수정, 리팩토링, 새 기능 추가가 주 업무야.',
+                    'reviewer': '코드 리뷰어로 활동해줘. /vibe-code-review 스킬을 활용하여 품질, 성능, 보안을 검토해.',
+                    'tester': '테스터로 활동해줘. /vibe-tdd 스킬로 테스트를 작성하고, 회귀 버그를 방지해.',
+                    'architect': '설계자로 활동해줘. /vibe-brainstorm 으로 아키텍처를 설계하고, 기술 결정을 문서화해.',
+                }
+                _role_prompt = _role_prompts.get(req_role, '')
+
+                # 슬롯 번호로 터미널 타이틀 구분
+                _slot_label = f"T{req_slot}" if req_slot else ""
+
                 if agent == 'claude':
                     yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
-                    cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title [Claude Code] && echo Launching Claude Code... && claude{yolo_flag}"'
+                    # Claude Code는 --prompt 플래그로 초기 프롬프트 전달 가능
+                    prompt_flag = f' -p "{_role_prompt}"' if _role_prompt else ""
+                    # 모델 선택: claude --model opus|sonnet|haiku
+                    model_flag = f' --model {req_model}' if req_model else ""
+                    title = f"[Claude Code] {_slot_label}" if _slot_label else "[Claude Code]"
+                    cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Claude Code... && claude{yolo_flag}{model_flag}{prompt_flag}"'
                 elif agent == 'gemini':
                     yolo_flag = " --yolo" if is_yolo else ""
                     gemini_bat = str(PROJECT_ROOT / 'run_gemini.bat')
-                    cmd = f'start "Gemini CLI" cmd.exe /k ""{gemini_bat}"{yolo_flag} --cwd "{_safe_dir}""'
+                    # Gemini CLI: --model 플래그로 모델 선택
+                    model_flag = f' --model {req_model}' if req_model else ""
+                    title = f"[Gemini CLI] {_slot_label}" if _slot_label else "[Gemini CLI]"
+                    # 역할 프롬프트는 Gemini의 -p 옵션으로 전달
+                    prompt_flag = f' -p "{_role_prompt}"' if _role_prompt else ""
+                    cmd = f'start "{title}" cmd.exe /k ""{gemini_bat}"{yolo_flag}{model_flag}{prompt_flag} --cwd "{_safe_dir}""'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
-                    model_name = _codex_main_model()
-                    # 모델명도 안전 문자만 허용 (영문, 숫자, -, _, /, :, .)
+                    # 요청된 모델 우선, 없으면 config에서 읽기
+                    model_name = req_model if req_model else _codex_main_model()
                     if model_name and not _re_launch.match(r'^[a-zA-Z0-9\-_/:.]+$', model_name):
                         model_name = None
                     model_flag = f' --model {model_name}' if model_name else ""
-                    cmd = f'start "Codex CLI" cmd.exe /k "cd /d "{_safe_dir}" && title [Codex CLI] && echo Launching Codex CLI... && codex{yolo_flag}{model_flag}"'
+                    title = f"[Codex CLI] {_slot_label}" if _slot_label else "[Codex CLI]"
+                    # Codex는 초기 프롬프트를 위치 인자로 전달
+                    prompt_arg = f' "{_role_prompt}"' if _role_prompt else ""
+                    cmd = f'start "{title}" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Codex CLI... && codex{yolo_flag}{model_flag}{prompt_arg}"'
                 else:
                     cmd = f'start "Terminal" cmd.exe /k "cd /d "{_safe_dir}""'
 
                 subprocess.Popen(cmd, shell=True)
-                
+
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json;charset=utf-8')
                 self.send_header('Access-Control-Allow-Origin', self._cors_origin())
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": "launched", "agent": agent}).encode('utf-8'))
+                self.wfile.write(json.dumps({
+                    "status": "launched", "agent": agent,
+                    "model": req_model, "role": req_role, "slot": req_slot
+                }).encode('utf-8'))
             except Exception as e:
                 self.send_response(500)
                 self.send_header('Access-Control-Allow-Origin', self._cors_origin())

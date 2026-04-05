@@ -1,65 +1,117 @@
-# 📜 Vibe Coding - Claude Code 프로젝트 가이드
+# CLAUDE.md
 
-이 파일은 Claude가 하이브 마인드(Hive Mind)의 일원으로 작업을 수행하기 위한 핵심 지침서입니다.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-- **공통 하네스 계약**: [docs/HARNESS_V2.md](./docs/HARNESS_V2.md)
+## 프로젝트 개요
 
-## 🤖 최우선 준수 사항 ..
-이 프로젝트의 모든 행동 원칙과 주석 규칙은 루트 폴더의 **`RULES.md`**에 정의되어 있습니다.
-**Claude는 어떤 작업을 시작하든 반드시 `RULES.md`를 먼저 읽고, 그 안의 모든 규칙을 절대적으로 준수해야 합니다.**
+**Vibe Coding**은 AI 멀티 에이전트 하이브 마인드 대시보드입니다. Claude, Gemini, Codex 등 여러 AI 에이전트를 통합 터미널 UI에서 오케스트레이션하며, PostgreSQL 18 기반 실시간 협업 시스템입니다. Windows 자체 호스팅(PyWebView) 방식으로 동작합니다.
 
-## 📂 프로젝트 핵심 구조
-- `.ai_monitor/` - 하이브 엔진 (Python 백엔드 + Vibe Coding 대시보드)
-- `scripts/` - 에이전트 브릿지, 공유 메모리, 오케스트레이터 유틸리티
-- `.gemini/skills/` - 하이브 마인드 공통 스킬 지침
-- `PROJECT_MAP.md` - 전체 파일 구조 및 역할 정의 (중앙 관리 문서)
-- `RULES.md` - AI 에이전트 공통 행동 헌법
+## 최우선 준수 사항
 
-## 🛠️ 작업 수행 가이드
+**반드시 `RULES.md`를 먼저 읽고 모든 규칙을 절대적으로 준수할 것.** 핵심 요약:
 
-### 0단계: 하이브 컨텍스트 로드 (Sync)
-- 작업을 시작하기 전 반드시 `python scripts/memory.py list`를 실행하여 Gemini나 다른 에이전트가 남긴 최신 기술 결정 사항과 공유 메모리를 확인합니다.
-- `.ai_monitor/data/task_logs.jsonl` 최근 내역을 통해 현재 진행 중인 작업 맥락을 파악합니다.
+- **한글 필수**: 모든 주석, 커밋 본문, 대화 출력은 한글로 작성
+- **표준 헤더**: 모든 파일 상단에 FILE/DESCRIPTION/REVISION HISTORY 템플릿 포함 (Python: `"""`, JS/TS: `/* */`, MD/HTML: `<!-- -->`)
+- **PostgreSQL-first**: 로깅은 반드시 PostgreSQL `pg_logs` 테이블에 기록 (`.jsonl`/SQLite 금지)
+- **Git worktree**: 새 기능 구현 시 격리된 worktree에서 작업
+- **커밋 메시지**: Conventional Commits 형식 + 한글 본문(Why/What/Impact 필수), 제목 한 줄만 작성 금지
+- **불필요한 문서 생성 금지**: `docs/` 내 1:1 설명 문서 대신 `PROJECT_MAP.md`에서 중앙 관리
 
-### 1단계: 요청 분석 및 계획 보고
-- 작업을 시작하기 전 `ai_monitor_plan.md`를 확인하여 현재 단계를 파악합니다.
-- 수정할 파일과 작업 계획을 사용자에게 간략히 보고하고 승인을 받습니다.
+## 빌드 및 실행
 
-### 2단계: 코드 구현 및 주석 (Mandatory)
-- **한글 주석**: 모든 주석은 설계 의도를 포함하여 **한글로 아주 상세하게** 작성합니다.
-- **표준 헤더 적용**: 모든 파일 상단에 `RULES.md`에 명시된 **변경 이력(REVISION HISTORY)** 템플릿을 반드시 포함합니다.
-- **배포 코드 관리**: 배포 버전의 소스 코드와 빌드 스크립트에도 동일한 주석 규칙을 적용합니다.
-
-### 3단계: 하이브 동기화
-- 작업 완료 후 `scripts/hive_bridge.py`를 호출하여 로그를 남깁니다.
-- `PROJECT_MAP.md`에 변경 사항이 있다면 즉시 업데이트합니다.
-- 공유할 지식이 있다면 `scripts/memory.py`를 통해 하이브 메모리에 기록합니다.
-
-## 📡 에이전트 협업
-- **Gemini**: 전체 설계 및 오케스트레이션 담당.
-- **Claude**: 정밀 로직 구현 및 프론트엔드 최적화 담당.
-- 서로의 작업 영역을 존중하며, `task_logs.jsonl`을 통해 현재 진행 상황을 공유합니다.
-
-## 🤖 에이전트 오케스트레이션 (Paperclip 스타일)
-에이전트 간 통신은 **태스크 코멘트** 기반 비동기 방식입니다 (그룹 채팅 대체).
-
-**핵심 구조:**
-- `hive_tasks` 테이블: 태스크 할당 + 원자적 체크아웃 (동시 작업 방지)
-- `task_comments` 테이블: 태스크별 코멘트로 에이전트 간 소통
-- `agent_heartbeats` 테이블: 에이전트 상태 추적 (working/idle/offline)
-- PostgreSQL NOTIFY: 태스크 할당 시 에이전트 자동 깨우기
-
-**하트비트 러너 실행:**
 ```bash
-python scripts/hive_heartbeat.py --agent claude-T1 --interval 300
+# 개발 모드 설치 및 실행
+pip install -e .
+vibe-coding          # CLI (콘솔 출력 있음)
+vibe-coding-gui      # GUI (콘솔 없이)
+
+# 서버 직접 실행
+python .ai_monitor/server.py
+
+# PyInstaller EXE 빌드
+pyinstaller vibe-coding.spec --noconfirm
+
+# Windows 인스톨러 빌드
+ISCC.exe vibe-coding-setup.iss
+
+# 테스트
+pytest tests/
 ```
 
-**에이전트 협업 흐름:**
-1. 디스패처가 태스크 생성 + assigned_to 설정 → NOTIFY 자동 발생
-2. 해당 에이전트의 하트비트 러너가 깨어남 → 원자적 체크아웃
-3. CLI로 태스크 실행 → 결과를 task_comments에 기록
-4. 태스크 완료/실패 상태 업데이트 → 다음 태스크로 이동
+## 작업 전 하이브 동기화 (필수)
 
----
-**작성일:** 2026-02-25
-**상태:** 하이브 마인드 v3.0 규격 적용 완료
+```bash
+# 공유 메모리 확인 (다른 에이전트의 기술 결정 사항)
+python scripts/memory.py list
+
+# 하이브 상태 분석
+python scripts/analyze_hive.py
+
+# 현재 단계 확인
+cat ai_monitor_plan.md
+```
+
+작업 완료 후:
+```bash
+# 로그 기록
+python scripts/hive_bridge.py
+# 지식 공유
+python scripts/memory.py
+```
+
+## 아키텍처
+
+```
+React/TS 프론트엔드 (.ai_monitor/dist/)
+  ↕ HTTP + SSE + WebSocket (포트 9000-9007)
+Python HTTP 서버 (.ai_monitor/server.py, ~5400줄)
+  ↕ API 모듈 (.ai_monitor/api/)
+  ↕ 데이터 계층 (.ai_monitor/src/pg_store.py)
+PostgreSQL 18 (포트 5433, 내장/포터블)
+  + Node.js PTY 서버 (.ai_monitor/pty-server/)
+```
+
+**서버** (`server.py`): 중앙 오케스트레이터. 라우팅, SSE 스트리밍, WebSocket PTY 멀티플렉싱, 정적 파일 서빙 담당. Flask 유사 구조(Python stdlib).
+
+**API 모듈** (`.ai_monitor/api/`): 도메인별 분리된 REST 핸들러.
+- `agent_api.py` — CLI 에이전트 실행/중지/상태 (claude, gemini, codex)
+- `hive_api.py` — 하이브 마인드 헬스체크, 스킬 체인, 오케스트레이션
+- `tasks_api.py` — 태스크 큐 CRUD + 원자적 체크아웃
+- `dispatcher_api.py` — 멀티 LLM 자동 태스크 분배
+- `memory_api.py` — 공유 지식 기반 (PostgreSQL hive_memory)
+- `git_api.py` — worktree + 커밋 통합
+- `pty_api.py` — 터미널 세션 관리
+- `files_api.py` — 파일 읽기/쓰기/탐색
+- `vibe_api.py` — UI 상태 + 진행률
+
+**데이터 계층** (`.ai_monitor/src/`):
+- `pg_store.py` — PostgreSQL 스키마 정의 + CRUD (pg_logs, pg_messages, hive_memory, hive_tasks, hive_sessions, hive_skill_chains, task_comments, agent_heartbeats)
+- `db_helper.py` — 트랜잭션 헬퍼
+- `file_store.py` — 레거시 JSONL/SQLite 폴백
+
+**프론트엔드** (React/TypeScript, Vite 빌드 → `.ai_monitor/dist/`):
+- `App.tsx` — 레이아웃 오케스트레이터, 폴링 코디네이터
+- `AgentPanel.tsx` (~2900줄) — 핵심 패널. 자가 치유, 스킬 체인, 사고 추적
+- `TerminalSlot.tsx` — xterm.js + WebSocket PTY 연결
+- 상태 관리: React hooks (Redux 없음, prop drilling)
+
+**에이전트 간 통신**: PostgreSQL NOTIFY/LISTEN 기반 비동기 방식. `task_comments` 테이블로 소통, `agent_heartbeats`로 상태 추적, `hive_tasks`의 원자적 체크아웃으로 동시 작업 방지.
+
+## 패키지 구조
+
+`.ai_monitor/` 디렉토리가 `ai_monitor` Python 패키지로 매핑됨 (pyproject.toml의 `package-dir` 설정). 패키지: `ai_monitor`, `ai_monitor.api`, `ai_monitor.src`.
+
+Python >= 3.11, 주요 의존성: pywebview, psycopg2-binary, watchdog, python-dotenv, rich, python-telegram-bot, pywin32 (Windows).
+
+## 에이전트 역할 분담
+
+- **Gemini**: 전체 설계 및 오케스트레이션
+- **Claude**: 정밀 로직 구현 및 프론트엔드 최적화
+- `task_logs.jsonl`과 `hive_tasks` 테이블로 진행 상황 공유
+
+## 작업 완료 리포트 (필수)
+
+단위 작업 완료 시 반드시 간결하게 출력:
+- **수정/생성된 파일:** (경로 나열)
+- **원인 (Why):** (1줄 요약)
+- **수정 내용 (How):** (1~2줄 요약)
