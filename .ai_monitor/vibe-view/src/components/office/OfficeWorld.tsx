@@ -1,511 +1,464 @@
 /**
  * ------------------------------------------------------------------------
- * 📄 파일명: OfficeWorld.tsx
- * 📝 설명: DeskRPG-Lite 2D 오피스 월드 렌더링.
- *          Canvas 2D로 야간 오피스 배경 + T1~T8 책상 + 픽셀아트 에이전트 아바타를 그립니다.
- *          에이전트 상태에 따라 idle/working 애니메이션, 말풍선, 호버 하이라이트를 표현합니다.
+ * FILE: OfficeWorld.tsx
+ * DESCRIPTION: 메타버스 오피스 Phase 1 월드 렌더러.
+ *              존 기반 2D 캔버스 오피스를 렌더링하고 에이전트를 각 공간으로 배치한다.
  * REVISION HISTORY:
- * - 2026-04-03 Claude: Phase 2 — 픽셀아트 아바타, 말풍선, 호버, 인월드 이벤트 애니메이션
- * - 2026-04-03 Claude: 초기 생성 — Canvas 2D 오피스 + 에이전트 아바타
+ * - 2026-04-06 Codex: 존 기반 메타버스 오피스 월드로 재작성
+ * - 2026-04-03 Claude: 초기 생성 — DeskRPG-Lite 캔버스 월드
  * ------------------------------------------------------------------------
  */
 
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { OfficeAgentPresence, OfficeEventCard, OfficeZone, OfficeZoneState } from '../../hooks/useOfficeState';
 
-// 에이전트 타입별 색상 + 픽셀 아바타 색상 매핑
-const AGENT_COLORS: Record<string, { main: string; glow: string; label: string; body: string; hair: string }> = {
-  claude:  { main: '#8b5cf6', glow: 'rgba(139,92,246,0.3)', label: 'Claude', body: '#7c3aed', hair: '#c4b5fd' },
-  gemini:  { main: '#10b981', glow: 'rgba(16,185,129,0.3)', label: 'Gemini', body: '#059669', hair: '#6ee7b7' },
-  codex:   { main: '#06b6d4', glow: 'rgba(6,182,212,0.3)',  label: 'Codex',  body: '#0891b2', hair: '#67e8f9' },
-};
-
-// 책상 배치: 2행 4열 오피스 레이아웃 (비율 기반 좌표)
-const DESK_LAYOUT = [
-  { id: 0, label: 'T1', rx: 0.12, ry: 0.28 },
-  { id: 1, label: 'T2', rx: 0.30, ry: 0.28 },
-  { id: 2, label: 'T3', rx: 0.48, ry: 0.28 },
-  { id: 3, label: 'T4', rx: 0.66, ry: 0.28 },
-  { id: 4, label: 'T5', rx: 0.12, ry: 0.62 },
-  { id: 5, label: 'T6', rx: 0.30, ry: 0.62 },
-  { id: 6, label: 'T7', rx: 0.48, ry: 0.62 },
-  { id: 7, label: 'T8', rx: 0.66, ry: 0.62 },
-];
-
-// 특수 오브젝트: 유저 책상, 회의실, 휴게실
-const SPECIAL_OBJECTS = [
-  { id: 'user', label: '내 책상', rx: 0.40, ry: 0.88, color: '#f59e0b', emoji: '👤' },
-  { id: 'meeting', label: '회의실', rx: 0.82, ry: 0.28, color: '#ef4444', emoji: '🗓' },
-  { id: 'lounge', label: '휴게실', rx: 0.82, ry: 0.62, color: '#6366f1', emoji: '☕' },
-];
-
-// 말풍선 데이터 타입
 interface SpeechBubble {
   deskId: number;
   text: string;
   createdAt: number;
-  duration: number; // ms
+  duration: number;
 }
 
 interface OfficeWorldProps {
-  agentTerminals: Record<string, any>;
+  presences: OfficeAgentPresence[];
+  zones: OfficeZoneState[];
+  events: OfficeEventCard[];
   selectedDesk: number;
   onDeskClick: (slotId: number) => void;
-  // 인월드 이벤트용 — 외부에서 말풍선 주입
+  onZoneClick?: (zone: OfficeZone) => void;
   speechBubbles?: SpeechBubble[];
 }
 
-// ── 픽셀아트 캐릭터 그리기 함수 (8x12 픽셀 스케일) ──
-function drawPixelCharacter(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number,
-  bodyColor: string, hairColor: string,
-  isWorking: boolean, t: number, scale: number = 2.5
-) {
-  const s = scale; // 픽셀 크기
-  const ox = x - 4 * s; // 중심 정렬 (8px 너비의 절반)
-  const oy = y - 12 * s; // 발 기준 → 머리 위로
+type Rect = { x: number; y: number; w: number; h: number };
 
-  // 타이핑 애니메이션: 상체 미세 흔들림
-  const bobY = isWorking ? Math.sin(t * 6) * 1.2 : 0;
-  // 팔 각도 (타이핑 중 팔이 움직임)
-  const armPhase = isWorking ? Math.floor(t * 4) % 2 : 0;
+const AGENT_COLORS: Record<string, { main: string; glow: string; body: string; hair: string }> = {
+  claude: { main: '#8b5cf6', glow: 'rgba(139,92,246,0.28)', body: '#6d28d9', hair: '#c4b5fd' },
+  gemini: { main: '#10b981', glow: 'rgba(16,185,129,0.26)', body: '#059669', hair: '#86efac' },
+  codex: { main: '#06b6d4', glow: 'rgba(6,182,212,0.28)', body: '#0891b2', hair: '#a5f3fc' },
+  unknown: { main: '#94a3b8', glow: 'rgba(148,163,184,0.24)', body: '#64748b', hair: '#e2e8f0' },
+};
 
-  ctx.save();
+const ZONE_LAYOUT: Record<OfficeZone, Rect> = {
+  desk: { x: 0.05, y: 0.16, w: 0.56, h: 0.58 },
+  meeting: { x: 0.66, y: 0.11, w: 0.27, h: 0.22 },
+  review: { x: 0.66, y: 0.37, w: 0.27, h: 0.19 },
+  memory: { x: 0.66, y: 0.60, w: 0.27, h: 0.16 },
+  git: { x: 0.05, y: 0.80, w: 0.24, h: 0.12 },
+  lounge: { x: 0.32, y: 0.80, w: 0.29, h: 0.12 },
+  recovery: { x: 0.66, y: 0.80, w: 0.27, h: 0.12 },
+  user: { x: 0.05, y: 0.04, w: 0.20, h: 0.08 },
+};
 
-  // ── 머리카락 (상단) ──
-  ctx.fillStyle = hairColor;
-  ctx.fillRect(ox + 1*s, oy + bobY, 6*s, 2*s); // 머리카락 (위)
-  ctx.fillRect(ox + 0*s, oy + 1*s + bobY, 8*s, 1*s); // 머리카락 (옆)
+const DESK_SLOTS = [
+  { id: 0, col: 0, row: 0 },
+  { id: 1, col: 1, row: 0 },
+  { id: 2, col: 2, row: 0 },
+  { id: 3, col: 3, row: 0 },
+  { id: 4, col: 0, row: 1 },
+  { id: 5, col: 1, row: 1 },
+  { id: 6, col: 2, row: 1 },
+  { id: 7, col: 3, row: 1 },
+];
 
-  // ── 얼굴 ──
-  ctx.fillStyle = '#fcd9b6'; // 살색
-  ctx.fillRect(ox + 1*s, oy + 2*s + bobY, 6*s, 3*s); // 얼굴
-  // 눈
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(ox + 2*s, oy + 3*s + bobY, 1*s, 1*s); // 왼쪽 눈
-  ctx.fillRect(ox + 5*s, oy + 3*s + bobY, 1*s, 1*s); // 오른쪽 눈
-
-  // ── 몸통 ──
-  ctx.fillStyle = bodyColor;
-  ctx.fillRect(ox + 1*s, oy + 5*s + bobY, 6*s, 4*s); // 상체
-
-  // ── 팔 (타이핑 애니메이션) ──
-  ctx.fillStyle = bodyColor;
-  if (isWorking) {
-    // 왼팔 — 타이핑
-    ctx.fillRect(ox - 1*s, oy + 5*s + bobY + (armPhase === 0 ? 0 : s), 2*s, 3*s);
-    // 오른팔 — 타이핑 (반대 위상)
-    ctx.fillRect(ox + 7*s, oy + 5*s + bobY + (armPhase === 1 ? 0 : s), 2*s, 3*s);
-    // 손
-    ctx.fillStyle = '#fcd9b6';
-    ctx.fillRect(ox - 1*s, oy + 8*s + bobY + (armPhase === 0 ? 0 : s), 2*s, 1*s);
-    ctx.fillRect(ox + 7*s, oy + 8*s + bobY + (armPhase === 1 ? 0 : s), 2*s, 1*s);
-  } else {
-    // idle — 팔 내림
-    ctx.fillRect(ox - 1*s, oy + 5*s, 2*s, 4*s);
-    ctx.fillRect(ox + 7*s, oy + 5*s, 2*s, 4*s);
-    ctx.fillStyle = '#fcd9b6';
-    ctx.fillRect(ox - 1*s, oy + 9*s, 2*s, 1*s);
-    ctx.fillRect(ox + 7*s, oy + 9*s, 2*s, 1*s);
-  }
-
-  // ── 다리 ──
-  ctx.fillStyle = '#334155'; // 바지색
-  ctx.fillRect(ox + 1*s, oy + 9*s, 2.5*s, 3*s); // 왼다리
-  ctx.fillRect(ox + 4.5*s, oy + 9*s, 2.5*s, 3*s); // 오른다리
-
-  ctx.restore();
+function getDeskAnchor(slotId: number, width: number, height: number) {
+  const rect = ZONE_LAYOUT.desk;
+  const px = rect.x * width;
+  const py = rect.y * height;
+  const pw = rect.w * width;
+  const ph = rect.h * height;
+  const slot = DESK_SLOTS.find((item) => item.id === slotId) ?? DESK_SLOTS[0];
+  const gapX = pw / 4.7;
+  const gapY = ph / 2.5;
+  return {
+    x: px + 90 + slot.col * gapX,
+    y: py + 95 + slot.row * gapY,
+  };
 }
 
-// ── 말풍선 그리기 ──
-function drawSpeechBubble(
+function getZonePoints(zone: OfficeZone, width: number, height: number, count: number) {
+  const rect = ZONE_LAYOUT[zone];
+  const px = rect.x * width;
+  const py = rect.y * height;
+  const pw = rect.w * width;
+  const ph = rect.h * height;
+  const points: Array<{ x: number; y: number }> = [];
+
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count || 1)));
+  const rows = Math.max(1, Math.ceil((count || 1) / cols));
+  const stepX = pw / (cols + 1);
+  const stepY = ph / (rows + 1);
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      points.push({
+        x: px + stepX * (col + 1),
+        y: py + stepY * (row + 1),
+      });
+    }
+  }
+
+  return points;
+}
+
+function drawAgent(
   ctx: CanvasRenderingContext2D,
-  x: number, y: number,
-  text: string, opacity: number
+  presence: OfficeAgentPresence,
+  x: number,
+  y: number,
+  selected: boolean,
+  t: number,
 ) {
+  const colors = AGENT_COLORS[presence.colorKey] ?? AGENT_COLORS.unknown;
+  const busy = presence.status === 'running' || presence.status === 'started';
+  const bobY = busy ? Math.sin(t * 5 + presence.slotId) * 2 : 0;
+
   ctx.save();
-  ctx.globalAlpha = opacity;
 
-  const maxWidth = 120;
-  ctx.font = '10px "Inter", system-ui, sans-serif';
-  const metrics = ctx.measureText(text);
-  const textW = Math.min(metrics.width + 16, maxWidth);
-  const textH = 22;
-  const bx = x - textW / 2;
-  const by = y - textH;
-
-  // 말풍선 배경
-  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.shadowColor = colors.main;
+  ctx.shadowBlur = selected ? 24 : busy ? 12 : 0;
+  ctx.fillStyle = selected ? `${colors.main}55` : colors.glow;
   ctx.beginPath();
-  ctx.roundRect(bx, by, textW, textH, 6);
+  ctx.ellipse(x, y + 20, selected ? 22 : 18, 7, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.shadowBlur = 0;
 
-  // 말풍선 꼬리
-  ctx.beginPath();
-  ctx.moveTo(x - 4, y);
-  ctx.lineTo(x, y + 6);
-  ctx.lineTo(x + 4, y);
-  ctx.closePath();
-  ctx.fill();
+  ctx.fillStyle = colors.hair;
+  ctx.fillRect(x - 9, y - 22 + bobY, 18, 7);
+  ctx.fillStyle = '#fde3c1';
+  ctx.fillRect(x - 8, y - 15 + bobY, 16, 11);
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(x - 5, y - 11 + bobY, 2, 2);
+  ctx.fillRect(x + 3, y - 11 + bobY, 2, 2);
+  ctx.fillStyle = colors.body;
+  ctx.fillRect(x - 10, y - 2 + bobY, 20, 18);
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(x - 8, y + 16 + bobY, 5, 12);
+  ctx.fillRect(x + 3, y + 16 + bobY, 5, 12);
 
-  // 텍스트
-  ctx.fillStyle = '#1a1a2e';
+  ctx.fillStyle = colors.main;
+  ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text.length > 16 ? text.substring(0, 15) + '…' : text, x, by + textH / 2);
+  ctx.fillText(`T${presence.slotId + 1}`, x, y - 30);
+
+  const badge = presence.liveTask
+    ? presence.liveTask.slice(0, 16)
+    : presence.zone === 'lounge'
+      ? 'idle'
+      : presence.pipelineStage || presence.zone;
+  const badgeWidth = Math.max(34, ctx.measureText(badge).width + 12);
+  ctx.fillStyle = 'rgba(8,15,28,0.86)';
+  ctx.strokeStyle = `${colors.main}66`;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x - badgeWidth / 2, y - 47, badgeWidth, 16, 8);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
+  ctx.fillText(badge, x, y - 35.5);
 
   ctx.restore();
 }
 
-// ── 진행률 바 그리기 ──
-function drawProgressBar(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number,
-  progress: number, // 0~1
-  color: string
-) {
-  const w = 40;
-  const h = 4;
-  const bx = x - w / 2;
-
-  // 배경
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.beginPath();
-  ctx.roundRect(bx, y, w, h, 2);
-  ctx.fill();
-
-  // 진행
-  if (progress > 0) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(bx, y, w * Math.min(progress, 1), h, 2);
-    ctx.fill();
-  }
-}
-
-export default function OfficeWorld({ agentTerminals, selectedDesk, onDeskClick, speechBubbles = [] }: OfficeWorldProps) {
+export default function OfficeWorld({
+  presences,
+  zones,
+  events,
+  selectedDesk,
+  onDeskClick,
+  onZoneClick,
+  speechBubbles = [],
+}: OfficeWorldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const animFrameRef = useRef(0);
+  const rafRef = useRef(0);
+  const positionsRef = useRef<Record<string, { x: number; y: number; tx: number; ty: number; zone: OfficeZone }>>({});
   const [hoveredDesk, setHoveredDesk] = useState<number | null>(null);
 
-  // 에이전트 상태 조회 헬퍼
-  const getAgentInfo = useCallback((slotId: number) => {
-    const termId = `terminal_${slotId + 1}`;
-    const data = agentTerminals[termId];
-    if (!data) return { cli: '', status: 'offline', pipeline: 'idle', liveTask: '' };
-    return {
-      cli: (data.cli || '').toLowerCase(),
-      status: data.status || 'idle',
-      pipeline: data.pipeline_stage || 'idle',
-      liveTask: data.live_task || '',
-    };
-  }, [agentTerminals]);
-
-  // 렌더 루프
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
     const rect = container.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
-    const W = rect.width;
-    const H = rect.height;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     const t = Date.now() / 1000;
     const now = Date.now();
 
-    // ── 배경: 야간 오피스 ──
-    ctx.fillStyle = '#0a0a12';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#071019';
+    ctx.fillRect(0, 0, width, height);
 
-    // 바닥 그리드 (미세한 타일 패턴)
-    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
-    ctx.lineWidth = 1;
-    const gridSize = 40;
-    for (let gx = 0; gx < W; gx += gridSize) {
-      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
-    }
-    for (let gy = 0; gy < H; gy += gridSize) {
-      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
-    }
+    const bg = ctx.createLinearGradient(0, 0, width, height);
+    bg.addColorStop(0, 'rgba(8,145,178,0.10)');
+    bg.addColorStop(0.6, 'rgba(139,92,246,0.06)');
+    bg.addColorStop(1, 'rgba(14,165,233,0.02)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, width, height);
 
-    // 바닥 앰비언트 — 중앙 약간 밝은 원형 비네팅
-    const grad = ctx.createRadialGradient(W * 0.4, H * 0.5, 0, W * 0.4, H * 0.5, W * 0.6);
-    grad.addColorStop(0, 'rgba(59,130,246,0.03)');
-    grad.addColorStop(1, 'transparent');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-
-    // 천장 네온 라인들
-    const neonY = H * 0.08;
-    ctx.shadowColor = '#3b82f6';
-    ctx.shadowBlur = 15;
-    ctx.strokeStyle = 'rgba(59,130,246,0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(W * 0.05, neonY); ctx.lineTo(W * 0.55, neonY); ctx.stroke();
-    // 두 번째 네온 라인 (보라)
-    ctx.shadowColor = '#8b5cf6';
-    ctx.strokeStyle = 'rgba(139,92,246,0.3)';
-    ctx.beginPath(); ctx.moveTo(W * 0.60, neonY); ctx.lineTo(W * 0.90, neonY); ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // "VIBE OFFICE" 네온 사인 텍스트
-    ctx.font = 'bold 14px "Inter", system-ui, sans-serif';
-    ctx.fillStyle = `rgba(59,130,246,${0.5 + 0.2 * Math.sin(t * 2)})`;
-    ctx.shadowColor = '#3b82f6';
-    ctx.shadowBlur = 20;
-    ctx.textAlign = 'left';
-    ctx.fillText('VIBE OFFICE', W * 0.05, neonY - 8);
-    ctx.shadowBlur = 0;
-
-    // ── 책상 + 에이전트 렌더링 ──
-    const deskW = 80;
-    const deskH = 50;
-
-    for (const desk of DESK_LAYOUT) {
-      const x = desk.rx * W;
-      const y = desk.ry * H;
-      const agent = getAgentInfo(desk.id);
-      const colors = AGENT_COLORS[agent.cli] || { main: '#555', glow: 'rgba(85,85,85,0.2)', label: '', body: '#555', hair: '#888' };
-      const isActive = agent.status === 'running' || agent.status === 'started';
-      const isSelected = selectedDesk === desk.id;
-      const isHovered = hoveredDesk === desk.id;
-
-      // 호버/선택 글로우
-      if (isSelected || isHovered) {
-        ctx.shadowColor = colors.main || '#3b82f6';
-        ctx.shadowBlur = isSelected ? 25 : 15;
-        ctx.fillStyle = isSelected
-          ? (colors.glow || 'rgba(59,130,246,0.15)')
-          : 'rgba(255,255,255,0.05)';
-        ctx.fillRect(x - deskW/2 - 8, y - deskH/2 - 8, deskW + 16, deskH + 16);
-        ctx.shadowBlur = 0;
-      }
-
-      // 책상 본체 — 모니터 + 키보드 디테일
-      ctx.fillStyle = isSelected ? '#1e293b' : '#151520';
-      ctx.strokeStyle = isActive ? colors.main : (isHovered ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)');
-      ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    for (let gx = 0; gx <= width; gx += 42) {
       ctx.beginPath();
-      ctx.roundRect(x - deskW/2, y - deskH/2, deskW, deskH, 6);
+      ctx.moveTo(gx, 0);
+      ctx.lineTo(gx, height);
+      ctx.stroke();
+    }
+    for (let gy = 0; gy <= height; gy += 42) {
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      ctx.lineTo(width, gy);
+      ctx.stroke();
+    }
+
+    (Object.keys(ZONE_LAYOUT) as OfficeZone[]).forEach((zoneId) => {
+      const zoneRect = ZONE_LAYOUT[zoneId];
+      const zone = zones.find((item) => item.id === zoneId);
+      const x = zoneRect.x * width;
+      const y = zoneRect.y * height;
+      const w = zoneRect.w * width;
+      const h = zoneRect.h * height;
+      const occupied = zone?.occupancy ?? 0;
+      const warningCount = zone?.warningCount ?? 0;
+      const congestion = Math.min(occupied / 4, 1);
+      const highlight = zoneId === 'recovery'
+        ? 'rgba(248,113,113,0.12)'
+        : zoneId === 'meeting'
+          ? 'rgba(34,197,94,0.10)'
+          : zoneId === 'memory'
+            ? 'rgba(250,204,21,0.08)'
+            : 'rgba(255,255,255,0.03)';
+
+      ctx.fillStyle = highlight;
+      ctx.strokeStyle = occupied > 0 ? 'rgba(148,163,184,0.24)' : 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 18);
       ctx.fill();
       ctx.stroke();
 
-      // 책상 위 모니터 (작은 사각형)
-      ctx.fillStyle = isActive ? `${colors.main}44` : 'rgba(255,255,255,0.04)';
-      ctx.fillRect(x - 12, y - deskH/2 + 6, 24, 16);
-      ctx.strokeStyle = isActive ? colors.main : 'rgba(255,255,255,0.1)';
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(x - 12, y - deskH/2 + 6, 24, 16);
-
-      // 모니터 스크린 라인 (작업 중이면 깜빡임)
-      if (isActive) {
-        const lineCount = 3;
-        for (let i = 0; i < lineCount; i++) {
-          const ly = y - deskH/2 + 9 + i * 4;
-          const lw = 8 + ((i + Math.floor(t * 3)) % 3) * 4;
-          ctx.fillStyle = `${colors.main}88`;
-          ctx.fillRect(x - 10, ly, lw, 1.5);
-        }
-      }
-
-      // 키보드 (작은 직사각형)
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(x - 8, y + deskH/2 - 10, 16, 5);
-
-      // 터미널 번호 라벨
-      ctx.font = 'bold 10px "Inter", system-ui, sans-serif';
-      ctx.fillStyle = isSelected ? colors.main : 'rgba(255,255,255,0.3)';
-      ctx.textAlign = 'center';
-      ctx.fillText(desk.label, x, y + deskH/2 + 14);
-
-      // ── 픽셀아트 에이전트 아바타 ──
-      if (agent.cli) {
-        const avatarX = x;
-        const avatarY = y - deskH/2 - 2; // 책상 위
-
-        // 활성 상태 글로우 (아바타 아래 바닥)
-        if (isActive) {
-          ctx.shadowColor = colors.main;
-          ctx.shadowBlur = 8 + 3 * Math.sin(t * 3);
-          ctx.fillStyle = `${colors.glow}`;
-          ctx.beginPath();
-          ctx.ellipse(avatarX, avatarY + 2, 12, 4, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        }
-
-        // 픽셀 캐릭터 그리기
-        drawPixelCharacter(ctx, avatarX, avatarY, colors.body, colors.hair, isActive, t);
-
-        // 에이전트 이름 (머리 위)
-        ctx.font = 'bold 9px "Inter", system-ui, sans-serif';
-        ctx.fillStyle = colors.main;
-        ctx.textAlign = 'center';
-        ctx.fillText(colors.label, avatarX, avatarY - 12 * 2.5 - 8);
-
-        // 상태 버블 배지
-        const pipelineText = agent.pipeline === 'modifying' ? '✏️ 수정중' :
-                             agent.pipeline === 'analyzing' ? '🔍 분석중' :
-                             agent.pipeline === 'verifying' ? '✅ 검증중' :
-                             isActive ? '⚡ 작업중' : '💤 대기';
-
-        // 상태 배지 (이름 아래)
-        ctx.font = '8px "Inter", system-ui, sans-serif';
-        const badgeW = ctx.measureText(pipelineText).width + 10;
-        const badgeX = avatarX - badgeW / 2;
-        const badgeY = avatarY - 12 * 2.5 - 4;
-        ctx.fillStyle = isActive ? `${colors.main}33` : 'rgba(255,255,255,0.05)';
+      if (congestion > 0 || warningCount > 0) {
+        const heatColor = zoneId === 'recovery'
+          ? `rgba(248,113,113,${0.12 + warningCount * 0.08})`
+          : `rgba(34,211,238,${0.04 + congestion * 0.10})`;
+        ctx.fillStyle = heatColor;
         ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeW, 13, 3);
+        ctx.roundRect(x + 8, y + 8, w - 16, h - 16, 14);
         ctx.fill();
-        ctx.fillStyle = isActive ? colors.main : 'rgba(255,255,255,0.4)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pipelineText, avatarX, badgeY + 6.5);
-        ctx.textBaseline = 'alphabetic';
-
-        // 진행률 바 (working 상태일 때)
-        if (isActive) {
-          // 의사 진행률: 시간 기반 순환 (실제 진행률 API 없으면 시각적 효과용)
-          const fakeProgress = (t * 0.05) % 1;
-          drawProgressBar(ctx, avatarX, avatarY + 4, fakeProgress, colors.main);
-        }
-      } else {
-        // 빈 책상 — 모니터 꺼짐 아이콘
-        ctx.font = '16px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('🖥️', x, y - 2);
-        ctx.font = '8px "Inter", system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.15)';
-        ctx.fillText('빈 자리', x, y + 12);
       }
-    }
 
-    // ── 특수 오브젝트 렌더링 ──
-    for (const obj of SPECIAL_OBJECTS) {
-      const ox = obj.rx * W;
-      const oy = obj.ry * H;
-      const objW = 70;
-      const objH = 40;
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 12px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(zone?.label ?? zoneId, x + 14, y + 22);
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillText(`${occupied} agents`, x + 14, y + 38);
+      if (warningCount > 0) {
+        ctx.fillStyle = 'rgba(252,165,165,0.92)';
+        ctx.fillText(`${warningCount} alerts`, x + 14, y + 52);
+      } else if (occupied >= 3) {
+        ctx.fillStyle = 'rgba(125,211,252,0.86)';
+        ctx.fillText('high traffic', x + 14, y + 52);
+      }
+    });
 
-      ctx.fillStyle = 'rgba(255,255,255,0.03)';
-      ctx.strokeStyle = `${obj.color}33`;
-      ctx.lineWidth = 1;
+    DESK_SLOTS.forEach((desk) => {
+      const anchor = getDeskAnchor(desk.id, width, height);
+      const selected = selectedDesk === desk.id;
+      const hovered = hoveredDesk === desk.id;
+      ctx.fillStyle = selected ? 'rgba(34,211,238,0.18)' : hovered ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.6)';
+      ctx.strokeStyle = selected ? 'rgba(34,211,238,0.55)' : 'rgba(255,255,255,0.08)';
       ctx.beginPath();
-      ctx.roundRect(ox - objW/2, oy - objH/2, objW, objH, 8);
+      ctx.roundRect(anchor.x - 44, anchor.y - 28, 88, 56, 10);
       ctx.fill();
       ctx.stroke();
 
-      ctx.font = '18px sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(anchor.x - 13, anchor.y - 20, 26, 15);
+      ctx.fillStyle = selected ? '#67e8f9' : 'rgba(255,255,255,0.30)';
+      ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(obj.emoji, ox, oy + 2);
-      ctx.font = '9px "Inter", system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.fillText(obj.label, ox, oy + objH/2 + 12);
-    }
+      ctx.fillText(`T${desk.id + 1}`, anchor.x, anchor.y + 39);
+    });
 
-    // ── 말풍선 렌더링 ──
-    for (const bubble of speechBubbles) {
-      const desk = DESK_LAYOUT[bubble.deskId];
-      if (!desk) continue;
+    const grouped = new Map<OfficeZone, OfficeAgentPresence[]>();
+    presences.forEach((presence) => {
+      const list = grouped.get(presence.zone) ?? [];
+      list.push(presence);
+      grouped.set(presence.zone, list);
+    });
+
+    presences.forEach((presence) => {
+      const selected = selectedDesk === presence.slotId;
+      let target = getDeskAnchor(presence.slotId, width, height);
+
+      if (presence.zone !== 'desk') {
+        const members = grouped.get(presence.zone) ?? [];
+        const points = getZonePoints(presence.zone, width, height, members.length);
+        const memberIndex = members.findIndex((member) => member.terminalId === presence.terminalId);
+        target = points[Math.max(0, memberIndex)] ?? target;
+      }
+
+      const prev = positionsRef.current[presence.terminalId];
+      if (!prev) {
+        positionsRef.current[presence.terminalId] = {
+          x: target.x,
+          y: target.y,
+          tx: target.x,
+          ty: target.y,
+          zone: presence.zone,
+        };
+      } else {
+        prev.tx = target.x;
+        prev.ty = target.y;
+        prev.zone = presence.zone;
+        prev.x += (prev.tx - prev.x) * 0.14;
+        prev.y += (prev.ty - prev.y) * 0.14;
+      }
+
+      const point = positionsRef.current[presence.terminalId];
+      const moving = Math.abs(point.tx - point.x) + Math.abs(point.ty - point.y) > 2.5;
+
+      if (moving) {
+        ctx.strokeStyle = presence.zone === 'recovery' ? 'rgba(248,113,113,0.30)' : 'rgba(125,211,252,0.20)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(point.x, point.y + 10);
+        ctx.lineTo(point.tx, point.ty + 10);
+        ctx.stroke();
+      }
+
+      drawAgent(ctx, presence, point.x, point.y, selected, t);
+
+      if (moving) {
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('moving', point.x, point.y + 38);
+      }
+    });
+
+    speechBubbles.forEach((bubble) => {
+      if (now - bubble.createdAt > bubble.duration) return;
+      const point = getDeskAnchor(bubble.deskId, width, height);
+      const fadeFrom = bubble.duration * 0.65;
       const elapsed = now - bubble.createdAt;
-      if (elapsed > bubble.duration) continue;
-      // 페이드 아웃
-      const fadeStart = bubble.duration * 0.7;
-      const opacity = elapsed > fadeStart
-        ? 1 - (elapsed - fadeStart) / (bubble.duration - fadeStart)
-        : 1;
-      const bx = desk.rx * W;
-      const by = desk.ry * H - deskH/2 - 12 * 2.5 - 24; // 아바타 머리 위
-      drawSpeechBubble(ctx, bx, by, bubble.text, opacity);
+      const opacity = elapsed > fadeFrom ? 1 - (elapsed - fadeFrom) / (bubble.duration - fadeFrom) : 1;
+      const text = bubble.text.slice(0, 18);
+      const tw = Math.max(56, ctx.measureText(text).width + 18);
+
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.fillStyle = 'rgba(255,255,255,0.94)';
+      ctx.beginPath();
+      ctx.roundRect(point.x - tw / 2, point.y - 76, tw, 22, 8);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(point.x - 4, point.y - 54);
+      ctx.lineTo(point.x, point.y - 46);
+      ctx.lineTo(point.x + 4, point.y - 54);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, point.x, point.y - 61);
+      ctx.restore();
+    });
+
+    events.slice(0, 3).forEach((event, index) => {
+      const x = width - 270;
+      const y = 28 + index * 48;
+      ctx.fillStyle = 'rgba(8,15,28,0.84)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, 240, 38, 10);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(event.title, x + 12, y + 15);
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillText(event.subtitle.slice(0, 42), x + 12, y + 29);
+    });
+
+    rafRef.current = window.requestAnimationFrame(render);
+  }, [events, hoveredDesk, onDeskClick, presences, selectedDesk, speechBubbles, zones]);
+
+  useEffect(() => {
+    rafRef.current = window.requestAnimationFrame(render);
+    return () => window.cancelAnimationFrame(rafRef.current);
+  }, [render]);
+
+  const findDeskAtPoint = useCallback((mx: number, my: number, width: number, height: number) => {
+    for (const desk of DESK_SLOTS) {
+      const anchor = getDeskAnchor(desk.id, width, height);
+      if (mx >= anchor.x - 48 && mx <= anchor.x + 48 && my >= anchor.y - 34 && my <= anchor.y + 34) {
+        return desk.id;
+      }
     }
+    return null;
+  }, []);
 
-    // 다음 프레임
-    animFrameRef.current = requestAnimationFrame(render);
-  }, [agentTerminals, selectedDesk, hoveredDesk, getAgentInfo, speechBubbles]);
+  const findZoneAtPoint = useCallback((mx: number, my: number, width: number, height: number) => {
+    const ordered: OfficeZone[] = ['meeting', 'review', 'memory', 'git', 'lounge', 'recovery', 'user', 'desk'];
+    for (const zone of ordered) {
+      const rect = ZONE_LAYOUT[zone];
+      const x = rect.x * width;
+      const y = rect.y * height;
+      const w = rect.w * width;
+      const h = rect.h * height;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+        return zone;
+      }
+    }
+    return null;
+  }, []);
 
-  // Canvas 초기화 + 애니메이션 루프
-  useEffect(() => {
-    animFrameRef.current = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animFrameRef.current);
-  }, [render]);
-
-  // 리사이즈 대응
-  useEffect(() => {
-    const handleResize = () => {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = requestAnimationFrame(render);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [render]);
-
-  // 마우스 이동 — 호버 감지
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const W = rect.width;
-    const H = rect.height;
-    const deskW = 80;
-    const deskH = 50;
-
-    let found: number | null = null;
-    for (const desk of DESK_LAYOUT) {
-      const dx = desk.rx * W;
-      const dy = desk.ry * H;
-      if (mx >= dx - deskW/2 - 10 && mx <= dx + deskW/2 + 10 &&
-          my >= dy - deskH/2 - 40 && my <= dy + deskH/2 + 10) {
-        found = desk.id;
-        break;
-      }
-    }
-    setHoveredDesk(found);
+    const deskId = findDeskAtPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+    setHoveredDesk(deskId);
   };
 
-  // 클릭 처리
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const W = rect.width;
-    const H = rect.height;
-    const deskW = 80;
-    const deskH = 50;
+    const deskId = findDeskAtPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+    if (deskId !== null) {
+      onDeskClick(deskId);
+      return;
+    }
 
-    for (const desk of DESK_LAYOUT) {
-      const dx = desk.rx * W;
-      const dy = desk.ry * H;
-      if (mx >= dx - deskW/2 - 10 && mx <= dx + deskW/2 + 10 &&
-          my >= dy - deskH/2 - 40 && my <= dy + deskH/2 + 10) {
-        onDeskClick(desk.id);
-        return;
-      }
+    const zone = findZoneAtPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+    if (zone && onZoneClick) {
+      onZoneClick(zone);
     }
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full relative">
+    <div ref={containerRef} className="h-full w-full">
       <canvas
         ref={canvasRef}
-        className={`w-full h-full ${hoveredDesk !== null ? 'cursor-pointer' : 'cursor-default'}`}
-        onClick={handleClick}
+        className={`h-full w-full ${hoveredDesk !== null ? 'cursor-pointer' : 'cursor-default'}`}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoveredDesk(null)}
+        onClick={handleClick}
       />
     </div>
   );

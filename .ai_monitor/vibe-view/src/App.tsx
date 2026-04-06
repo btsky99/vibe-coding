@@ -234,6 +234,12 @@ function App({ onSwitchToOffice }: { onSwitchToOffice?: () => void }) {
     setActiveMenu(null);
   };
 
+  const openOfficePage = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('page', 'office');
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  };
+
   // AI 도구 설치 (글로벌 CLI + 현재 프로젝트 Playwright + 하네스 V2)
   const installTool = async (tool: string) => {
     setActiveMenu(null);
@@ -495,6 +501,7 @@ function App({ onSwitchToOffice }: { onSwitchToOffice?: () => void }) {
         onClearLogs={() => setLogs([])}
         onOpenMissionControl={() => setActiveTab('agent')}
         onSwitchToOffice={onSwitchToOffice}
+        onOpenOfficePage={openOfficePage}
       />
 
       {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}

@@ -13,7 +13,7 @@
 import { memo, useState, useRef, useEffect } from 'react';
 import {
   Menu, Terminal, RotateCw, Monitor,
-  X, Zap, Cpu, Info, ShieldCheck,
+  X, Zap, Cpu, Info, ShieldCheck, ExternalLink,
   Trash2, LayoutDashboard, ClipboardCheck, FileText, Copy, Check, RefreshCw
 } from 'lucide-react';
 import { API_BASE } from '../constants';
@@ -48,6 +48,7 @@ interface TopMenuBarProps {
   onOpenMissionControl: () => void;
   // 오피스 모드 전환 (optional — 클래식 모드에서만 전달됨)
   onSwitchToOffice?: () => void;
+  onOpenOfficePage?: () => void;
 }
 
 // ── 서버 로그 뷰어 모달 — 서버/PG/태스크 로그를 탭으로 전환하며 확인 + 클립보드 복사 ──
@@ -179,7 +180,7 @@ const TopMenuBar = memo(function TopMenuBar({
   updateReady, updateApplying, updateChecking,
   onApplyUpdate, onTriggerUpdateCheck,
   onOpenFolder, onInstallSkills, onInstallTool, onOpenHelpDoc, onClearLogs,
-  onOpenMissionControl, onSwitchToOffice,
+  onOpenMissionControl, onSwitchToOffice, onOpenOfficePage,
 }: TopMenuBarProps) {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
@@ -272,6 +273,14 @@ const TopMenuBar = memo(function TopMenuBar({
                   >
                     <Monitor className="w-3.5 h-3.5 text-[#8b5cf6]" /> 🏢 오피스 모드로 전환
                   </button>
+                  {onOpenOfficePage && (
+                    <button
+                      onClick={() => { onOpenOfficePage(); setActiveMenu(null); }}
+                      className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-[#22d3ee]" /> 오피스 페이지 직접 열기
+                    </button>
+                  )}
                 </>
               )}
               <div className="h-px bg-white/5 my-1 mx-2"></div>
@@ -429,6 +438,35 @@ const TopMenuBar = memo(function TopMenuBar({
 
       {/* ── 우측 — 업데이트 버튼 + 버전 배지 ── */}
       <div className="ml-auto flex items-center gap-2 text-[11px] text-[#969696] px-2 font-mono overflow-hidden">
+        <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1 py-0.5">
+          <button
+            type="button"
+            className="shrink-0 rounded bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-white"
+            title="현재 클래식 화면"
+          >
+            Classic
+          </button>
+          {onSwitchToOffice && (
+            <button
+              type="button"
+              onClick={onSwitchToOffice}
+              className="shrink-0 rounded px-2 py-0.5 text-[9px] font-semibold text-[#c4b5fd] hover:bg-white/10"
+              title="오피스 모드로 전환"
+            >
+              Office
+            </button>
+          )}
+          {onOpenOfficePage && (
+            <button
+              type="button"
+              onClick={onOpenOfficePage}
+              className="shrink-0 rounded px-2 py-0.5 text-[9px] font-semibold text-[#7dd3fc] hover:bg-white/10"
+              title="오피스 페이지를 새 창으로 열기"
+            >
+              Office Page
+            </button>
+          )}
+        </div>
         {/* 🧠 중앙 통제실(Mission Control) 탭으로 이동 — 자율 에이전트 + 오케스트레이터 통합 뷰 */}
         <button
           onClick={onOpenMissionControl}

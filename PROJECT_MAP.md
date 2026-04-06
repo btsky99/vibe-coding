@@ -23,6 +23,7 @@
 | `docs/CODEX_RUNTIME_SETUP.md` | 설치 후 PC별 Codex 런타임 설정 및 운영 가이드 |
 | `docs/HARNESS_CHECKS.md` |  |
 | `docs/HARNESS_V1.md` |  |
+| `docs/METAVERSE_OFFICE_DESIGN.md` | 가상 메타버스 오피스 시스템 제품 방향 + 공간 모델 + 구현 단계 설계 |
 | `docs/TERMINAL3_SCROLL_ISSUE.md` |  |
 | `docs/VIBE_PROJECT_GUIDE.md` | 하이브 마인드 운영 및 아키텍처 통합 가이드 |
 

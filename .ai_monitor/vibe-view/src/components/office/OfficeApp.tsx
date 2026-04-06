@@ -1,31 +1,40 @@
 /**
  * ------------------------------------------------------------------------
- * 📄 파일명: OfficeApp.tsx
- * 📝 설명: DeskRPG-Lite 가상 오피스 모드 최상위 컴포넌트.
- *          중앙에 2D 오피스 월드, 우측에 HUD 패널(기존 패널 재활용).
- *          useVibeData 훅을 통해 클래식 모드와 동일한 데이터를 공유합니다.
+ * FILE: OfficeApp.tsx
+ * DESCRIPTION: 메타버스 오피스 Phase 1 메인 컴포넌트.
+ *              기존 Office 모드를 확장하여 존 기반 월드, 운영 HUD,
+ *              선택 에이전트 인스펙터, 이벤트 레일을 함께 제공한다.
  * REVISION HISTORY:
- * - 2026-04-03 Claude: 초기 생성 — 오피스 월드 + HUD 패널 레이아웃
+ * - 2026-04-06 Codex: 메타버스 오피스 Phase 1 구조로 재작성
+ * - 2026-04-03 Claude: 초기 생성 — 2D 오피스 월드 + HUD 레이아웃
  * ------------------------------------------------------------------------
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Monitor, LayoutGrid, MessageSquare, ClipboardList, Database, GitBranch, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Activity,
+  ClipboardList,
+  Database,
+  GitBranch,
+  LayoutGrid,
+  MessageSquare,
+  Monitor,
+  Radar,
+} from 'lucide-react';
 import { useVibeData } from '../../hooks/useVibeData';
+import { type OfficeZone, useOfficeState } from '../../hooks/useOfficeState';
 import OfficeWorld from './OfficeWorld';
-/* ── 기존 패널 컴포넌트 재활용 ── */
 import TerminalSlot from '../TerminalSlot';
 import MessagesPanel from '../panels/MessagesPanel';
 import TasksPanel from '../panels/TasksPanel';
 import MemoryPanel from '../panels/MemoryPanel';
 import GitPanel from '../panels/GitPanel';
 
-// HUD 탭 목록 정의
 const HUD_TABS = [
-  { id: 'terminal', label: '터미널', icon: Monitor },
-  { id: 'tasks', label: '태스크', icon: ClipboardList },
-  { id: 'messages', label: '메시지', icon: MessageSquare },
-  { id: 'memory', label: '메모리', icon: Database },
+  { id: 'terminal', label: 'Terminal', icon: Monitor },
+  { id: 'tasks', label: 'Tasks', icon: ClipboardList },
+  { id: 'messages', label: 'Messages', icon: MessageSquare },
+  { id: 'memory', label: 'Memory', icon: Database },
   { id: 'git', label: 'Git', icon: GitBranch },
 ] as const;
 
@@ -35,15 +44,6 @@ interface OfficeAppProps {
   onSwitchToClassic?: () => void;
 }
 
-// 토스트 알림 타입
-interface Toast {
-  id: number;
-  text: string;
-  type: 'info' | 'success' | 'warning';
-  createdAt: number;
-}
-
-// 말풍선 타입 (OfficeWorld와 공유)
 interface SpeechBubble {
   deskId: number;
   text: string;
@@ -51,168 +51,407 @@ interface SpeechBubble {
   duration: number;
 }
 
+const ZONE_PANEL_MAP: Record<OfficeZone, HudTab> = {
+  desk: 'terminal',
+  meeting: 'messages',
+  review: 'tasks',
+  memory: 'memory',
+  git: 'git',
+  lounge: 'terminal',
+  recovery: 'terminal',
+  user: 'terminal',
+};
+
+const ZONE_ACTION_HINT: Record<OfficeZone, string> = {
+  desk: 'Live execution and pair work',
+  meeting: 'Debate, sync, and prompt routing',
+  review: 'Verification, lint, and QA passes',
+  memory: 'Shared notes, memory, and docs',
+  git: 'Branch, commit, and release flow',
+  lounge: 'Idle agents waiting for dispatch',
+  recovery: 'Blocked or failed agents needing intervention',
+  user: 'Operator focus and manual control',
+};
+
 export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   const vibe = useVibeData();
+  const office = useOfficeState({
+    agentTerminals: vibe.agentTerminals,
+    messages: vibe.messages,
+    memory: vibe.memory,
+    logs: vibe.logs,
+    hiveHealth: vibe.hiveHealth,
+  });
+
   const [hudTab, setHudTab] = useState<HudTab>('terminal');
-  const [selectedDesk, setSelectedDesk] = useState(0);
-
-  // ── 인월드 이벤트 시스템 ──
+  const [selectedDesk, setSelectedDesk] = useState(office.selectedDefaultSlot);
+  const [selectedZone, setSelectedZone] = useState<OfficeZone>('desk');
   const [speechBubbles, setSpeechBubbles] = useState<SpeechBubble[]>([]);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const prevAgentStates = useRef<Record<string, string>>({});
-  const toastIdRef = useRef(0);
+  const prevStatuses = useRef<Record<string, string>>({});
 
-  // 말풍선 추가 헬퍼
-  const addBubble = useCallback((deskId: number, text: string, duration = 4000) => {
-    setSpeechBubbles(prev => [...prev, { deskId, text, createdAt: Date.now(), duration }]);
-  }, []);
-
-  // 토스트 추가 헬퍼
-  const addToast = useCallback((text: string, type: Toast['type'] = 'info') => {
-    const id = ++toastIdRef.current;
-    setToasts(prev => [...prev.slice(-4), { id, text, type, createdAt: Date.now() }]);
-    // 5초 후 자동 제거
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-  }, []);
-
-  // 에이전트 상태 변화 감지 → 인월드 이벤트 발생
   useEffect(() => {
-    const prev = prevAgentStates.current;
-    for (const [tid, data] of Object.entries(vibe.agentTerminals) as [string, any][]) {
-      const slotNum = parseInt(tid.replace('terminal_', '')) - 1;
-      const curStatus = data.status || 'idle';
-      const prevStatus = prev[tid] || 'idle';
-      const cli = (data.cli || 'agent').toLowerCase();
+    setSelectedDesk((prev) => (prev > 7 ? office.selectedDefaultSlot : prev));
+  }, [office.selectedDefaultSlot]);
 
-      // idle → running: 작업 시작 말풍선
-      if (prevStatus !== 'running' && prevStatus !== 'started' && (curStatus === 'running' || curStatus === 'started')) {
-        addBubble(slotNum, '작업 시작! 💪');
-        addToast(`${cli} (T${slotNum + 1}) 작업 시작`, 'info');
+  useEffect(() => {
+    const nextBubbles: SpeechBubble[] = [];
+    const now = Date.now();
+
+    for (const presence of office.presences) {
+      const prev = prevStatuses.current[presence.terminalId] || 'idle';
+      const curr = presence.status;
+      if (prev !== curr && (curr === 'running' || curr === 'started')) {
+        nextBubbles.push({
+          deskId: presence.slotId,
+          text: presence.zone === 'meeting' ? 'meeting sync' : 'work start',
+          createdAt: now,
+          duration: 3500,
+        });
       }
-      // running → idle/done: 작업 완료 말풍선
-      if ((prevStatus === 'running' || prevStatus === 'started') && curStatus !== 'running' && curStatus !== 'started') {
-        addBubble(slotNum, '완료했어요! ✅', 5000);
-        addToast(`${cli} (T${slotNum + 1}) 작업 완료`, 'success');
+      if ((prev === 'running' || prev === 'started') && curr !== 'running' && curr !== 'started') {
+        nextBubbles.push({
+          deskId: presence.slotId,
+          text: 'task done',
+          createdAt: now,
+          duration: 4200,
+        });
       }
-      prev[tid] = curStatus;
+      prevStatuses.current[presence.terminalId] = curr;
     }
-  }, [vibe.agentTerminals, addBubble, addToast]);
 
-  // 만료된 말풍선 정리 (10초마다)
+    if (nextBubbles.length > 0) {
+      setSpeechBubbles((prev) => [...prev, ...nextBubbles].slice(-10));
+    }
+  }, [office.presences]);
+
   useEffect(() => {
-    const iv = setInterval(() => {
+    const timer = window.setInterval(() => {
       const now = Date.now();
-      setSpeechBubbles(prev => prev.filter(b => now - b.createdAt < b.duration));
-    }, 10000);
-    return () => clearInterval(iv);
+      setSpeechBubbles((prev) => prev.filter((bubble) => now - bubble.createdAt < bubble.duration));
+    }, 1500);
+    return () => window.clearInterval(timer);
   }, []);
 
-  // 책상 클릭 핸들러
-  const handleDeskClick = (slotId: number) => {
+  const selectedPresence = useMemo(
+    () => office.presences.find((presence) => presence.slotId === selectedDesk) ?? null,
+    [office.presences, selectedDesk],
+  );
+  const zoneSummary = office.zones.filter((zone) => zone.id !== 'user');
+  const projectName = vibe.currentPath.split(/[/\\]/).filter(Boolean).pop();
+  const selectedZoneState = useMemo(
+    () => office.zones.find((zone) => zone.id === selectedZone) ?? office.zones[0],
+    [office.zones, selectedZone],
+  );
+  const selectedZoneMembers = useMemo(
+    () => office.presences.filter((presence) => presence.zone === selectedZone).slice(0, 4),
+    [office.presences, selectedZone],
+  );
+
+  const routeZoneToPanel = (zone: OfficeZone) => {
+    setHudTab(ZONE_PANEL_MAP[zone]);
+  };
+
+  const handleZoneClick = (zone: OfficeZone) => {
+    setSelectedZone(zone);
+    routeZoneToPanel(zone);
+  };
+
+  const handleDeskSelect = (slotId: number) => {
     setSelectedDesk(slotId);
-    setHudTab('terminal');
+    const presence = office.presences.find((item) => item.slotId === slotId);
+    if (presence) {
+      setSelectedZone(presence.zone);
+      routeZoneToPanel(presence.zone);
+    } else {
+      setSelectedZone('desk');
+      setHudTab('terminal');
+    }
+  };
+
+  const handleEventFocus = (event: (typeof office.events)[number]) => {
+    setSelectedZone(event.zone);
+    routeZoneToPanel(event.zone);
+    const targetTerminalId = event.terminalIds[0];
+    if (!targetTerminalId) return;
+    const targetPresence = office.presences.find((presence) => presence.terminalId === targetTerminalId);
+    if (targetPresence) {
+      setSelectedDesk(targetPresence.slotId);
+    }
+  };
+
+  const summonMeeting = () => {
+    setSelectedZone('meeting');
+    setHudTab('messages');
+    setSpeechBubbles((prev) => [
+      ...prev,
+      ...office.presences.slice(0, 3).map((presence) => ({
+        deskId: presence.slotId,
+        text: 'move to meeting',
+        createdAt: Date.now(),
+        duration: 3000,
+      })),
+    ].slice(-12));
+  };
+
+  const requestReview = () => {
+    setSelectedZone('review');
+    setHudTab('tasks');
+    if (selectedPresence) {
+      setSpeechBubbles((prev) => [
+        ...prev,
+        {
+          deskId: selectedPresence.slotId,
+          text: 'review requested',
+          createdAt: Date.now(),
+          duration: 3200,
+        },
+      ].slice(-12));
+    }
+  };
+
+  const openStandaloneOfficePage = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('page', 'office');
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <div className="flex h-screen w-full bg-[#0a0a0f] text-[#e2e8f0] overflow-hidden font-sans flex-col">
-      {/* ── 상단 바 — 로고 + 프로젝트명 + 모드 전환 ── */}
-      <header className="h-10 bg-[#0f0f1a] border-b border-white/5 flex items-center justify-between px-4 shrink-0">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-[#081019] text-[#e5eef8]">
+      <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/5 bg-[#0b1320] px-4">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
+          <span className="bg-gradient-to-r from-cyan-300 via-sky-400 to-fuchsia-400 bg-clip-text text-sm font-black tracking-[0.35em] text-transparent">
             VIBE OFFICE
           </span>
-          <span className="text-[10px] text-white/30 font-mono">{vibe.appVersion}</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-mono text-white/45">
+            v{vibe.appVersion}
+          </span>
+          <span className="text-[10px] text-white/30">
+            active {office.summary.activeAgents} · blocked {office.summary.blockedAgents}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          {/* 에이전트 요약 — 활성 에이전트 수 */}
-          <div className="flex items-center gap-1.5 text-[10px]">
-            {Object.entries(vibe.agentTerminals).map(([tid, data]: [string, any]) => {
-              const isActive = data.status === 'running' || data.status === 'started';
-              return (
-                <div key={tid} className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-400 animate-pulse' : 'bg-white/10'}`}
-                  title={`${tid}: ${data.cli || 'idle'} — ${data.status || 'offline'}`}
-                />
-              );
-            })}
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1 py-0.5">
+            {onSwitchToClassic && (
+              <button
+                type="button"
+                onClick={onSwitchToClassic}
+                className="rounded px-2 py-0.5 text-[10px] font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+              >
+                Classic
+              </button>
+            )}
+            <button
+              type="button"
+              className="rounded bg-cyan-400/12 px-2 py-0.5 text-[10px] font-semibold text-cyan-200"
+            >
+              Office
+            </button>
+            <button
+              type="button"
+              onClick={openStandaloneOfficePage}
+              className="rounded px-2 py-0.5 text-[10px] font-semibold text-sky-200 transition hover:bg-white/10"
+            >
+              Office Page
+            </button>
           </div>
-          {/* 모드 전환 버튼 */}
+          <button
+            type="button"
+            onClick={summonMeeting}
+            className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-200 transition hover:bg-cyan-400/15"
+          >
+            Open Meeting
+          </button>
+          <button
+            type="button"
+            onClick={requestReview}
+            className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-200 transition hover:bg-emerald-400/15"
+          >
+            Request Review
+          </button>
           {onSwitchToClassic && (
             <button
               onClick={onSwitchToClassic}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold
-                         bg-white/5 hover:bg-white/10 border border-white/10 text-white/50 hover:text-white/80 transition-all"
+              className="flex items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/55 transition hover:bg-white/10 hover:text-white/80"
             >
-              <LayoutGrid className="w-3 h-3" />
-              클래식 모드
+              <LayoutGrid className="h-3 w-3" />
+              Classic
             </button>
           )}
         </div>
       </header>
 
-      {/* ── 메인 영역 — 오피스 월드(좌) + HUD 패널(우) ── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── 오피스 월드 (중앙) ── */}
-        <div className="flex-1 min-w-0 relative">
+        <div className="relative min-w-0 flex-1 overflow-hidden">
           <OfficeWorld
-            agentTerminals={vibe.agentTerminals}
+            presences={office.presences}
+            zones={office.zones}
+            events={office.events}
             selectedDesk={selectedDesk}
-            onDeskClick={handleDeskClick}
+            onDeskClick={handleDeskSelect}
+            onZoneClick={handleZoneClick}
             speechBubbles={speechBubbles}
           />
-          {/* ── 토스트 알림 (좌하단) ── */}
-          {toasts.length > 0 && (
-            <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-10 pointer-events-none">
-              {toasts.map(toast => (
-                <div
-                  key={toast.id}
-                  className={`pointer-events-auto flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium shadow-lg backdrop-blur-sm animate-in slide-in-from-left duration-300 ${
-                    toast.type === 'success' ? 'bg-green-500/20 border border-green-500/30 text-green-300' :
-                    toast.type === 'warning' ? 'bg-yellow-500/20 border border-yellow-500/30 text-yellow-300' :
-                    'bg-blue-500/20 border border-blue-500/30 text-blue-300'
-                  }`}
+
+          <div className="absolute left-4 top-4 flex max-w-[70%] flex-wrap gap-2">
+            {zoneSummary.map((zone) => (
+              <button
+                key={zone.id}
+                type="button"
+                onClick={() => handleZoneClick(zone.id)}
+                className={`rounded-full border px-3 py-1 text-[10px] backdrop-blur ${
+                  selectedZone === zone.id
+                    ? 'border-cyan-300/35 bg-cyan-300/12'
+                    : 'border-white/10 bg-black/35 hover:bg-black/50'
+                }`}
+              >
+                <span className="font-semibold text-white/75">{zone.label}</span>
+                <span className="ml-2 text-white/35">{zone.occupancy}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="absolute bottom-4 left-4 w-[320px] rounded-xl border border-white/10 bg-[#08111ccc] p-3 backdrop-blur">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-white/80">
+              <Radar className="h-3.5 w-3.5 text-cyan-300" />
+              Event Rail
+            </div>
+            <div className="space-y-2">
+              {office.events.slice(0, 4).map((event) => (
+                <button
+                  key={event.id}
+                  type="button"
+                  onClick={() => handleEventFocus(event)}
+                  className="block w-full rounded-lg border border-white/6 bg-white/[0.03] px-2.5 py-2 text-left transition hover:border-cyan-300/20 hover:bg-cyan-300/[0.05]"
                 >
-                  <span>{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
-                  <span>{toast.text}</span>
-                  <button
-                    onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                    className="ml-1 opacity-50 hover:opacity-100"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-[10px] font-semibold text-white/78">{event.title}</div>
+                    <span className="text-[9px] uppercase tracking-[0.18em] text-white/28">{event.zone}</span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-white/42">{event.subtitle}</div>
+                </button>
               ))}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* ── HUD 패널 (우측) ── */}
-        <div className="w-[420px] shrink-0 bg-[#0f0f1a]/90 backdrop-blur-md border-l border-white/5 flex flex-col">
-          {/* HUD 탭 바 */}
-          <div className="h-9 flex items-center gap-0.5 px-2 bg-[#0a0a12] border-b border-white/5 shrink-0">
-            {HUD_TABS.map(tab => {
+        <aside className="flex w-[430px] shrink-0 flex-col border-l border-white/5 bg-[#0c1522]/95 backdrop-blur">
+          <div className="border-b border-white/5 px-3 py-3">
+            <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.03] p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-white/35">Focused Agent</div>
+              {selectedPresence ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-bold text-white/85">
+                      T{selectedPresence.slotId + 1} · {selectedPresence.agent || 'unknown'}
+                    </div>
+                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">
+                      {selectedPresence.zone}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={summonMeeting}
+                      className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-200 transition hover:bg-cyan-400/15"
+                    >
+                      Meeting
+                    </button>
+                    <button
+                      type="button"
+                      onClick={requestReview}
+                      className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-200 transition hover:bg-emerald-400/15"
+                    >
+                      Review
+                    </button>
+                  </div>
+                  <div className="mt-2 text-[11px] text-white/48">
+                    {selectedPresence.liveTask || 'No live task'}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedPresence.badges.map((badge) => (
+                      <span key={badge} className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-[10px] text-cyan-200">
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="text-[11px] text-white/40">Select a desk to inspect the agent.</div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">Busy Zones</div>
+                <div className="mt-1 text-lg font-bold text-white/82">{office.summary.busyZones}</div>
+              </div>
+              <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">Tasks</div>
+                <div className="mt-1 text-lg font-bold text-white/82">{vibe.activeTaskCount}</div>
+              </div>
+              <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">Unread</div>
+                <div className="mt-1 text-lg font-bold text-white/82">{vibe.unreadMsgCount}</div>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-white/35">Zone Control</div>
+                  <div className="mt-1 text-sm font-bold text-white/82">{selectedZoneState?.label ?? 'Desk'}</div>
+                </div>
+                <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">
+                  {selectedZoneState?.occupancy ?? 0} active
+                </span>
+              </div>
+              <div className="mt-2 text-[11px] text-white/46">
+                {ZONE_ACTION_HINT[selectedZone]}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedZoneMembers.length > 0 ? (
+                  selectedZoneMembers.map((presence) => (
+                    <button
+                      key={presence.terminalId}
+                      type="button"
+                      onClick={() => handleDeskSelect(presence.slotId)}
+                      className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] text-white/68 transition hover:border-cyan-300/25 hover:bg-cyan-300/[0.08]"
+                    >
+                      T{presence.slotId + 1} {presence.agent}
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-[10px] text-white/32">No agents currently mapped here.</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-white/5 bg-[#09111c] px-2">
+            {HUD_TABS.map((tab) => {
               const Icon = tab.icon;
-              const isActive = hudTab === tab.id;
+              const active = hudTab === tab.id;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setHudTab(tab.id)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
-                    isActive
-                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                      : 'text-white/40 hover:text-white/60 hover:bg-white/5 border border-transparent'
+                  className={`flex items-center gap-1 rounded px-2.5 py-1 text-[10px] font-semibold transition ${
+                    active
+                      ? 'border border-cyan-400/25 bg-cyan-400/12 text-cyan-200'
+                      : 'border border-transparent text-white/40 hover:bg-white/5 hover:text-white/70'
                   }`}
                 >
-                  <Icon className="w-3 h-3" />
+                  <Icon className="h-3 w-3" />
                   {tab.label}
                 </button>
               );
             })}
           </div>
 
-          {/* HUD 컨텐츠 — 기존 패널 컴포넌트 재활용 */}
-          <div className="flex-1 overflow-hidden flex flex-col p-2">
+          <div className="flex-1 overflow-hidden p-2">
             {hudTab === 'terminal' ? (
-              <div className="flex-1 min-h-0">
+              <div className="h-full min-h-0">
                 <TerminalSlot
                   key={selectedDesk}
                   slotId={selectedDesk}
@@ -234,25 +473,30 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             ) : hudTab === 'messages' ? (
               <MessagesPanel onUnreadCount={vibe.setUnreadMsgCount} />
             ) : hudTab === 'memory' ? (
-              <MemoryPanel currentProjectName={vibe.currentPath.split(/[/\\]/).filter(Boolean).pop()} />
-            ) : hudTab === 'git' ? (
-              <GitPanel currentPath={vibe.currentPath} onChangesCount={(c, conf) => { vibe.setTotalGitChanges(c); vibe.setConflictCount(conf); }} />
-            ) : null}
+              <MemoryPanel currentProjectName={projectName} />
+            ) : (
+              <GitPanel
+                currentPath={vibe.currentPath}
+                onChangesCount={(count, conflictCount) => {
+                  vibe.setTotalGitChanges(count);
+                  vibe.setConflictCount(conflictCount);
+                }}
+              />
+            )}
           </div>
-        </div>
-      </div>
 
-      {/* ── 하단 상태바 ── */}
-      <footer className="h-6 bg-[#0a0a12] border-t border-white/5 flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-4 text-[9px] text-white/30">
-          <span>에이전트 {Object.values(vibe.agentTerminals).filter((t: any) => t.status === 'running').length}/{Object.keys(vibe.agentTerminals).length} active</span>
-          <span>태스크 {vibe.activeTaskCount}개 진행중</span>
-          <span>메시지 {vibe.unreadMsgCount}개 미읽음</span>
-        </div>
-        <div className="text-[9px] text-white/20 font-mono">
-          vibe-office v{vibe.appVersion}
-        </div>
-      </footer>
+          <footer className="flex h-7 shrink-0 items-center justify-between border-t border-white/5 px-3 text-[9px] text-white/28">
+            <div className="flex items-center gap-3">
+              <span>{office.summary.activeAgents} agents active</span>
+              <span>{office.summary.blockedAgents} in recovery</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Activity className="h-3 w-3" />
+              office-phase1
+            </div>
+          </footer>
+        </aside>
+      </div>
     </div>
   );
 }
