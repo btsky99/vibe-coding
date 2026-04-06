@@ -308,6 +308,118 @@ def get_stats(project: str = '') -> dict:
     }
 
 
+# ── 유사 노트 탐지 ────────────────────────────────────────────────────────
+
+def find_similar(content: str, tags: list | None = None,
+                 exclude_id: str = '', limit: int = 5) -> list[dict]:
+    """태그 교집합 + 키워드 ILIKE 매칭으로 유사 노트를 탐지한다.
+
+    1순위: 태그가 겹치는 노트 (태그 교집합 크기 내림차순)
+    2순위: 본문 키워드가 겹치는 노트
+    """
+    ensure_schema()
+    if not content and not tags:
+        return []
+
+    # 키워드 추출: 내용에서 의미 있는 단어 (3자 이상) 상위 5개
+    keywords = _extract_keywords(content, max_words=5)
+    tags = tags or []
+
+    # 제외 조건
+    exclude_clause = f"AND id != {_sql_text(exclude_id)}" if exclude_id else ""
+
+    results = []
+
+    # 1) 태그 교집합 매칭
+    if tags:
+        tags_json = json.dumps(tags, ensure_ascii=False)
+        tag_rows = query_rows(
+            f"SELECT id, title, note_type, tags::text AS tags_text, "
+            f"  (SELECT COUNT(*) FROM jsonb_array_elements_text(tags) t "
+            f"   WHERE t.value = ANY(ARRAY(SELECT jsonb_array_elements_text({_sql_text(tags_json)}::jsonb)))) AS tag_overlap "
+            f"FROM zettel_notes "
+            f"WHERE archived = FALSE {exclude_clause} "
+            f"ORDER BY tag_overlap DESC, updated_at DESC "
+            f"LIMIT {int(limit)};"
+        )
+        for row in tag_rows:
+            row['tags'] = _parse_tags(row.pop('tags_text', '[]'))
+            row['similarity_reason'] = 'tag_overlap'
+            if row.get('tag_overlap', 0) > 0:
+                results.append(row)
+
+    # 2) 키워드 ILIKE 매칭 (태그 매칭이 부족할 때 보충)
+    if len(results) < limit and keywords:
+        existing_ids = {r['id'] for r in results}
+        ilike_conditions = ' OR '.join(
+            f"(title ILIKE {_sql_text(f'%{kw}%')} OR content ILIKE {_sql_text(f'%{kw}%')})"
+            for kw in keywords
+        )
+        kw_rows = query_rows(
+            f"SELECT id, title, note_type, tags::text AS tags_text "
+            f"FROM zettel_notes "
+            f"WHERE archived = FALSE {exclude_clause} AND ({ilike_conditions}) "
+            f"ORDER BY updated_at DESC "
+            f"LIMIT {int(limit)};"
+        )
+        for row in kw_rows:
+            if row['id'] not in existing_ids:
+                row['tags'] = _parse_tags(row.pop('tags_text', '[]'))
+                row['similarity_reason'] = 'keyword_match'
+                results.append(row)
+
+    return results[:limit]
+
+
+def _extract_keywords(text: str, max_words: int = 5) -> list[str]:
+    """텍스트에서 의미 있는 키워드를 추출한다 (3자 이상, 불용어 제외)."""
+    if not text:
+        return []
+    # 한글/영문 단어 추출
+    words = re.findall(r'[가-힣a-zA-Z_]{3,}', text)
+    # 불용어 제거
+    stopwords = {
+        'the', 'and', 'for', 'from', 'with', 'that', 'this', 'are', 'was', 'not',
+        'def', 'import', 'return', 'class', 'self', 'none', 'true', 'false',
+        '있는', '하는', '없는', '되는', '위한', '대한', '통해', '이번',
+    }
+    filtered = [w for w in words if w.lower() not in stopwords]
+    # 빈도순 정렬 후 상위 N개
+    from collections import Counter
+    counted = Counter(filtered)
+    return [word for word, _ in counted.most_common(max_words)]
+
+
+def refine_note(note_id: str, new_title: str = '', new_content: str = '',
+                new_type: str = 'permanent', new_tags: list | None = None) -> dict | None:
+    """fleeting/literature 노트를 permanent로 승격한다. 내용 정제 + 유형 변경."""
+    ensure_schema()
+    note = _get_note_raw(note_id)
+    if not note:
+        return None
+
+    updates = {'note_type': new_type}
+    if new_title:
+        updates['title'] = new_title
+    if new_content:
+        updates['content'] = new_content
+    if new_tags is not None:
+        updates['tags'] = new_tags
+
+    return update_note(note_id, **updates)
+
+
+def auto_link(note_id: str, content: str = '', tags: list | None = None,
+              created_by: str = 'auto') -> list[dict]:
+    """노트 생성 후 유사 노트를 찾아 자동으로 링크를 생성한다."""
+    similar = find_similar(content, tags, exclude_id=note_id, limit=3)
+    linked = []
+    for s in similar:
+        if add_link(note_id, s['id'], link_type='relates_to', created_by=created_by):
+            linked.append(s)
+    return linked
+
+
 # ── 유틸리티 ───────────────────────────────────────────────────────────────
 
 def _parse_tags(tags_text: str) -> list:

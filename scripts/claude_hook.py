@@ -51,6 +51,26 @@ _SKIP_PREFIXES = (
     "find ", "grep ", "rg ",
 )
 
+def _extract_commit_msg(cmd: str) -> str:
+    """git commit 명령에서 실제 커밋 메시지를 추출한다.
+
+    지원 패턴:
+      git commit -m "feat(scope): 메시지"
+      git commit -m "$(cat <<'EOF'\n메시지\nEOF\n)"
+    """
+    import re as _re
+    # 패턴 1: HEREDOC — git commit -m "$(cat <<'EOF'\n내용\nEOF)"
+    m = _re.search(r"cat\s+<<['\"]?EOF['\"]?\n(.+?)(?:\n\s*Co-Authored|\nEOF)", cmd, _re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # 패턴 2: 단순 -m "..." 또는 -m '...'
+    m = _re.search(r'-m\s+["\'](.+?)["\']', cmd, _re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # 폴백: 전체 명령에서 git commit 부분 제거
+    return cmd.replace('git commit', '').strip()[:200]
+
+
 def _short(text: str, n: int = 60) -> str:
     """긴 문자열을 n자로 자릅니다."""
     text = text.strip().replace('\n', ' ')
@@ -71,6 +91,24 @@ def _get_path(tool_input: dict) -> str:
     """tool_input에서 파일 경로를 추출합니다."""
     return (tool_input.get('file_path') or tool_input.get('path') or
             tool_input.get('filename') or '')
+
+
+def _spawn_zettel_capture(mode: str, agent: str, data: dict):
+    """제텔카스텐 자동 캡처를 백그라운드로 spawn한다."""
+    import json as _json
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    capture_script = str(SCRIPTS_DIR / 'zettel_capture.py')
+    try:
+        subprocess.Popen(
+            [sys.executable, capture_script,
+             '--mode', mode, '--agent', agent,
+             '--data', _json.dumps(data, ensure_ascii=False)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_no_window,
+        )
+    except Exception:
+        pass  # 캡처 실패해도 훅 전체가 실패하면 안 됨
 
 
 def _do_log(data: dict):
@@ -140,6 +178,11 @@ def _do_log(data: dict):
                         'title': f'Git 커밋',
                         'content': short_cmd
                     })
+                    # ── 제텔카스텐 자동 캡처: 커밋 → 노트 생성 ──
+                    _commit_msg = _extract_commit_msg(cmd)
+                    _spawn_zettel_capture('commit', agent_name, {
+                        'message': _commit_msg,
+                    })
                 elif 'npm run build' in cmd or 'build' in cmd:
                     log_task('Claude', f'[빌드] {short_cmd}')
                     log_thought('claude', 'build', {
@@ -160,6 +203,8 @@ def _do_log(data: dict):
             'title': f'세션 종료 [{session_id}]',
             'content': f'stop_reason: {stop_reason}'
         })
+        # ── 제텔카스텐 자동 캡처: 세션 종료 → 세션 요약 노트 생성 ──
+        _spawn_zettel_capture('session', agent_name, {})
 
 
 def main():

@@ -1,5 +1,10 @@
 ## 하이브 동기화 프로토콜
 
+### 상태 확인 원칙 (필수)
+- **DB 우선**: 작업 이력/진행 상황 확인 시 PostgreSQL(`pg_logs`, `hive_tasks`, `agent_heartbeats`)을 **먼저** 조회
+- **git log는 보조**: 커밋 내역 확인용으로만 사용. "어제 뭐 했지" 류 질문에 git log만 보고 답변 금지
+- DB에 명령 실행/완료, 태스크 상태 변경, 에이전트 하트비트 등 세부 이력이 기록됨
+
 ### 작업 시작 전 (필수)
 ```bash
 python scripts/memory.py list        # 공유 메모리 확인
