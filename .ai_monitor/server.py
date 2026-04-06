@@ -345,13 +345,16 @@ def ensure_postgres_running():
         pass  # 소켓 테스트 실패 시 그냥 시작 시도
 
     # 3) pg_ctl start
+    # [수정 2026-04-06] timeout=15 추가 — 이전 실행의 PG가 같은 pgdata를 락하고 있으면
+    # pg_ctl start가 무한 대기하여 서버 전체가 시작 불가했던 치명적 버그 수정.
+    # timeout 발생 시 기존 PG 인스턴스를 그대로 사용하도록 폴백.
     print(f"[PG] PostgreSQL 시작 중 (port={PG_PORT})...")
     try:
         subprocess.run(
             [str(PG_CTL_BIN), "start", "-D", str(_PG_DATA_DIR),
              "-l", str(pg_log), "-o", f"-p {PG_PORT}"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
+            creationflags=_no_window, timeout=15
         )
         # [v3.7.62 수정] 고정 2초 대기 → 실제 ready 폴링으로 교체
         # pg_ctl start 직후 psql SELECT 1로 100ms 간격으로 최대 5초 폴링.
@@ -372,8 +375,29 @@ def ensure_postgres_running():
             except Exception as e:
                 pass  # PG ready 폴링 중 일시적 실패 허용
         print(f"[PG] PostgreSQL 시작 완료 ({(_i+1)*100}ms 소요)")
+    except subprocess.TimeoutExpired:
+        # [2026-04-06] pg_ctl start가 15초 내 완료 못 함 → pgdata 락 충돌 가능성 높음
+        # 이전 실행의 PG가 살아있으면 원래 포트(5433)로 연결 시도
+        print(f"[PG] pg_ctl start 타임아웃 (pgdata 락 충돌 가능) → 기존 PG 인스턴스 재사용 시도")
+        import socket as _pg_sock2
+        for _fallback_port in [5433, 5434, 5435, 5432]:
+            try:
+                _s = _pg_sock2.socket(_pg_sock2.AF_INET, _pg_sock2.SOCK_STREAM)
+                _r = _s.connect_ex(('127.0.0.1', _fallback_port))
+                _s.close()
+                if _r == 0:
+                    PG_PORT = _fallback_port
+                    os.environ['VIBE_PG_PORT'] = str(PG_PORT)
+                    print(f"[PG] 기존 PG 인스턴스 발견 (port={PG_PORT}) → 재사용")
+                    break
+            except Exception:
+                continue
+        else:
+            print("[PG ERROR] 실행 중인 PostgreSQL을 찾지 못함")
+            return
 
-        # 4) pgvector 확장 설치 시도
+    # 4) pgvector 확장 설치 시도 (정상 시작/타임아웃 폴백 모두 실행)
+    try:
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;")
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
         run_pg_sql("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;")
@@ -4664,15 +4688,49 @@ def _cleanup_pyinstaller_temp():
         pass
 
 
+# ── PostgreSQL 종료 함수 — 프로그램 종료 시 내장 PG도 같이 종료 ──────────────────
+def _cleanup_postgres():
+    """내장 PostgreSQL 인스턴스를 pg_ctl stop으로 정상 종료합니다.
+    [2026-04-06] 프로그램 종료 후 PG가 좀비로 남아 다음 실행 시 pgdata 락 충돌로
+    서버가 시작 불가했던 버그 수정. atexit + 시그널 핸들러에서 호출."""
+    if not PG_CTL_BIN.exists():
+        return
+    if not _PG_DATA_DIR.exists():
+        return
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    try:
+        # fast 모드: 클라이언트 연결 즉시 끊고 종료 (smart보다 빠름)
+        subprocess.run(
+            [str(PG_CTL_BIN), "stop", "-D", str(_PG_DATA_DIR), "-m", "fast"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window, timeout=10
+        )
+        print("[PG] PostgreSQL 정상 종료 완료")
+    except subprocess.TimeoutExpired:
+        # 강제 종료
+        try:
+            subprocess.run(
+                [str(PG_CTL_BIN), "stop", "-D", str(_PG_DATA_DIR), "-m", "immediate"],
+                capture_output=True, creationflags=_no_window, timeout=5
+            )
+            print("[PG] PostgreSQL 강제 종료 완료")
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[PG] PostgreSQL 종료 실패: {e}")
+
 # ── atexit 등록 — 정상 종료(sys.exit, return from __main__)에도 PTY + 자식 프로세스 정리 보장 ──
 import atexit, signal as _signal
 # [제거됨] PTY 세션 정리는 Node PTY 서버가 자체 처리 + _child_procs로 프로세스 kill
 atexit.register(_cleanup_child_procs)
+# [주의] _cleanup_postgres는 main() 내에서만 등록 — 모듈 레벨에서 등록하면
+# server.py를 import하는 모든 프로세스 종료 시 PG를 죽여버리는 치명적 버그 발생
 
 def _signal_exit_handler(sig, frame):
-    """SIGTERM / SIGBREAK(Ctrl+Break) 수신 시 PTY + 자식 프로세스 정리 후 즉시 종료."""
+    """SIGTERM / SIGBREAK(Ctrl+Break) 수신 시 PTY + 자식 프로세스 + PG 정리 후 즉시 종료."""
     print(f"[*] 시그널 {sig} 수신 — PTY 및 자식 프로세스 정리 후 종료합니다.")
     _cleanup_child_procs()  # Node PTY 서버도 _child_procs에 포함되어 자동 종료됨
+    _cleanup_postgres()  # [2026-04-06] 내장 PG도 종료
     time.sleep(1)  # 자식 프로세스 파일 핸들 해제 대기
     _cleanup_pyinstaller_temp()
     os._exit(0)
@@ -4909,6 +4967,10 @@ def main():
 
     # ── PostgreSQL 자동 초기화 및 시작 (PG 바이너리가 있는 경우에만) ──
     ensure_postgres_running()
+
+    # [2026-04-07] PG 시작 성공 후에만 atexit 등록 — main() 스코프에서만 PG 종료 보장
+    # 모듈 레벨에서 등록하면 import server만 해도 종료 시 PG를 죽이는 버그 발생
+    atexit.register(_cleanup_postgres)
 
     # ── 프로젝트별 DB 초기화 (PG 시작 후) ────────────────────────────────────
     # [2026-03-22] 단일 PG 인스턴스 + 프로젝트별 DB 분리
@@ -5651,6 +5713,7 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
         print("[*] GUI 창이 닫혔습니다. 좀비 프로세스 방지 — 모든 자식 프로세스 정리 중...")
         # [제거됨] PTY 세션 정리는 Node PTY 서버 자체 처리
         _cleanup_child_procs()               # hive_watchdog / heal_daemon / telegram_bridge 종료
+        _cleanup_postgres()                  # [2026-04-06] 내장 PG 종료
         try:
             server.shutdown()                # HTTP 요청 처리 스레드 정지
             server.server_close()            # 포트 소켓 해제 (TIME_WAIT 방지)
