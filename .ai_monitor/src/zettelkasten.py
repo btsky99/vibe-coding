@@ -16,55 +16,79 @@ from src.pg_store import execute, execute_raw, query_rows, ensure_schema, _sql_t
 
 # ── 분기 번호(Zettel ID) 생성 ──────────────────────────────────────────────
 
-def _next_zettel_id(parent_id: str = '') -> str:
-    """루만식 분기 번호 생성. 부모가 없으면 루트 번호, 있으면 하위 분기.
+def _project_prefix(project: str = '') -> str:
+    """프로젝트명에서 vault 안전한 접두사를 생성한다.
 
-    예: '' → '1', '1' → '1a', '1a' → '1a1', 이미 '1a1' 있으면 '1a2'
+    예: 'D--vibe-coding' → 'vibe', 'my-project' → 'myproj', '' → ''
+    """
+    if not project:
+        return ''
+    # D-- 접두사 제거, 소문자화, 최대 8자
+    name = re.sub(r'^[A-Z]--', '', project).lower()
+    # 'vibe-coding' → 'vibe' (첫 단어)
+    parts = re.split(r'[-_]', name)
+    prefix = parts[0][:8] if parts else name[:8]
+    return prefix
+
+
+def _next_zettel_id(parent_id: str = '', project: str = '') -> str:
+    """루만식 분기 번호 생성. 프로젝트 접두사 포함.
+
+    예: project='D--vibe-coding' → 'vibe-1', 'vibe-2', 'vibe-2a', 'vibe-2a1'
+        parent='vibe-2' → 'vibe-2a'
     """
     ensure_schema()
+    prefix = _project_prefix(project)
+    sep = '-' if prefix else ''
+
     if not parent_id:
-        # 루트 레벨: 가장 큰 숫자 + 1
+        # 루트 레벨: 해당 프로젝트 접두사의 가장 큰 숫자 + 1
+        pattern = f'^{re.escape(prefix)}{re.escape(sep)}[0-9]+$' if prefix else '^[0-9]+$'
         rows = query_rows(
-            "SELECT id FROM zettel_notes WHERE id ~ '^[0-9]+$' ORDER BY CAST(id AS INT) DESC LIMIT 1;"
+            f"SELECT id FROM zettel_notes WHERE id ~ {_sql_text(pattern)} "
+            f"ORDER BY LENGTH(id) DESC, id DESC LIMIT 10;"
         )
         if rows:
-            return str(int(rows[0]['id']) + 1)
-        return '1'
+            # 숫자 부분만 추출하여 최대값 찾기
+            max_num = 0
+            strip_len = len(prefix) + len(sep)
+            for r in rows:
+                try:
+                    num = int(r['id'][strip_len:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    continue
+            return f"{prefix}{sep}{max_num + 1}"
+        return f"{prefix}{sep}1"
 
-    # 하위 분기: 마지막 문자가 숫자면 알파벳 분기, 알파벳이면 숫자 분기
+    # 하위 분기: 기존 루만식 로직 유지
     last_char = parent_id[-1]
     if last_char.isdigit():
-        # 1 → 1a, 1a1 → 1a1a (알파벳 분기)
-        prefix = parent_id
         rows = query_rows(
-            f"SELECT id FROM zettel_notes WHERE id ~ {_sql_text('^' + re.escape(prefix) + '[a-z]$')} "
+            f"SELECT id FROM zettel_notes WHERE id ~ {_sql_text('^' + re.escape(parent_id) + '[a-z]$')} "
             f"ORDER BY id DESC LIMIT 1;"
         )
         if rows:
             last_branch = rows[0]['id'][-1]
             if last_branch >= 'z':
-                # z 초과 시 숫자 분기로 전환: 1z → 1z1
-                return prefix + 'z1'
-            return prefix + chr(ord(last_branch) + 1)
-        return prefix + 'a'
+                return parent_id + 'z1'
+            return parent_id + chr(ord(last_branch) + 1)
+        return parent_id + 'a'
     else:
-        # 1a → 1a1, 1a1a → 1a1a1 (숫자 분기)
-        prefix = parent_id
-        # CAST로 정수 정렬하여 사전식 오류 방지 (1a9 < 1a10)
         rows = query_rows(
-            f"SELECT id, CAST(SUBSTRING(id FROM {len(prefix) + 1}) AS INT) AS num "
-            f"FROM zettel_notes WHERE id ~ {_sql_text('^' + re.escape(prefix) + '[0-9]+$')} "
+            f"SELECT id, CAST(SUBSTRING(id FROM {len(parent_id) + 1}) AS INT) AS num "
+            f"FROM zettel_notes WHERE id ~ {_sql_text('^' + re.escape(parent_id) + '[0-9]+$')} "
             f"ORDER BY num DESC LIMIT 1;"
         )
         if rows:
-            suffix = rows[0]['id'][len(prefix):]
-            return prefix + str(int(suffix) + 1)
-        return prefix + '1'
+            suffix = rows[0]['id'][len(parent_id):]
+            return parent_id + str(int(suffix) + 1)
+        return parent_id + '1'
 
 
-def generate_zettel_id(parent_id: str = '') -> str:
+def generate_zettel_id(parent_id: str = '', project: str = '') -> str:
     """외부에서 호출 가능한 분기 번호 생성 함수."""
-    return _next_zettel_id(parent_id)
+    return _next_zettel_id(parent_id, project=project)
 
 
 # ── CRUD ───────────────────────────────────────────────────────────────────
@@ -75,7 +99,7 @@ def create_note(title: str, content: str = '', note_type: str = 'fleeting',
                 custom_id: str = '') -> dict | None:
     """원자 노트 생성. 분기 번호 자동 생성 또는 custom_id 지정 가능."""
     ensure_schema()
-    zettel_id = custom_id or _next_zettel_id(parent_id)
+    zettel_id = custom_id or _next_zettel_id(parent_id, project=project)
     now = datetime.now(timezone.utc).isoformat()
     tags_json = json.dumps(tags or [], ensure_ascii=False)
 

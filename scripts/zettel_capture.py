@@ -41,6 +41,7 @@ from src.zettelkasten import create_note, auto_link, find_similar
 # ── 설정 ──────────────────────────────────────────────────────────────────
 
 DEFAULT_VAULT_DIR = _PROJECT_ROOT / '.zettel-vault'
+GDRIVE_VAULT_DIR = Path('I:/내 드라이브/obsidian/hive-zettel')
 DEFAULT_PROJECT = os.environ.get('VIBE_PROJECT', 'D--vibe-coding')
 
 # 커밋 타입 → 노트 유형 매핑
@@ -283,10 +284,13 @@ def _rel_path(file_path: str) -> str:
 
 
 def _sync_vault():
-    """Obsidian vault에 동기화 (에러 무시)."""
+    """Obsidian vault에 동기화 (로컬 + Google Drive, 에러 무시)."""
     try:
         from zettel_sync import export_to_vault
         export_to_vault(DEFAULT_VAULT_DIR)
+        # Google Drive vault도 동기화 (존재할 때만)
+        if GDRIVE_VAULT_DIR.exists():
+            export_to_vault(GDRIVE_VAULT_DIR)
     except Exception as e:
         print(f"[zettel_capture] vault 동기화 실패 (무시): {e}")
 
