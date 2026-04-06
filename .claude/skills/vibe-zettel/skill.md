@@ -108,19 +108,13 @@ python scripts/zettel_sync.py --vault "I:/내 드라이브/obsidian/hive-zettel"
 ```
 
 vault 구조:
-- `fleeting/`, `literature/`, `permanent/` — 지식 노트
-- `_project/` — CLAUDE.md, RULES.md, AGENTS.md, GEMINI.md 등 루트 문서
-- `_project/docs/` — API_SPEC, HARNESS 등 상세 문서
-- `_project/rules/` — architecture, commit-rules, hive-sync 규칙
-- `_project/skills/` — 스킬 정의 문서 (vibe-zettel, vibe-heal 등)
-
-## 6. `docs` — 프로젝트 문서만 동기화
-
-프로젝트 문서만 빠르게 동기화할 때 사용.
-
-```bash
-python scripts/zettel_sync.py --vault "I:/내 드라이브/obsidian/hive-zettel"
-```
+- `fleeting/`, `literature/`, `permanent/` — 지식 노트 (자동 캡처)
+- `_project/{프로젝트명}/` — 프로젝트별 문서 (멀티 프로젝트 충돌 방지)
+  - 루트 문서: 클로드/제미나이/코덱스 설정, 프로젝트 규칙, 구조 지도 등
+  - `docs/` — API 명세서, 하네스 계약, 개발 가이드 등
+  - `rules/` — 아키텍처 규칙, 커밋 규칙, 동기화 프로토콜
+  - `skills/` — 모든 스킬 정의 문서
+- `INDEX.md` — 전체 목차 (한글 제목, 위키링크)
 
 ## 7. `stats` — 현황 요약 (기본)
 

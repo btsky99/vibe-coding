@@ -344,37 +344,75 @@ def _sync_project_docs(vault_dir: Path) -> int:
 
 
 def _generate_moc(vault_dir: Path, notes: list):
-    """MOC(Map of Content) 인덱스 파일 생성."""
+    """MOC(Map of Content) 인덱스 파일 생성 — 한글화 + 프로젝트 문서 포함."""
     lines = [
         '---',
-        'title: "Hive Zettelkasten Index"',
+        'title: "하이브 지식 저장소"',
         f'updated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")}',
         '---',
         '',
-        '# Hive Zettelkasten',
+        '# 하이브 지식 저장소',
         '',
-        f'총 {len(notes)}개 노트',
+        f'총 {len(notes)}개 지식 노트',
         '',
     ]
 
-    # 유형별 그룹핑
+    # ── 지식 노트 (유형별 그룹핑) ──
     by_type = {}
     for n in notes:
         t = n.get('note_type', 'fleeting')
         by_type.setdefault(t, []).append(n)
 
-    type_labels = {'permanent': '영구 노트', 'literature': '문헌 노트', 'fleeting': '일시 노트'}
+    type_labels = {'permanent': '영구 지식', 'literature': '참고 문헌', 'fleeting': '작업 기록'}
+    type_icons = {'permanent': '🏛️', 'literature': '📚', 'fleeting': '📝'}
     for note_type in ('permanent', 'literature', 'fleeting'):
         group = by_type.get(note_type, [])
         if not group:
             continue
-        lines.append(f'## {type_labels.get(note_type, note_type)} ({len(group)})')
+        icon = type_icons.get(note_type, '')
+        lines.append(f'## {icon} {type_labels.get(note_type, note_type)} ({len(group)})')
         lines.append('')
-        for n in group[:50]:  # 유형당 최대 50개
+        for n in group[:50]:
             lines.append(f'- [[{n["id"]}]] {n.get("title", "")}')
         if len(group) > 50:
             lines.append(f'- ... 외 {len(group) - 50}개')
         lines.append('')
+
+    # ── 프로젝트 문서 섹션 ──
+    project_dir = vault_dir / '_project'
+    if project_dir.exists():
+        lines.append('---')
+        lines.append('')
+        for proj_folder in sorted(project_dir.iterdir()):
+            if not proj_folder.is_dir():
+                continue
+            proj_name = proj_folder.name
+            lines.append(f'## 📁 프로젝트: {proj_name}')
+            lines.append('')
+
+            # 루트 문서
+            root_docs = sorted(proj_folder.glob('*.md'))
+            if root_docs:
+                for doc in root_docs:
+                    title = _DOC_TITLE_KO.get(doc.stem, doc.stem)
+                    lines.append(f'- [[{doc.stem}]] {title}')
+                lines.append('')
+
+            # 하위 폴더별
+            sub_labels = {'docs': '📄 상세 문서', 'rules': '📏 규칙', 'skills': '🛠️ 스킬'}
+            for subdir_name in ('docs', 'rules', 'skills'):
+                subdir = proj_folder / subdir_name
+                if not subdir.exists():
+                    continue
+                sub_docs = sorted(subdir.glob('*.md'))
+                if not sub_docs:
+                    continue
+                lines.append(f'### {sub_labels.get(subdir_name, subdir_name)}')
+                lines.append('')
+                for doc in sub_docs:
+                    title = _DOC_TITLE_KO.get(doc.stem, doc.stem)
+                    lines.append(f'- [[{doc.stem}]] {title}')
+                lines.append('')
 
     (vault_dir / 'INDEX.md').write_text('\n'.join(lines), encoding='utf-8')
 
