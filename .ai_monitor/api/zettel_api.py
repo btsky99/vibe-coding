@@ -93,7 +93,8 @@ def handle_get(handler, path: str, params: dict,
     if path == '/api/zettel/next-id':
         ensure_schema(DATA_DIR)
         parent = params.get('parent', [''])[0]
-        _json_response(handler, {'next_id': generate_zettel_id(parent)})
+        project = params.get('project', [PROJECT_ID])[0]
+        _json_response(handler, {'next_id': generate_zettel_id(parent, project=project)})
         return True
 
     return False
