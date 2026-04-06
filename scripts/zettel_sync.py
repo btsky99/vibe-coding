@@ -226,6 +226,48 @@ _DOC_SCAN_PATTERNS = [
 # 제외 패턴 (vault 자체, node_modules 등)
 _DOC_EXCLUDE = {'.zettel-vault', 'node_modules', '.git', 'dist', 'build'}
 
+# 문서 제목 한글 매핑
+_DOC_TITLE_KO = {
+    'CLAUDE': '클로드 에이전트 설정',
+    'GEMINI': '제미나이 에이전트 설정',
+    'CODEX_GUIDE': '코덱스 에이전트 가이드',
+    'AGENTS': '에이전트 목록',
+    'HIVEMIND': '하이브 마인드 설계',
+    'RULES': '프로젝트 규칙',
+    'README': '프로젝트 소개',
+    'PROJECT_MAP': '프로젝트 구조 지도',
+    'CHANGELOG': '변경 이력',
+    'ai_monitor_plan': '현재 작업 계획',
+    'memory': '공유 메모리',
+    'progress': '진행 상황',
+    'API_SPEC': 'API 명세서',
+    'HARNESS_V2': '하네스 V2 계약',
+    'HARNESS_V1': '하네스 V1 (레거시)',
+    'HARNESS_CHECKS': '하네스 점검 항목',
+    'VIBE_PROJECT_GUIDE': '프로젝트 개발 가이드',
+    'CODEX_HARDENING': '코덱스 보안 강화',
+    'CODEX_RUNTIME_SETUP': '코덱스 런타임 설정',
+    'CLAUDE_CODE_AGENT_TEAMS_ANALYSIS': '에이전트 팀 분석',
+    'METAVERSE_OFFICE_DESIGN': '메타버스 오피스 설계',
+    'TERMINAL3_SCROLL_ISSUE': '터미널3 스크롤 이슈',
+    'architecture': '아키텍처 규칙',
+    'commit-rules': '커밋 메시지 규칙',
+    'hive-sync': '하이브 동기화 프로토콜',
+    'vibe-zettel': '제텔카스텐 스킬',
+    'vibe-heal': '자기치유 스킬',
+    'vibe-brainstorm': '브레인스토밍 스킬',
+    'vibe-code-review': '코드 리뷰 스킬',
+    'vibe-debug': '디버그 스킬',
+    'vibe-execute-plan': '계획 실행 스킬',
+    'vibe-write-plan': '계획 작성 스킬',
+    'vibe-orchestrate': '오케스트레이터 스킬',
+    'vibe-release': '릴리즈 스킬',
+    'vibe-security': '보안 점검 스킬',
+    'vibe-tdd': 'TDD 스킬',
+    'vibe-dispatcher': '디스패처 스킬',
+    'SKILL': '스킬 정의',
+}
+
 
 def _sync_project_docs(vault_dir: Path) -> int:
     """프로젝트 핵심 문서를 vault의 _project/ 폴더에 자동 동기화한다.
@@ -263,8 +305,8 @@ def _sync_project_docs(vault_dir: Path) -> int:
             else:
                 filename = src.name
 
-            # 프론트매터 생성
-            title = Path(filename).stem
+            # 프론트매터 생성 (제목은 한글 매핑 우선)
+            title = _DOC_TITLE_KO.get(Path(filename).stem, Path(filename).stem)
             fm = '\n'.join([
                 '---',
                 f'title: "{title}"',
