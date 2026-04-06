@@ -345,15 +345,16 @@ def ensure_postgres_running():
         pass  # 소켓 테스트 실패 시 그냥 시작 시도
 
     # 3) pg_ctl start
-    # [수정 2026-04-06] timeout=15 추가 — 이전 실행의 PG가 같은 pgdata를 락하고 있으면
-    # pg_ctl start가 무한 대기하여 서버 전체가 시작 불가했던 치명적 버그 수정.
-    # timeout 발생 시 기존 PG 인스턴스를 그대로 사용하도록 폴백.
+    # [수정 2026-04-07] capture_output=True → DEVNULL — pg_ctl start가 postgres를
+    # 자식으로 생성하면 PIPE 핸들을 상속받아 subprocess.run()이 영원히 반환 안 하는
+    # Windows 전용 치명적 버그 수정. DEVNULL로 출력을 버리면 pg_ctl이 즉시 반환됨.
+    # timeout=15는 pgdata 락 충돌 시 폴백용으로 유지.
     print(f"[PG] PostgreSQL 시작 중 (port={PG_PORT})...")
     try:
         subprocess.run(
             [str(PG_CTL_BIN), "start", "-D", str(_PG_DATA_DIR),
              "-l", str(pg_log), "-o", f"-p {PG_PORT}"],
-            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=_no_window, timeout=15
         )
         # [v3.7.62 수정] 고정 2초 대기 → 실제 ready 폴링으로 교체
