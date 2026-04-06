@@ -98,15 +98,31 @@ print(f'--- 총 {len(results)}건 ---')
 "
 ```
 
-## 5. `sync` — Obsidian vault 즉시 동기화
+## 5. `sync` — Obsidian vault 즉시 동기화 (노트 + 프로젝트 문서)
+
+로컬 vault + Google Drive vault 동시 동기화. 프로젝트 문서(CLAUDE.md, RULES.md, 스킬, 규칙, docs/ 등)도 자동 포함.
 
 ```bash
 python scripts/zettel_sync.py
+python scripts/zettel_sync.py --vault "I:/내 드라이브/obsidian/hive-zettel"
 ```
 
-동기화 결과를 보고합니다.
+vault 구조:
+- `fleeting/`, `literature/`, `permanent/` — 지식 노트
+- `_project/` — CLAUDE.md, RULES.md, AGENTS.md, GEMINI.md 등 루트 문서
+- `_project/docs/` — API_SPEC, HARNESS 등 상세 문서
+- `_project/rules/` — architecture, commit-rules, hive-sync 규칙
+- `_project/skills/` — 스킬 정의 문서 (vibe-zettel, vibe-heal 등)
 
-## 6. `stats` — 현황 요약 (기본)
+## 6. `docs` — 프로젝트 문서만 동기화
+
+프로젝트 문서만 빠르게 동기화할 때 사용.
+
+```bash
+python scripts/zettel_sync.py --vault "I:/내 드라이브/obsidian/hive-zettel"
+```
+
+## 7. `stats` — 현황 요약 (기본)
 
 ```bash
 python -c "

@@ -203,11 +203,99 @@ def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool =
         filepath.write_text(md_content, encoding='utf-8')
         exported += 1
 
+    # 프로젝트 문서 동기화
+    doc_count = _sync_project_docs(vault_dir)
+
     # 인덱스 파일 생성 (MOC — Map of Content)
     _generate_moc(vault_dir, notes)
 
-    print(f'[zettel_sync] {exported}개 노트를 {vault_dir}에 동기화 완료')
+    print(f'[zettel_sync] {exported}개 노트 + {doc_count}개 문서를 {vault_dir}에 동기화 완료')
     return exported
+
+
+# ── 프로젝트 문서 동기화 ──────────────────────────────────────────────────
+
+# 동기화 대상 문서 탐색 패턴 (프로젝트 루트 기준)
+_DOC_SCAN_PATTERNS = [
+    ('*.md', '_project'),                      # 루트 .md 파일 (CLAUDE.md, RULES.md 등)
+    ('docs/*.md', '_project/docs'),            # docs/ 하위 문서
+    ('.claude/rules/*.md', '_project/rules'),   # 에이전트 규칙
+    ('.claude/skills/*/skill.md', '_project/skills'),  # 스킬 문서
+]
+
+# 제외 패턴 (vault 자체, node_modules 등)
+_DOC_EXCLUDE = {'.zettel-vault', 'node_modules', '.git', 'dist', 'build'}
+
+
+def _sync_project_docs(vault_dir: Path) -> int:
+    """프로젝트 핵심 문서를 vault의 _project/ 폴더에 자동 동기화한다.
+
+    루트 .md, docs/, .claude/rules/, .claude/skills/ 문서를 자동 탐색하여
+    Obsidian 프론트매터를 추가하고 vault에 복사한다.
+    """
+    synced = 0
+
+    for glob_pattern, dest_subdir in _DOC_SCAN_PATTERNS:
+        dest_dir = vault_dir / dest_subdir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        for src in _PROJECT_ROOT.glob(glob_pattern):
+            if not src.is_file():
+                continue
+            # 제외 패턴 체크
+            if any(excl in str(src) for excl in _DOC_EXCLUDE):
+                continue
+
+            try:
+                content = src.read_text(encoding='utf-8')
+            except Exception:
+                continue
+
+            # 상대 경로 계산
+            try:
+                rel_path = str(src.relative_to(_PROJECT_ROOT)).replace('\\', '/')
+            except ValueError:
+                continue
+
+            # 스킬 문서는 폴더명을 파일명에 포함 (skill.md → vibe-zettel.md)
+            if 'skills' in rel_path and src.name == 'skill.md':
+                filename = src.parent.name + '.md'
+            else:
+                filename = src.name
+
+            # 프론트매터 생성
+            title = Path(filename).stem
+            fm = '\n'.join([
+                '---',
+                f'title: "{title}"',
+                'note_type: project-doc',
+                f'source: "{rel_path}"',
+                f'updated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")}',
+                '---',
+                '',
+            ])
+
+            # 기존 프론트매터 제거 후 새로 추가
+            if content.startswith('---'):
+                m = re.match(r'^---\s*\n.*?\n---\s*\n', content, re.DOTALL)
+                if m:
+                    content = content[m.end():]
+            # HTML 주석 프론트매터도 제거 (<!-- FILE: ... -->)
+            if content.startswith('<!--'):
+                m = re.match(r'^<!--.*?-->\s*\n', content, re.DOTALL)
+                if m:
+                    content = fm + content  # 주석은 유지하되 앞에 FM 추가
+                    fm = ''  # 이미 추가했으므로 아래에서 다시 추가하지 않음
+
+            dest = dest_dir / filename
+            # 경로 트래버설 방어
+            if not dest.resolve().is_relative_to(vault_dir.resolve()):
+                continue
+
+            dest.write_text((fm + content) if fm else content, encoding='utf-8')
+            synced += 1
+
+    return synced
 
 
 def _generate_moc(vault_dir: Path, notes: list):
