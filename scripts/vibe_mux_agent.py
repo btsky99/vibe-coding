@@ -253,7 +253,7 @@ def _itcp_listener_loop(terminal_id: str, agent: str):
         conn = psycopg2.connect(
             host='localhost',
             port=pg_port,
-            dbname='postgres',
+            dbname=itcp.PG_DB,
             user='postgres',
         )
         conn.autocommit = True

@@ -45,6 +45,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+try:
+    from pg_project import resolve_project_db
+except ImportError:
+    from scripts.pg_project import resolve_project_db
+
 # 경로 설정
 _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
@@ -61,7 +66,7 @@ _LEGACY_CONFIG_FILE = _PROJECT_ROOT / ".ai_monitor" / "config.json"
 
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 PG_USER = "postgres"
-PG_DB = "postgres"
+PG_DB = resolve_project_db(_PROJECT_ROOT)
 
 # Windows 환경 UTF-8 강제
 if hasattr(sys.stdout, "reconfigure"):

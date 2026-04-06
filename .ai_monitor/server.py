@@ -1508,7 +1508,11 @@ def _tool_status(name: str) -> dict:
 
     candidates = [name]
     if os.name == 'nt':
-        candidates.append(f'{name}.cmd')
+        path_name = Path(name).name
+        if '.' not in path_name:
+            candidates.extend([f'{name}.exe', f'{name}.cmd', f'{name}.bat'])
+        else:
+            candidates.append(f'{name}.cmd')
 
     exe_path = ''
     for candidate in candidates:

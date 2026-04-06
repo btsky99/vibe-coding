@@ -20,3 +20,19 @@ type: project
 ## useMemo 훅 규칙 위반 (2026-04-05 최초 발견)
 - AgentMonitorPanel: `offlineAgents` useMemo가 얼리 리턴(loading/empty 분기) 이후에 선언됨.
 - React Hooks 규칙 위반 — 조건부 실행 경로에 따라 훅 호출 순서가 달라질 수 있음.
+
+## N+1 쿼리 — 루프 내 개별 SELECT (2026-04-06 최초 발견, 백엔드)
+- `import_from_vault`: vault 파일 루프 내에서 파일마다 `_get_note_raw(id)` 1회 SELECT.
+- `export_to_vault`: 노트 루프 내에서 `_format_links_section(id)` → get_links + get_backlinks = 2 SELECT.
+- `get_stats` 허브 계산: 노트마다 zettel_links 서브쿼리.
+- 공통 패턴: 루프 전에 관련 테이블을 한 번에 로드 후 dict로 O(1) 조회.
+
+## bash 명령 전체를 이벤트 데이터로 전달 (2026-04-06 최초 발견)
+- `claude_hook.py`: `git commit` 감지 시 bash 명령 문자열 전체를 `message` 필드로 전달.
+- `zettel_capture.py`의 Conventional Commit 정규식이 `git commit -m "..."` 형태를 받아 파싱 실패.
+- 수정 방향: hook에서 커밋 메시지 부분만 추출 후 전달.
+
+## 함수 내부 표준 라이브러리 임포트 (2026-04-06 최초 발견)
+- `_extract_keywords`에서 `from collections import Counter` 함수 내부에 위치.
+- `_spawn_zettel_capture`에서 `import json as _json` — 최상단 `import json`과 중복.
+- 표준 라이브러리는 항상 모듈 최상단에 임포트.

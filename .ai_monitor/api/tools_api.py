@@ -306,12 +306,26 @@ def _check_tool_installed(tool: dict) -> dict:
     # 1) 명령어 실행으로 확인
     for cmd in tool.get("check_commands", []):
         try:
+            resolved_cmd = list(cmd)
+            exe_name = resolved_cmd[0]
+            if not os.path.isabs(exe_name):
+                candidates = [exe_name]
+                if os.name == "nt" and "." not in Path(exe_name).name:
+                    candidates.extend([f"{exe_name}.exe", f"{exe_name}.cmd", f"{exe_name}.bat"])
+
+                for candidate in candidates:
+                    found = shutil.which(candidate)
+                    if found:
+                        resolved_cmd[0] = found
+                        break
+
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10,
+                resolved_cmd, capture_output=True, text=True, timeout=10,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if result.returncode == 0:
-                version = result.stdout.strip().split("\n")[0]
+                output = (result.stdout or result.stderr).strip()
+                version = output.split("\n")[0] if output else ""
                 break
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             continue

@@ -25,6 +25,11 @@ import subprocess
 from datetime import datetime
 import urllib.request
 
+try:
+    from pg_project import resolve_project_db
+except ImportError:
+    from scripts.pg_project import resolve_project_db
+
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     try:
@@ -38,6 +43,7 @@ PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 SERVER_URL = "http://localhost:9000"
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
+PG_DB = resolve_project_db(PROJECT_ROOT)
 
 # 에이전트별 마지막 삽입된 thought id — reflect_to_pg parent_id 체인에 사용
 # (프로세스 수명 동안 인메모리 유지, 재시작 시 리셋됨)
@@ -76,7 +82,7 @@ def _run_psql(sql: str, params: tuple = None) -> str:
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         res = subprocess.run(
-            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", sql],
+            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", PG_DB, "-c", sql],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             creationflags=_no_window
         )

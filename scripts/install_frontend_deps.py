@@ -50,19 +50,33 @@ FRONTEND_TOOLS: dict[str, dict] = {
 
 def _run(cmd: list[str], cwd: str | Path | None = None) -> tuple[int, str, str]:
     """명령을 실행하고 (returncode, stdout, stderr) 반환."""
+    resolved = list(cmd)
+    exe_name = resolved[0]
+    if not os.path.isabs(exe_name):
+        candidates = [exe_name]
+        if os.name == "nt" and "." not in Path(exe_name).name:
+            candidates.extend([f"{exe_name}.cmd", f"{exe_name}.exe", f"{exe_name}.bat"])
+
+        for candidate in candidates:
+            found = shutil.which(candidate)
+            if found:
+                resolved[0] = found
+                break
+
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300, cwd=cwd,
+        resolved, capture_output=True, text=True, timeout=300, cwd=cwd,
     )
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
 def check_node() -> bool:
     """Node.js/npm 설치 여부 확인."""
-    if not shutil.which("npm"):
+    npm_cmd = shutil.which("npm.cmd") or shutil.which("npm.exe") or shutil.which("npm")
+    if not npm_cmd:
         print("[오류] npm이 설치되어 있지 않습니다.")
         print("       Node.js를 먼저 설치하세요: https://nodejs.org/")
         return False
-    code, out, _ = _run(["npm", "--version"])
+    code, out, _ = _run([npm_cmd, "--version"])
     if code == 0:
         print(f"[확인] npm {out}")
     return code == 0
@@ -94,8 +108,9 @@ def npm_install() -> bool:
     print(f"       경로: {_VIBE_VIEW_DIR}")
 
     # npm install 실행 (stdout을 실시간 출력)
+    npm_cmd = shutil.which("npm.cmd") or shutil.which("npm.exe") or shutil.which("npm") or "npm"
     proc = subprocess.run(
-        ["npm", "install"],
+        [npm_cmd, "install"],
         cwd=str(_VIBE_VIEW_DIR),
         timeout=600,
         text=True,

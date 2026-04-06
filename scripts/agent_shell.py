@@ -257,10 +257,18 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     else:
         cmd = ['gemini', '-p', direct_task]
 
-    # 중복 세션 에러 방지: CLAUDECODE 관련 환경 변수 제거
-    # VIBE_CHILD_AGENT=1: 자식 claude -p 세션에서 hook_bridge.py가 또 실행되어
-    # 서버 API를 재호출하는 이중 실행 루프 방지
+    # [수정 2026-04-06] 바이브 코딩(Vibe Coding) 전용 환경 식별
+    # VS Code 내부 터미널에서 실행될 경우 상속되는 변수들을 정화하여,
+    # Gemini CLI가 "No installer is available for IDE" 경고를 내보내지 않도록 함.
     env = os.environ.copy()
+    env['TERM_PROGRAM'] = 'vibe-coding'
+    env.pop('TERM_PROGRAM_VERSION', None)
+    
+    # VSCODE_... 관련 변수 일괄 제거
+    for k in list(env.keys()):
+        if k.startswith('VSCODE_'):
+            env.pop(k, None)
+
     env.pop('CLAUDECODE', None)
     env.pop('CLAUDE_CODE_ENTRYPOINT', None)
     env.pop('CLAUDE_CODE_SSE_PORT', None)
