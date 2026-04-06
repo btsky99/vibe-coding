@@ -216,11 +216,12 @@ def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool =
 # ── 프로젝트 문서 동기화 ──────────────────────────────────────────────────
 
 # 동기화 대상 문서 탐색 패턴 (프로젝트 루트 기준)
+# {proj} 는 _sync_project_docs에서 프로젝트 이름으로 치환됨
 _DOC_SCAN_PATTERNS = [
-    ('*.md', '_project'),                      # 루트 .md 파일 (CLAUDE.md, RULES.md 등)
-    ('docs/*.md', '_project/docs'),            # docs/ 하위 문서
-    ('.claude/rules/*.md', '_project/rules'),   # 에이전트 규칙
-    ('.claude/skills/*/skill.md', '_project/skills'),  # 스킬 문서
+    ('*.md', '_project/{proj}'),                        # 루트 .md 파일
+    ('docs/*.md', '_project/{proj}/docs'),              # docs/ 하위 문서
+    ('.claude/rules/*.md', '_project/{proj}/rules'),     # 에이전트 규칙
+    ('.claude/skills/*/skill.md', '_project/{proj}/skills'),  # 스킬 문서
 ]
 
 # 제외 패턴 (vault 자체, node_modules 등)
@@ -270,14 +271,16 @@ _DOC_TITLE_KO = {
 
 
 def _sync_project_docs(vault_dir: Path) -> int:
-    """프로젝트 핵심 문서를 vault의 _project/ 폴더에 자동 동기화한다.
+    """프로젝트 핵심 문서를 vault의 _project/{프로젝트명}/ 폴더에 자동 동기화한다.
 
-    루트 .md, docs/, .claude/rules/, .claude/skills/ 문서를 자동 탐색하여
-    Obsidian 프론트매터를 추가하고 vault에 복사한다.
+    프로젝트별 하위 폴더로 분리하여 멀티 프로젝트 vault에서 충돌을 방지한다.
     """
+    # 프로젝트 이름 추출 (폴더명에서)
+    proj_name = _PROJECT_ROOT.name  # 'vibe-coding'
     synced = 0
 
-    for glob_pattern, dest_subdir in _DOC_SCAN_PATTERNS:
+    for glob_pattern, dest_subdir_tmpl in _DOC_SCAN_PATTERNS:
+        dest_subdir = dest_subdir_tmpl.replace('{proj}', proj_name)
         dest_dir = vault_dir / dest_subdir
         dest_dir.mkdir(parents=True, exist_ok=True)
 
