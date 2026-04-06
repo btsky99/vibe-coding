@@ -148,12 +148,22 @@ def _format_ts(ts) -> str:
 
 
 def _safe_filename(note_id: str, title: str) -> str:
-    """Obsidian에서 사용 가능한 안전한 파일명 생성. 경로 트래버설 방어."""
-    import re
-    # 위험 문자 제거: .., /, \, 제어문자
-    safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', note_id)
-    safe = safe.replace('..', '')
-    return safe or 'unnamed'
+    """Obsidian에서 사용 가능한 안전한 파일명 생성. 제목 포함 + 경로 트래버설 방어.
+
+    예: vibe-3, "결정: 방식 C 선택" → "vibe-3 결정 — 방식 C 선택"
+    """
+    # 위험 문자 제거
+    safe_id = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', note_id).replace('..', '')
+    if not safe_id:
+        safe_id = 'unnamed'
+
+    if title:
+        # 제목에서 파일명 불가 문자 제거, 콜론→대시
+        safe_title = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', title)
+        safe_title = safe_title.replace('..', '').strip()[:60]  # 최대 60자
+        return f'{safe_id} {safe_title}' if safe_title else safe_id
+
+    return safe_id
 
 
 def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool = False):
@@ -302,14 +312,15 @@ def _sync_project_docs(vault_dir: Path) -> int:
             except ValueError:
                 continue
 
-            # 스킬 문서는 폴더명을 파일명에 포함 (skill.md → vibe-zettel.md)
+            # 스킬 문서는 폴더명을 키로 사용 (skill.md → vibe-zettel)
             if 'skills' in rel_path and src.name == 'skill.md':
-                filename = src.parent.name + '.md'
+                file_key = src.parent.name
             else:
-                filename = src.name
+                file_key = src.stem
 
-            # 프론트매터 생성 (제목은 한글 매핑 우선)
-            title = _DOC_TITLE_KO.get(Path(filename).stem, Path(filename).stem)
+            # 한글 제목 → 파일명으로도 사용
+            title = _DOC_TITLE_KO.get(file_key, file_key)
+            filename = f'{title}.md'
             fm = '\n'.join([
                 '---',
                 f'title: "{title}"',
@@ -373,7 +384,8 @@ def _generate_moc(vault_dir: Path, notes: list):
         lines.append(f'## {icon} {type_labels.get(note_type, note_type)} ({len(group)})')
         lines.append('')
         for n in group[:50]:
-            lines.append(f'- [[{n["id"]}]] {n.get("title", "")}')
+            fname = _safe_filename(n['id'], n.get('title', ''))
+            lines.append(f'- [[{fname}]]')
         if len(group) > 50:
             lines.append(f'- ... 외 {len(group) - 50}개')
         lines.append('')
@@ -394,8 +406,7 @@ def _generate_moc(vault_dir: Path, notes: list):
             root_docs = sorted(proj_folder.glob('*.md'))
             if root_docs:
                 for doc in root_docs:
-                    title = _DOC_TITLE_KO.get(doc.stem, doc.stem)
-                    lines.append(f'- [[{doc.stem}]] {title}')
+                    lines.append(f'- [[{doc.stem}]]')
                 lines.append('')
 
             # 하위 폴더별
@@ -410,8 +421,7 @@ def _generate_moc(vault_dir: Path, notes: list):
                 lines.append(f'### {sub_labels.get(subdir_name, subdir_name)}')
                 lines.append('')
                 for doc in sub_docs:
-                    title = _DOC_TITLE_KO.get(doc.stem, doc.stem)
-                    lines.append(f'- [[{doc.stem}]] {title}')
+                    lines.append(f'- [[{doc.stem}]]')
                 lines.append('')
 
     (vault_dir / 'INDEX.md').write_text('\n'.join(lines), encoding='utf-8')
