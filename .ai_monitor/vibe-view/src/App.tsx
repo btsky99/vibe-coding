@@ -65,7 +65,7 @@ import SetupBanner from './components/SetupBanner';
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
 type LayoutMode = '1' | '2' | '3' | '4' | '2x2' | '6' | '8' | '9';
 
-function App({ onSwitchToOffice }: { onSwitchToOffice?: () => void }) {
+function App() {
 
   // ─── 공유 데이터 훅 — 모든 폴링/SSE/상태를 useVibeData로 통합 ──────
   const vibe = useVibeData();
@@ -500,7 +500,6 @@ function App({ onSwitchToOffice }: { onSwitchToOffice?: () => void }) {
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
         onOpenMissionControl={() => setActiveTab('agent')}
-        onSwitchToOffice={onSwitchToOffice}
         onOpenOfficePage={openOfficePage}
       />
 
@@ -929,24 +928,9 @@ function Root() {
   return <AppWithModeToggle />;
 }
 
-// viewMode 전환 래퍼 — classic(기존) ↔ office(가상 오피스) 토글
+// 클래식 모드 고정 — 오피스는 독립 창(?page=office)으로만 접근
 function AppWithModeToggle() {
-  const [viewMode, setViewMode] = useState<'classic' | 'office'>(() => {
-    return (localStorage.getItem('vibe_view_mode') as 'classic' | 'office') || 'classic';
-  });
-  const toggleMode = () => {
-    const next = viewMode === 'classic' ? 'office' : 'classic';
-    localStorage.setItem('vibe_view_mode', next);
-    setViewMode(next);
-  };
-  if (viewMode === 'office') {
-    return (
-      <Suspense fallback={<div className="w-screen h-screen bg-[#0a0a0f] flex items-center justify-center text-white">Loading Office...</div>}>
-        <OfficeApp onSwitchToClassic={toggleMode} />
-      </Suspense>
-    );
-  }
-  return <App onSwitchToOffice={toggleMode} />;
+  return <App />;
 }
 
 export default Root;

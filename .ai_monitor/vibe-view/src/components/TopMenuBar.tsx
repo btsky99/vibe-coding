@@ -46,8 +46,7 @@ interface TopMenuBarProps {
   onClearLogs: () => void;
   // 자율 주행 버튼 → 중앙 통제실(mission-control) 탭으로 이동
   onOpenMissionControl: () => void;
-  // 오피스 모드 전환 (optional — 클래식 모드에서만 전달됨)
-  onSwitchToOffice?: () => void;
+  // 오피스 독립 창 열기
   onOpenOfficePage?: () => void;
 }
 
@@ -180,7 +179,7 @@ const TopMenuBar = memo(function TopMenuBar({
   updateReady, updateApplying, updateChecking,
   onApplyUpdate, onTriggerUpdateCheck,
   onOpenFolder, onInstallSkills, onInstallTool, onOpenHelpDoc, onClearLogs,
-  onOpenMissionControl, onSwitchToOffice, onOpenOfficePage,
+  onOpenMissionControl, onOpenOfficePage,
 }: TopMenuBarProps) {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
@@ -240,7 +239,7 @@ const TopMenuBar = memo(function TopMenuBar({
 
           {/* ── 보기 메뉴 — 사이드바 토글 + 레이아웃 선택 ── */}
           {activeMenu === menu && menu === '보기' && (
-            <div className="absolute top-full left-0 w-48 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+            <div className="absolute top-full left-0 w-48 max-h-[80vh] overflow-y-auto bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1 custom-scrollbar">
               <button
                 onClick={() => { setIsSidebarOpen(!isSidebarOpen); setActiveMenu(null); }}
                 className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
@@ -262,27 +261,15 @@ const TopMenuBar = memo(function TopMenuBar({
                    mode === '6' ? '6 분할 (3×2 격자)' : '8 분할 (4×2 격자)'}
                 </button>
               ))}
-              {/* 오피스 모드 전환 */}
-              {onSwitchToOffice && (
-                <>
-                  <div className="h-px bg-white/5 my-1 mx-2"></div>
-                  <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">뷰 모드</div>
-                  <button
-                    onClick={() => { onSwitchToOffice(); setActiveMenu(null); }}
-                    className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
-                  >
-                    <Monitor className="w-3.5 h-3.5 text-[#8b5cf6]" /> 🏢 오피스 모드로 전환
-                  </button>
-                  {onOpenOfficePage && (
-                    <button
-                      onClick={() => { onOpenOfficePage(); setActiveMenu(null); }}
-                      className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5 text-[#22d3ee]" /> 오피스 페이지 직접 열기
-                    </button>
-                  )}
-                </>
-              )}
+              {/* 오피스 */}
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">오피스</div>
+              <button
+                onClick={() => { onOpenOfficePage?.(); setActiveMenu(null); }}
+                className="w-full text-left px-4 py-1.5 hover:bg-[#8b5cf6]/15 flex items-center gap-2 text-[#c4b5fd] font-semibold"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-[#8b5cf6]" /> 오피스 독립 창 열기
+              </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">진단</div>
               <button
@@ -439,31 +426,20 @@ const TopMenuBar = memo(function TopMenuBar({
       {/* ── 우측 — 업데이트 버튼 + 버전 배지 ── */}
       <div className="ml-auto flex items-center gap-2 text-[11px] text-[#969696] px-2 font-mono overflow-hidden">
         <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1 py-0.5">
-          <button
-            type="button"
+          <span
             className="shrink-0 rounded bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-white"
-            title="현재 클래식 화면"
           >
             Classic
-          </button>
-          {onSwitchToOffice && (
-            <button
-              type="button"
-              onClick={onSwitchToOffice}
-              className="shrink-0 rounded px-2 py-0.5 text-[9px] font-semibold text-[#c4b5fd] hover:bg-white/10"
-              title="오피스 모드로 전환"
-            >
-              Office
-            </button>
-          )}
+          </span>
           {onOpenOfficePage && (
             <button
               type="button"
               onClick={onOpenOfficePage}
-              className="shrink-0 rounded px-2 py-0.5 text-[9px] font-semibold text-[#7dd3fc] hover:bg-white/10"
-              title="오피스 페이지를 새 창으로 열기"
+              className="shrink-0 rounded px-2 py-0.5 text-[9px] font-semibold text-[#c4b5fd] hover:bg-[#8b5cf6]/20 flex items-center gap-1"
+              title="오피스를 독립 창으로 열기"
             >
-              Office Page
+              <ExternalLink className="w-2.5 h-2.5" />
+              Office
             </button>
           )}
         </div>
