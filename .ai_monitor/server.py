@@ -4632,6 +4632,31 @@ _REMOVED_PTY_HANDLER = True  # 마커 — 참조 점검용
 _child_procs: list = []
 
 
+def _graceful_shutdown_pty_server():
+    """Node PTY 서버에 graceful shutdown 요청을 보냅니다.
+
+    [2026-04-07] taskkill /F로 Node PTY 서버를 강제 종료하면 PTY가 생성한
+    conhost.exe/cmd.exe 셸 프로세스가 고아가 되어 빈 터미널 창이 여러 개 나타나는
+    치명적 UX 버그가 있었습니다.
+    /api/pty/shutdown 엔드포인트를 먼저 호출하여 Node 측에서 모든 PTY 세션을
+    정리(pty.kill())한 뒤 프로세스를 스스로 종료하도록 합니다.
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{WS_PORT}/api/pty/shutdown',
+            method='POST',
+            data=b'{}',
+            headers={'Content-Type': 'application/json'}
+        )
+        urllib.request.urlopen(req, timeout=2)
+        # Node 프로세스가 자체 종료될 시간 확보 (300ms setTimeout + 여유)
+        time.sleep(0.5)
+        print("[cleanup] PTY 서버 graceful shutdown 완료")
+    except Exception as e:
+        print(f"[cleanup] PTY 서버 graceful shutdown 실패 (무시, 강제종료로 폴백): {e}")
+
+
 def _cleanup_child_procs():
     """_child_procs 목록에 등록된 모든 서브프로세스를 강제 종료합니다.
 
@@ -4639,7 +4664,12 @@ def _cleanup_child_procs():
     자식 프로세스(hive_watchdog, heal_daemon, telegram_bridge 등)는
     자동으로 죽지 않아 좀비로 남습니다.
     'taskkill /F /T /PID'로 프로세스 트리 전체를 강제 종료합니다.
+
+    [2026-04-07] PTY 서버는 먼저 graceful shutdown → 나머지 프로세스 강제 종료.
     """
+    # PTY 서버 graceful shutdown 먼저 시도 (고아 터미널 창 방지)
+    _graceful_shutdown_pty_server()
+
     for proc in list(_child_procs):
         if proc is None:
             continue
@@ -4693,12 +4723,51 @@ def _cleanup_pyinstaller_temp():
 def _cleanup_postgres():
     """내장 PostgreSQL 인스턴스를 pg_ctl stop으로 정상 종료합니다.
     [2026-04-06] 프로그램 종료 후 PG가 좀비로 남아 다음 실행 시 pgdata 락 충돌로
-    서버가 시작 불가했던 버그 수정. atexit + 시그널 핸들러에서 호출."""
+    서버가 시작 불가했던 버그 수정. atexit + 시그널 핸들러에서 호출.
+    [2026-04-07] 다른 인스턴스(개발용/설치용)가 PG를 공유 사용 중이면 종료 스킵.
+    """
     if not PG_CTL_BIN.exists():
         return
     if not _PG_DATA_DIR.exists():
         return
     _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+    # ── 자기 인스턴스의 커넥션 풀 먼저 정리 ──
+    # 풀에 남은 연결이 pg_stat_activity에 잡혀 "다른 인스턴스 있음"으로 오판 방지
+    try:
+        with _pg_pool_lock:
+            for conn, db in _pg_pool:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            _pg_pool.clear()
+    except Exception:
+        pass
+
+    # ── 다른 인스턴스가 PG를 사용 중인지 확인 (공유 PG 보호) ──
+    # 개발 버전과 설치 버전이 동일 pgdata(%APPDATA%\VibeCoding\pgdata)를 공유하므로,
+    # 한쪽이 종료할 때 다른 쪽의 DB 연결이 끊기는 치명적 버그 방지.
+    try:
+        import psycopg2 as _pg2
+        _chk_conn = _pg2.connect(host='127.0.0.1', port=int(PG_PORT),
+                                  user='postgres', dbname='postgres')
+        _chk_conn.autocommit = True
+        _cur = _chk_conn.cursor()
+        # 자기 백엔드를 제외한 클라이언트 연결 수 확인 (다른 인스턴스의 커넥션 풀 포함)
+        # backend_type='client backend' 필터로 autovacuum 등 PG 내부 워커 제외
+        _cur.execute("SELECT count(*) FROM pg_stat_activity "
+                     "WHERE pid != pg_backend_pid() "
+                     "AND backend_type = 'client backend'")
+        _total = _cur.fetchone()[0]
+        _cur.close()
+        _chk_conn.close()
+        if _total > 0:
+            print(f"[PG] 다른 연결 {_total}개 존재 → PG 종료 스킵 (개발/설치 버전 공유 보호)")
+            return
+    except Exception:
+        pass  # psycopg2 없거나 연결 실패 → PG가 이미 죽었거나 외부 PG → 종료 시도
+
     try:
         # fast 모드: 클라이언트 연결 즉시 끊고 종료 (smart보다 빠름)
         subprocess.run(
@@ -4966,7 +5035,19 @@ def main():
 
     print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
 
-    # ── PostgreSQL 자동 초기화 및 시작 (PG 바이너리가 있는 경우에만) ──
+    # ── PostgreSQL + PTY 준비를 병렬 실행 (기동 시간 단축) ──────────────
+    # [2026-04-07] PTY 좀비 정리 + node-pty 검증은 PG와 독립적이므로 병렬 실행.
+    # PG 시작 ~2~5초 + PTY 준비 ~2~6초가 직렬이면 ~4~11초 → 병렬이면 ~2~6초.
+    _pty_prep_done = threading.Event()
+    def _prepare_pty_parallel():
+        try:
+            _kill_orphan_pty_servers()
+            _ensure_pty_node_modules()
+        except Exception as e:
+            print(f"[!] PTY 병렬 준비 오류 (무시): {e}")
+        _pty_prep_done.set()
+    threading.Thread(target=_prepare_pty_parallel, daemon=True, name='PTY-Prep').start()
+
     ensure_postgres_running()
 
     # [2026-04-07] PG 시작 성공 후에만 atexit 등록 — main() 스코프에서만 PG 종료 보장
@@ -5139,8 +5220,6 @@ def main():
                     _current_cmdline = ""
         except Exception as e:
             print(f"[PTY Cleanup] 좀비 정리 실패 (무시): {e}")
-        # 포트 해제 대기
-        time.sleep(1)
 
     def _ensure_pty_node_modules():
         """PTY 서버의 node_modules가 현재 PC에서 유효한지 확인하고, 필요하면 npm rebuild를 실행합니다.
@@ -5341,7 +5420,8 @@ def main():
 
             time.sleep(interval)
 
-    _kill_orphan_pty_servers()  # 좀비 PTY 프로세스 정리 후 시작
+    # PTY 병렬 준비 완료 대기 (PG 초기화 중 이미 실행됨)
+    _pty_prep_done.wait(timeout=30)
     _start_node_pty_server()
     # PTY 헬스체크 워치독 데몬 스레드 시작
     threading.Thread(target=_pty_watchdog_loop, daemon=True,

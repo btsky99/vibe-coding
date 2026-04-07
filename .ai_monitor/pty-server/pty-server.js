@@ -1052,6 +1052,21 @@ function cleanupAllSessions() {
   }
 }
 
+/**
+ * POST /api/pty/shutdown
+ * Python 서버가 종료 시 호출 — 모든 PTY 세션을 정리한 뒤 프로세스 종료.
+ * taskkill /F 강제 종료 전에 이 엔드포인트를 먼저 호출하면
+ * conhost.exe/cmd.exe 고아 프로세스(빈 터미널 창)가 남지 않습니다.
+ */
+app.post('/api/pty/shutdown', (req, res) => {
+  const count = ptySessions.size;
+  console.log('[PTY] Shutdown 요청 수신 — 모든 세션 정리 후 종료합니다.');
+  cleanupAllSessions();
+  res.json({ status: 'shutdown', sessions_cleaned: count });
+  // 응답 전송 완료 후 프로세스 종료 (약간의 지연으로 응답이 클라이언트에 도달하도록 보장)
+  setTimeout(() => { process.exit(0); }, 300);
+});
+
 process.on('SIGTERM', () => { cleanupAllSessions(); process.exit(0); });
 process.on('SIGINT', () => { cleanupAllSessions(); process.exit(0); });
 process.on('exit', () => { cleanupAllSessions(); });
