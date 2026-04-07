@@ -4917,89 +4917,50 @@ def main():
     except Exception:
         pass  # 바로가기 생성 실패해도 서버 시작에는 지장 없음
 
-    # ── 다중 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
-    # [버그 수정 2026-03-14 v3.7.60] 소켓 락을 ensure_postgres_running() 이전에
-    # 먼저 획득해야 한다. 이전 코드는 postgres 초기화(수 초 소요) 이후에 락을
-    # 체크했기 때문에, 두 번째 더블클릭이 그 사이에 발생하면 둘 다 bind 성공하여
-    # 2개 인스턴스가 실행되는 타이밍 버그가 있었음.
-    # [수정 2026-03-14 v3.7.61] 소켓 락을 __main__ 진입 직후 첫 번째 동작으로 이동.
-    # [수정 2026-03-15 v3.7.64] _MAX_INSTANCES 1→4 — 개발버전과 설치버전을 동시에 실행하면
-    #   동일 PROJECT_ROOT 해시로 락 포트가 충돌하여 두 번째 인스턴스가 os._exit(0) 종료.
-    #   사용자 요구: 같은 프로젝트라도 dev/installer 등 4개까지 동시 실행 허용.
-    # PROJECT_ROOT 경로 해시 기반으로 고유 포트 결정 (19001~19480 범위).
-    # [수정 2026-03-15 v3.7.70] hash() → hashlib.md5 — Python의 hash()는 프로세스마다
-    # 다른 값을 반환(PYTHONHASHSEED 랜덤화)하여 두 인스턴스가 서로 다른 락 포트 범위를 사용,
-    # 결과적으로 동일 HTTP 포트(9000)에 바인딩하는 충돌이 발생했음.
-    # hashlib.md5는 입력이 같으면 항상 동일한 해시를 반환하여 락 포트 범위가 일관됨.
+    # ── 단일 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
+    # [v3.7.179] 단일 인스턴스 전면 전환 — _MAX_INSTANCES 4→1.
+    # 더블클릭으로 2개 창이 뜨고, 하나를 닫으면 터미널이 죽는 치명적 UX 버그 해결.
+    # 이미 실행 중이면 기존 창을 Win32 API로 포커스하고 새 인스턴스는 즉시 종료.
     import hashlib as _hl
-    _proj_hash    = int(_hl.md5(str(PROJECT_ROOT).encode()).hexdigest()[:4], 16)  # 결정적 해시
-    _BASE_PORT    = 19001 + (_proj_hash % 480)             # 프로젝트별 고유 포트 (슬롯 0)
-    _MAX_INSTANCES = 4                                     # 최대 4개 동시 실행 허용 (dev+installer 공존)
-    _proj_id      = f"{_proj_hash:04x}"                   # 타이틀용 짧은 hex ID
+    _proj_hash    = int(_hl.md5(str(PROJECT_ROOT).encode()).hexdigest()[:4], 16)
+    _LOCK_PORT    = 19001 + (_proj_hash % 480)
+    _proj_id      = f"{_proj_hash:04x}"
 
-    # 빈 슬롯(포트)을 순서대로 시도하여 첫 번째 빈 자리를 점유
     _lock_sock = None
-    _instance_slot = -1
-    for _slot in range(_MAX_INSTANCES):
-        _try_port = _BASE_PORT + _slot
-        try:
-            _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-            _sock.bind(('127.0.0.1', _try_port))
-            _lock_sock = _sock
-            _instance_slot = _slot
-            break  # 슬롯 확보 성공 — 루프 종료
-        except OSError:
-            continue  # 이미 사용 중인 슬롯 → 다음 슬롯 시도
-
-    if _instance_slot == -1:
-        # 모든 슬롯이 사용 중 — 좀비 프로세스(크래시 잔류)인지 확인 후 강제 회수
-        # [2026-03-26] 이전 실행이 크래시/강제종료되면 소켓이 TIME_WAIT로 남아
-        # 새 실행을 차단하는 문제 → vibe-coding 프로세스가 실제로 살아있는지 확인
-        print(f"[*] 인스턴스 슬롯 부족 — 좀비 프로세스 정리 시도 중...")
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        try:
-            # vibe-coding / ai_monitor 관련 프로세스만 강제 종료
-            subprocess.run(
-                'wmic process where "CommandLine like \'%ai_monitor.server%\' or CommandLine like \'%vibe-coding%\'" delete',
-                shell=True, capture_output=True, timeout=10,
-                creationflags=_no_window,
-            )
-        except Exception:
-            pass
-        time.sleep(2)  # 소켓 해제 대기
-
-        # 재시도
-        for _slot in range(_MAX_INSTANCES):
-            _try_port = _BASE_PORT + _slot
+    try:
+        _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        _sock.bind(('127.0.0.1', _LOCK_PORT))
+        _lock_sock = _sock
+    except OSError:
+        # 이미 실행 중 — 기존 창을 포커스하고 종료
+        print(f"[*] 이미 실행 중인 인스턴스 감지 (락 포트 {_LOCK_PORT})")
+        if os.name == 'nt':
             try:
-                _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-                _sock.bind(('127.0.0.1', _try_port))
-                _lock_sock = _sock
-                _instance_slot = _slot
-                print(f"[*] 좀비 정리 후 슬롯 {_slot} 확보 성공!")
-                break
-            except OSError:
-                continue
-
-    if _instance_slot == -1:
-        print(f"[!] 최대 인스턴스({_MAX_INSTANCES}개) 초과 (프로젝트: {PROJECT_ROOT.name}). 종료합니다.")
+                import ctypes
+                _win_title = f"바이브 코딩 [{PROJECT_ROOT.name}]"
+                _hwnd = ctypes.windll.user32.FindWindowW(None, _win_title)
+                if _hwnd:
+                    ctypes.windll.user32.ShowWindow(_hwnd, 9)        # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(_hwnd)
+                    print(f"[*] 기존 창 포커스 완료: {_win_title}")
+                else:
+                    print(f"[*] 기존 창을 찾을 수 없습니다 (아직 로딩 중일 수 있음)")
+            except Exception as e:
+                print(f"[!] 창 포커스 실패: {e}")
         os._exit(0)
 
-    print(f"[*] 인스턴스 락 확보 (슬롯 {_instance_slot}, 포트 {_BASE_PORT + _instance_slot})")
+    # 좀비 소켓 대비: 락 획득 실패 후 프로세스가 실제로 없으면 강제 회수
+    # (위에서 이미 성공했으므로 여기는 도달하지 않음 — 안전장치)
 
-    # ── 포트 확정: 슬롯 기반 + 실제 바인딩 확인 ─────────────────────────────────
-    # [수정 2026-03-16 v3.7.78] 서로 다른 프로젝트(dev/installer 등)가 각자 slot 0을 받으면
-    # 둘 다 HTTP:9000을 시도하여 충돌. 인스턴스 락 포트(_BASE_PORT)는 프로젝트 해시별 고유이므로
-    # 다른 프로젝트 간에는 중복 방지가 안 됨. 해결: 슬롯 기반 포트를 먼저 시도하되,
-    # 이미 사용 중이면 _find_free_port로 빈 포트 탐색.
-    _preferred_http = 9000 + _instance_slot * 2
+    print(f"[*] 인스턴스 락 확보 (포트 {_LOCK_PORT})")
+
+    # ── 포트 확정: HTTP 9000, WS 9001 고정 + 충돌 시 대체 탐색 ─────────────────
+    # 단일 인스턴스이므로 슬롯 기반 분배 불필요. 고정 포트 우선 시도.
+    _preferred_http = 9000
     _http_ok = False
     try:
         _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # [수정 2026-03-18] SO_REUSEADDR=0 — Windows에서 SO_REUSEADDR=1이면
-        # 이미 점유된 포트에도 bind 성공하여 포트 충돌이 발생했음
         _test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         _test_sock.bind(('127.0.0.1', _preferred_http))
         _test_sock.close()
@@ -5010,16 +4971,13 @@ def main():
     if _http_ok:
         HTTP_PORT = _preferred_http  # noqa: F811
     else:
-        # 슬롯 기반 포트가 점유됨 → 9010부터 빈 포트 탐색 (기본 범위 밖)
         HTTP_PORT = _find_free_port(9010, max_tries=40)  # noqa: F811
-        print(f"[!] 슬롯 기반 포트 {_preferred_http} 사용 중 → 대체 포트 {HTTP_PORT} 사용")
+        print(f"[!] 포트 {_preferred_http} 사용 중 → 대체 포트 {HTTP_PORT} 사용")
 
-    # WS 포트: HTTP + 1, 마찬가지로 바인딩 확인
     _preferred_ws = HTTP_PORT + 1
     _ws_ok = False
     try:
         _test_sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # [수정 2026-03-18] SO_REUSEADDR=0 — HTTP 포트와 동일한 이유
         _test_sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         _test_sock2.bind(('127.0.0.1', _preferred_ws))
         _test_sock2.close()
@@ -5035,44 +4993,16 @@ def main():
 
     print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
 
-    # ── PostgreSQL + PTY 준비를 병렬 실행 (기동 시간 단축) ──────────────
-    # [2026-04-07] PTY 좀비 정리 + node-pty 검증은 PG와 독립적이므로 병렬 실행.
-    # PG 시작 ~2~5초 + PTY 준비 ~2~6초가 직렬이면 ~4~11초 → 병렬이면 ~2~6초.
-    _pty_prep_done = threading.Event()
-    def _prepare_pty_parallel():
+    # ── AppUserModelID 설정 (WebView 생성 전에 필요) ──────────────────────
+    if os.name == 'nt':
         try:
-            _kill_orphan_pty_servers()
-            _ensure_pty_node_modules()
-        except Exception as e:
-            print(f"[!] PTY 병렬 준비 오류 (무시): {e}")
-        _pty_prep_done.set()
-    threading.Thread(target=_prepare_pty_parallel, daemon=True, name='PTY-Prep').start()
+            import ctypes
+            import ctypes.wintypes
+            myappid = f'com.vibe.coding.{__version__}'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except: pass
 
-    ensure_postgres_running()
-
-    # [2026-04-07] PG 시작 성공 후에만 atexit 등록 — main() 스코프에서만 PG 종료 보장
-    # 모듈 레벨에서 등록하면 import server만 해도 종료 시 PG를 죽이는 버그 발생
-    atexit.register(_cleanup_postgres)
-
-    # ── 프로젝트별 DB 초기화 (PG 시작 후) ────────────────────────────────────
-    # [2026-03-22] 단일 PG 인스턴스 + 프로젝트별 DB 분리
-    # ensure_postgres_running()이 PG를 기동한 뒤, PROJECT_ID 기반 DB를 생성.
-    # 개발 모드에서도 기존 PG가 떠 있으면 프로젝트 DB를 사용.
-    _init_project_db(PROJECT_ID)
-
-    # ── 프로젝트 DB 스키마 초기화 (프로젝트 DB 생성 후) ─────────────────────
-    # [2026-03-22] frozen 모드: _init_project_db()가 PG_PROJECT_DB를 설정한 뒤
-    # pg_store.ensure_schema()를 호출하여 프로젝트 DB에 테이블 생성.
-    # _SCHEMA_READY를 리셋하여 프로젝트 DB에 새로 스키마를 적용.
-    # frozen/개발 모두: 프로젝트 DB에 스키마 생성
-    try:
-        import src.pg_store as _pg_mod
-        _pg_mod._SCHEMA_READY = False  # 프로젝트 DB용 스키마 재실행 허용
-        _pg_mod.ensure_schema(DATA_DIR)
-    except Exception as e:
-        print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
-
-    # ── PID 파일 기록 (중복 실행 방지) ─────────────────────────────────────
+    # ── PID 파일 기록 ─────────────────────────────────────────────────────
     try:
         _pid_file = DATA_DIR / '.dev_server.pid'
         _pid_file.parent.mkdir(parents=True, exist_ok=True)
@@ -5080,17 +5010,7 @@ def main():
     except Exception:
         pass
 
-    if os.name == 'nt':
-        try:
-            import ctypes
-            import ctypes.wintypes
-
-            # 작업표시줄 AppUserModelID — 같은 앱으로 그룹화
-            myappid = f'com.vibe.coding.{__version__}'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-        except: pass
-
-    # 서버 시작 시 상황판 창 플래그 초기화 (새 세션에서 창이 다시 열릴 수 있도록)
+    # 서버 시작 시 상황판 창 플래그 초기화
     try:
         _win_flag = DATA_DIR / '.monitor_opened'
         if _win_flag.exists():
@@ -5098,21 +5018,22 @@ def main():
     except Exception:
         pass
 
+    # ── [v3.7.179] 스플래시 선행 표시 + 백그라운드 초기화 ──────────────────
+    # WebView 창을 PG/PTY/HTTP 초기화 **전에** 먼저 생성하여 사용자에게 즉시 피드백.
+    # 모든 무거운 초기화는 _init_and_load_app() 콜백에서 수행.
+    # 기존: PG(2~5초)+PTY(1~2초)+HTTP 전부 끝난 후 창 생성 → 5~10초 무반응
+    # 수정: 락+포트 확인(~0.1초) → 창 즉시 표시 → 백그라운드에서 초기화 → 완료 후 앱 전환
+
     # --- Auto-update check (non-blocking) ---
-    # frozen(EXE) 모드: EXE 다운로드+교체, pip 모드: pip install --upgrade
-    # 둘 다 check_and_update()가 내부에서 분기 처리
     try:
         try:
             from updater import check_and_update
         except ImportError:
             from .updater import check_and_update
 
-        # 시작 즉시 1회 체크 + 이후 10분마다 반복
-        # → 앱 사용 중에도 새 버전 배포되면 배너로 알림
         def _update_loop():
             while True:
                 try:
-                    # 이미 다운로드 완료 상태면 재다운로드 건너뜀
                     ready_file = DATA_DIR / "update_ready.json"
                     already_ready = False
                     if ready_file.exists():
@@ -5125,7 +5046,7 @@ def main():
                         check_and_update(DATA_DIR)
                 except Exception as e:
                     print(f"[!] Update check error: {e}")
-                time.sleep(600)  # 10분 간격
+                time.sleep(600)
 
         threading.Thread(target=_update_loop, daemon=True).start()
     except ImportError:
@@ -5420,46 +5341,23 @@ def main():
 
             time.sleep(interval)
 
-    # PTY 병렬 준비 완료 대기 (PG 초기화 중 이미 실행됨)
-    _pty_prep_done.wait(timeout=30)
-    _start_node_pty_server()
-    # PTY 헬스체크 워치독 데몬 스레드 시작
-    threading.Thread(target=_pty_watchdog_loop, daemon=True,
-                     name='PTY-Watchdog').start()
-
-    # Node PTY REST URL 설정 — _get_node_pty_sessions()가 사용
-    _NODE_PTY_REST_URL = f"http://127.0.0.1:{WS_PORT}"
-
-    # pty_api / agent_api에 REST URL 주입
-    pty_api.set_pty_rest_url(_NODE_PTY_REST_URL)
-    agent_api.set_pty_rest_url(_NODE_PTY_REST_URL)
-
-    # 자율 에이전트 브로드캐스트 워커: cli_agent 큐 → 다중 SSE 클라이언트 팬아웃
-    threading.Thread(target=_agent_broadcast_worker, daemon=True,
-                     name='AgentBroadcast').start()
+    # ── [v3.7.179] GUI 창 선행 표시 → 백그라운드 초기화 → 앱 로드 ────────────
+    # 모든 무거운 초기화(PG, PTY, 데몬, HTTP)를 WebView 콜백에서 실행.
+    # 사용자는 스플래시를 즉시 보고, 초기화 진행 상황을 텍스트로 확인.
+    _http_server_ref = [None]  # HTTP 서버 참조 (콜백 → 정리 코드 공유)
     
-    # 실시간 파일 감시 시작
-    start_fs_watcher(PROJECT_ROOT)
+    # ── 데몬 함수 정의 (실행은 _init_and_load_app 콜백에서) ──────────────────
 
-    MemoryWatcher().start()  # 에이전트 메모리 파일 → PostgreSQL hive_memory 자동 동기화
-    
-    # 하이브 워치독(Watchdog) 엔진 실행
-    # --data-dir 인자로 실제 DATA_DIR 전달 — 설치 버전에서 경로 오탐 방지
     def run_watchdog():
         if not SCRIPTS_DIR:
             return
         watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
         if watchdog_script.exists():
-            # [버그수정] frozen(EXE) 모드에서 sys.executable = EXE 자신 → subprocess로 실행 시
-            # EXE가 무한 재귀 생성되는 버그 수정.
-            # _python_runner_cmds()로 실제 Python 인터프리터를 탐색하여 사용.
             _python_cmds = _python_runner_cmds()
             if not _python_cmds:
                 print("[!] run_watchdog: Python 인터프리터를 찾을 수 없어 워치독 스킵")
                 return
             python_exe = _python_cmds[0]
-            # CREATE_NO_WINDOW: 워치독 데몬 시작 시 콘솔 창 표시 방지
-            # 반환된 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
             proc = subprocess.Popen(
                 [python_exe, str(watchdog_script), "--data-dir", str(DATA_DIR)],
                 stdout=subprocess.PIPE,
@@ -5470,11 +5368,8 @@ def main():
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             )
             _child_procs.append(proc)
-    threading.Thread(target=run_watchdog, daemon=True).start()
 
-    # Telegram 브릿지 자동 시작: .env에 TELEGRAM_BOT_T{N} 토큰이 1개 이상 설정된 경우 실행
-    # 에이전트 간 대화를 텔레그램 그룹 채팅으로 미러링 + 사용자 원격 개입 지원
-    _tg_bridge_launched = [False]  # 서버 인스턴스 내 1회만 실행 보장 (mutable 리스트로 closure 회피)
+    _tg_bridge_launched = [False]
     def run_telegram_bridge():
         if _tg_bridge_launched[0]:
             return
@@ -5486,8 +5381,6 @@ def main():
         tg_log = DATA_DIR / "telegram_bridge.log"
         if not tg_script.exists():
             return
-        # 중복 실행 방지: telegram_bridge.py 자체에 PID lock이 있으므로
-        # 서버에서는 PID 파일 존재 + 프로세스 생존만 빠르게 체크
         tg_pid_file = DATA_DIR / "telegram_bridge.pid"
         if tg_pid_file.exists():
             try:
@@ -5506,17 +5399,14 @@ def main():
                 tg_pid_file.unlink(missing_ok=True)
         try:
             env_content = env_file.read_text(encoding='utf-8') if env_file.exists() else ""
-            # 멀티봇 형식(TELEGRAM_BOT_T1~T8) 또는 레거시(TELEGRAM_BOT_TOKEN) 확인
             has_token = False
             for line in env_content.splitlines():
                 stripped = line.strip()
-                # 멀티봇: TELEGRAM_BOT_T1=xxx ~ TELEGRAM_BOT_T8=xxx
                 if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
                     token_val = stripped.split("=", 1)[1].strip()
                     if token_val:
                         has_token = True
                         break
-                # 레거시 호환: TELEGRAM_BOT_TOKEN=xxx
                 elif stripped.startswith("TELEGRAM_BOT_TOKEN="):
                     token_val = stripped.split("=", 1)[1].strip()
                     if token_val:
@@ -5547,27 +5437,22 @@ def main():
         )
         proc._vibe_log_handle = log_handle
         _child_procs.append(proc)
-        # PID 파일 저장 (중복 실행 방지용)
         try:
             tg_pid_file.write_text(str(proc.pid))
         except Exception:
             pass
         print(f"[*] Telegram Bridge 자동 시작됨 (PID={proc.pid})")
-    threading.Thread(target=run_telegram_bridge, daemon=True).start()
 
-    # 자기치유 데몬 자동 시작: 5분마다 task_logs 패턴 분석 → 반복 오류 자동 치유
     def run_heal_daemon():
         if not SCRIPTS_DIR:
             return
         heal_script = SCRIPTS_DIR / "heal_daemon.py"
         if heal_script.exists():
-            # [버그수정] frozen 모드에서 sys.executable = EXE → 실제 Python 인터프리터 탐색
             _python_cmds = _python_runner_cmds()
             if not _python_cmds:
                 print("[!] run_heal_daemon: Python 인터프리터를 찾을 수 없어 힐데몬 스킵")
                 return
             python_exe = _python_cmds[0]
-            # 힐데몬 Popen 핸들을 _child_procs에 등록 → X 버튼 종료 시 일괄 kill
             proc = subprocess.Popen(
                 [python_exe, str(heal_script), "--interval", "300"],
                 cwd=str(PROJECT_ROOT),
@@ -5579,19 +5464,12 @@ def main():
             )
             _child_procs.append(proc)
             print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
-    threading.Thread(target=run_heal_daemon, daemon=True).start()
 
-    # ── 에이전트 상태 자동 동기화 데몬 (60초 주기) ─────────────────────────
-    # 인메모리 AGENT_STATUS ↔ PostgreSQL agent_heartbeats 양방향 동기화.
-    # - 인메모리에 있는 활성 에이전트 → DB에 heartbeat 기록
-    # - 5분 이상 heartbeat 없는 에이전트 → offline 자동 전환
-    # - DB에만 있는 에이전트 → 인메모리에 복구 (다른 프로세스가 기록한 경우)
     def _agent_sync_daemon():
         while True:
             try:
                 time.sleep(60)
                 now_ts = time.time()
-                # 1) 인메모리 → DB 동기화 (활성 에이전트 heartbeat 갱신)
                 with AGENT_STATUS_LOCK:
                     snapshot = dict(AGENT_STATUS)
                 for agent_name, info in snapshot.items():
@@ -5602,7 +5480,6 @@ def main():
                                              current_task=info.get('task'))
                         except Exception:
                             pass
-                # 2) DB → 인메모리 동기화 (다른 프로세스가 기록한 에이전트 반영)
                 try:
                     db_rows = list_agent_status()
                     with AGENT_STATUS_LOCK:
@@ -5610,7 +5487,6 @@ def main():
                             aid = row.get('agent_id', '')
                             if not aid:
                                 continue
-                            # 인메모리에 없는 에이전트는 DB에서 복구
                             if aid not in AGENT_STATUS:
                                 try:
                                     from datetime import datetime as _dt
@@ -5624,7 +5500,6 @@ def main():
                                     'last_seen': lb,
                                     'beat_count': row.get('beat_count', 0),
                                 }
-                        # 3) 5분 이상 heartbeat 없는 에이전트 → offline 전환
                         for aid, info in AGENT_STATUS.items():
                             last = info.get('last_seen', 0)
                             if now_ts - last > 300 and info.get('status') not in ('offline',):
@@ -5632,13 +5507,8 @@ def main():
                 except Exception:
                     pass
             except Exception:
-                pass  # 다음 루프 시작 시 sleep(60)에서 대기
-    threading.Thread(target=_agent_sync_daemon, daemon=True, name='AgentSyncDaemon').start()
-    print("[*] 에이전트 상태 동기화 데몬 시작됨 (60초 주기)")
+                pass
 
-    # MUX 서버 자동 시작: cmux-style 터미널 멀티플렉서 (Named Pipe)
-    # [2026-03-18] Claude: P6 — 에이전트 간 텍스트 직접 주입을 위한 MUX 데몬.
-    # 바이브 코딩 서버 시작 시 자동 기동, 종료 시 자동 정리.
     def run_mux_server():
         if not SCRIPTS_DIR:
             return
@@ -5658,83 +5528,33 @@ def main():
             )
             _child_procs.append(proc)
             print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
-    threading.Thread(target=run_mux_server, daemon=True).start()
 
-    # [2026-03-30] 그룹챗 WebSocket/브릿지 제거됨 — Paperclip 스타일 하트비트로 전환
-    # 에이전트 간 통신은 task_comments + PostgreSQL NOTIFY로 대체
-
-    # 1.5. PostgreSQL 기동 완료 후 에이전트 상태 복구
-    _restore_agent_status_from_db()
-
-    # 2. HTTP 서버 시작 (포트 충돌 시 자동 탐색된 포트로 재시도)
-    try:
-        server = ThreadedHTTPServer(('127.0.0.1', HTTP_PORT), SSEHandler)
-        print(f"[*] Server running on http://localhost:{HTTP_PORT}")
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        # [v3.7.62] task_logs 사전 로드 — 서버 시작 후 백그라운드에서 실행 (기동 시간 단축)
-        threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
-                         name='ThoughtPreload').start()
-        # 브로드캐스트 워커는 HTTP 서버 시작 전(4097~4099)에서 이미 시작됨 — 중복 시작 금지
-    except OSError as e:
-        if 'already in use' in str(e).lower() or '10048' in str(e):
-            print(f"[!] 포트 {HTTP_PORT} 충돌 — 이미 다른 프로세스가 사용 중입니다.")
-            print(f"    대안 포트를 탐색합니다...")
-            try:
-                alt_port = _find_free_port(HTTP_PORT + 10, max_tries=50)
-                HTTP_PORT = alt_port
-                server = ThreadedHTTPServer(('127.0.0.1', HTTP_PORT), SSEHandler)
-                print(f"[*] 대안 포트로 서버 시작: http://localhost:{HTTP_PORT}")
-                threading.Thread(target=server.serve_forever, daemon=True).start()
-                threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
-                                 name='ThoughtPreload').start()
-            except Exception as e2:
-                print(f"[!] 대안 포트에서도 실패: {e2}")
-                import sys as _sys; _sys.exit(1)
-        else:
-            print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
-            import sys as _sys; _sys.exit(1)
-    except Exception as e:
-        print(f"[!] Server Start Error on port {HTTP_PORT}: {e}")
-        import sys as _sys; _sys.exit(1)
-
-    # 3. GUI 창 띄우기 (최우선 순위)
+    # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
     try:
         import webview
-        # 아이콘 경로 결정
         official_icon = os.path.join(os.path.dirname(__file__), "bin", "vibe_final.ico")
         if not os.path.exists(official_icon):
             official_icon = os.path.join(os.path.dirname(__file__), "bin", "app_icon.ico")
-        
-        # 윈도우 하단바 아이콘 강제 교체 함수 (Win32 API)
+
         def force_win32_icon():
             if os.name == 'nt' and os.path.exists(official_icon):
                 try:
                     import ctypes
                     from ctypes import wintypes
-                    import time
-                    
-                    # 창이 생성될 때까지 잠시 대기
                     time.sleep(2)
-                    
-                    # 바이브 코딩 창 핸들 찾기 — 프로젝트명 포함 제목으로 검색
                     hwnd = ctypes.windll.user32.FindWindowW(None, f"바이브 코딩 [{PROJECT_ROOT.name}]")
                     if hwnd:
-                        # 아이콘 파일 로드 (유효한 경로인지 재확인)
                         hicon = ctypes.windll.user32.LoadImageW(
                             None, official_icon, 1, 0, 0, 0x00000010 | 0x00000040
                         )
                         if hicon:
-                            # 큰 아이콘 (작업표시줄용)
                             ctypes.windll.user32.SendMessageW(hwnd, 0x80, 1, hicon)
-                            # 작은 아이콘 (창 제목줄용)
                             ctypes.windll.user32.SendMessageW(hwnd, 0x80, 0, hicon)
                             print(f"[*] Win32 Taskbar Icon Forced: {official_icon}")
                 except Exception as e:
                     print(f"[!] Win32 Icon Fix Error: {e}")
 
-        # ── 로딩 스플래시 HTML ──────────────────────────────────────────────────
-        # webview 창이 뜨자마자 스플래시를 먼저 표시 → 사용자가 "앱이 켜지고 있다"는 피드백 즉시 수신
-        # HTTP 서버가 응답하면 실제 앱 URL로 전환 (보통 < 1초)
+        # ── 스플래시 HTML — 진행 상황 텍스트 실시간 업데이트 지원 ──────────────
         _SPLASH_HTML = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 *{{margin:0;padding:0;box-sizing:border-box}}
@@ -5743,7 +5563,7 @@ height:100vh;font-family:-apple-system,'Segoe UI',sans-serif;color:white}}
 .box{{text-align:center}}
 .logo{{font-size:52px;margin-bottom:12px}}
 .title{{font-size:22px;font-weight:600;margin-bottom:6px}}
-.sub{{font-size:13px;color:#666;margin-bottom:28px}}
+.sub{{font-size:13px;color:#888;margin-bottom:28px;transition:opacity .3s}}
 .proj{{font-size:12px;color:#7c3aed;margin-bottom:28px;
 background:#1a0a3a;padding:4px 12px;border-radius:20px;display:inline-block}}
 .ring{{width:36px;height:36px;border:3px solid #222;border-top-color:#7c3aed;
@@ -5754,53 +5574,134 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
   <div class="logo">🚀</div>
   <div class="title">바이브 코딩</div>
   <div class="proj">{PROJECT_ROOT.name}</div>
-  <div class="sub">서버 시작 중...</div>
+  <div class="sub" id="status">초기화 준비 중...</div>
   <div class="ring"></div>
 </div></body></html>"""
 
-        def _load_app_when_ready(window):
-            """스플래시 표시 후 HTTP 서버 응답 확인 → 실제 앱 URL로 전환.
-            [v3.7.61 수정] timeout 0.5→0.1, sleep 0.5→0.1 으로 단축.
-            서버는 이미 socket bind 완료 상태이므로 대부분 첫 번째 시도에서 성공.
-            최대 3초(30회×0.1초) 대기로 충분. 이전 최대 5초(10회×0.5초)에서 단축."""
+        def _init_and_load_app(window):
+            """[v3.7.179] 스플래시 표시 상태에서 PG/PTY/HTTP 전체 초기화 수행 후 앱 로드.
+            이전: PG+PTY+HTTP 모두 끝난 후 창 생성 → 5~10초 무반응.
+            수정: 창 즉시 표시 → 초기화 진행 → 완료 후 앱 전환."""
             import urllib.request as _ureq
-            import time as _t
-            _target = f'http://localhost:{HTTP_PORT}'
-            for _ in range(30):
+
+            def _update_splash(msg):
                 try:
-                    _ureq.urlopen(f'http://127.0.0.1:{HTTP_PORT}/', timeout=0.1)
+                    window.evaluate_js(
+                        f"document.getElementById('status').textContent='{msg}'"
+                    )
+                except Exception:
+                    pass
+
+            # ── 1단계: PostgreSQL + PTY 병렬 시작 ──
+            _update_splash('데이터베이스 시작 중...')
+            _pty_prep_done = threading.Event()
+            def _prepare_pty():
+                try:
+                    _kill_orphan_pty_servers()
+                    _ensure_pty_node_modules()
+                except Exception as e:
+                    print(f"[!] PTY 병렬 준비 오류: {e}")
+                _pty_prep_done.set()
+            threading.Thread(target=_prepare_pty, daemon=True).start()
+
+            ensure_postgres_running()
+            atexit.register(_cleanup_postgres)
+
+            # ── 2단계: 프로젝트 DB + 스키마 ──
+            _update_splash('프로젝트 데이터베이스 초기화 중...')
+            _init_project_db(PROJECT_ID)
+            try:
+                import src.pg_store as _pg_mod
+                _pg_mod._SCHEMA_READY = False
+                _pg_mod.ensure_schema(DATA_DIR)
+            except Exception as e:
+                print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
+
+            # ── 3단계: PTY 서버 시작 ──
+            _update_splash('터미널 서버 시작 중...')
+            _pty_prep_done.wait(timeout=30)
+            _start_node_pty_server()
+            threading.Thread(target=_pty_watchdog_loop, daemon=True,
+                             name='PTY-Watchdog').start()
+
+            _NODE_PTY_REST_URL = f"http://127.0.0.1:{WS_PORT}"
+            pty_api.set_pty_rest_url(_NODE_PTY_REST_URL)
+            agent_api.set_pty_rest_url(_NODE_PTY_REST_URL)
+
+            # ── 4단계: 데몬 스레드 일괄 시작 ──
+            _update_splash('서비스 시작 중...')
+            threading.Thread(target=_agent_broadcast_worker, daemon=True,
+                             name='AgentBroadcast').start()
+            start_fs_watcher(PROJECT_ROOT)
+            MemoryWatcher().start()
+            threading.Thread(target=run_watchdog, daemon=True).start()
+            threading.Thread(target=run_telegram_bridge, daemon=True).start()
+            threading.Thread(target=run_heal_daemon, daemon=True).start()
+            threading.Thread(target=_agent_sync_daemon, daemon=True,
+                             name='AgentSyncDaemon').start()
+            threading.Thread(target=run_mux_server, daemon=True).start()
+
+            _restore_agent_status_from_db()
+
+            # ── 5단계: HTTP 서버 시작 ──
+            _update_splash('웹 서버 시작 중...')
+            _actual_port = HTTP_PORT
+            try:
+                _srv = ThreadedHTTPServer(('127.0.0.1', _actual_port), SSEHandler)
+                print(f"[*] Server running on http://localhost:{_actual_port}")
+                threading.Thread(target=_srv.serve_forever, daemon=True).start()
+                threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
+                                 name='ThoughtPreload').start()
+                _http_server_ref[0] = _srv
+            except OSError as e:
+                if 'already in use' in str(e).lower() or '10048' in str(e):
+                    print(f"[!] 포트 {_actual_port} 충돌 → 대체 포트 탐색")
+                    try:
+                        _actual_port = _find_free_port(_actual_port + 10, max_tries=50)
+                        _srv = ThreadedHTTPServer(('127.0.0.1', _actual_port), SSEHandler)
+                        print(f"[*] 대안 포트로 서버 시작: http://localhost:{_actual_port}")
+                        threading.Thread(target=_srv.serve_forever, daemon=True).start()
+                        threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
+                                         name='ThoughtPreload').start()
+                        _http_server_ref[0] = _srv
+                    except Exception as e2:
+                        print(f"[!] 대안 포트에서도 실패: {e2}")
+                        return
+                else:
+                    print(f"[!] Server Start Error: {e}")
+                    return
+
+            # ── 6단계: 서버 응답 확인 후 앱 로드 ──
+            _update_splash('앱 로딩 중...')
+            for _ in range(50):  # 최대 5초
+                try:
+                    _ureq.urlopen(f'http://127.0.0.1:{_actual_port}/', timeout=0.1)
                     break
                 except Exception:
-                    _t.sleep(0.1)
-            window.load_url(_target)
+                    time.sleep(0.1)
+            window.load_url(f'http://localhost:{_actual_port}')
+            print(f"[*] 앱 로드 완료 — http://localhost:{_actual_port}")
 
-        print(f"[*] Launching Desktop Window with Official Icon...")
-        # 창 제목에 프로젝트명 포함 — 다중 인스턴스 실행 시 작업표시줄에서 구분 가능
-        # html= 파라미터로 스플래시 먼저 표시 → webview.start() 직후 창 즉시 가시화
-        global main_window  # SSEHandler에서 폴더 다이얼로그 등에 사용
+        print(f"[*] Launching Desktop Window with Splash...")
+        global main_window
         main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
                               html=_SPLASH_HTML, width=1400, height=900)
 
-        # 아이콘 교체 스레드 별도 실행
         threading.Thread(target=force_win32_icon, daemon=True).start()
 
-        # _load_app_when_ready: webview GUI 루프 시작 후 별도 스레드에서 실행
-        # → 창이 즉시 뜨고 스플래시 표시 → 서버 확인 후 실제 앱으로 전환
-        webview.start(_load_app_when_ready, args=[main_window])
-        # 창 닫힘 = 서버 소켓 정상 종료 후 프로세스 종료
-        # os._exit()는 소켓을 강제 종료 → 포트 TIME_WAIT 잔류 원인
-        # server.shutdown() + server_close()로 포트를 먼저 해제한 뒤 종료
-        # X 버튼으로 창이 닫힘 → PTY 자식 프로세스 먼저 kill → HTTP 서버 소켓 해제 → 프로세스 종료
-        print("[*] GUI 창이 닫혔습니다. 좀비 프로세스 방지 — 모든 자식 프로세스 정리 중...")
-        # [제거됨] PTY 세션 정리는 Node PTY 서버 자체 처리
-        _cleanup_child_procs()               # hive_watchdog / heal_daemon / telegram_bridge 종료
-        _cleanup_postgres()                  # [2026-04-06] 내장 PG 종료
+        # webview.start() 블로킹 — _init_and_load_app이 별도 스레드에서 전체 초기화 수행
+        webview.start(_init_and_load_app, args=[main_window])
+
+        # ── 창 닫힘 → 정리 ──
+        print("[*] GUI 창이 닫혔습니다. 모든 자식 프로세스 정리 중...")
+        _cleanup_child_procs()
+        _cleanup_postgres()
         try:
-            server.shutdown()                # HTTP 요청 처리 스레드 정지
-            server.server_close()            # 포트 소켓 해제 (TIME_WAIT 방지)
+            if _http_server_ref[0]:
+                _http_server_ref[0].shutdown()
+                _http_server_ref[0].server_close()
         except Exception:
             pass
-        # 락 소켓 명시적 해제 — os._exit() 전에 닫아야 다음 실행에서 즉시 포트 재사용 가능
         try:
             if _lock_sock:
                 _lock_sock.close()
@@ -5811,17 +5712,16 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
     except Exception as e:
         print(f"[!] GUI Error: {e}")
         open_app_window(f"http://localhost:{HTTP_PORT}")
-        # 브라우저 모드에서는 Ctrl+C(SIGINT)로 종료 — KeyboardInterrupt 잡아서 정리 후 종료
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("[*] Ctrl+C 감지 — PTY 세션 및 서버 정리 후 종료합니다.")
-            pass  # [제거됨] PTY 세션 정리는 Node PTY 서버 자체 처리
-            _cleanup_child_procs()           # 좀비 방지: watchdog/heal/telegram 종료
+            print("[*] Ctrl+C 감지 — 정리 후 종료합니다.")
+            _cleanup_child_procs()
             try:
-                server.shutdown()
-                server.server_close()
+                if _http_server_ref[0]:
+                    _http_server_ref[0].shutdown()
+                    _http_server_ref[0].server_close()
             except Exception:
                 pass
             os._exit(0)
