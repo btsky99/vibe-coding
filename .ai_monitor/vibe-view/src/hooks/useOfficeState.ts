@@ -61,14 +61,14 @@ interface UseOfficeStateArgs {
 }
 
 const ZONE_LABELS: Record<OfficeZone, string> = {
-  desk: 'Desk',
-  meeting: 'Meeting',
-  review: 'Review',
-  memory: 'Memory',
+  desk: '데스크',
+  meeting: '회의실',
+  review: '리뷰',
+  memory: '메모리',
   git: 'Git',
-  lounge: 'Lounge',
-  recovery: 'Recovery',
-  user: 'User',
+  lounge: '라운지',
+  recovery: '복구',
+  user: '사용자',
 };
 
 function deriveZone(data: any, hiveHealth: any): OfficeZone {
@@ -163,8 +163,8 @@ export function useOfficeState({
       .map((log, index) => ({
         id: `log-${index}-${log.session_id}`,
         zone: 'recovery' as OfficeZone,
-        title: `${log.agent} failed`,
-        subtitle: log.trigger || 'Execution failed',
+        title: `${log.agent} 실패`,
+        subtitle: log.trigger || '실행 실패',
         severity: 'error' as const,
         terminalIds: [log.terminal_id],
       }));
@@ -186,7 +186,7 @@ export function useOfficeState({
         id: `memory-${index}-${note.id}`,
         zone: 'memory' as OfficeZone,
         title: note.title || note.key,
-        subtitle: `${note.author} updated shared memory`,
+        subtitle: `${note.author} 공유 메모리 업데이트`,
         severity: 'success' as const,
         terminalIds: [],
       }));

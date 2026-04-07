@@ -13,7 +13,7 @@
 import { memo, useState, useRef, useEffect } from 'react';
 import {
   Menu, Terminal, RotateCw, Monitor,
-  X, Zap, Cpu, Info, ShieldCheck, ExternalLink,
+  X, Zap, Cpu, Info, ShieldCheck,
   Trash2, LayoutDashboard, ClipboardCheck, FileText, Copy, Check, RefreshCw
 } from 'lucide-react';
 import { API_BASE } from '../constants';
@@ -46,8 +46,6 @@ interface TopMenuBarProps {
   onClearLogs: () => void;
   // 자율 주행 버튼 → 중앙 통제실(mission-control) 탭으로 이동
   onOpenMissionControl: () => void;
-  // 오피스 독립 창 열기
-  onOpenOfficePage?: () => void;
 }
 
 // ── 서버 로그 뷰어 모달 — 서버/PG/태스크 로그를 탭으로 전환하며 확인 + 클립보드 복사 ──
@@ -179,7 +177,7 @@ const TopMenuBar = memo(function TopMenuBar({
   updateReady, updateApplying, updateChecking,
   onApplyUpdate, onTriggerUpdateCheck,
   onOpenFolder, onInstallSkills, onInstallTool, onOpenHelpDoc, onClearLogs,
-  onOpenMissionControl, onOpenOfficePage,
+  onOpenMissionControl,
 }: TopMenuBarProps) {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
@@ -261,15 +259,6 @@ const TopMenuBar = memo(function TopMenuBar({
                    mode === '6' ? '6 분할 (3×2 격자)' : '8 분할 (4×2 격자)'}
                 </button>
               ))}
-              {/* 오피스 */}
-              <div className="h-px bg-white/5 my-1 mx-2"></div>
-              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">오피스</div>
-              <button
-                onClick={() => { onOpenOfficePage?.(); setActiveMenu(null); }}
-                className="w-full text-left px-4 py-1.5 hover:bg-[#8b5cf6]/15 flex items-center gap-2 text-[#c4b5fd] font-semibold"
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-[#8b5cf6]" /> 오피스 독립 창 열기
-              </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">진단</div>
               <button
@@ -425,24 +414,6 @@ const TopMenuBar = memo(function TopMenuBar({
 
       {/* ── 우측 — 업데이트 버튼 + 버전 배지 ── */}
       <div className="ml-auto flex items-center gap-2 text-[11px] text-[#969696] px-2 font-mono overflow-hidden">
-        <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1 py-0.5">
-          <span
-            className="shrink-0 rounded bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-white"
-          >
-            Classic
-          </span>
-          {onOpenOfficePage && (
-            <button
-              type="button"
-              onClick={onOpenOfficePage}
-              className="shrink-0 rounded px-2 py-0.5 text-[9px] font-semibold text-[#c4b5fd] hover:bg-[#8b5cf6]/20 flex items-center gap-1"
-              title="오피스를 독립 창으로 열기"
-            >
-              <ExternalLink className="w-2.5 h-2.5" />
-              Office
-            </button>
-          )}
-        </div>
         {/* 🧠 중앙 통제실(Mission Control) 탭으로 이동 — 자율 에이전트 + 오케스트레이터 통합 뷰 */}
         <button
           onClick={onOpenMissionControl}

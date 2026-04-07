@@ -3528,6 +3528,28 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
+        # ── 오피스 독립 창 실행 — dashboard_window.py office 탭 ──
+        if path == '/api/office/launch':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+                dashboard_script = BASE_DIR / 'dashboard_window.py'
+                python_cmds = _python_runner_cmds()
+                if not python_cmds:
+                    raise RuntimeError('Python interpreter not found for office launch')
+                subprocess.Popen(
+                    [python_cmds[0], str(dashboard_script), str(HTTP_PORT), 'office'],
+                    creationflags=_no_window,
+                    close_fds=True,
+                )
+                self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
         # ── 스킬 평가 리뷰어 실행 — 브라우저에서 eval_review.html 열기 ──
         # [설계 의도] skill-creator의 description 최적화 평가 쿼리셋을 리뷰하는 HTML 뷰어.
         # vibe-dispatcher-workspace/eval_review.html 파일을 기본 브라우저로 열어줍니다.

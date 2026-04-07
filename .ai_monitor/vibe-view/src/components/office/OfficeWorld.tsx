@@ -262,13 +262,13 @@ export default function OfficeWorld({
       ctx.fillText(zone?.label ?? zoneId, x + 14, y + 22);
       ctx.fillStyle = 'rgba(255,255,255,0.45)';
       ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-      ctx.fillText(`${occupied} agents`, x + 14, y + 38);
+      ctx.fillText(`${occupied} 에이전트`, x + 14, y + 38);
       if (warningCount > 0) {
         ctx.fillStyle = 'rgba(252,165,165,0.92)';
-        ctx.fillText(`${warningCount} alerts`, x + 14, y + 52);
+        ctx.fillText(`${warningCount} 경고`, x + 14, y + 52);
       } else if (occupied >= 3) {
         ctx.fillStyle = 'rgba(125,211,252,0.86)';
-        ctx.fillText('high traffic', x + 14, y + 52);
+        ctx.fillText('혼잡', x + 14, y + 52);
       }
     });
 
@@ -344,7 +344,7 @@ export default function OfficeWorld({
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
         ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('moving', point.x, point.y + 38);
+        ctx.fillText('이동 중', point.x, point.y + 38);
       }
     });
 

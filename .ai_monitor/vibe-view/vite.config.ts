@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
+    // 빌드 출력을 서버 서빙 디렉토리(.ai_monitor/dist/)로 직접 내보냄
+    outDir: '../dist',
+    emptyOutDir: true,
     // [v3.7.62] 1MB 단일 번들 → 청크 분할로 초기 로드 속도 개선
     // Monaco Editor(~800kB)를 별도 청크로 분리해 첫 화면 렌더링을 앞당김
     rollupOptions: {

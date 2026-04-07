@@ -31,10 +31,10 @@ import MemoryPanel from '../panels/MemoryPanel';
 import GitPanel from '../panels/GitPanel';
 
 const HUD_TABS = [
-  { id: 'terminal', label: 'Terminal', icon: Monitor },
-  { id: 'tasks', label: 'Tasks', icon: ClipboardList },
-  { id: 'messages', label: 'Messages', icon: MessageSquare },
-  { id: 'memory', label: 'Memory', icon: Database },
+  { id: 'terminal', label: '터미널', icon: Monitor },
+  { id: 'tasks', label: '태스크', icon: ClipboardList },
+  { id: 'messages', label: '메시지', icon: MessageSquare },
+  { id: 'memory', label: '메모리', icon: Database },
   { id: 'git', label: 'Git', icon: GitBranch },
 ] as const;
 
@@ -63,14 +63,14 @@ const ZONE_PANEL_MAP: Record<OfficeZone, HudTab> = {
 };
 
 const ZONE_ACTION_HINT: Record<OfficeZone, string> = {
-  desk: 'Live execution and pair work',
-  meeting: 'Debate, sync, and prompt routing',
-  review: 'Verification, lint, and QA passes',
-  memory: 'Shared notes, memory, and docs',
-  git: 'Branch, commit, and release flow',
-  lounge: 'Idle agents waiting for dispatch',
-  recovery: 'Blocked or failed agents needing intervention',
-  user: 'Operator focus and manual control',
+  desk: '실시간 실행 및 페어 작업',
+  meeting: '토론, 동기화, 프롬프트 라우팅',
+  review: '검증, 린트, QA 패스',
+  memory: '공유 노트, 메모리, 문서',
+  git: '브랜치, 커밋, 릴리즈 흐름',
+  lounge: '디스패치 대기 중인 유휴 에이전트',
+  recovery: '차단되거나 실패한 에이전트 — 개입 필요',
+  user: '운영자 포커스 및 수동 제어',
 };
 
 export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
@@ -103,7 +103,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       if (prev !== curr && (curr === 'running' || curr === 'started')) {
         nextBubbles.push({
           deskId: presence.slotId,
-          text: presence.zone === 'meeting' ? 'meeting sync' : 'work start',
+          text: presence.zone === 'meeting' ? '회의 동기화' : '작업 시작',
           createdAt: now,
           duration: 3500,
         });
@@ -111,7 +111,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       if ((prev === 'running' || prev === 'started') && curr !== 'running' && curr !== 'started') {
         nextBubbles.push({
           deskId: presence.slotId,
-          text: 'task done',
+          text: '작업 완료',
           createdAt: now,
           duration: 4200,
         });
@@ -186,7 +186,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       ...prev,
       ...office.presences.slice(0, 3).map((presence) => ({
         deskId: presence.slotId,
-        text: 'move to meeting',
+        text: '회의실 이동',
         createdAt: Date.now(),
         duration: 3000,
       })),
@@ -201,7 +201,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
         ...prev,
         {
           deskId: selectedPresence.slotId,
-          text: 'review requested',
+          text: '리뷰 요청됨',
           createdAt: Date.now(),
           duration: 3200,
         },
@@ -220,13 +220,13 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/5 bg-[#0b1320] px-4">
         <div className="flex items-center gap-3">
           <span className="bg-gradient-to-r from-cyan-300 via-sky-400 to-fuchsia-400 bg-clip-text text-sm font-black tracking-[0.35em] text-transparent">
-            VIBE OFFICE
+            바이브 오피스
           </span>
           <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-mono text-white/45">
             v{vibe.appVersion}
           </span>
           <span className="text-[10px] text-white/30">
-            active {office.summary.activeAgents} · blocked {office.summary.blockedAgents}
+            활성 {office.summary.activeAgents} · 차단 {office.summary.blockedAgents}
           </span>
         </div>
 
@@ -238,21 +238,21 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                 onClick={onSwitchToClassic}
                 className="rounded px-2 py-0.5 text-[10px] font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
               >
-                Classic
+                클래식
               </button>
             )}
             <button
               type="button"
               className="rounded bg-cyan-400/12 px-2 py-0.5 text-[10px] font-semibold text-cyan-200"
             >
-              Office
+              오피스
             </button>
             <button
               type="button"
               onClick={openStandaloneOfficePage}
               className="rounded px-2 py-0.5 text-[10px] font-semibold text-sky-200 transition hover:bg-white/10"
             >
-              Office Page
+              오피스 페이지
             </button>
           </div>
           <button
@@ -260,14 +260,14 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             onClick={summonMeeting}
             className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-200 transition hover:bg-cyan-400/15"
           >
-            Open Meeting
+            회의 소집
           </button>
           <button
             type="button"
             onClick={requestReview}
             className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-200 transition hover:bg-emerald-400/15"
           >
-            Request Review
+            리뷰 요청
           </button>
           {onSwitchToClassic && (
             <button
@@ -275,7 +275,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               className="flex items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/55 transition hover:bg-white/10 hover:text-white/80"
             >
               <LayoutGrid className="h-3 w-3" />
-              Classic
+              클래식
             </button>
           )}
         </div>
@@ -314,7 +314,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
           <div className="absolute bottom-4 left-4 w-[320px] rounded-xl border border-white/10 bg-[#08111ccc] p-3 backdrop-blur">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-white/80">
               <Radar className="h-3.5 w-3.5 text-cyan-300" />
-              Event Rail
+              이벤트 레일
             </div>
             <div className="space-y-2">
               {office.events.slice(0, 4).map((event) => (
@@ -338,7 +338,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
         <aside className="flex w-[430px] shrink-0 flex-col border-l border-white/5 bg-[#0c1522]/95 backdrop-blur">
           <div className="border-b border-white/5 px-3 py-3">
             <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.03] p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-white/35">Focused Agent</div>
+              <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-white/35">포커스 에이전트</div>
               {selectedPresence ? (
                 <>
                   <div className="flex items-center justify-between">
@@ -355,18 +355,18 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                       onClick={summonMeeting}
                       className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-200 transition hover:bg-cyan-400/15"
                     >
-                      Meeting
+                      회의
                     </button>
                     <button
                       type="button"
                       onClick={requestReview}
                       className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-200 transition hover:bg-emerald-400/15"
                     >
-                      Review
+                      리뷰
                     </button>
                   </div>
                   <div className="mt-2 text-[11px] text-white/48">
-                    {selectedPresence.liveTask || 'No live task'}
+                    {selectedPresence.liveTask || '진행 중인 작업 없음'}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {selectedPresence.badges.map((badge) => (
@@ -377,21 +377,21 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                   </div>
                 </>
               ) : (
-                <div className="text-[11px] text-white/40">Select a desk to inspect the agent.</div>
+                <div className="text-[11px] text-white/40">에이전트를 확인하려면 데스크를 선택하세요.</div>
               )}
             </div>
 
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">Busy Zones</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">활성 존</div>
                 <div className="mt-1 text-lg font-bold text-white/82">{office.summary.busyZones}</div>
               </div>
               <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">Tasks</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">태스크</div>
                 <div className="mt-1 text-lg font-bold text-white/82">{vibe.activeTaskCount}</div>
               </div>
               <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">Unread</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">읽지 않음</div>
                 <div className="mt-1 text-lg font-bold text-white/82">{vibe.unreadMsgCount}</div>
               </div>
             </div>
@@ -399,11 +399,11 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.03] p-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-white/35">Zone Control</div>
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-white/35">존 제어</div>
                   <div className="mt-1 text-sm font-bold text-white/82">{selectedZoneState?.label ?? 'Desk'}</div>
                 </div>
                 <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">
-                  {selectedZoneState?.occupancy ?? 0} active
+                  {selectedZoneState?.occupancy ?? 0} 활성
                 </span>
               </div>
               <div className="mt-2 text-[11px] text-white/46">
@@ -422,7 +422,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                     </button>
                   ))
                 ) : (
-                  <span className="text-[10px] text-white/32">No agents currently mapped here.</span>
+                  <span className="text-[10px] text-white/32">현재 이 존에 배정된 에이전트가 없습니다.</span>
                 )}
               </div>
             </div>
@@ -487,8 +487,8 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
           <footer className="flex h-7 shrink-0 items-center justify-between border-t border-white/5 px-3 text-[9px] text-white/28">
             <div className="flex items-center gap-3">
-              <span>{office.summary.activeAgents} agents active</span>
-              <span>{office.summary.blockedAgents} in recovery</span>
+              <span>{office.summary.activeAgents} 에이전트 활성</span>
+              <span>{office.summary.blockedAgents} 복구 중</span>
             </div>
             <div className="flex items-center gap-1">
               <Activity className="h-3 w-3" />

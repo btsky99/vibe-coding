@@ -234,11 +234,6 @@ function App() {
     setActiveMenu(null);
   };
 
-  const openOfficePage = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('page', 'office');
-    window.open(url.toString(), '_blank', 'noopener,noreferrer');
-  };
 
   // AI 도구 설치 (글로벌 CLI + 현재 프로젝트 Playwright + 하네스 V2)
   const installTool = async (tool: string) => {
@@ -500,7 +495,6 @@ function App() {
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
         onOpenMissionControl={() => setActiveTab('agent')}
-        onOpenOfficePage={openOfficePage}
       />
 
       {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}
@@ -928,7 +922,7 @@ function Root() {
   return <AppWithModeToggle />;
 }
 
-// 클래식 모드 고정 — 오피스는 독립 창(?page=office)으로만 접근
+// 클래식 모드 고정 — 오피스는 보기 메뉴에서 ?page=office 로 전환
 function AppWithModeToggle() {
   return <App />;
 }

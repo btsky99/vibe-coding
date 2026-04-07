@@ -49,11 +49,15 @@ TITLE_MAP = {
     'hive': '바이브 코딩 - 하이브',
     # kanban: React TaskBoardPanel 기반 오케스트레이션 보드 (B안 통합)
     'kanban': '바이브 코딩 - 오케스트레이션 보드',
+    # office: 가상 오피스(메타버스) 독립 창
+    'office': '바이브 코딩 - 오피스',
 }
 # kanban 탭은 ?kanban=1 파라미터로 KanbanOnlyApp 컴포넌트를 렌더링
 # 그 외 탭은 기존 ?page=dashboard&tab=<name> 경로 사용
 if TAB == 'kanban':
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?kanban=1"
+elif TAB == 'office':
+    DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=office"
 else:
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=dashboard&tab={quote(TAB)}"
 
@@ -77,7 +81,7 @@ class DashboardWindow(QMainWindow):
         title = f"{base_title} [{project_name}]" if project_name else base_title
         self.setWindowTitle(title)
         # kanban(오케스트레이션 보드)은 기존 kanban_board.py와 동일한 크기로 시작
-        w, h = (1440, 860) if TAB == 'kanban' else (1400, 900)
+        w, h = (1440, 860) if TAB in ('kanban', 'office') else (1400, 900)
         self.resize(w, h)
 
         screen = QApplication.primaryScreen().geometry()

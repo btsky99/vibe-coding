@@ -110,6 +110,72 @@ def create_shortcut():
         print(f"바로가기 생성 중 오류 발생: {e}")
 
 
+def create_office_shortcut():
+    """Windows 바탕화면에 '바이브 오피스' 바로가기를 생성합니다.
+    dashboard_window.py를 office 탭으로 실행하는 독립 바로가기입니다.
+    """
+    if os.name != 'nt':
+        print("바탕화면 바로가기는 Windows에서만 지원됩니다.")
+        return
+
+    try:
+        from win32com.client import Dispatch
+    except ImportError:
+        print("pywin32가 필요합니다: pip install pywin32")
+        return
+
+    desktop = Path(os.environ.get('USERPROFILE', '')) / 'Desktop'
+    shortcut_path = desktop / "바이브 오피스.lnk"
+
+    if shortcut_path.exists():
+        try:
+            shortcut_path.unlink()
+        except Exception:
+            pass
+
+    # pythonw.exe로 dashboard_window.py office 실행
+    base_dir = Path(__file__).resolve().parent
+    dashboard_script = base_dir / 'dashboard_window.py'
+
+    # venv pythonw → 시스템 pythonw 순으로 탐색
+    pythonw = None
+    for candidate in [
+        base_dir / 'venv' / 'Scripts' / 'pythonw.exe',
+        Path(sys.executable).parent / 'pythonw.exe',
+    ]:
+        if candidate.exists():
+            pythonw = str(candidate)
+            break
+    if not pythonw:
+        pythonw = shutil.which('pythonw') or shutil.which('python')
+    if not pythonw:
+        print("Python 인터프리터를 찾을 수 없습니다.")
+        return
+
+    try:
+        shell = Dispatch('WScript.Shell')
+        shortcut = shell.CreateShortCut(str(shortcut_path))
+        shortcut.Targetpath = pythonw
+        shortcut.Arguments = f'"{dashboard_script}" 9000 office'
+        shortcut.WorkingDirectory = str(base_dir.parent)
+        shortcut.Description = "바이브 오피스 - AI 에이전트 가상 오피스"
+        shortcut.WindowStyle = 1  # SW_SHOWNORMAL
+
+        # 아이콘 — 클래식과 동일 아이콘 사용
+        for ico_candidate in [
+            base_dir / "bin" / "app_icon.ico",
+            base_dir.parent / ".ai_monitor" / "bin" / "app_icon.ico",
+        ]:
+            if ico_candidate.exists():
+                shortcut.IconLocation = f"{ico_candidate},0"
+                break
+
+        shortcut.save()
+        print(f"바탕화면 바로가기가 생성되었습니다: {shortcut_path}")
+    except Exception as e:
+        print(f"바로가기 생성 중 오류 발생: {e}")
+
+
 def remove_shortcut():
     """Windows 바탕화면의 '바이브코딩' 바로가기를 삭제합니다.
     언인스톨 시 호출됩니다.
