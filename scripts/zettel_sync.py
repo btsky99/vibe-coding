@@ -126,7 +126,10 @@ def _format_links_section_cached(note_id: str, all_links: dict) -> str:
 
 
 def _render_links_section(links: list, backlinks: list) -> str:
-    """링크/백링크를 Obsidian 위키링크 마크다운으로 렌더링."""
+    """링크/백링크를 Obsidian 위키링크 마크다운으로 렌더링.
+    [v3.7.179] [[ID 제목|표시명]] 형식으로 변경 — Obsidian이 파일명과 매칭할 수 있도록.
+    이전: [[vibe-21]] → 파일명 'vibe-21 세션 요약...'과 매칭 실패 → 루트에 빈 파일 생성.
+    수정: [[vibe-21 세션 요약...|vibe-21: 세션 요약...]] → 정확한 파일 매칭."""
     if not links and not backlinks:
         return ''
 
@@ -138,13 +141,18 @@ def _render_links_section(links: list, backlinks: list) -> str:
         sections.append('\n## 연결된 노트')
         for link in links:
             label = link_labels.get(link.get('link_type', ''), link.get('link_type', ''))
-            sections.append(f'- [[{link["id"]}]] {link.get("title", "")} ({label})')
+            # [[파일명|표시명]] 형식 — Obsidian이 파일명으로 정확히 매칭
+            fname = _safe_filename(link['id'], link.get('title', ''))
+            display = f'{link["id"]}: {link.get("title", "")}' if link.get('title') else link['id']
+            sections.append(f'- [[{fname}|{display}]] ({label})')
 
     if backlinks:
         sections.append('\n## 백링크')
         for bl in backlinks:
             label = backlink_labels.get(bl.get('link_type', ''), bl.get('link_type', ''))
-            sections.append(f'- [[{bl["id"]}]] {bl.get("title", "")} ({label})')
+            fname = _safe_filename(bl['id'], bl.get('title', ''))
+            display = f'{bl["id"]}: {bl.get("title", "")}' if bl.get('title') else bl['id']
+            sections.append(f'- [[{fname}|{display}]] ({label})')
 
     return '\n'.join(sections)
 

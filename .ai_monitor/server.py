@@ -5546,6 +5546,18 @@ def main():
             _vault = PROJECT_ROOT / '.zettel-vault'
             _vault.mkdir(exist_ok=True)
             print(f"[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — 60초 주기, 양방향")
+            # Google Drive vault도 동기화 (존재할 때만)
+            _gdrive_vault = Path('I:/내 드라이브/obsidian/hive-zettel')
+            def _sync_with_gdrive():
+                while True:
+                    try:
+                        if _gdrive_vault.exists():
+                            _mod.export_to_vault(_gdrive_vault, project='')
+                    except Exception as _ge:
+                        print(f"[zettel_sync] Google Drive 동기화 오류: {_ge}")
+                    time.sleep(120)  # 2분 간격 (Drive는 느리므로)
+            threading.Thread(target=_sync_with_gdrive, daemon=True,
+                             name='ZettelGDrive').start()
             _mod.watch_and_sync(_vault, project='', interval=60, bidirectional=True)
         except Exception as e:
             print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
