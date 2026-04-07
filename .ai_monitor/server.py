@@ -5529,6 +5529,139 @@ def main():
             _child_procs.append(proc)
             print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
 
+    # ── 제텔카스텐 Vault 동기화 데몬 (DB ↔ Obsidian 60초 주기) ────────────
+    def run_zettel_sync():
+        """PostgreSQL zettel_notes ↔ Obsidian vault 양방향 동기화 데몬.
+        [v3.7.179] 서버 시작 시 자동 실행 — 이전에는 수동 실행만 가능했음."""
+        try:
+            _sync_dir = SCRIPTS_DIR or (BASE_DIR.parent / 'scripts')
+            _sync_script = _sync_dir / 'zettel_sync.py'
+            if not _sync_script.exists():
+                return
+            # zettel_sync 모듈 직접 import하여 스레드 내에서 실행 (subprocess 대신)
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location('zettel_sync', str(_sync_script))
+            _mod = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _vault = PROJECT_ROOT / '.zettel-vault'
+            _vault.mkdir(exist_ok=True)
+            print(f"[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — 60초 주기, 양방향")
+            _mod.watch_and_sync(_vault, project='', interval=60, bidirectional=True)
+        except Exception as e:
+            print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
+
+    # ── fleeting 노트 자동 정제 데몬 (10분 주기) ──────────────────────────
+    def run_zettel_refine():
+        """24시간 이상 된 fleeting 노트를 자동으로 permanent로 승격.
+        [v3.7.179] 수동 refine_note() 없이도 지식이 자동 정제됨."""
+        try:
+            time.sleep(120)  # 서버 안정화 대기 (2분)
+            sys.path.insert(0, str(BASE_DIR))
+            from src.zettelkasten import list_notes, refine_note, auto_link
+            from src.pg_store import ensure_schema
+            while True:
+                try:
+                    ensure_schema()
+                    notes = list_notes(note_type='fleeting', limit=100)
+                    from datetime import datetime, timezone, timedelta
+                    now = datetime.now(timezone.utc)
+                    cutoff = now - timedelta(hours=24)
+                    promoted = 0
+                    for n in notes:
+                        # created가 문자열이면 파싱
+                        created = n.get('created_at') or n.get('created', '')
+                        if isinstance(created, str):
+                            try:
+                                created = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                            except Exception:
+                                continue
+                        if hasattr(created, 'tzinfo') and created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        if created < cutoff:
+                            nid = n.get('id') or n.get('zettel_id', '')
+                            if nid:
+                                refine_note(nid, new_type='permanent')
+                                auto_link(nid, content=n.get('content', ''),
+                                         tags=n.get('tags', []), created_by='system')
+                                promoted += 1
+                    if promoted:
+                        print(f"[zettel_refine] {promoted}개 fleeting 노트 → permanent 승격 완료")
+                except Exception as e:
+                    print(f"[!] 제텔 자동 정제 오류: {e}")
+                time.sleep(600)  # 10분 주기
+        except Exception as e:
+            print(f"[!] 제텔 자동 정제 데몬 시작 실패: {e}")
+
+    # ── git 커밋 감지 → 제텔카스텐 자동 캡처 데몬 (60초 폴링) ──────────────
+    def run_commit_watcher():
+        """새 git 커밋을 폴링하여 zettel_capture.capture_commit() 자동 호출.
+        [v3.7.179] git hook 없이도 커밋 노트가 자동 생성됨."""
+        try:
+            time.sleep(60)  # 서버 안정화 대기
+            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            # 마지막으로 처리한 커밋 해시
+            _last_hash = None
+            try:
+                r = subprocess.run(
+                    ['git', 'rev-parse', 'HEAD'],
+                    cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+                    timeout=5, creationflags=_no_window,
+                )
+                if r.returncode == 0:
+                    _last_hash = r.stdout.strip()
+            except Exception:
+                pass
+
+            while True:
+                try:
+                    time.sleep(60)
+                    r = subprocess.run(
+                        ['git', 'rev-parse', 'HEAD'],
+                        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+                        timeout=5, creationflags=_no_window,
+                    )
+                    if r.returncode != 0:
+                        continue
+                    current_hash = r.stdout.strip()
+                    if current_hash == _last_hash:
+                        continue
+
+                    # 새 커밋 감지 — 커밋 메시지 + 변경 파일 조회
+                    r2 = subprocess.run(
+                        ['git', 'log', '-1', '--pretty=format:%B', current_hash],
+                        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+                        timeout=5, encoding='utf-8', errors='replace',
+                        creationflags=_no_window,
+                    )
+                    commit_msg = r2.stdout.strip() if r2.returncode == 0 else ''
+
+                    r3 = subprocess.run(
+                        ['git', 'diff-tree', '--no-commit-id', '--name-only', '-r', current_hash],
+                        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+                        timeout=5, encoding='utf-8', errors='replace',
+                        creationflags=_no_window,
+                    )
+                    files = [f for f in r3.stdout.strip().split('\n') if f] if r3.returncode == 0 else []
+
+                    if commit_msg and 'auto-bump version' not in commit_msg:
+                        try:
+                            _cap_dir = SCRIPTS_DIR or (BASE_DIR.parent / 'scripts')
+                            _cap_script = _cap_dir / 'zettel_capture.py'
+                            if _cap_script.exists():
+                                import importlib.util as _ilu2
+                                _spec2 = _ilu2.spec_from_file_location('zettel_capture', str(_cap_script))
+                                _mod2 = _ilu2.module_from_spec(_spec2)
+                                _spec2.loader.exec_module(_mod2)
+                                _mod2.capture_commit(commit_msg, files=files, agent='system')
+                        except Exception as e:
+                            print(f"[commit_watcher] 캡처 오류: {e}")
+
+                    _last_hash = current_hash
+                except Exception as e:
+                    print(f"[commit_watcher] 폴링 오류: {e}")
+        except Exception as e:
+            print(f"[!] 커밋 감시 데몬 시작 실패: {e}")
+
     # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
     try:
         import webview
@@ -5640,6 +5773,12 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             threading.Thread(target=_agent_sync_daemon, daemon=True,
                              name='AgentSyncDaemon').start()
             threading.Thread(target=run_mux_server, daemon=True).start()
+            threading.Thread(target=run_zettel_sync, daemon=True,
+                             name='ZettelSync').start()
+            threading.Thread(target=run_zettel_refine, daemon=True,
+                             name='ZettelRefine').start()
+            threading.Thread(target=run_commit_watcher, daemon=True,
+                             name='CommitWatcher').start()
 
             _restore_agent_status_from_db()
 

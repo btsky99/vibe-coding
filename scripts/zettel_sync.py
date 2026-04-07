@@ -35,8 +35,15 @@ DEFAULT_VAULT_DIR = _PROJECT_ROOT / '.zettel-vault'
 DATA_DIR = _PROJECT_ROOT / '.ai_monitor' / 'data'
 
 
+_NOTE_TYPE_EMOJI = {
+    'permanent': '\U0001f48e',   # 💎
+    'literature': '\U0001f4da',  # 📚
+    'fleeting': '\U0001f4dd',    # 📝
+}
+
 def _format_frontmatter(note: dict) -> str:
-    """Obsidian 호환 YAML 프론트매터 생성."""
+    """Obsidian 호환 YAML 프론트매터 생성.
+    [v3.7.179] aliases + cssclasses 추가 — 그래프에서 타입별 이모지 + 짧은 제목 표시."""
     tags_list = note.get('tags', [])
     if isinstance(tags_list, str):
         try:
@@ -44,11 +51,20 @@ def _format_frontmatter(note: dict) -> str:
         except (json.JSONDecodeError, TypeError):
             tags_list = []
 
+    note_type = note.get('note_type', 'fleeting')
+    title = note.get('title', '')
+    emoji = _NOTE_TYPE_EMOJI.get(note_type, '')
+    # aliases: 그래프에서 노드 이름으로 이모지+짧은 제목 표시
+    short_title = title[:30] + ('...' if len(title) > 30 else '')
+    alias = f'{emoji} {short_title}' if short_title else note.get('id', '')
+
     lines = [
         '---',
         f'zettel_id: "{note["id"]}"',
-        f'title: "{_escape_yaml(note.get("title", ""))}"',
-        f'note_type: {note.get("note_type", "fleeting")}',
+        f'title: "{_escape_yaml(title)}"',
+        f'aliases: ["{_escape_yaml(alias)}"]',
+        f'note_type: {note_type}',
+        f'cssclasses: [zettel-{note_type}]',
         f'author: {note.get("author", "unknown")}',
         f'project: {note.get("project", "")}',
         'tags: [{}]'.format(', '.join('"{}"'.format(t) for t in tags_list)),
