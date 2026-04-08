@@ -314,7 +314,7 @@ function getCodexMainModel() {
  * 프론트엔드 TerminalSlot.tsx에서 WebSocket 연결이 들어오면
  * node-pty로 셸을 spawn하고 양방향 스트리밍을 설정합니다.
  *
- * URL 형식: /pty/slot{0-7}?agent={claude|gemini|codex}&cwd={path}&cols=80&rows=24&yolo=false
+ * URL 형식: /pty/slot{0-31}?agent={claude|gemini|codex}&cwd={path}&cols=80&rows=24&yolo=false&model=...&name=...
  *
  * 프로토콜:
  *   Client → Server: 일반 텍스트(키 입력) 또는 JSON({type:'resize',cols,rows})
@@ -637,6 +637,9 @@ function handlePersistentPtyConnection(ws, req) {
     const cols = parseInt(url.searchParams.get('cols') || '80', 10);
     const rows = parseInt(url.searchParams.get('rows') || '24', 10);
     const isYolo = url.searchParams.get('yolo') === 'true';
+    // 오피스 모드 워크스페이스 프로필: 모델 및 슬롯 이름
+    const requestedModel = url.searchParams.get('model') || '';
+    const slotName = url.searchParams.get('name') || '';
 
     const slotMatch = req.url.match(/\/pty\/slot(\d+)/);
     sessionId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
@@ -704,27 +707,27 @@ function handlePersistentPtyConnection(ws, req) {
 
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
+      const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
+      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}${modelFlag}\r\n`);
     } else if (agent === 'gemini') {
       const yoloFlag = isYolo ? ' -y' : '';
-      ptyProcess.write(`gemini${yoloFlag}\n`);
+      const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
+      ptyProcess.write(`gemini${yoloFlag}${modelFlag}\n`);
     } else if (agent === 'codex') {
       const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
-      const modelName = getCodexMainModel();
+      const modelName = requestedModel || getCodexMainModel();
       const modelFlag = modelName ? ` --model ${modelName}` : '';
-      // Preserve xterm scrollback for Codex's interactive TUI.
       ptyProcess.write(`codex --no-alt-screen${yoloFlag}${modelFlag}\n`);
     } else if (agent.startsWith('groupchat-')) {
       const cli = agent.replace('groupchat-', '');
-      // 원래 슬롯 번호 사용: sessionId는 slotId+100 기반이므로 -100하여 원래 번호 복원
       const slotNum = parseInt(sessionId, 10) - 100;
       const termName = `T${slotNum}-${cli}`;
       ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
 
-    const mainModel = agent === 'claude'
+    const mainModel = requestedModel || (agent === 'claude'
       ? (process.env.ANTHROPIC_MODEL || 'sonnet-4-6')
-      : '';
+      : '');
     const bgModel = agent === 'claude'
       ? (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || '')
       : '';
@@ -739,6 +742,7 @@ function handlePersistentPtyConnection(ws, req) {
       lastLine: '',
       mainModel: mainModel,
       bgModel: bgModel,
+      slotName: slotName,
       attached: true,
       detachedAt: '',
       detachTimer: null,
@@ -879,8 +883,11 @@ app.use((req, res, next) => {
  */
 app.get('/api/pty/sessions', (req, res) => {
   const terminals = {};
-  for (let slot = 1; slot <= 8; slot++) {
+  // 클래식 모드 호환: 슬롯 1~8은 항상 반환
+  // 오피스 모드: 슬롯 9~32는 실제 세션이 있는 경우만 반환
+  for (let slot = 1; slot <= 32; slot++) {
     const info = ptySessions.get(String(slot));
+    if (slot > 8 && !info) continue;
     terminals[`T${slot}`] = {
       running: !!info,
       attached: info ? !!info.attached : false,
@@ -891,10 +898,38 @@ app.get('/api/pty/sessions', (req, res) => {
       last_line: info ? info.lastLine : '',
       main_model: info ? info.mainModel : '',
       bg_model: info ? info.bgModel : '',
+      slot_name: info ? (info.slotName || '') : '',
       detached_at: info ? info.detachedAt : '',
     };
   }
   res.json(terminals);
+});
+
+/**
+ * GET /api/pty/models
+ * 각 CLI에서 사용 가능한 모델 목록을 반환합니다.
+ * 오피스 모드 워크스페이스 프로필의 모델 선택 드롭다운에서 사용합니다.
+ */
+app.get('/api/pty/models', (req, res) => {
+  res.json({
+    claude: [
+      { id: 'claude-opus-4-6', label: 'Opus 4.6 (최강)' },
+      { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (균형)' },
+      { id: 'claude-haiku-4-5', label: 'Haiku 4.5 (경량)' },
+    ],
+    gemini: [
+      { id: 'gemini-2.5-pro', label: '2.5 Pro (최강)' },
+      { id: 'gemini-2.5-flash', label: '2.5 Flash (빠름)' },
+      { id: 'gemini-2.0-flash', label: '2.0 Flash (저지연)' },
+    ],
+    codex: [
+      { id: 'o4-mini', label: 'o4-mini (기본)' },
+      { id: 'o3', label: 'o3 (고급 추론)' },
+      { id: 'gpt-4.1', label: 'GPT-4.1 (플래그십)' },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (빠름)' },
+      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (최경량)' },
+    ],
+  });
 });
 
 /**

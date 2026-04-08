@@ -105,6 +105,12 @@ def handle_get(handler, path: str, params: dict | None = None) -> None:
         _json_response(handler, result or {})
         return
 
+    if path == '/api/pty/models':
+        # CLI별 사용 가능한 모델 목록 조회 (오피스 워크스페이스 프로필용)
+        result = _node_get('/api/pty/models')
+        _json_response(handler, result or {})
+        return
+
     if path == '/api/pty/output':
         params = params or {}
         target = _resolve_target({

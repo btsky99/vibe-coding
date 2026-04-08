@@ -64,10 +64,16 @@ interface TerminalSlotProps {
   orchestratorData?: { skill_registry?: any[]; terminals?: Record<string, any> };
   // 하이브 활동 이벤트 — /api/hive/activity 폴링 (memory_write/orchestrate 여부 표시용)
   hiveActivity?: Array<{ timestamp: string; agent: string; type: string; task: string }>;
+  // 오피스 워크스페이스 프로필: 슬롯 사용자 지정 이름
+  slotName?: string;
+  // 오피스 워크스페이스 프로필: 선택된 모델 ID
+  slotModel?: string;
+  // 오피스 워크스페이스 프로필: 선택된 CLI (claude/gemini/codex)
+  slotCli?: string;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
 }: TerminalSlotProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
@@ -118,6 +124,8 @@ export default function TerminalSlot({
 
   // 이 슬롯의 터미널 ID — cli_agent.py의 _terminals 키와 일치 (T1, T2, ...)
   const terminalId = `T${slotId + 1}`;
+  // 오피스 프로필 사용자 이름 (없으면 T1 등 기본값)
+  const displayName = slotName || terminalId;
 
   // 이 슬롯의 에이전트 타입 (claude / gemini / codex)
   // [버그수정 2026-03-08] Codex가 'claude'로 분류되어 T1 데이터를 T3에 표시하는 문제 수정
@@ -269,13 +277,15 @@ export default function TerminalSlot({
         ro.observe(termContainer);
         resizeObserverRef.current = ro;
       }
-      // WebSocket에 yolo 상태 전달
+      // WebSocket에 yolo/model/name 상태 전달
       const wsParams = new URLSearchParams({
-        agent,
+        agent: slotCli || agent,
         cwd: currentPath,
         cols: term.cols.toString(),
         rows: term.rows.toString(),
-        yolo: yolo.toString()
+        yolo: yolo.toString(),
+        ...(slotModel ? { model: slotModel } : {}),
+        ...(slotName ? { name: slotName } : {}),
       });
       const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
@@ -508,7 +518,7 @@ export default function TerminalSlot({
         <div className="flex items-center gap-2 max-w-[60%] overflow-hidden">
           <Terminal className="w-3 h-3 text-accent shrink-0" />
           <span className="text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider truncate">
-            {isTerminalMode ? `터미널 ${slotId + 1} - ${activeAgent}` : `터미널 ${slotId + 1}`}
+            {isTerminalMode ? `${displayName} - ${activeAgent}` : displayName}
           </span>
           {/* Git 브랜치 배지 — cmux 스타일 수직 탭 컨텍스트 정보 */}
           {gitBranch && (

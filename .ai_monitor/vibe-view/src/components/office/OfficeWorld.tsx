@@ -1,15 +1,15 @@
 /**
  * ------------------------------------------------------------------------
  * FILE: OfficeWorld.tsx
- * DESCRIPTION: 메타버스 오피스 Phase 1 월드 렌더러.
- *              존 기반 2D 캔버스 오피스를 렌더링하고 에이전트를 각 공간으로 배치한다.
+ * DESCRIPTION: 메타버스 오피스 Phase 2: Glassmorphism Spatial UI.
+ *              Canvas 배경(그리드, 라인) + React DOM(유리 질감 오브젝트) 하이브리드 렌더러.
  * REVISION HISTORY:
- * - 2026-04-06 Codex: 존 기반 메타버스 오피스 월드로 재작성
- * - 2026-04-03 Claude: 초기 생성 — DeskRPG-Lite 캔버스 월드
+ * - 2026-04-08 Gemini: 전면 재설계 — 하이테크 홀로그램 & 유리 질감 UI 도입
  * ------------------------------------------------------------------------
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { OfficeAgentPresence, OfficeEventCard, OfficeZone, OfficeZoneState } from '../../hooks/useOfficeState';
 
 interface SpeechBubble {
@@ -27,56 +27,63 @@ interface OfficeWorldProps {
   onDeskClick: (slotId: number) => void;
   onZoneClick?: (zone: OfficeZone) => void;
   speechBubbles?: SpeechBubble[];
+  slotNames?: string[];
 }
 
 type Rect = { x: number; y: number; w: number; h: number };
 
-const AGENT_COLORS: Record<string, { main: string; glow: string; body: string; hair: string }> = {
-  claude: { main: '#8b5cf6', glow: 'rgba(139,92,246,0.28)', body: '#6d28d9', hair: '#c4b5fd' },
-  gemini: { main: '#10b981', glow: 'rgba(16,185,129,0.26)', body: '#059669', hair: '#86efac' },
-  codex: { main: '#06b6d4', glow: 'rgba(6,182,212,0.28)', body: '#0891b2', hair: '#a5f3fc' },
-  unknown: { main: '#94a3b8', glow: 'rgba(148,163,184,0.24)', body: '#64748b', hair: '#e2e8f0' },
+const AGENT_THEMES: Record<string, { main: string; glow: string; secondary: string }> = {
+  claude: { main: '#a78bfa', glow: 'rgba(167, 139, 250, 0.4)', secondary: '#7c3aed' },
+  gemini: { main: '#34d399', glow: 'rgba(52, 211, 153, 0.4)', secondary: '#059669' },
+  codex: { main: '#22d3ee', glow: 'rgba(34, 211, 238, 0.4)', secondary: '#0891b2' },
+  user: { main: '#fbbf24', glow: 'rgba(251, 191, 36, 0.4)', secondary: '#d97706' },
+  unknown: { main: '#94a3b8', glow: 'rgba(148, 163, 184, 0.3)', secondary: '#475569' },
 };
 
-const ZONE_LAYOUT: Record<OfficeZone, Rect> = {
-  desk: { x: 0.05, y: 0.16, w: 0.56, h: 0.58 },
-  meeting: { x: 0.66, y: 0.11, w: 0.27, h: 0.22 },
-  review: { x: 0.66, y: 0.37, w: 0.27, h: 0.19 },
-  memory: { x: 0.66, y: 0.60, w: 0.27, h: 0.16 },
-  git: { x: 0.05, y: 0.80, w: 0.24, h: 0.12 },
-  lounge: { x: 0.32, y: 0.80, w: 0.29, h: 0.12 },
-  recovery: { x: 0.66, y: 0.80, w: 0.27, h: 0.12 },
-  user: { x: 0.05, y: 0.04, w: 0.20, h: 0.08 },
+// 공용 존 레이아웃 (부서 공간은 desk 영역에 배치)
+const ZONE_LAYOUT: Record<string, Rect> = {
+  desk: { x: 0.04, y: 0.16, w: 0.58, h: 0.60 },
+  meeting: { x: 0.66, y: 0.08, w: 0.30, h: 0.30 },
+  recovery: { x: 0.66, y: 0.42, w: 0.30, h: 0.20 },
+  user: { x: 0.04, y: 0.04, w: 0.20, h: 0.08 },
 };
 
-const DESK_SLOTS = [
-  { id: 0, col: 0, row: 0 },
-  { id: 1, col: 1, row: 0 },
-  { id: 2, col: 2, row: 0 },
-  { id: 3, col: 3, row: 0 },
-  { id: 4, col: 0, row: 1 },
-  { id: 5, col: 1, row: 1 },
-  { id: 6, col: 2, row: 1 },
-  { id: 7, col: 3, row: 1 },
-];
+// 부서 ID → 존 레이아웃 매핑: 없으면 desk 폴백
+function getZoneRect(zone: string): Rect {
+  return ZONE_LAYOUT[zone] || ZONE_LAYOUT.desk;
+}
 
-function getDeskAnchor(slotId: number, width: number, height: number) {
+function buildDeskSlots(count: number): Array<{ id: number; col: number; row: number }> {
+  const n = Math.min(count, 8);
+  const slots: Array<{ id: number; col: number; row: number }> = [];
+  const cols = 4;
+  for (let i = 0; i < n; i++) {
+    slots.push({ id: i, col: i % cols, row: Math.floor(i / cols) });
+  }
+  return slots;
+}
+
+function getDeskPos(slotId: number, width: number, height: number, slotCount: number) {
   const rect = ZONE_LAYOUT.desk;
   const px = rect.x * width;
   const py = rect.y * height;
   const pw = rect.w * width;
   const ph = rect.h * height;
-  const slot = DESK_SLOTS.find((item) => item.id === slotId) ?? DESK_SLOTS[0];
-  const gapX = pw / 4.7;
-  const gapY = ph / 2.5;
+  
+  const slots = buildDeskSlots(slotCount);
+  const slot = slots.find(s => s.id === slotId) || slots[0];
+  
+  const gapX = pw / 4.2;
+  const gapY = ph / 2.2;
+  
   return {
-    x: px + 90 + slot.col * gapX,
-    y: py + 95 + slot.row * gapY,
+    x: px + 80 + slot.col * gapX,
+    y: py + 80 + slot.row * gapY,
   };
 }
 
-function getZonePoints(zone: OfficeZone, width: number, height: number, count: number) {
-  const rect = ZONE_LAYOUT[zone];
+function getZonePoints(zone: string, width: number, height: number, count: number) {
+  const rect = getZoneRect(zone);
   const px = rect.x * width;
   const py = rect.y * height;
   const pw = rect.w * width;
@@ -96,68 +103,7 @@ function getZonePoints(zone: OfficeZone, width: number, height: number, count: n
       });
     }
   }
-
   return points;
-}
-
-function drawAgent(
-  ctx: CanvasRenderingContext2D,
-  presence: OfficeAgentPresence,
-  x: number,
-  y: number,
-  selected: boolean,
-  t: number,
-) {
-  const colors = AGENT_COLORS[presence.colorKey] ?? AGENT_COLORS.unknown;
-  const busy = presence.status === 'running' || presence.status === 'started';
-  const bobY = busy ? Math.sin(t * 5 + presence.slotId) * 2 : 0;
-
-  ctx.save();
-
-  ctx.shadowColor = colors.main;
-  ctx.shadowBlur = selected ? 24 : busy ? 12 : 0;
-  ctx.fillStyle = selected ? `${colors.main}55` : colors.glow;
-  ctx.beginPath();
-  ctx.ellipse(x, y + 20, selected ? 22 : 18, 7, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = colors.hair;
-  ctx.fillRect(x - 9, y - 22 + bobY, 18, 7);
-  ctx.fillStyle = '#fde3c1';
-  ctx.fillRect(x - 8, y - 15 + bobY, 16, 11);
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(x - 5, y - 11 + bobY, 2, 2);
-  ctx.fillRect(x + 3, y - 11 + bobY, 2, 2);
-  ctx.fillStyle = colors.body;
-  ctx.fillRect(x - 10, y - 2 + bobY, 20, 18);
-  ctx.fillStyle = '#334155';
-  ctx.fillRect(x - 8, y + 16 + bobY, 5, 12);
-  ctx.fillRect(x + 3, y + 16 + bobY, 5, 12);
-
-  ctx.fillStyle = colors.main;
-  ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(`T${presence.slotId + 1}`, x, y - 30);
-
-  const badge = presence.liveTask
-    ? presence.liveTask.slice(0, 16)
-    : presence.zone === 'lounge'
-      ? 'idle'
-      : presence.pipelineStage || presence.zone;
-  const badgeWidth = Math.max(34, ctx.measureText(badge).width + 12);
-  ctx.fillStyle = 'rgba(8,15,28,0.86)';
-  ctx.strokeStyle = `${colors.main}66`;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(x - badgeWidth / 2, y - 47, badgeWidth, 16, 8);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#e2e8f0';
-  ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
-  ctx.fillText(badge, x, y - 35.5);
-
-  ctx.restore();
 }
 
 export default function OfficeWorld({
@@ -168,298 +114,294 @@ export default function OfficeWorld({
   onDeskClick,
   onZoneClick,
   speechBubbles = [],
+  slotNames,
 }: OfficeWorldProps) {
+  const slotCount = slotNames?.length || 8;
+  const DESK_SLOTS = useMemo(() => buildDeskSlots(slotCount), [slotCount]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const rafRef = useRef(0);
-  const positionsRef = useRef<Record<string, { x: number; y: number; tx: number; ty: number; zone: OfficeZone }>>({});
-  const [hoveredDesk, setHoveredDesk] = useState<number | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-  const render = useCallback(() => {
-    const canvas = canvasRef.current;
+  // 화면 크기 추적 — ResizeObserver로 정확히 크기 변경 시에만 업데이트
+  useEffect(() => {
     const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!container) return;
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      setDimensions(prev => (prev.width === Math.round(width) && prev.height === Math.round(height)) ? prev : { width: Math.round(width), height: Math.round(height) });
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
 
-    const rect = container.getBoundingClientRect();
-    const width = rect.width;
-    const height = rect.height;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
+  // 1. Canvas 배경 렌더링 (그리드, 존 베이스)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || dimensions.width === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const t = Date.now() / 1000;
-    const now = Date.now();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = dimensions.width * dpr;
+    canvas.height = dimensions.height * dpr;
+    ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = '#071019';
+    const { width, height } = dimensions;
+
+    // 배경 채우기
+    ctx.fillStyle = '#060a0f';
     ctx.fillRect(0, 0, width, height);
 
-    const bg = ctx.createLinearGradient(0, 0, width, height);
-    bg.addColorStop(0, 'rgba(8,145,178,0.10)');
-    bg.addColorStop(0.6, 'rgba(139,92,246,0.06)');
-    bg.addColorStop(1, 'rgba(14,165,233,0.02)');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-    for (let gx = 0; gx <= width; gx += 42) {
-      ctx.beginPath();
-      ctx.moveTo(gx, 0);
-      ctx.lineTo(gx, height);
-      ctx.stroke();
+    // 미래지향적 그리드
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.04)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < width; x += 40) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
     }
-    for (let gy = 0; gy <= height; gy += 42) {
-      ctx.beginPath();
-      ctx.moveTo(0, gy);
-      ctx.lineTo(width, gy);
-      ctx.stroke();
+    for (let y = 0; y < height; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
     }
 
-    (Object.keys(ZONE_LAYOUT) as OfficeZone[]).forEach((zoneId) => {
-      const zoneRect = ZONE_LAYOUT[zoneId];
-      const zone = zones.find((item) => item.id === zoneId);
-      const x = zoneRect.x * width;
-      const y = zoneRect.y * height;
-      const w = zoneRect.w * width;
-      const h = zoneRect.h * height;
-      const occupied = zone?.occupancy ?? 0;
-      const warningCount = zone?.warningCount ?? 0;
-      const congestion = Math.min(occupied / 4, 1);
-      const highlight = zoneId === 'recovery'
-        ? 'rgba(248,113,113,0.12)'
-        : zoneId === 'meeting'
-          ? 'rgba(34,197,94,0.10)'
-          : zoneId === 'memory'
-            ? 'rgba(250,204,21,0.08)'
-            : 'rgba(255,255,255,0.03)';
+    // 존 영역 외곽 광채 (Soft Glow)
+    Object.keys(ZONE_LAYOUT).forEach(zId => {
+      const r = ZONE_LAYOUT[zId];
+      const zx = r.x * width;
+      const zy = r.y * height;
+      const zw = r.w * width;
+      const zh = r.h * height;
 
-      ctx.fillStyle = highlight;
-      ctx.strokeStyle = occupied > 0 ? 'rgba(148,163,184,0.24)' : 'rgba(255,255,255,0.08)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, 18);
-      ctx.fill();
-      ctx.stroke();
+      const gradient = ctx.createRadialGradient(zx + zw/2, zy + zh/2, 0, zx + zw/2, zy + zh/2, zw/1.5);
+      gradient.addColorStop(0, 'rgba(15, 23, 42, 0.4)');
+      gradient.addColorStop(1, 'rgba(6, 10, 15, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(zx - 20, zy - 20, zw + 40, zh + 40);
 
-      if (congestion > 0 || warningCount > 0) {
-        const heatColor = zoneId === 'recovery'
-          ? `rgba(248,113,113,${0.12 + warningCount * 0.08})`
-          : `rgba(34,211,238,${0.04 + congestion * 0.10})`;
-        ctx.fillStyle = heatColor;
-        ctx.beginPath();
-        ctx.roundRect(x + 8, y + 8, w - 16, h - 16, 14);
-        ctx.fill();
-      }
-
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = 'bold 12px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(zone?.label ?? zoneId, x + 14, y + 22);
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-      ctx.fillText(`${occupied} 에이전트`, x + 14, y + 38);
-      if (warningCount > 0) {
-        ctx.fillStyle = 'rgba(252,165,165,0.92)';
-        ctx.fillText(`${warningCount} 경고`, x + 14, y + 52);
-      } else if (occupied >= 3) {
-        ctx.fillStyle = 'rgba(125,211,252,0.86)';
-        ctx.fillText('혼잡', x + 14, y + 52);
-      }
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.setLineDash([10, 5]);
+      ctx.strokeRect(zx, zy, zw, zh);
+      ctx.setLineDash([]);
     });
+  }, [dimensions.width, dimensions.height]);
 
-    DESK_SLOTS.forEach((desk) => {
-      const anchor = getDeskAnchor(desk.id, width, height);
-      const selected = selectedDesk === desk.id;
-      const hovered = hoveredDesk === desk.id;
-      ctx.fillStyle = selected ? 'rgba(34,211,238,0.18)' : hovered ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.6)';
-      ctx.strokeStyle = selected ? 'rgba(34,211,238,0.55)' : 'rgba(255,255,255,0.08)';
-      ctx.beginPath();
-      ctx.roundRect(anchor.x - 44, anchor.y - 28, 88, 56, 10);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(anchor.x - 13, anchor.y - 20, 26, 15);
-      ctx.fillStyle = selected ? '#67e8f9' : 'rgba(255,255,255,0.30)';
-      ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`T${desk.id + 1}`, anchor.x, anchor.y + 39);
+  // 2. 에이전트 그룹화 (좌표 계산용)
+  const groupedPresences = useMemo(() => {
+    const map = new Map<string, OfficeAgentPresence[]>();
+    presences.forEach(p => {
+      const list = map.get(p.zone) || [];
+      list.push(p);
+      map.set(p.zone, list);
     });
-
-    const grouped = new Map<OfficeZone, OfficeAgentPresence[]>();
-    presences.forEach((presence) => {
-      const list = grouped.get(presence.zone) ?? [];
-      list.push(presence);
-      grouped.set(presence.zone, list);
-    });
-
-    presences.forEach((presence) => {
-      const selected = selectedDesk === presence.slotId;
-      let target = getDeskAnchor(presence.slotId, width, height);
-
-      if (presence.zone !== 'desk') {
-        const members = grouped.get(presence.zone) ?? [];
-        const points = getZonePoints(presence.zone, width, height, members.length);
-        const memberIndex = members.findIndex((member) => member.terminalId === presence.terminalId);
-        target = points[Math.max(0, memberIndex)] ?? target;
-      }
-
-      const prev = positionsRef.current[presence.terminalId];
-      if (!prev) {
-        positionsRef.current[presence.terminalId] = {
-          x: target.x,
-          y: target.y,
-          tx: target.x,
-          ty: target.y,
-          zone: presence.zone,
-        };
-      } else {
-        prev.tx = target.x;
-        prev.ty = target.y;
-        prev.zone = presence.zone;
-        prev.x += (prev.tx - prev.x) * 0.14;
-        prev.y += (prev.ty - prev.y) * 0.14;
-      }
-
-      const point = positionsRef.current[presence.terminalId];
-      const moving = Math.abs(point.tx - point.x) + Math.abs(point.ty - point.y) > 2.5;
-
-      if (moving) {
-        ctx.strokeStyle = presence.zone === 'recovery' ? 'rgba(248,113,113,0.30)' : 'rgba(125,211,252,0.20)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(point.x, point.y + 10);
-        ctx.lineTo(point.tx, point.ty + 10);
-        ctx.stroke();
-      }
-
-      drawAgent(ctx, presence, point.x, point.y, selected, t);
-
-      if (moving) {
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('이동 중', point.x, point.y + 38);
-      }
-    });
-
-    speechBubbles.forEach((bubble) => {
-      if (now - bubble.createdAt > bubble.duration) return;
-      const point = getDeskAnchor(bubble.deskId, width, height);
-      const fadeFrom = bubble.duration * 0.65;
-      const elapsed = now - bubble.createdAt;
-      const opacity = elapsed > fadeFrom ? 1 - (elapsed - fadeFrom) / (bubble.duration - fadeFrom) : 1;
-      const text = bubble.text.slice(0, 18);
-      const tw = Math.max(56, ctx.measureText(text).width + 18);
-
-      ctx.save();
-      ctx.globalAlpha = opacity;
-      ctx.fillStyle = 'rgba(255,255,255,0.94)';
-      ctx.beginPath();
-      ctx.roundRect(point.x - tw / 2, point.y - 76, tw, 22, 8);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(point.x - 4, point.y - 54);
-      ctx.lineTo(point.x, point.y - 46);
-      ctx.lineTo(point.x + 4, point.y - 54);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#0f172a';
-      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(text, point.x, point.y - 61);
-      ctx.restore();
-    });
-
-    events.slice(0, 3).forEach((event, index) => {
-      const x = width - 270;
-      const y = 28 + index * 48;
-      ctx.fillStyle = 'rgba(8,15,28,0.84)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-      ctx.beginPath();
-      ctx.roundRect(x, y, 240, 38, 10);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(event.title, x + 12, y + 15);
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
-      ctx.fillText(event.subtitle.slice(0, 42), x + 12, y + 29);
-    });
-
-    rafRef.current = window.requestAnimationFrame(render);
-  }, [events, hoveredDesk, onDeskClick, presences, selectedDesk, speechBubbles, zones]);
-
-  useEffect(() => {
-    rafRef.current = window.requestAnimationFrame(render);
-    return () => window.cancelAnimationFrame(rafRef.current);
-  }, [render]);
-
-  const findDeskAtPoint = useCallback((mx: number, my: number, width: number, height: number) => {
-    for (const desk of DESK_SLOTS) {
-      const anchor = getDeskAnchor(desk.id, width, height);
-      if (mx >= anchor.x - 48 && mx <= anchor.x + 48 && my >= anchor.y - 34 && my <= anchor.y + 34) {
-        return desk.id;
-      }
-    }
-    return null;
-  }, []);
-
-  const findZoneAtPoint = useCallback((mx: number, my: number, width: number, height: number) => {
-    const ordered: OfficeZone[] = ['meeting', 'review', 'memory', 'git', 'lounge', 'recovery', 'user', 'desk'];
-    for (const zone of ordered) {
-      const rect = ZONE_LAYOUT[zone];
-      const x = rect.x * width;
-      const y = rect.y * height;
-      const w = rect.w * width;
-      const h = rect.h * height;
-      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
-        return zone;
-      }
-    }
-    return null;
-  }, []);
-
-  const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const deskId = findDeskAtPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
-    setHoveredDesk(deskId);
-  };
-
-  const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const deskId = findDeskAtPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
-    if (deskId !== null) {
-      onDeskClick(deskId);
-      return;
-    }
-
-    const zone = findZoneAtPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
-    if (zone && onZoneClick) {
-      onZoneClick(zone);
-    }
-  };
+    return map;
+  }, [presences]);
 
   return (
-    <div ref={containerRef} className="h-full w-full">
-      <canvas
-        ref={canvasRef}
-        className={`h-full w-full ${hoveredDesk !== null ? 'cursor-pointer' : 'cursor-default'}`}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoveredDesk(null)}
-        onClick={handleClick}
-      />
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-[#060a0f] font-sans selection:bg-cyan-500/30">
+      {/* Layer 1: Canvas Background */}
+      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+
+      {/* Layer 2: Zone Labels (DOM) — 라벨만 클릭 가능, 영역 전체는 투과 */}
+      {zones.map(z => {
+        const r = getZoneRect(z.id);
+        return (
+        <div
+          key={z.id}
+          className="absolute pointer-events-none"
+          style={{
+            left: `${r.x * 100}%`,
+            top: `${r.y * 100}%`,
+            width: `${r.w * 100}%`,
+            height: `${r.h * 100}%`,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => onZoneClick?.(z.id)}
+            className="pointer-events-auto absolute top-2 left-4 flex flex-col gap-0.5 opacity-40 hover:opacity-100 transition-opacity cursor-pointer bg-transparent border-none p-0"
+          >
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-400/80">
+              {z.label}
+            </span>
+            <div className="h-[1px] w-8 bg-gradient-to-r from-cyan-500/50 to-transparent" />
+          </button>
+        </div>
+        );
+      })}
+
+      {/* Layer 3: Desks (Glassmorphism Nodes) */}
+      <div className="absolute inset-0 pointer-events-none">
+        {DESK_SLOTS.map(desk => {
+          const pos = getDeskPos(desk.id, dimensions.width, dimensions.height, slotCount);
+          const isSelected = selectedDesk === desk.id;
+          const label = slotNames?.[desk.id] || `T${desk.id + 1}`;
+          
+          return (
+            <div
+              key={desk.id}
+              className="absolute transition-all duration-500 pointer-events-auto"
+              style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -50%)' }}
+            >
+              <div 
+                onClick={() => onDeskClick(desk.id)}
+                className={`
+                  relative w-24 h-16 rounded-xl border transition-all duration-300 cursor-pointer
+                  backdrop-blur-md flex flex-col items-center justify-center gap-1
+                  ${isSelected 
+                    ? 'bg-cyan-500/10 border-cyan-400/50 shadow-[0_0_20px_rgba(34,211,238,0.25)] scale-110' 
+                    : 'bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.06] hover:border-white/20'
+                  }
+                `}
+              >
+                {/* Desk Hologram Details */}
+                <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
+                  <div className={`absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
+                  <div className="absolute -inset-4 bg-cyan-500/5 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                
+                <div className={`text-[10px] font-bold tracking-widest ${isSelected ? 'text-cyan-300' : 'text-white/40'}`}>
+                  {label}
+                </div>
+                <div className="flex gap-1">
+                  <div className={`h-1 w-1 rounded-full ${isSelected ? 'bg-cyan-400 animate-pulse' : 'bg-white/10'}`} />
+                  <div className={`h-1 w-1 rounded-full ${isSelected ? 'bg-cyan-400/60 animate-pulse delay-75' : 'bg-white/10'}`} />
+                  <div className={`h-1 w-1 rounded-full ${isSelected ? 'bg-cyan-400/30 animate-pulse delay-150' : 'bg-white/10'}`} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Layer 4: Agents (Glowing Orbs) */}
+      <div className="absolute inset-0 pointer-events-none">
+        <AnimatePresence>
+          {presences.map(presence => {
+            const isSelected = selectedDesk === presence.slotId;
+            const theme = AGENT_THEMES[presence.colorKey] || AGENT_THEMES.unknown;
+            const busy = presence.status === 'running' || presence.status === 'started';
+            
+            // 좌표 계산: 부서 zone → 데스크 위치, 공용 zone → zone 위치
+            let targetPos: { x: number; y: number };
+            const isInDeskArea = !ZONE_LAYOUT[presence.zone] || presence.zone === 'desk';
+            if (isInDeskArea && presence.slotId >= 0) {
+              targetPos = getDeskPos(presence.slotId, dimensions.width, dimensions.height, slotCount);
+            } else {
+              const members = groupedPresences.get(presence.zone) || [];
+              const points = getZonePoints(presence.zone, dimensions.width, dimensions.height, Math.max(members.length, 1));
+              const idx = members.findIndex(m => m.terminalId === presence.terminalId);
+              targetPos = points[Math.max(0, idx)] || { x: dimensions.width * 0.14, y: dimensions.height * 0.08 };
+            }
+
+            return (
+              <motion.div
+                key={presence.terminalId}
+                initial={false}
+                animate={{ x: targetPos.x, y: targetPos.y }}
+                transition={{ type: 'spring', damping: 25, stiffness: 120 }}
+                className="absolute"
+                style={{ transform: 'translate(-50%, -50%)', zIndex: isSelected ? 50 : 10 }}
+              >
+                <div className="relative flex flex-col items-center">
+                  {/* Rotating Ring */}
+                  <div 
+                    className={`absolute rounded-full border border-dashed transition-all duration-700 ${busy ? 'animate-[spin_4s_linear_infinite]' : 'opacity-30'}`}
+                    style={{ 
+                      width: isSelected ? 54 : 42, 
+                      height: isSelected ? 54 : 42, 
+                      borderColor: isSelected ? theme.main : `${theme.main}44`,
+                      top: '50%', left: '50%', transform: 'translate(-50%, -50%)'
+                    }}
+                  />
+                  
+                  {/* Central Orb */}
+                  <div 
+                    className={`relative rounded-full transition-all duration-500 shadow-2xl flex items-center justify-center`}
+                    style={{ 
+                      width: isSelected ? 28 : 22, 
+                      height: isSelected ? 28 : 22, 
+                      backgroundColor: theme.main,
+                      boxShadow: `0 0 ${busy ? '30px' : '15px'} ${theme.glow}`,
+                    }}
+                  >
+                    {/* Inner Core */}
+                    <div className="w-1/2 h-1/2 rounded-full bg-white/40 blur-[1px] animate-pulse" />
+                  </div>
+
+                  {/* Label & Task Badge */}
+                  <div className="absolute top-8 flex flex-col items-center gap-1 w-32">
+                    <span className={`text-[9px] font-black tracking-tighter uppercase px-1.5 py-0.5 rounded border backdrop-blur-sm transition-colors ${
+                      isSelected ? 'text-white border-cyan-500/50 bg-cyan-500/20' : 'text-white/60 border-white/5 bg-black/40'
+                    }`}>
+                      T{presence.slotId + 1} · {presence.agent}
+                    </span>
+                    
+                    {presence.liveTask && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="max-w-full"
+                      >
+                        <span className="text-[8px] text-cyan-200/80 bg-cyan-950/40 border border-cyan-500/20 px-2 py-0.5 rounded-full backdrop-blur-sm truncate block">
+                          {presence.liveTask.slice(0, 20)}
+                        </span>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+
+      {/* Layer 5: Speech Bubbles (Floating Glass) */}
+      <AnimatePresence>
+        {speechBubbles.map((bubble, idx) => {
+          const point = getDeskPos(bubble.deskId, dimensions.width, dimensions.height, slotCount);
+          return (
+            <motion.div
+              key={`${bubble.deskId}-${bubble.createdAt}-${idx}`}
+              initial={{ opacity: 0, scale: 0.8, y: -20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: -10 }}
+              className="absolute pointer-events-none"
+              style={{ left: point.x, top: point.y - 70, transform: 'translateX(-50%)' }}
+            >
+              <div className="bg-white/[0.08] backdrop-blur-xl border border-white/10 px-4 py-1.5 rounded-2xl shadow-2xl">
+                <span className="text-[11px] font-medium text-white/90 whitespace-nowrap">
+                  {bubble.text}
+                </span>
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white/10 rotate-45 border-r border-b border-white/10" />
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+
+      {/* Layer 6: Events (Minimal HUD Cards) */}
+      <div className="absolute top-24 right-6 flex flex-col gap-3 w-64 pointer-events-none">
+        {events.slice(0, 3).map((event, i) => (
+          <motion.div
+            key={event.id}
+            initial={{ x: 50, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: i * 0.1 }}
+            className={`
+              p-3 rounded-xl border backdrop-blur-lg flex flex-col gap-1 transition-all
+              ${event.severity === 'error' ? 'bg-red-500/10 border-red-500/20' : 'bg-white/[0.03] border-white/5'}
+            `}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-[9px] font-black uppercase tracking-widest ${event.severity === 'error' ? 'text-red-400' : 'text-cyan-400/60'}`}>
+                {event.zone}
+              </span>
+              <div className={`h-1 w-1 rounded-full ${event.severity === 'error' ? 'bg-red-500 animate-ping' : 'bg-cyan-500/50'}`} />
+            </div>
+            <div className="text-[10px] font-bold text-white/80 truncate">{event.title}</div>
+            <div className="text-[9px] text-white/40 truncate">{event.subtitle}</div>
+          </motion.div>
+        ))}
+      </div>
     </div>
   );
 }

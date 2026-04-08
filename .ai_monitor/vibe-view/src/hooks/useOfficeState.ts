@@ -12,15 +12,8 @@
 import { useMemo } from 'react';
 import type { AgentMessage, LogRecord, MemoryEntry } from '../types';
 
-export type OfficeZone =
-  | 'desk'
-  | 'meeting'
-  | 'review'
-  | 'memory'
-  | 'git'
-  | 'lounge'
-  | 'recovery'
-  | 'user';
+// 동적 존: 부서 ID가 곧 존. 공용 존(meeting, user, recovery)만 예약.
+export type OfficeZone = string;
 
 export interface OfficeAgentPresence {
   terminalId: string;
@@ -52,52 +45,56 @@ export interface OfficeEventCard {
   terminalIds: string[];
 }
 
+export interface ProfileSlotInfo {
+  name: string;
+  cli: string;
+  model: string;
+}
+
+export interface DepartmentInfo {
+  id: string;
+  name: string;
+  color: string;
+  agentCount: number;
+}
+
 interface UseOfficeStateArgs {
   agentTerminals: Record<string, any>;
   messages: AgentMessage[];
   memory: MemoryEntry[];
   logs: LogRecord[];
   hiveHealth: any;
+  profileSlots?: ProfileSlotInfo[];
+  /** 부서 목록 — 동적 존 생성용 */
+  departments?: DepartmentInfo[];
 }
 
-const ZONE_LABELS: Record<OfficeZone, string> = {
-  desk: '데스크',
+// 공용 존 (항상 존재)
+const COMMON_ZONES: Record<string, string> = {
   meeting: '회의실',
-  review: '리뷰',
-  memory: '메모리',
-  git: 'Git',
-  lounge: '라운지',
+  user: '대표실',
   recovery: '복구',
-  user: '사용자',
 };
 
-function deriveZone(data: any, hiveHealth: any): OfficeZone {
+function deriveZone(data: any, hiveHealth: any, deptId?: string): OfficeZone {
+  if (!data) return deptId || 'desk';
+
   const status = String(data?.status || 'idle').toLowerCase();
-  const stage = String(data?.pipeline_stage || 'idle').toLowerCase();
   const task = String(data?.live_task || '').toLowerCase();
 
+  // 에러 → 복구
   if (status.includes('error') || status.includes('failed') || task.includes('hang')) {
     return 'recovery';
   }
   if (hiveHealth?.status === 'healing' && status !== 'idle') {
     return 'recovery';
   }
-  if (task.includes('debate') || task.includes('meeting') || task.includes('discussion') || task.includes('review with')) {
+  // 회의 중
+  if (task.includes('debate') || task.includes('meeting') || task.includes('discussion')) {
     return 'meeting';
   }
-  if (stage === 'verifying' || task.includes('test') || task.includes('verify') || task.includes('lint')) {
-    return 'review';
-  }
-  if (task.includes('memory') || task.includes('zettel') || task.includes('docs') || task.includes('note')) {
-    return 'memory';
-  }
-  if (task.includes('commit') || task.includes('git') || task.includes('merge') || task.includes('release')) {
-    return 'git';
-  }
-  if (status === 'running' || status === 'started' || stage === 'modifying' || stage === 'analyzing') {
-    return 'desk';
-  }
-  return 'lounge';
+  // 기본: 자기 부서에 있음
+  return deptId || 'desk';
 }
 
 function makeBadges(data: any, zone: OfficeZone): string[] {
@@ -122,39 +119,80 @@ export function useOfficeState({
   memory,
   logs,
   hiveHealth,
+  profileSlots,
+  departments: deptInfos,
 }: UseOfficeStateArgs) {
   return useMemo(() => {
-    const presences: OfficeAgentPresence[] = Object.entries(agentTerminals)
-      .map(([terminalId, data]) => {
-        const slotId = Math.max(0, Number(String(terminalId).replace('terminal_', '')) - 1);
-        const agent = String(data?.cli || 'unknown').toLowerCase();
-        const zone = deriveZone(data, hiveHealth);
+    let presences: OfficeAgentPresence[];
 
-        return {
-          terminalId,
-          slotId,
-          agent,
-          status: String(data?.status || 'idle'),
-          pipelineStage: String(data?.pipeline_stage || 'idle'),
-          liveTask: String(data?.live_task || ''),
-          zone,
-          anchorId: zone === 'desk' ? `desk-${slotId}` : zone,
-          badges: makeBadges(data, zone),
-          colorKey: ['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown',
-        };
-      })
-      .sort((a, b) => a.slotId - b.slotId);
+    if (profileSlots && profileSlots.length > 0 && deptInfos && deptInfos.length > 0) {
+      // 오피스 모드: 부서 기반 — 클래식과 완전 분리
+      presences = [];
+      let flatIdx = 0;
+      for (const dept of deptInfos) {
+        for (let i = 0; i < dept.agentCount; i++) {
+          const slot = profileSlots[flatIdx];
+          if (!slot) { flatIdx++; continue; }
+          const agent = slot.cli.toLowerCase();
+          const zone = deriveZone(null, hiveHealth, dept.id);
 
-    const zones = (Object.keys(ZONE_LABELS) as OfficeZone[]).map((id) => {
-      const members = presences.filter((p) => p.zone === id);
-      const warningCount = members.filter((p) => p.zone === 'recovery').length;
+          presences.push({
+            terminalId: `office-${flatIdx}`,
+            slotId: flatIdx,
+            agent,
+            status: 'idle',
+            pipelineStage: 'idle',
+            liveTask: '',
+            zone,
+            anchorId: `${dept.id}-${i}`,
+            badges: [],
+            colorKey: ['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown',
+          });
+          flatIdx++;
+        }
+      }
+    } else {
+      // 클래식 모드 호환
+      presences = Object.entries(agentTerminals)
+        .map(([terminalId, data]) => {
+          const slotId = Math.max(0, Number(String(terminalId).replace('terminal_', '')) - 1);
+          const agent = String(data?.cli || 'unknown').toLowerCase();
+          const zone = deriveZone(data, hiveHealth);
+
+          return {
+            terminalId,
+            slotId,
+            agent,
+            status: String(data?.status || 'idle'),
+            pipelineStage: String(data?.pipeline_stage || 'idle'),
+            liveTask: String(data?.live_task || ''),
+            zone,
+            anchorId: zone === 'desk' ? `desk-${slotId}` : zone,
+            badges: makeBadges(data, zone),
+            colorKey: ['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown',
+          };
+        })
+        .sort((a, b) => a.slotId - b.slotId);
+    }
+
+    // 동적 존 목록: 부서 + 공용 존
+    const zoneMap = new Map<string, string>();
+    if (deptInfos && deptInfos.length > 0) {
+      for (const dept of deptInfos) zoneMap.set(dept.id, dept.name);
+    } else {
+      zoneMap.set('desk', '데스크');
+    }
+    for (const [id, label] of Object.entries(COMMON_ZONES)) zoneMap.set(id, label);
+
+    const zones: OfficeZoneState[] = Array.from(zoneMap.entries()).map(([id, label]) => {
+      const members = presences.filter(p => p.zone === id);
       return {
         id,
-        label: ZONE_LABELS[id],
+        label,
         occupancy: members.length,
-        warningCount,
-        primaryTerminalIds: members.map((p) => p.terminalId),
-      } satisfies OfficeZoneState;
+        warningCount: members.filter(p => p.status?.includes('error') || p.status?.includes('failed')).length,
+        primaryTerminalIds: members.map(p => p.terminalId),
+      };
     });
 
     const recentFailures = logs
@@ -223,5 +261,5 @@ export function useOfficeState({
         busyZones: zones.filter((z) => z.occupancy > 0 && z.id !== 'lounge' && z.id !== 'user').length,
       },
     };
-  }, [agentTerminals, hiveHealth, logs, memory, messages]);
+  }, [agentTerminals, hiveHealth, logs, memory, messages, profileSlots, deptInfos]);
 }

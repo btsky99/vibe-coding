@@ -13,32 +13,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
-  ClipboardList,
-  Database,
-  GitBranch,
   LayoutGrid,
-  MessageSquare,
-  Monitor,
+  Pencil,
+  Plus,
   Radar,
+  Settings2,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { useVibeData } from '../../hooks/useVibeData';
 import { type OfficeZone, useOfficeState } from '../../hooks/useOfficeState';
+import { type AgentCli, useWorkspaceProfiles, MAX_SLOTS } from '../../hooks/useWorkspaceProfiles';
+import { useCliModels, getDefaultModel } from '../../hooks/useCliModels';
 import OfficeWorld from './OfficeWorld';
-import TerminalSlot from '../TerminalSlot';
-import MessagesPanel from '../panels/MessagesPanel';
-import TasksPanel from '../panels/TasksPanel';
-import MemoryPanel from '../panels/MemoryPanel';
-import GitPanel from '../panels/GitPanel';
+import OfficeChatPanel from './OfficeChatPanel';
 
-const HUD_TABS = [
-  { id: 'terminal', label: '터미널', icon: Monitor },
-  { id: 'tasks', label: '태스크', icon: ClipboardList },
-  { id: 'messages', label: '메시지', icon: MessageSquare },
-  { id: 'memory', label: '메모리', icon: Database },
-  { id: 'git', label: 'Git', icon: GitBranch },
-] as const;
-
-type HudTab = typeof HUD_TABS[number]['id'];
+// HUD 탭 제거됨 — 오피스 우측은 채팅 전용
 
 interface OfficeAppProps {
   onSwitchToClassic?: () => void;
@@ -51,47 +41,53 @@ interface SpeechBubble {
   duration: number;
 }
 
-const ZONE_PANEL_MAP: Record<OfficeZone, HudTab> = {
-  desk: 'terminal',
-  meeting: 'messages',
-  review: 'tasks',
-  memory: 'memory',
-  git: 'git',
-  lounge: 'terminal',
-  recovery: 'terminal',
-  user: 'terminal',
-};
+// ZONE_PANEL_MAP 제거 — 채팅 전용 모드
 
-const ZONE_ACTION_HINT: Record<OfficeZone, string> = {
-  desk: '실시간 실행 및 페어 작업',
-  meeting: '토론, 동기화, 프롬프트 라우팅',
-  review: '검증, 린트, QA 패스',
-  memory: '공유 노트, 메모리, 문서',
-  git: '브랜치, 커밋, 릴리즈 흐름',
-  lounge: '디스패치 대기 중인 유휴 에이전트',
-  recovery: '차단되거나 실패한 에이전트 — 개입 필요',
-  user: '운영자 포커스 및 수동 제어',
-};
+// ZONE_ACTION_HINT 제거 — 채팅 전용 모드에서 미사용
 
 export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   const vibe = useVibeData();
+
+  // ── 워크스페이스 프로필 (office 전에 초기화 — profileSlots를 전달하기 위해) ──
+  const wp = useWorkspaceProfiles();
+  const cliModels = useCliModels();
+
   const office = useOfficeState({
     agentTerminals: vibe.agentTerminals,
     messages: vibe.messages,
     memory: vibe.memory,
     logs: vibe.logs,
     hiveHealth: vibe.hiveHealth,
+    profileSlots: wp.activeProfile.slots.map(s => ({ name: s.name, cli: s.cli, model: s.model })),
+    departments: wp.activeProfile.departments.map(d => ({ id: d.id, name: d.name, color: d.color, agentCount: d.agents.length })),
   });
+  const [showAddSlot, setShowAddSlot] = useState(false);
+  const [showProfileMgr, setShowProfileMgr] = useState(false);
+  const [newSlotName, setNewSlotName] = useState('');
+  const [newSlotCli, setNewSlotCli] = useState<AgentCli>('claude');
+  const [newSlotModel, setNewSlotModel] = useState('claude-sonnet-4-6');
+  const [newSlotYolo, setNewSlotYolo] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+  // 슬롯 편집 모달
+  const [editSlotId, setEditSlotId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCli, setEditCli] = useState<AgentCli>('claude');
+  const [editModel, setEditModel] = useState('');
+  const [editYolo, setEditYolo] = useState(false);
 
-  const [hudTab, setHudTab] = useState<HudTab>('terminal');
+  // hudTab 제거 — 채팅 전용
   const [selectedDesk, setSelectedDesk] = useState(office.selectedDefaultSlot);
   const [selectedZone, setSelectedZone] = useState<OfficeZone>('desk');
   const [speechBubbles, setSpeechBubbles] = useState<SpeechBubble[]>([]);
+  // rightMode 제거 — 오피스 우측은 채팅 전용
   const prevStatuses = useRef<Record<string, string>>({});
 
+  const activeSlots = wp.activeProfile.slots;
+  const slotCount = activeSlots.length;
+
   useEffect(() => {
-    setSelectedDesk((prev) => (prev > 7 ? office.selectedDefaultSlot : prev));
-  }, [office.selectedDefaultSlot]);
+    setSelectedDesk((prev) => (prev >= slotCount ? 0 : prev));
+  }, [slotCount]);
 
   useEffect(() => {
     const nextBubbles: SpeechBubble[] = [];
@@ -138,22 +134,10 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   );
   const zoneSummary = office.zones.filter((zone) => zone.id !== 'user');
   const projectName = vibe.currentPath.split(/[/\\]/).filter(Boolean).pop();
-  const selectedZoneState = useMemo(
-    () => office.zones.find((zone) => zone.id === selectedZone) ?? office.zones[0],
-    [office.zones, selectedZone],
-  );
-  const selectedZoneMembers = useMemo(
-    () => office.presences.filter((presence) => presence.zone === selectedZone).slice(0, 4),
-    [office.presences, selectedZone],
-  );
-
-  const routeZoneToPanel = (zone: OfficeZone) => {
-    setHudTab(ZONE_PANEL_MAP[zone]);
-  };
+  // selectedZoneState/selectedZoneMembers 제거 — 채팅 모드에서 미사용
 
   const handleZoneClick = (zone: OfficeZone) => {
     setSelectedZone(zone);
-    routeZoneToPanel(zone);
   };
 
   const handleDeskSelect = (slotId: number) => {
@@ -161,16 +145,13 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     const presence = office.presences.find((item) => item.slotId === slotId);
     if (presence) {
       setSelectedZone(presence.zone);
-      routeZoneToPanel(presence.zone);
     } else {
       setSelectedZone('desk');
-      setHudTab('terminal');
     }
   };
 
   const handleEventFocus = (event: (typeof office.events)[number]) => {
     setSelectedZone(event.zone);
-    routeZoneToPanel(event.zone);
     const targetTerminalId = event.terminalIds[0];
     if (!targetTerminalId) return;
     const targetPresence = office.presences.find((presence) => presence.terminalId === targetTerminalId);
@@ -181,7 +162,6 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
   const summonMeeting = () => {
     setSelectedZone('meeting');
-    setHudTab('messages');
     setSpeechBubbles((prev) => [
       ...prev,
       ...office.presences.slice(0, 3).map((presence) => ({
@@ -195,7 +175,6 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
   const requestReview = () => {
     setSelectedZone('review');
-    setHudTab('tasks');
     if (selectedPresence) {
       setSpeechBubbles((prev) => [
         ...prev,
@@ -216,72 +195,157 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   };
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-[#081019] text-[#e5eef8]">
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-white/5 bg-[#0b1320] px-4">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-[#060a0f] text-[#e5eef8]" onContextMenu={e => e.preventDefault()}>
+      {/* ═══ 헤더 ═══ */}
+      <header className="flex h-10 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#080e18]/90 px-4 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <span className="bg-gradient-to-r from-cyan-300 via-sky-400 to-fuchsia-400 bg-clip-text text-sm font-black tracking-[0.35em] text-transparent">
-            바이브 오피스
+          <span className="bg-gradient-to-r from-cyan-300 via-sky-400 to-fuchsia-400 bg-clip-text text-xs font-black tracking-[0.3em] text-transparent">
+            VIBE OFFICE
           </span>
-          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-mono text-white/45">
-            v{vibe.appVersion}
-          </span>
-          <span className="text-[10px] text-white/30">
-            활성 {office.summary.activeAgents} · 차단 {office.summary.blockedAgents}
-          </span>
+          <div className="h-3 w-px bg-white/10" />
+          <select
+            value={wp.activeProfileId}
+            onChange={e => wp.setActiveProfile(e.target.value)}
+            className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/60 outline-none backdrop-blur"
+          >
+            {wp.profiles.map(p => (
+              <option key={p.id} value={p.id} className="bg-[#0b1320]">{p.name} ({p.slots.length})</option>
+            ))}
+          </select>
+          <button onClick={() => setShowAddSlot(true)} className="rounded border border-cyan-500/20 bg-cyan-500/8 p-1 text-cyan-300 hover:bg-cyan-500/15" title="터미널 추가">
+            <Plus className="h-3 w-3" />
+          </button>
+          <button onClick={() => setShowProfileMgr(true)} className="rounded border border-white/8 bg-white/[0.03] p-1 text-white/35 hover:text-white/60" title="프로필 관리">
+            <Settings2 className="h-3 w-3" />
+          </button>
         </div>
-
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1 py-0.5">
-            {onSwitchToClassic && (
-              <button
-                type="button"
-                onClick={onSwitchToClassic}
-                className="rounded px-2 py-0.5 text-[10px] font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
-              >
-                클래식
-              </button>
-            )}
-            <button
-              type="button"
-              className="rounded bg-cyan-400/12 px-2 py-0.5 text-[10px] font-semibold text-cyan-200"
-            >
-              오피스
-            </button>
-            <button
-              type="button"
-              onClick={openStandaloneOfficePage}
-              className="rounded px-2 py-0.5 text-[10px] font-semibold text-sky-200 transition hover:bg-white/10"
-            >
-              오피스 페이지
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={summonMeeting}
-            className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-200 transition hover:bg-cyan-400/15"
-          >
-            회의 소집
-          </button>
-          <button
-            type="button"
-            onClick={requestReview}
-            className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-200 transition hover:bg-emerald-400/15"
-          >
-            리뷰 요청
-          </button>
+          <span className="text-[9px] text-white/25">{office.summary.activeAgents} 활성 · {office.summary.blockedAgents} 차단</span>
+          <button onClick={summonMeeting} className="rounded border border-cyan-500/20 bg-cyan-500/8 px-2 py-0.5 text-[9px] font-bold text-cyan-300 hover:bg-cyan-500/15">회의</button>
+          <button onClick={requestReview} className="rounded border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-[9px] font-bold text-emerald-300 hover:bg-emerald-500/15">리뷰</button>
           {onSwitchToClassic && (
-            <button
-              onClick={onSwitchToClassic}
-              className="flex items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-white/55 transition hover:bg-white/10 hover:text-white/80"
-            >
-              <LayoutGrid className="h-3 w-3" />
-              클래식
+            <button onClick={onSwitchToClassic} className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-bold text-white/50 hover:text-white/80">
+              <LayoutGrid className="mr-1 inline h-2.5 w-2.5" />클래식
             </button>
           )}
         </div>
       </header>
 
+      {/* ═══ 3-Column 본문 ═══ */}
       <div className="flex flex-1 overflow-hidden">
+
+        {/* ── 왼쪽: 부서별 에이전트 사이드바 ── */}
+        <aside className="flex w-[190px] shrink-0 flex-col border-r border-white/[0.04] bg-[#080d15]">
+          {/* 대표 (사용자) */}
+          <div className="border-b border-white/[0.04] px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400/30 to-orange-500/20 border-2 border-amber-400/40 flex items-center justify-center">
+                <span className="text-[10px] font-black text-amber-300">CEO</span>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-amber-200/90">대표</div>
+                <div className="text-[8px] text-white/25">전체 부서 총괄</div>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2">
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25">조직</div>
+            <span className="text-[8px] text-white/15">{activeSlots.length}명</span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-2">
+            {wp.activeProfile.departments.map(dept => {
+              // 이 부서의 에이전트들의 flat index 시작점
+              let flatStartIdx = 0;
+              for (const d of wp.activeProfile.departments) {
+                if (d.id === dept.id) break;
+                flatStartIdx += d.agents.length;
+              }
+              return (
+                <div key={dept.id}>
+                  {/* 부서 헤더 */}
+                  <div className="flex items-center gap-1.5 px-1 py-1">
+                    <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dept.color }} />
+                    <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: `${dept.color}cc` }}>
+                      {dept.name}
+                    </span>
+                    <span className="text-[8px] text-white/15">{dept.agents.length}</span>
+                  </div>
+                  {/* 에이전트 목록 */}
+                  <div className="space-y-0.5">
+                    {dept.agents.map((agent, agentIdx) => {
+                      const flatIdx = flatStartIdx + agentIdx;
+                      const presence = office.presences.find(p => p.slotId === flatIdx);
+                      const isActive = selectedDesk === flatIdx;
+                      const cliColor = agent.cli === 'claude' ? '#a78bfa' : agent.cli === 'gemini' ? '#34d399' : '#22d3ee';
+                      const busy = presence?.status === 'running' || presence?.status === 'started';
+                      return (
+                        <button
+                          key={agent.id}
+                          onClick={() => handleDeskSelect(flatIdx)}
+                          className={`group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-all ${
+                            isActive
+                              ? 'bg-white/[0.06] border border-cyan-500/25'
+                              : 'border border-transparent hover:bg-white/[0.03]'
+                          }`}
+                        >
+                          <div className="relative shrink-0">
+                            <div
+                              className={`h-6 w-6 rounded-full flex items-center justify-center text-[8px] font-black text-white/90 ${busy ? 'animate-pulse' : ''}`}
+                              style={{ backgroundColor: `${cliColor}25`, border: `1.5px solid ${cliColor}${isActive ? 'aa' : '33'}` }}
+                            >
+                              {agent.cli[0].toUpperCase()}
+                            </div>
+                            {busy && (
+                              <div className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-green-400" style={{ boxShadow: '0 0 4px rgba(74,222,128,0.6)' }} />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className={`truncate text-[9px] font-bold ${isActive ? 'text-white/85' : 'text-white/50'}`}>
+                              {agent.name}
+                            </div>
+                            <div className="truncate text-[7px] text-white/20">
+                              {agent.model.replace('claude-', '').replace('gemini-', '').replace('gpt-', '')}
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditSlotId(agent.id);
+                              setEditName(agent.name);
+                              setEditCli(agent.cli);
+                              setEditModel(agent.model);
+                              setEditYolo(agent.yolo);
+                            }}
+                            className="shrink-0 rounded p-0.5 text-white/0 group-hover:text-white/25 hover:!text-white/60 transition-all"
+                          >
+                            <Pencil className="h-2.5 w-2.5" />
+                          </button>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* 하단 존 목록 */}
+          <div className="border-t border-white/[0.04] px-2 py-2 space-y-0.5">
+            {zoneSummary.slice(0, 5).map(zone => (
+              <button
+                key={zone.id}
+                onClick={() => handleZoneClick(zone.id)}
+                className={`flex w-full items-center justify-between rounded px-2 py-1 text-[9px] transition ${
+                  selectedZone === zone.id ? 'bg-cyan-500/10 text-cyan-300' : 'text-white/30 hover:text-white/50'
+                }`}
+              >
+                <span>{zone.label}</span>
+                {zone.occupancy > 0 && <span className="rounded-full bg-white/[0.06] px-1.5 text-[8px]">{zone.occupancy}</span>}
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        {/* ── 가운데: 오피스 월드 ── */}
         <div className="relative min-w-0 flex-1 overflow-hidden">
           <OfficeWorld
             presences={office.presences}
@@ -291,212 +355,280 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             onDeskClick={handleDeskSelect}
             onZoneClick={handleZoneClick}
             speechBubbles={speechBubbles}
+            slotNames={activeSlots.map(s => s.name)}
           />
 
-          <div className="absolute left-4 top-4 flex max-w-[70%] flex-wrap gap-2">
-            {zoneSummary.map((zone) => (
+          {/* 이벤트 레일 (월드 위 오버레이) */}
+          <div className="absolute bottom-3 left-3 right-3 flex items-end gap-2 pointer-events-none">
+            {office.events.slice(0, 3).map((event) => (
               <button
-                key={zone.id}
-                type="button"
-                onClick={() => handleZoneClick(zone.id)}
-                className={`rounded-full border px-3 py-1 text-[10px] backdrop-blur ${
-                  selectedZone === zone.id
-                    ? 'border-cyan-300/35 bg-cyan-300/12'
-                    : 'border-white/10 bg-black/35 hover:bg-black/50'
-                }`}
+                key={event.id}
+                onClick={() => handleEventFocus(event)}
+                className="pointer-events-auto rounded-lg border border-white/[0.06] bg-[#0a1018ee] px-3 py-1.5 text-left backdrop-blur-xl transition hover:border-cyan-500/20"
               >
-                <span className="font-semibold text-white/75">{zone.label}</span>
-                <span className="ml-2 text-white/35">{zone.occupancy}</span>
+                <div className="text-[9px] font-bold text-white/60 truncate">{event.title}</div>
+                <div className="text-[8px] text-white/25 truncate">{event.subtitle}</div>
               </button>
             ))}
           </div>
 
-          <div className="absolute bottom-4 left-4 w-[320px] rounded-xl border border-white/10 bg-[#08111ccc] p-3 backdrop-blur">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-white/80">
-              <Radar className="h-3.5 w-3.5 text-cyan-300" />
-              이벤트 레일
+          {/* 상태 요약 (월드 위 오버레이) */}
+          <div className="absolute top-3 right-3 flex gap-2 pointer-events-none">
+            <div className="rounded-lg border border-white/[0.06] bg-[#0a1018dd] px-2.5 py-1.5 backdrop-blur-xl">
+              <div className="text-[8px] uppercase tracking-widest text-white/25">존</div>
+              <div className="text-sm font-bold text-white/70">{office.summary.busyZones}</div>
             </div>
-            <div className="space-y-2">
-              {office.events.slice(0, 4).map((event) => (
-                <button
-                  key={event.id}
-                  type="button"
-                  onClick={() => handleEventFocus(event)}
-                  className="block w-full rounded-lg border border-white/6 bg-white/[0.03] px-2.5 py-2 text-left transition hover:border-cyan-300/20 hover:bg-cyan-300/[0.05]"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="truncate text-[10px] font-semibold text-white/78">{event.title}</div>
-                    <span className="text-[9px] uppercase tracking-[0.18em] text-white/28">{event.zone}</span>
-                  </div>
-                  <div className="mt-1 text-[10px] text-white/42">{event.subtitle}</div>
-                </button>
-              ))}
+            <div className="rounded-lg border border-white/[0.06] bg-[#0a1018dd] px-2.5 py-1.5 backdrop-blur-xl">
+              <div className="text-[8px] uppercase tracking-widest text-white/25">태스크</div>
+              <div className="text-sm font-bold text-white/70">{vibe.activeTaskCount}</div>
+            </div>
+            <div className="rounded-lg border border-white/[0.06] bg-[#0a1018dd] px-2.5 py-1.5 backdrop-blur-xl">
+              <div className="text-[8px] uppercase tracking-widest text-white/25">메시지</div>
+              <div className="text-sm font-bold text-white/70">{vibe.unreadMsgCount}</div>
             </div>
           </div>
         </div>
 
-        <aside className="flex w-[430px] shrink-0 flex-col border-l border-white/5 bg-[#0c1522]/95 backdrop-blur">
-          <div className="border-b border-white/5 px-3 py-3">
-            <div className="mb-3 rounded-xl border border-white/8 bg-white/[0.03] p-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-white/35">포커스 에이전트</div>
-              {selectedPresence ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-bold text-white/85">
-                      T{selectedPresence.slotId + 1} · {selectedPresence.agent || 'unknown'}
-                    </div>
-                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">
-                      {selectedPresence.zone}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={summonMeeting}
-                      className="rounded border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-200 transition hover:bg-cyan-400/15"
-                    >
-                      회의
-                    </button>
-                    <button
-                      type="button"
-                      onClick={requestReview}
-                      className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-200 transition hover:bg-emerald-400/15"
-                    >
-                      리뷰
-                    </button>
-                  </div>
-                  <div className="mt-2 text-[11px] text-white/48">
-                    {selectedPresence.liveTask || '진행 중인 작업 없음'}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {selectedPresence.badges.map((badge) => (
-                      <span key={badge} className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-[10px] text-cyan-200">
-                        {badge}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="text-[11px] text-white/40">에이전트를 확인하려면 데스크를 선택하세요.</div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">활성 존</div>
-                <div className="mt-1 text-lg font-bold text-white/82">{office.summary.busyZones}</div>
-              </div>
-              <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">태스크</div>
-                <div className="mt-1 text-lg font-bold text-white/82">{vibe.activeTaskCount}</div>
-              </div>
-              <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/28">읽지 않음</div>
-                <div className="mt-1 text-lg font-bold text-white/82">{vibe.unreadMsgCount}</div>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.03] p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-white/35">존 제어</div>
-                  <div className="mt-1 text-sm font-bold text-white/82">{selectedZoneState?.label ?? 'Desk'}</div>
-                </div>
-                <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">
-                  {selectedZoneState?.occupancy ?? 0} 활성
-                </span>
-              </div>
-              <div className="mt-2 text-[11px] text-white/46">
-                {ZONE_ACTION_HINT[selectedZone]}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {selectedZoneMembers.length > 0 ? (
-                  selectedZoneMembers.map((presence) => (
-                    <button
-                      key={presence.terminalId}
-                      type="button"
-                      onClick={() => handleDeskSelect(presence.slotId)}
-                      className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] text-white/68 transition hover:border-cyan-300/25 hover:bg-cyan-300/[0.08]"
-                    >
-                      T{presence.slotId + 1} {presence.agent}
-                    </button>
-                  ))
-                ) : (
-                  <span className="text-[10px] text-white/32">현재 이 존에 배정된 에이전트가 없습니다.</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-white/5 bg-[#09111c] px-2">
-            {HUD_TABS.map((tab) => {
-              const Icon = tab.icon;
-              const active = hudTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setHudTab(tab.id)}
-                  className={`flex items-center gap-1 rounded px-2.5 py-1 text-[10px] font-semibold transition ${
-                    active
-                      ? 'border border-cyan-400/25 bg-cyan-400/12 text-cyan-200'
-                      : 'border border-transparent text-white/40 hover:bg-white/5 hover:text-white/70'
-                  }`}
-                >
-                  <Icon className="h-3 w-3" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex-1 overflow-hidden p-2">
-            {hudTab === 'terminal' ? (
-              <div className="h-full min-h-0">
-                <TerminalSlot
-                  key={selectedDesk}
-                  slotId={selectedDesk}
-                  logs={vibe.logs}
-                  currentPath={vibe.currentPath}
-                  terminalCount={8}
-                  locks={vibe.locks}
-                  messages={vibe.messages}
-                  tasks={[]}
-                  geminiUsage={vibe.geminiUsage}
-                  claudeUsage={vibe.claudeUsage}
-                  agentTerminals={vibe.agentTerminals}
-                  orchestratorData={vibe.skillChain}
-                  hiveActivity={vibe.hiveActivity}
-                />
-              </div>
-            ) : hudTab === 'tasks' ? (
-              <TasksPanel onActiveCount={vibe.setActiveTaskCount} />
-            ) : hudTab === 'messages' ? (
-              <MessagesPanel onUnreadCount={vibe.setUnreadMsgCount} />
-            ) : hudTab === 'memory' ? (
-              <MemoryPanel currentProjectName={projectName} />
-            ) : (
-              <GitPanel
-                currentPath={vibe.currentPath}
-                onChangesCount={(count, conflictCount) => {
-                  vibe.setTotalGitChanges(count);
-                  vibe.setConflictCount(conflictCount);
-                }}
-              />
-            )}
-          </div>
-
-          <footer className="flex h-7 shrink-0 items-center justify-between border-t border-white/5 px-3 text-[9px] text-white/28">
-            <div className="flex items-center gap-3">
-              <span>{office.summary.activeAgents} 에이전트 활성</span>
-              <span>{office.summary.blockedAgents} 복구 중</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Activity className="h-3 w-3" />
-              office-phase1
-            </div>
-          </footer>
+        {/* ── 오른쪽: 채팅 전용 패널 ── */}
+        <aside className="flex w-[380px] shrink-0 flex-col border-l border-white/[0.04] bg-[#0a0f18]">
+          <OfficeChatPanel
+            messages={vibe.messages}
+            selectedAgent={activeSlots[selectedDesk]?.cli || 'claude'}
+            selectedSlotName={activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`}
+            allSlotNames={activeSlots.map(s => s.name)}
+            allSlotClis={activeSlots.map(s => s.cli)}
+            onSendMessage={(text, target) => {
+              fetch('/api/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from: 'user', to: target, type: 'chat', content: text }),
+              }).catch(err => console.error('[OfficeChatPanel] send error:', err));
+            }}
+          />
         </aside>
       </div>
+
+      {/* ── 슬롯 편집 모달 ── */}
+      {editSlotId && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-[340px] rounded-xl border border-white/15 bg-[#0c1522] p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white/85">슬롯 편집</h3>
+              <button onClick={() => setEditSlotId(null)} className="text-white/30 hover:text-white/70"><X className="h-4 w-4" /></button>
+            </div>
+            <label className="mb-2 block">
+              <span className="text-[10px] text-white/50">이름</span>
+              <input
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none focus:border-cyan-400/40"
+              />
+            </label>
+            <label className="mb-2 block">
+              <span className="text-[10px] text-white/50">CLI</span>
+              <select
+                value={editCli}
+                onChange={e => {
+                  const cli = e.target.value as AgentCli;
+                  setEditCli(cli);
+                  setEditModel(getDefaultModel(cli));
+                }}
+                className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
+              >
+                <option value="claude" className="bg-[#0c1522]">Claude</option>
+                <option value="gemini" className="bg-[#0c1522]">Gemini</option>
+                <option value="codex" className="bg-[#0c1522]">Codex</option>
+              </select>
+            </label>
+            <label className="mb-2 block">
+              <span className="text-[10px] text-white/50">모델</span>
+              <select
+                value={editModel}
+                onChange={e => setEditModel(e.target.value)}
+                className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
+              >
+                {(cliModels[editCli] || []).map(m => (
+                  <option key={m.id} value={m.id} className="bg-[#0c1522]">{m.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mb-4 flex items-center gap-2">
+              <input type="checkbox" checked={editYolo} onChange={e => setEditYolo(e.target.checked)} className="accent-cyan-400" />
+              <span className="text-[10px] text-white/60">자율 실행 (YOLO)</span>
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  wp.updateSlot(wp.activeProfileId, editSlotId, {
+                    name: editName,
+                    cli: editCli,
+                    model: editModel,
+                    yolo: editYolo,
+                  });
+                  setEditSlotId(null);
+                }}
+                className="flex-1 rounded bg-cyan-500/20 py-2 text-xs font-bold text-cyan-200 transition hover:bg-cyan-500/30"
+              >
+                저장
+              </button>
+              <button
+                onClick={() => {
+                  wp.removeSlot(wp.activeProfileId, editSlotId);
+                  setEditSlotId(null);
+                }}
+                className="rounded bg-red-500/15 px-3 py-2 text-xs font-bold text-red-300 transition hover:bg-red-500/25"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 터미널 추가 모달 ── */}
+      {showAddSlot && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-[340px] rounded-xl border border-white/15 bg-[#0c1522] p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white/85">터미널 추가</h3>
+              <button onClick={() => setShowAddSlot(false)} className="text-white/30 hover:text-white/70"><X className="h-4 w-4" /></button>
+            </div>
+            {slotCount >= MAX_SLOTS ? (
+              <div className="text-[11px] text-red-300">최대 {MAX_SLOTS}개까지만 추가할 수 있습니다.</div>
+            ) : (
+              <>
+                <label className="mb-2 block">
+                  <span className="text-[10px] text-white/50">이름</span>
+                  <input
+                    value={newSlotName}
+                    onChange={e => setNewSlotName(e.target.value)}
+                    placeholder={`터미널 ${slotCount + 1}`}
+                    className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none focus:border-cyan-400/40"
+                  />
+                </label>
+                <label className="mb-2 block">
+                  <span className="text-[10px] text-white/50">CLI</span>
+                  <select
+                    value={newSlotCli}
+                    onChange={e => {
+                      const cli = e.target.value as AgentCli;
+                      setNewSlotCli(cli);
+                      setNewSlotModel(getDefaultModel(cli));
+                    }}
+                    className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
+                  >
+                    <option value="claude" className="bg-[#0c1522]">Claude</option>
+                    <option value="gemini" className="bg-[#0c1522]">Gemini</option>
+                    <option value="codex" className="bg-[#0c1522]">Codex</option>
+                  </select>
+                </label>
+                <label className="mb-2 block">
+                  <span className="text-[10px] text-white/50">모델</span>
+                  <select
+                    value={newSlotModel}
+                    onChange={e => setNewSlotModel(e.target.value)}
+                    className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
+                  >
+                    {(cliModels[newSlotCli] || []).map(m => (
+                      <option key={m.id} value={m.id} className="bg-[#0c1522]">{m.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="mb-4 flex items-center gap-2">
+                  <input type="checkbox" checked={newSlotYolo} onChange={e => setNewSlotYolo(e.target.checked)} className="accent-cyan-400" />
+                  <span className="text-[10px] text-white/60">자율 실행 (YOLO)</span>
+                </label>
+                <button
+                  onClick={() => {
+                    wp.addSlot(wp.activeProfileId, {
+                      name: newSlotName || `터미널 ${slotCount + 1}`,
+                      cli: newSlotCli,
+                      model: newSlotModel,
+                      yolo: newSlotYolo,
+                    });
+                    setNewSlotName('');
+                    setShowAddSlot(false);
+                  }}
+                  className="w-full rounded bg-cyan-500/20 py-2 text-xs font-bold text-cyan-200 transition hover:bg-cyan-500/30"
+                >
+                  추가
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 프로필 관리 모달 ── */}
+      {showProfileMgr && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="max-h-[80vh] w-[420px] overflow-y-auto rounded-xl border border-white/15 bg-[#0c1522] p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white/85">프로필 관리</h3>
+              <button onClick={() => setShowProfileMgr(false)} className="text-white/30 hover:text-white/70"><X className="h-4 w-4" /></button>
+            </div>
+
+            {/* 새 프로필 만들기 */}
+            <div className="mb-4 flex gap-2">
+              <input
+                value={newProfileName}
+                onChange={e => setNewProfileName(e.target.value)}
+                placeholder="새 프로필 이름"
+                className="flex-1 rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
+              />
+              <button
+                onClick={() => {
+                  if (newProfileName.trim()) {
+                    const id = wp.addProfile(newProfileName.trim());
+                    wp.setActiveProfile(id);
+                    setNewProfileName('');
+                  }
+                }}
+                className="rounded bg-cyan-500/20 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30"
+              >
+                생성
+              </button>
+            </div>
+
+            {/* 프로필 목록 */}
+            {wp.profiles.map(profile => (
+              <div key={profile.id} className={`mb-3 rounded-lg border p-3 ${
+                profile.id === wp.activeProfileId ? 'border-cyan-400/30 bg-cyan-400/5' : 'border-white/8 bg-white/[0.02]'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => wp.setActiveProfile(profile.id)}
+                    className="text-xs font-bold text-white/80 hover:text-cyan-200"
+                  >
+                    {profile.name} ({profile.slots.length}개)
+                  </button>
+                  {!profile.isDefault && (
+                    <button onClick={() => wp.deleteProfile(profile.id)} className="text-white/25 hover:text-red-300">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                <div className="mt-2 space-y-1">
+                  {profile.slots.map(slot => (
+                    <div key={slot.id} className="flex items-center justify-between rounded bg-white/[0.03] px-2 py-1">
+                      <span className="text-[10px] text-white/60">{slot.name}</span>
+                      <span className="text-[10px] text-white/35">{slot.cli} · {slot.model}</span>
+                      {profile.id === wp.activeProfileId && (
+                        <button
+                          onClick={() => wp.removeSlot(profile.id, slot.id)}
+                          className="text-white/20 hover:text-red-300"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
