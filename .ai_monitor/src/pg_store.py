@@ -1,7 +1,11 @@
 # ────────────────────────────────────────────────────────────────────────────
 # 📄 파일명: src/pg_store.py
-# 📝 설명: PostgreSQL 저장소 — session_logs, skill_chain 등 관리
+# 📝 설명: PostgreSQL 저장소 — session_logs, skill_chain, 오피스 프로필 등 관리
 # 🕒 변경 이력:
+# [2026-04-09] Claude — 오피스 프로필 중앙화 (localStorage → PostgreSQL SSOT)
+#   - office_profiles, office_profile_state 테이블 추가
+#   - LISTEN/NOTIFY 'office_profiles_changed' 채널로 창 간 실시간 동기화
+#   - seed/list/get/upsert/delete/get_active/set_active 헬퍼 함수 추가
 # [2026-03-11] Claude — frozen(EXE) 모드 PG_BIN 경로 수정
 #   - 기존: PROJECT_ROOT / '.ai_monitor' / 'bin' / 'pgsql' (개발 경로 하드코딩)
 #   - 수정: frozen 모드 → Path(sys.executable).parent / "pgsql" / "bin" / "psql.exe"
@@ -613,6 +617,76 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
                     CREATE TRIGGER trg_zettel_change
                     AFTER INSERT OR UPDATE ON zettel_notes
                     FOR EACH ROW EXECUTE FUNCTION notify_zettel_change();
+                END IF;
+            END;
+            $$;
+        """)
+
+        # ── [2026-04-09] 클래식/오피스 워커 네임스페이스 분리 ──
+        # hive_tasks, agent_heartbeats에 source/namespace 컬럼을 추가해
+        # 두 모드의 실행 상태가 섞이지 않도록 한다.
+        execute_raw("ALTER TABLE hive_tasks ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'classic';")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_hive_tasks_source ON hive_tasks (source, status);")
+        execute_raw("ALTER TABLE agent_heartbeats ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT 'classic';")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_agent_heartbeats_ns ON agent_heartbeats (namespace);")
+
+        # ── [2026-04-09] 오피스 프로필 중앙화 — localStorage → PostgreSQL SSOT ──
+        # 창(pywebview/QWebEngine)이 여러 개라 localStorage를 공유할 수 없고
+        # 브라우저별 영구 저장 정책이 달라 데이터 유실이 발생하므로
+        # 서버 단일 진실의 원천(SSOT)으로 프로필을 이동한다.
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS office_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_office_profiles_updated ON office_profiles (updated_at DESC);")
+
+        # 활성 프로필 포인터 — 싱글톤 레코드 (id=1 고정)
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS office_profile_state (
+                id INT PRIMARY KEY DEFAULT 1,
+                active_profile_id TEXT NOT NULL DEFAULT 'default',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT office_profile_state_singleton CHECK (id = 1)
+            );
+        """)
+        execute_raw("INSERT INTO office_profile_state (id, active_profile_id) VALUES (1, 'default') ON CONFLICT (id) DO NOTHING;")
+
+        # NOTIFY 트리거 — 프로필 변경 시 'office_profiles_changed' 채널로 알림
+        # 모든 창(메인/오피스)의 SSE 구독자가 즉시 반영
+        execute_raw("""
+            CREATE OR REPLACE FUNCTION notify_office_profiles_changed()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                payload TEXT;
+            BEGIN
+                IF TG_OP = 'DELETE' THEN
+                    payload := json_build_object('op', 'delete', 'id', OLD.id)::text;
+                ELSE
+                    payload := json_build_object('op', TG_OP, 'id', NEW.id)::text;
+                END IF;
+                PERFORM pg_notify('office_profiles_changed', payload);
+                RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        execute_raw("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_office_profiles_changed') THEN
+                    CREATE TRIGGER trg_office_profiles_changed
+                    AFTER INSERT OR UPDATE OR DELETE ON office_profiles
+                    FOR EACH ROW EXECUTE FUNCTION notify_office_profiles_changed();
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_office_profile_state_changed') THEN
+                    CREATE TRIGGER trg_office_profile_state_changed
+                    AFTER UPDATE ON office_profile_state
+                    FOR EACH ROW EXECUTE PROCEDURE notify_office_profiles_changed();
                 END IF;
             END;
             $$;
@@ -1336,4 +1410,143 @@ def insert_pg_log(agent: str, task: str = '', status: str = 'success',
         f"VALUES ({_sql_text(agent)}, {_sql_text(task)}, {_sql_text(status)}, "
         f"{_sql_text(terminal_id)}, {_sql_text(project_id)}, "
         f"{_sql_text(meta_json)}::jsonb);"
+    )
+
+
+# ── 오피스 프로필 CRUD ──────────────────────────────────────────────────────
+#
+# 메인 창(pywebview)과 오피스 창(QWebEngineView)은 서로 다른 브라우저 엔진이라
+# localStorage가 공유되지 않는다. 프로필은 서버 DB에서만 관리한다.
+
+# 기본 프로필 씨드 — 경영진(대표) + 코딩 부서. useWorkspaceProfiles.ts의 DEFAULT_PROFILE과 동일
+_DEFAULT_OFFICE_PROFILE = {
+    "id": "default",
+    "name": "코딩 회사",
+    "isDefault": True,
+    "createdAt": "2026-04-08T00:00:00.000Z",
+    "departments": [
+        {
+            "id": "dept-exec",
+            "name": "경영진",
+            "color": "#fbbf24",
+            "icon": "crown",
+            "agents": [
+                {"id": "ceo", "name": "대표 (지휘자)", "role": "ceo",
+                 "cli": "claude", "model": "claude-opus-4-6",
+                 "skills": ["orchestrate", "brainstorm", "write-plan"],
+                 "avatar": "crown", "yolo": True, "order": 0},
+            ],
+        },
+        {
+            "id": "dept-coding",
+            "name": "코딩 부서",
+            "color": "#22d3ee",
+            "icon": "code-2",
+            "agents": [
+                {"id": "a1", "name": "기획자",     "role": "planner",   "cli": "claude", "model": "claude-opus-4-6",   "skills": ["brainstorm", "write-plan"], "avatar": "clipboard-list", "yolo": True, "order": 0},
+                {"id": "a2", "name": "아키텍트",   "role": "architect", "cli": "claude", "model": "claude-opus-4-6",   "skills": ["brainstorm"],               "avatar": "blocks",         "yolo": True, "order": 1},
+                {"id": "a3", "name": "프론트엔드", "role": "frontend",  "cli": "gemini", "model": "gemini-2.5-pro",    "skills": ["code"],                     "avatar": "monitor",        "yolo": True, "order": 2},
+                {"id": "a4", "name": "백엔드",     "role": "backend",   "cli": "claude", "model": "claude-sonnet-4-6", "skills": ["code"],                     "avatar": "server",         "yolo": True, "order": 3},
+                {"id": "a5", "name": "풀스택",     "role": "fullstack", "cli": "gemini", "model": "gemini-2.5-flash",  "skills": ["code"],                     "avatar": "layers",         "yolo": True, "order": 4},
+                {"id": "a6", "name": "코드 리뷰어","role": "reviewer",  "cli": "claude", "model": "claude-opus-4-6",   "skills": ["code-review"],              "avatar": "search-check",   "yolo": True, "order": 5},
+                {"id": "a7", "name": "QA 테스터",  "role": "qa",        "cli": "codex",  "model": "o4-mini",           "skills": ["tdd"],                      "avatar": "test-tubes",     "yolo": True, "order": 6},
+                {"id": "a8", "name": "보안 담당",  "role": "security",  "cli": "claude", "model": "claude-opus-4-6",   "skills": ["security"],                 "avatar": "shield",         "yolo": True, "order": 7},
+                {"id": "a9", "name": "DevOps",     "role": "devops",    "cli": "codex",  "model": "gpt-4.1",           "skills": ["release"],                  "avatar": "wrench",         "yolo": True, "order": 8},
+            ],
+        },
+    ],
+}
+
+
+def seed_default_office_profile() -> bool:
+    """최초 실행 시 기본 프로필을 시드한다. 이미 있으면 아무것도 하지 않는다."""
+    import json as _json
+    existing = query_rows("SELECT id FROM office_profiles LIMIT 1;")
+    if existing:
+        return True
+    data_json = _json.dumps(_DEFAULT_OFFICE_PROFILE, ensure_ascii=False)
+    ok = execute(
+        f"INSERT INTO office_profiles (id, name, data, is_default) "
+        f"VALUES ('default', {_sql_text(_DEFAULT_OFFICE_PROFILE['name'])}, "
+        f"{_sql_text(data_json)}::jsonb, TRUE) "
+        f"ON CONFLICT (id) DO NOTHING;"
+    )
+    return ok
+
+
+def list_office_profiles() -> list[dict]:
+    """전체 오피스 프로필 목록 + 활성 프로필 ID 반환.
+
+    반환 형식: [{"id", "name", "data", "is_default", "created_at", "updated_at"}, ...]
+    data 필드는 JSON 문자열이 아닌 파싱된 dict이다.
+    """
+    import json as _json
+    rows = query_rows(
+        "SELECT id, name, data::text AS data, is_default, "
+        "to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS created_at, "
+        "to_char(updated_at, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS updated_at "
+        "FROM office_profiles ORDER BY is_default DESC, created_at ASC;"
+    )
+    for r in rows:
+        try:
+            r['data'] = _json.loads(r.get('data') or '{}')
+        except Exception:
+            r['data'] = {}
+    return rows
+
+
+def get_office_profile(profile_id: str) -> dict | None:
+    """단일 프로필 조회."""
+    import json as _json
+    rows = query_rows(
+        f"SELECT id, name, data::text AS data, is_default, "
+        f"to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS created_at, "
+        f"to_char(updated_at, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS updated_at "
+        f"FROM office_profiles WHERE id = {_sql_text(profile_id)} LIMIT 1;"
+    )
+    if not rows:
+        return None
+    r = rows[0]
+    try:
+        r['data'] = _json.loads(r.get('data') or '{}')
+    except Exception:
+        r['data'] = {}
+    return r
+
+
+def upsert_office_profile(profile_id: str, name: str, data: dict,
+                           is_default: bool = False) -> bool:
+    """프로필 생성 또는 전체 대체. data는 departments를 포함한 전체 JSON."""
+    import json as _json
+    data_json = _json.dumps(data, ensure_ascii=False)
+    return execute(
+        f"INSERT INTO office_profiles (id, name, data, is_default, updated_at) "
+        f"VALUES ({_sql_text(profile_id)}, {_sql_text(name)}, "
+        f"{_sql_text(data_json)}::jsonb, {'TRUE' if is_default else 'FALSE'}, NOW()) "
+        f"ON CONFLICT (id) DO UPDATE SET "
+        f"name = EXCLUDED.name, data = EXCLUDED.data, updated_at = NOW();"
+    )
+
+
+def delete_office_profile(profile_id: str) -> bool:
+    """프로필 삭제. 기본 프로필은 삭제 불가 (is_default=TRUE 제외)."""
+    return execute(
+        f"DELETE FROM office_profiles "
+        f"WHERE id = {_sql_text(profile_id)} AND is_default = FALSE;"
+    )
+
+
+def get_active_office_profile_id() -> str:
+    """현재 활성 프로필 ID."""
+    rows = query_rows("SELECT active_profile_id FROM office_profile_state WHERE id = 1 LIMIT 1;")
+    if rows:
+        return rows[0].get('active_profile_id') or 'default'
+    return 'default'
+
+
+def set_active_office_profile(profile_id: str) -> bool:
+    """활성 프로필 변경 — 싱글톤 레코드 업데이트."""
+    return execute(
+        f"UPDATE office_profile_state SET active_profile_id = {_sql_text(profile_id)}, "
+        f"updated_at = NOW() WHERE id = 1;"
     )

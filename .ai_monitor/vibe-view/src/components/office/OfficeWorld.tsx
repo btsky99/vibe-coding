@@ -4,6 +4,9 @@
  * DESCRIPTION: 메타버스 오피스 Phase 2: Glassmorphism Spatial UI.
  *              Canvas 배경(그리드, 라인) + React DOM(유리 질감 오브젝트) 하이브리드 렌더러.
  * REVISION HISTORY:
+ * - 2026-04-09 Claude: 동적 zone 레이아웃 — 부서 개수만큼 desk 영역을 자동 분할.
+ *                      기존에는 하드코딩된 4개 zone만 지원해 모든 부서가 'desk'로
+ *                      폴백되며 시각적으로 겹치는 버그가 있었음.
  * - 2026-04-08 Gemini: 전면 재설계 — 하이테크 홀로그램 & 유리 질감 UI 도입
  * ------------------------------------------------------------------------
  */
@@ -40,50 +43,88 @@ const AGENT_THEMES: Record<string, { main: string; glow: string; secondary: stri
   unknown: { main: '#94a3b8', glow: 'rgba(148, 163, 184, 0.3)', secondary: '#475569' },
 };
 
-// 공용 존 레이아웃 (부서 공간은 desk 영역에 배치)
-const ZONE_LAYOUT: Record<string, Rect> = {
-  desk: { x: 0.04, y: 0.16, w: 0.58, h: 0.60 },
-  meeting: { x: 0.66, y: 0.08, w: 0.30, h: 0.30 },
+// 공용 존 (항상 같은 위치)
+// - user: 대표실 (CEO 전용) — 좌상단 확대
+// - meeting: 회의실
+// - recovery: 복구 영역
+// 그 외 zone ID는 동적 부서 zone으로 간주되어 desk 영역(중앙 하단)을 분할한다.
+const COMMON_ZONE_LAYOUT: Record<string, Rect> = {
+  user:     { x: 0.04, y: 0.04, w: 0.22, h: 0.14 },
+  meeting:  { x: 0.66, y: 0.08, w: 0.30, h: 0.30 },
   recovery: { x: 0.66, y: 0.42, w: 0.30, h: 0.20 },
-  user: { x: 0.04, y: 0.04, w: 0.20, h: 0.08 },
 };
 
-// 부서 ID → 존 레이아웃 매핑: 없으면 desk 폴백
-function getZoneRect(zone: string): Rect {
-  return ZONE_LAYOUT[zone] || ZONE_LAYOUT.desk;
-}
+// 부서 zone이 배치될 기본 영역 — 공용 존을 제외한 중앙~좌하단
+const DEPT_CANVAS: Rect = { x: 0.04, y: 0.20, w: 0.58, h: 0.72 };
 
-function buildDeskSlots(count: number): Array<{ id: number; col: number; row: number }> {
-  const n = Math.min(count, 8);
-  const slots: Array<{ id: number; col: number; row: number }> = [];
-  const cols = 4;
-  for (let i = 0; i < n; i++) {
-    slots.push({ id: i, col: i % cols, row: Math.floor(i / cols) });
+type ZoneLayout = Record<string, Rect>;
+
+/**
+ * 전체 zone 레이아웃 계산.
+ * 공용 존은 고정 위치, 동적 부서 zone은 DEPT_CANVAS를 개수에 맞춰 균등 분할한다.
+ *
+ * 분할 규칙:
+ *  - 1개: 전체
+ *  - 2개: 좌우 2분할
+ *  - 3개: 상단 1개 + 하단 2개
+ *  - 4개 이상: 2xN 그리드
+ */
+function computeZoneLayout(zoneIds: string[]): ZoneLayout {
+  const layout: ZoneLayout = { ...COMMON_ZONE_LAYOUT };
+  const deptZones = zoneIds.filter((z) => !COMMON_ZONE_LAYOUT[z] && z !== 'desk');
+
+  if (deptZones.length === 0) {
+    layout.desk = DEPT_CANVAS;
+    return layout;
   }
-  return slots;
+
+  const n = deptZones.length;
+  const { x, y, w, h } = DEPT_CANVAS;
+
+  if (n === 1) {
+    layout[deptZones[0]] = { x, y, w, h };
+  } else if (n === 2) {
+    const half = w / 2;
+    const gap = 0.012;
+    layout[deptZones[0]] = { x, y, w: half - gap, h };
+    layout[deptZones[1]] = { x: x + half + gap, y, w: half - gap, h };
+  } else if (n === 3) {
+    const halfH = h / 2;
+    const halfW = w / 2;
+    const gap = 0.012;
+    layout[deptZones[0]] = { x, y, w, h: halfH - gap };
+    layout[deptZones[1]] = { x, y: y + halfH + gap, w: halfW - gap, h: halfH - gap };
+    layout[deptZones[2]] = { x: x + halfW + gap, y: y + halfH + gap, w: halfW - gap, h: halfH - gap };
+  } else {
+    // 2열 그리드
+    const cols = 2;
+    const rows = Math.ceil(n / cols);
+    const cellW = w / cols;
+    const cellH = h / rows;
+    const gap = 0.008;
+    deptZones.forEach((id, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      layout[id] = {
+        x: x + col * cellW + gap,
+        y: y + row * cellH + gap,
+        w: cellW - gap * 2,
+        h: cellH - gap * 2,
+      };
+    });
+  }
+
+  // desk는 폴백용 — 아직 분류 안 된 에이전트가 오면 첫 번째 부서 자리로
+  layout.desk = layout[deptZones[0]] || DEPT_CANVAS;
+  return layout;
 }
 
-function getDeskPos(slotId: number, width: number, height: number, slotCount: number) {
-  const rect = ZONE_LAYOUT.desk;
-  const px = rect.x * width;
-  const py = rect.y * height;
-  const pw = rect.w * width;
-  const ph = rect.h * height;
-  
-  const slots = buildDeskSlots(slotCount);
-  const slot = slots.find(s => s.id === slotId) || slots[0];
-  
-  const gapX = pw / 4.2;
-  const gapY = ph / 2.2;
-  
-  return {
-    x: px + 80 + slot.col * gapX,
-    y: py + 80 + slot.row * gapY,
-  };
+function getZoneRect(zone: string, layout: ZoneLayout): Rect {
+  return layout[zone] || layout.desk || DEPT_CANVAS;
 }
 
-function getZonePoints(zone: string, width: number, height: number, count: number) {
-  const rect = getZoneRect(zone);
+function getZonePoints(zone: string, width: number, height: number, count: number, layout: ZoneLayout) {
+  const rect = getZoneRect(zone, layout);
   const px = rect.x * width;
   const py = rect.y * height;
   const pw = rect.w * width;
@@ -92,14 +133,17 @@ function getZonePoints(zone: string, width: number, height: number, count: numbe
 
   const cols = Math.max(1, Math.ceil(Math.sqrt(count || 1)));
   const rows = Math.max(1, Math.ceil((count || 1) / cols));
+  // 상단 라벨 공간 확보 — y 방향 여백을 두고 시작
+  const topPad = 36; // px, 부서 이름 라벨 영역
   const stepX = pw / (cols + 1);
-  const stepY = ph / (rows + 1);
+  const availH = Math.max(ph - topPad, ph * 0.6);
+  const stepY = availH / (rows + 1);
 
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
       points.push({
         x: px + stepX * (col + 1),
-        y: py + stepY * (row + 1),
+        y: py + topPad + stepY * (row + 1),
       });
     }
   }
@@ -116,9 +160,11 @@ export default function OfficeWorld({
   speechBubbles = [],
   slotNames,
 }: OfficeWorldProps) {
-  const slotCount = slotNames?.length || 8;
-  const DESK_SLOTS = useMemo(() => buildDeskSlots(slotCount), [slotCount]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 동적 zone 레이아웃 — zones prop이 바뀔 때마다 재계산
+  const zoneLayout = useMemo(() => computeZoneLayout(zones.map((z) => z.id)), [zones]);
+  // slotNames는 타입 시그니처 유지용(외부 props 호환). 내부에서는 presence.agent 라벨을 사용.
+  void slotNames;
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
@@ -164,8 +210,9 @@ export default function OfficeWorld({
     }
 
     // 존 영역 외곽 광채 (Soft Glow)
-    Object.keys(ZONE_LAYOUT).forEach(zId => {
-      const r = ZONE_LAYOUT[zId];
+    Object.keys(zoneLayout).forEach(zId => {
+      if (zId === 'desk') return; // desk는 폴백 별칭 — 중복 렌더 방지
+      const r = zoneLayout[zId];
       const zx = r.x * width;
       const zy = r.y * height;
       const zw = r.w * width;
@@ -182,7 +229,7 @@ export default function OfficeWorld({
       ctx.strokeRect(zx, zy, zw, zh);
       ctx.setLineDash([]);
     });
-  }, [dimensions.width, dimensions.height]);
+  }, [dimensions.width, dimensions.height, zoneLayout]);
 
   // 2. 에이전트 그룹화 (좌표 계산용)
   const groupedPresences = useMemo(() => {
@@ -202,7 +249,7 @@ export default function OfficeWorld({
 
       {/* Layer 2: Zone Labels (DOM) — 라벨만 클릭 가능, 영역 전체는 투과 */}
       {zones.map(z => {
-        const r = getZoneRect(z.id);
+        const r = getZoneRect(z.id, zoneLayout);
         return (
         <div
           key={z.id}
@@ -228,51 +275,7 @@ export default function OfficeWorld({
         );
       })}
 
-      {/* Layer 3: Desks (Glassmorphism Nodes) */}
-      <div className="absolute inset-0 pointer-events-none">
-        {DESK_SLOTS.map(desk => {
-          const pos = getDeskPos(desk.id, dimensions.width, dimensions.height, slotCount);
-          const isSelected = selectedDesk === desk.id;
-          const label = slotNames?.[desk.id] || `T${desk.id + 1}`;
-          
-          return (
-            <div
-              key={desk.id}
-              className="absolute transition-all duration-500 pointer-events-auto"
-              style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -50%)' }}
-            >
-              <div 
-                onClick={() => onDeskClick(desk.id)}
-                className={`
-                  relative w-24 h-16 rounded-xl border transition-all duration-300 cursor-pointer
-                  backdrop-blur-md flex flex-col items-center justify-center gap-1
-                  ${isSelected 
-                    ? 'bg-cyan-500/10 border-cyan-400/50 shadow-[0_0_20px_rgba(34,211,238,0.25)] scale-110' 
-                    : 'bg-white/[0.03] border-white/[0.08] hover:bg-white/[0.06] hover:border-white/20'
-                  }
-                `}
-              >
-                {/* Desk Hologram Details */}
-                <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
-                  <div className={`absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
-                  <div className="absolute -inset-4 bg-cyan-500/5 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-                
-                <div className={`text-[10px] font-bold tracking-widest ${isSelected ? 'text-cyan-300' : 'text-white/40'}`}>
-                  {label}
-                </div>
-                <div className="flex gap-1">
-                  <div className={`h-1 w-1 rounded-full ${isSelected ? 'bg-cyan-400 animate-pulse' : 'bg-white/10'}`} />
-                  <div className={`h-1 w-1 rounded-full ${isSelected ? 'bg-cyan-400/60 animate-pulse delay-75' : 'bg-white/10'}`} />
-                  <div className={`h-1 w-1 rounded-full ${isSelected ? 'bg-cyan-400/30 animate-pulse delay-150' : 'bg-white/10'}`} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Layer 4: Agents (Glowing Orbs) */}
+      {/* Layer 3: Agents (Glowing Orbs) — 부서 zone 내부 좌표로 배치 */}
       <div className="absolute inset-0 pointer-events-none">
         <AnimatePresence>
           {presences.map(presence => {
@@ -280,17 +283,11 @@ export default function OfficeWorld({
             const theme = AGENT_THEMES[presence.colorKey] || AGENT_THEMES.unknown;
             const busy = presence.status === 'running' || presence.status === 'started';
             
-            // 좌표 계산: 부서 zone → 데스크 위치, 공용 zone → zone 위치
-            let targetPos: { x: number; y: number };
-            const isInDeskArea = !ZONE_LAYOUT[presence.zone] || presence.zone === 'desk';
-            if (isInDeskArea && presence.slotId >= 0) {
-              targetPos = getDeskPos(presence.slotId, dimensions.width, dimensions.height, slotCount);
-            } else {
-              const members = groupedPresences.get(presence.zone) || [];
-              const points = getZonePoints(presence.zone, dimensions.width, dimensions.height, Math.max(members.length, 1));
-              const idx = members.findIndex(m => m.terminalId === presence.terminalId);
-              targetPos = points[Math.max(0, idx)] || { x: dimensions.width * 0.14, y: dimensions.height * 0.08 };
-            }
+            // 좌표 계산: zone(부서 또는 공용) 내부에 그리드 배치
+            const members = groupedPresences.get(presence.zone) || [];
+            const points = getZonePoints(presence.zone, dimensions.width, dimensions.height, Math.max(members.length, 1), zoneLayout);
+            const idx = members.findIndex(m => m.terminalId === presence.terminalId);
+            const targetPos = points[Math.max(0, idx)] || { x: dimensions.width * 0.14, y: dimensions.height * 0.08 };
 
             return (
               <motion.div
@@ -298,7 +295,8 @@ export default function OfficeWorld({
                 initial={false}
                 animate={{ x: targetPos.x, y: targetPos.y }}
                 transition={{ type: 'spring', damping: 25, stiffness: 120 }}
-                className="absolute"
+                className="absolute pointer-events-auto cursor-pointer"
+                onClick={() => onDeskClick(presence.slotId)}
                 style={{ transform: 'translate(-50%, -50%)', zIndex: isSelected ? 50 : 10 }}
               >
                 <div className="relative flex flex-col items-center">
@@ -357,7 +355,13 @@ export default function OfficeWorld({
       {/* Layer 5: Speech Bubbles (Floating Glass) */}
       <AnimatePresence>
         {speechBubbles.map((bubble, idx) => {
-          const point = getDeskPos(bubble.deskId, dimensions.width, dimensions.height, slotCount);
+          // deskId → slotId에 해당하는 presence의 위치를 찾는다
+          const bubblePresence = presences.find((p) => p.slotId === bubble.deskId);
+          if (!bubblePresence) return null;
+          const members = groupedPresences.get(bubblePresence.zone) || [];
+          const pts = getZonePoints(bubblePresence.zone, dimensions.width, dimensions.height, Math.max(members.length, 1), zoneLayout);
+          const mIdx = members.findIndex((m) => m.terminalId === bubblePresence.terminalId);
+          const point = pts[Math.max(0, mIdx)] || { x: dimensions.width * 0.14, y: dimensions.height * 0.3 };
           return (
             <motion.div
               key={`${bubble.deskId}-${bubble.createdAt}-${idx}`}

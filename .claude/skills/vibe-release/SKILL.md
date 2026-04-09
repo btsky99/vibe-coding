@@ -13,6 +13,10 @@ DESCRIPTION: Vibe Coding EXE 릴리즈 스킬.
   /vibe-release 명령으로 호출. 버전 증가 → 커밋 → 푸시하면 CI가 EXE 빌드.
 
 REVISION HISTORY:
+- 2026-04-09 Claude: 로컬 검증 명령을 `vite build` → `npm run build`로 교체.
+                     vite만 돌리면 `tsc -b` 타입체크가 스킵되어 타입 에러가 CI에서
+                     처음 노출되는 문제가 반복됨 (v3.7.179 릴리즈 실패 원인).
+                     Step 0(푸시 전 필수 검증) 단계 신설 — 타입체크 + Python 구문검사.
 - 2026-03-28 Claude: Step 4에 CI 빌드 완료 대기 + 검증 단계 추가. EXE 빌드 주의사항 섹션 신설
 - 2026-03-27 Claude: EXE 빌드 방식으로 전면 재작성 — pip 전용 내용 제거
 - 2026-03-26 Claude: pip 전용으로 재작성 (실패 — v3.7.146에서 EXE로 복원)
@@ -50,7 +54,26 @@ REVISION HISTORY:
 
 ---
 
-## 실행 절차 (4단계)
+## 실행 절차 (5단계)
+
+### Step 0: 로컬 사전 검증 (필수 — 실패 시 중단)
+
+푸시 후 CI에서 터지는 사고를 막기 위해 **푸시 전에 로컬에서 동일 명령을 돌려봅니다.**
+
+```bash
+# 1. Python 구문 검사
+python -c "import py_compile; py_compile.compile('.ai_monitor/server.py', doraise=True)"
+python -c "import py_compile; py_compile.compile('.ai_monitor/dashboard_window.py', doraise=True)"
+
+# 2. ruff 린트 (CI와 동일한 규칙)
+ruff check .ai_monitor --select E9,F821,F823
+
+# 3. 프론트엔드 풀 빌드 (tsc 타입체크 + vite 번들링)
+#    ⚠️ `vite build`만 돌리면 TypeScript 타입체크가 스킵됨 → 반드시 `npm run build`
+cd .ai_monitor/vibe-view && npm run build
+```
+
+**어느 하나라도 실패하면 여기서 중단하고 수정. Step 1 진행 금지.**
 
 ### Step 1: 버전 자동 증가
 

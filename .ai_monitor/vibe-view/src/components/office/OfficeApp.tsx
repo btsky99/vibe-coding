@@ -58,7 +58,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     memory: vibe.memory,
     logs: vibe.logs,
     hiveHealth: vibe.hiveHealth,
-    profileSlots: wp.activeProfile.slots.map(s => ({ name: s.name, cli: s.cli, model: s.model })),
+    profileSlots: wp.activeProfile.slots.map(s => ({ name: s.name, cli: s.cli, model: s.model, role: s.role })),
     departments: wp.activeProfile.departments.map(d => ({ id: d.id, name: d.name, color: d.color, agentCount: d.agents.length })),
   });
   const [showAddSlot, setShowAddSlot] = useState(false);
@@ -132,7 +132,11 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     () => office.presences.find((presence) => presence.slotId === selectedDesk) ?? null,
     [office.presences, selectedDesk],
   );
+  // 'user' zone(대표실)은 사이드바 zone 요약에서 제외 — 대표실은 월드에 별도로 표시됨
   const zoneSummary = office.zones.filter((zone) => zone.id !== 'user');
+  // 'desk'는 폴백 별칭이라 사이드바에서 숨김
+  const visibleZones = zoneSummary.filter((zone) => zone.id !== 'desk');
+  void visibleZones;
   const projectName = vibe.currentPath.split(/[/\\]/).filter(Boolean).pop();
   // selectedZoneState/selectedZoneMembers 제거 — 채팅 모드에서 미사용
 
@@ -236,21 +240,10 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
         {/* ── 왼쪽: 부서별 에이전트 사이드바 ── */}
         <aside className="flex w-[190px] shrink-0 flex-col border-r border-white/[0.04] bg-[#080d15]">
-          {/* 대표 (사용자) */}
-          <div className="border-b border-white/[0.04] px-3 py-2.5">
-            <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400/30 to-orange-500/20 border-2 border-amber-400/40 flex items-center justify-center">
-                <span className="text-[10px] font-black text-amber-300">CEO</span>
-              </div>
-              <div>
-                <div className="text-[10px] font-bold text-amber-200/90">대표</div>
-                <div className="text-[8px] text-white/25">전체 부서 총괄</div>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center justify-between px-3 py-2">
-            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-white/25">조직</div>
-            <span className="text-[8px] text-white/15">{activeSlots.length}명</span>
+          {/* 조직 헤더 — 하드코딩된 "대표" 아이콘 제거 (CEO는 월드 대표실에 렌더링됨) */}
+          <div className="flex items-center justify-between border-b border-white/[0.04] px-3 py-3">
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">조직도</div>
+            <span className="text-[8px] text-white/25">{activeSlots.length}명</span>
           </div>
           <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-2">
             {wp.activeProfile.departments.map(dept => {
@@ -542,8 +535,11 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                   onClick={() => {
                     wp.addSlot(wp.activeProfileId, {
                       name: newSlotName || `터미널 ${slotCount + 1}`,
+                      role: 'fullstack',
                       cli: newSlotCli,
                       model: newSlotModel,
+                      skills: ['code'],
+                      avatar: 'layers',
                       yolo: newSlotYolo,
                     });
                     setNewSlotName('');

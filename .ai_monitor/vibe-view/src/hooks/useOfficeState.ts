@@ -49,6 +49,7 @@ export interface ProfileSlotInfo {
   name: string;
   cli: string;
   model: string;
+  role?: string; // CEO 여부 판단용 — 'ceo'면 대표실(user zone)로 배치
 }
 
 export interface DepartmentInfo {
@@ -127,6 +128,7 @@ export function useOfficeState({
 
     if (profileSlots && profileSlots.length > 0 && deptInfos && deptInfos.length > 0) {
       // 오피스 모드: 부서 기반 — 클래식과 완전 분리
+      // role === 'ceo'인 에이전트는 소속 부서가 아닌 대표실(user zone)로 강제 배치.
       presences = [];
       let flatIdx = 0;
       for (const dept of deptInfos) {
@@ -134,7 +136,9 @@ export function useOfficeState({
           const slot = profileSlots[flatIdx];
           if (!slot) { flatIdx++; continue; }
           const agent = slot.cli.toLowerCase();
-          const zone = deriveZone(null, hiveHealth, dept.id);
+          const isCeo = (slot.role || '').toLowerCase() === 'ceo';
+          // CEO는 대표실, 그 외는 소속 부서 zone
+          const zone = isCeo ? 'user' : deriveZone(null, hiveHealth, dept.id);
 
           presences.push({
             terminalId: `office-${flatIdx}`,
@@ -144,9 +148,9 @@ export function useOfficeState({
             pipelineStage: 'idle',
             liveTask: '',
             zone,
-            anchorId: `${dept.id}-${i}`,
-            badges: [],
-            colorKey: ['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown',
+            anchorId: isCeo ? 'user' : `${dept.id}-${i}`,
+            badges: isCeo ? ['ceo'] : [],
+            colorKey: isCeo ? 'user' : (['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown'),
           });
           flatIdx++;
         }

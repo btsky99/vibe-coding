@@ -134,6 +134,7 @@ import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
+import api.office_api as office_api
 import string
 import socket
 from collections import deque
@@ -1077,6 +1078,12 @@ ensure_legacy_store(DATA_DIR)
 # 개발 모드에서는 아래 _try_ensure_schema_dev()에서 처리.
 # PG가 이미 떠있으면 바로 스키마 초기화
 ensure_schema(DATA_DIR)
+
+# 오피스 프로필 초기화 — 기본 프로필 시드 + LISTEN/NOTIFY 리스너 기동
+try:
+    office_api.init_office(DATA_DIR)
+except Exception as _office_init_err:
+    print(f"[office_api] 초기화 실패: {_office_init_err}")
 
 # [2026-03-22] 지식그래프 관련 _backfill_thought_parent_ids() 제거
 
@@ -2799,6 +2806,17 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
+        # ── [모듈 위임] office_api — /api/office/* ──────────────────────
+        # 프로필 중앙화 + 클래식/오피스 워커 네임스페이스 분리
+        elif parsed_path.path.startswith('/api/office/'):
+            _params = parse_qs(parsed_path.query)
+            if not office_api.handle_get(self, parsed_path.path, _params, DATA_DIR=DATA_DIR):
+                self.send_response(404)
+                self.send_header('Content-Type', 'application/json;charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+                self.end_headers()
+                self.wfile.write(b'{"error":"not found"}')
+
         # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
         elif parsed_path.path.startswith('/api/dispatcher/'):
             _params = parse_qs(parsed_path.query)
@@ -3307,9 +3325,35 @@ class SSEHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.end_headers()
+
+    def do_PUT(self):
+        """PUT 메소드 — 오피스 프로필 전체 대체 + 활성 프로필 변경."""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        if path.startswith('/api/office/'):
+            if office_api.handle_put(self, path, DATA_DIR=DATA_DIR):
+                return
+        self.send_response(404)
+        self.send_header('Content-Type', 'application/json;charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+        self.end_headers()
+        self.wfile.write(b'{"error":"not found"}')
+
+    def do_DELETE(self):
+        """DELETE 메소드 — 오피스 프로필 삭제."""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        if path.startswith('/api/office/'):
+            if office_api.handle_delete(self, path, DATA_DIR=DATA_DIR):
+                return
+        self.send_response(404)
+        self.send_header('Content-Type', 'application/json;charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+        self.end_headers()
+        self.wfile.write(b'{"error":"not found"}')
 
     def do_POST(self):
         parsed_path = urlparse(self.path)
@@ -3321,6 +3365,17 @@ class SSEHandler(BaseHTTPRequestHandler):
             return
         elif path == '/api/telegram/test':
             self._handle_telegram_test()
+            return
+
+        # ── [모듈 위임] office_api POST — /api/office/* ─────────────────
+        if path.startswith('/api/office/'):
+            if office_api.handle_post(self, path, DATA_DIR=DATA_DIR):
+                return
+            self.send_response(404)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            self.wfile.write(b'{"error":"not found"}')
             return
 
         # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
