@@ -5862,8 +5862,23 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
 
         threading.Thread(target=force_win32_icon, daemon=True).start()
 
+        # ── WebView2 영구 저장소 경로 ──
+        # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
+        # %APPDATA%/vibe-coding/<dev|exe>/<프로젝트명>/webview_data 에 영구 저장
+        # 개발/EXE 분리: 스키마 차이로 인한 데이터 손상 방지
+        _appdata = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')
+        _mode = 'exe' if getattr(sys, 'frozen', False) else 'dev'
+        _webview_storage = Path(_appdata) / 'vibe-coding' / _mode / PROJECT_ROOT.name / 'webview_data'
+        _webview_storage.mkdir(parents=True, exist_ok=True)
+        print(f"[*] WebView2 storage: {_webview_storage}")
+
         # webview.start() 블로킹 — _init_and_load_app이 별도 스레드에서 전체 초기화 수행
-        webview.start(_init_and_load_app, args=[main_window])
+        webview.start(
+            _init_and_load_app,
+            args=[main_window],
+            private_mode=False,
+            storage_path=str(_webview_storage),
+        )
 
         # ── 창 닫힘 → 정리 ──
         print("[*] GUI 창이 닫혔습니다. 모든 자식 프로세스 정리 중...")
