@@ -5,6 +5,9 @@
  *              PTY 서버의 /api/pty/models에서 동적으로 가져오며,
  *              실패 시 하드코딩 폴백 목록을 반환한다.
  * REVISION HISTORY:
+ * - 2026-04-09 Claude: Gemini/Codex 폴백 모델을 2026-04 기준 최신으로 교체.
+ *                     Gemini: 2.5 계열 → 3.1 계열 (3.1 Pro / Flash / Flash-Lite).
+ *                     Codex: o3/o4-mini/gpt-4.1 → gpt-5.3-codex / gpt-5.4-mini.
  * - 2026-04-08 Claude: 초기 생성 — 오피스 워크스페이스 프로필 모델 선택용
  * ------------------------------------------------------------------------
  */
@@ -27,16 +30,17 @@ const FALLBACK_MODELS: CliModelMap = {
     { id: 'claude-haiku-4-5', label: 'Haiku 4.5 (경량)' },
   ],
   gemini: [
-    { id: 'gemini-2.5-pro', label: '2.5 Pro (최강)' },
-    { id: 'gemini-2.5-flash', label: '2.5 Flash (빠름)' },
-    { id: 'gemini-2.0-flash', label: '2.0 Flash (저지연)' },
+    { id: 'gemini-3.1-pro', label: '3.1 Pro (최강)' },
+    { id: 'gemini-3.1-flash', label: '3.1 Flash (빠름)' },
+    { id: 'gemini-3.1-flash-lite', label: '3.1 Flash-Lite (저지연)' },
+    { id: 'gemini-2.5-pro', label: '2.5 Pro (레거시)' },
   ],
   codex: [
-    { id: 'o4-mini', label: 'o4-mini (기본)' },
-    { id: 'o3', label: 'o3 (고급 추론)' },
-    { id: 'gpt-4.1', label: 'GPT-4.1 (플래그십)' },
-    { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (빠름)' },
-    { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (최경량)' },
+    { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex (최강)' },
+    { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3-Codex Spark (실시간)' },
+    { id: 'gpt-5.4', label: 'GPT-5.4 (범용)' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini (빠름)' },
+    { id: 'gpt-5.2-codex', label: 'GPT-5.2-Codex (이전 세대)' },
   ],
 };
 

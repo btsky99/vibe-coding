@@ -917,17 +917,19 @@ app.get('/api/pty/models', (req, res) => {
       { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (균형)' },
       { id: 'claude-haiku-4-5', label: 'Haiku 4.5 (경량)' },
     ],
+    // 2026-04 기준 최신 모델. useCliModels.ts 폴백과 반드시 동기화 유지.
     gemini: [
-      { id: 'gemini-2.5-pro', label: '2.5 Pro (최강)' },
-      { id: 'gemini-2.5-flash', label: '2.5 Flash (빠름)' },
-      { id: 'gemini-2.0-flash', label: '2.0 Flash (저지연)' },
+      { id: 'gemini-3.1-pro', label: '3.1 Pro (최강)' },
+      { id: 'gemini-3.1-flash', label: '3.1 Flash (빠름)' },
+      { id: 'gemini-3.1-flash-lite', label: '3.1 Flash-Lite (저지연)' },
+      { id: 'gemini-2.5-pro', label: '2.5 Pro (레거시)' },
     ],
     codex: [
-      { id: 'o4-mini', label: 'o4-mini (기본)' },
-      { id: 'o3', label: 'o3 (고급 추론)' },
-      { id: 'gpt-4.1', label: 'GPT-4.1 (플래그십)' },
-      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (빠름)' },
-      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (최경량)' },
+      { id: 'gpt-5.3-codex', label: 'GPT-5.3-Codex (최강)' },
+      { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3-Codex Spark (실시간)' },
+      { id: 'gpt-5.4', label: 'GPT-5.4 (범용)' },
+      { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini (빠름)' },
+      { id: 'gpt-5.2-codex', label: 'GPT-5.2-Codex (이전 세대)' },
     ],
   });
 });

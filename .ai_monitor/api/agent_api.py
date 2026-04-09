@@ -895,7 +895,7 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
     - claude: claude --verbose --output-format stream-json [--resume SID] [--dangerously-skip-permissions] -p "메시지"
       → -p는 프롬프트 텍스트를 인자로 받으므로 반드시 -p message 순서로 배치.
         stdin=DEVNULL 사용 (stdin 파이프 불필요).
-    - gemini: gemini -m gemini-2.5-pro [--resume SID] [-y]
+    - gemini: gemini -m gemini-3.1-pro [--resume SID] [-y]
     - codex:  codex --full-auto [--resume SID]
 
     Args:
@@ -918,7 +918,7 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
         if message:
             cmd += ['-p', message]
     elif cli == 'gemini':
-        cmd = ['gemini', '-m', 'gemini-2.5-pro']
+        cmd = ['gemini', '-m', 'gemini-3.1-pro']
         if session_id:
             cmd += ['--resume', session_id]
         if yolo:

@@ -1418,11 +1418,16 @@ def insert_pg_log(agent: str, task: str = '', status: str = 'success',
 # 메인 창(pywebview)과 오피스 창(QWebEngineView)은 서로 다른 브라우저 엔진이라
 # localStorage가 공유되지 않는다. 프로필은 서버 DB에서만 관리한다.
 
+# 기본 프로필 시드 스키마 버전 — 이 값을 올리면 재시드 시 기본 프로필의 모델/역할이
+# 자동 업그레이드된다. 사용자가 생성한 커스텀 프로필은 절대 건드리지 않는다.
+_OFFICE_PROFILE_SCHEMA_VERSION = 2  # v2: Gemini 3.1 / GPT-5.3-Codex 최신 모델 반영
+
 # 기본 프로필 씨드 — 경영진(대표) + 코딩 부서. useWorkspaceProfiles.ts의 DEFAULT_PROFILE과 동일
 _DEFAULT_OFFICE_PROFILE = {
     "id": "default",
     "name": "코딩 회사",
     "isDefault": True,
+    "schemaVersion": _OFFICE_PROFILE_SCHEMA_VERSION,
     "createdAt": "2026-04-08T00:00:00.000Z",
     "departments": [
         {
@@ -1445,13 +1450,13 @@ _DEFAULT_OFFICE_PROFILE = {
             "agents": [
                 {"id": "a1", "name": "기획자",     "role": "planner",   "cli": "claude", "model": "claude-opus-4-6",   "skills": ["brainstorm", "write-plan"], "avatar": "clipboard-list", "yolo": True, "order": 0},
                 {"id": "a2", "name": "아키텍트",   "role": "architect", "cli": "claude", "model": "claude-opus-4-6",   "skills": ["brainstorm"],               "avatar": "blocks",         "yolo": True, "order": 1},
-                {"id": "a3", "name": "프론트엔드", "role": "frontend",  "cli": "gemini", "model": "gemini-2.5-pro",    "skills": ["code"],                     "avatar": "monitor",        "yolo": True, "order": 2},
-                {"id": "a4", "name": "백엔드",     "role": "backend",   "cli": "claude", "model": "claude-sonnet-4-6", "skills": ["code"],                     "avatar": "server",         "yolo": True, "order": 3},
-                {"id": "a5", "name": "풀스택",     "role": "fullstack", "cli": "gemini", "model": "gemini-2.5-flash",  "skills": ["code"],                     "avatar": "layers",         "yolo": True, "order": 4},
-                {"id": "a6", "name": "코드 리뷰어","role": "reviewer",  "cli": "claude", "model": "claude-opus-4-6",   "skills": ["code-review"],              "avatar": "search-check",   "yolo": True, "order": 5},
-                {"id": "a7", "name": "QA 테스터",  "role": "qa",        "cli": "codex",  "model": "o4-mini",           "skills": ["tdd"],                      "avatar": "test-tubes",     "yolo": True, "order": 6},
-                {"id": "a8", "name": "보안 담당",  "role": "security",  "cli": "claude", "model": "claude-opus-4-6",   "skills": ["security"],                 "avatar": "shield",         "yolo": True, "order": 7},
-                {"id": "a9", "name": "DevOps",     "role": "devops",    "cli": "codex",  "model": "gpt-4.1",           "skills": ["release"],                  "avatar": "wrench",         "yolo": True, "order": 8},
+                {"id": "a3", "name": "프론트엔드", "role": "frontend",  "cli": "gemini", "model": "gemini-3.1-pro",       "skills": ["code"],                     "avatar": "monitor",        "yolo": True, "order": 2},
+                {"id": "a4", "name": "백엔드",     "role": "backend",   "cli": "claude", "model": "claude-sonnet-4-6",    "skills": ["code"],                     "avatar": "server",         "yolo": True, "order": 3},
+                {"id": "a5", "name": "풀스택",     "role": "fullstack", "cli": "gemini", "model": "gemini-3.1-flash",     "skills": ["code"],                     "avatar": "layers",         "yolo": True, "order": 4},
+                {"id": "a6", "name": "코드 리뷰어","role": "reviewer",  "cli": "claude", "model": "claude-opus-4-6",      "skills": ["code-review"],              "avatar": "search-check",   "yolo": True, "order": 5},
+                {"id": "a7", "name": "QA 테스터",  "role": "qa",        "cli": "codex",  "model": "gpt-5.3-codex-spark",  "skills": ["tdd"],                      "avatar": "test-tubes",     "yolo": True, "order": 6},
+                {"id": "a8", "name": "보안 담당",  "role": "security",  "cli": "claude", "model": "claude-opus-4-6",      "skills": ["security"],                 "avatar": "shield",         "yolo": True, "order": 7},
+                {"id": "a9", "name": "DevOps",     "role": "devops",    "cli": "codex",  "model": "gpt-5.3-codex",        "skills": ["release"],                  "avatar": "wrench",         "yolo": True, "order": 8},
             ],
         },
     ],
@@ -1459,19 +1464,42 @@ _DEFAULT_OFFICE_PROFILE = {
 
 
 def seed_default_office_profile() -> bool:
-    """최초 실행 시 기본 프로필을 시드한다. 이미 있으면 아무것도 하지 않는다."""
+    """기본 프로필을 시드 또는 업그레이드한다.
+
+    - 최초 실행: 'default' 프로필을 그대로 INSERT.
+    - 재실행: 'default' 프로필의 schemaVersion이 현재 버전보다 낮으면 data를 덮어쓴다.
+              사용자가 생성한 다른 프로필은 절대 건드리지 않는다.
+              'default' 프로필을 사용자가 직접 수정했더라도, 기본 시드는 진실의 원천이
+              바뀐 경우(예: 구버전 모델 → 최신 모델) 자동 최신화되는 편이 안전하다.
+    """
     import json as _json
-    existing = query_rows("SELECT id FROM office_profiles LIMIT 1;")
-    if existing:
-        return True
     data_json = _json.dumps(_DEFAULT_OFFICE_PROFILE, ensure_ascii=False)
-    ok = execute(
-        f"INSERT INTO office_profiles (id, name, data, is_default) "
-        f"VALUES ('default', {_sql_text(_DEFAULT_OFFICE_PROFILE['name'])}, "
-        f"{_sql_text(data_json)}::jsonb, TRUE) "
-        f"ON CONFLICT (id) DO NOTHING;"
+
+    # 현재 저장된 'default' 프로필의 schemaVersion 확인
+    rows = query_rows(
+        "SELECT (data->>'schemaVersion')::int AS v FROM office_profiles WHERE id = 'default';"
     )
-    return ok
+    if not rows:
+        # 최초 시드
+        return execute(
+            f"INSERT INTO office_profiles (id, name, data, is_default) "
+            f"VALUES ('default', {_sql_text(_DEFAULT_OFFICE_PROFILE['name'])}, "
+            f"{_sql_text(data_json)}::jsonb, TRUE) "
+            f"ON CONFLICT (id) DO NOTHING;"
+        )
+
+    current_version = rows[0].get('v') or 0
+    if current_version < _OFFICE_PROFILE_SCHEMA_VERSION:
+        # 기본 프로필 데이터 업그레이드 (모델명 등 최신화)
+        print(f"[pg_store] 기본 오피스 프로필 업그레이드: v{current_version} → v{_OFFICE_PROFILE_SCHEMA_VERSION}")
+        return execute(
+            f"UPDATE office_profiles SET "
+            f"data = {_sql_text(data_json)}::jsonb, "
+            f"name = {_sql_text(_DEFAULT_OFFICE_PROFILE['name'])}, "
+            f"updated_at = NOW() "
+            f"WHERE id = 'default';"
+        )
+    return True
 
 
 def list_office_profiles() -> list[dict]:

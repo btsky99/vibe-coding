@@ -5,9 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    // 빌드 출력을 서버 서빙 디렉토리(.ai_monitor/dist/)로 직접 내보냄
-    outDir: '../dist',
-    emptyOutDir: true,
+    // outDir 기본값(./dist) 유지 → .ai_monitor/vibe-view/dist/ 로 출력.
+    // spec/workflow/pyproject/build_verify가 전부 이 경로를 참조하므로 기본값 유지 필수.
+    // [2026-04-09] outDir: '../dist' 로 변경했다가 CI 파이프라인과 불일치로 롤백.
     // [v3.7.62] 1MB 단일 번들 → 청크 분할로 초기 로드 속도 개선
     // Monaco Editor(~800kB)를 별도 청크로 분리해 첫 화면 렌더링을 앞당김
     rollupOptions: {

@@ -1,7 +1,8 @@
 .zettel-vault/
 node_modules/
 dist/
-!.ai_monitor/dist/
+!.ai_monitor/vibe-view/dist/
+!.ai_monitor/vibe-view/dist/**
 build/
 .ai_monitor/data/
 __pycache__/

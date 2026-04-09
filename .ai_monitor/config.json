@@ -9,11 +9,11 @@
   },
   "agent_mode": "normal",
   "gemini_models": {
-    "main": "gemini-2.0-flash",
-    "background": "gemini-1.5-flash"
+    "main": "gemini-3.1-pro",
+    "background": "gemini-3.1-flash-lite"
   },
   "codex_models": {
-    "main": "o3-mini",
-    "background": "o4-mini"
+    "main": "gpt-5.3-codex",
+    "background": "gpt-5.4-mini"
   }
 }

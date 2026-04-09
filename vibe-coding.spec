@@ -55,7 +55,7 @@ a = Analysis(
         (str(_winpty_dir / 'conpty.dll'), 'winpty'),
     ],
     datas=[
-        # 프론트엔드 빌드 결과물 (React/Vite)
+        # 프론트엔드 빌드 결과물 (React/Vite) — vite 기본 outDir = vibe-view/dist
         ('.ai_monitor/vibe-view/dist', 'vibe-view/dist'),
         # 서버 보조 스크립트 (워치독, 브릿지, 메모리, 오케스트레이터 등)
         # → 배포 버전 SCRIPTS_DIR = sys._MEIPASS/scripts

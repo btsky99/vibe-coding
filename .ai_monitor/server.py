@@ -1042,7 +1042,7 @@ except ImportError as e:
 init_db()
 
 # 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
-STATIC_DIR = (BASE_DIR / "dist").resolve()
+STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 LOCKS_FILE = DATA_DIR / "locks.json"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -1914,13 +1914,13 @@ def _parse_gemini_session(path: Path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 정적 파일 경로
-STATIC_DIR = (BASE_DIR / "dist").resolve()
+STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
 
 print(f"[*] Static files directory: {STATIC_DIR}")
 if not STATIC_DIR.exists():
     print(f"[!] WARNING: Static directory NOT FOUND at {STATIC_DIR}")
     # 실행 중인 파일 주변에서 dist 폴더를 한 번 더 찾아봄 (휴리스틱)
-    alt_dist = (Path(sys.executable).parent / "dist").resolve()
+    alt_dist = (Path(sys.executable).parent / "vibe-view" / "dist").resolve()
     if alt_dist.exists():
         STATIC_DIR = alt_dist
         print(f"[*] Found alternative static directory at {alt_dist}")
