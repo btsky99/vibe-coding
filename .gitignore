@@ -3,6 +3,13 @@ node_modules/
 dist/
 !.ai_monitor/vibe-view/dist/
 !.ai_monitor/vibe-view/dist/**
+
+# LimeZu Modern Interiors Free — 비상업 라이선스, 퍼블릭 리포에 포함 금지
+.ai_monitor/vibe-view/public/assets/limezu/
+.ai_monitor/vibe-view/dist/assets/limezu/
+# 원본 압축해제 폴더들 — 로컬에만 유지
+/Modern_Interiors_Free_v2.2/
+/Pixel Art Top Down - Basic v1.2.3/
 build/
 .ai_monitor/data/
 __pycache__/

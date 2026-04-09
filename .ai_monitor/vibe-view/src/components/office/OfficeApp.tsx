@@ -25,7 +25,7 @@ import { useVibeData } from '../../hooks/useVibeData';
 import { type OfficeZone, useOfficeState } from '../../hooks/useOfficeState';
 import { type AgentCli, useWorkspaceProfiles, MAX_SLOTS } from '../../hooks/useWorkspaceProfiles';
 import { useCliModels, getDefaultModel } from '../../hooks/useCliModels';
-import OfficeWorld from './OfficeWorld';
+import OfficeCanvas from './OfficeCanvas';
 import OfficeChatPanel from './OfficeChatPanel';
 
 // HUD 탭 제거됨 — 오피스 우측은 채팅 전용
@@ -340,7 +340,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
         {/* ── 가운데: 오피스 월드 ── */}
         <div className="relative min-w-0 flex-1 overflow-hidden">
-          <OfficeWorld
+          <OfficeCanvas
             presences={office.presences}
             zones={office.zones}
             events={office.events}
@@ -349,6 +349,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             onZoneClick={handleZoneClick}
             speechBubbles={speechBubbles}
             slotNames={activeSlots.map(s => s.name)}
+            slotRoles={activeSlots.map(s => s.role || 'unknown')}
           />
 
           {/* 이벤트 레일 (월드 위 오버레이) */}
