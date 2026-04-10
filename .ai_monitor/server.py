@@ -4380,16 +4380,18 @@ class SSEHandler(BaseHTTPRequestHandler):
                 if _to not in ('ceo', 'all', 'broadcast', ''):
                     try:
                         import urllib.request as _ureq
+                        # /api/pty/sessions 는 {"T1": {"agent":"claude","running":true,...}, ...} 형식 반환
                         _sessions_url = f'http://127.0.0.1:{WS_PORT}/api/pty/sessions'
                         with _ureq.urlopen(_sessions_url, timeout=2) as _r:
                             _sessions = json.loads(_r.read().decode())
-                        # to와 매칭되는 세션 찾기 (cli 또는 terminalId 기준)
-                        for _sess in (_sessions if isinstance(_sessions, list) else []):
-                            _cli  = str(_sess.get('cli', '')).lower()
-                            _tid  = str(_sess.get('id',  _sess.get('terminalId', ''))).lower()
-                            _name = str(_sess.get('name', '')).lower()
-                            if _to in (_cli, _tid, _name) or _to in _cli:
-                                _write_url = f'http://127.0.0.1:{WS_PORT}/api/pty/write/{_sess.get("id", _sess.get("terminalId", ""))}'
+                        # to와 매칭되는 세션 찾기 (agent 필드 기준)
+                        for _slot_id, _sess in (_sessions.items() if isinstance(_sessions, dict) else []):
+                            _agent = str(_sess.get('agent', '')).lower()
+                            _slot_name = str(_sess.get('slot_name', '')).lower()
+                            if not _sess.get('running', False):
+                                continue
+                            if _to in _agent or _agent.startswith(_to) or _to in _slot_name:
+                                _write_url = f'http://127.0.0.1:{WS_PORT}/api/pty/write/{_slot_id}'
                                 _payload = json.dumps({'text': content_to_send}).encode()
                                 _req = _ureq.Request(
                                     _write_url, data=_payload,
@@ -4397,7 +4399,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                                     method='POST',
                                 )
                                 _ureq.urlopen(_req, timeout=2)
-                                print(f'[msg→PTY] {msg["from"]} → {_sess.get("id")} : {content_to_send[:40]}')
+                                print(f'[msg→PTY] {msg["from"]} → {_slot_id}({_agent}) : {content_to_send[:40]}')
                                 break
                     except Exception as _e:
                         print(f'[msg inject error] {_e}')
