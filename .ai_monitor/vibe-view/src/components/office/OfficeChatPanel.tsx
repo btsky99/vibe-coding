@@ -28,6 +28,7 @@ interface OfficeChatPanelProps {
   selectedSlotName: string;
   allSlotNames: string[];
   allSlotClis: string[];
+  ceoCli?: string; // CEO 슬롯의 실제 CLI (예: 'claude') — CEO 메시지 필터링용
   onSendMessage?: (text: string, target: string) => void;
 }
 
@@ -43,6 +44,7 @@ export default function OfficeChatPanel({
   selectedSlotName,
   allSlotNames,
   allSlotClis,
+  ceoCli,
   onSendMessage,
 }: OfficeChatPanelProps) {
   const [mode, setMode] = useState<ChatMode>('direct');
@@ -68,9 +70,12 @@ export default function OfficeChatPanel({
       const agent = selectedAgent.toLowerCase();
       const from = (m.from || '').toLowerCase();
       const to = (m.to || '').toLowerCase();
-      /* CEO 채팅: from/to가 'ceo' 또는 'user'/'operator' 포함 */
+      /* CEO 채팅: from/to가 'ceo' 또는 CEO의 실제 CLI(예: 'claude') 포함 */
       if (agent === 'ceo') {
-        return from === 'ceo' || to === 'ceo' || from === 'user' || to === 'user';
+        const cli = ceoCli?.toLowerCase() || '';
+        return from === 'ceo' || to === 'ceo'
+          || (cli && (from === cli || to === cli))
+          || from === 'user' || to === 'user';
       }
       return from.includes(agent) || to.includes(agent);
     }

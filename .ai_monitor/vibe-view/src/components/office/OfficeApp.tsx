@@ -400,11 +400,16 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
             allSlotNames={activeSlots.map(s => s.name)}
             allSlotClis={activeSlots.map(s => s.cli)}
+            ceoCli={activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli}
             onSendMessage={(text, target) => {
+              // CEO(role=ceo)는 PTY가 없으므로 실제 CLI로 변환하여 inject
+              const sendTo = target === 'ceo'
+                ? (activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli || 'claude')
+                : target;
               fetch('/api/message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ from: 'user', to: target, type: 'office_chat', content: text }),
+                body: JSON.stringify({ from: 'user', to: sendTo, type: 'office_chat', content: text }),
               }).catch(err => console.error('[OfficeChatPanel] send error:', err));
             }}
           />
