@@ -2,137 +2,144 @@
  * ------------------------------------------------------------------------
  * FILE: IsoFurniture.tsx
  * DESCRIPTION: 아이소메트릭 오피스 가구 SVG 컴포넌트.
- *              책상, 모니터, 파티션, 소파, 테이블.
+ *              LEGO 스타일 조립 구조 (Parts-based Composition).
  * REVISION HISTORY:
- * - 2026-04-10 Gemini: 컴포넌트 이름 통일 및 빌드 에러 수정
+ * - 2026-04-10 Gemini: 가구 부품화 및 대표님 전용 세트(CEO Set) 추가
  * ------------------------------------------------------------------------
  */
 
-import { isoToScreen, TW, TH, WALL_H } from './IsoRoom';
+import { isoToScreen, TW, TH } from './IsoRoom';
 
-/* ── 아이소메트릭 책상 ── */
+// ─── LEGO 가구 파츠 (Furniture Parts) ───
+
+/** 책상 상판 파츠 */
+function PartDeskTop({ x, y, w, h, depth, color, stroke }: any) {
+  const pts = [
+    { x: x,         y: y - depth },
+    { x: x + w / 2, y: y + h / 2 - depth },
+    { x: x,         y: y + h - depth },
+    { x: x - w / 2, y: y + h / 2 - depth }
+  ];
+  const toStr = (p: any[]) => p.map(pt => `${pt.x},${pt.y}`).join(' ');
+  
+  return (
+    <g>
+      {/* 두께(옆면) */}
+      <polygon points={toStr([pts[2], {x: pts[2].x, y: pts[2].y + depth}, {x: pts[3].x, y: pts[3].y + depth}, pts[3]])} fill={stroke} />
+      <polygon points={toStr([pts[1], {x: pts[1].x, y: pts[1].y + depth}, {x: pts[2].x, y: pts[2].y + depth}, pts[2]])} fill={stroke} opacity="0.8" />
+      {/* 상판 */}
+      <polygon points={toStr(pts)} fill={color} stroke={stroke} strokeWidth="1" />
+    </g>
+  );
+}
+
+/** 모니터 파츠 */
+function PartMonitor({ x, y, color = "#0f172a" }: { x: number; y: number; color?: string }) {
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      <rect x="-1" y="8" width="2" height="8" fill="#1e293b" />
+      <ellipse cx="0" cy="16" rx="6" ry="2.5" fill="#1e293b" />
+      <polygon points="0,0 16,8 0,16 -16,8" fill={color} stroke="#334155" />
+      <polygon points="0,2 13,8.5 0,15 -13,8.5" fill="#1e3a8a" opacity="0.4" />
+    </g>
+  );
+}
+
+/** 소품 파츠: 커피/명패 */
+function PartProp({ type, x, y }: { type: 'coffee' | 'nameplate'; x: number; y: number }) {
+  if (type === 'coffee') {
+    return (
+      <g transform={`translate(${x}, ${y})`}>
+        <rect x="-2" y="-4" width="4" height="6" fill="white" />
+        <ellipse cx="0" cy="-4" rx="2" ry="1" fill="#ddd" />
+      </g>
+    );
+  }
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      <polygon points="-8,0 8,0 6,4 -6,4" fill="#fbbf24" stroke="#d97706" strokeWidth="0.5" />
+      <text x="0" y="3" textAnchor="middle" fontSize="3" fill="#92400e" fontWeight="bold">CEO</text>
+    </g>
+  );
+}
+
+// ─── 조립기 (Assemblers) ───
+
+/** [LEGO 세트] 대표님 전용 중역 책상 */
+export function CeoDesk({ col, row }: { col: number; row: number }) {
+  const c = isoToScreen(col, row);
+  const ox = c.x;
+  const oy = c.y + TH * 0.2;
+
+  return (
+    <g>
+      {/* 1. 책상 베이스 (원목) */}
+      <PartDeskTop x={ox} y={oy} w={TW * 1.2} h={TH * 1.2} depth={14} color="#451a03" stroke="#270e02" />
+      {/* 2. 가죽 매트 */}
+      <PartDeskTop x={ox} y={oy - 1} w={TW * 0.8} h={TH * 0.8} depth={2} color="#1e293b" stroke="#0f172a" />
+      {/* 3. 트리플 모니터 조립 */}
+      <PartMonitor x={ox - 22} y={oy - 12} />
+      <PartMonitor x={ox} y={oy - 15} />
+      <PartMonitor x={ox + 22} y={oy - 12} />
+      {/* 4. 소품: 황금 명패 & 커피 */}
+      <PartProp type="nameplate" x={ox} y={oy + 10} />
+      <PartProp type="coffee" x={ox + 25} y={oy + 5} />
+    </g>
+  );
+}
+
+/** [LEGO 세트] 일반 직원 책상 */
 export function IsoDesk({ col, row }: { col: number; row: number }) {
   const c = isoToScreen(col, row);
-  const dw = TW * 0.75;
-  const dh = TH * 0.75;
-  const oh = 12;
-
   const ox = c.x;
-  const oy = c.y + TH * 0.15;
-
-  const top    = { x: ox,          y: oy };
-  const right  = { x: ox + dw / 2, y: oy + dh / 2 };
-  const bottom = { x: ox,          y: oy + dh };
-  const left   = { x: ox - dw / 2, y: oy + dh / 2 };
-
-  const topUp   = { x: top.x,   y: top.y   - oh };
-  const rightUp = { x: right.x, y: right.y - oh };
-  const leftUp  = { x: left.x,  y: left.y  - oh };
-
-  const toStr = (...pts: {x:number;y:number}[]) => pts.map(p => `${p.x},${p.y}`).join(' ');
+  const oy = c.y + TH * 0.2;
 
   return (
     <g>
-      <polygon points={toStr(topUp, rightUp, bottom, leftUp)} fill="#5c3d1e" stroke="#3d2810" strokeWidth="1" />
-      <polygon points={toStr(topUp, rightUp, { x: rightUp.x, y: rightUp.y }, top, leftUp)} fill="#6b4826" stroke="#3d2810" strokeWidth="1" />
-      <polygon points={toStr(leftUp, bottom, left, { x: leftUp.x, y: leftUp.y + oh })} fill="#3d2810" stroke="#2a1c08" strokeWidth="1" />
-      <polygon points={toStr(rightUp, bottom, right, { x: rightUp.x, y: rightUp.y + oh })} fill="#4a2e12" stroke="#2a1c08" strokeWidth="1" />
-      <line x1={left.x + 2} y1={left.y} x2={left.x + 2} y2={left.y + 14} stroke="#2a1c08" strokeWidth="2" />
-      <line x1={right.x - 2} y1={right.y} x2={right.x - 2} y2={right.y + 14} stroke="#2a1c08" strokeWidth="2" />
+      <PartDeskTop x={ox} y={oy} w={TW * 0.8} h={TH * 0.8} depth={10} color="#334155" stroke="#1e293b" />
+      <PartMonitor x={ox} y={oy - 10} />
+      <PartProp type="coffee" x={ox + 15} y={oy + 2} />
     </g>
   );
 }
 
-/* ── 아이소메트릭 모니터 ── */
-export function IsoMonitor({ col, row }: { col: number; row: number }) {
-  const c = isoToScreen(col, row);
-  const mx = c.x;
-  const my = c.y - 18;
-
-  return (
-    <g>
-      <line x1={mx} y1={my + 22} x2={mx} y2={my + 32} stroke="#0d1826" strokeWidth="3" />
-      <ellipse cx={mx} cy={my + 32} rx={6} ry={2.5} fill="#0d1826" />
-      <polygon points={`${mx},${my} ${mx + 18},${my + 9} ${mx},${my + 18} ${mx - 18},${my + 9}`} fill="#0d1826" stroke="#1e3048" strokeWidth="1" />
-      <polygon points={`${mx},${my + 2} ${mx + 15},${my + 9.5} ${mx},${my + 17} ${mx - 15},${my + 9.5}`} fill="#0a2040" />
-    </g>
-  );
-}
-
-/* ── 아이소메트릭 파티션 ── */
-export function IsoPartition({ col, row }: { col: number; row: number }) {
-  const c = isoToScreen(col, row);
-  const h = WALL_H * 0.55;
-
-  const top    = { x: c.x,            y: c.y };
-  const right  = { x: c.x + TW / 2,  y: c.y + TH / 2 };
-  const bottom = { x: c.x,            y: c.y + TH };
-  const left   = { x: c.x - TW / 2,  y: c.y + TH / 2 };
-
-  const topUp   = { x: top.x,   y: top.y   - h };
-  const rightUp = { x: right.x, y: right.y - h };
-  const leftUp  = { x: left.x,  y: left.y  - h };
-
-  const toStr = (...pts: {x:number;y:number}[]) => pts.map(p => `${p.x},${p.y}`).join(' ');
-
-  return (
-    <g opacity="0.85">
-      <polygon points={toStr(topUp, rightUp, top, leftUp)} fill="#1e3348" stroke="rgba(147,197,253,0.2)" strokeWidth="1" />
-      <polygon points={toStr(leftUp, top, bottom, left)} fill="rgba(147,197,253,0.07)" stroke="rgba(147,197,253,0.15)" strokeWidth="1" />
-      <polygon points={toStr(topUp, rightUp, right, top)} fill="rgba(147,197,253,0.05)" stroke="rgba(147,197,253,0.12)" strokeWidth="1" />
-    </g>
-  );
-}
-
-/* ── 아이소메트릭 소파 ── */
+// ... (다른 가구들도 부품화 가능)
 export function IsoSofa({ col, row }: { col: number; row: number }) {
   const c = isoToScreen(col, row);
-  const ox = c.x;
-  const oy = c.y + TH * 0.1;
-
-  const sw = TW * 0.85;
-  const sh = TH * 0.6;
-  const backH = 22;
-
-  const sTop    = { x: ox,          y: oy + sh * 0.2 };
-  const sRight  = { x: ox + sw / 2, y: oy + sh * 0.7 };
-  const sBottom = { x: ox,          y: oy + sh * 1.2 };
-  const sLeft   = { x: ox - sw / 2, y: oy + sh * 0.7 };
-
-  const toStr = (...pts: {x:number;y:number}[]) => pts.map(p => `${p.x},${p.y}`).join(' ');
-
   return (
-    <g>
-      <polygon points={toStr(sTop, sRight, sBottom, sLeft)} fill="#2952a0" stroke="#1e3c7a" strokeWidth="1" />
-      <line x1={ox} y1={oy + sh * 0.2} x2={ox} y2={oy + sh * 1.2} stroke="rgba(255,255,255,0.07)" strokeWidth="1" />
+    <g transform={`translate(${c.x}, ${c.y + 10})`}>
+      <rect x="-20" y="-10" width="40" height="20" rx="4" fill="#1e40af" stroke="#1e3a8a" />
+      <rect x="-20" y="-20" width="40" height="12" rx="4" fill="#1e3a8a" />
     </g>
   );
 }
 
-/* ── 아이소메트릭 테이블 ── */
 export function IsoTable({ col, row }: { col: number; row: number }) {
   const c = isoToScreen(col, row);
-  const cx = c.x;
-  const cy = c.y + TH * 0.5;
-
   return (
-    <g>
-      <rect x={cx - 2} y={cy} width={4} height={16} rx={2} fill="#2a1c0e" />
-      <ellipse cx={cx} cy={cy - 4} rx={26} ry={12} fill="#3d2810" stroke="#2a1c0e" strokeWidth="1.5" />
+    <g transform={`translate(${c.x}, ${c.y + 10})`}>
+       <PartDeskTop x={0} y={0} w={TW * 1.2} h={TH * 1.2} depth={6} color="#451a03" stroke="#270e02" />
     </g>
   );
 }
 
-/* ── 화분 ── */
 export function IsoPot({ col, row }: { col: number; row: number }) {
   const c = isoToScreen(col, row);
-  const px = c.x;
-  const py = c.y + TH * 0.2;
-
   return (
-    <g>
-      <polygon points={`${px - 6},${py + 16} ${px + 6},${py + 16} ${px + 4},${py + 26} ${px - 4},${py + 26}`} fill="#92400e" stroke="#78350f" strokeWidth="1" />
-      <ellipse cx={px} cy={py + 16} rx={6} ry={2.5} fill="#a16207" />
+    <g transform={`translate(${c.x}, ${c.y + 12})`}>
+      <polygon points="-6,0 6,0 4,10 -4,10" fill="#92400e" />
+      <circle cx="0" cy="-4" r="8" fill="#166534" />
+      <circle cx="4" cy="-8" r="6" fill="#15803d" />
+      <circle cx="-3" cy="-10" r="5" fill="#16a34a" />
+    </g>
+  );
+}
+
+export function IsoPartition({ col, row }: { col: number; row: number }) {
+  const c = isoToScreen(col, row);
+  return (
+    <g transform={`translate(${c.x}, ${c.y})`} opacity="0.6">
+      <rect x="-30" y="-40" width="60" height="50" rx="2" fill="#94a3b8" stroke="#64748b" />
     </g>
   );
 }

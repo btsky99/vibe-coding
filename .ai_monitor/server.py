@@ -135,6 +135,7 @@ import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
 import api.office_api as office_api
+import api.experience_api as experience_api
 import string
 import socket
 from collections import deque
@@ -2805,6 +2806,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                 __version__=__version__,
             )
 
+        # ── [모듈 위임] experience_api — /api/experience/* ────────────
+        elif parsed_path.path.startswith('/api/experience'):
+            _params = parse_qs(parsed_path.query)
+            experience_api.handle_get(self, parsed_path.path, _params)
+
         # ── [모듈 위임] zettel_api — /api/zettel/* ────────────────────
         elif parsed_path.path.startswith('/api/zettel/'):
             _params = parse_qs(parsed_path.query)
@@ -4024,6 +4030,10 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path.startswith('/api/pty/'):
             pty_api.handle_post(self, parsed_path.path)
 
+        # ── [모듈 위임 - POST] experience_api — /api/experience ───────
+        elif parsed_path.path == '/api/experience':
+            experience_api.handle_post(self, parsed_path.path)
+
         # ── [모듈 위임 - POST] zettel_api — /api/zettel/* ─────────────
         elif parsed_path.path.startswith('/api/zettel/'):
             content_length = int(self.headers.get('Content-Length', 0))
@@ -4376,8 +4386,9 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 # PTY inject: to 대상 터미널에 메시지 전달
                 # CEO(사람)는 PTY 없으므로 스킵, 나머지 에이전트는 PTY write
+                # office_chat 타입은 오피스 UI 전용 — PTY inject 금지
                 _to = msg['to'].lower()
-                if _to not in ('ceo', 'all', 'broadcast', ''):
+                if msg['type'] != 'office_chat' and _to not in ('ceo', 'all', 'broadcast', ''):
                     try:
                         import urllib.request as _ureq
                         # /api/pty/sessions 는 {"T1": {"agent":"claude","running":true,...}, ...} 형식 반환

@@ -60,9 +60,17 @@ export function FloorTile({
   stroke?: string;
 }) {
   const c = isoToScreen(col, row);
+  const isCeo = zone === 'ceo';
+
+  // 기본 타일 색상
   let color = '#1a2435';
-  if (zone === 'ceo') color = '#0d1a2a';
-  else if (zone === 'workspace') color = '#0e1d2e';
+  let finalStroke = stroke;
+
+  // 대표실 전용 레드 카펫 (LEGO Luxury Tile)
+  if (isCeo) {
+    color = (col + row) % 2 === 0 ? '#7f1d1d' : '#991b1b'; // 진한 레드 조립 브릭
+    finalStroke = '#f59e0b'; // 금색 테두리
+  } else if (zone === 'workspace') color = '#0e1d2e';
   else if (zone === 'meeting') color = '#121a2e';
   else if (zone === 'pantry') color = '#1a242a';
   else if (zone === 'corridor') color = '#0a1520';
@@ -73,7 +81,16 @@ export function FloorTile({
     `${c.x},${c.y + TH}`,
     `${c.x - TW / 2},${c.y + TH / 2}`,
   ].join(' ');
-  return <polygon points={points} fill={color} stroke={stroke} strokeWidth="0.5" />;
+
+  return (
+    <g>
+      <polygon points={points} fill={color} stroke={finalStroke} strokeWidth={isCeo ? "0.8" : "0.5"} />
+      {/* 대표실 타일에는 작은 금색 브릭 포인트 추가 */}
+      {isCeo && (col % 2 === 0 && row % 2 === 0) && (
+        <circle cx={c.x} cy={c.y + TH/2} r="1.2" fill="#fbbf24" opacity="0.6" />
+      )}
+    </g>
+  );
 }
 
 /* ── 복도 타일 ── */

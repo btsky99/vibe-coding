@@ -828,6 +828,17 @@ def main():
                 except Exception:
                     pass  # validator 오류는 조용히 무시
 
+            # ── 경험 회상 자동 주입 ──────────────────────────────────────────
+            # 사용자 지시와 유사한 과거 작업 경험을 자동 검색하여 컨텍스트에 주입.
+            # 에이전트가 과거 경험을 활용해 더 나은 판단을 할 수 있도록 한다.
+            try:
+                from src.pg_store import recall_context_summary
+                _recall_text = recall_context_summary(short, limit=3)
+                if _recall_text:
+                    print(_recall_text, flush=True)
+            except Exception:
+                pass  # 회상 실패는 훅 전체를 중단하지 않음
+
             # 의도 감지: 키워드 매칭 → 관련 워크플로 컨텍스트를 stdout으로 출력
             # Claude Code는 이 출력을 Claude에게 시스템 컨텍스트로 주입함
             # 사용자가 자연어로 "빌드해줘", "커밋해줘" 등만 말해도 자동 워크플로 실행 가능

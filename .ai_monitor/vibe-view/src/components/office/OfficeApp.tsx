@@ -10,7 +10,7 @@
  * ------------------------------------------------------------------------
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   LayoutGrid,
@@ -39,6 +39,15 @@ interface SpeechBubble {
   text: string;
   createdAt: number;
   duration: number;
+}
+
+export interface AgentStats {
+  agent_id: string;
+  total_xp: number;
+  level: number;
+  task_count: number;
+  skill_map: Record<string, number>;
+  streak_days: number;
 }
 
 // ZONE_PANEL_MAP 제거 — 채팅 전용 모드
@@ -74,6 +83,20 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   const [editCli, setEditCli] = useState<AgentCli>('claude');
   const [editModel, setEditModel] = useState('');
   const [editYolo, setEditYolo] = useState(false);
+
+  // ── 에이전트 경험/성장 데이터 폴링 ──
+  const [agentStats, setAgentStats] = useState<AgentStats[]>([]);
+  const fetchStats = useCallback(() => {
+    fetch('/api/experience/stats')
+      .then(r => r.json())
+      .then(data => { if (data.stats) setAgentStats(data.stats); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    fetchStats();
+    const timer = window.setInterval(fetchStats, 30_000); // 30초마다 폴링
+    return () => window.clearInterval(timer);
+  }, [fetchStats]);
 
   // hudTab 제거 — 채팅 전용
   const [selectedDesk, setSelectedDesk] = useState(office.selectedDefaultSlot);
@@ -244,7 +267,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── 왼쪽: 부서별 에이전트 사이드바 ── */}
-        <aside className="flex w-[190px] shrink-0 flex-col border-r border-white/[0.04] bg-[#080d15]">
+        <aside className="flex w-[190px] shrink-0 flex-col overflow-y-auto border-r border-white/[0.04] bg-[#080d15]">
           {/* 조직 헤더 — 하드코딩된 "대표" 아이콘 제거 (CEO는 월드 대표실에 렌더링됨) */}
           <div className="flex items-center justify-between border-b border-white/[0.04] px-3 py-3">
             <div className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">조직도</div>
@@ -343,6 +366,53 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               </button>
             ))}
           </div>
+
+          {/* ── 선택된 에이전트 스킬 패널 ── */}
+          {(() => {
+            const selCli = selectedDesk === -1
+              ? (activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli || 'claude')
+              : activeSlots[selectedDesk]?.cli || '';
+            const selStats = agentStats.find(s => s.agent_id === selCli.toLowerCase());
+            if (!selStats) return null;
+            const skillEntries = Object.entries(selStats.skill_map || {}).sort((a, b) => b[1] - a[1]);
+            const maxSkillXp = skillEntries.length > 0 ? skillEntries[0][1] : 1;
+            const DOMAIN_LABEL: Record<string, string> = {
+              frontend: '프론트엔드', backend: '백엔드', db: 'DB', infra: '인프라',
+              docs: '문서', config: '설정', general: '일반', build: '빌드',
+            };
+            const DOMAIN_COLOR: Record<string, string> = {
+              frontend: '#22d3ee', backend: '#a78bfa', db: '#f97316', infra: '#ef4444',
+              docs: '#94a3b8', config: '#64748b', general: '#6b7280', build: '#fbbf24',
+            };
+            return (
+              <div className="border-t border-white/[0.04] px-3 py-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[8px] uppercase tracking-widest text-white/25">스킬 맵</span>
+                  <span className="text-[9px] font-bold" style={{ color: selStats.level >= 7 ? '#a78bfa' : '#94a3b8' }}>
+                    Lv.{selStats.level} · {selStats.total_xp} XP
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {skillEntries.slice(0, 6).map(([domain, xp]) => (
+                    <div key={domain} className="flex items-center gap-2">
+                      <span className="w-16 truncate text-[8px] text-white/40">{DOMAIN_LABEL[domain] || domain}</span>
+                      <div className="relative h-2 flex-1 rounded-full bg-white/[0.06]">
+                        <div
+                          className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+                          style={{ width: `${(xp / maxSkillXp) * 100}%`, backgroundColor: DOMAIN_COLOR[domain] || '#6b7280' }}
+                        />
+                      </div>
+                      <span className="w-8 text-right text-[7px] text-white/30">{xp}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-[7px] text-white/20">
+                  <span>{selStats.task_count}개 작업 완료</span>
+                  {selStats.streak_days > 0 && <span>{selStats.streak_days}일 연속</span>}
+                </div>
+              </div>
+            );
+          })()}
         </aside>
 
         {/* ── 가운데: 오피스 월드 ── */}
@@ -357,6 +427,8 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             speechBubbles={speechBubbles}
             slotNames={activeSlots.map(s => s.name)}
             slotRoles={activeSlots.map(s => s.role || 'unknown')}
+            agentStats={agentStats}
+            slotClis={activeSlots.map(s => s.cli)}
           />
 
           {/* 이벤트 레일 (월드 위 오버레이) */}

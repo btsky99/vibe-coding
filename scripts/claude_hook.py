@@ -93,6 +93,45 @@ def _get_path(tool_input: dict) -> str:
             tool_input.get('filename') or '')
 
 
+def _spawn_experience_record(agent: str, commit_msg: str):
+    """커밋 메시지에서 경험을 추출하여 백그라운드로 DB에 기록한다."""
+    import re as _re
+    # task_type 추출 (feat/fix/refactor/...)
+    m = _re.match(r'^(feat|fix|refactor|docs|build|chore|test)', commit_msg.lower())
+    task_type = m.group(1) if m else 'chore'
+
+    # domain 추론: scope에서 힌트 (예: feat(office) → frontend)
+    scope_match = _re.search(r'\((\w+)\)', commit_msg)
+    scope = scope_match.group(1).lower() if scope_match else ''
+    domain_map = {
+        'office': 'frontend', 'ui': 'frontend', 'view': 'frontend',
+        'server': 'backend', 'api': 'backend', 'pty': 'backend',
+        'db': 'db', 'pg': 'db', 'sql': 'db',
+        'zettel': 'backend', 'release': 'infra', 'build': 'infra',
+    }
+    domain = domain_map.get(scope, 'general')
+
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    # recall.py를 재활용하지 않고 직접 DB 호출하는 작은 스크립트 실행
+    py_code = (
+        f"import sys; sys.path.insert(0, {str(MONITOR_DIR)!r}); "
+        f"from src.pg_store import ensure_schema, record_experience; "
+        f"ensure_schema(); "
+        f"record_experience("
+        f"agent_id={agent.lower()!r}, task_type={task_type!r}, "
+        f"domain={domain!r}, outcome='success', "
+        f"description={commit_msg[:200]!r})"
+    )
+    try:
+        subprocess.Popen(
+            [sys.executable, '-c', py_code],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=_no_window,
+        )
+    except Exception:
+        pass  # 훅 실패가 Claude 응답을 막으면 안 됨
+
+
 def _spawn_zettel_capture(mode: str, agent: str, data: dict):
     """제텔카스텐 자동 캡처를 백그라운드로 spawn한다."""
     import json as _json
@@ -183,6 +222,8 @@ def _do_log(data: dict):
                     _spawn_zettel_capture('commit', agent_name, {
                         'message': _commit_msg,
                     })
+                    # ── 경험 자동 기록: 커밋 → agent_experience 추가 ──
+                    _spawn_experience_record(agent_name, _commit_msg)
                 elif 'npm run build' in cmd or 'build' in cmd:
                     log_task('Claude', f'[빌드] {short_cmd}')
                     log_thought('claude', 'build', {
