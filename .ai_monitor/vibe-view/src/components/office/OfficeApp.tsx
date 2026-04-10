@@ -25,7 +25,7 @@ import { useVibeData } from '../../hooks/useVibeData';
 import { type OfficeZone, useOfficeState } from '../../hooks/useOfficeState';
 import { type AgentCli, useWorkspaceProfiles, MAX_SLOTS } from '../../hooks/useWorkspaceProfiles';
 import { useCliModels, getDefaultModel } from '../../hooks/useCliModels';
-import OfficeCanvas from './OfficeCanvas';
+import IsometricOffice from './IsometricOffice';
 import OfficeChatPanel from './OfficeChatPanel';
 
 // HUD 탭 제거됨 — 오피스 우측은 채팅 전용
@@ -340,7 +340,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
         {/* ── 가운데: 오피스 월드 ── */}
         <div className="relative min-w-0 flex-1 overflow-hidden">
-          <OfficeCanvas
+          <IsometricOffice
             presences={office.presences}
             zones={office.zones}
             events={office.events}

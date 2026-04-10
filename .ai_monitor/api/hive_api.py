@@ -619,32 +619,68 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
-            claude_proj_dir = Path.home() / '.claude' / 'projects' / PROJECT_ID
+            # Claude Code 프로젝트 디렉터리 자동 탐색.
+            # PROJECT_ID 하드 계산 규칙이 Claude 본체의 실제 인코딩과 달라
+            # 설치 버전(경로 상이)에서 디렉터리를 찾지 못하던 버그 수정.
+            # ~/.claude/projects/ 아래 모든 세션을 훑고, 각 세션 메타의
+            # 'cwd' 값이 현재 PROJECT_ROOT와 일치하는 것만 선택.
+            claude_root = Path.home() / '.claude' / 'projects'
+            current_cwd_norm = str(PROJECT_ROOT).replace('\\', '/').rstrip('/').lower()
             sessions = []
-            if claude_proj_dir.exists():
-                for jsonl_file in claude_proj_dir.glob('*.jsonl'):
-                    try:
-                        info = _parse_session_tail(jsonl_file)
-                        if info:
-                            sessions.append(info)
-                    except Exception:
-                        continue
+            if claude_root.exists():
+                # 1차 시도: PROJECT_ID로 직접 접근 (기존 동작 유지 · 빠름)
+                primary_dir = claude_root / PROJECT_ID
+                candidate_dirs = []
+                if primary_dir.exists() and primary_dir.is_dir():
+                    candidate_dirs.append(primary_dir)
+                # 2차 시도: 전체 스캔 (설치 버전 · 경로 불일치 대응)
+                for sub in claude_root.iterdir():
+                    if sub.is_dir() and sub not in candidate_dirs:
+                        candidate_dirs.append(sub)
+
+                for proj_dir in candidate_dirs:
+                    for jsonl_file in proj_dir.glob('*.jsonl'):
+                        try:
+                            info = _parse_session_tail(jsonl_file)
+                            if not info:
+                                continue
+                            # cwd가 현재 프로젝트 루트와 일치하는 세션만 채택
+                            sess_cwd = str(info.get('cwd') or '').rstrip('/').lower()
+                            if sess_cwd and sess_cwd == current_cwd_norm:
+                                sessions.append(info)
+                        except Exception:
+                            continue
+                    if sessions:
+                        break  # 일치 세션 확보되면 추가 스캔 중단
             sessions.sort(key=lambda s: s.get('last_ts', ''), reverse=True)
             
-            # [Fix] sessions 리스트 대신 최신 세션의 요약 정보를 반환하여 일관성 유지
+            # [Fix] 최신 세션의 상세 토큰 정보 반환.
+            # 프론트엔드(TerminalSlot.tsx)는 input_tokens/output_tokens/
+            # cache_read/cache_write/last_ts 필드를 개별적으로 읽어
+            # 컬러 블록 바·카테고리 그리드를 그리므로 모두 포함해야 함.
             result = {
+                'input_tokens': 0,
+                'output_tokens': 0,
+                'cache_read': 0,
+                'cache_write': 0,
                 'total_tokens': 0,
-                'context_window': 200000, # 200k tokens (Claude 3 standard)
+                'context_window': 200000,  # Claude 3/4 표준 200k
                 'percentage': 0,
-                'model': 'claude'
+                'model': 'claude',
+                'last_ts': '',
             }
             if sessions:
                 latest = sessions[0]
-                result['total_tokens'] = latest.get('input_tokens', 0) + latest.get('output_tokens', 0)
+                result['input_tokens'] = latest.get('input_tokens', 0)
+                result['output_tokens'] = latest.get('output_tokens', 0)
+                result['cache_read'] = latest.get('cache_read', 0)
+                result['cache_write'] = latest.get('cache_write', 0)
+                result['total_tokens'] = result['input_tokens'] + result['output_tokens']
                 result['model'] = latest.get('model', 'claude')
-                # 비율 계산
+                result['last_ts'] = latest.get('last_ts', '')
+                # 컨텍스트 창 사용률은 input_tokens 기준 (Claude 공식 /context 와 동일)
                 if result['context_window'] > 0:
-                    result['percentage'] = (result['total_tokens'] / result['context_window']) * 100
+                    result['percentage'] = (result['input_tokens'] / result['context_window']) * 100
 
             handler.wfile.write(json.dumps(
                 result, ensure_ascii=False

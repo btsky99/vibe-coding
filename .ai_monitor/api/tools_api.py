@@ -22,9 +22,17 @@ from pathlib import Path
 from typing import Any
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────
-_BASE_DIR = Path(__file__).resolve().parent.parent  # .ai_monitor/
-_PROJECT_ROOT = _BASE_DIR.parent
-_SCRIPTS_DIR = _PROJECT_ROOT / "scripts"
+# [2026-04-10] Claude: frozen(EXE) 모드에서 경로 오계산 버그 수정
+#   - Dev:    __file__ = .ai_monitor/api/tools_api.py → _BASE_DIR = .ai_monitor/, _PROJECT_ROOT = 프로젝트 루트
+#   - Frozen: __file__ = MEIPASS/api/tools_api.py → _BASE_DIR = MEIPASS/, _PROJECT_ROOT = MEIPASS/ (scripts는 MEIPASS/scripts/)
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = Path(sys._MEIPASS)
+    _PROJECT_ROOT = Path(sys.executable).resolve().parent
+    _SCRIPTS_DIR = _BASE_DIR / "scripts"  # MEIPASS/scripts/ (spec datas에 포함됨)
+else:
+    _BASE_DIR = Path(__file__).resolve().parent.parent  # .ai_monitor/
+    _PROJECT_ROOT = _BASE_DIR.parent
+    _SCRIPTS_DIR = _PROJECT_ROOT / "scripts"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -113,8 +121,8 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "description": "PostgreSQL 직접 쿼리 및 디버깅 — 내장 PG 또는 시스템 PG 자동 감지",
         "check_commands": [["psql", "--version"]],
         "check_paths": [
-            # 내장 포터블 PostgreSQL 경로 (개발 모드)
-            str(Path(__file__).resolve().parent.parent / "bin" / "pgsql" / "bin" / "psql.exe"),
+            # 내장 포터블 PostgreSQL 경로 (개발/frozen 모드 공통 — _BASE_DIR 기준)
+            str(_BASE_DIR / "bin" / "pgsql" / "bin" / "psql.exe"),
             # 시스템 PostgreSQL 기본 경로
             os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "18", "bin", "psql.exe"),
             os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "PostgreSQL", "17", "bin", "psql.exe"),

@@ -60,8 +60,13 @@ from pathlib import Path
 #   - 수정: sys.frozen 여부로 분기 — EXE는 MEIPASS/scripts, Dev는 기존 경로 사용
 _API_DIR = Path(__file__).resolve().parent
 _BASE_DIR = _API_DIR.parent
-# 개발 환경: api/../.. = 프로젝트 루트, 거기서 scripts/
-_SCRIPTS_DIR = _BASE_DIR.parent / 'scripts'
+# [2026-04-10] Claude: frozen 모드 분기 실제 구현 (기존 주석만 있고 코드가 없었음)
+#   - Dev:    _SCRIPTS_DIR = .ai_monitor/../../scripts = 프로젝트 루트/scripts ✓
+#   - Frozen: _SCRIPTS_DIR = MEIPASS/scripts ✓ (spec datas에 포함됨)
+if getattr(sys, 'frozen', False):
+    _SCRIPTS_DIR = Path(sys._MEIPASS) / 'scripts'
+else:
+    _SCRIPTS_DIR = _BASE_DIR.parent / 'scripts'
 # [2026-03-24] 배포 범용화: scripts 폴더가 없으면 sys.path 추가 skip
 if _SCRIPTS_DIR.exists() and str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -781,6 +786,7 @@ def handle_live_runs(handler) -> None:
     반환 구조: { "T1": [...runs], "T2": [...runs], ... }
     각 run: { run_id, task, cli, status, ts, output_preview }
     """
+    _api_dir = Path(__file__).resolve().parent
     live_file = _api_dir.parent / 'data' / 'agent_live.jsonl'
     result: dict[str, list[dict]] = {}
 
@@ -885,7 +891,11 @@ def handle_live_runs(handler) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # 프로젝트 루트 경로 (CLI spawn의 cwd로 사용)
-_project_root = str(_BASE_DIR.parent)
+# frozen 모드에서는 exe 옆 디렉터리(설치 경로)를 프로젝트 루트로 사용
+if getattr(sys, 'frozen', False):
+    _project_root = str(Path(sys.executable).resolve().parent)
+else:
+    _project_root = str(_BASE_DIR.parent)
 
 
 def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, message: str = '') -> list[str]:

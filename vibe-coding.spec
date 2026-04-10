@@ -79,6 +79,9 @@ a = Analysis(
         ('AGENTS.md', '.'),
         # API 모듈 (hive_api, git_api 등)
         ('.ai_monitor/api', 'api'),
+        # 버전 정보 파일 — frozen 모드에서 server.py가 MEIPASS 루트에서 import함
+        # 없으면 ImportError → __version__ = "0.0.0-unknown" → 상단 버전 미표시
+        ('.ai_monitor/_version.py', '.'),
     ],
     hiddenimports=['websockets', 'winpty'],
     hookspath=[],
