@@ -4374,10 +4374,33 @@ class SSEHandler(BaseHTTPRequestHandler):
                 else:
                     cmd_to_exec = None
 
-                # [변경 2026-03-22] PTY 직접 접근 → Node PTY 서버로 이전
-                # 메시지 브로드캐스트는 향후 Node PTY 서버에 /api/pty/broadcast 추가 시 구현
-                # 현재는 ITCP 메시지 저장만 수행 (터미널 화면 출력은 미지원)
-                pass
+                # PTY inject: to 대상 터미널에 메시지 전달
+                # CEO(사람)는 PTY 없으므로 스킵, 나머지 에이전트는 PTY write
+                _to = msg['to'].lower()
+                if _to not in ('ceo', 'all', 'broadcast', ''):
+                    try:
+                        import urllib.request as _ureq
+                        _sessions_url = f'http://127.0.0.1:{WS_PORT}/api/pty/sessions'
+                        with _ureq.urlopen(_sessions_url, timeout=2) as _r:
+                            _sessions = json.loads(_r.read().decode())
+                        # to와 매칭되는 세션 찾기 (cli 또는 terminalId 기준)
+                        for _sess in (_sessions if isinstance(_sessions, list) else []):
+                            _cli  = str(_sess.get('cli', '')).lower()
+                            _tid  = str(_sess.get('id',  _sess.get('terminalId', ''))).lower()
+                            _name = str(_sess.get('name', '')).lower()
+                            if _to in (_cli, _tid, _name) or _to in _cli:
+                                _write_url = f'http://127.0.0.1:{WS_PORT}/api/pty/write/{_sess.get("id", _sess.get("terminalId", ""))}'
+                                _payload = json.dumps({'text': content_to_send}).encode()
+                                _req = _ureq.Request(
+                                    _write_url, data=_payload,
+                                    headers={'Content-Type': 'application/json'},
+                                    method='POST',
+                                )
+                                _ureq.urlopen(_req, timeout=2)
+                                print(f'[msg→PTY] {msg["from"]} → {_sess.get("id")} : {content_to_send[:40]}')
+                                break
+                    except Exception as _e:
+                        print(f'[msg inject error] {_e}')
 
                 # SSE 스트림 (session_logs 테이블) 에도 알림 기록하여 로그 뷰에 반영
                 try:

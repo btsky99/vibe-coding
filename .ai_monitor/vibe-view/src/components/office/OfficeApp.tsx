@@ -391,7 +391,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
         {/* ── 오른쪽: 채팅 전용 패널 ── */}
         <aside className="flex w-[380px] shrink-0 flex-col border-l border-white/[0.04] bg-[#0a0f18]">
           <OfficeChatPanel
-            messages={vibe.messages}
+            messages={vibe.messages.filter(m => m.type === 'office_chat')}
             selectedAgent={selectedDesk === -1 ? 'ceo' : (activeSlots[selectedDesk]?.cli || 'claude')}
             selectedSlotName={selectedDesk === -1
               ? (activeSlots.find(s => s.role?.toLowerCase() === 'ceo')?.name ?? 'CEO')
@@ -402,7 +402,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               fetch('/api/message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ from: 'user', to: target, type: 'chat', content: text }),
+                body: JSON.stringify({ from: 'user', to: target, type: 'office_chat', content: text }),
               }).catch(err => console.error('[OfficeChatPanel] send error:', err));
             }}
           />

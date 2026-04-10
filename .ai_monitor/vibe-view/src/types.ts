@@ -131,7 +131,7 @@ export interface AgentMessage {
     timestamp: string;             // ISO 형식 타임스탬프
     from: string;                  // 발신 에이전트 (claude / gemini / system)
     to: string;                    // 수신 대상 (claude / gemini / all)
-    type: 'info' | 'handoff' | 'request' | 'task_complete' | 'warning';
+    type: 'info' | 'handoff' | 'request' | 'task_complete' | 'warning' | 'office_chat' | 'chat';
     content: string;               // 메시지 본문
     read: boolean;                 // 읽음 여부
 }
