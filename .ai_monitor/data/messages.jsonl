@@ -59,3 +59,6 @@
 {"id": "1773671353418", "timestamp": "2026-03-16T23:29:13", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 P2 코드품질 고도화 6건 전부 수정 | vibe-execute-plan -> vibe-code-review", "read": false}
 {"id": "1773671775612", "timestamp": "2026-03-16T23:36:15", "from": "claude", "to": "all", "type": "status", "content": "claude finished [vibe-code-review] | P2 코드품질 6건 전부 완료", "read": false}
 {"id": "1773845102981", "timestamp": "2026-03-18T23:45:02", "from": "gemini", "to": "all", "type": "status", "content": "[skill-chain] T2 hook_bridge.py PID 락 코드 리뷰 (ITCP T1 요청) | vibe-code-review", "read": false}
+{"id": "1775826772980", "timestamp": "2026-04-10T22:12:52", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 아이소메트릭 오피스 UI 재설계 (Task 1~8 순서 실행) | vibe-execute-plan", "read": false}
+{"id": "1775827693006", "timestamp": "2026-04-10T22:28:13", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 아이소메트릭 오피스 빌드 에러 수정 후 플랜 실행 | vibe-debug -> vibe-execute-plan", "read": false}
+{"id": "1775827903883", "timestamp": "2026-04-10T22:31:43", "from": "agent", "to": "all", "type": "status", "content": "agent finished [vibe-execute-plan] | 빌드 에러 3건 수정 완료: IsoSofa/IsoTable 중복 선언 제거, IsoPartition 추가, CorridorTile color prop 수정", "read": false}

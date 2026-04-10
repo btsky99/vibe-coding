@@ -25,36 +25,60 @@ export function isoToScreen(col: number, row: number): { x: number; y: number } 
   };
 }
 
+/* ── 방 구역 정의 ── */
+export const ROOM_ZONES = {
+  ceo:       { col: [0, 5],  row: [0, 6],  color: '#0d1a2a', label: 'CEO Room' },
+  workspace: { col: [7, 14], row: [0, 8],  color: '#0e1d2e', label: 'Workspace' },
+  meeting:   { col: [10, 15], row: [10, 15], color: '#1a1a2e', label: 'Meeting' },
+  pantry:    { col: [0, 4],  row: [10, 15], color: '#1a242a', label: 'Pantry' },
+  corridor:  { col: [0, 15], row: [7, 9],   color: '#0a1520', label: 'Hallway' },
+};
+
+export function getZoneAt(col: number, row: number): string | null {
+  if (col >= 0 && col <= 5 && row >= 0 && row <= 6) return 'ceo';
+  if (col >= 7 && col <= 14 && row >= 0 && row <= 8) return 'workspace';
+  if (col >= 10 && col <= 15 && row >= 10 && row <= 15) return 'meeting';
+  if (col >= 0 && col <= 4 && row >= 10 && row <= 15) return 'pantry';
+  return 'corridor';
+}
+
 /* ── 타일 타입 ── */
 export type TileType =
   | 'floor'        /* 방 바닥 */
   | 'corridor'     /* 복도 */
-  | 'wall_n'       /* 북쪽 벽 (좌상단 방향) */
+  | 'wall_n'       /* 북쪽 벽 */
   | 'wall_w'       /* 서쪽 벽 */
-  | 'empty';       /* 빈 공간 */
+  | 'empty';
 
-/* ── 바닥 타일 polygon (다이아몬드) ── */
 export function FloorTile({
   col, row,
-  color = '#1a2435',
-  stroke = 'rgba(255,255,255,0.06)',
+  zone,
+  stroke = 'rgba(255,255,255,0.04)',
 }: {
   col: number; row: number;
-  color?: string; stroke?: string;
+  zone?: string;
+  stroke?: string;
 }) {
   const c = isoToScreen(col, row);
+  let color = '#1a2435';
+  if (zone === 'ceo') color = '#0d1a2a';
+  else if (zone === 'workspace') color = '#0e1d2e';
+  else if (zone === 'meeting') color = '#121a2e';
+  else if (zone === 'pantry') color = '#1a242a';
+  else if (zone === 'corridor') color = '#0a1520';
+
   const points = [
     `${c.x},${c.y}`,
     `${c.x + TW / 2},${c.y + TH / 2}`,
     `${c.x},${c.y + TH}`,
     `${c.x - TW / 2},${c.y + TH / 2}`,
   ].join(' ');
-  return <polygon points={points} fill={color} stroke={stroke} strokeWidth="1" />;
+  return <polygon points={points} fill={color} stroke={stroke} strokeWidth="0.5" />;
 }
 
 /* ── 복도 타일 ── */
 export function CorridorTile({ col, row }: { col: number; row: number }) {
-  return <FloorTile col={col} row={row} color="#111d2b" stroke="rgba(255,255,255,0.04)" />;
+  return <FloorTile col={col} row={row} zone="corridor" stroke="rgba(255,255,255,0.04)" />;
 }
 
 /* ── 북쪽 벽 (타일 상단에 솟아오르는 2면 벽) ──

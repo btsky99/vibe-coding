@@ -1,284 +1,81 @@
 /**
  * ------------------------------------------------------------------------
  * FILE: isometric.css
- * DESCRIPTION: 아이소메트릭 오피스 UI 스타일 시스템.
- *              CSS transform 기반 2.5D 렌더링 + 캐릭터 애니메이션.
- * REVISION HISTORY:
- * - 2026-04-10 Claude: 최초 생성 — 아이소메트릭 오피스 재설계
+ * DESCRIPTION: 2.5D 아이소메트릭 오피스 스타일 및 애니메이션.
  * ------------------------------------------------------------------------
  */
 
-/* ── CSS 변수 ── */
-:root {
-  --iso-tile-w: 64px;       /* 바닥 타일 너비 */
-  --iso-tile-h: 32px;       /* 바닥 타일 높이 (너비의 절반) */
-  --iso-wall-h: 80px;       /* 벽 높이 */
-  --iso-scale: 1;            /* 줌 스케일 */
-
-  /* 색상 팔레트 */
-  --iso-floor-light: #1a2435;
-  --iso-floor-dark: #131c2b;
-  --iso-wall-left: #0f1923;
-  --iso-wall-right: #162030;
-  --iso-wall-top: #1e2d42;
-  --iso-room-border: #2a3f5a;
-
-  /* 에이전트 LED 색상 */
-  --led-idle: #3b82f6;
-  --led-working: #22c55e;
-  --led-error: #ef4444;
-  --led-meeting: #f97316;
-}
-
-/* ── 씬 컨테이너 ── */
-.iso-scene {
-  position: relative;
+.iso-office-container {
   width: 100%;
   height: 100%;
+  background: #050a10;
   overflow: hidden;
-  background: #060a0f;
-  cursor: grab;
-  user-select: none;
-}
-
-.iso-scene:active {
-  cursor: grabbing;
-}
-
-/* 전체 월드 (패닝/줌 대상) */
-.iso-world {
-  position: absolute;
-  transform-origin: center center;
-  transition: transform 0.1s ease;
-}
-
-/* ── 아이소메트릭 그룹 ── */
-.iso-group {
   position: relative;
-  transform-style: preserve-3d;
-}
-
-/* ── 방 컨테이너 ── */
-.iso-room {
-  position: absolute;
-  display: inline-block;
-}
-
-/* ── 바닥 타일 ── */
-.iso-floor-grid {
-  position: relative;
-  transform: rotateX(60deg) rotateZ(-45deg);
-  transform-origin: center center;
-}
-
-.iso-floor-tile {
-  position: absolute;
-  width: var(--iso-tile-w);
-  height: var(--iso-tile-h);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  box-sizing: border-box;
-}
-
-.iso-floor-tile.light {
-  background: var(--iso-floor-light);
-}
-
-.iso-floor-tile.dark {
-  background: var(--iso-floor-dark);
-}
-
-/* ── 벽 ── */
-.iso-wall {
-  position: absolute;
-  bottom: 0;
-  background: var(--iso-wall-left);
-  border: 1px solid var(--iso-room-border);
-  box-sizing: border-box;
-  transform-origin: bottom center;
-}
-
-.iso-wall.left {
-  transform: rotateY(0deg) skewY(-30deg);
-  background: var(--iso-wall-left);
-}
-
-.iso-wall.right {
-  transform: skewY(30deg);
-  background: var(--iso-wall-right);
-}
-
-.iso-wall.back {
-  background: var(--iso-wall-top);
-  border-bottom: 2px solid var(--iso-room-border);
-}
-
-/* 방 레이블 */
-.iso-room-label {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.35);
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-/* ── 오브젝트 기본 위치 ── */
-.iso-object {
-  position: absolute;
-  bottom: 0;
-  transform-origin: bottom center;
-}
-
-/* ── 파티션 ── */
-.iso-partition {
-  position: absolute;
-  background: rgba(147, 197, 253, 0.08);
-  border: 1px solid rgba(147, 197, 253, 0.15);
-  backdrop-filter: blur(2px);
-  border-radius: 1px;
-}
-
-/* ── 캐릭터 공통 ── */
-.iso-character {
-  position: absolute;
   display: flex;
-  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  cursor: pointer;
-  transition: transform 0.2s ease;
-  z-index: 10;
 }
 
-.iso-character:hover {
-  transform: translateY(-4px);
+.iso-svg {
+  filter: drop-shadow(0 10px 20px rgba(0,0,0,0.5));
 }
 
-/* 캐릭터 이름 태그 */
-.iso-character .name-tag {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 9px;
-  font-weight: 600;
-  color: #e5eef8;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s;
+/* ── 에이전트 애니메이션 ── */
+
+/* Idle: 위아래로 부드럽게 둥둥 */
+.anim-bob {
+  animation: iso-bob 2s infinite ease-in-out;
 }
-
-.iso-character:hover .name-tag {
-  opacity: 1;
-}
-
-/* ── LED 상태 표시 ── */
-.iso-led {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.iso-led.idle     { background: var(--led-idle);    box-shadow: 0 0 6px var(--led-idle); }
-.iso-led.working  { background: var(--led-working); box-shadow: 0 0 6px var(--led-working); }
-.iso-led.error    { background: var(--led-error);   box-shadow: 0 0 8px var(--led-error); }
-.iso-led.meeting  { background: var(--led-meeting); box-shadow: 0 0 6px var(--led-meeting); }
-
-/* ── 애니메이션 키프레임 ── */
-
-/* LED 깜빡임 */
-@keyframes led-blink {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.2; }
-}
-
-/* 로봇 아이들 — 살짝 위아래 */
-@keyframes bob {
+@keyframes iso-bob {
   0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-3px); }
+  50% { transform: translateY(-3px); }
 }
 
-/* 로봇 타이핑 — 앞으로 기울기 */
-@keyframes lean-forward {
+/* Working: 앞뒤로 까닥까닥 (타이핑 느낌) */
+.anim-lean {
+  animation: iso-lean 0.5s infinite ease-in-out;
+}
+@keyframes iso-lean {
   0%, 100% { transform: rotate(0deg); }
-  50%       { transform: rotate(8deg); }
+  50% { transform: rotate(1deg) translateX(1px); }
 }
 
-/* 오류 — 흔들리기 */
-@keyframes shake {
+/* Meeting: 위아래로 끄덕끄덕 (경청 느낌) */
+.anim-nod {
+  animation: iso-nod 1.5s infinite ease-in-out;
+}
+@keyframes iso-nod {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(2px); }
+}
+
+/* Error: 좌우로 흔들흔들 (당황 느낌) */
+.anim-shake {
+  animation: iso-shake 0.3s infinite ease-in-out;
+}
+@keyframes iso-shake {
   0%, 100% { transform: translateX(0); }
-  20%       { transform: translateX(-3px); }
-  40%       { transform: translateX(3px); }
-  60%       { transform: translateX(-2px); }
-  80%       { transform: translateX(2px); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
 }
 
-/* 회의 — 가볍게 끄덕 */
-@keyframes nod {
-  0%, 100% { transform: rotate(0deg); }
-  30%       { transform: rotate(-5deg); }
-  70%       { transform: rotate(5deg); }
+/* ── 타일 호버 효과 ── */
+.iso-layer-floor polygon:hover {
+  fill-opacity: 0.8;
+  filter: brightness(1.2);
+  cursor: pointer;
 }
 
-/* 애니메이션 클래스 */
-.anim-bob         { animation: bob 3s ease-in-out infinite; }
-.anim-blink       { animation: led-blink 2s ease-in-out infinite; }
-.anim-lean        { animation: lean-forward 1.5s ease-in-out infinite; }
-.anim-shake       { animation: shake 0.5s ease-in-out infinite; }
-.anim-nod         { animation: nod 2s ease-in-out infinite; }
-
-/* ── 툴팁 ── */
-.iso-tooltip {
-  position: absolute;
-  z-index: 100;
-  background: #0d1826;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 8px 12px;
-  min-width: 160px;
-  pointer-events: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+/* ── 캐릭터 그룹 트랜지션 ── */
+.iso-layer-objects > g {
+  transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.iso-tooltip .tooltip-name {
-  font-size: 12px;
-  font-weight: 700;
-  color: #e5eef8;
-  margin-bottom: 4px;
+.iso-agent-group:hover {
+  filter: brightness(1.2);
 }
 
-.iso-tooltip .tooltip-status {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.iso-tooltip .tooltip-task {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  padding-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
-}
-
-/* ── 반응형: 작은 화면에서 스케일 다운 ── */
-@media (max-width: 900px) {
-  :root {
-    --iso-tile-w: 48px;
-    --iso-tile-h: 24px;
-    --iso-wall-h: 60px;
-  }
+.name-tag-bg {
+  fill: rgba(0,0,0,0.7);
+  backdrop-filter: blur(2px);
 }

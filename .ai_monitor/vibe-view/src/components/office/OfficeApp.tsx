@@ -276,12 +276,14 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                       const isActive = selectedDesk === flatIdx;
                       const cliColor = agent.cli === 'claude' ? '#a78bfa' : agent.cli === 'gemini' ? '#34d399' : '#22d3ee';
                       const busy = presence?.status === 'running' || presence?.status === 'started';
+                      const isCeoAgent = (agent.role || '').toLowerCase() === 'ceo';
+                      const isActiveFinal = isCeoAgent ? selectedDesk === -1 : isActive;
                       return (
                         <button
                           key={agent.id}
-                          onClick={() => handleDeskSelect(flatIdx)}
+                          onClick={() => handleDeskSelect(isCeoAgent ? -1 : flatIdx)}
                           className={`group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-all ${
-                            isActive
+                            isActiveFinal
                               ? 'bg-white/[0.06] border border-cyan-500/25'
                               : 'border border-transparent hover:bg-white/[0.03]'
                           }`}
@@ -298,7 +300,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className={`truncate text-[9px] font-bold ${isActive ? 'text-white/85' : 'text-white/50'}`}>
+                            <div className={`truncate text-[9px] font-bold ${isActiveFinal ? 'text-white/85' : 'text-white/50'}`}>
                               {agent.name}
                             </div>
                             <div className="truncate text-[7px] text-white/20">
