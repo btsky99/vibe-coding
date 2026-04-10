@@ -31,7 +31,10 @@ from src.zettelkasten import (
 
 # ── 기본 설정 ──────────────────────────────────────────────────────────────
 
-DEFAULT_VAULT_DIR = _PROJECT_ROOT / '.zettel-vault'
+_appdata = os.environ.get('APPDATA') or str(Path.home())
+_default_global_vault = Path(_appdata) / 'VibeCoding' / 'vault' if os.name == 'nt' \
+    else Path.home() / '.vibe-coding' / 'vault'
+DEFAULT_VAULT_DIR = Path(os.environ.get('VIBE_VAULT_DIR', str(_default_global_vault)))
 DATA_DIR = _PROJECT_ROOT / '.ai_monitor' / 'data'
 
 

@@ -40,9 +40,12 @@ from src.zettelkasten import create_note, auto_link, find_similar
 
 # ── 설정 ──────────────────────────────────────────────────────────────────
 
-DEFAULT_VAULT_DIR = _PROJECT_ROOT / '.zettel-vault'
-GDRIVE_VAULT_DIR = Path('I:/내 드라이브/obsidian/hive-zettel')
-DEFAULT_PROJECT = os.environ.get('VIBE_PROJECT', 'D--vibe-coding')
+_appdata = os.environ.get('APPDATA') or str(Path.home())
+_default_global_vault = Path(_appdata) / 'VibeCoding' / 'vault' if os.name == 'nt'     else Path.home() / '.vibe-coding' / 'vault'
+DEFAULT_VAULT_DIR = Path(os.environ.get('VIBE_VAULT_DIR', str(_default_global_vault)))
+_gdrive_env = os.environ.get('VIBE_GDRIVE_VAULT', '')
+GDRIVE_VAULT_DIR = Path(_gdrive_env) if _gdrive_env else None
+DEFAULT_PROJECT = os.environ.get('VIBE_PROJECT', _PROJECT_ROOT.name)
 
 # 커밋 타입 → 노트 유형 매핑
 _COMMIT_TYPE_MAP = {
@@ -287,10 +290,10 @@ def _sync_vault():
     """Obsidian vault에 동기화 (로컬 + Google Drive, 에러 무시)."""
     try:
         from zettel_sync import export_to_vault
-        export_to_vault(DEFAULT_VAULT_DIR)
+        export_to_vault(DEFAULT_VAULT_DIR, project=DEFAULT_PROJECT)
         # Google Drive vault도 동기화 (존재할 때만)
-        if GDRIVE_VAULT_DIR.exists():
-            export_to_vault(GDRIVE_VAULT_DIR)
+        if GDRIVE_VAULT_DIR and GDRIVE_VAULT_DIR.exists():
+            export_to_vault(GDRIVE_VAULT_DIR, project=DEFAULT_PROJECT)
     except Exception as e:
         print(f"[zettel_capture] vault 동기화 실패 (무시): {e}")
 

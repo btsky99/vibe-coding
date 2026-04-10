@@ -1,4 +1,4 @@
-﻿"""
+"""
 FILE: .ai_monitor/server.py
 DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
 
@@ -1017,6 +1017,12 @@ if getattr(sys, 'frozen', False):
 else:
     DATA_DIR = BASE_DIR / "data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# 전역 Obsidian Vault — 모든 프로젝트가 공유하는 단일 vault
+if os.name == 'nt':
+    GLOBAL_VAULT_DIR = Path(os.getenv('APPDATA', str(Path.home()))) / 'VibeCoding' / 'vault'
+else:
+    GLOBAL_VAULT_DIR = Path.home() / '.vibe-coding' / 'vault'
 
 # 스크립트 디렉토리
 _scripts_candidate = PROJECT_ROOT / 'scripts'
@@ -2461,6 +2467,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                         config = json.load(f)
                 except: pass
+            config.setdefault('vault_dir', str(GLOBAL_VAULT_DIR))
             self.wfile.write(json.dumps(config).encode('utf-8'))
         elif parsed_path.path == '/api/tool-status':
             self.send_response(200)
@@ -5620,22 +5627,50 @@ def main():
             _spec = _ilu.spec_from_file_location('zettel_sync', str(_sync_script))
             _mod = _ilu.module_from_spec(_spec)
             _spec.loader.exec_module(_mod)
-            _vault = PROJECT_ROOT / '.zettel-vault'
-            _vault.mkdir(exist_ok=True)
-            print(f"[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — 60초 주기, 양방향")
-            # Google Drive vault도 동기화 (존재할 때만)
-            _gdrive_vault = Path('I:/내 드라이브/obsidian/hive-zettel')
+
+            # 전역 vault 사용 — 모든 프로젝트가 한 vault 공유
+            _vault = GLOBAL_VAULT_DIR
+            _vault.mkdir(parents=True, exist_ok=True)
+
+            # 기존 .zettel-vault 마이그레이션 (최초 1회)
+            import shutil as _shutil
+            _old_vault = _current_project_root() / '.zettel-vault'
+            if _old_vault.exists() and not (_vault / '_migrated').exists():
+                try:
+                    _shutil.copytree(str(_old_vault), str(_vault), dirs_exist_ok=True)
+                    (_vault / '_migrated').touch()
+                    print(f'[zettel_sync] 기존 vault 마이그레이션 완료: {_old_vault} -> {_vault}')
+                except Exception as _me:
+                    print(f'[zettel_sync] 마이그레이션 오류 (무시): {_me}')
+
+            # 현재 활성 프로젝트명
+            _proj_name = _current_project_root().name
+            print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project={_proj_name}, 60초 양방향')
+
+            # Google Drive vault — config.json에서 경로 읽기
+            def _get_gdrive_vault():
+                try:
+                    if CONFIG_FILE.exists():
+                        _cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+                        _gd = _cfg.get('gdrive_vault_path', '')
+                        if _gd:
+                            return Path(_gd)
+                except Exception:
+                    pass
+                return None
+
             def _sync_with_gdrive():
                 while True:
                     try:
-                        if _gdrive_vault.exists():
-                            _mod.export_to_vault(_gdrive_vault, project='')
+                        _gdrive_vault = _get_gdrive_vault()
+                        if _gdrive_vault and _gdrive_vault.exists():
+                            _mod.export_to_vault(_gdrive_vault, project=_proj_name)
                     except Exception as _ge:
-                        print(f"[zettel_sync] Google Drive 동기화 오류: {_ge}")
-                    time.sleep(120)  # 2분 간격 (Drive는 느리므로)
+                        print(f'[zettel_sync] Google Drive 동기화 오류: {_ge}')
+                    time.sleep(120)
             threading.Thread(target=_sync_with_gdrive, daemon=True,
                              name='ZettelGDrive').start()
-            _mod.watch_and_sync(_vault, project='', interval=60, bidirectional=True)
+            _mod.watch_and_sync(_vault, project=_proj_name, interval=60, bidirectional=True)
         except Exception as e:
             print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
 
