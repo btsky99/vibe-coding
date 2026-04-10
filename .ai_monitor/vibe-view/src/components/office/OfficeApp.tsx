@@ -146,6 +146,11 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
   const handleDeskSelect = (slotId: number) => {
     setSelectedDesk(slotId);
+    if (slotId === -1) {
+      /* CEO 특수값 */
+      setSelectedZone('user');
+      return;
+    }
     const presence = office.presences.find((item) => item.slotId === slotId);
     if (presence) {
       setSelectedZone(presence.zone);
@@ -387,8 +392,10 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
         <aside className="flex w-[380px] shrink-0 flex-col border-l border-white/[0.04] bg-[#0a0f18]">
           <OfficeChatPanel
             messages={vibe.messages}
-            selectedAgent={activeSlots[selectedDesk]?.cli || 'claude'}
-            selectedSlotName={activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`}
+            selectedAgent={selectedDesk === -1 ? 'ceo' : (activeSlots[selectedDesk]?.cli || 'claude')}
+            selectedSlotName={selectedDesk === -1
+              ? (activeSlots.find(s => s.role?.toLowerCase() === 'ceo')?.name ?? 'CEO')
+              : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
             allSlotNames={activeSlots.map(s => s.name)}
             allSlotClis={activeSlots.map(s => s.cli)}
             onSendMessage={(text, target) => {

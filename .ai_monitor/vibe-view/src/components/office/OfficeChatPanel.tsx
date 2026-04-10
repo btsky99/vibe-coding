@@ -17,6 +17,7 @@ const AGENT_COLORS: Record<string, string> = {
   claude: '#a78bfa',
   gemini: '#34d399',
   codex: '#22d3ee',
+  ceo: '#f59e0b',
 };
 
 type ChatMode = 'direct' | 'meeting' | 'broadcast';
@@ -64,7 +65,14 @@ export default function OfficeChatPanel({
   // 모드별 메시지 필터
   const filteredMessages = allMessages.filter(m => {
     if (mode === 'direct') {
-      return m.from?.toLowerCase().includes(selectedAgent) || m.to?.toLowerCase().includes(selectedAgent);
+      const agent = selectedAgent.toLowerCase();
+      const from = (m.from || '').toLowerCase();
+      const to = (m.to || '').toLowerCase();
+      /* CEO 채팅: from/to가 'ceo' 또는 'user'/'operator' 포함 */
+      if (agent === 'ceo') {
+        return from === 'ceo' || to === 'ceo' || from === 'user' || to === 'user';
+      }
+      return from.includes(agent) || to.includes(agent);
     }
     if (mode === 'meeting') {
       return m.to === 'all' || m.to === 'meeting' || (m.from && m.to);

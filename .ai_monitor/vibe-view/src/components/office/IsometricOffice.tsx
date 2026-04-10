@@ -292,7 +292,7 @@ export default function IsometricOffice({
   zones: _zones,
   events: _events,
   selectedDesk: _selectedDesk,
-  onDeskClick: _onDeskClick,
+  onDeskClick,
   onZoneClick: _onZoneClick,
   speechBubbles: _speechBubbles,
   slotNames,
@@ -484,7 +484,10 @@ export default function IsometricOffice({
                 agentType="ceo"
                 status={ceoPresence ? toAgentStatus(ceoPresence.status) : 'idle'}
                 selected={selectedAgent === 'ceo'}
-                onClick={() => setSelectedAgent(a => a === 'ceo' ? null : 'ceo')}
+                onClick={() => {
+                  setSelectedAgent(a => a === 'ceo' ? null : 'ceo');
+                  onDeskClick(-1); /* -1 = CEO 특수값 */
+                }}
               />
             );
           })()}
@@ -502,7 +505,10 @@ export default function IsometricOffice({
                 agentType={detectAgentType(p.agent || p.terminalId)}
                 status={toAgentStatus(p.status)}
                 selected={selectedAgent === p.terminalId}
-                onClick={() => setSelectedAgent(a => a === p.terminalId ? null : p.terminalId)}
+                onClick={() => {
+                  setSelectedAgent(a => a === p.terminalId ? null : p.terminalId);
+                  onDeskClick(p.slotId);
+                }}
               />
             );
           })}
@@ -521,7 +527,10 @@ export default function IsometricOffice({
                 agentType={detectAgentType(p.agent || p.terminalId)}
                 status="meeting"
                 selected={selectedAgent === p.terminalId}
-                onClick={() => setSelectedAgent(a => a === p.terminalId ? null : p.terminalId)}
+                onClick={() => {
+                  setSelectedAgent(a => a === p.terminalId ? null : p.terminalId);
+                  onDeskClick(p.slotId);
+                }}
               />
             );
           })}
