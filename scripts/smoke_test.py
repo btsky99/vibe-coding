@@ -101,34 +101,43 @@ def run_smoke_test(exe_path: Path) -> bool:
     env['VIBE_SMOKE_TEST'] = '1'  # 서버에서 smoke test 모드 감지용
     env['VIBE_PORT_BASE'] = str(SMOKE_PORT_BASE)  # 격리된 포트 대역 강제
 
+    # GUI EXE(runw)는 stdout이 없으므로 PIPE 대신 DEVNULL 사용 — 블로킹 방지
     proc = subprocess.Popen(
         [str(exe_path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         env=env,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
     )
 
     port = None
     try:
-        # stdout에서 포트 파싱 시도
-        port = find_server_port(proc, timeout=STARTUP_TIMEOUT)
-
-        if port is None:
-            # stdout 파싱 실패 시 포트 스캔 — 반드시 격리 대역(9100~)만 스캔
-            # 9000~9050은 개발 서버 대역이므로 절대 건드리지 않음
-            print('[smoke] stdout에서 포트 감지 실패 — 격리 포트 대역 스캔 시도')
-            for p in range(SMOKE_PORT_BASE, SMOKE_PORT_BASE + 50):
-                try:
-                    resp = urlopen(f'http://127.0.0.1:{p}/api/config', timeout=1)
-                    if resp.status == 200:
-                        port = p
-                        break
-                except (URLError, OSError):
-                    continue
+        # 격리 포트 대역(9100~)에서 서버 기동 대기 — socket으로 빠른 스캔
+        print(f'[smoke] 격리 포트 대역 {SMOKE_PORT_BASE}~{SMOKE_PORT_BASE+20} 스캔 중...')
+        import socket
+        _scan_start = time.time()
+        while time.time() - _scan_start < STARTUP_TIMEOUT:
+            if proc.poll() is not None:
+                print(f'[smoke] FAIL — EXE 프로세스가 조기 종료됨 (exit code: {proc.returncode})')
+                return False
+            for p in range(SMOKE_PORT_BASE, SMOKE_PORT_BASE + 20):
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.1)
+                if s.connect_ex(('127.0.0.1', p)) == 0:
+                    s.close()
+                    # 소켓 열림 확인 후 HTTP API 응답까지 확인
+                    try:
+                        resp = urlopen(f'http://127.0.0.1:{p}/api/config', timeout=2)
+                        if resp.status == 200:
+                            port = p
+                            break
+                    except (URLError, OSError):
+                        continue
+                else:
+                    s.close()
+            if port:
+                break
+            time.sleep(HEALTH_CHECK_INTERVAL)
 
         if port is None:
             print('[smoke] FAIL — 서버 기동 실패 (포트 감지 불가)')
