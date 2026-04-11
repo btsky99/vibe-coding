@@ -95,32 +95,28 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       .catch(() => {});
   }, []);
 
-  const handleChangeProject = useCallback(() => {
-    // PyWebView 파일 다이얼로그 호출
-    const pywebview = (window as any).pywebview;
-    if (pywebview?.api?.select_folder) {
-      pywebview.api.select_folder().then((folder: string | null) => {
-        if (folder) {
-          setProjectPath(folder);
-          // 서버에 last_path 업데이트
-          fetch('/api/config/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ last_path: folder }),
-          }).catch(() => {});
-        }
-      });
-    } else {
-      // PyWebView 없으면 prompt 폴백
-      const folder = prompt('프로젝트 폴더 경로:', projectPath);
-      if (folder) {
-        setProjectPath(folder);
-        fetch('/api/config/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ last_path: folder }),
-        }).catch(() => {});
+  const handleChangeProject = useCallback(async () => {
+    let selectedPath: string | null = null;
+    try {
+      const pywebview = (window as any).pywebview;
+      if (pywebview?.api?.select_folder) {
+        const data = await pywebview.api.select_folder();
+        if (data.status === 'success' && data.path) selectedPath = data.path;
+      } else {
+        const res = await fetch('/api/select-folder', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success' && data.path) selectedPath = data.path;
       }
+    } catch {
+      selectedPath = prompt('프로젝트 폴더 경로:', projectPath);
+    }
+    if (selectedPath) {
+      setProjectPath(selectedPath);
+      fetch('/api/config/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ last_path: selectedPath }),
+      }).catch(() => {});
     }
   }, [projectPath]);
 

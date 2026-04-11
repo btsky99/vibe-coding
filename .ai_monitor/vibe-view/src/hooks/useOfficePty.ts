@@ -49,16 +49,21 @@ function isNoiseLine(text: string): boolean {
   if (/^[✢✶✻✽*●◐◑◒◓·•▸►]?\s*[A-Z][a-zéè]+ing…/i.test(t)) return true;
   // 장식 문자 + 짧은 텍스트 (스피너 잔여물)
   if (/^[✢✶✻✽*●◐◑◒◓·•▪▸►▹▻→←↑↓]\s*\S+…?\s*$/.test(t)) return true;
-  // 타이머 "(30s)" 등
-  if (/^\(\d+s\)$/.test(t)) return true;
+  // 장식 문자로 시작 + 상태 텍스트 (●Ran 2 stop hooks, ✢ · 30s 등)
+  if (/^[✢✶✻✽*●◐◑◒◓⎿]/.test(t)) return true;
+  // 타이머/토큰 카운터 (30s, ↓10 tokens 등)
+  if (/^\(?\d+s\)?$/.test(t) || /↓\d+\s*tokens/i.test(t)) return true;
+  // 괄호로 시작하는 상태 메시지 ((running stop hooks… 0/2) 등)
+  if (/^\(running\s|^\(waiting\s/i.test(t)) return true;
   // 박스 드로잉 + 구분선
   if (/^[╭╰│├┌└┃┣╮╯┐┘┫─━═]/.test(t)) return true;
   // ❯ 프롬프트 (에코된 입력 포함)
   if (/^❯/.test(t)) return true;
-  // Claude Code 버전 배너 + UI 하단바
-  if (/ClaudeCode|Opus.*context|Claude Max|▐▛|▝▜|▘▘▝|⏵⏵|bypass.*permission|alt\+m.*cycle|esc.*interrupt/i.test(t)) return true;
-  // 상태 메시지
-  if (/^(Thinking|Working|Loading|Searching|Reading|Writing|Review previous session|Resuming|Ran \d+ stop hooks|Stop hook|running stop hooks)\b/i.test(t)) return true;
+  // Claude Code 버전 배너 + UI 하단바 + 팁
+  if (/ClaudeCode|Opus.*context|Claude Max|▐▛|▝▜|▘▘▝|⏵⏵|bypass.*permission|alt\+m.*cycle|esc.*interrupt|Tip:\s*Run\s*\//i.test(t)) return true;
+  // stop hooks, 상태 메시지 (앞에 장식 문자 유무 상관없이)
+  if (/Ran \d+ stop hooks|stop hook|running stop hooks/i.test(t)) return true;
+  if (/^(Thinking|Working|Loading|Searching|Reading|Writing|Review previous session|Resuming)\b/i.test(t)) return true;
   // 빈 줄, 점 반복, ANSI 잔여물, 단순 스피너
   if (/^\s*$/.test(t) || /^\.{2,}$/.test(t) || /^\d+;\d+[Hf]?$/.test(t) || /^[|/\\-] /.test(t)) return true;
 
