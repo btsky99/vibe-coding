@@ -94,9 +94,12 @@ def run_smoke_test(exe_path: Path) -> bool:
     print(f'[smoke] 서버 기동 중... (최대 {STARTUP_TIMEOUT}초 대기)')
 
     # console 모드가 아닌 EXE는 stdout이 없으므로 직접 포트 스캔
-    # 개발 서버가 9000을 쓰고 있을 수 있으니 9010~9050 범위도 확인
+    # ── 핵심: 개발 서버(9000~9050)와 완전 격리된 포트 대역 사용 ──
+    # 개발 서버와 EXE가 같은 포트/DB를 쓰면 충돌 → 개발 터미널 크래시 위험
+    SMOKE_PORT_BASE = 9100
     env = os.environ.copy()
     env['VIBE_SMOKE_TEST'] = '1'  # 서버에서 smoke test 모드 감지용
+    env['VIBE_PORT_BASE'] = str(SMOKE_PORT_BASE)  # 격리된 포트 대역 강제
 
     proc = subprocess.Popen(
         [str(exe_path)],
@@ -115,11 +118,12 @@ def run_smoke_test(exe_path: Path) -> bool:
         port = find_server_port(proc, timeout=STARTUP_TIMEOUT)
 
         if port is None:
-            # stdout 파싱 실패 시 포트 스캔
-            print('[smoke] stdout에서 포트 감지 실패 — 포트 스캔 시도')
-            for p in range(9000, 9050):
+            # stdout 파싱 실패 시 포트 스캔 — 반드시 격리 대역(9100~)만 스캔
+            # 9000~9050은 개발 서버 대역이므로 절대 건드리지 않음
+            print('[smoke] stdout에서 포트 감지 실패 — 격리 포트 대역 스캔 시도')
+            for p in range(SMOKE_PORT_BASE, SMOKE_PORT_BASE + 50):
                 try:
-                    resp = urlopen(f'http://127.0.0.1:{p}/api/health', timeout=1)
+                    resp = urlopen(f'http://127.0.0.1:{p}/api/config', timeout=1)
                     if resp.status == 200:
                         port = p
                         break
@@ -138,10 +142,18 @@ def run_smoke_test(exe_path: Path) -> bool:
             return False
 
         # ── API 테스트 ──
+        # 기본 서버 + DB 연동 + 하이브 마인드 + 제텔카스텐 통합 검증
         tests = [
+            # 기본 서버
             ('/api/config', None),
             ('/api/agents', None),
+            # DB 연동 (PostgreSQL)
             ('/api/hive/health', None),
+            # 하이브 마인드
+            ('/api/memory', None),
+            ('/api/tasks', None),
+            # 제텔카스텐 (Obsidian vault 연동)
+            ('/api/zettel/notes', None),
         ]
 
         passed = 0

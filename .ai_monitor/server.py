@@ -5076,8 +5076,9 @@ def main():
     print(f"[*] 인스턴스 락 확보 (포트 {_LOCK_PORT})")
 
     # ── 포트 확정: HTTP 9000, WS 9001 고정 + 충돌 시 대체 탐색 ─────────────────
+    # VIBE_PORT_BASE 환경변수가 있으면 해당 포트부터 시작 (smoke test 격리용)
     # 단일 인스턴스이므로 슬롯 기반 분배 불필요. 고정 포트 우선 시도.
-    _preferred_http = 9000
+    _preferred_http = int(os.environ.get('VIBE_PORT_BASE', '9000'))
     _http_ok = False
     try:
         _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
