@@ -2257,14 +2257,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             with _SSE_LOCK:
                 THOUGHT_CLIENTS.add(self)
             try:
-                # SSE 연결 타임아웃 완화 (60초)
-                self.connection.settimeout(60.0)
+                self.connection.settimeout(None)  # 타임아웃 제거 — 하트비트로 연결 관리
                 while True:
-                    time.sleep(30) # 하트비트 주기를 30초로 완화
+                    time.sleep(30)
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
-            except Exception as e:
-                pass  # SSE thought 클라이언트 연결 끊김
+            except Exception:
+                pass  # SSE thought 클라이언트 연결 끊김 — finally에서 정리
             finally:
                 with _SSE_LOCK:
                     THOUGHT_CLIENTS.discard(self)
@@ -3710,7 +3709,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                     clients_snapshot = list(THOUGHT_CLIENTS)
                 for client in clients_snapshot:
                     try:
-                        client.connection.settimeout(1.0)
                         client.wfile.write(msg.encode('utf-8'))
                         client.wfile.flush()
                     except Exception:
@@ -4388,9 +4386,9 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 # PTY inject: to 대상 터미널에 메시지 전달
                 # CEO(사람)는 PTY 없으므로 스킵, 나머지 에이전트는 PTY write
-                # office_chat 타입은 오피스 UI 전용 — PTY inject 금지
+                # office_chat도 에이전트에게 전달 (양방향 통신)
                 _to = msg['to'].lower()
-                if msg['type'] != 'office_chat' and _to not in ('ceo', 'all', 'broadcast', ''):
+                if _to not in ('ceo', 'all', 'broadcast', ''):
                     try:
                         import urllib.request as _ureq
                         # /api/pty/sessions 는 {"T1": {"agent":"claude","running":true,...}, ...} 형식 반환

@@ -329,8 +329,8 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
   };
 
   // ── 현재 CLI/역할 정보 ──
-  const currentCli = CLI_OPTIONS.find(c => c.key === cli)!;
-  const currentRole = ROLE_OPTIONS.find(r => r.key === role)!;
+  const currentCli = CLI_OPTIONS.find(c => c.key === cli) ?? CLI_OPTIONS[0];
+  const currentRole = ROLE_OPTIONS.find(r => r.key === role) ?? ROLE_OPTIONS[0];
 
   return (
     <div className="flex-1 flex flex-col bg-[#1e1e1e] h-full overflow-hidden">

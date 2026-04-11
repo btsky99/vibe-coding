@@ -841,10 +841,10 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
   const [codexPolicySaving, setCodexPolicySaving] = useState(false);
   const [codexPolicyNotice, setCodexPolicyNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // ── 분석/수정 파일 추적 (상황판 탭에서 표시) ──────────────────────────────
+  // ── 분석/수정 파일 추적 (향후 상황판 탭에서 표시 예정) ──────────────────────
   // SSE 출력에서 '● Read(file)' → 분석, '● Edit(file)' → 수정 으로 파싱
-  const [_analyzedFiles, setAnalyzedFiles] = useState<string[]>([]);
-  const [_modifiedFiles, setModifiedFiles] = useState<string[]>([]);
+  const analyzedFilesRef = useRef<string[]>([]);
+  const modifiedFilesRef = useRef<string[]>([]);
 
   // ── 하이브 활동 탭 데이터 — /api/hive/activity 3초 폴링 ───────────────────
   // 하이브 메모리 읽기/쓰기, 오케스트레이션, 메시지 수신 이벤트를 시각화
@@ -1430,8 +1430,8 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
           setWfStage('analyzing');
           wfCurrentStageRef.current = 'analyzing';
           setWfLoop(0);
-          setAnalyzedFiles([]);
-          setModifiedFiles([]);
+          analyzedFilesRef.current = [];
+          modifiedFilesRef.current = [];
 
           // 터미널: 구분선 추가
           setOutputLines(prev => [...prev, { text: `── 실행 시작 (ID: ${data.run_id}) ──`, ts, type: 'started' }]);
@@ -1485,13 +1485,13 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
               ? line.match(/(?:Read|Glob|Grep|Search)\s*\(([^)]{3,80})\)/i) : null;
             if (readMatch) {
               const fname = basename(readMatch[1]);
-              setAnalyzedFiles(prev => prev.includes(fname) ? prev : [...prev.slice(-9), fname]);
+              if (!analyzedFilesRef.current.includes(fname)) analyzedFilesRef.current = [...analyzedFilesRef.current.slice(-9), fname];
             }
             const editMatch = /Edit|Write|Create/i.test(line)
               ? line.match(/(?:Edit|Write|Create)\s*\(([^)]{3,80})\)/i) : null;
             if (editMatch) {
               const fname = basename(editMatch[1]);
-              setModifiedFiles(prev => prev.includes(fname) ? prev : [...prev.slice(-9), fname]);
+              if (!modifiedFilesRef.current.includes(fname)) modifiedFilesRef.current = [...modifiedFilesRef.current.slice(-9), fname];
             }
           }
 
@@ -1688,8 +1688,8 @@ export default function AgentPanel({ onStatusChange, onOpenFilePath }: AgentPane
     setWfStage('analyzing');
     wfCurrentStageRef.current = 'analyzing';
     setWfLoop(0);
-    setAnalyzedFiles([]);
-    setModifiedFiles([]);
+    analyzedFilesRef.current = [];
+    modifiedFilesRef.current = [];
 
     // 30초 내 SSE started 이벤트 없으면 자동 오류 처리
     // 출력 유무와 무관하게 항상 타임아웃 메시지를 추가해야 "중간에 멈춘 것처럼 보이는" 버그를 방지

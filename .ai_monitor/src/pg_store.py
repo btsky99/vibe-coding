@@ -116,8 +116,9 @@ _pg_conn_lock = threading.Lock()
 
 
 def _get_pg_conn():
-    """psycopg2 커넥션을 반환합니다. 끊겼으면 재연결합니다."""
-    global _pg_conn, _HAS_PSYCOPG2  # [2026-03-30 Claude] _HAS_PSYCOPG2도 global 선언 — 폴백 전환 버그 수정
+    """psycopg2 커넥션을 반환합니다. 끊겼으면 재연결합니다.
+    주의: 반드시 _pg_conn_lock 안에서 호출할 것."""
+    global _pg_conn, _HAS_PSYCOPG2
     if _pg_conn is not None:
         try:
             with _pg_conn.cursor() as cur:
@@ -130,20 +131,23 @@ def _get_pg_conn():
                 pass
             _pg_conn = None
     try:
-        _pg_conn = psycopg2.connect(
+        conn = psycopg2.connect(
             host='127.0.0.1',
             port=int(PG_PORT),
             user=PG_USER,
             dbname=PG_DB,
-            options='-c lc_messages=C',  # 에러 메시지 영문 강제 (CP949 디코딩 방지)
+            options='-c lc_messages=C',
+            connect_timeout=5,
         )
-        _pg_conn.autocommit = True
+        conn.autocommit = True
+        _pg_conn = conn
     except UnicodeDecodeError:
-        # PostgreSQL이 CP949/EUC-KR 에러 메시지를 반환할 때 psycopg2가 UTF-8 디코딩 실패
-        # lc_messages=C 옵션이 적용되기 전에 연결 자체가 실패하는 경우 (DB 없음 등)
-        # → psql subprocess 폴백으로 전환
         print("[pg_store] psycopg2 UnicodeDecodeError — CP949 에러 메시지 감지. subprocess 폴백 사용.")
         _HAS_PSYCOPG2 = False
+        _pg_conn = None
+        return None
+    except Exception as e:
+        print(f"[pg_store] psycopg2 연결 실패: {e}")
         _pg_conn = None
         return None
     return _pg_conn
@@ -261,6 +265,9 @@ def query_rows(sql: str, timeout: int = 15) -> list[dict]:
                 return [dict(row) for row in cur.fetchall()]
         except Exception as e:
             print(f"[pg_store] query_rows 오류 (psycopg2): {e}")
+            # 커넥션 에러 시 다음 호출에서 재연결하도록 리셋
+            with _pg_conn_lock:
+                _pg_conn = None
             return []
     # psycopg2 미설치 시 psql.exe 폴백
     ok, output = _run_psql(sql, csv_output=True, timeout=timeout)
@@ -287,10 +294,12 @@ def execute(sql: str, timeout: int = 15) -> bool:
             except Exception as e:
                 err_msg = str(e)
                 if 'tuple concurrently updated' in err_msg and attempt < 2:
-                    import time
-                    time.sleep(0.05 * (attempt + 1))  # 50~100ms 대기 후 재시도
+                    import time as _t
+                    _t.sleep(0.05 * (attempt + 1))
                     continue
                 print(f"[pg_store] execute 오류 (psycopg2): {e}")
+                with _pg_conn_lock:
+                    _pg_conn = None
                 return False
     ok, _ = _run_psql(sql, csv_output=False, timeout=timeout)
     return ok
@@ -756,6 +765,7 @@ def execute_raw(sql: str, timeout: int = 15) -> bool:
                     time.sleep(0.05 * (attempt + 1))  # 50~100ms 대기 후 재시도
                     continue
                 print(f"[pg_store] execute_raw 오류 (psycopg2): {e}")
+                _pg_conn = None
                 break
         # psycopg2 실패 시 psql.exe 폴백 시도
     ok, _ = _run_psql(sql, csv_output=False, timeout=timeout)

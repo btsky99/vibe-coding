@@ -34,8 +34,8 @@ def _read_body(handler) -> dict:
         if content_length > 0:
             raw = handler.rfile.read(content_length).decode('utf-8')
             return json.loads(raw)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[experience_api] JSON 파싱 실패: {e}")
     return {}
 
 

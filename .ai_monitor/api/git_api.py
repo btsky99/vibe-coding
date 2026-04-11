@@ -114,7 +114,8 @@ def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
                 if len(parts) == 4:
                     commits.append({'hash': parts[0], 'message': parts[1], 'author': parts[2], 'date': parts[3]})
             handler.wfile.write(json.dumps(commits, ensure_ascii=False).encode('utf-8'))
-        except Exception:
+        except Exception as e:
+            print(f"[git_api] git log 조회 실패: {e}")
             handler.wfile.write(json.dumps([]).encode('utf-8'))
         return True
 

@@ -52,15 +52,12 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
-  // 컴포넌트 마운트 시 초기 로드 + 5초 폴링 시작 (공유 메모리는 변경 빈도 낮음)
+  // 컴포넌트 마운트 시 초기 로드 + 5초 폴링 (검색어 변경 시 interval 재시작 = 즉시 재검색)
   useEffect(() => {
-    fetchMemory();
+    fetchMemory(memSearch);
     const interval = setInterval(() => fetchMemory(memSearch), 5000);
     return () => clearInterval(interval);
   }, [memSearch]);
-
-  // 검색어 변경 시 즉시 재검색 (디바운스 없이 즉시 — 서버 부하 낮음)
-  useEffect(() => { fetchMemory(memSearch); }, [memSearch]);
 
   // ─── DB 정보 상태 ────────────────────────────────────────────────────────
   const [dbInfo, setDbInfo] = useState<{ db_path?: string; is_local?: boolean; count?: number } | null>(null);
