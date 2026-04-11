@@ -29,6 +29,7 @@ interface OfficeChatPanelProps {
   allSlotNames: string[];
   allSlotClis: string[];
   ceoCli?: string; // CEO 슬롯의 실제 CLI (예: 'claude') — CEO 메시지 필터링용
+  sendError?: string | null;
   onSendMessage?: (text: string, target: string) => void;
 }
 
@@ -45,6 +46,7 @@ export default function OfficeChatPanel({
   allSlotNames,
   allSlotClis,
   ceoCli,
+  sendError,
   onSendMessage,
 }: OfficeChatPanelProps) {
   const [mode, setMode] = useState<ChatMode>('direct');
@@ -209,6 +211,13 @@ export default function OfficeChatPanel({
           })
         )}
       </div>
+
+      {/* 전송 에러 배너 */}
+      {sendError && (
+        <div className="shrink-0 border-t border-red-500/20 bg-red-500/8 px-4 py-2 text-[10px] text-red-300">
+          {sendError}
+        </div>
+      )}
 
       {/* 입력창 */}
       <div className="shrink-0 border-t border-white/[0.06] bg-[#080d15] p-3">

@@ -1025,8 +1025,10 @@ if os.name == 'nt':
 else:
     GLOBAL_VAULT_DIR = Path.home() / '.vibe-coding' / 'vault'
 
-# 스크립트 디렉토리
+# 스크립트 디렉토리 — 개발: PROJECT_ROOT/scripts, 배포(frozen): BASE_DIR/scripts
 _scripts_candidate = PROJECT_ROOT / 'scripts'
+if not _scripts_candidate.exists():
+    _scripts_candidate = BASE_DIR / 'scripts'
 SCRIPTS_DIR = _scripts_candidate if _scripts_candidate.exists() else None
 # Claude Code 프로젝트 디렉터리 명명 규칙(: 제거, /·\ → --) 과 동일하게 인코딩
 _proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
@@ -4413,7 +4415,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                                 print(f'[msg→PTY] {msg["from"]} → {_slot_id}({_agent}) : {content_to_send[:40]}')
                                 break
                     except Exception as _e:
-                        print(f'[msg inject error] {_e}')
+                        print(f'[msg inject error] to={_to} err={_e}')
 
                 # SSE 스트림 (session_logs 테이블) 에도 알림 기록하여 로그 뷰에 반영
                 try:
@@ -5654,7 +5656,7 @@ def main():
         """PostgreSQL zettel_notes ↔ Obsidian vault 양방향 동기화 데몬.
         [v3.7.179] 서버 시작 시 자동 실행 — 이전에는 수동 실행만 가능했음."""
         try:
-            _sync_dir = SCRIPTS_DIR or (BASE_DIR.parent / 'scripts')
+            _sync_dir = SCRIPTS_DIR or (BASE_DIR / 'scripts')
             _sync_script = _sync_dir / 'zettel_sync.py'
             if not _sync_script.exists():
                 return

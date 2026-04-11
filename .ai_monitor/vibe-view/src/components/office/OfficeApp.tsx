@@ -78,6 +78,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   const [newSlotYolo, setNewSlotYolo] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   // 슬롯 편집 모달
+  const [sendError, setSendError] = useState<string | null>(null);
   const [editSlotId, setEditSlotId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editCli, setEditCli] = useState<AgentCli>('claude');
@@ -90,7 +91,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     fetch('/api/experience/stats')
       .then(r => r.json())
       .then(data => { if (data.stats) setAgentStats(data.stats); })
-      .catch(() => {});
+      .catch(err => console.warn('[OfficeApp] 에이전트 스탯 조회 실패:', err));
   }, []);
   useEffect(() => {
     fetchStats();
@@ -473,16 +474,30 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
             allSlotNames={activeSlots.map(s => s.name)}
             allSlotClis={activeSlots.map(s => s.cli)}
             ceoCli={activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli}
+            sendError={sendError}
             onSendMessage={(text, target) => {
               // CEO(role=ceo)는 PTY가 없으므로 실제 CLI로 변환하여 inject
-              const sendTo = target === 'ceo'
-                ? (activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli || 'claude')
-                : target;
+              let sendTo = target;
+              if (target === 'ceo') {
+                const ceoSlot = activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo');
+                if (!ceoSlot) {
+                  console.warn('[OfficeChatPanel] CEO 슬롯을 찾을 수 없음 — claude로 폴백');
+                  setSendError('CEO 슬롯이 설정되지 않았어. 프로필에서 CEO 역할을 지정해봐.');
+                }
+                sendTo = ceoSlot?.cli || 'claude';
+              }
+              setSendError(null);
               fetch('/api/message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ from: 'user', to: sendTo, type: 'office_chat', content: text }),
-              }).catch(err => console.error('[OfficeChatPanel] send error:', err));
+              })
+                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+                .then(data => { if (data.status === 'error') setSendError(data.message || '전송 실패'); })
+                .catch(err => {
+                  console.error('[OfficeChatPanel] send error:', err);
+                  setSendError('메시지 전송 실패 — 서버 연결을 확인해봐');
+                });
             }}
           />
         </aside>

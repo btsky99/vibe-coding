@@ -59,8 +59,8 @@ def _start_notify_listener():
             # psycopg2 autocommit 모드에서만 LISTEN이 즉시 작동
             try:
                 conn.set_isolation_level(0)  # ISOLATION_LEVEL_AUTOCOMMIT
-            except Exception:
-                pass
+            except Exception as e:
+                print(f'[office_api] autocommit 설정 실패: {e}')
             with conn.cursor() as cur:
                 cur.execute("LISTEN office_profiles_changed;")
             print('[office_api] LISTEN office_profiles_changed 시작')
@@ -91,7 +91,10 @@ def _broadcast(payload: str):
         for q in _SSE_CLIENTS:
             try:
                 q.put_nowait(payload)
-            except Exception:
+            except queue.Full:
+                dead.append(q)
+            except Exception as e:
+                print(f'[office_api] SSE 브로드캐스트 실패: {e}')
                 dead.append(q)
         for q in dead:
             _SSE_CLIENTS.discard(q)
@@ -115,7 +118,8 @@ def _read_json_body(handler) -> dict:
     raw = handler.rfile.read(length)
     try:
         return json.loads(raw.decode('utf-8'))
-    except Exception:
+    except Exception as e:
+        print(f'[office_api] JSON 파싱 실패: {e}')
         return {}
 
 
