@@ -4,6 +4,26 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    // 개발 모드에서 /api/* 요청을 메인 Python 서버(9000)로 프록시
+    proxy: {
+      // PTY 요청 → Node PTY 서버(9001)로 직접 프록시
+      // (개발 모드에서 Python 서버 프록시를 거치지 않고 직접 통신)
+      '/api/pty': {
+        target: 'http://127.0.0.1:9001',
+        changeOrigin: true,
+      },
+      // 나머지 API → Python 메인 서버(9000)
+      '/api': {
+        target: 'http://127.0.0.1:9000',
+        changeOrigin: true,
+      },
+      '/stream': {
+        target: 'http://127.0.0.1:9000',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     // outDir 기본값(./dist) 유지 → .ai_monitor/vibe-view/dist/ 로 출력.
     // spec/workflow/pyproject/build_verify가 전부 이 경로를 참조하므로 기본값 유지 필수.

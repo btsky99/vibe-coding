@@ -1,10 +1,13 @@
 """
 FILE: api/pty_api.py
-DESCRIPTION: PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 REST 프록시.
-  프론트엔드와 Discord 브릿지가 기존 /api/pty/* URL을 그대로 사용할 수 있도록
-  Node PTY 서버(pty-server.js)의 REST API를 투명하게 프록시합니다.
+DESCRIPTION: PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시.
+  /api/pty/* 요청을 Node PTY 서버로 그대로 전달한다 (패스스루).
+  일부 레거시 경로(/api/pty/terminals, /api/pty/output)만 변환 처리하고,
+  나머지는 Node PTY 서버의 경로를 그대로 사용한다.
+  → Node PTY 서버에 엔드포인트를 추가해도 이 파일 수정 불필요.
 
 REVISION HISTORY:
+- 2026-04-12 Claude: 패스스루 프록시로 전면 재작성 (엔드포인트 나열 방식 폐기)
 - 2026-03-22 Claude: Node PTY 서버 REST 프록시로 전면 재작성 (pywinpty 직접 접근 제거)
 - 2026-03-12 Claude: Initial extraction for Discord PTY-first remote control
 """
@@ -12,6 +15,7 @@ REVISION HISTORY:
 import json
 import urllib.request
 import urllib.error
+from urllib.parse import urlencode
 
 # Node PTY 서버 REST URL — server.py __main__에서 set_pty_rest_url()로 주입
 _node_pty_url = None
@@ -25,15 +29,13 @@ def set_pty_rest_url(url: str) -> None:
 
 # ── 하위 호환: 기존 getter 방식 유지 (사용하지 않지만 import 에러 방지) ──────
 def set_pty_sessions_getter(getter) -> None:
-    """[Deprecated] Node PTY 전환으로 더 이상 사용하지 않음. set_pty_rest_url() 사용."""
     pass
 
 def set_pty_output_getter(getter) -> None:
-    """[Deprecated] Node PTY 전환으로 더 이상 사용하지 않음. set_pty_rest_url() 사용."""
     pass
 
 
-def _node_get(path: str, timeout: float = 2.0):
+def _node_get(path: str, timeout: float = 3.0):
     """Node PTY 서버에 GET 요청을 보내고 JSON 응답을 반환합니다."""
     if not _node_pty_url:
         return None
@@ -97,21 +99,18 @@ def _resolve_target(data) -> str:
 
 
 def handle_get(handler, path: str, params: dict | None = None) -> None:
-    """프론트엔드/Discord 브릿지의 GET 요청을 Node PTY 서버로 프록시합니다."""
-
+    """
+    GET /api/pty/* → Node PTY 서버로 투명 프록시.
+    레거시 경로만 변환하고, 나머지는 그대로 전달.
+    """
+    # ── 레거시 경로 변환 ──
     if path in ('/api/pty/terminals', '/api/pty/status'):
-        # Node PTY 서버에서 세션 스냅샷 조회
         result = _node_get('/api/pty/sessions')
         _json_response(handler, result or {})
         return
 
-    if path == '/api/pty/models':
-        # CLI별 사용 가능한 모델 목록 조회 (오피스 워크스페이스 프로필용)
-        result = _node_get('/api/pty/models')
-        _json_response(handler, result or {})
-        return
-
     if path == '/api/pty/output':
+        # 레거시: query param으로 target 전달 → /api/pty/output/{target} 변환
         params = params or {}
         target = _resolve_target({
             'terminal_id': (params.get('terminal_id') or [''])[0],
@@ -120,56 +119,77 @@ def handle_get(handler, path: str, params: dict | None = None) -> None:
         if not target:
             _json_response(handler, {'error': 'missing_target'}, 400)
             return
-
         since = (params.get('since') or ['0'])[0]
         limit = (params.get('limit') or ['80'])[0]
-
-        # Node PTY 서버로 출력 버퍼 조회 프록시
         result = _node_get(f'/api/pty/output/{target}?since={since}&limit={limit}')
         if result is None:
             _json_response(handler, {
                 'terminal_id': f'T{target}',
-                'entries': [],
-                'latest_seq': 0,
-                'running': False,
+                'entries': [], 'latest_seq': 0, 'running': False,
             })
         else:
             _json_response(handler, result)
         return
 
-    _json_response(handler, {'error': 'not_found', 'path': path}, 404)
+    # ── 패스스루: 그대로 Node PTY 서버로 전달 ──
+    # query string 복원
+    qs = ''
+    if params:
+        flat = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in params.items()}
+        qs = '?' + urlencode(flat, doseq=True) if flat else ''
+
+    result = _node_get(f'{path}{qs}')
+    if result is not None:
+        _json_response(handler, result)
+    else:
+        _json_response(handler, {'error': 'node_pty_unreachable', 'path': path}, 502)
 
 
 def handle_post(handler, path: str) -> None:
-    """프론트엔드/Discord 브릿지의 POST 요청을 Node PTY 서버로 프록시합니다."""
+    """
+    POST /api/pty/* → Node PTY 서버로 투명 프록시.
+    레거시 경로만 변환하고, 나머지는 그대로 전달.
+    """
+    # ── 레거시 경로 변환 (body에 target이 있는 경우 → URL path로 변환) ──
+    if path in ('/api/pty/interrupt', '/api/pty/terminate', '/api/pty/write'):
+        try:
+            data = _read_body(handler)
+        except Exception as exc:
+            _json_response(handler, {'error': 'invalid_json', 'detail': str(exc)}, 400)
+            return
 
-    if path not in ('/api/pty/interrupt', '/api/pty/terminate', '/api/pty/write'):
-        _json_response(handler, {'error': 'not_found', 'path': path}, 404)
+        target = _resolve_target(data)
+        if not target:
+            _json_response(handler, {'error': 'missing_target'}, 400)
+            return
+
+        if path == '/api/pty/write':
+            result = _node_post(f'/api/pty/write/{target}', data)
+        else:
+            action = 'interrupt' if path == '/api/pty/interrupt' else 'terminate'
+            result = _node_post(f'/api/pty/{action}/{target}')
+
+        if result is None:
+            _json_response(handler, {'error': 'node_pty_unreachable'}, 502)
+        elif 'error' in result:
+            status = 404 if result.get('error') == 'not_running' else 500
+            _json_response(handler, result, status)
+        else:
+            _json_response(handler, result)
         return
 
+    # ── 패스스루: 그대로 Node PTY 서버로 전달 ──
     try:
         data = _read_body(handler)
     except Exception as exc:
         _json_response(handler, {'error': 'invalid_json', 'detail': str(exc)}, 400)
         return
 
-    target = _resolve_target(data)
-    if not target:
-        _json_response(handler, {'error': 'missing_target'}, 400)
-        return
-
-    # Node PTY 서버의 해당 엔드포인트로 프록시
-    if path == '/api/pty/write':
-        # PTY write: 텔레그램 → 기존 터미널에 텍스트 주입
-        result = _node_post(f'/api/pty/write/{target}', data)
-    else:
-        action = 'interrupt' if path == '/api/pty/interrupt' else 'terminate'
-        result = _node_post(f'/api/pty/{action}/{target}')
-
+    result = _node_post(path, data)
     if result is None:
         _json_response(handler, {'error': 'node_pty_unreachable'}, 502)
     elif 'error' in result:
-        status = 404 if result['error'] == 'not_running' else 500
+        status = 404 if result.get('error') == 'not_running' else 500
         _json_response(handler, result, status)
     else:
         _json_response(handler, result)

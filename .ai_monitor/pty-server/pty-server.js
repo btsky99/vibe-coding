@@ -1033,6 +1033,134 @@ app.post('/api/pty/write/:id', (req, res) => {
 });
 
 /**
+ * POST /api/pty/office/spawn
+ * 오피스 전용 PTY 세션 생성 (클래식 T1~T8과 완전 분리).
+ * body: { agent: 'claude', yolo: true, model: 'claude-sonnet-4-6' }
+ * 세션 ID: O1, O2, ... (Office namespace)
+ */
+app.post('/api/pty/office/spawn', (req, res) => {
+  const agent = (req.body && req.body.agent) || 'claude';
+  const isYolo = !!(req.body && req.body.yolo);
+  const requestedCwd = req.body && req.body.cwd;
+  const cwd = (requestedCwd && fs.existsSync(requestedCwd)) ? requestedCwd : PROJECT_ROOT;
+
+  // 오피스 세션 ID 할당 (O1, O2, ...)
+  let officeId = 1;
+  while (ptySessions.has(`O${officeId}`)) officeId++;
+  const sessionId = `O${officeId}`;
+
+  const env = Object.assign({}, process.env, {
+    PYTHONIOENCODING: 'utf-8',
+    LANG: 'ko_KR.UTF-8',
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    TERMINAL_ID: sessionId,
+    HIVE_AGENT: agent,
+    OFFICE_MODE: 'true',
+  });
+
+  // 셸 선택
+  let shell, shellArgs;
+  if ((agent === 'gemini' || agent === 'codex') && BASH_AVAILABLE) {
+    shell = BASH_EXE;
+    shellArgs = ['--login'];
+  } else {
+    shell = 'cmd.exe';
+    shellArgs = [];
+  }
+
+  try {
+    const ptyProcess = pty.spawn(shell, shellArgs, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 40,
+      cwd: cwd,
+      env: env,
+      useConpty: true,
+    });
+
+    console.log(`[PTY-Office] 세션 시작: ${sessionId} agent=${agent} pid=${ptyProcess.pid}`);
+
+    // 에이전트 시작 명령
+    if (agent === 'claude') {
+      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
+      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
+    } else if (agent === 'gemini') {
+      const yoloFlag = isYolo ? ' -y' : '';
+      ptyProcess.write(`gemini${yoloFlag}\n`);
+    } else if (agent === 'codex') {
+      const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
+      ptyProcess.write(`codex --no-alt-screen${yoloFlag}\n`);
+    }
+
+    // 세션 등록
+    ptySessions.set(sessionId, {
+      pty: ptyProcess,
+      socket: null,      // 오피스 세션은 WebSocket 없음 (REST only)
+      agent: agent,
+      yolo: isYolo,
+      started: new Date().toISOString(),
+      cwd: cwd,
+      lastLine: '',
+      mainModel: req.body?.model || '',
+      bgModel: '',
+      attached: false,
+      detachedAt: '',
+      detachTimer: null,
+      slotName: `Office-${agent}`,
+      namespace: 'office',  // 오피스 네임스페이스 표시
+    });
+
+    // 출력 버퍼 초기화
+    ptyOutputBuffers.set(sessionId, []);
+    ptyOutputSeq.set(sessionId, 0);
+
+    // PTY 출력 캡처
+    ptyProcess.onData((data) => {
+      appendPtyOutput(sessionId, data);
+      const info = ptySessions.get(sessionId);
+      if (info) {
+        const clean = data.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '').trim();
+        if (clean.length > 2) info.lastLine = clean.substring(0, 120);
+      }
+    });
+
+    ptyProcess.onExit(({ exitCode }) => {
+      console.log(`[PTY-Office] 세션 종료: ${sessionId} exitCode=${exitCode}`);
+      ptySessions.delete(sessionId);
+      ptyOutputBuffers.delete(sessionId);
+      ptyOutputSeq.delete(sessionId);
+    });
+
+    res.json({ status: 'spawned', sessionId, agent, pid: ptyProcess.pid });
+  } catch (err) {
+    console.error(`[PTY-Office] 스폰 실패:`, err);
+    res.status(500).json({ error: 'spawn_failed', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/pty/office/sessions
+ * 오피스 전용 세션 목록만 반환 (O1, O2, ...)
+ */
+app.get('/api/pty/office/sessions', (req, res) => {
+  const sessions = {};
+  for (const [id, info] of ptySessions.entries()) {
+    if (id.startsWith('O')) {
+      sessions[id] = {
+        running: !!(info.pty),
+        agent: info.agent || '',
+        slot_name: info.slotName || '',
+        last_line: info.lastLine || '',
+        main_model: info.mainModel || '',
+        namespace: 'office',
+      };
+    }
+  }
+  res.json(sessions);
+});
+
+/**
  * GET /health
  * 헬스체크 엔드포인트 — Python 서버가 Node PTY 서버 생존 확인용
  */

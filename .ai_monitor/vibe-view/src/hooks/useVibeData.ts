@@ -109,16 +109,39 @@ export function useVibeData(): VibeData {
     return () => clearInterval(interval);
   }, []);
 
-  // SSE 로그 스트림 — 실시간 이벤트 수신 (최대 200개)
+  // SSE 로그 스트림 — 실시간 이벤트 수신 (최대 200개) + 자동 재연결
   useEffect(() => {
-    const sse = new EventSource(`${API_BASE}/stream`);
-    sse.onmessage = (e) => {
-      try {
-        const data: LogRecord = JSON.parse(e.data);
-        setLogs(prev => [...prev.slice(-199), data]);
-      } catch {}
+    let sse: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryDelay = 1000; // 1초 → 2초 → 4초... 최대 30초
+    let closed = false;
+
+    const connect = () => {
+      if (closed) return;
+      sse = new EventSource(`${API_BASE}/stream`);
+      sse.onopen = () => { retryDelay = 1000; }; // 연결 성공 시 딜레이 리셋
+      sse.onmessage = (e) => {
+        try {
+          const data: LogRecord = JSON.parse(e.data);
+          setLogs(prev => [...prev.slice(-199), data]);
+        } catch {}
+      };
+      sse.onerror = () => {
+        sse?.close();
+        if (!closed) {
+          console.warn(`[SSE] 연결 끊김 — ${retryDelay / 1000}초 후 재연결`);
+          retryTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 30_000);
+        }
+      };
     };
-    return () => sse.close();
+    connect();
+
+    return () => {
+      closed = true;
+      sse?.close();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, []);
 
   // 파일 락 폴링 (5초)

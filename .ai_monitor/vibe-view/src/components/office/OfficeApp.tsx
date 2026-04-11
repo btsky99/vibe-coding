@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  FolderOpen,
   LayoutGrid,
   Pencil,
   Plus,
@@ -27,6 +28,7 @@ import { type AgentCli, useWorkspaceProfiles, MAX_SLOTS } from '../../hooks/useW
 import { useCliModels, getDefaultModel } from '../../hooks/useCliModels';
 import IsometricOffice from './IsometricOffice';
 import OfficeChatPanel from './OfficeChatPanel';
+import { useOfficePty } from '../../hooks/useOfficePty';
 
 // HUD 탭 제거됨 — 오피스 우측은 채팅 전용
 
@@ -78,12 +80,49 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   const [newSlotYolo, setNewSlotYolo] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
   // 슬롯 편집 모달
-  const [sendError, setSendError] = useState<string | null>(null);
   const [editSlotId, setEditSlotId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editCli, setEditCli] = useState<AgentCli>('claude');
   const [editModel, setEditModel] = useState('');
   const [editYolo, setEditYolo] = useState(false);
+
+  // ── 프로젝트 폴더 선택 ──
+  const [projectPath, setProjectPath] = useState('');
+  useEffect(() => {
+    fetch('/api/config')
+      .then(r => r.json())
+      .then(data => { if (data.last_path) setProjectPath(data.last_path); })
+      .catch(() => {});
+  }, []);
+
+  const handleChangeProject = useCallback(() => {
+    // PyWebView 파일 다이얼로그 호출
+    const pywebview = (window as any).pywebview;
+    if (pywebview?.api?.select_folder) {
+      pywebview.api.select_folder().then((folder: string | null) => {
+        if (folder) {
+          setProjectPath(folder);
+          // 서버에 last_path 업데이트
+          fetch('/api/config/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ last_path: folder }),
+          }).catch(() => {});
+        }
+      });
+    } else {
+      // PyWebView 없으면 prompt 폴백
+      const folder = prompt('프로젝트 폴더 경로:', projectPath);
+      if (folder) {
+        setProjectPath(folder);
+        fetch('/api/config/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ last_path: folder }),
+        }).catch(() => {});
+      }
+    }
+  }, [projectPath]);
 
   // ── 에이전트 경험/성장 데이터 폴링 ──
   const [agentStats, setAgentStats] = useState<AgentStats[]>([]);
@@ -99,7 +138,9 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     return () => window.clearInterval(timer);
   }, [fetchStats]);
 
-  // hudTab 제거 — 채팅 전용
+  // ── PTY 직통 채팅 ──
+  // selectedDesk(슬롯 인덱스) → 터미널 ID(T1, T2, ...) 매핑
+  // 슬롯 0 → T1, 슬롯 1 → T2, CEO(-1) → CEO의 CLI에 해당하는 첫 터미널
   const [selectedDesk, setSelectedDesk] = useState(office.selectedDefaultSlot);
   const [selectedZone, setSelectedZone] = useState<OfficeZone>('desk');
   const [speechBubbles, setSpeechBubbles] = useState<SpeechBubble[]>([]);
@@ -108,6 +149,52 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
   const activeSlots = wp.activeProfile.slots;
   const slotCount = activeSlots.length;
+
+  // ── 오피스 전용 PTY 세션 (클래식 T1~T8과 완전 분리) ──
+  // 선택된 슬롯의 CLI(claude/gemini/codex)에 해당하는 오피스 세션(O1, O2, ...)을 찾는다.
+  // 세션이 없으면 자동 생성한다.
+
+  // 첫 번째 오피스 세션을 active로 설정 (아직 세션이 없을 때는 null)
+  const [activeOfficeSessionId, setActiveOfficeSessionId] = useState<string | null>(null);
+  const ptyHook = useOfficePty(activeOfficeSessionId);
+
+  // 선택된 슬롯의 CLI
+  const selectedCli = useMemo(() => {
+    if (selectedDesk === -1) {
+      return activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli || 'claude';
+    }
+    return activeSlots[selectedDesk]?.cli || 'claude';
+  }, [selectedDesk, activeSlots]);
+
+  // 선택된 CLI에 맞는 오피스 세션 찾기
+  const resolvedTerminalId = useMemo(() => {
+    const match = ptyHook.sessions.find(s => s.agent === selectedCli && s.running);
+    return match?.id || null;
+  }, [selectedCli, ptyHook.sessions]);
+
+  const resolvedTerminalRunning = useMemo(() => {
+    return resolvedTerminalId !== null;
+  }, [resolvedTerminalId]);
+
+  // resolvedTerminalId가 바뀌면 active 세션 업데이트
+  useEffect(() => {
+    if (resolvedTerminalId) {
+      setActiveOfficeSessionId(resolvedTerminalId);
+    }
+  }, [resolvedTerminalId]);
+
+  // 오피스 세션이 없으면 자동 생성
+  const spawnInProgress = useRef(false);
+  useEffect(() => {
+    if (!resolvedTerminalId && !spawnInProgress.current && ptyHook.sessions.length === 0) {
+      // 아직 오피스 세션이 하나도 없으면 기본 claude 세션 생성
+      spawnInProgress.current = true;
+      ptyHook.spawnSession('claude', true, projectPath || undefined).then(id => {
+        if (id) setActiveOfficeSessionId(id);
+        spawnInProgress.current = false;
+      });
+    }
+  }, [resolvedTerminalId, ptyHook.sessions.length]);
 
   useEffect(() => {
     setSelectedDesk((prev) => (prev >= slotCount ? 0 : prev));
@@ -245,6 +332,15 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               <option key={p.id} value={p.id} className="bg-[#0b1320]">{p.name} ({p.slots.length})</option>
             ))}
           </select>
+          <div className="h-3 w-px bg-white/10" />
+          <button
+            onClick={handleChangeProject}
+            className="flex items-center gap-1 rounded border border-white/8 bg-white/[0.03] px-1.5 py-0.5 text-[9px] text-white/40 hover:text-white/70"
+            title={projectPath || '프로젝트 선택'}
+          >
+            <FolderOpen className="h-2.5 w-2.5" />
+            <span className="max-w-[120px] truncate">{projectPath ? projectPath.split(/[/\\]/).pop() : '프로젝트'}</span>
+          </button>
           <button onClick={() => setShowAddSlot(true)} className="rounded border border-cyan-500/20 bg-cyan-500/8 p-1 text-cyan-300 hover:bg-cyan-500/15" title="터미널 추가">
             <Plus className="h-3 w-3" />
           </button>
@@ -463,42 +559,23 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
           </div>
         </div>
 
-        {/* ── 오른쪽: 채팅 전용 패널 ── */}
+        {/* ── 오른쪽: PTY 직통 채팅 패널 ── */}
         <aside className="flex w-[380px] shrink-0 flex-col border-l border-white/[0.04] bg-[#0a0f18]">
           <OfficeChatPanel
-            messages={vibe.messages.filter(m => m.type === 'office_chat')}
+            chatMessages={ptyHook.chatMessages}
             selectedAgent={selectedDesk === -1 ? 'ceo' : (activeSlots[selectedDesk]?.cli || 'claude')}
             selectedSlotName={selectedDesk === -1
               ? (activeSlots.find(s => s.role?.toLowerCase() === 'ceo')?.name ?? 'CEO')
               : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
-            allSlotNames={activeSlots.map(s => s.name)}
-            allSlotClis={activeSlots.map(s => s.cli)}
-            ceoCli={activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.cli}
-            sendError={sendError}
-            onSendMessage={(text, target) => {
-              // CEO(role=ceo)는 PTY가 없으므로 실제 CLI로 변환하여 inject
-              let sendTo = target;
-              if (target === 'ceo') {
-                const ceoSlot = activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo');
-                if (!ceoSlot) {
-                  console.warn('[OfficeChatPanel] CEO 슬롯을 찾을 수 없음 — claude로 폴백');
-                  setSendError('CEO 슬롯이 설정되지 않았어. 프로필에서 CEO 역할을 지정해봐.');
-                }
-                sendTo = ceoSlot?.cli || 'claude';
+            terminalId={resolvedTerminalId}
+            terminalRunning={resolvedTerminalRunning}
+            sendError={ptyHook.sendError}
+            onSendMessage={(text) => {
+              if (resolvedTerminalId) {
+                ptyHook.sendMessage(resolvedTerminalId, text);
               }
-              setSendError(null);
-              fetch('/api/message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ from: 'user', to: sendTo, type: 'office_chat', content: text }),
-              })
-                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-                .then(data => { if (data.status === 'error') setSendError(data.message || '전송 실패'); })
-                .catch(err => {
-                  console.error('[OfficeChatPanel] send error:', err);
-                  setSendError('메시지 전송 실패 — 서버 연결을 확인해봐');
-                });
             }}
+            onClearChat={ptyHook.clearChat}
           />
         </aside>
       </div>
