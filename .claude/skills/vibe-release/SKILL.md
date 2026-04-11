@@ -13,6 +13,9 @@ DESCRIPTION: Vibe Coding EXE 릴리즈 스킬.
   /vibe-release 명령으로 호출. 버전 증가 → 커밋 → 푸시하면 CI가 EXE 빌드.
 
 REVISION HISTORY:
+- 2026-04-11 Claude: Step 0.5 로컬 EXE 빌드 + smoke test 단계 추가.
+                     scripts/smoke_test.py로 빌드된 EXE의 서버 기동/API 응답을 자동 검증.
+                     push 전에 설치 버전 동작을 미리 확인하여 CI 실패 위험 최소화.
 - 2026-04-09 Claude: 로컬 검증 명령을 `vite build` → `npm run build`로 교체.
                      vite만 돌리면 `tsc -b` 타입체크가 스킵되어 타입 에러가 CI에서
                      처음 노출되는 문제가 반복됨 (v3.7.179 릴리즈 실패 원인).
@@ -54,7 +57,7 @@ REVISION HISTORY:
 
 ---
 
-## 실행 절차 (5단계)
+## 실행 절차 (6단계)
 
 ### Step 0: 로컬 사전 검증 (필수 — 실패 시 중단)
 
@@ -73,7 +76,29 @@ ruff check .ai_monitor --select E9,F821,F823
 cd .ai_monitor/vibe-view && npm run build
 ```
 
-**어느 하나라도 실패하면 여기서 중단하고 수정. Step 1 진행 금지.**
+**어느 하나라도 실패하면 여기서 중단하고 수정. Step 0.5 진행 금지.**
+
+### Step 0.5: 로컬 EXE 빌드 + Smoke Test (필수 — 실패 시 중단)
+
+**push 전에 로컬에서 EXE를 빌드하고 실제로 서버가 뜨는지 검증합니다.**
+포트 충돌 걱정 없음 — 기존 서버가 9000을 쓰면 테스트 EXE는 자동으로 빈 포트를 찾습니다.
+
+```bash
+# 1. PyInstaller로 로컬 EXE 빌드 (약 3~5분 소요)
+pyinstaller vibe-coding.spec --noconfirm
+
+# 2. Smoke test — EXE 기동 → API 응답 검증 → 자동 종료
+python scripts/smoke_test.py
+```
+
+**smoke test가 실패하면 중단. EXE에서만 발생하는 문제(import 에러, 경로 문제 등)를 push 전에 잡을 수 있습니다.**
+
+Smoke test 검증 항목:
+- [ ] EXE 서버 기동 성공 (30초 내)
+- [ ] `GET /api/config` 응답 200
+- [ ] `GET /api/agents` 응답 200
+- [ ] `GET /api/hive/health` 응답 200
+- [ ] `GET /` 프론트엔드 HTML 로드
 
 ### Step 1: 버전 자동 증가
 
@@ -194,7 +219,7 @@ cd .ai_monitor/vibe-view && npx vite build
 
 1. `_version.py` 직접 편집 → `auto_version.py` 사용
 2. `git add .` 또는 `git add -A` → 파일 명시적 지정
-3. 로컬에서 PyInstaller 직접 실행 → CI가 알아서 빌드
+3. smoke test 없이 push → Step 0.5 필수
 4. pip install로 배포 → EXE 전용 배포
 
 ---
