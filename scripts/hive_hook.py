@@ -1034,10 +1034,12 @@ def main():
         # ── Auto-Stop: 계획 완료 시 {"continue": false} 신호 출력 ────────────
         # ai_monitor_plan.md의 모든 태스크가 [x] 상태이면 Claude Code에
         # continue: false 신호를 보내 세션을 자동 종료합니다.
-        # Harness의 {"continue": false} 패턴을 Vibe Coding에 이식.
+        # 오피스 세션(OFFICE_MODE=true)에서는 Auto-Stop 비활성화 — 대화형 세션이므로.
         try:
             import re as _re_stop, json as _json_stop, os as _os_stop
             from pathlib import Path as _PV_Path
+            if _os_stop.environ.get('OFFICE_MODE') == 'true':
+                raise Exception('skip')  # 오피스 세션 → Auto-Stop 스킵
             # _scripts_dir 글로벌 변수 대신 직접 계산 — self-reflect 블록의 지역 재할당 충돌 방지
             _stop_scripts = _os_stop.path.dirname(_os_stop.path.abspath(__file__))
             _plan_path = _PV_Path(_stop_scripts).parent / "ai_monitor_plan.md"
