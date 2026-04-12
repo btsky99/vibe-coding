@@ -56,6 +56,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   'package-manager': '패키지 관리',
   'image': '이미지',
   'git': 'Git',
+  'knowledge': '지식 관리',
+  'harness': '하네스',
 };
 
 /* ── 컴포넌트 ──────────────────────────────────────────────────────── */

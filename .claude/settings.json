@@ -16,15 +16,6 @@
             "command": "python D:/vibe-coding/scripts/hook_bridge.py"
           }
         ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"D:\\vibe-coding\\scripts\\hook_bridge.py\" \"$PROMPT\""
-          }
-        ]
       }
     ],
     "PreToolUse": [

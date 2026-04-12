@@ -8,37 +8,34 @@ REVISION HISTORY:
 
 # Progress
 
-## 최종 업데이트: 2026-03-30 by Claude
+## 최종 업데이트: 2026-04-12 by Claude
 
 ### 완료된 작업
 - [F001] 터미널 실시간 모니터링 — v3.5 Claude
 - [F002] 에이전트 상태 패널 — v3.6 Claude
 - [F007] EXE 빌드 파이프라인 — v3.6 Claude
 - [F008] 하이브 마인드 통합 — v3.7 Claude
+- [F004] 하네스 검증 시스템 V2 — harness_verify.py 10개 검사 완료
 - HARNESS V2 설계 + 구현 + 자동화(CI + Claude 훅) — 2026-03-30
 - 코드 품질 감사 Phase 1+2 수정 완료 — 2026-03-30
+- 메타버스 오피스 모드 구현 — v3.7.180+ Claude
+- 클래식 모드 안정성 전면 개선 — v3.7.193
+- 로컬 EXE smoke test 자동화 — v3.7.194
+- 하네스를 AI 도구 목록에 통합 — 2026-04-12
 
 ### 진행 중
-- [F003] LLM 그룹 채팅 — 기본 구현 완료, 컨텍스트 메뉴 검증 필요
-- [F004] 하네스 검증 시스템 V2 — harness_verify.py V2 완료, CI 게이트 설정 완료
-- [F005] Generator-Evaluator 파이프라인 — HARNESS_V2.md 설계 완료, 운영 단계 미적용
+- [F003] LLM 그룹 채팅 — 기본 구현 완료
+- [F005] Generator-Evaluator 파이프라인 — 솔로 모드에서는 harness_verify.py로 대체
 - [F006] 세션 시작 프로토콜 — Claude 자동(훅), Gemini/Codex 수동
+- 하네스 경량화 — 도구 목록에서 원클릭 설치 가능하도록 개선 중
 
-### 코드 품질 감사 수정 이력 (2026-03-30)
-- **Phase 1 (보안)**: SQL 인젝션 수정 (itcp.py send/receive/history, shared_history.py)
-- **Phase 1 (버그)**: pg_store.py _HAS_PSYCOPG2 global 선언 누락 수정
-- **Phase 1 (성능)**: pg_store.py 커넥션 락 과점유 → 락 범위 최소화
-- **Phase 2 (프론트)**: TerminalSlot.tsx stale closure 재연결 버그 수정 (ref 기반)
-- **Phase 2 (프론트)**: TerminalSlot.tsx window.resize 메모리 누수 수정
-
-### 미수정 잔여 이슈 (Phase 3-4)
-- server.py 5207줄 → 모듈 분리 필요 (HARNESS 경고)
-- AgentPanel.tsx 2934줄 → 컴포넌트 분리 필요 (HARNESS 경고)
-- 중복 API 폴링 (App.tsx + AgentPanel.tsx)
-- any 타입 전파 (agentTerminals, hiveActivity)
-- bare except 패턴 60회+ → 로깅 추가 필요
+### 미수정 잔여 이슈
+- server.py 6046줄 → 모듈 분리 필요 (HARNESS 경고, 5000줄 초과)
+- AgentPanel.tsx 2934줄 → 컴포넌트 분리 필요 (HARNESS 경고, 2500줄 초과)
+- TerminalSlot.tsx 1243줄 → 경고 수준 (1200줄 초과)
+- hook_bridge.py 중복 등록 수정 완료 (2026-04-12)
 
 ### 다음 세션 시작 시 참고사항
-- HARNESS V2 완전 가동 중. 하네스 검증은 매 프롬프트마다 자동 실행됨.
-- Phase 3(구조: server.py 분리, AgentPanel 분리)가 다음 우선순위.
-- sprint_contracts/ 디렉토리 아직 미생성 (첫 스프린트 계약 시 생성 예정)
+- 하네스 V2 가동 중. 검증은 매 프롬프트마다 자동 실행됨.
+- AI 도구 목록에 harness 카테고리 3개 항목 추가됨 (hooks, rules, verify)
+- install_harness.py로 다른 프로젝트에도 경량 하네스 설치 가능

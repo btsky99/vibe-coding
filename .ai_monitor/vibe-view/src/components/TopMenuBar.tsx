@@ -41,7 +41,6 @@ interface TopMenuBarProps {
   // 파일 / 도구 작업 콜백
   onOpenFolder: () => void;
   onInstallSkills: () => void;
-  onInstallTool: (tool: string) => void;
   onOpenHelpDoc: (topic: string, title: string) => void;
   onClearLogs: () => void;
   // 자율 주행 버튼 → 중앙 통제실(mission-control) 탭으로 이동
@@ -176,7 +175,7 @@ const TopMenuBar = memo(function TopMenuBar({
   appVersion,
   updateReady, updateApplying, updateChecking,
   onApplyUpdate, onTriggerUpdateCheck,
-  onOpenFolder, onInstallSkills, onInstallTool, onOpenHelpDoc, onClearLogs,
+  onOpenFolder, onInstallSkills, onOpenHelpDoc, onClearLogs,
   onOpenMissionControl,
 }: TopMenuBarProps) {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
@@ -283,74 +282,6 @@ const TopMenuBar = memo(function TopMenuBar({
                   <span>하이브 스킬 설치 (현재 프로젝트)</span>
                 </div>
                 <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">Recommended</span>
-              </button>
-              <div className="h-px bg-white/5 my-1 mx-2"></div>
-              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">하네스 V2</div>
-              <button
-                onClick={() => onInstallTool('harness-init')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
-              >
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#4ade80]" />
-                  <span>하네스 V2 설치 (현재 프로젝트)</span>
-                </div>
-                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">/vibe-harness-init</span>
-              </button>
-              <button
-                onClick={() => onInstallTool('harness-verify')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
-              >
-                <div className="flex items-center gap-2">
-                  <ClipboardCheck className="w-3.5 h-3.5 text-[#60a5fa]" />
-                  <span>하네스 검증 실행</span>
-                </div>
-                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">harness_verify.py</span>
-              </button>
-              <button
-                onClick={() => onInstallTool('session-init')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
-              >
-                <div className="flex items-center gap-2">
-                  <RotateCw className="w-3.5 h-3.5 text-[#c084fc]" />
-                  <span>세션 프로토콜 실행</span>
-                </div>
-                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">session_init.py</span>
-              </button>
-              <div className="h-px bg-white/5 my-1 mx-2"></div>
-              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">프로젝트 런타임</div>
-              <button
-                onClick={() => onInstallTool('playwright')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center justify-between group"
-              >
-                <div className="flex items-center gap-2">
-                  <Terminal className="w-3.5 h-3.5 text-[#7dd3fc]" />
-                  <span>Playwright 설치 (현재 프로젝트)</span>
-                </div>
-                <span className="text-[9px] text-white/30 group-hover:text-white/60 font-mono italic">Python</span>
-              </button>
-              <div className="h-px bg-white/5 my-1 mx-2"></div>
-              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">글로벌 CLI 도구</div>
-              <button
-                onClick={() => onInstallTool('gemini')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2"
-              >
-                <Terminal className="w-3.5 h-3.5 text-accent" />
-                <span>Gemini CLI 설치 (npm -g)</span>
-              </button>
-              <button
-                onClick={() => onInstallTool('claude')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2"
-              >
-                <Cpu className="w-3.5 h-3.5 text-success" />
-                <span>Claude Code 설치 (npm -g)</span>
-              </button>
-              {/* Codex CLI 설치 — OpenAI Codex CLI 글로벌 설치 */}
-              <button
-                onClick={() => onInstallTool('codex')}
-                className="w-full text-left px-4 py-1.5 hover:bg-primary/20 flex items-center gap-2"
-              >
-                <Terminal className="w-3.5 h-3.5 text-[#f0a500]" />
-                <span>Codex CLI 설치 (npm -g)</span>
               </button>
               <div className="h-px bg-white/5 my-1 mx-2"></div>
               <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">스킬 관리</div>

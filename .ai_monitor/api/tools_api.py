@@ -301,6 +301,63 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_hint": "winget install --id Obsidian.Obsidian",
         "category": "knowledge",
     },
+    # ── 하네스 (Harness) — 프로젝트 품질 관리 ─────────────────────────
+    {
+        "id": "harness-hooks",
+        "name": "Claude Code 훅",
+        "description": "UserPromptSubmit/PreToolUse/PostToolUse/Stop 자동 트레이싱 훅 설정",
+        "check_commands": [[
+            sys.executable, "-c",
+            "import json,pathlib,sys;"
+            f"p=pathlib.Path(r'{_PROJECT_ROOT}') / '.claude' / 'settings.json';"
+            "d=json.loads(p.read_text(encoding='utf-8'));"
+            "h=d.get('hooks',{});"
+            "n=sum(len(v) for v in h.values());"
+            "print(f'v2 ({n} hooks)') if n>0 else sys.exit(1)",
+        ]],
+        "check_paths": [],
+        "install_script": "install_harness.py",
+        "install_args": ["--component", "hooks"],
+        "install_url": "",
+        "install_hint": "python scripts/install_harness.py --component hooks",
+        "category": "harness",
+    },
+    {
+        "id": "harness-rules",
+        "name": "프로젝트 규칙 파일",
+        "description": "CLAUDE.md + .claude/rules/ — AI 에이전트 행동 규칙 스캐폴딩",
+        "check_commands": [[
+            sys.executable, "-c",
+            "import pathlib,sys;"
+            f"r=pathlib.Path(r'{_PROJECT_ROOT}');"
+            "has_claude=any((r/'CLAUDE.md').exists() for _ in [1]);"
+            "has_rules=(r/'.claude'/'rules').is_dir();"
+            "print('설정됨') if has_claude and has_rules else sys.exit(1)",
+        ]],
+        "check_paths": [],
+        "install_script": "install_harness.py",
+        "install_args": ["--component", "rules"],
+        "install_url": "",
+        "install_hint": "python scripts/install_harness.py --component rules",
+        "category": "harness",
+    },
+    {
+        "id": "harness-verify",
+        "name": "하네스 검증 시스템",
+        "description": "harness_verify.py — 프로젝트 구조/문서/파일 크기 자동 검증",
+        "check_commands": [[
+            sys.executable, "-c",
+            "import pathlib,sys;"
+            f"p=pathlib.Path(r'{_PROJECT_ROOT}') / 'scripts' / 'harness_verify.py';"
+            "print('v2') if p.exists() else sys.exit(1)",
+        ]],
+        "check_paths": [],
+        "install_script": "install_harness.py",
+        "install_args": ["--component", "verify"],
+        "install_url": "",
+        "install_hint": "python scripts/install_harness.py --component verify",
+        "category": "harness",
+    },
 ]
 
 
