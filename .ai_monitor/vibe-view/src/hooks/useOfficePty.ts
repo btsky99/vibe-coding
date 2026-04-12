@@ -134,9 +134,20 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
           }
 
           if (data.entries && data.entries.length > 0) {
-            // 노이즈 필터링 — 의미 있는 출력만 남기기
+            // 최근 보낸 메시지 텍스트 (에코 필터용)
+            const recentSent = userMsgsRef.current
+              .slice(-5)
+              .map(m => m.content.trim().toLowerCase().replace(/\s+/g, ''));
+
+            // 노이즈 + 에코 필터링
             const meaningful = (data.entries as any[])
-              .filter((entry: any) => !isNoiseLine(entry.text));
+              .filter((entry: any) => {
+                if (isNoiseLine(entry.text)) return false;
+                // 에코 필터: 최근 보낸 메시지와 동일하면 제거
+                const clean = (entry.text || '').trim().toLowerCase().replace(/\s+/g, '');
+                if (clean.length > 0 && recentSent.some(s => clean.includes(s) || s.includes(clean))) return false;
+                return true;
+              });
 
             if (meaningful.length > 0) {
               // 연속된 줄을 하나의 채팅 메시지로 묶기
@@ -181,7 +192,7 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
       const res = await fetch(`${PTY_BASE}/api/pty/write/${terminalId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: text + '\r' }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));

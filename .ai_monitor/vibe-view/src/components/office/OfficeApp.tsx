@@ -18,6 +18,7 @@ import {
   Pencil,
   Plus,
   Radar,
+  RefreshCw,
   Settings2,
   Trash2,
   X,
@@ -348,6 +349,12 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
           <span className="text-[9px] text-white/25">{office.summary.activeAgents} 활성 · {office.summary.blockedAgents} 차단</span>
           <button onClick={summonMeeting} className="rounded border border-cyan-500/20 bg-cyan-500/8 px-2 py-0.5 text-[9px] font-bold text-cyan-300 hover:bg-cyan-500/15">회의</button>
           <button onClick={requestReview} className="rounded border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-[9px] font-bold text-emerald-300 hover:bg-emerald-500/15">리뷰</button>
+          <button onClick={() => {
+            ptyHook.clearChat();
+            window.location.href = window.location.href;
+          }} className="rounded border border-white/8 bg-white/[0.03] p-1 text-white/30 hover:text-white/60" title="새로고침">
+            <RefreshCw className="h-2.5 w-2.5" />
+          </button>
           {onSwitchToClassic && (
             <button onClick={onSwitchToClassic} className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-bold text-white/50 hover:text-white/80">
               <LayoutGrid className="mr-1 inline h-2.5 w-2.5" />클래식
