@@ -49,8 +49,10 @@ function isNoiseLine(text: string): boolean {
   if (/^[✢✶✻✽*●◐◑◒◓·•▸►]?\s*[A-Z][a-zéè]+ing…/i.test(t)) return true;
   // 장식 문자 + 짧은 텍스트 (스피너 잔여물)
   if (/^[✢✶✻✽*●◐◑◒◓·•▪▸►▹▻→←↑↓]\s*\S+…?\s*$/.test(t)) return true;
-  // 장식 문자로 시작 + 상태 텍스트 (●Ran 2 stop hooks, ✢ · 30s 등)
-  if (/^[✢✶✻✽*●◐◑◒◓⎿]/.test(t)) return true;
+  // 장식 문자로 시작 + 상태 텍스트 (✢ · 30s, ⎿ 등)
+  // ● 뒤에 한글/CJK가 오면 실제 응답이므로 보존 (Claude Code 응답 마커)
+  if (/^[✢✶✻✽*◐◑◒◓⎿]/.test(t)) return true;
+  if (/^●/.test(t) && !/●[\u3131-\uD79D\uAC00-\uD7A3]/.test(t)) return true;
   // 타이머/토큰 카운터 (30s, ↓10 tokens 등)
   if (/^\(?\d+s\)?$/.test(t) || /↓\d+\s*tokens/i.test(t)) return true;
   // 괄호로 시작하는 상태 메시지 ((running stop hooks… 0/2) 등)
@@ -66,6 +68,8 @@ function isNoiseLine(text: string): boolean {
   if (/^(Thinking|Working|Loading|Searching|Reading|Writing|Review previous session|Resuming)\b/i.test(t)) return true;
   // 빈 줄, 점 반복, ANSI 잔여물, 단순 스피너
   if (/^\s*$/.test(t) || /^\.{2,}$/.test(t) || /^\d+;\d+[Hf]?$/.test(t) || /^[|/\\-] /.test(t)) return true;
+  // 스피너 잔여물 — 짧은 영문 조각 (Orbiting→itng, Orbiting→itct 등)
+  if (t.length <= 8 && /^[a-z]+$/i.test(t) && !/[\u3131-\uD79D\uAC00-\uD7A3]/.test(t)) return true;
 
   return false;
 }
@@ -128,12 +132,19 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
       fetch(`${PTY_BASE}/api/pty/output/${activeTerminalId}?since=${since}&limit=50`)
         .then(r => r.json())
         .then(data => {
-          // 첫 연결: cmd.exe 부팅 노이즈를 건너뛰되, 이후 출력은 모두 표시
+          // 첫 연결: cmd.exe 부팅 노이즈를 건너뛰되, ❯ 프롬프트 감지는 수행
           if (!initializedRef.current.has(activeTerminalId)) {
             initializedRef.current.add(activeTerminalId);
             // 부팅 노이즈(cmd.exe 배너, Claude Code 로고 등)만 스킵 — 최근 seq 기준
             // 단, 유저가 이미 메시지를 보냈으면(userMsgsRef) 스킵하지 않음
             if (userMsgsRef.current.length === 0) {
+              // ❯ 감지: 스킵해도 ready 상태는 설정 (입력 활성화 필수)
+              if (data.entries && data.entries.length > 0) {
+                const hasPrompt = (data.entries as any[]).some(
+                  (e: any) => (e.text || '').includes('❯') && !(e.text || '').includes('bypass')
+                );
+                if (hasPrompt && !ready) setReady(true);
+              }
               lastSeqRef.current[activeTerminalId] = data.latest_seq || 0;
               return;
             }
@@ -164,16 +175,27 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
             if (meaningful.length > 0) {
               // 연속된 줄을 하나의 채팅 메시지로 묶기
               const agentName = sessions.find(s => s.id === activeTerminalId)?.agent || 'agent';
-              const grouped = meaningful.map((entry: any) => entry.text).join('\n');
-              const newMsg: PtyChatMessage = {
-                id: `pty-${activeTerminalId}-${meaningful[meaningful.length - 1].seq}`,
-                from: agentName,
-                content: grouped,
-                timestamp: new Date().toISOString(),
-                type: 'received',
-              };
-
-              setChatMessages(prev => [...prev, newMsg].slice(-200));
+              const grouped = meaningful.map((entry: any) => {
+                let line = (entry.text || '').trim();
+                // ● 응답 마커 제거
+                line = line.replace(/^●/, '');
+                // 응답 뒤 스피너/상태바 잔여물 제거 (✽ Orbiting…, ❯, ⏵⏵ 등)
+                line = line.replace(/[✢✶✻✽*◐◑◒◓]?\s*[A-Z][a-z]+ing….*$/i, '');
+                line = line.replace(/\(running stop hooks.*$/, '');
+                line = line.replace(/\s*❯\s*$/, '');
+                line = line.replace(/\s*⏵⏵.*$/, '');
+                return line.trim();
+              }).filter(l => l.length > 0).join('\n');
+              if (grouped.length > 0) {
+                const newMsg: PtyChatMessage = {
+                  id: `pty-${activeTerminalId}-${meaningful[meaningful.length - 1].seq}`,
+                  from: agentName,
+                  content: grouped,
+                  timestamp: new Date().toISOString(),
+                  type: 'received',
+                };
+                setChatMessages(prev => [...prev, newMsg].slice(-200));
+              }
             }
 
             lastSeqRef.current[activeTerminalId] = data.latest_seq;
