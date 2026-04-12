@@ -180,18 +180,17 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     }
   }, [resolvedTerminalId]);
 
-  // 오피스 세션이 없으면 자동 생성
+  // 오피스 세션 자동 생성 — 선택된 CLI에 맞는 세션이 없으면 새로 생성
   const spawnInProgress = useRef(false);
   useEffect(() => {
-    if (!resolvedTerminalId && !spawnInProgress.current && ptyHook.sessions.length === 0) {
-      // 아직 오피스 세션이 하나도 없으면 기본 claude 세션 생성
+    if (!resolvedTerminalId && !spawnInProgress.current) {
       spawnInProgress.current = true;
-      ptyHook.spawnSession('claude', true, projectPath || undefined).then(id => {
+      ptyHook.spawnSession(selectedCli, true, projectPath || undefined).then(id => {
         if (id) setActiveOfficeSessionId(id);
         spawnInProgress.current = false;
       });
     }
-  }, [resolvedTerminalId, ptyHook.sessions.length]);
+  }, [resolvedTerminalId, selectedCli]);
 
   useEffect(() => {
     setSelectedDesk((prev) => (prev >= slotCount ? 0 : prev));
@@ -572,6 +571,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
             terminalId={resolvedTerminalId}
             terminalRunning={resolvedTerminalRunning}
+            terminalReady={ptyHook.ready}
             sendError={ptyHook.sendError}
             onSendMessage={(text) => {
               if (resolvedTerminalId) {

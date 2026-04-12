@@ -26,6 +26,7 @@ interface OfficeChatPanelProps {
   selectedSlotName: string;
   terminalId: string | null;
   terminalRunning: boolean;
+  terminalReady: boolean;
   sendError: string | null;
   onSendMessage: (text: string) => void;
   onClearChat: () => void;
@@ -37,6 +38,7 @@ export default function OfficeChatPanel({
   selectedSlotName,
   terminalId,
   terminalRunning,
+  terminalReady,
   sendError,
   onSendMessage,
   onClearChat,
@@ -51,9 +53,10 @@ export default function OfficeChatPanel({
     }
   }, [chatMessages.length]);
 
+  const canSend = terminalRunning && terminalReady;
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed || !terminalId) return;
+    if (!trimmed || !terminalId || !canSend) return;
     onSendMessage(trimmed);
     setInput('');
   };
@@ -166,13 +169,13 @@ export default function OfficeChatPanel({
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
-            placeholder={terminalRunning ? `${selectedSlotName}에게...` : '터미널이 꺼져 있어'}
-            disabled={!terminalRunning}
+            placeholder={!terminalRunning ? '터미널이 꺼져 있어' : !terminalReady ? '에이전트 부팅 중...' : `${selectedSlotName}에게...`}
+            disabled={!canSend}
             className="flex-1 bg-transparent text-xs text-white/80 outline-none placeholder:text-white/18 disabled:opacity-30"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || !terminalRunning}
+            disabled={!input.trim() || !canSend}
             className="rounded-lg bg-cyan-500/15 p-2 text-cyan-400 transition hover:bg-cyan-500/25 disabled:opacity-20 disabled:cursor-not-allowed"
           >
             <Send className="h-3.5 w-3.5" />

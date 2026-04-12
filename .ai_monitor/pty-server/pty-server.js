@@ -1081,10 +1081,10 @@ app.post('/api/pty/office/spawn', (req, res) => {
 
     console.log(`[PTY-Office] 세션 시작: ${sessionId} agent=${agent} pid=${ptyProcess.pid}`);
 
-    // 에이전트 시작 명령
+    // 에이전트 시작 명령 (--resume no: 이전 세션 복구 없이 즉시 시작)
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
+      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag} --resume no\r\n`);
     } else if (agent === 'gemini') {
       const yoloFlag = isYolo ? ' -y' : '';
       ptyProcess.write(`gemini${yoloFlag}\n`);

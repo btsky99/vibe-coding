@@ -77,6 +77,7 @@ interface UseOfficePtyReturn {
   spawnSession: (agent: string, yolo?: boolean, cwd?: string) => Promise<string | null>;
   sendError: string | null;
   clearChat: () => void;
+  ready: boolean; // Claude Code가 ❯ 프롬프트를 표시하여 입력 대기 상태인지
 }
 
 /**
@@ -87,6 +88,7 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
   const [sessions, setSessions] = useState<PtySession[]>([]);
   const [chatMessages, setChatMessages] = useState<PtyChatMessage[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const lastSeqRef = useRef<Record<string, number>>({});
   const initializedRef = useRef<Set<string>>(new Set());
   const userMsgsRef = useRef<PtyChatMessage[]>([]);
@@ -137,7 +139,13 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
             }
           }
 
+          // ❯ 프롬프트 감지 → ready 상태 설정
           if (data.entries && data.entries.length > 0) {
+            const hasPrompt = (data.entries as any[]).some(
+              (e: any) => (e.text || '').includes('❯') && !(e.text || '').includes('bypass')
+            );
+            if (hasPrompt && !ready) setReady(true);
+
             // 최근 보낸 메시지 텍스트 (에코 필터용)
             const recentSent = userMsgsRef.current
               .slice(-5)
@@ -185,6 +193,7 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
     if (prevTerminalRef.current !== activeTerminalId) {
       setChatMessages([]);
       userMsgsRef.current = [];
+      setReady(false);
       prevTerminalRef.current = activeTerminalId;
     }
   }, [activeTerminalId]);
@@ -250,5 +259,5 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
     userMsgsRef.current = [];
   }, []);
 
-  return { sessions, chatMessages, sendMessage, spawnSession, sendError, clearChat };
+  return { sessions, chatMessages, sendMessage, spawnSession, sendError, clearChat, ready };
 }
