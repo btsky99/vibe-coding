@@ -134,7 +134,7 @@ import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
-# [제거됨 2026-04-12] office_api → office_server.py로 이전
+import api.office_api as office_api  # 폴백용 — 오피스 서버 미시작 시 클래식에서 직접 처리
 import api.experience_api as experience_api
 import string
 import socket
@@ -1088,8 +1088,11 @@ ensure_legacy_store(DATA_DIR)
 # PG가 이미 떠있으면 바로 스키마 초기화
 ensure_schema(DATA_DIR)
 
-# [제거됨 2026-04-12] 오피스 초기화는 office_server.py에서 자체 처리
-# office_api.init_office(DATA_DIR) → office_server.py main()에서 호출
+# 오피스 프로필 초기화 — 폴백용 (오피스 서버 미시작 시 클래식에서 직접 처리)
+try:
+    office_api.init_office(DATA_DIR)
+except Exception as _office_init_err:
+    print(f"[office_api] 초기화 실패: {_office_init_err}")
 
 # [2026-03-22] 지식그래프 관련 _backfill_thought_parent_ids() 제거
 
@@ -2817,8 +2820,15 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
-        # ── [제거됨 2026-04-12] office_api GET → office_server.py로 이전 ──
-        # /api/office/* GET 요청은 오피스 서버(별도 프로세스)에서 직접 처리
+        # ── [폴백] office_api GET — 오피스 서버 미시작 시 클래식에서 직접 처리 ──
+        elif parsed_path.path.startswith('/api/office/'):
+            _params = parse_qs(parsed_path.query)
+            if not office_api.handle_get(self, parsed_path.path, _params, DATA_DIR=DATA_DIR):
+                self.send_response(404)
+                self.send_header('Content-Type', 'application/json;charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+                self.end_headers()
+                self.wfile.write(b'{"error":"not found"}')
 
         # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
         elif parsed_path.path.startswith('/api/dispatcher/'):
@@ -3333,8 +3343,12 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_PUT(self):
-        """PUT 메소드 — [제거됨] 오피스 프로필은 office_server에서 처리."""
-        # /api/office/* PUT 요청은 오피스 서버(별도 프로세스)에서 직접 처리
+        """PUT 메소드 — 오피스 프로필 전체 대체 + 활성 프로필 변경 (폴백)."""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        if path.startswith('/api/office/'):
+            if office_api.handle_put(self, path, DATA_DIR=DATA_DIR):
+                return
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3342,8 +3356,12 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'{"error":"not found"}')
 
     def do_DELETE(self):
-        """DELETE 메소드 — [제거됨] 오피스 프로필은 office_server에서 처리."""
-        # /api/office/* DELETE 요청은 오피스 서버(별도 프로세스)에서 직접 처리
+        """DELETE 메소드 — 오피스 프로필 삭제 (폴백)."""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        if path.startswith('/api/office/'):
+            if office_api.handle_delete(self, path, DATA_DIR=DATA_DIR):
+                return
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3362,9 +3380,18 @@ class SSEHandler(BaseHTTPRequestHandler):
             self._handle_telegram_test()
             return
 
-        # ── [제거됨 2026-04-12] office_api POST → office_server.py로 이전 ──
-        # /api/office/* POST 요청은 오피스 서버(별도 프로세스)에서 직접 처리
-        # 단, /api/office/launch, /api/office/restart, /api/office/status는 아래에서 처리
+        # ── [폴백] office_api POST — 오피스 서버 미시작 시 클래식에서 직접 처리 ──
+        if path.startswith('/api/office/') and path not in (
+            '/api/office/launch', '/api/office/restart', '/api/office/status',
+        ):
+            if office_api.handle_post(self, path, DATA_DIR=DATA_DIR):
+                return
+            self.send_response(404)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            self.wfile.write(b'{"error":"not found"}')
+            return
 
         # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
         # window.open() 대신 PySide6 네이티브 프로세스를 직접 실행하여
