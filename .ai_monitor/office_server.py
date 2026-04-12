@@ -9,6 +9,7 @@ REVISION HISTORY:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -175,7 +176,6 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if path.startswith('/api/office/'):
             # body를 다시 읽을 수 있도록 rfile을 교체
             if body:
-                import io
                 self.rfile = io.BytesIO(body)
                 self.headers['Content-Length'] = str(len(body))
             if not office_api.handle_post(self, path, DATA_DIR=DATA_DIR):
@@ -194,7 +194,6 @@ class OfficeHandler(BaseHTTPRequestHandler):
 
         if path.startswith('/api/office/'):
             if body:
-                import io
                 self.rfile = io.BytesIO(body)
                 self.headers['Content-Length'] = str(len(body))
             if not office_api.handle_put(self, path, DATA_DIR=DATA_DIR):

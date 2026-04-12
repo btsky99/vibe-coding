@@ -4776,16 +4776,21 @@ def _launch_office_server() -> int:
     """
     global _office_server_proc, _office_server_port
 
-    # 기존 프로세스가 살아있으면 종료
-    if _office_server_proc and _office_server_proc.poll() is None:
+    # 기존 프로세스가 살아있으면 종료 + _child_procs에서 제거
+    if _office_server_proc:
         try:
-            _office_server_proc.terminate()
-            _office_server_proc.wait(timeout=3)
-        except Exception:
+            _child_procs.remove(_office_server_proc)
+        except ValueError:
+            pass
+        if _office_server_proc.poll() is None:
             try:
-                _office_server_proc.kill()
+                _office_server_proc.terminate()
+                _office_server_proc.wait(timeout=3)
             except Exception:
-                pass
+                try:
+                    _office_server_proc.kill()
+                except Exception:
+                    pass
 
     python_cmds = _python_runner_cmds()
     if not python_cmds:
@@ -4803,9 +4808,7 @@ def _launch_office_server() -> int:
     _child_procs.append(_office_server_proc)
 
     # stdout에서 PORT:<N> 읽기 (최대 5초 대기)
-    import select as _select
     deadline = time.time() + 5
-    port_line = ''
     while time.time() < deadline:
         line = _office_server_proc.stdout.readline()
         if not line:
