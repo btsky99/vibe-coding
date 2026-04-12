@@ -249,8 +249,11 @@ def _do_log(data: dict):
 
 
 def main():
-    """stdin에서 이벤트를 읽고, 로깅은 백그라운드 프로세스로 넘긴 뒤 즉시 종료합니다.
-    이렇게 하면 Claude Code UI의 전송 버튼이 hook 완료를 기다리지 않아도 됩니다."""
+    """stdin에서 이벤트를 읽고, 로깅은 백그라운드 프로세스로 넘긴 뒤 즉시 종료합니다."""
+    # 오피스 세션(OFFICE_MODE=true)에서는 hook 비활성화
+    if os.environ.get('OFFICE_MODE') == 'true':
+        sys.exit(0)
+
     # stdin에서 이벤트 JSON 수신
     try:
         raw = sys.stdin.read()

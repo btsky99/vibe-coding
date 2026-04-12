@@ -408,8 +408,11 @@ def _ensure_postgres() -> None:
 
 
 def main():
+    # 오피스 세션(OFFICE_MODE=true)에서는 hook 비활성화 — 대화형 세션이므로 hook 불필요
+    if os.environ.get('OFFICE_MODE') == 'true':
+        sys.exit(0)
+
     # 캐스케이드 루프 방지: cli_agent.py가 spawn한 자식 프로세스(VIBE_CHILD_AGENT=1)는 즉시 종료.
-    # VIBE_AGENT_MODE는 서버/다른 용도로도 사용되므로 체크하지 않음.
     if os.environ.get('VIBE_CHILD_AGENT'):
         sys.exit(0)
 

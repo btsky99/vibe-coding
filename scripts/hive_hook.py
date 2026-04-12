@@ -650,6 +650,10 @@ def _snippet(text: str, max_len: int = 60) -> str:
 
 
 def main():
+    # 오피스 세션(OFFICE_MODE=true)에서는 hook 비활성화 — 대화형 세션이므로
+    if os.environ.get('OFFICE_MODE') == 'true':
+        return
+
     try:
         raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
         if not raw.strip():
