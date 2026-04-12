@@ -63,32 +63,42 @@ export default function OfficeChatPanel({
 
   return (
     <div className="flex h-full flex-col">
-      {/* 헤더 — 연결된 터미널 표시 */}
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#080d15] px-3">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-3 w-3 text-white/30" />
-          <div className="h-2 w-2 rounded-full" style={{
-            backgroundColor: terminalRunning ? '#4ade80' : '#ef4444',
-            boxShadow: terminalRunning ? '0 0 6px rgba(74,222,128,0.5)' : 'none',
-          }} />
-          <span className="text-[10px] font-bold text-white/60">
-            {selectedSlotName}
-          </span>
-          {terminalId && (
-            <span className="text-[8px] text-white/20">{terminalId}</span>
-          )}
+      {/* 헤더 — Claude Code 상태 시각화 */}
+      <div className="flex shrink-0 flex-col border-b border-white/[0.06] bg-[#080d15]">
+        <div className="flex h-10 items-center justify-between px-3">
+          <div className="flex items-center gap-2">
+            <Terminal className="h-3 w-3 text-white/30" />
+            <div className="h-2 w-2 rounded-full" style={{
+              backgroundColor: !terminalRunning ? '#ef4444' : terminalReady ? '#4ade80' : '#f59e0b',
+              boxShadow: terminalReady ? '0 0 6px rgba(74,222,128,0.5)' : 'none',
+              animation: terminalRunning && !terminalReady ? 'pulse 1.5s infinite' : 'none',
+            }} />
+            <span className="text-[10px] font-bold text-white/60">
+              {selectedSlotName}
+            </span>
+            {terminalId && (
+              <span className="text-[8px] text-white/20">{terminalId}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 w-2 rounded-full" style={{ backgroundColor: agentColor }} />
+            <span className="text-[9px] text-white/40">{selectedAgent}</span>
+            {chatMessages.length > 0 && (
+              <button onClick={onClearChat} className="ml-2 rounded p-1 text-white/15 hover:text-white/40 transition" title="채팅 초기화">
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: agentColor }} />
-          <span className="text-[9px] text-white/40">{selectedAgent}</span>
-          {chatMessages.length > 0 && (
-            <button
-              onClick={onClearChat}
-              className="ml-2 rounded p-1 text-white/15 hover:text-white/40 transition"
-              title="채팅 초기화"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
+        {/* 상태 바 */}
+        <div className="flex h-5 items-center gap-2 border-t border-white/[0.03] px-3">
+          <span className={`text-[9px] font-bold ${!terminalRunning ? 'text-red-400' : terminalReady ? 'text-emerald-400' : 'text-amber-400'}`}>
+            {!terminalRunning ? '꺼짐' : terminalReady ? '대기 중' : '부팅 중...'}
+          </span>
+          {terminalRunning && !terminalReady && (
+            <div className="flex-1 h-1 rounded bg-white/[0.04] overflow-hidden">
+              <div className="h-full w-1/3 rounded bg-amber-500/40 animate-[slide_1.5s_infinite_linear]" />
+            </div>
           )}
         </div>
       </div>
