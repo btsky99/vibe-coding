@@ -126,11 +126,15 @@ export function useOfficePty(activeTerminalId: string | null): UseOfficePtyRetur
       fetch(`${PTY_BASE}/api/pty/output/${activeTerminalId}?since=${since}&limit=50`)
         .then(r => r.json())
         .then(data => {
-          // 첫 연결: 과거 히스토리 스킵 — latest_seq만 기록
+          // 첫 연결: cmd.exe 부팅 노이즈를 건너뛰되, 이후 출력은 모두 표시
           if (!initializedRef.current.has(activeTerminalId)) {
             initializedRef.current.add(activeTerminalId);
-            lastSeqRef.current[activeTerminalId] = data.latest_seq || 0;
-            return; // 히스토리 표시 안 함
+            // 부팅 노이즈(cmd.exe 배너, Claude Code 로고 등)만 스킵 — 최근 seq 기준
+            // 단, 유저가 이미 메시지를 보냈으면(userMsgsRef) 스킵하지 않음
+            if (userMsgsRef.current.length === 0) {
+              lastSeqRef.current[activeTerminalId] = data.latest_seq || 0;
+              return;
+            }
           }
 
           if (data.entries && data.entries.length > 0) {
