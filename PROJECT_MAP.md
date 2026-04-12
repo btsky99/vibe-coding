@@ -31,7 +31,8 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 5176 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | ~6000 | 클래식 HTTP 서버 (클래식 API 라우팅, SSE, PostgreSQL 연동) |
+| `office_server.py` | ~260 | 오피스 전용 HTTP 서버 (별도 프로세스, /api/office/* 직접 + 기타 클래식 프록시) |
 | `_version.py` | 8 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -58,6 +59,7 @@
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
 | `logger.py` | 123 |  |
 | `pg_store.py` | 1034 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `server_utils.py` | ~60 | 서버 공통 유틸 (포트 탐색, CORS, JSON 응답 헬퍼) |
 | `secure.py` | 52 |  |
 | `view.py` | 243 |  |
 

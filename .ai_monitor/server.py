@@ -134,7 +134,7 @@ import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
-import api.office_api as office_api
+# [제거됨 2026-04-12] office_api → office_server.py로 이전
 import api.experience_api as experience_api
 import string
 import socket
@@ -1088,11 +1088,8 @@ ensure_legacy_store(DATA_DIR)
 # PG가 이미 떠있으면 바로 스키마 초기화
 ensure_schema(DATA_DIR)
 
-# 오피스 프로필 초기화 — 기본 프로필 시드 + LISTEN/NOTIFY 리스너 기동
-try:
-    office_api.init_office(DATA_DIR)
-except Exception as _office_init_err:
-    print(f"[office_api] 초기화 실패: {_office_init_err}")
+# [제거됨 2026-04-12] 오피스 초기화는 office_server.py에서 자체 처리
+# office_api.init_office(DATA_DIR) → office_server.py main()에서 호출
 
 # [2026-03-22] 지식그래프 관련 _backfill_thought_parent_ids() 제거
 
@@ -2820,16 +2817,8 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
-        # ── [모듈 위임] office_api — /api/office/* ──────────────────────
-        # 프로필 중앙화 + 클래식/오피스 워커 네임스페이스 분리
-        elif parsed_path.path.startswith('/api/office/'):
-            _params = parse_qs(parsed_path.query)
-            if not office_api.handle_get(self, parsed_path.path, _params, DATA_DIR=DATA_DIR):
-                self.send_response(404)
-                self.send_header('Content-Type', 'application/json;charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-                self.end_headers()
-                self.wfile.write(b'{"error":"not found"}')
+        # ── [제거됨 2026-04-12] office_api GET → office_server.py로 이전 ──
+        # /api/office/* GET 요청은 오피스 서버(별도 프로세스)에서 직접 처리
 
         # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
         elif parsed_path.path.startswith('/api/dispatcher/'):
@@ -3344,12 +3333,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_PUT(self):
-        """PUT 메소드 — 오피스 프로필 전체 대체 + 활성 프로필 변경."""
-        parsed_path = urlparse(self.path)
-        path = parsed_path.path
-        if path.startswith('/api/office/'):
-            if office_api.handle_put(self, path, DATA_DIR=DATA_DIR):
-                return
+        """PUT 메소드 — [제거됨] 오피스 프로필은 office_server에서 처리."""
+        # /api/office/* PUT 요청은 오피스 서버(별도 프로세스)에서 직접 처리
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3357,12 +3342,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'{"error":"not found"}')
 
     def do_DELETE(self):
-        """DELETE 메소드 — 오피스 프로필 삭제."""
-        parsed_path = urlparse(self.path)
-        path = parsed_path.path
-        if path.startswith('/api/office/'):
-            if office_api.handle_delete(self, path, DATA_DIR=DATA_DIR):
-                return
+        """DELETE 메소드 — [제거됨] 오피스 프로필은 office_server에서 처리."""
+        # /api/office/* DELETE 요청은 오피스 서버(별도 프로세스)에서 직접 처리
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3381,16 +3362,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             self._handle_telegram_test()
             return
 
-        # ── [모듈 위임] office_api POST — /api/office/* ─────────────────
-        if path.startswith('/api/office/'):
-            if office_api.handle_post(self, path, DATA_DIR=DATA_DIR):
-                return
-            self.send_response(404)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            self.wfile.write(b'{"error":"not found"}')
-            return
+        # ── [제거됨 2026-04-12] office_api POST → office_server.py로 이전 ──
+        # /api/office/* POST 요청은 오피스 서버(별도 프로세스)에서 직접 처리
+        # 단, /api/office/launch, /api/office/restart, /api/office/status는 아래에서 처리
 
         # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
         # window.open() 대신 PySide6 네이티브 프로세스를 직접 실행하여
@@ -3597,26 +3571,65 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
-        # ── 오피스 독립 창 실행 — dashboard_window.py office 탭 ──
+        # ── 오피스 독립 서버 + 창 실행 ──
+        # office_server.py를 별도 프로세스로 시작 → 포트 확인 → dashboard_window.py 실행
         if path == '/api/office/launch':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
+                # 이미 오피스 서버가 실행 중이면 재사용
+                if _office_server_proc and _office_server_proc.poll() is None and _office_server_port:
+                    office_port = _office_server_port
+                else:
+                    office_port = _launch_office_server()
+                # 오피스 대시보드 창 실행 (오피스 서버 포트 전달)
                 _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
                 dashboard_script = BASE_DIR / 'dashboard_window.py'
                 python_cmds = _python_runner_cmds()
                 if not python_cmds:
                     raise RuntimeError('Python interpreter not found for office launch')
                 subprocess.Popen(
-                    [python_cmds[0], str(dashboard_script), str(HTTP_PORT), 'office'],
+                    [python_cmds[0], str(dashboard_script), str(office_port), 'office'],
                     creationflags=_no_window,
                     close_fds=True,
                 )
-                self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
+                self.wfile.write(json.dumps({
+                    "status": "launched",
+                    "office_port": office_port,
+                }).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
+        # ── 오피스 서버 재시작 ──
+        if path == '/api/office/restart':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                new_port = _restart_office_server()
+                self.wfile.write(json.dumps({
+                    "status": "restarted", "office_port": new_port,
+                }).encode('utf-8'))
+            except Exception as e:
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            return
+
+        # ── 오피스 서버 상태 조회 ──
+        if path == '/api/office/status':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            alive = _office_server_proc and _office_server_proc.poll() is None
+            self.wfile.write(json.dumps({
+                "running": alive,
+                "port": _office_server_port if alive else None,
+                "pid": _office_server_proc.pid if alive and _office_server_proc else None,
+            }).encode('utf-8'))
             return
 
         # ── 스킬 평가 리뷰어 실행 — 브라우저에서 eval_review.html 열기 ──
@@ -4751,6 +4764,110 @@ _REMOVED_PTY_HANDLER = True  # 마커 — 참조 점검용
 # — X 버튼 종료 시 이 목록을 순회하여 모두 taskkill로 강제 종료
 _child_procs: list = []
 
+# ── 오피스 서버 프로세스 관리 ─────────────────────────────────────────────
+_office_server_proc = None   # subprocess.Popen 인스턴스
+_office_server_port = None   # 실제 바인딩된 포트
+
+
+def _launch_office_server() -> int:
+    """office_server.py를 서브프로세스로 시작하고 실제 바인딩 포트를 반환한다.
+
+    stdout 첫 줄에서 'PORT:<N>' 형식으로 포트를 읽는다.
+    """
+    global _office_server_proc, _office_server_port
+
+    # 기존 프로세스가 살아있으면 종료
+    if _office_server_proc and _office_server_proc.poll() is None:
+        try:
+            _office_server_proc.terminate()
+            _office_server_proc.wait(timeout=3)
+        except Exception:
+            try:
+                _office_server_proc.kill()
+            except Exception:
+                pass
+
+    python_cmds = _python_runner_cmds()
+    if not python_cmds:
+        raise RuntimeError('Python 인터프리터를 찾을 수 없음')
+
+    office_script = BASE_DIR / 'office_server.py'
+    _office_server_proc = subprocess.Popen(
+        [python_cmds[0], str(office_script),
+         '--classic-port', str(HTTP_PORT),
+         '--port-start', '9010'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+    )
+    _child_procs.append(_office_server_proc)
+
+    # stdout에서 PORT:<N> 읽기 (최대 5초 대기)
+    import select as _select
+    deadline = time.time() + 5
+    port_line = ''
+    while time.time() < deadline:
+        line = _office_server_proc.stdout.readline()
+        if not line:
+            if _office_server_proc.poll() is not None:
+                stderr_out = _office_server_proc.stderr.read().decode('utf-8', errors='replace')
+                raise RuntimeError(f'오피스 서버 시작 실패: {stderr_out[:500]}')
+            time.sleep(0.1)
+            continue
+        decoded = line.decode('utf-8', errors='replace').strip()
+        if decoded.startswith('PORT:'):
+            _office_server_port = int(decoded.split(':')[1])
+            print(f'[server] 오피스 서버 시작됨: 포트 {_office_server_port}, PID {_office_server_proc.pid}')
+            # 남은 stdout을 비동기로 소비 (파이프 막힘 방지)
+            threading.Thread(
+                target=lambda p: [p.stdout.read() for _ in [None]],
+                args=(_office_server_proc,), daemon=True,
+            ).start()
+            _start_office_monitor()
+            return _office_server_port
+        print(f'[office_server] {decoded}')
+
+    raise RuntimeError('오피스 서버 포트 응답 타임아웃 (5초)')
+
+
+def _restart_office_server() -> int:
+    """오피스 서버를 재시작하고 새 포트를 반환한다."""
+    return _launch_office_server()
+
+
+_office_monitor_running = False
+
+
+def _start_office_monitor():
+    """오피스 서버 프로세스 모니터링 스레드. 크래시 감지 시 자동 재시작 (최대 3회)."""
+    global _office_monitor_running
+    if _office_monitor_running:
+        return
+    _office_monitor_running = True
+
+    def _monitor():
+        global _office_monitor_running
+        restart_count = 0
+        max_restarts = 3
+        while _office_monitor_running:
+            time.sleep(5)
+            if _office_server_proc and _office_server_proc.poll() is not None:
+                exit_code = _office_server_proc.returncode
+                print(f'[server] ⚠️ 오피스 서버 크래시 감지 (exit={exit_code}), 재시작 {restart_count + 1}/{max_restarts}')
+                if restart_count >= max_restarts:
+                    print('[server] 오피스 서버 최대 재시작 횟수 초과 — 모니터링 중단')
+                    break
+                try:
+                    _restart_office_server()
+                    restart_count += 1
+                    print(f'[server] 오피스 서버 재시작 성공 (포트 {_office_server_port})')
+                except Exception as e:
+                    print(f'[server] 오피스 서버 재시작 실패: {e}')
+                    restart_count += 1
+        _office_monitor_running = False
+
+    threading.Thread(target=_monitor, daemon=True, name='OfficeMonitor').start()
+
 
 def _graceful_shutdown_pty_server():
     """Node PTY 서버에 graceful shutdown 요청을 보냅니다.
@@ -4935,16 +5052,7 @@ except (AttributeError, OSError):
 
 # 포트 설정: 9000(HTTP) / 9001(WS) — 충돌 시 빈 포트 자동 탐색 (최대 20개)
 # 9000은 개발/모니터링 도구 관례 포트 (사용자 지정)
-def _find_free_port(start: int, max_tries: int = 20) -> int:
-    import socket
-    for port in range(start, start + max_tries):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(('127.0.0.1', port))
-                return port
-            except OSError:
-                continue
-    return start  # 실패 시 원래 포트 반환 (에러는 서버 시작 시 처리)
+from src.server_utils import find_free_port as _find_free_port
 
 # [수정 2026-03-15 v3.7.68] HTTP/WS 포트는 __main__ 인스턴스 락 획득 후 슬롯 기반으로 확정
 # 모듈 임포트 시점에는 기본값만 설정. 실제 포트는 아래 __main__ 블록에서 덮어씀.
