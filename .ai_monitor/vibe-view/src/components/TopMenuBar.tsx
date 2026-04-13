@@ -14,7 +14,8 @@ import { memo, useState, useRef, useEffect } from 'react';
 import {
   Menu, Terminal, RotateCw, Monitor,
   X, Zap, Cpu, Info, ShieldCheck,
-  Trash2, LayoutDashboard, ClipboardCheck, FileText, Copy, Check, RefreshCw
+  Trash2, LayoutDashboard, ClipboardCheck, FileText, Copy, Check, RefreshCw,
+  Settings, Wrench, Database, Shield, BookOpen, FileCode
 } from 'lucide-react';
 import { API_BASE } from '../constants';
 import { VscFolderOpened } from 'react-icons/vsc';
@@ -181,7 +182,36 @@ const TopMenuBar = memo(function TopMenuBar({
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
   // 메뉴 항목 목록 — 순서가 곧 표시 순서
-  const menus = ['파일', '편집', '보기', 'AI 도구', '도움말'];
+  const menus = ['파일', '편집', '보기', 'AI 도구', '도움말', '프로젝트 세팅'];
+
+  // 프로젝트 세팅 프롬프트 목록 (도움말 옆 별도 메뉴)
+  const [setupPrompts, setSetupPrompts] = useState<{id: string; agent: string; category: string; description: string; prompt: string}[]>([]);
+  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeMenu === '프로젝트 세팅' && setupPrompts.length === 0) {
+      fetch(`${API_BASE}/api/tools/rule-prompts`)
+        .then(r => r.json())
+        .then(d => setSetupPrompts(d.prompts || []))
+        .catch(() => {});
+    }
+  }, [activeMenu]);
+
+  const handleCopyPrompt = (id: string, prompt: string) => {
+    navigator.clipboard.writeText(prompt).then(() => {
+      setCopiedPromptId(id);
+      setTimeout(() => setCopiedPromptId(null), 2000);
+    });
+  };
+
+  // 카테고리별 아이콘 매핑
+  const promptIcon = (id: string) => {
+    if (id === 'dev-tools') return <Wrench className="w-3.5 h-3.5 text-[#e8a87c]" />;
+    if (id === 'db-hive') return <Database className="w-3.5 h-3.5 text-accent" />;
+    if (id === 'harness') return <Shield className="w-3.5 h-3.5 text-primary" />;
+    if (id === 'zettelkasten') return <BookOpen className="w-3.5 h-3.5 text-success" />;
+    return <FileCode className="w-3.5 h-3.5 text-white/50" />;
+  };
 
   return (
     <div className="h-7 bg-[#323233] flex items-center px-2 gap-0.5 text-[12px] border-b border-black/30 shrink-0 z-50 shadow-lg">
@@ -338,6 +368,56 @@ const TopMenuBar = memo(function TopMenuBar({
               >
                 <Info className="w-3.5 h-3.5 text-[#3794ef]" /> 버전 정보
               </button>
+            </div>
+          )}
+
+          {/* ── 프로젝트 세팅 메뉴 (도움말 옆) ── */}
+          {activeMenu === menu && menu === '프로젝트 세팅' && (
+            <div className="absolute top-full left-0 w-80 bg-[#252526] border border-black/40 shadow-2xl rounded-b z-[100] py-1 animate-in fade-in slide-in-from-top-1">
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">환경 설치 프롬프트</div>
+              <div className="px-3 py-1.5 text-[10px] text-white/30">클릭하면 프롬프트가 클립보드에 복사됩니다. AI 에이전트에 붙여넣기 하세요.</div>
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              {setupPrompts.filter(p => p.category === 'setup').map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { handleCopyPrompt(p.id, p.prompt); }}
+                  className="w-full text-left px-4 py-2 hover:bg-primary/10 flex items-center gap-2.5 group"
+                >
+                  {promptIcon(p.id)}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-white/80 group-hover:text-white truncate">{p.description}</div>
+                    <div className="text-[9px] text-white/30">{p.agent}</div>
+                  </div>
+                  {copiedPromptId === p.id
+                    ? <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                    : <Copy className="w-3 h-3 text-white/20 group-hover:text-white/50 shrink-0" />}
+                </button>
+              ))}
+              {setupPrompts.filter(p => p.category === 'rules').length > 0 && (
+                <>
+                  <div className="h-px bg-white/5 my-1 mx-2"></div>
+                  <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">규칙 파일 생성</div>
+                  {setupPrompts.filter(p => p.category === 'rules').map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => { handleCopyPrompt(p.id, p.prompt); }}
+                      className="w-full text-left px-4 py-2 hover:bg-primary/10 flex items-center gap-2.5 group"
+                    >
+                      {promptIcon(p.id)}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] text-white/80 group-hover:text-white truncate">{p.description}</div>
+                        <div className="text-[9px] text-white/30">{p.agent}</div>
+                      </div>
+                      {copiedPromptId === p.id
+                        ? <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                        : <Copy className="w-3 h-3 text-white/20 group-hover:text-white/50 shrink-0" />}
+                    </button>
+                  ))}
+                </>
+              )}
+              {setupPrompts.length === 0 && (
+                <div className="px-4 py-3 text-[11px] text-white/30 text-center">프롬프트 로딩 중...</div>
+              )}
             </div>
           )}
         </div>

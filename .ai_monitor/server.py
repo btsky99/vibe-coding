@@ -135,7 +135,7 @@ import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
 # [2026-04-13] office_api 직접 호출 제거 — 오피스 서버로 프록시 전환
-# import api.office_api as office_api
+import api.office_api as office_api
 import api.experience_api as experience_api
 import string
 import socket
@@ -995,11 +995,24 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
-# 버전 로드: PyInstaller 빌드 환경에서 _version 모듈 누락 방지용 이중 안전장치
+# 버전 로드: PyInstaller frozen 환경에서도 확실히 동작하도록 파일 읽기 + import 이중 시도
+__version__ = "0.0.0-unknown"
 try:
+    # 1차: 모듈 import (개발 모드에서 동작)
     from _version import __version__
 except ImportError:
-    __version__ = "0.0.0-unknown"
+    # 2차: 파일 직접 읽기 (PyInstaller frozen 환경 — datas로 복사된 파일)
+    import re as _re_ver
+    for _candidate in [
+        os.path.join(getattr(sys, '_MEIPASS', ''), '_version.py'),
+        os.path.join(os.path.dirname(__file__), '_version.py'),
+    ]:
+        if os.path.isfile(_candidate):
+            with open(_candidate, 'r', encoding='utf-8') as _vf:
+                _m = _re_ver.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _vf.read())
+                if _m:
+                    __version__ = _m.group(1)
+                    break
 
 # 데이터 디렉토리: 배포 모드 → %APPDATA%\VibeCoding, 개발 모드 → .ai_monitor/data
 if getattr(sys, 'frozen', False):
@@ -4785,11 +4798,35 @@ def _proxy_to_office_server(handler, method: str = 'GET', body: bytes | None = N
     오피스 서버로 프록시하는 방식으로 전환. 중복 코드 제거 + 단일 책임.
     """
     if not _office_server_port:
-        handler.send_response(503)
+        # 폴백: 오피스 서버 없으면 office_api를 직접 호출
+        parsed = urlparse(handler.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
+        try:
+            if method == 'GET':
+                if office_api.handle_get(handler, path, params, DATA_DIR):
+                    return
+            elif method == 'POST':
+                if office_api.handle_post(handler, path, DATA_DIR):
+                    return
+            elif method == 'PUT':
+                if office_api.handle_put(handler, path, DATA_DIR):
+                    return
+            elif method == 'DELETE':
+                if office_api.handle_delete(handler, path, DATA_DIR):
+                    return
+        except Exception as e:
+            handler.send_response(500)
+            handler.send_header('Content-Type', 'application/json;charset=utf-8')
+            handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+            handler.end_headers()
+            handler.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+            return
+        handler.send_response(404)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
-        handler.wfile.write(b'{"error":"office server not running"}')
+        handler.wfile.write(b'{"error":"not found"}')
         return
 
     import urllib.request

@@ -29,7 +29,7 @@ import { type AgentCli, useWorkspaceProfiles, MAX_SLOTS } from '../../hooks/useW
 import { useCliModels, getDefaultModel } from '../../hooks/useCliModels';
 import IsometricOffice from './IsometricOffice';
 import OfficeChatPanel from './OfficeChatPanel';
-import { useOfficePty } from '../../hooks/useOfficePty';
+import { useOfficeChat } from '../../hooks/useOfficeChat';
 
 // HUD 탭 제거됨 — 오피스 우측은 채팅 전용
 
@@ -135,26 +135,19 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     return () => window.clearInterval(timer);
   }, [fetchStats]);
 
-  // ── PTY 직통 채팅 ──
-  // selectedDesk(슬롯 인덱스) → 터미널 ID(T1, T2, ...) 매핑
-  // 슬롯 0 → T1, 슬롯 1 → T2, CEO(-1) → CEO의 CLI에 해당하는 첫 터미널
+  // ── agent/chat API 기반 채팅 ──
+  // selectedDesk(슬롯 인덱스) → 터미널 ID 매핑
   const [selectedDesk, setSelectedDesk] = useState(office.selectedDefaultSlot);
   const [selectedZone, setSelectedZone] = useState<OfficeZone>('desk');
   const [speechBubbles, setSpeechBubbles] = useState<SpeechBubble[]>([]);
-  // rightMode 제거 — 오피스 우측은 채팅 전용
   const prevStatuses = useRef<Record<string, string>>({});
 
   const activeSlots = wp.activeProfile.slots;
   const slotCount = activeSlots.length;
 
-  // ── 오피스 전용 PTY 세션 (클래식 T1~T8과 완전 분리) ──
-  // 선택된 슬롯의 CLI(claude/gemini/codex)에 해당하는 오피스 세션(O1, O2, ...)을 찾는다.
-  // 세션이 없으면 자동 생성한다.
-
-  // 첫 번째 오피스 세션을 active로 설정 (아직 세션이 없을 때는 null)
-  // ptyHook: 세션 목록 폴링은 항상 동작, 출력 폴링은 activeTerminalId에 의존
-  const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
-  const ptyHook = useOfficePty(activeTerminalId);
+  // ── 오피스 채팅 (agent/chat SSE 기반) ──
+  // 선택된 슬롯의 CLI에 해당하는 오피스 터미널 ID를 생성한다.
+  // PTY spawn 대신 agent_api.py의 /api/agent/chat을 사용.
 
   // 선택된 슬롯의 CLI
   const selectedCli = useMemo(() => {
@@ -164,39 +157,21 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     return activeSlots[selectedDesk]?.cli || 'claude';
   }, [selectedDesk, activeSlots]);
 
-  // 선택된 CLI에 맞는 오피스 세션 찾기 → 이것이 write/output 모두의 SSOT
-  const resolvedTerminalId = useMemo(() => {
-    const match = ptyHook.sessions.find(s => s.agent === selectedCli && s.running);
-    return match?.id || null;
-  }, [selectedCli, ptyHook.sessions]);
-
-  const resolvedTerminalRunning = useMemo(() => {
-    return resolvedTerminalId !== null;
-  }, [resolvedTerminalId]);
-
-  // resolvedTerminalId → activeTerminalId 동기화 (폴링 대상 갱신)
-  useEffect(() => {
-    if (resolvedTerminalId && resolvedTerminalId !== activeTerminalId) {
-      setActiveTerminalId(resolvedTerminalId);
+  // 선택된 슬롯의 YOLO 모드
+  const selectedYolo = useMemo(() => {
+    if (selectedDesk === -1) {
+      return activeSlots.find(s => (s.role || '').toLowerCase() === 'ceo')?.yolo || false;
     }
-  }, [resolvedTerminalId]);
+    return activeSlots[selectedDesk]?.yolo || false;
+  }, [selectedDesk, activeSlots]);
 
-  // 오피스 세션 자동 생성 — 세션 목록 로딩 완료 후에만 spawn 판단
-  const spawnInProgress = useRef(false);
-  const initialFetchDone = useRef(false);
-  useEffect(() => {
-    if (ptyHook.sessions.length > 0) initialFetchDone.current = true;
-  }, [ptyHook.sessions]);
-  useEffect(() => {
-    if (!initialFetchDone.current) return;
-    if (!resolvedTerminalId && !spawnInProgress.current) {
-      spawnInProgress.current = true;
-      ptyHook.spawnSession(selectedCli, true, projectPath || undefined).then(id => {
-        if (id) setActiveTerminalId(id);
-        spawnInProgress.current = false;
-      });
-    }
-  }, [resolvedTerminalId, selectedCli, ptyHook.sessions]);
+  // 오피스 터미널 ID: 슬롯 인덱스 기반 (O1, O2, ...)
+  const terminalId = useMemo(() => {
+    if (selectedDesk === -1) return 'O-CEO';
+    return `O${selectedDesk + 1}`;
+  }, [selectedDesk]);
+
+  const chatHook = useOfficeChat(terminalId, selectedCli, selectedYolo);
 
   useEffect(() => {
     setSelectedDesk((prev) => (prev >= slotCount ? 0 : prev));
@@ -355,7 +330,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
           <button onClick={summonMeeting} className="rounded border border-cyan-500/20 bg-cyan-500/8 px-2 py-0.5 text-[9px] font-bold text-cyan-300 hover:bg-cyan-500/15">회의</button>
           <button onClick={requestReview} className="rounded border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-[9px] font-bold text-emerald-300 hover:bg-emerald-500/15">리뷰</button>
           <button onClick={() => {
-            ptyHook.clearChat();
+            chatHook.clearChat();
             window.location.href = window.location.href;
           }} className="rounded border border-white/8 bg-white/[0.03] p-1 text-white/30 hover:text-white/60" title="새로고침">
             <RefreshCw className="h-2.5 w-2.5" />
@@ -567,24 +542,20 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
           </div>
         </div>
 
-        {/* ── 오른쪽: PTY 직통 채팅 패널 ── */}
+        {/* ── 오른쪽: agent/chat API 채팅 패널 ── */}
         <aside className="flex w-[380px] shrink-0 flex-col border-l border-white/[0.04] bg-[#0a0f18]">
           <OfficeChatPanel
-            chatMessages={ptyHook.chatMessages}
+            chatMessages={chatHook.messages}
             selectedAgent={selectedDesk === -1 ? 'ceo' : (activeSlots[selectedDesk]?.cli || 'claude')}
             selectedSlotName={selectedDesk === -1
               ? (activeSlots.find(s => s.role?.toLowerCase() === 'ceo')?.name ?? 'CEO')
               : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
-            terminalId={resolvedTerminalId}
-            terminalRunning={resolvedTerminalRunning}
-            terminalReady={ptyHook.ready}
-            sendError={ptyHook.sendError}
-            onSendMessage={(text) => {
-              if (resolvedTerminalId) {
-                ptyHook.sendMessage(resolvedTerminalId, text);
-              }
-            }}
-            onClearChat={ptyHook.clearChat}
+            terminalId={terminalId}
+            isStreaming={chatHook.isStreaming}
+            sendError={chatHook.sendError}
+            onSendMessage={chatHook.sendMessage}
+            onStopStreaming={chatHook.stopStreaming}
+            onClearChat={chatHook.clearChat}
           />
         </aside>
       </div>

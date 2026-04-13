@@ -723,6 +723,51 @@ def main():
         except Exception:
             pass  # 하네스 검증 실패는 훅 전체를 중단하지 않음
 
+        # ── [2026-04-14] 중단 세션 복구 브리핑 ──────────────────────────────
+        # 이전 세션이 비정상 종료(Stop 없이 끝남)되었으면 미완료 작업 브리핑 자동 출력.
+        # 매 프롬프트마다 active_session_context를 확인하여 중단된 세션이 있는지 감지.
+        try:
+            from src.pg_store import get_interrupted_sessions, complete_active_session
+            _interrupted = get_interrupted_sessions()
+            if _interrupted:
+                _resume_lines = ["🔄 [세션 복구] 이전에 중단된 작업이 감지되었습니다:"]
+                for _sess in _interrupted:
+                    _task = _sess.get('task_summary', '(알 수 없음)')
+                    _files_raw = _sess.get('modified_files', '[]')
+                    try:
+                        _files = json.loads(_files_raw) if isinstance(_files_raw, str) else _files_raw
+                    except Exception:
+                        _files = []
+                    _tid = _sess.get('terminal_id', '?')
+                    _updated = _sess.get('updated_at', '')
+                    _resume_lines.append(f"  [{_tid}] 작업: {_task}")
+                    if _files:
+                        _resume_lines.append(f"       수정 파일: {', '.join(_files[:8])}")
+                    _resume_lines.append(f"       마지막 활동: {_updated}")
+                    # 이전 세션은 '중단'으로 마킹 (중복 브리핑 방지)
+                    complete_active_session(_sess.get('terminal_id', ''))
+                # uncommitted git 변경도 함께 표시
+                try:
+                    import subprocess as _sp_git
+                    _no_win = getattr(_sp_git, 'CREATE_NO_WINDOW', 0x08000000)
+                    _git_r = _sp_git.run(
+                        ['git', 'diff', '--stat', '--no-color'],
+                        capture_output=True, text=True, encoding='utf-8', errors='replace',
+                        timeout=5, cwd=str(ROOT_DIR), creationflags=_no_win,
+                    )
+                    if _git_r.returncode == 0 and _git_r.stdout.strip():
+                        _resume_lines.append(f"  📂 커밋 안 된 변경:")
+                        for _gl in _git_r.stdout.strip().split('\n')[:8]:
+                            _resume_lines.append(f"       {_gl.strip()}")
+                except Exception:
+                    pass
+                _resume_lines.append("⚠️  이전 작업을 이어서 진행할지, 새 작업을 시작할지 사용자에게 확인하세요.")
+                print("\n".join(_resume_lines), flush=True)
+                if log_task:
+                    log_task("Hive", f"[세션 복구] 중단 세션 {len(_interrupted)}건 감지 → 브리핑 완료", _TERMINAL_ID)
+        except Exception:
+            pass  # 복구 실패는 훅 흐름 차단 안 함
+
         # [하이브 컨텍스트 자동 주입] 작업 시작 전 current-work + 오늘 활동 자동 로드
         # → Claude가 매번 수동으로 memory.py list를 실행하지 않아도 항상 컨텍스트 보유
         hive_ctx = _inject_hive_context()
@@ -772,6 +817,19 @@ def main():
             _SESSION_HAD_ERROR = False
             _SESSION_ASSIGNED_TASKS = []
             _SESSION_REVIEW_REQUESTS = []
+
+            # ── [2026-04-14] 활성 세션 컨텍스트 기록 ──────────────────────────
+            # 매 지시마다 DB에 현재 작업 상태를 기록 → 튕겨도 마지막 상태가 남아있음
+            try:
+                from src.pg_store import upsert_active_session
+                upsert_active_session(
+                    terminal_id=_TERMINAL_ID,
+                    agent_id='claude',
+                    task_summary=short,
+                    modified_files=[],  # 새 지시 시작 → 파일 목록 리셋
+                )
+            except Exception:
+                pass  # DB 기록 실패는 훅 흐름 차단 안 함
 
             # [파이프라인 단계 업데이트] 사용자 지시 수신 → "분석" 단계 표시
             _update_pipeline_stage('analyzing', short)
@@ -926,6 +984,12 @@ def main():
             # self-reflect: 수정 파일 누적
             if fp not in _SESSION_MODIFIED_FILES:
                 _SESSION_MODIFIED_FILES.append(_short_path(fp))
+            # [2026-04-14] 활성 세션에 수정 파일 실시간 추가
+            try:
+                from src.pg_store import update_session_files
+                update_session_files(_TERMINAL_ID, _short_path(fp))
+            except Exception:
+                pass
 
         elif tool_name == "Write":
             fp = tool_input.get("file_path", "?")
@@ -935,6 +999,12 @@ def main():
             # self-reflect: 생성 파일 누적
             if fp not in _SESSION_MODIFIED_FILES:
                 _SESSION_MODIFIED_FILES.append(_short_path(fp))
+            # [2026-04-14] 활성 세션에 생성 파일 실시간 추가
+            try:
+                from src.pg_store import update_session_files
+                update_session_files(_TERMINAL_ID, _short_path(fp))
+            except Exception:
+                pass
 
         elif tool_name == "Bash":
             cmd = tool_input.get("command", "").strip()
@@ -964,6 +1034,15 @@ def main():
 
         # [파이프라인 단계] Claude 응답 완료 → "완료" 단계 표시
         _update_pipeline_stage('done')
+
+        # ── [2026-04-14] 활성 세션 완료 마킹 ──────────────────────────────
+        # 정상적으로 Stop 이벤트가 발생하면 active → done으로 변경
+        # 튕기면 이 코드가 실행 안 됨 → active 상태로 남아 → 다음 세션에서 감지
+        try:
+            from src.pg_store import complete_active_session
+            complete_active_session(_TERMINAL_ID)
+        except Exception:
+            pass
 
         # Claude 응답이 끝나면 in_progress 상태인 claude 태스크 처리
         # → stop_reason이 'error'가 아닌 경우에만 done으로 변경

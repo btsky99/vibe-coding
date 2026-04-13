@@ -134,8 +134,100 @@ def init_office(DATA_DIR: Path):
 
 # ── GET 핸들러 ───────────────────────────────────────────────────────────
 
+_skills_cache: dict | None = None
+_skills_cache_ts: float = 0
+
+
+def _parse_skills() -> list[dict]:
+    """프로젝트의 .claude/skills/ 디렉토리에서 스킬 메타데이터를 파싱한다.
+    YAML frontmatter에서 name, description, user-invocable 추출.
+    결과를 5분간 캐시.
+    """
+    global _skills_cache, _skills_cache_ts
+    now = time.time()
+    if _skills_cache is not None and now - _skills_cache_ts < 300:
+        return _skills_cache
+
+    skills = []
+    # 프로젝트 루트의 .claude/skills/ 탐색
+    project_root = Path(__file__).resolve().parent.parent.parent
+    skills_dir = project_root / '.claude' / 'skills'
+    if not skills_dir.exists():
+        _skills_cache = skills
+        _skills_cache_ts = now
+        return skills
+
+    for skill_dir in sorted(skills_dir.iterdir()):
+        skill_file = skill_dir / 'SKILL.md' if skill_dir.is_dir() else None
+        if skill_file is None or not skill_file.exists():
+            # 디렉토리가 아닌 .md 파일일 수 있음
+            if skill_dir.is_file() and skill_dir.suffix == '.md':
+                skill_file = skill_dir
+            else:
+                continue
+
+        try:
+            content = skill_file.read_text(encoding='utf-8')
+            # YAML frontmatter 파싱 (--- 사이)
+            if not content.startswith('---'):
+                continue
+            end = content.find('---', 3)
+            if end == -1:
+                continue
+            frontmatter = content[3:end]
+
+            meta: dict = {'name': '', 'description': '', 'userInvocable': False}
+            for line in frontmatter.split('\n'):
+                line = line.strip()
+                if line.startswith('name:'):
+                    meta['name'] = line[5:].strip().strip('"').strip("'")
+                elif line.startswith('description:'):
+                    # description은 > 멀티라인일 수 있음 — 첫 줄만 추출
+                    val = line[12:].strip()
+                    if val == '>' or val == '|':
+                        # 다음 줄들이 실제 설명
+                        desc_lines = []
+                        for dl in frontmatter[frontmatter.index(line) + len(line):].split('\n'):
+                            dl = dl.strip()
+                            if dl and not dl.endswith(':') and not dl.startswith('-'):
+                                # 키워드가 아닌 줄이면 설명의 일부
+                                if ':' in dl and dl.split(':')[0].replace('-', '').replace('_', '').isalpha():
+                                    break  # 다음 키 시작
+                                desc_lines.append(dl)
+                            elif not dl:
+                                continue
+                            else:
+                                break
+                        meta['description'] = ' '.join(desc_lines)
+                    else:
+                        meta['description'] = val.strip('"').strip("'")
+                elif line.startswith('user-invocable:'):
+                    val = line[15:].strip().lower()
+                    meta['userInvocable'] = val in ('true', 'yes', '1')
+
+            if meta['name']:
+                # description에서 "Use when:" 이전까지만 추출 (간결하게)
+                desc = meta['description']
+                use_when_idx = desc.find('Use when:')
+                if use_when_idx > 0:
+                    meta['description'] = desc[:use_when_idx].strip()
+                skills.append(meta)
+        except Exception:
+            continue
+
+    _skills_cache = skills
+    _skills_cache_ts = now
+    return skills
+
+
 def handle_get(handler, path: str, params: dict, DATA_DIR: Path) -> bool:
     ensure_schema(DATA_DIR)
+
+    # 스킬 목록
+    if path == '/api/office/skills':
+        skills = _parse_skills()
+        _send_json(handler, 200, {'skills': skills})
+        return True
 
     # SSE 스트림 — 프로필 변경 실시간 통지
     if path == '/api/office/profiles/stream':

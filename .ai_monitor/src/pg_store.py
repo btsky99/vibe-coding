@@ -721,6 +721,24 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_exp_session ON agent_experience (agent_id, session_id) WHERE session_id != '';")
 
         execute_raw("""
+        # ── [2026-04-14] 활성 세션 컨텍스트 — 크래시 복구용 ──
+        # 매 UserPromptSubmit마다 현재 작업 상태를 기록.
+        # Stop 이벤트 시 status='done'으로 갱신.
+        # 앱 비정상 종료 시 status='active'인 레코드가 남아 → 다음 세션에서 복구 브리핑.
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS active_session_context (
+                id BIGSERIAL PRIMARY KEY,
+                terminal_id TEXT NOT NULL DEFAULT 'T0',
+                agent_id TEXT NOT NULL DEFAULT 'claude',
+                task_summary TEXT NOT NULL DEFAULT '',
+                modified_files JSONB NOT NULL DEFAULT '[]'::jsonb,
+                status TEXT NOT NULL DEFAULT 'active',
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_active_session_status ON active_session_context (status, terminal_id);")
+
             CREATE TABLE IF NOT EXISTS agent_stats (
                 agent_id TEXT PRIMARY KEY,
                 total_xp INTEGER NOT NULL DEFAULT 0,
@@ -1803,4 +1821,81 @@ def set_active_office_profile(profile_id: str) -> bool:
     return execute(
         f"UPDATE office_profile_state SET active_profile_id = {_sql_text(profile_id)}, "
         f"updated_at = NOW() WHERE id = 1;"
+    )
+
+
+# ── 활성 세션 컨텍스트 (크래시 복구) ─────────────────────────────────────────
+
+def upsert_active_session(terminal_id: str, agent_id: str, task_summary: str,
+                          modified_files: list | None = None) -> bool:
+    """현재 작업 컨텍스트를 DB에 기록/갱신한다.
+
+    매 UserPromptSubmit/PostToolUse마다 호출되어 최신 상태를 유지.
+    동일 terminal_id + status='active' 레코드를 덮어쓰기(UPSERT).
+    """
+    import json as _json
+    files_json = _json.dumps(modified_files or [], ensure_ascii=False)
+
+    # 기존 active 레코드가 있으면 업데이트, 없으면 새로 생성
+    existing = query_rows(
+        f"SELECT id FROM active_session_context "
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active' "
+        f"LIMIT 1;"
+    )
+    if existing:
+        return execute(
+            f"UPDATE active_session_context SET "
+            f"task_summary = {_sql_text(task_summary)}, "
+            f"modified_files = {_sql_text(files_json)}::jsonb, "
+            f"updated_at = NOW() "
+            f"WHERE id = {existing[0]['id']};"
+        )
+    else:
+        return execute(
+            f"INSERT INTO active_session_context "
+            f"(terminal_id, agent_id, task_summary, modified_files, status) "
+            f"VALUES ({_sql_text(terminal_id)}, {_sql_text(agent_id)}, "
+            f"{_sql_text(task_summary)}, {_sql_text(files_json)}::jsonb, 'active');"
+        )
+
+
+def update_session_files(terminal_id: str, file_path: str) -> bool:
+    """활성 세션의 수정 파일 목록에 파일을 추가한다.
+
+    PostToolUse에서 Edit/Write 완료 시 호출.
+    jsonb_set으로 기존 배열에 추가 (중복 방지).
+    """
+    return execute(
+        f"UPDATE active_session_context SET "
+        f"modified_files = CASE "
+        f"  WHEN NOT modified_files @> to_jsonb({_sql_text(file_path)}::text) "
+        f"  THEN modified_files || to_jsonb({_sql_text(file_path)}::text) "
+        f"  ELSE modified_files END, "
+        f"updated_at = NOW() "
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active';"
+    )
+
+
+def complete_active_session(terminal_id: str) -> bool:
+    """활성 세션을 완료 처리한다. Stop 이벤트에서 호출."""
+    return execute(
+        f"UPDATE active_session_context SET status = 'done', updated_at = NOW() "
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active';"
+    )
+
+
+def get_interrupted_sessions(terminal_id: str = '') -> list[dict]:
+    """미완료(active) 상태인 세션 목록을 반환한다.
+
+    새 세션 시작 시 UserPromptSubmit에서 호출.
+    terminal_id 필터는 선택적 — 빈 문자열이면 모든 터미널의 중단 세션 반환.
+    """
+    where = f"WHERE status = 'active'"
+    if terminal_id:
+        where += f" AND terminal_id = {_sql_text(terminal_id)}"
+    return query_rows(
+        f"SELECT id, terminal_id, agent_id, task_summary, "
+        f"modified_files::text, status, started_at, updated_at "
+        f"FROM active_session_context {where} "
+        f"ORDER BY updated_at DESC LIMIT 5;"
     )
