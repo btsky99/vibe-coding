@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Package, CheckCircle, XCircle, Download, ExternalLink,
+  Package, CheckCircle, XCircle, ExternalLink,
   RefreshCw, Filter, ClipboardCopy, FileText, Check, Settings,
 } from 'lucide-react';
 import { API_BASE } from '../../constants';
@@ -67,7 +67,6 @@ const ToolsPanel = () => {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [summary, setSummary] = useState<ToolsSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [installing, setInstalling] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [rulePrompts, setRulePrompts] = useState<RulePrompt[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -100,37 +99,6 @@ const ToolsPanel = () => {
       setCopiedId(prompt.id);
       setTimeout(() => setCopiedId(null), 2000);
     });
-  };
-
-  /* ── 도구 설치 ── */
-  const handleInstall = (toolId: string) => {
-    setInstalling(toolId);
-    fetch(`${API_BASE}/api/tools/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tool: toolId }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === 'manual') {
-          // 수동 설치 안내
-          const msg = `${data.message}\n\n${data.install_hint || ''}`;
-          if (data.install_url) {
-            const doOpen = confirm(`${msg}\n\n[확인]을 누르면 다운로드 페이지를 엽니다.`);
-            if (doOpen) window.open(data.install_url, '_blank');
-          } else {
-            alert(msg);
-          }
-        } else if (data.status === 'success') {
-          // 설치 콘솔 창이 열림 — 3초 후 + 10초 후 자동 새로고침
-          setTimeout(fetchTools, 3000);
-          setTimeout(fetchTools, 10000);
-        } else if (data.status === 'error') {
-          alert(`설치 실패: ${data.message}`);
-        }
-      })
-      .catch(err => alert(`설치 요청 실패: ${err}`))
-      .finally(() => setInstalling(null));
   };
 
   /* ── 카테고리 추출 ── */
@@ -247,43 +215,18 @@ const ToolsPanel = () => {
                     </div>
                   </div>
 
-                  {/* 우측: 액션 버튼 */}
-                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {!tool.installed && tool.can_auto_install && (
-                      <button
-                        onClick={() => handleInstall(tool.id)}
-                        disabled={installing === tool.id}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50 transition-colors"
-                        title="자동 설치"
-                      >
-                        <Download className={`w-3 h-3 ${installing === tool.id ? 'animate-bounce' : ''}`} />
-                        설치
-                      </button>
-                    )}
-                    {!tool.installed && !tool.can_auto_install && tool.install_url && (
-                      <a
-                        href={tool.install_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-white/5 text-[#969696] hover:text-white hover:bg-white/10 transition-colors"
-                        title="다운로드 페이지"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        수동
-                      </a>
-                    )}
-                    {tool.installed && tool.install_url && (
-                      <a
-                        href={tool.install_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1 text-[#969696] hover:text-white transition-colors"
-                        title="공식 문서"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
+                  {/* 우측: 공식 문서 링크만 */}
+                  {tool.install_url && (
+                    <a
+                      href={tool.install_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 text-[#969696] hover:text-white transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+                      title="공식 문서"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </div>
               </div>
             ))}
