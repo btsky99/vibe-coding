@@ -134,7 +134,8 @@ import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
-import api.office_api as office_api  # 폴백용 — 오피스 서버 미시작 시 클래식에서 직접 처리
+# [2026-04-13] office_api 직접 호출 제거 — 오피스 서버로 프록시 전환
+# import api.office_api as office_api
 import api.experience_api as experience_api
 import string
 import socket
@@ -399,13 +400,17 @@ def ensure_postgres_running():
             print("[PG ERROR] 실행 중인 PostgreSQL을 찾지 못함")
             return
 
-    # 4) pgvector 확장 설치 시도 (정상 시작/타임아웃 폴백 모두 실행)
+    # 4) 확장 + 테이블 + 트리거를 단일 배치 SQL로 실행 (기동 속도 최적화)
+    # [2026-04-13] Claude: 13번 개별 run_pg_sql() → 1번 배치로 합침
+    # psql subprocess 폴백 시 프로세스 생성 13회 → 1회로 줄여 ~5초 단축
     try:
-        run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;")
-        run_pg_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
-        run_pg_sql("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;")
-        # [2026-03-22] pg_thoughts 테이블 제거 (지식그래프 기능 삭제)
+        import time as _schema_time
+        _schema_start = _schema_time.monotonic()
         run_pg_sql("""
+            CREATE EXTENSION IF NOT EXISTS vector;
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
+            CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+
             CREATE TABLE IF NOT EXISTS pg_logs (
                 id BIGSERIAL PRIMARY KEY,
                 agent TEXT NOT NULL,
@@ -415,14 +420,9 @@ def ensure_postgres_running():
                 project_id TEXT DEFAULT '',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
-        """)
-        # 기존 pg_logs 테이블에 project_id 컬럼 없으면 추가 (마이그레이션)
-        run_pg_sql("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
-        run_pg_sql("CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs(project_id);")
-        # ── P5: vibe CLI 알림/상태/로그 테이블 (cmux 호환) ──────────────────
-        # [2026-03-18] Claude: cmux 분석 기반 vibe 알림 시스템 스키마 추가
-        # vibe_notifications: 에이전트 알림 (cmux notification.create 미러)
-        run_pg_sql("""
+            ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';
+            CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs(project_id);
+
             CREATE TABLE IF NOT EXISTS vibe_notifications (
                 id BIGSERIAL PRIMARY KEY,
                 agent TEXT NOT NULL DEFAULT 'unknown',
@@ -433,9 +433,7 @@ def ensure_postgres_running():
                 is_read BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
-        """)
-        # vibe_agent_state: 에이전트 상태 (progress + status 통합, UPSERT 패턴)
-        run_pg_sql("""
+
             CREATE TABLE IF NOT EXISTS vibe_agent_state (
                 agent TEXT NOT NULL,
                 key TEXT NOT NULL,
@@ -445,9 +443,7 @@ def ensure_postgres_running():
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 PRIMARY KEY (agent, key)
             );
-        """)
-        # vibe_agent_logs: 에이전트 로그 (cmux log 미러)
-        run_pg_sql("""
+
             CREATE TABLE IF NOT EXISTS vibe_agent_logs (
                 id BIGSERIAL PRIMARY KEY,
                 agent TEXT NOT NULL DEFAULT 'unknown',
@@ -456,10 +452,7 @@ def ensure_postgres_running():
                 source TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
-        """)
-        # NOTIFY 트리거: vibe_notifications INSERT 시 vibe_notification 채널로 알림 전파
-        # Mission Control UI가 LISTEN vibe_notification으로 실시간 수신
-        run_pg_sql("""
+
             CREATE OR REPLACE FUNCTION notify_vibe_notification() RETURNS trigger AS $$
             BEGIN
                 PERFORM pg_notify('vibe_notification', json_build_object(
@@ -469,8 +462,7 @@ def ensure_postgres_running():
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql;
-        """)
-        run_pg_sql("""
+
             DO $$ BEGIN
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vibe_notification'
@@ -480,9 +472,7 @@ def ensure_postgres_running():
                         FOR EACH ROW EXECUTE FUNCTION notify_vibe_notification();
                 END IF;
             END $$;
-        """)
-        # vibe_agent_state 변경 시에도 알림 (진행률/상태 실시간 반영용)
-        run_pg_sql("""
+
             CREATE OR REPLACE FUNCTION notify_vibe_state_change() RETURNS trigger AS $$
             BEGIN
                 PERFORM pg_notify('vibe_notification', json_build_object(
@@ -492,8 +482,7 @@ def ensure_postgres_running():
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql;
-        """)
-        run_pg_sql("""
+
             DO $$ BEGIN
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vibe_state_change'
@@ -504,7 +493,8 @@ def ensure_postgres_running():
                 END IF;
             END $$;
         """)
-        print("[PG] 스키마 및 확장 초기화 완료 (vibe 테이블 포함)")
+        _schema_ms = (_schema_time.monotonic() - _schema_start) * 1000
+        print(f"[PG] 스키마 및 확장 초기화 완료 ({_schema_ms:.0f}ms)")
     except Exception as e:
         print(f"[PG] 시작 오류: {e}")
 
@@ -552,10 +542,12 @@ def _init_project_db(project_id: str):
         # 환경변수로도 전파 — mission_control.py, mcp_server.py 등 하위 프로세스용
         os.environ['VIBE_PG_DB'] = db_name
 
-        # 프로젝트 DB에 확장 설치
-        run_pg_sql("CREATE EXTENSION IF NOT EXISTS vector;", db=PG_PROJECT_DB)
-        run_pg_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm;", db=PG_PROJECT_DB)
-        run_pg_sql("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;", db=PG_PROJECT_DB)
+        # 프로젝트 DB에 확장 설치 (배치)
+        run_pg_sql("""
+            CREATE EXTENSION IF NOT EXISTS vector;
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
+            CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+        """, db=PG_PROJECT_DB)
 
     except Exception as e:
         print(f"[PG] 프로젝트 DB 생성 실패 (postgres DB 폴백): {e}")
@@ -1088,11 +1080,7 @@ ensure_legacy_store(DATA_DIR)
 # PG가 이미 떠있으면 바로 스키마 초기화
 ensure_schema(DATA_DIR)
 
-# 오피스 프로필 초기화 — 폴백용 (오피스 서버 미시작 시 클래식에서 직접 처리)
-try:
-    office_api.init_office(DATA_DIR)
-except Exception as _office_init_err:
-    print(f"[office_api] 초기화 실패: {_office_init_err}")
+# [2026-04-13] 오피스 초기화는 office_server.py에서 수행 — 클래식 서버에서 제거
 
 # [2026-03-22] 지식그래프 관련 _backfill_thought_parent_ids() 제거
 
@@ -2820,15 +2808,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
-        # ── [폴백] office_api GET — 오피스 서버 미시작 시 클래식에서 직접 처리 ──
+        # ── 오피스 API → 오피스 서버 프록시 (중복 코드 제거 — 2026-04-13) ──
         elif parsed_path.path.startswith('/api/office/'):
-            _params = parse_qs(parsed_path.query)
-            if not office_api.handle_get(self, parsed_path.path, _params, DATA_DIR=DATA_DIR):
-                self.send_response(404)
-                self.send_header('Content-Type', 'application/json;charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-                self.end_headers()
-                self.wfile.write(b'{"error":"not found"}')
+            _proxy_to_office_server(self, method='GET')
 
         # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
         elif parsed_path.path.startswith('/api/dispatcher/'):
@@ -3343,12 +3325,14 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_PUT(self):
-        """PUT 메소드 — 오피스 프로필 전체 대체 + 활성 프로필 변경 (폴백)."""
+        """PUT 메소드 — 오피스 API는 오피스 서버로 프록시."""
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         if path.startswith('/api/office/'):
-            if office_api.handle_put(self, path, DATA_DIR=DATA_DIR):
-                return
+            length = int(self.headers.get('Content-Length', '0') or 0)
+            body = self.rfile.read(length) if length > 0 else None
+            _proxy_to_office_server(self, method='PUT', body=body)
+            return
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3356,12 +3340,14 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'{"error":"not found"}')
 
     def do_DELETE(self):
-        """DELETE 메소드 — 오피스 프로필 삭제 (폴백)."""
+        """DELETE 메소드 — 오피스 API는 오피스 서버로 프록시."""
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         if path.startswith('/api/office/'):
-            if office_api.handle_delete(self, path, DATA_DIR=DATA_DIR):
-                return
+            length = int(self.headers.get('Content-Length', '0') or 0)
+            body = self.rfile.read(length) if length > 0 else None
+            _proxy_to_office_server(self, method='DELETE', body=body)
+            return
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3380,17 +3366,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             self._handle_telegram_test()
             return
 
-        # ── [폴백] office_api POST — 오피스 서버 미시작 시 클래식에서 직접 처리 ──
+        # ── 오피스 API POST → 오피스 서버 프록시 (launch/restart/status 제외) ──
         if path.startswith('/api/office/') and path not in (
             '/api/office/launch', '/api/office/restart', '/api/office/status',
         ):
-            if office_api.handle_post(self, path, DATA_DIR=DATA_DIR):
-                return
-            self.send_response(404)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            self.wfile.write(b'{"error":"not found"}')
+            _cl = int(self.headers.get('Content-Length', '0') or 0)
+            _raw = self.rfile.read(_cl) if _cl > 0 else None
+            _proxy_to_office_server(self, method='POST', body=_raw)
             return
 
         # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
@@ -4794,6 +4776,54 @@ _child_procs: list = []
 # ── 오피스 서버 프로세스 관리 ─────────────────────────────────────────────
 _office_server_proc = None   # subprocess.Popen 인스턴스
 _office_server_port = None   # 실제 바인딩된 포트
+
+
+def _proxy_to_office_server(handler, method: str = 'GET', body: bytes | None = None):
+    """오피스 서버(office_server.py)로 요청을 투명 프록시한다.
+
+    [2026-04-13] server.py에서 office_api를 직접 호출하던 폴백 코드를 제거하고
+    오피스 서버로 프록시하는 방식으로 전환. 중복 코드 제거 + 단일 책임.
+    """
+    if not _office_server_port:
+        handler.send_response(503)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        handler.wfile.write(b'{"error":"office server not running"}')
+        return
+
+    import urllib.request
+    import urllib.error
+    target = f'http://127.0.0.1:{_office_server_port}{handler.path}'
+    headers = {}
+    for key in ('Content-Type', 'Accept', 'Authorization'):
+        val = handler.headers.get(key)
+        if val:
+            headers[key] = val
+    try:
+        req = urllib.request.Request(target, data=body, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            ct = resp.headers.get('Content-Type', 'application/octet-stream')
+            data = resp.read()
+            handler.send_response(resp.status)
+            handler.send_header('Content-Type', ct)
+            handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+            handler.end_headers()
+            handler.wfile.write(data)
+    except urllib.error.URLError as e:
+        handler.send_response(502)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        handler.wfile.write(json.dumps(
+            {'error': f'office server proxy failed: {e}'},
+            ensure_ascii=False,
+        ).encode('utf-8'))
+    except Exception as e:
+        handler.send_response(500)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
 
 
 def _launch_office_server() -> int:

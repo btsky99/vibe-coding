@@ -25,9 +25,10 @@ export default defineConfig({
     },
   },
   build: {
-    // outDir 기본값(./dist) 유지 → .ai_monitor/vibe-view/dist/ 로 출력.
-    // spec/workflow/pyproject/build_verify가 전부 이 경로를 참조하므로 기본값 유지 필수.
-    // [2026-04-09] outDir: '../dist' 로 변경했다가 CI 파이프라인과 불일치로 롤백.
+    // outDir 기본값(./dist) 유지. spec/workflow/pyproject가 이 경로 참조.
+    // [2026-04-13] 오피스/클래식이 같은 dist/ 공유 — 빌드 시 기존 번들 삭제하면
+    // 다른 윈도우의 lazy import가 404로 크래시. 기존 파일 보존.
+    emptyOutDir: false,
     // [v3.7.62] 1MB 단일 번들 → 청크 분할로 초기 로드 속도 개선
     // Monaco Editor(~800kB)를 별도 청크로 분리해 첫 화면 렌더링을 앞당김
     rollupOptions: {

@@ -22,13 +22,25 @@ from pathlib import Path
 from typing import Any
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────
-# [2026-04-10] Claude: frozen(EXE) 모드에서 경로 오계산 버그 수정
-#   - Dev:    __file__ = .ai_monitor/api/tools_api.py → _BASE_DIR = .ai_monitor/, _PROJECT_ROOT = 프로젝트 루트
-#   - Frozen: __file__ = MEIPASS/api/tools_api.py → _BASE_DIR = MEIPASS/, _PROJECT_ROOT = MEIPASS/ (scripts는 MEIPASS/scripts/)
+# [2026-04-13] Claude: frozen(EXE) 모드에서 _PROJECT_ROOT가 EXE 설치 경로를 가리키던 버그 수정
+#   - 기존: _PROJECT_ROOT = EXE 폴더 → .claude/, scripts/, CLAUDE.md 못 찾음 (11/23 도구만 감지)
+#   - 수정: config.json의 last_path(사용자가 선택한 프로젝트 경로) 우선 사용
+#   - server.py의 _current_project_root()와 동일한 로직 적용
 if getattr(sys, 'frozen', False):
     _BASE_DIR = Path(sys._MEIPASS)
-    _PROJECT_ROOT = Path(sys.executable).resolve().parent
-    _SCRIPTS_DIR = _BASE_DIR / "scripts"  # MEIPASS/scripts/ (spec datas에 포함됨)
+    # config.json에서 실제 프로젝트 경로 로드 (server.py _current_project_root() 동일 로직)
+    _PROJECT_ROOT = Path(sys.executable).resolve().parent  # 폴백
+    try:
+        _cfg_path = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "config.json"
+        if _cfg_path.exists():
+            import json as _json_init
+            _cfg = _json_init.loads(_cfg_path.read_text(encoding='utf-8'))
+            _lp = _cfg.get('last_path', '')
+            if _lp and Path(_lp).is_dir():
+                _PROJECT_ROOT = Path(_lp)
+    except Exception:
+        pass  # config 로드 실패 시 EXE 경로 폴백
+    _SCRIPTS_DIR = _PROJECT_ROOT / "scripts"  # 실제 프로젝트의 scripts/
 else:
     _BASE_DIR = Path(__file__).resolve().parent.parent  # .ai_monitor/
     _PROJECT_ROOT = _BASE_DIR.parent
@@ -264,6 +276,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "description": "Windows 인스톨러 빌드 도구 — EXE 설치 파일 생성",
         "check_commands": [["ISCC.exe", "/?"]],
         "check_paths": [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Inno Setup 6", "ISCC.exe"),
             os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "Inno Setup 6", "ISCC.exe"),
             os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Inno Setup 6", "ISCC.exe"),
         ],
@@ -293,7 +306,10 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "description": "마크다운 지식 관리 앱 — Zettelkasten 그래프 뷰어 + 편집기",
         "check_commands": [["obsidian", "--version"]],
         "check_paths": [
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Obsidian", "Obsidian.exe"),
             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Obsidian", "Obsidian.exe"),
+            # Electron 앱 기본 user install 경로 (다른 PC에서 감지 안 되는 주요 원인)
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Obsidian", "Obsidian.exe"),
         ],
         "install_script": "install_system_tool.py",
         "install_args": ["--tool", "obsidian"],
@@ -361,17 +377,48 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
 ]
 
 
+def _resolve_python() -> str:
+    """EXE 모드에서도 실제 Python 인터프리터 경로를 반환한다.
+
+    Why: frozen(EXE) 모드에서 sys.executable = vibe-coding.exe이므로
+    Python -c 명령을 실행할 수 없다. 프로젝트 venv → 시스템 Python 순으로 탐색.
+    """
+    # 1) 프로젝트 venv
+    for venv_python in [
+        _PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        _PROJECT_ROOT / "venv" / "Scripts" / "python.exe",
+        _BASE_DIR / "venv" / "Scripts" / "python.exe",
+    ]:
+        if venv_python.exists():
+            return str(venv_python)
+    # 2) 시스템 PATH
+    found = shutil.which("python") or shutil.which("python3")
+    if found:
+        return found
+    # 3) 폴백
+    return sys.executable
+
+
 def _check_tool_installed(tool: dict) -> dict:
     """단일 도구의 설치 상태를 확인하여 결과 딕셔너리 반환.
 
     Why: 명령 실행과 경로 확인을 모두 시도하여 다양한 설치 방식을 지원.
     """
     version = None
+    real_python = _resolve_python()
+
+    # npx 계열 도구는 node_modules가 있는 디렉토리에서 실행해야 함
+    _npx_cwd = str(_BASE_DIR / "vibe-view") if (_BASE_DIR / "vibe-view" / "node_modules").is_dir() else None
 
     # 1) 명령어 실행으로 확인
     for cmd in tool.get("check_commands", []):
         try:
             resolved_cmd = list(cmd)
+
+            # [EXE 호환] sys.executable 자리에 실제 Python 경로 대입
+            if resolved_cmd[0] == sys.executable and getattr(sys, 'frozen', False):
+                resolved_cmd[0] = real_python
+
             exe_name = resolved_cmd[0]
             if not os.path.isabs(exe_name):
                 candidates = [exe_name]
@@ -384,15 +431,20 @@ def _check_tool_installed(tool: dict) -> dict:
                         resolved_cmd[0] = found
                         break
 
+            # npx 명령은 vibe-view 디렉토리에서 실행
+            cwd = _npx_cwd if (exe_name == "npx" and _npx_cwd) else None
+
             result = subprocess.run(
                 resolved_cmd, capture_output=True, text=True, timeout=10,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                cwd=cwd,
+                encoding="utf-8", errors="replace",
             )
             if result.returncode == 0:
                 output = (result.stdout or result.stderr).strip()
                 version = output.split("\n")[0] if output else ""
                 break
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
             continue
 
     # 2) 알려진 설치 경로 확인 (PATH에 없는 경우 대비)
@@ -403,12 +455,67 @@ def _check_tool_installed(tool: dict) -> dict:
                     result = subprocess.run(
                         [path, "--version"], capture_output=True, text=True, timeout=10,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        encoding="utf-8", errors="replace",
                     )
                     if result.returncode == 0:
                         version = result.stdout.strip().split("\n")[0]
                         break
                 except (subprocess.TimeoutExpired, OSError):
-                    continue
+                    pass
+                # --version 실패해도 파일이 존재하면 설치된 것으로 처리
+                # (ISCC.exe 등 --version을 지원하지 않는 도구 대응)
+                if not version:
+                    version = f"설치됨 ({Path(path).name})"
+                    break
+
+    # 3) Windows 레지스트리에서 설치 경로 동적 검색 (하드코딩 경로 의존 제거)
+    if not version and os.name == "nt":
+        tool_name = tool.get("name", "")
+        try:
+            import winreg
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    key = winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\Uninstall")
+                    i = 0
+                    while True:
+                        try:
+                            subkey_name = winreg.EnumKey(key, i)
+                            subkey = winreg.OpenKey(key, subkey_name)
+                            try:
+                                display, _ = winreg.QueryValueEx(subkey, "DisplayName")
+                                if tool_name.lower() in display.lower():
+                                    # DisplayIcon에서 exe 경로 추출
+                                    try:
+                                        icon, _ = winreg.QueryValueEx(subkey, "DisplayIcon")
+                                        exe_path = icon.split(",")[0].strip('"')
+                                        if os.path.exists(exe_path):
+                                            version = f"설치됨 ({Path(exe_path).name})"
+                                    except (OSError, ValueError):
+                                        pass
+                                    # InstallLocation 폴백
+                                    if not version:
+                                        try:
+                                            loc, _ = winreg.QueryValueEx(subkey, "InstallLocation")
+                                            if loc and os.path.isdir(loc):
+                                                version = f"설치됨 ({loc})"
+                                        except (OSError, ValueError):
+                                            pass
+                            except OSError:
+                                pass
+                            finally:
+                                winreg.CloseKey(subkey)
+                            if version:
+                                break
+                            i += 1
+                        except OSError:
+                            break
+                    winreg.CloseKey(key)
+                except OSError:
+                    pass
+                if version:
+                    break
+        except ImportError:
+            pass
 
     return {
         "id": tool["id"],
@@ -448,6 +555,9 @@ def _find_install_script(script_name: str) -> Path | None:
         _PROJECT_ROOT / "scripts" / script_name,
         _BASE_DIR.parent / "scripts" / script_name,
     ]
+    # frozen 모드: MEIPASS/scripts/ 도 탐색 (spec에 포함된 경우)
+    if getattr(sys, 'frozen', False):
+        candidates.append(Path(sys._MEIPASS) / "scripts" / script_name)
     for path in candidates:
         if path.exists():
             return path
@@ -484,11 +594,139 @@ def _json_response(handler, data: Any, status: int = 200) -> None:
 # ═══════════════════════════════════════════════════════════════════════
 
 RULE_SETUP_PROMPTS: list[dict[str, str]] = [
+    # ── 1단계: 개발 도구 설치 (기반) ──────────────────────────────────
+    {
+        "id": "dev-tools",
+        "agent": "공통 (아무 에이전트)",
+        "category": "setup",
+        "description": "① 개발 도구 일괄 설치 — pip/npm/winget 기반",
+        "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
+            "이 프로젝트의 개발 환경을 세팅해줘.\n\n"
+            "【작업 순서】\n"
+            "1. 프로젝트의 언어, 프레임워크를 파악 (package.json, pyproject.toml, go.mod 등)\n"
+            "2. 필요한 런타임/도구 확인:\n"
+            "   - Python >= 3.11 + pip\n"
+            "   - Node.js >= 20 + npm\n"
+            "   - Git + GitHub CLI (gh)\n"
+            "3. 누락된 도구를 설치:\n"
+            "   - Windows: winget install 사용\n"
+            "   - 이미 설치된 도구는 건너뛰기\n"
+            "4. 프로젝트 의존성 설치:\n"
+            "   - Python: pip install -e . 또는 pip install -r requirements.txt\n"
+            "   - Node.js: npm install (package.json이 있는 디렉토리에서)\n"
+            "5. 설치 결과를 도구별로 ✅/❌ 요약\n\n"
+            "【원칙】\n"
+            "- 이미 설치된 도구는 재설치하지 않기\n"
+            "- 설치 실패 시 수동 설치 URL 안내\n"
+            "- 글로벌 설치와 프로젝트 로컬 설치 구분"
+        ),
+    },
+    # ── 2단계: DB + 하이브 마인드 ─────────────────────────────────────
+    {
+        "id": "db-hive",
+        "agent": "공통 (아무 에이전트)",
+        "category": "setup",
+        "description": "② DB + 하이브 마인드 — PostgreSQL 스키마 초기화",
+        "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
+            "이 프로젝트용 PostgreSQL DB와 하이브 마인드를 세팅해줘.\n\n"
+            "【사전 조건】\n"
+            "- PostgreSQL 18이 포트 5433에서 실행 중 (비이브 코딩 내장 포터블)\n"
+            "- psql 명령어 사용 가능\n\n"
+            "【작업 순서】\n"
+            "1. 프로젝트 이름으로 DB 생성 (이미 있으면 건너뛰기):\n"
+            "   CREATE DATABASE ai_monitor_<프로젝트폴더명>;\n"
+            "2. 필수 테이블 스키마 초기화:\n"
+            "   - pg_logs — 에이전트 활동 로그\n"
+            "   - hive_tasks — 태스크 큐 (원자적 체크아웃)\n"
+            "   - agent_heartbeats — 에이전트 상태 추적\n"
+            "   - hive_memory — 공유 지식 기반\n"
+            "   - task_comments — 에이전트 간 소통\n"
+            "   - zettel_notes — 제텔카스텐 노트\n"
+            "3. NOTIFY/LISTEN 채널 확인 (하이브 통신용)\n"
+            "4. 연결 테스트: SELECT count(*) FROM pg_logs;\n\n"
+            "【원칙】\n"
+            "- 기존 데이터 절대 삭제 금지 (CREATE IF NOT EXISTS)\n"
+            "- 포트 5433 고정 (기본 5432 아님 주의)\n"
+            "- 스키마는 {project_path}/scripts/init_schema.sql 참고"
+        ),
+    },
+    # ── 3단계: 하네스 엔지니어링 ──────────────────────────────────────
+    {
+        "id": "harness",
+        "agent": "Claude Code",
+        "category": "setup",
+        "description": "③ 하네스 훅 설정 — .claude/settings.json + 검증 스크립트",
+        "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
+            "이 프로젝트에 비이브 코딩 하네스를 세팅해줘.\n\n"
+            "【하네스란?】\n"
+            "Claude Code가 매 프롬프트 제출 시 자동으로 실행하는 검증 시스템.\n"
+            "품질 게이트 역할 — 규칙 위반, 보안 취약점, 코드 품질을 자동 체크.\n\n"
+            "【작업 순서】\n"
+            "1. .claude/settings.json 생성/수정:\n"
+            "   hooks > UserPromptSubmit에 harness_v2.py 등록\n"
+            "   ```json\n"
+            '   {"hooks": {"UserPromptSubmit": [{\n'
+            '     "type": "command",\n'
+            '     "command": "python scripts/harness_v2.py \\"$PROMPT\\""\n'
+            "   }]}}\n"
+            "   ```\n"
+            "2. scripts/harness_v2.py 존재 확인 (없으면 생성):\n"
+            "   - 프로젝트 규칙 파일 로드 (CLAUDE.md, RULES.md)\n"
+            "   - 표준 헤더 검증\n"
+            "   - 커밋 메시지 형식 검증\n"
+            "   - 보안 기본 체크 (하드코딩 시크릿 등)\n"
+            "3. scripts/experience.py — 작업 완료 시 XP 기록\n"
+            "4. 하네스 테스트: 간단한 프롬프트로 훅 동작 확인\n\n"
+            "【원칙】\n"
+            "- 하네스는 경고만 (블로킹 금지) — 개발 흐름 방해 최소화\n"
+            "- 기존 settings.json이 있으면 hooks만 추가 (덮어쓰기 금지)\n"
+            "- 검증 실패 시 구체적 수정 가이드 출력"
+        ),
+    },
+    # ── 4단계: 옵시디언 제텔카스텐 ────────────────────────────────────
+    {
+        "id": "zettelkasten",
+        "agent": "공통 (아무 에이전트)",
+        "category": "setup",
+        "description": "④ 옵시디언 제텔카스텐 — 지식 관리 vault 연결",
+        "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
+            "이 프로젝트에 옵시디언 제텔카스텐 지식 관리를 세팅해줘.\n\n"
+            "【제텔카스텐이란?】\n"
+            "에이전트가 작업하면서 배운 지식을 노트로 저장하고,\n"
+            "노트 간 링크로 지식 그래프를 형성하는 시스템.\n\n"
+            "【작업 순서】\n"
+            "1. 옵시디언 vault 경로 확인/설정:\n"
+            "   - 기본 위치: {project_path}/zettel/ 또는 사용자 지정 경로\n"
+            "   - .obsidian/ 디렉토리 존재 확인\n"
+            "2. vault 기본 구조 생성:\n"
+            "   - 0-inbox/ — 새 노트 (fleeting notes)\n"
+            "   - 1-permanent/ — 정제된 영구 노트\n"
+            "   - 2-index/ — 주제별 인덱스 (MOC)\n"
+            "   - templates/ — 노트 템플릿\n"
+            "3. 노트 템플릿 생성:\n"
+            "   - fleeting.md — 빠른 메모 (ID, 태그, 본문)\n"
+            "   - permanent.md — 영구 노트 (ID, 링크, 출처, 본문)\n"
+            "4. DB 연결 확인: zettel_notes 테이블 존재 여부\n"
+            "5. scripts/zettel.py 동작 테스트:\n"
+            "   python scripts/zettel.py capture \"테스트 노트\"\n\n"
+            "【원칙】\n"
+            "- 기존 vault가 있으면 구조만 보강 (덮어쓰기 금지)\n"
+            "- 옵시디언 미설치여도 vault 구조는 생성 (텍스트 파일이니까)\n"
+            "- 노트 ID는 Zettelkasten 표준: YYYYMMDDHHmmss"
+        ),
+    },
+    # ── 규칙 파일 생성 (기존) ─────────────────────────────────────────
     {
         "id": "claude-rules",
         "agent": "Claude Code",
+        "category": "rules",
         "description": "CLAUDE.md + .claude/rules/ 자동 생성",
         "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
             "이 프로젝트를 분석하고 Claude Code용 규칙 파일을 생성해줘.\n\n"
             "【작업 순서】\n"
             "1. 프로젝트의 언어, 프레임워크, 빌드 도구, 디렉토리 구조를 파악\n"
@@ -507,8 +745,10 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
     {
         "id": "gemini-rules",
         "agent": "Gemini CLI",
+        "category": "rules",
         "description": "GEMINI.md 자동 생성",
         "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
             "이 프로젝트를 분석하고 Gemini CLI용 규칙 파일(GEMINI.md)을 생성해줘.\n\n"
             "【작업 순서】\n"
             "1. 프로젝트의 언어, 프레임워크, 빌드 도구, 디렉토리 구조를 파악\n"
@@ -527,8 +767,10 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
     {
         "id": "codex-rules",
         "agent": "Codex CLI",
+        "category": "rules",
         "description": "AGENTS.md 자동 생성",
         "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
             "이 프로젝트를 분석하고 Codex CLI용 규칙 파일(AGENTS.md)을 생성해줘.\n\n"
             "【작업 순서】\n"
             "1. 프로젝트의 언어, 프레임워크, 빌드 도구, 디렉토리 구조를 파악\n"
@@ -557,7 +799,13 @@ def handle_get(handler, path: str, params: dict = None, **kwargs) -> bool:
     Returns: True if path handled, False otherwise.
     """
     if path == "/api/tools/rule-prompts":
-        _json_response(handler, {"prompts": RULE_SETUP_PROMPTS})
+        # {project_path} 플레이스홀더를 실제 프로젝트 경로로 치환
+        project_path = str(_PROJECT_ROOT)
+        prompts = []
+        for p in RULE_SETUP_PROMPTS:
+            resolved = {**p, "prompt": p["prompt"].replace("{project_path}", project_path)}
+            prompts.append(resolved)
+        _json_response(handler, {"prompts": prompts})
         return True
     if path == "/api/tools/status":
         try:

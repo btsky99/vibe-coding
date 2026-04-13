@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Package, CheckCircle, XCircle, Download, ExternalLink,
-  RefreshCw, Filter, ClipboardCopy, FileText, Check,
+  RefreshCw, Filter, ClipboardCopy, FileText, Check, Settings,
 } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
@@ -37,6 +37,7 @@ interface ToolsSummary {
 interface RulePrompt {
   id: string;
   agent: string;
+  category?: string;
   description: string;
   prompt: string;
 }
@@ -121,7 +122,8 @@ const ToolsPanel = () => {
             alert(msg);
           }
         } else if (data.status === 'success') {
-          // 설치 콘솔 창이 열림 — 10초 후 자동 새로고침
+          // 설치 콘솔 창이 열림 — 3초 후 + 10초 후 자동 새로고침
+          setTimeout(fetchTools, 3000);
           setTimeout(fetchTools, 10000);
         } else if (data.status === 'error') {
           alert(`설치 실패: ${data.message}`);
@@ -287,20 +289,68 @@ const ToolsPanel = () => {
             ))}
           </div>
 
-          {/* ── 프로젝트 규칙 설정 섹션 ── */}
-          {rulePrompts.length > 0 && (
+          {/* ── 프로젝트 세팅 프롬프트 섹션 ── */}
+          {rulePrompts.filter(rp => rp.category === 'setup').length > 0 && (
+            <div className="border-t border-white/10 mt-2">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
+                <Settings className="w-4 h-4 text-orange-400" />
+                <span className="font-semibold text-[#cccccc] uppercase text-[11px] tracking-wide">
+                  프로젝트 풀 세팅
+                </span>
+                <span className="text-[10px] text-[#969696]">
+                  순서대로 복사 → 에이전트에 붙여넣기
+                </span>
+              </div>
+              <div className="divide-y divide-white/5">
+                {rulePrompts.filter(rp => rp.category === 'setup').map(rp => (
+                  <div
+                    key={rp.id}
+                    className="px-3 py-2 hover:bg-white/[0.03] transition-colors group"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Settings className="w-4 h-4 text-orange-400/60 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-medium text-[#cccccc]">{rp.agent}</span>
+                          <p className="text-[11px] text-[#969696] leading-snug">{rp.description}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCopyPrompt(rp)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors shrink-0 ${
+                          copiedId === rp.id
+                            ? 'bg-green-500/20 text-green-400'
+                            : 'bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 opacity-0 group-hover:opacity-100'
+                        }`}
+                        title="프롬프트 복사"
+                      >
+                        {copiedId === rp.id ? (
+                          <><Check className="w-3 h-3" /> 복사됨</>
+                        ) : (
+                          <><ClipboardCopy className="w-3 h-3" /> 복사</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── 규칙 파일 생성 섹션 ── */}
+          {rulePrompts.filter(rp => rp.category === 'rules' || !rp.category).length > 0 && (
             <div className="border-t border-white/10 mt-2">
               <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
                 <FileText className="w-4 h-4 text-blue-400" />
                 <span className="font-semibold text-[#cccccc] uppercase text-[11px] tracking-wide">
-                  프로젝트 규칙 설정
+                  규칙 파일 생성
                 </span>
                 <span className="text-[10px] text-[#969696]">
                   프롬프트를 복사하여 에이전트에 붙여넣기
                 </span>
               </div>
               <div className="divide-y divide-white/5">
-                {rulePrompts.map(rp => (
+                {rulePrompts.filter(rp => rp.category === 'rules' || !rp.category).map(rp => (
                   <div
                     key={rp.id}
                     className="px-3 py-2 hover:bg-white/[0.03] transition-colors group"

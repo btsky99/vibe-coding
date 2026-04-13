@@ -152,8 +152,9 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
   // 세션이 없으면 자동 생성한다.
 
   // 첫 번째 오피스 세션을 active로 설정 (아직 세션이 없을 때는 null)
-  const [activeOfficeSessionId, setActiveOfficeSessionId] = useState<string | null>(null);
-  const ptyHook = useOfficePty(activeOfficeSessionId);
+  // ptyHook: 세션 목록 폴링은 항상 동작, 출력 폴링은 activeTerminalId에 의존
+  const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
+  const ptyHook = useOfficePty(activeTerminalId);
 
   // 선택된 슬롯의 CLI
   const selectedCli = useMemo(() => {
@@ -163,7 +164,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     return activeSlots[selectedDesk]?.cli || 'claude';
   }, [selectedDesk, activeSlots]);
 
-  // 선택된 CLI에 맞는 오피스 세션 찾기
+  // 선택된 CLI에 맞는 오피스 세션 찾기 → 이것이 write/output 모두의 SSOT
   const resolvedTerminalId = useMemo(() => {
     const match = ptyHook.sessions.find(s => s.agent === selectedCli && s.running);
     return match?.id || null;
@@ -173,24 +174,29 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
     return resolvedTerminalId !== null;
   }, [resolvedTerminalId]);
 
-  // resolvedTerminalId가 바뀌면 active 세션 업데이트
+  // resolvedTerminalId → activeTerminalId 동기화 (폴링 대상 갱신)
   useEffect(() => {
-    if (resolvedTerminalId) {
-      setActiveOfficeSessionId(resolvedTerminalId);
+    if (resolvedTerminalId && resolvedTerminalId !== activeTerminalId) {
+      setActiveTerminalId(resolvedTerminalId);
     }
   }, [resolvedTerminalId]);
 
-  // 오피스 세션 자동 생성 — 선택된 CLI에 맞는 세션이 없으면 새로 생성
+  // 오피스 세션 자동 생성 — 세션 목록 로딩 완료 후에만 spawn 판단
   const spawnInProgress = useRef(false);
+  const initialFetchDone = useRef(false);
   useEffect(() => {
+    if (ptyHook.sessions.length > 0) initialFetchDone.current = true;
+  }, [ptyHook.sessions]);
+  useEffect(() => {
+    if (!initialFetchDone.current) return;
     if (!resolvedTerminalId && !spawnInProgress.current) {
       spawnInProgress.current = true;
       ptyHook.spawnSession(selectedCli, true, projectPath || undefined).then(id => {
-        if (id) setActiveOfficeSessionId(id);
+        if (id) setActiveTerminalId(id);
         spawnInProgress.current = false;
       });
     }
-  }, [resolvedTerminalId, selectedCli]);
+  }, [resolvedTerminalId, selectedCli, ptyHook.sessions]);
 
   useEffect(() => {
     setSelectedDesk((prev) => (prev >= slotCount ? 0 : prev));
