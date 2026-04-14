@@ -44,6 +44,13 @@ _NOTE_TYPE_EMOJI = {
     'fleeting': '\U0001f4dd',    # 📝
 }
 
+# vault 폴더명 한글 매핑
+_NOTE_TYPE_FOLDER = {
+    'permanent': '영구지식',
+    'literature': '참고문헌',
+    'fleeting': '작업기록',
+}
+
 def _format_frontmatter(note: dict) -> str:
     """Obsidian 호환 YAML 프론트매터 생성.
     [v3.7.179] aliases + cssclasses 추가 — 그래프에서 타입별 이모지 + 짧은 제목 표시."""
@@ -198,8 +205,8 @@ def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool =
     ensure_schema(DATA_DIR)
     vault_dir.mkdir(parents=True, exist_ok=True)
 
-    # 노트 유형별 폴더 생성
-    for subdir in ('fleeting', 'literature', 'permanent', '_archived'):
+    # 노트 유형별 폴더 생성 (한글)
+    for subdir in ('작업기록', '참고문헌', '영구지식', '_보관'):
         (vault_dir / subdir).mkdir(exist_ok=True)
 
     # 전체 노트 조회
@@ -214,12 +221,12 @@ def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool =
 
     exported = 0
     for note in notes:
-        # 폴더 결정
+        # 폴더 결정 (한글 폴더명)
         if note.get('archived'):
-            folder = vault_dir / '_archived'
+            folder = vault_dir / '_보관'
         else:
             note_type = note.get('note_type', 'fleeting')
-            folder = vault_dir / note_type if note_type in ('fleeting', 'literature', 'permanent') else vault_dir / 'fleeting'
+            folder = vault_dir / _NOTE_TYPE_FOLDER.get(note_type, '작업기록')
 
         # 마크다운 생성
         frontmatter = _format_frontmatter(note)

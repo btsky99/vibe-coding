@@ -58,6 +58,27 @@ _COMMIT_TYPE_MAP = {
     'test':     'fleeting',
 }
 
+# 커밋 타입 → 한글 태그 매핑
+_COMMIT_TAG_KO = {
+    'feat':     '기능',
+    'fix':      '수정',
+    'refactor': '리팩터링',
+    'docs':     '문서',
+    'build':    '빌드',
+    'chore':    '잡일',
+    'test':     '테스트',
+}
+
+# 영역 태그 한글 매핑
+_AREA_TAG_KO = {
+    'ui':       'UI',
+    'backend':  '백엔드',
+    'db':       'DB',
+    'scripts':  '스크립트',
+    'hooks':    '훅',
+    'test':     '테스트',
+}
+
 
 # ── 캡처 함수 ─────────────────────────────────────────────────────────────
 
@@ -83,10 +104,10 @@ def capture_commit(commit_msg: str, files: list[str] | None = None,
     note_type = _COMMIT_TYPE_MAP.get(commit_type, 'fleeting')
     files = files or []
 
-    # 태그 생성
-    tags = [commit_type]
+    # 태그 생성 (한글)
+    tags = [_COMMIT_TAG_KO.get(commit_type, commit_type)]
     if files:
-        # 파일 경로에서 영역 태그 추출 (예: vibe-view → ui, api → backend)
+        # 파일 경로에서 영역 태그 추출 (예: vibe-view → UI, api → 백엔드)
         tags.extend(_extract_area_tags(files))
 
     # 본문 생성
@@ -115,6 +136,10 @@ def capture_commit(commit_msg: str, files: list[str] | None = None,
         _sync_vault()
         print(f"[zettel_capture] 커밋 노트 생성: {note['id']} — {title} ({note_type})")
 
+    # 변경 파일의 역할 카드 자동 생성/업데이트
+    if files:
+        capture_file_roles(commit_msg, files=files, agent=agent)
+
     return note
 
 
@@ -127,7 +152,7 @@ def capture_fix(file_path: str, old_code: str, new_code: str,
 
     rel_path = _rel_path(file_path)
     title = f"버그 수정: {rel_path}"
-    tags = ['fix', 'bug']
+    tags = ['수정', '버그']
     tags.extend(_extract_area_tags([file_path]))
 
     content = f"## 수정 파일\n`{rel_path}`\n\n"
@@ -162,7 +187,7 @@ def capture_decision(context: str, choice: str, reason: str,
         return None
 
     title = f"결정: {choice[:60]}"
-    tags = ['decision', 'architecture']
+    tags = ['결정', '아키텍처']
 
     content = f"## 맥락\n{context}\n\n## 선택\n{choice}\n\n## 이유\n{reason}"
 
@@ -226,7 +251,7 @@ def capture_session(agent: str = 'claude') -> dict | None:
             categories.setdefault('기타', []).append(task)
 
     content_lines = [f"## 세션 활동 요약 ({len(rows)}건)"]
-    tags = ['session']
+    tags = ['세션']
 
     for cat, items in categories.items():
         content_lines.append(f"\n### {cat} ({len(items)}건)")
@@ -256,6 +281,128 @@ def capture_session(agent: str = 'claude') -> dict | None:
     return note
 
 
+def capture_file_roles(commit_msg: str, files: list[str] | None = None,
+                       agent: str = 'claude') -> list[dict]:
+    """커밋 시 변경된 파일의 역할 카드를 자동 생성/업데이트한다.
+
+    - 기존 역할 카드가 없는 파일 → 새 permanent 노트 생성
+    - 기존 역할 카드가 있는 파일 → "최근 변경" 섹션에 커밋 기록 추가
+    - 코드는 저장하지 않음 — 역할/맥락/변경 이력만 기록
+    """
+    ensure_schema()
+    files = files or []
+    if not files:
+        return []
+
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone(timedelta(hours=9)))
+    today = now.strftime('%Y-%m-%d')
+    results = []
+
+    for file_path in files:
+        rel = _rel_path(file_path)
+        # 테스트/빌드 산출물 등 노이즈 파일은 스킵 (원본 경로도 함께 체크)
+        if _is_noise_file(rel) or _is_noise_file(file_path):
+            continue
+
+        # source_ref로 기존 역할 카드 검색
+        source_ref = f"file-role:{rel}"
+        existing = query_rows(
+            f"SELECT id, content FROM zettel_notes "
+            f"WHERE source_ref = {_sql_text(source_ref)} "
+            f"AND project = {_sql_text(DEFAULT_PROJECT)} "
+            f"LIMIT 1;"
+        )
+
+        if existing:
+            # 기존 카드에 "최근 변경" 이력 추가
+            note_id = existing[0]['id']
+            old_content = existing[0].get('content', '')
+            change_line = f"- [{today}] {commit_msg.split(chr(10))[0][:80]}"
+
+            if '## 최근 변경' in old_content:
+                # 기존 변경 이력에 추가 (최대 10건 유지)
+                parts = old_content.split('## 최근 변경')
+                before = parts[0]
+                after_lines = parts[1].strip().split('\n') if len(parts) > 1 else []
+                # 기존 이력 항목만 필터 (- 로 시작하는 줄)
+                history = [l for l in after_lines if l.strip().startswith('-')]
+                history.insert(0, change_line)
+                history = history[:10]  # 최신 10건만 유지
+                new_content = before + '## 최근 변경\n' + '\n'.join(history)
+            else:
+                new_content = old_content + f"\n\n## 최근 변경\n{change_line}"
+
+            from src.zettelkasten import update_note
+            updated = update_note(note_id, content=new_content)
+            if updated:
+                results.append(updated)
+        else:
+            # 새 역할 카드 생성
+            role_desc = _guess_file_role(rel)
+            tags = ['파일역할']
+            tags.extend(_extract_area_tags([file_path]))
+
+            content = f"## 역할\n{role_desc}\n\n"
+            content += f"## 파일 경로\n`{rel}`\n\n"
+            content += f"## 최근 변경\n- [{today}] {commit_msg.split(chr(10))[0][:80]}"
+
+            note = create_note(
+                title=f"📄 {Path(rel).name} — {role_desc[:40]}",
+                content=content,
+                note_type='permanent',
+                author=agent,
+                project=DEFAULT_PROJECT,
+                tags=tags,
+                source_ref=source_ref,
+            )
+            if note:
+                auto_link(note['id'], content=content, tags=tags, created_by=agent)
+                results.append(note)
+
+    if results:
+        _sync_vault()
+        print(f"[zettel_capture] 파일 역할 카드 {len(results)}건 생성/업데이트")
+
+    return results
+
+
+def _is_noise_file(rel_path: str) -> bool:
+    """노이즈 파일 필터 — 역할 카드 생성 대상에서 제외."""
+    noise_patterns = [
+        'dist/', 'node_modules/', '__pycache__/', '.pyc',
+        'package-lock.json', 'yarn.lock', '.spec.',
+        '_version.py', '.gitignore', '.env',
+    ]
+    rel_lower = rel_path.lower().replace('\\', '/')
+    return any(p in rel_lower for p in noise_patterns)
+
+
+def _guess_file_role(rel_path: str) -> str:
+    """파일 경로에서 역할을 추측한다. 코드를 읽지 않고 경로 패턴만으로 판단."""
+    p = rel_path.lower().replace('\\', '/')
+    if 'server.py' in p:
+        return 'HTTP 서버 — 라우팅, SSE, WebSocket, 정적 파일 서빙'
+    if '/api/' in p:
+        name = Path(rel_path).stem
+        return f'API 모듈 — {name} 관련 엔드포인트'
+    if 'pg_store' in p:
+        return 'PostgreSQL 데이터 계층 — 스키마 + CRUD'
+    if 'zettelkasten' in p:
+        return '제텔카스텐 지식 관리 모듈'
+    if '.tsx' in p or '.ts' in p:
+        name = Path(rel_path).stem
+        return f'React 컴포넌트/모듈 — {name}'
+    if '/scripts/' in p:
+        name = Path(rel_path).stem
+        return f'유틸리티 스크립트 — {name}'
+    if 'hook' in p:
+        return 'Claude Code 훅 핸들러'
+    if 'test' in p:
+        return '테스트 코드'
+    return f'프로젝트 파일 — {Path(rel_path).name}'
+
+
 # ── 유틸리티 ──────────────────────────────────────────────────────────────
 
 def _extract_area_tags(files: list[str]) -> list[str]:
@@ -264,17 +411,17 @@ def _extract_area_tags(files: list[str]) -> list[str]:
     for f in files:
         f_lower = f.lower().replace('\\', '/')
         if 'vibe-view' in f_lower or '.tsx' in f_lower or '.ts' in f_lower:
-            tags.add('ui')
+            tags.add(_AREA_TAG_KO.get('ui', 'UI'))
         if '/api/' in f_lower:
-            tags.add('backend')
+            tags.add(_AREA_TAG_KO.get('backend', '백엔드'))
         if 'pg_store' in f_lower or 'zettelkasten' in f_lower:
-            tags.add('db')
+            tags.add(_AREA_TAG_KO.get('db', 'DB'))
         if '/scripts/' in f_lower:
-            tags.add('scripts')
+            tags.add(_AREA_TAG_KO.get('scripts', '스크립트'))
         if 'hook' in f_lower:
-            tags.add('hooks')
+            tags.add(_AREA_TAG_KO.get('hooks', '훅'))
         if 'test' in f_lower:
-            tags.add('test')
+            tags.add(_AREA_TAG_KO.get('test', '테스트'))
     return list(tags)
 
 
@@ -303,7 +450,7 @@ def _sync_vault():
 def main():
     parser = argparse.ArgumentParser(description='제텔카스텐 자동 캡처 엔진')
     parser.add_argument('--mode', required=True,
-                        choices=['commit', 'fix', 'decision', 'session'],
+                        choices=['commit', 'fix', 'decision', 'session', 'file-roles'],
                         help='캡처 모드')
     parser.add_argument('--agent', default='claude', help='에이전트 이름')
     parser.add_argument('--data', default='{}', help='이벤트 데이터 (JSON 문자열)')
@@ -336,6 +483,12 @@ def main():
         )
     elif args.mode == 'session':
         capture_session(agent=args.agent)
+    elif args.mode == 'file-roles':
+        capture_file_roles(
+            commit_msg=data.get('message', ''),
+            files=data.get('files', []),
+            agent=args.agent,
+        )
 
 
 if __name__ == '__main__':

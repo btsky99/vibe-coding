@@ -5888,8 +5888,16 @@ def main():
             _mod = _ilu.module_from_spec(_spec)
             _spec.loader.exec_module(_mod)
 
-            # 전역 vault 사용 — 모든 프로젝트가 한 vault 공유
+            # config.json에서 사용자 지정 vault 경로 읽기 (없으면 전역 기본값)
             _vault = GLOBAL_VAULT_DIR
+            try:
+                if CONFIG_FILE.exists():
+                    _cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+                    _user_vault = _cfg.get('vault_dir', '')
+                    if _user_vault:
+                        _vault = Path(_user_vault)
+            except Exception:
+                pass
             _vault.mkdir(parents=True, exist_ok=True)
 
             # 기존 .zettel-vault 마이그레이션 (최초 1회)

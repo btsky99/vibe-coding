@@ -187,15 +187,42 @@ const TopMenuBar = memo(function TopMenuBar({
   // 프로젝트 세팅 프롬프트 목록 (도움말 옆 별도 메뉴)
   const [setupPrompts, setSetupPrompts] = useState<{id: string; agent: string; category: string; description: string; prompt: string}[]>([]);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [vaultDir, setVaultDir] = useState('');
+  const [vaultSaved, setVaultSaved] = useState(false);
 
   useEffect(() => {
-    if (activeMenu === '프로젝트 세팅' && setupPrompts.length === 0) {
-      fetch(`${API_BASE}/api/tools/rule-prompts`)
+    if (activeMenu === '프로젝트 세팅') {
+      if (setupPrompts.length === 0) {
+        fetch(`${API_BASE}/api/tools/rule-prompts`)
+          .then(r => r.json())
+          .then(d => setSetupPrompts(d.prompts || []))
+          .catch(() => {});
+      }
+      fetch(`${API_BASE}/api/config`)
         .then(r => r.json())
-        .then(d => setSetupPrompts(d.prompts || []))
+        .then(d => setVaultDir(d.vault_dir || ''))
         .catch(() => {});
     }
   }, [activeMenu]);
+
+  const handleBrowseVault = () => {
+    fetch(`${API_BASE}/api/browse-folder`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.path) {
+          setVaultDir(d.path);
+          fetch(`${API_BASE}/api/config/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vault_dir: d.path }),
+          }).then(() => {
+            setVaultSaved(true);
+            setTimeout(() => setVaultSaved(false), 2000);
+          });
+        }
+      })
+      .catch(() => {});
+  };
 
   const handleCopyPrompt = (id: string, prompt: string) => {
     navigator.clipboard.writeText(prompt).then(() => {
@@ -418,6 +445,22 @@ const TopMenuBar = memo(function TopMenuBar({
               {setupPrompts.length === 0 && (
                 <div className="px-4 py-3 text-[11px] text-white/30 text-center">프롬프트 로딩 중...</div>
               )}
+              {/* ── 옵시디언 Vault 경로 설정 ── */}
+              <div className="h-px bg-white/5 my-1 mx-2"></div>
+              <div className="px-3 py-1 text-[10px] text-textMuted font-bold uppercase tracking-wider opacity-60">옵시디언 Vault 경로</div>
+              <div className="px-3 py-2 flex items-center gap-2">
+                <div className="flex-1 min-w-0 bg-[#1e1e1e] rounded px-2 py-1 text-[10px] text-white/60 truncate border border-white/10" title={vaultDir}>
+                  {vaultDir || '(기본 경로)'}
+                </div>
+                <button
+                  onClick={handleBrowseVault}
+                  className="shrink-0 px-2 py-1 text-[10px] rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors flex items-center gap-1"
+                >
+                  <VscFolderOpened className="w-3 h-3" />
+                  변경
+                </button>
+                {vaultSaved && <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />}
+              </div>
             </div>
           )}
         </div>
