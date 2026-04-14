@@ -1,102 +1,78 @@
-# 🔀 오피스/클래식 서버 프로세스 분리
+# 코드 인텔리전스 시스템 — MindVault 영감 기반
 
-## 🎯 목표
-현재 server.py 하나가 클래식+오피스를 모두 서빙하는 구조를 분리.
-오피스 전용 서버(office_server.py)를 별도 프로세스로 실행하여
-안정성(크래시 격리), 독립 재시작, 리소스 격리를 확보한다.
-DB(PostgreSQL)는 공유 유지 → 하이브 마인드 동기화 자연스러움.
-
-## 🛠️ 태스크 리스트
-
-### Phase 1: 공통 유틸 추출
-
-- [x] **Task 1: server_utils.py 신규 — 포트 탐색 + JSON 응답 헬퍼 추출** ✅
-    파일: `.ai_monitor/src/server_utils.py` (신규)
-    방법:
-    - `_find_free_port(start, max_tries)` — server.py L4938~4947에서 추출
-    - `json_response(handler, data, status=200)` — CORS + Content-Type + JSON 직렬화 공통화
-    - `cors_origin(headers, default_port)` — server.py `_cors_origin` 로직 추출
-    검증: server.py에서 `from src.server_utils import find_free_port` 임포트하여 기존 동작 동일 확인
-
-### Phase 2: 오피스 전용 서버
-
-- [x] **Task 2: office_server.py 신규 — 오피스 전용 HTTP 서버** ✅
-    파일: `.ai_monitor/office_server.py` (신규)
-    방법:
-    - BaseHTTPRequestHandler 기반 경량 서버
-    - 9010~9027 범위에서 `find_free_port`로 자동 포트 탐색
-    - `/api/office/*` → office_api.py 위임 (기존 핸들러 재사용)
-    - `/api/pty/*` → PTY 프록시 또는 직접 처리 (오피스 터미널 전용)
-    - `/api/experience/*`, `/api/agent/chat/*` 등 오피스에서 필요한 공유 API 포워딩
-    - 정적 파일 서빙 (vibe-view/dist/)
-    - 시작 시 stdout 첫 줄에 `PORT:<실제포트>` 출력 → 부모 프로세스가 읽음
-    - `--classic-port <N>` 인자: 클래식 서버 포트 (공유 API 프록시용)
-    검증: `python office_server.py` 단독 실행 → `/api/office/profiles` 200 OK
-
-- [x] **Task 3: office_server에 PTY 연동 추가** ✅ (클래식 프록시 경유 — Task 2에서 이미 처리)
-    파일: `.ai_monitor/office_server.py`
-    방법:
-    - 오피스 PTY 세션 관리 (`/api/pty/office/spawn`, `/api/pty/office/sessions`)
-    - pty-server (Node.js) 인스턴스를 오피스 서버가 직접 관리하거나, 기존 PTY 서버에 프록시
-    - 터미널 네임스페이스 `O` 접두사 유지
-    검증: 오피스 창에서 터미널 세션 생성/입출력 동작
-
-### Phase 3: server.py 수정 (클래식 전담)
-
-- [x] **Task 4: server.py — 오피스 서버 서브프로세스 관리 추가** ✅
-    파일: `.ai_monitor/server.py`
-    방법:
-    - `/api/office/launch` 핸들러 수정:
-      1. `office_server.py`를 서브프로세스로 시작
-      2. stdout에서 `PORT:<N>` 읽어 실제 포트 확인
-      3. `dashboard_window.py`에 오피스 서버 포트 전달
-    - `_child_procs`에 오피스 서버 프로세스 등록 → 종료 시 자동 정리
-    - `/api/office/restart` 엔드포인트 추가: 오피스 서버만 kill + 재시작
-    - `_find_free_port` → `from src.server_utils import find_free_port`로 교체
-    검증: 오피스 실행 → 클래식 대시보드 영향 없음 확인
-
-- [x] **Task 5: server.py — /api/office/* 라우팅 제거** ✅
-    파일: `.ai_monitor/server.py`
-    의존: Task 4 완료 후
-    방법:
-    - do_GET L2825, do_POST L3385, do_PUT L3350, do_DELETE L3363의 `/api/office/` 분기 제거
-    - office_api import 제거 (server.py에서만 — office_server.py에서 사용)
-    검증: 클래식 서버에서 `/api/office/profiles` → 404 확인 (오피스 서버에서만 서빙)
-
-### Phase 4: 프론트엔드 + dashboard_window 수정
-
-- [x] **Task 6: dashboard_window.py — 오피스 서버 포트 수신** ✅ (기존 sys.argv[1] 포트 인자로 이미 호환)
-    파일: `.ai_monitor/dashboard_window.py`
-    방법:
-    - CLI 인자: `dashboard_window.py <classic_port> <tab> [office_port]`
-    - office 탭일 때 `office_port`로 연결 (없으면 classic_port 폴백)
-    - URL: `http://localhost:{office_port}/?page=office`
-    검증: 오피스 창이 오피스 서버 포트에 연결되어 로드
-
-- [x] **Task 7: 프론트엔드 — 오피스 API 라우팅 확인** ✅ (window.location 기반이라 변경 불필요)
-    파일: `.ai_monitor/vibe-view/src/services/officeApi.ts`, `useOfficePty.ts`
-    방법:
-    - officeApi.ts는 이미 상대 URL 사용 (`/api/office/...`) → 변경 불필요 (오피스 서버에서 서빙되면 자동)
-    - useOfficePty.ts도 PTY_BASE='' (상대 URL) → 변경 불필요
-    - useVibeData.ts의 API_BASE는 `window.location` 기반 → 오피스 서버 포트로 자동 연결
-    - 단, 클래식 전용 API (파일 탐색기, 칸반 등)가 오피스에서 필요한 경우 프록시 확인
-    검증: Playwright로 오피스 창 열어서 프로필 CRUD, 채팅, 터미널 정상 동작
-
-### Phase 5: 안정화
-
-- [x] **Task 8: 오피스 서버 헬스체크 + 자동 재시작** ✅
-    파일: `.ai_monitor/server.py`
-    방법:
-    - 기존 watchdog 패턴 재사용: 주기적으로 오피스 서버 프로세스 생존 확인
-    - 크래시 감지 시 자동 재시작 (최대 3회)
-    - `/api/office/status` 엔드포인트: 오피스 서버 상태(포트, PID, uptime) 반환
-    검증: 오피스 서버 수동 kill → 자동 재시작 확인
-
-## ⚠️ 예상 위험 및 대응
-- **공유 API 접근**: 오피스에서 클래식 전용 API 필요 시 → office_server가 클래식 서버로 프록시
-- **포트 충돌**: 양쪽 모두 자동 탐색이라 충돌 없음. 범위도 분리 (9000대 vs 9010대)
-- **EXE 빌드**: office_server.py도 별도 EXE로 빌드 필요 → pyinstaller spec 수정
+> tree-sitter + PostgreSQL FTS + 코드 그래프 + LLM 위키 (접근법 C)
+> 승인일: 2026-04-14
 
 ---
-**작성일:** 2026-04-12
-**상태:** ✅ 완료 (2026-04-12)
+
+## Phase 1: 인덱싱 + 검색 + 그래프 저장 (백엔드)
+
+[x] Task 1: PostgreSQL 스키마 추가 — code_projects/nodes/edges/wiki 4개 테이블
+    파일: .ai_monitor/src/pg_store.py
+    방법: ensure_schema() 내 schema_sql에 CREATE TABLE IF NOT EXISTS 블록 4개 추가. code_nodes에 TSVECTOR 컬럼 + GIN 인덱스, code_edges에 source/target 인덱스. content_tsv 자동 업데이트 트리거
+    검증: ensure_schema() 호출 후 psql에서 \dt code_* 테이블 4개 확인
+
+[x] Task 2: tree-sitter 의존성 추가
+    파일: pyproject.toml
+    방법: optional-dependencies에 [codegraph] = ["tree-sitter>=0.24", "tree-sitter-python", "tree-sitter-javascript", "tree-sitter-typescript", "tree-sitter-go", "tree-sitter-rust", "tree-sitter-java"] 추가
+    검증: pip install -e ".[codegraph]" 성공
+
+[x] Task 3: 코드 인덱서 엔진 — tree-sitter AST 파싱
+    파일: .ai_monitor/src/code_indexer.py (신규)
+    방법: tree-sitter로 파일별 AST 파싱 → 함수/클래스/import 노드 추출 → code_nodes/code_edges 저장. threading.Thread 백그라운드 실행. 언어별 파서 동적 로드 (확장자 매핑). tree-sitter 없으면 정규식 fallback. SSE로 진행률 스트리밍
+    검증: 테스트 폴더 인덱싱 → code_nodes 레코드 존재 확인
+    의존: Task 1, Task 2 완료 후
+
+[x] Task 4: BM25 검색 엔진 — PostgreSQL FTS
+    파일: .ai_monitor/src/code_search.py (신규)
+    방법: plainto_tsquery + ts_rank_cd()로 BM25 랭킹. code_nodes.content_tsv GIN 인덱스 활용. 결과: file_path, name, node_type, snippet, score 포함
+    검증: 인덱싱된 프로젝트에서 함수명 검색 → 관련 결과 반환
+    의존: Task 1 완료 후
+
+[x] Task 5: CodeGraph REST API
+    파일: .ai_monitor/api/codegraph_api.py (신규)
+    방법: handle_get/handle_post 패턴. POST /register(프로젝트등록), POST /index(인덱싱), GET /search(BM25), GET /graph(노드+엣지), GET /impact(영향분석 — 재귀적 엣지 탐색)
+    검증: curl로 각 엔드포인트 호출 → JSON 응답 확인
+    의존: Task 3, Task 4 완료 후
+
+[x] Task 6: server.py에 라우팅 등록
+    파일: .ai_monitor/server.py
+    방법: import api.codegraph_api as codegraph_api + do_GET/do_POST에 /api/codegraph/ 분기 추가
+    검증: 서버 시작 → /api/codegraph/search?q=test 호출 → 200
+    의존: Task 5 완료 후
+
+---
+
+## Phase 2: 시각화 UI (프론트엔드)
+
+[x] Task 7: react-force-graph-2d 의존성 추가
+    파일: .ai_monitor/vibe-view/package.json
+    방법: npm install react-force-graph-2d
+    검증: npm ls react-force-graph-2d
+
+[x] Task 8: CodeGraphPanel — 인터랙티브 그래프
+    파일: .ai_monitor/vibe-view/src/components/panels/CodeGraphPanel.tsx (신규)
+    방법: react-force-graph-2d로 노드+엣지 시각화. 노드 색상=타입별(function:파랑, class:초록, module:주황). 클릭→상세팝업. 줌/패닝. 프로젝트 선택 드롭다운. /api/codegraph/graph에서 데이터 fetch
+    검증: Playwright로 그래프 렌더링 확인
+    의존: Task 6, Task 7 완료 후
+
+[x] Task 9: CodeSearchPanel — BM25 검색 UI
+    파일: .ai_monitor/vibe-view/src/components/panels/CodeSearchPanel.tsx (신규)
+    방법: 검색창(debounce 300ms) + 결과 리스트(파일경로/함수명/스니펫/점수). 결과 클릭→그래프 노드 하이라이트 연동
+    검증: Playwright로 검색→결과 표시 확인
+    의존: Task 6, Task 7 완료 후
+
+[x] Task 10: App.tsx + ActivityBar에 패널 등록
+    파일: .ai_monitor/vibe-view/src/App.tsx, .ai_monitor/vibe-view/src/components/ActivityBar.tsx
+    방법: import 추가 + activeTab 조건식에 'codegraph'/'codesearch' 추가 + ActivityBar에 아이콘 탭 추가
+    검증: 탭 클릭 → 패널 전환
+    의존: Task 8, Task 9 완료 후
+
+---
+
+## Phase 3: LLM 위키 자동생성 (Phase 1,2 완료 후 별도 계획)
+
+> wiki_generator.py + CodeWikiPanel.tsx — Karpathy LLM Wiki 패턴
+
+---
+**상태:** ✅ Phase 1+2 완료 (2026-04-14)

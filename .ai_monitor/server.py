@@ -137,6 +137,7 @@ import api.zettel_api as zettel_api
 # [2026-04-13] office_api 직접 호출 제거 — 오피스 서버로 프록시 전환
 import api.office_api as office_api
 import api.experience_api as experience_api
+import api.codegraph_api as codegraph_api
 import string
 import socket
 from collections import deque
@@ -2821,6 +2822,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
+        # ── [모듈 위임] codegraph_api — /api/codegraph/* ─────────────
+        elif parsed_path.path.startswith('/api/codegraph/'):
+            _params = parse_qs(parsed_path.query)
+            codegraph_api.handle_get(
+                self, parsed_path.path, _params,
+                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
+            )
+
         # ── 오피스 API → 오피스 서버 프록시 (중복 코드 제거 — 2026-04-13) ──
         elif parsed_path.path.startswith('/api/office/'):
             _proxy_to_office_server(self, method='GET')
@@ -4074,6 +4083,15 @@ class SSEHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get('Content-Length', 0))
             _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
             zettel_api.handle_post(
+                self, parsed_path.path, _body,
+                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
+            )
+
+        # ── [모듈 위임 - POST] codegraph_api — /api/codegraph/* ──────────
+        elif parsed_path.path.startswith('/api/codegraph/'):
+            content_length = int(self.headers.get('Content-Length', 0))
+            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
+            codegraph_api.handle_post(
                 self, parsed_path.path, _body,
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )

@@ -720,7 +720,6 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("CREATE INDEX IF NOT EXISTS idx_agent_exp_agent ON agent_experience (agent_id, created_at DESC);")
         execute_raw("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_exp_session ON agent_experience (agent_id, session_id) WHERE session_id != '';")
 
-        execute_raw("""
         # ── [2026-04-14] 활성 세션 컨텍스트 — 크래시 복구용 ──
         # 매 UserPromptSubmit마다 현재 작업 상태를 기록.
         # Stop 이벤트 시 status='done'으로 갱신.
@@ -739,6 +738,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         """)
         execute_raw("CREATE INDEX IF NOT EXISTS idx_active_session_status ON active_session_context (status, terminal_id);")
 
+        execute_raw("""
             CREATE TABLE IF NOT EXISTS agent_stats (
                 agent_id TEXT PRIMARY KEY,
                 total_xp INTEGER NOT NULL DEFAULT 0,
@@ -750,6 +750,95 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
+
+        # ── [2026-04-14] 코드 인텔리전스 — MindVault 영감 기반 코드 그래프 ──
+        # tree-sitter AST 파싱 결과를 저장하여 BM25 검색 + 의존관계 그래프 제공
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS code_projects (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                root_path TEXT NOT NULL UNIQUE,
+                language TEXT NOT NULL DEFAULT '',
+                file_count INTEGER NOT NULL DEFAULT 0,
+                node_count INTEGER NOT NULL DEFAULT 0,
+                last_indexed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS code_nodes (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES code_projects(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                node_type TEXT NOT NULL DEFAULT 'function',
+                name TEXT NOT NULL DEFAULT '',
+                signature TEXT DEFAULT '',
+                line_start INTEGER NOT NULL DEFAULT 0,
+                line_end INTEGER NOT NULL DEFAULT 0,
+                docstring TEXT DEFAULT '',
+                raw_content TEXT DEFAULT '',
+                content_tsv TSVECTOR
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_nodes_project ON code_nodes (project_id, node_type);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_nodes_file ON code_nodes (project_id, file_path);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_nodes_name ON code_nodes (name);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_nodes_tsv ON code_nodes USING GIN (content_tsv);")
+
+        # content_tsv 자동 업데이트 트리거
+        execute_raw("""
+            CREATE OR REPLACE FUNCTION code_nodes_tsv_update()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.content_tsv := to_tsvector('english',
+                    COALESCE(NEW.name, '') || ' ' ||
+                    COALESCE(NEW.signature, '') || ' ' ||
+                    COALESCE(NEW.docstring, '') || ' ' ||
+                    COALESCE(NEW.raw_content, '')
+                );
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        execute_raw("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_code_nodes_tsv') THEN
+                    CREATE TRIGGER trg_code_nodes_tsv
+                    BEFORE INSERT OR UPDATE ON code_nodes
+                    FOR EACH ROW EXECUTE FUNCTION code_nodes_tsv_update();
+                END IF;
+            END;
+            $$;
+        """)
+
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS code_edges (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES code_projects(id) ON DELETE CASCADE,
+                source_id INTEGER NOT NULL REFERENCES code_nodes(id) ON DELETE CASCADE,
+                target_id INTEGER NOT NULL REFERENCES code_nodes(id) ON DELETE CASCADE,
+                edge_type TEXT NOT NULL DEFAULT 'imports'
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_edges_source ON code_edges (source_id);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_edges_target ON code_edges (target_id);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_edges_project ON code_edges (project_id, edge_type);")
+
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS code_wiki (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES code_projects(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                source_hash TEXT DEFAULT '',
+                generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_code_wiki_project ON code_wiki (project_id);")
+        execute_raw("CREATE UNIQUE INDEX IF NOT EXISTS idx_code_wiki_path ON code_wiki (project_id, file_path);")
 
         _SCHEMA_READY = True
         if not _MIGRATION_DONE:
