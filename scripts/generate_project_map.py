@@ -5,12 +5,23 @@ DESCRIPTION: PROJECT_MAP.md 자동 생성 스크립트.
              문서 드리프트를 방지하기 위해 파일 시스템을 진실의 원천으로 사용합니다.
 
 REVISION HISTORY:
+- 2026-04-15 Claude: stdout UTF-8 강제 — Windows CP949 환경에서 ✅ 이모지 print
+  실패로 인해 17일째 자동 갱신 안 되던 근본 원인 수정
 - 2026-03-22 Claude: 최초 생성 — 5축 모듈 맵 기반 자동 생성
 """
 
 import os
+import sys
 import time
 from pathlib import Path
+
+# Windows CP949 콘솔에서도 이모지 출력 가능하도록 stdout/stderr UTF-8 강제.
+# 이 한 줄이 빠져있어 매번 print의 ✅ 이모지에서 UnicodeEncodeError로 죽었음.
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 
 # ── 프로젝트 루트 ─────────────────────────────────────────────────────────

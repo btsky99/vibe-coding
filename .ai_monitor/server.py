@@ -6,6 +6,13 @@ REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 # 🕒 변경 이력 (History):
+# [2026-04-15] - Claude (자동 문서 생성기 데몬 추가 — PROJECT_MAP/HIVEMIND stale 수정)
+#   - run_doc_generators_daemon(): generate_project_map.py + generate_hivemind_doc.py를
+#     30분 주기로 자동 실행 (시동 시 즉시 1회 + 이후 주기적)
+#   - 데몬 등록 블록에 DocGeneratorsDaemon 스레드 추가
+#   - 원인: 두 자동 생성기가 시동 시퀀스에서 빠져있어 PROJECT_MAP.md 17일/HIVEMIND.md 15일째
+#     stale 상태. 이로 인해 사용자/AI 모두 옛날 정보 위에서 작업하던 문제
+#   - 효과: PROJECT_MAP.md, HIVEMIND.md가 항상 최신 상태 유지
 # [2026-04-15] - Claude (오케스트레이터 데몬 자동 시동 — 'all' 태스크 적체 근본 수정)
 #   - run_orchestrator_daemon(): scripts/orchestrator.py를 --daemon 모드로 자동 실행
 #   - 데몬 스레드 등록 블록에 OrchestratorDaemon 스레드 추가
@@ -5840,6 +5847,52 @@ def main():
             _child_procs.append(proc)
             print("[*] 하이브 오케스트레이터 데몬(orchestrator) 자동 시작됨")
 
+    def run_doc_generators_daemon():
+        # PROJECT_MAP.md / HIVEMIND.md 자동 갱신 데몬.
+        # 시동 시 즉시 1회 + 이후 30분마다 갱신.
+        # 원인: 두 자동 생성기가 시동 시퀀스에서 빠져있어 17일/15일째 stale.
+        if not SCRIPTS_DIR:
+            return
+        pm_script = SCRIPTS_DIR / "generate_project_map.py"
+        hv_script = SCRIPTS_DIR / "generate_hivemind_doc.py"
+        _python_cmds = _python_runner_cmds()
+        if not _python_cmds:
+            print("[!] run_doc_generators_daemon: Python 인터프리터를 찾을 수 없어 스킵")
+            return
+        python_exe = _python_cmds[0]
+        interval_sec = 30 * 60  # 30분 주기
+
+        while True:
+            # PROJECT_MAP.md 갱신
+            if pm_script.exists():
+                try:
+                    subprocess.run(
+                        [python_exe, str(pm_script)],
+                        cwd=str(PROJECT_ROOT),
+                        timeout=120,
+                        capture_output=True,
+                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+                    )
+                    print("[*] PROJECT_MAP.md 자동 갱신 완료")
+                except Exception as e:
+                    print(f"[!] PROJECT_MAP.md 갱신 실패: {e}")
+
+            # HIVEMIND.md 갱신
+            if hv_script.exists():
+                try:
+                    subprocess.run(
+                        [python_exe, str(hv_script)],
+                        cwd=str(PROJECT_ROOT),
+                        timeout=120,
+                        capture_output=True,
+                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+                    )
+                    print("[*] HIVEMIND.md 자동 갱신 완료")
+                except Exception as e:
+                    print(f"[!] HIVEMIND.md 갱신 실패: {e}")
+
+            time.sleep(interval_sec)
+
     def _agent_sync_daemon():
         while True:
             try:
@@ -6195,6 +6248,8 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             threading.Thread(target=run_heal_daemon, daemon=True).start()
             threading.Thread(target=run_orchestrator_daemon, daemon=True,
                              name='OrchestratorDaemon').start()
+            threading.Thread(target=run_doc_generators_daemon, daemon=True,
+                             name='DocGeneratorsDaemon').start()
             threading.Thread(target=_agent_sync_daemon, daemon=True,
                              name='AgentSyncDaemon').start()
             threading.Thread(target=run_mux_server, daemon=True).start()
