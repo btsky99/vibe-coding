@@ -2,6 +2,12 @@
 # 📄 파일명: src/pg_store.py
 # 📝 설명: PostgreSQL 저장소 — session_logs, skill_chain, 오피스 프로필 등 관리
 # 🕒 변경 이력:
+# [2026-04-15] Claude — get_agent_last_seen 이중 소스 종합 (alive 판정 정확도 개선)
+#   - 기존: hive_sessions.ts_start만 조회 → Claude Code CLI 등 외부 클라이언트
+#           활동을 못 잡아 claude가 36일째 idle로 잘못 판정되는 문제
+#   - 수정: agent_heartbeats.last_beat 채널 추가 → 두 소스의 MAX 선택
+#   - 영향: scripts/orchestrator.py의 pick_best_agent가 alive 체크 시 claude를
+#           정상적으로 살아있음으로 판정 → 'all' 태스크 정상 재배정 재개
 # [2026-04-09] Claude — 오피스 프로필 중앙화 (localStorage → PostgreSQL SSOT)
 #   - office_profiles, office_profile_state 테이블 추가
 #   - LISTEN/NOTIFY 'office_profiles_changed' 채널로 창 간 실시간 동기화
@@ -1137,17 +1143,56 @@ def list_session_logs(limit: int = 200) -> list[dict]:
 
 
 def get_agent_last_seen(agent_names: list[str] | None = None) -> dict[str, str | None]:
+    """
+    에이전트별 마지막 활동 시각 반환 (ISO 문자열).
+
+    두 소스를 종합하여 가장 최근 시각을 선택한다:
+      1) hive_sessions.ts_start — PTY 세션 시작 시각 (기존 소스)
+      2) agent_heartbeats.last_beat — 에이전트 하트비트 (실시간 추적)
+
+    Why: hive_sessions는 PTY 터미널 세션에만 기록되어 Claude Code CLI 등
+    외부 클라이언트 활동을 놓침. agent_heartbeats는 서버가 주기적으로
+    갱신하는 실시간 소스이므로 더 정확한 alive 판정 가능.
+    scripts/orchestrator.py의 pick_best_agent가 이 함수 결과로 죽은
+    에이전트를 후보에서 제외하는데, 구 로직은 claude도 36일 idle로
+    판정해 모든 'all' 태스크가 영원히 적체되던 문제 수정.
+    """
     agent_names = agent_names or []
-    result = {name: None for name in agent_names}
-    rows = query_rows(
-        "SELECT LOWER(agent) AS agent_name, MAX(ts_start) AS last_seen "
-        "FROM hive_sessions GROUP BY LOWER(agent) ORDER BY last_seen DESC;"
-    )
-    for row in rows:
-        agent_name = row.get('agent_name', '')
-        for wanted in agent_names:
-            if wanted in agent_name and result.get(wanted) is None:
-                result[wanted] = row.get('last_seen')
+    result: dict[str, str | None] = {name: None for name in agent_names}
+
+    # 채널 1: hive_sessions (PTY 세션 기록)
+    try:
+        rows = query_rows(
+            "SELECT LOWER(agent) AS agent_name, MAX(ts_start) AS last_seen "
+            "FROM hive_sessions GROUP BY LOWER(agent) ORDER BY last_seen DESC;"
+        )
+        for row in rows:
+            agent_name = row.get('agent_name', '')
+            for wanted in agent_names:
+                if wanted in agent_name:
+                    seen = row.get('last_seen')
+                    if seen and (result.get(wanted) is None or str(seen) > str(result[wanted])):
+                        result[wanted] = str(seen)
+    except Exception:
+        pass
+
+    # 채널 2: agent_heartbeats (실시간 하트비트 — 더 신선한 소스)
+    try:
+        hb_rows = query_rows(
+            "SELECT LOWER(agent_id) AS agent_name, "
+            "to_char(last_beat, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS last_seen "
+            "FROM agent_heartbeats ORDER BY last_beat DESC;"
+        )
+        for row in hb_rows:
+            agent_name = row.get('agent_name', '')
+            for wanted in agent_names:
+                if wanted in agent_name:
+                    seen = row.get('last_seen')
+                    if seen and (result.get(wanted) is None or str(seen) > str(result[wanted])):
+                        result[wanted] = str(seen)
+    except Exception:
+        pass
+
     return result
 
 
