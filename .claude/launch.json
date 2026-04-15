@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vite-frontend",
+      "cwd": ".ai_monitor/vibe-view",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "python-main-server",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [".ai_monitor/server.py"],
+      "port": 9000
+    },
+    {
+      "name": "node-pty-server",
+      "cwd": ".ai_monitor/pty-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["pty-server.js"],
+      "port": 9001
+    }
+  ]
+}

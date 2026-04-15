@@ -6,6 +6,12 @@ REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 # 🕒 변경 이력 (History):
+# [2026-04-15] - Claude (오케스트레이터 데몬 자동 시동 — 'all' 태스크 적체 근본 수정)
+#   - run_orchestrator_daemon(): scripts/orchestrator.py를 --daemon 모드로 자동 실행
+#   - 데몬 스레드 등록 블록에 OrchestratorDaemon 스레드 추가
+#   - 원인: wiki_generator 등이 발행하는 assigned_to='all' 태스크를 재배정할
+#     주체(orchestrator)가 시동 시퀀스에서 빠져있어 태스크가 영원히 pending 상태로 적체
+#   - 효과: 60초마다 'all' pending 태스크를 살아있는 에이전트로 자동 재배정
 # [2026-03-26] - Claude (원스톱 설치 + 언인스톨 + PTY 자동 빌드)
 #   - --install: 바탕화면 바로가기 + PTY node-pty 네이티브 모듈 자동 npm install
 #   - --uninstall: 바탕화면 바로가기 삭제 + pip uninstall 안내
@@ -5809,6 +5815,31 @@ def main():
             _child_procs.append(proc)
             print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
 
+    def run_orchestrator_daemon():
+        # 하이브 오케스트레이터 데몬 — assigned_to='all' 태스크를
+        # 살아있는 에이전트로 자동 재배정. wiki_generator 등 'all' 발행자가
+        # 만든 태스크가 영원히 적체되는 것을 방지한다.
+        if not SCRIPTS_DIR:
+            return
+        orch_script = SCRIPTS_DIR / "orchestrator.py"
+        if orch_script.exists():
+            _python_cmds = _python_runner_cmds()
+            if not _python_cmds:
+                print("[!] run_orchestrator_daemon: Python 인터프리터를 찾을 수 없어 오케스트레이터 스킵")
+                return
+            python_exe = _python_cmds[0]
+            proc = subprocess.Popen(
+                [python_exe, str(orch_script), "--daemon", "--interval", "60"],
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+            )
+            _child_procs.append(proc)
+            print("[*] 하이브 오케스트레이터 데몬(orchestrator) 자동 시작됨")
+
     def _agent_sync_daemon():
         while True:
             try:
@@ -6162,6 +6193,8 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             threading.Thread(target=run_watchdog, daemon=True).start()
             threading.Thread(target=run_telegram_bridge, daemon=True).start()
             threading.Thread(target=run_heal_daemon, daemon=True).start()
+            threading.Thread(target=run_orchestrator_daemon, daemon=True,
+                             name='OrchestratorDaemon').start()
             threading.Thread(target=_agent_sync_daemon, daemon=True,
                              name='AgentSyncDaemon').start()
             threading.Thread(target=run_mux_server, daemon=True).start()
