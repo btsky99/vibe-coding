@@ -834,11 +834,16 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT NOT NULL DEFAULT '',
                 source_hash TEXT DEFAULT '',
+                wiki_type TEXT NOT NULL DEFAULT 'file',
+                node_id INTEGER REFERENCES code_nodes(id) ON DELETE CASCADE,
                 generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
         execute_raw("CREATE INDEX IF NOT EXISTS idx_code_wiki_project ON code_wiki (project_id);")
-        execute_raw("CREATE UNIQUE INDEX IF NOT EXISTS idx_code_wiki_path ON code_wiki (project_id, file_path);")
+        execute_raw("CREATE UNIQUE INDEX IF NOT EXISTS idx_code_wiki_compound ON code_wiki (project_id, file_path, wiki_type, COALESCE(node_id, -1));")
+        # 기존 DB 마이그레이션 — wiki_type, node_id 컬럼 추가
+        execute_raw("ALTER TABLE code_wiki ADD COLUMN IF NOT EXISTS wiki_type TEXT NOT NULL DEFAULT 'file';")
+        execute_raw("ALTER TABLE code_wiki ADD COLUMN IF NOT EXISTS node_id INTEGER REFERENCES code_nodes(id) ON DELETE CASCADE;")
 
         _SCHEMA_READY = True
         if not _MIGRATION_DONE:

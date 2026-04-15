@@ -190,6 +190,9 @@ const ActivityBar = memo(function ActivityBar({
       <button onClick={() => onTabChange('codesearch')} className={tabCls('codesearch')} title="코드 검색">
         <Search className="w-5 h-5" />
       </button>
+      <button onClick={() => onTabChange('codewiki')} className={tabCls('codewiki')} title="코드 위키">
+        <BookOpen className="w-5 h-5" />
+      </button>
 
       <div className="mt-auto flex flex-col gap-4">
         <button

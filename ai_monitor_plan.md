@@ -1,78 +1,66 @@
-# 코드 인텔리전스 시스템 — MindVault 영감 기반
+# Phase 3: LLM 위키 자동생성 — 에이전트 브릿지 방식
 
-> tree-sitter + PostgreSQL FTS + 코드 그래프 + LLM 위키 (접근법 C)
-> 승인일: 2026-04-14
+> 코드 인텔리전스 Phase 3. code_nodes → 프롬프트 조립 → hive_tasks 등록 → 에이전트 위키 생성 → code_wiki 저장
+> 승인일: 2026-04-15
 
 ---
 
-## Phase 1: 인덱싱 + 검색 + 그래프 저장 (백엔드)
+## 백엔드
 
-[x] Task 1: PostgreSQL 스키마 추가 — code_projects/nodes/edges/wiki 4개 테이블
-    파일: .ai_monitor/src/pg_store.py
-    방법: ensure_schema() 내 schema_sql에 CREATE TABLE IF NOT EXISTS 블록 4개 추가. code_nodes에 TSVECTOR 컬럼 + GIN 인덱스, code_edges에 source/target 인덱스. content_tsv 자동 업데이트 트리거
-    검증: ensure_schema() 호출 후 psql에서 \dt code_* 테이블 4개 확인
+[x] Task 1: code_wiki 스키마 확장 — wiki_type + node_id 컬럼 추가
+    파일: .ai_monitor/src/pg_store.py (L829~841)
+    방법: code_wiki CREATE TABLE에 wiki_type TEXT DEFAULT 'file' + node_id INTEGER REFERENCES code_nodes(id) ON DELETE CASCADE 추가. UNIQUE 인덱스를 (project_id, file_path, wiki_type, COALESCE(node_id, -1))로 변경. ensure_schema() 내 마이그레이션 블록에 ALTER TABLE ADD COLUMN IF NOT EXISTS도 추가 (기존 DB 호환)
+    검증: 서버 시작 → psql에서 \d code_wiki로 wiki_type, node_id 컬럼 확인
 
-[x] Task 2: tree-sitter 의존성 추가
-    파일: pyproject.toml
-    방법: optional-dependencies에 [codegraph] = ["tree-sitter>=0.24", "tree-sitter-python", "tree-sitter-javascript", "tree-sitter-typescript", "tree-sitter-go", "tree-sitter-rust", "tree-sitter-java"] 추가
-    검증: pip install -e ".[codegraph]" 성공
-
-[x] Task 3: 코드 인덱서 엔진 — tree-sitter AST 파싱
-    파일: .ai_monitor/src/code_indexer.py (신규)
-    방법: tree-sitter로 파일별 AST 파싱 → 함수/클래스/import 노드 추출 → code_nodes/code_edges 저장. threading.Thread 백그라운드 실행. 언어별 파서 동적 로드 (확장자 매핑). tree-sitter 없으면 정규식 fallback. SSE로 진행률 스트리밍
-    검증: 테스트 폴더 인덱싱 → code_nodes 레코드 존재 확인
-    의존: Task 1, Task 2 완료 후
-
-[x] Task 4: BM25 검색 엔진 — PostgreSQL FTS
-    파일: .ai_monitor/src/code_search.py (신규)
-    방법: plainto_tsquery + ts_rank_cd()로 BM25 랭킹. code_nodes.content_tsv GIN 인덱스 활용. 결과: file_path, name, node_type, snippet, score 포함
-    검증: 인덱싱된 프로젝트에서 함수명 검색 → 관련 결과 반환
+[x] Task 2: wiki_generator.py 신규 — 프롬프트 조립 + 태스크 등록 엔진
+    파일: .ai_monitor/src/wiki_generator.py (신규)
+    방법:
+      - generate_file_wiki(project_id, file_path): code_nodes에서 해당 파일의 함수/클래스 목록 + raw_content 수집 → 한글 마크다운 위키 프롬프트 조립 → hive_tasks에 태스크 등록 (title: "위키생성: {file_path}", tags: ["wiki_generate"], description에 프롬프트 포함)
+      - generate_module_wiki(project_id, dir_path): 하위 파일들의 기존 위키 요약 → 모듈 위키 생성 태스크
+      - generate_node_wiki(project_id, node_id): 개별 함수/클래스 위키 생성 태스크
+      - save_wiki(project_id, file_path, wiki_type, content, node_id=None): code_wiki에 UPSERT
+      - get_wiki(project_id, file_path=None, wiki_type=None): 위키 조회
+      - get_wiki_tree(project_id): 파일 목록 + 위키 존재 여부 트리
+      - source_hash로 변경 감지 — 해시 동일하면 재생성 스킵
+    검증: generate_file_wiki() 호출 → hive_tasks에 wiki_generate 태스크 생성 확인
     의존: Task 1 완료 후
 
-[x] Task 5: CodeGraph REST API
-    파일: .ai_monitor/api/codegraph_api.py (신규)
-    방법: handle_get/handle_post 패턴. POST /register(프로젝트등록), POST /index(인덱싱), GET /search(BM25), GET /graph(노드+엣지), GET /impact(영향분석 — 재귀적 엣지 탐색)
+[x] Task 3: codegraph_api.py에 위키 API 엔드포인트 4개 추가
+    파일: .ai_monitor/api/codegraph_api.py (L91 앞, L150 앞)
+    방법:
+      - GET /api/codegraph/wiki?project_id=&file_path=&wiki_type= → get_wiki() 호출
+      - GET /api/codegraph/wiki/tree?project_id= → get_wiki_tree() 호출
+      - POST /api/codegraph/wiki/generate → {project_id, target_type(file/module/node), target_path, node_id?} → generate_*_wiki() 호출
+      - PUT /api/codegraph/wiki → {project_id, file_path, wiki_type, content, node_id?} → save_wiki() 호출 (수동 편집/에이전트 결과 저장)
     검증: curl로 각 엔드포인트 호출 → JSON 응답 확인
+    의존: Task 2 완료 후
+
+---
+
+## 프론트엔드
+
+[x] Task 4: react-markdown 의존성 추가
+    파일: .ai_monitor/vibe-view/package.json
+    방법: npm install react-markdown remark-gfm
+    검증: npm ls react-markdown
+
+[x] Task 5: CodeWikiPanel.tsx 신규 — 파일트리 + 마크다운 뷰어/편집기
+    파일: .ai_monitor/vibe-view/src/components/panels/CodeWikiPanel.tsx (신규)
+    방법:
+      - 상단: 프로젝트 선택 드롭다운 + "전체 생성" 버튼
+      - 좌측 (w-1/3): 파일 트리 — /api/codegraph/wiki/tree에서 fetch. 폴더 접기/펼치기. 각 항목에 생성 상태 아이콘 (✅/⏳/➕)
+      - 우측 (w-2/3): 뷰 모드=react-markdown 렌더링 / 편집 모드=textarea. 하단에 "위키 생성"/"재생성"/"저장" 버튼
+      - 트리에서 파일 클릭 → GET /wiki로 조회 → 우측에 표시
+      - "위키 생성" 클릭 → POST /wiki/generate 호출
+      - "저장" 클릭 → PUT /wiki 호출
+    검증: Playwright로 패널 렌더링 + 트리 클릭 → 위키 표시 확인
     의존: Task 3, Task 4 완료 후
 
-[x] Task 6: server.py에 라우팅 등록
-    파일: .ai_monitor/server.py
-    방법: import api.codegraph_api as codegraph_api + do_GET/do_POST에 /api/codegraph/ 분기 추가
-    검증: 서버 시작 → /api/codegraph/search?q=test 호출 → 200
+[x] Task 6: App.tsx + ActivityBar.tsx에 codewiki 탭 등록
+    파일: .ai_monitor/vibe-view/src/App.tsx (L525~527), .ai_monitor/vibe-view/src/components/ActivityBar.tsx (L192 뒤)
+    방법: App.tsx에 CodeWikiPanel import + activeTab === 'codewiki' 분기 추가. ActivityBar에 BookOpen 아이콘 버튼 추가 (이미 import됨)
+    검증: 탭 클릭 → CodeWikiPanel 전환 확인
     의존: Task 5 완료 후
 
 ---
-
-## Phase 2: 시각화 UI (프론트엔드)
-
-[x] Task 7: react-force-graph-2d 의존성 추가
-    파일: .ai_monitor/vibe-view/package.json
-    방법: npm install react-force-graph-2d
-    검증: npm ls react-force-graph-2d
-
-[x] Task 8: CodeGraphPanel — 인터랙티브 그래프
-    파일: .ai_monitor/vibe-view/src/components/panels/CodeGraphPanel.tsx (신규)
-    방법: react-force-graph-2d로 노드+엣지 시각화. 노드 색상=타입별(function:파랑, class:초록, module:주황). 클릭→상세팝업. 줌/패닝. 프로젝트 선택 드롭다운. /api/codegraph/graph에서 데이터 fetch
-    검증: Playwright로 그래프 렌더링 확인
-    의존: Task 6, Task 7 완료 후
-
-[x] Task 9: CodeSearchPanel — BM25 검색 UI
-    파일: .ai_monitor/vibe-view/src/components/panels/CodeSearchPanel.tsx (신규)
-    방법: 검색창(debounce 300ms) + 결과 리스트(파일경로/함수명/스니펫/점수). 결과 클릭→그래프 노드 하이라이트 연동
-    검증: Playwright로 검색→결과 표시 확인
-    의존: Task 6, Task 7 완료 후
-
-[x] Task 10: App.tsx + ActivityBar에 패널 등록
-    파일: .ai_monitor/vibe-view/src/App.tsx, .ai_monitor/vibe-view/src/components/ActivityBar.tsx
-    방법: import 추가 + activeTab 조건식에 'codegraph'/'codesearch' 추가 + ActivityBar에 아이콘 탭 추가
-    검증: 탭 클릭 → 패널 전환
-    의존: Task 8, Task 9 완료 후
-
----
-
-## Phase 3: LLM 위키 자동생성 (Phase 1,2 완료 후 별도 계획)
-
-> wiki_generator.py + CodeWikiPanel.tsx — Karpathy LLM Wiki 패턴
-
----
-**상태:** ✅ Phase 1+2 완료 (2026-04-14)
+**상태:** ✅ Phase 3 완료 (2026-04-15)

@@ -1,9 +1,10 @@
 """
 FILE: api/codegraph_api.py
 DESCRIPTION: 코드 인텔리전스 REST API 핸들러.
-             tree-sitter AST 인덱싱 + BM25 검색 + 코드 그래프 시각화.
+             tree-sitter AST 인덱싱 + BM25 검색 + 코드 그래프 시각화 + LLM 위키.
 REVISION HISTORY:
     2026-04-14 — 초기 구현. MindVault 영감 기반 코드 그래프 시스템
+    2026-04-15 — Phase 3: LLM 위키 API 추가 (wiki CRUD + generate)
 """
 
 import json
@@ -14,6 +15,10 @@ from src.code_indexer import (
     register_project, list_projects, index_project, get_indexing_status,
 )
 from src.code_search import search_code, get_graph_data, get_impact_analysis
+from src.wiki_generator import (
+    generate_file_wiki, generate_module_wiki, generate_node_wiki,
+    generate_all_file_wikis, save_wiki, get_wiki, get_wiki_tree,
+)
 
 
 def _json_response(handler, data: dict | list, status: int = 200):
@@ -90,6 +95,32 @@ def handle_get(handler, path: str, params: dict,
         _json_response(handler, status)
         return True
 
+    # 위키 조회
+    if path == '/api/codegraph/wiki':
+        ensure_schema(DATA_DIR)
+        pid = params.get('project_id', [''])[0]
+        if not pid:
+            _error(handler, 'project_id 필수')
+            return True
+        fp = params.get('file_path', [''])[0] or None
+        wtype = params.get('wiki_type', [''])[0] or None
+        nid_str = params.get('node_id', [''])[0]
+        nid = int(nid_str) if nid_str else None
+        result = get_wiki(int(pid), file_path=fp, wiki_type=wtype, node_id=nid)
+        _json_response(handler, result)
+        return True
+
+    # 위키 트리
+    if path == '/api/codegraph/wiki/tree':
+        ensure_schema(DATA_DIR)
+        pid = params.get('project_id', [''])[0]
+        if not pid:
+            _error(handler, 'project_id 필수')
+            return True
+        result = get_wiki_tree(int(pid))
+        _json_response(handler, result)
+        return True
+
     return False
 
 
@@ -146,6 +177,49 @@ def handle_post(handler, path: str, data: dict,
 
         background = data.get('background', True)
         result = index_project(int(pid), root_path, background=background)
+        _json_response(handler, result)
+        return True
+
+    # 위키 생성 요청
+    if path == '/api/codegraph/wiki/generate':
+        ensure_schema(DATA_DIR)
+        pid = data.get('project_id')
+        if not pid:
+            _error(handler, 'project_id 필수')
+            return True
+        target_type = data.get('target_type', 'file')  # file / module / node / all
+        target_path = data.get('target_path', '')
+        node_id = data.get('node_id')
+
+        if target_type == 'all':
+            result = generate_all_file_wikis(int(pid))
+        elif target_type == 'module':
+            result = generate_module_wiki(int(pid), target_path)
+        elif target_type == 'node' and node_id:
+            result = generate_node_wiki(int(pid), int(node_id))
+        else:
+            result = generate_file_wiki(int(pid), target_path)
+        _json_response(handler, result)
+        return True
+
+    # 위키 저장 (수동 편집 / 에이전트 결과 저장)
+    if path == '/api/codegraph/wiki':
+        ensure_schema(DATA_DIR)
+        pid = data.get('project_id')
+        if not pid:
+            _error(handler, 'project_id 필수')
+            return True
+        fp = data.get('file_path', '')
+        wtype = data.get('wiki_type', 'file')
+        content = data.get('content', '')
+        title = data.get('title', '')
+        node_id = data.get('node_id')
+        source_hash = data.get('source_hash', '')
+        result = save_wiki(
+            int(pid), fp, wtype, content,
+            title=title, node_id=int(node_id) if node_id else None,
+            source_hash=source_hash,
+        )
         _json_response(handler, result)
         return True
 

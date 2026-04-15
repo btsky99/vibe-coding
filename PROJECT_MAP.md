@@ -59,6 +59,9 @@
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
 | `logger.py` | 123 |  |
 | `pg_store.py` | 1034 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `code_indexer.py` | ~530 | tree-sitter AST 파싱 코드 인덱서 |
+| `code_search.py` | ~150 | BM25 코드 검색 엔진 (PostgreSQL FTS) |
+| `wiki_generator.py` | ~280 | LLM 위키 자동생성 엔진 — 프롬프트 조립 + hive_tasks 등록 |
 | `server_utils.py` | ~60 | 서버 공통 유틸 (포트 탐색, CORS, JSON 응답 헬퍼) |
 | `secure.py` | 52 |  |
 | `view.py` | 243 |  |
@@ -210,6 +213,9 @@
 | `TaskBoardPanel.tsx` | 460 | 칸반 스타일 태스크 보드 |
 | `TasksPanel.tsx` | 375 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 243 |  |
+| `CodeGraphPanel.tsx` | ~280 | 코드 인텔리전스 — 코드 그래프 시각화 (react-force-graph-2d) |
+| `CodeSearchPanel.tsx` | ~150 | 코드 인텔리전스 — BM25 코드 검색 UI |
+| `CodeWikiPanel.tsx` | ~280 | 코드 인텔리전스 — LLM 위키 뷰어/편집기 (react-markdown) |
 
 ## 🧪 테스트 (tests/)
 | 파일 | 줄 수 | 테스트 대상 |
