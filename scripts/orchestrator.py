@@ -3,6 +3,12 @@ FILE: scripts/orchestrator.py
 DESCRIPTION: 하이브 마인드 자동 조율 오케스트레이터 — 태스크 스케줄링, 에이전트 감시, 자동 배분.
 
 REVISION HISTORY:
+- 2026-04-15 Claude: pick_best_agent에 alive 체크 추가 — 죽은 에이전트 좀비 배정 차단
+  - DEAD_THRESHOLD_SEC=24h 상수 신설
+  - DEAD_THRESHOLD_SEC 이상 활동 없는 에이전트는 후보에서 완전 제외
+  - 살아있는 에이전트 0명이면 None 반환 → 호출자가 'all' 유지하도록
+  - auto_assign_tasks: best is None 분기 추가
+  - 원인: 36일째 비활성인 gemini에게 위키 태스크 9건이 자동 배정되어 영원히 적체
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 import sys
@@ -30,7 +36,8 @@ except Exception:
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
 DEFAULT_PORTS = [8005, 8000]
 BASE_AGENTS = ['claude', 'gemini']
-IDLE_THRESHOLD_SEC = 300                # 유휴 판정 기준: 5분 (300초)
+IDLE_THRESHOLD_SEC = 300                # 유휴 판정 기준: 5분 (300초) — 경고용
+DEAD_THRESHOLD_SEC = 24 * 3600          # 사망 판정 기준: 24시간 — 재배정 후보에서 완전 제외
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data')
 LOG_FILE = os.path.join(DATA_DIR, 'orchestrator_log.jsonl')
 THOUGHT_FILE = os.path.join(DATA_DIR, 'thought_stream.jsonl')
@@ -202,25 +209,43 @@ def _infer_task_type(task: dict) -> str:
         return ''
 
 
-def pick_best_agent(last_seen: dict, task_count: dict, task: dict | None = None) -> str:
+def pick_best_agent(last_seen: dict, task_count: dict, task: dict | None = None) -> str | None:
     """
     가장 적합한 에이전트 선택 (미할당 태스크 자동 배정용).
     기준: 1) 작업 유형과 에이전트 역량 일치도, 2) 최근 활동성, 3) 태스크 부하
+
+    DEAD_THRESHOLD_SEC(24시간) 이상 활동 없는 에이전트는 후보에서 완전 제외한다.
+    살아있는 에이전트가 0명이면 None 반환 — 호출자는 'all' 상태를 유지해야 한다.
     """
     now = datetime.now()
     agents = _known_agents()
     task_type = _infer_task_type(task or {})
-    scores = {}
+
+    # ⚡ alive 후보 추림: DEAD_THRESHOLD_SEC 이내 활동 기록이 있는 에이전트만
+    alive: list[str] = []
     for agent in agents:
         seen_str = last_seen.get(agent)
-        if seen_str:
-            try:
-                seen_dt = datetime.fromisoformat(seen_str.replace('Z', ''))
-                idle_sec = max(0.0, (now - seen_dt).total_seconds())
-                recency_bonus = max(0.0, 0.12 - min(idle_sec, IDLE_THRESHOLD_SEC * 4) / (IDLE_THRESHOLD_SEC * 40))
-            except Exception:
-                recency_bonus = 0.0
-        else:
+        if not seen_str:
+            continue  # 한 번도 활동 기록 없는 에이전트는 후보 제외
+        try:
+            seen_dt = datetime.fromisoformat(seen_str.replace('Z', ''))
+            if (now - seen_dt).total_seconds() < DEAD_THRESHOLD_SEC:
+                alive.append(agent)
+        except Exception:
+            continue
+
+    # 살아있는 에이전트 0명: 'all' 유지 신호로 None 반환
+    if not alive:
+        return None
+
+    scores: dict[str, float] = {}
+    for agent in alive:
+        seen_str = last_seen.get(agent)
+        try:
+            seen_dt = datetime.fromisoformat(seen_str.replace('Z', ''))
+            idle_sec = max(0.0, (now - seen_dt).total_seconds())
+            recency_bonus = max(0.0, 0.12 - min(idle_sec, IDLE_THRESHOLD_SEC * 4) / (IDLE_THRESHOLD_SEC * 40))
+        except Exception:
             recency_bonus = 0.0
 
         capability_score = 0.0
@@ -276,6 +301,9 @@ def auto_assign_tasks(tasks: list, last_seen: dict, task_count: dict,
     for t in tasks:
         if t.get('assigned_to') == 'all' and t.get('status') == 'pending':
             best = pick_best_agent(last_seen, task_count, task=t)
+            if best is None:
+                # 살아있는 에이전트 0명 — 'all' 유지하고 다음 사이클에서 재시도
+                continue
             t['assigned_to'] = best
             t['updated_at'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
             task_count[best] = task_count.get(best, 0) + 1
