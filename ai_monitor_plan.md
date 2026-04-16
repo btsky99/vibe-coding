@@ -1,66 +1,130 @@
-# Phase 3: LLM 위키 자동생성 — 에이전트 브릿지 방식
+# 바이브 코딩 — Next Phase 계획서
 
-> 코드 인텔리전스 Phase 3. code_nodes → 프롬프트 조립 → hive_tasks 등록 → 에이전트 위키 생성 → code_wiki 저장
-> 승인일: 2026-04-15
-
----
-
-## 백엔드
-
-[x] Task 1: code_wiki 스키마 확장 — wiki_type + node_id 컬럼 추가
-    파일: .ai_monitor/src/pg_store.py (L829~841)
-    방법: code_wiki CREATE TABLE에 wiki_type TEXT DEFAULT 'file' + node_id INTEGER REFERENCES code_nodes(id) ON DELETE CASCADE 추가. UNIQUE 인덱스를 (project_id, file_path, wiki_type, COALESCE(node_id, -1))로 변경. ensure_schema() 내 마이그레이션 블록에 ALTER TABLE ADD COLUMN IF NOT EXISTS도 추가 (기존 DB 호환)
-    검증: 서버 시작 → psql에서 \d code_wiki로 wiki_type, node_id 컬럼 확인
-
-[x] Task 2: wiki_generator.py 신규 — 프롬프트 조립 + 태스크 등록 엔진
-    파일: .ai_monitor/src/wiki_generator.py (신규)
-    방법:
-      - generate_file_wiki(project_id, file_path): code_nodes에서 해당 파일의 함수/클래스 목록 + raw_content 수집 → 한글 마크다운 위키 프롬프트 조립 → hive_tasks에 태스크 등록 (title: "위키생성: {file_path}", tags: ["wiki_generate"], description에 프롬프트 포함)
-      - generate_module_wiki(project_id, dir_path): 하위 파일들의 기존 위키 요약 → 모듈 위키 생성 태스크
-      - generate_node_wiki(project_id, node_id): 개별 함수/클래스 위키 생성 태스크
-      - save_wiki(project_id, file_path, wiki_type, content, node_id=None): code_wiki에 UPSERT
-      - get_wiki(project_id, file_path=None, wiki_type=None): 위키 조회
-      - get_wiki_tree(project_id): 파일 목록 + 위키 존재 여부 트리
-      - source_hash로 변경 감지 — 해시 동일하면 재생성 스킵
-    검증: generate_file_wiki() 호출 → hive_tasks에 wiki_generate 태스크 생성 확인
-    의존: Task 1 완료 후
-
-[x] Task 3: codegraph_api.py에 위키 API 엔드포인트 4개 추가
-    파일: .ai_monitor/api/codegraph_api.py (L91 앞, L150 앞)
-    방법:
-      - GET /api/codegraph/wiki?project_id=&file_path=&wiki_type= → get_wiki() 호출
-      - GET /api/codegraph/wiki/tree?project_id= → get_wiki_tree() 호출
-      - POST /api/codegraph/wiki/generate → {project_id, target_type(file/module/node), target_path, node_id?} → generate_*_wiki() 호출
-      - PUT /api/codegraph/wiki → {project_id, file_path, wiki_type, content, node_id?} → save_wiki() 호출 (수동 편집/에이전트 결과 저장)
-    검증: curl로 각 엔드포인트 호출 → JSON 응답 확인
-    의존: Task 2 완료 후
+> 2026-04-16 브레인스토밍 결과. 5단계 개선 계획 완료 후 다음 방향.
 
 ---
 
-## 프론트엔드
+## 설계 철학 (오늘 토론에서 합의)
 
-[x] Task 4: react-markdown 의존성 추가
-    파일: .ai_monitor/vibe-view/package.json
-    방법: npm install react-markdown remark-gfm
-    검증: npm ls react-markdown
-
-[x] Task 5: CodeWikiPanel.tsx 신규 — 파일트리 + 마크다운 뷰어/편집기
-    파일: .ai_monitor/vibe-view/src/components/panels/CodeWikiPanel.tsx (신규)
-    방법:
-      - 상단: 프로젝트 선택 드롭다운 + "전체 생성" 버튼
-      - 좌측 (w-1/3): 파일 트리 — /api/codegraph/wiki/tree에서 fetch. 폴더 접기/펼치기. 각 항목에 생성 상태 아이콘 (✅/⏳/➕)
-      - 우측 (w-2/3): 뷰 모드=react-markdown 렌더링 / 편집 모드=textarea. 하단에 "위키 생성"/"재생성"/"저장" 버튼
-      - 트리에서 파일 클릭 → GET /wiki로 조회 → 우측에 표시
-      - "위키 생성" 클릭 → POST /wiki/generate 호출
-      - "저장" 클릭 → PUT /wiki 호출
-    검증: Playwright로 패널 렌더링 + 트리 클릭 → 위키 표시 확인
-    의존: Task 3, Task 4 완료 후
-
-[x] Task 6: App.tsx + ActivityBar.tsx에 codewiki 탭 등록
-    파일: .ai_monitor/vibe-view/src/App.tsx (L525~527), .ai_monitor/vibe-view/src/components/ActivityBar.tsx (L192 뒤)
-    방법: App.tsx에 CodeWikiPanel import + activeTab === 'codewiki' 분기 추가. ActivityBar에 BookOpen 아이콘 버튼 추가 (이미 import됨)
-    검증: 탭 클릭 → CodeWikiPanel 전환 확인
-    의존: Task 5 완료 후
+1. **멀티-LLM 유지** — Claude/Gemini/Codex 각자 강점 활용, 직접 협업보다 **메모리 공유** 중심
+2. **로컬 DB = 속도**, **옵시디언+GDrive = 공유** — 역할 분리
+3. **점진적 구현** — 한번에 다 안 만들고 단계별로
 
 ---
-**상태:** ✅ Phase 3 완료 (2026-04-15)
+
+## Phase A: 멀티 프로젝트 탭
+
+> 하나의 EXE에서 여러 프로젝트를 탭으로 전환, 각 프로젝트마다 T1~T8 독립 실행
+
+### Step A-1: 프로젝트 스위칭 (MVP)
+- 상단 메뉴바에 프로젝트 드롭다운 추가
+- config.json `projects`에서 목록 로드
+- 전환 시 `current_project_id` 변경 + PTY 세션 리셋
+- DB는 project_id로 이미 격리됨 — 추가 작업 최소
+
+### Step A-2: 프로젝트 탭 UI
+- 드롭다운 → 상단 탭 바로 업그레이드
+- 탭 간 전환 시 PTY 세션 상태 보존 (숨김 처리)
+- 각 탭에 프로젝트명 + 활성 에이전트 수 배지
+
+### Step A-3: 완전 독립 멀티탭
+- 프로젝트별 PTY 세션 풀 분리 (project_id:T1~T8)
+- 동시에 여러 프로젝트 에이전트 실행
+- 탭 간 메모리 공유 (hive_memory 크로스 project)
+
+---
+
+## Phase B: 멀티-LLM 메모리 공유 모델
+
+> 직접 협업 → 간접 협업. 각 LLM이 자기 일 하면서 배운 것을 공유 메모리에 남기는 구조.
+
+### 현재 상태
+- `hive_memory` 테이블 존재, `scripts/memory.py`로 읽기/쓰기 가능
+- 에이전트별 프로필과 디스패처 코드는 유지 (실험적 라벨)
+- Claude만 실제 활성, Gemini/Codex는 사용자가 수동 실행 시 참여
+
+### 강화할 것
+- [ ] 세션 시작 시 **자동 브리핑** — "지난번에 Gemini가 이거 조사했어" 자동 주입
+- [ ] 메모리 **작성자 태그** 강화 — 누가 남긴 메모인지 명확히
+- [ ] 메모리 UI — HivePanel에 "최근 공유 메모리" 카드 추가
+- [ ] 디스패처는 "실험적" 유지 — 필요 시 수동으로 활성화 가능
+
+### 원칙
+- 에이전트끼리 직접 통신 안 함 (ITCP는 레거시 유지)
+- DB에 남기고, 다음 에이전트가 읽는 비동기 패턴
+- 오버헤드 최소: 메모리 읽기/쓰기만
+
+---
+
+## Phase C: 하이브-옵시디언 통합 (크로스 PC 지식 공유)
+
+> 로컬 DB는 속도, 옵시디언+Google Drive는 PC 간 공유
+
+### 아키텍처
+```
+PC 1 (메인)                    PC 2 (서브)
+├── 바이브코딩 앱               ├── 바이브코딩 앱
+├── PostgreSQL (로컬)          ├── PostgreSQL (로컬)
+├── 에이전트 T1~T8             ├── 에이전트 T1~T8
+└── 빠른 실시간 작업            └── 빠른 실시간 작업
+         │                            │
+         └──── 옵시디언 vault (Google Drive) ────┘
+               ├── 지식 노트 (마크다운)
+               ├── 크로스 PC 메모리 공유
+               └── 사용자가 읽기/편집하기 좋은 형태
+```
+
+### 역할 분리
+| 계층 | 역할 | 속도 | 범위 |
+|------|------|------|------|
+| 로컬 DB | 실시간 상태, 하트비트, 태스크 큐 | ms | PC 1대 |
+| 옵시디언+GDrive | 지식, 의사결정, 학습 기록 | 초~분 | 모든 PC |
+
+### 핵심: 하이브 메모리 = 제텔카스텐
+
+hive_memory와 zettel_notes를 **통합** — 에이전트 메모가 곧 제텔 노트.
+
+```
+에이전트 작업 완료 → 자동 분류기
+  ├── 휘발성 메모 ("포트 9000 테스트 중") → DB에만 (동기화 안 함)
+  └── 지식 메모 ("NOTIFY는 이렇게 쓰면 돼") → fleeting note 자동 생성
+        → 시간/중요도 기준 permanent 승격
+        → 관련 노트 자동 링크 ([[연결]])
+        → 옵시디언 + GDrive 동기화
+        → 다른 PC에서도 열람 가능
+```
+
+### 강화할 것
+- [ ] hive_memory → zettel_notes 자동 변환 (지식성 메모만 선별)
+- [ ] `zettel_sync.py` → **선별 동기화** ("공유 가치 있는 것"만)
+- [ ] 동기화 대상: 의사결정, 학습 내용, 완료 태스크 요약
+- [ ] 제외 대상: 하트비트, 임시 로그, 디버그 데이터
+- [ ] 옵시디언 → DB **역동기화** (사용자가 옵시디언에서 편집한 내용 반영)
+- [ ] 동기화 주기: 태스크 완료 시 + 5분 배치
+- [ ] fleeting → permanent 자동 승격 기준 정의
+
+---
+
+## 우선순위 & 실행 순서
+
+| 순서 | Phase | 난이도 | 예상 | 의존성 |
+|------|-------|--------|------|--------|
+| 1 | A-1 프로젝트 스위칭 | 🟢 쉬움 | 반나절 | 없음 |
+| 2 | B 메모리 공유 강화 | 🟢 쉬움 | 반나절 | 없음 |
+| 3 | C 하이브-옵시디언 통합 | 🟡 중간 | 1일 | B |
+| 4 | A-2 프로젝트 탭 UI | 🟡 중간 | 1일 | A-1 |
+| 5 | A-3 완전 독립 멀티탭 | 🔴 큼 | 2일+ | A-2 |
+
+---
+
+## 완료된 작업 (2026-04-15~16)
+
+- [x] Phase 1: 정확한 그림 만들기
+- [x] Phase 2: 시스템 정직성 확보 — gemini/codex 라벨링
+- [x] Phase 3: 자동 분배 시스템 점검 — alive 체크 + 게이팅
+- [x] Phase 4: 가시성 UI — 오케스트레이터 카드, 유령 배지, 백프레셔
+- [x] Phase 5: 최적화 — hive_hook 다이어트, SkillChainPanel 리네임
+
+---
+> 이 계획서는 2026-04-16 브레인스토밍 결과입니다.
+> Phase A-1부터 순서대로 진행하며, 각 단계 끝마다 검증 + 사용자 OK 후 다음으로.
