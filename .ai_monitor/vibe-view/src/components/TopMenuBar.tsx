@@ -46,6 +46,9 @@ interface TopMenuBarProps {
   onClearLogs: () => void;
   // 자율 주행 버튼 → 중앙 통제실(mission-control) 탭으로 이동
   onOpenMissionControl: () => void;
+  // 프로젝트 전환 시 App의 currentPath 업데이트
+  currentPath?: string;
+  onSwitchProject?: (path: string) => void;
 }
 
 // ── 서버 로그 뷰어 모달 — 서버/PG/태스크 로그를 탭으로 전환하며 확인 + 클립보드 복사 ──
@@ -178,6 +181,8 @@ const TopMenuBar = memo(function TopMenuBar({
   onApplyUpdate, onTriggerUpdateCheck,
   onOpenFolder, onInstallSkills, onOpenHelpDoc, onClearLogs,
   onOpenMissionControl,
+  currentPath: propCurrentPath,
+  onSwitchProject,
 }: TopMenuBarProps) {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
@@ -192,10 +197,10 @@ const TopMenuBar = memo(function TopMenuBar({
       .then(r => r.json())
       .then(cfg => {
         setProjects(cfg.projects || {});
-        setCurrentPath(cfg.last_path || cfg.path || '');
+        setCurrentPath(propCurrentPath || cfg.last_path || cfg.path || '');
       })
       .catch(() => {});
-  }, []);
+  }, [propCurrentPath]);
 
   // 프로젝트 메뉴 외부 클릭 닫기
   useEffect(() => {
@@ -218,8 +223,8 @@ const TopMenuBar = memo(function TopMenuBar({
       .then(() => {
         setCurrentPath(path);
         setProjectMenuOpen(false);
-        // 페이지 새로고침으로 모든 상태 리셋
-        window.location.reload();
+        // App의 currentPath도 업데이트 (파일 탐색기 연동)
+        if (onSwitchProject) onSwitchProject(path);
       })
       .catch(() => {});
   };
