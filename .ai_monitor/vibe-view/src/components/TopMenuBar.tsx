@@ -552,15 +552,7 @@ const TopMenuBar = memo(function TopMenuBar({
           </div>
         )}
 
-        {/* 🧠 중앙 통제실(Mission Control) 탭으로 이동 — 자율 에이전트 + 오케스트레이터 통합 뷰 */}
-        <button
-          onClick={onOpenMissionControl}
-          className="shrink-0 flex items-center gap-1.5 px-2 py-0.5 rounded border transition-all bg-white/5 border-white/10 text-white/40 hover:text-white/70 hover:border-white/30"
-          title="중앙 통제실 열기 (자율 에이전트 + 오케스트레이터)"
-        >
-          <Cpu className="w-3.5 h-3.5" />
-          <span className="text-[9px] font-black uppercase tracking-tighter">중앙 통제실</span>
-        </button>
+        {/* 중앙 통제실 버튼 제거 — 사용자 요청 (2026-04-16) */}
 
         {/* 업데이트 즉시 적용 버튼 — updateReady 상태일 때만 표시 */}
         {updateReady && (
