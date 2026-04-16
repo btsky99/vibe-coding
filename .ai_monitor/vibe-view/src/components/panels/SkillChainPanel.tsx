@@ -1,6 +1,6 @@
 /**
- * FILE: OrchestratorPanel.tsx
- * DESCRIPTION: AI 오케스트레이터 패널 — 스킬 레지스트리(①~⑦) 세로 나열 +
+ * FILE: SkillChainPanel.tsx (구 OrchestratorPanel.tsx)
+ * DESCRIPTION: 스킬 체인 현황판 — 스킬 레지스트리(①~⑦) 세로 나열 +
  *              각 스킬에 어떤 터미널이 사용 중인지 배지로 표시.
  *              하단에 터미널별 스킬 사용 순서(N-M 표기)를 보여줍니다.
  *              App.tsx에서 분리된 독립 컴포넌트로, skill_chain.db 기반 API를
@@ -66,13 +66,13 @@ interface SkillChainResponse {
   terminals: Record<string, TerminalChain>;
 }
 
-// ── OrchestratorPanel Props ───────────────────────────────────────────────────
-interface OrchestratorPanelProps {
+// ── SkillChainPanel Props ───────────────────────────────────────────────────
+interface SkillChainPanelProps {
   onWarningCount: (count: number) => void;
 }
 
 /**
- * OrchestratorPanel
+ * SkillChainPanel
  *
  * 역할:
  *   상단 — 스킬 ①~⑦ 세로 목록. 각 스킬 오른쪽에 그 스킬을 실행 중인 터미널 배지 표시.
@@ -82,7 +82,7 @@ interface OrchestratorPanelProps {
  *   - /api/orchestrator/status    : 3초
  *   - /api/orchestrator/skill-chain: 3초
  */
-export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelProps) {
+export default function SkillChainPanel({ onWarningCount }: SkillChainPanelProps) {
   const [orchStatus, setOrchStatus] = useState<OrchestratorStatus | null>(null);
   const [orchRunning, setOrchRunning] = useState(false);
   const [orchLastRun, setOrchLastRun] = useState<string | null>(null);
@@ -100,7 +100,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
           setOrchStatus(data);
           onWarningCount(data.warnings?.length ?? 0);
         })
-        .catch((err) => console.error('[OrchestratorPanel] fetch error:', err));
+        .catch((err) => console.error('[SkillChainPanel] fetch error:', err));
     };
     fetchOrch();
     const interval = setInterval(fetchOrch, 3000);
@@ -118,7 +118,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
             setChainData(data);
           }
         })
-        .catch((err) => console.error('[OrchestratorPanel] fetch error:', err));
+        .catch((err) => console.error('[SkillChainPanel] fetch error:', err));
     };
     fetchChain();
     const interval = setInterval(fetchChain, 3000);
@@ -143,7 +143,7 @@ export default function OrchestratorPanel({ onWarningCount }: OrchestratorPanelP
         setOrchStatus(data);
         onWarningCount(data.warnings?.length ?? 0);
       })
-      .catch((err) => console.error('[OrchestratorPanel] fetch error:', err))
+      .catch((err) => console.error('[SkillChainPanel] fetch error:', err))
       .finally(() => setOrchRunning(false));
   };
 
