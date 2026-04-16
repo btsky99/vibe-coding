@@ -10,10 +10,12 @@
   "agent_mode": "normal",
   "gemini_models": {
     "main": "gemini-3.1-pro",
-    "background": "gemini-3.1-flash-lite"
+    "background": "gemini-3.1-flash-lite",
+    "_status": "experimental"
   },
   "codex_models": {
     "main": "gpt-5.3-codex",
-    "background": "gpt-5.4-mini"
+    "background": "gpt-5.4-mini",
+    "_status": "experimental"
   }
 }

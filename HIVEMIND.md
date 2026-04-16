@@ -1,36 +1,27 @@
 # HiveMind Status
 
-Updated: `2026-03-31 00:09:06`
+Updated: `2026-04-16` (수동 검증 — Phase 2 정직성 확보)
 
 ## Current Focus
-Open plan tasks:
-- Task 1: hive_tasks 테이블에 하트비트/체크아웃 컬럼 추가
-  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수, ~line 369)
-  방법: ALTER TABLE로 parent_id, checkout_by, checkout_at, result 컬럼 추가
-- Task 2: task_comments 테이블 생성
-  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수)
-  방법: CREATE TABLE task_comments (id SERIAL, task_id TEXT REFERENCES hive_tasks,
-- Task 3: agent_heartbeats 테이블 생성
-  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수)
-  방법: CREATE TABLE agent_heartbeats (agent_id TEXT PK, status TEXT, last_beat TIMESTAMPTZ,
-- Task 4: NOTIFY 트리거 생성
-  파일: .ai_monitor/src/pg_store.py (ensure_schema 함수)
-  방법: CREATE FUNCTION notify_task_assigned() — hive_tasks의 assigned_to 변경 시
-- Task 5: pg_store.py에 원자적 체크아웃 함수 추가
-  파일: .ai_monitor/src/pg_store.py
-  방법: atomic_checkout(agent_id, task_id) — SELECT ... FOR UPDATE SKIP LOCKED로
 
-Alignment: Current work aligns best with Task 14: AgentMonitorPanel 신규 작성. Matched files: .ai_monitor/api/tasks_api.py, .ai_monitor/bin/codex_wrapper.py, .ai_monitor/server.py, .ai_monitor/src/pg_store.py, .ai_monitor/vibe-view/dist/index.html. Unmatched changes still present: .claude/agent-memory/, .mcp.json, chat.jsonl, hivemind.md, last_python_cmd.txt (+20 more).
-Changed files:
-- .ai_monitor/api/tasks_api.py
-- .ai_monitor/bin/codex_wrapper.py
-- .ai_monitor/server.py
-- .ai_monitor/src/pg_store.py
-- .ai_monitor/vibe-view/dist/index.html
-- .ai_monitor/vibe-view/src/app.tsx
-- .ai_monitor/vibe-view/src/components/panels/agentmonitorpanel.tsx
-- .ai_monitor/vibe-view/src/components/panels/groupchatpanel.tsx
-- ... and 29 more
+> 아래 태스크들은 모두 구현 완료됨 (pg_store.py에 반영 확인, 2026-04-16 검증)
+
+- ~~Task 1: hive_tasks 체크아웃 컬럼~~ ✅ checkout_by, checkout_at 구현됨
+- ~~Task 2: task_comments 테이블~~ ✅ 구현됨
+- ~~Task 3: agent_heartbeats 테이블~~ ✅ 구현됨 + namespace 컬럼 추가
+- ~~Task 4: NOTIFY 트리거~~ ✅ 구현됨
+- ~~Task 5: atomic_checkout() 함수~~ ✅ 구현됨 + release_checkout() 포함
+
+### 진행 중인 계획
+- Phase 2: 시스템 정직성 확보 (gemini/codex 라벨링, stale 청소)
+- Phase 3~5: [memory/project_hive_5phase_plan.md 참조]
+
+## Agent 지원 현황
+| Agent | 상태 | 비고 |
+|-------|------|------|
+| Claude | ✅ 완전 통합 | T1 터미널, 모든 역할 수행 |
+| Gemini | 🧪 실험적 | 디스패처 프로필만 구현, CLI 자동 실행 미완성 |
+| Codex | 🧪 실험적 | codex_enabled 플래그로 게이팅, CLI 자동 실행 미완성 |
 
 ## Agent Flow
 ```mermaid
@@ -82,7 +73,7 @@ graph LR
 
 ## Debate Ledger
 - #8 [closed] round=1: codex smoke test 2 decision=smoke final decision
-- #7 [open] round=1: codex smoke test
+- #7 [closed] round=1: codex smoke test — codex 실험적 상태로 격하 (Phase 2)
 - #5 [closed] round=1: close 4 final decision decision=보안이 강화된 'close 4 final decision' 하이브리드 모델로 최종 합의됨.
 - #6 [closed] round=1: post 4 1 gemini proposal body proposal decision=보안이 강화된 'post 4 1 gemini proposal body proposal' 하이브리드 모델로 최종 합의됨.
 - #4 [closed] round=1: smoke test decision=보안이 강화된 'smoke test' 하이브리드 모델로 최종 합의됨.
