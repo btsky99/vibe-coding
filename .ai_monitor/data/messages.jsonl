@@ -62,3 +62,7 @@
 {"id": "1775826772980", "timestamp": "2026-04-10T22:12:52", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 아이소메트릭 오피스 UI 재설계 (Task 1~8 순서 실행) | vibe-execute-plan", "read": false}
 {"id": "1775827693006", "timestamp": "2026-04-10T22:28:13", "from": "agent", "to": "all", "type": "status", "content": "[skill-chain] T? 아이소메트릭 오피스 빌드 에러 수정 후 플랜 실행 | vibe-debug -> vibe-execute-plan", "read": false}
 {"id": "1775827903883", "timestamp": "2026-04-10T22:31:43", "from": "agent", "to": "all", "type": "status", "content": "agent finished [vibe-execute-plan] | 빌드 에러 3건 수정 완료: IsoSofa/IsoTable 중복 선언 제거, IsoPartition 추가, CorridorTile color prop 수정", "read": false}
+{"id": "1775913159976", "timestamp": "2026-04-11T22:12:39", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T2 클래식 모드 분석 결과 우선순위순 수정 | vibe-code-review -> vibe-debug -> vibe-release", "read": false}
+{"id": "1776005723767", "timestamp": "2026-04-12T23:55:23", "from": "claude", "to": "all", "type": "status", "content": "[skill-chain] T1 오피스/클래식 dist 공유 분리 + server.py 중복 코드 정리 | vibe-brainstorm -> vibe-write-plan -> vibe-execute-plan", "read": false}
+{"id": "1776005755539", "timestamp": "2026-04-12T23:55:55", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-write-plan]", "read": false}
+{"id": "1776006171136", "timestamp": "2026-04-13T00:02:51", "from": "claude", "to": "all", "type": "status", "content": "claude running [vibe-execute-plan]", "read": false}

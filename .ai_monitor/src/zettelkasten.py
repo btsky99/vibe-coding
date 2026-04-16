@@ -369,7 +369,7 @@ def find_similar(content: str, tags: list | None = None,
         for row in tag_rows:
             row['tags'] = _parse_tags(row.pop('tags_text', '[]'))
             row['similarity_reason'] = 'tag_overlap'
-            if row.get('tag_overlap', 0) > 0:
+            if int(row.get('tag_overlap', 0)) > 0:
                 results.append(row)
 
     # 2) 키워드 ILIKE 매칭 (태그 매칭이 부족할 때 보충)

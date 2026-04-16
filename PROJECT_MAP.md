@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-04-15 23:12
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-04-16 22:00
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -18,6 +18,7 @@
 | `ai_monitor_plan.md` | 하이브 마인드 고도화 및 신규 기능 구현 로드맵 |
 | `memory.md` |  |
 | `progress.md` |  |
+| `test_office_report.md` |  |
 | `docs/API_SPEC.md` | REST API 엔드포인트 및 통신 규격 상세 명세 |
 | `docs/CLAUDE_CODE_AGENT_TEAMS_ANALYSIS.md` |  |
 | `docs/CODEX_HARDENING.md` | Codex 경로 고도화 적용 내용과 재적용 조건 |
@@ -66,7 +67,7 @@
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
 | `logger.py` | 123 |  |
-| `pg_store.py` | 1995 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `pg_store.py` | 2040 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `secure.py` | 52 |  |
 | `server_utils.py` | 59 |  |
 | `view.py` | 243 |  |
@@ -266,4 +267,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-04-15 23:12
+> 자동 생성 완료: 2026-04-16 22:00
