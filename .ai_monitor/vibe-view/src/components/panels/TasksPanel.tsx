@@ -274,6 +274,10 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
                         ? 'bg-green-500/15 text-green-400' :
                       task.assigned_to === 'gemini'
                         ? 'bg-blue-500/15 text-blue-400' :
+                      task.assigned_to === 'codex'
+                        ? 'bg-orange-500/15 text-orange-400' :
+                      task.assigned_to === 'all'
+                        ? 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30' :
                       'bg-white/10 text-white/50'
                     }`}
                   >

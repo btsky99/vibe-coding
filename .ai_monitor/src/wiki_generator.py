@@ -226,16 +226,47 @@ def generate_node_wiki(project_id: int, node_id: int) -> dict:
     return {'status': 'queued', 'task_id': task_id, 'node_name': node['name']}
 
 
-def generate_all_file_wikis(project_id: int) -> dict:
-    """프로젝트 전체 파일 위키 일괄 생성."""
+WIKI_BATCH_SIZE = 5  # 한 번에 큐잉할 최대 위키 태스크 수
+
+
+def generate_all_file_wikis(project_id: int, batch_size: int = WIKI_BATCH_SIZE) -> dict:
+    """프로젝트 전체 파일 위키 일괄 생성 — 배치 제한 + 백프레셔.
+
+    한 번에 최대 batch_size건만 큐잉하고, 나머지는 'deferred'로 표시.
+    이미 pending인 위키 태스크가 있으면 추가 큐잉하지 않는다 (백프레셔).
+    """
     ensure_schema()
+
+    # 백프레셔: 아직 처리 안 된 wiki 태스크가 있으면 추가 큐잉 차단
+    pending_wiki_tasks = query_rows(
+        f"SELECT COUNT(*) as cnt FROM hive_tasks "
+        f"WHERE status IN ('pending', 'dispatched') "
+        f"AND tags::text LIKE '%%wiki_generate%%'"
+    )
+    pending_count = (pending_wiki_tasks[0]['cnt'] if pending_wiki_tasks else 0)
+    if pending_count >= batch_size:
+        return {
+            'queued': 0, 'skipped': 0, 'deferred': 0,
+            'backpressure': True,
+            'pending_tasks': pending_count,
+            'message': f'위키 태스크 {pending_count}건 처리 대기 중 — 완료 후 재시도',
+            'files': [],
+        }
+
+    # 큐잉 가능 슬롯 계산
+    available_slots = max(0, batch_size - pending_count)
+
     files = query_rows(
         f"SELECT DISTINCT file_path FROM code_nodes "
         f"WHERE project_id = {int(project_id)} ORDER BY file_path"
     )
-    results = {'queued': 0, 'skipped': 0, 'files': []}
+    results = {'queued': 0, 'skipped': 0, 'deferred': 0, 'files': []}
     for f in files:
         fp = f['file_path']
+        if results['queued'] >= available_slots:
+            results['deferred'] += 1
+            results['files'].append({'file_path': fp, 'status': 'deferred'})
+            continue
         r = generate_file_wiki(project_id, fp)
         if r['status'] == 'queued':
             results['queued'] += 1
