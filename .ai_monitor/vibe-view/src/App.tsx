@@ -433,6 +433,8 @@ function App() {
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
         onOpenMissionControl={() => setActiveTab('agent')}
+        currentPath={currentPath}
+        onSwitchProject={(path) => setCurrentPath(path)}
       />
 
       {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}
