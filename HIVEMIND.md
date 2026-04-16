@@ -13,8 +13,19 @@ Updated: `2026-04-16` (수동 검증 — Phase 2 정직성 확보)
 - ~~Task 5: atomic_checkout() 함수~~ ✅ 구현됨 + release_checkout() 포함
 
 ### 진행 중인 계획
-- Phase 2: 시스템 정직성 확보 (gemini/codex 라벨링, stale 청소)
-- Phase 3~5: [memory/project_hive_5phase_plan.md 참조]
+- Phase 2: ✅ 완료 (gemini/codex 라벨링, stale 청소)
+- Phase 3: ✅ 완료 (auto_dispatcher/orchestrator 점검 + 수정)
+- Phase 4~5: [memory/project_hive_5phase_plan.md 참조]
+
+## 태스크 분배 시스템 책임 경계
+
+| 모듈 | 역할 | 호출 방식 |
+|------|------|-----------|
+| `auto_dispatcher.py` | 역량 기반 에이전트 매칭 + ITCP 전달 + 크로스 검증 | CLI/API (dispatcher_api.py) |
+| `orchestrator.py` | 데몬: 미할당 태스크 감시 + 자동 배정 + 유휴/과부하 경고 | server.py가 --daemon으로 자동 기동 |
+| `dispatcher_api.py` | auto_dispatcher의 HTTP 래퍼 (score/dispatch/fan-out/verify) | server.py 라우팅 |
+
+**공유 원칙**: 둘 다 `is_codex_enabled()`, `is_gemini_enabled()` 게이팅 준수, alive 24h 체크 적용
 
 ## Agent 지원 현황
 | Agent | 상태 | 비고 |

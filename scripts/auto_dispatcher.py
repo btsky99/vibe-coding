@@ -49,6 +49,10 @@ REVISION HISTORY:
 - 2026-03-30 Codex: Codex 테스트 작업 우선 배정 보정 추가
   - auto_dispatcher 점수 체계에서 test 유형이 Claude로 치우치던 문제 수정
   - 좁은 실행 작업은 Codex 샌드박스 강점을 반영하도록 소폭 가산점 적용
+- 2026-04-16 Claude: Phase 3 시스템 정직성 — alive 체크 + 실험적 에이전트 게이팅
+  - select_best_agent()에 alive 체크 추가 (24h 비활성 에이전트 제외)
+  - is_gemini_enabled() 신설, codex/gemini 기본값 False (실험적 상태 일치)
+  - fan_out()에도 gemini 게이팅 적용
 """
 
 from __future__ import annotations
@@ -188,10 +192,24 @@ def _load_runtime_config() -> dict:
     return {}
 
 
-def is_codex_enabled() -> bool:
-    """Return whether Codex should be eligible for automatic dispatch on this PC."""
+def is_gemini_enabled() -> bool:
+    """Return whether Gemini should be eligible for automatic dispatch on this PC.
+
+    기본값 False — Gemini CLI 자동 실행은 실험적 단계이므로
+    명시적으로 gemini_enabled=true 설정한 경우에만 활성화.
+    """
     config = _load_runtime_config()
-    return bool(config.get("codex_enabled", True))
+    return bool(config.get("gemini_enabled", False))
+
+
+def is_codex_enabled() -> bool:
+    """Return whether Codex should be eligible for automatic dispatch on this PC.
+
+    기본값 False — Codex CLI 자동 실행은 실험적 단계이므로
+    명시적으로 codex_enabled=true 설정한 경우에만 활성화.
+    """
+    config = _load_runtime_config()
+    return bool(config.get("codex_enabled", False))
 
 
 def _generate_task_id() -> str:
@@ -312,13 +330,41 @@ def score_agent(agent_name: str, task_type: str) -> float:
     return round(score, 4)
 
 
-def select_best_agent(task_type: str, exclude: Optional[list[str]] = None) -> str:
+def _get_alive_agents() -> set[str]:
+    """DEAD_THRESHOLD(24h) 이내 활동 기록이 있는 에이전트 집합 반환.
+
+    DB 조회 실패 시 빈 집합 대신 전체 에이전트를 반환하여 폴백.
+    """
+    try:
+        sys.path.insert(0, str(_MONITOR_DIR))
+        from src.pg_store import get_agent_last_seen
+        last_seen = get_agent_last_seen(list(AGENT_CAPABILITIES.keys()))
+        now = datetime.now()
+        alive = set()
+        for agent, seen_str in last_seen.items():
+            if not seen_str:
+                continue
+            try:
+                seen_dt = datetime.fromisoformat(seen_str.replace('Z', ''))
+                if (now - seen_dt).total_seconds() < 24 * 3600:
+                    alive.add(agent)
+            except Exception:
+                continue
+        return alive
+    except Exception:
+        # DB 미연결 시 전체 에이전트 반환 (폴백)
+        return set(AGENT_CAPABILITIES.keys())
+
+
+def select_best_agent(task_type: str, exclude: Optional[list[str]] = None,
+                      *, check_alive: bool = True) -> str:
     """태스크 유형에 가장 적합한 에이전트를 선택합니다.
 
     [동작]
     1. 모든 에이전트의 적합도 점수 계산
     2. exclude 목록의 에이전트 제외 (크로스 검증 시 작성자 제외용)
-    3. 최고 점수 에이전트 반환
+    3. check_alive=True면 24시간 이상 비활성 에이전트도 제외
+    4. 최고 점수 에이전트 반환
 
     [크로스 검증 원칙]
     작성자와 검증자는 반드시 다른 에이전트여야 합니다.
@@ -327,6 +373,16 @@ def select_best_agent(task_type: str, exclude: Optional[list[str]] = None) -> st
     exclude = list(exclude or [])
     if not is_codex_enabled() and "codex" not in exclude:
         exclude.append("codex")
+    if not is_gemini_enabled() and "gemini" not in exclude:
+        exclude.append("gemini")
+
+    # alive 체크: 24시간 이상 비활성 에이전트 제외
+    if check_alive:
+        alive = _get_alive_agents()
+        for name in list(AGENT_CAPABILITIES.keys()):
+            if name not in alive and name not in exclude:
+                exclude.append(name)
+
     candidates = {
         name: score_agent(name, task_type)
         for name in AGENT_CAPABILITIES
@@ -511,6 +567,8 @@ def fan_out(*descriptions: str, task_type: Optional[str] = None) -> list[dict]:
         adjusted_scores = {}
         for name in AGENT_CAPABILITIES:
             if name == "codex" and not is_codex_enabled():
+                continue
+            if name == "gemini" and not is_gemini_enabled():
                 continue
             base_score = score_agent(name, t_type)
             # 이미 할당된 태스크가 많으면 패널티 (max_concurrent 대비)

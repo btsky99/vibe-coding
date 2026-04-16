@@ -3,6 +3,7 @@ FILE: scripts/orchestrator.py
 DESCRIPTION: 하이브 마인드 자동 조율 오케스트레이터 — 태스크 스케줄링, 에이전트 감시, 자동 배분.
 
 REVISION HISTORY:
+- 2026-04-16 Claude: _known_agents() gemini/codex 게이팅 통일 — 기본 비활성, config 명시 시만 포함
 - 2026-04-15 Claude: pick_best_agent에 alive 체크 추가 — 죽은 에이전트 좀비 배정 차단
   - DEAD_THRESHOLD_SEC=24h 상수 신설
   - DEAD_THRESHOLD_SEC 이상 활동 없는 에이전트는 후보에서 완전 제외
@@ -35,7 +36,7 @@ except Exception:
 
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
 DEFAULT_PORTS = [8005, 8000]
-BASE_AGENTS = ['claude', 'gemini']
+# BASE_AGENTS 제거 — _known_agents()에서 config 기반으로 동적 결정
 IDLE_THRESHOLD_SEC = 300                # 유휴 판정 기준: 5분 (300초) — 경고용
 DEAD_THRESHOLD_SEC = 24 * 3600          # 사망 판정 기준: 24시간 — 재배정 후보에서 완전 제외
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.ai_monitor', 'data')
@@ -87,19 +88,38 @@ def _load_runtime_config() -> dict:
 
 
 def _known_agents() -> list[str]:
-    """현재 PC 설정을 반영한 활성 에이전트 목록을 반환합니다."""
-    agents = list(BASE_AGENTS)
-    codex_enabled = True
+    """현재 PC 설정을 반영한 활성 에이전트 목록을 반환합니다.
+
+    gemini/codex는 실험적 단계이므로 config에서 명시적으로 활성화한 경우만 포함.
+    """
+    agents = ['claude']  # claude는 항상 포함
+
+    config = _load_runtime_config()
+
+    # gemini: 기본 비활성 (실험적)
+    gemini_enabled = False
+    if _dispatcher is not None:
+        try:
+            gemini_enabled = bool(_dispatcher.is_gemini_enabled())
+        except Exception:
+            gemini_enabled = bool(config.get('gemini_enabled', False))
+    else:
+        gemini_enabled = bool(config.get('gemini_enabled', False))
+    if gemini_enabled:
+        agents.append('gemini')
+
+    # codex: 기본 비활성 (실험적)
+    codex_enabled = False
     if _dispatcher is not None:
         try:
             codex_enabled = bool(_dispatcher.is_codex_enabled())
         except Exception:
-            codex_enabled = bool(_load_runtime_config().get('codex_enabled', True))
+            codex_enabled = bool(config.get('codex_enabled', False))
     else:
-        codex_enabled = bool(_load_runtime_config().get('codex_enabled', True))
-
+        codex_enabled = bool(config.get('codex_enabled', False))
     if codex_enabled:
         agents.append('codex')
+
     return agents
 
 def open_mission_control() -> None:
