@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Bot, AlertTriangle, Cpu, RotateCw, CheckCircle2, Zap } from 'lucide-react';
+import { Bot, AlertTriangle, Cpu, RotateCw, CheckCircle2, Zap, Ghost, Users, Activity } from 'lucide-react';
 import { HiveHealth, OrchestratorStatus } from '../../types';
 import { API_BASE } from '../../constants';
 
@@ -96,19 +96,101 @@ export default function HivePanel() {
             </div>
           )}
 
-          {/* 태스크 분배 전체 요약 — all 키가 있을 때만 표시 */}
-          {orchStatus.task_distribution?.all && (
-            <div className="p-2 rounded border border-white/10">
-              <div className="text-[9px] font-bold text-[#969696] mb-1">미할당 태스크 (all)</div>
-              <div className="flex gap-3 text-[9px] font-mono">
-                <span className="text-[#858585]">대기: {orchStatus.task_distribution.all.pending}</span>
-                <span className="text-primary">진행: {orchStatus.task_distribution.all.in_progress}</span>
-                <span className="text-green-400">완료: {orchStatus.task_distribution.all.done}</span>
+          {/* ── 4.3 오케스트레이터 한 눈에 카드 ── */}
+          {(() => {
+            const agents = orchStatus.agent_status || {};
+            const dist = orchStatus.task_distribution || {};
+            const activeCount = Object.values(agents).filter((a: any) => a.state === 'active').length;
+            const idleCount = Object.values(agents).filter((a: any) => a.state === 'idle').length;
+            const deadCount = Object.values(agents).filter((a: any) =>
+              a.state === 'unknown' || (a.state === 'idle' && a.idle_sec > 86400)
+            ).length;
+            const totalPending = Object.values(dist).reduce((sum: number, d: any) => sum + (d?.pending || 0), 0);
+            const totalInProgress = Object.values(dist).reduce((sum: number, d: any) => sum + (d?.in_progress || 0), 0);
+            return (
+              <div className="p-2.5 rounded border border-white/10 bg-white/[0.02]">
+                <div className="text-[10px] font-bold text-[#969696] mb-2 flex items-center gap-1.5">
+                  <Activity className="w-3 h-3" /> 오케스트레이터 한 눈에
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-1.5 rounded bg-green-500/10 border border-green-500/20">
+                    <div className="text-lg font-bold text-green-400">{activeCount}</div>
+                    <div className="text-[8px] text-green-300/60">활성</div>
+                  </div>
+                  <div className="p-1.5 rounded bg-yellow-500/10 border border-yellow-500/20">
+                    <div className="text-lg font-bold text-yellow-400">{idleCount}</div>
+                    <div className="text-[8px] text-yellow-300/60">유휴</div>
+                  </div>
+                  <div className={`p-1.5 rounded border ${deadCount > 0 ? 'bg-red-500/10 border-red-500/20' : 'bg-white/5 border-white/10'}`}>
+                    <div className={`text-lg font-bold ${deadCount > 0 ? 'text-red-400' : 'text-[#555]'}`}>{deadCount}</div>
+                    <div className={`text-[8px] ${deadCount > 0 ? 'text-red-300/60' : 'text-[#555]'}`}>사망</div>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-2 text-[9px] font-mono justify-center">
+                  <span className="text-[#858585]">대기 {totalPending}</span>
+                  <span className="text-primary">진행 {totalInProgress}</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── 4.5+4.6 에이전트 분포 카드 + 유령 배지 ── */}
+          {orchStatus.agent_status && (
+            <div className="p-2.5 rounded border border-white/10 bg-white/[0.02]">
+              <div className="text-[10px] font-bold text-[#969696] mb-2 flex items-center gap-1.5">
+                <Users className="w-3 h-3" /> 에이전트 분포
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {Object.entries(orchStatus.agent_status).map(([name, info]: [string, any]) => {
+                  const isDead = info.state === 'unknown' || (info.state === 'idle' && info.idle_sec > 86400);
+                  const isIdle = info.state === 'idle' && !isDead;
+                  const isActive = info.state === 'active';
+                  const dist = orchStatus.task_distribution?.[name];
+                  const taskCount = dist ? (dist.pending || 0) + (dist.in_progress || 0) : 0;
+
+                  return (
+                    <div key={name} className={`flex items-center justify-between p-1.5 rounded text-xs ${isDead ? 'opacity-40' : ''}`}>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-green-400 animate-pulse' : isIdle ? 'bg-yellow-400' : 'bg-red-400/50'}`} />
+                        <span className="font-mono text-[#ccc]">{name}</span>
+                        {isDead && (
+                          <span className="flex items-center gap-0.5 text-[8px] text-red-400/70 bg-red-500/10 px-1 rounded">
+                            <Ghost className="w-2.5 h-2.5" /> 유령
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-[9px] font-mono">
+                        {taskCount > 0 && (
+                          <span className={`px-1 rounded ${taskCount >= 5 ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-[#999]'}`}>
+                            {taskCount}건
+                          </span>
+                        )}
+                        <span className={`${isActive ? 'text-green-400' : isIdle ? 'text-yellow-400' : 'text-[#555]'}`}>
+                          {isActive ? '활성' : isIdle ? `${Math.floor(info.idle_sec / 60)}분 유휴` : '미확인'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* 최근 액션은 AI 오케스트레이터 탭(OrchestratorPanel)에서 확인 */}
+          {/* 태스크 분배 전체 요약 — all 키가 있을 때만 표시 */}
+          {orchStatus.task_distribution?.all && (() => {
+            const allDist = orchStatus.task_distribution.all;
+            const total = (allDist.pending || 0) + (allDist.in_progress || 0);
+            return total > 0 ? (
+              <div className={`p-2 rounded border ${total >= 5 ? 'border-red-500/40 bg-red-500/5' : 'border-yellow-500/30 bg-yellow-500/5'}`}>
+                <div className="text-[9px] font-bold text-yellow-300 mb-1">⚠ 미할당 태스크 (all): {total}건</div>
+                <div className="flex gap-3 text-[9px] font-mono">
+                  <span className="text-[#858585]">대기: {allDist.pending}</span>
+                  <span className="text-primary">진행: {allDist.in_progress}</span>
+                  <span className="text-green-400">완료: {allDist.done}</span>
+                </div>
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
 
