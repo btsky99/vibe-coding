@@ -90,6 +90,8 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_url": "https://github.com/openai/codex",
         "install_hint": "npm install -g @openai/codex",
         "category": "ai-agent",
+        # Phase 2 정직성 — Claude만 활성, Codex는 수동 실행 시에만 참여.
+        "experimental": True,
     },
     {
         "id": "claude",
@@ -114,6 +116,8 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_url": "https://github.com/google-gemini/gemini-cli",
         "install_hint": "npm install -g @google/gemini-cli",
         "category": "ai-agent",
+        # Phase 2 정직성 — 사용자 수동 실행 시만 참여. 자동 디스패처는 라벨링 유지.
+        "experimental": True,
     },
     {
         "id": "nodejs",
@@ -516,6 +520,8 @@ def _check_tool_installed(tool: dict) -> dict:
         "install_hint": tool.get("install_hint", ""),
         "category": tool.get("category", ""),
         "can_auto_install": tool.get("install_script") is not None,
+        # Phase 2 정직성 라벨 — UI가 "실험적" 배지를 표시하기 위해 전달.
+        "experimental": bool(tool.get("experimental", False)),
     }
 
 

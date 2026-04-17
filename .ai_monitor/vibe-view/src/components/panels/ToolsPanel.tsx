@@ -26,6 +26,8 @@ interface ToolInfo {
   install_hint: string;
   category: string;
   can_auto_install: boolean;
+  // Phase 2 정직성 라벨 — 실험적 도구(codex/gemini)는 UI에 배지 노출.
+  experimental?: boolean;
 }
 
 interface ToolsSummary {
@@ -192,10 +194,18 @@ const ToolsPanel = () => {
                       <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-medium text-[#cccccc] truncate">
                           {tool.name}
                         </span>
+                        {tool.experimental && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 shrink-0"
+                            title="실험적 — 메인 워크플로에 편입되지 않음. 사용자 수동 실행 시에만 참여."
+                          >
+                            🧪 실험적
+                          </span>
+                        )}
                         {tool.version && (
                           <span className="text-[10px] text-[#969696] shrink-0">
                             {tool.version.length > 30
