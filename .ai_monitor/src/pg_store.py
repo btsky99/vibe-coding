@@ -1858,6 +1858,88 @@ def recall_context_summary(query: str, domain: str = '', limit: int = 5) -> str:
     return "\n".join(lines)
 
 
+# ── C.2 — 지식 회상 (zettel_notes + hive_memory 통합) ──────────────────────
+
+def recall_knowledge_summary(query: str, limit: int = 5) -> str:
+    """사용자 프롬프트와 관련된 누적 지식(zettel + hive)을 요약 텍스트로 반환.
+
+    recall_context_summary(agent_experience 기반)를 보완 — 이쪽은 "작업 결과"가
+    아니라 "정제된 지식"이 대상. 에이전트가 과거 배운 것/합의/가이드를 세션
+    첫 턴부터 참조하도록 주입한다.
+
+    작성자 태그(B.2)와 맞물려 "누가 남긴 지식"인지 구분 표시.
+    """
+    if not query or not query.strip():
+        return ""
+
+    # 2자 이상 키워드 추출 (한글/영어 공통)
+    import re as _re_k
+    keywords = [w for w in _re_k.split(r'\s+', query.strip()) if len(w) >= 2][:4]
+    if not keywords:
+        return ""
+
+    # ILIKE OR 조합 — 짧은 쿼리도 놓치지 않도록
+    or_parts = []
+    for kw in keywords:
+        safe_kw = _sql_text(f'%{kw}%')
+        or_parts.append(f"(title ILIKE {safe_kw} OR content ILIKE {safe_kw})")
+    where_ilike = " OR ".join(or_parts)
+
+    # zettel_notes (archived=FALSE만, access_count 높은 것 우선).
+    # 자동 캡처물("세션 요약:", "📄 파일 설명")은 브리핑 노이즈 — 사람/에이전트가
+    # 의도적으로 쓴 지식만 우선. 매칭 없으면 fallback으로 자동 캡처물도 허용.
+    zettel_rows = query_rows(
+        f"SELECT id, title, author, note_type, access_count "
+        f"FROM zettel_notes "
+        f"WHERE archived = FALSE "
+        f"  AND title NOT LIKE '세션 요약:%' "
+        f"  AND title NOT LIKE '📄 %' "
+        f"  AND ({where_ilike}) "
+        f"ORDER BY access_count DESC, updated_at DESC "
+        f"LIMIT {int(limit)};"
+    )
+    if not zettel_rows:
+        # fallback — 지식 우선 필터로 0건이면 자동 캡처물도 포함해 재조회
+        zettel_rows = query_rows(
+            f"SELECT id, title, author, note_type, access_count "
+            f"FROM zettel_notes "
+            f"WHERE archived = FALSE AND ({where_ilike}) "
+            f"ORDER BY access_count DESC, updated_at DESC "
+            f"LIMIT {int(limit)};"
+        )
+
+    # hive_memory (만료되지 않은 것만, 최근순)
+    now = _now_iso()
+    hive_rows = query_rows(
+        f"SELECT key, title, author "
+        f"FROM hive_memory "
+        f"WHERE (expires_at IS NULL OR expires_at > {_sql_text(now)}) "
+        f"  AND ({where_ilike}) "
+        f"ORDER BY updated_at DESC "
+        f"LIMIT {int(limit)};"
+    )
+
+    if not zettel_rows and not hive_rows:
+        return ""
+
+    lines = [f"[지식 회상] '{query[:50]}'와 관련된 누적 지식 "
+             f"{len(zettel_rows) + len(hive_rows)}건 (zettel {len(zettel_rows)} + hive {len(hive_rows)}):"]
+
+    for r in zettel_rows:
+        title = (r.get('title') or r.get('id', ''))[:60]
+        author = r.get('author', 'unknown')
+        nt = r.get('note_type', 'fleeting')
+        ac = r.get('access_count', 0) or 0
+        lines.append(f"  🧠 [{nt}] {title} — by {author} (참조 {ac}회)")
+
+    for r in hive_rows:
+        title = (r.get('title') or r.get('key', ''))[:60]
+        author = r.get('author', 'unknown')
+        lines.append(f"  💾 {title} — by {author}")
+
+    return "\n".join(lines)
+
+
 # ── pg_logs 활동 기록 ────────────────────────────────────────────────────────
 
 def insert_pg_log(agent: str, task: str = '', status: str = 'success',

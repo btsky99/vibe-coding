@@ -706,6 +706,17 @@ def main():
             except Exception:
                 pass  # 회상 실패는 훅 전체를 중단하지 않음
 
+            # ── C.2 지식 회상 자동 주입 (zettel + hive) ─────────────────────
+            # 작업 결과(agent_experience)와 별개로, 누적된 정제 지식을 함께 주입.
+            # 에이전트가 과거 합의/가이드/학습 내용을 세션 첫 턴부터 참조 가능.
+            try:
+                from src.pg_store import recall_knowledge_summary
+                _know_text = recall_knowledge_summary(short, limit=3)
+                if _know_text:
+                    print(_know_text, flush=True)
+            except Exception:
+                pass  # 지식 회상 실패도 훅 전체를 중단하지 않음
+
             # 의도 감지: 키워드 매칭 → 관련 워크플로 컨텍스트를 stdout으로 출력
             # Claude Code는 이 출력을 Claude에게 시스템 컨텍스트로 주입함
             # 사용자가 자연어로 "빌드해줘", "커밋해줘" 등만 말해도 자동 워크플로 실행 가능
