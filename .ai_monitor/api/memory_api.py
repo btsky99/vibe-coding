@@ -28,10 +28,11 @@ def handle_get(handler, path: str, params: dict,
         q = params.get('q', [''])[0].strip()
         top_k = int(params.get('top', ['20'])[0])
         show_all = params.get('all', ['false'])[0].lower() == 'true'
+        author = params.get('author', [''])[0].strip()
         project = '' if show_all else PROJECT_ID
         try:
             ensure_schema(DATA_DIR)
-            entries = list_memory(q=q, top_k=top_k, project=project, show_all=show_all)
+            entries = list_memory(q=q, top_k=top_k, project=project, show_all=show_all, author=author)
             handler.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
@@ -78,12 +79,14 @@ def handle_post(handler, path: str, data: dict,
                 tags = [tag.strip() for tag in tags.split(',') if tag.strip()]
 
             ensure_schema(DATA_DIR)
+            # author 미지정 시 None 전달 — pg_store._resolve_author()가 env 우선 처리
+            author_raw = data.get('author')
             saved = set_memory(
                 key=key,
                 content=content,
                 title=title,
                 tags=tags if isinstance(tags, list) else [],
-                author=str(data.get('author', 'unknown')),
+                author=str(author_raw) if author_raw else None,
                 project=project,
                 created_at=now,
                 updated_at=now,

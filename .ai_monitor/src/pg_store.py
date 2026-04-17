@@ -965,11 +965,19 @@ def _migrate_skill_chains(data_dir: Path) -> None:
         upsert_skill_chain_row(row, legacy_id=row.get('id'))
 
 
-def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool = False) -> list[dict]:
+def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool = False,
+                author: str = '') -> list[dict]:
     filters = []
     if project and not show_all:
         # 현재 프로젝트 + 글로벌(__global__) 항목 모두 반환 (크로스 프로젝트 지식 공유)
         filters.append(f"(project = {_sql_text(project)} OR project = '__global__')")
+    # 작성자 필터 — 'claude-t1'처럼 정확 매칭, 'claude' 처럼 prefix 매칭 둘 다 지원
+    author_norm = (author or '').strip().lower()
+    if author_norm:
+        filters.append(
+            f"(LOWER(author) = {_sql_text(author_norm)} "
+            f"OR LOWER(author) LIKE {_sql_text(author_norm + '-%')})"
+        )
     # 만료된 항목 제외 (expires_at이 NULL이거나 현재 시각 이후인 것만)
     filters.append(f"(expires_at IS NULL OR expires_at > {_sql_text(_now_iso())})")
     where_sql = f"WHERE {' AND '.join(filters)}" if filters else ''
@@ -1014,12 +1022,28 @@ def get_memory(key: str) -> dict | None:
     return row
 
 
+# 작성자 식별자 정규화 — 모호한 기본값('unknown','agent',빈값)일 때 env 우선 승격.
+# 우선순위: 명시된 author(모호 아님) > HIVE_AGENT_ID env > 'unknown'
+# 포맷: 소문자화 + 공백 제거 (예: 'claude-t1', 'gemini', 'user')
+_AMBIGUOUS_AUTHORS = {'', 'unknown', 'agent', 'none', 'null'}
+
+
+def _resolve_author(author: str | None) -> str:
+    raw = (author or '').strip().lower()
+    if raw and raw not in _AMBIGUOUS_AUTHORS:
+        return raw
+    env_val = (os.environ.get('HIVE_AGENT_ID', '') or '').strip().lower()
+    if env_val and env_val not in _AMBIGUOUS_AUTHORS:
+        return env_val
+    return 'unknown'
+
+
 def set_memory(
     key: str,
     content: str,
     title: str = '',
     tags: list | None = None,
-    author: str = 'unknown',
+    author: str | None = None,
     project: str = '',
     created_at: str = '',
     updated_at: str = '',
@@ -1027,6 +1051,7 @@ def set_memory(
 ) -> dict | None:
     if not key or content is None:
         return None
+    author = _resolve_author(author)
     existing = get_memory(key)
     created_value = existing.get('created_at', '') if existing else (created_at or updated_at or _now_iso())
     updated_value = updated_at or _now_iso()

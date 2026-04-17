@@ -88,16 +88,21 @@ def cmd_set(args) -> None:
     content = args.content
     title = getattr(args, "title", "") or key
     tags = [tag.strip() for tag in (getattr(args, "tags", "") or "").split(",") if tag.strip()]
-    author = getattr(args, "by", "agent") or "agent"
+    # author는 pg_store._resolve_author()가 처리 — 여기선 인자만 전달.
+    # 미지정 시 HIVE_AGENT_ID env → 없으면 'unknown'
+    author_arg = getattr(args, "by", None)
 
-    set_memory(
+    saved = set_memory(
         key=key,
         content=content,
         title=title,
         tags=tags,
-        author=author,
+        author=author_arg,
     )
-    print(f"saved memory [{key}] by {author}")
+    resolved = (saved or {}).get('author', 'unknown')
+    print(f"saved memory [{key}] by {resolved}")
+    if resolved == 'unknown':
+        print("  hint: HIVE_AGENT_ID 환경변수 설정 or --by 인자 지정 권장 (예: --by claude-t1)")
 
 
 def cmd_list(args) -> None:
@@ -106,12 +111,20 @@ def cmd_list(args) -> None:
         sys.exit(1)
 
     query = getattr(args, "q", "") or ""
-    entries = list_memory(q=query, top_k=20, show_all=True)
+    author_filter = getattr(args, "by", "") or ""
+    entries = list_memory(q=query, top_k=20, show_all=True, author=author_filter)
     if not entries:
-        print("no memory entries found")
+        msg = f"no memory entries found"
+        if author_filter:
+            msg += f" (author={author_filter})"
+        print(msg)
         return
 
-    print("\n--- Hive Memory ---")
+    header = "--- Hive Memory"
+    if author_filter:
+        header += f" (by {author_filter})"
+    header += " ---"
+    print(f"\n{header}")
     for entry in entries:
         summary = str(entry.get("content", "")).replace("\n", " ")[:100]
         updated = entry.get('updated_at', '')
@@ -119,7 +132,7 @@ def cmd_list(args) -> None:
         updated_str = str(updated)[:19] if updated else ''
         print(f"[{entry['key']}] by {entry.get('author', 'unknown')} | {updated_str}")
         print(f"  {summary}...")
-    print("-------------------\n")
+    print("-" * len(header) + "\n")
 
 
 def cmd_get(args) -> None:
@@ -196,10 +209,12 @@ def main() -> None:
     p_set.add_argument("content")
     p_set.add_argument("--title", default="")
     p_set.add_argument("--tags", default="")
-    p_set.add_argument("--by", default="agent")
+    # --by 기본값을 빈 문자열로 — pg_store._resolve_author()가 HIVE_AGENT_ID env 우선 처리
+    p_set.add_argument("--by", default="")
 
     p_list = sub.add_parser("list")
     p_list.add_argument("--q", default="")
+    p_list.add_argument("--by", default="", help="작성자 필터 (예: claude, claude-t1, gemini)")
 
     p_get = sub.add_parser("get")
     p_get.add_argument("key")
