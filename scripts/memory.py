@@ -25,7 +25,7 @@ MONITOR_DIR = PROJECT_ROOT / ".ai_monitor"
 if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
-from src.pg_store import ensure_schema, get_memory, list_memory, migrate_legacy_data, set_memory
+from src.pg_store import ensure_schema, get_memory, list_memory, migrate_legacy_data, set_memory, promote_to_zettel
 
 
 PG_BIN = MONITOR_DIR / "bin" / "pgsql" / "bin" / "psql.exe"
@@ -151,6 +151,24 @@ def cmd_get(args) -> None:
     print(entry.get("content", ""))
 
 
+def cmd_promote(args) -> None:
+    """hive_memory 항목을 zettel_notes로 승격 (C.3).
+
+    원본은 유지하고 zettel 쪽에 source_ref=hive:<key>로 기록.
+    --type fleeting|literature|permanent 지정 가능 (생략 시 태그 기반 자동 판정).
+    """
+    if not ensure_schema(DATA_DIR):
+        print("PostgreSQL is not available.")
+        sys.exit(1)
+
+    note_type = getattr(args, 'type', '') or ''
+    note = promote_to_zettel(args.key, note_type=note_type)
+    if not note:
+        print(f"승격 실패 — key를 찾을 수 없음: {args.key}")
+        sys.exit(1)
+    print(f"승격 완료 — zettel id={note.get('id')} type={note.get('note_type')}")
+
+
 def cmd_sync(args) -> None:
     if not ensure_schema(DATA_DIR):
         print("PostgreSQL is not available.")
@@ -219,6 +237,13 @@ def main() -> None:
     p_get = sub.add_parser("get")
     p_get.add_argument("key")
 
+    # C.3 — 수동 승격: hive_memory 항목을 zettel_notes로
+    p_promote = sub.add_parser("promote", help="hive_memory 항목을 zettel_notes로 승격")
+    p_promote.add_argument("key")
+    p_promote.add_argument("--type", default="",
+                           choices=["", "fleeting", "literature", "permanent"],
+                           help="zettel note_type (생략 시 태그 기반 자동)")
+
     sub.add_parser("sync")
 
     p_q = sub.add_parser("q")
@@ -233,6 +258,8 @@ def main() -> None:
         cmd_list(args)
     elif args.command == "get":
         cmd_get(args)
+    elif args.command == "promote":
+        cmd_promote(args)
     elif args.command == "sync":
         cmd_sync(args)
     elif args.command == "q":

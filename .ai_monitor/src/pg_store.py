@@ -1142,11 +1142,80 @@ def set_memory(
             expires_at = EXCLUDED.expires_at;
         """
     )
+
+    # C.3 — 승격 유도 태그가 있으면 zettel_notes에 자동 승격. 실패는 조용히 무시.
+    tag_set = {str(t).lower() for t in (tags or [])}
+    if tag_set & _PROMOTION_TAGS:
+        try:
+            promote_to_zettel(key)
+        except Exception:
+            pass
+
     return get_memory(key)
 
 
 def delete_memory(key: str) -> bool:
     return execute(f"DELETE FROM hive_memory WHERE key = {_sql_text(key)};")
+
+
+# ── C.3 — hive_memory → zettel_notes 승격 ─────────────────────────────────
+
+# 자동 승격 유도 태그 — set_memory 시 이들 태그가 있으면 즉시 zettel로도 저장
+_PROMOTION_TAGS = {'learning', 'insight', 'knowledge', 'permanent', '지식', '교훈'}
+# tags에 'permanent'/'영구'가 있으면 permanent로, 아니면 fleeting으로 승격
+_PERMANENT_TAGS = {'permanent', '영구'}
+
+
+def promote_to_zettel(key: str, note_type: str = '') -> dict | None:
+    """hive_memory 항목을 zettel_notes로 승격한다.
+
+    원본은 유지(작업 흔적 보존), zettel 쪽에 `source_ref`로 원본 key 기록.
+    동일 source_ref가 이미 있으면 중복 승격 방지.
+    note_type 미지정 시 tags 기반 자동 결정(_PERMANENT_TAGS → permanent, 나머지 fleeting).
+    """
+    entry = get_memory(key)
+    if not entry:
+        return None
+
+    # 중복 승격 방지 — 같은 hive key가 이미 zettel source_ref로 쓰였는지 확인
+    existing = query_rows(
+        f"SELECT id FROM zettel_notes WHERE source_ref = {_sql_text(f'hive:{key}')} LIMIT 1;"
+    )
+    if existing:
+        return _get_existing_zettel(existing[0]['id'])
+
+    # note_type 자동 결정
+    tags = entry.get('tags') or []
+    tag_set = {str(t).lower() for t in tags}
+    if not note_type:
+        note_type = 'permanent' if tag_set & _PERMANENT_TAGS else 'fleeting'
+
+    try:
+        from src.zettelkasten import create_note
+    except ImportError:
+        from .zettelkasten import create_note  # type: ignore
+
+    note = create_note(
+        title=entry.get('title') or key,
+        content=entry.get('content', ''),
+        note_type=note_type,
+        author=entry.get('author', 'unknown'),
+        project=entry.get('project', ''),
+        tags=tags,
+        source_ref=f'hive:{key}',
+    )
+    return note
+
+
+def _get_existing_zettel(note_id: str) -> dict | None:
+    rows = query_rows(
+        f"SELECT *, tags::text AS tags_text FROM zettel_notes WHERE id = {_sql_text(note_id)};"
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    row['tags'] = _parse_json_text(row.pop('tags_text', '[]'), [])
+    return row
 
 
 def cleanup_expired_memory() -> int:

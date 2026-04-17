@@ -140,6 +140,23 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
     }).then(() => fetchMemory(memSearch, memAuthorFilter, includeZettel)).catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
+  // C.3 — hive_memory 항목을 zettel_notes로 승격 (원본 유지).
+  // 태그 기반 note_type 자동 판정. 실패 시 alert.
+  const promoteMemory = (key: string) => {
+    if (!confirm(`"${key}" 을(를) 정제 지식(zettel_notes)으로 승격할까요?\n원본은 유지됩니다.`)) return;
+    fetch(`${API_BASE}/api/memory/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status !== 'success') alert(data.message || '승격 실패');
+        fetchMemory(memSearch, memAuthorFilter, includeZettel);
+      })
+      .catch((err) => console.error('[MemoryPanel] promote error:', err));
+  };
+
   // 수정 폼 열기 — 기존 항목 데이터를 상태에 주입하여 편집 가능하게 함
   const startEditMemory = (entry: MemoryEntry) => {
     setMemKey(entry.key);
@@ -272,6 +289,14 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
                   {/* zettel은 별도 API(zettelkasten.py)가 관리 — 여기선 hive_memory 편집만 허용 */}
                   {entry.source !== 'zettel' && (
                     <>
+                      {/* C.3 — 정제 지식(zettel)로 승격. hive 항목에만 노출. */}
+                      <button
+                        onClick={() => promoteMemory(entry.key)}
+                        className="px-1.5 py-0.5 bg-white/5 hover:bg-purple-500/20 rounded text-[9px] text-[#858585] hover:text-purple-300 transition-colors"
+                        title="정제 지식(zettel)로 승격"
+                      >
+                        🧠
+                      </button>
                       <button
                         onClick={() => startEditMemory(entry)}
                         className="px-1.5 py-0.5 bg-white/5 hover:bg-primary/20 rounded text-[9px] text-[#858585] hover:text-primary transition-colors"

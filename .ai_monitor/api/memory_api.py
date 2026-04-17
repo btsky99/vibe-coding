@@ -13,6 +13,7 @@ from src.pg_store import (
     set_memory,
     delete_memory,
     migrate_legacy_data,
+    promote_to_zettel,
 )
 
 
@@ -111,6 +112,40 @@ def handle_post(handler, path: str, data: dict,
             ensure_schema(DATA_DIR)
             delete_memory(str(data.get('key', '')).strip())
             handler.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
+
+    if path == '/api/memory/promote':
+        # C.3 — hive_memory 항목을 zettel_notes로 승격. 원본은 유지.
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            key = str(data.get('key', '')).strip()
+            note_type = str(data.get('note_type', '')).strip()
+            if not key:
+                handler.wfile.write(json.dumps(
+                    {'status': 'error', 'message': 'key is required'}
+                ).encode('utf-8'))
+                return True
+            ensure_schema(DATA_DIR)
+            note = promote_to_zettel(key, note_type=note_type)
+            if not note:
+                handler.wfile.write(json.dumps(
+                    {'status': 'error', 'message': f'not found: {key}'},
+                    ensure_ascii=False,
+                ).encode('utf-8'))
+                return True
+            handler.wfile.write(json.dumps(
+                {'status': 'success', 'note': {
+                    'id': note.get('id'),
+                    'note_type': note.get('note_type'),
+                    'title': note.get('title'),
+                }, 'message': f'"{key}" 승격 완료 (zettel {note.get("id")})'},
+                ensure_ascii=False,
+            ).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True
