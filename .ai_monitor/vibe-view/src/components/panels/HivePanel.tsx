@@ -91,11 +91,12 @@ export default function HivePanel() {
       .catch((err) => console.error('[HivePanel] fetch error:', err));
   }, []);
 
-  // ── 최근 공유 메모리 폴링 (20초) — B.3 ───────────────────────────────────
+  // ── 최근 공유 메모리 폴링 (20초) — B.3 + C.1 ─────────────────────────────
   // all=true로 전역 집계, top=20으로 작성자 분포 파악에 충분한 샘플 확보.
+  // include_zettel=true로 zettel_notes(정제 지식)도 함께 집계 대상에 포함.
   useEffect(() => {
     const fetchRecent = () => {
-      fetch(`${API_BASE}/api/memory?all=true&top=20`)
+      fetch(`${API_BASE}/api/memory?all=true&top=20&include_zettel=true`)
         .then(res => res.json())
         .then(data => setRecentMemory(Array.isArray(data) ? data : []))
         .catch((err) => console.error('[HivePanel] memory fetch error:', err));
@@ -210,14 +211,18 @@ export default function HivePanel() {
             </div>
           )}
 
-          {/* ── B.3 최근 공유 메모리 카드 ── */}
-          {/* 에이전트별 누적 메모 분포 + 최근 5건. B.2 작성자 태그 강화의 UI 노출. */}
+          {/* ── B.3 + C.1 최근 공유 메모리 카드 ── */}
+          {/* 에이전트별 누적 메모 분포 + hive/zettel source 집계 + 최근 5건. */}
           {recentMemory.length > 0 && (() => {
             // 작성자 계열별 집계 (claude / gemini / codex / user / unknown 등)
             const familyCounts: Record<string, number> = {};
+            let hiveCount = 0;
+            let zettelCount = 0;
             for (const e of recentMemory) {
               const fam = authorFamily(e.author);
               familyCounts[fam] = (familyCounts[fam] || 0) + 1;
+              if (e.source === 'zettel') zettelCount++;
+              else hiveCount++;
             }
             const families = Object.entries(familyCounts).sort((a, b) => b[1] - a[1]);
             const recent5 = recentMemory.slice(0, 5);
@@ -227,6 +232,15 @@ export default function HivePanel() {
                   <Brain className="w-3 h-3" /> 최근 공유 메모리
                   <span className="ml-auto text-[9px] text-[#555] font-normal">
                     최근 {recentMemory.length}건
+                  </span>
+                </div>
+                {/* C.1 — hive / zettel 소스 집계 */}
+                <div className="flex gap-1 mb-1.5">
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold font-mono bg-white/5 text-[#aaa]">
+                    💾 hive {hiveCount}
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold font-mono bg-purple-500/15 text-purple-300">
+                    🧠 zettel {zettelCount}
                   </span>
                 </div>
                 {/* 작성자 계열별 집계 배지 */}
@@ -248,6 +262,9 @@ export default function HivePanel() {
                       className="flex items-center justify-between gap-2 text-[9px] py-0.5"
                       title={entry.title || entry.key}
                     >
+                      <span className="shrink-0 text-[8px]" title={entry.source === 'zettel' ? `zettel ${entry.note_type || ''}` : 'hive'}>
+                        {entry.source === 'zettel' ? '🧠' : '💾'}
+                      </span>
                       <span className="font-mono text-[#ccc] truncate flex-1 min-w-0">
                         {entry.key}
                       </span>

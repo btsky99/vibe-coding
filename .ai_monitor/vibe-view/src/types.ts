@@ -64,6 +64,10 @@ export interface MemoryEntry {
     timestamp: string;   // 최초 생성 시각
     updated_at: string;  // 최종 수정 시각
     project: string;     // 출처 프로젝트 (예: D--vibe-coding)
+    // C.1 — 통합 검색 결과에서 항목 출처 구분. 기본은 'hive', include_zettel=true 조회 시 일부는 'zettel'.
+    source?: 'hive' | 'zettel';
+    note_type?: string;    // zettel 전용 — fleeting / literature / permanent
+    access_count?: number; // zettel 전용 — 참조 횟수
 }
 
 // 제텔카스텐 원자 노트

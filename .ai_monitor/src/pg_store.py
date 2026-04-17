@@ -966,7 +966,12 @@ def _migrate_skill_chains(data_dir: Path) -> None:
 
 
 def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool = False,
-                author: str = '') -> list[dict]:
+                author: str = '', include_zettel: bool = False) -> list[dict]:
+    """하이브 메모리 조회. include_zettel=True면 zettel_notes(정제 지식)도 합쳐 반환.
+
+    반환 항목에 `source: 'hive' | 'zettel'` 필드를 붙여 UI에서 구분 가능.
+    zettel 결과는 `note_type`(fleeting/permanent 등)도 함께 담김.
+    """
     filters = []
     if project and not show_all:
         # 현재 프로젝트 + 글로벌(__global__) 항목 모두 반환 (크로스 프로젝트 지식 공유)
@@ -1007,6 +1012,58 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
     rows = query_rows(query)
     for row in rows:
         row['tags'] = _parse_json_text(row.get('tags'), [])
+        row['source'] = 'hive'
+
+    # C.1 — 지식 저장소(zettel_notes) 통합 조회.
+    # hive_memory와 시그니처를 맞춰 key/content/author/updated_at 필드로 정규화한 뒤
+    # updated_at 내림차순 병합. 검색어가 없으면 zettel이 activity 많아 hive를
+    # 밀어내지 않도록 각 소스에서 절반씩만 가져와 섞음.
+    if include_zettel:
+        try:
+            from src.zettelkasten import list_notes
+        except ImportError:
+            from .zettelkasten import list_notes  # type: ignore
+        # zettel 쪽 필터도 비슷하게 적용. project는 show_all일 때 빈 문자열.
+        zettel_project = '' if show_all or not project else project
+        # 검색어 있으면 hit 전량, 없으면 hive가 밀리지 않게 균형 배분 (절반씩)
+        if q:
+            zettel_limit = int(top_k) * 2
+            hive_rows_kept = rows
+        else:
+            half = max(1, int(top_k) // 2)
+            zettel_limit = half
+            hive_rows_kept = rows[:half]
+        notes = list_notes(
+            project=zettel_project,
+            author=author_norm if author_norm else '',
+            q=q or '',
+            limit=zettel_limit,
+        )
+        rows = list(hive_rows_kept)
+        for note in notes:
+            updated = note.get('updated_at')
+            created = note.get('created_at')
+            # hive_memory는 'YYYY-MM-DDTHH:MM:SS' 형식, zettel은 datetime 객체.
+            # 문자열 비교 정렬이 일관되도록 공백 구분자를 'T'로 통일.
+            updated_str = str(updated)[:19].replace(' ', 'T') if updated else ''
+            created_str = str(created)[:19].replace(' ', 'T') if created else ''
+            rows.append({
+                'key': note.get('id', ''),
+                'title': note.get('title', ''),
+                'content': note.get('content', ''),
+                'tags': note.get('tags', []) or [],
+                'author': note.get('author', 'unknown'),
+                'project': note.get('project', ''),
+                'created_at': created_str,
+                'updated_at': updated_str,
+                'source': 'zettel',
+                'note_type': note.get('note_type', 'fleeting'),
+                'access_count': note.get('access_count', 0),
+            })
+        # updated_at 내림차순 재정렬 후 top_k 절단
+        rows.sort(key=lambda r: r.get('updated_at', ''), reverse=True)
+        rows = rows[:int(top_k)]
+
     return rows
 
 

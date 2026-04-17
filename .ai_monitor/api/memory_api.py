@@ -29,10 +29,14 @@ def handle_get(handler, path: str, params: dict,
         top_k = int(params.get('top', ['20'])[0])
         show_all = params.get('all', ['false'])[0].lower() == 'true'
         author = params.get('author', [''])[0].strip()
+        include_zettel = params.get('include_zettel', ['false'])[0].lower() == 'true'
         project = '' if show_all else PROJECT_ID
         try:
             ensure_schema(DATA_DIR)
-            entries = list_memory(q=q, top_k=top_k, project=project, show_all=show_all, author=author)
+            entries = list_memory(
+                q=q, top_k=top_k, project=project, show_all=show_all,
+                author=author, include_zettel=include_zettel,
+            )
             handler.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))

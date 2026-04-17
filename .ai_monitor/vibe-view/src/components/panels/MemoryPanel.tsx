@@ -34,6 +34,10 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   // B.2 — 작성자 필터 (예: 'claude', 'gemini'). 빈값이면 전체.
   const [memAuthorFilter, setMemAuthorFilter] = useState('');
 
+  // C.1 — 제텔카스텐(zettel_notes) 지식 포함 여부. 기본 on으로 에이전트가
+  // 놓치던 234건을 바로 활용하도록 유도.
+  const [includeZettel, setIncludeZettel] = useState(true);
+
   // ─── 폼 상태 (신규 추가 / 수정) ──────────────────────────────────────
   const [showMemForm, setShowMemForm] = useState(false);
   const [editingMemKey, setEditingMemKey] = useState<string | null>(null);
@@ -44,11 +48,12 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   const [memAuthor, setMemAuthor] = useState('claude');
 
   // ─── 데이터 페칭 ────────────────────────────────────────────────────────
-  // 검색어/작성자 필터가 있으면 쿼리 파라미터로 전달. 없으면 전체 목록 조회.
-  const fetchMemory = (q = '', author = '') => {
+  // 검색어/작성자/지식포함 파라미터를 쿼리스트링으로 전달.
+  const fetchMemory = (q = '', author = '', withZettel = false) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (author) params.set('author', author);
+    if (withZettel) params.set('include_zettel', 'true');
     const url = params.toString()
       ? `${API_BASE}/api/memory?${params.toString()}`
       : `${API_BASE}/api/memory`;
@@ -58,12 +63,15 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
-  // 검색어 또는 작성자 필터 변경 시 즉시 재조회 + 5초 폴링 유지
+  // 검색어/작성자/지식포함 변경 시 즉시 재조회 + 5초 폴링 유지
   useEffect(() => {
-    fetchMemory(memSearch, memAuthorFilter);
-    const interval = setInterval(() => fetchMemory(memSearch, memAuthorFilter), 5000);
+    fetchMemory(memSearch, memAuthorFilter, includeZettel);
+    const interval = setInterval(
+      () => fetchMemory(memSearch, memAuthorFilter, includeZettel),
+      5000,
+    );
     return () => clearInterval(interval);
-  }, [memSearch, memAuthorFilter]);
+  }, [memSearch, memAuthorFilter, includeZettel]);
 
   // ─── DB 정보 상태 ────────────────────────────────────────────────────────
   const [dbInfo, setDbInfo] = useState<{ db_path?: string; is_local?: boolean; count?: number } | null>(null);
@@ -86,7 +94,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .then(res => res.json())
       .then(data => {
         setSyncMsg(data.message || '완료');
-        fetchMemory(memSearch, memAuthorFilter); // 목록 즉시 갱신
+        fetchMemory(memSearch, memAuthorFilter, includeZettel); // 목록 즉시 갱신
       })
       .catch(() => setSyncMsg('동기화 실패'))
       .finally(() => setSyncing(false));
@@ -118,7 +126,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         // 저장 후 폼 초기화 및 목록 갱신
         setMemKey(''); setMemTitle(''); setMemContent('');
         setMemTags(''); setShowMemForm(false); setEditingMemKey(null);
-        fetchMemory(memSearch, memAuthorFilter);
+        fetchMemory(memSearch, memAuthorFilter, includeZettel);
       })
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
@@ -129,7 +137,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key }),
-    }).then(() => fetchMemory(memSearch, memAuthorFilter)).catch((err) => console.error('[MemoryPanel] fetch error:', err));
+    }).then(() => fetchMemory(memSearch, memAuthorFilter, includeZettel)).catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
   // 수정 폼 열기 — 기존 항목 데이터를 상태에 주입하여 편집 가능하게 함
@@ -168,13 +176,25 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         />
       </div>
 
-      {/* 항목 수 요약 + 작성자 필터 + 전체/현재 프로젝트 토글 */}
+      {/* 항목 수 요약 + 지식 포함 + 작성자 필터 + 전체/현재 프로젝트 토글 */}
       <div className="flex items-center justify-between shrink-0 px-0.5 gap-1">
         <span className="text-[9px] text-[#858585] shrink-0">
           총 {displayedMemory.length}개{memSearch && ` (검색)`}
           {memAuthorFilter && ` (by ${memAuthorFilter})`}
         </span>
         <div className="flex items-center gap-1">
+          {/* C.1 — 제텔카스텐 지식 포함 토글 */}
+          <button
+            onClick={() => setIncludeZettel(prev => !prev)}
+            className={`text-[8px] px-1.5 py-0.5 rounded transition-colors ${
+              includeZettel
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                : 'bg-white/5 text-[#858585] hover:text-white border border-white/10'
+            }`}
+            title="zettel_notes 지식 포함 여부"
+          >
+            {includeZettel ? '🧠 지식 on' : '🧠 지식 off'}
+          </button>
           {/* B.2 — 작성자 필터 드롭다운 (prefix 매칭: 'claude' → claude-*) */}
           <select
             value={memAuthorFilter}
@@ -219,24 +239,53 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
               key={entry.key}
               className="p-2 rounded border border-white/10 bg-white/2 text-[10px] hover:border-white/20 transition-colors group"
             >
-              {/* 키 + 액션 버튼 */}
+              {/* 키 + 소스 배지 + 액션 버튼 */}
               <div className="flex items-start justify-between gap-1 mb-1">
-                <span className="font-mono font-bold text-cyan-400 text-[10px] break-all leading-tight">
-                  {entry.key}
-                </span>
+                <div className="flex items-start gap-1 min-w-0 flex-1">
+                  {/* C.1 — source 배지. zettel은 note_type까지 표시해 정제 단계 구분. */}
+                  {entry.source === 'zettel' ? (
+                    <span
+                      className={`px-1 py-0.5 rounded text-[7px] font-bold shrink-0 leading-tight ${
+                        entry.note_type === 'permanent'
+                          ? 'bg-purple-500/25 text-purple-200'
+                          : entry.note_type === 'literature'
+                          ? 'bg-indigo-500/20 text-indigo-300'
+                          : 'bg-purple-500/10 text-purple-400/80'
+                      }`}
+                      title={`zettel ${entry.note_type || 'fleeting'} · access ${entry.access_count ?? 0}`}
+                    >
+                      🧠 {entry.note_type || 'fleeting'}
+                    </span>
+                  ) : (
+                    <span
+                      className="px-1 py-0.5 rounded text-[7px] font-bold shrink-0 leading-tight bg-white/5 text-[#888]"
+                      title="hive_memory (작업 흔적)"
+                    >
+                      💾 hive
+                    </span>
+                  )}
+                  <span className="font-mono font-bold text-cyan-400 text-[10px] break-all leading-tight min-w-0">
+                    {entry.key}
+                  </span>
+                </div>
                 <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => startEditMemory(entry)}
-                    className="px-1.5 py-0.5 bg-white/5 hover:bg-primary/20 rounded text-[9px] text-[#858585] hover:text-primary transition-colors"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => deleteMemory(entry.key)}
-                    className="px-1.5 py-0.5 bg-white/5 hover:bg-red-500/20 rounded text-[9px] text-[#858585] hover:text-red-400 transition-colors"
-                  >
-                    🗑️
-                  </button>
+                  {/* zettel은 별도 API(zettelkasten.py)가 관리 — 여기선 hive_memory 편집만 허용 */}
+                  {entry.source !== 'zettel' && (
+                    <>
+                      <button
+                        onClick={() => startEditMemory(entry)}
+                        className="px-1.5 py-0.5 bg-white/5 hover:bg-primary/20 rounded text-[9px] text-[#858585] hover:text-primary transition-colors"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => deleteMemory(entry.key)}
+                        className="px-1.5 py-0.5 bg-white/5 hover:bg-red-500/20 rounded text-[9px] text-[#858585] hover:text-red-400 transition-colors"
+                      >
+                        🗑️
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
