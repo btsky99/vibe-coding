@@ -159,18 +159,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "category": "code-quality",
     },
     {
-        "id": "uv",
-        "name": "uv",
-        "description": "초고속 Python 패키지 관리자 (pip 대체) — Gemini 추천",
-        "check_commands": [["uv", "--version"]],
-        "check_paths": [],
-        "install_script": "install_dev_tools.py",
-        "install_args": ["--tool", "uv"],
-        "install_url": "https://docs.astral.sh/uv/",
-        "install_hint": "pip install uv",
-        "category": "package-manager",
-    },
-    {
         "id": "pytest",
         "name": "pytest",
         "description": "Python 단위 테스트 프레임워크 — Gemini 추천",
