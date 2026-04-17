@@ -5,8 +5,10 @@
  * 📝 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트.
  *          레이아웃 상태, 데이터 폴링, 플로팅 윈도우, 업데이트 관리를 담당하며,
  *          각 기능 영역은 독립 컴포넌트(TopMenuBar, ActivityBar, FileExplorer,
- *          MessageComposer, 각 패널)로 분리되어 있습니다.
+ *          각 패널)로 분리되어 있습니다.
  * REVISION HISTORY:
+ * - 2026-04-18 Claude: MessageComposer / MessagesPanel 제거 — 레거시 직접 메시징 UI.
+ *                      Phase B 원칙(에이전트끼리 직접 통신 X, 메모리 공유 중심)에 맞춰 정리.
  * - 2026-03-22 Codex: 기본 터미널 레이아웃을 2분할에서 3분할로 변경.
  * - 2026-03-07 Claude: ActivityBar HiveEngineStatus 통합 — globalEngineStage 계산 + hive_health 폴링 추가.
  *                      agentTerminals에서 최고 우선순위 파이프라인 단계를 추출, ActivityBar LED 링에 연동.
@@ -40,7 +42,6 @@ import { useVibeData } from './hooks/useVibeData';
 import TopMenuBar from './components/TopMenuBar';
 import ActivityBar from './components/ActivityBar';
 import FileExplorer from './components/FileExplorer';
-import MessageComposer from './components/MessageComposer';
 /* ── 유틸리티 컴포넌트 ── */
 // [v3.7.62] FloatingWindow(Monaco Editor ~800kB) → React.lazy() 동적 import
 // 파일을 열 때만 로드되므로 초기 번들에서 제외 → 첫 화면 렌더링 대폭 단축
@@ -49,7 +50,6 @@ import TerminalSlot from './components/TerminalSlot';
 /* ── 오피스 모드 컴포넌트 ── */
 const OfficeApp = lazy(() => import('./components/office/OfficeApp'));
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
-import MessagesPanel from './components/panels/MessagesPanel';
 import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
@@ -79,7 +79,6 @@ function App() {
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
-    unreadMsgCount, setUnreadMsgCount,
     activeTaskCount, setActiveTaskCount,
     totalGitChanges, setTotalGitChanges,
     conflictCount, setConflictCount,
@@ -456,7 +455,6 @@ function App() {
           onOpenSettings={bringSettingsToFront}
           skillChainStatus={skillChain.status}
           orchWarningCount={orchWarningCount}
-          unreadMsgCount={unreadMsgCount}
           activeTaskCount={activeTaskCount}
           memoryCount={memory.length}
           conflictCount={conflictCount}
@@ -488,12 +486,9 @@ function App() {
             </div>
           </div>
 
-          {/* 패널 컨텐츠 + 메시지 작성창 */}
+          {/* 패널 컨텐츠 */}
           <div className="p-3 flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'messages' ? (
-              /* 메시지 채널 패널 */
-              <MessagesPanel onUnreadCount={setUnreadMsgCount} onOpenFilePath={handleOpenFilePath} />
-            ) : activeTab === 'tasks' ? (
+            {activeTab === 'tasks' ? (
               /* 태스크 보드 패널 (리스트 뷰) */
               <TasksPanel onActiveCount={setActiveTaskCount} />
             ) : activeTab === 'memory' ? (
@@ -545,8 +540,6 @@ function App() {
               />
             </div>
 
-            {/* 에이전트 간 메시지 작성 — messages 탭은 MessagesPanel 내부 폼 사용, 나머지 탭 공통 */}
-            {activeTab !== 'messages' && <MessageComposer />}
           </div>
         </motion.div>
 
@@ -825,8 +818,6 @@ function DashboardOnlyApp() {
 
   const renderPanel = () => {
     switch (tab) {
-      case 'messages':
-        return <MessagesPanel onUnreadCount={() => {}} />;
       case 'tasks':
         return <TasksPanel onActiveCount={() => {}} />;
       case 'memory':

@@ -535,10 +535,6 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
               <div className="text-[8px] uppercase tracking-widest text-white/25">태스크</div>
               <div className="text-sm font-bold text-white/70">{vibe.activeTaskCount}</div>
             </div>
-            <div className="rounded-lg border border-white/[0.06] bg-[#0a1018dd] px-2.5 py-1.5 backdrop-blur-xl">
-              <div className="text-[8px] uppercase tracking-widest text-white/25">메시지</div>
-              <div className="text-sm font-bold text-white/70">{vibe.unreadMsgCount}</div>
-            </div>
           </div>
         </div>
 

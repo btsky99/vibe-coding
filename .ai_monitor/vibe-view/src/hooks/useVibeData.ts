@@ -49,8 +49,6 @@ export interface VibeData {
   setUpdateChecking: React.Dispatch<React.SetStateAction<boolean>>;
 
   // 배지 카운트
-  unreadMsgCount: number;
-  setUnreadMsgCount: React.Dispatch<React.SetStateAction<number>>;
   activeTaskCount: number;
   setActiveTaskCount: React.Dispatch<React.SetStateAction<number>>;
   totalGitChanges: number;
@@ -90,7 +88,6 @@ export function useVibeData(): VibeData {
   const [updateChecking, setUpdateChecking] = useState(false);
 
   // ─── 배지 카운트 ──────────────────────────────────────────────────
-  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [activeTaskCount, setActiveTaskCount] = useState(0);
   const [totalGitChanges, setTotalGitChanges] = useState(0);
   const [conflictCount, setConflictCount] = useState(0);
@@ -302,7 +299,6 @@ export function useVibeData(): VibeData {
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
-    unreadMsgCount, setUnreadMsgCount,
     activeTaskCount, setActiveTaskCount,
     totalGitChanges, setTotalGitChanges,
     conflictCount, setConflictCount,

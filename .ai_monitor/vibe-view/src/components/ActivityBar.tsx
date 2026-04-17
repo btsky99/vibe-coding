@@ -8,7 +8,6 @@ import {
   Files,
   GitBranch,
   LayoutDashboard,
-  MessageSquare,
   Package,
   Search,
   Settings,
@@ -23,7 +22,6 @@ interface ActivityBarProps {
   onOpenSettings: () => void;
   skillChainStatus: string;
   orchWarningCount: number;
-  unreadMsgCount: number;
   activeTaskCount: number;
   memoryCount: number;
   conflictCount: number;
@@ -41,7 +39,6 @@ const ActivityBar = memo(function ActivityBar({
   onOpenSettings,
   skillChainStatus,
   orchWarningCount,
-  unreadMsgCount,
   activeTaskCount,
   memoryCount,
   conflictCount,
@@ -120,11 +117,6 @@ const ActivityBar = memo(function ActivityBar({
       </button>
 
       <div className="w-6 h-px bg-white/10" />
-
-      <button onClick={() => onTabChange('messages')} className={tabCls('messages')} title="Messages">
-        <MessageSquare className="w-5 h-5" />
-        {unreadMsgCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full" />}
-      </button>
 
       <button onClick={() => onTabChange('tasks')} className={tabCls('tasks')} title="Tasks">
         <ClipboardList className="w-5 h-5" />
