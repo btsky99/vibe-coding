@@ -60,8 +60,6 @@ import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
-import CodeGraphPanel from './components/panels/CodeGraphPanel';
-import CodeSearchPanel from './components/panels/CodeSearchPanel';
 import SetupBanner from './components/SetupBanner';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
@@ -517,12 +515,6 @@ function App() {
             ) : activeTab === 'tools' ? (
               /* 개발 도구 설치 관리 패널 — TOOL_REGISTRY 연동 */
               <ToolsPanel />
-            ) : activeTab === 'codegraph' ? (
-              /* 코드 인텔리전스 — 코드 그래프 시각화 */
-              <CodeGraphPanel />
-            ) : activeTab === 'codesearch' ? (
-              /* 코드 인텔리전스 — BM25 코드 검색 */
-              <CodeSearchPanel />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.
