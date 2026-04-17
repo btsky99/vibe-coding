@@ -31,6 +31,9 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   // 전체 보기(true) vs 현재 프로젝트만(false) 토글
   const [memShowAll, setMemShowAll] = useState(true);
 
+  // B.2 — 작성자 필터 (예: 'claude', 'gemini'). 빈값이면 전체.
+  const [memAuthorFilter, setMemAuthorFilter] = useState('');
+
   // ─── 폼 상태 (신규 추가 / 수정) ──────────────────────────────────────
   const [showMemForm, setShowMemForm] = useState(false);
   const [editingMemKey, setEditingMemKey] = useState<string | null>(null);
@@ -41,10 +44,13 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   const [memAuthor, setMemAuthor] = useState('claude');
 
   // ─── 데이터 페칭 ────────────────────────────────────────────────────────
-  // 검색어가 있으면 서버 측 검색 API 사용, 없으면 전체 목록 조회
-  const fetchMemory = (q = '') => {
-    const url = q
-      ? `${API_BASE}/api/memory?q=${encodeURIComponent(q)}`
+  // 검색어/작성자 필터가 있으면 쿼리 파라미터로 전달. 없으면 전체 목록 조회.
+  const fetchMemory = (q = '', author = '') => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (author) params.set('author', author);
+    const url = params.toString()
+      ? `${API_BASE}/api/memory?${params.toString()}`
       : `${API_BASE}/api/memory`;
     fetch(url)
       .then(res => res.json())
@@ -52,12 +58,12 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
-  // 컴포넌트 마운트 시 초기 로드 + 5초 폴링 (검색어 변경 시 interval 재시작 = 즉시 재검색)
+  // 검색어 또는 작성자 필터 변경 시 즉시 재조회 + 5초 폴링 유지
   useEffect(() => {
-    fetchMemory(memSearch);
-    const interval = setInterval(() => fetchMemory(memSearch), 5000);
+    fetchMemory(memSearch, memAuthorFilter);
+    const interval = setInterval(() => fetchMemory(memSearch, memAuthorFilter), 5000);
     return () => clearInterval(interval);
-  }, [memSearch]);
+  }, [memSearch, memAuthorFilter]);
 
   // ─── DB 정보 상태 ────────────────────────────────────────────────────────
   const [dbInfo, setDbInfo] = useState<{ db_path?: string; is_local?: boolean; count?: number } | null>(null);
@@ -80,7 +86,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .then(res => res.json())
       .then(data => {
         setSyncMsg(data.message || '완료');
-        fetchMemory(memSearch); // 목록 즉시 갱신
+        fetchMemory(memSearch, memAuthorFilter); // 목록 즉시 갱신
       })
       .catch(() => setSyncMsg('동기화 실패'))
       .finally(() => setSyncing(false));
@@ -112,7 +118,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         // 저장 후 폼 초기화 및 목록 갱신
         setMemKey(''); setMemTitle(''); setMemContent('');
         setMemTags(''); setShowMemForm(false); setEditingMemKey(null);
-        fetchMemory(memSearch);
+        fetchMemory(memSearch, memAuthorFilter);
       })
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
@@ -123,7 +129,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key }),
-    }).then(() => fetchMemory(memSearch)).catch((err) => console.error('[MemoryPanel] fetch error:', err));
+    }).then(() => fetchMemory(memSearch, memAuthorFilter)).catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
   // 수정 폼 열기 — 기존 항목 데이터를 상태에 주입하여 편집 가능하게 함
@@ -162,24 +168,42 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         />
       </div>
 
-      {/* 항목 수 요약 + 전체/현재 프로젝트 토글 */}
-      <div className="flex items-center justify-between shrink-0 px-0.5">
-        <span className="text-[9px] text-[#858585]">
-          총 {displayedMemory.length}개 항목{memSearch && ` (검색: "${memSearch}")`}
+      {/* 항목 수 요약 + 작성자 필터 + 전체/현재 프로젝트 토글 */}
+      <div className="flex items-center justify-between shrink-0 px-0.5 gap-1">
+        <span className="text-[9px] text-[#858585] shrink-0">
+          총 {displayedMemory.length}개{memSearch && ` (검색)`}
+          {memAuthorFilter && ` (by ${memAuthorFilter})`}
         </span>
-        {/* 프로젝트 필터 토글 — currentProjectName이 있을 때만 표시 */}
-        {currentProjectName && (
-          <button
-            onClick={() => setMemShowAll(prev => !prev)}
-            className={`text-[8px] px-1.5 py-0.5 rounded transition-colors ${
-              memShowAll
-                ? 'bg-white/5 text-[#858585] hover:text-white'
-                : 'bg-cyan-500/15 text-cyan-400'
-            }`}
+        <div className="flex items-center gap-1">
+          {/* B.2 — 작성자 필터 드롭다운 (prefix 매칭: 'claude' → claude-*) */}
+          <select
+            value={memAuthorFilter}
+            onChange={e => setMemAuthorFilter(e.target.value)}
+            className="text-[8px] bg-[#3c3c3c] border border-white/5 rounded px-1 py-0.5 focus:outline-none cursor-pointer text-white"
+            title="작성자 필터"
           >
-            {memShowAll ? '전체' : currentProjectName}
-          </button>
-        )}
+            <option value="">작성자: 전체</option>
+            <option value="claude">claude 계열</option>
+            <option value="gemini">gemini 계열</option>
+            <option value="codex">codex 계열</option>
+            <option value="user">user</option>
+            <option value="unknown">unknown</option>
+            <option value="legacy">legacy</option>
+          </select>
+          {/* 프로젝트 필터 토글 — currentProjectName이 있을 때만 표시 */}
+          {currentProjectName && (
+            <button
+              onClick={() => setMemShowAll(prev => !prev)}
+              className={`text-[8px] px-1.5 py-0.5 rounded transition-colors ${
+                memShowAll
+                  ? 'bg-white/5 text-[#858585] hover:text-white'
+                  : 'bg-cyan-500/15 text-cyan-400'
+              }`}
+            >
+              {memShowAll ? '전체' : currentProjectName}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 메모리 항목 목록 */}

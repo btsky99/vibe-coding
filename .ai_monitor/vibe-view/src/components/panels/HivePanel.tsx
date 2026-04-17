@@ -8,9 +8,27 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Bot, AlertTriangle, Cpu, RotateCw, CheckCircle2, Zap, Ghost, Users, Activity } from 'lucide-react';
-import { HiveHealth, OrchestratorStatus } from '../../types';
+import { Bot, AlertTriangle, Cpu, RotateCw, CheckCircle2, Zap, Ghost, Users, Activity, Brain } from 'lucide-react';
+import { HiveHealth, OrchestratorStatus, MemoryEntry } from '../../types';
 import { API_BASE } from '../../constants';
+
+// 작성자 태그 색상 매핑 — B.2 작성자 식별 강화와 맞물리는 시각적 구분.
+// claude 계열은 초록, gemini 계열은 파랑, user는 보라, 기타(unknown/legacy)는 회색.
+function authorBadgeClass(author: string): string {
+  const a = (author || '').toLowerCase();
+  if (a.startsWith('claude')) return 'bg-green-500/15 text-green-400';
+  if (a.startsWith('gemini')) return 'bg-blue-500/15 text-blue-400';
+  if (a.startsWith('codex')) return 'bg-purple-500/15 text-purple-400';
+  if (a === 'user') return 'bg-cyan-500/15 text-cyan-400';
+  return 'bg-white/10 text-white/50';
+}
+
+// 작성자 LLM 계열 추출 — 'claude-t1' → 'claude', 'gemini:terminal-3' → 'gemini'
+function authorFamily(author: string): string {
+  const a = (author || '').toLowerCase();
+  const cut = a.split(/[-:]/, 2)[0];
+  return cut || 'unknown';
+}
 
 /**
  * HivePanel
@@ -33,6 +51,8 @@ export default function HivePanel() {
   const [spMsg, setSpMsg] = useState('');
   // 스킬 복구 버튼용 현재 경로 — 서버 설정에서 가져옴
   const [currentPath, setCurrentPath] = useState('');
+  // B.3 — 최근 공유 메모리 (모든 프로젝트). 20초 폴링.
+  const [recentMemory, setRecentMemory] = useState<MemoryEntry[]>([]);
 
   // ── 오케스트레이터 상태 폴링 (3초 간격) ──────────────────────────────────
   useEffect(() => {
@@ -69,6 +89,20 @@ export default function HivePanel() {
       .then(res => res.json())
       .then(data => { if (data.path) setCurrentPath(data.path); })
       .catch((err) => console.error('[HivePanel] fetch error:', err));
+  }, []);
+
+  // ── 최근 공유 메모리 폴링 (20초) — B.3 ───────────────────────────────────
+  // all=true로 전역 집계, top=20으로 작성자 분포 파악에 충분한 샘플 확보.
+  useEffect(() => {
+    const fetchRecent = () => {
+      fetch(`${API_BASE}/api/memory?all=true&top=20`)
+        .then(res => res.json())
+        .then(data => setRecentMemory(Array.isArray(data) ? data : []))
+        .catch((err) => console.error('[HivePanel] memory fetch error:', err));
+    };
+    fetchRecent();
+    const interval = setInterval(fetchRecent, 20000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -175,6 +209,62 @@ export default function HivePanel() {
               </div>
             </div>
           )}
+
+          {/* ── B.3 최근 공유 메모리 카드 ── */}
+          {/* 에이전트별 누적 메모 분포 + 최근 5건. B.2 작성자 태그 강화의 UI 노출. */}
+          {recentMemory.length > 0 && (() => {
+            // 작성자 계열별 집계 (claude / gemini / codex / user / unknown 등)
+            const familyCounts: Record<string, number> = {};
+            for (const e of recentMemory) {
+              const fam = authorFamily(e.author);
+              familyCounts[fam] = (familyCounts[fam] || 0) + 1;
+            }
+            const families = Object.entries(familyCounts).sort((a, b) => b[1] - a[1]);
+            const recent5 = recentMemory.slice(0, 5);
+            return (
+              <div className="p-2.5 rounded border border-white/10 bg-white/[0.02]">
+                <div className="text-[10px] font-bold text-[#969696] mb-2 flex items-center gap-1.5">
+                  <Brain className="w-3 h-3" /> 최근 공유 메모리
+                  <span className="ml-auto text-[9px] text-[#555] font-normal">
+                    최근 {recentMemory.length}건
+                  </span>
+                </div>
+                {/* 작성자 계열별 집계 배지 */}
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {families.map(([fam, cnt]) => (
+                    <span
+                      key={fam}
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-mono ${authorBadgeClass(fam)}`}
+                    >
+                      {fam} {cnt}
+                    </span>
+                  ))}
+                </div>
+                {/* 최근 5건 리스트 */}
+                <div className="flex flex-col gap-1">
+                  {recent5.map(entry => (
+                    <div
+                      key={entry.key}
+                      className="flex items-center justify-between gap-2 text-[9px] py-0.5"
+                      title={entry.title || entry.key}
+                    >
+                      <span className="font-mono text-[#ccc] truncate flex-1 min-w-0">
+                        {entry.key}
+                      </span>
+                      <span
+                        className={`px-1 rounded text-[8px] font-bold shrink-0 ${authorBadgeClass(entry.author)}`}
+                      >
+                        {entry.author}
+                      </span>
+                      <span className="text-[#555] text-[8px] font-mono shrink-0">
+                        {(entry.updated_at || '').slice(5, 16).replace('T', ' ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 태스크 분배 전체 요약 — all 키가 있을 때만 표시 */}
           {orchStatus.task_distribution?.all && (() => {
