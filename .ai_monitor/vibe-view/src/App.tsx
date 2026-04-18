@@ -55,7 +55,6 @@ import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
-import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
@@ -360,12 +359,6 @@ function App() {
     openFileWindow(item.path, item.name);
   };
 
-  const handleOpenFilePath = (rawPath: string) => {
-    const normalizedPath = normalizePreviewPath(rawPath);
-    if (!normalizedPath) return;
-    openFileWindow(normalizedPath);
-  };
-
   // 터미널 슬롯 인덱스 배열 — terminalCount가 변경될 때만 배열 재생성 (useMemo로 최적화)
   const slots = useMemo(() => Array.from({ length: terminalCount }, (_, i) => i), [terminalCount]);
 
@@ -378,7 +371,6 @@ function App() {
     memory: '공유 메모리',
     hive: '하이브 진단 / 스킬',
     git: 'Git 감시',
-    agent: '자율 에이전트',
   }[activeTab] ?? activeTab;
 
   return (
@@ -427,7 +419,6 @@ function App() {
         onInstallSkills={installSkills}
         onOpenHelpDoc={openHelpDoc}
         onClearLogs={() => setLogs([])}
-        onOpenMissionControl={() => setActiveTab('agent')}
         currentPath={currentPath}
         onSwitchProject={(path) => setCurrentPath(path)}
       />
@@ -502,9 +493,6 @@ function App() {
                 currentPath={currentPath}
                 onChangesCount={(c, conf) => { setTotalGitChanges(c); setConflictCount(conf); }}
               />
-            ) : activeTab === 'agent' ? (
-              /* 자율 에이전트 패널 — CLI 오케스트레이터 (OpenHands 스타일) */
-              <AgentPanel onStatusChange={setIsAgentRunning} onOpenFilePath={handleOpenFilePath} />
             ) : activeTab === 'telegram' ? (
               /* 텔레그램 브릿지 설정 패널 — 봇 토큰 + T1~T8 채팅 ID 관리 */
               <TelegramPanel />
@@ -783,16 +771,10 @@ function KanbanOnlyApp() {
 // ?kanban=1 / ?graph=1 쿼리 파라미터에 따라 전용 창 렌더링
 function DashboardOnlyApp() {
   const params = new URLSearchParams(window.location.search);
-  const rawTab = (params.get('tab') || 'agent').toLowerCase();
-  const tab = (
-    rawTab === 'master' ||
-    rawTab === 'vibe-master' ||
-    rawTab === 'mission-control'
-  ) ? 'agent' : rawTab;
+  const rawTab = (params.get('tab') || 'hive').toLowerCase();
+  const tab = rawTab;
 
   const titleMap: Record<string, string> = {
-    agent: 'Vibe Coding Master',
-    messages: 'Messages',
     tasks: 'Tasks',
     memory: 'Shared Memory',
     git: 'Git',
@@ -808,13 +790,11 @@ function DashboardOnlyApp() {
         return <MemoryPanel />;
       case 'git':
         return <GitPanel currentPath="" onChangesCount={() => {}} />;
-      case 'hive':
-        return <HivePanel />;
       case 'telegram':
         return <TelegramPanel />;
-      case 'agent':
+      case 'hive':
       default:
-        return <AgentPanel onStatusChange={() => {}} />;
+        return <HivePanel />;
     }
   };
 

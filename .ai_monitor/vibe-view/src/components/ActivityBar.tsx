@@ -2,7 +2,6 @@ import { memo } from 'react';
 import {
   Activity,
   BookOpen,
-  Bot,
   Brain,
   ClipboardList,
   Files,
@@ -142,17 +141,6 @@ const ActivityBar = memo(function ActivityBar({
           <span
             className={`absolute top-0.5 right-0.5 w-2 h-2 rounded-full ${
               conflictCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-cyan-400'
-            }`}
-          />
-        )}
-      </button>
-
-      <button onClick={() => onTabChange('agent')} className={tabCls('agent')} title="Agent">
-        <Bot className="w-5 h-5" />
-        {(isAgentRunning || skillChainStatus === 'running') && (
-          <span
-            className={`absolute top-0.5 right-0.5 w-2 h-2 rounded-full animate-pulse ${
-              isAgentRunning ? 'bg-yellow-400' : 'bg-primary'
             }`}
           />
         )}

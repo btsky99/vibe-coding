@@ -44,8 +44,6 @@ interface TopMenuBarProps {
   onInstallSkills: () => void;
   onOpenHelpDoc: (topic: string, title: string) => void;
   onClearLogs: () => void;
-  // 자율 주행 버튼 → 중앙 통제실(mission-control) 탭으로 이동
-  onOpenMissionControl: () => void;
   // 프로젝트 전환 시 App의 currentPath 업데이트
   currentPath?: string;
   onSwitchProject?: (path: string) => void;
@@ -180,7 +178,6 @@ const TopMenuBar = memo(function TopMenuBar({
   updateReady, updateApplying, updateChecking,
   onApplyUpdate, onTriggerUpdateCheck,
   onOpenFolder, onInstallSkills, onOpenHelpDoc, onClearLogs,
-  onOpenMissionControl,
   currentPath: propCurrentPath,
   onSwitchProject,
 }: TopMenuBarProps) {
