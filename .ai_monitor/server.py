@@ -1207,7 +1207,8 @@ class MemoryWatcher(threading.Thread):
     # ── 공개 메서드 ─────────────────────────────────────────────────────────
     def run(self) -> None:
         print("[MemoryWatcher] 에이전트 메모리 감시 시작")
-        _sync_tick = 0  # 역방향 동기화 주기 카운터 (40 * 15초 = 10분)
+        _sync_tick = 0     # 역방향 동기화 주기 카운터 (40 * 30초 ≈ 20분)
+        _promote_tick = 0  # C.4 자동 승격 주기 (10 * 30초 = 5분)
         while True:
             try:
                 self._scan_claude_memories()
@@ -1218,9 +1219,30 @@ class MemoryWatcher(threading.Thread):
                 if _sync_tick >= 40:
                     self._sync_to_claude_memory()
                     _sync_tick = 0
+                # 5분마다 fleeting → permanent 자동 승격 (C.4)
+                _promote_tick += 1
+                if _promote_tick >= 10:
+                    self._auto_promote_zettel()
+                    _promote_tick = 0
             except Exception as e:
                 print(f"[MemoryWatcher] 스캔 오류: {e}")
             time.sleep(self.POLL_INTERVAL)
+
+    # ── 내부: C.4 자동 승격 배치 ─────────────────────────────────────────────
+    def _auto_promote_zettel(self) -> None:
+        """조건 충족한 fleeting 노트를 permanent로 일괄 승격 (5분 배치).
+        실패해도 조용히 넘어감 — 다음 주기에 재시도.
+        """
+        try:
+            from src.pg_store import auto_promote_fleeting
+        except ImportError:
+            return
+        try:
+            n = auto_promote_fleeting()
+            if n > 0:
+                print(f"[MemoryWatcher] 자동 승격 — {n}건 fleeting → permanent")
+        except Exception as e:
+            print(f"[MemoryWatcher] 자동 승격 오류: {e}")
 
     # ── 내부: 역방향 동기화 (PostgreSQL hive_memory → MEMORY.md) ────────────
     def _sync_to_claude_memory(self) -> None:
