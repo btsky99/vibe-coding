@@ -55,7 +55,12 @@
       "Bash(\"D:/vibe-coding/.ai_monitor/bin/pgsql/bin/pg_ctl.exe\" -D \"D:/vibe-coding/.ai_monitor/bin/pgsql/data\" -l \"D:/vibe-coding/.ai_monitor/bin/pgsql/pg.log\" start 2>&1)",
       "Skill(vibe-release)",
       "Bash(findstr /i python)",
-      "Skill(vibe-brainstorm)"
+      "Skill(vibe-brainstorm)",
+      "Bash(rm -f .ai_monitor/api/dispatcher_api.py)",
+      "Bash(rm -f .ai_monitor/vibe-view/src/components/panels/DispatcherPanel.tsx)",
+      "Bash(rm -f scripts/auto_dispatcher.py)",
+      "Bash(rm -f .claude/commands/vibe-dispatcher.md)",
+      "Bash(rm -rf .claude/skills/vibe-dispatcher)"
     ]
   }
 }

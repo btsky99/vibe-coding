@@ -54,7 +54,6 @@ import TasksPanel from './components/panels/TasksPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
-import DispatcherPanel from './components/panels/DispatcherPanel';
 import GitPanel from './components/panels/GitPanel';
 import AgentPanel from './components/panels/AgentPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
@@ -494,9 +493,6 @@ function App() {
             ) : activeTab === 'zettel' ? (
               /* 제텔카스텐 패널 — 카파시+루만 융합 메모 시스템 */
               <ZettelkastenPanel />
-            ) : activeTab === 'dispatcher' ? (
-              /* 멀티-LLM 디스패처 패널 — 에이전트 역량 기반 자동 분배 UI */
-              <DispatcherPanel />
             ) : activeTab === 'hive' ? (
               /* 하이브 진단 패널 */
               <HivePanel />

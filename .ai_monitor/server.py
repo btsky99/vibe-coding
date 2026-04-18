@@ -143,7 +143,6 @@ import api.memory_api as memory_api
 import api.agent_api as agent_api
 import api.pty_api as pty_api
 import api.vibe_api as vibe_api
-import api.dispatcher_api as dispatcher_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
@@ -2869,16 +2868,6 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path.startswith('/api/office/'):
             _proxy_to_office_server(self, method='GET')
 
-        # ── [모듈 위임] dispatcher_api — /api/dispatcher/* ─────────────
-        elif parsed_path.path.startswith('/api/dispatcher/'):
-            _params = parse_qs(parsed_path.query)
-            dispatcher_api.handle_get(
-                self, parsed_path.path, _params,
-                SCRIPTS_DIR=SCRIPTS_DIR,
-                list_tasks=list_tasks,
-                current_project_id=_current_project_id(),
-            )
-
         # ── [모듈 위임] tasks_api — /api/tasks, /api/task-logs ─────────
         elif (parsed_path.path in ('/api/tasks', '/api/tasks/kanban', '/api/task-logs',
                                     '/api/agents/status')
@@ -3305,7 +3294,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        # [2026-03-22] /api/dispatcher/* → dispatcher_api.py로 위임됨
+        # [2026-04-18] /api/dispatcher/* 제거 — 멀티 LLM 디스패처 정리 (실사용 0)
 
         elif parsed_path.path == '/api/memory/db-info':
             # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
@@ -3698,32 +3687,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             }).encode('utf-8'))
             return
 
-        # ── 스킬 평가 리뷰어 실행 — 브라우저에서 eval_review.html 열기 ──
-        # [설계 의도] skill-creator의 description 최적화 평가 쿼리셋을 리뷰하는 HTML 뷰어.
-        # vibe-dispatcher-workspace/eval_review.html 파일을 기본 브라우저로 열어줍니다.
-        if path == '/api/eval-review/launch':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                # 프로젝트 루트의 workspace 디렉토리에서 eval_review.html 탐색
-                project_root = BASE_DIR.parent
-                eval_html = project_root / 'vibe-dispatcher-workspace' / 'eval_review.html'
-                if not eval_html.exists():
-                    # 범용 탐색: *-workspace/eval_review.html 패턴
-                    candidates = list(project_root.glob('*-workspace/eval_review.html'))
-                    if candidates:
-                        eval_html = max(candidates, key=lambda p: p.stat().st_mtime)
-                    else:
-                        raise RuntimeError('eval_review.html 없음. 먼저 /skill-creator로 평가 쿼리셋을 생성하세요.')
-                webbrowser.open(eval_html.as_uri())
-                self.wfile.write(json.dumps({"status": "launched", "path": str(eval_html)}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
         # [2026-03-22] /api/graph/launch 제거 (지식그래프 삭제)
+        # [2026-04-18] /api/eval-review/launch 제거 (디스패처 정리)
 
         # ─── 신규: 사고 과정 로그 추가 (v5.0) ───
         # ─── 신규: PostgreSQL 통합 로깅 API (v5.0) ───
@@ -4551,13 +4516,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 trigger_agent=trigger_agent,
             )
 
-        # ── [모듈 위임 - POST] dispatcher_api — /api/dispatcher/* ──────
-        elif parsed_path.path.startswith('/api/dispatcher/'):
-            dispatcher_api.handle_post(
-                self, parsed_path.path, data,
-                SCRIPTS_DIR=SCRIPTS_DIR,
-            )
-
         elif parsed_path.path == '/api/memory/sync':
             # APPDATA DB → 현재 프로젝트 로컬 DB 동기화
             # 배포 버전에서 APPDATA DB에 있는 항목을 로컬 DB로 가져옴 (updated_at 기준 최신 우선)
@@ -4796,7 +4754,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 }, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        # [2026-03-22] /api/dispatcher/* POST → dispatcher_api.py로 위임됨
         else:
             self.send_response(404)
             self.end_headers()

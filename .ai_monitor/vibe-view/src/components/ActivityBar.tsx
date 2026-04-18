@@ -12,7 +12,6 @@ import {
   Search,
   Settings,
   Smartphone,
-  Target,
   Zap,
 } from 'lucide-react';
 
@@ -157,10 +156,6 @@ const ActivityBar = memo(function ActivityBar({
             }`}
           />
         )}
-      </button>
-
-      <button onClick={() => onTabChange('dispatcher')} className={tabCls('dispatcher')} title="Dispatcher">
-        <Target className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('hive')} className={tabCls('hive')} title="Hive">
