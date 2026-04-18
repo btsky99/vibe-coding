@@ -96,7 +96,7 @@
 
 #### C.3 hive_memory → zettel_notes 승격 파이프라인
 - [ ] 자동 분류기 — tag에 `learning`/`insight` 또는 note_type 지정 시 승격
-- [ ] fleeting → permanent 자동 승격 규칙 (access_count ≥ 3, 30일 생존 등)
+- [x] fleeting → permanent 자동 승격 규칙 — C.4, B안 (7일+access≥2 OR degree≥3 OR 태그 permanent/영구), `memory.py promote-auto [--dry-run]`
 - [ ] 승격 시 `source_ref`에 원본 hive_memory key 보존
 - [ ] 옵시디언 동기화 선별 (permanent만, fleeting 제외)
 - **효용**: 잡다한 `hive_memory`가 지식으로 정제되어 쌓임

@@ -25,7 +25,16 @@ MONITOR_DIR = PROJECT_ROOT / ".ai_monitor"
 if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
-from src.pg_store import ensure_schema, get_memory, list_memory, migrate_legacy_data, set_memory, promote_to_zettel
+from src.pg_store import (
+    ensure_schema,
+    get_memory,
+    list_memory,
+    migrate_legacy_data,
+    set_memory,
+    promote_to_zettel,
+    auto_promote_fleeting,
+    preview_auto_promote,
+)
 
 
 PG_BIN = MONITOR_DIR / "bin" / "pgsql" / "bin" / "psql.exe"
@@ -169,6 +178,34 @@ def cmd_promote(args) -> None:
     print(f"승격 완료 — zettel id={note.get('id')} type={note.get('note_type')}")
 
 
+def cmd_promote_auto(args) -> None:
+    """C.4 — fleeting → permanent 자동 승격 일괄 실행.
+
+    승격 조건 (OR): 생성 7일+ AND access≥2 / 링크 degree≥3 / 태그 permanent|영구.
+    --dry-run: 대상만 출력하고 변경 없음.
+    """
+    if not ensure_schema(DATA_DIR):
+        print("PostgreSQL is not available.")
+        sys.exit(1)
+
+    targets = preview_auto_promote()
+    if not targets:
+        print("승격 대상 없음 — 조건을 만족하는 fleeting 노트가 없습니다.")
+        return
+
+    print(f"승격 대상 {len(targets)}건:")
+    for t in targets:
+        created = str(t.get('created_at', ''))[:19]
+        print(f"  - {t['id']}: {t['title'][:50]} (access={t.get('access_count', 0)}, {created})")
+
+    if getattr(args, 'dry_run', False):
+        print("\n[dry-run] 실제 승격은 --dry-run 제거 후 실행하세요.")
+        return
+
+    n = auto_promote_fleeting()
+    print(f"\n승격 완료 — {n}건을 permanent로 전환했습니다.")
+
+
 def cmd_sync(args) -> None:
     if not ensure_schema(DATA_DIR):
         print("PostgreSQL is not available.")
@@ -244,6 +281,12 @@ def main() -> None:
                            choices=["", "fleeting", "literature", "permanent"],
                            help="zettel note_type (생략 시 태그 기반 자동)")
 
+    # C.4 — 자동 승격: fleeting → permanent 일괄 전환
+    p_auto = sub.add_parser("promote-auto",
+                            help="fleeting 노트를 조건(7일+access≥2 / degree≥3 / 태그) 충족 시 permanent로 일괄 승격")
+    p_auto.add_argument("--dry-run", action="store_true",
+                        help="대상만 미리보기 (실제 변경 없음)")
+
     sub.add_parser("sync")
 
     p_q = sub.add_parser("q")
@@ -260,6 +303,8 @@ def main() -> None:
         cmd_get(args)
     elif args.command == "promote":
         cmd_promote(args)
+    elif args.command == "promote-auto":
+        cmd_promote_auto(args)
     elif args.command == "sync":
         cmd_sync(args)
     elif args.command == "q":

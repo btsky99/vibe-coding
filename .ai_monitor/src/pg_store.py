@@ -1218,6 +1218,85 @@ def _get_existing_zettel(note_id: str) -> dict | None:
     return row
 
 
+# ── C.4 — fleeting → permanent 자동 승격 ─────────────────────────────────────
+# 승격 조건 (B안, OR 결합):
+#   1) 생존형: 생성 N일 경과 + access_count ≥ M회 (버려지지 않고 재사용됨)
+#   2) 허브형: 링크 degree ≥ K (다른 노트와 많이 연결된 지식 허브)
+#   3) 명시형: tags에 permanent/영구 포함 (사용자 수동 마킹)
+_AUTO_PROMOTE_MIN_AGE_DAYS = 7
+_AUTO_PROMOTE_MIN_ACCESS = 2
+_AUTO_PROMOTE_MIN_DEGREE = 3
+
+
+def _auto_promote_where_clause() -> str:
+    """fleeting → permanent 승격 대상 zettel_notes 행을 고르는 WHERE 절.
+
+    호출부에서 `FROM zettel_notes zn` 별칭을 쓴다고 가정.
+    """
+    age_days = _AUTO_PROMOTE_MIN_AGE_DAYS
+    min_access = _AUTO_PROMOTE_MIN_ACCESS
+    min_degree = _AUTO_PROMOTE_MIN_DEGREE
+    return (
+        "zn.note_type = 'fleeting' "
+        "AND (zn.archived IS NOT TRUE) "
+        "AND ("
+        f"(zn.created_at < NOW() - INTERVAL '{age_days} days' AND zn.access_count >= {min_access}) "
+        "OR EXISTS ("
+        "  SELECT 1 FROM ("
+        "    SELECT source_id AS nid FROM zettel_links "
+        "    UNION ALL "
+        "    SELECT target_id AS nid FROM zettel_links"
+        "  ) l "
+        f"  WHERE l.nid = zn.id GROUP BY l.nid HAVING COUNT(*) >= {min_degree}"
+        ") "
+        "OR zn.tags @> '[\"permanent\"]'::jsonb "
+        "OR zn.tags @> '[\"영구\"]'::jsonb"
+        ")"
+    )
+
+
+def preview_auto_promote() -> list[dict]:
+    """승격 대상(fleeting) 노트 목록을 반환 — dry-run 용."""
+    sql = (
+        "SELECT zn.id, zn.title, zn.access_count, zn.created_at, "
+        "       zn.tags::text AS tags_text "
+        "FROM zettel_notes zn "
+        f"WHERE {_auto_promote_where_clause()} "
+        "ORDER BY zn.created_at ASC;"
+    )
+    rows = query_rows(sql)
+    for r in rows:
+        r['tags'] = _parse_json_text(r.pop('tags_text', '[]'), [])
+    return rows
+
+
+def auto_promote_fleeting() -> int:
+    """조건을 만족하는 fleeting 노트를 permanent로 일괄 승격한다.
+
+    반환값: 승격된 노트 수 (psql은 UPDATE 행 수 직접 반환 안 해서
+            사전 COUNT로 추정).
+    """
+    count_rows = query_rows(
+        "SELECT COUNT(*) AS n FROM zettel_notes zn "
+        f"WHERE {_auto_promote_where_clause()};"
+    )
+    n = int(count_rows[0].get('n', 0)) if count_rows else 0
+    if n == 0:
+        return 0
+
+    # UPDATE는 서브쿼리로 대상 id를 뽑아서 적용 — WHERE 절 구조상
+    # zn 별칭 UPDATE가 psql에서 까다로워서 ID 서브쿼리 방식 사용
+    subquery = (
+        "SELECT zn.id FROM zettel_notes zn "
+        f"WHERE {_auto_promote_where_clause()}"
+    )
+    ok = execute(
+        f"UPDATE zettel_notes SET note_type = 'permanent', updated_at = NOW() "
+        f"WHERE id IN ({subquery});"
+    )
+    return n if ok else 0
+
+
 def cleanup_expired_memory() -> int:
     """expires_at이 현재 시각보다 이전인 메모리 항목을 삭제합니다.
     워치독 루프 또는 서버 기동 시 호출하여 오래된 데이터를 자동 정리합니다.
