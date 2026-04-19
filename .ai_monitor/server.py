@@ -1009,24 +1009,36 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs, urlencode
 import urllib.request
-# 버전 로드: PyInstaller frozen 환경에서도 확실히 동작하도록 파일 읽기 + import 이중 시도
+# 버전 로드: 파일 경로 기반으로 일원화.
+# 과거 `from _version import __version__` 방식은 PyInstaller frozen 환경에서
+# sys.modules/sys.path 상태에 따라 다른 '_version' 모듈과 충돌하거나
+# ModuleNotFoundError가 발생할 수 있어 v3.7.207부터 파일 읽기만 사용.
 __version__ = "0.0.0-unknown"
-try:
-    # 1차: 모듈 import (개발 모드에서 동작)
-    from _version import __version__
-except ImportError:
-    # 2차: 파일 직접 읽기 (PyInstaller frozen 환경 — datas로 복사된 파일)
-    import re as _re_ver
-    for _candidate in [
-        os.path.join(getattr(sys, '_MEIPASS', ''), '_version.py'),
-        os.path.join(os.path.dirname(__file__), '_version.py'),
-    ]:
-        if os.path.isfile(_candidate):
+import re as _re_ver
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_version_candidates = [
+    # frozen(PyInstaller): MEIPASS 루트 (spec의 ('.ai_monitor/_version.py', '.') 대상)
+    os.path.join(getattr(sys, '_MEIPASS', ''), '_version.py'),
+    # 개발 모드: server.py와 같은 디렉토리 (.ai_monitor/_version.py)
+    os.path.join(_this_dir, '_version.py'),
+    # 폴백: 상위 디렉토리 (일부 설치 레이아웃)
+    os.path.join(_this_dir, '..', '_version.py'),
+]
+for _candidate in _version_candidates:
+    try:
+        if _candidate and os.path.isfile(_candidate):
             with open(_candidate, 'r', encoding='utf-8') as _vf:
                 _m = _re_ver.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _vf.read())
                 if _m:
                     __version__ = _m.group(1)
                     break
+    except Exception:
+        continue
+if __version__ == "0.0.0-unknown":
+    # 진단: 모든 후보가 실패하면 stderr에 경로 덤프 (EXE 로그에서 확인)
+    print(f"[version] WARN: _version.py 로딩 실패. frozen={getattr(sys, 'frozen', False)} "
+          f"MEIPASS={getattr(sys, '_MEIPASS', '(none)')} __file__={__file__}",
+          file=sys.stderr)
 
 # 데이터 디렉토리: 배포 모드 → %APPDATA%\VibeCoding, 개발 모드 → .ai_monitor/data
 if getattr(sys, 'frozen', False):
