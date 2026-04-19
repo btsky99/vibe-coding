@@ -26,6 +26,8 @@ interface SkillMeta {
   name: string;
   description: string;
   userInvocable: boolean;
+  /** Platform Phase 3: .claude vs .vibe 출처 배지 */
+  origin?: 'claude' | 'vibe';
 }
 
 interface OfficeChatPanelProps {
@@ -297,6 +299,14 @@ export default function OfficeChatPanel({
               }`}
             >
               <span className="shrink-0 text-[10px] font-bold text-cyan-400">/{skill.name}</span>
+              {skill.origin === 'vibe' && (
+                <span
+                  className="shrink-0 rounded-sm bg-emerald-500/15 px-1 py-[1px] text-[8px] font-bold uppercase tracking-wide text-emerald-300"
+                  title=".vibe/skills/ — 프로젝트별 확장 (Layer 2)"
+                >
+                  vibe
+                </span>
+              )}
               <span className="text-[9px] text-white/40 line-clamp-2">{skill.description}</span>
             </button>
           ))}

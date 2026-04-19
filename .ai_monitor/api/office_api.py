@@ -139,8 +139,13 @@ _skills_cache_ts: float = 0
 
 
 def _parse_skills() -> list[dict]:
-    """프로젝트의 .claude/skills/ 디렉토리에서 스킬 메타데이터를 파싱한다.
-    YAML frontmatter에서 name, description, user-invocable 추출.
+    """Platform Phase 3 스캐너를 경유해 .claude/skills + .vibe/skills 병합 목록 반환.
+
+    응답 포맷은 기존 오피스 채팅 UI와 호환:
+    - userInvocable (camelCase)
+    - description은 "Use when:" 이전까지만 (간결 표시)
+    - 신규: origin ("claude" | "vibe") — UI 배지용
+
     결과를 5분간 캐시.
     """
     global _skills_cache, _skills_cache_ts
@@ -148,72 +153,29 @@ def _parse_skills() -> list[dict]:
     if _skills_cache is not None and now - _skills_cache_ts < 300:
         return _skills_cache
 
-    skills = []
-    # 프로젝트 루트의 .claude/skills/ 탐색
-    project_root = Path(__file__).resolve().parent.parent.parent
-    skills_dir = project_root / '.claude' / 'skills'
-    if not skills_dir.exists():
-        _skills_cache = skills
-        _skills_cache_ts = now
-        return skills
+    try:
+        from api.vibe_skills_api import scan_project_skills
+        project_root = Path(__file__).resolve().parent.parent.parent
+        result = scan_project_skills(project_root)
+        raw = result.get('skills', [])
+    except Exception:
+        raw = []
 
-    for skill_dir in sorted(skills_dir.iterdir()):
-        skill_file = skill_dir / 'SKILL.md' if skill_dir.is_dir() else None
-        if skill_file is None or not skill_file.exists():
-            # 디렉토리가 아닌 .md 파일일 수 있음
-            if skill_dir.is_file() and skill_dir.suffix == '.md':
-                skill_file = skill_dir
-            else:
-                continue
-
-        try:
-            content = skill_file.read_text(encoding='utf-8')
-            # YAML frontmatter 파싱 (--- 사이)
-            if not content.startswith('---'):
-                continue
-            end = content.find('---', 3)
-            if end == -1:
-                continue
-            frontmatter = content[3:end]
-
-            meta: dict = {'name': '', 'description': '', 'userInvocable': False}
-            for line in frontmatter.split('\n'):
-                line = line.strip()
-                if line.startswith('name:'):
-                    meta['name'] = line[5:].strip().strip('"').strip("'")
-                elif line.startswith('description:'):
-                    # description은 > 멀티라인일 수 있음 — 첫 줄만 추출
-                    val = line[12:].strip()
-                    if val == '>' or val == '|':
-                        # 다음 줄들이 실제 설명
-                        desc_lines = []
-                        for dl in frontmatter[frontmatter.index(line) + len(line):].split('\n'):
-                            dl = dl.strip()
-                            if dl and not dl.endswith(':') and not dl.startswith('-'):
-                                # 키워드가 아닌 줄이면 설명의 일부
-                                if ':' in dl and dl.split(':')[0].replace('-', '').replace('_', '').isalpha():
-                                    break  # 다음 키 시작
-                                desc_lines.append(dl)
-                            elif not dl:
-                                continue
-                            else:
-                                break
-                        meta['description'] = ' '.join(desc_lines)
-                    else:
-                        meta['description'] = val.strip('"').strip("'")
-                elif line.startswith('user-invocable:'):
-                    val = line[15:].strip().lower()
-                    meta['userInvocable'] = val in ('true', 'yes', '1')
-
-            if meta['name']:
-                # description에서 "Use when:" 이전까지만 추출 (간결하게)
-                desc = meta['description']
-                use_when_idx = desc.find('Use when:')
-                if use_when_idx > 0:
-                    meta['description'] = desc[:use_when_idx].strip()
-                skills.append(meta)
-        except Exception:
+    skills: list[dict] = []
+    for s in raw:
+        name = str(s.get('name', '')).strip()
+        if not name:
             continue
+        desc = str(s.get('description', ''))
+        use_when_idx = desc.find('Use when:')
+        if use_when_idx > 0:
+            desc = desc[:use_when_idx].strip()
+        skills.append({
+            'name': name,
+            'description': desc,
+            'userInvocable': bool(s.get('user_invocable', True)),
+            'origin': s.get('origin', 'claude'),
+        })
 
     _skills_cache = skills
     _skills_cache_ts = now
