@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-03-30",
+  "last_updated": "2026-04-19",
   "last_updated_by": "claude",
   "description": "Vibe Coding 프로젝트 기능 목록. 에이전트는 항목 삭제 금지. passes 변경은 Evaluator만 가능.",
   "features": [
@@ -74,13 +74,13 @@
       "acceptance_criteria": [
         "스프린트 계약 템플릿이 존재한다",
         "Generator가 자신의 passes를 true로 변경할 수 없다",
-        "ITCP review 채널로 평가 요청/결과가 전달된다",
-        "auto_dispatcher.py가 역할 매칭 매트릭스를 참조한다"
+        "ITCP(pg_messages) review 채널로 평가 요청/결과가 전달된다",
+        "솔로 모드에서 harness_verify.py가 기계적 Evaluator로 대체 가능하다"
       ],
       "assigned_to": "claude",
       "evaluated_by": "gemini",
       "passes": false,
-      "notes": "HARNESS_V2 설계 완료. auto_dispatcher evaluate 명령 구현 중."
+      "notes": "HARNESS_V2 설계 완료. 2026-04-18 auto_dispatcher 폐기 — hive_tasks 원자적 체크아웃으로 대체. 실 평가 사이클 미검증."
     },
     {
       "id": "F006",
@@ -120,14 +120,14 @@
       "description": "하이브 마인드 통합 — PostgreSQL 기반 에이전트 협업 인프라",
       "acceptance_criteria": [
         "ITCP(pg_messages)로 에이전트 간 비동기 통신이 가능하다",
-        "auto_dispatcher.py로 역량 기반 태스크 분배가 동작한다",
-        "hive_bridge.py로 활동 로그가 PostgreSQL에 기록된다",
-        "memory.py로 하이브 공유 메모리가 관리된다"
+        "hive_tasks 원자적 체크아웃으로 태스크 분배가 동작한다",
+        "pg_logs로 활동 로그가 PostgreSQL에 기록된다",
+        "memory.py/zettel_notes로 하이브 공유 지식이 관리된다"
       ],
       "assigned_to": "claude",
       "evaluated_by": "gemini",
       "passes": true,
-      "notes": "v3.7에서 PostgreSQL 전면 이관 완료. ITCP 통신 테스트 통과 확인."
+      "notes": "v3.7에서 PostgreSQL 전면 이관 완료. 2026-04-18 auto_dispatcher/hive_bridge 폐기 — hive_tasks+pg_logs 직접 사용. Platform Phase 2에서 project_id 스코프 강제."
     }
   ]
 }
