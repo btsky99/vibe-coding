@@ -146,6 +146,7 @@ import api.vibe_api as vibe_api
 import api.tasks_api as tasks_api
 import api.files_api as files_api
 import api.zettel_api as zettel_api
+import api.vibe_skills_api as vibe_skills_api
 # [2026-04-13] office_api 직접 호출 제거 — 오피스 서버로 프록시 전환
 import api.office_api as office_api
 import api.experience_api as experience_api
@@ -2847,6 +2848,11 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path.startswith('/api/experience'):
             _params = parse_qs(parsed_path.query)
             experience_api.handle_get(self, parsed_path.path, _params)
+
+        # ── [모듈 위임] vibe_skills_api — /api/vibe/skills (Phase 3-2) ───
+        elif parsed_path.path == '/api/vibe/skills':
+            _params = parse_qs(parsed_path.query)
+            vibe_skills_api.handle_get(self, parsed_path.path, _params, PROJECT_ROOT)
 
         # ── [모듈 위임] zettel_api — /api/zettel/* ────────────────────
         elif parsed_path.path.startswith('/api/zettel/'):

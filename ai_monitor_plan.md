@@ -162,6 +162,45 @@
 
 ---
 
+## Platform Phase 3 — `.vibe/` 컨벤션 스캐너
+
+> 상위 문서: [docs/PLATFORM_LAYERS.md](docs/PLATFORM_LAYERS.md)
+> 목표: 프로젝트 루트의 `.vibe/skills/`를 자동 스캔해 Claude/Gemini/Codex
+> 공통으로 사용 가능한 슬래시 커맨드로 노출. Layer 2 확장의 첫 걸음.
+
+**2026-04-19 설계 결정:**
+- 깊이: 얕은 스캐너 (UI 팝업 병합, 런타임 주입 X)
+- 포맷: Claude Code skills 스키마 (`.vibe/skills/<name>/SKILL.md` + YAML frontmatter)
+- 병합: `.claude/` + `.vibe/` 둘 다 스캔, 중복 시 `.vibe/` 우선
+
+### 3-1 규약 문서 (`docs/VIBE_CONVENTIONS.md`) ✅ 2026-04-19
+- [x] `.vibe/` 디렉토리 구조 정의
+- [x] SKILL.md frontmatter 스키마 (Claude Code 호환)
+- [x] `.claude/` vs `.vibe/` 병합 규칙 명시
+- [x] 제한·금지 사항
+
+### 3-2 서버 스캐너 (`.ai_monitor/api/vibe_skills_api.py`)
+- [ ] `list_vibe_skills(project_root)` — `.vibe/skills/*/SKILL.md` 파싱
+- [ ] `list_claude_skills(project_root)` — 기존 `.claude/skills/*/SKILL.md` 파싱 (재사용)
+- [ ] `merge_skills()` — 이름 충돌 시 `.vibe/` 우선, origin 필드 부여
+- [ ] GET `/api/vibe/skills` 라우팅 (server.py)
+
+### 3-3 UI 병합
+- [ ] 오피스 채팅 `/` 팝업의 스킬 소스를 `/api/vibe/skills`로 전환
+- [ ] `origin` 배지(claude/vibe) 표시
+- [ ] 클래식 모드 슬래시 팝업(있다면)도 동일 전환
+
+### 3-4 자기 드레싱 — 이 리포의 `.vibe/skills/` 샘플
+- [ ] `.vibe/skills/platform-check/SKILL.md` — PLATFORM_LAYERS.md 요약 + 레이어 진단
+- [ ] 또는 `.vibe/skills/phase-plan/SKILL.md` — 현재 Phase 상태 보고
+
+### 3-5 하네스 검증
+- [ ] `scripts/harness_verify.py`에 `.vibe/` 포맷 검증 추가
+- [ ] SKILL.md frontmatter 필수 필드 (`name`, `description`) 누락 시 WARN
+- [ ] `tests/test_harness_verify.py` 케이스 추가
+
+---
+
 ## 완료된 작업 (2026-04-15~16)
 
 - [x] Phase 1: 정확한 그림 만들기

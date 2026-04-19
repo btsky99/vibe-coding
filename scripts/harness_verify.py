@@ -31,6 +31,9 @@ REVISION HISTORY:
 - 2026-04-19 Claude: 어제 UI 대청소(커밋 37d8266, 83cee44) 반영
   - REQUIRED_RUNTIME_FILES에서 auto_dispatcher.py 제거 (디스패처 폐기)
   - HOT_FILE_THRESHOLDS에서 AgentPanel.tsx 제거 (AgentPanel 폐기)
+- 2026-04-19 Claude: Platform Phase 3-5 — .vibe/skills 포맷 검증 추가
+  - _check_vibe_skills(): frontmatter 존재/필수 필드(name,description)/디렉토리명 일치
+  - .vibe/ 자체는 선택 — 없으면 검사 스킵
 """
 
 from __future__ import annotations
@@ -171,6 +174,76 @@ def _check_runtime_files(root: Path, passes: list, errors: list) -> None:
             passes.append(f"runtime-path:{rel_path}")
         else:
             errors.append(f"runtime-path-missing:{rel_path}")
+
+
+def _check_vibe_skills(root: Path, passes: list, warnings: list) -> None:
+    """[검사 V3] .vibe/skills/ 포맷 검증 — Platform Phase 3
+    규약: docs/VIBE_CONVENTIONS.md
+    - 각 <name>/SKILL.md가 YAML frontmatter(--- ... ---)를 가져야 함
+    - name, description 필수 필드가 있어야 함
+    - 디렉토리명과 name 필드가 불일치하면 WARN
+    .vibe/ 자체는 선택 — 없으면 검사 스킵.
+    """
+    skills_dir = root / ".vibe" / "skills"
+    if not skills_dir.exists() or not skills_dir.is_dir():
+        return
+
+    for entry in sorted(skills_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        skill_md = None
+        for candidate in ("SKILL.md", "skill.md"):
+            p = entry / candidate
+            if p.exists():
+                skill_md = p
+                break
+        if skill_md is None:
+            warnings.append(f"vibe-skill-no-md:{entry.name}")
+            continue
+
+        text = _read_text(skill_md)
+        # frontmatter --- ... ---
+        if not text.startswith("---"):
+            warnings.append(f"vibe-skill-no-frontmatter:{entry.name}")
+            continue
+
+        # 단순 블록 추출: 첫 ---와 두 번째 ---
+        lines = text.splitlines()
+        if lines[0].strip() != "---":
+            warnings.append(f"vibe-skill-no-frontmatter:{entry.name}")
+            continue
+        end_idx = None
+        for i, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                end_idx = i
+                break
+        if end_idx is None:
+            warnings.append(f"vibe-skill-unclosed-frontmatter:{entry.name}")
+            continue
+
+        block = "\n".join(lines[1:end_idx])
+        has_name = False
+        has_desc = False
+        name_value = ""
+        for raw in block.splitlines():
+            stripped = raw.strip()
+            if stripped.startswith("name:"):
+                has_name = True
+                name_value = stripped[len("name:"):].strip()
+            elif stripped.startswith("description:"):
+                has_desc = True
+
+        if not has_name:
+            warnings.append(f"vibe-skill-missing-name:{entry.name}")
+            continue
+        if not has_desc:
+            warnings.append(f"vibe-skill-missing-description:{entry.name}")
+            continue
+        if name_value and name_value != entry.name:
+            warnings.append(f"vibe-skill-name-mismatch:{entry.name}!={name_value}")
+            continue
+
+        passes.append(f"vibe-skill:{entry.name}")
 
 
 def _check_hot_files(root: Path, passes: list, warnings: list) -> None:
@@ -323,6 +396,9 @@ def verify_repository(root: Path) -> dict[str, list[str]]:
     _check_guide_links(root, passes, errors)
     _check_runtime_files(root, passes, errors)
     _check_hot_files(root, passes, warnings)
+
+    # V3 검사 (Platform Phase 3) — .vibe/skills 포맷
+    _check_vibe_skills(root, passes, warnings)
 
     # V2 검사 (7~10)
     feature_data = _check_feature_list(root, passes, warnings, errors)
