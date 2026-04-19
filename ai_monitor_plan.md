@@ -119,9 +119,46 @@
 | 5 | C.1 통합 검색 API | 🟢 쉬움 | 반나절 | B.2 | ✅ (5f64eac) |
 | 6 | C.2 브리핑 소스 확장 | 🟡 중간 | 반나절 | C.1, B.1 | ✅ (1bb9414) |
 | 7 | C.3 승격 파이프라인 | 🟡 중간 | 1일 | C.1 | ✅ (0489122) |
-| 8 | C.4 fleeting→permanent 자동 규칙 | 🟡 중간 | 반나절 | C.3 | 🎯 다음 |
-| 9 | A-2 프로젝트 탭 UI | 🟡 중간 | 1일 | A-1 | 대기 |
-| 10 | A-3 완전 독립 멀티탭 | 🔴 큼 | 2일+ | A-2 | 대기 |
+| 8 | C.4 fleeting→permanent 자동 규칙 | 🟡 중간 | 반나절 | C.3 | ✅ (8ec7e74, c685f4a) |
+| 9 | A-2/A-3 → **Platform Phase 2~5로 통합** (`docs/PLATFORM_LAYERS.md`) | — | — | — | 🎯 진행 중 |
+
+> **2026-04-19 재정렬:** A-2/A-3(멀티 프로젝트 탭)는 단순 UI 작업이 아니라
+> "Vibe Coding = 하네스/하이브/옵시디언 내장 IDE" 아키텍처 정의의 일부.
+> 상위 로드맵은 [docs/PLATFORM_LAYERS.md](docs/PLATFORM_LAYERS.md)로 승격,
+> 이 계획서는 그 하위 마이크로태스크만 추적.
+
+---
+
+## Platform Phase 2 — project_id 스코프 강제 (상세)
+
+> 상위 문서: [docs/PLATFORM_LAYERS.md](docs/PLATFORM_LAYERS.md)
+> 목표: Layer 1의 모든 DB 쓰기가 `project_id`로 격리되어, 여러 프로젝트가
+> 서로 오염 없이 공존 가능하게 한다.
+
+### 2-1 DB 스키마 감사 (읽기 전용)
+- [ ] Layer 1 테이블 목록 확정 (hive_*, zettel_*, pg_logs, pg_messages,
+      agent_*, active_session_context, task_comments, office_*)
+- [ ] 각 테이블에 `project_id` 컬럼 존재 여부 + 기본값 + NOT NULL 여부 확인
+- [ ] 기존 데이터의 `project_id` 분포 (empty/NULL 비율) 측정
+- [ ] 감사 결과 표로 정리 + 마이그레이션 대상 후보 도출
+
+### 2-2 project_id 컬럼 추가 마이그레이션 (있어야 할 곳)
+- [ ] 2-1에서 도출된 테이블에 `project_id TEXT NOT NULL DEFAULT ''` 추가
+- [ ] 빈 값 데이터에 현재 활성 프로젝트 id 일괄 backfill
+- [ ] 인덱스 추가 (`(project_id, status)` 등 조회 패턴별)
+
+### 2-3 project_id Resolver 유틸
+- [ ] 현재 활성 프로젝트 조회 헬퍼 (서버·UI 양쪽 일관)
+- [ ] 컨텍스트 미지정 쿼리 탐지 (개발 모드에서 경고)
+
+### 2-4 API 레이어 일관화
+- [ ] 모든 `.ai_monitor/api/*.py`의 쓰기 경로에 `project_id` 인자 필수화
+- [ ] 읽기 경로에 `project_id` 필터 옵션 추가
+
+### 2-5 UI 프로젝트 탭 (기존 A-2 흡수)
+- [ ] 상단 탭 바 컴포넌트
+- [ ] 탭 전환 시 SWR/폴링 키에 project_id 자동 첨부
+- [ ] 탭별 PTY 세션 상태 보존
 
 ---
 
