@@ -28,6 +28,9 @@ REVISION HISTORY:
   - Generator-Evaluator 분리 위반 탐지 추가
   - 스프린트 계약 존재 확인 추가
   - JSON 출력 모드 추가
+- 2026-04-19 Claude: 어제 UI 대청소(커밋 37d8266, 83cee44) 반영
+  - REQUIRED_RUNTIME_FILES에서 auto_dispatcher.py 제거 (디스패처 폐기)
+  - HOT_FILE_THRESHOLDS에서 AgentPanel.tsx 제거 (AgentPanel 폐기)
 """
 
 from __future__ import annotations
@@ -77,7 +80,6 @@ AGENT_GUIDE_REQUIREMENTS = {
 
 REQUIRED_RUNTIME_FILES = [
     "scripts/harness_verify.py",
-    "scripts/auto_dispatcher.py",
     "scripts/itcp.py",
     "feature_list.json",
     "progress.md",
@@ -85,7 +87,6 @@ REQUIRED_RUNTIME_FILES = [
 
 HOT_FILE_THRESHOLDS = {
     ".ai_monitor/server.py": 5000,
-    ".ai_monitor/vibe-view/src/components/panels/AgentPanel.tsx": 2500,
     ".ai_monitor/vibe-view/src/components/TerminalSlot.tsx": 1200,
     ".ai_monitor/vibe-view/src/App.tsx": 1200,
 }

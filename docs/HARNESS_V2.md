@@ -11,6 +11,9 @@ REVISION HISTORY:
   - Feature List JSON 기반 진행 추적
   - 스프린트 계약 패턴 명세
   - 컨텍스트 관리 전략 (리셋 vs 압축)
+- 2026-04-19 Claude: Layer 3 다이어그램에서 auto_dispatcher.py 제거
+  - 2026-04-18 커밋 37d8266 "멀티 LLM 디스패처 정리 — 실사용 0" 반영
+  - 실제 작업 분배는 hive_tasks 원자적 체크아웃으로 대체됨
 -->
 
 # 🛡️ Vibe Coding Harness V2
@@ -57,8 +60,8 @@ REVISION HISTORY:
 ├─────────────────────────────────────────────────────────┤
 │  Layer 3: 실행 하네스 (Execution Harness)                 │
 │  ─ 에이전트 간 작업 분배와 통신                             │
-│  ─ auto_dispatcher.py (역량 기반 분배)                    │
 │  ─ itcp.py (PostgreSQL 기반 메시징)                       │
+│  ─ hive_tasks (PostgreSQL 원자적 체크아웃 기반 분배)       │
 │  ─ Plan → Work → Review 사이클                           │
 └─────────────────────────────────────────────────────────┘
 ```

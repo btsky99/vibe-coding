@@ -47,10 +47,8 @@ def _seed_minimal_repo(root: Path) -> None:
     _write(root, "GEMINI.md", "RULES.md\nHARNESS_V2.md")
     _write(root, "CODEX_GUIDE.md", "HARNESS_V2.md")
     _write(root, "scripts/harness_verify.py", "print('ok')\n")
-    _write(root, "scripts/auto_dispatcher.py", "print('ok')\n")
     _write(root, "scripts/itcp.py", "print('ok')\n")
     _write(root, ".ai_monitor/server.py", "print('ok')\n")
-    _write(root, ".ai_monitor/vibe-view/src/components/panels/AgentPanel.tsx", "export {};\n")
     _write(root, ".ai_monitor/vibe-view/src/components/TerminalSlot.tsx", "export {};\n")
     _write(root, ".ai_monitor/vibe-view/src/App.tsx", "export {};\n")
 
