@@ -31,11 +31,11 @@ def handle_get(handler, path: str, params: dict,
         show_all = params.get('all', ['false'])[0].lower() == 'true'
         author = params.get('author', [''])[0].strip()
         include_zettel = params.get('include_zettel', ['false'])[0].lower() == 'true'
-        project = '' if show_all else PROJECT_ID
+        project_id = '' if show_all else PROJECT_ID
         try:
             ensure_schema(DATA_DIR)
             entries = list_memory(
-                q=q, top_k=top_k, project=project, show_all=show_all,
+                q=q, top_k=top_k, project_id=project_id, show_all=show_all,
                 author=author, include_zettel=include_zettel,
             )
             handler.wfile.write(json.dumps(entries, ensure_ascii=False).encode('utf-8'))
@@ -78,7 +78,7 @@ def handle_post(handler, path: str, data: dict,
 
             now = time.strftime('%Y-%m-%dT%H:%M:%S')
             title = str(data.get('title', key)).strip()[:300]
-            project = str(data.get('project', PROJECT_ID)).strip() or PROJECT_ID
+            project_id = str(data.get('project_id', PROJECT_ID)).strip() or PROJECT_ID
             tags = data.get('tags', [])
             if isinstance(tags, str):
                 tags = [tag.strip() for tag in tags.split(',') if tag.strip()]
@@ -92,7 +92,7 @@ def handle_post(handler, path: str, data: dict,
                 title=title,
                 tags=tags if isinstance(tags, list) else [],
                 author=str(author_raw) if author_raw else None,
-                project=project,
+                project_id=project_id,
                 created_at=now,
                 updated_at=now,
             )
@@ -173,14 +173,14 @@ def handle_post(handler, path: str, data: dict,
                 ).encode('utf-8'))
                 return True
 
-            # project를 __global__로 변경하여 모든 프로젝트에서 접근 가능하게 함
+            # project_id를 __global__로 변경하여 모든 프로젝트에서 접근 가능하게 함
             saved = set_memory(
                 key=key,
                 content=entry.get('content', ''),
                 title=entry.get('title', key),
                 tags=entry.get('tags', []),
                 author=entry.get('author', 'unknown'),
-                project='__global__',
+                project_id='__global__',
                 updated_at=time.strftime('%Y-%m-%dT%H:%M:%S'),
             )
             handler.wfile.write(json.dumps(

@@ -104,7 +104,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   // memShowAll=false이고 currentProjectName이 있으면 프로젝트 필터 적용
   const displayedMemory = memShowAll || !currentProjectName
     ? memory
-    : memory.filter(entry => entry.project === currentProjectName);
+    : memory.filter(entry => entry.project_id === currentProjectName);
 
   // ─── CRUD 핸들러 ────────────────────────────────────────────────────────
 

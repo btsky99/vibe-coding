@@ -38,7 +38,7 @@ def handle_get(handler, path: str, params: dict,
     if path == '/api/zettel/notes':
         ensure_schema(DATA_DIR)
         notes = list_notes(
-            project=params.get('project', [''])[0] or '',
+            project_id=params.get('project_id', [''])[0] or '',
             note_type=params.get('type', [''])[0],
             author=params.get('author', [''])[0],
             include_archived=params.get('archived', ['false'])[0].lower() == 'true',
@@ -67,17 +67,17 @@ def handle_get(handler, path: str, params: dict,
     # 지식 그래프
     if path == '/api/zettel/graph':
         ensure_schema(DATA_DIR)
-        project = params.get('project', [''])[0]
+        project_id = params.get('project_id', [''])[0]
         limit = int(params.get('limit', ['200'])[0])
-        graph = get_graph(project=project, limit=limit)
+        graph = get_graph(project_id=project_id, limit=limit)
         _json_response(handler, graph)
         return True
 
     # 통계
     if path == '/api/zettel/stats':
         ensure_schema(DATA_DIR)
-        project = params.get('project', [''])[0]
-        stats = get_stats(project=project)
+        project_id = params.get('project_id', [''])[0]
+        stats = get_stats(project_id=project_id)
         _json_response(handler, stats)
         return True
 
@@ -93,8 +93,8 @@ def handle_get(handler, path: str, params: dict,
     if path == '/api/zettel/next-id':
         ensure_schema(DATA_DIR)
         parent = params.get('parent', [''])[0]
-        project = params.get('project', [PROJECT_ID])[0]
-        _json_response(handler, {'next_id': generate_zettel_id(parent, project=project)})
+        project_id = params.get('project_id', [PROJECT_ID])[0]
+        _json_response(handler, {'next_id': generate_zettel_id(parent, project_id=project_id)})
         return True
 
     return False
@@ -119,7 +119,7 @@ def handle_post(handler, path: str, data: dict,
             content=str(data.get('content', '')),
             note_type=str(data.get('note_type', 'fleeting')),
             author=str(data.get('author', 'unknown')),
-            project=str(data.get('project', PROJECT_ID)) or PROJECT_ID,
+            project_id=str(data.get('project_id', PROJECT_ID)) or PROJECT_ID,
             tags=tags,
             source_ref=str(data.get('source_ref', '')),
             parent_id=str(data.get('parent_id', '')),

@@ -16,29 +16,29 @@ from src.pg_store import execute, execute_raw, query_rows, ensure_schema, _sql_t
 
 # ── 분기 번호(Zettel ID) 생성 ──────────────────────────────────────────────
 
-def _project_prefix(project: str = '') -> str:
-    """프로젝트명에서 vault 안전한 접두사를 생성한다.
+def _project_prefix(project_id: str = '') -> str:
+    """프로젝트 ID에서 vault 안전한 접두사를 생성한다.
 
     예: 'D--vibe-coding' → 'vibe', 'my-project' → 'myproj', '' → ''
     """
-    if not project:
+    if not project_id:
         return ''
     # D-- 접두사 제거, 소문자화, 최대 8자
-    name = re.sub(r'^[A-Z]--', '', project).lower()
+    name = re.sub(r'^[A-Z]--', '', project_id).lower()
     # 'vibe-coding' → 'vibe' (첫 단어)
     parts = re.split(r'[-_]', name)
     prefix = parts[0][:8] if parts else name[:8]
     return prefix
 
 
-def _next_zettel_id(parent_id: str = '', project: str = '') -> str:
+def _next_zettel_id(parent_id: str = '', project_id: str = '') -> str:
     """루만식 분기 번호 생성. 프로젝트 접두사 포함.
 
-    예: project='D--vibe-coding' → 'vibe-1', 'vibe-2', 'vibe-2a', 'vibe-2a1'
+    예: project_id='D--vibe-coding' → 'vibe-1', 'vibe-2', 'vibe-2a', 'vibe-2a1'
         parent='vibe-2' → 'vibe-2a'
     """
     ensure_schema()
-    prefix = _project_prefix(project)
+    prefix = _project_prefix(project_id)
     sep = '-' if prefix else ''
 
     if not parent_id:
@@ -86,27 +86,27 @@ def _next_zettel_id(parent_id: str = '', project: str = '') -> str:
         return parent_id + '1'
 
 
-def generate_zettel_id(parent_id: str = '', project: str = '') -> str:
+def generate_zettel_id(parent_id: str = '', project_id: str = '') -> str:
     """외부에서 호출 가능한 분기 번호 생성 함수."""
-    return _next_zettel_id(parent_id, project=project)
+    return _next_zettel_id(parent_id, project_id=project_id)
 
 
 # ── CRUD ───────────────────────────────────────────────────────────────────
 
 def create_note(title: str, content: str = '', note_type: str = 'fleeting',
-                author: str = 'unknown', project: str = '', tags: list | None = None,
+                author: str = 'unknown', project_id: str = '', tags: list | None = None,
                 source_ref: str = '', parent_id: str = '',
                 custom_id: str = '') -> dict | None:
     """원자 노트 생성. 분기 번호 자동 생성 또는 custom_id 지정 가능."""
     ensure_schema()
-    zettel_id = custom_id or _next_zettel_id(parent_id, project=project)
+    zettel_id = custom_id or _next_zettel_id(parent_id, project_id=project_id)
     now = datetime.now(timezone.utc).isoformat()
     tags_json = json.dumps(tags or [], ensure_ascii=False)
 
     ok = execute(
-        f"INSERT INTO zettel_notes (id, title, content, note_type, author, project, tags, source_ref, created_at, updated_at) "
+        f"INSERT INTO zettel_notes (id, title, content, note_type, author, project_id, tags, source_ref, created_at, updated_at) "
         f"VALUES ({_sql_text(zettel_id)}, {_sql_text(title)}, {_sql_text(content)}, "
-        f"{_sql_text(note_type)}, {_sql_text(author)}, {_sql_text(project)}, "
+        f"{_sql_text(note_type)}, {_sql_text(author)}, {_sql_text(project_id)}, "
         f"{_sql_text(tags_json)}::jsonb, {_sql_text(source_ref)}, "
         f"{_sql_text(now)}, {_sql_text(now)});"
     )
@@ -164,7 +164,7 @@ def delete_note(note_id: str) -> bool:
     return execute(f"DELETE FROM zettel_notes WHERE id = {_sql_text(note_id)};")
 
 
-def list_notes(project: str = '', note_type: str = '', author: str = '',
+def list_notes(project_id: str = '', note_type: str = '', author: str = '',
                include_archived: bool = False, q: str = '',
                order_by: str = 'updated_at', limit: int = 50,
                offset: int = 0) -> list[dict]:
@@ -173,8 +173,8 @@ def list_notes(project: str = '', note_type: str = '', author: str = '',
     conditions = []
     if not include_archived:
         conditions.append("archived = FALSE")
-    if project:
-        conditions.append(f"project = {_sql_text(project)}")
+    if project_id:
+        conditions.append(f"project_id = {_sql_text(project_id)}")
     if note_type:
         conditions.append(f"note_type = {_sql_text(note_type)}")
     if author:
@@ -244,10 +244,10 @@ def get_backlinks(note_id: str) -> list[dict]:
     )
 
 
-def get_graph(project: str = '', limit: int = 200) -> dict:
+def get_graph(project_id: str = '', limit: int = 200) -> dict:
     """전체 노트 그래프 반환 (nodes + edges). UI 시각화용."""
     ensure_schema()
-    proj_filter = f"WHERE project = {_sql_text(project)}" if project else ""
+    proj_filter = f"WHERE project_id = {_sql_text(project_id)}" if project_id else ""
     nodes = query_rows(
         f"SELECT id, title, note_type, author, access_count, archived, tags::text AS tags_text "
         f"FROM zettel_notes {proj_filter} "
@@ -306,11 +306,11 @@ def apply_gravity(days_threshold: int = 30, archive: bool = False) -> list[dict]
     return sunk
 
 
-def get_stats(project: str = '') -> dict:
+def get_stats(project_id: str = '') -> dict:
     """제텔카스텐 통계: 노트/링크 수, 유형별 분포, 최다 연결 노트."""
     ensure_schema()
-    proj_filter = f"WHERE project = {_sql_text(project)}" if project else ""
-    proj_filter_and = f"AND project = {_sql_text(project)}" if project else ""
+    proj_filter = f"WHERE project_id = {_sql_text(project_id)}" if project_id else ""
+    proj_filter_and = f"AND project_id = {_sql_text(project_id)}" if project_id else ""
 
     total = query_rows(f"SELECT COUNT(*) AS cnt FROM zettel_notes {proj_filter};")
     by_type = query_rows(

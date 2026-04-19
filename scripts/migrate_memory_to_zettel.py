@@ -33,7 +33,7 @@ def migrate():
 
     # 기존 메모리 전체 조회
     memories = query_rows(
-        "SELECT key, title, content, tags::text AS tags_text, author, project, "
+        "SELECT key, title, content, tags::text AS tags_text, author, project_id, "
         "created_at, updated_at FROM hive_memory ORDER BY created_at ASC;"
     )
     if not memories:
@@ -57,7 +57,7 @@ def migrate():
             content=mem.get('content', ''),
             note_type='literature',  # 기존 메모리는 문헌 노트로 분류
             author=mem.get('author', 'unknown'),
-            project=mem.get('project', ''),
+            project_id=mem.get('project_id', ''),
             tags=tags,
             source_ref=f"migrated:hive_memory:{mem.get('key', '')}",
         )
@@ -72,7 +72,7 @@ def migrate():
     for key, zid in id_map.items():
         mem = next((m for m in memories if m['key'] == key), None)
         if mem:
-            proj = mem.get('project', '')
+            proj = mem.get('project_id', '')
             by_project.setdefault(proj, []).append(zid)
 
     link_count = 0

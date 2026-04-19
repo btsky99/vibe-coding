@@ -76,7 +76,7 @@ def _format_frontmatter(note: dict) -> str:
         f'note_type: {note_type}',
         f'cssclasses: [zettel-{note_type}]',
         f'author: {note.get("author", "unknown")}',
-        f'project: {note.get("project", "")}',
+        f'project_id: {note.get("project_id", "")}',
         'tags: [{}]'.format(', '.join('"{}"'.format(t) for t in tags_list)),
         f'source_ref: "{_escape_yaml(note.get("source_ref", ""))}"',
         f'access_count: {note.get("access_count", 0)}',
@@ -200,7 +200,7 @@ def _safe_filename(note_id: str, title: str) -> str:
     return safe_id
 
 
-def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool = False):
+def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: bool = False):
     """PostgreSQL → Obsidian Vault 전체 동기화."""
     ensure_schema(DATA_DIR)
     vault_dir.mkdir(parents=True, exist_ok=True)
@@ -211,7 +211,7 @@ def export_to_vault(vault_dir: Path, project: str = '', include_archived: bool =
 
     # 전체 노트 조회
     notes = list_notes(
-        project=project,
+        project_id=project_id,
         include_archived=include_archived,
         limit=10000,
     )
@@ -507,7 +507,7 @@ def _extract_body(text: str) -> str:
     return body.strip()
 
 
-def import_from_vault(vault_dir: Path, project: str = ''):
+def import_from_vault(vault_dir: Path, project_id: str = ''):
     """Obsidian Vault → PostgreSQL 역동기화.
 
     vault의 .md 파일을 읽어 YAML 프론트매터를 파싱하고,
@@ -574,7 +574,7 @@ def import_from_vault(vault_dir: Path, project: str = ''):
             # 신규 생성
             create_note(
                 title=title, content=body, note_type=note_type,
-                author=author, project=project, tags=tags,
+                author=author, project_id=project_id, tags=tags,
                 source_ref=source_ref, custom_id=zettel_id,
             )
 
@@ -584,7 +584,7 @@ def import_from_vault(vault_dir: Path, project: str = ''):
     return imported
 
 
-def watch_and_sync(vault_dir: Path, project: str = '', interval: int = 60,
+def watch_and_sync(vault_dir: Path, project_id: str = '', interval: int = 60,
                    bidirectional: bool = False):
     """주기적 동기화 루프. 데몬 모드로 실행."""
     mode_label = '양방향' if bidirectional else '단방향(PG→Vault)'
@@ -592,8 +592,8 @@ def watch_and_sync(vault_dir: Path, project: str = '', interval: int = 60,
     while True:
         try:
             if bidirectional:
-                import_from_vault(vault_dir, project=project)
-            export_to_vault(vault_dir, project=project)
+                import_from_vault(vault_dir, project_id=project_id)
+            export_to_vault(vault_dir, project_id=project_id)
         except Exception as e:
             print(f'[zettel_sync] 동기화 오류: {e}')
         time.sleep(interval)
@@ -620,12 +620,12 @@ def main():
     vault_path = Path(args.vault)
 
     if args.do_import:
-        import_from_vault(vault_path, project=args.project)
+        import_from_vault(vault_path, project_id=args.project)
     elif args.watch:
-        watch_and_sync(vault_path, project=args.project,
+        watch_and_sync(vault_path, project_id=args.project,
                        interval=args.interval, bidirectional=args.bidirectional)
     else:
-        export_to_vault(vault_path, project=args.project, include_archived=args.archived)
+        export_to_vault(vault_path, project_id=args.project, include_archived=args.archived)
 
 
 if __name__ == '__main__':

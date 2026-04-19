@@ -42,7 +42,7 @@ def migrate():
         tags = row['tags'] if row['tags'] else '[]'
         
         cmd = f"""
-        INSERT INTO hive_memory (key, title, content, tags, author, project, updated_at)
+        INSERT INTO hive_memory (key, title, content, tags, author, project_id, updated_at)
         VALUES ({esc(row['key'])}, {esc(row['title'])}, {esc(row['content'])}, {esc(tags)}::jsonb, {esc(row['author'])}, {esc(row['project'])}, {esc(row['updated_at'])})
         ON CONFLICT (key) DO UPDATE SET
             content = EXCLUDED.content,

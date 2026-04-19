@@ -38,7 +38,7 @@ def log_start(terminal_id: str, project: str, project_path: str, agent: str, ski
         terminal_id=terminal_id,
         agent=agent,
         trigger_msg=mask_sensitive_data(trigger),
-        project=project,
+        project_id=project,
         status="running"
     )
     return session_id
@@ -52,7 +52,7 @@ def log_phase(session_id: str, phase_name: str, status: str, detail: str):
         terminal_id=terminal_id,
         agent="system",
         trigger_msg=f"[{phase_name}] {mask_sensitive_data(detail)}",
-        project="phase",
+        project_id="phase",
         status=status
     )
 
@@ -68,7 +68,7 @@ def log_end(session_id: str, status: str, commit: str = "", files_changed: list 
         terminal_id=terminal_id,
         agent="system",
         trigger_msg=f"Session completed. Files changed: {len(files_changed)}",
-        project="end",
+        project_id="end",
         status=status
     )
 

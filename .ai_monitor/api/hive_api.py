@@ -405,7 +405,7 @@ def handle_get(handler, path: str, params: dict,
             agent_last_seen: dict = get_agent_last_seen(KNOWN_AGENTS)
             # 현재 프로젝트 메모리만 조회 (프로젝트 격리)
             _proj_id_str = str(_current_project_root()).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
-            for row in list_memory(top_k=100, project=_proj_id_str):
+            for row in list_memory(top_k=100, project_id=_proj_id_str):
                 author_lower = str(row.get('author', '')).lower()
                 last = row.get('updated_at')
                 for agent_name in KNOWN_AGENTS:

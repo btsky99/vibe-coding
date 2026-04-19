@@ -357,13 +357,13 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             content TEXT NOT NULL DEFAULT '',
             tags JSONB NOT NULL DEFAULT '[]'::jsonb,
             author TEXT NOT NULL DEFAULT 'unknown',
-            project TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
             expires_at TEXT DEFAULT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_hive_memory_updated ON hive_memory (updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_hive_memory_project ON hive_memory (project);
+        -- idx_hive_memory_project_id: Phase 2 단계 2 RENAME 이후 execute_raw로 생성
 
         CREATE TABLE IF NOT EXISTS hive_sessions (
             id BIGSERIAL PRIMARY KEY,
@@ -371,7 +371,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             legacy_id BIGINT,
             session_id TEXT NOT NULL,
             terminal_id TEXT DEFAULT '',
-            project TEXT DEFAULT '',
+            project_id TEXT DEFAULT '',
             agent TEXT DEFAULT '',
             trigger_msg TEXT DEFAULT '',
             status TEXT DEFAULT '',
@@ -575,7 +575,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
                 content TEXT NOT NULL DEFAULT '',
                 note_type TEXT NOT NULL DEFAULT 'fleeting',
                 author TEXT NOT NULL DEFAULT 'unknown',
-                project TEXT NOT NULL DEFAULT '',
+                project_id TEXT NOT NULL DEFAULT '',
                 tags JSONB NOT NULL DEFAULT '[]'::jsonb,
                 source_ref TEXT DEFAULT '',
                 access_count INT NOT NULL DEFAULT 0,
@@ -587,7 +587,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         """)
         execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_type ON zettel_notes (note_type);")
         execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_author ON zettel_notes (author);")
-        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_project ON zettel_notes (project);")
+        # idx_zettel_notes_project_id: Phase 2 단계 2 RENAME 이후 execute_raw로 생성
         execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_updated ON zettel_notes (updated_at DESC);")
         execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_rescued ON zettel_notes (last_rescued_at DESC NULLS LAST);")
         execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_archived ON zettel_notes (archived, updated_at DESC);")
@@ -851,6 +851,52 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("ALTER TABLE code_wiki ADD COLUMN IF NOT EXISTS wiki_type TEXT NOT NULL DEFAULT 'file';")
         execute_raw("ALTER TABLE code_wiki ADD COLUMN IF NOT EXISTS node_id INTEGER REFERENCES code_nodes(id) ON DELETE CASCADE;")
 
+        # ── [2026-04-19] Platform Phase 2 단계 2 — project → project_id 컬럼 RENAME ──
+        # hive_memory, hive_sessions, zettel_notes 3개 테이블의 구 컬럼 'project'를
+        # 'project_id'로 통일. 멱등: 이미 바뀐 DB에서는 no-op.
+        _rename_pairs = [
+            ("hive_memory",   "idx_hive_memory_project"),
+            ("hive_sessions", None),
+            ("zettel_notes",  "idx_zettel_notes_project"),
+        ]
+        for _tbl, _old_idx in _rename_pairs:
+            execute_raw(f"""
+                DO $$ BEGIN
+                  IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='{_tbl}' AND column_name='project'
+                  ) THEN
+                    ALTER TABLE {_tbl} RENAME COLUMN project TO project_id;
+                  END IF;
+                END $$;
+            """)
+            if _old_idx:
+                execute_raw(f"DROP INDEX IF EXISTS {_old_idx};")
+        # RENAME 후 새 인덱스 생성 — 구 스키마에서도 안전하게 실행 가능
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_hive_memory_project_id ON hive_memory (project_id);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_notes_project_id ON zettel_notes (project_id);")
+
+        # ── [2026-04-19] Platform Phase 2 단계 3 — Layer 1 project_id 스코프 강제 ──
+        # 모든 Layer 1 테이블이 project_id TEXT NOT NULL DEFAULT ''를 갖도록 업그레이드.
+        # 데이터 backfill은 scripts/migrate_project_id_backfill.py가 담당.
+        # 상위 문서: docs/PLATFORM_LAYERS.md
+        _layer1_project_id_tables = [
+            "zettel_links",
+            "agent_experience",
+            "agent_heartbeats",
+            "agent_stats",
+            "active_session_context",
+            "hive_skill_chains",
+            "hive_state",
+            "office_profile_state",
+            "office_profiles",
+            "pg_messages",
+            "task_comments",
+        ]
+        for _tbl in _layer1_project_id_tables:
+            execute_raw(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';")
+            execute_raw(f"CREATE INDEX IF NOT EXISTS idx_{_tbl}_project_id ON {_tbl} (project_id);")
+
         _SCHEMA_READY = True
         if not _MIGRATION_DONE:
             # DB에 마이그레이션 완료 플래그 확인 — 프로세스 재시작 시 재실행 방지
@@ -910,7 +956,7 @@ def _migrate_memory(data_dir: Path) -> None:
             title=row.get('title', '') or row.get('key', ''),
             tags=_parse_json_text(row.get('tags'), []),
             author=row.get('author', 'unknown'),
-            project=row.get('project', ''),
+            project_id=row.get('project', ''),
             created_at=row.get('created_at') or row.get('updated_at') or '',
             updated_at=row.get('updated_at') or row.get('created_at') or '',
         )
@@ -922,7 +968,7 @@ def _migrate_sessions(data_dir: Path) -> None:
         upsert_session_log(
             session_id=row.get('session_id', ''),
             terminal_id=row.get('terminal_id', ''),
-            project=row.get('project', ''),
+            project_id=row.get('project', ''),
             agent=row.get('agent', ''),
             trigger_msg=row.get('trigger_msg', ''),
             status=row.get('status', ''),
@@ -965,7 +1011,7 @@ def _migrate_skill_chains(data_dir: Path) -> None:
         upsert_skill_chain_row(row, legacy_id=row.get('id'))
 
 
-def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool = False,
+def list_memory(q: str = '', top_k: int = 20, project_id: str = '', show_all: bool = False,
                 author: str = '', include_zettel: bool = False) -> list[dict]:
     """하이브 메모리 조회. include_zettel=True면 zettel_notes(정제 지식)도 합쳐 반환.
 
@@ -973,9 +1019,9 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
     zettel 결과는 `note_type`(fleeting/permanent 등)도 함께 담김.
     """
     filters = []
-    if project and not show_all:
+    if project_id and not show_all:
         # 현재 프로젝트 + 글로벌(__global__) 항목 모두 반환 (크로스 프로젝트 지식 공유)
-        filters.append(f"(project = {_sql_text(project)} OR project = '__global__')")
+        filters.append(f"(project_id = {_sql_text(project_id)} OR project_id = '__global__')")
     # 작성자 필터 — 'claude-t1'처럼 정확 매칭, 'claude' 처럼 prefix 매칭 둘 다 지원
     author_norm = (author or '').strip().lower()
     if author_norm:
@@ -989,7 +1035,7 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
     if q:
         q_sql = _sql_text(q)
         query = f"""
-        SELECT key, title, content, author, project, created_at, updated_at, tags::text AS tags
+        SELECT key, title, content, author, project_id, created_at, updated_at, tags::text AS tags
         FROM hive_memory
         {where_sql} {'AND' if where_sql else 'WHERE'}
             (
@@ -1003,7 +1049,7 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
         """
     else:
         query = f"""
-        SELECT key, title, content, author, project, created_at, updated_at, tags::text AS tags
+        SELECT key, title, content, author, project_id, created_at, updated_at, tags::text AS tags
         FROM hive_memory
         {where_sql}
         ORDER BY updated_at DESC
@@ -1023,8 +1069,8 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
             from src.zettelkasten import list_notes
         except ImportError:
             from .zettelkasten import list_notes  # type: ignore
-        # zettel 쪽 필터도 비슷하게 적용. project는 show_all일 때 빈 문자열.
-        zettel_project = '' if show_all or not project else project
+        # zettel 쪽 필터도 비슷하게 적용. project_id는 show_all일 때 빈 문자열.
+        zettel_project_id = '' if show_all or not project_id else project_id
         # 검색어 있으면 hit 전량, 없으면 hive가 밀리지 않게 균형 배분 (절반씩)
         if q:
             zettel_limit = int(top_k) * 2
@@ -1034,7 +1080,7 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
             zettel_limit = half
             hive_rows_kept = rows[:half]
         notes = list_notes(
-            project=zettel_project,
+            project_id=zettel_project_id,
             author=author_norm if author_norm else '',
             q=q or '',
             limit=zettel_limit,
@@ -1053,7 +1099,7 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
                 'content': note.get('content', ''),
                 'tags': note.get('tags', []) or [],
                 'author': note.get('author', 'unknown'),
-                'project': note.get('project', ''),
+                'project_id': note.get('project_id', ''),
                 'created_at': created_str,
                 'updated_at': updated_str,
                 'source': 'zettel',
@@ -1069,7 +1115,7 @@ def list_memory(q: str = '', top_k: int = 20, project: str = '', show_all: bool 
 
 def get_memory(key: str) -> dict | None:
     rows = query_rows(
-        f"SELECT key, title, content, author, project, created_at, updated_at, tags::text AS tags "
+        f"SELECT key, title, content, author, project_id, created_at, updated_at, tags::text AS tags "
         f"FROM hive_memory WHERE key = {_sql_text(key)} LIMIT 1;"
     )
     if not rows:
@@ -1101,7 +1147,7 @@ def set_memory(
     title: str = '',
     tags: list | None = None,
     author: str | None = None,
-    project: str = '',
+    project_id: str = '',
     created_at: str = '',
     updated_at: str = '',
     ttl_days: int | None = None,
@@ -1120,14 +1166,14 @@ def set_memory(
         expires_value = (_dt.datetime.fromisoformat(updated_value) + _dt.timedelta(days=ttl_days)).isoformat()
     execute(
         f"""
-        INSERT INTO hive_memory (key, title, content, tags, author, project, created_at, updated_at, expires_at)
+        INSERT INTO hive_memory (key, title, content, tags, author, project_id, created_at, updated_at, expires_at)
         VALUES (
             {_sql_text(key)},
             {_sql_text(title_value)},
             {_sql_text(content)},
             {_sql_json(tags or [])},
             {_sql_text(author)},
-            {_sql_text(project)},
+            {_sql_text(project_id)},
             {_sql_text(created_value)},
             {_sql_text(updated_value)},
             {_sql_text(expires_value)}
@@ -1137,7 +1183,7 @@ def set_memory(
             content = EXCLUDED.content,
             tags = EXCLUDED.tags,
             author = EXCLUDED.author,
-            project = EXCLUDED.project,
+            project_id = EXCLUDED.project_id,
             updated_at = EXCLUDED.updated_at,
             expires_at = EXCLUDED.expires_at;
         """
@@ -1200,7 +1246,7 @@ def promote_to_zettel(key: str, note_type: str = '') -> dict | None:
         content=entry.get('content', ''),
         note_type=note_type,
         author=entry.get('author', 'unknown'),
-        project=entry.get('project', ''),
+        project_id=entry.get('project_id', ''),
         tags=tags,
         source_ref=f'hive:{key}',
     )
@@ -1312,7 +1358,7 @@ def cleanup_expired_memory() -> int:
 def upsert_session_log(
     session_id: str,
     terminal_id: str = '',
-    project: str = '',
+    project_id: str = '',
     agent: str = '',
     trigger_msg: str = '',
     status: str = '',
@@ -1334,11 +1380,11 @@ def upsert_session_log(
         return execute(
             f"""
             INSERT INTO hive_sessions
-                (legacy_source, legacy_id, session_id, terminal_id, project, agent, trigger_msg,
+                (legacy_source, legacy_id, session_id, terminal_id, project_id, agent, trigger_msg,
                  status, commit_hash, files_changed, ts_start, ts_end)
             VALUES (
                 {_sql_text(legacy_source)}, {legacy_id}, {_sql_text(session_id)}, {_sql_text(terminal_id)},
-                {_sql_text(project)}, {_sql_text(agent)}, {_sql_text(trigger_msg)}, {_sql_text(status)},
+                {_sql_text(project_id)}, {_sql_text(agent)}, {_sql_text(trigger_msg)}, {_sql_text(status)},
                 {_sql_text(commit_hash)}, {_sql_json(files_changed or [])}, {_sql_text(ts_start or _now_iso())},
                 {_sql_text(ts_end or '')}
             );
@@ -1347,9 +1393,9 @@ def upsert_session_log(
     return execute(
         f"""
         INSERT INTO hive_sessions
-            (session_id, terminal_id, project, agent, trigger_msg, status, commit_hash, files_changed, ts_start, ts_end)
+            (session_id, terminal_id, project_id, agent, trigger_msg, status, commit_hash, files_changed, ts_start, ts_end)
         VALUES (
-            {_sql_text(session_id)}, {_sql_text(terminal_id)}, {_sql_text(project)}, {_sql_text(agent)},
+            {_sql_text(session_id)}, {_sql_text(terminal_id)}, {_sql_text(project_id)}, {_sql_text(agent)},
             {_sql_text(trigger_msg)}, {_sql_text(status)}, {_sql_text(commit_hash)},
             {_sql_json(files_changed or [])}, {_sql_text(ts_start or _now_iso())}, {_sql_text(ts_end or '')}
         );
@@ -1360,7 +1406,7 @@ def upsert_session_log(
 def list_session_logs(limit: int = 200) -> list[dict]:
     rows = query_rows(
         f"""
-        SELECT id, session_id, terminal_id, project, agent, trigger_msg, status, commit_hash,
+        SELECT id, session_id, terminal_id, project_id, agent, trigger_msg, status, commit_hash,
                files_changed::text AS files_changed, ts_start, ts_end
         FROM hive_sessions
         ORDER BY ts_start DESC, id DESC
@@ -1646,7 +1692,7 @@ def list_skill_chain_rows() -> list[dict]:
 # key 형식: chat:{timestamp}:{sender}
 # LISTEN/NOTIFY 트리거가 자동으로 'hive_realtime' 채널에 알림
 
-def send_chat(sender: str, content: str, project: str = '') -> dict | None:
+def send_chat(sender: str, content: str, project_id: str = '') -> dict | None:
     """실시간 채팅 메시지 전송 — hive_memory에 저장 + NOTIFY 자동 발생."""
     import time as _t
     key = f"chat:{_t.strftime('%Y%m%d-%H%M%S')}:{sender}:{id(_t)}"
@@ -1656,7 +1702,7 @@ def send_chat(sender: str, content: str, project: str = '') -> dict | None:
         content=content[:2000],
         tags=["chat"],
         author=sender,
-        project=project,
+        project_id=project_id,
         ttl_days=7,  # 채팅 메시지는 7일 후 자동 삭제
     )
 

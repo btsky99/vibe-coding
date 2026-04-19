@@ -1257,7 +1257,7 @@ class MemoryWatcher(threading.Thread):
             return
         try:
             rows = [
-                row for row in list_memory(top_k=30, project=PROJECT_ID)
+                row for row in list_memory(top_k=30, project_id=PROJECT_ID)
                 if not str(row.get('key', '')).startswith('claude:T')
             ][:15]
             if not rows:
@@ -1313,9 +1313,9 @@ class MemoryWatcher(threading.Thread):
 
     # ── 내부: DB 저장 (Postgres-backed memory store) ───────────────────────
     def _upsert(self, key: str, title: str, content: str,
-                author: str, tags: list, project: str = '') -> None:
+                author: str, tags: list, project_id: str = '') -> None:
         now = time.strftime('%Y-%m-%dT%H:%M:%S')
-        proj = project or PROJECT_ID
+        proj = project_id or PROJECT_ID
         try:
             existing = get_memory(key)
             created_at = existing.get('created_at', now) if existing else now
@@ -1325,7 +1325,7 @@ class MemoryWatcher(threading.Thread):
                 content=content,
                 tags=tags,
                 author=author,
-                project=proj,
+                project_id=proj,
                 created_at=created_at,
                 updated_at=now,
             )
@@ -1376,7 +1376,7 @@ class MemoryWatcher(threading.Thread):
                         content=content,
                         author=f"claude-code:terminal-{tid}",
                         tags=['claude', f'terminal-{tid}', stem, proj_dir.name],
-                        project=proj_dir.name,
+                        project_id=proj_dir.name,
                     )
                 except Exception as e:
                     print(f"[MemoryWatcher] Claude 파일 오류 {md_file}: {e}")
@@ -1432,7 +1432,7 @@ class MemoryWatcher(threading.Thread):
                     content='\n'.join(lines),
                     author=f"gemini:terminal-{tid}",
                     tags=['gemini', f'terminal-{tid}', proj_name, 'log'],
-                    project=proj_name,
+                    project_id=proj_name,
                 )
             except Exception as e:
                 print(f"[MemoryWatcher] Gemini logs 오류 {logs_file}: {e}")
@@ -1495,7 +1495,7 @@ class MemoryWatcher(threading.Thread):
                     content=content,
                     author=f"gemini:terminal-{tid}",
                     tags=['gemini', f'terminal-{tid}', proj_name, 'chat'],
-                    project=proj_name,
+                    project_id=proj_name,
                 )
             except Exception as e:
                 print(f"[MemoryWatcher] Gemini chat 오류 {latest}: {e}")
@@ -3175,7 +3175,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         agent_last_seen[agent_name] = last_seen
 
                 # 메모리 작성 시각으로 보완 — 더 최신 활동 기록 포함
-                for row in list_memory(top_k=100, project=_current_project_id()):
+                for row in list_memory(top_k=100, project_id=_current_project_id()):
                     author_lower = str(row.get('author', '')).lower()
                     last = row.get('updated_at')
                     for agent_name in KNOWN_AGENTS:
@@ -3784,7 +3784,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         content=content,
                         tags=tags,
                         author=agent,
-                        project=PROJECT_ID,
+                        project_id=PROJECT_ID,
                         created_at=data['timestamp'],
                         updated_at=data['timestamp'],
                     )
@@ -4390,7 +4390,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                             terminal_id="LOCK_API",
                             agent=agent,
                             trigger_msg=safe_msg,
-                            project="hive",
+                            project_id="hive",
                             status="success"
                         )
                     except Exception as e:
@@ -4480,7 +4480,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         terminal_id="MSG_CHANNEL",
                         agent=msg['from'],
                         trigger_msg=f"[메시지→{msg['to']}] {safe_content[:100]}",
-                        project="hive",
+                        project_id="hive",
                         status="success"
                     )
                 except Exception as e:
@@ -4585,16 +4585,17 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 now     = time.strftime('%Y-%m-%dT%H:%M:%S')
                 title   = str(data.get('title', key)).strip()[:300]
-                project = str(data.get('project', PROJECT_ID)).strip() or PROJECT_ID
+                project_id = str(data.get('project_id', PROJECT_ID)).strip() or PROJECT_ID
                 legacy_dir = _legacy_memory_data_dir()
                 existing = get_memory_entry(legacy_dir, key)
+                # 레거시 파일(shared_memory.json) 포맷은 'project' key로 고정돼 있어 그대로 저장
                 entry = upsert_memory_entry(legacy_dir, {
                     'key': key,
                     'title': title,
                     'content': content,
                     'tags': data.get('tags', []),
                     'author': str(data.get('author', 'unknown')),
-                    'project': project,
+                    'project': project_id,
                     'created_at': existing.get('created_at', now) if existing else now,
                     'updated_at': now,
                 })
@@ -5995,13 +5996,13 @@ def main():
                     try:
                         _gdrive_vault = _get_gdrive_vault()
                         if _gdrive_vault and _gdrive_vault.exists():
-                            _mod.export_to_vault(_gdrive_vault, project=_proj_name)
+                            _mod.export_to_vault(_gdrive_vault, project_id=_proj_name)
                     except Exception as _ge:
                         print(f'[zettel_sync] Google Drive 동기화 오류: {_ge}')
                     time.sleep(120)
             threading.Thread(target=_sync_with_gdrive, daemon=True,
                              name='ZettelGDrive').start()
-            _mod.watch_and_sync(_vault, project=_proj_name, interval=60, bidirectional=True)
+            _mod.watch_and_sync(_vault, project_id=_proj_name, interval=60, bidirectional=True)
         except Exception as e:
             print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
 

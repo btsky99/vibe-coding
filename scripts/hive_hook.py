@@ -173,7 +173,7 @@ def _save_session_snapshot() -> None:
             content="\n".join(important_lines[-20:]),
             tags=["auto", "session", "claude", "snapshot"],
             author="claude",
-            project="vibe-coding",
+            project_id="vibe-coding",
             created_at=now,
             updated_at=now,
         )
@@ -240,7 +240,7 @@ def _update_current_work(completed_items: list[str]) -> None:
             content=content + completed_block,
             tags=rows[0].get("tags", []),
             author=rows[0].get("author", "claude"),
-            project=rows[0].get("project", "vibe-coding"),
+            project_id=rows[0].get("project_id", "vibe-coding"),
             created_at=rows[0].get("created_at", ""),
             updated_at=datetime.now().isoformat(),
         )

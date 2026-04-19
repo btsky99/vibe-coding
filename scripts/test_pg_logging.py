@@ -63,7 +63,7 @@ if __name__ == "__main__":
         terminal_id="TERM_1",
         agent="test_agent",
         trigger_msg="Hello PostgreSQL Hive Logic!",
-        project="test_proj",
+        project_id="test_proj",
         status="running"
     )
     

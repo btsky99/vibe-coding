@@ -125,7 +125,7 @@ def capture_commit(commit_msg: str, files: list[str] | None = None,
         content=content,
         note_type=note_type,
         author=agent,
-        project=DEFAULT_PROJECT,
+        project_id=DEFAULT_PROJECT,
         tags=tags,
         source_ref=f"git-commit:{commit_type}",
     )
@@ -166,7 +166,7 @@ def capture_fix(file_path: str, old_code: str, new_code: str,
         content=content,
         note_type='permanent',
         author=agent,
-        project=DEFAULT_PROJECT,
+        project_id=DEFAULT_PROJECT,
         tags=tags,
         source_ref=f"fix:{rel_path}",
     )
@@ -196,7 +196,7 @@ def capture_decision(context: str, choice: str, reason: str,
         content=content,
         note_type='permanent',
         author=agent,
-        project=DEFAULT_PROJECT,
+        project_id=DEFAULT_PROJECT,
         tags=tags,
         source_ref='decision',
     )
@@ -268,7 +268,7 @@ def capture_session(agent: str = 'claude') -> dict | None:
         content=content,
         note_type='fleeting',
         author=agent,
-        project=DEFAULT_PROJECT,
+        project_id=DEFAULT_PROJECT,
         tags=tags,
         source_ref='session-summary',
     )
@@ -310,7 +310,7 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
         existing = query_rows(
             f"SELECT id, content FROM zettel_notes "
             f"WHERE source_ref = {_sql_text(source_ref)} "
-            f"AND project = {_sql_text(DEFAULT_PROJECT)} "
+            f"AND project_id = {_sql_text(DEFAULT_PROJECT)} "
             f"LIMIT 1;"
         )
 
@@ -352,7 +352,7 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
                 content=content,
                 note_type='permanent',
                 author=agent,
-                project=DEFAULT_PROJECT,
+                project_id=DEFAULT_PROJECT,
                 tags=tags,
                 source_ref=source_ref,
             )
@@ -437,10 +437,10 @@ def _sync_vault():
     """Obsidian vault에 동기화 (로컬 + Google Drive, 에러 무시)."""
     try:
         from zettel_sync import export_to_vault
-        export_to_vault(DEFAULT_VAULT_DIR, project=DEFAULT_PROJECT)
+        export_to_vault(DEFAULT_VAULT_DIR, project_id=DEFAULT_PROJECT)
         # Google Drive vault도 동기화 (존재할 때만)
         if GDRIVE_VAULT_DIR and GDRIVE_VAULT_DIR.exists():
-            export_to_vault(GDRIVE_VAULT_DIR, project=DEFAULT_PROJECT)
+            export_to_vault(GDRIVE_VAULT_DIR, project_id=DEFAULT_PROJECT)
     except Exception as e:
         print(f"[zettel_capture] vault 동기화 실패 (무시): {e}")
 

@@ -1,7 +1,7 @@
 ﻿export interface LogRecord {
     session_id: string;
     terminal_id: string;
-    project: string;
+    project_id: string;
     agent: string;
     trigger: string;
     status: 'running' | 'success' | 'failed';
@@ -63,7 +63,7 @@ export interface MemoryEntry {
     author: string;      // 작성 에이전트
     timestamp: string;   // 최초 생성 시각
     updated_at: string;  // 최종 수정 시각
-    project: string;     // 출처 프로젝트 (예: D--vibe-coding)
+    project_id: string;  // 출처 프로젝트 ID (예: D--vibe-coding)
     // C.1 — 통합 검색 결과에서 항목 출처 구분. 기본은 'hive', include_zettel=true 조회 시 일부는 'zettel'.
     source?: 'hive' | 'zettel';
     note_type?: string;    // zettel 전용 — fleeting / literature / permanent
@@ -77,7 +77,7 @@ export interface ZettelNote {
     content: string;
     note_type: 'fleeting' | 'literature' | 'permanent';
     author: string;
-    project: string;
+    project_id: string;
     tags: string[];
     source_ref: string;
     access_count: number;
@@ -176,7 +176,7 @@ export interface HiveLog {
   id: number;
   session_id: string;
   terminal_id: string;
-  project: string;
+  project_id: string;
   agent: string;
   trigger_msg: string;
   status: string;

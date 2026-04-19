@@ -16,13 +16,13 @@ except ImportError:
         return False
 
 
-def insert_log(session_id, terminal_id, agent, trigger_msg, project="hive", status="running"):
+def insert_log(session_id, terminal_id, agent, trigger_msg, project_id="hive", status="running"):
     try:
         ensure_schema()
         upsert_session_log(
             session_id=session_id,
             terminal_id=terminal_id,
-            project=project,
+            project_id=project_id,
             agent=agent,
             trigger_msg=trigger_msg,
             status=status,
