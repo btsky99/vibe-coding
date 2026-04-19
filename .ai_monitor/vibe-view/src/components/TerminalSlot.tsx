@@ -41,6 +41,8 @@ import '@xterm/xterm/css/xterm.css';
 import { API_BASE, WS_PORT, Shortcut, defaultShortcuts, SLASH_COMMANDS } from '../constants';
 import { LogRecord, AgentMessage, Task } from '../types';
 import ChatSlot from './ChatSlot';
+import ShortcutEditModal from './terminal/ShortcutEditModal';
+import SlashCommandMenu from './terminal/SlashCommandMenu';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
 
@@ -961,50 +963,12 @@ export default function TerminalSlot({
                 rows={2}
                 className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white resize-none custom-scrollbar leading-relaxed"
               />
-              {/* 슬래시 커맨드 퀵 팝업 버튼 */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSlashMenu(v => !v)}
-                  className={`px-2.5 py-2 rounded text-xs font-bold border transition-all ${showSlashMenu ? 'bg-primary text-white border-primary' : 'bg-[#3c3c3c] text-[#cccccc] border-white/10 hover:bg-white/10'}`}
-                  title="슬래시 커맨드 목록"
-                >
-                  /
-                </button>
-                {/* 슬래시 커맨드 팝업 */}
-                {showSlashMenu && (
-                  <div className="absolute bottom-full right-0 mb-1 w-72 bg-[#252526] border border-white/15 rounded-md shadow-2xl z-50 overflow-hidden">
-                    <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center px-3 gap-1.5">
-                      <span className="text-primary font-bold text-[11px]">/</span>
-                      <span className="text-[11px] font-bold text-[#cccccc] uppercase tracking-wider">
-                        {activeAgent.toUpperCase()} 슬래시 커맨드
-                      </span>
-                    </div>
-                    <div className="max-h-64 overflow-y-auto custom-scrollbar py-1">
-                      {/* 카테고리별 그룹핑 */}
-                      {['설정', '작업', '도움말'].map(cat => {
-                        const cmds = (SLASH_COMMANDS[activeAgent] ?? SLASH_COMMANDS['claude'])
-                          .filter(c => c.category === cat);
-                        if (!cmds.length) return null;
-                        return (
-                          <div key={cat}>
-                            <div className="px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest text-white/25">{cat}</div>
-                            {cmds.map(sc => (
-                              <button
-                                key={sc.cmd}
-                                onClick={() => { setInputValue(sc.cmd + ' '); setShowSlashMenu(false); }}
-                                className="w-full flex items-center gap-3 px-3 py-1.5 hover:bg-primary/20 text-left group transition-colors"
-                              >
-                                <span className="text-primary font-mono text-[11px] font-bold w-24 shrink-0 group-hover:text-white transition-colors">{sc.cmd}</span>
-                                <span className="text-[#969696] text-[10px] group-hover:text-[#cccccc] transition-colors leading-tight">{sc.desc}</span>
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <SlashCommandMenu
+                activeAgent={activeAgent}
+                showSlashMenu={showSlashMenu}
+                setShowSlashMenu={setShowSlashMenu}
+                onSelect={(cmd) => setInputValue(cmd + ' ')}
+              />
               <button
                 onClick={() => handleSend(inputValue)}
                 className="px-4 py-2 bg-primary/80 hover:bg-primary text-white rounded text-xs font-bold transition-colors shadow-sm"
@@ -1211,32 +1175,13 @@ export default function TerminalSlot({
         </div>
       )}
 
-      {/* 단축어 편집 모달 팝업 */}
+      {/* 단축어 편집 모달 팝업 — 별도 컴포넌트로 분리 */}
       {showShortcutEditor && (
-        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-2">
-          <div className="bg-[#252526] border border-black/40 shadow-2xl rounded-md flex flex-col w-full max-w-md max-h-full">
-            <div className="h-8 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
-              <span className="text-xs font-bold text-[#cccccc]">단축어 편집 (개인화)</span>
-              <button onClick={() => setShowShortcutEditor(false)} className="p-1 hover:bg-white/10 rounded text-[#cccccc]"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-              {shortcuts.map((sc, i) => (
-                <div key={i} className="flex gap-2 items-center">
-                  <input value={sc.label} onChange={e => { const n = [...shortcuts]; n[i].label = e.target.value; saveShortcuts(n); }} placeholder="버튼 이름" className="w-1/3 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-xs text-white focus:border-primary focus:outline-none transition-colors" />
-                  <input value={sc.cmd} onChange={e => { const n = [...shortcuts]; n[i].cmd = e.target.value; saveShortcuts(n); }} placeholder="실행할 명령어" className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-2 py-1.5 text-xs text-white font-mono focus:border-primary focus:outline-none transition-colors" />
-                  <button onClick={() => { const n = shortcuts.filter((_, idx) => idx !== i); saveShortcuts(n); }} className="p-1.5 text-red-400 hover:bg-red-400/20 rounded transition-colors"><Trash2 className="w-4 h-4" /></button>
-                </div>
-              ))}
-              <button onClick={() => saveShortcuts([...shortcuts, {label: '새 단축어', cmd: ''}])} className="w-full py-2 mt-2 border border-dashed border-white/20 hover:border-white/40 hover:bg-white/5 rounded text-xs text-[#cccccc] transition-colors">
-                + 새 단축어 추가
-              </button>
-            </div>
-            <div className="p-3 border-t border-black/40 flex justify-end gap-2 shrink-0">
-              <button onClick={() => { if(confirm('모든 단축어를 기본값으로 초기화하시겠습니까?')) saveShortcuts(defaultShortcuts); }} className="px-3 py-1.5 hover:bg-white/5 text-xs text-[#cccccc] rounded transition-colors">기본값 복원</button>
-              <button onClick={() => setShowShortcutEditor(false)} className="px-4 py-1.5 bg-primary hover:bg-primary/80 text-white rounded text-xs font-bold transition-colors">닫기</button>
-            </div>
-          </div>
-        </div>
+        <ShortcutEditModal
+          shortcuts={shortcuts}
+          saveShortcuts={saveShortcuts}
+          onClose={() => setShowShortcutEditor(false)}
+        />
       )}
     </div>
   );
