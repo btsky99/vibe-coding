@@ -767,98 +767,27 @@ else:
         PROJECT_ROOT = _parent
 
 
-def _open_folder_dialog_subprocess() -> str:
-    """tkinter 폴더 선택 다이얼로그를 별도 프로세스에서 실행.
-
-    pywebview GUI 스레드에서 tkinter를 직접 호출하면 충돌하므로,
-    독립 Python 프로세스로 실행하여 선택된 경로 문자열을 반환합니다.
-    사용자가 취소하면 빈 문자열 반환.
-
-    주의: EXE 빌드에서는 sys.executable이 vibe-coding.exe를 가리키므로,
-    _python_runner_cmds()로 실제 Python 인터프리터를 찾아야 합니다.
-    """
-    import subprocess as _sp
-    script = (
-        "import tkinter as tk; from tkinter import filedialog; "
-        "root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True); "
-        "path = filedialog.askdirectory(title='프로젝트 폴더 선택'); "
-        "print(path if path else '')"
-    )
-    # EXE 빌드에서 sys.executable은 vibe-coding.exe → 실제 Python을 찾아서 사용
-    python_cmd = _python_runner_cmds()[0]
-    _no_win = getattr(_sp, 'CREATE_NO_WINDOW', 0x08000000)
-    result = _sp.run(
-        [python_cmd, '-c', script],
-        capture_output=True, text=True, timeout=60,
-        creationflags=_no_win
-    )
-    return result.stdout.strip()
+# ── 런타임 보조 유틸 — infra/runtime.py로 분리 (2026-04-20) ──────────────────────
+# 무상태 함수는 infra/runtime.py로 옮기고, BASE_DIR/PROJECT_ROOT 글로벌을 바인딩하는
+# 얇은 래퍼만 server.py에 남김.
+from infra import runtime as _runtime
 
 
 def _python_runner_cmds() -> list[str]:
-    """Python 스크립트를 실행할 인터프리터 후보 목록을 반환합니다."""
-    candidates: list[str] = []
-    seen: set[str] = set()
-
-    for path in (
-        BASE_DIR / 'venv' / 'Scripts' / 'python.exe',
-        PROJECT_ROOT / '.ai_monitor' / 'venv' / 'Scripts' / 'python.exe',
-        PROJECT_ROOT / 'venv' / 'Scripts' / 'python.exe',
-    ):
-        path_str = str(path)
-        if path.exists() and path_str not in seen:
-            candidates.append(path_str)
-            seen.add(path_str)
-
-    exe_name = Path(sys.executable).name.lower()
-    if exe_name.startswith('python') and sys.executable not in seen:
-        candidates.append(sys.executable)
-        seen.add(sys.executable)
-
-    for name in ('python', 'py'):
-        resolved = shutil.which(name)
-        if resolved and resolved not in seen:
-            candidates.append(resolved)
-            seen.add(resolved)
-
-    return candidates or ['python']
+    return _runtime.python_runner_cmds(BASE_DIR, PROJECT_ROOT)
 
 
 def _project_python_runner_cmds(project_root: Path | None = None) -> list[str]:
-    """현재 프로젝트 가상환경을 우선하는 Python 인터프리터 후보 목록."""
-    candidates: list[str] = []
-    seen: set[str] = set()
-
-    if project_root is not None:
-        for path in (
-            project_root / '.venv' / 'Scripts' / 'python.exe',
-            project_root / 'venv' / 'Scripts' / 'python.exe',
-            project_root / '.ai_monitor' / 'venv' / 'Scripts' / 'python.exe',
-        ):
-            path_str = str(path)
-            if path.exists() and path_str not in seen:
-                candidates.append(path_str)
-                seen.add(path_str)
-
-    for cmd in _python_runner_cmds():
-        if cmd not in seen:
-            candidates.append(cmd)
-            seen.add(cmd)
-
-    return candidates or ['python']
+    return _runtime.project_python_runner_cmds(BASE_DIR, PROJECT_ROOT, project_root)
 
 
 def _resolve_playwright_install_script() -> Path | None:
-    """Playwright 설치 스크립트 위치를 탐색합니다."""
-    candidates = (
-        PROJECT_ROOT / 'scripts' / 'install_playwright_cli.py',
-        BASE_DIR.parent / 'scripts' / 'install_playwright_cli.py',
-        Path.cwd() / 'scripts' / 'install_playwright_cli.py',
-    )
-    for path in candidates:
-        if path.exists():
-            return path
-    return None
+    return _runtime.resolve_playwright_install_script(BASE_DIR, PROJECT_ROOT)
+
+
+def _open_folder_dialog_subprocess() -> str:
+    # EXE 빌드에서 sys.executable은 vibe-coding.exe → 실제 Python을 인자로 전달
+    return _runtime.open_folder_dialog_subprocess(_python_runner_cmds()[0])
 
 # [제거됨 2026-03-22] websockets import → Node.js ws 라이브러리로 대체
 
