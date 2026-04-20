@@ -833,14 +833,7 @@ def _load_task_logs_into_thoughts():
 # 기존: server.py import 시 파일 IO가 즉시 발생 → 창 뜨기 전에 블로킹.
 # 수정: HTTP 서버 시작 후 _schedule_thought_preload()로 호출됨.
 
-# --- 신규: 파일 시스템 실시간 감시 (Watchdog) ---
-try:
-    from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler
-except ImportError:
-    Observer = None
-    FileSystemEventHandler = object
-
+# --- 파일 시스템 실시간 감시 (Watchdog) — 본체는 infra/fs_watcher.py ----------
 FS_CLIENTS = set() # SSE 클라이언트 연결 세트
 THOUGHT_CLIENTS = set() # 사고 과정 SSE 클라이언트 연결 세트
 # 자율 에이전트 SSE: 클라이언트별 개별 Queue 세트 (브로드캐스트 방식)
@@ -851,82 +844,22 @@ AGENT_CLIENTS: set = set()
 _SSE_LOCK = threading.Lock()
 
 
+# ── FS 감시 + 에이전트 브로드캐스트 — infra/fs_watcher.py로 분리 (2026-04-20) ────
+# Handler/Worker 본체는 infra/fs_watcher.py로 옮기고, SSE 글로벌 상태(FS_CLIENTS,
+# AGENT_CLIENTS, _SSE_LOCK, DATA_DIR)를 바인딩하는 얇은 래퍼만 server.py에 남김.
+from infra import fs_watcher as _fs_watcher
+# Observer / FileSystemEventHandler — 다른 코드(데몬 등)에서 server 모듈 통해
+# 참조할 수 있어 호환성 유지를 위해 재노출
+Observer = _fs_watcher.Observer
+FileSystemEventHandler = _fs_watcher.FileSystemEventHandler
+
+
 def _agent_broadcast_worker():
-    """cli_agent._output_queue를 읽어 모든 연결된 SSE 클라이언트에게 팬아웃합니다.
+    _fs_watcher.agent_broadcast_worker(AGENT_CLIENTS, _SSE_LOCK)
 
-    단일 생산자(cli_agent) → 다중 소비자(SSE 클라이언트) 패턴 구현.
-    cli_agent가 Queue에 이벤트를 넣으면 이 워커가 즉시 모든 클라이언트 큐에 복사합니다.
-    """
-    from queue import Empty as _Empty
-    _scripts = str(Path(__file__).resolve().parent.parent / 'scripts')
-    if _scripts not in sys.path:
-        sys.path.insert(0, _scripts)
-    try:
-        import cli_agent as _ca
-    except ImportError:
-        return  # cli_agent 미설치 시 종료
-
-    while True:
-        try:
-            msg = _ca._output_queue.get(timeout=1.0)
-            # 연결된 모든 클라이언트 큐에 동일 메시지 복사 전송
-            with _SSE_LOCK:
-                cq_snapshot = list(AGENT_CLIENTS)
-            for cq in cq_snapshot:
-                try:
-                    cq.put_nowait(msg)
-                except Exception as e:
-                    pass  # 클라이언트 큐 가득 참 등 무시
-        except _Empty:
-            pass  # 1초 타임아웃 — 정상, 계속 대기
-        except Exception as e:
-            pass  # 기타 오류 무시 후 재시도
-
-class FSChangeHandler(FileSystemEventHandler):
-    """파일 시스템 변경 이벤트를 감지하여 SSE 클라이언트들에게 알립니다."""
-    def on_any_event(self, event):
-        if event.is_directory: return
-        # 노이즈가 심한 파일/폴더는 제외 (시스템 레벨 필터링이 안 될 경우 대비)
-        path = event.src_path.replace('\\', '/')
-        # DATA_DIR 경로도 동적으로 제외 — 설치버전은 AppData에 있어서 하드코딩 필터 불충분
-        data_dir_str = str(DATA_DIR).replace('\\', '/')
-        if any(x in path for x in ['.git', '.ai_monitor/data', '__pycache__', '.ruff_cache',
-                                    '.ico', '.png', '.jpg', '.tmp', 'node_modules', 'dist', 'build',
-                                    '.db-wal', '.db-shm']):  # SQLite WAL/SHM 파일 제외
-            return
-        if data_dir_str and path.startswith(data_dir_str):
-            return  # DATA_DIR 하위 파일 전체 제외 (DB, 로그 등 런타임 데이터)
-        
-        # 브로드캐스트 메시지 생성
-        msg_obj = {'type': 'fs_change', 'path': path, 'event': event.event_type}
-        msg = f"data: {json.dumps(msg_obj, ensure_ascii=False)}\n\n"
-        
-        # 연결된 모든 클라이언트에게 전송 (비정상 연결 조기 제거)
-        disconnected = []
-        with _SSE_LOCK:
-            clients_snapshot = list(FS_CLIENTS)
-        for client in clients_snapshot:
-            try:
-                client.connection.settimeout(1.0)
-                client.wfile.write(msg.encode('utf-8'))
-                client.wfile.flush()
-            except Exception as e:
-                disconnected.append(client)  # SSE FS 클라이언트 연결 끊김
-        if disconnected:
-            with _SSE_LOCK:
-                for d in disconnected:
-                    FS_CLIENTS.discard(d)
 
 def start_fs_watcher(root_path):
-    if Observer is None:
-        print("[!] watchdog 라이브러리가 없어 실시간 파일 감시를 시작할 수 없습니다.")
-        return None
-    handler = FSChangeHandler()
-    observer = Observer()
-    observer.schedule(handler, str(root_path), recursive=True)
-    observer.start()
-    print(f"[*] File System Watcher started on {root_path}")
-    return observer
+    return _fs_watcher.start_fs_watcher(root_path, FS_CLIENTS, _SSE_LOCK, DATA_DIR)
 # ----------------------------------------------
 
 # [제거됨 2026-03-22] winpty/pywinpty → Node.js node-pty 마이크로서비스로 대체
