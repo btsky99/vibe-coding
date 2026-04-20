@@ -210,5 +210,135 @@
 - [x] Phase 5: 최적화 — hive_hook 다이어트, SkillChainPanel 리네임
 
 ---
+
+## server.py 분할 (2026-04-20 승인 — B안 도메인 모듈화)
+
+> 상위 메모: `~/.claude/projects/D--vibe-coding/memory/project_server_split_plan.md`
+> 목표: 6363 → 4963줄 (5000 미만 안전 마진). 마지막 hot-file WARN 해소 + Platform Phase 5(빌드 분리) 선행.
+> 원칙: 단계별 별도 커밋, 함수 시그니처 유지, 매 단계 후 `pytest tests/` + 서버 부팅 smoke.
+
+### 사전 작업
+
+- [ ] **Task 0: infra/ 패키지 디렉토리 생성**
+  - 파일: `.ai_monitor/infra/__init__.py`
+  - 방법: 빈 `__init__.py` 생성. 패키지화만 목적.
+  - 검증: `python -c "from ai_monitor import infra"` 성공
+
+### 단계 1 — infra/lifecycle.py (190줄, 🟢)
+
+- [ ] **Task 1.1: 정리/시그널 함수 추출**
+  - 파일: `.ai_monitor/infra/lifecycle.py` 신설
+  - 방법: server.py L4998~5191의 `_graceful_shutdown_pty_server`, `_cleanup_child_procs`, `_cleanup_pyinstaller_temp`, `_cleanup_postgres`, `_signal_exit_handler` 5개 함수 이동. 글로벌 의존성(`_child_procs`, `_BASE_PORT` 등) 인자/import로 명시화.
+  - 검증: `from ai_monitor.infra.lifecycle import _signal_exit_handler` 성공
+- [ ] **Task 1.2: server.py 호출부 import 전환 + 원본 삭제**
+  - 파일: `.ai_monitor/server.py`
+  - 방법: 상단 import 추가, `atexit.register`/`signal.signal` 호출 위치 그대로 유지. 원본 def 5개 삭제.
+  - 검증: `pytest tests/` + `python .ai_monitor/server.py --version` 무에러
+- [ ] **Task 1.3: 단계 1 커밋 (`refactor(server): infra/lifecycle.py 분리`)**
+
+### 단계 2 — infra/runtime.py (100줄, 🟢)
+
+- [ ] **Task 2.1: 런타임 유틸 추출**
+  - 파일: `.ai_monitor/infra/runtime.py` 신설
+  - 방법: server.py L770~870의 `_open_folder_dialog_subprocess`, `_python_runner_cmds`, `_project_python_runner_cmds`, `_resolve_playwright_install_script` 이동.
+  - 검증: import 성공
+- [ ] **Task 2.2: server.py + watchdog 호출부 import 전환**
+  - 파일: `.ai_monitor/server.py`
+  - 방법: 모든 호출부(`_python_runner_cmds()` 등) `runtime.` 접두 적용 또는 from-import.
+  - 검증: 서버 부팅 smoke + `pytest tests/`
+- [ ] **Task 2.3: 단계 2 커밋**
+
+### 단계 3 — infra/fs_watcher.py (95줄, 🟢)
+
+- [ ] **Task 3.1: FS Watcher + broadcast 워커 추출**
+  - 파일: `.ai_monitor/infra/fs_watcher.py` 신설
+  - 방법: server.py L907~1000의 `_agent_broadcast_worker`, `FSChangeHandler`, `start_fs_watcher` 이동. `AGENT_CLIENTS` 등 글로벌 큐 의존성은 인자로 주입.
+  - 검증: import + 클래스 인스턴스화 성공
+- [ ] **Task 3.2: 시동 시퀀스 import 전환**
+  - 파일: `.ai_monitor/server.py` (`main()` 부근)
+  - 방법: `start_fs_watcher(PROJECT_ROOT)` 호출 유지, import만 수정.
+  - 검증: 서버 부팅 시 watchdog 로그 정상 출력
+- [ ] **Task 3.3: 단계 3 커밋**
+
+### 단계 4 — api/office_proxy_api.py (210줄, 🟢)
+
+- [ ] **Task 4.1: Office 프록시 함수 추출**
+  - 파일: `.ai_monitor/api/office_proxy_api.py` 신설
+  - 방법: server.py L4823~4998의 `_proxy_to_office_server`, `_launch_office_server`, `_restart_office_server`, `_start_office_monitor` 이동. `_child_procs` 등은 인자/모듈 주입.
+  - 검증: import 성공
+- [ ] **Task 4.2: SSEHandler 호출부 + 시동 시퀀스 import 전환**
+  - 파일: `.ai_monitor/server.py`
+  - 방법: `/api/office/*` 라우트 핸들러의 `_proxy_to_office_server` 호출 유지, 모듈 import만 수정.
+  - 검증: 서버 부팅 시 office_server 자동 기동 확인
+- [ ] **Task 4.3: 단계 4 커밋**
+
+### 단계 5 — api/telegram_api.py (155줄, 🟡)
+
+- [ ] **Task 5.1: Telegram 핸들러 함수 변환**
+  - 파일: `.ai_monitor/api/telegram_api.py` 신설
+  - 방법: SSEHandler 메서드 3개(`_handle_telegram_config_get/post`, `_handle_telegram_test`)를 모듈 함수 `def telegram_config_get(handler: SSEHandler) -> None:` 형태로 추출. `self.send_response` 등은 `handler.send_response`로 변환.
+  - 검증: import 성공 + 시그니처 SSEHandler 인자 패턴 통일
+- [ ] **Task 5.2: SSEHandler 라우팅에서 위임 호출**
+  - 파일: `.ai_monitor/server.py` (L2847, L3427, L3430)
+  - 방법: `self._handle_telegram_*` → `telegram_api.telegram_*(self)`. 클래스 메서드 def 3개 삭제.
+  - 검증: `/api/config/telegram` GET/POST 수동 호출 200 응답
+- [ ] **Task 5.3: 단계 5 커밋**
+
+### 단계 6 — infra/memory_watcher.py (370줄, 🟡)
+
+- [ ] **Task 6.1: 메모리 임베딩 + Watcher 추출**
+  - 파일: `.ai_monitor/infra/memory_watcher.py` 신설
+  - 방법: server.py L1127~1500의 `_legacy_memory_data_dir`, `_memory_conn`, `_init_memory_db`, `_get_embedder`, `_embed`, `_cosine_sim`, `MemoryWatcher` 이동. embedder lazy init 글로벌(`_EMBEDDER`)은 모듈 내로 캡슐화.
+  - 검증: `from ai_monitor.infra.memory_watcher import MemoryWatcher` + 인스턴스화 성공
+- [ ] **Task 6.2: 시동 시퀀스 + memory_api 호출부 전환**
+  - 파일: `.ai_monitor/server.py`, 필요 시 `.ai_monitor/api/memory_api.py`
+  - 방법: import만 수정. `_embed`/`_cosine_sim` 사용처 grep 후 일괄 변경.
+  - 검증: 서버 부팅 시 MemoryWatcher 스레드 정상 시작 + memory 검색 API smoke
+- [ ] **Task 6.3: 단계 6 커밋**
+
+### 단계 7 — infra/tool_install.py (200줄, 🟡)
+
+- [ ] **Task 7.1: 도구 설치 상태 머신 추출**
+  - 파일: `.ai_monitor/infra/tool_install.py` 신설
+  - 방법: server.py L1594~1850의 `_tool_status`, `_tool_install_now`, `_default_tool_install_state`, `_get_npm_executable`, `_get_tool_install_state`, `_set_tool_install_state`, `_watch_tool_install`, `_start_tool_install` 이동. 글로벌 상태 dict는 모듈 변수로 캡슐화.
+  - 검증: import 성공 + `_tool_status('codex')` 응답 동일
+- [ ] **Task 7.2: SSEHandler 라우팅 import 전환**
+  - 파일: `.ai_monitor/server.py`
+  - 방법: `/api/tools/*` 핸들러의 함수 호출만 import 수정.
+  - 검증: 서버 부팅 + `/api/tools/status` 응답 비교
+- [ ] **Task 7.3: 단계 7 커밋**
+
+### 단계 8a — src/pg_store.py 흡수: 커넥션 풀 (80줄, 🟡)
+
+- [ ] **Task 8a.1: 커넥션 풀 함수 이관**
+  - 파일: `.ai_monitor/src/pg_store.py` (기존 파일 확장)
+  - 방법: server.py L216~261의 `_get_pg_conn`, `_return_pg_conn` 두 함수를 `pg_store.py`로 이동. 풀 잠금/딕셔너리도 함께. 시그니처 유지.
+  - 검증: `from ai_monitor.src.pg_store import _get_pg_conn` 성공
+- [ ] **Task 8a.2: server.py + 모든 호출부 import 전환**
+  - 파일: `.ai_monitor/server.py`, `.ai_monitor/api/*.py` (호출하는 곳 전부)
+  - 방법: `grep -rn "_get_pg_conn\|_return_pg_conn" .ai_monitor/`로 전수조사 후 import 수정.
+  - 검증: `pytest tests/` 통과 + 서버 부팅 + `/api/hive/health` 200
+- [ ] **Task 8a.3: 단계 8a 커밋**
+
+### 최종 검증
+
+- [ ] **Task 9: 줄 수 + 하네스 검증**
+  - 방법: `wc -l .ai_monitor/server.py` (목표: <5000줄). `python scripts/harness_verify.py` (목표: hot-file WARN 0건).
+  - 검증: 줄 수 표기 + 하네스 출력 caller에 보고
+- [ ] **Task 10: progress.md 업데이트**
+  - 파일: `progress.md`
+  - 방법: 완료 섹션에 단계 8개 + 줄 수 결과 기록. 다음 진입점 갱신 (Phase 4 Obsidian Vault 또는 8b ensure_postgres 이관).
+
+### 의존성 그래프
+
+- Task 0 → 모든 단계의 선행 조건
+- 단계 1~4: 서로 독립 (병렬 가능하지만 커밋 분리 위해 순차)
+- 단계 5: 단계 1~4 완료 후 (안정성 확인)
+- 단계 6: Task 0 완료 후 가능, 5 완료 권장
+- 단계 7: 6 완료 후
+- 단계 8a: 7 완료 후 (가장 위험, 마지막에)
+- Task 9~10: 8a 완료 후
+
+---
 > 이 계획서는 2026-04-16 브레인스토밍 결과입니다.
 > Phase A-1부터 순서대로 진행하며, 각 단계 끝마다 검증 + 사용자 OK 후 다음으로.
