@@ -7,11 +7,12 @@ REVISION HISTORY:
 - 2026-04-19 Claude: Platform Phase 2 완료 + 잔여 이슈 현실 반영
 - 2026-04-19 Claude (저녁): Phase 3 전체 완료 + 설치본 버전 표시 수정 +
   TerminalSlot 분할 + 내일 할 일 정리
+- 2026-04-20 Claude: server.py 분할 8단계 중 5단계 완료 (-556줄, 6363→5807)
 -->
 
 # Progress
 
-## 최종 업데이트: 2026-04-19 by Claude (저녁)
+## 최종 업데이트: 2026-04-20 by Claude
 
 ### 완료된 작업 (대시보드 대청소 ~ Platform Phase 2)
 - [F001] 터미널 실시간 모니터링 — v3.5 Claude
@@ -41,6 +42,15 @@ REVISION HISTORY:
   실패 시 stderr 진단 덤프. v3.7.207 이후 EXE에서 v-배지 정상 표시 예정
 - **TerminalSlot 분할** (2026-04-19 저녁): 1243 → 1188줄. ShortcutEditModal,
   SlashCommandMenu를 `components/terminal/`로 추출. 하네스 WARN 해소
+- **server.py 분할 5단계 완료** (2026-04-20): B안 도메인 모듈화. 6363 → 5807줄
+  (-556, 41% 진척). branch: `claude/zen-jennings-713b94`. 5 commits.
+  - 단계 1: `infra/lifecycle.py` — _cleanup_*, _signal_exit_handler (-135)
+  - 단계 2: `infra/runtime.py` — _python_runner_cmds, playwright (-71)
+  - 단계 3: `infra/fs_watcher.py` — FSChangeHandler, agent broadcast (-67)
+  - 단계 4: `api/office_proxy_api.py` — OfficeServerState 캡슐화 (-149)
+  - 단계 5: `api/telegram_api.py` — handler 위임 패턴 첫 도입 (-134)
+  - 매 단계 별도 커밋, pytest 51 passed 일관 유지
+  - 8단계 계획 ai_monitor_plan.md 기록 (남은 단계 6/7/8a)
 
 ### 진행 중
 - [F003] LLM 그룹 채팅 — 기본 구현 완료, 컨텍스트 메뉴 검증 대기. sprint_contracts/sprint_F003_20260419.md
@@ -53,33 +63,49 @@ REVISION HISTORY:
 - **Phase 5**: 플랫폼 빌드 분리 — 리포 개발 코드와 배포 IDE 런타임 분리
 
 ### 남은 하네스 WARN
-- `hot-file-large:.ai_monitor/server.py:6363>5000` — **1,363줄 초과**. 큰 스프린트
-  필요. ensure_schema/라우팅/핸들러 분리 후보 다수. Platform Phase 5(빌드 분리)와
-  같은 선상에서 설계 필요
+- `hot-file-large:.ai_monitor/server.py:5807>5000` — **807줄 초과** (어제 1,363
+  → 오늘 807로 -556 감소). 단계 6~8a 끝나면 5000 미만 도달 예정.
+  worktree `claude/zen-jennings-713b94`에서 진행 중, 아직 main 머지 안 함.
 
 ### 🌅 내일 시작 시 진입점 (우선순위 순)
 
-1. **새 EXE 설치본 버전 표시 실측** — 사용자 대기 중 작업.
-   - GitHub Actions가 v3.7.209 전후로 새 EXE 자동 빌드
-   - 설치 후 우상단 보라 배지에 실제 버전이 뜨는지 확인
+1. **server.py 분할 단계 6 — `infra/memory_watcher.py` 추출** (🟡 위험도)
+   - 위치: `claude/zen-jennings-713b94` 워크트리에서 계속
+   - 추출 대상: server.py L1127~1500의 `_legacy_memory_data_dir`, `_memory_conn`,
+     `_init_memory_db`, `_get_embedder`, `_embed`, `_cosine_sim`, `MemoryWatcher`
+   - 예상 절감: ~370줄 (5807 → 약 5437)
+   - 주의: embedder lazy init 글로벌(`_EMBEDDER`) 캡슐화, memory_api 호출부도 grep
+   - 시작 명령:
+     `git -C D:/vibe-coding worktree list  # 워크트리 위치 확인`
+     `cd D:/vibe-coding/.claude/worktrees/zen-jennings-713b94`
+     `cat ai_monitor_plan.md | tail -100  # 단계 6 상세 확인`
+
+2. **server.py 분할 단계 7 — `infra/tool_install.py`** (🟡, ~200줄, 단계 6 완료 후)
+   - server.py L1594~1850. 도구 설치 상태 머신 + 글로벌 dict 캡슐화
+
+3. **server.py 분할 단계 8a — `src/pg_store.py` 흡수** (🟡, ~80줄, 단계 7 완료 후)
+   - L216~261의 `_get_pg_conn`/`_return_pg_conn` 이관. 모든 호출부 grep 후 import 변경
+
+4. **5000 미만 도달 시 머지** — 하네스 WARN 0건 확인 후
+   - `git -C D:/vibe-coding fetch && git rebase origin/main` (worktree에서)
+   - main으로 머지 → push → GitHub Actions가 자동 빌드. **설치본 버전 표시 실측은
+     머지 후 새 EXE에서**
+
+5. **새 EXE 설치본 버전 표시 실측** — 머지/빌드 완료 후 (어제 진입점에서 이월)
+   - 우상단 보라 배지에 실제 버전이 뜨는지 확인
    - 실패 시 EXE 실행 로그의 `[version] WARN: ...` stderr 줄 참조
-     (frozen/MEIPASS/__file__ 경로가 찍혀 근본 원인 즉시 파악 가능)
 
-2. **server.py 5000줄 이하 분할** — 하네스 남은 WARN 1건.
-   - 6363 → 5000 이하. 1,363줄 절감 필요.
-   - 후보: ensure_schema 이식(이미 pg_store로 일부 이관), 긴 핸들러들
-     (/api/agent/*, /api/orchestrator/*, 세션 복구)을 별도 api/*.py 모듈로 추출
-   - brainstorm 선행 필수 — 큰 리팩터링
-
-3. **Platform Phase 4 — Obsidian Vault 연동** — `docs/PLATFORM_LAYERS.md` §Phase 4.
-   - `zettel_notes`(permanent) ↔ `vaults/<project_id>/` Markdown 양방향 동기화
-   - `zettel_links` ↔ `[[wiki-links]]` 변환
-   - 프로젝트별 Vault 분리
+6. **Platform Phase 4 — Obsidian Vault 연동** (server.py 작업 마무리 후)
    - brainstorm 필요 — 규모 큼
 
-4. **Platform Phase 5 — 플랫폼 빌드 분리** — 리포 개발 코드와 배포 IDE 런타임 분리.
-   - `.vibe/` 템플릿을 EXE에 내장 → 새 프로젝트 오픈 시 자동 스캐폴딩
-   - Phase 3-5에서 준비된 규약 기반
+### 작업 위치/상태
+- **현재 브랜치**: `claude/zen-jennings-713b94` (워크트리)
+- **워크트리 경로**: `D:/vibe-coding/.claude/worktrees/zen-jennings-713b94`
+- **마지막 커밋**: `8c7900b refactor(server): api/telegram_api.py 분리 — 단계 5`
+- **메인과 차이**: ahead 5 commits (단계 1~5), 미머지
+- **신규 파일**: `.ai_monitor/infra/{lifecycle,runtime,fs_watcher}.py`,
+  `.ai_monitor/api/{office_proxy_api,telegram_api}.py`
+- **계획 위치**: `ai_monitor_plan.md` 마지막 섹션 "server.py 분할" 참조
 
 ### 운영 메모 (2026-04-19에 학습)
 - **머지 루틴**: 매 push마다 GitHub Actions가 auto-bump 커밋을 origin/main에
@@ -92,9 +118,14 @@ REVISION HISTORY:
   전까지는 구 훅이 신 DB에 충돌. 머지하면 자동 해결
 
 ### 다음 세션 시작 시 참고사항
-- 하네스 V2 가동 중. `status=ok` (40 passes, 1 warning — server.py만).
+- 하네스 V2 가동 중. `status=ok` (40 passes, 1 warning — server.py만, 5807줄).
 - Platform Layer 경계 준수: 모든 DB 쓰기는 `project_id` 스코프 강제됨.
 - `.vibe/skills/` 스캐너 가동 중: `/api/vibe/skills` GET + 오피스 채팅 `/` 팝업.
+- **server.py 분할 패턴 (4가지)** — 단계 6~8a에서 동일 적용:
+  1. **인자 명시화**: 모듈 글로벌(BASE_DIR/PROJECT_ROOT 등)을 함수 인자로 받기
+  2. **얇은 래퍼**: server.py에는 글로벌 바인딩만 하는 1~3줄짜리 래퍼만 유지
+  3. **State 객체**: 변하는 상태는 클래스로 캡슐화 (OfficeServerState 사례)
+  4. **핸들러 위임**: SSEHandler 메서드는 `module_fn(self, ...)` 위임으로 1줄화
 - 상위 로드맵: [docs/PLATFORM_LAYERS.md](docs/PLATFORM_LAYERS.md).
 - 세부 실행 계획: [ai_monitor_plan.md](ai_monitor_plan.md).
 - `.vibe/` 규약: [docs/VIBE_CONVENTIONS.md](docs/VIBE_CONVENTIONS.md).
