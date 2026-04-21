@@ -159,6 +159,52 @@ def _get_pg_conn():
     return _pg_conn
 
 
+# ── 다중 DB 커넥션 풀 (서버 측 고빈도 쿼리용) ───────────────────────────────
+# [2026-04-21 단계 8a] server.py L208~252에서 이관. 위의 단일 `_pg_conn`은
+# 모듈 내부 CRUD(단일 프로젝트 DB)용이고, 아래 풀은 server.py가 여러 DB
+# (postgres / 프로젝트 DB 등)에 접속하는 고빈도 API 핸들러 전용이다.
+_pool: list = []                  # (conn, db) 튜플 리스트
+_pool_lock = threading.Lock()
+_POOL_MAX = 5
+
+
+def get_pool_conn(db: str = "postgres"):
+    """풀에서 커넥션을 꺼내거나, 풀이 비었으면 새로 생성하여 반환.
+
+    같은 db 이름의 커넥션만 재사용. 다른 db의 커넥션은 풀에 그대로 둠.
+    연결이 끊어졌으면(OperationalError) 버리고 새로 생성.
+    """
+    import psycopg2
+    with _pool_lock:
+        for i, (conn, conn_db) in enumerate(_pool):
+            if conn_db == db:
+                _pool.pop(i)
+                try:
+                    conn.cursor().execute("SELECT 1")
+                    return conn
+                except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    break
+    conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
+    conn.autocommit = True
+    return conn
+
+
+def return_pool_conn(conn, db: str = "postgres") -> None:
+    """사용 완료된 커넥션을 풀에 반환. 풀이 가득 차면 연결을 닫고 폐기."""
+    with _pool_lock:
+        if len(_pool) < _POOL_MAX:
+            _pool.append((conn, db))
+        else:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 _SCHEMA_LOCK = threading.Lock()
 _SCHEMA_READY = False
 _MIGRATION_DONE = False

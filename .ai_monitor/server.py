@@ -205,51 +205,21 @@ PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 # 초기값은 'postgres' (DB 생성 전 ensure_postgres_running 등에서 사용).
 PG_PROJECT_DB: str = "postgres"
 
-# ── PostgreSQL 커넥션 풀 (최대 5개, 스레드 안전) ──
-# 매 쿼리마다 psycopg2.connect()를 호출하면 ~1ms의 오버헤드가 쿼리당 발생.
-# 풀을 사용하면 이미 열린 연결을 재사용하여 connect 비용을 제거.
-_pg_pool = []           # 사용 가능한 커넥션 리스트 (db별 (conn, db) 튜플)
-_pg_pool_lock = threading.Lock()  # 풀 접근 동기화 락
-_PG_POOL_MAX = 5        # 풀에 보관할 최대 커넥션 수
+# ── PostgreSQL 커넥션 풀은 src/pg_store.py로 이관 (단계 8a) ────────────────
+# [2026-04-21] server.py L208~252의 다중 DB 풀 함수 4개를 pg_store에 흡수.
+# lifecycle.cleanup_postgres가 `_pg_pool`/`_pg_pool_lock`을 인자로 받으므로
+# 이름 alias로 재노출하여 호출부(L3980)의 시그니처를 유지한다.
+from src import pg_store as _pg_store_mod
+_pg_pool = _pg_store_mod._pool
+_pg_pool_lock = _pg_store_mod._pool_lock
+
+
 def _get_pg_conn(db: str = "postgres"):
-    """풀에서 커넥션을 꺼내거나, 풀이 비었으면 새로 생성하여 반환.
+    return _pg_store_mod.get_pool_conn(db)
 
-    같은 db 이름의 커넥션만 재사용. 다른 db의 커넥션은 풀에 그대로 둠.
-    연결이 끊어졌으면(OperationalError) 버리고 새로 생성.
-    """
-    import psycopg2
-    with _pg_pool_lock:
-        # 풀에서 같은 db의 커넥션 탐색
-        for i, (conn, conn_db) in enumerate(_pg_pool):
-            if conn_db == db:
-                _pg_pool.pop(i)
-                # 커넥션 유효성 검증 (끊어진 연결 감지)
-                try:
-                    conn.cursor().execute("SELECT 1")
-                    return conn
-                except (psycopg2.OperationalError, psycopg2.InterfaceError):
-                    # 끊어진 커넥션 — 조용히 폐기하고 새로 생성
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-                    break
-    # 풀에 적합한 커넥션 없음 → 새로 생성
-    conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
-    conn.autocommit = True
-    return conn
 
-def _return_pg_conn(conn, db: str = "postgres"):
-    """사용 완료된 커넥션을 풀에 반환. 풀이 가득 차면 연결을 닫고 폐기."""
-    with _pg_pool_lock:
-        if len(_pg_pool) < _PG_POOL_MAX:
-            _pg_pool.append((conn, db))
-        else:
-            # 풀 용량 초과 — 연결 닫기
-            try:
-                conn.close()
-            except Exception:
-                pass
+def _return_pg_conn(conn, db: str = "postgres") -> None:
+    _pg_store_mod.return_pool_conn(conn, db)
 
 # DB 데이터: %APPDATA%\VibeCoding\pgdata (배포/개발 모두 동일)
 # [2026-04-05 Claude] 개발 모드에서 소스 트리 내 data/ 사용 시 PG 버전 불일치 문제 발생
