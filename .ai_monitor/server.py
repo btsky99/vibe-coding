@@ -211,9 +211,6 @@ PG_PROJECT_DB: str = "postgres"
 _pg_pool = []           # 사용 가능한 커넥션 리스트 (db별 (conn, db) 튜플)
 _pg_pool_lock = threading.Lock()  # 풀 접근 동기화 락
 _PG_POOL_MAX = 5        # 풀에 보관할 최대 커넥션 수
-_tool_install_lock = threading.Lock()
-_tool_install_state: dict[str, dict] = {}
-
 def _get_pg_conn(db: str = "postgres"):
     """풀에서 커넥션을 꺼내거나, 풀이 비었으면 새로 생성하여 반환.
 
@@ -1081,261 +1078,23 @@ def _codex_main_model() -> str:
     return ''
 
 
+# ── CLI 도구 설치 상태 + npm install 상태 머신은 infra/tool_install.py로 이관 ──
+# [2026-04-21] server.py L1081~1335 블록 분리 (Task 7.1). 글로벌 상태 dict는
+# 모듈 내부로 캡슐화되었다. server.py에는 /api 라우트가 실제로 호출하는 3개 함수
+# (tool_status / get_npm_executable / get_tool_install_state)의 얇은 래퍼만 남긴다.
+from infra import tool_install as _tool_install
+
+
 def _tool_status(name: str) -> dict:
-    """Return local CLI installation status for a supported tool."""
-    if not name:
-        return {"installed": False, "path": "", "version": ""}
-
-    candidates = [name]
-    if os.name == 'nt':
-        path_name = Path(name).name
-        if '.' not in path_name:
-            candidates.extend([f'{name}.exe', f'{name}.cmd', f'{name}.bat'])
-        else:
-            candidates.append(f'{name}.cmd')
-
-    exe_path = ''
-    for candidate in candidates:
-        found = shutil.which(candidate)
-        if found:
-            exe_path = found
-            break
-
-    if not exe_path:
-        return {"installed": False, "path": "", "version": ""}
-
-    version = ''
-    try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        proc = subprocess.run(
-            [exe_path, '--version'],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=10,
-            creationflags=_no_window,
-        )
-        output = (proc.stdout or proc.stderr or '').strip()
-        version = output.splitlines()[0] if output else ''
-    except Exception:
-        version = ''
-
-    return {"installed": True, "path": exe_path, "version": version}
-
-
-_TOOL_INSTALL_TARGETS = {
-    'gemini': {
-        'package': '@google/gemini-cli',
-        'display': 'Gemini CLI',
-        'command': 'gemini',
-    },
-    'claude': {
-        'package': '@anthropic-ai/claude-code',
-        'display': 'Claude Code',
-        'command': 'claude',
-    },
-    'codex': {
-        'package': '@openai/codex',
-        'display': 'Codex CLI',
-        'command': 'codex',
-    },
-}
-
-
-def _tool_install_now() -> str:
-    """Return a compact local timestamp for tool install progress snapshots."""
-    return time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime())
-
-
-def _default_tool_install_state(name: str) -> dict:
-    """Return the default install state payload for a supported tool."""
-    tool_meta = _TOOL_INSTALL_TARGETS.get(name, {})
-    return {
-        'tool': name,
-        'display': tool_meta.get('display', name),
-        'status': 'idle',
-        'message': '',
-        'last_line': '',
-        'logs': [],
-        'started_at': '',
-        'finished_at': '',
-        'pid': None,
-        'exit_code': None,
-    }
+    return _tool_install.tool_status(name)
 
 
 def _get_npm_executable() -> str:
-    """Resolve npm executable with Windows-first lookup for background installs."""
-    candidates = ['npm']
-    if os.name == 'nt':
-        candidates = ['npm.cmd', 'npm.exe', 'npm']
-
-    for candidate in candidates:
-        found = shutil.which(candidate)
-        if found:
-            return found
-    return ''
+    return _tool_install.get_npm_executable()
 
 
 def _get_tool_install_state(name: str) -> dict:
-    """Return a thread-safe snapshot of the current install state."""
-    base = _default_tool_install_state(name)
-    with _tool_install_lock:
-        current = _tool_install_state.get(name, {})
-        snapshot = dict(base)
-        snapshot.update(current)
-        logs = snapshot.get('logs') or []
-        snapshot['logs'] = list(logs[-20:])
-        return snapshot
-
-
-def _set_tool_install_state(name: str, **updates) -> dict:
-    """Update a tool install snapshot and return the merged state."""
-    with _tool_install_lock:
-        current = _tool_install_state.get(name, _default_tool_install_state(name))
-        next_state = dict(current)
-        next_state.update(updates)
-        logs = next_state.get('logs') or []
-        next_state['logs'] = list(logs[-20:])
-        _tool_install_state[name] = next_state
-        return dict(next_state)
-
-
-def _watch_tool_install(name: str, proc: subprocess.Popen, command_name: str, display_name: str):
-    """Capture npm install output so the UI can poll live progress lines."""
-    logs: list[str] = []
-    last_line = ''
-
-    try:
-        if proc.stdout is not None:
-            for raw_line in proc.stdout:
-                line = (raw_line or '').strip()
-                if not line:
-                    continue
-                last_line = line
-                logs.append(line)
-                _set_tool_install_state(name, last_line=line, logs=logs)
-
-        exit_code = proc.wait()
-        tool_info = _tool_status(command_name)
-        installed = bool(tool_info.get('installed'))
-
-        if exit_code == 0 and installed:
-            message = f'{display_name} installation completed.'
-            status = 'completed'
-        else:
-            fallback = last_line or f'npm exited with code {exit_code}.'
-            message = f'{display_name} installation failed: {fallback}'
-            status = 'failed'
-
-        _set_tool_install_state(
-            name,
-            status=status,
-            message=message,
-            last_line=last_line,
-            logs=logs,
-            finished_at=_tool_install_now(),
-            exit_code=exit_code,
-            pid=None,
-        )
-    except Exception as exc:
-        failure_line = str(exc)
-        if failure_line:
-            logs.append(failure_line)
-        _set_tool_install_state(
-            name,
-            status='failed',
-            message=f'{display_name} installation failed: {failure_line or "unknown error"}',
-            last_line=failure_line,
-            logs=logs,
-            finished_at=_tool_install_now(),
-            pid=None,
-        )
-
-
-def _start_tool_install(name: str) -> dict:
-    """Start a background npm install and expose pollable progress for the UI."""
-    tool_meta = _TOOL_INSTALL_TARGETS.get(name)
-    if not tool_meta:
-        return {'status': 'error', 'message': f'Unsupported tool: {name}'}
-
-    current = _get_tool_install_state(name)
-    if current.get('status') == 'running':
-        return {
-            'status': 'success',
-            'message': f'{tool_meta["display"]} installation is already running.',
-            'install': current,
-        }
-
-    npm_exe = _get_npm_executable()
-    if not npm_exe:
-        failed = _set_tool_install_state(
-            name,
-            status='failed',
-            message='npm executable was not found.',
-            last_line='npm executable was not found.',
-            logs=['npm executable was not found.'],
-            finished_at=_tool_install_now(),
-            pid=None,
-            exit_code=None,
-        )
-        return {'status': 'error', 'message': failed['message'], 'install': failed}
-
-    display_name = tool_meta['display']
-    package_name = tool_meta['package']
-    command_name = tool_meta['command']
-    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000) if os.name == 'nt' else 0
-
-    try:
-        proc = subprocess.Popen(
-            [npm_exe, 'install', '-g', package_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            creationflags=creationflags,
-        )
-    except Exception as exc:
-        failed = _set_tool_install_state(
-            name,
-            status='failed',
-            message=f'Could not start {display_name} installation: {exc}',
-            last_line=str(exc),
-            logs=[str(exc)],
-            finished_at=_tool_install_now(),
-            pid=None,
-            exit_code=None,
-        )
-        return {'status': 'error', 'message': failed['message'], 'install': failed}
-
-    initial = _set_tool_install_state(
-        name,
-        display=display_name,
-        status='running',
-        message=f'{display_name} installation is in progress.',
-        last_line=f'Running npm install -g {package_name}',
-        logs=[f'Running npm install -g {package_name}'],
-        started_at=_tool_install_now(),
-        finished_at='',
-        pid=proc.pid,
-        exit_code=None,
-    )
-
-    watcher = threading.Thread(
-        target=_watch_tool_install,
-        args=(name, proc, command_name, display_name),
-        daemon=True,
-    )
-    watcher.start()
-
-    return {
-        'status': 'success',
-        'message': f'{display_name} installation started.',
-        'install': initial,
-    }
+    return _tool_install.get_tool_install_state(name)
 
 
 def _parse_session_tail(path: Path):
