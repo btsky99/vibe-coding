@@ -19,7 +19,6 @@ from src.pg_store import (
 
 def handle_get(handler, path: str, params: dict,
                DATA_DIR: Path, PROJECT_ID: str, PROJECT_ROOT: Path,
-               _memory_conn, _embed, _cosine_sim,
                __version__: str) -> bool:
     if path == '/api/memory':
         handler.send_response(200)
@@ -60,8 +59,7 @@ def handle_get(handler, path: str, params: dict,
 
 
 def handle_post(handler, path: str, data: dict,
-                DATA_DIR: Path, PROJECT_ID: str,
-                _memory_conn, _embed) -> bool:
+                DATA_DIR: Path, PROJECT_ID: str) -> bool:
     if path == '/api/memory/set':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
