@@ -31,6 +31,21 @@ from src.pg_store import (
 )
 
 
+# ── Claude 모델별 컨텍스트 창 매핑 ─────────────────────────────────────────
+# Session JSONL의 `model` 필드는 base ID만 기록한다(`[1m]` 접미사 없음).
+# Opus 4.7은 Claude Code CLI가 1M 컨텍스트로 구동하므로 1M으로 취급한다.
+def _claude_ctx_window(model: str) -> int:
+    """모델명 → 컨텍스트 창 토큰 수. 알 수 없는 모델은 200k 기본."""
+    if not model:
+        return 200_000
+    m = model.lower()
+    # Opus 4.7 이상은 1M 컨텍스트 (Claude Code CLI 기본 운용)
+    if 'opus-4-7' in m or 'opus-4-8' in m or 'opus-5' in m:
+        return 1_000_000
+    # 향후 확장: Sonnet 1M 변종 추가 시 여기에 조건 추가
+    return 200_000
+
+
 def _json_response(handler, data: dict | list, status: int = 200) -> None:
     """JSON 응답을 전송하는 공통 헬퍼 함수.
 
@@ -664,7 +679,8 @@ def handle_get(handler, path: str, params: dict,
                 'cache_read': 0,
                 'cache_write': 0,
                 'total_tokens': 0,
-                'context_window': 200000,  # Claude 3/4 표준 200k
+                'context_used': 0,         # [2026-04-21] 실제 컨텍스트 점유 = input + cache_read + cache_write
+                'context_window': 200_000, # 기본 200k, 모델에 따라 _claude_ctx_window로 갱신
                 'percentage': 0,
                 'model': 'claude',
                 'last_ts': '',
@@ -678,9 +694,14 @@ def handle_get(handler, path: str, params: dict,
                 result['total_tokens'] = result['input_tokens'] + result['output_tokens']
                 result['model'] = latest.get('model', 'claude')
                 result['last_ts'] = latest.get('last_ts', '')
-                # 컨텍스트 창 사용률은 input_tokens 기준 (Claude 공식 /context 와 동일)
+                # [2026-04-21] 실제 컨텍스트 점유 = 현재 턴 input + 캐시 히트 + 캐시 생성
+                # Claude Code CLI `/context` 가 표시하는 값과 일치.
+                result['context_window'] = _claude_ctx_window(result['model'])
+                result['context_used'] = (
+                    result['input_tokens'] + result['cache_read'] + result['cache_write']
+                )
                 if result['context_window'] > 0:
-                    result['percentage'] = (result['input_tokens'] / result['context_window']) * 100
+                    result['percentage'] = (result['context_used'] / result['context_window']) * 100
 
             handler.wfile.write(json.dumps(
                 result, ensure_ascii=False

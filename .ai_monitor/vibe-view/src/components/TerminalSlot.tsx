@@ -58,6 +58,7 @@ interface TerminalSlotProps {
   // Claude Code 세션 컨텍스트 사용량 — 컬러 블록 바 표시용
   claudeUsage: {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
+    context_used?: number;  // [2026-04-21] input + cache_read + cache_write (캐시 포함 실제 점유)
     model: string; context_window: number; percentage: number; last_ts: string;
   } | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
@@ -615,8 +616,12 @@ export default function TerminalSlot({
         const outputTok = ctx?.output_tokens ?? 0;
         const cacheRead = ctx?.cache_read ?? 0;
         const cacheWrite = ctx?.cache_write ?? 0;
-        const ctxPct = ctx ? Math.round((inputTok / CTX_MAX) * 100) : 0;
-        const freeTok = Math.max(0, CTX_MAX - inputTok);
+        // [2026-04-21] 실제 컨텍스트 점유 = 현재 턴 input + 캐시 히트 + 캐시 생성.
+        // Claude Code CLI `/context` 와 동일. 서버가 context_used를 주면 그대로 쓰고
+        // 없으면(구 응답) 프론트에서 합산한다.
+        const usedTok = ctx?.context_used ?? (inputTok + cacheRead + cacheWrite);
+        const ctxPct = ctx ? Math.round((usedTok / CTX_MAX) * 100) : 0;
+        const freeTok = Math.max(0, CTX_MAX - usedTok);
 
         // 각 토큰 타입의 컨텍스트 점유 %
         const cacheReadPct = Math.min(100, (cacheRead / CTX_MAX) * 100);
@@ -635,7 +640,7 @@ export default function TerminalSlot({
           ? ctx.model.replace(/^claude-/, '').replace(/-(\d)/, ' $1').replace(/-latest$/, '').replace(/-\d{8}$/, '').replace(/\b\w/g, c => c.toUpperCase())
           : 'Claude';
         const maxLabel = CTX_MAX >= 1_000_000 ? `${CTX_MAX / 1_000_000}M` : `${CTX_MAX / 1000}k`;
-        const usedLabel = `${Math.round(inputTok / 1000)}k`;
+        const usedLabel = `${Math.round(usedTok / 1000)}k`;
 
         // 블록 그리드 색상 결정 (100개 블록, 각 1%)
         const getBlockColor = (idx: number) => {
