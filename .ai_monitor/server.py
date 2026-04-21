@@ -227,313 +227,38 @@ def _return_pg_conn(conn, db: str = "postgres") -> None:
 _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
 
 
-def ensure_postgres_running():
-    """배포(frozen) 모드 전용: PostgreSQL이 실행 중이지 않으면 자동으로 초기화하고 시작합니다.
+# ── PG 런타임은 infra/postgres_runtime.py로 이관 (단계 8b) ────────────────
+# [2026-04-21] server.py L230~536 (ensure_postgres_running + _init_project_db)
+# 블록 분리. PG_PORT/PG_PROJECT_DB 글로벌 mutation은 caller 래퍼가 담당.
+from infra import postgres_runtime as _postgres_runtime
 
-    1) pgsql 바이너리가 없으면 스킵 (설치 안 된 환경 — 개발 모드 등)
-    2) pgdata 디렉터리가 없으면 initdb로 초기화
-    3) pg_ctl status로 실행 여부 확인 후, 미실행 시 pg_ctl start
-    4) 확장(vector, pg_trgm) 활성화 SQL 실행
-    """
+
+def ensure_postgres_running() -> None:
+    """PG 기동 + 공용 스키마 초기화. PG_PORT 글로벌을 갱신한다."""
     global PG_PORT
+    PG_PORT = _postgres_runtime.start_server(
+        PG_CTL_BIN, INITDB_BIN, _PG_DATA_DIR, PG_PORT
+    )
+    os.environ['VIBE_PG_PORT'] = str(PG_PORT)
     if not PG_CTL_BIN.exists():
-        print(f"[PG] pg_ctl.exe 없음 → PG 자동시작 스킵 ({PG_CTL_BIN})")
-        return
-
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-    pg_log = _PG_DATA_DIR.parent / "pgsql.log"
-
-    # 1) initdb — pgdata 없으면 최초 DB 클러스터 생성
-    if not _PG_DATA_DIR.exists():
-        print(f"[PG] pgdata 없음 → initdb 실행: {_PG_DATA_DIR}")
-        _PG_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        try:
-            res = subprocess.run(
-                [str(INITDB_BIN), "-D", str(_PG_DATA_DIR),
-                 "-U", "postgres", "-E", "UTF8", "--no-locale"],
-                capture_output=True, text=True, encoding='utf-8', errors='replace',
-                creationflags=_no_window
-            )
-            if res.returncode != 0:
-                print(f"[PG] initdb 오류:\n{res.stderr}")
-                return
-            print(f"[PG] initdb 완료")
-
-            # postgresql.conf에서 포트를 5433으로 변경
-            pg_conf = _PG_DATA_DIR / "postgresql.conf"
-            if pg_conf.exists():
-                conf_text = pg_conf.read_text(encoding='utf-8')
-                # 기본 포트(5432) → 5433으로 교체, listen_addresses 활성화
-                conf_text = conf_text.replace("#listen_addresses = 'localhost'", "listen_addresses = 'localhost'")
-                conf_text = conf_text.replace("#port = 5432", f"port = {PG_PORT}")
-                conf_text = conf_text.replace("port = 5432", f"port = {PG_PORT}")
-                pg_conf.write_text(conf_text, encoding='utf-8')
-                print(f"[PG] postgresql.conf 포트 {PG_PORT} 설정 완료")
-        except Exception as e:
-            print(f"[PG] initdb 예외: {e}")
-            return
-
-    # 2) 실행 여부 확인 — pg_ctl status + 포트 바인딩 이중 검증
-    try:
-        status_res = subprocess.run(
-            [str(PG_CTL_BIN), "status", "-D", str(_PG_DATA_DIR)],
-            capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
-        )
-        if "server is running" in status_res.stdout:
-            print("[PG] 이미 실행 중")
-            return
-    except Exception as e:
-        print(f"[PG ERROR] pg_ctl status 확인: {e}")
-
-    # 2-1) 포트 점유 확인 — 다른 PostgreSQL(예: 시스템 서비스)이 포트를 선점한 경우 자동 회피
-    # [2026-04-05 Claude] 기존: 포트 점유 시 스킵 → 기존 PG에 우리 DB가 없어 에러 발생
-    # 변경: 우리 pgdata의 PG가 아닌 외부 프로세스가 포트를 점유하면 빈 포트를 자동 탐색
-    import socket as _pg_sock
-    try:
-        _pg_test = _pg_sock.socket(_pg_sock.AF_INET, _pg_sock.SOCK_STREAM)
-        _pg_result = _pg_test.connect_ex(('127.0.0.1', PG_PORT))
-        _pg_test.close()
-        if _pg_result == 0:
-            # 포트가 열려 있음 — 우리 PG인지 확인 (pgdata로 판별)
-            # pg_ctl status가 "not running"이면 외부 프로세스가 점유 중
-            print(f"[PG] 포트 {PG_PORT}이 이미 사용 중 (외부 프로세스) → 빈 포트 탐색")
-            _found_port = False
-            for _try_port in range(PG_PORT + 1, PG_PORT + 20):
-                _s = _pg_sock.socket(_pg_sock.AF_INET, _pg_sock.SOCK_STREAM)
-                _r = _s.connect_ex(('127.0.0.1', _try_port))
-                _s.close()
-                if _r != 0:  # 포트가 비어있음
-                    PG_PORT = _try_port
-                    print(f"[PG] 빈 포트 발견: {PG_PORT}")
-                    # postgresql.conf 포트도 갱신
-                    pg_conf = _PG_DATA_DIR / "postgresql.conf"
-                    if pg_conf.exists():
-                        conf_text = pg_conf.read_text(encoding='utf-8')
-                        import re as _pg_re
-                        # 활성 설정(port = XXXX) 또는 주석(#port = XXXX) 모두 대응
-                        if _pg_re.search(r'^\s*port\s*=', conf_text, flags=_pg_re.MULTILINE):
-                            conf_text = _pg_re.sub(r'^\s*port\s*=\s*\d+', f'port = {PG_PORT}', conf_text, flags=_pg_re.MULTILINE)
-                        elif _pg_re.search(r'^\s*#\s*port\s*=', conf_text, flags=_pg_re.MULTILINE):
-                            conf_text = _pg_re.sub(r'^\s*#\s*port\s*=\s*\d+', f'port = {PG_PORT}', conf_text, flags=_pg_re.MULTILINE)
-                        else:
-                            conf_text += f'\nport = {PG_PORT}\n'
-                        pg_conf.write_text(conf_text, encoding='utf-8')
-                    # 환경변수도 갱신하여 pg_store.py 등 다른 모듈이 새 포트를 인식
-                    os.environ['VIBE_PG_PORT'] = str(PG_PORT)
-                    _found_port = True
-                    break
-            if not _found_port:
-                print(f"[PG ERROR] 포트 {PG_PORT-19}~{PG_PORT} 범위에서 빈 포트를 찾지 못함")
-                return
-    except Exception:
-        pass  # 소켓 테스트 실패 시 그냥 시작 시도
-
-    # 3) pg_ctl start
-    # [수정 2026-04-07] capture_output=True → DEVNULL — pg_ctl start가 postgres를
-    # 자식으로 생성하면 PIPE 핸들을 상속받아 subprocess.run()이 영원히 반환 안 하는
-    # Windows 전용 치명적 버그 수정. DEVNULL로 출력을 버리면 pg_ctl이 즉시 반환됨.
-    # timeout=15는 pgdata 락 충돌 시 폴백용으로 유지.
-    print(f"[PG] PostgreSQL 시작 중 (port={PG_PORT})...")
-    try:
-        subprocess.run(
-            [str(PG_CTL_BIN), "start", "-D", str(_PG_DATA_DIR),
-             "-l", str(pg_log), "-o", f"-p {PG_PORT}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=_no_window, timeout=15
-        )
-        # [v3.7.62 수정] 고정 2초 대기 → 실제 ready 폴링으로 교체
-        # pg_ctl start 직후 psql SELECT 1로 100ms 간격으로 최대 5초 폴링.
-        # PG가 빠르게 뜨면 (보통 0.3~0.5초) 즉시 통과 → 기동 시간 단축.
-        import time as _time
-        _pg_ready = False
-        for _i in range(50):  # 최대 5초 (100ms × 50회)
-            _time.sleep(0.1)
-            try:
-                _chk = subprocess.run(
-                    [str(PG_CTL_BIN), "status", "-D", str(_PG_DATA_DIR)],
-                    capture_output=True, text=True, encoding='utf-8', errors='replace',
-                    creationflags=_no_window, timeout=1
-                )
-                if "server is running" in _chk.stdout:
-                    _pg_ready = True
-                    break
-            except Exception as e:
-                pass  # PG ready 폴링 중 일시적 실패 허용
-        print(f"[PG] PostgreSQL 시작 완료 ({(_i+1)*100}ms 소요)")
-    except subprocess.TimeoutExpired:
-        # [2026-04-06] pg_ctl start가 15초 내 완료 못 함 → pgdata 락 충돌 가능성 높음
-        # 이전 실행의 PG가 살아있으면 원래 포트(5433)로 연결 시도
-        print(f"[PG] pg_ctl start 타임아웃 (pgdata 락 충돌 가능) → 기존 PG 인스턴스 재사용 시도")
-        import socket as _pg_sock2
-        for _fallback_port in [5433, 5434, 5435, 5432]:
-            try:
-                _s = _pg_sock2.socket(_pg_sock2.AF_INET, _pg_sock2.SOCK_STREAM)
-                _r = _s.connect_ex(('127.0.0.1', _fallback_port))
-                _s.close()
-                if _r == 0:
-                    PG_PORT = _fallback_port
-                    os.environ['VIBE_PG_PORT'] = str(PG_PORT)
-                    print(f"[PG] 기존 PG 인스턴스 발견 (port={PG_PORT}) → 재사용")
-                    break
-            except Exception:
-                continue
-        else:
-            print("[PG ERROR] 실행 중인 PostgreSQL을 찾지 못함")
-            return
-
-    # 4) 확장 + 테이블 + 트리거를 단일 배치 SQL로 실행 (기동 속도 최적화)
-    # [2026-04-13] Claude: 13번 개별 run_pg_sql() → 1번 배치로 합침
-    # psql subprocess 폴백 시 프로세스 생성 13회 → 1회로 줄여 ~5초 단축
+        return  # 개발/미설치 환경은 스키마 배치 스킵
     try:
         import time as _schema_time
         _schema_start = _schema_time.monotonic()
-        run_pg_sql("""
-            CREATE EXTENSION IF NOT EXISTS vector;
-            CREATE EXTENSION IF NOT EXISTS pg_trgm;
-            CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
-
-            CREATE TABLE IF NOT EXISTS pg_logs (
-                id BIGSERIAL PRIMARY KEY,
-                agent TEXT NOT NULL,
-                terminal_id TEXT DEFAULT '',
-                task TEXT NOT NULL,
-                status TEXT DEFAULT 'success',
-                project_id TEXT DEFAULT '',
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';
-            CREATE INDEX IF NOT EXISTS idx_pg_logs_project_id ON pg_logs(project_id);
-
-            CREATE TABLE IF NOT EXISTS vibe_notifications (
-                id BIGSERIAL PRIMARY KEY,
-                agent TEXT NOT NULL DEFAULT 'unknown',
-                title TEXT NOT NULL,
-                subtitle TEXT,
-                body TEXT NOT NULL,
-                source TEXT DEFAULT 'cli',
-                is_read BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS vibe_agent_state (
-                agent TEXT NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT,
-                icon TEXT,
-                color TEXT,
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                PRIMARY KEY (agent, key)
-            );
-
-            CREATE TABLE IF NOT EXISTS vibe_agent_logs (
-                id BIGSERIAL PRIMARY KEY,
-                agent TEXT NOT NULL DEFAULT 'unknown',
-                message TEXT NOT NULL,
-                level TEXT DEFAULT 'info',
-                source TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-
-            CREATE OR REPLACE FUNCTION notify_vibe_notification() RETURNS trigger AS $$
-            BEGIN
-                PERFORM pg_notify('vibe_notification', json_build_object(
-                    'table', 'vibe_notifications',
-                    'data', row_to_json(NEW)
-                )::text);
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-
-            DO $$ BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vibe_notification'
-                ) THEN
-                    CREATE TRIGGER trg_vibe_notification
-                        AFTER INSERT ON vibe_notifications
-                        FOR EACH ROW EXECUTE FUNCTION notify_vibe_notification();
-                END IF;
-            END $$;
-
-            CREATE OR REPLACE FUNCTION notify_vibe_state_change() RETURNS trigger AS $$
-            BEGIN
-                PERFORM pg_notify('vibe_notification', json_build_object(
-                    'table', 'vibe_agent_state',
-                    'data', row_to_json(NEW)
-                )::text);
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql;
-
-            DO $$ BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vibe_state_change'
-                ) THEN
-                    CREATE TRIGGER trg_vibe_state_change
-                        AFTER INSERT OR UPDATE ON vibe_agent_state
-                        FOR EACH ROW EXECUTE FUNCTION notify_vibe_state_change();
-                END IF;
-            END $$;
-        """)
+        run_pg_sql(_postgres_runtime.BOOTSTRAP_SCHEMA_SQL)
         _schema_ms = (_schema_time.monotonic() - _schema_start) * 1000
         print(f"[PG] 스키마 및 확장 초기화 완료 ({_schema_ms:.0f}ms)")
     except Exception as e:
-        print(f"[PG] 시작 오류: {e}")
+        print(f"[PG] 스키마 초기화 오류: {e}")
 
 
-def _init_project_db(project_id: str):
-    """프로젝트별 PostgreSQL 데이터베이스를 생성하고 PG_PROJECT_DB를 갱신합니다.
-
-    [2026-03-22] 하나의 PG 인스턴스에서 프로젝트별 DB 분리 — 포트 충돌 없이 다중 프로젝트 지원.
-    DB 이름 규칙: vibe_{project_id} (소문자, 하이픈→언더스코어, 최대 63자)
-    예: PROJECT_ID="D--vibe-coding" → DB="vibe_d__vibe_coding"
-    """
+def _init_project_db(project_id: str) -> None:
+    """프로젝트 DB 생성 + pg_store 전파. PG_PROJECT_DB 글로벌을 갱신한다."""
     global PG_PROJECT_DB
-    # DB 이름 생성: PostgreSQL 식별자 규칙 (소문자, _ 허용, 63자 제한)
-    safe_id = project_id.lower().replace('-', '_').replace(' ', '_')
-    # 알파벳/숫자/밑줄만 허용
-    safe_id = ''.join(c for c in safe_id if c.isalnum() or c == '_')
-    db_name = f"vibe_{safe_id}"[:63]
-
-    if not db_name or db_name == "vibe_":
-        db_name = "vibe_default"
-
-    # postgres DB에 연결하여 프로젝트 DB 존재 여부 확인 후 생성
-    try:
-        result = run_pg_sql(
-            "SELECT 1 FROM pg_database WHERE datname = %s;",
-            (db_name,), db="postgres"
-        )
-        if not result or not result.strip():
-            # DB가 없으면 생성 (CREATE DATABASE는 parameterized 불가 → 안전한 이름 직접 삽입)
-            run_pg_sql(f'CREATE DATABASE "{db_name}";', db="postgres")
-            print(f"[PG] 프로젝트 DB 생성 완료: {db_name}")
-        else:
-            print(f"[PG] 프로젝트 DB 확인: {db_name} (이미 존재)")
-
-        PG_PROJECT_DB = db_name
-        print(f"[PG] PG_PROJECT_DB = {PG_PROJECT_DB}")
-
-        # pg_store 모듈에도 프로젝트 DB 이름 전파
-        try:
-            from src.pg_store import set_project_db
-            set_project_db(db_name)
-        except Exception as e:
-            print(f"[PG] pg_store.set_project_db 전파 실패 (무시): {e}")
-
-        # 환경변수로도 전파 — mission_control.py, mcp_server.py 등 하위 프로세스용
-        os.environ['VIBE_PG_DB'] = db_name
-
-        # 프로젝트 DB에 확장 설치 (배치)
-        run_pg_sql("""
-            CREATE EXTENSION IF NOT EXISTS vector;
-            CREATE EXTENSION IF NOT EXISTS pg_trgm;
-            CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
-        """, db=PG_PROJECT_DB)
-
-    except Exception as e:
-        print(f"[PG] 프로젝트 DB 생성 실패 (postgres DB 폴백): {e}")
-        PG_PROJECT_DB = "postgres"
+    from src.pg_store import set_project_db as _set_project_db
+    PG_PROJECT_DB = _postgres_runtime.create_project_db(
+        project_id, run_pg_sql, _set_project_db
+    )
 
 
 def run_pg_sql(sql: str, params: tuple = None, db: str = None):
