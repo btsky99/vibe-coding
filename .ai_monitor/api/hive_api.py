@@ -46,6 +46,75 @@ def _claude_ctx_window(model: str) -> int:
     return 200_000
 
 
+def _sum_usage_since(jsonl_files: list, since_epoch: float) -> dict:
+    """session JSONL 파일들의 assistant usage를 시간 윈도우로 집계.
+
+    각 파일의 끝 64KB만 읽어 Claude Code의 최근 활동(수백 턴)을 커버한다.
+    since_epoch 이후의 assistant 메시지 usage(input/output/cache)를 누적한다.
+
+    Returns:
+        {'input_tokens': int, 'output_tokens': int, 'cache_read': int,
+         'cache_write': int, 'total': int, 'oldest_ts': str, 'message_count': int}
+    """
+    result = {
+        'input_tokens': 0, 'output_tokens': 0,
+        'cache_read': 0, 'cache_write': 0,
+        'total': 0, 'oldest_ts': '', 'message_count': 0,
+    }
+    TAIL_BYTES = 64 * 1024  # 64KB면 수백 턴 커버 (8KB는 최근 usage 1개용이라 부족)
+    oldest_dt = None
+
+    for path in jsonl_files:
+        try:
+            with open(path, 'rb') as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - TAIL_BYTES))
+                raw = f.read().decode('utf-8', errors='ignore')
+        except Exception:
+            continue
+
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if obj.get('type') != 'assistant':
+                continue
+            msg = obj.get('message') or {}
+            usage = msg.get('usage') or {}
+            if not usage:
+                continue
+
+            ts_raw = obj.get('timestamp') or ''
+            dt = _parse_iso_dt(ts_raw)
+            if dt is None:
+                continue
+            try:
+                epoch = dt.timestamp()
+            except Exception:
+                continue
+            if epoch < since_epoch:
+                continue
+
+            result['input_tokens'] += int(usage.get('input_tokens', 0) or 0)
+            result['output_tokens'] += int(usage.get('output_tokens', 0) or 0)
+            result['cache_read'] += int(usage.get('cache_read_input_tokens', 0) or 0)
+            result['cache_write'] += int(usage.get('cache_creation_input_tokens', 0) or 0)
+            result['message_count'] += 1
+            if oldest_dt is None or dt < oldest_dt:
+                oldest_dt = dt
+                result['oldest_ts'] = ts_raw
+
+    result['total'] = (
+        result['input_tokens'] + result['cache_read'] + result['cache_write']
+    )
+    return result
+
+
 def _json_response(handler, data: dict | list, status: int = 200) -> None:
     """JSON 응답을 전송하는 공통 헬퍼 함수.
 
@@ -662,6 +731,7 @@ def handle_get(handler, path: str, params: dict,
                             # cwd가 현재 프로젝트 루트와 일치하는 세션만 채택
                             sess_cwd = str(info.get('cwd') or '').rstrip('/').lower()
                             if sess_cwd and sess_cwd == current_cwd_norm:
+                                info['_path'] = str(jsonl_file)  # 5h 집계용 파일 경로 보존
                                 sessions.append(info)
                         except Exception:
                             continue
@@ -684,6 +754,11 @@ def handle_get(handler, path: str, params: dict,
                 'percentage': 0,
                 'model': 'claude',
                 'last_ts': '',
+                # [2026-04-21] 5시간 sliding window 누적 (CLI /context 의 5h 제한 흉내)
+                # 쿼터 한도는 모르므로 절대 토큰 수만 제공 — 프론트에서 라벨링.
+                'last_5h_tokens': 0,
+                'last_5h_messages': 0,
+                'last_5h_oldest_ts': '',
             }
             if sessions:
                 latest = sessions[0]
@@ -702,6 +777,20 @@ def handle_get(handler, path: str, params: dict,
                 )
                 if result['context_window'] > 0:
                     result['percentage'] = (result['context_used'] / result['context_window']) * 100
+
+                # 5시간 sliding window 집계 — cwd 일치 세션들의 지난 5h assistant usage 합
+                try:
+                    import time as _t
+                    since = _t.time() - (5 * 3600)
+                    matched_files = [
+                        Path(s['_path']) for s in sessions if s.get('_path')
+                    ]
+                    win = _sum_usage_since(matched_files, since)
+                    result['last_5h_tokens'] = win.get('total', 0)
+                    result['last_5h_messages'] = win.get('message_count', 0)
+                    result['last_5h_oldest_ts'] = win.get('oldest_ts', '')
+                except Exception:
+                    pass  # 집계 실패해도 기본 바는 표시 가능
 
             handler.wfile.write(json.dumps(
                 result, ensure_ascii=False

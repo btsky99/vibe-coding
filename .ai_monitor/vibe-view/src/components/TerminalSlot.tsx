@@ -60,6 +60,10 @@ interface TerminalSlotProps {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
     context_used?: number;  // [2026-04-21] input + cache_read + cache_write (캐시 포함 실제 점유)
     model: string; context_window: number; percentage: number; last_ts: string;
+    // [2026-04-21] 5시간 sliding window 집계 (쿼터 한도 모르므로 절대값만)
+    last_5h_tokens?: number;
+    last_5h_messages?: number;
+    last_5h_oldest_ts?: string;
   } | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
@@ -691,9 +695,10 @@ export default function TerminalSlot({
                   return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
                 })}
               </div>
-              {/* 텍스트: 모델명 · 사용량 */}
+              {/* 텍스트: 모델명 (컨텍스트 크기) · 사용량 */}
               <div className="flex items-center gap-0 whitespace-nowrap flex-1 min-w-0">
                 <span className="font-semibold" style={{ color: modelColor }}>{modelShort}</span>
+                <span className="text-[#555] ml-1 text-[9px]">({maxLabel} context)</span>
                 <span className="text-[#444] mx-1.5">·</span>
                 <span className="text-[#ccc]">{usedLabel}/{maxLabel} tokens ({ctxPct}%)</span>
                 {ctx && ctxRelTime && <span className="text-[#333] ml-2 text-[9px]">{ctxRelTime}</span>}
@@ -707,47 +712,88 @@ export default function TerminalSlot({
                 No usage data yet
               </div>
             )}
-            {/* 데이터 있을 때 2행: In / Out / Cache+ / Cache~ 상세 */}
+            {/* 데이터 있을 때 2행: In / Out / Cache+ / Cache~ · 5h 누적 */}
             {ctx && (
-              <div className="border-b border-white/5 bg-[#0d1117] px-3 py-[2px] font-mono text-[9px] text-[#888] flex items-center gap-3">
+              <div className="border-b border-white/5 bg-[#0d1117] px-3 py-[2px] font-mono text-[9px] text-[#888] flex items-center gap-3 flex-wrap">
                 <span>In: <span className="text-[#fbbf24]">{fmtTok(inputTok)}</span></span>
                 <span>Out: <span className="text-[#ccc]">{fmtTok(outputTok)}</span></span>
                 {cacheWrite > 0 && <span>Cache+: <span className="text-[#4ade80]">{fmtTok(cacheWrite)}</span></span>}
                 {cacheRead > 0 && <span>Cache~: <span className="text-[#22d3ee]">{fmtTok(cacheRead)}</span></span>}
+                {(ctx.last_5h_tokens ?? 0) > 0 && (
+                  <span className="ml-auto text-[#666]" title="지난 5시간 누적 (cwd 일치 세션)">
+                    5h: <span className="text-[#a3e635]">{fmtTok(ctx.last_5h_tokens ?? 0)}</span>
+                    <span className="text-[#444] ml-1">· {ctx.last_5h_messages ?? 0}회</span>
+                  </span>
+                )}
               </div>
             )}
 
-            {/* 상세 팝업: /context 스타일 블록 그리드 + 카테고리 (클릭 토글) */}
-            {showCtxDetail && ctx && (
-              <div className="absolute top-full left-0 right-0 z-50 bg-[#0d1117] border-b border-x border-white/10 shadow-2xl font-mono text-[10px] px-3 pt-2 pb-3 space-y-2">
-                <div className="text-[#ccc] font-bold text-[11px]">컨텍스트 사용량</div>
-                {/* 블록 그리드 10×10 */}
-                <div className="flex flex-col gap-[2px]">
-                  {Array.from({ length: 10 }, (_, row) => (
-                    <div key={row} className="flex gap-[2px]">
-                      {Array.from({ length: 10 }, (_, col) => (
-                        <span key={col} style={{ color: getBlockColor(row * 10 + col), fontSize: 11, lineHeight: 1 }}>█</span>
-                      ))}
+            {/* 상세 팝업: /context 스타일 블록 그리드 + 카테고리 + 5h sliding (클릭 토글) */}
+            {showCtxDetail && ctx && (() => {
+              // 5시간 집계 리셋 시각 계산: oldest_ts + 5h
+              const oldestMs = ctx.last_5h_oldest_ts ? new Date(ctx.last_5h_oldest_ts).getTime() : 0;
+              const resetLabel = oldestMs
+                ? (() => {
+                    const remainSec = Math.max(0, Math.floor((oldestMs + 5 * 3600 * 1000 - Date.now()) / 1000));
+                    if (remainSec <= 0) return '곧 초기화';
+                    const h = Math.floor(remainSec / 3600);
+                    const m = Math.floor((remainSec % 3600) / 60);
+                    return h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
+                  })()
+                : '';
+              return (
+                <div className="absolute top-full left-0 right-0 z-50 bg-[#0d1117] border-b border-x border-white/10 shadow-2xl font-mono text-[10px] px-3 pt-2 pb-3 space-y-3">
+                  {/* ── 상단 프로그레스 바 — CLI /context 스타일 ── */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[#ccc] font-bold text-[11px]">컨텍스트 창</span>
+                      <span className="text-[#ccc] text-[10px]">
+                        {usedLabel}/{maxLabel} ({ctxPct}%)
+                      </span>
                     </div>
-                  ))}
-                </div>
-                {/* 카테고리별 사용량 */}
-                <div className="pt-1 space-y-[3px]">
-                  <div className="text-[#444] text-[9px] mb-1">카테고리별 사용량</div>
-                  {categories.map(cat => (
-                    <div key={cat.label} className="flex items-center gap-1">
-                      <span style={{ color: cat.color, fontSize: 9 }}>█</span>
-                      <span className="text-[#999] w-14">{cat.label}</span>
-                      <span className="text-[#ccc] w-10 text-right">{fmtTok(cat.tok)}</span>
-                      <div className="flex-1 h-1 bg-[#1a1a2e] rounded-full overflow-hidden ml-1">
-                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, cat.pct)}%`, backgroundColor: cat.color }} />
+                    <div className="h-2 bg-[#1a1a2e] rounded-full overflow-hidden flex">
+                      {/* 캐시 읽기 · 쓰기 · 입력 순서로 쌓인 스택형 프로그레스 */}
+                      <div style={{ width: `${cacheReadPct}%`, backgroundColor: '#22d3ee' }} />
+                      <div style={{ width: `${cacheWritePct}%`, backgroundColor: '#4ade80' }} />
+                      <div style={{ width: `${inputOnlyPct}%`, backgroundColor: '#fbbf24' }} />
+                    </div>
+                  </div>
+
+                  {/* ── 5시간 sliding window (쿼터 한도 없음, 절대값만) ── */}
+                  {(ctx.last_5h_tokens ?? 0) > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[#ccc] font-bold text-[11px]">5시간 누적 사용량</span>
+                        <span className="text-[#888] text-[10px]">
+                          {fmtTok(ctx.last_5h_tokens ?? 0)} tokens · {ctx.last_5h_messages ?? 0}회
+                          {resetLabel && <span className="text-[#555] ml-2">· {resetLabel} 롤오프</span>}
+                        </span>
                       </div>
-                      <span className="text-[#555] w-8 text-right">{Math.round(cat.pct)}%</span>
+                      <div className="text-[9px] text-[#555] leading-tight">
+                        cwd 일치 세션의 지난 5h assistant usage 합계.
+                        쿼터 한도 정보는 Anthropic Admin API 필요.
+                      </div>
                     </div>
-                  ))}
+                  )}
+
+                  {/* ── 카테고리별 사용량 ── */}
+                  <div className="pt-1 space-y-[3px]">
+                    <div className="text-[#444] text-[9px] mb-1">카테고리별 사용량</div>
+                    {categories.map(cat => (
+                      <div key={cat.label} className="flex items-center gap-1">
+                        <span style={{ color: cat.color, fontSize: 9 }}>█</span>
+                        <span className="text-[#999] w-14">{cat.label}</span>
+                        <span className="text-[#ccc] w-10 text-right">{fmtTok(cat.tok)}</span>
+                        <div className="flex-1 h-1 bg-[#1a1a2e] rounded-full overflow-hidden ml-1">
+                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, cat.pct)}%`, backgroundColor: cat.color }} />
+                        </div>
+                        <span className="text-[#555] w-8 text-right">{Math.round(cat.pct)}%</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         );
       })()}
