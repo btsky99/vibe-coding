@@ -129,10 +129,16 @@ def _json_response(handler, data: dict | list, status: int = 200) -> None:
 
 
 def _parse_iso_dt(value: str | None) -> datetime | None:
+    """ISO 8601 문자열 → aware datetime. Z suffix는 UTC로 명시 처리.
+
+    [2026-04-21] Z를 단순히 제거하면 naive datetime이 되어 `.timestamp()`가
+    로컬 시간대로 해석됨 → 5시간 sliding window 집계에서 9시간 오프셋 발생.
+    Z를 '+00:00'으로 치환해 aware datetime을 반환하도록 수정.
+    """
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace('Z', ''))
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
     except Exception:
         return None
 
@@ -738,7 +744,18 @@ def handle_get(handler, path: str, params: dict,
                     if sessions:
                         break  # 일치 세션 확보되면 추가 스캔 중단
             sessions.sort(key=lambda s: s.get('last_ts', ''), reverse=True)
-            
+            # [2026-04-21] 방금 시작된 세션은 아직 assistant usage 없을 수 있음.
+            # 그 경우 model='unknown' + 토큰 0이 맨 앞에 와서 빈 바가 표시되는
+            # 현상 방지 → usage 있는 가장 최신 세션을 우선 선택.
+            with_usage = [
+                s for s in sessions
+                if s.get('model') not in ('', 'unknown')
+                and (s.get('input_tokens', 0) + s.get('cache_read', 0)) > 0
+            ]
+            if with_usage:
+                seen = {id(s) for s in with_usage}
+                sessions = with_usage + [s for s in sessions if id(s) not in seen]
+
             # [Fix] 최신 세션의 상세 토큰 정보 반환.
             # 프론트엔드(TerminalSlot.tsx)는 input_tokens/output_tokens/
             # cache_read/cache_write/last_ts 필드를 개별적으로 읽어
