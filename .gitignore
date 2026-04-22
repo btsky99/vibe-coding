@@ -32,3 +32,16 @@ worktrees/
 nul
 vibe_coding.egg-info/
 %TEMP%/
+
+# 루트 테스트 아티팩트 (Playwright 스크린샷, 리포트)
+/test-results/
+/test_chat_*.png
+/test_office_*.png
+/office_check*.png
+/office_debug_*.png
+/office_test_*.png
+/ceo_design_result.png
+
+# 루트에 임시로 내려받은 외부 유틸 zip
+/SDCardFormatterv5_WinEN.zip
+/h2testw_*.zip
