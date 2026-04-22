@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-04-16 22:00
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-04-22 22:34
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -27,14 +27,16 @@
 | `docs/HARNESS_V1.md` |  |
 | `docs/HARNESS_V2.md` |  |
 | `docs/METAVERSE_OFFICE_DESIGN.md` |  |
+| `docs/PLATFORM_LAYERS.md` |  |
 | `docs/TERMINAL3_SCROLL_ISSUE.md` |  |
+| `docs/VIBE_CONVENTIONS.md` |  |
 | `docs/VIBE_PROJECT_GUIDE.md` | 하이브 마인드 운영 및 아키텍처 통합 가이드 |
 
 ## 🖥️ 서버 & API (.ai_monitor/)
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 6365 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4914 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -44,18 +46,20 @@
 |------|------|------|
 | `agent_api.py` | 1311 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 226 |  |
-| `dispatcher_api.py` | 194 | 디스패처 API (/api/dispatcher/*) — server.py에서 분리 |
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
 | `git_api.py` | 177 | Git 저장소 관리 API (/api/git/*) |
-| `hive_api.py` | 1016 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
-| `memory_api.py` | 168 | 메모리/지식 저장소 API (/api/memory/*) |
-| `office_api.py` | 469 |  |
+| `hive_api.py` | 1143 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `memory_api.py` | 208 | 메모리/지식 저장소 API (/api/memory/*) |
+| `office_api.py` | 431 |  |
+| `office_proxy_api.py` | 229 |  |
 | `pty_api.py` | 195 | PTY 터미널 제어 API (/api/pty/*) |
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
-| `tools_api.py` | 908 |  |
+| `telegram_api.py` | 164 |  |
+| `tools_api.py` | 902 |  |
 | `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
+| `vibe_skills_api.py` | 246 |  |
 | `zettel_api.py` | 209 |  |
 
 ### 데이터 계층 (.ai_monitor/src/)
@@ -67,12 +71,12 @@
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
 | `logger.py` | 123 |  |
-| `pg_store.py` | 2040 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `pg_store.py` | 2444 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `secure.py` | 52 |  |
 | `server_utils.py` | 59 |  |
 | `view.py` | 243 |  |
-| `wiki_generator.py` | 350 |  |
-| `zettelkasten.py` | 454 |  |
+| `wiki_generator.py` | 381 |  |
+| `zettelkasten.py` | 457 |  |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -89,11 +93,10 @@
 ### 하이브/협업
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `auto_dispatcher.py` | 817 | 역량 기반 자동 작업 분배 + 크로스 검증 |
-| `orchestrator.py` | 564 | 하이브 태스크 스케줄링 및 에이전트 감시 |
+| `orchestrator.py` | 584 | 하이브 태스크 스케줄링 및 에이전트 감시 |
 | `hive_debate.py` | 428 | 에이전트 간 의견 조율 토론 워크플로우 |
 | `hive_bridge.py` | 184 | PostgreSQL 18 기반 하이브 통합 로깅 |
-| `memory.py` | 230 | PostgreSQL 기반 하이브 메모리 CLI |
+| `memory.py` | 317 | PostgreSQL 기반 하이브 메모리 CLI |
 | `worktree_manager.py` | 349 | Git Worktree 격리 관리자 |
 | `generate_hivemind_doc.py` | 323 | HIVEMIND.md 자동 생성기 |
 | `analyze_hive.py` | 66 | 하이브 실시간 상태 분석 보고서 |
@@ -101,7 +104,7 @@
 ### 훅/이벤트
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_hook.py` | 1165 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
+| `hive_hook.py` | 981 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
 | `hook_bridge.py` | 497 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
 | `gemini_hook.py` | 629 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
@@ -173,7 +176,7 @@
 | `build_verify.py` | 637 |  |
 | `gemini_output_filter.py` | 78 |  |
 | `gemini_session_repair.py` | 216 |  |
-| `harness_verify.py` | 393 |  |
+| `harness_verify.py` | 470 |  |
 | `hive_heartbeat.py` | 330 |  |
 | `install_dev_tools.py` | 159 |  |
 | `install_frontend_deps.py` | 195 |  |
@@ -184,7 +187,11 @@
 | `install_playwright_cli.py` | 65 |  |
 | `install_psql.py` | 189 |  |
 | `install_system_tool.py` | 208 |  |
+| `intent_map.py` | 175 |  |
+| `migrate_memory_authors.py` | 99 |  |
 | `migrate_memory_to_zettel.py` | 93 |  |
+| `migrate_project_id_backfill.py` | 163 |  |
+| `migrate_project_id_normalize.py` | 167 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_gemini_clean.py` | 130 |  |
@@ -200,48 +207,41 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 879 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 836 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
-| `types.ts` | 194 |  |
+| `types.ts` | 198 |  |
 | `constants.tsx` | 93 |  |
 
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
-| `ActivityBar.tsx` | 210 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
+| `ActivityBar.tsx` | 176 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
 | `ChatSlot.tsx` | 607 |  |
 | `FileExplorer.tsx` | 519 | 파일 시스템 탐색기 (트리/플랫 뷰) |
 | `FilePathText.tsx` | 102 | 파일 경로 렌더링 (클릭 가능 링크화) |
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
-| `MessageComposer.tsx` | 135 | 에이전트 간 메시지 작성 폼 |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1243 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1239 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
-| `TopMenuBar.tsx` | 513 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
+| `TopMenuBar.tsx` | 591 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 140 | 코드 에디터 래퍼 (Monaco Editor) |
 
 ### 패널 컴포넌트 (components/panels/)
 | 패널 | 줄 수 | 설명 |
 |------|------|------|
 | `AgentMonitorPanel.tsx` | 729 |  |
-| `AgentPanel.tsx` | 2934 | 자율 에이전트 통합 컨트롤 패널 (SSE 스트림, 워크플로우, 사고흐름) |
 | `AgentTerminalCard.tsx` | 256 |  |
-| `CodeGraphPanel.tsx` | 306 |  |
-| `CodeSearchPanel.tsx` | 227 |  |
-| `CodeWikiPanel.tsx` | 379 |  |
-| `DispatcherPanel.tsx` | 436 | 멀티-LLM 디스패처 (역량 레이더 차트) |
 | `GitPanel.tsx` | 250 | Git 통합 (브랜치, 스테이징, 커밋) |
-| `HivePanel.tsx` | 275 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
+| `HivePanel.tsx` | 464 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
 | `KanbanPanel.tsx` | 446 | 오케스트레이션 수평 파이프라인 뷰 |
-| `MemoryPanel.tsx` | 371 | 공유 지식 베이스 (PostgreSQL) |
-| `MessagesPanel.tsx` | 466 | 에이전트 간 메시지 채널 (채팅 버블 스타일) |
-| `OrchestratorPanel.tsx` | 394 | 스킬 체인 현황판 |
+| `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
+| `SkillChainPanel.tsx` | 394 |  |
 | `SkillResultsPanel.tsx` | 492 | 스킬 실행 결과 (라이브 + 기록) |
 | `TaskBoardPanel.tsx` | 703 | 칸반 스타일 태스크 보드 |
-| `TasksPanel.tsx` | 491 | 에이전트 간 태스크 큐 |
+| `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 204 |  |
-| `ToolsPanel.tsx` | 337 |  |
+| `ToolsPanel.tsx` | 347 |  |
 | `ZettelkastenPanel.tsx` | 537 |  |
 
 ## 🧪 테스트 (tests/)
@@ -251,7 +251,7 @@
 | `test_codex_harness_v2.py` | 88 |  |
 | `test_codex_orchestration.py` | 77 |  |
 | `test_dispatcher_loop.py` | 122 | scripts/auto_dispatcher.py + scripts/itcp.py |
-| `test_harness_verify.py` | 218 |  |
+| `test_harness_verify.py` | 216 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 225 | scripts/itcp.py 폴백 경로 |
 | `test_new_api_modules.py` | 467 |  |
@@ -267,4 +267,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-04-16 22:00
+> 자동 생성 완료: 2026-04-22 22:34
