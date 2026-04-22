@@ -4520,8 +4520,27 @@ def main():
             _proj_name = _current_project_root().name
             print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project={_proj_name}, 60초 양방향')
 
-            # Google Drive vault — config.json에서 경로 읽기
+            # Google Drive vault — 자동 탐지 + config.json 오버라이드
+            # PC마다 드라이브 레터(I:/G:/H:…)와 언어(내 드라이브/My Drive)가 달라
+            # 고정 경로를 쓰면 다른 PC에서 동작하지 않는다.
+            _VAULT_MARKER = Path('obsidian') / 'hive-zettel'
+            _DRIVE_ROOTS = ('내 드라이브', 'My Drive')
+
+            def _detect_gdrive_vault():
+                """드라이브 레터 A~Z를 스캔해 GDrive vault를 자동 탐지한다."""
+                import string as _string
+                for _letter in _string.ascii_uppercase:
+                    _root = Path(f'{_letter}:/')
+                    if not _root.exists():
+                        continue
+                    for _label in _DRIVE_ROOTS:
+                        _candidate = _root / _label / _VAULT_MARKER
+                        if _candidate.exists():
+                            return _candidate
+                return None
+
             def _get_gdrive_vault():
+                # 1순위: config.json 명시 설정 (사용자 오버라이드)
                 try:
                     if CONFIG_FILE.exists():
                         _cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
@@ -4530,14 +4549,23 @@ def main():
                             return Path(_gd)
                 except Exception:
                     pass
-                return None
+                # 2순위: 자동 탐지
+                return _detect_gdrive_vault()
 
             def _sync_with_gdrive():
+                _last_vault = None
                 while True:
                     try:
                         _gdrive_vault = _get_gdrive_vault()
                         if _gdrive_vault and _gdrive_vault.exists():
+                            if _last_vault != _gdrive_vault:
+                                print(f'[zettel_sync] Google Drive vault 감지됨: {_gdrive_vault}')
+                                _last_vault = _gdrive_vault
                             _mod.export_to_vault(_gdrive_vault, project_id=_proj_name)
+                        else:
+                            if _last_vault is not None:
+                                print('[zettel_sync] Google Drive vault 사라짐 — 동기화 일시 중단')
+                                _last_vault = None
                     except Exception as _ge:
                         print(f'[zettel_sync] Google Drive 동기화 오류: {_ge}')
                     time.sleep(120)

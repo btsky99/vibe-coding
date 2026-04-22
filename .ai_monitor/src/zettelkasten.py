@@ -195,6 +195,9 @@ def list_notes(project_id: str = '', note_type: str = '', author: str = '',
     )
     for row in rows:
         row['tags'] = _parse_tags(row.pop('tags_text', '[]'))
+        arch = row.get('archived')
+        if isinstance(arch, str):
+            row['archived'] = arch.lower() in ('t', 'true', '1')
     return rows
 
 
