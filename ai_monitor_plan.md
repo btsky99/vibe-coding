@@ -179,24 +179,23 @@
 - [x] `.claude/` vs `.vibe/` 병합 규칙 명시
 - [x] 제한·금지 사항
 
-### 3-2 서버 스캐너 (`.ai_monitor/api/vibe_skills_api.py`)
-- [ ] `list_vibe_skills(project_root)` — `.vibe/skills/*/SKILL.md` 파싱
-- [ ] `list_claude_skills(project_root)` — 기존 `.claude/skills/*/SKILL.md` 파싱 (재사용)
-- [ ] `merge_skills()` — 이름 충돌 시 `.vibe/` 우선, origin 필드 부여
-- [ ] GET `/api/vibe/skills` 라우팅 (server.py)
+### 3-2 서버 스캐너 (`.ai_monitor/api/vibe_skills_api.py`) ✅ 2026-04-19
+- [x] `list_vibe_skills(project_root)` — `.vibe/skills/*/SKILL.md` 파싱
+- [x] `list_claude_skills(project_root)` — 기존 `.claude/skills/*/SKILL.md` 파싱 (재사용)
+- [x] `merge_skills()` — 이름 충돌 시 `.vibe/` 우선, origin 필드 부여
+- [x] GET `/api/vibe/skills` 라우팅 (server.py:1672)
 
 ### 3-3 UI 병합
-- [ ] 오피스 채팅 `/` 팝업의 스킬 소스를 `/api/vibe/skills`로 전환
+- [ ] 오피스 채팅 `/` 팝업의 스킬 소스를 `/api/vibe/skills`로 전환 (현재 `/api/office/skills`)
 - [ ] `origin` 배지(claude/vibe) 표시
 - [ ] 클래식 모드 슬래시 팝업(있다면)도 동일 전환
 
-### 3-4 자기 드레싱 — 이 리포의 `.vibe/skills/` 샘플
-- [ ] `.vibe/skills/platform-check/SKILL.md` — PLATFORM_LAYERS.md 요약 + 레이어 진단
-- [ ] 또는 `.vibe/skills/phase-plan/SKILL.md` — 현재 Phase 상태 보고
+### 3-4 자기 드레싱 — 이 리포의 `.vibe/skills/` 샘플 ✅
+- [x] `.vibe/skills/platform-check/SKILL.md` 존재
 
-### 3-5 하네스 검증
-- [ ] `scripts/harness_verify.py`에 `.vibe/` 포맷 검증 추가
-- [ ] SKILL.md frontmatter 필수 필드 (`name`, `description`) 누락 시 WARN
+### 3-5 하네스 검증 ✅ 2026-04-19
+- [x] `scripts/harness_verify.py`에 `.vibe/` 포맷 검증 추가 (`_check_vibe_skills`)
+- [x] SKILL.md frontmatter 필수 필드 (`name`, `description`) 누락 시 WARN
 - [ ] `tests/test_harness_verify.py` 케이스 추가
 
 ---
@@ -211,20 +210,21 @@
 
 ---
 
-## server.py 분할 (2026-04-20 승인 — B안 도메인 모듈화)
+## server.py 분할 (2026-04-20 승인 — B안 도메인 모듈화) ✅ 2026-04-30 완료
 
 > 상위 메모: `~/.claude/projects/D--vibe-coding/memory/project_server_split_plan.md`
 > 목표: 6363 → 4963줄 (5000 미만 안전 마진). 마지막 hot-file WARN 해소 + Platform Phase 5(빌드 분리) 선행.
 > 원칙: 단계별 별도 커밋, 함수 시그니처 유지, 매 단계 후 `pytest tests/` + 서버 부팅 smoke.
+> **결과: 4914줄 달성 (5000 미만). infra/ 6모듈(lifecycle/runtime/fs_watcher/memory_watcher/tool_install/postgres_runtime) 분리 완료. 단계 8b 커밋 8507db6.**
 
 ### 사전 작업
 
-- [ ] **Task 0: infra/ 패키지 디렉토리 생성**
+- [x] **Task 0: infra/ 패키지 디렉토리 생성** ✅
   - 파일: `.ai_monitor/infra/__init__.py`
   - 방법: 빈 `__init__.py` 생성. 패키지화만 목적.
   - 검증: `python -c "from ai_monitor import infra"` 성공
 
-### 단계 1 — infra/lifecycle.py (190줄, 🟢)
+### 단계 1 — infra/lifecycle.py (190줄, 🟢) ✅
 
 - [ ] **Task 1.1: 정리/시그널 함수 추출**
   - 파일: `.ai_monitor/infra/lifecycle.py` 신설
@@ -236,7 +236,7 @@
   - 검증: `pytest tests/` + `python .ai_monitor/server.py --version` 무에러
 - [ ] **Task 1.3: 단계 1 커밋 (`refactor(server): infra/lifecycle.py 분리`)**
 
-### 단계 2 — infra/runtime.py (100줄, 🟢)
+### 단계 2 — infra/runtime.py (100줄, 🟢) ✅
 
 - [ ] **Task 2.1: 런타임 유틸 추출**
   - 파일: `.ai_monitor/infra/runtime.py` 신설
@@ -248,7 +248,7 @@
   - 검증: 서버 부팅 smoke + `pytest tests/`
 - [ ] **Task 2.3: 단계 2 커밋**
 
-### 단계 3 — infra/fs_watcher.py (95줄, 🟢)
+### 단계 3 — infra/fs_watcher.py (95줄, 🟢) ✅
 
 - [ ] **Task 3.1: FS Watcher + broadcast 워커 추출**
   - 파일: `.ai_monitor/infra/fs_watcher.py` 신설
@@ -260,7 +260,7 @@
   - 검증: 서버 부팅 시 watchdog 로그 정상 출력
 - [ ] **Task 3.3: 단계 3 커밋**
 
-### 단계 4 — api/office_proxy_api.py (210줄, 🟢)
+### 단계 4 — api/office_proxy_api.py (210줄, 🟢) ✅
 
 - [ ] **Task 4.1: Office 프록시 함수 추출**
   - 파일: `.ai_monitor/api/office_proxy_api.py` 신설
@@ -272,7 +272,7 @@
   - 검증: 서버 부팅 시 office_server 자동 기동 확인
 - [ ] **Task 4.3: 단계 4 커밋**
 
-### 단계 5 — api/telegram_api.py (155줄, 🟡)
+### 단계 5 — api/telegram_api.py (155줄, 🟡) ✅
 
 - [ ] **Task 5.1: Telegram 핸들러 함수 변환**
   - 파일: `.ai_monitor/api/telegram_api.py` 신설
@@ -284,7 +284,7 @@
   - 검증: `/api/config/telegram` GET/POST 수동 호출 200 응답
 - [ ] **Task 5.3: 단계 5 커밋**
 
-### 단계 6 — infra/memory_watcher.py (370줄, 🟡)
+### 단계 6 — infra/memory_watcher.py (370줄, 🟡) ✅
 
 - [ ] **Task 6.1: 메모리 임베딩 + Watcher 추출**
   - 파일: `.ai_monitor/infra/memory_watcher.py` 신설
@@ -296,7 +296,7 @@
   - 검증: 서버 부팅 시 MemoryWatcher 스레드 정상 시작 + memory 검색 API smoke
 - [ ] **Task 6.3: 단계 6 커밋**
 
-### 단계 7 — infra/tool_install.py (200줄, 🟡)
+### 단계 7 — infra/tool_install.py (200줄, 🟡) ✅
 
 - [ ] **Task 7.1: 도구 설치 상태 머신 추출**
   - 파일: `.ai_monitor/infra/tool_install.py` 신설
@@ -308,7 +308,9 @@
   - 검증: 서버 부팅 + `/api/tools/status` 응답 비교
 - [ ] **Task 7.3: 단계 7 커밋**
 
-### 단계 8a — src/pg_store.py 흡수: 커넥션 풀 (80줄, 🟡)
+### 단계 8a — src/pg_store.py 흡수: 커넥션 풀 (80줄, 🟡) ✅
+
+### 단계 8b — infra/postgres_runtime.py 분리 ✅ 2026-04-30 (커밋 8507db6)
 
 - [ ] **Task 8a.1: 커넥션 풀 함수 이관**
   - 파일: `.ai_monitor/src/pg_store.py` (기존 파일 확장)
