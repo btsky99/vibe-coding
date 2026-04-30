@@ -5,6 +5,8 @@
  *              PTY 직통에서 REST API 브릿지로 전환.
  *              / 입력 시 스킬 팝업 표시.
  * REVISION HISTORY:
+ * - 2026-04-30 Claude: Platform Phase 3-3 — 스킬 소스 /api/vibe/skills 직접 호출
+ *                      (office_api 어댑터 제거, snake→camel 매핑은 UI에서 처리)
  * - 2026-04-13 Claude: agent/chat API 전환 + 스킬 팝업 추가
  * - 2026-04-11 Claude: PTY 직통 통신으로 전면 재작성 (클래식 분리)
  * - 2026-04-08 Claude: 3모드 채팅 패널로 재설계 (1:1, 회의실, 전체)
@@ -65,7 +67,7 @@ export default function OfficeChatPanel({
   const [selectedSkillIdx, setSelectedSkillIdx] = useState(0);
   const skillsCacheRef = useRef<{ data: SkillMeta[]; ts: number } | null>(null);
 
-  // 스킬 목록 로드 (5분 캐시)
+  // 스킬 목록 로드 — Layer 2 스캐너(.claude + .vibe 병합) 직접 호출. 5분 캐시.
   const loadSkills = useCallback(async () => {
     const cache = skillsCacheRef.current;
     if (cache && Date.now() - cache.ts < 300_000) {
@@ -73,9 +75,21 @@ export default function OfficeChatPanel({
       return;
     }
     try {
-      const resp = await fetch('/api/office/skills');
+      const resp = await fetch('/api/vibe/skills');
       const data = await resp.json();
-      const list: SkillMeta[] = (data.skills || []).filter((s: SkillMeta) => s.userInvocable);
+      const list: SkillMeta[] = (data.skills || [])
+        .filter((s: { user_invocable?: boolean }) => s.user_invocable !== false)
+        .map((s: { name: string; description: string; origin?: 'claude' | 'vibe' }) => {
+          // description의 'Use when:' 이후는 트리거 가이드 — UI에선 잘라냄
+          const raw = s.description || '';
+          const cut = raw.indexOf('Use when:');
+          return {
+            name: s.name,
+            description: cut > 0 ? raw.slice(0, cut).trim() : raw,
+            userInvocable: true,
+            origin: s.origin,
+          };
+        });
       setSkills(list);
       skillsCacheRef.current = { data: list, ts: Date.now() };
     } catch {

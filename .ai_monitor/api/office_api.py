@@ -4,6 +4,8 @@ DESCRIPTION: 오피스 모드 전용 API — 프로필 중앙화(PostgreSQL SSOT
              모든 오피스 관련 요청(/api/office/*)을 단일 진입점에서 처리한다.
 
 REVISION HISTORY:
+- 2026-04-30 Claude: Platform Phase 3-3 — /api/office/skills 어댑터 제거.
+                     UI는 /api/vibe/skills 직접 호출 (vibe_skills_api 단일 소스).
 - 2026-04-09 Claude: 초기 작성 — 프로필 CRUD + SSE + 에이전트/태스크 네임스페이스 분리
 """
 
@@ -134,62 +136,8 @@ def init_office(DATA_DIR: Path):
 
 # ── GET 핸들러 ───────────────────────────────────────────────────────────
 
-_skills_cache: dict | None = None
-_skills_cache_ts: float = 0
-
-
-def _parse_skills() -> list[dict]:
-    """Platform Phase 3 스캐너를 경유해 .claude/skills + .vibe/skills 병합 목록 반환.
-
-    응답 포맷은 기존 오피스 채팅 UI와 호환:
-    - userInvocable (camelCase)
-    - description은 "Use when:" 이전까지만 (간결 표시)
-    - 신규: origin ("claude" | "vibe") — UI 배지용
-
-    결과를 5분간 캐시.
-    """
-    global _skills_cache, _skills_cache_ts
-    now = time.time()
-    if _skills_cache is not None and now - _skills_cache_ts < 300:
-        return _skills_cache
-
-    try:
-        from api.vibe_skills_api import scan_project_skills
-        project_root = Path(__file__).resolve().parent.parent.parent
-        result = scan_project_skills(project_root)
-        raw = result.get('skills', [])
-    except Exception:
-        raw = []
-
-    skills: list[dict] = []
-    for s in raw:
-        name = str(s.get('name', '')).strip()
-        if not name:
-            continue
-        desc = str(s.get('description', ''))
-        use_when_idx = desc.find('Use when:')
-        if use_when_idx > 0:
-            desc = desc[:use_when_idx].strip()
-        skills.append({
-            'name': name,
-            'description': desc,
-            'userInvocable': bool(s.get('user_invocable', True)),
-            'origin': s.get('origin', 'claude'),
-        })
-
-    _skills_cache = skills
-    _skills_cache_ts = now
-    return skills
-
-
 def handle_get(handler, path: str, params: dict, DATA_DIR: Path) -> bool:
     ensure_schema(DATA_DIR)
-
-    # 스킬 목록
-    if path == '/api/office/skills':
-        skills = _parse_skills()
-        _send_json(handler, 200, {'skills': skills})
-        return True
 
     # SSE 스트림 — 프로필 변경 실시간 통지
     if path == '/api/office/profiles/stream':
