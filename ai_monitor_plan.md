@@ -147,9 +147,12 @@
 - [x] hive_sessions, pg_logs project_id NOT NULL 강제
 - [x] pg_store.py 동기화 — 신규 환경에서도 동일 보장
 
-### 2-3 project_id Resolver 유틸
-- [ ] 현재 활성 프로젝트 조회 헬퍼 (서버·UI 양쪽 일관)
-- [ ] 컨텍스트 미지정 쿼리 탐지 (개발 모드에서 경고)
+### 2-3 project_id Resolver 유틸 ✅ 2026-04-30
+- [x] 활성 project_id 헬퍼 분리 — `infra/project_context.py` 신설
+      (`current_project_root`, `current_project_id`, `slugify`)
+- [x] 서버: `_current_project_root`/`_id`가 새 모듈 위임
+- [x] 컨텍스트 미지정 경고 — `assert_project_id(pid, op)` + VIBE_DEV_MODE 가드
+- [ ] UI 측 통합 헬퍼 (Phase 2-4/2-5에서 라우팅 일관화 시 같이 처리)
 
 ### 2-4 API 레이어 일관화
 - [ ] 모든 `.ai_monitor/api/*.py`의 쓰기 경로에 `project_id` 인자 필수화

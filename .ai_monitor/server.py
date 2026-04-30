@@ -3,6 +3,8 @@ FILE: .ai_monitor/server.py
 DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
 
 REVISION HISTORY:
+- 2026-04-30 Claude: Platform Phase 2-3 — _current_project_root/_id 로직을
+                     infra/project_context.py로 추출 (서버 외부에서도 재사용 가능)
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 # 🕒 변경 이력 (History):
@@ -697,23 +699,20 @@ MemoryWatcher = _memory_watcher.MemoryWatcher
 
 
 # ── 현재 활성 프로젝트 루트 동적 조회 ────────────────────────────────────────
+# 실제 로직은 infra/project_context.py로 분리 (Phase 2-3, 2026-04-30).
+# 여기엔 서버 전역 PROJECT_ROOT/CONFIG_FILE을 주입하는 얇은 래퍼만 둔다.
+from infra.project_context import (
+    current_project_root as _ctx_project_root,
+    current_project_id as _ctx_project_id,
+)
+
+
 def _current_project_root() -> Path:
     """현재 활성 프로젝트 루트를 반환합니다.
 
-    [개발 vs 배포 버전 차이 해소]
-    배포(frozen) 버전에서 PROJECT_ROOT가 exe 폴더나 임시 폴더로 잘못 설정되는 문제 방지.
-    config.json의 last_path(UI에서 사용자가 선택한 경로)를 최우선으로 사용합니다.
-    config.json이 없거나 경로가 없으면 시작 시 결정된 PROJECT_ROOT를 사용합니다.
+    config.json의 last_path가 유효하면 우선, 없으면 시작 시 결정된 PROJECT_ROOT.
     """
-    try:
-        if CONFIG_FILE.exists():
-            cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-            lp = cfg.get('last_path', '')
-            if lp and Path(lp).is_dir():
-                return Path(lp)
-    except Exception as e:
-        print(f"[FILE ERROR] _current_project_root config 로드: {e}")
-    return PROJECT_ROOT
+    return _ctx_project_root(PROJECT_ROOT, CONFIG_FILE)
 
 
 def _validate_file_path(raw_path: str) -> Path:
@@ -741,13 +740,12 @@ def _validate_file_path(raw_path: str) -> Path:
 
 
 def _current_project_id() -> str:
-    """현재 활성 프로젝트의 PROJECT_ID 문자열을 반환합니다.
+    """현재 활성 프로젝트의 PROJECT_ID 슬러그를 반환합니다.
 
     UI에서 폴더를 전환하면 즉시 반영됩니다 (_current_project_root 기반).
     형식: 경로의 드라이브/슬래시를 '--'로 치환 (예: D--vibe-coding)
     """
-    root = _current_project_root()
-    return str(root).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
+    return _ctx_project_id(PROJECT_ROOT, CONFIG_FILE)
 
 
 def _codex_main_model() -> str:
