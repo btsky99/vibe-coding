@@ -17,6 +17,8 @@ DESCRIPTION: Platform Phase 2 단계 3 — 미존재 컬럼 추가 후 데이터
              python scripts/migrate_project_id_backfill.py --apply  # 실제 UPDATE 수행
 
 REVISION HISTORY:
+- 2026-04-30 Claude: hive_tasks, pg_logs 추가 + --apply 시 hive_sessions 인덱스
+                    생성 및 hive_sessions/pg_logs project_id NOT NULL 강제
 - 2026-04-19 Claude: 최초 작성 — Platform Phase 2 단계 3
 """
 
@@ -60,6 +62,18 @@ LAYER1_TABLES = [
     "office_profiles",
     "pg_messages",
     "task_comments",
+    "hive_tasks",
+    "pg_logs",
+]
+
+# --apply 시 backfill 후 적용할 제약/인덱스 마이그레이션
+POST_BACKFILL_DDL = [
+    # hive_sessions — Phase 2-1 감사에서 인덱스 누락 발견
+    "CREATE INDEX IF NOT EXISTS idx_hive_sessions_project_id "
+    "ON hive_sessions (project_id);",
+    # NOT NULL 강제 — 빈 값이 모두 backfill된 직후에만 안전하게 적용
+    "ALTER TABLE hive_sessions ALTER COLUMN project_id SET NOT NULL;",
+    "ALTER TABLE pg_logs ALTER COLUMN project_id SET NOT NULL;",
 ]
 
 
@@ -122,6 +136,13 @@ def _apply() -> None:
         ok = execute(sql)
         status = "OK" if ok else "FAIL"
         print(f"  [{status}] {tbl}")
+
+    print("\n[APPLY] 인덱스/제약 적용...")
+    for sql in POST_BACKFILL_DDL:
+        ok = execute(sql)
+        status = "OK" if ok else "FAIL"
+        # 출력엔 짧게 — DDL 첫 80자
+        print(f"  [{status}] {sql.strip()[:80]}")
 
 
 def main() -> None:

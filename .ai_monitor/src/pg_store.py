@@ -417,7 +417,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             legacy_id BIGINT,
             session_id TEXT NOT NULL,
             terminal_id TEXT DEFAULT '',
-            project_id TEXT DEFAULT '',
+            project_id TEXT NOT NULL DEFAULT '',
             agent TEXT DEFAULT '',
             trigger_msg TEXT DEFAULT '',
             status TEXT DEFAULT '',
@@ -430,6 +430,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             ON hive_sessions (legacy_source, legacy_id)
             WHERE legacy_source IS NOT NULL AND legacy_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_hive_sessions_start ON hive_sessions (ts_start DESC);
+        CREATE INDEX IF NOT EXISTS idx_hive_sessions_project_id ON hive_sessions (project_id);
 
         CREATE TABLE IF NOT EXISTS hive_tasks (
             id TEXT PRIMARY KEY,
@@ -491,6 +492,9 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS task TEXT NOT NULL DEFAULT '';")
         execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'success';")
         execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT '';")
+        # Phase 2-2 (2026-04-30) — 빈 값 backfill 후 NOT NULL 강제
+        execute_raw("UPDATE pg_logs SET project_id = '' WHERE project_id IS NULL;")
+        execute_raw("ALTER TABLE pg_logs ALTER COLUMN project_id SET NOT NULL;")
         execute_raw("ALTER TABLE pg_logs ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;")
         execute_raw("UPDATE pg_logs SET created_at = COALESCE(created_at, ts, NOW()) WHERE created_at IS NULL;")
         execute_raw("UPDATE pg_logs SET ts = COALESCE(ts, created_at, NOW()) WHERE ts IS NULL;")

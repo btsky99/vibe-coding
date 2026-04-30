@@ -135,17 +135,17 @@
 > 목표: Layer 1의 모든 DB 쓰기가 `project_id`로 격리되어, 여러 프로젝트가
 > 서로 오염 없이 공존 가능하게 한다.
 
-### 2-1 DB 스키마 감사 (읽기 전용)
-- [ ] Layer 1 테이블 목록 확정 (hive_*, zettel_*, pg_logs, pg_messages,
-      agent_*, active_session_context, task_comments, office_*)
-- [ ] 각 테이블에 `project_id` 컬럼 존재 여부 + 기본값 + NOT NULL 여부 확인
-- [ ] 기존 데이터의 `project_id` 분포 (empty/NULL 비율) 측정
-- [ ] 감사 결과 표로 정리 + 마이그레이션 대상 후보 도출
+### 2-1 DB 스키마 감사 (읽기 전용) ✅ 2026-04-30
+- [x] Layer 1 테이블 목록 확정 — 16개 테이블
+- [x] 각 테이블에 `project_id` 컬럼 존재 여부 측정 — 16/16 보유
+- [x] 기존 데이터의 `project_id` 분포 측정 — 빈 값 332건 (5개 테이블)
+- [x] 감사 결과: 인덱스 누락 1건(hive_sessions), NOT NULL 미적용 2건(hive_sessions, pg_logs)
 
-### 2-2 project_id 컬럼 추가 마이그레이션 (있어야 할 곳)
-- [ ] 2-1에서 도출된 테이블에 `project_id TEXT NOT NULL DEFAULT ''` 추가
-- [ ] 빈 값 데이터에 현재 활성 프로젝트 id 일괄 backfill
-- [ ] 인덱스 추가 (`(project_id, status)` 등 조회 패턴별)
+### 2-2 project_id 컬럼 추가 마이그레이션 (있어야 할 곳) ✅ 2026-04-30
+- [x] 빈 값 데이터 332건 'D--vibe-coding'으로 backfill (migrate_project_id_backfill.py 확장 — hive_tasks, pg_logs 추가)
+- [x] hive_sessions에 project_id 인덱스 추가
+- [x] hive_sessions, pg_logs project_id NOT NULL 강제
+- [x] pg_store.py 동기화 — 신규 환경에서도 동일 보장
 
 ### 2-3 project_id Resolver 유틸
 - [ ] 현재 활성 프로젝트 조회 헬퍼 (서버·UI 양쪽 일관)
