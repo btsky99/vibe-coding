@@ -33,6 +33,7 @@ from src.file_store import (
     load_session_logs,
     load_skill_chain_rows,
 )
+from infra.project_context import assert_project_id
 
 
 # ── PostgreSQL 바이너리 경로 — frozen(EXE) / 개발 모드 분기 ───────────────────
@@ -1204,6 +1205,7 @@ def set_memory(
 ) -> dict | None:
     if not key or content is None:
         return None
+    project_id = assert_project_id(project_id, 'set_memory')
     author = _resolve_author(author)
     existing = get_memory(key)
     created_value = existing.get('created_at', '') if existing else (created_at or updated_at or _now_iso())
@@ -1419,6 +1421,7 @@ def upsert_session_log(
     legacy_source: str | None = None,
     legacy_id: int | None = None,
 ) -> bool:
+    project_id = assert_project_id(project_id, 'upsert_session_log')
     if legacy_source and legacy_id is not None:
         # SELECT-first: partial unique index와 ON CONFLICT 호환 문제 회피
         existing = query_rows(
@@ -1528,6 +1531,7 @@ def save_task(task: dict, project_id: str = '') -> dict | None:
         return None
     # task dict 안에 project_id가 있으면 우선 사용, 없으면 파라미터 사용
     _proj_id = str(task.get('project_id', '') or project_id)
+    _proj_id = assert_project_id(_proj_id, 'save_task')
     payload = {
         'timestamp': str(task.get('timestamp', '') or task.get('created_at', '') or _now_iso()),
         'updated_at': str(task.get('updated_at', '') or _now_iso()),
@@ -1654,18 +1658,27 @@ def delete_task(task_id: str) -> bool:
     return execute(f"DELETE FROM hive_tasks WHERE id = {_sql_text(task_id)};")
 
 
-def bulk_update_tasks(assigned_to: str, statuses: list[str], new_status: str) -> int:
+def bulk_update_tasks(assigned_to: str, statuses: list[str], new_status: str,
+                      project_id: str = '') -> int:
     if not statuses:
         return 0
+    project_id = assert_project_id(project_id, 'bulk_update_tasks')
+    # 프로젝트 누수 차단 — project_id 지정 시 해당 프로젝트 + 빈 값(레거시)만 갱신
+    proj_clause = (
+        f" AND (project_id = {_sql_text(project_id)} OR project_id = '')"
+        if project_id else ""
+    )
     execute(
         f"""
         UPDATE hive_tasks
         SET status = {_sql_text(new_status)}, updated_at = {_sql_text(_now_iso())}
         WHERE assigned_to = {_sql_text(assigned_to)}
-          AND status IN ({', '.join(_sql_text(status) for status in statuses)});
+          AND status IN ({', '.join(_sql_text(status) for status in statuses)})
+          {proj_clause};
         """
     )
-    return len([task for task in list_tasks() if task.get('assigned_to') == assigned_to and task.get('status') == new_status])
+    return len([task for task in list_tasks(project_id=project_id or None)
+                if task.get('assigned_to') == assigned_to and task.get('status') == new_status])
 
 
 def save_state(state_key: str, payload: dict) -> bool:
@@ -1689,7 +1702,11 @@ def load_state(state_key: str, default=None):
     return _parse_json_text(rows[0].get('payload'), default)
 
 
-def upsert_skill_chain_row(row: dict, legacy_id: int | None = None) -> bool:
+def upsert_skill_chain_row(row: dict, legacy_id: int | None = None,
+                            project_id: str = '') -> bool:
+    # row dict에 project_id가 있으면 우선 사용
+    _proj_id = str(row.get('project_id', '') or project_id)
+    _proj_id = assert_project_id(_proj_id, 'upsert_skill_chain_row')
     if legacy_id is not None:
         # 기존 레코드 존재 여부 먼저 확인 (ON CONFLICT + partial unique index 호환 문제 회피)
         existing = query_rows(f"SELECT id FROM hive_skill_chains WHERE legacy_id = {int(legacy_id)} LIMIT 1;")
@@ -1699,28 +1716,28 @@ def upsert_skill_chain_row(row: dict, legacy_id: int | None = None) -> bool:
             f"""
             INSERT INTO hive_skill_chains
                 (legacy_id, session_id, terminal_id, agent, request, skill_num, skill_name,
-                 step_order, status, summary, started_at, updated_at)
+                 step_order, status, summary, started_at, updated_at, project_id)
             VALUES (
                 {legacy_id}, {_sql_text(row.get('session_id', ''))}, {int(row.get('terminal_id', 0) or 0)},
                 {_sql_text(row.get('agent', ''))}, {_sql_text(row.get('request', ''))},
                 {int(row.get('skill_num', 0) or 0)}, {_sql_text(row.get('skill_name', ''))},
                 {int(row.get('step_order', 0) or 0)}, {_sql_text(row.get('status', 'pending'))},
                 {_sql_text(row.get('summary', ''))}, {_sql_text(row.get('started_at', ''))},
-                {_sql_text(row.get('updated_at', ''))}
+                {_sql_text(row.get('updated_at', ''))}, {_sql_text(_proj_id)}
             );
             """
         )
     return execute(
         f"""
         INSERT INTO hive_skill_chains
-            (session_id, terminal_id, agent, request, skill_num, skill_name, step_order, status, summary, started_at, updated_at)
+            (session_id, terminal_id, agent, request, skill_num, skill_name, step_order, status, summary, started_at, updated_at, project_id)
         VALUES (
             {_sql_text(row.get('session_id', ''))}, {int(row.get('terminal_id', 0) or 0)},
             {_sql_text(row.get('agent', ''))}, {_sql_text(row.get('request', ''))},
             {int(row.get('skill_num', 0) or 0)}, {_sql_text(row.get('skill_name', ''))},
             {int(row.get('step_order', 0) or 0)}, {_sql_text(row.get('status', 'pending'))},
             {_sql_text(row.get('summary', ''))}, {_sql_text(row.get('started_at', ''))},
-            {_sql_text(row.get('updated_at', ''))}
+            {_sql_text(row.get('updated_at', ''))}, {_sql_text(_proj_id)}
         );
         """
     )
@@ -1744,6 +1761,7 @@ def list_skill_chain_rows() -> list[dict]:
 
 def send_chat(sender: str, content: str, project_id: str = '') -> dict | None:
     """실시간 채팅 메시지 전송 — hive_memory에 저장 + NOTIFY 자동 발생."""
+    project_id = assert_project_id(project_id, 'send_chat')
     import time as _t
     key = f"chat:{_t.strftime('%Y%m%d-%H%M%S')}:{sender}:{id(_t)}"
     return set_memory(
@@ -1857,11 +1875,14 @@ def find_tasks_for_agent(agent_id: str, project_id: str = '') -> list[dict]:
 
 # ── 태스크 코멘트 CRUD ──────────────────────────────────────────────────────
 
-def add_task_comment(task_id: str, author: str, content: str) -> bool:
+def add_task_comment(task_id: str, author: str, content: str,
+                     project_id: str = '') -> bool:
     """태스크에 코멘트 추가 — 에이전트 간 비동기 통신 채널."""
+    project_id = assert_project_id(project_id, 'add_task_comment')
     return execute(
-        f"INSERT INTO task_comments (task_id, author, content) "
-        f"VALUES ({_sql_text(task_id)}, {_sql_text(author)}, {_sql_text(content)});"
+        f"INSERT INTO task_comments (task_id, author, content, project_id) "
+        f"VALUES ({_sql_text(task_id)}, {_sql_text(author)}, {_sql_text(content)}, "
+        f"{_sql_text(project_id)});"
     )
 
 
@@ -1936,8 +1957,10 @@ def _calc_level(total_xp: int) -> int:
 def record_experience(agent_id: str, task_type: str = 'feat',
                       domain: str = 'general', outcome: str = 'success',
                       duration_sec: int = 0, file_patterns: list | None = None,
-                      session_id: str = '', description: str = '') -> bool:
+                      session_id: str = '', description: str = '',
+                      project_id: str = '') -> bool:
     """에이전트 경험 기록 + agent_stats 자동 갱신."""
+    project_id = assert_project_id(project_id, 'record_experience')
     import json as _json
     xp = _XP_WEIGHTS.get(task_type, 30)
     if outcome == 'fail':
@@ -1950,10 +1973,10 @@ def record_experience(agent_id: str, task_type: str = 'feat',
     # 경험 기록 삽입
     ok = execute(
         f"INSERT INTO agent_experience (agent_id, session_id, task_type, domain, "
-        f"file_patterns, duration_sec, outcome, xp_earned, description) "
+        f"file_patterns, duration_sec, outcome, xp_earned, description, project_id) "
         f"VALUES ({_sql_text(agent_id)}, {_sql_text(session_id)}, {_sql_text(task_type)}, "
         f"{_sql_text(domain)}, {_sql_text(files_json)}::jsonb, {int(duration_sec)}, "
-        f"{_sql_text(outcome)}, {xp}, {_sql_text(description)});"
+        f"{_sql_text(outcome)}, {xp}, {_sql_text(description)}, {_sql_text(project_id)});"
     )
     if not ok:
         return False
@@ -2194,6 +2217,7 @@ def insert_pg_log(agent: str, task: str = '', status: str = 'success',
     서버 API 호출, heartbeat 갱신, 태스크 상태 변경 등
     모든 에이전트 활동의 영구 로그를 남긴다.
     """
+    project_id = assert_project_id(project_id, 'insert_pg_log')
     import json as _json
     meta_json = _json.dumps(metadata or {}, ensure_ascii=False)
     return execute(
@@ -2374,12 +2398,14 @@ def set_active_office_profile(profile_id: str) -> bool:
 # ── 활성 세션 컨텍스트 (크래시 복구) ─────────────────────────────────────────
 
 def upsert_active_session(terminal_id: str, agent_id: str, task_summary: str,
-                          modified_files: list | None = None) -> bool:
+                          modified_files: list | None = None,
+                          project_id: str = '') -> bool:
     """현재 작업 컨텍스트를 DB에 기록/갱신한다.
 
     매 UserPromptSubmit/PostToolUse마다 호출되어 최신 상태를 유지.
     동일 terminal_id + status='active' 레코드를 덮어쓰기(UPSERT).
     """
+    project_id = assert_project_id(project_id, 'upsert_active_session')
     import json as _json
     files_json = _json.dumps(modified_files or [], ensure_ascii=False)
 
@@ -2394,15 +2420,17 @@ def upsert_active_session(terminal_id: str, agent_id: str, task_summary: str,
             f"UPDATE active_session_context SET "
             f"task_summary = {_sql_text(task_summary)}, "
             f"modified_files = {_sql_text(files_json)}::jsonb, "
+            f"project_id = {_sql_text(project_id)}, "
             f"updated_at = NOW() "
             f"WHERE id = {existing[0]['id']};"
         )
     else:
         return execute(
             f"INSERT INTO active_session_context "
-            f"(terminal_id, agent_id, task_summary, modified_files, status) "
+            f"(terminal_id, agent_id, task_summary, modified_files, status, project_id) "
             f"VALUES ({_sql_text(terminal_id)}, {_sql_text(agent_id)}, "
-            f"{_sql_text(task_summary)}, {_sql_text(files_json)}::jsonb, 'active');"
+            f"{_sql_text(task_summary)}, {_sql_text(files_json)}::jsonb, 'active', "
+            f"{_sql_text(project_id)});"
         )
 
 

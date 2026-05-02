@@ -154,9 +154,40 @@
 - [x] 컨텍스트 미지정 경고 — `assert_project_id(pid, op)` + VIBE_DEV_MODE 가드
 - [ ] UI 측 통합 헬퍼 (Phase 2-4/2-5에서 라우팅 일관화 시 같이 처리)
 
-### 2-4 API 레이어 일관화
-- [ ] 모든 `.ai_monitor/api/*.py`의 쓰기 경로에 `project_id` 인자 필수화
-- [ ] 읽기 경로에 `project_id` 필터 옵션 추가
+### 2-4 데이터 계층 일관화 (pg_store.py 중심) ✅ 2026-05-02
+
+> 2026-04-30 브레인스토밍 결과 — 타겟을 **API 모듈 → 데이터 계층**으로 이동.
+> API 직접 INSERT는 2개뿐(office/vibe), 실제 쓰기 진입점은 `pg_store.py` 32곳에 집약.
+> 호출자 9~18개 모듈은 pg_store 한 군데 잡으면 자동 혜택.
+> 위험도 🟢 — Phase 2-2의 NOT NULL이 마지막 수문장. 가드는 dev 모드 전용, prod 무동작.
+>
+> **결과 (2026-05-02):** pg_store 11곳 + zettelkasten 1곳 가드 적용. 패턴 C 5개를 A로 변환. `save_state`/`record_heartbeat`는 본질적으로 전역(state_key/agent_id PK)이라 N/A 재분류. `api/office_api.py` 직접 INSERT 2건은 다음 라운드 별도 처리.
+
+#### 패턴 정의
+- **A. 호출자 인자**: `def f(..., project_id='')` — 호출자가 명시
+- **B. 내부 자동해결**: 함수 내부에서 `current_project_id()` 호출
+- **C. 누락**: 빈 값 들어갈 수 있음 → A 또는 B로 변환 대상
+
+#### 마이크로태스크
+
+- [x] **Task 2-4.0 감사** — pg_store.py 쓰기 함수 27개 분류 완료. 패턴 A 5, B 0, C 7(→ 2개는 N/A 재분류, 5개 보완), N/A 13.
+- [x] **Task 2-4.1 가드 삽입 — 패턴 A** — pg_store 5곳 + zettelkasten 1곳에 `assert_project_id` 적용.
+- [x] **Task 2-4.2 누락 보완 — 패턴 C** — 5개 함수 시그니처에 `project_id: str = ''` 추가 + 가드 + INSERT/UPDATE 컬럼 반영. `bulk_update_tasks`는 WHERE 절 필터 추가(프로젝트 누수 차단). `save_state`/`record_heartbeat`는 PK 전역이라 N/A 유지.
+- [x] **Task 2-4.3 검증** — VIBE_DEV_MODE=1 정상 7건 WARN 0 / 누락 케이스 의도 WARN / prod 무동작 ✅
+- [x] **Task 2-4.4 문서** — `.claude/rules/architecture.md` 데이터 계층 항목 + `infra/project_context.py` 헤더 사용 예시 추가.
+- [x] **Task 2-4.5 메모리 + 계획서** — `feedback_project_id_pattern.md` 신규 + `MEMORY.md` 인덱스 + `project_next_phase_plan.md` 갱신.
+
+#### 의존성
+- 2-4.1은 2-4.0 완료 후
+- 2-4.2는 2-4.0 완료 후 (패턴 C 0이면 스킵)
+- 2-4.3은 2-4.1, (2-4.2) 완료 후
+- 2-4.4는 2-4.3 완료 후 (검증 통과 후 문서화)
+- 2-4.5는 마지막
+
+#### 비범위 (Out of Scope)
+- 읽기 경로 `project_id` 필터 — Phase 2-5 또는 별도 작업
+- 시그니처를 `project_id: str` (필수 인자)로 강제 — 6개월 dev 운영 후 검토 (Q2=A 결정)
+- CI에서 VIBE_DEV_MODE=1 자동 실행 — 메모리에만 보존, 별도 작업
 
 ### 2-5 UI 프로젝트 탭 (기존 A-2 흡수)
 - [ ] 상단 탭 바 컴포넌트

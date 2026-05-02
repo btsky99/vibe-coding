@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.pg_store import execute, execute_raw, query_rows, ensure_schema, _sql_text
+from infra.project_context import assert_project_id
 
 
 # ── 분기 번호(Zettel ID) 생성 ──────────────────────────────────────────────
@@ -98,6 +99,7 @@ def create_note(title: str, content: str = '', note_type: str = 'fleeting',
                 source_ref: str = '', parent_id: str = '',
                 custom_id: str = '') -> dict | None:
     """원자 노트 생성. 분기 번호 자동 생성 또는 custom_id 지정 가능."""
+    project_id = assert_project_id(project_id, 'create_note')
     ensure_schema()
     zettel_id = custom_id or _next_zettel_id(parent_id, project_id=project_id)
     now = datetime.now(timezone.utc).isoformat()

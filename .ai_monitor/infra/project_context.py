@@ -15,8 +15,16 @@ DESCRIPTION: Platform Phase 2-3 — 활성 프로젝트 컨텍스트 Resolver.
              - VIBE_DEV_MODE=1 환경변수에서 빈 project_id로 쓰기 시
                stderr에 경고와 호출 스택을 남긴다. 프로덕션은 무동작.
 
+             [가드 사용 예시 — Phase 2-4 패턴]
+                 from infra.project_context import assert_project_id
+
+                 def save_task(task: dict, project_id: str = '') -> dict | None:
+                     project_id = assert_project_id(project_id, 'save_task')
+                     # ... INSERT/UPDATE with project_id
+
 REVISION HISTORY:
 - 2026-04-30 Claude: 최초 작성 — Platform Phase 2-3
+- 2026-05-02 Claude: Phase 2-4 가드 사용 예시 헤더 추가
 """
 
 from __future__ import annotations

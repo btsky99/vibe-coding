@@ -29,6 +29,8 @@ PostgreSQL 18 (포트 5433, 내장/포터블)
 - `db_helper.py` — 트랜잭션 헬퍼
 - `file_store.py` — 레거시 JSONL/SQLite 폴백
 
+**project_id 가드 의무 (Phase 2-4):** DB 쓰기 함수는 `pg_store.py`에 집중한다. `project_id` 컬럼이 있는 테이블에 INSERT/UPDATE 하는 함수는 진입부에서 `assert_project_id(project_id, '<함수명>')`을 호출해 빈 값 유입을 dev 모드에서 경고한다. 우회 INSERT(`api/office_api.py` 등)는 점진적으로 pg_store로 흡수한다.
+
 ### 프론트엔드 (React/TypeScript, Vite)
 - `App.tsx` — 레이아웃, 폴링 코디네이터
 - `AgentPanel.tsx` — 핵심 패널. 자가 치유, 스킬 체인
