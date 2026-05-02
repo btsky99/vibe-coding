@@ -1525,13 +1525,14 @@ def get_agent_last_seen(agent_names: list[str] | None = None) -> dict[str, str |
     return result
 
 
-def save_task(task: dict, project_id: str = '') -> dict | None:
+def save_task(task: dict, project_id: str = '', source: str = 'classic') -> dict | None:
     task_id = str(task.get('id', '')).strip()
     if not task_id:
         return None
-    # task dict 안에 project_id가 있으면 우선 사용, 없으면 파라미터 사용
+    # task dict 안에 project_id/source가 있으면 우선 사용, 없으면 파라미터 사용
     _proj_id = str(task.get('project_id', '') or project_id)
     _proj_id = assert_project_id(_proj_id, 'save_task')
+    _source = str(task.get('source', '') or source)
     payload = {
         'timestamp': str(task.get('timestamp', '') or task.get('created_at', '') or _now_iso()),
         'updated_at': str(task.get('updated_at', '') or _now_iso()),
@@ -1546,24 +1547,26 @@ def save_task(task: dict, project_id: str = '') -> dict | None:
         'claimed_by': str(task.get('claimed_by', '')),
         'tags': task.get('tags', []),
         'project_id': _proj_id,
+        'source': _source,
     }
     extra = {
         k: v for k, v in task.items()
         if k not in {'id', 'timestamp', 'updated_at', 'title', 'description', 'status', 'assigned_to',
-                     'priority', 'created_by', 'kanban_status', 'role', 'claimed_by', 'tags', 'project_id'}
+                     'priority', 'created_by', 'kanban_status', 'role', 'claimed_by', 'tags', 'project_id',
+                     'source'}
     }
     execute(
         f"""
         INSERT INTO hive_tasks
             (id, timestamp, updated_at, title, description, status, assigned_to, priority,
-             created_by, kanban_status, role, claimed_by, tags, extra, project_id)
+             created_by, kanban_status, role, claimed_by, tags, extra, project_id, source)
         VALUES (
             {_sql_text(task_id)}, {_sql_text(payload['timestamp'])}, {_sql_text(payload['updated_at'])},
             {_sql_text(payload['title'])}, {_sql_text(payload['description'])}, {_sql_text(payload['status'])},
             {_sql_text(payload['assigned_to'])}, {_sql_text(payload['priority'])}, {_sql_text(payload['created_by'])},
             {_sql_text(payload['kanban_status'])}, {_sql_text(payload['role'])}, {_sql_text(payload['claimed_by'])},
             {_sql_json(payload['tags'] if isinstance(payload['tags'], list) else [])}, {_sql_json(extra)},
-            {_sql_text(_proj_id)}
+            {_sql_text(_proj_id)}, {_sql_text(_source)}
         )
         ON CONFLICT (id) DO UPDATE SET
             timestamp = EXCLUDED.timestamp,
@@ -1579,7 +1582,8 @@ def save_task(task: dict, project_id: str = '') -> dict | None:
             claimed_by = EXCLUDED.claimed_by,
             tags = EXCLUDED.tags,
             extra = EXCLUDED.extra,
-            project_id = EXCLUDED.project_id;
+            project_id = EXCLUDED.project_id,
+            source = EXCLUDED.source;
         """
     )
     return get_task(task_id)
@@ -1899,16 +1903,21 @@ def list_task_comments(task_id: str, limit: int = 50) -> list[dict]:
 # ── 에이전트 하트비트 ────────────────────────────────────────────────────────
 
 def record_heartbeat(agent_id: str, status: str = 'idle',
-                     current_task: str = None) -> bool:
-    """에이전트 하트비트 기록 — 상태 갱신 + 카운터 증가."""
+                     current_task: str = None, namespace: str = 'classic') -> bool:
+    """에이전트 하트비트 기록 — 상태 갱신 + 카운터 증가.
+
+    namespace: 'classic'(기본) 또는 'office' 등. 같은 agent_id가 다른
+    네임스페이스에서 사용될 수 있어 ON CONFLICT 시에도 갱신.
+    """
     task_val = _sql_text(current_task) if current_task else 'NULL'
     return execute(
-        f"INSERT INTO agent_heartbeats (agent_id, status, last_beat, current_task, beat_count) "
-        f"VALUES ({_sql_text(agent_id)}, {_sql_text(status)}, now(), {task_val}, 1) "
+        f"INSERT INTO agent_heartbeats (agent_id, status, last_beat, current_task, beat_count, namespace) "
+        f"VALUES ({_sql_text(agent_id)}, {_sql_text(status)}, now(), {task_val}, 1, {_sql_text(namespace)}) "
         f"ON CONFLICT (agent_id) DO UPDATE SET "
         f"status = {_sql_text(status)}, last_beat = now(), "
         f"current_task = {task_val}, "
-        f"beat_count = agent_heartbeats.beat_count + 1;"
+        f"beat_count = agent_heartbeats.beat_count + 1, "
+        f"namespace = {_sql_text(namespace)};"
     )
 
 

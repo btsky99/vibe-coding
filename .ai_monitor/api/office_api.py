@@ -26,6 +26,8 @@ from src.pg_store import (
     delete_office_profile,
     get_active_office_profile_id,
     set_active_office_profile,
+    save_task,
+    record_heartbeat,
     _get_pg_conn,
     query_rows,
     execute,
@@ -256,25 +258,24 @@ def handle_post(handler, path: str, DATA_DIR: Path) -> bool:
             _send_json(handler, 500, {'error': str(e)})
         return True
 
-    # 오피스 태스크 생성 — source='office' 자동 태깅
+    # 오피스 태스크 생성 — source='office' 자동 태깅 (pg_store.save_task 위임)
     if path == '/api/office/tasks':
         body = _read_json_body(handler)
         import uuid
         tid = body.get('id') or f"office-task-{uuid.uuid4().hex[:10]}"
         title = (body.get('title') or '').strip()
-        desc = body.get('description') or ''
-        assigned_to = body.get('assigned_to') or 'all'
-        priority = body.get('priority') or 'medium'
-        now_iso = time.strftime('%Y-%m-%dT%H:%M:%S')
         try:
-            ok = execute(
-                f"INSERT INTO hive_tasks (id, title, description, status, "
-                f"assigned_to, priority, kanban_status, source, timestamp, updated_at) "
-                f"VALUES ({_sql_text(tid)}, {_sql_text(title)}, {_sql_text(desc)}, "
-                f"'pending', {_sql_text(assigned_to)}, {_sql_text(priority)}, "
-                f"'todo', 'office', {_sql_text(now_iso)}, {_sql_text(now_iso)});"
-            )
-            if ok:
+            saved = save_task({
+                'id': tid,
+                'title': title,
+                'description': body.get('description') or '',
+                'status': 'pending',
+                'assigned_to': body.get('assigned_to') or 'all',
+                'priority': body.get('priority') or 'medium',
+                'kanban_status': 'todo',
+                'source': 'office',
+            })
+            if saved:
                 _send_json(handler, 201, {'id': tid, 'status': 'created'})
             else:
                 _send_json(handler, 500, {'error': 'insert 실패'})
@@ -282,7 +283,7 @@ def handle_post(handler, path: str, DATA_DIR: Path) -> bool:
             _send_json(handler, 500, {'error': str(e)})
         return True
 
-    # 오피스 에이전트 하트비트 기록 — namespace='office' 고정
+    # 오피스 에이전트 하트비트 기록 — namespace='office' 고정 (pg_store.record_heartbeat 위임)
     if path == '/api/office/agents/heartbeat':
         body = _read_json_body(handler)
         agent_id = (body.get('agent_id') or '').strip()
@@ -291,19 +292,9 @@ def handle_post(handler, path: str, DATA_DIR: Path) -> bool:
         if not agent_id:
             _send_json(handler, 400, {'error': 'agent_id 필수'})
             return True
-        task_val = _sql_text(current_task) if current_task else 'NULL'
         try:
-            ok = execute(
-                f"INSERT INTO agent_heartbeats "
-                f"(agent_id, status, last_beat, current_task, beat_count, namespace) "
-                f"VALUES ({_sql_text(agent_id)}, {_sql_text(status)}, now(), "
-                f"{task_val}, 1, 'office') "
-                f"ON CONFLICT (agent_id) DO UPDATE SET "
-                f"status = EXCLUDED.status, last_beat = now(), "
-                f"current_task = EXCLUDED.current_task, "
-                f"beat_count = agent_heartbeats.beat_count + 1, "
-                f"namespace = 'office';"
-            )
+            ok = record_heartbeat(agent_id, status=status,
+                                  current_task=current_task, namespace='office')
             _send_json(handler, 200 if ok else 500, {'ok': ok})
         except Exception as e:
             _send_json(handler, 500, {'error': str(e)})
