@@ -739,12 +739,36 @@ def _validate_file_path(raw_path: str) -> Path:
     return resolved
 
 
+# ── 요청 단위 project_id override (Phase 2-5.2) ────────────────────────────
+# do_GET/POST/PUT/DELETE 진입부에서 ?project_id= 쿼리를 thread-local에 설정.
+# 같은 스레드의 다음 요청 진입부에서 무조건 덮어쓰므로 finally 불필요.
+_request_pid_ctx = threading.local()
+
+
+def _set_request_pid(query_string: str) -> None:
+    """요청 핸들러 진입부에서 호출 — 쿼리의 ?project_id=를 thread-local에 저장."""
+    pid = ''
+    if query_string:
+        try:
+            qs = parse_qs(query_string)
+            pid = (qs.get('project_id', [''])[0] or '').strip()
+        except Exception:
+            pid = ''
+    _request_pid_ctx.override = pid
+
+
 def _current_project_id() -> str:
     """현재 활성 프로젝트의 PROJECT_ID 슬러그를 반환합니다.
 
     UI에서 폴더를 전환하면 즉시 반영됩니다 (_current_project_root 기반).
     형식: 경로의 드라이브/슬래시를 '--'로 치환 (예: D--vibe-coding)
+
+    [Phase 2-5.2] 요청에 ?project_id= 쿼리가 있으면 우선 사용.
+    멀티 윈도우/탭 전환 직후 race window 차단 목적.
     """
+    explicit = (getattr(_request_pid_ctx, 'override', '') or '').strip()
+    if explicit:
+        return explicit
     return _ctx_project_id(PROJECT_ROOT, CONFIG_FILE)
 
 
@@ -1094,6 +1118,7 @@ class SSEHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+        _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
 
         # ─── 신규: 사고 과정 실시간 스트리밍 ───
         if path == '/api/events/thoughts':
@@ -2198,6 +2223,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         """PUT 메소드 — 오피스 API는 오피스 서버로 프록시."""
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+        _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
         if path.startswith('/api/office/'):
             length = int(self.headers.get('Content-Length', '0') or 0)
             body = self.rfile.read(length) if length > 0 else None
@@ -2213,6 +2239,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         """DELETE 메소드 — 오피스 API는 오피스 서버로 프록시."""
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+        _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
         if path.startswith('/api/office/'):
             length = int(self.headers.get('Content-Length', '0') or 0)
             body = self.rfile.read(length) if length > 0 else None
@@ -2227,6 +2254,7 @@ class SSEHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+        _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
 
         # ─── Telegram 설정 저장 + 테스트 ───────────────────────────────────
         if path == '/api/config/telegram':

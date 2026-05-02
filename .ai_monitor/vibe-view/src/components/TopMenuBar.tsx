@@ -186,8 +186,6 @@ const TopMenuBar = memo(function TopMenuBar({
   // ── 프로젝트 스위칭 상태 ──────────────────────────────────────────────
   const [projects, setProjects] = useState<Record<string, string>>({});
   const [currentPath, setCurrentPath] = useState('');
-  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const projectMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/config`)
@@ -199,19 +197,7 @@ const TopMenuBar = memo(function TopMenuBar({
       .catch(() => {});
   }, [propCurrentPath]);
 
-  // 프로젝트 메뉴 외부 클릭 닫기
-  useEffect(() => {
-    if (!projectMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) {
-        setProjectMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [projectMenuOpen]);
-
-  const switchProject = (name: string, path: string) => {
+  const switchProject = (_name: string, path: string) => {
     fetch(`${API_BASE}/api/config/update`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -219,16 +205,11 @@ const TopMenuBar = memo(function TopMenuBar({
     })
       .then(() => {
         setCurrentPath(path);
-        setProjectMenuOpen(false);
         // App의 currentPath도 업데이트 (파일 탐색기 연동)
         if (onSwitchProject) onSwitchProject(path);
       })
       .catch(() => {});
   };
-
-  const currentProjectName = Object.entries(projects).find(
-    ([, p]) => p.replace(/\\/g, '/') === currentPath.replace(/\\/g, '/')
-  )?.[0] || currentPath.split(/[/\\]/).pop() || '프로젝트';
 
   // 메뉴 항목 목록 — 순서가 곧 표시 순서
   const menus = ['파일', '편집', '보기', 'AI 도구', '도움말', '프로젝트 세팅'];
@@ -517,40 +498,27 @@ const TopMenuBar = memo(function TopMenuBar({
 
       {/* ── 우측 — 업데이트 버튼 + 버전 배지 ── */}
       <div className="ml-auto flex items-center gap-2 text-[11px] text-[#969696] px-2 font-mono overflow-hidden">
-        {/* 📂 프로젝트 스위칭 드롭다운 */}
+        {/* 📂 프로젝트 탭 — 항상 표시 (Phase 2-5.1) */}
         {Object.keys(projects).length > 1 && (
-          <div className="relative shrink-0" ref={projectMenuRef}>
-            <button
-              onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded border transition-all bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30"
-              title={`현재 프로젝트: ${currentPath}`}
-            >
-              <VscFolderOpened className="w-3.5 h-3.5 text-primary" />
-              <span className="text-[9px] font-bold max-w-[100px] truncate">{currentProjectName}</span>
-              <span className="text-[8px] opacity-40">▾</span>
-            </button>
-            {projectMenuOpen && (
-              <div className="absolute top-full right-0 mt-1 min-w-[200px] bg-[#252526] border border-white/15 rounded-lg shadow-2xl z-[100] py-1">
-                <div className="px-3 py-1 text-[8px] text-white/30 uppercase tracking-wider">프로젝트 전환</div>
-                {Object.entries(projects).map(([name, path]) => {
-                  const isCurrent = path.replace(/\\/g, '/') === currentPath.replace(/\\/g, '/');
-                  return (
-                    <button
-                      key={name}
-                      onClick={() => !isCurrent && switchProject(name, path)}
-                      className={`w-full text-left px-3 py-1.5 text-[11px] flex items-center justify-between transition-colors ${
-                        isCurrent
-                          ? 'text-primary bg-primary/10'
-                          : 'text-white/70 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      <span className="font-mono">{name}</span>
-                      {isCurrent && <Check className="w-3 h-3 text-primary" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+          <div className="flex items-center gap-1 shrink-0">
+            {Object.entries(projects).map(([name, path]) => {
+              const isCurrent = path.replace(/\\/g, '/') === currentPath.replace(/\\/g, '/');
+              return (
+                <button
+                  key={name}
+                  onClick={() => !isCurrent && switchProject(name, path)}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-all ${
+                    isCurrent
+                      ? 'bg-primary/15 border-primary/40 text-primary cursor-default'
+                      : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30'
+                  }`}
+                  title={path}
+                >
+                  <VscFolderOpened className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[9px] font-bold max-w-[100px] truncate">{name}</span>
+                </button>
+              );
+            })}
           </div>
         )}
 

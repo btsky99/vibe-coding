@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { API_BASE } from '../constants';
+import { withProjectId } from '../lib/projectContext';
 import { LogRecord, AgentMessage, MemoryEntry } from '../types';
 
 export interface VibeData {
@@ -167,10 +168,10 @@ export function useVibeData(): VibeData {
     return () => clearInterval(interval);
   }, []);
 
-  // 공유 메모리 폴링 (10초)
+  // 공유 메모리 폴링 (10초) — Phase 2-5.2: project_id 명시 첨부
   useEffect(() => {
     const fetchMemory = () => {
-      fetch(`${API_BASE}/api/memory`)
+      fetch(withProjectId(`${API_BASE}/api/memory`, currentPath))
         .then(res => res.json())
         .then(data => setMemory(Array.isArray(data) ? data : []))
         .catch((err) => console.error('[useVibeData] fetch error:', err));
@@ -178,7 +179,7 @@ export function useVibeData(): VibeData {
     fetchMemory();
     const interval = setInterval(fetchMemory, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentPath]);
 
   // 스킬 체인 상태 폴링 (5초)
   useEffect(() => {
