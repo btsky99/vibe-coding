@@ -67,20 +67,26 @@ class FSChangeHandler(FileSystemEventHandler):
         self._data_dir_str = str(data_dir).replace('\\', '/') if data_dir else ''
 
     def on_any_event(self, event):
-        if event.is_directory:
-            return
-        # 노이즈가 심한 파일/폴더는 제외 (시스템 레벨 필터링이 안 될 경우 대비)
+        # 노이즈가 심한 파일/폴더는 제외
         path = event.src_path.replace('\\', '/')
         if any(x in path for x in ['.git', '.ai_monitor/data', '__pycache__', '.ruff_cache',
                                     '.ico', '.png', '.jpg', '.tmp', 'node_modules', 'dist', 'build',
-                                    '.db-wal', '.db-shm']):  # SQLite WAL/SHM 파일 제외
+                                    '.db-wal', '.db-shm']):
             return
         if self._data_dir_str and path.startswith(self._data_dir_str):
-            return  # DATA_DIR 하위 파일 전체 제외 (DB, 로그 등 런타임 데이터)
+            return
 
         # 브로드캐스트 메시지 생성
-        msg_obj = {'type': 'fs_change', 'path': path, 'event': event.event_type}
+        msg_obj = {
+            'type': 'fs_change',
+            'path': path,
+            'event': event.event_type,
+            'is_dir': event.is_directory
+        }
         msg = f"data: {json.dumps(msg_obj, ensure_ascii=False)}\n\n"
+        
+        if event.event_type in ['created', 'deleted', 'moved']:
+            print(f"[*] FS Event: {event.event_type} - {path} (is_dir: {event.is_directory})")
 
         # 연결된 모든 클라이언트에게 전송 (비정상 연결 조기 제거)
         disconnected = []

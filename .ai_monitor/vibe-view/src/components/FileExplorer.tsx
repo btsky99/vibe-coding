@@ -123,6 +123,44 @@ export default function FileExplorer({ currentPath, onPathChange, onOpenFile, re
   // currentPath 변경 또는 외부 refreshKey 증가 시 항목 목록 재요청
   useEffect(() => { refreshItems(); }, [currentPath, refreshKey]);
 
+  // ─── 실시간 파일 시스템 감시 (SSE) ───────────────────────────────────
+  useEffect(() => {
+    const sse = new EventSource(`${API_BASE}/api/events/fs`);
+
+    sse.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'fs_change') {
+          const changedPath = data.path.replace(/\\/g, '/');
+          const parentPath = changedPath.split('/').slice(0, -1).join('/');
+
+          // 1. 현재 보고 있는 플랫 리스트 경로와 관련이 있으면 새로고침
+          if (parentPath === currentPath.replace(/\\/g, '/')) {
+            refreshItems();
+          }
+
+          // 2. 트리 뷰에서 해당 부모 폴더가 열려있으면 해당 페이지만 새로고침
+          // 부모 경로가 빈 값이면(루트 레벨) 초기 아이템들 새로고침
+          if (!parentPath) {
+            refreshItems();
+          } else if (treeExpanded[parentPath] || treeChildren[parentPath]) {
+            refreshTree(parentPath);
+          }
+        }
+      } catch (err) {
+        // 하트비트나 빈 메시지 무시
+      }
+    };
+
+    sse.onerror = () => {
+      sse.close();
+      // 5초 후 재연결 시도
+      setTimeout(() => {}, 5000);
+    };
+
+    return () => sse.close();
+  }, [currentPath, treeExpanded, treeChildren]);
+
   // ─── 파일/폴더 조작 함수들 ────────────────────────────────────────────
 
   // ─── 경로 직접 입력 상태 ─────────────────────────────────────────────

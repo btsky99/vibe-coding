@@ -42,6 +42,13 @@ const OUTPUT_BUFFER_MAX = 400;
 const REPLAY_LINES_ON_ATTACH = 200;
 const DETACH_GRACE_MS = parseInt(process.env.PTY_DETACH_GRACE_MS || String(30 * 60 * 1000), 10);
 
+// ── Phase 2-5.3b: idle TTL 워커 설정 ───────────────────────────────────────
+// DETACH_GRACE_MS와 별도. DETACH_GRACE는 socket 끊긴 후 PTY 즉시 종료,
+// TTL_MS는 attach 여부와 무관하게 lastInput/Output 누적 idle 기준.
+const PTY_TTL_MS = parseInt(process.env.PTY_TTL_MS || String(60 * 60 * 1000), 10);
+const PTY_IDLE_THRESHOLD_MS = parseInt(process.env.PTY_IDLE_THRESHOLD_MS || String(10 * 60 * 1000), 10);
+const PTY_TTL_SWEEP_MS = parseInt(process.env.PTY_TTL_SWEEP_MS || String(5 * 60 * 1000), 10);
+
 // ANSI 이스케이프 코드 제거용 정규식
 const ANSI_ESCAPE = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
@@ -251,6 +258,34 @@ function scheduleDetachedCleanup(sessionId) {
   }, DETACH_GRACE_MS);
 }
 
+// ── Phase 2-5.3b: idle TTL 정리 헬퍼 ──────────────────────────────────────
+// 정리 대상 조건:
+//   - !attached            (사용자가 보고 있지 않음)
+//   - !yolo                (장기 실행 의도 명시 면제)
+//   - !slotId.startsWith('O')  (오피스 풀 면제 — 별도 정책)
+//   - 세션 시작 후 TTL_MS 경과
+//   - lastInputAt/lastOutputAt 모두 IDLE_THRESHOLD_MS 무변화
+function isSessionIdleForCleanup(session, now) {
+  if (!session) return false;
+  if (session.attached) return false;
+  if (session.yolo) return false;
+  if (String(session.slotId || '').startsWith('O')) return false;
+
+  // detachedAt이 명시된 persistent 세션만 정리 대상.
+  // legacy 핸들러(handlePtyConnectionLegacy)는 detachedAt 필드를 쓰지 않으므로
+  // 살아있는 동안 절대 자동 종료되지 않는다.
+  const detachedMs = Date.parse(session.detachedAt || '');
+  if (!Number.isFinite(detachedMs)) return false;
+  if ((now - detachedMs) <= PTY_TTL_MS) return false;
+
+  const lastIn = Number(session.lastInputAt) || 0;
+  const lastOut = Number(session.lastOutputAt) || 0;
+  if ((now - lastIn) <= PTY_IDLE_THRESHOLD_MS) return false;
+  if ((now - lastOut) <= PTY_IDLE_THRESHOLD_MS) return false;
+
+  return true;
+}
+
 function replayBufferedOutput(sessionId, ws) {
   const buffer = ptyOutputBuffers.get(sessionId) || [];
   if (!buffer.length || ws.readyState !== WebSocket.OPEN) return;
@@ -306,6 +341,10 @@ function attachSocketToSession(ws, sessionId, agent) {
           // JSON 파싱 실패 시 일반 입력으로 처리
         }
       }
+
+      // idle TTL 워커용: 사용자 키 입력 시각 갱신 (resize 제외)
+      const inputSession = ptySessions.get(sessionId);
+      if (inputSession) inputSession.lastInputAt = Date.now();
 
       const processed = msgStr.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
 
@@ -560,6 +599,8 @@ function handlePtyConnectionLegacy(ws, req) {
       bgModel: bgModel,
       projectId: projectId,
       slotId: slotId,
+      lastInputAt: Date.now(),
+      lastOutputAt: Date.now(),
     });
     ptyOutputBuffers.set(sessionId, []);
     ptyOutputSeq.set(sessionId, 0);
@@ -594,6 +635,7 @@ function handlePtyConnectionLegacy(ws, req) {
       // last_line 업데이트 (에이전트 패널 표시용)
       const session = ptySessions.get(sessionId);
       if (session) {
+        session.lastOutputAt = Date.now();
         try {
           const clean = streamData.replace(ANSI_ESCAPE, '').replace(/\r/g, '\n');
           const lines = clean.split('\n').filter(l => l.trim().length > 2);
@@ -660,6 +702,10 @@ function handlePtyConnectionLegacy(ws, req) {
             // JSON 파싱 실패 → 일반 입력으로 처리
           }
         }
+
+        // idle TTL 워커용: 사용자 키 입력 시각 갱신 (resize 제외)
+        const inputSession = ptySessions.get(sessionId);
+        if (inputSession) inputSession.lastInputAt = Date.now();
 
         // ── 입력 정규화 및 PTY 전달 ────────────────────────────────────
         const processed = msgStr.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
@@ -890,6 +936,8 @@ function handlePersistentPtyConnection(ws, req) {
       detachTimer: null,
       projectId: projectId,
       slotId: slotId,
+      lastInputAt: Date.now(),
+      lastOutputAt: Date.now(),
     });
     ptyOutputBuffers.set(sessionId, []);
     ptyOutputSeq.set(sessionId, 0);
@@ -920,6 +968,7 @@ function handlePersistentPtyConnection(ws, req) {
 
       const session = ptySessions.get(sessionId);
       if (session) {
+        session.lastOutputAt = Date.now();
         try {
           const clean = streamData.replace(ANSI_ESCAPE, '').replace(/\r/g, '\n');
           const lines = clean.split('\n').filter(l => l.trim().length > 2);
@@ -1034,6 +1083,15 @@ app.use((req, res, next) => {
 app.get('/api/pty/sessions', (req, res) => {
   const requestedPid = (req.query.project_id || '').trim();
   const terminals = {};
+  const nowMs = Date.now();
+
+  // Phase 2-5.3b: idle_seconds = 마지막 키 입력/출력 중 최근 값으로부터의 초.
+  function idleSecondsOf(info) {
+    if (!info) return 0;
+    const last = Math.max(Number(info.lastInputAt) || 0, Number(info.lastOutputAt) || 0);
+    if (!last) return 0;
+    return Math.max(0, Math.floor((nowMs - last) / 1000));
+  }
 
   if (requestedPid) {
     // 단일 프로젝트 필터
@@ -1053,6 +1111,9 @@ app.get('/api/pty/sessions', (req, res) => {
         slot_name: info ? (info.slotName || '') : '',
         detached_at: info ? info.detachedAt : '',
         project_id: requestedPid,
+        last_input_at: info ? (Number(info.lastInputAt) || 0) : 0,
+        last_output_at: info ? (Number(info.lastOutputAt) || 0) : 0,
+        idle_seconds: idleSecondsOf(info),
       };
     }
   } else {
@@ -1078,6 +1139,9 @@ app.get('/api/pty/sessions', (req, res) => {
         slot_name: info.slotName || '',
         detached_at: info.detachedAt || '',
         project_id: projectId,
+        last_input_at: Number(info.lastInputAt) || 0,
+        last_output_at: Number(info.lastOutputAt) || 0,
+        idle_seconds: idleSecondsOf(info),
       };
     }
     // 클래식 호환: _default 풀의 1~8 슬롯이 비어있으면 빈 항목으로 채움
@@ -1088,6 +1152,7 @@ app.get('/api/pty/sessions', (req, res) => {
           running: false, attached: false, agent: '', yolo: false,
           started: '', cwd: '', last_line: '', main_model: '', bg_model: '',
           slot_name: '', detached_at: '', project_id: '_default',
+          last_input_at: 0, last_output_at: 0, idle_seconds: 0,
         };
       }
     }
@@ -1467,8 +1532,35 @@ wss.on('connection', (ws, req) => {
   handlePersistentPtyConnection(ws, req);
 });
 
+// ── Phase 2-5.3b: TTL 스윕 워커 ───────────────────────────────────────────
+// PTY_TTL_SWEEP_MS마다 ptySessions 순회 → idle 세션 자동 종료.
+// yolo/오피스 면제는 isSessionIdleForCleanup이 처리.
+let ttlSweepTimer = null;
+function startTtlSweepWorker() {
+  if (ttlSweepTimer) return;
+  ttlSweepTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, info] of ptySessions.entries()) {
+      if (isSessionIdleForCleanup(info, now)) {
+        const idleSec = Math.floor((now - Math.max(Number(info.lastInputAt) || 0, Number(info.lastOutputAt) || 0)) / 1000);
+        console.log(`[PTY] TTL cleanup: ${key} idle=${idleSec}s`);
+        killSessionPty(key, 'ttl_cleanup');
+      }
+    }
+  }, PTY_TTL_SWEEP_MS);
+  if (typeof ttlSweepTimer.unref === 'function') ttlSweepTimer.unref();
+  console.log(`[PTY] TTL sweep worker started (TTL=${PTY_TTL_MS}ms idle=${PTY_IDLE_THRESHOLD_MS}ms sweep=${PTY_TTL_SWEEP_MS}ms)`);
+}
+
+function stopTtlSweepWorker() {
+  if (!ttlSweepTimer) return;
+  clearInterval(ttlSweepTimer);
+  ttlSweepTimer = null;
+}
+
 // ── 프로세스 종료 시 모든 PTY 세션 정리 ───────────────────────────────────
 function cleanupAllSessions() {
+  stopTtlSweepWorker();
   console.log(`[PTY] 서버 종료 — ${ptySessions.size}개 세션 정리 중...`);
   for (const [sid] of ptySessions.entries()) {
     killSessionPty(sid, 'server_shutdown');
@@ -1500,4 +1592,5 @@ server.listen(PTY_PORT, '127.0.0.1', () => {
   console.log(`[PTY Server] node-pty WebSocket + REST on port ${PTY_PORT}`);
   console.log(`[PTY Server] WS: ws://127.0.0.1:${PTY_PORT}/pty/slot{N}`);
   console.log(`[PTY Server] REST: http://127.0.0.1:${PTY_PORT}/api/pty/*`);
+  startTtlSweepWorker();
 });

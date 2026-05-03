@@ -4372,6 +4372,28 @@ def main():
             _child_procs.append(proc)
             print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
 
+    def run_codex_pg_watcher():
+        if not SCRIPTS_DIR:
+            return
+        watcher_script = SCRIPTS_DIR / "codex_pg_watcher.py"
+        if watcher_script.exists():
+            _python_cmds = _python_runner_cmds()
+            if not _python_cmds:
+                print("[!] run_codex_pg_watcher: Python interpreter not found")
+                return
+            python_exe = _python_cmds[0]
+            proc = subprocess.Popen(
+                [python_exe, str(watcher_script), "--interval", "5"],
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+            )
+            _child_procs.append(proc)
+            print("[*] Codex pg_logs watcher started")
+
     def run_orchestrator_daemon():
         # 하이브 오케스트레이터 데몬 — assigned_to='all' 태스크를
         # 살아있는 에이전트로 자동 재배정. wiki_generator 등 'all' 발행자가
@@ -4826,6 +4848,8 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             threading.Thread(target=run_watchdog, daemon=True).start()
             threading.Thread(target=run_telegram_bridge, daemon=True).start()
             threading.Thread(target=run_heal_daemon, daemon=True).start()
+            threading.Thread(target=run_codex_pg_watcher, daemon=True,
+                             name='CodexPGWatcher').start()
             threading.Thread(target=run_orchestrator_daemon, daemon=True,
                              name='OrchestratorDaemon').start()
             threading.Thread(target=run_doc_generators_daemon, daemon=True,
