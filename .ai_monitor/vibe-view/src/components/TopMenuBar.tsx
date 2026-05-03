@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { API_BASE } from '../constants';
 import { VscFolderOpened } from 'react-icons/vsc';
+import { slugifyProjectPath } from '../lib/projectContext';
 
 // 레이아웃 모드 타입 — App.tsx와 동일하게 유지
 type LayoutMode = '1' | '2' | '3' | '4' | '2x2' | '6' | '8';
@@ -47,6 +48,8 @@ interface TopMenuBarProps {
   // 프로젝트 전환 시 App의 currentPath 업데이트
   currentPath?: string;
   onSwitchProject?: (path: string) => void;
+  // Phase 2-5.3c: 프로젝트별 활성 PTY 세션 집계 (탭 배지)
+  ptySessionsSummary?: Record<string, { agent_count: number; total: number }>;
 }
 
 // ── 서버 로그 뷰어 모달 — 서버/PG/태스크 로그를 탭으로 전환하며 확인 + 클립보드 복사 ──
@@ -180,6 +183,7 @@ const TopMenuBar = memo(function TopMenuBar({
   onOpenFolder, onInstallSkills, onOpenHelpDoc, onClearLogs,
   currentPath: propCurrentPath,
   onSwitchProject,
+  ptySessionsSummary,
 }: TopMenuBarProps) {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
@@ -503,19 +507,29 @@ const TopMenuBar = memo(function TopMenuBar({
           <div className="flex items-center gap-1 shrink-0">
             {Object.entries(projects).map(([name, path]) => {
               const isCurrent = path.replace(/\\/g, '/') === currentPath.replace(/\\/g, '/');
+              const projectId = slugifyProjectPath(path);
+              const agentCount = ptySessionsSummary?.[projectId]?.agent_count ?? 0;
               return (
                 <button
                   key={name}
                   onClick={() => !isCurrent && switchProject(name, path)}
-                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-all ${
+                  className={`relative flex items-center gap-1.5 px-2 py-0.5 rounded border transition-all ${
                     isCurrent
                       ? 'bg-primary/15 border-primary/40 text-primary cursor-default'
                       : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80 hover:border-white/30'
                   }`}
-                  title={path}
+                  title={agentCount > 0 ? `${path} — 에이전트 ${agentCount}개 실행 중` : path}
                 >
                   <VscFolderOpened className="w-3.5 h-3.5 shrink-0" />
                   <span className="text-[9px] font-bold max-w-[100px] truncate">{name}</span>
+                  {agentCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-primary text-white text-[9px] font-bold leading-[14px] text-center shadow"
+                      aria-label={`에이전트 ${agentCount}개 실행 중`}
+                    >
+                      {agentCount}
+                    </span>
+                  )}
                 </button>
               );
             })}

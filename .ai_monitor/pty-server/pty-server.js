@@ -1161,6 +1161,28 @@ app.get('/api/pty/sessions', (req, res) => {
 });
 
 /**
+ * GET /api/pty/sessions/summary
+ * Phase 2-5.3c: 프로젝트 ID별 활성 세션 집계.
+ *   - agent_count: 에이전트가 붙어 실제로 실행 중인 슬롯 수 (오피스 O* 제외)
+ *   - total: 해당 프로젝트가 가진 PTY 슬롯 총 개수 (오피스 포함)
+ * 프론트엔드 TopMenuBar 탭 배지가 10초 폴링으로 호출.
+ * 응답 예: { "D--vibe-coding": { agent_count: 2, total: 3 }, "_default": { agent_count: 0, total: 0 } }
+ */
+app.get('/api/pty/sessions/summary', (req, res) => {
+  const summary = {};
+  for (const [key, info] of ptySessions.entries()) {
+    const { projectId, slotId } = parseSessionKey(key);
+    if (!summary[projectId]) summary[projectId] = { agent_count: 0, total: 0 };
+    summary[projectId].total += 1;
+    const isOffice = String(slotId).startsWith('O');
+    if (!isOffice && info && info.agent) {
+      summary[projectId].agent_count += 1;
+    }
+  }
+  res.json(summary);
+});
+
+/**
  * DELETE /api/pty/sessions
  * Phase 2-5.3a: 특정 프로젝트의 모든 PTY 세션을 일괄 종료합니다.
  * 프론트에서 탭 닫기/프로젝트 제거 시 호출. 오피스 O* 슬롯은 별도 라이프사이클이라 제외.

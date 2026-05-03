@@ -421,6 +421,7 @@ function App() {
         onClearLogs={() => setLogs([])}
         currentPath={currentPath}
         onSwitchProject={(path) => setCurrentPath(path)}
+        ptySessionsSummary={vibe.ptySessionsSummary}
       />
 
       {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}

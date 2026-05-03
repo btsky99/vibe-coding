@@ -28,6 +28,9 @@ export interface VibeData {
   globalPipelineStage: string;
   skillChain: any;
 
+  // Phase 2-5.3c: 프로젝트별 PTY 세션 집계 (탭 배지용)
+  ptySessionsSummary: Record<string, { agent_count: number; total: number }>;
+
   // 컨텍스트 사용량
   geminiUsage: { total_tokens: number; context_window: number; percentage: number } | null;
   claudeUsage: {
@@ -74,6 +77,7 @@ export function useVibeData(): VibeData {
 
   // ─── 에이전트 상태 ────────────────────────────────────────────────
   const [agentTerminals, setAgentTerminals] = useState<Record<string, any>>({});
+  const [ptySessionsSummary, setPtySessionsSummary] = useState<VibeData['ptySessionsSummary']>({});
   const [geminiUsage, setGeminiUsage] = useState<VibeData['geminiUsage']>(null);
   const [claudeUsage, setClaudeUsage] = useState<VibeData['claudeUsage']>(null);
 
@@ -207,6 +211,19 @@ export function useVibeData(): VibeData {
     return () => clearInterval(interval);
   }, [currentPath]);
 
+  // Phase 2-5.3c: PTY 세션 집계 폴링 (10초) — 프로젝트 무관 전체 응답
+  useEffect(() => {
+    const fetchSummary = () => {
+      fetch(`${API_BASE}/api/pty/sessions/summary`)
+        .then(res => res.json())
+        .then(data => setPtySessionsSummary(data && typeof data === 'object' ? data : {}))
+        .catch(() => { /* PTY 서버 미가동 시 조용히 무시 — 배지는 0으로 표시되지 않음 */ });
+    };
+    fetchSummary();
+    const interval = setInterval(fetchSummary, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // 하이브 헬스 폴링 (10초)
   useEffect(() => {
     const fetchHealth = () => {
@@ -296,6 +313,7 @@ export function useVibeData(): VibeData {
   return {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
+    ptySessionsSummary,
     geminiUsage, claudeUsage,
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,

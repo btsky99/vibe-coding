@@ -557,36 +557,36 @@
 
 ### 마이크로태스크
 
-- [ ] **Task C.1: GET /api/pty/sessions/summary 엔드포인트**
+- [x] **Task C.1: GET /api/pty/sessions/summary 엔드포인트** ✅ (2026-05-03)
   - 파일: `.ai_monitor/pty-server/pty-server.js` (L1096 라우트 다음)
   - 방법: 모든 project_id별 활성 에이전트 수 집계. 응답: `{ "D--vibe-coding": { agent_count: 2, total: 3 }, "_default": {...} }`. 오피스 O* 슬롯은 `total`엔 포함, `agent_count`엔 제외.
   - 검증: `curl /api/pty/sessions/summary` 응답이 `Object.keys(projects)` 전체 커버
 
-- [ ] **Task C.2: pty_api.py 패스스루**
+- [x] **Task C.2: pty_api.py 패스스루** ✅ (2026-05-03 — handle_get L156-166 자동 패스스루로 추가 매핑 불필요)
   - 파일: `.ai_monitor/api/pty_api.py`
   - 방법: 현재 패스스루 라우팅이 자동 처리되는지 확인. 별도 매핑 필요하면 `/api/pty/sessions/summary` 추가. 196줄 패스스루 코드 검토.
   - 검증: `curl localhost:9000/api/pty/sessions/summary` Node와 동일 응답
 
-- [ ] **Task C.3: useVibeData.ts 폴링 추가**
+- [x] **Task C.3: useVibeData.ts 폴링 추가** ✅ (2026-05-03)
   - 파일: `.ai_monitor/vibe-view/src/hooks/useVibeData.ts`
   - 방법: `ptySessionsSummary` state(`Record<string, {agent_count: number; total: number}>`) 추가. `useEffect`에 10초 폴링. fetch는 프로젝트 무관(전체 집계)이므로 `withProjectId` 미적용. VibeData interface에 노출.
   - 검증: DevTools Network에 10초마다 요청 + state 갱신
 
-- [ ] **Task C.4: TopMenuBar.tsx 배지 렌더링**
+- [x] **Task C.4: TopMenuBar.tsx 배지 렌더링** ✅ (2026-05-03 — slugifyProjectPath로 path → project_id 매핑, 우상단 absolute 배지)
   - 파일: `.ai_monitor/vibe-view/src/components/TopMenuBar.tsx` L502~509
   - 방법: props에 `ptySessionsSummary` 추가. 탭 버튼 내부에 `{summary[path]?.agent_count > 0 && <span className="agent-badge">{n}</span>}` 추가. CSS는 inline style 또는 globals.css에 `.agent-badge` 정의(원형, 12px, 우상단 absolute).
   - 검증: 탭 A에서 claude spawn → 탭 A 버튼에 "1" 배지 → 탭 B 전환 후 gemini spawn → 탭 B에 "1", 탭 A에 "1" 동시 표시
 
-- [ ] **Task C.5: App.tsx props 전달**
+- [x] **Task C.5: App.tsx props 전달** ✅ (2026-05-03)
   - 파일: `.ai_monitor/vibe-view/src/App.tsx`
   - 방법: useVibeData에서 `ptySessionsSummary` 받아 TopMenuBar에 전달. 1줄 변경.
   - 검증: TS 타입 체크 통과 + 빌드
 
-- [ ] **Task C.6: 빌드 + Playwright 검증**
+- [x] **Task C.6: 빌드 + Playwright 검증** ✅ (2026-05-03 — tsc 0 errors + vite build 38s, 신규 번들 index-DQ7XHOFl.js. PyWebView 재시작 검증은 사용자 확인 대기)
   - 방법: `npm run build` → EXE 재시작 → 프로젝트 2개 탭 → 각각에 spawn → 배지 숫자 정상 + 0개 탭 배지 미표시
   - 검증: 5초 이내 배지 갱신, 종료 시 0으로 소멸
 
-- [ ] **Task C.7: 메모리 + 계획서 갱신**
+- [x] **Task C.7: 메모리 + 계획서 갱신** ✅ (2026-05-03)
   - 파일: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`, `ai_monitor_plan.md`
   - 방법: 2-5.3c 완료 표시, 스크린샷 첨부 시 옵시디언 자산 폴더 사용
 
