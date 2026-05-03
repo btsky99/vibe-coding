@@ -194,10 +194,10 @@ export function useVibeData(): VibeData {
     return () => clearInterval(interval);
   }, []);
 
-  // 에이전트 터미널 상태 폴링 (5초)
+  // 에이전트 터미널 상태 폴링 (5초) — Phase 2-5.3a: project_id 명시 첨부
   useEffect(() => {
     const fetchTerminals = () => {
-      fetch(`${API_BASE}/api/agent/terminals`)
+      fetch(withProjectId(`${API_BASE}/api/agent/terminals`, currentPath))
         .then(res => res.json())
         .then(data => setAgentTerminals(typeof data === 'object' && data !== null ? data : {}))
         .catch((err) => console.error('[useVibeData] fetch error:', err));
@@ -205,7 +205,7 @@ export function useVibeData(): VibeData {
     fetchTerminals();
     const interval = setInterval(fetchTerminals, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentPath]);
 
   // 하이브 헬스 폴링 (10초)
   useEffect(() => {

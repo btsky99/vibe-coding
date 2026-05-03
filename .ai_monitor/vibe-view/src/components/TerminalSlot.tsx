@@ -40,6 +40,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { API_BASE, WS_PORT, Shortcut, defaultShortcuts, SLASH_COMMANDS } from '../constants';
 import { LogRecord, AgentMessage, Task } from '../types';
+import { slugifyProjectPath } from '../lib/projectContext';
 import ChatSlot from './ChatSlot';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
@@ -284,13 +285,15 @@ export default function TerminalSlot({
         ro.observe(termContainer);
         resizeObserverRef.current = ro;
       }
-      // WebSocket에 yolo/model/name 상태 전달
+      // WebSocket에 yolo/model/name + project_id 상태 전달 (Phase 2-5.3a)
+      const projectId = slugifyProjectPath(currentPath);
       const wsParams = new URLSearchParams({
         agent: slotCli || agent,
         cwd: currentPath,
         cols: term.cols.toString(),
         rows: term.rows.toString(),
         yolo: yolo.toString(),
+        ...(projectId ? { project_id: projectId } : {}),
         ...(slotModel ? { model: slotModel } : {}),
         ...(slotName ? { name: slotName } : {}),
       });

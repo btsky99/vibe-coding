@@ -45,6 +45,121 @@ const DETACH_GRACE_MS = parseInt(process.env.PTY_DETACH_GRACE_MS || String(30 * 
 // ANSI 이스케이프 코드 제거용 정규식
 const ANSI_ESCAPE = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
+// ── 프로젝트 격리 키 헬퍼 (Phase 2-5.3a) ──────────────────────────────────
+// 백엔드 infra/project_context.py::slugify와 동일 규칙. 프로젝트 rename 비지원
+// (config.json 편집 후 앱 재시작 필요. 슬러그 바뀌면 기존 풀 고립).
+function slugifyProjectPath(p) {
+  if (!p) return '';
+  return String(p)
+    .replace(/\\/g, '/')
+    .replace(/:/g, '')
+    .replace(/\//g, '--')
+    .replace(/^-+/, '');
+}
+
+function sessionKey(projectId, slotId) {
+  const pid = (projectId && String(projectId).trim()) || '_default';
+  return `${pid}:${slotId}`;
+}
+
+function parseSessionKey(key) {
+  const idx = String(key).indexOf(':');
+  if (idx < 0) return { projectId: '_default', slotId: String(key) };
+  return { projectId: key.slice(0, idx), slotId: key.slice(idx + 1) };
+}
+
+function _resolvePidFromQuery(searchParams, cwd) {
+  const explicit = (searchParams && searchParams.get('project_id') || '').trim();
+  if (explicit) return explicit;
+  const fromCwd = slugifyProjectPath(cwd || '');
+  return fromCwd || '_default';
+}
+
+// 로그 출력용: 키에서 슬롯 ID만 추출 (T1, T101, TO1 등 표기 유지).
+function displayId(sessionId) {
+  return parseSessionKey(sessionId).slotId;
+}
+
+function terminalLabel(slotId) {
+  const sid = String(slotId || '').trim();
+  return sid.startsWith('T') ? sid : `T${sid}`;
+}
+
+function agentHeartbeatId(agent, slotId) {
+  return `${String(agent || 'unknown').toLowerCase()}:${terminalLabel(slotId)}`;
+}
+
+function meaningfulTaskLine(line) {
+  const text = String(line || '')
+    .replace(ANSI_ESCAPE, '')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length < 6) return '';
+  if (/^[\u2800-\u28ff\s|/\\\-_.:;]+$/.test(text)) return '';
+  if (/^(Bi|ought for|vibe-coding|[0-9]+;)/i.test(text)) return '';
+  if (text.length > 220) return text.slice(0, 220);
+  return text;
+}
+
+function updateSessionTaskFromLine(session, line, preferInput = false) {
+  if (!session) return;
+  const taskLine = meaningfulTaskLine(line);
+  if (!taskLine) return;
+
+  if (preferInput || !session.currentTask || /^(PTY|세션|\[PTY\])/i.test(session.currentTask)) {
+    session.currentTask = taskLine;
+    return;
+  }
+
+  if (/(진행|작업|수정|검증|테스트|빌드|커밋|완료|Phase|Task|TODO|plan|implement|fix|refactor)/i.test(taskLine)) {
+    session.currentTask = taskLine;
+  }
+}
+
+function sendPtyHeartbeat(sessionId, status = 'running', force = false) {
+  const session = ptySessions.get(sessionId);
+  if (!session || !session.agent) return;
+
+  const now = Date.now();
+  if (!force && session.lastHeartbeatAt && now - session.lastHeartbeatAt < 5000) return;
+  session.lastHeartbeatAt = now;
+
+  const payload = JSON.stringify({
+    agent: session.agent,
+    terminal_id: terminalLabel(session.slotId || displayId(sessionId)),
+    agent_id: agentHeartbeatId(session.agent, session.slotId || displayId(sessionId)),
+    status,
+    current_task: session.currentTask || `[PTY] ${String(session.agent).toUpperCase()} 세션 활성`,
+    project_id: session.projectId || parseSessionKey(sessionId).projectId,
+    cwd: session.cwd || '',
+    last_line: session.lastLine || '',
+  });
+
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port: PYTHON_HTTP_PORT,
+    path: '/api/agent/heartbeat',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    },
+    timeout: 2000,
+  });
+
+  req.on('error', () => {});
+  req.on('timeout', () => req.destroy());
+  req.write(payload);
+  req.end();
+}
+
+setInterval(() => {
+  for (const sessionId of ptySessions.keys()) {
+    sendPtyHeartbeat(sessionId, 'running');
+  }
+}, 15000);
+
 // ── 출력 버퍼 관리 ────────────────────────────────────────────────────────
 /**
  * PTY 출력을 세션 버퍼에 추가합니다.
@@ -109,13 +224,13 @@ function killSessionPty(sessionId, reason = 'terminated') {
   if (!session || !session.pty) return false;
 
   clearDetachTimer(session);
-  console.log(`[PTY] 세션 종료 요청: T${sessionId} reason=${reason}`);
+  console.log(`[PTY] 세션 종료 요청: T${displayId(sessionId)} reason=${reason}`);
 
   try {
     session.pty.kill();
     return true;
   } catch (err) {
-    console.log(`[PTY] PTY 종료 실패: T${sessionId} ${err.message}`);
+    console.log(`[PTY] PTY 종료 실패: T${displayId(sessionId)} ${err.message}`);
     clearSessionState(sessionId);
     return false;
   }
@@ -131,7 +246,7 @@ function scheduleDetachedCleanup(sessionId) {
   session.detachTimer = setTimeout(() => {
     const current = ptySessions.get(sessionId);
     if (!current || current.attached) return;
-    console.log(`[PTY] 재연결 유예시간 만료: T${sessionId} -> PTY 종료`);
+    console.log(`[PTY] 재연결 유예시간 만료: T${displayId(sessionId)} -> PTY 종료`);
     killSessionPty(sessionId, 'detach_timeout');
   }, DETACH_GRACE_MS);
 }
@@ -148,7 +263,7 @@ function replayBufferedOutput(sessionId, ws) {
   if (!replay) return;
 
   ws.send(
-    `\r\n\x1b[38;5;39m[HIVE] 기존 PTY 세션 T${sessionId}에 재부착했습니다.\x1b[0m\r\n` +
+    `\r\n\x1b[38;5;39m[HIVE] 기존 PTY 세션 T${displayId(sessionId)}에 재부착했습니다.\x1b[0m\r\n` +
     `\x1b[38;5;244m최근 출력 ${Math.min(buffer.length, REPLAY_LINES_ON_ATTACH)}줄을 복원합니다.\x1b[0m\r\n` +
     `${replay}\r\n`
   );
@@ -214,6 +329,11 @@ function attachSocketToSession(ws, sessionId, agent) {
               const completedLine = wsInputBuf.join('');
               wsInputBuf = [];
               const cleaned = completedLine.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim();
+              const current = ptySessions.get(sessionId);
+              if (current && cleaned.length >= 4) {
+                updateSessionTaskFromLine(current, cleaned, true);
+                sendPtyHeartbeat(sessionId, 'running', true);
+              }
               if (cleaned.length >= 4 && !agent) {
                 dispatchToAgent(cleaned, ptyProcess);
               }
@@ -239,7 +359,7 @@ function attachSocketToSession(ws, sessionId, agent) {
   });
 
   ws.on('close', (code) => {
-    console.log(`[PTY] WebSocket 닫힘: T${sessionId} code=${code}`);
+    console.log(`[PTY] WebSocket 닫힘: T${displayId(sessionId)} code=${code}`);
 
     const current = ptySessions.get(sessionId);
     if (!current || current.socket !== ws) {
@@ -266,7 +386,7 @@ function attachSocketToSession(ws, sessionId, agent) {
   });
 
   ws.on('error', (err) => {
-    console.error(`[WS ERROR] T${sessionId}: ${err.message}`);
+    console.error(`[WS ERROR] T${displayId(sessionId)}: ${err.message}`);
   });
 }
 
@@ -323,6 +443,7 @@ function getCodexMainModel() {
 function handlePtyConnectionLegacy(ws, req) {
   let ptyProcess = null;
   let sessionId = null;
+  let slotId = null;
 
   try {
     // ── URL 파싱 ──────────────────────────────────────────────────────
@@ -340,19 +461,24 @@ function handlePtyConnectionLegacy(ws, req) {
     const rows = parseInt(url.searchParams.get('rows') || '24', 10);
     const isYolo = url.searchParams.get('yolo') === 'true';
 
-    // ── 세션 ID 계산 (슬롯 번호 + 1, UI 터미널 번호와 일치) ─────────
+    // ── 세션 ID 계산 (Phase 2-5.3a: 프로젝트 격리 복합 키) ──────────
+    // slotId: 외부 표시/TERMINAL_ID env용 (T1, T8 등 — UI/wrapper 호환)
+    // sessionId: 내부 Map 키 — `{project_id}:{slotId}` (탭별 풀 격리)
+    const projectId = _resolvePidFromQuery(url.searchParams, cwd);
     const slotMatch = req.url.match(/\/pty\/slot(\d+)/);
-    sessionId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
+    slotId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
+    sessionId = sessionKey(projectId, slotId);
 
     // ── 환경변수 구성 ─────────────────────────────────────────────────
     // Python 서버와 동일한 환경변수를 PTY 프로세스에 주입합니다.
+    // TERMINAL_ID는 외부 약속(slot 번호) 유지 — wrapper/docs가 T1, T2 형식 기대.
     const env = Object.assign({}, process.env, {
       PYTHONIOENCODING: 'utf-8',
       LANG: 'ko_KR.UTF-8',
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       PYTHONLEGACYWINDOWSSTDIO: '0',
-      TERMINAL_ID: sessionId,
+      TERMINAL_ID: slotId,
       // instructor 패키지의 deprecated google.generativeai FutureWarning 억제
       PYTHONWARNINGS: 'ignore::FutureWarning',
     });
@@ -390,7 +516,7 @@ function handlePtyConnectionLegacy(ws, req) {
       useConpty: true,
     });
 
-    console.log(`[PTY] 세션 시작: T${sessionId} agent=${agent} shell=${path.basename(shell)} pid=${ptyProcess.pid}`);
+    console.log(`[PTY] 세션 시작: T${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
 
     // ── 에이전트별 시작 명령 ──────────────────────────────────────────
     if (agent === 'claude') {
@@ -408,9 +534,8 @@ function handlePtyConnectionLegacy(ws, req) {
     } else if (agent.startsWith('groupchat-')) {
       // 그룹챗 터미널 — LLM + 그룹 채팅 통합 모드
       const cli = agent.replace('groupchat-', '');
-      // 원래 슬롯 번호 사용: sessionId는 slotId+100 기반이므로 -100하여 원래 번호 복원
-      // 예: slot101 → sessionId=102 → slotNum=2 → T2-gemini
-      const slotNum = parseInt(sessionId, 10) - 100;
+      // 원래 슬롯 번호 복원: slotId는 slot번호+1 형식 (예: slot101 → slotId=102 → slotNum=2)
+      const slotNum = parseInt(slotId, 10) - 100;
       const termName = `T${slotNum}-${cli}`;
       ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
@@ -430,8 +555,11 @@ function handlePtyConnectionLegacy(ws, req) {
       started: new Date().toISOString(),
       cwd: cwd,
       lastLine: '',
+      currentTask: agent ? `[PTY] ${String(agent).toUpperCase()} 세션 활성` : '',
       mainModel: mainModel,
       bgModel: bgModel,
+      projectId: projectId,
+      slotId: slotId,
     });
     ptyOutputBuffers.set(sessionId, []);
     ptyOutputSeq.set(sessionId, 0);
@@ -446,6 +574,7 @@ function handlePtyConnectionLegacy(ws, req) {
         `─── ${agent.toUpperCase()} 세션 시작 ${modeTag} ───`,
         'running'
       );
+      sendPtyHeartbeat(sessionId, 'running', true);
     }
 
     // ── PTY → WebSocket (출력 스트리밍) ───────────────────────────────
@@ -470,6 +599,8 @@ function handlePtyConnectionLegacy(ws, req) {
           const lines = clean.split('\n').filter(l => l.trim().length > 2);
           if (lines.length > 0) {
             session.lastLine = lines[lines.length - 1].trim().substring(0, 120);
+            updateSessionTaskFromLine(session, session.lastLine);
+            sendPtyHeartbeat(sessionId, 'running');
           }
         } catch (_) {
           // last_line 업데이트 실패 시 무시 (메인 흐름 보호)
@@ -479,7 +610,7 @@ function handlePtyConnectionLegacy(ws, req) {
 
     // ── PTY 종료 감지 ─────────────────────────────────────────────────
     ptyProcess.onExit(({ exitCode, signal }) => {
-      console.log(`[PTY] 프로세스 종료: T${sessionId} code=${exitCode} signal=${signal}`);
+      console.log(`[PTY] 프로세스 종료: T${slotId} code=${exitCode} signal=${signal}`);
 
       if (agent) {
         const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
@@ -489,6 +620,7 @@ function handlePtyConnectionLegacy(ws, req) {
           `─── ${agent.toUpperCase()} 프로세스 종료 (exit=${exitCode}) ───`,
           'success'
         );
+        sendPtyHeartbeat(sessionId, exitCode === 0 ? 'done' : 'error', true);
       }
 
       // 세션 정리
@@ -555,6 +687,11 @@ function handlePtyConnectionLegacy(ws, req) {
                 const completedLine = wsInputBuf.join('');
                 wsInputBuf = [];
                 const cleaned = completedLine.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim();
+                const current = ptySessions.get(sessionId);
+                if (current && cleaned.length >= 4) {
+                  updateSessionTaskFromLine(current, cleaned, true);
+                  sendPtyHeartbeat(sessionId, 'running', true);
+                }
                 if (cleaned.length >= 4 && !agent) {
                   dispatchToAgent(cleaned, ptyProcess);
                 }
@@ -581,7 +718,7 @@ function handlePtyConnectionLegacy(ws, req) {
 
     // ── WebSocket 닫힘 처리 ───────────────────────────────────────────
     ws.on('close', () => {
-      console.log(`[PTY] WebSocket 닫힘: T${sessionId}`);
+      console.log(`[PTY] WebSocket 닫힘: T${slotId}`);
 
       if (agent) {
         const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
@@ -605,7 +742,7 @@ function handlePtyConnectionLegacy(ws, req) {
     });
 
     ws.on('error', (err) => {
-      console.error(`[WS ERROR] T${sessionId}: ${err.message}`);
+      console.error(`[WS ERROR] T${slotId}: ${err.message}`);
     });
 
   } catch (err) {
@@ -625,6 +762,7 @@ function handlePtyConnectionLegacy(ws, req) {
 function handlePersistentPtyConnection(ws, req) {
   let ptyProcess = null;
   let sessionId = null;
+  let slotId = null;
 
   try {
     const url = new URL(req.url, `http://127.0.0.1:${PTY_PORT}`);
@@ -641,8 +779,11 @@ function handlePersistentPtyConnection(ws, req) {
     const requestedModel = url.searchParams.get('model') || '';
     const slotName = url.searchParams.get('name') || '';
 
+    // Phase 2-5.3a: 프로젝트 격리 복합 키
+    const projectId = _resolvePidFromQuery(url.searchParams, cwd);
     const slotMatch = req.url.match(/\/pty\/slot(\d+)/);
-    sessionId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
+    slotId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
+    sessionId = sessionKey(projectId, slotId);
 
     const existingSession = ptySessions.get(sessionId);
     if (existingSession && existingSession.pty) {
@@ -661,7 +802,7 @@ function handlePersistentPtyConnection(ws, req) {
       try {
         existingSession.pty.resize(cols, rows);
       } catch (_) {}
-      console.log(`[PTY] existing session reattached: T${sessionId} agent=${existingSession.agent}`);
+      console.log(`[PTY] existing session reattached: T${slotId} agent=${existingSession.agent} project=${projectId}`);
       replayBufferedOutput(sessionId, ws);
       return;
     }
@@ -672,7 +813,7 @@ function handlePersistentPtyConnection(ws, req) {
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       PYTHONLEGACYWINDOWSSTDIO: '0',
-      TERMINAL_ID: sessionId,
+      TERMINAL_ID: slotId,
       // instructor 패키지의 deprecated google.generativeai FutureWarning 억제
       PYTHONWARNINGS: 'ignore::FutureWarning',
     });
@@ -703,7 +844,7 @@ function handlePersistentPtyConnection(ws, req) {
       useConpty: true,
     });
 
-    console.log(`[PTY] session started: T${sessionId} agent=${agent} shell=${path.basename(shell)} pid=${ptyProcess.pid}`);
+    console.log(`[PTY] session started: T${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
 
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
@@ -720,7 +861,7 @@ function handlePersistentPtyConnection(ws, req) {
       ptyProcess.write(`codex --no-alt-screen${yoloFlag}${modelFlag}\n`);
     } else if (agent.startsWith('groupchat-')) {
       const cli = agent.replace('groupchat-', '');
-      const slotNum = parseInt(sessionId, 10) - 100;
+      const slotNum = parseInt(slotId, 10) - 100;
       const termName = `T${slotNum}-${cli}`;
       ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
     }
@@ -740,12 +881,15 @@ function handlePersistentPtyConnection(ws, req) {
       started: new Date().toISOString(),
       cwd: cwd,
       lastLine: '',
+      currentTask: agent ? `[PTY] ${String(agent).toUpperCase()} 세션 활성` : '',
       mainModel: mainModel,
       bgModel: bgModel,
       slotName: slotName,
       attached: true,
       detachedAt: '',
       detachTimer: null,
+      projectId: projectId,
+      slotId: slotId,
     });
     ptyOutputBuffers.set(sessionId, []);
     ptyOutputSeq.set(sessionId, 0);
@@ -759,6 +903,7 @@ function handlePersistentPtyConnection(ws, req) {
         `─── ${agent.toUpperCase()} session started ${modeTag} ───`,
         'running'
       );
+      sendPtyHeartbeat(sessionId, 'running', true);
     }
 
     ptyProcess.onData((data) => {
@@ -780,13 +925,15 @@ function handlePersistentPtyConnection(ws, req) {
           const lines = clean.split('\n').filter(l => l.trim().length > 2);
           if (lines.length > 0) {
             session.lastLine = lines[lines.length - 1].trim().substring(0, 120);
+            updateSessionTaskFromLine(session, session.lastLine);
+            sendPtyHeartbeat(sessionId, 'running');
           }
         } catch (_) {}
       }
     });
 
     ptyProcess.onExit(({ exitCode, signal }) => {
-      console.log(`[PTY] process exit: T${sessionId} code=${exitCode} signal=${signal}`);
+      console.log(`[PTY] process exit: T${slotId} code=${exitCode} signal=${signal}`);
 
       if (agent) {
         const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
@@ -796,6 +943,7 @@ function handlePersistentPtyConnection(ws, req) {
           `─── ${agent.toUpperCase()} process exited (exit=${exitCode}) ───`,
           'success'
         );
+        sendPtyHeartbeat(sessionId, exitCode === 0 ? 'done' : 'error', true);
       }
 
       const activeSession = ptySessions.get(sessionId);
@@ -878,31 +1026,102 @@ app.use((req, res, next) => {
 
 /**
  * GET /api/pty/sessions
- * 전체 PTY 세션 스냅샷을 반환합니다.
+ * PTY 세션 스냅샷. Phase 2-5.3a부터 ?project_id= 쿼리로 프로젝트별 필터.
+ *   - project_id 명시: 해당 프로젝트의 슬롯 1~32만 반환 (오피스 O* 제외)
+ *   - 누락: _default 풀 + 그 외 모든 프로젝트 통합 응답 (관리용)
  * Python 서버의 agent_api.py, pty_api.py가 이 엔드포인트를 호출합니다.
  */
 app.get('/api/pty/sessions', (req, res) => {
+  const requestedPid = (req.query.project_id || '').trim();
   const terminals = {};
-  // 클래식 모드 호환: 슬롯 1~8은 항상 반환
-  // 오피스 모드: 슬롯 9~32는 실제 세션이 있는 경우만 반환
-  for (let slot = 1; slot <= 32; slot++) {
-    const info = ptySessions.get(String(slot));
-    if (slot > 8 && !info) continue;
-    terminals[`T${slot}`] = {
-      running: !!info,
-      attached: info ? !!info.attached : false,
-      agent: info ? info.agent : '',
-      yolo: info ? info.yolo : false,
-      started: info ? info.started : '',
-      cwd: info ? info.cwd : '',
-      last_line: info ? info.lastLine : '',
-      main_model: info ? info.mainModel : '',
-      bg_model: info ? info.bgModel : '',
-      slot_name: info ? (info.slotName || '') : '',
-      detached_at: info ? info.detachedAt : '',
-    };
+
+  if (requestedPid) {
+    // 단일 프로젝트 필터
+    for (let slot = 1; slot <= 32; slot++) {
+      const info = ptySessions.get(sessionKey(requestedPid, String(slot)));
+      if (slot > 8 && !info) continue;
+      terminals[`T${slot}`] = {
+        running: !!info,
+        attached: info ? !!info.attached : false,
+        agent: info ? info.agent : '',
+        yolo: info ? info.yolo : false,
+        started: info ? info.started : '',
+        cwd: info ? info.cwd : '',
+        last_line: info ? info.lastLine : '',
+        main_model: info ? info.mainModel : '',
+        bg_model: info ? info.bgModel : '',
+        slot_name: info ? (info.slotName || '') : '',
+        detached_at: info ? info.detachedAt : '',
+        project_id: requestedPid,
+      };
+    }
+  } else {
+    // 전체 통합 응답: 슬롯 키 + 프로젝트 ID 함께 노출
+    // _default 풀의 1~8은 클래식 호환을 위해 T1~T8로 노출 (project_id='_default')
+    const seenSlots = new Set();
+    for (const [key, info] of ptySessions.entries()) {
+      const { projectId, slotId } = parseSessionKey(key);
+      // 오피스 O* 슬롯은 office/sessions로 별도 노출 — 여기서는 제외
+      if (String(slotId).startsWith('O')) continue;
+      const label = projectId === '_default' ? `T${slotId}` : `T${slotId}@${projectId}`;
+      seenSlots.add(label);
+      terminals[label] = {
+        running: !!info,
+        attached: !!info.attached,
+        agent: info.agent || '',
+        yolo: info.yolo || false,
+        started: info.started || '',
+        cwd: info.cwd || '',
+        last_line: info.lastLine || '',
+        main_model: info.mainModel || '',
+        bg_model: info.bgModel || '',
+        slot_name: info.slotName || '',
+        detached_at: info.detachedAt || '',
+        project_id: projectId,
+      };
+    }
+    // 클래식 호환: _default 풀의 1~8 슬롯이 비어있으면 빈 항목으로 채움
+    for (let slot = 1; slot <= 8; slot++) {
+      const label = `T${slot}`;
+      if (!seenSlots.has(label)) {
+        terminals[label] = {
+          running: false, attached: false, agent: '', yolo: false,
+          started: '', cwd: '', last_line: '', main_model: '', bg_model: '',
+          slot_name: '', detached_at: '', project_id: '_default',
+        };
+      }
+    }
   }
   res.json(terminals);
+});
+
+/**
+ * DELETE /api/pty/sessions
+ * Phase 2-5.3a: 특정 프로젝트의 모든 PTY 세션을 일괄 종료합니다.
+ * 프론트에서 탭 닫기/프로젝트 제거 시 호출. 오피스 O* 슬롯은 별도 라이프사이클이라 제외.
+ * query: project_id (필수)
+ * 응답: { cleaned: N, project_id, skipped_office: M }
+ */
+app.delete('/api/pty/sessions', (req, res) => {
+  const requestedPid = (req.query.project_id || '').trim();
+  if (!requestedPid) {
+    return res.status(400).json({ error: 'missing_project_id' });
+  }
+  let cleaned = 0;
+  let skippedOffice = 0;
+  const targets = [];
+  for (const [key, info] of ptySessions.entries()) {
+    const { projectId, slotId } = parseSessionKey(key);
+    if (projectId !== requestedPid) continue;
+    if (String(slotId).startsWith('O')) { skippedOffice++; continue; }
+    targets.push({ key, hasPty: !!(info && info.pty) });
+  }
+  for (const { key, hasPty } of targets) {
+    if (hasPty) killSessionPty(key, 'project_removed');
+    clearSessionState(key);
+    cleaned++;
+  }
+  res.json({ cleaned, project_id: requestedPid, skipped_office: skippedOffice });
 });
 
 /**
@@ -934,10 +1153,27 @@ app.get('/api/pty/models', (req, res) => {
   });
 });
 
+// Phase 2-5.3a: 단건 조작 엔드포인트의 target → 내부 키 변환.
+// O*로 시작하는 슬롯(오피스)은 키에 project_id prefix 없는 단독 키로 별도 처리.
+function _resolveSessionKey(target, queryPid) {
+  const slotId = String(target);
+  if (slotId.startsWith('O')) {
+    // 오피스 세션: 기존에는 평탄 키 'O*'였지만 spawn에서 sessionKey로 묶이도록 변경됨.
+    // 호환을 위해 두 가지 모두 시도 — 새 키 우선, 없으면 평탄 키 폴백.
+    const pid = (queryPid || '_default').trim() || '_default';
+    const newKey = sessionKey(pid, slotId);
+    if (ptySessions.has(newKey)) return newKey;
+    // 평탄 키 폴백 (구버전 office 세션 호환)
+    if (ptySessions.has(slotId)) return slotId;
+    return newKey;
+  }
+  return sessionKey((queryPid || '_default').trim() || '_default', slotId);
+}
+
 /**
  * GET /api/pty/output/:id
  * 특정 세션의 출력 버퍼를 반환합니다.
- * query: since (시퀀스 번호), limit (최대 줄 수)
+ * query: project_id, since (시퀀스 번호), limit (최대 줄 수)
  */
 app.get('/api/pty/output/:id', (req, res) => {
   let target = req.params.id.toUpperCase();
@@ -945,17 +1181,18 @@ app.get('/api/pty/output/:id', (req, res) => {
 
   const since = parseInt(req.query.since || '0', 10);
   const limit = Math.max(1, Math.min(parseInt(req.query.limit || '80', 10), 200));
+  const key = _resolveSessionKey(target, req.query.project_id);
 
-  const buffer = ptyOutputBuffers.get(target) || [];
+  const buffer = ptyOutputBuffers.get(key) || [];
   const filtered = buffer.filter(entry => entry.seq > since).slice(0, limit);
   const latestSeq = buffer.length > 0 ? buffer[buffer.length - 1].seq : 0;
-  const info = ptySessions.get(target);
+  const info = ptySessions.get(key);
 
   res.json({
     terminal_id: `T${target}`,
     entries: filtered,
     latest_seq: latestSeq,
-    running: ptySessions.has(target),
+    running: ptySessions.has(key),
     attached: !!(info && info.attached),
   });
 });
@@ -963,12 +1200,14 @@ app.get('/api/pty/output/:id', (req, res) => {
 /**
  * POST /api/pty/interrupt/:id
  * 특정 세션에 SIGINT(Ctrl+C)를 전송합니다.
+ * query: project_id (Phase 2-5.3a)
  */
 app.post('/api/pty/interrupt/:id', (req, res) => {
   let target = req.params.id.toUpperCase();
   if (target.startsWith('T')) target = target.substring(1);
 
-  const info = ptySessions.get(target);
+  const key = _resolveSessionKey(target, req.query.project_id);
+  const info = ptySessions.get(key);
   if (!info || !info.pty) {
     return res.status(404).json({ error: 'not_running', terminal_id: `T${target}` });
   }
@@ -984,17 +1223,19 @@ app.post('/api/pty/interrupt/:id', (req, res) => {
 /**
  * POST /api/pty/terminate/:id
  * 특정 세션의 PTY 프로세스를 강제 종료합니다.
+ * query: project_id (Phase 2-5.3a)
  */
 app.post('/api/pty/terminate/:id', (req, res) => {
   let target = req.params.id.toUpperCase();
   if (target.startsWith('T')) target = target.substring(1);
 
-  const info = ptySessions.get(target);
+  const key = _resolveSessionKey(target, req.query.project_id);
+  const info = ptySessions.get(key);
   if (!info || !info.pty) {
     return res.status(404).json({ error: 'not_running', terminal_id: `T${target}` });
   }
 
-  if (!killSessionPty(target, 'api_terminate')) {
+  if (!killSessionPty(key, 'api_terminate')) {
     return res.status(500).json({ error: 'terminate_failed', detail: 'killSessionPty failed' });
   }
 
@@ -1005,13 +1246,15 @@ app.post('/api/pty/terminate/:id', (req, res) => {
  * POST /api/pty/write/:id
  * 특정 세션의 PTY에 텍스트를 직접 입력합니다.
  * body: { "text": "입력할 텍스트" }
+ * query: project_id (Phase 2-5.3a)
  * 텔레그램 브릿지에서 기존 터미널의 Claude Code에 메시지를 주입하는 데 사용.
  */
 app.post('/api/pty/write/:id', (req, res) => {
   let target = req.params.id.toUpperCase();
   if (target.startsWith('T')) target = target.substring(1);
 
-  const info = ptySessions.get(target);
+  const key = _resolveSessionKey(target, req.query.project_id);
+  const info = ptySessions.get(key);
   if (!info || !info.pty) {
     return res.status(404).json({ error: 'not_running', terminal_id: `T${target}` });
   }
@@ -1035,8 +1278,9 @@ app.post('/api/pty/write/:id', (req, res) => {
 /**
  * POST /api/pty/office/spawn
  * 오피스 전용 PTY 세션 생성 (클래식 T1~T8과 완전 분리).
- * body: { agent: 'claude', yolo: true, model: 'claude-sonnet-4-6' }
- * 세션 ID: O1, O2, ... (Office namespace)
+ * body: { agent: 'claude', yolo: true, model: 'claude-sonnet-4-6', project_id?: 'D--vibe-coding' }
+ * 세션 ID(slot): O1, O2, ... (Office namespace) — 내부 키는 {pid}:O{N} (Phase 2-5.3a)
+ * 본 정책(TTL/배지)에서는 slotId가 'O'로 시작하면 자연 제외.
  */
 app.post('/api/pty/office/spawn', (req, res) => {
   const agent = (req.body && req.body.agent) || 'claude';
@@ -1044,17 +1288,22 @@ app.post('/api/pty/office/spawn', (req, res) => {
   const requestedCwd = req.body && req.body.cwd;
   const cwd = (requestedCwd && fs.existsSync(requestedCwd)) ? requestedCwd : PROJECT_ROOT;
 
-  // 오피스 세션 ID 할당 (O1, O2, ...)
+  // 프로젝트 ID 결정: body.project_id → cwd slugify → _default 폴백
+  const projectId = ((req.body && req.body.project_id) || '').trim() ||
+                    slugifyProjectPath(cwd) || '_default';
+
+  // 오피스 슬롯 ID 할당 (O1, O2, ...) — 동일 프로젝트 내 충돌만 검사
   let officeId = 1;
-  while (ptySessions.has(`O${officeId}`)) officeId++;
-  const sessionId = `O${officeId}`;
+  while (ptySessions.has(sessionKey(projectId, `O${officeId}`))) officeId++;
+  const slotId = `O${officeId}`;
+  const sessionId = sessionKey(projectId, slotId);
 
   const env = Object.assign({}, process.env, {
     PYTHONIOENCODING: 'utf-8',
     LANG: 'ko_KR.UTF-8',
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    TERMINAL_ID: sessionId,
+    TERMINAL_ID: slotId,
     HIVE_AGENT: agent,
     OFFICE_MODE: 'true',
   });
@@ -1079,7 +1328,7 @@ app.post('/api/pty/office/spawn', (req, res) => {
       useConpty: true,
     });
 
-    console.log(`[PTY-Office] 세션 시작: ${sessionId} agent=${agent} pid=${ptyProcess.pid}`);
+    console.log(`[PTY-Office] 세션 시작: ${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
 
     // 에이전트 시작 명령 — 새 대화를 즉시 시작 (--resume 없이 실행)
     if (agent === 'claude') {
@@ -1109,6 +1358,8 @@ app.post('/api/pty/office/spawn', (req, res) => {
       detachTimer: null,
       slotName: `Office-${agent}`,
       namespace: 'office',  // 오피스 네임스페이스 표시
+      projectId: projectId,
+      slotId: slotId,
     });
 
     // 출력 버퍼 초기화
@@ -1126,13 +1377,14 @@ app.post('/api/pty/office/spawn', (req, res) => {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
-      console.log(`[PTY-Office] 세션 종료: ${sessionId} exitCode=${exitCode}`);
+      console.log(`[PTY-Office] 세션 종료: ${slotId} exitCode=${exitCode} project=${projectId}`);
       ptySessions.delete(sessionId);
       ptyOutputBuffers.delete(sessionId);
       ptyOutputSeq.delete(sessionId);
     });
 
-    res.json({ status: 'spawned', sessionId, agent, pid: ptyProcess.pid });
+    // sessionId 응답: 호환을 위해 slotId(O*) 그대로 반환 — 클라이언트는 단건 조작에 ?project_id= 첨부.
+    res.json({ status: 'spawned', sessionId: slotId, agent, pid: ptyProcess.pid, project_id: projectId });
   } catch (err) {
     console.error(`[PTY-Office] 스폰 실패:`, err);
     res.status(500).json({ error: 'spawn_failed', detail: err.message });
@@ -1141,21 +1393,28 @@ app.post('/api/pty/office/spawn', (req, res) => {
 
 /**
  * GET /api/pty/office/sessions
- * 오피스 전용 세션 목록만 반환 (O1, O2, ...)
+ * 오피스 전용 세션 목록만 반환 (slot O1, O2, ...).
+ * Phase 2-5.3a: 내부 키는 {pid}:O{N}이지만 응답 키는 호환을 위해 slotId(O*) 단독 사용.
+ * query: project_id 명시하면 해당 프로젝트만, 누락 시 모든 프로젝트의 오피스 세션 통합.
  */
 app.get('/api/pty/office/sessions', (req, res) => {
+  const requestedPid = (req.query.project_id || '').trim();
   const sessions = {};
-  for (const [id, info] of ptySessions.entries()) {
-    if (id.startsWith('O')) {
-      sessions[id] = {
-        running: !!(info.pty),
-        agent: info.agent || '',
-        slot_name: info.slotName || '',
-        last_line: info.lastLine || '',
-        main_model: info.mainModel || '',
-        namespace: 'office',
-      };
-    }
+  for (const [key, info] of ptySessions.entries()) {
+    const { projectId, slotId } = parseSessionKey(key);
+    if (!String(slotId).startsWith('O')) continue;
+    if (requestedPid && projectId !== requestedPid) continue;
+    // 응답 키: 단일 프로젝트 필터 시 slotId 단독, 통합 시 슬롯@프로젝트 라벨
+    const respKey = requestedPid ? slotId : (projectId === '_default' ? slotId : `${slotId}@${projectId}`);
+    sessions[respKey] = {
+      running: !!(info.pty),
+      agent: info.agent || '',
+      slot_name: info.slotName || '',
+      last_line: info.lastLine || '',
+      main_model: info.mainModel || '',
+      namespace: 'office',
+      project_id: projectId,
+    };
   }
   res.json(sessions);
 });

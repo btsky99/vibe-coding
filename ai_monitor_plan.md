@@ -376,5 +376,232 @@
 - Task 9~10: 8a 완료 후
 
 ---
+
+## Phase 2-5.3a — 탭별 PTY 세션 풀 분리 (1차 PR, 2026-05-02 brainstorm 승인)
+
+> 상위 메모: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`
+> 목표: 평탄 PTY 풀에 `project_id` 차원 추가. 탭 전환 시 프로젝트별 세션 격리.
+> 후속(분리 PR): 2-5.3b TTL 정리 워커, 2-5.3c UI 탭별 활성 에이전트 수 배지.
+> 위험도 🟡 중간 — PTY 동작 변경, 단독 PR 권장. 매 단계 후 서버 부팅 smoke + Playwright 검증.
+
+### 사전 조사 결과 (2026-05-02 스캔)
+- 프론트 `slot[0-9]` 직접 참조 0건 ✅ (안전)
+- 현재 sessionId 구조: WebSocket 슬롯 번호 +1 ("1"~"8" 일반, "101+N" 오피스 채팅, "O1+" 오피스 spawn)
+- 오피스 spawn(`O*`)은 같은 ptySessions Map에 prefix로 구분 — 본 정책 미적용 대상
+- WebSocket 핸들러 2곳: L325(일반), L627(오피스 채팅)
+
+### 마이크로태스크
+
+- [x] **Task A.1: Node 키 헬퍼 함수 추가**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` (상단 ~L40 부근)
+  - 방법: `sessionKey(pid, slotId)`, `parseSessionKey(key)`, `_resolvePidFromQuery(url, cwd)` 3개 헬퍼 추가. pid 빈 값이면 `'_default'` 폴백. `slugifyProjectPath` 동일 규칙(백엔드 infra/project_context.py).
+  - 검증: 단위 호출로 키 생성/파싱 round-trip 확인
+
+- [x] **Task A.2: WebSocket 핸들러 #1 sessionId 생성 변경**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` L325~497 (일반 PTY 핸들러)
+  - 방법: L344~345의 sessionId 생성을 `sessionKey(pid, slotMatch[1]+1)` 형태로 교체. URL searchParams에서 `project_id` 추출, 누락 시 cwd로 폴백 후 `_default`. 모든 ptySessions/ptyOutputBuffers/ptyOutputSeq 호출은 sessionId 변수 사용 → 자동 전환.
+  - 검증: `node -e "require('./pty-server.js')"` syntax check + 서버 부팅 smoke
+
+- [x] **Task A.3: WebSocket 핸들러 #2 sessionId 생성 변경**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` L627~810 (오피스 채팅 핸들러)
+  - 방법: L644~645도 동일하게 sessionKey 적용. existingSession 재부착 로직(L647)도 새 키 사용.
+  - 검증: 서버 부팅 smoke
+
+- [x] **Task A.4: GET /api/pty/sessions 라우트 — project_id 필터**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` L884~905
+  - 방법: `?project_id=` 쿼리 받음. 있으면 해당 prefix만 필터, 없으면 전체. 응답 sessionInfo에 `projectId` 필드 추가. 슬롯 표기는 `T{1-8}` 유지(키에서 slot 번호 parse).
+  - 검증: `curl http://127.0.0.1:9001/api/pty/sessions?project_id=D--vibe-coding` 응답 확인
+
+- [x] **Task A.5: 단건 조작 엔드포인트 (write/interrupt/terminate/output)**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` L952, L971, L992, L1014
+  - 방법: 각 핸들러에서 `req.query.project_id` 받아 `sessionKey(pid, target)`로 조회. 누락 시 `_default` 폴백. 4개 핸들러 동일 패턴.
+  - 검증: `curl -X POST .../api/pty/interrupt/3?project_id=...` 정상 응답
+
+- [x] **Task A.6: 오피스 spawn 핸들러 키 적용**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` L1041~1138
+  - 방법: L1049 `O${officeId}` → `sessionKey(pid, 'O' + officeId)`. 본 정책(TTL/배지)에서는 prefix `*:O*` 검사로 자연 제외 보장 (2-5.3b에서 활용).
+  - 검증: `/api/pty/office/spawn` 호출 후 `/api/pty/office/sessions` 응답에 새 키 형식 노출
+
+- [x] **Task A.7: DELETE /api/pty/sessions 핸들러 신설**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` (L1041 바로 위 적당한 위치)
+  - 방법: `app.delete('/api/pty/sessions', ...)` 추가. `?project_id={pid}` 필수. 해당 prefix 모든 세션 `killSessionPty(key, 'project_removed')` 호출. `O*` 오피스는 제외(별도 라이프사이클). 응답: `{cleaned: N, project_id}`.
+  - 검증: spawn → DELETE → sessions 비어있음 확인
+
+- [x] **Task A.8: pty_api.py 패스스루 검증**
+  - 파일: `.ai_monitor/api/pty_api.py`
+  - 방법: 196줄 패스스루 코드 검토. query string 자동 전달되는지 확인 (L136 `urlencode(flat, doseq=True)`). 별도 수정 없으면 무변경, 필요 시 레거시 변환 경로(`/api/pty/output` L113~131)에 project_id 명시 전달.
+  - 검증: `curl localhost:9000/api/pty/sessions?project_id=...` Node와 동일 응답
+
+- [x] **Task A.9: 프론트 TerminalSlot.tsx WebSocket URL**
+  - 파일: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx` L297
+  - 방법: `wsParams.append('project_id', slugifyProjectPath(currentPath))` 한 줄 추가. `withProjectId`는 URL에 ?를 붙이는 헬퍼라 wsParams.append가 더 자연스러움. import에 `slugifyProjectPath` 추가.
+  - 검증: 빌드 후 DevTools Network에 ws URL `?project_id=D--vibe-coding` 포함 확인
+
+- [x] **Task A.10: useVibeData.ts /api/pty/sessions 폴링 적용**
+  - 파일: `.ai_monitor/vibe-view/src/hooks/useVibeData.ts`
+  - 방법: pty/sessions 폴링 fetch에 `withProjectId(URL, currentPath)` 적용. 이미 `/api/memory`에 적용된 패턴 동일.
+  - 검증: DevTools Network에 폴링 요청 `?project_id=` 포함 + 다른 프로젝트 탭 전환 시 세션 분리 동작
+
+- [x] **Task A.11: 빌드 + 서버 부팅 smoke**
+  - 방법: `cd .ai_monitor/vibe-view && npm run build` → `python .ai_monitor/server.py`. 콘솔에 PTY 서버 정상 기동 + `[PTY] 세션 시작: T...` 로그 정상 형식 확인.
+  - 검증: 부팅 무에러, 기존 단일 프로젝트 시나리오 회귀 없음
+
+- [ ] **Task A.12: Playwright 격리 검증** ⏳ EXE 재시작 후 사용자 검증 대기
+  - 방법: 프로젝트 2개 추가(config.json `projects`) → 탭 A에서 T1 spawn(`echo TAB_A`) → 탭 B 전환 → T1 spawn(`echo TAB_B`) → 탭 A 복귀 → T1 출력에 `TAB_A`만 있는지 확인.
+  - 검증: 탭 간 출력 섞임 없음, 탭 복귀 시 detach 재부착 정상
+
+- [x] **Task A.13: 메모리/계획서/HIVEMIND 갱신**
+  - 파일: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md` (구현 완료 표시), `MEMORY.md` (Next Phase 항목 업데이트), `HIVEMIND.md` (Phase 2-5.3a 완료)
+  - 방법: 실제 변경 줄 수, 검증 결과, 후속(2-5.3b/c) 진입점 기록
+
+- [ ] **Task A.14: 커밋** ⏳ A.12 검증 통과 후
+  - 방법: `feat(pty): Phase 2-5.3a — 탭별 PTY 세션 풀 분리 ({pid}:slot{N} 복합 키)`. 본문에 변경 파일/이유/영향 명시(commit-rules 준수).
+  - 검증: `git log --oneline -1` + `git status` 클린
+
+### 의존성
+- A.1 → A.2, A.3 (헬퍼 먼저)
+- A.2, A.3 → A.4~A.7 (핸들러 변경 후 라우트 적응)
+- A.4~A.7 → A.8 (백엔드 안정 후 패스스루 검증)
+- A.8 → A.9, A.10 (백엔드 OK 확인 후 프론트)
+- A.9, A.10 → A.11 → A.12 (검증)
+- A.12 → A.13 → A.14 (마무리)
+
+### 비범위 (2-5.3b/c로 분리)
+- TTL 60분 자동 정리 워커, lastInputAt/lastOutputAt 필드 추가 → 2-5.3b
+- UI 탭별 활성 에이전트 수 배지 → 2-5.3c
+- 프로젝트 rename 지원 → 미지원 명시(헤더 주석에 기재)
+
+---
+
+## Phase 2-5.3b — TTL 정리 워커 (2차 PR, 2026-05-02 계획)
+
+> 상위 메모: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`
+> 목표: 탭 detach 후 60분 + idle 조건 만족 시 PTY 자동 정리. 풀 무한 누적 방지.
+> 의존성: 2-5.3a 커밋 완료 후. lastInputAt/lastOutputAt 필드 도입이 핵심.
+> 위험도 🟡 중간 — 자동 종료 로직 오류 시 사용자 작업 유실. yolo=true 면제 + idle 판정 보수적으로.
+>
+> **정책 합의 (2026-05-02 brainstorm):**
+> - TTL: 60분
+> - 스윕 주기: 5분 (setInterval)
+> - idle 판정: `agent_status == 'idle'` **AND** `now - lastOutputAt > 10분` **AND** `now - lastInputAt > 10분`
+> - **yolo=true 세션 면제** — 사용자가 명시한 장기 실행 의도 존중
+> - **오피스 O* 슬롯 면제** — 별도 라이프사이클(spawn/사용자 close)
+> - **attached 세션 면제** — WebSocket 살아있는 동안 정리 금지
+> - DETACH_GRACE_MS(현재 30분)와 별도 — DETACH_GRACE는 socket 끊긴 후 PTY 즉시 종료, TTL은 idle 누적
+
+### 마이크로태스크
+
+- [ ] **Task B.1: lastInputAt / lastOutputAt 필드 추가**
+  - 파일: `.ai_monitor/pty-server/pty-server.js`
+  - 방법: `ptySessions.set(sessionId, {...})` 6곳(legacy spawn, persistent spawn, office spawn 등)에 `lastInputAt: Date.now(), lastOutputAt: Date.now()` 추가. `ptyProcess.onData` 핸들러(L581, L909, L1370)에서 `session.lastOutputAt = Date.now()` 갱신. WebSocket `ws.on('message')` 핸들러(L292, L645)에서 PTY write 직후 `session.lastInputAt = Date.now()` 갱신.
+  - 검증: spawn → write 1회 → output 수신 → `/api/pty/sessions?project_id=...` 응답에 두 timestamp 포함 (Task B.4의 응답 필드 확장 후 확인)
+
+- [ ] **Task B.2: idle 판정 헬퍼 추가**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` (L70 부근, 기존 키 헬퍼 아래)
+  - 방법: `function isSessionIdleForCleanup(session, now)` 추가. 반환 조건: `!session.attached` AND `!session.yolo` AND `!String(session.slotId).startsWith('O')` AND `(now - (session.detachedAt timestamp || session.started)) > TTL_MS` AND `(now - session.lastOutputAt) > IDLE_THRESHOLD_MS` AND `(now - session.lastInputAt) > IDLE_THRESHOLD_MS`. agent_status는 hive_tasks 조회가 어려우므로 위 조건으로 근사. 상수: `TTL_MS = 60*60*1000`, `IDLE_THRESHOLD_MS = 10*60*1000` 환경변수 오버라이드 가능 (`PTY_TTL_MS`, `PTY_IDLE_THRESHOLD_MS`).
+  - 검증: 단위 호출 — yolo=true 케이스, attached 케이스, O* 케이스, idle 60분 초과 케이스 4개 round-trip
+
+- [ ] **Task B.3: 5분 스윕 워커 setInterval 추가**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` (L161 heartbeat setInterval 아래)
+  - 방법: `setInterval(() => { const now = Date.now(); for (const [key, info] of ptySessions.entries()) { if (isSessionIdleForCleanup(info, now)) { console.log('[PTY] TTL cleanup:', key, 'idle=', ...); killSessionPty(key, 'ttl_cleanup'); } } }, 5*60*1000)`. 환경변수 `PTY_TTL_SWEEP_MS` 오버라이드 가능.
+  - 검증: 환경변수 짧게 설정(`PTY_IDLE_THRESHOLD_MS=5000 PTY_TTL_MS=10000 PTY_TTL_SWEEP_MS=3000`) 후 spawn → detach → 15초 대기 → 세션 자동 사라짐 확인
+
+- [ ] **Task B.4: GET /api/pty/sessions 응답 필드 확장**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` L1043~1095
+  - 방법: terminals[label] 객체에 `last_input_at`, `last_output_at`, `idle_seconds` 필드 추가. `idle_seconds = Math.floor((now - Math.max(lastInputAt, lastOutputAt)) / 1000)`. 디버깅 + 2-5.3c UI 표시 양쪽 활용.
+  - 검증: `curl /api/pty/sessions?project_id=...` 응답에 새 필드 3개 포함
+
+- [ ] **Task B.5: shutdown/exit 시 TTL 워커 정리**
+  - 파일: `.ai_monitor/pty-server/pty-server.js`
+  - 방법: TTL 워커 timer를 모듈 변수로 보관 → SIGTERM/SIGINT/exit 핸들러(L1494~1496)에서 `clearInterval(ttlSweepTimer)` 호출. cleanupAllSessions와 충돌 회피.
+  - 검증: Ctrl+C 종료 시 워커 정상 정리, 좀비 timer 없음
+
+- [ ] **Task B.6: 빌드 + 서버 부팅 + 단기 시나리오 검증**
+  - 방법: `npm run build` (TS 빌드, pty-server.js는 빌드 영향 없음) → 환경변수 짧게 설정해서 서버 부팅 → spawn 후 detach → idle 도달 → console에 `[PTY] TTL cleanup` 로그 + sessions에서 사라짐 확인.
+  - 검증: yolo=true 세션이 같은 idle 시간에도 살아있음 / 오피스 O* 살아있음 / attached 살아있음
+
+- [ ] **Task B.7: 메모리 + 계획서 갱신**
+  - 파일: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`, `ai_monitor_plan.md`
+  - 방법: 2-5.3b 완료 표시, 측정값(검증 로그 발췌), 환경변수 기본값 명시
+
+- [ ] **Task B.8: 커밋**
+  - 방법: `feat(pty): Phase 2-5.3b — TTL 60분 idle 세션 자동 정리 워커`. 본문에 정책(yolo/오피스 면제), 환경변수 4개, lastInputAt/lastOutputAt 필드 추가 명시.
+  - 검증: `git log --oneline -1` + `git status` 클린
+
+### 의존성
+- B.1 → B.2 (헬퍼가 새 필드 사용)
+- B.2 → B.3 (워커가 헬퍼 호출)
+- B.1, B.3 → B.4 (응답 필드는 B.1 필드 + B.3 idle 계산 의존)
+- B.3 → B.5 (정리 대상 timer 존재)
+- B.1~B.5 → B.6 → B.7 → B.8
+
+### 비범위
+- agent_status DB 조회 통합 — 현재는 lastInput/Output으로 근사. 추후 hive_tasks 연동 시 별도 작업.
+- UI에서 idle 시간 표시 — 2-5.3c 배지 작업의 일부로 통합 가능.
+
+---
+
+## Phase 2-5.3c — 탭별 활성 에이전트 수 배지 (3차 PR, 2026-05-02 계획)
+
+> 상위 메모: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`
+> 목표: TopMenuBar.tsx 프로젝트 탭에 "에이전트 N개 실행 중" 배지 추가. 사용자가 어느 탭에서 무엇이 돌고 있는지 즉시 파악.
+> 의존성: 2-5.3a 커밋 완료 + (선택) 2-5.3b idle_seconds 필드 활용 시 2-5.3b 선행.
+> 위험도 🟢 낮음 — UI 표시 추가, 데이터 흐름 변경 없음.
+>
+> **설계 합의 (2026-05-02 brainstorm):**
+> - 표시 위치: TopMenuBar.tsx L502~509 프로젝트 탭 버튼 우측 상단 모서리
+> - 카운트: 해당 project_id의 ptySessions 중 `running && agent && !slot.startsWith('O')` 개수
+> - 데이터 소스: `/api/pty/sessions` (현재 단일 프로젝트만 노출) → 신규 `/api/pty/sessions/summary` 추가
+> - 0개 탭은 배지 미표시(노이즈 방지)
+> - 폴링 주기: 10초 (활성도 체감 vs 백엔드 부하 균형)
+
+### 마이크로태스크
+
+- [ ] **Task C.1: GET /api/pty/sessions/summary 엔드포인트**
+  - 파일: `.ai_monitor/pty-server/pty-server.js` (L1096 라우트 다음)
+  - 방법: 모든 project_id별 활성 에이전트 수 집계. 응답: `{ "D--vibe-coding": { agent_count: 2, total: 3 }, "_default": {...} }`. 오피스 O* 슬롯은 `total`엔 포함, `agent_count`엔 제외.
+  - 검증: `curl /api/pty/sessions/summary` 응답이 `Object.keys(projects)` 전체 커버
+
+- [ ] **Task C.2: pty_api.py 패스스루**
+  - 파일: `.ai_monitor/api/pty_api.py`
+  - 방법: 현재 패스스루 라우팅이 자동 처리되는지 확인. 별도 매핑 필요하면 `/api/pty/sessions/summary` 추가. 196줄 패스스루 코드 검토.
+  - 검증: `curl localhost:9000/api/pty/sessions/summary` Node와 동일 응답
+
+- [ ] **Task C.3: useVibeData.ts 폴링 추가**
+  - 파일: `.ai_monitor/vibe-view/src/hooks/useVibeData.ts`
+  - 방법: `ptySessionsSummary` state(`Record<string, {agent_count: number; total: number}>`) 추가. `useEffect`에 10초 폴링. fetch는 프로젝트 무관(전체 집계)이므로 `withProjectId` 미적용. VibeData interface에 노출.
+  - 검증: DevTools Network에 10초마다 요청 + state 갱신
+
+- [ ] **Task C.4: TopMenuBar.tsx 배지 렌더링**
+  - 파일: `.ai_monitor/vibe-view/src/components/TopMenuBar.tsx` L502~509
+  - 방법: props에 `ptySessionsSummary` 추가. 탭 버튼 내부에 `{summary[path]?.agent_count > 0 && <span className="agent-badge">{n}</span>}` 추가. CSS는 inline style 또는 globals.css에 `.agent-badge` 정의(원형, 12px, 우상단 absolute).
+  - 검증: 탭 A에서 claude spawn → 탭 A 버튼에 "1" 배지 → 탭 B 전환 후 gemini spawn → 탭 B에 "1", 탭 A에 "1" 동시 표시
+
+- [ ] **Task C.5: App.tsx props 전달**
+  - 파일: `.ai_monitor/vibe-view/src/App.tsx`
+  - 방법: useVibeData에서 `ptySessionsSummary` 받아 TopMenuBar에 전달. 1줄 변경.
+  - 검증: TS 타입 체크 통과 + 빌드
+
+- [ ] **Task C.6: 빌드 + Playwright 검증**
+  - 방법: `npm run build` → EXE 재시작 → 프로젝트 2개 탭 → 각각에 spawn → 배지 숫자 정상 + 0개 탭 배지 미표시
+  - 검증: 5초 이내 배지 갱신, 종료 시 0으로 소멸
+
+- [ ] **Task C.7: 메모리 + 계획서 갱신**
+  - 파일: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`, `ai_monitor_plan.md`
+  - 방법: 2-5.3c 완료 표시, 스크린샷 첨부 시 옵시디언 자산 폴더 사용
+
+- [ ] **Task C.8: 커밋**
+  - 방법: `feat(ui): Phase 2-5.3c — 프로젝트 탭별 활성 에이전트 수 배지`. 본문에 신규 엔드포인트, 폴링 주기, 표시 규칙 명시.
+  - 검증: `git log --oneline -1`
+
+### 의존성
+- C.1 → C.2 → C.3 → C.4, C.5 → C.6 → C.7 → C.8 (순차)
+- C.4와 C.5는 병렬 가능
+
+### 비범위
+- 탭별 idle 시간/마지막 활동 표시 — 2-5.3b의 idle_seconds 활용 시 추후 확장
+- 배지 클릭 시 해당 탭 자동 전환 — 현재 탭 클릭으로 충분
+
+---
 > 이 계획서는 2026-04-16 브레인스토밍 결과입니다.
 > Phase A-1부터 순서대로 진행하며, 각 단계 끝마다 검증 + 사용자 OK 후 다음으로.

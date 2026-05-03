@@ -2236,7 +2236,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'{"error":"not found"}')
 
     def do_DELETE(self):
-        """DELETE 메소드 — 오피스 API는 오피스 서버로 프록시."""
+        """DELETE 메소드 — 오피스 API는 오피스 서버로 프록시, PTY는 Node로 프록시."""
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
@@ -2244,6 +2244,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', '0') or 0)
             body = self.rfile.read(length) if length > 0 else None
             _proxy_to_office_server(self, method='DELETE', body=body)
+            return
+        if path.startswith('/api/pty/'):
+            pty_api.handle_delete(self, path)
             return
         self.send_response(404)
         self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -4542,9 +4545,11 @@ def main():
                 except Exception as _me:
                     print(f'[zettel_sync] 마이그레이션 오류 (무시): {_me}')
 
-            # 현재 활성 프로젝트명
-            _proj_name = _current_project_root().name
-            print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project={_proj_name}, 60초 양방향')
+            # 현재 활성 project_id. Phase 2 이후 zettel_notes.project_id는 폴더명이 아니라
+            # 경로 slug(D--vibe-coding)를 표준으로 사용한다. 폴더명을 쓰면 Obsidian export가
+            # 구형 project_id(vibe-coding) 49건만 내보내고 최신 지식 대부분을 누락한다.
+            _proj_id = _current_project_id()
+            print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project_id={_proj_id}, 60초 양방향')
 
             # Google Drive vault — 자동 탐지 + config.json 오버라이드
             # PC마다 드라이브 레터(I:/G:/H:…)와 언어(내 드라이브/My Drive)가 달라
@@ -4587,7 +4592,7 @@ def main():
                             if _last_vault != _gdrive_vault:
                                 print(f'[zettel_sync] Google Drive vault 감지됨: {_gdrive_vault}')
                                 _last_vault = _gdrive_vault
-                            _mod.export_to_vault(_gdrive_vault, project_id=_proj_name)
+                            _mod.export_to_vault(_gdrive_vault, project_id=_proj_id)
                         else:
                             if _last_vault is not None:
                                 print('[zettel_sync] Google Drive vault 사라짐 — 동기화 일시 중단')
@@ -4597,7 +4602,7 @@ def main():
                     time.sleep(120)
             threading.Thread(target=_sync_with_gdrive, daemon=True,
                              name='ZettelGDrive').start()
-            _mod.watch_and_sync(_vault, project_id=_proj_name, interval=60, bidirectional=True)
+            _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60, bidirectional=True)
         except Exception as e:
             print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
 
