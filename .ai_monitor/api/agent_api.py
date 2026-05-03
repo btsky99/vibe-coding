@@ -37,6 +37,9 @@
 #   - 동시 요청 시 중복 실행 방지 (동일 태스크 여러 번 실행 버그 수정)
 # [2026-03-08] Claude: [버그수정] _detect_external_gemini 주석 오류 수정
 #   - 주석 "60초 이내" → "600초(10분) 이내"로 수정 (실제 코드와 일치)
+# [2026-05-02] Codex: PTY 슬롯 heartbeat 엔드포인트 추가
+#   - node-pty 세션을 claude:T1/gemini:T2/codex:T3 단위로 agent_heartbeats에 기록
+#   - 사용자가 PTY에 입력한 지시와 최신 출력 줄을 config에 저장하여 하이브 상태 복구 보완
 # [2026-03-05] Claude: 대화형 세션 파이프라인 실시간 추적 추가
 #   - _interactive_stages: hive_hook.py가 업데이트하는 인메모리 stage dict
 #   - handle_stage_update: POST /api/agent/stage — hook이 stage를 직접 업데이트
@@ -80,7 +83,7 @@ except ImportError as e:
 
 # pg_store 활동 로깅 — 에이전트 시작/중지를 pg_logs에 영구 기록
 try:
-    from src.pg_store import insert_pg_log, record_heartbeat
+    from src.pg_store import insert_pg_log, record_heartbeat, list_agent_status
     _PG_LOG_AVAILABLE = True
 except ImportError:
     _PG_LOG_AVAILABLE = False
@@ -559,6 +562,68 @@ def _merge_live_file_status(terminals: dict) -> None:
                 terminals[tid]['pipeline_stage'] = 'done'
 
 
+def _merge_pty_heartbeats(terminals: dict) -> None:
+    """agent_heartbeats(namespace='pty')의 슬롯별 현재 작업을 터미널 카드에 병합."""
+    if not _PG_LOG_AVAILABLE:
+        return
+    try:
+        rows = list_agent_status()
+    except Exception:
+        return
+
+    now = time.time()
+    for row in rows:
+        if row.get('config') is None:
+            continue
+        if ':T' not in str(row.get('agent_id', '')):
+            continue
+        try:
+            cfg = json.loads(row.get('config') or '{}')
+        except Exception:
+            cfg = {}
+        if cfg.get('source') != 'pty':
+            continue
+
+        tid = str(cfg.get('terminal_id') or '').upper()
+        if not tid.startswith('T'):
+            continue
+
+        last_beat = str(row.get('last_beat') or '')
+        try:
+            beat_ts = time.mktime(time.strptime(last_beat[:19], '%Y-%m-%dT%H:%M:%S'))
+            is_fresh = now - beat_ts <= 45
+        except Exception:
+            is_fresh = True
+
+        status = row.get('status') or 'running'
+        if status == 'running' and not is_fresh:
+            status = 'idle'
+
+        if tid not in terminals:
+            terminals[tid] = {
+                'status': status,
+                'task': '',
+                'cli': cfg.get('agent', ''),
+                'run_id': '',
+                'ts': last_beat,
+                'last_line': '',
+                'pipeline_stage': 'idle',
+            }
+
+        task = row.get('current_task') or ''
+        if task:
+            terminals[tid]['task'] = task
+        if cfg.get('agent') and not terminals[tid].get('cli'):
+            terminals[tid]['cli'] = cfg.get('agent')
+        if cfg.get('last_line'):
+            terminals[tid]['last_line'] = cfg.get('last_line')
+        terminals[tid]['heartbeat_agent_id'] = row.get('agent_id')
+        terminals[tid]['heartbeat_ts'] = last_beat
+        if status == 'running':
+            terminals[tid]['status'] = 'running'
+            terminals[tid]['pipeline_stage'] = terminals[tid].get('pipeline_stage') or 'analyzing'
+
+
 def handle_terminals(handler) -> None:
     """GET /api/agent/terminals — T1~T8 터미널별 에이전트 상태 반환.
 
@@ -587,6 +652,7 @@ def handle_terminals(handler) -> None:
     # T1.bat ~ T8.bat를 통해 agent_shell.py로 실행한 Gemini/Claude는
     # cli_agent._terminals 메모리에 반영되지 않으므로, 로그 파일에서 읽어 병합합니다.
     _merge_live_file_status(terminals)
+    _merge_pty_heartbeats(terminals)
 
     # ── 외부 실행 중인 Gemini 세션 감지 및 오버레이 ──────────────────────────
     # 대시보드 API를 통하지 않고 직접 터미널에서 실행된 Gemini를 감지합니다.
@@ -777,6 +843,56 @@ def handle_stage_update(handler) -> None:
         'ts': time.time(),  # epoch 초 — 10분 이내만 유효
     }
     _json_response(handler, {'ok': True})
+
+
+def handle_heartbeat(handler) -> None:
+    """POST /api/agent/heartbeat — PTY/외부 런타임의 슬롯별 하트비트 기록.
+
+    PTY 서버는 Python 프로세스 내부 상태를 직접 만질 수 없으므로 이 엔드포인트를 통해
+    pg_store.record_heartbeat()를 재사용한다. agent_id는 claude:T1처럼 슬롯까지 포함해야
+    같은 CLI가 여러 터미널에서 실행될 때 current_task가 서로 덮이지 않는다.
+    """
+    if not _PG_LOG_AVAILABLE:
+        _json_response(handler, {'ok': False, 'error': 'pg_store_unavailable'}, 503)
+        return
+
+    data = _read_body(handler)
+    agent = str(data.get('agent') or '').strip().lower()
+    terminal_id = str(data.get('terminal_id') or '').strip().upper()
+    agent_id = str(data.get('agent_id') or '').strip()
+    status = str(data.get('status') or 'running').strip().lower()
+    current_task = str(data.get('current_task') or '').strip()
+    project_id = str(data.get('project_id') or '').strip()
+    cwd = str(data.get('cwd') or '').strip()
+    last_line = str(data.get('last_line') or '').strip()
+
+    if terminal_id and terminal_id.isdigit():
+        terminal_id = f'T{terminal_id}'
+    if not agent_id and agent and terminal_id:
+        agent_id = f'{agent}:{terminal_id}'
+    if not agent_id:
+        _json_response(handler, {'ok': False, 'error': 'missing_agent_id'}, 400)
+        return
+
+    if status not in ('idle', 'running', 'done', 'error', 'offline'):
+        status = 'running'
+
+    config = {
+        'agent': agent,
+        'terminal_id': terminal_id,
+        'project_id': project_id,
+        'cwd': cwd,
+        'last_line': last_line[:200],
+        'source': 'pty',
+    }
+    ok = record_heartbeat(
+        agent_id,
+        status=status,
+        current_task=current_task[:300] if current_task else None,
+        namespace='pty',
+        config=config,
+    )
+    _json_response(handler, {'ok': bool(ok), 'agent_id': agent_id})
 
 
 def handle_live_runs(handler) -> None:
@@ -1298,6 +1414,9 @@ def handle_post(handler, path: str) -> bool:
         return True
     if path == '/api/agent/stage':
         handle_stage_update(handler)
+        return True
+    if path == '/api/agent/heartbeat':
+        handle_heartbeat(handler)
         return True
     if path == '/api/agent/chat/bus':
         handle_chat_bus_post(handler)

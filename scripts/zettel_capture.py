@@ -6,6 +6,8 @@ DESCRIPTION: 제텔카스텐 자동 캡처 엔진.
              자동으로 zettel_notes에 지식 노트를 생성하고 Obsidian vault에 동기화한다.
 
 REVISION HISTORY:
+    2026-05-02 Codex: DEFAULT_PROJECT를 폴더명 대신 project_id 경로 slug로 변경
+    - 서버/DB 표준(D--vibe-coding)과 캡처/Obsidian export 대상이 갈라지는 문제 수정
     2026-04-06 Claude: 초기 구현 — 이벤트별 자동 캡처 + 유사 노트 연결 + vault 동기화
 """
 
@@ -45,7 +47,10 @@ _default_global_vault = Path(_appdata) / 'VibeCoding' / 'vault' if os.name == 'n
 DEFAULT_VAULT_DIR = Path(os.environ.get('VIBE_VAULT_DIR', str(_default_global_vault)))
 _gdrive_env = os.environ.get('VIBE_GDRIVE_VAULT', '')
 GDRIVE_VAULT_DIR = Path(_gdrive_env) if _gdrive_env else None
-DEFAULT_PROJECT = os.environ.get('VIBE_PROJECT', _PROJECT_ROOT.name)
+DEFAULT_PROJECT = os.environ.get(
+    'VIBE_PROJECT',
+    str(_PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-'),
+)
 
 # 커밋 타입 → 노트 유형 매핑
 _COMMIT_TYPE_MAP = {

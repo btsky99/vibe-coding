@@ -200,6 +200,53 @@ def _safe_filename(note_id: str, title: str) -> str:
     return safe_id
 
 
+def _note_output_path(vault_dir: Path, note: dict) -> Path:
+    """DB 노트 1건이 export되어야 하는 단일 표준 경로를 반환한다."""
+    if note.get('archived'):
+        folder = vault_dir / '_보관'
+    else:
+        note_type = note.get('note_type', 'fleeting')
+        folder = vault_dir / _NOTE_TYPE_FOLDER.get(note_type, '작업기록')
+    filename = _safe_filename(note['id'], note.get('title', ''))
+    return folder / f"{filename}.md"
+
+
+def _cleanup_stale_note_files(vault_dir: Path, notes: list[dict]) -> int:
+    """export 대상 노트의 오래된 중복 파일을 제거한다.
+
+    note_type이 바뀌면 같은 zettel_id가 작업기록/영구지식 양쪽에 남을 수 있다.
+    PostgreSQL을 원본으로 보고 현재 DB 기준 표준 경로 1개만 유지한다.
+    """
+    expected = {
+        str(note.get('id', '')): _note_output_path(vault_dir, note).resolve()
+        for note in notes
+        if note.get('id')
+    }
+    if not expected:
+        return 0
+
+    removed = 0
+    for md_file in vault_dir.rglob('*.md'):
+        if md_file.name == 'INDEX.md':
+            continue
+        try:
+            if not md_file.resolve().is_relative_to(vault_dir.resolve()):
+                continue
+            text = md_file.read_text(encoding='utf-8')
+            zettel_id = _parse_frontmatter(text).get('zettel_id', '')
+        except Exception:
+            continue
+        target = expected.get(zettel_id)
+        if not target or md_file.resolve() == target:
+            continue
+        try:
+            md_file.unlink()
+            removed += 1
+        except Exception as exc:
+            print(f'[zettel_sync] 오래된 중복 노트 삭제 실패: {md_file} ({exc})')
+    return removed
+
+
 def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: bool = False):
     """PostgreSQL → Obsidian Vault 전체 동기화."""
     ensure_schema(DATA_DIR)
@@ -215,19 +262,15 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
         include_archived=include_archived,
         limit=10000,
     )
+    removed = _cleanup_stale_note_files(vault_dir, notes)
+    if removed:
+        print(f'[zettel_sync] 오래된 중복 노트 {removed}개 삭제')
 
     # 전체 링크를 한 번에 로드 (N+1 쿼리 방지)
     all_links = _load_all_links([n['id'] for n in notes])
 
     exported = 0
     for note in notes:
-        # 폴더 결정 (한글 폴더명)
-        if note.get('archived'):
-            folder = vault_dir / '_보관'
-        else:
-            note_type = note.get('note_type', 'fleeting')
-            folder = vault_dir / _NOTE_TYPE_FOLDER.get(note_type, '작업기록')
-
         # 마크다운 생성
         frontmatter = _format_frontmatter(note)
         content = note.get('content', '')
@@ -239,8 +282,8 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
         md_content += '\n'
 
         # 파일 쓰기 (경로 트래버설 방어)
-        filename = _safe_filename(note['id'], note.get('title', ''))
-        filepath = folder / f"{filename}.md"
+        filepath = _note_output_path(vault_dir, note)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
         if not filepath.resolve().is_relative_to(vault_dir.resolve()):
             print(f'[zettel_sync] 경로 인젝션 탐지, 건너뜀: {note["id"]}')
             continue
@@ -507,6 +550,50 @@ def _extract_body(text: str) -> str:
     return body.strip()
 
 
+def _frontmatter_project_id(fm: dict) -> str:
+    """구형 frontmatter(project)와 신형 project_id를 같은 값으로 취급한다."""
+    return str(fm.get('project_id') or fm.get('project') or '').strip()
+
+
+def _candidate_score(vault_dir: Path, md_file: Path, fm: dict,
+                     existing: dict | None) -> tuple:
+    """같은 zettel_id 중 DB 상태와 가장 잘 맞는 파일을 고르기 위한 점수."""
+    note_type = fm.get('note_type', 'fleeting')
+    archived = bool(fm.get('archived', False))
+    expected_folder = '_보관' if archived else _NOTE_TYPE_FOLDER.get(note_type, '작업기록')
+    folder_match = md_file.parent.name == expected_folder
+
+    existing_type = existing.get('note_type') if existing else ''
+    type_match = bool(existing_type and note_type == existing_type)
+    try:
+        mtime = md_file.stat().st_mtime
+    except OSError:
+        mtime = 0
+    return (1 if type_match else 0, 1 if folder_match else 0, mtime)
+
+
+def _same_note_payload(existing: dict, title: str, body: str, note_type: str,
+                       tags: list, source_ref: str, archived: bool) -> bool:
+    """export된 동일 내용 파일을 import하면서 updated_at만 밀어 올리는 일을 막는다."""
+    existing_tags = existing.get('tags', [])
+    if isinstance(existing_tags, str):
+        try:
+            existing_tags = json.loads(existing_tags)
+        except (json.JSONDecodeError, TypeError):
+            existing_tags = []
+    existing_archived = existing.get('archived')
+    if isinstance(existing_archived, str):
+        existing_archived = existing_archived.lower() in ('t', 'true', '1')
+    return (
+        str(existing.get('title', '')) == str(title)
+        and str(existing.get('content', '')).strip() == str(body).strip()
+        and str(existing.get('note_type', '')) == str(note_type)
+        and list(existing_tags or []) == list(tags or [])
+        and str(existing.get('source_ref', '') or '') == str(source_ref or '')
+        and bool(existing_archived) == bool(archived)
+    )
+
+
 def import_from_vault(vault_dir: Path, project_id: str = ''):
     """Obsidian Vault → PostgreSQL 역동기화.
 
@@ -526,7 +613,9 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
     for note in list_notes(include_archived=True, limit=10000):
         existing_notes[note['id']] = note
 
-    # vault 내 모든 .md 파일 탐색 (INDEX.md 제외)
+    # vault 내 모든 .md 파일 탐색 (INDEX.md 제외). 같은 zettel_id가 여러
+    # 폴더에 남아 있으면 DB note_type과 맞는 후보 1개만 import한다.
+    candidates = {}
     for md_file in vault_dir.rglob('*.md'):
         if md_file.name == 'INDEX.md':
             continue
@@ -544,6 +633,21 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
         if not zettel_id:
             skipped += 1
             continue
+        fm_project_id = _frontmatter_project_id(fm)
+        if project_id and fm_project_id and fm_project_id != project_id:
+            skipped += 1
+            continue
+        existing = existing_notes.get(zettel_id)
+        if project_id and existing and existing.get('project_id') not in (project_id, '', None):
+            skipped += 1
+            continue
+
+        score = _candidate_score(vault_dir, md_file, fm, existing)
+        current = candidates.get(zettel_id)
+        if not current or score > current[0]:
+            candidates[zettel_id] = (score, md_file, text, fm)
+
+    for zettel_id, (_, md_file, text, fm) in candidates.items():
 
         body = _extract_body(text)
         title = fm.get('title', md_file.stem)
@@ -565,6 +669,10 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
                 if file_mtime.timestamp() <= db_updated.timestamp():
                     skipped += 1
                     continue
+            if _same_note_payload(existing, title, body, note_type,
+                                  tags, source_ref, archived):
+                skipped += 1
+                continue
 
             # 업데이트
             update_note(zettel_id,

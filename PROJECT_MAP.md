@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-05-02 21:23
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-05-03 10:49
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -36,7 +36,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 4912 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4945 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -44,7 +44,7 @@
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `agent_api.py` | 1311 | CLI 에이전트 관리 API (/api/agent/*) |
+| `agent_api.py` | 1430 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 226 |  |
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
@@ -53,7 +53,7 @@
 | `memory_api.py` | 208 | 메모리/지식 저장소 API (/api/memory/*) |
 | `office_api.py` | 370 |  |
 | `office_proxy_api.py` | 229 |  |
-| `pty_api.py` | 195 | PTY 터미널 제어 API (/api/pty/*) |
+| `pty_api.py` | 259 | PTY 터미널 제어 API (/api/pty/*) |
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
@@ -71,7 +71,7 @@
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
 | `logger.py` | 123 |  |
-| `pg_store.py` | 2485 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `pg_store.py` | 2492 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `secure.py` | 52 |  |
 | `server_utils.py` | 59 |  |
 | `view.py` | 243 |  |
@@ -200,7 +200,7 @@
 | `sync_manager.py` | 120 |  |
 | `telegram_bridge.py` | 1616 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
-| `zettel_capture.py` | 495 |  |
+| `zettel_capture.py` | 500 |  |
 | `zettel_sync.py` | 632 |  |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
@@ -222,7 +222,7 @@
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1239 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1242 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 559 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 140 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -267,4 +267,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-05-02 21:23
+> 자동 생성 완료: 2026-05-03 10:49

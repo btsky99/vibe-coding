@@ -1903,21 +1903,28 @@ def list_task_comments(task_id: str, limit: int = 50) -> list[dict]:
 # ── 에이전트 하트비트 ────────────────────────────────────────────────────────
 
 def record_heartbeat(agent_id: str, status: str = 'idle',
-                     current_task: str = None, namespace: str = 'classic') -> bool:
+                     current_task: str = None, namespace: str = 'classic',
+                     config: dict | None = None) -> bool:
     """에이전트 하트비트 기록 — 상태 갱신 + 카운터 증가.
 
-    namespace: 'classic'(기본) 또는 'office' 등. 같은 agent_id가 다른
-    네임스페이스에서 사용될 수 있어 ON CONFLICT 시에도 갱신.
+    namespace: 'classic'(기본), 'pty', 'office' 등.
+    config: terminal_id/project_id/last_line 같은 상태 보조 메타데이터.
     """
+    import json as _json
     task_val = _sql_text(current_task) if current_task else 'NULL'
+    config_val = (
+        f"{_sql_text(_json.dumps(config, ensure_ascii=False))}::jsonb"
+        if config else "'{}'::jsonb"
+    )
     return execute(
-        f"INSERT INTO agent_heartbeats (agent_id, status, last_beat, current_task, beat_count, namespace) "
-        f"VALUES ({_sql_text(agent_id)}, {_sql_text(status)}, now(), {task_val}, 1, {_sql_text(namespace)}) "
+        f"INSERT INTO agent_heartbeats (agent_id, status, last_beat, current_task, beat_count, namespace, config) "
+        f"VALUES ({_sql_text(agent_id)}, {_sql_text(status)}, now(), {task_val}, 1, {_sql_text(namespace)}, {config_val}) "
         f"ON CONFLICT (agent_id) DO UPDATE SET "
         f"status = {_sql_text(status)}, last_beat = now(), "
         f"current_task = {task_val}, "
         f"beat_count = agent_heartbeats.beat_count + 1, "
-        f"namespace = {_sql_text(namespace)};"
+        f"namespace = {_sql_text(namespace)}, "
+        f"config = agent_heartbeats.config || {config_val};"
     )
 
 
