@@ -1,6 +1,10 @@
 @echo off
 setlocal
 
+chcp 65001 >nul
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
+
 rem Project-local Claude launcher.
 rem Why: when this repo is opened inside an existing Claude Code session,
 rem      raw `claude` inherits CLAUDE* vars and trips the nested-session guard.

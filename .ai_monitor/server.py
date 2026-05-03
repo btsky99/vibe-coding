@@ -4402,6 +4402,21 @@ def main():
             return
         orch_script = SCRIPTS_DIR / "orchestrator.py"
         if orch_script.exists():
+            pid_file = DATA_DIR / "orchestrator.pid"
+            def _pid_is_alive(pid: int) -> bool:
+                try:
+                    result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+                    return result.returncode == 0 and f'"{pid}"' in result.stdout
+                except Exception:
+                    return False
+            try:
+                existing_pid = int(pid_file.read_text(encoding='utf-8').strip())
+            except Exception:
+                existing_pid = 0
+            if existing_pid and _pid_is_alive(existing_pid):
+                print(f"[*] Orchestrator daemon already running (PID={existing_pid})")
+                return
+
             _python_cmds = _python_runner_cmds()
             if not _python_cmds:
                 print("[!] run_orchestrator_daemon: Python 인터프리터를 찾을 수 없어 오케스트레이터 스킵")
@@ -4418,6 +4433,11 @@ def main():
             )
             _child_procs.append(proc)
             print("[*] 하이브 오케스트레이터 데몬(orchestrator) 자동 시작됨")
+
+            try:
+                pid_file.write_text(str(proc.pid), encoding='utf-8')
+            except Exception:
+                pass
 
     def run_doc_generators_daemon():
         # PROJECT_MAP.md / HIVEMIND.md 자동 갱신 데몬.
@@ -4614,7 +4634,11 @@ def main():
                             if _last_vault != _gdrive_vault:
                                 print(f'[zettel_sync] Google Drive vault 감지됨: {_gdrive_vault}')
                                 _last_vault = _gdrive_vault
-                            _mod.export_to_vault(_gdrive_vault, project_id=_proj_id)
+                            # Google Drive is the shared copy of the local vault, not a
+                            # second independent export target. Mirror after refreshing
+                            # the local vault so Obsidian folders/canvases/settings stay aligned.
+                            _mod.export_to_vault(_vault, project_id=_proj_id)
+                            _mod.mirror_vault(_vault, _gdrive_vault)
                         else:
                             if _last_vault is not None:
                                 print('[zettel_sync] Google Drive vault 사라짐 — 동기화 일시 중단')

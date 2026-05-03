@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -304,6 +305,54 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
 
 # 동기화 대상 문서 탐색 패턴 (프로젝트 루트 기준)
 # {proj} 는 _sync_project_docs에서 프로젝트 이름으로 치환됨
+def mirror_vault(source_vault: Path, target_vault: Path) -> int:
+    """Mirror the local Obsidian vault into a shared Google Drive vault.
+
+    The mirror is non-destructive: it copies or updates files from the local vault
+    but keeps target-only files so another project or device is not wiped.
+    """
+    source_vault = Path(source_vault).resolve()
+    target_vault = Path(target_vault).resolve()
+    if source_vault == target_vault or not source_vault.exists():
+        return 0
+
+    target_vault.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for src in source_vault.rglob('*'):
+        try:
+            if not src.resolve().is_relative_to(source_vault):
+                continue
+        except Exception:
+            continue
+
+        rel = src.relative_to(source_vault)
+        dst = target_vault / rel
+        if src.is_dir():
+            dst.mkdir(parents=True, exist_ok=True)
+            continue
+        if not src.is_file():
+            continue
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        should_copy = True
+        if dst.exists():
+            try:
+                src_stat = src.stat()
+                dst_stat = dst.stat()
+                should_copy = (
+                    src_stat.st_size != dst_stat.st_size
+                    or src_stat.st_mtime > dst_stat.st_mtime + 0.001
+                )
+            except OSError:
+                should_copy = True
+        if should_copy:
+            shutil.copy2(src, dst)
+            copied += 1
+
+    print(f'[zettel_sync] vault mirror complete: {source_vault} -> {target_vault} ({copied} files)')
+    return copied
+
+
 _DOC_SCAN_PATTERNS = [
     ('*.md', '_project/{proj}'),                        # 루트 .md 파일
     ('docs/*.md', '_project/{proj}/docs'),              # docs/ 하위 문서

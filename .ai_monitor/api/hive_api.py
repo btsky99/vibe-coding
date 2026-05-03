@@ -160,12 +160,44 @@ def _synthetic_chain_request(agent: str, last_line: str) -> str:
     return f'[PTY] {label} session running'
 
 
+def _pty_slot_info(pty_sessions: dict, slot_num: int, project_id: str = '') -> dict | None:
+    """Return live PTY session info for a slot across legacy and project-scoped keys.
+
+    Phase 2-5.3 changed Node PTY session snapshots from plain T1/T2 keys to
+    project-scoped keys such as T1@D--vibe-coding. Orchestrator APIs still need
+    a slot-number view so the monitor panels can render live agents.
+    """
+    if not isinstance(pty_sessions, dict):
+        return None
+
+    candidates = []
+    if project_id:
+        candidates.append(f'T{slot_num}@{project_id}')
+    candidates.extend((f'T{slot_num}', str(slot_num)))
+
+    for key in candidates:
+        info = pty_sessions.get(key)
+        if isinstance(info, dict) and info.get('running'):
+            return info
+
+    suffix = f'@{project_id}' if project_id else ''
+    for key, info in pty_sessions.items():
+        if not isinstance(info, dict) or not info.get('running'):
+            continue
+        key_text = str(key)
+        if key_text == f'T{slot_num}' or key_text.startswith(f'T{slot_num}@'):
+            if not suffix or key_text.endswith(suffix) or info.get('project_id') == project_id:
+                return info
+
+    return None
+
+
 def _merge_live_pty_skill_chains(result: dict, pty_sessions: dict) -> dict:
     terminals = dict(result.get('terminals') or {})
     now_iso = datetime.now().isoformat(timespec='seconds')
 
     for slot_num in range(1, 9):
-        info = pty_sessions.get(str(slot_num))
+        info = _pty_slot_info(pty_sessions, slot_num)
         if not isinstance(info, dict):
             continue
 
@@ -521,7 +553,7 @@ def handle_get(handler, path: str, params: dict,
             terminal_agents: dict = {}
             pty_active_agents: set = set()
             for slot_num in range(1, 9):
-                info = pty_sessions.get(str(slot_num))
+                info = _pty_slot_info(pty_sessions, slot_num, PROJECT_ID)
                 if info:
                     a = info.get('agent', '') or 'shell'
                     terminal_agents[str(slot_num)] = a

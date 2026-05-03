@@ -14,6 +14,11 @@
 
 cd /d "%~dp0"
 
+:: 에이전트 런처와 하위 Python 프로세스의 한글 출력 깨짐을 방지합니다.
+chcp 65001 >nul
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
+
 set PYTHON=.ai_monitor\venv\Scripts\python.exe
 
 :: agent_launcher를 통해 저장된 모드로 Claude 실행

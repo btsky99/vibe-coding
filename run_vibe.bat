@@ -18,6 +18,12 @@ setlocal enabledelayedexpansion
 :: -----------------------------------------------------------------------
 cd /d "%~dp0"
 
+:: Windows 기본 코드페이지/파이프 인코딩 차이로 하이브 로그의 한글이 깨지는
+:: 문제를 줄이기 위해 프로젝트 진입점에서 UTF-8 환경을 먼저 고정합니다.
+chcp 65001 >nul
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
+
 :: ── 중복 실행 방지 (더블클릭 실수로 2개 인스턴스 뜨는 문제 해소) ──────────
 :: server.py가 시작 시 .ai_monitor\data\.dev_server.pid 에 자신의 PID를 기록함.
 :: 이 PID의 pythonw.exe 프로세스가 살아있으면 이미 실행 중이므로 조용히 종료.

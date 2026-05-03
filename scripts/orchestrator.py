@@ -35,7 +35,7 @@ except Exception:
     _dispatcher = None
 
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
-DEFAULT_PORTS = [8005, 8000]
+DEFAULT_PORTS = [9000, 8005, 8000]
 # BASE_AGENTS 제거 — _known_agents()에서 config 기반으로 동적 결정
 IDLE_THRESHOLD_SEC = 300                # 유휴 판정 기준: 5분 (300초) — 경고용
 DEAD_THRESHOLD_SEC = 24 * 3600          # 사망 판정 기준: 24시간 — 재배정 후보에서 완전 제외
