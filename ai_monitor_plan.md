@@ -491,36 +491,36 @@
 
 ### 마이크로태스크
 
-- [ ] **Task B.1: lastInputAt / lastOutputAt 필드 추가**
+- [x] **Task B.1: lastInputAt / lastOutputAt 필드 추가** ✅ (2026-05-03)
   - 파일: `.ai_monitor/pty-server/pty-server.js`
   - 방법: `ptySessions.set(sessionId, {...})` 6곳(legacy spawn, persistent spawn, office spawn 등)에 `lastInputAt: Date.now(), lastOutputAt: Date.now()` 추가. `ptyProcess.onData` 핸들러(L581, L909, L1370)에서 `session.lastOutputAt = Date.now()` 갱신. WebSocket `ws.on('message')` 핸들러(L292, L645)에서 PTY write 직후 `session.lastInputAt = Date.now()` 갱신.
   - 검증: spawn → write 1회 → output 수신 → `/api/pty/sessions?project_id=...` 응답에 두 timestamp 포함 (Task B.4의 응답 필드 확장 후 확인)
 
-- [ ] **Task B.2: idle 판정 헬퍼 추가**
+- [x] **Task B.2: idle 판정 헬퍼 추가** ✅ (2026-05-03)
   - 파일: `.ai_monitor/pty-server/pty-server.js` (L70 부근, 기존 키 헬퍼 아래)
   - 방법: `function isSessionIdleForCleanup(session, now)` 추가. 반환 조건: `!session.attached` AND `!session.yolo` AND `!String(session.slotId).startsWith('O')` AND `(now - (session.detachedAt timestamp || session.started)) > TTL_MS` AND `(now - session.lastOutputAt) > IDLE_THRESHOLD_MS` AND `(now - session.lastInputAt) > IDLE_THRESHOLD_MS`. agent_status는 hive_tasks 조회가 어려우므로 위 조건으로 근사. 상수: `TTL_MS = 60*60*1000`, `IDLE_THRESHOLD_MS = 10*60*1000` 환경변수 오버라이드 가능 (`PTY_TTL_MS`, `PTY_IDLE_THRESHOLD_MS`).
   - 검증: 단위 호출 — yolo=true 케이스, attached 케이스, O* 케이스, idle 60분 초과 케이스 4개 round-trip
 
-- [ ] **Task B.3: 5분 스윕 워커 setInterval 추가**
+- [x] **Task B.3: 5분 스윕 워커 setInterval 추가** ✅ (2026-05-03)
   - 파일: `.ai_monitor/pty-server/pty-server.js` (L161 heartbeat setInterval 아래)
   - 방법: `setInterval(() => { const now = Date.now(); for (const [key, info] of ptySessions.entries()) { if (isSessionIdleForCleanup(info, now)) { console.log('[PTY] TTL cleanup:', key, 'idle=', ...); killSessionPty(key, 'ttl_cleanup'); } } }, 5*60*1000)`. 환경변수 `PTY_TTL_SWEEP_MS` 오버라이드 가능.
   - 검증: 환경변수 짧게 설정(`PTY_IDLE_THRESHOLD_MS=5000 PTY_TTL_MS=10000 PTY_TTL_SWEEP_MS=3000`) 후 spawn → detach → 15초 대기 → 세션 자동 사라짐 확인
 
-- [ ] **Task B.4: GET /api/pty/sessions 응답 필드 확장**
+- [x] **Task B.4: GET /api/pty/sessions 응답 필드 확장** ✅ (2026-05-03)
   - 파일: `.ai_monitor/pty-server/pty-server.js` L1043~1095
   - 방법: terminals[label] 객체에 `last_input_at`, `last_output_at`, `idle_seconds` 필드 추가. `idle_seconds = Math.floor((now - Math.max(lastInputAt, lastOutputAt)) / 1000)`. 디버깅 + 2-5.3c UI 표시 양쪽 활용.
   - 검증: `curl /api/pty/sessions?project_id=...` 응답에 새 필드 3개 포함
 
-- [ ] **Task B.5: shutdown/exit 시 TTL 워커 정리**
+- [x] **Task B.5: shutdown/exit 시 TTL 워커 정리** ✅ (2026-05-03)
   - 파일: `.ai_monitor/pty-server/pty-server.js`
   - 방법: TTL 워커 timer를 모듈 변수로 보관 → SIGTERM/SIGINT/exit 핸들러(L1494~1496)에서 `clearInterval(ttlSweepTimer)` 호출. cleanupAllSessions와 충돌 회피.
   - 검증: Ctrl+C 종료 시 워커 정상 정리, 좀비 timer 없음
 
-- [ ] **Task B.6: 빌드 + 서버 부팅 + 단기 시나리오 검증**
+- [x] **Task B.6: 빌드 + 서버 부팅 + 단기 시나리오 검증** ✅ (2026-05-03 — 단위 8/8 + 부팅 OK + 응답 필드 OK)
   - 방법: `npm run build` (TS 빌드, pty-server.js는 빌드 영향 없음) → 환경변수 짧게 설정해서 서버 부팅 → spawn 후 detach → idle 도달 → console에 `[PTY] TTL cleanup` 로그 + sessions에서 사라짐 확인.
   - 검증: yolo=true 세션이 같은 idle 시간에도 살아있음 / 오피스 O* 살아있음 / attached 살아있음
 
-- [ ] **Task B.7: 메모리 + 계획서 갱신**
+- [x] **Task B.7: 메모리 + 계획서 갱신** ✅ (2026-05-03)
   - 파일: `~/.claude/projects/D--vibe-coding/memory/project_pty_pool_isolation.md`, `ai_monitor_plan.md`
   - 방법: 2-5.3b 완료 표시, 측정값(검증 로그 발췌), 환경변수 기본값 명시
 
