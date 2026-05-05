@@ -164,6 +164,7 @@ jobs:
             --add-data "bin;bin" \
             --add-data "vibe-view/dist;vibe-view/dist" \
             --add-data "api;api" \
+            --add-data "infra;infra" \
             --add-data "pty-server;pty-server" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
@@ -191,6 +192,7 @@ jobs:
             --add-data "bin;bin" \
             --add-data "vibe-view/dist;vibe-view/dist" \
             --add-data "api;api" \
+            --add-data "infra;infra" \
             --add-data "pty-server;pty-server" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
