@@ -11,6 +11,12 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-05-05] Claude — Windows Defender 예외 자동 등록 추가 (v3.7.220)
+;              [Run] 섹션에서 PowerShell로 Add-MpPreference 자동 호출.
+;              PyInstaller EXE의 _MEI 추출 시 python311.dll 격리 사고 자동 방지.
+;              setup.exe 자체는 Inno Setup 빌드라 Defender가 안 막지만, 설치 후 실행되는
+;              vibe-coding.exe(PyInstaller)는 새 hash마다 격리 위험 → 사전 예외 등록.
+;              실패해도 무시(SilentlyContinue) — 비관리자 환경 대비.
 ; [2026-03-16] Claude — 설치 폴더 영문화 (바이브코딩→VibeCoding), 아이콘/표시명만 한글 유지 (v3.7.78)
 ;              MyAppName="VibeCoding"(폴더용), MyAppDisplayName="바이브코딩"(UI표시용) 분리
 ; [2026-03-11] Claude — PostgreSQL 포터블 바이너리 자동 설치 추가 (v3.7.48)
@@ -23,7 +29,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.219"
+  #define MyAppVersion   "3.7.220"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -108,7 +114,13 @@ Name: "{autodesktop}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName
 Name: "{userstartup}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startupicon
 
 [Run]
-; 설치 완료 후 바로 실행 (선택)
+; ── Windows Defender 예외 자동 등록 ──────────────────────────────────────
+; PyInstaller EXE는 매 빌드마다 새 hash → Defender의 reputation check가
+; 추출된 python311.dll을 격리하는 사고 다발. 설치 폴더와 추출 디렉토리(%APPDATA%
+; \VibeCoding\runtime)를 사전 예외 등록하여 자동 업데이트 시점에도 격리 방지.
+; 비관리자/Defender 미사용 환경에서도 SilentlyContinue로 무해하게 패스.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try {{ Add-MpPreference -ExclusionPath ('{app}') -ErrorAction SilentlyContinue }} catch {{}}; try {{ Add-MpPreference -ExclusionPath ($env:APPDATA + '\VibeCoding') -ErrorAction SilentlyContinue }} catch {{}}"""; Flags: runhidden; StatusMsg: "Windows Defender 예외 등록 중..."
+
 ; Claude Code settings.json에 statusLine 자동 설정
 ; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
