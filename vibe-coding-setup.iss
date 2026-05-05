@@ -11,6 +11,10 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-05-05] Claude — PrivilegesRequired=admin 강제 (v3.7.221)
+;              v3.7.220의 Defender 예외 자동 등록이 lowest 권한에서 SilentlyContinue로
+;              조용히 실패하던 문제 수정. admin 강제 → UAC 1회로 모든 단계 정상 권한 확보.
+;              {autopf}는 Program Files로 고정, 구버전(LocalAppData)은 자동 제거 로직이 처리.
 ; [2026-05-05] Claude — Windows Defender 예외 자동 등록 추가 (v3.7.220)
 ;              [Run] 섹션에서 PowerShell로 Add-MpPreference 자동 호출.
 ;              PyInstaller EXE의 _MEI 추출 시 python311.dll 격리 사고 자동 방지.
@@ -29,7 +33,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.220"
+  #define MyAppVersion   "3.7.221"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -62,8 +66,10 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 
-; 권한 설정 (관리자 불필요 — 사용자 폴더에도 설치 가능)
-PrivilegesRequired=lowest
+; 권한 설정 — admin 강제 (Defender 예외 등록 + Program Files 설치 + 구버전 제거 통합)
+; [2026-05-05] lowest → admin: Add-MpPreference가 lowest에서 권한 부족으로 silently 실패
+;              UAC 1회만 받으면 모든 [Run] 단계가 정상 권한으로 동작.
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 ; 설치 전 실행 중인 앱 자동 종료 (덮어쓰기 허용)
 CloseApplications=yes
