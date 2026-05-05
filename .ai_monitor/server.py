@@ -449,10 +449,68 @@ if sys.stdout is None or sys.stderr is None:
 # socket.setdefaulttimeout(60)  <-- 제거됨
 
 # BASE_DIR: 개발 모드 → server.py 위치, 배포(frozen) 모드 → sys._MEIPASS
-# PROJECT_ROOT: 개발 모드 → git 루트, 배포 모드 → exe 옆, pip → 사용자 홈
+# PROJECT_ROOT: 개발 모드 → git 루트, 배포 모드 → cwd/exe-parent에서 마커 탐색,
+#               마커 부재 시 %APPDATA%\VibeCoding\{projects.json,config.json} fallback
+def _find_project_root_marker(start: Path) -> Path | None:
+    """start와 상위 디렉토리에서 .git/CLAUDE.md/GEMINI.md 마커 탐색.
+    찾으면 마커가 있는 디렉토리, 없으면 None.
+    """
+    try:
+        cur = start.resolve()
+    except Exception:
+        return None
+    for _ in range(10):
+        if any((cur / m).exists() for m in ('.git', 'CLAUDE.md', 'GEMINI.md')):
+            return cur
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    return None
+
+
+def _resolve_frozen_project_root(exe_parent: Path) -> Path:
+    """[회귀 수정] 설치 EXE의 PROJECT_ROOT 결정.
+    1) cwd 마커 탐색 → 사용자가 프로젝트 폴더에서 실행한 경우
+    2) exe_parent 마커 탐색 → 설치 폴더에 마커가 있는 경우(거의 없음)
+    3) %APPDATA%\\VibeCoding\\config.json.last_path
+    4) %APPDATA%\\VibeCoding\\projects.json[0]
+    5) 최종 폴백: exe_parent (잘못된 PROJECT_ID 발생 가능)
+    """
+    found = _find_project_root_marker(Path.cwd())
+    if found is not None:
+        return found
+    found = _find_project_root_marker(exe_parent)
+    if found is not None:
+        return found
+    if os.name == 'nt':
+        _appdata = Path(os.getenv('APPDATA', '')) / 'VibeCoding'
+    else:
+        _appdata = Path.home() / '.vibe-coding'
+    try:
+        cfg_file = _appdata / 'config.json'
+        if cfg_file.exists():
+            cfg = json.loads(cfg_file.read_text(encoding='utf-8'))
+            lp = cfg.get('last_path', '')
+            if lp and Path(lp).is_dir():
+                return Path(lp)
+    except Exception:
+        pass
+    try:
+        projs_file = _appdata / 'projects.json'
+        if projs_file.exists():
+            saved = json.loads(projs_file.read_text(encoding='utf-8'))
+            if isinstance(saved, list) and saved:
+                first = Path(str(saved[0]).replace('/', os.sep))
+                if first.is_dir():
+                    return first
+    except Exception:
+        pass
+    return exe_parent
+
+
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
-    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    PROJECT_ROOT = _resolve_frozen_project_root(Path(sys.executable).resolve().parent)
 else:
     BASE_DIR = Path(__file__).resolve().parent
     _parent = BASE_DIR.parent
@@ -3828,7 +3886,11 @@ def main():
     # 더블클릭으로 2개 창이 뜨고, 하나를 닫으면 터미널이 죽는 치명적 UX 버그 해결.
     # 이미 실행 중이면 기존 창을 Win32 API로 포커스하고 새 인스턴스는 즉시 종료.
     import hashlib as _hl
-    _proj_hash    = int(_hl.md5(str(PROJECT_ROOT).encode()).hexdigest()[:4], 16)
+    # smoke test에서는 개발 서버와 동일 PROJECT_ROOT를 가질 수 있으므로 락 포트를 분리
+    _lock_seed = str(PROJECT_ROOT)
+    if os.environ.get('VIBE_SMOKE_TEST', '').strip() in ('1', 'true', 'on'):
+        _lock_seed = f"{_lock_seed}::smoke"
+    _proj_hash    = int(_hl.md5(_lock_seed.encode()).hexdigest()[:4], 16)
     _LOCK_PORT    = 19001 + (_proj_hash % 480)
     _proj_id      = f"{_proj_hash:04x}"
 
