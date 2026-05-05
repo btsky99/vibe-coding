@@ -6,6 +6,10 @@
 #          출력 파일명: vibe-coding-vX.Y.Z.exe (버전 자동 포함)
 #
 # 🕒 변경 이력:
+# [2026-05-05] Claude — datas 보강: .ai_monitor/infra 추가
+#   - Phase 2-3에서 infra/project_context.py 분리 후 spec 미반영 → frozen 모드에서
+#     ModuleNotFoundError: No module named 'infra' 발생하여 EXE 부팅 실패
+#   - server.py / pg_store.py / zettelkasten.py가 'from infra.xxx' import하므로 필수
 # [2026-03-16] Claude — runtime_tmpdir 설정: None→%APPDATA%\VibeCoding\runtime
 #   - None이면 Windows Temp에 추출 → 백신이 삭제하여 "Not Found" 에러 발생
 #   - APPDATA 고정 경로로 변경하여 안정적 추출 보장
@@ -79,6 +83,10 @@ a = Analysis(
         ('AGENTS.md', '.'),
         # API 모듈 (hive_api, git_api 등)
         ('.ai_monitor/api', 'api'),
+        # 인프라 모듈 (project_context, postgres_runtime, lifecycle 등)
+        # → server.py / src/pg_store.py / src/zettelkasten.py에서 'from infra.xxx' import
+        # 누락 시 frozen 모드에서 ModuleNotFoundError: No module named 'infra' 발생
+        ('.ai_monitor/infra', 'infra'),
         # 버전 정보 파일 — frozen 모드에서 server.py가 MEIPASS 루트에서 import함
         # 없으면 ImportError → __version__ = "0.0.0-unknown" → 상단 버전 미표시
         ('.ai_monitor/_version.py', '.'),
