@@ -3886,8 +3886,11 @@ def main():
     # 더블클릭으로 2개 창이 뜨고, 하나를 닫으면 터미널이 죽는 치명적 UX 버그 해결.
     # 이미 실행 중이면 기존 창을 Win32 API로 포커스하고 새 인스턴스는 즉시 종료.
     import hashlib as _hl
-    # smoke test에서는 개발 서버와 동일 PROJECT_ROOT를 가질 수 있으므로 락 포트를 분리
+    # 같은 PROJECT_ROOT라도 개발 모드/설치 EXE/smoke test가 동시에 떠야 하므로
+    # 락 시드를 실행 환경별로 분리한다 (v3.7.225)
     _lock_seed = str(PROJECT_ROOT)
+    if getattr(sys, 'frozen', False):
+        _lock_seed = f"{_lock_seed}::frozen"
     if os.environ.get('VIBE_SMOKE_TEST', '').strip() in ('1', 'true', 'on'):
         _lock_seed = f"{_lock_seed}::smoke"
     _proj_hash    = int(_hl.md5(_lock_seed.encode()).hexdigest()[:4], 16)
