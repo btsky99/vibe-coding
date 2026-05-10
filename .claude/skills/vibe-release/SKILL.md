@@ -13,6 +13,11 @@ DESCRIPTION: Vibe Coding EXE 릴리즈 스킬.
   /vibe-release 명령으로 호출. 버전 증가 → 커밋 → 푸시하면 CI가 EXE 빌드.
 
 REVISION HISTORY:
+- 2026-05-10 Claude: EXE 빌드 주의사항에 "5. spec ↔ CI command 동기화" 추가.
+                     `vibe-coding.spec` datas와 `.github/workflows/build-release.yml`의
+                     `--add-data` 인자가 따로 관리되어 한쪽만 갱신하면 설치 EXE에서만
+                     누락이 발생함. v3.7.215~218(infra/) + v3.7.207~223(_version.py)
+                     두 사고가 같은 패턴.
 - 2026-04-11 Claude: Step 0.5 로컬 EXE 빌드 + smoke test 단계 추가.
                      scripts/smoke_test.py로 빌드된 EXE의 서버 기동/API 응답을 자동 검증.
                      push 전에 설치 버전 동작을 미리 확인하여 CI 실패 위험 최소화.
@@ -212,6 +217,28 @@ ruff check .ai_monitor/server.py --select E9,F821,F823
 # 프론트엔드 빌드 (타입 에러 확인)
 cd .ai_monitor/vibe-view && npx vite build
 ```
+
+### 5. spec ↔ CI command 동기화 (중요 — 두 번 사고)
+PyInstaller는 두 가지 빌드 경로가 있고 **각각 다른 데이터 소스**를 본다:
+- 로컬 빌드 (`pyinstaller vibe-coding.spec`): `vibe-coding.spec`의 `datas=[...]` 사용
+- CI 빌드 (`build-release.yml`): `pyinstaller --onefile ... server.py`의 `--add-data` 인자 사용
+
+**spec datas만 갱신하면 로컬 EXE는 통과해도 CI 설치 EXE에서 누락 발생**.
+
+PR/커밋에서 다음 변경이 있으면 양쪽 동시 갱신 필수:
+- `.ai_monitor/`에 새 디렉토리 추가 (예: `infra/`, `api/`, `pty-server/`)
+- `.ai_monitor/`에 새 데이터 파일 추가 (예: `_version.py`, 마이그레이션 SQL)
+- 모듈 import 방식을 `import X` → `open('X.py')` 같은 파일 읽기로 전환
+
+**체크 명령:**
+```bash
+# spec datas와 CI --add-data 항목 비교
+grep -E "add-data" .github/workflows/build-release.yml
+grep -E "datas=|\\('\\.ai_monitor/" vibe-coding.spec
+```
+
+과거 사고: v3.7.215~218(`infra/` 누락 → ModuleNotFoundError 좀비 4릴리즈),
+v3.7.207~223(`_version.py` 누락 → 우상단 버전 미표시 장기 미해결).
 
 ---
 
