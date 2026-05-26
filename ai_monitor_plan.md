@@ -605,3 +605,195 @@
 ---
 > 이 계획서는 2026-04-16 브레인스토밍 결과입니다.
 > Phase A-1부터 순서대로 진행하며, 각 단계 끝마다 검증 + 사용자 OK 후 다음으로.
+
+---
+
+# 🔥 최우선: Antigravity CLI 마이그레이션 (2026-05-24 ~)
+
+> Gemini CLI → Antigravity CLI(`agy`) 전면 교체. **2026-06-18 데드라인** (Gemini CLI 무료/개인 서비스 종료)
+> 브레인스토밍: 2026-05-24 승인 (식별자 일괄 변경 + DB UPDATE 채택)
+> 참고 메모리: `project_antigravity_migration.md`
+
+## 의존성 그래프
+- Phase 0 (PoC) → 게이트. 실패 시 STOP + 재설계
+- Phase 1 (어댑터 + rename) → Phase 0 통과 후
+- Phase 2 (식별자 일괄) → Phase 1 완료 후
+- Phase 3 (DB UPDATE) → Phase 2 완료 후 (코드와 DB 동기 변경)
+- Phase 4 (검증/문서) → Phase 3 완료 후
+
+---
+
+## Phase 0: PoC 검증 (블로커 게이트)
+
+[ ] Task 0.1: `agy` CLI 설치 및 기본 동작 확인
+    파일: docs/AGY_POC_RESULTS.md (신규)
+    방법: PowerShell `irm https://antigravity.google/cli/install.ps1 | iex` 실행 → `agy --version`, `agy --help` 출력 수집
+    검증: 버전 문자열 출력 + help 텍스트에서 비대화형 플래그 후보 식별 (`-p`, `--prompt`, `--json`, `--exec` 등)
+
+[ ] Task 0.2: 비대화형 호출 방식 검증 (**블로커**)
+    파일: docs/AGY_POC_RESULTS.md
+    방법: stdin pipe (`echo "hello" | agy`), 플래그 방식 (`agy -p "hello"`, `agy --prompt "hello"`), JSON 출력 (`agy --json -p "hello"`) 시도
+    검증: stdout으로 응답 텍스트 추출 가능. **불가 시 즉시 STOP + 사용자 알림**
+
+[ ] Task 0.3: 설정 폴더 & 인증 위치 확인 + 결과 문서화
+    파일: docs/AGY_POC_RESULTS.md
+    방법: 첫 실행 후 `%USERPROFILE%`, `%APPDATA%`, `%LOCALAPPDATA%`에서 신규 폴더 탐지 (`.antigravity/`, `.agy/`, `Antigravity/`)
+    검증: 폴더명 확정 + 인증 토큰 위치 명시. Phase 1에서 사용할 폴더명 결정
+
+---
+
+## Phase 1: 어댑터 + 파일 rename
+
+[ ] Task 1.1: `AntigravityAdapter` 클래스 작성
+    파일: scripts/antigravity_adapter.py (신규)
+    방법: PoC에서 확정한 비대화형 인터페이스를 캡슐화. `run(prompt, model=None, json=False) -> str` API. subprocess 호출 + 노이즈 필터링 + 타임아웃 + 에러 처리
+    검증: 단위 테스트 1건 (`tests/test_antigravity_adapter.py`)에서 mock subprocess로 응답 파싱 확인
+
+[ ] Task 1.2: `scripts/gemini_*.py` 4개 파일 rename + import 수정
+    파일: scripts/gemini_hook.py → antigravity_hook.py, gemini_responder.py → antigravity_responder.py, gemini_output_filter.py → antigravity_output_filter.py, gemini_session_repair.py → antigravity_session_repair.py
+    방법: `git mv`로 rename 후 각 파일 내 `Gemini`/`gemini` 클래스명·변수명·docstring 변경. 외부 import 참조부도 동기 수정 (cli_agent.py 등)
+    검증: `python -c "import scripts.antigravity_hook"` 성공 + `grep -r "gemini_hook\|gemini_responder\|gemini_output_filter\|gemini_session_repair" --include='*.py'` 결과 0건
+
+[ ] Task 1.3: 진입점 스크립트 rename
+    파일: run_gemini.bat → run_antigravity.bat, scripts/run_gemini_clean.py → run_antigravity_clean.py
+    방법: `git mv` 후 내부 호출 명령 `gemini` → `agy` 교체. 외부 참조(README, docs, settings) 동기 수정
+    검증: 새 bat 실행 시 `agy` 호출 + Windows 콘솔에서 응답 표시
+
+[ ] Task 1.4: `.gemini/` 폴더 rename
+    파일: .gemini/ → (PoC 결과 폴더명, 기본 .antigravity/)
+    방법: `git mv .gemini .antigravity` (commands, rules, skills, settings.json 전체 이동)
+    검증: `agy` 첫 실행 시 새 폴더의 settings.json/skills 인식 (PoC에서 확인된 방식대로)
+
+[ ] Task 1.5: `GEMINI.md` rename
+    파일: GEMINI.md → ANTIGRAVITY.md
+    방법: `git mv`. 내용 중 "제미나이"/"Gemini" 표기 변경. Antigravity CLI 마이그레이션 노트 헤더 추가
+    검증: 파일 존재 + 내용에 `gemini` 잔존 0건 (외부 변수 제외)
+
+[ ] Task 1.6: `cli_agent.py` 핵심 호출부 어댑터 연결
+    파일: scripts/cli_agent.py
+    방법: `_GEMINI_CMD = _find_cli('gemini')` → `_AGY_CMD = _find_cli('agy')`. `cli == 'gemini'` 분기 → `cli == 'antigravity'`. `AntigravityAdapter` 호출로 위임 (직접 subprocess 호출 점진 제거)
+    검증: `python scripts/cli_agent.py "test"` 실행 시 `agy`가 호출되고 응답 받음
+
+---
+
+## Phase 2: 코드 식별자 일괄 변경
+
+[ ] Task 2.1: `scripts/` Python 파일 일괄 변경
+    파일: scripts/auto_dispatcher.py, orchestrator.py, hive_bridge.py, hive_hook.py, hive_heartbeat.py, hive_watchdog.py, agent_shell.py, agent_protocol.py, agent_detector.py, agent_launcher.py, intent_map.py, vibe_mux.py, vibe_mux_agent.py, vibe_cli.py, telegram_bridge.py, terminal_agent.py, send_message.py, session_init.py, harness_verify.py, memory.py, recall.py, sync_manager.py, itcp.py, skill_analyzer.py, skill_manager.py, install_npm_tool.py, screenshot_analyzer.py, safety_guard.py, rules_validator.py, generate_project_map.py, zettel_sync.py, setup_hive_pg.py, migrate_memory_to_pg.py, pg_manager.py, lock_manager.py, heal_daemon.py, git_visualizer.py, auto_release.py, hook_bridge.py
+    방법: `'gemini'` 리터럴 → `'antigravity'`, 함수명 `_select_gemini_model` → `_select_antigravity_model` 등. **보존 대상**: `GEMINI_API_KEY`, `GOOGLE_API_KEY` (외부 의존성). Edit 도구로 파일별 처리 + 변경 후 grep 자가검증
+    검증: 변경 후 `grep "'gemini'" scripts/ -r` 0건. `pytest tests/` 통과
+
+[ ] Task 2.2: `.ai_monitor/api/` Python 파일 일괄 변경
+    파일: agent_api.py, hive_api.py, tools_api.py, dispatcher_api.py, experience_api.py
+    방법: agent_api.py에서 `~/.gemini/tmp/` 경로 참조 다수 → `~/.antigravity/tmp/` (PoC 결과 따름). `'gemini'` 식별자 변경. `_detect_external_gemini` → `_detect_external_antigravity` 함수명 변경
+    검증: API 서버 재시작 후 `/api/agents` 응답에서 `antigravity` 에이전트 표시. `grep gemini .ai_monitor/api/` 0건 (외부 변수 제외)
+
+[ ] Task 2.3: `.ai_monitor/src/` + `infra/` Python 파일 일괄 변경
+    파일: pg_store.py, wiki_generator.py, infra/tool_install.py, infra/memory_watcher.py
+    방법: SQL 쿼리 내 `agent = 'gemini'` → `agent = 'antigravity'` 변경 (단, 마이그레이션 스크립트는 별도). 도구 설치 매핑에서 `gemini` 키 → `antigravity`
+    검증: `grep "'gemini'" .ai_monitor/src/ .ai_monitor/infra/ -r` 0건
+
+[ ] Task 2.4: TypeScript UI 파일 일괄 변경
+    파일: .ai_monitor/vibe-view/src/ 하위 — App.tsx, TerminalSlot.tsx, ChatSlot.tsx, TopMenuBar.tsx, ThoughtTrace.tsx, types.ts, hooks/useVibeData.ts, useCliModels.ts, useOfficePty.ts, useOfficeChat.ts, useOfficeState.ts, services/officeApi.ts, components/panels/*.tsx (10개), components/office/*.tsx (4개)
+    방법: `'gemini'` 리터럴 → `'antigravity'`, 표시명 "Gemini" → "Antigravity", 아이콘/색상 키도 동기 변경. ToolsPanel.tsx의 도구 목록 라벨 변경
+    검증: `npm run build` 성공 + 브라우저에서 에이전트 패널에 "Antigravity" 표시. `grep -r "'gemini'" .ai_monitor/vibe-view/src/` 0건
+
+[ ] Task 2.5: 한글 "제미나이" 9개 파일 변경
+    파일: scripts/zettel_sync.py, scripts/intent_map.py, .claude/skills/vibe-zettel/skill.md, .gemini→.antigravity/skills/vibe-heal/SKILL.md, .gemini→.antigravity/commands/dashboard.toml, .ai_monitor/docs/help-codex.md, help-gemini-cli.md(→help-antigravity-cli.md rename), help-claude-code.md, GEMINI.md(→ANTIGRAVITY.md, Task 1.5에서 처리)
+    방법: 본문 "제미나이" → "Antigravity"로 한글 통일 (브랜드명은 영문 표기). help-gemini-cli.md는 git mv로 rename
+    검증: `grep -r "제미나이"` 결과 0건
+
+[ ] Task 2.6: 설정 파일 변경
+    파일: .ai_monitor/config.json, .claude/settings.local.json, feature_list.json, chat.jsonl(레거시), sprint_contracts/sprint_F005_20260419.md, sprint_F006_20260419.md
+    방법: JSON 키 `gemini_models` → `antigravity_models`, 환경변수 매핑 등. config.json은 신중하게 — 기존 사용자 설정 백업 후 변경. sprint_contracts는 역사 문서이므로 본문에 "(구 gemini)" 주석 추가만
+    검증: JSON 파싱 성공 + 서버 재시작 시 설정 로드 에러 없음
+
+[ ] Task 2.7: 디스패처 프로필/역량 매핑 검증
+    파일: scripts/auto_dispatcher.py (이미 Task 2.1에서 변경)
+    방법: fan-out 시 antigravity 에이전트가 매칭되는지 dry-run 모드로 확인. `python scripts/auto_dispatcher.py fan-out "테스트 태스크" --dry-run`
+    검증: 출력에 `antigravity` 에이전트 명시 + Gemini 잔존 없음
+
+---
+
+## Phase 3: DB 마이그레이션
+
+[ ] Task 3.1: `pg_dump` 백업
+    파일: backups/pre_antigravity_migration_20260524.sql.gz (신규)
+    방법: `pg_dump -h localhost -p 5433 -U vibe vibe_coding | gzip > backups/pre_antigravity_migration_20260524.sql.gz`. 백업 무결성 검증 (`gunzip -t`)
+    검증: 파일 존재 + 압축 무결성 OK + 백업 크기 >0
+
+[ ] Task 3.2: PG view/function 'gemini' 하드코딩 검색
+    파일: docs/AGY_POC_RESULTS.md (검색 결과 추가)
+    방법: `psql -c "SELECT viewname, definition FROM pg_views WHERE definition ILIKE '%gemini%'"`, `SELECT proname, prosrc FROM pg_proc WHERE prosrc ILIKE '%gemini%'`
+    검증: 결과 0건이면 다음 단계. 발견 시 Task 3.3에서 ALTER 포함
+
+[ ] Task 3.3: 마이그레이션 스크립트 작성
+    파일: scripts/migrate_gemini_to_antigravity.py (신규)
+    방법: 트랜잭션 내에서 테이블별 배치(1000건) UPDATE. 대상 테이블: hive_tasks, agent_heartbeats, pg_logs, hive_memory, task_comments, agent_sessions (실제 컬럼 확인 후 결정). Task 3.2에서 발견된 view/function ALTER 포함. dry-run 모드 지원
+    검증: dry-run 출력 시 변경될 레코드 수와 SQL 표시
+
+[ ] Task 3.4: 롤백 스크립트 작성
+    파일: scripts/rollback_antigravity_to_gemini.py (신규)
+    방법: 역방향 UPDATE 또는 백업 복원 명령 안내. 백업 파일 경로 명시
+    검증: dry-run으로 역변환 SQL 확인
+
+[ ] Task 3.5: 마이그레이션 실행 + 검증 쿼리
+    파일: (실행)
+    방법: `python scripts/migrate_gemini_to_antigravity.py --execute`. 실행 후 검증 쿼리 `SELECT agent, COUNT(*) FROM hive_tasks GROUP BY agent` 등으로 잔존 'gemini' 확인
+    검증: 모든 대상 테이블에서 `agent = 'gemini'` 레코드 0건 (관리 목적 보존 행 제외)
+
+---
+
+## Phase 4: 검증 & 정리
+
+[ ] Task 4.1: `grep -ri gemini` 전수 잔존 확인
+    파일: (전체 코드베이스)
+    방법: `grep -ri "gemini" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=backups --exclude-dir=dist --exclude-dir=build` 실행 후 잔존 항목을 보존 대상(GEMINI_API_KEY 등)과 누락 항목으로 분류
+    검증: 누락 항목 0건. 보존 대상은 docs/AGY_POC_RESULTS.md에 화이트리스트 기록
+
+[ ] Task 4.2: 통합 테스트 실행
+    파일: tests/ 하위
+    방법: `pytest tests/test_agent_api.py tests/test_codex_orchestration.py tests/test_new_api_modules.py tests/test_itcp_fallback.py tests/test_harness_verify.py` 실행
+    검증: 모든 테스트 통과. 실패 시 즉시 디버그 (Phase 4에서 STOP 가능)
+
+[ ] Task 4.3: 디스패처 fan-out E2E 수동 테스트
+    파일: (실행)
+    방법: 서버 실행 → 오피스 채팅에서 antigravity 에이전트에 태스크 fan-out → 응답 수신 → 하트비트 갱신 확인 → hive_tasks에 antigravity 레코드 신규 생성 확인
+    검증: 4단계 모두 성공. DB에 `agent='antigravity'` 신규 행 존재
+
+[ ] Task 4.4: 문서 갱신
+    파일: PROJECT_MAP.md, HIVEMIND.md, CLAUDE.md, README.md, docs/VIBE_PROJECT_GUIDE.md, docs/VIBE_CONVENTIONS.md, docs/HARNESS_V2.md, docs/PLATFORM_LAYERS.md, docs/CODEX_HARDENING.md, .claude/rules/hive-sync.md, .codex/rules/hive-sync.md, AGENTS.md
+    방법: "Gemini"/"제미나이" → "Antigravity" 변경. 에이전트 역할 설명 갱신 ("Antigravity가 전체 설계 및 오케스트레이션 담당")
+    검증: 모든 문서에서 잔존 0건 + 새 워크플로우 명시
+
+[ ] Task 4.5: 사용자 안내 메시지 작성
+    파일: docs/ANTIGRAVITY_MIGRATION_NOTICE.md (신규), README.md 헤더 추가
+    방법: "Antigravity CLI 첫 실행 시 OAuth 재로그인 필요" 안내. 백업 파일 위치 명시. 롤백 절차 링크
+    검증: README 헤더에 공지 박스 표시 + 신규 문서 작성 완료
+
+[ ] Task 4.6: 메모리 기록
+    파일: C:/Users/com/.claude/projects/D--vibe-coding/memory/project_antigravity_migration.md (완료 상태 업데이트), feedback_agy_binary_name.md (신규)
+    방법: 마이그레이션 완료 일자, 어댑터 위치, 화이트리스트, PoC 결과 폴더명 등을 기록. 인덱스 MEMORY.md 업데이트
+    검증: 두 파일 모두 frontmatter 포함 + MEMORY.md 인덱스 추가
+
+---
+
+## 보존 화이트리스트 (변경 금지)
+- `GEMINI_API_KEY`, `GOOGLE_API_KEY` 환경변수
+- 백업 파일명 (`pre_antigravity_migration_20260524.sql.gz`)
+- 마이그레이션 스크립트 내 'gemini' 문자열 (의도된 참조)
+- 역사 문서 (sprint_contracts/) 본문 — 주석 추가만
+- 메모리 파일 내 과거 작업 기록 (역사 보존)
+
+## 게이트 & STOP 조건
+- Phase 0 Task 0.2 실패 (비대화형 호출 불가) → 즉시 STOP + 재설계
+- Phase 4 Task 4.2 통합 테스트 실패 → 즉시 STOP + 디버그
+- Phase 3 마이그레이션 후 신규 INSERT 실패 → 롤백 실행
+
+## 예상 소요 시간
+- Phase 0: 30분~1시간
+- Phase 1: 4~5시간
+- Phase 2: 6~8시간
+- Phase 3: 1~2시간
+- Phase 4: 3~4시간
+- **총 15~20시간** (2~3일 작업)

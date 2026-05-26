@@ -129,6 +129,47 @@ REVISION HISTORY:
 ...
 # ... 기존 내용 유지 ...
 
+import sys
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🎯 'hook' 서브커맨드 빠른 경로 — 무거운 서버 import 전에 분기
+# ─────────────────────────────────────────────────────────────────────────────
+# 설치 EXE 단독 PC에서도 외부 프로젝트가 `vibe-coding.exe hook`만 호출하면
+# scripts/hive_hook.py main()이 stdin JSON을 받아 PreToolUse/PostToolUse/Stop/
+# UserPromptSubmit 이벤트를 처리한다. 서버 부트(PostgreSQL, API 모듈 로드 등)
+# 없이 즉시 디스패치하므로 매 훅 호출당 startup 비용이 수 초→수십 ms 수준으로 축소.
+# (개발 모드/설치 EXE 양쪽 모두 동일하게 동작)
+if len(sys.argv) > 1 and sys.argv[1] == 'hook':
+    import os as _os_hook
+    from pathlib import Path as _Path_hook
+    if getattr(sys, 'frozen', False):
+        _hook_base = _Path_hook(getattr(sys, '_MEIPASS', _os_hook.path.dirname(sys.executable)))
+        _hook_scripts = _hook_base / 'scripts'
+    else:
+        _hook_base = _Path_hook(__file__).resolve().parent
+        _hook_scripts = _hook_base.parent / 'scripts'
+    # hive_hook이 `from src.xxx`/`from infra.xxx` import 가능하도록 base 추가
+    for _p in (str(_hook_scripts), str(_hook_base)):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    # windowed EXE(--noconsole)에서 stdout/stderr가 None이면 hive_hook의 print()가 터짐 → devnull 폴백
+    # (부모 프로세스가 pipe로 연결한 경우엔 valid file이라 그대로 사용됨)
+    if sys.stdout is None:
+        sys.stdout = open(_os_hook.devnull, 'w', encoding='utf-8')
+    if sys.stderr is None:
+        sys.stderr = open(_os_hook.devnull, 'w', encoding='utf-8')
+    try:
+        from hive_hook import main as _hive_hook_main
+        _hive_hook_main()
+        sys.exit(0)
+    except Exception as _hook_err:
+        # 훅 자체가 사용자 작업을 차단하면 안 됨 — 조용히 종료
+        try:
+            sys.stderr.write(f"[hook dispatch error] {_hook_err}\n")
+        except Exception:
+            pass
+        sys.exit(0)
+
 import json
 import time
 import os
@@ -138,7 +179,6 @@ import shutil
 import subprocess
 import re
 import threading
-import sys
 import asyncio
 import api.git_api as git_api
 import api.memory_api as memory_api
@@ -3180,15 +3220,20 @@ class SSEHandler(BaseHTTPRequestHandler):
                     model_flag = f' --model {req_model}' if req_model else ""
                     title = f"[Claude Code] {_slot_label}" if _slot_label else "[Claude Code]"
                     cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Claude Code... && claude{yolo_flag}{model_flag}{prompt_flag}"'
-                elif agent == 'gemini':
-                    yolo_flag = " --yolo" if is_yolo else ""
-                    gemini_bat = str(PROJECT_ROOT / 'run_gemini.bat')
-                    # Gemini CLI: --model 플래그로 모델 선택
-                    model_flag = f' --model {req_model}' if req_model else ""
-                    title = f"[Gemini CLI] {_slot_label}" if _slot_label else "[Gemini CLI]"
-                    # 역할 프롬프트는 Gemini의 -p 옵션으로 전달
-                    prompt_flag = f' -p "{_role_prompt}"' if _role_prompt else ""
-                    cmd = f'start "{title}" cmd.exe /k ""{gemini_bat}"{yolo_flag}{model_flag}{prompt_flag} --cwd "{_safe_dir}""'
+                elif agent in ('gemini', 'antigravity', 'agy'):
+                    # [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환.
+                    # Gemini CLI는 2026-06-18 무료/개인 종료. 'gemini' 식별자는 프론트엔드/DB
+                    # 호환을 위해 그대로 받지만 실제 실행은 agy.exe. 'antigravity'/'agy'
+                    # 별칭도 같은 분기로 받아 5 Phase 마이그레이션 시 식별자 전환에 대비.
+                    # agy 옵션 매핑:
+                    #   --yolo                    → --dangerously-skip-permissions
+                    #   -p "<prompt>"             → -i "<prompt>" (인터랙티브 초기 프롬프트)
+                    #   --cwd <dir>               → 미지원, `cd /d <dir>`로 대체
+                    #   --model <name>            → 미지원, 무시
+                    yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
+                    title = f"[Antigravity] {_slot_label}" if _slot_label else "[Antigravity]"
+                    prompt_flag = f' -i "{_role_prompt}"' if _role_prompt else ""
+                    cmd = f'start "{title}" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Antigravity CLI... && agy{yolo_flag}{prompt_flag}"'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
                     # 요청된 모델 우선, 없으면 config에서 읽기

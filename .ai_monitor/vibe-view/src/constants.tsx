@@ -61,7 +61,7 @@ export const defaultShortcuts: Shortcut[] = [
   { label: '🧹 화면 지우기', cmd: '/clear' },
   { label: '깃 커밋', cmd: 'git add . && git commit -m "update"' },
   { label: '깃 푸시', cmd: 'git push' },
-  { label: '문서 업데이트', cmd: 'gemini "현재까지 진행 상황 문서 업데이트"' },
+  { label: '문서 업데이트', cmd: 'agy -i "현재까지 진행 상황 문서 업데이트"' },
 ];
 
 // ─── 에이전트별 슬래시 커맨드 목록 ───────────────────────────────────────
@@ -84,10 +84,10 @@ export const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
     { cmd: '/pr_comments', desc: 'GitHub PR 댓글 가져오기',               category: '작업' },
     { cmd: '/terminal',    desc: '터미널 명령 실행 모드',                  category: '작업' },
   ],
+  // Antigravity CLI(`agy`) — 'gemini' 키는 백엔드/DB 식별자 호환을 위해 유지.
+  // 슬래시 커맨드는 agy 실제 지원 목록에 맞춤 (Gemini CLI 슬래시는 deprecated).
   gemini: [
     { cmd: '/help',        desc: '전체 도움말 보기',                       category: '도움말' },
     { cmd: '/clear',       desc: '대화 초기화',                            category: '설정' },
-    { cmd: '/chat',        desc: '대화형 채팅 모드 전환',                  category: '설정' },
-    { cmd: '/tools',       desc: '사용 가능한 툴 목록 보기',              category: '도움말' },
   ],
 };

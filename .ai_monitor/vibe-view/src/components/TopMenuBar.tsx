@@ -411,10 +411,10 @@ const TopMenuBar = memo(function TopMenuBar({
                 <Cpu className="w-3.5 h-3.5 text-success" /> Claude Code 사용법
               </button>
               <button
-                onClick={() => onOpenHelpDoc('gemini-cli', 'Gemini CLI 사용 설명서')}
+                onClick={() => onOpenHelpDoc('gemini-cli', 'Antigravity CLI 사용 설명서')}
                 className="w-full text-left px-4 py-1.5 hover:bg-white/10 flex items-center gap-2"
               >
-                <Terminal className="w-3.5 h-3.5 text-accent" /> Gemini CLI 사용법
+                <Terminal className="w-3.5 h-3.5 text-accent" /> Antigravity CLI 사용법
               </button>
               <button
                 onClick={() => onOpenHelpDoc('codex', '코덱스(Codex) 사용 설명서')}

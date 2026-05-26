@@ -60,7 +60,9 @@
       "Bash(rm -f .ai_monitor/vibe-view/src/components/panels/DispatcherPanel.tsx)",
       "Bash(rm -f scripts/auto_dispatcher.py)",
       "Bash(rm -f .claude/commands/vibe-dispatcher.md)",
-      "Bash(rm -rf .claude/skills/vibe-dispatcher)"
+      "Bash(rm -rf .claude/skills/vibe-dispatcher)",
+      "Bash(cp \"D:/ons/.claude/settings.local.json\" \"D:/ons/.claude/settings.local.json.bak.20260510\")",
+      "Read(//d/ons/.claude/**)"
     ]
   }
 }

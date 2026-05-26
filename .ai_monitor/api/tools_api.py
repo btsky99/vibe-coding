@@ -713,6 +713,60 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
             "- 노트 ID는 Zettelkasten 표준: YYYYMMDDHHmmss"
         ),
     },
+    # ── 5단계: 하이브 훅 설치 (외부 프로젝트 → vibe-coding 연결) ──────
+    {
+        "id": "hive-hooks",
+        "agent": "Claude Code",
+        "category": "setup",
+        "description": "⑤ 하이브 훅 설치 — 이 프로젝트의 작업이 비이브 코딩 하이브 DB/옵시디언에 자동 기록되도록 연결",
+        "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
+            "이 프로젝트(외부 프로젝트일 수 있음)의 .claude/settings.local.json에\n"
+            "비이브 코딩 하이브 마인드 훅을 등록해줘. 이 훅이 있어야 본 프로젝트에서\n"
+            "Claude Code로 한 작업이 PostgreSQL 하이브 DB와 옵시디언 제텔카스텐에\n"
+            "자동 저장돼. (없으면 작업 흔적이 어디에도 안 남아.)\n\n"
+            "【권장 — install_hive_hooks.py 사용】\n"
+            "수동으로 hooks 키를 만지지 말고 비이브 코딩이 제공하는 스크립트를 호출해:\n"
+            "  python <비이브-코딩>/scripts/install_hive_hooks.py --target {project_path}\n"
+            "이 스크립트가 아래의 자동 탐색 + 멱등 머지 + 백업을 전부 수행해. dry-run으로\n"
+            "선검증 후 실행: `--dry-run` 플래그 추가.\n\n"
+            "【진입점 자동 탐색 우선순위】\n"
+            "스크립트는 다음 순서로 hook 진입점을 찾는다 (실제 파일 존재 여부로 판단):\n"
+            "  (a) 환경변수 VIBE_HIVE_HOOK — 다음 셋 중 하나를 받음\n"
+            "      • scripts/hive_hook.py 파일 직접 지정 (PY 형식)\n"
+            "      • scripts/ 디렉토리 지정 (PY 형식)\n"
+            "      • vibe-coding.exe 파일 지정 (EXE 형식, 설치 EXE 단독 PC)\n"
+            "  (b) PATH의 vibe-coding[.exe] 옆/부모의 scripts/hive_hook.py (PY 형식)\n"
+            "  (c) PATH의 vibe-coding[.exe] 자체 (EXE 형식 — scripts/ 미동봉 시 폴백)\n"
+            "  (d) 표준 설치 경로 후보 순회:\n"
+            "      [PY] C:/Program Files/vibe-coding/scripts/hive_hook.py\n"
+            "      [PY] %LOCALAPPDATA%/Programs/vibe-coding/scripts/hive_hook.py\n"
+            "      [PY] D:/vibe-coding/scripts/hive_hook.py\n"
+            "      [EXE] C:/Program Files/VibeCoding/vibe-coding.exe\n"
+            "      [EXE] %LOCALAPPDATA%/Programs/VibeCoding/vibe-coding.exe\n"
+            "  (e) 모두 실패 시 중단 — 사용자에게 VIBE_HIVE_HOOK 설정 안내 (추측 금지)\n\n"
+            "【등록 명령 형식】\n"
+            "  • PY 형식  : `python \"<scripts>/hive_hook.py\"`\n"
+            "  • EXE 형식 : `\"<vibe-coding.exe>\" hook`\n"
+            "  설치 EXE는 `hook` 서브커맨드로 hive_hook.main()을 즉시 디스패치한다\n"
+            "  (서버 부트 없이 stdin JSON만 처리 — startup 비용 수십 ms).\n\n"
+            "【등록 이벤트 (4개)】\n"
+            "  - UserPromptSubmit  : hook 진입점 (PY 형식이면 hook_bridge.py도 함께)\n"
+            "  - PreToolUse        : matcher \"Edit|Write|Bash\"\n"
+            "  - PostToolUse       : matcher \"Edit|Write|Bash|NotebookEdit\"\n"
+            "  - Stop              : hook 진입점 (PY 형식이면 claude_hook.py stop도 함께)\n\n"
+            "【검증 보고】\n"
+            "  - 사용한 진입점 (PY/EXE + 경로 + 어떤 우선순위로 찾았는지)\n"
+            "  - 등록된 이벤트 4개 체크리스트 ✅/❌\n"
+            "  - 다음 Claude Code 재시작부터 적용된다는 안내\n\n"
+            "【원칙】\n"
+            "- 절대 경로를 직접 박지 말고 자동 탐색 결과를 사용 (다른 PC 호환)\n"
+            "- 기존 hooks 키가 있으면 머지만 (다른 hook 절대 삭제 금지)\n"
+            "- 백업 없이 수정 금지 (`settings.local.json.bak.YYYYMMDDHHmmss`)\n"
+            "- 멱등성: 같은 진입점을 가리키는 명령은 따옴표/슬래시 차이를 무시하고 중복 제거\n"
+            "- 설치 EXE 단독 PC: scripts/ 폴더가 외부에 없어도 `vibe-coding.exe hook`만으로 작동"
+        ),
+    },
     # ── 규칙 파일 생성 (기존) ─────────────────────────────────────────
     {
         "id": "claude-rules",

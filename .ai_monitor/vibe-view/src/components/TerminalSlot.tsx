@@ -32,7 +32,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Terminal, TerminalSquare, X, Zap, ClipboardList, MessageSquare, Cpu, Trash2, Activity, CheckCircle2, Clock, Code2
+  Terminal, TerminalSquare, X, Zap, ClipboardList, MessageSquare, Cpu, Trash2, Activity, CheckCircle2, Clock, Code2, Orbit
 } from 'lucide-react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -1131,39 +1131,39 @@ export default function TerminalSlot({
                 </div>
               </motion.div>
 
-              {/* Gemini Card */}
+              {/* Antigravity Card (식별자 'gemini'는 Phase 1 alias 정책으로 유지) */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
                 whileHover={{ scale: 1.02, translateY: -5 }}
-                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-accent/50 group relative overflow-hidden"
+                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-indigo-400/50 group relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <Terminal className="w-12 h-12 text-accent" />
+                  <Orbit className="w-12 h-12 text-indigo-400" />
                 </div>
-                <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mb-2 group-hover:bg-accent/20 transition-colors shadow-inner">
-                  <Terminal className="w-8 h-8 text-accent" />
+                <div className="w-16 h-16 rounded-2xl bg-indigo-400/10 flex items-center justify-center mb-2 group-hover:bg-indigo-400/20 transition-colors shadow-inner">
+                  <Orbit className="w-8 h-8 text-indigo-400" />
                 </div>
                 <div className="text-center">
-                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">GEMINI CLI</h3>
-                  <p className="text-[10px] text-accent font-bold uppercase tracking-widest opacity-60">High Speed Reasoning</p>
+                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">ANTIGRAVITY</h3>
+                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest opacity-60">Agentic Code Pilot</p>
                 </div>
                 <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
-                  Google의 초거대 언어 모델 기반 고속 추론 도구.<br/>빠른 프로토타이핑과 넓은 컨텍스트를 제공합니다.
+                  Google의 차세대 에이전트 CLI.<br/>비대화형 실행과 멀티스텝 자동화에 최적화됐습니다.
                 </p>
                 <div className="flex flex-col w-full gap-2 mt-4">
                   <button
                     onClick={() => launchAgent('gemini', false)}
                     className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
                   >
-                    Gemini 일반 모드
+                    Antigravity 일반 모드
                   </button>
                   <button
                     onClick={() => launchAgent('gemini', true)}
-                    className="w-full py-2.5 bg-primary/20 hover:bg-primary/40 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2 shadow-lg shadow-primary/10"
+                    className="w-full py-2.5 bg-indigo-400/20 hover:bg-indigo-400/40 text-indigo-300 rounded-xl text-[11px] font-black transition-all border border-indigo-400/30 flex items-center justify-center gap-2 shadow-lg shadow-indigo-400/10"
                   >
-                    <Zap className="w-3.5 h-3.5 fill-current" /> Gemini 욜로(YOLO)
+                    <Zap className="w-3.5 h-3.5 fill-current" /> Antigravity 욜로(YOLO)
                   </button>
                 </div>
               </motion.div>

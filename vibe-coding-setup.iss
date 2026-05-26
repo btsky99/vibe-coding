@@ -11,6 +11,10 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-05-26] Claude — [Registry] 섹션 추가: 시스템 환경변수 VIBE_HIVE_HOOK 등록 (B3)
+;              설치 EXE 단독 PC에서도 install_hive_hooks.py가 자동으로 EXE 경로를
+;              찾을 수 있도록 HKLM\...\Environment에 vibe-coding.exe 절대경로를 박는다.
+;              제거 시 함께 삭제(uninsdeletevalue) — 잔여 환경변수 방지.
 ; [2026-05-05] Claude — PrivilegesRequired=admin 강제 (v3.7.221)
 ;              v3.7.220의 Defender 예외 자동 등록이 lowest 권한에서 SilentlyContinue로
 ;              조용히 실패하던 문제 수정. admin 강제 → UAC 1회로 모든 단계 정상 권한 확보.
@@ -33,7 +37,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.225"
+  #define MyAppVersion   "3.7.226"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"
@@ -75,6 +79,10 @@ PrivilegesRequiredOverridesAllowed=dialog
 CloseApplications=yes
 CloseApplicationsFilter=*vibe-coding*
 
+; 환경변수 변경 시 WM_SETTINGCHANGE 자동 broadcast — VIBE_HIVE_HOOK 등록을 새 셸에 즉시 반영
+; [2026-05-26] B3 — 외부 프로젝트가 설치 EXE만 있는 PC에서도 hive_hook 자동 발견 가능
+ChangesEnvironment=yes
+
 ; 아이콘 — vibe_final.ico를 설치 폴더에 복사 후 바로가기에 명시적 지정
 ; (자동 업데이트로 EXE만 교체해도 아이콘이 최신 상태로 유지됨)
 SetupIconFile=.ai_monitor\bin\vibe_final.ico
@@ -110,6 +118,14 @@ Source: ".ai_monitor\bin\pgsql\bin\*"; DestDir: "{app}\pgsql\bin"; Flags: ignore
 Source: ".ai_monitor\bin\pgsql\lib\*"; DestDir: "{app}\pgsql\lib"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: ".ai_monitor\bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Registry]
+; ── VIBE_HIVE_HOOK 시스템 환경변수 등록 ──────────────────────────────────
+; [2026-05-26] B3 — 외부 프로젝트가 dev 체크아웃 없이도 설치 EXE를 hook 진입점으로 찾을 수 있게 함.
+; install_hive_hooks.py가 우선 탐색하는 변수. 값이 .exe이면 EXE 모드(`<exe> hook`),
+; .py/디렉토리면 Python 모드로 동작한다.
+; uninsdeletevalue: 제거 시 값 자동 삭제. preservestringtype: REG_EXPAND_SZ 유지.
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "VIBE_HIVE_HOOK"; ValueData: "{app}\{#MyAppExeName}"; Flags: preservestringtype uninsdeletevalue
+
 [Icons]
 ; 시작 메뉴 — 폴더는 영문(MyAppName), 아이콘 표시명은 한글(MyAppDisplayName)
 Name: "{group}\{#MyAppDisplayName}";             Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"
@@ -118,6 +134,7 @@ Name: "{group}\{#MyAppDisplayName} 제거";        Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: desktopicon
 ; 시작프로그램 (선택) — 아이콘 이름만 한글
 Name: "{userstartup}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\vibe_final.ico"; Tasks: startupicon
+
 
 [Run]
 ; ── Windows Defender 예외 자동 등록 ──────────────────────────────────────

@@ -91,7 +91,9 @@ a = Analysis(
         # 없으면 ImportError → __version__ = "0.0.0-unknown" → 상단 버전 미표시
         ('.ai_monitor/_version.py', '.'),
     ],
-    hiddenimports=['websockets', 'winpty'],
+    # hive_hook이 사용하는 stdlib 모듈: server.py가 직접 import 하지 않는 것까지 명시 보강
+    # (런타임 동적 import는 PyInstaller 정적 분석에서 누락 가능 → hook EXE 모드에서 ImportError 위험)
+    hiddenimports=['websockets', 'winpty', 'urllib.request'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

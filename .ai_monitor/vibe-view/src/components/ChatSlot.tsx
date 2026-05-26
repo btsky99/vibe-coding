@@ -46,7 +46,7 @@ const ROLE_OPTIONS: { key: AgentRole; label: string; icon: typeof Brain; color: 
 type AgentCli = 'claude' | 'gemini' | 'codex';
 const CLI_OPTIONS: { key: AgentCli; label: string; icon: typeof Cpu; color: string }[] = [
   { key: 'claude', label: 'Claude', icon: Cpu,      color: 'text-emerald-400' },
-  { key: 'gemini', label: 'Gemini', icon: Terminal,  color: 'text-orange-400' },
+  { key: 'gemini', label: 'Antigravity', icon: Terminal,  color: 'text-orange-400' },
   { key: 'codex',  label: 'Codex',  icon: Code2,    color: 'text-amber-400' },
 ];
 

@@ -132,7 +132,7 @@ export const CLI_LABELS: Record<CliChoice, string> = {
   orchestrate: '오케스트레이션',
   auto:   '🤖 Auto (자동 선택)',
   claude: '⚡ Claude Code',
-  gemini: '✨ Gemini CLI',
+  gemini: '✨ Antigravity CLI',
   codex:  '🟠 Codex CLI',
 };
 

@@ -562,8 +562,9 @@ function handlePtyConnectionLegacy(ws, req) {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
     } else if (agent === 'gemini') {
-      const yoloFlag = isYolo ? ' -y' : '';
-      ptyProcess.write(`gemini${yoloFlag}\n`);
+      // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
+      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
+      ptyProcess.write(`agy${yoloFlag}\n`);
     } else if (agent === 'codex') {
       const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       const modelName = getCodexMainModel();
@@ -897,9 +898,9 @@ function handlePersistentPtyConnection(ws, req) {
       const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
       ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}${modelFlag}\r\n`);
     } else if (agent === 'gemini') {
-      const yoloFlag = isYolo ? ' -y' : '';
-      const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
-      ptyProcess.write(`gemini${yoloFlag}${modelFlag}\n`);
+      // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. agy는 --model 미지원이라 무시.
+      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
+      ptyProcess.write(`agy${yoloFlag}\n`);
     } else if (agent === 'codex') {
       const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       const modelName = requestedModel || getCodexMainModel();
@@ -1422,8 +1423,9 @@ app.post('/api/pty/office/spawn', (req, res) => {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
     } else if (agent === 'gemini') {
-      const yoloFlag = isYolo ? ' -y' : '';
-      ptyProcess.write(`gemini${yoloFlag}\n`);
+      // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
+      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
+      ptyProcess.write(`agy${yoloFlag}\n`);
     } else if (agent === 'codex') {
       const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       ptyProcess.write(`codex --no-alt-screen${yoloFlag}\n`);

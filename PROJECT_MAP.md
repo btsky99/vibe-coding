@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-05-10 09:15
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-05-26 21:24
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -36,7 +36,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 5055 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 5103 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -57,7 +57,7 @@
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
-| `tools_api.py` | 902 |  |
+| `tools_api.py` | 956 |  |
 | `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
 | `zettel_api.py` | 209 |  |
@@ -183,12 +183,13 @@
 | `install_frontend_deps.py` | 195 |  |
 | `install_gh_cli.py` | 154 |  |
 | `install_harness.py` | 331 |  |
+| `install_hive_hooks.py` | 307 |  |
 | `install_nodejs.py` | 135 |  |
 | `install_npm_tool.py` | 92 |  |
 | `install_playwright_cli.py` | 65 |  |
 | `install_psql.py` | 189 |  |
 | `install_system_tool.py` | 208 |  |
-| `intent_map.py` | 175 |  |
+| `intent_map.py` | 177 |  |
 | `migrate_memory_authors.py` | 99 |  |
 | `migrate_memory_to_zettel.py` | 93 |  |
 | `migrate_project_id_backfill.py` | 184 |  |
@@ -242,7 +243,7 @@
 | `TaskBoardPanel.tsx` | 703 | 칸반 스타일 태스크 보드 |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 204 |  |
-| `ToolsPanel.tsx` | 347 |  |
+| `ToolsPanel.tsx` | 350 |  |
 | `ZettelkastenPanel.tsx` | 537 |  |
 
 ## 🧪 테스트 (tests/)
@@ -271,4 +272,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-05-10 09:15
+> 자동 생성 완료: 2026-05-26 21:24

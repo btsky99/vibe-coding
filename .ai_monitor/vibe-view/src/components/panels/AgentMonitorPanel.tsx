@@ -51,7 +51,7 @@ const CLI_META: Record<string, {
   color: string;
 }> = {
   claude: { label: 'Claude', Icon: Code2, color: '#8b5cf6' },
-  gemini: { label: 'Gemini', Icon: Globe, color: '#eab308' },
+  gemini: { label: 'Antigravity', Icon: Globe, color: '#eab308' },
   codex:  { label: 'Codex',  Icon: Wrench, color: '#3b82f6' },
 };
 
