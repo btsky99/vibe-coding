@@ -129,7 +129,7 @@
 - **예상 시간**: 5분
 - **의존성**: Task 6 완료 후
 
-### [ ] Task 8: `PROJECT_MAP.md` 스킬 카운트 갱신
+### [x] Task 8: `PROJECT_MAP.md` 스킬 카운트 갱신
 - **파일**: `PROJECT_MAP.md`
 - **방법**:
   1. `commands/` 관련 줄이 있으면 제거 또는 "삭제됨" 표기
@@ -141,7 +141,7 @@
 - **예상 시간**: 10분
 - **의존성**: Task 1 완료 후
 
-### [ ] Task 9: 수동 검증 — 스킬 1개 실제 호출
+### [x] Task 9: 수동 검증 — 스킬 1개 실제 호출 (2026-06-07: orchestrator 호출 시 reminder에서 vibe-* 중복 없음 확인)
 - **파일**: 없음 (실행 검증)
 - **방법**:
   1. 메인 세션에서 `/vibe-code-review` 호출 시도 (이번 변경의 git diff 대상)
@@ -155,7 +155,7 @@
 - **예상 시간**: 10분
 - **의존성**: Task 1~7 모두 완료 후
 
-### [ ] Task 10: 커밋 (Conventional Commits + 한글 본문)
+### [x] Task 10: 커밋 (Conventional Commits + 한글 본문)
 - **파일**: 없음 (git 작업)
 - **방법**:
   ```
