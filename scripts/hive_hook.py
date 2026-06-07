@@ -204,6 +204,27 @@ def _inject_hive_context() -> str:
         if today_snap:
             parts.append(f"[오늘 완료 항목]\n" + "\n".join(today_snap.strip().split("\n")[-5:]))
 
+        # 다른 에이전트가 남긴 최근 메모리 (멀티-LLM 간접 협업)
+        # [WHY] hive_memory에 다른 LLM(Gemini/Codex)이 남긴 통찰을 세션 시작 시 자동 주입.
+        # claude만 보면 자기 작업만 이어가서 협업 효과 0. 작성자 필터로 자기 메모 제외.
+        # [출처] 워크트리 vigilant-lamarr에서 회수 (2026-06-07, 미머지 변경 손실 방지).
+        try:
+            other_memos = [
+                row for row in list_memory(top_k=30, show_all=True)
+                if row.get('author', '').lower() not in ('', 'unknown', 'claude', 'agent')
+                and row.get('content', '').strip()
+            ][:3]
+            if other_memos:
+                memo_lines = []
+                for m in other_memos:
+                    author = m.get('author', '?')
+                    title = m.get('title') or m.get('key', '')
+                    snippet = m.get('content', '')[:100].replace('\n', ' ')
+                    memo_lines.append(f"  - [{author}] {title}: {snippet}")
+                parts.append("[다른 에이전트 최근 메모리]\n" + "\n".join(memo_lines))
+        except Exception:
+            pass
+
         if not parts:
             return ""
 
