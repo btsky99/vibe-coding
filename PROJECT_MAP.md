@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-05-26 21:24
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 11:31
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -263,6 +263,33 @@
 | `test_zettel_sync_mirror.py` | 42 |  |
 | `FileExplorer.test.tsx` | 128 | FileExplorer 컴포넌트 |
 
+## 🤖 Claude 통합 (.claude/)
+### Skills (.claude/skills/) — Slash 명령 워크플로우
+| 스킬 | 설명 |
+|------|------|
+| `vibe-brainstorm` | 기능 구현 전 설계 정제 + 승인 |
+| `vibe-write-plan` | 승인된 설계를 마이크로태스크로 분해 (ai_monitor_plan.md) |
+| `vibe-execute-plan` | 계획 순차 실행, 계획 외 작업 금지 |
+| `vibe-code-review` | code-reviewer subagent로 위임 (3관점) |
+| `vibe-security` | security-auditor subagent로 위임 (OWASP) |
+| `vibe-debug` | debugger subagent로 위임 (4단계) |
+| `vibe-orchestrate` | 통합 컨트롤 타워, 스킬 체인 |
+| `vibe-heal` | 반복 오류 패턴 자기치유 |
+| `vibe-release` | 버전 증가 + 커밋/푸시 + GitHub Actions |
+| `vibe-tdd` | RED-GREEN-REFACTOR |
+| `vibe-zettel` | 제텔카스텐 노트 관리 (옵시디언 sync) |
+| `vibe-harness-init` | settings.json + harness_v2.py 초기 세팅 |
+
+### Subagents (.claude/agents/) — 위임 대상
+| Agent | 모델 | 도구 | 매핑 |
+|-------|------|------|------|
+| `code-reviewer` | sonnet | Read/Grep/Glob/Bash | `/vibe-code-review` |
+| `security-auditor` | inherit | Read/Grep/Glob/Bash | `/vibe-security` |
+| `debugger` | inherit | Read/Grep/Glob/Bash/Edit | `/vibe-debug` |
+
+> 라우팅 정책 상세: [`.claude/agents/README.md`](.claude/agents/README.md)
+> 외부 프로젝트 적용(⑨ skills-install)은 2차 PR 예정.
+
 ## 🏗️ 빌드 & CI
 | 파일 | 설명 |
 |------|------|
@@ -272,4 +299,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-05-26 21:24
+> 자동 생성 완료: 2026-06-07 11:31

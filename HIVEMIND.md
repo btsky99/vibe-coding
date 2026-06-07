@@ -1,20 +1,20 @@
 # HiveMind Status
 
-Updated: `2026-05-26 21:24:29`
+Updated: `2026-06-07 11:31:35`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/api/tools_api.py, .ai_monitor/pty-server/pty-server.js, .ai_monitor/server.py, .ai_monitor/vibe-view/dist/index.html, .ai_monitor/vibe-view/src/components/chatslot.tsx (+16 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .claude/commands/vibe-brainstorm.md, .claude/commands/vibe-code-review.md, .claude/commands/vibe-debug.md, .claude/commands/vibe-execute-plan.md, .claude/commands/vibe-heal.md (+16 more). Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- .ai_monitor/api/tools_api.py
-- .ai_monitor/pty-server/pty-server.js
-- .ai_monitor/server.py
-- .ai_monitor/vibe-view/dist/index.html
-- .ai_monitor/vibe-view/src/components/chatslot.tsx
-- .ai_monitor/vibe-view/src/components/panels/agentmonitorpanel.tsx
-- .ai_monitor/vibe-view/src/components/panels/agentpaneltypes.ts
-- .ai_monitor/vibe-view/src/components/panels/toolspanel.tsx
+- .claude/commands/vibe-brainstorm.md
+- .claude/commands/vibe-code-review.md
+- .claude/commands/vibe-debug.md
+- .claude/commands/vibe-execute-plan.md
+- .claude/commands/vibe-heal.md
+- .claude/commands/vibe-orchestrate.md
+- .claude/commands/vibe-release.md
+- .claude/commands/vibe-security.md
 - ... and 13 more
 
 ## Agent Flow
