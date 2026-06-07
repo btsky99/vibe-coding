@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 FILE: tests/test_new_api_modules.py
-DESCRIPTION: dispatcher_api, tasks_api, files_api 단위 테스트.
-             server.py에서 분리된 3개 신규 API 모듈의 핵심 로직을 검증합니다.
+DESCRIPTION: tasks_api, files_api 단위 테스트.
+             server.py에서 분리된 신규 API 모듈의 핵심 로직을 검증합니다.
 
              [테스트 전략]
              - HTTP 핸들러는 Mock 객체로 대체 (실제 서버 시작 없이 테스트)
@@ -10,15 +10,16 @@ DESCRIPTION: dispatcher_api, tasks_api, files_api 단위 테스트.
              - 파일 I/O는 tmp_path로 격리
 
 REVISION HISTORY:
+- 2026-06-07 Claude: dispatcher_api 테스트 제거 — 디스패처 시스템 폐기로 대상 모듈 사라짐.
+                    auto_dispatcher 모킹도 함께 제거.
 - 2026-03-22 Claude: 최초 작성 — server.py 라우트 분리 후 회귀 방지 커버리지
 """
 
 import io
 import json
 import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 # ── 프로젝트 경로 설정 ──
@@ -29,22 +30,6 @@ sys.path.insert(0, str(_AI_MONITOR))
 sys.path.insert(0, str(_AI_MONITOR / "api"))
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
-# auto_dispatcher 모킹 (실제 ITCP/PG 없이 테스트)
-_mock_dispatcher = MagicMock()
-_mock_dispatcher.AGENT_CAPABILITIES = {
-    'claude': {'strengths': ['code', 'debug']},
-    'gemini': {'strengths': ['design', 'plan']},
-}
-_mock_dispatcher.detect_task_type.return_value = 'bug_fix'
-_mock_dispatcher.score_agent.return_value = 0.85
-_mock_dispatcher.select_best_agent.return_value = 'claude'
-_mock_dispatcher.status.return_value = {'active': True, 'agents': 2}
-_mock_dispatcher.dispatch.return_value = {'status': 'dispatched', 'assigned_to': 'claude'}
-_mock_dispatcher.fan_out.return_value = [{'task': 't1', 'agent': 'claude'}]
-_mock_dispatcher.request_verification.return_value = {'status': 'verified'}
-sys.modules['auto_dispatcher'] = _mock_dispatcher
-
-import dispatcher_api
 import tasks_api
 import files_api
 
@@ -75,104 +60,6 @@ class MockHandler:
     def response_json(self):
         """응답 바디를 JSON으로 파싱합니다."""
         return json.loads(self._output.getvalue().decode('utf-8'))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# dispatcher_api 테스트
-# ══════════════════════════════════════════════════════════════════════════════
-
-class TestDispatcherApiGet:
-    """dispatcher_api.handle_get 테스트."""
-
-    def test_score_returns_best_agent(self):
-        """GET /api/dispatcher/score — 최적 에이전트와 점수를 반환해야 한다."""
-        handler = MockHandler()
-        result = dispatcher_api.handle_get(
-            handler, '/api/dispatcher/score',
-            {'desc': ['fix bug'], 'type': ['bug_fix']},
-            SCRIPTS_DIR=_PROJECT_ROOT / 'scripts',
-            list_tasks=MagicMock(return_value=[]),
-            current_project_id='test',
-        )
-        assert result is True
-        assert handler._response_code == 200
-        data = handler.response_json
-        assert data['best_agent'] == 'claude'
-        assert 'scores' in data
-
-    def test_status_returns_dispatcher_state(self):
-        """GET /api/dispatcher/status — 현재 분배 현황을 반환해야 한다."""
-        handler = MockHandler()
-        result = dispatcher_api.handle_get(
-            handler, '/api/dispatcher/status', {},
-            SCRIPTS_DIR=_PROJECT_ROOT / 'scripts',
-            list_tasks=MagicMock(return_value=[]),
-            current_project_id='test',
-        )
-        assert result is True
-        data = handler.response_json
-        assert data['active'] is True
-
-    def test_history_filters_dispatch_tasks(self):
-        """GET /api/dispatcher/history — created_by=dispatcher 태스크만 필터링해야 한다."""
-        mock_tasks = [
-            {'id': '1', 'created_by': 'dispatcher', 'assigned_to': 'claude',
-             'status': 'done', 'tags': ['dispatch'], 'timestamp': '2026-03-22T10:00:00'},
-            {'id': '2', 'created_by': 'user', 'assigned_to': 'gemini',
-             'status': 'pending', 'tags': [], 'timestamp': '2026-03-22T10:01:00'},
-        ]
-        handler = MockHandler()
-        result = dispatcher_api.handle_get(
-            handler, '/api/dispatcher/history', {},
-            SCRIPTS_DIR=_PROJECT_ROOT / 'scripts',
-            list_tasks=MagicMock(return_value=mock_tasks),
-            current_project_id='test',
-        )
-        assert result is True
-        data = handler.response_json
-        # user 태스크는 필터링되어야 함
-        assert len(data) == 1
-        assert data[0]['assigned_to'] == 'claude'
-
-    def test_unknown_path_returns_false(self):
-        """알 수 없는 경로는 False를 반환해야 한다."""
-        handler = MockHandler()
-        result = dispatcher_api.handle_get(
-            handler, '/api/dispatcher/unknown', {},
-            SCRIPTS_DIR=_PROJECT_ROOT / 'scripts',
-            list_tasks=MagicMock(return_value=[]),
-            current_project_id='test',
-        )
-        assert result is False
-
-
-class TestDispatcherApiPost:
-    """dispatcher_api.handle_post 테스트."""
-
-    def test_dispatch_returns_assignment(self):
-        """POST /api/dispatcher/dispatch — 태스크 분배 결과를 반환해야 한다."""
-        handler = MockHandler()
-        result = dispatcher_api.handle_post(
-            handler, '/api/dispatcher/dispatch',
-            {'description': 'fix bug', 'type': 'bug_fix', 'priority': 'high'},
-            SCRIPTS_DIR=_PROJECT_ROOT / 'scripts',
-        )
-        assert result is True
-        data = handler.response_json
-        assert data['status'] == 'dispatched'
-        assert data['assigned_to'] == 'claude'
-
-    def test_verify_returns_result(self):
-        """POST /api/dispatcher/verify — 크로스 검증 결과를 반환해야 한다."""
-        handler = MockHandler()
-        result = dispatcher_api.handle_post(
-            handler, '/api/dispatcher/verify',
-            {'task_id': 'TASK-1', 'summary': 'done', 'author': 'claude'},
-            SCRIPTS_DIR=_PROJECT_ROOT / 'scripts',
-        )
-        assert result is True
-        data = handler.response_json
-        assert data['status'] == 'verified'
 
 
 # ══════════════════════════════════════════════════════════════════════════════

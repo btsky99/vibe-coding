@@ -63,7 +63,6 @@ FILE_DESCRIPTIONS = {
     "api/git_api.py": "Git 저장소 관리 API (/api/git/*)",
     "api/memory_api.py": "메모리/지식 저장소 API (/api/memory/*)",
     "api/pty_api.py": "PTY 터미널 제어 API (/api/pty/*)",
-    "api/dispatcher_api.py": "디스패처 API (/api/dispatcher/*) — server.py에서 분리",
     "api/tasks_api.py": "태스크 API (/api/tasks/*) — server.py에서 분리",
     "api/files_api.py": "파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리",
 
@@ -81,7 +80,6 @@ FILE_DESCRIPTIONS = {
     "scripts/gemini_responder.py": "Gemini CLI 자동 응답기",
 
     # ── scripts/ 하이브/협업 ──
-    "scripts/auto_dispatcher.py": "역량 기반 자동 작업 분배 + 크로스 검증",
     "scripts/orchestrator.py": "하이브 태스크 스케줄링 및 에이전트 감시",
     "scripts/hive_debate.py": "에이전트 간 의견 조율 토론 워크플로우",
     "scripts/hive_bridge.py": "PostgreSQL 18 기반 하이브 통합 로깅",
@@ -168,7 +166,6 @@ FILE_DESCRIPTIONS = {
     "TaskBoardPanel.tsx": "칸반 스타일 태스크 보드",
     "MemoryPanel.tsx": "공유 지식 베이스 (PostgreSQL)",
     "HivePanel.tsx": "하이브 시스템 진단 (헬스 체크, 자가 치유)",
-    "DispatcherPanel.tsx": "멀티-LLM 디스패처 (역량 레이더 차트)",
     "OrchestratorPanel.tsx": "스킬 체인 현황판",
     "KanbanPanel.tsx": "오케스트레이션 수평 파이프라인 뷰",
     "SkillResultsPanel.tsx": "스킬 실행 결과 (라이브 + 기록)",
@@ -297,7 +294,7 @@ def generate():
     categories = {
         "에이전트/터미널": ["cli_agent.py", "agent_shell.py", "terminal_agent.py",
                            "agent_launcher.py", "agent_detector.py", "agent_protocol.py", "gemini_responder.py"],
-        "하이브/협업": ["auto_dispatcher.py", "orchestrator.py", "hive_debate.py", "hive_bridge.py",
+        "하이브/협업": ["orchestrator.py", "hive_debate.py", "hive_bridge.py",
                         "memory.py", "worktree_manager.py", "generate_hivemind_doc.py", "analyze_hive.py"],
         "훅/이벤트": ["hive_hook.py", "hook_bridge.py", "claude_hook.py", "gemini_hook.py"],
         "통신/ITCP": ["itcp.py", "vibe_mux.py", "vibe_mux_agent.py", "send_message.py",
@@ -391,7 +388,6 @@ def generate():
     tests_dir = PROJECT_ROOT / "tests"
     test_targets = {
         "test_agent_api.py": "api/agent_api.py",
-        "test_dispatcher_loop.py": "scripts/auto_dispatcher.py + scripts/itcp.py",
         "test_itcp_context.py": "scripts/itcp.py 컨텍스트 빌딩",
         "test_itcp_fallback.py": "scripts/itcp.py 폴백 경로",
     }

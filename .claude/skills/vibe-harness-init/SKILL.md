@@ -1,9 +1,21 @@
+---
+name: vibe-harness-init
+description: >
+  하네스 V2를 새 프로젝트에 자동 설치합니다. AGENTS.md / RULES.md / HARNESS_V2.md /
+  feature_list.json 등을 프로젝트에 맞게 커스터마이즈하여 생성합니다.
+  Use when: "하네스 설치", "하네스 세팅", 새 프로젝트 초기화 시.
+allowed-tools: Read, Write, Bash, Glob, Grep
+user-invocable: true
+---
+
 <!--
 FILE: .claude/skills/vibe-harness-init/SKILL.md
 DESCRIPTION: 하네스 V2를 새 프로젝트에 자동 설치하는 스킬.
              /vibe-harness-init 명령으로 호출. 프로젝트에 맞게 커스터마이즈된 하네스 구조를 생성.
 
 REVISION HISTORY:
+- 2026-06-07 Claude: frontmatter 추가 — 시스템 reminder가 description 읽어 "<!--"로 표시되던
+                    문제 해결. 다른 vibe-* 스킬과 형식 통일.
 - 2026-03-30 Claude: 최초 생성 — 하네스 V2 설치 자동화 스킬
 -->
 

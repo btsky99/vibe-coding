@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 12:13
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 15:22
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -104,7 +104,7 @@
 ### 훅/이벤트
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_hook.py` | 981 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
+| `hive_hook.py` | 1002 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
 | `hook_bridge.py` | 497 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
 | `gemini_hook.py` | 629 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
@@ -155,7 +155,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 511 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 507 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -253,11 +253,10 @@
 | `test_codex_harness_v2.py` | 88 |  |
 | `test_codex_orchestration.py` | 77 |  |
 | `test_codex_pg_watcher.py` | 108 |  |
-| `test_dispatcher_loop.py` | 122 | scripts/auto_dispatcher.py + scripts/itcp.py |
 | `test_harness_verify.py` | 216 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 225 | scripts/itcp.py 폴백 경로 |
-| `test_new_api_modules.py` | 467 |  |
+| `test_new_api_modules.py` | 354 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
@@ -271,7 +270,7 @@
 | `vibe-code-review` | 코드 품질, 성능, 가독성을 3가지 관점에서 검토합니다. 보안 심층 점검은 /vibe-security를 사용하세요. |
 | `vibe-debug` | 버그의 근본 원인을 4단계로 분석합니다. 증상이 아닌 원인을 수정합니다. |
 | `vibe-execute-plan` | ai_monitor_plan.md의 계획을 순서대로 실행합니다. 계획 외 작업 추가 금지. |
-| `vibe-harness-init` |  |
+| `vibe-harness-init` | 하네스 V2를 새 프로젝트에 자동 설치합니다. AGENTS.md / RULES.md / HARNESS_V2.md / |
 | `vibe-heal` | 자기치유 스킬. 반복 오류 패턴을 감지하고 근본 원인을 수정하여 재발을 방지합니다. |
 | `vibe-orchestrate` | Vibe Coding 통합 컨트롤 타워. 하이브 컨텍스트 로드 + 요청 분석 + 스킬 체인 자동 실행 + 자기치유. |
 | `vibe-release` | EXE 빌드 릴리즈 파이프라인. 버전 증가 → 커밋 → 푸시 → GitHub Actions가 자동으로 EXE 빌드 + Release 생성. |
@@ -298,4 +297,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-07 12:13
+> 자동 생성 완료: 2026-06-07 15:22
