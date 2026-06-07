@@ -100,8 +100,6 @@ FILE_DESCRIPTIONS = {
     "scripts/vibe_mux_agent.py": "터미널별 MUX 에이전트 수신/실행 루프",
     "scripts/send_message.py": "ITCP 기반 터미널 간 메시지 전송 CLI",
     "scripts/megaphone.py": "하이브 브로드캐스트 메시지 유틸",
-    "scripts/discord_bridge.py": "Discord 멀티터미널 브릿지",
-
     # ── scripts/ 검증/가드 ──
     "scripts/safety_guard.py": "Bounded Autonomy 위험 명령 탐지 (60+ 패턴)",
     "scripts/completion_guard.py": "Harness continue:false 완료 신호 감지",
@@ -137,14 +135,8 @@ FILE_DESCRIPTIONS = {
     "scripts/setup_hive_pg.py": "PostgreSQL 18 + pgvector 자동 설치",
     "scripts/install_codex.py": "Codex CLI npm 설치 및 검증",
 
-    # ── scripts/ 마이그레이션 ──
-    "scripts/migrate_memory_to_pg.py": "SQLite → PostgreSQL 데이터 이관",
-    "scripts/migrate_sqlite_to_files.py": "SQLite → 파일 시스템 마이그레이션",
-
     # ── scripts/ 테스트/디버깅 ──
     "scripts/test_pg_logging.py": "PostgreSQL 로깅 테스트",
-    "scripts/test_discord.py": "Discord 브릿지 통합 테스트",
-    "scripts/debug_discord.py": "Discord 브릿지 디버거",
     "scripts/generate_project_map.py": "PROJECT_MAP.md 자동 생성 스크립트 (이 파일)",
 
     # ── 프론트엔드 컴포넌트 ──
@@ -157,7 +149,6 @@ FILE_DESCRIPTIONS = {
     "VibeEditor.tsx": "코드 에디터 래퍼 (Monaco Editor)",
     "MessageComposer.tsx": "에이전트 간 메시지 작성 폼",
     "ThoughtTrace.tsx": "AI 사고 로그 표시",
-    "DiscordSettingsModal.tsx": "Discord 설정 모달",
     "FileTreeNode.tsx": "파일 트리 노드 (재귀 폴더 확장)",
     "FilePathText.tsx": "파일 경로 렌더링 (클릭 가능 링크화)",
     "AgentPanel.tsx": "자율 에이전트 통합 컨트롤 패널 (SSE 스트림, 워크플로우, 사고흐름)",
@@ -168,7 +159,6 @@ FILE_DESCRIPTIONS = {
     "HivePanel.tsx": "하이브 시스템 진단 (헬스 체크, 자가 치유)",
     "SkillResultsPanel.tsx": "스킬 실행 결과 (라이브 + 기록)",
     "GitPanel.tsx": "Git 통합 (브랜치, 스테이징, 커밋)",
-    "DiscordConfigPanel.tsx": "Discord 설정 패널",
 }
 
 
@@ -296,7 +286,7 @@ def generate():
                         "memory.py", "worktree_manager.py", "generate_hivemind_doc.py", "analyze_hive.py"],
         "훅/이벤트": ["hive_hook.py", "hook_bridge.py", "claude_hook.py", "gemini_hook.py"],
         "통신/ITCP": ["itcp.py", "vibe_mux.py", "vibe_mux_agent.py", "send_message.py",
-                       "megaphone.py", "discord_bridge.py"],
+                       "megaphone.py"],
         "검증/가드": ["safety_guard.py", "completion_guard.py", "drift_detector.py",
                       "plan_validator.py", "rules_validator.py"],
         "스킬 관리": ["skill_orchestrator.py", "skill_manager.py", "skill_analyzer.py",
@@ -306,7 +296,6 @@ def generate():
                      "lock_manager.py", "osc_parser.py", "git_visualizer.py", "screenshot_analyzer.py",
                      "generate_project_map.py"],
         "인프라": ["pg_manager.py", "setup_hive_pg.py", "install_codex.py"],
-        "마이그레이션": ["migrate_memory_to_pg.py", "migrate_sqlite_to_files.py"],
     }
 
     categorized = set()

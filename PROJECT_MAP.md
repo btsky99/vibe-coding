@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 16:18
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 16:24
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -155,7 +155,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 505 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 494 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -163,12 +163,6 @@
 | `pg_manager.py` | 269 | 포터블 PostgreSQL 18 + pgvector 통합 관리자 |
 | `setup_hive_pg.py` | 133 | PostgreSQL 18 + pgvector 자동 설치 |
 | `install_codex.py` | 85 | Codex CLI npm 설치 및 검증 |
-
-### 마이그레이션
-| 파일 | 줄 수 | 설명 |
-|------|------|------|
-| `migrate_memory_to_pg.py` | 83 | SQLite → PostgreSQL 데이터 이관 |
-| `migrate_sqlite_to_files.py` | 127 | SQLite → 파일 시스템 마이그레이션 |
 
 ### 기타
 | 파일 | 줄 수 | 설명 |
@@ -190,10 +184,6 @@
 | `install_psql.py` | 189 |  |
 | `install_system_tool.py` | 208 |  |
 | `intent_map.py` | 177 |  |
-| `migrate_memory_authors.py` | 99 |  |
-| `migrate_memory_to_zettel.py` | 93 |  |
-| `migrate_project_id_backfill.py` | 184 |  |
-| `migrate_project_id_normalize.py` | 167 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_gemini_clean.py` | 130 |  |
@@ -294,4 +284,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-07 16:18
+> 자동 생성 완료: 2026-06-07 16:24
