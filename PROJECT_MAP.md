@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 11:31
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 12:13
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -155,7 +155,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 437 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 511 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -267,28 +267,27 @@
 ### Skills (.claude/skills/) — Slash 명령 워크플로우
 | 스킬 | 설명 |
 |------|------|
-| `vibe-brainstorm` | 기능 구현 전 설계 정제 + 승인 |
-| `vibe-write-plan` | 승인된 설계를 마이크로태스크로 분해 (ai_monitor_plan.md) |
-| `vibe-execute-plan` | 계획 순차 실행, 계획 외 작업 금지 |
-| `vibe-code-review` | code-reviewer subagent로 위임 (3관점) |
-| `vibe-security` | security-auditor subagent로 위임 (OWASP) |
-| `vibe-debug` | debugger subagent로 위임 (4단계) |
-| `vibe-orchestrate` | 통합 컨트롤 타워, 스킬 체인 |
-| `vibe-heal` | 반복 오류 패턴 자기치유 |
-| `vibe-release` | 버전 증가 + 커밋/푸시 + GitHub Actions |
-| `vibe-tdd` | RED-GREEN-REFACTOR |
-| `vibe-zettel` | 제텔카스텐 노트 관리 (옵시디언 sync) |
-| `vibe-harness-init` | settings.json + harness_v2.py 초기 세팅 |
+| `vibe-brainstorm` | 모든 기능 구현 전 필수 단계. 요구사항을 정제하고 설계를 승인받습니다. 승인 전 코드 작성 금지. |
+| `vibe-code-review` | 코드 품질, 성능, 가독성을 3가지 관점에서 검토합니다. 보안 심층 점검은 /vibe-security를 사용하세요. |
+| `vibe-debug` | 버그의 근본 원인을 4단계로 분석합니다. 증상이 아닌 원인을 수정합니다. |
+| `vibe-execute-plan` | ai_monitor_plan.md의 계획을 순서대로 실행합니다. 계획 외 작업 추가 금지. |
+| `vibe-harness-init` |  |
+| `vibe-heal` | 자기치유 스킬. 반복 오류 패턴을 감지하고 근본 원인을 수정하여 재발을 방지합니다. |
+| `vibe-orchestrate` | Vibe Coding 통합 컨트롤 타워. 하이브 컨텍스트 로드 + 요청 분석 + 스킬 체인 자동 실행 + 자기치유. |
+| `vibe-release` | EXE 빌드 릴리즈 파이프라인. 버전 증가 → 커밋 → 푸시 → GitHub Actions가 자동으로 EXE 빌드 + Release 생성. |
+| `vibe-security` | OWASP Top 10 기반 보안 취약점을 4단계로 점검합니다. 배포 전 필수 보안 검토. |
+| `vibe-tdd` | RED-GREEN-REFACTOR 사이클로 테스트 주도 개발을 진행합니다. |
+| `vibe-write-plan` | 승인된 아이디어를 마이크로태스크로 분해하여 ai_monitor_plan.md에 저장합니다. |
+| `vibe-zettel` | 제텔카스텐 지식 관리 스킬. 노트 캡처, 정제(fleeting→permanent 승격), 유사 노트 연결, 검색, Obsidian 동기화. |
 
 ### Subagents (.claude/agents/) — 위임 대상
-| Agent | 모델 | 도구 | 매핑 |
-|-------|------|------|------|
-| `code-reviewer` | sonnet | Read/Grep/Glob/Bash | `/vibe-code-review` |
-| `security-auditor` | inherit | Read/Grep/Glob/Bash | `/vibe-security` |
-| `debugger` | inherit | Read/Grep/Glob/Bash/Edit | `/vibe-debug` |
+| Agent | 매핑 스킬 |
+|-------|-----------|
+| `code-reviewer` | /vibe-code-review |
+| `debugger` | /vibe-debug |
+| `security-auditor` | /vibe-security |
 
 > 라우팅 정책 상세: [`.claude/agents/README.md`](.claude/agents/README.md)
-> 외부 프로젝트 적용(⑨ skills-install)은 2차 PR 예정.
 
 ## 🏗️ 빌드 & CI
 | 파일 | 설명 |
@@ -299,4 +298,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-07 11:31
+> 자동 생성 완료: 2026-06-07 12:13

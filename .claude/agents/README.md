@@ -53,7 +53,7 @@ REVISION HISTORY:
 
 ## 외부 프로젝트 적용 (2차 PR 예고)
 
-이 라우팅 정책을 다른 프로젝트(예: D:/ons, D:/clim)에서도 그대로 쓰려면 별도 작업 필요:
+이 라우팅 정책을 다른 프로젝트(`<외부 프로젝트 루트>`)에서도 그대로 쓰려면 별도 작업 필요:
 - 신규 세팅 프롬프트 ⑨ `skills-install` 추가 — `install_hive_hooks.py` 패턴 복제
 - vibe-coding 저장소의 `.claude/skills/`, `.claude/agents/`를 외부 프로젝트로 동기화
 - 외부 프로젝트 세팅 시 "프로젝트 세팅" 버튼 한 번 누르면 자동 적용

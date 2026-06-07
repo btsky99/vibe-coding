@@ -1,21 +1,15 @@
 # HiveMind Status
 
-Updated: `2026-06-07 11:31:35`
+Updated: `2026-06-07 12:01:39`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .claude/commands/vibe-brainstorm.md, .claude/commands/vibe-code-review.md, .claude/commands/vibe-debug.md, .claude/commands/vibe-execute-plan.md, .claude/commands/vibe-heal.md (+16 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .claude/scheduled_tasks.lock, ai_monitor_plan.md, project_map.md. Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- .claude/commands/vibe-brainstorm.md
-- .claude/commands/vibe-code-review.md
-- .claude/commands/vibe-debug.md
-- .claude/commands/vibe-execute-plan.md
-- .claude/commands/vibe-heal.md
-- .claude/commands/vibe-orchestrate.md
-- .claude/commands/vibe-release.md
-- .claude/commands/vibe-security.md
-- ... and 13 more
+- .claude/scheduled_tasks.lock
+- ai_monitor_plan.md
+- project_map.md
 
 ## Agent Flow
 ```mermaid

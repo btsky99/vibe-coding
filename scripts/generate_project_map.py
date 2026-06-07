@@ -5,6 +5,8 @@ DESCRIPTION: PROJECT_MAP.md 자동 생성 스크립트.
              문서 드리프트를 방지하기 위해 파일 시스템을 진실의 원천으로 사용합니다.
 
 REVISION HISTORY:
+- 2026-06-07 Claude: Claude 통합 섹션(.claude/skills/, .claude/agents/) 자동 생성 추가.
+  [과거사고] 2026-06-07 수동 추가한 Claude 통합 섹션이 자동 재생성 시 즉시 사라지는 사고 발생 — 자동 스크립트에 누락된 섹션은 무조건 사라짐을 입증.
 - 2026-04-15 Claude: stdout UTF-8 강제 — Windows CP949 환경에서 ✅ 이모지 print
   실패로 인해 17일째 자동 갱신 안 되던 근본 원인 수정
 - 2026-03-22 Claude: 최초 생성 — 5축 모듈 맵 기반 자동 생성
@@ -406,7 +408,79 @@ def generate():
             lines.append(f"| `{f.name}` | {lc} | {f.stem.replace('.test', '')} 컴포넌트 |")
     lines.append("")
 
-    # ── 6. 빌드/CI ──
+    # ── 6. Claude 통합 (.claude/) ──
+    # [WHY] vibe-* 슬래시 스킬과 Subagent 위임 매핑을 PROJECT_MAP에 노출해야
+    # 신규 멤버가 "어떤 스킬을 부르면 어떤 subagent가 도는지" 한눈에 파악 가능.
+    # [과거사고] 2026-06-07: 수동 추가 섹션이 자동 재생성 시 사라짐 → 자동 생성으로 흡수.
+    claude_dir = PROJECT_ROOT / ".claude"
+    skills_dir = claude_dir / "skills"
+    agents_dir = claude_dir / "agents"
+    if skills_dir.exists() or agents_dir.exists():
+        lines.append("## 🤖 Claude 통합 (.claude/)")
+
+        if skills_dir.exists():
+            lines.append("### Skills (.claude/skills/) — Slash 명령 워크플로우")
+            lines.append("| 스킬 | 설명 |")
+            lines.append("|------|------|")
+            for d in sorted(skills_dir.iterdir()):
+                if not d.is_dir() or d.name.startswith('.') or d.name.startswith('__'):
+                    continue
+                skill_md = d / "SKILL.md"
+                desc = ""
+                if skill_md.exists():
+                    # frontmatter의 description: 줄 파싱.
+                    # [제약] 정식 YAML 파서 안 씀 — 시작/끝 마커 사이만 보고 description: 키 추출.
+                    # [멀티라인] `description: >` 또는 `description: |` 다음 들여쓴 줄 첫 문장 1개만 채택.
+                    try:
+                        text = skill_md.read_text(encoding='utf-8', errors='replace')
+                        in_fm = False
+                        capture_next = False
+                        for ln in text.splitlines():
+                            if ln.strip() == '---':
+                                if in_fm:
+                                    break
+                                in_fm = True
+                                continue
+                            if not in_fm:
+                                continue
+                            if capture_next:
+                                if ln.strip():
+                                    desc = ln.strip()
+                                    break
+                                continue
+                            if ln.strip().startswith('description:'):
+                                val = ln.split(':', 1)[1].strip()
+                                if val and val not in ('>', '|', '|-', '>-'):
+                                    desc = val.strip('"').strip("'")
+                                    break
+                                # 멀티라인 마커 — 다음 비어있지 않은 들여쓴 줄을 채택.
+                                capture_next = True
+                    except Exception:
+                        pass
+                lines.append(f"| `{d.name}` | {desc} |")
+            lines.append("")
+
+        if agents_dir.exists():
+            lines.append("### Subagents (.claude/agents/) — 위임 대상")
+            lines.append("| Agent | 매핑 스킬 |")
+            lines.append("|-------|-----------|")
+            # vibe-* 스킬 ↔ subagent 라우팅. agents/README.md와 동기 유지.
+            agent_routing = {
+                "code-reviewer": "/vibe-code-review",
+                "security-auditor": "/vibe-security",
+                "debugger": "/vibe-debug",
+            }
+            for f in sorted(agents_dir.iterdir()):
+                if not f.is_file() or f.suffix != '.md' or f.name == 'README.md':
+                    continue
+                agent_name = f.stem
+                mapping = agent_routing.get(agent_name, "(매핑 미정)")
+                lines.append(f"| `{agent_name}` | {mapping} |")
+            lines.append("")
+            lines.append("> 라우팅 정책 상세: [`.claude/agents/README.md`](.claude/agents/README.md)")
+            lines.append("")
+
+    # ── 7. 빌드/CI ──
     lines.append("## 🏗️ 빌드 & CI")
     lines.append("| 파일 | 설명 |")
     lines.append("|------|------|")
