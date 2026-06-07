@@ -767,6 +767,51 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
             "- 설치 EXE 단독 PC: scripts/ 폴더가 외부에 없어도 `vibe-coding.exe hook`만으로 작동"
         ),
     },
+    # ── 9단계: 스킬/Subagent 설치 (외부 프로젝트에 vibe-* 슬래시 명령 + subagent 복사) ──────
+    {
+        "id": "skills-install",
+        "agent": "Claude Code",
+        "category": "setup",
+        "description": "⑨ 스킬/Subagent 설치 — vibe-* 슬래시 명령(brainstorm/write-plan/code-review 등)과 code-reviewer/security-auditor/debugger subagent를 이 프로젝트에 복사",
+        "prompt": (
+            "【대상 프로젝트】{project_path}\n\n"
+            "이 프로젝트(외부 프로젝트일 수 있음)의 .claude/skills/와 .claude/agents/에\n"
+            "비이브 코딩이 제공하는 12개 스킬과 3개 subagent를 복사해줘. 이게 있어야\n"
+            "외부 프로젝트에서도 `/vibe-brainstorm`, `/vibe-code-review` 같은 slash 명령이\n"
+            "동작하고 code-reviewer/security-auditor/debugger 위임이 작동한다.\n\n"
+            "【권장 — install_skills.py 사용】\n"
+            "수동으로 파일을 옮기지 말고 비이브 코딩이 제공하는 스크립트를 호출해:\n"
+            "  python <비이브-코딩>/scripts/install_skills.py --target {project_path}\n"
+            "이 스크립트가 자동 탐색 + 멱등 비교 + 백업 + 복사를 전부 수행한다.\n"
+            "dry-run으로 선검증 후 실행: `--dry-run` 플래그 추가.\n\n"
+            "【진입점 자동 탐색 우선순위】\n"
+            "스크립트는 다음 순서로 비이브 코딩 저장소 루트를 찾는다 (.claude/skills/ +\n"
+            ".claude/agents/ 둘 다 있어야 OK):\n"
+            "  (a) 환경변수 VIBE_HOME — 비이브 코딩 루트 디렉토리 직접 지정\n"
+            "  (b) PATH의 vibe-coding[.exe] 옆/부모/조부모에 .claude/ 있는지 확인\n"
+            "  (c) 표준 설치 경로 후보 순회:\n"
+            "      C:/Program Files/vibe-coding/\n"
+            "      %LOCALAPPDATA%/Programs/vibe-coding/\n"
+            "      D:/vibe-coding/\n"
+            "      C:/vibe-coding/\n"
+            "  (d) 모두 실패 시 중단 — 사용자에게 VIBE_HOME 설정 안내 (추측 금지)\n\n"
+            "【복사 정책】\n"
+            "  - 멱등성: 대상이 이미 최신이면 SKIP (filecmp.dircmp 재귀 비교)\n"
+            "  - 다른 내용이 있으면 백업 후 덮어쓰기 (.bak.YYYYMMDDHHmmss 디렉토리)\n"
+            "  - 자기 자신을 자기 자신에 설치 시도하면 no-op (저장소 본인이 대상)\n\n"
+            "【검증 보고】\n"
+            "  - 사용한 vibe-coding 루트 (어떤 우선순위로 찾았는지)\n"
+            "  - 복사된 항목 수 (skills 12개 + agents 3개 기준)\n"
+            "  - 백업 폴더명 (있으면)\n"
+            "  - 다음 Claude Code 재시작부터 /vibe-* 명령이 동작한다는 안내\n\n"
+            "【원칙】\n"
+            "- 절대 경로를 직접 박지 말고 자동 탐색 결과 사용 (다른 PC 호환)\n"
+            "- 기존 사용자 커스텀이 있을 수 있으니 백업 없이 덮어쓰기 금지\n"
+            "- 멱등성: 매번 실행해도 변경 없으면 백업 안 만든다 (디스크 절약)\n"
+            "- ⑤ hive-hooks와 짝 — 메모리 인프라 + 슬래시 명령이 함께 있어야 외부 프로젝트에서\n"
+            "  '바이브 코딩처럼' 작업 가능"
+        ),
+    },
     # ── 규칙 파일 생성 (기존) ─────────────────────────────────────────
     {
         "id": "claude-rules",
