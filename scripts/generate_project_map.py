@@ -166,8 +166,6 @@ FILE_DESCRIPTIONS = {
     "TaskBoardPanel.tsx": "칸반 스타일 태스크 보드",
     "MemoryPanel.tsx": "공유 지식 베이스 (PostgreSQL)",
     "HivePanel.tsx": "하이브 시스템 진단 (헬스 체크, 자가 치유)",
-    "OrchestratorPanel.tsx": "스킬 체인 현황판",
-    "KanbanPanel.tsx": "오케스트레이션 수평 파이프라인 뷰",
     "SkillResultsPanel.tsx": "스킬 실행 결과 (라이브 + 기록)",
     "GitPanel.tsx": "Git 통합 (브랜치, 스테이징, 커밋)",
     "DiscordConfigPanel.tsx": "Discord 설정 패널",

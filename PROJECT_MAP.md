@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 15:22
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 16:18
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -155,7 +155,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 507 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 505 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -232,13 +232,10 @@
 ### 패널 컴포넌트 (components/panels/)
 | 패널 | 줄 수 | 설명 |
 |------|------|------|
-| `AgentMonitorPanel.tsx` | 729 |  |
 | `AgentTerminalCard.tsx` | 256 |  |
 | `GitPanel.tsx` | 250 | Git 통합 (브랜치, 스테이징, 커밋) |
 | `HivePanel.tsx` | 464 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
-| `KanbanPanel.tsx` | 446 | 오케스트레이션 수평 파이프라인 뷰 |
 | `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
-| `SkillChainPanel.tsx` | 394 |  |
 | `SkillResultsPanel.tsx` | 492 | 스킬 실행 결과 (라이브 + 기록) |
 | `TaskBoardPanel.tsx` | 703 | 칸반 스타일 태스크 보드 |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
@@ -297,4 +294,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-07 15:22
+> 자동 생성 완료: 2026-06-07 16:18
