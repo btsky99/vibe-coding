@@ -77,7 +77,6 @@ FILE_DESCRIPTIONS = {
     "scripts/agent_launcher.py": "통합 에이전트 런처 (NORMAL/YOLO 모드)",
     "scripts/agent_detector.py": "활성 AI 에이전트 자동 감지 (psutil)",
     "scripts/agent_protocol.py": "RFC 관리 + 하이브 토론 프로토콜",
-    "scripts/gemini_responder.py": "Gemini CLI 자동 응답기",
 
     # ── scripts/ 하이브/협업 ──
     "scripts/orchestrator.py": "하이브 태스크 스케줄링 및 에이전트 감시",
@@ -99,7 +98,6 @@ FILE_DESCRIPTIONS = {
     "scripts/vibe_mux.py": "cmux-style Named Pipe 멀티플렉서 서버",
     "scripts/vibe_mux_agent.py": "터미널별 MUX 에이전트 수신/실행 루프",
     "scripts/send_message.py": "ITCP 기반 터미널 간 메시지 전송 CLI",
-    "scripts/megaphone.py": "하이브 브로드캐스트 메시지 유틸",
     # ── scripts/ 검증/가드 ──
     "scripts/safety_guard.py": "Bounded Autonomy 위험 명령 탐지 (60+ 패턴)",
     "scripts/completion_guard.py": "Harness continue:false 완료 신호 감지",
@@ -118,7 +116,6 @@ FILE_DESCRIPTIONS = {
     "scripts/hive_watchdog.py": "자가 치유(3계층) 엔진 + skill_analyzer 트리거",
     "scripts/claude_watchdog.py": "Claude 에이전트 행(hang) 오류 감지 + 재시작",
     "scripts/heal_daemon.py": "pg_logs 감시 + 에러 자동 수리",
-    "scripts/terminal_status.py": "터미널 상태 모니터",
 
     # ── scripts/ 유틸리티 ──
     "scripts/vibe_cli.py": "cmux 호환 vibe CLI (notify/set-progress/codex)",
@@ -281,17 +278,16 @@ def generate():
     # 카테고리별 그룹핑
     categories = {
         "에이전트/터미널": ["cli_agent.py", "agent_shell.py", "terminal_agent.py",
-                           "agent_launcher.py", "agent_detector.py", "agent_protocol.py", "gemini_responder.py"],
+                           "agent_launcher.py", "agent_detector.py", "agent_protocol.py"],
         "하이브/협업": ["orchestrator.py", "hive_debate.py", "hive_bridge.py",
                         "memory.py", "worktree_manager.py", "generate_hivemind_doc.py", "analyze_hive.py"],
         "훅/이벤트": ["hive_hook.py", "hook_bridge.py", "claude_hook.py", "gemini_hook.py"],
-        "통신/ITCP": ["itcp.py", "vibe_mux.py", "vibe_mux_agent.py", "send_message.py",
-                       "megaphone.py"],
+        "통신/ITCP": ["itcp.py", "vibe_mux.py", "vibe_mux_agent.py", "send_message.py"],
         "검증/가드": ["safety_guard.py", "completion_guard.py", "drift_detector.py",
                       "plan_validator.py", "rules_validator.py"],
         "스킬 관리": ["skill_orchestrator.py", "skill_manager.py", "skill_analyzer.py",
                       "skill_predictor.py", "skill_ab_test.py"],
-        "모니터링": ["hive_watchdog.py", "claude_watchdog.py", "heal_daemon.py", "terminal_status.py"],
+        "모니터링": ["hive_watchdog.py", "claude_watchdog.py", "heal_daemon.py"],
         "유틸리티": ["vibe_cli.py", "task.py", "auto_version.py", "auto_release.py",
                      "lock_manager.py", "osc_parser.py", "git_visualizer.py", "screenshot_analyzer.py",
                      "generate_project_map.py"],

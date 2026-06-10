@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-07 16:24
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-10 20:48
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -57,7 +57,7 @@
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
-| `tools_api.py` | 956 |  |
+| `tools_api.py` | 1001 |  |
 | `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
 | `zettel_api.py` | 209 |  |
@@ -88,7 +88,6 @@
 | `agent_launcher.py` | 227 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
 | `agent_detector.py` | 198 | 활성 AI 에이전트 자동 감지 (psutil) |
 | `agent_protocol.py` | 373 | RFC 관리 + 하이브 토론 프로토콜 |
-| `gemini_responder.py` | 85 | Gemini CLI 자동 응답기 |
 
 ### 하이브/협업
 | 파일 | 줄 수 | 설명 |
@@ -116,7 +115,6 @@
 | `vibe_mux.py` | 619 | cmux-style Named Pipe 멀티플렉서 서버 |
 | `vibe_mux_agent.py` | 524 | 터미널별 MUX 에이전트 수신/실행 루프 |
 | `send_message.py` | 74 | ITCP 기반 터미널 간 메시지 전송 CLI |
-| `megaphone.py` | 36 | 하이브 브로드캐스트 메시지 유틸 |
 
 ### 검증/가드
 | 파일 | 줄 수 | 설명 |
@@ -142,7 +140,6 @@
 | `hive_watchdog.py` | 567 | 자가 치유(3계층) 엔진 + skill_analyzer 트리거 |
 | `claude_watchdog.py` | 204 | Claude 에이전트 행(hang) 오류 감지 + 재시작 |
 | `heal_daemon.py` | 128 | pg_logs 감시 + 에러 자동 수리 |
-| `terminal_status.py` | 73 | 터미널 상태 모니터 |
 
 ### 유틸리티
 | 파일 | 줄 수 | 설명 |
@@ -155,7 +152,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 494 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 490 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -182,6 +179,7 @@
 | `install_npm_tool.py` | 92 |  |
 | `install_playwright_cli.py` | 65 |  |
 | `install_psql.py` | 189 |  |
+| `install_skills.py` | 195 |  |
 | `install_system_tool.py` | 208 |  |
 | `intent_map.py` | 177 |  |
 | `pg_project.py` | 39 |  |
@@ -284,4 +282,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-07 16:24
+> 자동 생성 완료: 2026-06-10 20:48
