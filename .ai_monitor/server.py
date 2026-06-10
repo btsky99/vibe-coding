@@ -4957,7 +4957,9 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             _init_project_db(PROJECT_ID)
             try:
                 import src.pg_store as _pg_mod
-                _pg_mod._SCHEMA_READY = False
+                # [WHY] pg_store 분할(2026-06-10) 후 _SCHEMA_READY는 pg_schema 내부
+                # 상태 — 모듈 속성 직접 대입은 무효라 reset_schema_cache()로 캡슐화
+                _pg_mod.reset_schema_cache()
                 _pg_mod.ensure_schema(DATA_DIR)
             except Exception as e:
                 print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
