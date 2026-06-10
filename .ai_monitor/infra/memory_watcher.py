@@ -12,6 +12,8 @@ DESCRIPTION: 에이전트 메모리(Claude Code / Gemini CLI) 파일 감시 + Po
                데이터 디렉터리 탐색 (있으면 ensure_legacy_store)
 
 REVISION HISTORY:
+- 2026-06-10 Claude: 임베딩 헬퍼를 infra/embed_service.py로 이관, 재노출만 유지
+                     (자가 치유 2.0 Task 1 — warm 싱글톤을 회상 v2와 공유)
 - 2026-04-21 Claude: server.py L989~1378 분리 (Task 6.1)
                      embedder lazy-init 글로벌(_embedder/_embedder_lock)을
                      모듈 내부로 캡슐화. PROJECT_ID는 생성자 인자로 주입.
@@ -59,52 +61,10 @@ def init_memory_db(data_dir: Path) -> None:
     ensure_schema(data_dir)
 
 
-# ── 임베딩 헬퍼 (fastembed 기반, 한국어 포함 다국어 지원) ────────────────────
-_embedder = None
-_embedder_lock = threading.Lock()
-_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-
-def _get_embedder():
-    """fastembed 모델 lazy 초기화 — 첫 호출 시 한 번만 로드."""
-    global _embedder
-    if _embedder is None:
-        with _embedder_lock:
-            if _embedder is None:
-                try:
-                    from fastembed import TextEmbedding
-                    _embedder = TextEmbedding(model_name=_EMBED_MODEL)
-                    print(f"[Embedding] 모델 로드 완료: {_EMBED_MODEL}")
-                except Exception as e:
-                    print(f"[Embedding] 모델 로드 실패: {e}")
-                    _embedder = False  # 실패 표시 (재시도 방지)
-    return _embedder if _embedder else None
-
-
-def embed(text: str) -> bytes | None:
-    """텍스트 → float32 벡터 bytes 변환. 실패 시 None 반환."""
-    try:
-        import numpy as np
-        embedder = _get_embedder()
-        if embedder is None:
-            return None
-        vec = list(embedder.embed([text[:512]]))[0]  # 512자 제한
-        return np.array(vec, dtype=np.float32).tobytes()
-    except Exception as e:
-        print(f"[Embedding] 변환 실패: {e}")
-        return None
-
-
-def cosine_sim(a_bytes: bytes, b_bytes: bytes) -> float:
-    """두 float32 벡터 bytes 간 코사인 유사도 (0~1)."""
-    try:
-        import numpy as np
-        a = np.frombuffer(a_bytes, dtype=np.float32)
-        b = np.frombuffer(b_bytes, dtype=np.float32)
-        denom = np.linalg.norm(a) * np.linalg.norm(b)
-        return float(np.dot(a, b) / denom) if denom > 1e-10 else 0.0
-    except Exception:
-        return 0.0  # 벡터 유사도 계산 실패 — 0.0 반환
+# ── 임베딩 헬퍼 — embed_service로 이관 (2026-06-10 자가 치유 2.0 Task 1) ────
+# [호환성] 기존 import 경로(from infra.memory_watcher import embed) 유지용 재노출.
+# 신규 코드는 infra.embed_service를 직접 import할 것.
+from infra.embed_service import embed, cosine_sim  # noqa: F401
 
 
 # ── 에이전트 메모리 워처 ─────────────────────────────────────────────────────

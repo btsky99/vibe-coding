@@ -175,6 +175,10 @@ jobs:
             --hidden-import winpty \
             --hidden-import psycopg2 \
             --hidden-import _version \
+            --hidden-import fastembed \
+            --hidden-import onnxruntime \
+            --hidden-import tokenizers \
+            --collect-data fastembed \
             server.py
 
       - name: Build exe (console)
@@ -204,6 +208,10 @@ jobs:
             --hidden-import winpty \
             --hidden-import psycopg2 \
             --hidden-import _version \
+            --hidden-import fastembed \
+            --hidden-import onnxruntime \
+            --hidden-import tokenizers \
+            --collect-data fastembed \
             server.py
 
       - name: Build sub-window EXEs

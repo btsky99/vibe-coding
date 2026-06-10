@@ -77,10 +77,13 @@ REVISION HISTORY:
 - **원인 (Why):** (1줄)
 - **수정 내용 (How):** (1~2줄)
 
+긴 작업의 단계 전환 시 `python scripts/checkpoint.py "의도" --decided "결정" --next "다음"` 기록 — 세션이 튕겨도 다음 세션이 재설명 없이 이어받는다. 에러를 고친 직후에는 `python scripts/incident.py record`로 사고 장부 기록 (자가 치유 2.0).
+
 ---
 
 ## 🗂️ 세부 규칙 (자동 로드되는 보조 파일)
 
+- [`.claude/rules/lessons.md`](.claude/rules/lessons.md) — 증류된 세션 교훈 (lesson.py approve로만 추가)
 - [`.claude/rules/architecture.md`](.claude/rules/architecture.md) — 아키텍처 + 데이터 흐름
 - [`.claude/rules/commit-rules.md`](.claude/rules/commit-rules.md) — 커밋 메시지 상세
 - [`.claude/rules/hive-sync.md`](.claude/rules/hive-sync.md) — 하이브 동기화 프로토콜

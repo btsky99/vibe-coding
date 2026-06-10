@@ -12,6 +12,13 @@ python scripts/analyze_hive.py       # 하이브 상태 분석
 cat ai_monitor_plan.md               # 현재 계획 확인
 ```
 
+### 작업 중 (자가 치유 2.0)
+```bash
+python scripts/checkpoint.py "의도" --decided "결정" --next "다음"   # 단계 전환 시 — 튕김 대비
+python scripts/incident.py record --error "..." --cause "..." --fix "..."  # 에러 수정 직후 — 재발 방지
+python scripts/incident.py search "에러 텍스트"                      # 디버깅 시작 전 — 과거 수정법 조회
+```
+
 ### 작업 완료 후 (필수)
 ```bash
 python scripts/hive_bridge.py        # 로그 기록

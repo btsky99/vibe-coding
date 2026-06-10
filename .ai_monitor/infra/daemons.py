@@ -550,3 +550,47 @@ def run_commit_watcher(env: DaemonEnv) -> None:
     except Exception as e:
         print(f"[!] 커밋 감시 데몬 시작 실패: {e}")
 
+
+# ── 임베딩 백필 데몬 (60초 주기) — 자가 치유 2.0 ④ ─────────────────────
+def run_embedding_backfill(env: DaemonEnv) -> None:
+    """embedding IS NULL 행(zettel/메모리/경험)을 주기적으로 임베딩 채움.
+
+    [WHY] 쓰기 경로(훅/CLI)는 단명 프로세스라 모델 로드(수 초~수십 초) 불가 —
+    warm 모델을 가진 서버가 사후 60초 내 채우는 구조. INSERT 측 수정 불필요.
+    [제약] 모델 첫 호출이 ~100MB 다운로드를 트리거할 수 있음 — 데몬 스레드라 OK,
+    동기 경로(API 핸들러)에서는 절대 첫 로드를 트리거하지 말 것.
+    """
+    try:
+        time.sleep(90)  # 서버 안정화 + PG 기동 대기
+        sys.path.insert(0, str(env.base_dir))
+        from infra.embed_service import embed_floats
+        from src.pg_store import ensure_schema
+        from src.pg_vector_search import (
+            _TABLES, ensure_vector_schema, pending_embedding_rows, upsert_embedding,
+        )
+        if not ensure_schema() or not ensure_vector_schema():
+            print("[embed_backfill] vector 비활성 — 백필 데몬 종료 (ILIKE 회상 유지)")
+            return
+        if embed_floats('워밍업') is None:
+            print("[embed_backfill] 임베딩 모델 사용 불가 — 백필 데몬 종료")
+            return
+        # _TABLES가 단일 진실 — 테이블 추가(예: incident_ledger) 시 자동 포함
+        tables = tuple(_TABLES)
+        while True:
+            try:
+                done = 0
+                for table in tables:
+                    for row in pending_embedding_rows(table, limit=50):
+                        # 빈 텍스트도 placeholder로 임베딩 — 스킵하면 매 주기 재선택(무한 루프)
+                        text = (row.get('text') or '').strip() or '(빈 내용)'
+                        vec = embed_floats(text)
+                        if vec and upsert_embedding(table, row['pk'], vec):
+                            done += 1
+                if done:
+                    print(f"[embed_backfill] 임베딩 {done}건 채움")
+            except Exception as e:
+                print(f"[embed_backfill] 주기 오류: {e}")
+            time.sleep(60)
+    except Exception as e:
+        print(f"[!] 임베딩 백필 데몬 시작 실패: {e}")
+

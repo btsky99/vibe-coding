@@ -6,6 +6,10 @@
 #          출력 파일명: vibe-coding-vX.Y.Z.exe (버전 자동 포함)
 #
 # 🕒 변경 이력:
+# [2026-06-10] Claude — 자가 치유 2.0 ④: fastembed/onnxruntime hiddenimports + 데이터 수집
+#   - embed_service가 함수 내부에서 from fastembed import — 정적 분석 누락 대비 명시
+#   - [과거사고 v3.7.215~218] spec ↔ CI(build-release.yml) 양쪽 동시 갱신 필수.
+#     누락 시 EXE에서 모델 로드 실패 → 회상 v2 무음 비활성 (ILIKE 폴백이라 부팅은 됨)
 # [2026-05-05] Claude — datas 보강: .ai_monitor/infra 추가
 #   - Phase 2-3에서 infra/project_context.py 분리 후 spec 미반영 → frozen 모드에서
 #     ModuleNotFoundError: No module named 'infra' 발생하여 EXE 부팅 실패
@@ -32,6 +36,14 @@ import re as _re
 import sys as _sys
 from pathlib import Path as _Path
 import winpty as _winpty_mod
+
+# fastembed 패키지 내 모델 레지스트리 JSON — 없으면 TextEmbedding() 생성 자체가 실패
+# [WHY] 일반 hiddenimport는 .py만 수집 — 패키지 데이터는 collect_data_files 필수
+from PyInstaller.utils.hooks import collect_data_files as _collect_data_files
+try:
+    _fastembed_datas = _collect_data_files('fastembed')
+except Exception:
+    _fastembed_datas = []  # fastembed 미설치 빌드 환경 — 회상 v2 없이 빌드 (폴백 동작)
 
 # winpty 실행 파일 경로 (winpty-agent.exe, OpenConsole.exe)
 # 이 파일들이 EXE 번들에 없으면 PtyProcess.spawn() 실패 → PTY 터미널 불가
@@ -90,10 +102,12 @@ a = Analysis(
         # 버전 정보 파일 — frozen 모드에서 server.py가 MEIPASS 루트에서 import함
         # 없으면 ImportError → __version__ = "0.0.0-unknown" → 상단 버전 미표시
         ('.ai_monitor/_version.py', '.'),
-    ],
+    ] + _fastembed_datas,
     # hive_hook이 사용하는 stdlib 모듈: server.py가 직접 import 하지 않는 것까지 명시 보강
     # (런타임 동적 import는 PyInstaller 정적 분석에서 누락 가능 → hook EXE 모드에서 ImportError 위험)
-    hiddenimports=['websockets', 'winpty', 'urllib.request'],
+    # fastembed/onnxruntime/tokenizers: embed_service가 함수 내부 import — 회상 v2 필수
+    hiddenimports=['websockets', 'winpty', 'urllib.request',
+                   'fastembed', 'onnxruntime', 'tokenizers'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

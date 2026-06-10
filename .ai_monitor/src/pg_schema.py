@@ -46,6 +46,12 @@ def reset_schema_cache() -> None:
     """
     global _SCHEMA_READY
     _SCHEMA_READY = False
+    # vector 가용성도 DB 단위 상태 — 프로젝트 DB 전환 시 함께 재확인
+    try:
+        from src.pg_vector_search import reset_vector_cache
+        reset_vector_cache()
+    except Exception:
+        pass
 
 
 def ensure_schema(data_dir: Path | None = None) -> bool:
@@ -484,6 +490,11 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             );
         """)
         execute_raw("CREATE INDEX IF NOT EXISTS idx_active_session_status ON active_session_context (status, terminal_id);")
+        # [2026-06-10 자가 치유 2.0 ②] 의도 단위 체크포인트 — 복구 브리핑을
+        # "파일 목록"에서 "왜/어디까지 결정/다음 뭐" 수준으로 격상하는 3컬럼
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS intent TEXT NOT NULL DEFAULT '';")
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS decisions JSONB NOT NULL DEFAULT '[]'::jsonb;")
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS next_step TEXT NOT NULL DEFAULT '';")
 
         execute_raw("""
             CREATE TABLE IF NOT EXISTS agent_stats (
@@ -638,7 +649,40 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             execute_raw(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';")
             execute_raw(f"CREATE INDEX IF NOT EXISTS idx_{_tbl}_project_id ON {_tbl} (project_id);")
 
+        # ── [2026-06-10] 자가 치유 2.0 ① — 사고 장부 ──
+        # 고친 에러를 기억: 동일 시그니처 재발 시 과거 수정법을 훅이 주입.
+        # 시그니처 = pg_incidents.normalize_signature (경로/줄번호/주소/시각 제거 해시)
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS incident_ledger (
+                id BIGSERIAL PRIMARY KEY,
+                project_id TEXT NOT NULL DEFAULT '',
+                error_signature TEXT NOT NULL,
+                error_text TEXT NOT NULL DEFAULT '',
+                root_cause TEXT NOT NULL DEFAULT '',
+                fix_description TEXT NOT NULL DEFAULT '',
+                fix_commit TEXT DEFAULT '',
+                files JSONB NOT NULL DEFAULT '[]'::jsonb,
+                recurrence_count INT NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (project_id, error_signature)
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_incident_sig ON incident_ledger (error_signature);")
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_incident_project ON incident_ledger (project_id, last_seen_at DESC);")
+
         _SCHEMA_READY = True
+
+        # ── [2026-06-10] 자가 치유 2.0 ④ — pgvector 회상 스키마 (선택적) ──
+        # [제약] 반드시 _SCHEMA_READY=True 이후 — pg_vector_search가 query_rows를
+        # 쓰므로 그 전에 부르면 ensure_schema 재진입(_SCHEMA_LOCK 데드락).
+        # 확장 미설치 DB에서는 내부적으로 무음 비활성 (ILIKE 회상 폴백 유지).
+        try:
+            from src.pg_vector_search import ensure_vector_schema
+            ensure_vector_schema()
+        except Exception as _ve:
+            print(f"[pg_schema] vector 스키마 스킵: {_ve}")
+
         if not _MIGRATION_DONE:
             # DB에 마이그레이션 완료 플래그 확인 — 프로세스 재시작 시 재실행 방지
             _mig_check = query_rows(

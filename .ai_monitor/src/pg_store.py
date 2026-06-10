@@ -118,6 +118,7 @@ from src.pg_office import (
     list_office_profiles,
     seed_default_office_profile,
     set_active_office_profile,
+    set_session_checkpoint,
     update_session_files,
     upsert_active_session,
     upsert_office_profile,

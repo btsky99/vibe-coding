@@ -32,6 +32,15 @@ REVISION HISTORY:
 - **[실수]** 다른 에이전트가 작업 중인 파일을 건드려 충돌 발생.
   - **[방어]** 작업 전 반드시 `lock_manager.py acquire`로 소유권을 확보할 것.
 
+## 🧬 3.5. 자가 치유 2.0 설계 결정 (2026-06-10 승인)
+- **북극성 지표**: 동일 에러 시그니처 재발률 (`scripts/incident.py stats`). 목표 = 삽질 빈도 감소.
+- **회상 v2**: 서버 상주 fastembed(다국어 MiniLM, 384차원) + pgvector. 훅은 `recall-smart` API 호출, 서버 미가동 시 ILIKE 폴백 — 외부 프로젝트 이식성 보존.
+- **유사도 0.45 미만은 컨텍스트에 주입하지 않음** — 무관 회상 노이즈 차단 결정.
+- **랭킹**: 유사도 + 0.1×log(1+참조횟수) − 시간감쇠. 참조 0회 지속 노트는 정제 대상 강등.
+- **사고 장부**: `incident_ledger` 테이블. 에러 시그니처 = 경로/줄번호/주소/타임스탬프 제거 후 해시. vibe-debug 0단계 조회 + 종료 시 기록 의무.
+- **교훈 증류**: `.claude/rules/lessons.md` (승인 게이트 필수, CLAUDE.md 본문 자동 수정 금지).
+- **EXE 주의**: fastembed/onnxruntime hiddenimports — spec ↔ CI 양쪽 동기 (v3.7.215~218 사고 재발 방지).
+
 ## 🔗 4. 지식 간의 관계 (Knowledge Graph)
 - `오케스트레이션` → `데이터 저장` (상태 영속성 의존)
 - `Git 전략` → `오케스트레이션` (워크트리 기반 작업 흐름)

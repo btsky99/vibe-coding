@@ -1,5 +1,24 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-06-10] - 자가 치유 2.0 (삽질 빈도 감소 시스템)
+
+### 🧠 ④ 회상 v2 — pgvector 임베딩 회상
+- **[Feature] pg_vector_search.py**: zettel/메모리/경험/사고장부 4테이블에 `embedding vector(384)` + 코사인 검색. **유사도 0.45 미만 비주입** — 무관 회상 노이즈 차단.
+- **[Feature] embed_service.py**: fastembed 다국어 모델 warm 싱글톤 (memory_watcher 고아 헬퍼 이관). 캐시는 DATA_DIR 고정.
+- **[Feature] recall-smart API + recall_client**: 훅은 서버 임베딩 회상 호출(2초 상한), 서버 불통 시 기존 ILIKE 자동 폴백 — 외부 프로젝트 이식성 보존.
+- **[Feature] 임베딩 백필 데몬**: embedding IS NULL 행을 60초 주기 사후 채움. 참조 피드백(ref_count/access_count) 랭킹 가산.
+
+### ⚡ ① 사고 장부 — 고친 에러는 두 번 고치지 않는다
+- **[Feature] incident_ledger**: 에러 시그니처(경로/줄번호/주소/시각 정규화 해시) + 근본원인/수정법/커밋. 재발 시 recurrence_count 증가.
+- **[Feature] incident.py CLI**: record/search/**stats(북극성 지표: 재발률)**.
+- **[Feature] 훅 자동 주입**: 프롬프트에 에러 감지 시 과거 수정법 즉시 브리핑. vibe-debug 0단계 조회 + 종료 기록 의무화.
+
+### 🔄 ② 의도 단위 체크포인트
+- **[Feature] checkpoint.py**: "왜/결정/다음" 3요소 기록 → 크래시 복구 브리핑이 파일 목록 대신 의도를 표시.
+
+### 📚 ③ 교훈 증류 (승인 게이트)
+- **[Feature] lesson.py + .claude/rules/lessons.md**: propose(후보) → 사용자 승인 → approve만 파일 기록. CLAUDE.md 자동 수정 금지.
+
 ## [2026-03-07] - v3.7.9 (윈도우 네이티브 미션 컨트롤 고도화)
 
 ### 🛰️ Windows Native Mission Control (CMUX 스타일)

@@ -18,6 +18,8 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-06-10 Claude: 회상 2블록(경험/지식)을 recall_client.smart_recall_summary로
+  통합 — 자가 치유 2.0 ④ Task 6. 서버 임베딩 회상 우선, 불통 시 v1 폴백 내장.
 - 2026-03-01 Claude: Stop 이벤트 세션 자동 스냅샷 저장 추가
   - _save_session_snapshot(): 오늘 task_logs에서 사용자 지시 + 완료 액션 추출
   - shared_memory.db에 "claude:auto-session:YYYY-MM-DD" 키로 INSERT OR REPLACE
@@ -567,6 +569,18 @@ def main():
                     _tid = _sess.get('terminal_id', '?')
                     _updated = _sess.get('updated_at', '')
                     _resume_lines.append(f"  [{_tid}] 작업: {_task}")
+                    # [자가 치유 2.0 ②] 의도/결정/다음 — 있으면 파일 목록보다 먼저 표시.
+                    # 다음 세션이 "왜 하고 있었는지"를 재추론 없이 즉시 이어받게 한다.
+                    if _sess.get('intent'):
+                        _resume_lines.append(f"       왜(의도): {_sess['intent']}")
+                    try:
+                        _decs = json.loads(_sess.get('decisions') or '[]')
+                        if _decs:
+                            _resume_lines.append(f"       결정 사항: {' → '.join(str(d) for d in _decs[-3:])}")
+                    except Exception:
+                        pass
+                    if _sess.get('next_step'):
+                        _resume_lines.append(f"       ▶ 다음 할 일: {_sess['next_step']}")
                     if _files:
                         _resume_lines.append(f"       수정 파일: {', '.join(_files[:8])}")
                     _resume_lines.append(f"       마지막 활동: {_updated}")
@@ -716,27 +730,35 @@ def main():
                 except Exception:
                     pass  # validator 오류는 조용히 무시
 
-            # ── 경험 회상 자동 주입 ──────────────────────────────────────────
-            # 사용자 지시와 유사한 과거 작업 경험을 자동 검색하여 컨텍스트에 주입.
-            # 에이전트가 과거 경험을 활용해 더 나은 판단을 할 수 있도록 한다.
+            # ── 회상 v2 통합 주입 (경험 + zettel + hive) ─────────────────────
+            # [2026-06-10 자가 치유 2.0 ④] 기존 ILIKE 2블록(경험/지식 회상)을
+            # recall_client 1회 호출로 교체 — 서버 임베딩 회상(유사도 0.45 임계)
+            # 우선, 서버 불통 시 내부에서 기존 v1(ILIKE)로 자동 폴백.
+            # [WHY] v1은 키워드 부분일치라 무관 회상이 주입되는 노이즈가 컸음
+            # ("ok 진행해" → "Initial commit" 회상 같은 오작동의 직접 수정).
             try:
-                from src.pg_store import recall_context_summary
-                _recall_text = recall_context_summary(short, limit=3)
+                from src.recall_client import smart_recall_summary
+                _recall_text = smart_recall_summary(short, limit=5)
                 if _recall_text:
                     print(_recall_text, flush=True)
             except Exception:
                 pass  # 회상 실패는 훅 전체를 중단하지 않음
 
-            # ── C.2 지식 회상 자동 주입 (zettel + hive) ─────────────────────
-            # 작업 결과(agent_experience)와 별개로, 누적된 정제 지식을 함께 주입.
-            # 에이전트가 과거 합의/가이드/학습 내용을 세션 첫 턴부터 참조 가능.
+            # ── 사고 장부 자동 주입 (자가 치유 2.0 ①) ───────────────────────
+            # 프롬프트에 에러 흔적이 있으면 과거 동일/유사 사고의 수정법을 주입.
+            # [WHY] "고친 걸 또 고친다" 방지의 핵심 — 에이전트가 디버깅을 시작하기
+            # 전에 과거 근본원인/수정법/커밋을 먼저 보게 한다.
             try:
-                from src.pg_store import recall_knowledge_summary
-                _know_text = recall_knowledge_summary(short, limit=3)
-                if _know_text:
-                    print(_know_text, flush=True)
+                import re as _re_err
+                if _re_err.search(r'Traceback|Error|Exception|에러|오류|버그',
+                                  prompt or ''):
+                    from src.pg_incidents import search_incidents, format_incident_briefing
+                    _inc_text = format_incident_briefing(
+                        search_incidents(prompt, limit=3))
+                    if _inc_text:
+                        print(_inc_text, flush=True)
             except Exception:
-                pass  # 지식 회상 실패도 훅 전체를 중단하지 않음
+                pass  # 장부 조회 실패도 훅 전체를 중단하지 않음
 
             # 의도 감지: 키워드 매칭 → 관련 워크플로 컨텍스트를 stdout으로 출력
             # Claude Code는 이 출력을 Claude에게 시스템 컨텍스트로 주입함

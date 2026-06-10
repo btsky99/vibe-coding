@@ -132,6 +132,14 @@ def verify_python_deps():
         except ImportError:
             _fail(cat, f"{pkg_name} 미설치 — pip install {pkg_name}")
 
+    # [자가 치유 2.0 ④] fastembed — 회상 v2 임베딩. 미설치여도 빌드는 가능하지만
+    # EXE에서 회상 v2가 무음 비활성되므로 경고로 표면화 (ILIKE 폴백 동작).
+    try:
+        importlib.import_module("fastembed")
+        _pass(cat, "fastembed 설치됨 (회상 v2 임베딩)")
+    except ImportError:
+        _warn(cat, "fastembed 미설치 — EXE에서 회상 v2 비활성 (pip install fastembed)")
+
     # PyInstaller 버전 범위 검증 (>=6.0, <7.0)
     try:
         import PyInstaller

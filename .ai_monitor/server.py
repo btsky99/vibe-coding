@@ -705,6 +705,11 @@ else:
     DATA_DIR = BASE_DIR / "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# [자가 치유 2.0 ④] 임베딩 모델 캐시를 DATA_DIR 하위로 고정
+# [WHY] fastembed 기본 캐시는 %TEMP%\fastembed_cache — Temp 정리 시 ~100MB 모델이
+# 증발해 매번 재다운로드. 이미 설정된 env(사용자 지정)는 존중한다.
+os.environ.setdefault('VIBE_EMBED_CACHE', str(DATA_DIR / 'embed_cache'))
+
 # 전역 Obsidian Vault — 모든 프로젝트가 공유하는 단일 vault
 if os.name == 'nt':
     GLOBAL_VAULT_DIR = Path(os.getenv('APPDATA', str(Path.home()))) / 'VibeCoding' / 'vault'
@@ -4416,6 +4421,9 @@ def main():
 
     def run_commit_watcher():
         _daemons.run_commit_watcher(_daemon_env())
+
+    def run_embedding_backfill():
+        _daemons.run_embedding_backfill(_daemon_env())
     # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
     try:
         import webview
@@ -4541,6 +4549,9 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
                              name='ZettelRefine').start()
             threading.Thread(target=run_commit_watcher, daemon=True,
                              name='CommitWatcher').start()
+            # [자가 치유 2.0 ④] 회상 v2 — embedding IS NULL 행 사후 채움
+            threading.Thread(target=run_embedding_backfill, daemon=True,
+                             name='EmbedBackfill').start()
 
             _restore_agent_status_from_db()
 

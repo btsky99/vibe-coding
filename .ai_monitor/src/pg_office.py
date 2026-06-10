@@ -3,10 +3,11 @@
 # 📝 설명: 오피스 프로필 CRUD(PostgreSQL SSOT) + 활성 세션 컨텍스트(크래시 복구)
 #          (pg_store.py 분할 6/6)
 # 🕒 변경 이력:
+# [2026-06-10] Claude — set_session_checkpoint 추가 (자가 치유 2.0 ② Task 13)
 # [2026-06-10] Claude — pg_store.py 분할로 신설 (1500줄 규칙 준수)
 # ────────────────────────────────────────────────────────────────────────────
 from infra.project_context import assert_project_id
-from src.pg_base import _sql_text, execute, query_rows
+from src.pg_base import _sql_json, _sql_text, execute, query_rows
 
 
 # ── 오피스 프로필 CRUD ──────────────────────────────────────────────────────
@@ -232,6 +233,43 @@ def update_session_files(terminal_id: str, file_path: str) -> bool:
     )
 
 
+def set_session_checkpoint(terminal_id: str, intent: str = '', decision: str = '',
+                           next_step: str = '', project_id: str = '') -> bool:
+    """의도 단위 체크포인트 — active 세션에 '왜/결정/다음'을 기록 (자가 치유 2.0 ②).
+
+    [WHY] 크래시 복구 브리핑이 '수정 파일 목록'만 보여주면 다음 세션이
+    의도를 재추론(=재설명 요구)해야 한다. 의도/결정/다음 단계를 남기면
+    설명 없이 즉시 이어받는다.
+    - decision은 decisions JSONB 배열에 누적 append — 세션 내 결정 흐름 보존.
+    - active 세션이 없으면 새로 생성 (CLI 단독 사용 대비).
+    """
+    project_id = assert_project_id(project_id, 'set_session_checkpoint')
+    existing = query_rows(
+        f"SELECT id FROM active_session_context "
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active' LIMIT 1;"
+    )
+    if not existing:
+        ok = execute(
+            f"INSERT INTO active_session_context "
+            f"(terminal_id, agent_id, task_summary, project_id) "
+            f"VALUES ({_sql_text(terminal_id)}, 'claude', {_sql_text(intent[:300])}, "
+            f"{_sql_text(project_id)});"
+        )
+        if not ok:
+            return False
+    sets = ["updated_at = NOW()"]
+    if intent:
+        sets.append(f"intent = {_sql_text(intent[:500])}")
+    if next_step:
+        sets.append(f"next_step = {_sql_text(next_step[:500])}")
+    if decision:
+        sets.append(f"decisions = decisions || {_sql_json([decision[:300]])}")
+    return execute(
+        f"UPDATE active_session_context SET {', '.join(sets)} "
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active';"
+    )
+
+
 def complete_active_session(terminal_id: str) -> bool:
     """활성 세션을 완료 처리한다. Stop 이벤트에서 호출."""
     return execute(
@@ -251,7 +289,8 @@ def get_interrupted_sessions(terminal_id: str = '') -> list[dict]:
         where += f" AND terminal_id = {_sql_text(terminal_id)}"
     return query_rows(
         f"SELECT id, terminal_id, agent_id, task_summary, "
-        f"modified_files::text, status, started_at, updated_at "
+        f"modified_files::text, status, started_at, updated_at, "
+        f"intent, decisions::text AS decisions, next_step "
         f"FROM active_session_context {where} "
         f"ORDER BY updated_at DESC LIMIT 5;"
     )
