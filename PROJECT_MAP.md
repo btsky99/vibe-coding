@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-10 21:06
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-10 21:26
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -36,7 +36,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 5105 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4647 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -289,4 +289,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-10 21:06
+> 자동 생성 완료: 2026-06-10 21:26

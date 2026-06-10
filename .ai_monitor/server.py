@@ -4365,515 +4365,57 @@ def main():
     
     # ── 데몬 함수 정의 (실행은 _init_and_load_app 콜백에서) ──────────────────
 
-    def run_watchdog():
-        if not SCRIPTS_DIR:
-            return
-        watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
-        if watchdog_script.exists():
-            _python_cmds = _python_runner_cmds()
-            if not _python_cmds:
-                print("[!] run_watchdog: Python 인터프리터를 찾을 수 없어 워치독 스킵")
-                return
-            python_exe = _python_cmds[0]
-            proc = subprocess.Popen(
-                [python_exe, str(watchdog_script), "--data-dir", str(DATA_DIR)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            )
-            _child_procs.append(proc)
+    # ── 데몬 본문은 infra/daemons.py로 분리 (2026-06-10 단계 9) ──────────────
+    # [WHY] env는 매 호출 시 생성 — HTTP_PORT가 main() 후반(포트 슬롯 결정)에
+    # 재바인딩되므로 함수 정의 시점에 값을 고정하면 안 된다.
+    from infra import daemons as _daemons
 
-    _tg_bridge_launched = [False]
-    def run_telegram_bridge():
-        if _tg_bridge_launched[0]:
-            return
-        _tg_bridge_launched[0] = True
-        if not SCRIPTS_DIR:
-            return
-        tg_script = SCRIPTS_DIR / "telegram_bridge.py"
-        env_file = PROJECT_ROOT / ".env"
-        tg_log = DATA_DIR / "telegram_bridge.log"
-        if not tg_script.exists():
-            return
-        tg_pid_file = DATA_DIR / "telegram_bridge.pid"
-        if tg_pid_file.exists():
-            try:
-                old_pid = int(tg_pid_file.read_text().strip())
-                check = subprocess.run(
-                    ['tasklist', '/FI', f'PID eq {old_pid}', '/NH'],
-                    capture_output=True, text=True, timeout=5,
-                    creationflags=0x08000000,
-                )
-                if str(old_pid) in check.stdout and 'python' in check.stdout.lower():
-                    print(f"[*] Telegram Bridge 이미 실행 중 (PID={old_pid}) — 스킵")
-                    return
-                else:
-                    tg_pid_file.unlink(missing_ok=True)
-            except Exception:
-                tg_pid_file.unlink(missing_ok=True)
-        try:
-            env_content = env_file.read_text(encoding='utf-8') if env_file.exists() else ""
-            has_token = False
-            for line in env_content.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
-                    token_val = stripped.split("=", 1)[1].strip()
-                    if token_val:
-                        has_token = True
-                        break
-                elif stripped.startswith("TELEGRAM_BOT_TOKEN="):
-                    token_val = stripped.split("=", 1)[1].strip()
-                    if token_val:
-                        has_token = True
-                        break
-            if not has_token:
-                return
-        except Exception:
-            return
-        _python_cmds = _python_runner_cmds()
-        if not _python_cmds:
-            print("[!] run_telegram_bridge: Python 인터프리터를 찾을 수 없어 Telegram 브릿지 스킵")
-            return
-        python_exe = _python_cmds[0]
-        child_env = os.environ.copy()
-        child_env['VIBE_SERVER_PORT'] = str(HTTP_PORT)
-        tg_log.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = open(tg_log, 'a', encoding='utf-8')
-        proc = subprocess.Popen(
-            [python_exe, str(tg_script)],
-            cwd=str(PROJECT_ROOT),
-            stdout=log_handle,
-            stderr=log_handle,
-            env=child_env,
-            encoding='utf-8',
-            errors='replace',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+    def _daemon_env() -> "_daemons.DaemonEnv":
+        return _daemons.DaemonEnv(
+            base_dir=BASE_DIR,
+            project_root=PROJECT_ROOT,
+            scripts_dir=SCRIPTS_DIR,
+            data_dir=DATA_DIR,
+            global_vault_dir=GLOBAL_VAULT_DIR,
+            config_file=CONFIG_FILE,
+            http_port=HTTP_PORT,
+            child_procs=_child_procs,
+            current_project_root=_current_project_root,
+            current_project_id=_current_project_id,
         )
-        proc._vibe_log_handle = log_handle
-        _child_procs.append(proc)
-        try:
-            tg_pid_file.write_text(str(proc.pid))
-        except Exception:
-            pass
-        print(f"[*] Telegram Bridge 자동 시작됨 (PID={proc.pid})")
+
+    def run_watchdog():
+        _daemons.run_watchdog(_daemon_env())
+
+    def run_telegram_bridge():
+        _daemons.run_telegram_bridge(_daemon_env())
 
     def run_heal_daemon():
-        if not SCRIPTS_DIR:
-            return
-        heal_script = SCRIPTS_DIR / "heal_daemon.py"
-        if heal_script.exists():
-            _python_cmds = _python_runner_cmds()
-            if not _python_cmds:
-                print("[!] run_heal_daemon: Python 인터프리터를 찾을 수 없어 힐데몬 스킵")
-                return
-            python_exe = _python_cmds[0]
-            proc = subprocess.Popen(
-                [python_exe, str(heal_script), "--interval", "300"],
-                cwd=str(PROJECT_ROOT),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                encoding='utf-8',
-                errors='replace',
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-            )
-            _child_procs.append(proc)
-            print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
+        _daemons.run_heal_daemon(_daemon_env())
 
     def run_codex_pg_watcher():
-        if not SCRIPTS_DIR:
-            return
-        watcher_script = SCRIPTS_DIR / "codex_pg_watcher.py"
-        if watcher_script.exists():
-            _python_cmds = _python_runner_cmds()
-            if not _python_cmds:
-                print("[!] run_codex_pg_watcher: Python interpreter not found")
-                return
-            python_exe = _python_cmds[0]
-            proc = subprocess.Popen(
-                [python_exe, str(watcher_script), "--interval", "5"],
-                cwd=str(PROJECT_ROOT),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                encoding='utf-8',
-                errors='replace',
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-            )
-            _child_procs.append(proc)
-            print("[*] Codex pg_logs watcher started")
+        _daemons.run_codex_pg_watcher(_daemon_env())
 
     def run_orchestrator_daemon():
-        # 하이브 오케스트레이터 데몬 — assigned_to='all' 태스크를
-        # 살아있는 에이전트로 자동 재배정. wiki_generator 등 'all' 발행자가
-        # 만든 태스크가 영원히 적체되는 것을 방지한다.
-        if not SCRIPTS_DIR:
-            return
-        orch_script = SCRIPTS_DIR / "orchestrator.py"
-        if orch_script.exists():
-            pid_file = DATA_DIR / "orchestrator.pid"
-            def _pid_is_alive(pid: int) -> bool:
-                try:
-                    result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
-                    return result.returncode == 0 and f'"{pid}"' in result.stdout
-                except Exception:
-                    return False
-            try:
-                existing_pid = int(pid_file.read_text(encoding='utf-8').strip())
-            except Exception:
-                existing_pid = 0
-            if existing_pid and _pid_is_alive(existing_pid):
-                print(f"[*] Orchestrator daemon already running (PID={existing_pid})")
-                return
-
-            _python_cmds = _python_runner_cmds()
-            if not _python_cmds:
-                print("[!] run_orchestrator_daemon: Python 인터프리터를 찾을 수 없어 오케스트레이터 스킵")
-                return
-            python_exe = _python_cmds[0]
-            proc = subprocess.Popen(
-                [python_exe, str(orch_script), "--daemon", "--interval", "60"],
-                cwd=str(PROJECT_ROOT),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                encoding='utf-8',
-                errors='replace',
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-            )
-            _child_procs.append(proc)
-            print("[*] 하이브 오케스트레이터 데몬(orchestrator) 자동 시작됨")
-
-            try:
-                pid_file.write_text(str(proc.pid), encoding='utf-8')
-            except Exception:
-                pass
+        _daemons.run_orchestrator_daemon(_daemon_env())
 
     def run_doc_generators_daemon():
-        # PROJECT_MAP.md / HIVEMIND.md 자동 갱신 데몬.
-        # 시동 시 즉시 1회 + 이후 30분마다 갱신.
-        # 원인: 두 자동 생성기가 시동 시퀀스에서 빠져있어 17일/15일째 stale.
-        if not SCRIPTS_DIR:
-            return
-        pm_script = SCRIPTS_DIR / "generate_project_map.py"
-        hv_script = SCRIPTS_DIR / "generate_hivemind_doc.py"
-        _python_cmds = _python_runner_cmds()
-        if not _python_cmds:
-            print("[!] run_doc_generators_daemon: Python 인터프리터를 찾을 수 없어 스킵")
-            return
-        python_exe = _python_cmds[0]
-        interval_sec = 30 * 60  # 30분 주기
-
-        while True:
-            # PROJECT_MAP.md 갱신
-            if pm_script.exists():
-                try:
-                    subprocess.run(
-                        [python_exe, str(pm_script)],
-                        cwd=str(PROJECT_ROOT),
-                        timeout=120,
-                        capture_output=True,
-                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-                    )
-                    print("[*] PROJECT_MAP.md 자동 갱신 완료")
-                except Exception as e:
-                    print(f"[!] PROJECT_MAP.md 갱신 실패: {e}")
-
-            # HIVEMIND.md 갱신
-            if hv_script.exists():
-                try:
-                    subprocess.run(
-                        [python_exe, str(hv_script)],
-                        cwd=str(PROJECT_ROOT),
-                        timeout=120,
-                        capture_output=True,
-                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-                    )
-                    print("[*] HIVEMIND.md 자동 갱신 완료")
-                except Exception as e:
-                    print(f"[!] HIVEMIND.md 갱신 실패: {e}")
-
-            time.sleep(interval_sec)
+        _daemons.run_doc_generators_daemon(_daemon_env())
 
     def _agent_sync_daemon():
-        while True:
-            try:
-                time.sleep(60)
-                now_ts = time.time()
-                with AGENT_STATUS_LOCK:
-                    snapshot = dict(AGENT_STATUS)
-                for agent_name, info in snapshot.items():
-                    status = info.get('status', 'idle')
-                    if status in ('active', 'running', 'working'):
-                        try:
-                            record_heartbeat(agent_name, status=status,
-                                             current_task=info.get('task'))
-                        except Exception:
-                            pass
-                try:
-                    db_rows = list_agent_status()
-                    with AGENT_STATUS_LOCK:
-                        for row in db_rows:
-                            aid = row.get('agent_id', '')
-                            if not aid:
-                                continue
-                            if aid not in AGENT_STATUS:
-                                try:
-                                    from datetime import datetime as _dt
-                                    lb = _dt.fromisoformat(row.get('last_beat', '')).timestamp()
-                                except Exception:
-                                    lb = now_ts - 600
-                                age = now_ts - lb
-                                AGENT_STATUS[aid] = {
-                                    'status': 'offline' if age > 300 else row.get('status', 'idle'),
-                                    'task': row.get('current_task'),
-                                    'last_seen': lb,
-                                    'beat_count': row.get('beat_count', 0),
-                                }
-                        for aid, info in AGENT_STATUS.items():
-                            last = info.get('last_seen', 0)
-                            if now_ts - last > 300 and info.get('status') not in ('offline',):
-                                AGENT_STATUS[aid]['status'] = 'offline'
-                except Exception:
-                    pass
-            except Exception:
-                pass
+        _daemons.agent_sync_daemon(AGENT_STATUS, AGENT_STATUS_LOCK)
 
     def run_mux_server():
-        if not SCRIPTS_DIR:
-            return
-        mux_script = SCRIPTS_DIR / "vibe_mux.py"
-        if mux_script.exists():
-            _python_cmds = _python_runner_cmds()
-            if not _python_cmds:
-                print("[!] run_mux_server: Python 인터프리터를 찾을 수 없어 MUX 서버 스킵")
-                return
-            python_exe = _python_cmds[0]
-            proc = subprocess.Popen(
-                [python_exe, str(mux_script), "server"],
-                cwd=str(PROJECT_ROOT),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-            )
-            _child_procs.append(proc)
-            print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
+        _daemons.run_mux_server(_daemon_env())
 
-    # ── 제텔카스텐 Vault 동기화 데몬 (DB ↔ Obsidian 60초 주기) ────────────
     def run_zettel_sync():
-        """PostgreSQL zettel_notes ↔ Obsidian vault 양방향 동기화 데몬.
-        [v3.7.179] 서버 시작 시 자동 실행 — 이전에는 수동 실행만 가능했음."""
-        try:
-            _sync_dir = SCRIPTS_DIR or (BASE_DIR / 'scripts')
-            _sync_script = _sync_dir / 'zettel_sync.py'
-            if not _sync_script.exists():
-                return
-            # zettel_sync 모듈 직접 import하여 스레드 내에서 실행 (subprocess 대신)
-            import importlib.util as _ilu
-            _spec = _ilu.spec_from_file_location('zettel_sync', str(_sync_script))
-            _mod = _ilu.module_from_spec(_spec)
-            _spec.loader.exec_module(_mod)
+        _daemons.run_zettel_sync(_daemon_env())
 
-            # config.json에서 사용자 지정 vault 경로 읽기 (없으면 전역 기본값)
-            _vault = GLOBAL_VAULT_DIR
-            try:
-                if CONFIG_FILE.exists():
-                    _cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-                    _user_vault = _cfg.get('vault_dir', '')
-                    if _user_vault:
-                        _vault = Path(_user_vault)
-            except Exception:
-                pass
-            _vault.mkdir(parents=True, exist_ok=True)
-
-            # 기존 .zettel-vault 마이그레이션 (최초 1회)
-            import shutil as _shutil
-            _old_vault = _current_project_root() / '.zettel-vault'
-            if _old_vault.exists() and not (_vault / '_migrated').exists():
-                try:
-                    _shutil.copytree(str(_old_vault), str(_vault), dirs_exist_ok=True)
-                    (_vault / '_migrated').touch()
-                    print(f'[zettel_sync] 기존 vault 마이그레이션 완료: {_old_vault} -> {_vault}')
-                except Exception as _me:
-                    print(f'[zettel_sync] 마이그레이션 오류 (무시): {_me}')
-
-            # 현재 활성 project_id. Phase 2 이후 zettel_notes.project_id는 폴더명이 아니라
-            # 경로 slug(D--vibe-coding)를 표준으로 사용한다. 폴더명을 쓰면 Obsidian export가
-            # 구형 project_id(vibe-coding) 49건만 내보내고 최신 지식 대부분을 누락한다.
-            _proj_id = _current_project_id()
-            print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project_id={_proj_id}, 60초 양방향')
-
-            # Google Drive vault — 자동 탐지 + config.json 오버라이드
-            # PC마다 드라이브 레터(I:/G:/H:…)와 언어(내 드라이브/My Drive)가 달라
-            # 고정 경로를 쓰면 다른 PC에서 동작하지 않는다.
-            _VAULT_MARKER = Path('obsidian') / 'hive-zettel'
-            _DRIVE_ROOTS = ('내 드라이브', 'My Drive')
-
-            def _detect_gdrive_vault():
-                """드라이브 레터 A~Z를 스캔해 GDrive vault를 자동 탐지한다."""
-                import string as _string
-                for _letter in _string.ascii_uppercase:
-                    _root = Path(f'{_letter}:/')
-                    if not _root.exists():
-                        continue
-                    for _label in _DRIVE_ROOTS:
-                        _candidate = _root / _label / _VAULT_MARKER
-                        if _candidate.exists():
-                            return _candidate
-                return None
-
-            def _get_gdrive_vault():
-                # 1순위: config.json 명시 설정 (사용자 오버라이드)
-                try:
-                    if CONFIG_FILE.exists():
-                        _cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-                        _gd = _cfg.get('gdrive_vault_path', '')
-                        if _gd:
-                            return Path(_gd)
-                except Exception:
-                    pass
-                # 2순위: 자동 탐지
-                return _detect_gdrive_vault()
-
-            def _sync_with_gdrive():
-                _last_vault = None
-                while True:
-                    try:
-                        _gdrive_vault = _get_gdrive_vault()
-                        if _gdrive_vault and _gdrive_vault.exists():
-                            if _last_vault != _gdrive_vault:
-                                print(f'[zettel_sync] Google Drive vault 감지됨: {_gdrive_vault}')
-                                _last_vault = _gdrive_vault
-                            # Google Drive is the shared copy of the local vault, not a
-                            # second independent export target. Mirror after refreshing
-                            # the local vault so Obsidian folders/canvases/settings stay aligned.
-                            _mod.export_to_vault(_vault, project_id=_proj_id)
-                            _mod.mirror_vault(_vault, _gdrive_vault)
-                        else:
-                            if _last_vault is not None:
-                                print('[zettel_sync] Google Drive vault 사라짐 — 동기화 일시 중단')
-                                _last_vault = None
-                    except Exception as _ge:
-                        print(f'[zettel_sync] Google Drive 동기화 오류: {_ge}')
-                    time.sleep(120)
-            threading.Thread(target=_sync_with_gdrive, daemon=True,
-                             name='ZettelGDrive').start()
-            _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60, bidirectional=True)
-        except Exception as e:
-            print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
-
-    # ── fleeting 노트 자동 정제 데몬 (10분 주기) ──────────────────────────
     def run_zettel_refine():
-        """24시간 이상 된 fleeting 노트를 자동으로 permanent로 승격.
-        [v3.7.179] 수동 refine_note() 없이도 지식이 자동 정제됨."""
-        try:
-            time.sleep(120)  # 서버 안정화 대기 (2분)
-            sys.path.insert(0, str(BASE_DIR))
-            from src.zettelkasten import list_notes, refine_note, auto_link
-            from src.pg_store import ensure_schema
-            while True:
-                try:
-                    ensure_schema()
-                    notes = list_notes(note_type='fleeting', limit=100)
-                    from datetime import datetime, timezone, timedelta
-                    now = datetime.now(timezone.utc)
-                    cutoff = now - timedelta(hours=24)
-                    promoted = 0
-                    for n in notes:
-                        # created가 문자열이면 파싱
-                        created = n.get('created_at') or n.get('created', '')
-                        if isinstance(created, str):
-                            try:
-                                created = datetime.fromisoformat(created.replace('Z', '+00:00'))
-                            except Exception:
-                                continue
-                        if hasattr(created, 'tzinfo') and created.tzinfo is None:
-                            created = created.replace(tzinfo=timezone.utc)
-                        if created < cutoff:
-                            nid = n.get('id') or n.get('zettel_id', '')
-                            if nid:
-                                refine_note(nid, new_type='permanent')
-                                auto_link(nid, content=n.get('content', ''),
-                                         tags=n.get('tags', []), created_by='system')
-                                promoted += 1
-                    if promoted:
-                        print(f"[zettel_refine] {promoted}개 fleeting 노트 → permanent 승격 완료")
-                except Exception as e:
-                    print(f"[!] 제텔 자동 정제 오류: {e}")
-                time.sleep(600)  # 10분 주기
-        except Exception as e:
-            print(f"[!] 제텔 자동 정제 데몬 시작 실패: {e}")
+        _daemons.run_zettel_refine(_daemon_env())
 
-    # ── git 커밋 감지 → 제텔카스텐 자동 캡처 데몬 (60초 폴링) ──────────────
     def run_commit_watcher():
-        """새 git 커밋을 폴링하여 zettel_capture.capture_commit() 자동 호출.
-        [v3.7.179] git hook 없이도 커밋 노트가 자동 생성됨."""
-        try:
-            time.sleep(60)  # 서버 안정화 대기
-            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            # 마지막으로 처리한 커밋 해시
-            _last_hash = None
-            try:
-                r = subprocess.run(
-                    ['git', 'rev-parse', 'HEAD'],
-                    cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-                    timeout=5, creationflags=_no_window,
-                )
-                if r.returncode == 0:
-                    _last_hash = r.stdout.strip()
-            except Exception:
-                pass
-
-            while True:
-                try:
-                    time.sleep(60)
-                    r = subprocess.run(
-                        ['git', 'rev-parse', 'HEAD'],
-                        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-                        timeout=5, creationflags=_no_window,
-                    )
-                    if r.returncode != 0:
-                        continue
-                    current_hash = r.stdout.strip()
-                    if current_hash == _last_hash:
-                        continue
-
-                    # 새 커밋 감지 — 커밋 메시지 + 변경 파일 조회
-                    r2 = subprocess.run(
-                        ['git', 'log', '-1', '--pretty=format:%B', current_hash],
-                        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-                        timeout=5, encoding='utf-8', errors='replace',
-                        creationflags=_no_window,
-                    )
-                    commit_msg = r2.stdout.strip() if r2.returncode == 0 else ''
-
-                    r3 = subprocess.run(
-                        ['git', 'diff-tree', '--no-commit-id', '--name-only', '-r', current_hash],
-                        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-                        timeout=5, encoding='utf-8', errors='replace',
-                        creationflags=_no_window,
-                    )
-                    files = [f for f in r3.stdout.strip().split('\n') if f] if r3.returncode == 0 else []
-
-                    if commit_msg and 'auto-bump version' not in commit_msg:
-                        try:
-                            _cap_dir = SCRIPTS_DIR or (BASE_DIR.parent / 'scripts')
-                            _cap_script = _cap_dir / 'zettel_capture.py'
-                            if _cap_script.exists():
-                                import importlib.util as _ilu2
-                                _spec2 = _ilu2.spec_from_file_location('zettel_capture', str(_cap_script))
-                                _mod2 = _ilu2.module_from_spec(_spec2)
-                                _spec2.loader.exec_module(_mod2)
-                                _mod2.capture_commit(commit_msg, files=files, agent='system')
-                        except Exception as e:
-                            print(f"[commit_watcher] 캡처 오류: {e}")
-
-                    _last_hash = current_hash
-                except Exception as e:
-                    print(f"[commit_watcher] 폴링 오류: {e}")
-        except Exception as e:
-            print(f"[!] 커밋 감시 데몬 시작 실패: {e}")
-
+        _daemons.run_commit_watcher(_daemon_env())
     # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
     try:
         import webview
