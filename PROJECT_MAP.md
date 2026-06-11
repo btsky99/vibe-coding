@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-10 22:48
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 18:12
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -191,6 +191,7 @@
 | `install_playwright_cli.py` | 65 |  |
 | `install_psql.py` | 189 |  |
 | `install_skills.py` | 195 |  |
+| `install_statusline.py` | 112 | Claude Code 상태줄 ~/.claude 멱등 설치 (PC 이식) |
 | `install_system_tool.py` | 208 |  |
 | `intent_map.py` | 177 |  |
 | `lesson.py` | 109 |  |
@@ -199,6 +200,7 @@
 | `run_gemini_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
+| `statusline.py` | 185 | 컨텍스트 사용량 상태줄 원본 (install_statusline.py가 배포) |
 | `sync_manager.py` | 120 |  |
 | `telegram_bridge.py` | 1616 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
@@ -296,4 +298,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-10 22:48
+> 자동 생성 완료: 2026-06-11 18:12
