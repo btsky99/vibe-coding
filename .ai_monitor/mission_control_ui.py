@@ -378,7 +378,7 @@ class MissionControlSidebar(QWidget):
             QFrame(frameShape=QFrame.HLine, styleSheet="background-color: rgba(255,255,255,20);")
         )
 
-        # 에이전트 링 영역 — Gemini / Claude / Codex
+        # 에이전트 링 영역 — Antigravity / Claude / Codex
         ring_layout = QHBoxLayout()
         self.gemini_ring = AgentRing("Gemini", "#3498db")
         self.claude_ring = AgentRing("Claude", "#2ecc71")
@@ -421,7 +421,7 @@ class MissionControlSidebar(QWidget):
     def _get_ring(self, agent: str):
         """에이전트 이름으로 AgentRing 위젯을 반환합니다."""
         name = agent.lower().split(':')[0].split('-')[0]
-        if 'gemini' in name:
+        if 'antigravity' in name:
             return self.gemini_ring
         elif 'claude' in name:
             return self.claude_ring
@@ -457,12 +457,12 @@ class MissionControlSidebar(QWidget):
         """에이전트 상태 업데이트 (링 애니메이션).
 
         status 딕셔너리 예시:
-            {"gemini": {"status": "active"}, "claude": {"status": "idle"}, "codex": {"status": "active"}}
+            {"antigravity": {"status": "active"}, "claude": {"status": "idle"}, "codex": {"status": "active"}}
         """
         def _is_active(name: str) -> bool:
             return status.get(name, {}).get("status") == "active"
 
-        self.gemini_ring.set_active(_is_active("gemini"))
+        self.gemini_ring.set_active(_is_active("antigravity"))
         self.claude_ring.set_active(_is_active("claude"))
         self.codex_ring.set_active(_is_active("codex"))
 
@@ -489,7 +489,7 @@ if __name__ == "__main__":
     sidebar.toggle()
     
     # 더미 데이터 테스트
-    QTimer.singleShot(1000, lambda: sidebar.add_log("GEMINI", "분석을 시작합니다..."))
-    QTimer.singleShot(2000, lambda: sidebar.update_status({"gemini": {"status": "active"}}))
+    QTimer.singleShot(1000, lambda: sidebar.add_log("ANTIGRAVITY", "분석을 시작합니다..."))
+    QTimer.singleShot(2000, lambda: sidebar.update_status({"antigravity": {"status": "active"}}))
     
     sys.exit(app.exec())

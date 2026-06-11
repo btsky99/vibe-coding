@@ -3,6 +3,7 @@ FILE: tests/test_codex_orchestration.py
 DESCRIPTION: Codex 라우팅과 오케스트레이터 연동 회귀 테스트.
 
 REVISION HISTORY:
+- 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-06-11 Claude: auto_dispatcher 폐기 반영 — _dispatcher 모킹 테스트 2개를
   config 기반 활성화/부하 기반 배정 검증으로 교체 (폐기 전에도 모킹 불완전으로 실패하던 테스트)
 - 2026-03-27 Codex: Codex 자동 라우팅, worktree 우선 경로, 오케스트레이터 Codex 포함 검증 추가
@@ -50,6 +51,8 @@ def test_resolve_working_dir_prefers_terminal_worktree(monkeypatch):
 
 
 def test_known_agents_includes_codex_when_enabled(monkeypatch):
+    # [레거시 alias] config 키 'gemini_enabled'는 입력 경계 — 본체(_known_agents)가
+    # 이 키를 받아 표준 식별자 'antigravity'를 반환하는지 검증 (agy 마이그레이션 규칙)
     monkeypatch.setattr(
         orchestrator, "_load_runtime_config",
         lambda: {"gemini_enabled": True, "codex_enabled": True},
@@ -57,14 +60,14 @@ def test_known_agents_includes_codex_when_enabled(monkeypatch):
 
     agents = orchestrator._known_agents()
 
-    assert agents == ["claude", "gemini", "codex"]
+    assert agents == ["claude", "antigravity", "codex"]
 
 
 def test_pick_best_agent_returns_none_when_all_dead():
     # 활동 기록이 전혀 없으면 alive 후보 0명 → None (호출자가 'all' 유지)
     best = orchestrator.pick_best_agent(
-        last_seen={"claude": None, "gemini": None, "codex": None},
-        task_count={"claude": 0, "gemini": 0, "codex": 0, "all": 0},
+        last_seen={"claude": None, "antigravity": None, "codex": None},
+        task_count={"claude": 0, "antigravity": 0, "codex": 0, "all": 0},
         task={"title": "테스트 추가", "description": "회귀 테스트 작성"},
     )
 

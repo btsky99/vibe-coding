@@ -3,7 +3,7 @@
  * 📄 파일명: ChatSlot.tsx
  * 📝 설명: cokacdir 패턴 채팅 UI 컴포넌트.
  *          메신저 스타일 말풍선으로 에이전트와 대화합니다.
- *          에이전트(Claude/Gemini/Codex) + 모드(일반/YOLO) + 역할(오케스트레이션/프론트/백엔드) 선택.
+ *          에이전트(Claude/Antigravity/Codex) + 모드(일반/YOLO) + 역할(오케스트레이션/프론트/백엔드) 선택.
  *          /api/agent/chat SSE로 실시간 스트리밍 수신.
  *          텔레그램과 동일한 백엔드를 공유하여 같은 세션 컨텍스트 유지.
  * REVISION HISTORY:
@@ -43,10 +43,10 @@ const ROLE_OPTIONS: { key: AgentRole; label: string; icon: typeof Brain; color: 
 ];
 
 /** CLI 에이전트 옵션 */
-type AgentCli = 'claude' | 'gemini' | 'codex';
+type AgentCli = 'claude' | 'antigravity' | 'codex';
 const CLI_OPTIONS: { key: AgentCli; label: string; icon: typeof Cpu; color: string }[] = [
   { key: 'claude', label: 'Claude', icon: Cpu,      color: 'text-emerald-400' },
-  { key: 'gemini', label: 'Antigravity', icon: Terminal,  color: 'text-orange-400' },
+  { key: 'antigravity', label: 'Antigravity', icon: Terminal,  color: 'text-orange-400' },
   { key: 'codex',  label: 'Codex',  icon: Code2,    color: 'text-amber-400' },
 ];
 

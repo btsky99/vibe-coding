@@ -25,7 +25,7 @@ def main():
     parser = argparse.ArgumentParser(description='경험 회상 — 유사 과거 작업 검색')
     parser.add_argument('query', help='검색할 작업 설명')
     parser.add_argument('--domain', default='', help='도메인 필터 (frontend/backend/db/infra)')
-    parser.add_argument('--agent', default='', help='에이전트 필터 (claude/gemini/codex)')
+    parser.add_argument('--agent', default='', help='에이전트 필터 (claude/antigravity/codex)')
     parser.add_argument('--limit', type=int, default=5, help='결과 수 (기본: 5)')
     parser.add_argument('--json', action='store_true', help='JSON 형식 출력')
     args = parser.parse_args()

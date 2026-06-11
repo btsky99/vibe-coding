@@ -4,7 +4,7 @@
  * DESCRIPTION: 아이소메트릭 오피스 가구 SVG 컴포넌트.
  *              LEGO 스타일 조립 구조 (Parts-based Composition).
  * REVISION HISTORY:
- * - 2026-04-10 Gemini: 가구 부품화 및 대표님 전용 세트(CEO Set) 추가
+ * - 2026-04-10 Antigravity: 가구 부품화 및 대표님 전용 세트(CEO Set) 추가
  * ------------------------------------------------------------------------
  */
 

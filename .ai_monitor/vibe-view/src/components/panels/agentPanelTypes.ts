@@ -12,7 +12,7 @@
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
 export type AgentStatus   = 'idle' | 'running' | 'done' | 'error' | 'unavailable';
-export type CliChoice     = 'orchestrate' | 'auto' | 'claude' | 'gemini' | 'codex';
+export type CliChoice     = 'orchestrate' | 'auto' | 'claude' | 'antigravity' | 'codex';
 export type ActiveTab     = 'workflow' | 'terminal' | 'thoughts' | 'history' | 'orchestrator' | 'hive';
 
 // 하이브 활동 이벤트 타입 — /api/hive/activity 응답 형식
@@ -78,12 +78,12 @@ export function detectStage(line: string): WorkflowStage | null {
 export interface TerminalState {
   status: 'idle' | 'running' | 'done' | 'error';
   task: string;           // 마지막/현재 실행 지시
-  cli: string;            // claude | gemini | ''
+  cli: string;            // claude | antigravity | ''
   run_id: string;
   ts: string;             // ISO 타임스탬프
   last_line: string;      // 마지막 출력 줄
   pipeline_stage?: string; // 서버에서 직접 받는 파이프라인 단계 (idle|analyzing|modifying|verifying|done|error)
-  external?: boolean;     // true = 외부 Gemini 세션 (다른 프로젝트) — UI에서 숨김
+  external?: boolean;     // true = 외부 Antigravity 세션 (다른 프로젝트) — UI에서 숨김
   routing_reason?: string; // 모델 자동 선택 근거 (예: "코드 작업 감지 (수정)")
 }
 
@@ -132,7 +132,7 @@ export const CLI_LABELS: Record<CliChoice, string> = {
   orchestrate: '오케스트레이션',
   auto:   '🤖 Auto (자동 선택)',
   claude: '⚡ Claude Code',
-  gemini: '✨ Antigravity CLI',
+  antigravity: '✨ Antigravity CLI',
   codex:  '🟠 Codex CLI',
 };
 

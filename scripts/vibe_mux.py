@@ -74,7 +74,7 @@ PIPE_BUFFER_SIZE = 65536
 PIPE_CONNECT_TIMEOUT = 5000
 
 # ── 터미널 레지스트리 ────────────────────────────────────────────────────────
-# {terminal_id: {"agent": "claude"|"gemini"|"codex", "pipe": pipe_name, "registered_at": ..., "status": "active"}}
+# {terminal_id: {"agent": "claude"|"antigravity"|"codex", "pipe": pipe_name, "registered_at": ..., "status": "active"}}
 _terminal_registry: dict[str, dict] = {}
 _registry_lock = threading.Lock()
 

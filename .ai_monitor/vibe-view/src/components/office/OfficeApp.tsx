@@ -377,7 +377,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                       const flatIdx = flatStartIdx + agentIdx;
                       const presence = office.presences.find(p => p.slotId === flatIdx);
                       const isActive = selectedDesk === flatIdx;
-                      const cliColor = agent.cli === 'claude' ? '#a78bfa' : agent.cli === 'gemini' ? '#34d399' : '#22d3ee';
+                      const cliColor = agent.cli === 'claude' ? '#a78bfa' : agent.cli === 'antigravity' ? '#34d399' : '#22d3ee';
                       const busy = presence?.status === 'running' || presence?.status === 'started';
                       const isCeoAgent = (agent.role || '').toLowerCase() === 'ceo';
                       const isActiveFinal = isCeoAgent ? selectedDesk === -1 : isActive;
@@ -407,7 +407,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                               {agent.name}
                             </div>
                             <div className="truncate text-[7px] text-white/20">
-                              {agent.model.replace('claude-', '').replace('gemini-', '').replace('gpt-', '')}
+                              {agent.model.replace('claude-', '').replace('antigravity-', '').replace('gpt-', '')}
                             </div>
                           </div>
                           <button
@@ -584,7 +584,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                 className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
               >
                 <option value="claude" className="bg-[#0c1522]">Claude</option>
-                <option value="gemini" className="bg-[#0c1522]">Gemini</option>
+                <option value="antigravity" className="bg-[#0c1522]">Antigravity</option>
                 <option value="codex" className="bg-[#0c1522]">Codex</option>
               </select>
             </label>
@@ -666,7 +666,7 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
                     className="mt-1 block w-full rounded border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/80 outline-none"
                   >
                     <option value="claude" className="bg-[#0c1522]">Claude</option>
-                    <option value="gemini" className="bg-[#0c1522]">Gemini</option>
+                    <option value="antigravity" className="bg-[#0c1522]">Antigravity</option>
                     <option value="codex" className="bg-[#0c1522]">Codex</option>
                   </select>
                 </label>

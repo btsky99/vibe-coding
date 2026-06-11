@@ -8,7 +8,7 @@ DESCRIPTION: 하이브 마인드 초기 설정 자동 진단 + 수리 엔진.
              1. pg_locale   — PostgreSQL lc_messages=C 강제 (CP949 크래시 방지)
              2. pg_database — 프로젝트별 DB 존재 여부 확인
              3. hooks       — .claude/settings.json 훅 설정 확인/생성
-             4. cli_agents  — claude/gemini/codex CLI 설치 감지
+             4. cli_agents  — claude/antigravity/codex CLI 설치 감지
              5. telegram    — .env 텔레그램 봇 토큰 유무
 
 REVISION HISTORY:
@@ -209,10 +209,10 @@ def check_hooks() -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 def check_cli_agents() -> dict:
-    """claude, gemini, codex CLI가 시스템에 설치되어 있는지 확인한다."""
+    """claude, antigravity, codex CLI가 시스템에 설치되어 있는지 확인한다."""
     agents = {
         "claude": ["claude", "--version"],
-        "gemini": ["gemini", "--version"],
+        "antigravity": ["antigravity", "--version"],
         "codex": ["codex", "--version"],
     }
 

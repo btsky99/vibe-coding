@@ -150,7 +150,7 @@ export function useOfficeState({
             zone,
             anchorId: isCeo ? 'user' : `${dept.id}-${i}`,
             badges: isCeo ? ['ceo'] : [],
-            colorKey: isCeo ? 'user' : (['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown'),
+            colorKey: isCeo ? 'user' : (['claude', 'antigravity', 'codex'].includes(agent) ? agent : 'unknown'),
           });
           flatIdx++;
         }
@@ -173,7 +173,7 @@ export function useOfficeState({
             zone,
             anchorId: zone === 'desk' ? `desk-${slotId}` : zone,
             badges: makeBadges(data, zone),
-            colorKey: ['claude', 'gemini', 'codex'].includes(agent) ? agent : 'unknown',
+            colorKey: ['claude', 'antigravity', 'codex'].includes(agent) ? agent : 'unknown',
           };
         })
         .sort((a, b) => a.slotId - b.slotId);

@@ -204,7 +204,7 @@ def _inject_hive_context() -> str:
             parts.append(f"[오늘 완료 항목]\n" + "\n".join(today_snap.strip().split("\n")[-5:]))
 
         # 다른 에이전트가 남긴 최근 메모리 (멀티-LLM 간접 협업)
-        # [WHY] hive_memory에 다른 LLM(Gemini/Codex)이 남긴 통찰을 세션 시작 시 자동 주입.
+        # [WHY] hive_memory에 다른 LLM(Antigravity/Codex)이 남긴 통찰을 세션 시작 시 자동 주입.
         # claude만 보면 자기 작업만 이어가서 협업 효과 0. 작성자 필터로 자기 메모 제외.
         # [출처] 워크트리 vigilant-lamarr에서 회수 (2026-06-07, 미머지 변경 손실 방지).
         try:
@@ -555,7 +555,7 @@ def main():
         # [2026-03-22] Self-Reflect 주입 제거 (pg_thoughts 삭제됨)
 
         # [ITCP 메시지 폴링] PostgreSQL pg_messages에서 Claude에게 온 미읽음 메시지 수신
-        # Gemini, Codex 등 다른 터미널 에이전트가 보낸 메시지를 자동으로 컨텍스트에 주입
+        # Antigravity, Codex 등 다른 터미널 에이전트가 보낸 메시지를 자동으로 컨텍스트에 주입
         # [2026-03-08] ITCP(itcp.py) 기반으로 전환 — PostgreSQL pg_messages FIRST
         unread = _read_messages("claude")
         if unread:

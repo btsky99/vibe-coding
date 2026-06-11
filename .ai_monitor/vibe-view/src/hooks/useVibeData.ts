@@ -32,7 +32,7 @@ export interface VibeData {
   ptySessionsSummary: Record<string, { agent_count: number; total: number }>;
 
   // 컨텍스트 사용량
-  geminiUsage: { total_tokens: number; context_window: number; percentage: number } | null;
+  antigravityUsage: { total_tokens: number; context_window: number; percentage: number } | null;
   claudeUsage: {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
     model: string; context_window: number; percentage: number; last_ts: string;
@@ -78,7 +78,7 @@ export function useVibeData(): VibeData {
   // ─── 에이전트 상태 ────────────────────────────────────────────────
   const [agentTerminals, setAgentTerminals] = useState<Record<string, any>>({});
   const [ptySessionsSummary, setPtySessionsSummary] = useState<VibeData['ptySessionsSummary']>({});
-  const [geminiUsage, setGeminiUsage] = useState<VibeData['geminiUsage']>(null);
+  const [antigravityUsage, setAntigravityUsage] = useState<VibeData['antigravityUsage']>(null);
   const [claudeUsage, setClaudeUsage] = useState<VibeData['claudeUsage']>(null);
 
   // ─── 하이브 상태 ──────────────────────────────────────────────────
@@ -260,12 +260,12 @@ export function useVibeData(): VibeData {
     return 'idle';
   }, [agentTerminals]);
 
-  // Gemini + Claude 컨텍스트 사용량 폴링 (10초)
+  // Antigravity + Claude 컨텍스트 사용량 폴링 (10초)
   useEffect(() => {
     const fetchUsage = () => {
-      fetch(`${API_BASE}/api/gemini-context-usage`)
+      fetch(`${API_BASE}/api/antigravity-context-usage`)
         .then(res => res.json())
-        .then(data => { if (!data.error) setGeminiUsage(data); })
+        .then(data => { if (!data.error) setAntigravityUsage(data); })
         .catch((err) => console.error('[useVibeData] fetch error:', err));
       fetch(`${API_BASE}/api/context-usage`)
         .then(res => res.json())
@@ -314,7 +314,7 @@ export function useVibeData(): VibeData {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
     ptySessionsSummary,
-    geminiUsage, claudeUsage,
+    antigravityUsage, claudeUsage,
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,

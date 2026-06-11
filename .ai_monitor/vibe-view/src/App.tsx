@@ -25,8 +25,8 @@
  *                      파일명 truncate→whitespace-nowrap 변경, 버튼 overflow-hidden 제거
  * - 2026-03-01 Claude: 사이드바 좌우 드래그 리사이즈 핸들 추가 (sidebarWidth 동적 상태, 150~600px),
  *                      오른쪽 터미널 영역 overflow-y-auto 스크롤 적용, 그리드 min-h-full로 변경
- * - 2026-03-01 Gemini CLI: 사이드바 VS Code 스타일 UI 복원 (인라인 편집, 호버 버튼 그룹)
- * - 2026-03-01 Gemini-2: 터미널 초기 레이아웃 2분할로 변경 및 뷰어 창 수동 리사이즈 핸들 도입
+ * - 2026-03-01 Antigravity CLI: 사이드바 VS Code 스타일 UI 복원 (인라인 편집, 호버 버튼 그룹)
+ * - 2026-03-01 Antigravity-2: 터미널 초기 레이아웃 2분할로 변경 및 뷰어 창 수동 리사이즈 핸들 도입
  * - 2026-02-24: 한글 입력 엔터 키 처리 로직 개선 반영
  * ------------------------------------------------------------------------
  */
@@ -70,7 +70,7 @@ function App() {
   const {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
-    geminiUsage, claudeUsage,
+    antigravityUsage, claudeUsage,
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
@@ -593,7 +593,7 @@ function App() {
                   locks={locks}
                   messages={messages}
                   tasks={[]}
-                  geminiUsage={geminiUsage}
+                  antigravityUsage={antigravityUsage}
                   claudeUsage={claudeUsage}
                   agentTerminals={agentTerminals}
                   orchestratorData={skillChain}

@@ -115,7 +115,7 @@ export interface Task {
     title: string;                     // 작업 제목
     description: string;               // 상세 설명 (선택)
     status: 'pending' | 'in_progress' | 'done';
-    assigned_to: string;               // 담당 에이전트 (claude / gemini / all)
+    assigned_to: string;               // 담당 에이전트 (claude / antigravity / all)
     priority: 'high' | 'medium' | 'low';
     created_by: string;                // 생성 주체
     // ── 칸반 보드 확장 필드 (TaskForce.AI 스타일) ──
@@ -133,8 +133,8 @@ export interface Task {
 export interface AgentMessage {
     id: string;                    // 고유 ID (timestamp 기반)
     timestamp: string;             // ISO 형식 타임스탬프
-    from: string;                  // 발신 에이전트 (claude / gemini / system)
-    to: string;                    // 수신 대상 (claude / gemini / all)
+    from: string;                  // 발신 에이전트 (claude / antigravity / system)
+    to: string;                    // 수신 대상 (claude / antigravity / all)
     type: 'info' | 'handoff' | 'request' | 'task_complete' | 'warning' | 'office_chat' | 'chat';
     content: string;               // 메시지 본문
     read: boolean;                 // 읽음 여부
@@ -150,7 +150,7 @@ export interface HiveHealth {
   logs?: string[];             // 워치독 이벤트 로그 (최근 20개)
   constitution?: {
     rules_md: boolean;
-    gemini_md: boolean;
+    gemini_md: boolean; // GEMINI.md 파일 점검 — 파일명이 agy 인터페이스라 키 유지
     claude_md: boolean;
     agents_md: boolean;
     project_map: boolean;
@@ -162,7 +162,7 @@ export interface HiveHealth {
   };
   agents?: {
     claude_config: boolean;
-    gemini_config: boolean;
+    antigravity_config: boolean;
     codex_config: boolean;
   };
   data?: {

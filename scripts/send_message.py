@@ -40,8 +40,8 @@ def send_message(
     """터미널 간 메시지 전송 (ITCP를 통해 PostgreSQL에 저장).
 
     [인자]
-    - from_agent : 발신자 (예: "claude", "gemini")
-    - to_agent   : 수신자 (예: "claude", "gemini", "all")
+    - from_agent : 발신자 (예: "claude", "antigravity")
+    - to_agent   : 수신자 (예: "claude", "antigravity", "all")
     - msg_type   : 메시지 유형 (info, request, response, alert, summary)
     - content    : 메시지 내용
     - channel    : 채널 분류 (general/task/debug/review/broadcast/hive)
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if len(args) < 4:
         print("사용법: send_message.py <from> <to> <type> <content> [channel]")
-        print("예시:   send_message.py claude gemini info '버그 발견됨' debug")
+        print("예시:   send_message.py claude antigravity info '버그 발견됨' debug")
         sys.exit(1)
 
     from_a = args[0]

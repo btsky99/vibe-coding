@@ -1,7 +1,7 @@
 """
 FILE: scripts/harness_verify.py
 DESCRIPTION: Vibe Coding 하네스 V2 검증 스크립트.
-             Claude, Gemini, Codex 모든 에이전트가 공통 하네스 규칙을 준수하는지 기계적으로 검사한다.
+             Claude, Antigravity, Codex 모든 에이전트가 공통 하네스 규칙을 준수하는지 기계적으로 검사한다.
 
              [V2 검사 항목 — 10개]
              1. required-doc        : 필수 문서 존재 확인

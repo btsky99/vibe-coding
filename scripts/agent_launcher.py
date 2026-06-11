@@ -31,7 +31,7 @@ AGENT_CMDS: dict[str, dict[str, list[str]]] = {
         "normal": ["claude"],
         "yolo": ["claude", "--dangerously-skip-permissions"],
     },
-    "gemini": {
+    "antigravity": {
         "normal": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_antigravity_clean.py")],
         "yolo": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_antigravity_clean.py"), "--yolo"],
     },
@@ -105,7 +105,7 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     """지정된 에이전트를 해당 모드로 실행.
 
     Args:
-        agent: 'claude' | 'gemini' | 'codex' | 'vibe'
+        agent: 'claude' | 'antigravity' | 'codex' | 'vibe'
         mode:  'normal' | 'yolo'
         extra_args: 명령줄에서 추가로 전달된 인자
     """
@@ -136,7 +136,7 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
         print(f"[HIVE] Failed to fetch debate context: {e}")
 
     # 중첩 세션 방지: CLAUDE 관련 환경 변수 제거
-    # Why: Gemini CLI 등에서 실행 시 상속된 변수가 Claude Code의 중첩 실행 방지 로직을 트리거함.
+    # Why: Antigravity CLI 등에서 실행 시 상속된 변수가 Claude Code의 중첩 실행 방지 로직을 트리거함.
     claude_vars = [k for k in os.environ.keys() if "CLAUDE" in k.upper()]
     if claude_vars:
         for k in claude_vars:
@@ -157,7 +157,7 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
         os.system("mode con cols=220")
         os.environ["COLUMNS"] = "220"
 
-    if agent == "gemini":
+    if agent == "antigravity":
         completed = subprocess.run(cmd, check=False)
         raise SystemExit(completed.returncode)
 
@@ -173,7 +173,7 @@ def main():
 예시:
   python agent_launcher.py claude normal
   python agent_launcher.py claude yolo
-  python agent_launcher.py gemini normal
+  python agent_launcher.py antigravity normal
   python agent_launcher.py codex yolo
   python agent_launcher.py vibe normal
   python agent_launcher.py --set-mode yolo   # 모드만 저장
@@ -184,7 +184,7 @@ def main():
         "agent",
         nargs="?",
         choices=list(AGENT_CMDS.keys()),
-        help="실행할 에이전트 (claude | gemini | codex | vibe)",
+        help="실행할 에이전트 (claude | antigravity | codex | vibe)",
     )
     parser.add_argument(
         "mode",

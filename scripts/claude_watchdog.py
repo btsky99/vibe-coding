@@ -111,13 +111,13 @@ def _dispatch(data: dict):
     if "] " in content:
         actual_task = content.split("] ", 1)[-1].strip()
 
-    # cli 강제 지정 파싱: "!claude 지시내용" 또는 "!gemini 지시내용"
+    # cli 강제 지정 파싱: "!claude 지시내용" 또는 "!antigravity 지시내용"
     cli = 'auto'
     if actual_task.startswith('!claude '):
         cli = 'claude'
         actual_task = actual_task[8:].strip()
-    elif actual_task.startswith('!gemini '):
-        cli = 'gemini'
+    elif actual_task.startswith('!antigravity '):
+        cli = 'antigravity'
         actual_task = actual_task[8:].strip()
 
     print(f"📥 지시 감지 [{from_}→agent | cli={cli}]: {actual_task[:80]}")

@@ -1,13 +1,13 @@
 """
 FILE: scripts/antigravity_session_repair.py
-DESCRIPTION: Gemini CLI 세션 히스토리 자동 수리 스크립트.
-    Gemini API 에러 "number of function response parts ≠ function call parts"의
+DESCRIPTION: Antigravity CLI 세션 히스토리 자동 수리 스크립트.
+    Antigravity API 에러 "number of function response parts ≠ function call parts"의
     근본 원인을 수정합니다.
 
     [근본 원인]
-    Gemini CLI가 read_file로 이미지(PNG 등)를 읽으면 result에
+    Antigravity CLI가 read_file로 이미지(PNG 등)를 읽으면 result에
     functionResponse + inlineData 2개 파트를 넣습니다.
-    Gemini API는 function call 1개당 function response 1개만 허용하므로
+    Antigravity API는 function call 1개당 function response 1개만 허용하므로
     result에 2개 파트가 들어가면 쌍이 깨져 400 에러가 발생합니다.
 
     [수리 방법]
@@ -32,13 +32,13 @@ from pathlib import Path
 from datetime import datetime
 
 
-def _find_gemini_chat_dirs() -> list[Path]:
-    """Gemini CLI 세션 저장 디렉터리 탐색"""
+def _find_antigravity_chat_dirs() -> list[Path]:
+    """Antigravity CLI 세션 저장 디렉터리 탐색"""
     home = Path.home()
     gemini_tmp = home / ".gemini" / "tmp"
     dirs = []
-    if gemini_tmp.exists():
-        for project_dir in gemini_tmp.iterdir():
+    if antigravity_tmp.exists():
+        for project_dir in antigravity_tmp.iterdir():
             chat_dir = project_dir / "chats"
             if chat_dir.exists():
                 dirs.append(chat_dir)
@@ -146,18 +146,18 @@ def repair_session(filepath: Path) -> tuple[bool, int]:
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Gemini 세션 히스토리 수리")
+    parser = argparse.ArgumentParser(description="Antigravity 세션 히스토리 수리")
     parser.add_argument("--scan", action="store_true", help="스캔만 (수정 안 함)")
     parser.add_argument("--clean", action="store_true", help="깨진 세션 삭제")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  Gemini 세션 히스토리 수리 도구")
+    print("  Antigravity 세션 히스토리 수리 도구")
     print("=" * 60)
 
-    chat_dirs = _find_gemini_chat_dirs()
+    chat_dirs = _find_antigravity_chat_dirs()
     if not chat_dirs:
-        print("  Gemini 세션 디렉터리를 찾을 수 없습니다.")
+        print("  Antigravity 세션 디렉터리를 찾을 수 없습니다.")
         return
 
     total_scanned = 0

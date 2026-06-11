@@ -61,13 +61,13 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     # ── ITCP: Inter-Terminal Communication Protocol 도구 ─────────────────────
-    # Codex가 Claude/Gemini와 PostgreSQL을 통해 메시지를 주고받을 수 있습니다.
+    # Codex가 Claude/Antigravity와 PostgreSQL을 통해 메시지를 주고받을 수 있습니다.
     {
         "name": "itcp_send",
         "description": (
             "Send a message to another terminal agent via the Hive ITCP protocol (PostgreSQL pg_messages). "
-            "Use this to communicate with Claude or Gemini terminals. "
-            "to_terminal: 'claude', 'gemini', 'all' (broadcast). "
+            "Use this to communicate with Claude or Antigravity terminals. "
+            "to_terminal: 'claude', 'antigravity', 'all' (broadcast). "
             "channel: 'general', 'task', 'debug', 'review', 'broadcast', 'hive'."
         ),
         "inputSchema": {
@@ -75,7 +75,7 @@ TOOLS = [
             "properties": {
                 "to_terminal": {
                     "type": "string",
-                    "description": "Recipient: 'claude', 'gemini', or 'all'",
+                    "description": "Recipient: 'claude', 'antigravity', or 'all'",
                 },
                 "content": {
                     "type": "string",
@@ -99,7 +99,7 @@ TOOLS = [
         "name": "itcp_receive",
         "description": (
             "Check and retrieve unread messages sent to this Codex terminal from other agents "
-            "(Claude, Gemini) via PostgreSQL pg_messages. Call this at session start to catch up."
+            "(Claude, Antigravity) via PostgreSQL pg_messages. Call this at session start to catch up."
         ),
         "inputSchema": {
             "type": "object",
@@ -135,7 +135,7 @@ TOOLS = [
         "name": "hive_memory_get",
         "description": (
             "Read a specific key from the Hive shared memory (PostgreSQL hive_memory table). "
-            "Use this to access knowledge shared by Claude or Gemini."
+            "Use this to access knowledge shared by Claude or Antigravity."
         ),
         "inputSchema": {
             "type": "object",
@@ -152,7 +152,7 @@ TOOLS = [
         "name": "hive_memory_set",
         "description": (
             "Write a key-value entry to the Hive shared memory (PostgreSQL hive_memory table). "
-            "Other agents (Claude, Gemini) will be able to read this knowledge."
+            "Other agents (Claude, Antigravity) will be able to read this knowledge."
         ),
         "inputSchema": {
             "type": "object",
@@ -277,7 +277,7 @@ def handle_tool_call(name: str, args: dict) -> str:
             return f"[error] {exc}"
 
     # ── ITCP 도구 핸들러 ────────────────────────────────────────────────────
-    # Codex가 Claude/Gemini와 PostgreSQL pg_messages를 통해 통신할 수 있도록 합니다.
+    # Codex가 Claude/Antigravity와 PostgreSQL pg_messages를 통해 통신할 수 있도록 합니다.
     if name == "itcp_send":
         to_terminal = args.get("to_terminal", "all")
         content = args.get("content", "")

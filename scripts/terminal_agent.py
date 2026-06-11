@@ -23,12 +23,12 @@ REVISION HISTORY:
 #         set TERMINAL_ID=T2 && python scripts/terminal_agent.py
 #
 #         # 단발 실행 (REPL 없이):
-#         python scripts/terminal_agent.py "버그 고쳐줘" [claude|gemini|auto]
+#         python scripts/terminal_agent.py "버그 고쳐줘" [claude|antigravity|auto]
 #
 #       [자동 라우팅 규칙]
 #         - 설계/분석/계획/아키텍처 키워드 -> 오케스트레이터(vibe-orchestrate)
 #         - 코드/버그/수정/구현 키워드     -> Claude Code CLI (-p 모드)
-#         - 검토/리뷰/문서 키워드          -> Gemini CLI
+#         - 검토/리뷰/문서 키워드          -> Antigravity CLI
 #         - 기타                            -> Claude (기본값)
 #
 # 변경 이력 (REVISION HISTORY):
@@ -52,7 +52,7 @@ from pathlib import Path
 from urllib import request as urllib_request
 from urllib.error import URLError
 
-from antigravity_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import AntigravityCliNoiseFilter
 
 # ── 경로 설정 ─────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = Path(__file__).parent
@@ -97,7 +97,7 @@ def _route(task: str) -> str:
     """지시 내용 분석 후 라우팅 대상 반환: 'orchestrate' | 'auto'.
 
     오케스트레이터 키워드가 많거나 지시가 복잡하면(다중 단계 추정) orchestrate,
-    그 외 기본값은 'auto'(cli_agent가 claude/gemini 선택).
+    그 외 기본값은 'auto'(cli_agent가 claude/antigravity 선택).
     """
     task_lower = task.lower()
     orch_score = sum(1 for kw in ORCH_KEYWORDS if kw in task_lower)
@@ -202,15 +202,15 @@ def _run_direct(task: str, cli: str = 'auto') -> None:
         bufsize=0,
         creationflags=creationflags,
     )
-    gemini_filter = GeminiCliNoiseFilter() if cli == 'gemini' else None
+    antigravity_filter = AntigravityCliNoiseFilter() if cli == 'antigravity' else None
 
     # 실시간 출력 스트리밍
     try:
         for raw_line in iter(proc.stdout.readline, b''):
             if raw_line:
                 line_data = raw_line.decode('utf-8', errors='replace').rstrip()
-                if gemini_filter is not None:
-                    line_data = gemini_filter.filter_line(line_data)
+                if antigravity_filter is not None:
+                    line_data = antigravity_filter.filter_line(line_data)
                     if line_data is None:
                         continue
                 # agent_live.jsonl 형식이면 파싱, 아니면 그대로 출력
@@ -325,7 +325,7 @@ def dispatch(task: str, cli_override: str = 'auto') -> None:
     _p(f'\n[🤖 {TERMINAL_ID}->{route_label}] "{short}"', C_BOLD + C_CYAN)
 
     # 실제 CLI 라우팅: orchestrate는 서버 측에서 처리하므로 api에 route='orchestrate' 전달
-    cli_for_api = route  # 'orchestrate' | 'auto' | 'claude' | 'gemini'
+    cli_for_api = route  # 'orchestrate' | 'auto' | 'claude' | 'antigravity'
 
     # 서버 API 호출
     result = _call_api(task, cli_for_api)
@@ -354,7 +354,7 @@ def _print_banner() -> None:
     """터미널 에이전트 시작 배너 출력."""
     server_status = '[온라인]' if _is_server_alive() else '[오프라인 - 자동시작]'
     _p(f'{C_BOLD}{C_CYAN}[Vibe Terminal Agent] {TERMINAL_ID}{C_RESET}')
-    _p(f'  Claude Code + Gemini 자율 에이전트')
+    _p(f'  Claude Code + Antigravity 자율 에이전트')
     _p(f'  서버: {server_status}  |  빈 줄 입력 -> 종료')
     _p(f'  라우팅: 복잡도 자동 감지 -> 에이전트/오케스트레이터 선택')
     _p('')
@@ -382,7 +382,7 @@ def _repl_mode() -> None:
 # ── 진입점 ─────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     if len(sys.argv) >= 2:
-        # 단발 실행 모드: python terminal_agent.py "지시" [claude|gemini|auto]
+        # 단발 실행 모드: python terminal_agent.py "지시" [claude|antigravity|auto]
         _task = sys.argv[1]
         _cli  = sys.argv[2] if len(sys.argv) >= 3 else 'auto'
         dispatch(_task, _cli)

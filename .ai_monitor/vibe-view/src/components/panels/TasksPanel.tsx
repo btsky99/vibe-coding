@@ -272,7 +272,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
                     className={`px-1.5 py-0.5 rounded text-[8px] font-bold font-mono ${
                       task.assigned_to === 'claude'
                         ? 'bg-green-500/15 text-green-400' :
-                      task.assigned_to === 'gemini'
+                      task.assigned_to === 'antigravity'
                         ? 'bg-blue-500/15 text-blue-400' :
                       task.assigned_to === 'codex'
                         ? 'bg-orange-500/15 text-orange-400' :
@@ -372,7 +372,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
                           <div key={c.id} className="text-[9px]">
                             <span className={`font-bold ${
                               c.author.includes('claude') ? 'text-green-400' :
-                              c.author.includes('gemini') ? 'text-blue-400' :
+                              c.author.includes('antigravity') ? 'text-blue-400' :
                               c.author.includes('codex') ? 'text-orange-400' :
                               'text-primary'
                             }`}>
@@ -449,7 +449,7 @@ const TasksPanel = ({ onActiveCount }: TasksPanelProps) => {
             >
               <option value="all">All</option>
               <option value="claude">Claude</option>
-              <option value="gemini">Gemini</option>
+              <option value="antigravity">Antigravity</option>
             </select>
             <select
               value={newTaskPriority}

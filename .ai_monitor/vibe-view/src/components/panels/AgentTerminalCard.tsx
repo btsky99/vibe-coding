@@ -52,7 +52,7 @@ export default function TerminalCard({
   // CLI 배지 색상
   const cliBadge =
     cli === 'claude' ? 'bg-orange-500/20 text-orange-300 border-orange-500/20' :
-    cli === 'gemini' ? 'bg-blue-500/20 text-blue-300 border-blue-500/20' :
+    cli === 'antigravity' ? 'bg-blue-500/20 text-blue-300 border-blue-500/20' :
     cli === 'codex'  ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/20' :
                        'bg-white/5 text-white/20 border-white/5';
 
@@ -66,7 +66,7 @@ export default function TerminalCard({
   })();
 
   // 파이프라인 단계: 서버 pipeline_stage가 정확한 소스 (hive_hook.py가 도구 이벤트 기반으로 전송)
-  // last_line 키워드 fallback은 훅이 없는 외부 CLI(Gemini 등)에서만 동작
+  // last_line 키워드 fallback은 훅이 없는 외부 CLI(Antigravity 등)에서만 동작
   const serverStage = pipeline_stage && pipeline_stage !== 'idle' ? pipeline_stage : null;
   const detectedStage = serverStage ?? (previewLine ? detectStage(previewLine) : null);
 

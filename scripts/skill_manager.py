@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 FILE: scripts/skill_manager.py
-DESCRIPTION: Gemini CLI 및 Claude용 스킬 통합 관리자.
+DESCRIPTION: Antigravity CLI 및 Claude용 스킬 통합 관리자.
 
 REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
@@ -22,11 +22,11 @@ def list_local_skills():
     각 스킬 폴더 내의 SKILL.md 파일을 분석하여 설명을 추출합니다.
     """
     skills = []
-    if not os.path.exists(GEMINI_SKILLS_DIR):
+    if not os.path.exists(ANTIGRAVITY_SKILLS_DIR):
         return skills
     
-    for item in os.listdir(GEMINI_SKILLS_DIR):
-        skill_path = os.path.join(GEMINI_SKILLS_DIR, item)
+    for item in os.listdir(ANTIGRAVITY_SKILLS_DIR):
+        skill_path = os.path.join(ANTIGRAVITY_SKILLS_DIR, item)
         if os.path.isdir(skill_path):
             skill_md = os.path.join(skill_path, 'SKILL.md')
             description = "설명 정보가 없습니다."
@@ -48,7 +48,7 @@ def list_local_skills():
                 "name": item,
                 "path": skill_path,
                 "description": description,
-                "type": "Gemini",
+                "type": "Antigravity",
                 "installed_at": datetime.fromtimestamp(os.path.getctime(skill_path)).isoformat()
             })
     return skills
@@ -60,18 +60,18 @@ def search_remote_skills(query):
     현재는 검색을 수행하기 위한 가이드와 시뮬레이션 데이터를 반환합니다.
     """
     # 시뮬레이션 데이터 (추후 실제 API 연동 가능)
-    # 실제로는 Gemini 에이전트가 이 스크립트의 출력을 보고 google_web_search를 실행하도록 설계됨
+    # 실제로는 Antigravity 에이전트가 이 스크립트의 출력을 보고 google_web_search를 실행하도록 설계됨
     mock_results = [
         {
             "name": "python-optimizer",
             "description": "파이썬 코드의 성능을 분석하고 최적화 제안을 하는 전문 스킬",
-            "url": "https://github.com/google-gemini/skills/python-optimizer",
-            "author": "Gemini Community"
+            "url": "https://github.com/google-antigravity/skills/python-optimizer",
+            "author": "Antigravity Community"
         },
         {
             "name": "ui-tester",
             "description": "Playwright 기반의 UI 자동화 테스트 생성 및 실행 스킬",
-            "url": "https://github.com/google-gemini/skills/ui-tester",
+            "url": "https://github.com/google-antigravity/skills/ui-tester",
             "author": "Vibe Team"
         }
     ]
@@ -84,7 +84,7 @@ def install_skill(name, url):
     """
     지정된 URL(주로 Git 저장소)로부터 스킬을 다운로드하여 로컬에 설치합니다.
     """
-    target_path = os.path.join(GEMINI_SKILLS_DIR, name)
+    target_path = os.path.join(ANTIGRAVITY_SKILLS_DIR, name)
     
     if os.path.exists(target_path):
         return {"status": "error", "message": f"이미 '{name}' 스킬이 존재합니다."}

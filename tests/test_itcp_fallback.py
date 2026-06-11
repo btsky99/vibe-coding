@@ -11,6 +11,7 @@ DESCRIPTION: ITCP 폴백 로직 단위 테스트.
              - 각 테스트는 독립적으로 실행 가능 (픽스처로 격리)
 
 REVISION HISTORY:
+- 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-03-09 Claude: 최초 작성 — ITCP v1 신규 구현 후 폴백 로직 커버리지 확보
 """
 
@@ -61,7 +62,7 @@ class TestFallbackFileSend:
 
     def test_send_pg없을때_폴백파일에_저장됨(self, fallback_file):
         """send() 호출 시 PG 불가 상태에서 messages.jsonl에 기록되는지 확인."""
-        result = itcp.send("claude", "gemini", "서버 버그 발견", channel="debug")
+        result = itcp.send("claude", "antigravity", "서버 버그 발견", channel="debug")
 
         assert result is True
         assert fallback_file.exists()
@@ -71,15 +72,15 @@ class TestFallbackFileSend:
 
         msg = json.loads(lines[0])
         assert msg["from_agent"] == "claude"
-        assert msg["to_agent"] == "gemini"
+        assert msg["to_agent"] == "antigravity"
         assert msg["content"] == "서버 버그 발견"
         assert msg["channel"] == "debug"
         assert msg["is_read"] is False
 
     def test_send_연속_2개_메시지_순서_유지됨(self, fallback_file):
         """두 번 send() 시 파일에 순서대로 두 줄이 기록되는지 확인."""
-        itcp.send("claude", "gemini", "첫 번째")
-        itcp.send("gemini", "claude", "두 번째")
+        itcp.send("claude", "antigravity", "첫 번째")
+        itcp.send("antigravity", "claude", "두 번째")
 
         lines = fallback_file.read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) == 2
@@ -99,7 +100,7 @@ class TestFallbackFileSend:
 
     def test_send_빈_컨텐츠도_저장됨(self, fallback_file):
         """빈 문자열도 유효한 메시지로 저장되는지 확인."""
-        result = itcp.send("claude", "gemini", "")
+        result = itcp.send("claude", "antigravity", "")
         assert result is True
 
     def test_broadcast_to_agent가_all로_저장됨(self, fallback_file):
@@ -125,9 +126,9 @@ class TestFallbackFileReceive:
     def test_receive_내게온_미읽음_반환됨(self, fallback_file):
         """to_agent='claude'이고 is_read=False인 메시지만 반환되는지 확인."""
         self._write_messages(fallback_file, [
-            {"id": "1", "from_agent": "gemini", "to_agent": "claude",
+            {"id": "1", "from_agent": "antigravity", "to_agent": "claude",
              "channel": "debug", "msg_type": "info", "content": "버그 발견", "is_read": False},
-            {"id": "2", "from_agent": "gemini", "to_agent": "gemini",  # 다른 수신자
+            {"id": "2", "from_agent": "antigravity", "to_agent": "antigravity",  # 다른 수신자
              "channel": "general", "msg_type": "info", "content": "내꺼", "is_read": False},
         ])
 
@@ -138,9 +139,9 @@ class TestFallbackFileReceive:
     def test_receive_이미읽은_메시지_제외됨(self, fallback_file):
         """is_read=True인 메시지는 receive()에서 반환되지 않아야 함."""
         self._write_messages(fallback_file, [
-            {"id": "1", "from_agent": "gemini", "to_agent": "claude",
+            {"id": "1", "from_agent": "antigravity", "to_agent": "claude",
              "channel": "general", "msg_type": "info", "content": "읽은 메시지", "is_read": True},
-            {"id": "2", "from_agent": "gemini", "to_agent": "claude",
+            {"id": "2", "from_agent": "antigravity", "to_agent": "claude",
              "channel": "general", "msg_type": "info", "content": "안읽은 메시지", "is_read": False},
         ])
 
@@ -156,14 +157,14 @@ class TestFallbackFileReceive:
              "content": "전체 공지", "is_read": False},
         ])
 
-        msgs = itcp.receive("gemini")
+        msgs = itcp.receive("antigravity")
         assert len(msgs) == 1
         assert msgs[0]["content"] == "전체 공지"
 
     def test_receive_mark_read_true이면_읽음처리됨(self, fallback_file):
         """mark_read=True(기본값) 시 반환된 메시지가 is_read=True로 업데이트되어야 함."""
         self._write_messages(fallback_file, [
-            {"id": "1", "from_agent": "gemini", "to_agent": "claude",
+            {"id": "1", "from_agent": "antigravity", "to_agent": "claude",
              "channel": "task", "msg_type": "request", "content": "작업 요청", "is_read": False},
         ])
 
@@ -177,7 +178,7 @@ class TestFallbackFileReceive:
     def test_receive_mark_read_false이면_읽음처리_안됨(self, fallback_file):
         """mark_read=False 시 메시지를 읽어도 is_read 상태가 변하지 않아야 함."""
         self._write_messages(fallback_file, [
-            {"id": "1", "from_agent": "gemini", "to_agent": "claude",
+            {"id": "1", "from_agent": "antigravity", "to_agent": "claude",
              "channel": "general", "msg_type": "info", "content": "엿보기", "is_read": False},
         ])
 
@@ -191,7 +192,7 @@ class TestFallbackFileReceive:
     def test_receive_두번째_호출시_이미읽음_반환안됨(self, fallback_file):
         """같은 메시지를 두 번 receive()하면 두 번째에는 빈 목록 반환."""
         self._write_messages(fallback_file, [
-            {"id": "1", "from_agent": "gemini", "to_agent": "claude",
+            {"id": "1", "from_agent": "antigravity", "to_agent": "claude",
              "channel": "general", "msg_type": "info", "content": "한번만", "is_read": False},
         ])
 
@@ -217,7 +218,7 @@ class TestFallbackFileReceive:
         """JSON 파싱 실패 줄이 섞여 있어도 정상 메시지는 처리되어야 함."""
         fallback_file.write_text(
             '{"broken": json line}\n'
-            '{"id":"2","from_agent":"gemini","to_agent":"claude","channel":"general","msg_type":"info","content":"정상 메시지","is_read":false}\n',
+            '{"id":"2","from_agent":"antigravity","to_agent":"claude","channel":"general","msg_type":"info","content":"정상 메시지","is_read":false}\n',
             encoding="utf-8"
         )
         msgs = itcp.receive("claude")

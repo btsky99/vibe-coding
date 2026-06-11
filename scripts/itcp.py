@@ -2,7 +2,7 @@
 """
 FILE: scripts/itcp.py
 DESCRIPTION: Inter-Terminal Communication Protocol (ITCP) — PostgreSQL 기반 터미널 간 통신 코어.
-             Claude, Gemini 등 서로 다른 터미널의 LLM이 pg_messages 테이블을 공유 메시지 버스로
+             Claude, Antigravity 등 서로 다른 터미널의 LLM이 pg_messages 테이블을 공유 메시지 버스로
              사용하여 비동기 양방향 통신을 실현합니다.
 
              [핵심 설계 원칙]
@@ -12,8 +12,8 @@ DESCRIPTION: Inter-Terminal Communication Protocol (ITCP) — PostgreSQL 기반 
              - LISTEN/NOTIFY 지원: 실시간 알림 채널 구독 가능
 
              [통신 모델]
-             터미널 A (Claude) ──[send]──▶ pg_messages ──[receive]──▶ 터미널 B (Gemini)
-             터미널 B (Gemini) ──[send]──▶ pg_messages ──[receive]──▶ 터미널 A (Claude)
+             터미널 A (Claude) ──[send]──▶ pg_messages ──[receive]──▶ 터미널 B (Antigravity)
+             터미널 B (Antigravity) ──[send]──▶ pg_messages ──[receive]──▶ 터미널 A (Claude)
 
              각 LLM 호출 시 UserPromptSubmit 훅이 receive()를 호출하여
              상대방이 남긴 메시지를 자동으로 컨텍스트에 주입합니다.
@@ -174,12 +174,12 @@ def send(
     """터미널 간 메시지를 pg_messages에 저장합니다.
 
     [사용 예]
-    itcp.send("claude", "gemini", "서버 버그 발견: server.py:145", channel="debug")
-    itcp.send("gemini", "all", "배포 완료 v3.7.5", channel="broadcast")
+    itcp.send("claude", "antigravity", "서버 버그 발견: server.py:145", channel="debug")
+    itcp.send("antigravity", "all", "배포 완료 v3.7.5", channel="broadcast")
 
     [인자]
-    - from_terminal: 발신자 (예: "claude", "gemini")
-    - to_terminal  : 수신자 (예: "claude", "gemini", "all" = 전체 브로드캐스트)
+    - from_terminal: 발신자 (예: "claude", "antigravity")
+    - to_terminal  : 수신자 (예: "claude", "antigravity", "all" = 전체 브로드캐스트)
     - content      : 메시지 내용
     - channel      : 채널 분류 (general/task/debug/review/broadcast/hive)
     - msg_type     : 메시지 유형 (info/request/response/alert/summary)
@@ -239,7 +239,7 @@ def receive(terminal_name: str, mark_read: bool = True, my_terminal_id: str = ""
     hive_hook.py의 UserPromptSubmit 이벤트에서 호출되어
     상대 에이전트가 보낸 메시지를 Claude 컨텍스트에 자동 주입합니다.
 
-    반환: [{"id": 1, "from_agent": "gemini", "channel": "debug", "content": "...", "ts": "..."}, ...]
+    반환: [{"id": 1, "from_agent": "antigravity", "channel": "debug", "content": "...", "ts": "..."}, ...]
     """
     if not _ensure_pg_running():
         return _fallback_file_receive(terminal_name, mark_read)
@@ -587,7 +587,7 @@ def build_agent_context(
 ) -> str:
     """Build extra prompt context for agents without native inbox hooks.
 
-    This is primarily used by Codex launches, because Claude/Gemini already
+    This is primarily used by Codex launches, because Claude/Antigravity already
     inject ITCP inbox state through their own hook systems.
     """
     sections: list[str] = []
@@ -779,9 +779,9 @@ def _fallback_file_receive(terminal_name: str, mark_read: bool) -> list[dict]:
 if __name__ == "__main__":
     """
     CLI 사용법:
-      python scripts/itcp.py send claude gemini "서버 버그 발견" debug
+      python scripts/itcp.py send claude antigravity "서버 버그 발견" debug
       python scripts/itcp.py receive claude
-      python scripts/itcp.py broadcast gemini "빌드 완료"
+      python scripts/itcp.py broadcast antigravity "빌드 완료"
       python scripts/itcp.py history 10
       python scripts/itcp.py status
     """

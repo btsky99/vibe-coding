@@ -5,7 +5,7 @@
  *              SVG 기반 True Isometric 좌표계 사용.
  *              대표실, 작업실, 회의실, 탕비실, 복도 구현.
  * REVISION HISTORY:
- * - 2026-04-10 Gemini: CEO 전용 중역 세트(CeoDesk) 및 레드 카펫 적용
+ * - 2026-04-10 Antigravity: CEO 전용 중역 세트(CeoDesk) 및 레드 카펫 적용
  * ------------------------------------------------------------------------
  */
 
@@ -68,7 +68,7 @@ export default function IsometricOffice({
       // CEO 감지: role이 'ceo'이거나 이름에 'ceo'/'대표' 포함
       const isCeo = role === 'ceo' || name.includes('대표') || name.toLowerCase().includes('ceo');
       const cli = (slotClis[idx] || p.agent || '').toLowerCase();
-      // CLI 기반으로 에이전트 타입 감지 (이름에 claude/gemini가 없어도 CLI로 판별)
+      // CLI 기반으로 에이전트 타입 감지 (이름에 claude/antigravity가 없어도 CLI로 판별)
       const type = isCeo ? 'ceo' as const
         : (detectAgentType(cli) !== 'unknown' ? detectAgentType(cli) : detectAgentType(name)) || (p.agent as any);
       
@@ -88,7 +88,7 @@ export default function IsometricOffice({
       }
 
       const screenPos = isoToScreen(targetCol, targetRow);
-      // 에이전트 CLI 이름으로 stats 매칭 (claude, gemini, codex)
+      // 에이전트 CLI 이름으로 stats 매칭 (claude, antigravity, codex)
       const stats = agentStats.find(s => s.agent_id === cli);
       return { ...p, col: targetCol, row: targetRow, sx: screenPos.x, sy: screenPos.y, status, type, name, originalIdx: idx, stats };
     });

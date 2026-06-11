@@ -71,7 +71,7 @@ FILE_DESCRIPTIONS = {
     "src/file_store.py": "파일 기반 레거시 저장소",
 
     # ── scripts/ 에이전트/터미널 ──
-    "scripts/cli_agent.py": "Claude/Gemini/Codex CLI 자율 오케스트레이션 엔진",
+    "scripts/cli_agent.py": "Claude/Antigravity/Codex CLI 자율 오케스트레이션 엔진",
     "scripts/agent_shell.py": "인터랙티브 자율 에이전트 쉘 (REPL)",
     "scripts/terminal_agent.py": "멀티터미널 자율 에이전트 디스패처",
     "scripts/agent_launcher.py": "통합 에이전트 런처 (NORMAL/YOLO 모드)",
@@ -107,7 +107,7 @@ FILE_DESCRIPTIONS = {
 
     # ── scripts/ 스킬 관리 ──
     "scripts/skill_orchestrator.py": "스킬 체인 상태 추적 (hive_skill_chains 테이블 기반)",
-    "scripts/skill_manager.py": "Gemini/Claude 스킬 통합 관리자",
+    "scripts/skill_manager.py": "Antigravity/Claude 스킬 통합 관리자",
     "scripts/skill_analyzer.py": "반복 패턴 감지 + 자기치유 스킬 업데이트",
     "scripts/skill_predictor.py": "마르코프 체인 기반 다음 스킬 예측",
     "scripts/skill_ab_test.py": "스킬 A/B 테스트 + 성능 분석",
@@ -125,7 +125,7 @@ FILE_DESCRIPTIONS = {
     "scripts/lock_manager.py": "파일 수정 충돌 방지 잠금 (JSON 기반)",
     "scripts/osc_parser.py": "OSC 시퀀스 파서 (Kitty/RXVT 알림)",
     "scripts/git_visualizer.py": "Git 워크트리/브랜치 시각화",
-    "scripts/screenshot_analyzer.py": "Gemini Vision 기반 스크린샷 버그 감지",
+    "scripts/screenshot_analyzer.py": "Antigravity Vision 기반 스크린샷 버그 감지",
 
     # ── scripts/ 인프라 ──
     "scripts/pg_manager.py": "포터블 PostgreSQL 18 + pgvector 통합 관리자",

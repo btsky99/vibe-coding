@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 FILE: scripts/run_antigravity_clean.py
-DESCRIPTION: Gemini CLI 직접 실행 래퍼.
-             프로젝트 경로에서 Gemini CLI를 실행할 때 stderr 노이즈를 로그 파일로 분리합니다.
+DESCRIPTION: Antigravity CLI 직접 실행 래퍼.
+             프로젝트 경로에서 Antigravity CLI를 실행할 때 stderr 노이즈를 로그 파일로 분리합니다.
 
 REVISION HISTORY:
 - 2026-03-22 Codex: 최초 작성
-  - Gemini CLI 내부 MCP/훅/텔레메트리 stderr를 별도 로그 파일에 기록
+  - Antigravity CLI 내부 MCP/훅/텔레메트리 stderr를 별도 로그 파일에 기록
   - 프로젝트 런처/대시보드가 공통으로 사용할 수 있는 직접 실행 진입점 제공
 """
 
@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from antigravity_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import AntigravityCliNoiseFilter
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,16 +26,16 @@ DATA_DIR = ROOT / ".ai_monitor" / "data"
 STDERR_LOG = DATA_DIR / "gemini-cli.stderr.log"
 
 
-def _find_gemini() -> str | None:
-    """PATH 또는 npm 기본 경로에서 Gemini CLI 실행 파일을 찾습니다."""
-    found = shutil.which("gemini") or shutil.which("gemini.cmd")
+def _find_antigravity() -> str | None:
+    """PATH 또는 npm 기본 경로에서 Antigravity CLI 실행 파일을 찾습니다."""
+    found = shutil.which("antigravity") or shutil.which("antigravity.cmd")
     if found:
         return found
 
     if os.name == "nt":
         npm_dir = Path(os.environ.get("APPDATA", "")) / "npm"
         for ext in (".cmd", ".ps1", ""):
-            candidate = npm_dir / f"gemini{ext}"
+            candidate = npm_dir / f"antigravity{ext}"
             if candidate.exists():
                 return str(candidate)
 
@@ -50,7 +50,7 @@ def _tail_text(text: str, max_lines: int = 12) -> str:
 
 
 def _extract_cwd(args: list[str]) -> tuple[Path, list[str]]:
-    """선택적 --cwd 인자를 분리하고 나머지 Gemini 인자를 반환합니다."""
+    """선택적 --cwd 인자를 분리하고 나머지 Antigravity 인자를 반환합니다."""
     if len(args) >= 2 and args[0] == "--cwd":
         return Path(args[1]).resolve(), args[2:]
     return ROOT, args
@@ -62,9 +62,9 @@ def _use_stdout_filter(args: list[str]) -> bool:
 
 
 def main() -> int:
-    gemini_bin = _find_gemini()
-    if not gemini_bin:
-        print("[gemini-launch] Gemini CLI를 찾지 못했습니다.", file=sys.stderr)
+    antigravity_bin = _find_antigravity()
+    if not antigravity_bin:
+        print("[antigravity-launch] Antigravity CLI를 찾지 못했습니다.", file=sys.stderr)
         return 1
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -77,13 +77,13 @@ def main() -> int:
     # instructor 패키지가 deprecated google.generativeai를 import할 때 FutureWarning 억제
     env.setdefault("PYTHONWARNINGS", "ignore::FutureWarning")
 
-    run_cwd, gemini_args = _extract_cwd(sys.argv[1:])
-    filter_stdout = _use_stdout_filter(gemini_args)
+    run_cwd, antigravity_args = _extract_cwd(sys.argv[1:])
+    filter_stdout = _use_stdout_filter(antigravity_args)
     if os.name == "nt":
-        cmd = ["cmd.exe", "/d", "/c", gemini_bin, *gemini_args]
+        cmd = ["cmd.exe", "/d", "/c", antigravity_bin, *antigravity_args]
         use_shell = False
     else:
-        cmd = [gemini_bin, *gemini_args]
+        cmd = [antigravity_bin, *antigravity_args]
         use_shell = False
 
     with STDERR_LOG.open("a+", encoding="utf-8", errors="replace") as stderr_log:
@@ -100,7 +100,7 @@ def main() -> int:
             stderr=stderr_log,
         )
         if filter_stdout and proc.stdout is not None:
-            noise_filter = GeminiCliNoiseFilter()
+            noise_filter = AntigravityCliNoiseFilter()
             for raw_line in iter(proc.stdout.readline, b""):
                 if not raw_line:
                     continue
@@ -117,10 +117,10 @@ def main() -> int:
             stderr_log.seek(stderr_start)
             captured = stderr_log.read()
             print(f"[gemini-launch] Gemini CLI 종료 코드: {rc}", file=sys.stderr)
-            print(f"[gemini-launch] stderr 로그: {STDERR_LOG}", file=sys.stderr)
+            print(f"[antigravity-launch] stderr 로그: {STDERR_LOG}", file=sys.stderr)
             tail = _tail_text(captured)
             if tail:
-                print("[gemini-launch] 최근 stderr:", file=sys.stderr)
+                print("[antigravity-launch] 최근 stderr:", file=sys.stderr)
                 print(tail, file=sys.stderr)
 
         return rc

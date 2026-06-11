@@ -17,7 +17,7 @@ REVISION HISTORY:
 # 변경 이력 (REVISION HISTORY):
 # [2026-03-04] Claude: 최초 구현
 #   - UserPromptSubmit 훅에서 stdin JSON 파싱
-#   - cli_agent.py에 auto 모드로 라우팅 (Claude/Gemini 자동 선택)
+#   - cli_agent.py에 auto 모드로 라우팅 (Claude/Antigravity 자동 선택)
 #   - 무한루프 방지: "[지시]" 접두사가 없는 메시지만 전달
 #   - 백그라운드 실행: 훅이 Claude 응답을 블로킹하지 않도록 non-blocking
 # [2026-03-04] Claude: [버그수정] 직접 subprocess 방식 -> HTTP API 방식으로 전환

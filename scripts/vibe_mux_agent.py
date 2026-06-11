@@ -16,10 +16,10 @@ DESCRIPTION: 터미널별 MUX 에이전트 — vibe_mux 서버에 등록하고 �
     [사용법]
     # 백그라운드 스레드로 실행 (cli_agent.py에서 자동 호출)
     from vibe_mux_agent import start_mux_agent
-    start_mux_agent('T2', 'gemini')
+    start_mux_agent('T2', 'antigravity')
 
     # 단독 실행 (테스트용)
-    python vibe_mux_agent.py T2 gemini
+    python vibe_mux_agent.py T2 antigravity
 
     [수신 가능한 명령 타입]
     - send_text: 텍스트를 받아 cli_agent.run()으로 실행
@@ -429,11 +429,11 @@ def start_mux_agent(
 
     [사용법]
     from vibe_mux_agent import start_mux_agent
-    start_mux_agent('T2', 'gemini')  # T2 터미널에서 gemini 에이전트 루프 시작
+    start_mux_agent('T2', 'antigravity')  # T2 터미널에서 antigravity 에이전트 루프 시작
 
     Args:
         terminal_id: 터미널 ID (T1, T2, T3 등)
-        agent: 에이전트 이름 (claude, gemini, codex)
+        agent: 에이전트 이름 (claude, antigravity, codex)
         execute_callback: 작업 실행 콜백 함수 (task_text, cli_name) → result_dict
                          미지정 시 cli_agent.run() 사용
     """
@@ -495,7 +495,7 @@ def stop_mux_agent() -> None:
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         print('사용법: python vibe_mux_agent.py <terminal_id> <agent>')
-        print('예시: python vibe_mux_agent.py T2 gemini')
+        print('예시: python vibe_mux_agent.py T2 antigravity')
         sys.exit(1)
 
     tid = sys.argv[1]

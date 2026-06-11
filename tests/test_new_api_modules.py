@@ -10,6 +10,7 @@ DESCRIPTION: tasks_api, files_api 단위 테스트.
              - 파일 I/O는 tmp_path로 격리
 
 REVISION HISTORY:
+- 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-06-07 Claude: dispatcher_api 테스트 제거 — 디스패처 시스템 폐기로 대상 모듈 사라짐.
                     auto_dispatcher 모킹도 함께 제거.
 - 2026-03-22 Claude: 최초 작성 — server.py 라우트 분리 후 회귀 방지 커버리지
@@ -111,7 +112,7 @@ class TestTasksApiGet:
         log_file = tmp_path / 'task_logs.jsonl'
         log_file.write_text(
             '{"agent":"claude","terminal_id":"T1","action":"test"}\n'
-            '{"agent":"gemini","terminal_id":"T2","action":"plan"}\n',
+            '{"agent":"antigravity","terminal_id":"T2","action":"plan"}\n',
             encoding='utf-8'
         )
         handler = MockHandler()

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 FILE: scripts/session_init.py
-DESCRIPTION: 모든 에이전트(Claude, Gemini, Codex)의 세션 시작 프로토콜 실행 스크립트.
+DESCRIPTION: 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트.
              HARNESS_V2 세션 시작 프로토콜의 5단계를 자동 수행하고 결과를 stdout에 출력한다.
-             Claude는 hive_hook.py 훅이 자동 실행하므로, 이 스크립트는 주로 Gemini/Codex용.
+             Claude는 hive_hook.py 훅이 자동 실행하므로, 이 스크립트는 주로 Antigravity/Codex용.
 
              [사용법]
              python scripts/session_init.py                    # 전체 프로토콜 실행
-             python scripts/session_init.py --agent gemini     # Gemini 전용 추가 프로토콜 포함
+             python scripts/session_init.py --agent antigravity     # Antigravity 전용 추가 프로토콜 포함
              python scripts/session_init.py --agent codex      # Codex 전용 추가 프로토콜 포함
              python scripts/session_init.py --json             # JSON 출력 (대시보드 연동)
 
@@ -20,7 +20,7 @@ DESCRIPTION: 모든 에이전트(Claude, Gemini, Codex)의 세션 시작 프로�
 
 REVISION HISTORY:
 - 2026-03-30 Claude: 최초 생성 — HARNESS_V2 세션 프로토콜 구현
-  - Gemini/Codex 에이전트도 세션 시작 시 동일한 프로토콜을 수행할 수 있도록
+  - Antigravity/Codex 에이전트도 세션 시작 시 동일한 프로토콜을 수행할 수 있도록
   - 5단계 자동 실행 + 결과를 구조화된 형태로 출력
 """
 
@@ -235,7 +235,7 @@ def run_protocol(agent: str = "claude", as_json: bool = False) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="HARNESS V2 세션 시작 프로토콜")
-    parser.add_argument("--agent", default="claude", choices=["claude", "gemini", "codex"],
+    parser.add_argument("--agent", default="claude", choices=["claude", "antigravity", "codex"],
                         help="에이전트 이름 (기본: claude)")
     parser.add_argument("--json", action="store_true", help="JSON 출력")
     args = parser.parse_args()

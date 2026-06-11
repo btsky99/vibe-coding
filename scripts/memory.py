@@ -269,7 +269,7 @@ def main() -> None:
 
     p_list = sub.add_parser("list")
     p_list.add_argument("--q", default="")
-    p_list.add_argument("--by", default="", help="작성자 필터 (예: claude, claude-t1, gemini)")
+    p_list.add_argument("--by", default="", help="작성자 필터 (예: claude, claude-t1, antigravity)")
 
     p_get = sub.add_parser("get")
     p_get.add_argument("key")

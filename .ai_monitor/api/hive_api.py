@@ -202,7 +202,7 @@ def _merge_live_pty_skill_chains(result: dict, pty_sessions: dict) -> dict:
             continue
 
         agent = str(info.get('agent') or '').strip().lower()
-        if agent not in {'claude', 'gemini', 'codex'}:
+        if agent not in {'claude', 'antigravity', 'codex'}:
             continue
 
         terminal_key = str(slot_num)
@@ -263,11 +263,11 @@ def handle_get(handler, path: str, params: dict,
                PROJECT_ROOT: Path, PROJECT_ID: str,
                TASKS_FILE: Path, AGENT_STATUS: dict, AGENT_STATUS_LOCK,
                pty_sessions: dict,
-               _current_project_root, _parse_session_tail, _parse_gemini_session,
+               _current_project_root, _parse_session_tail, _parse_antigravity_session,
                run_pg_sql_csv=None) -> bool:
     """GET 요청 처리 — /api/hive/*, /api/orchestrator/*, /api/install-skills,
     /api/skill-results, /api/context-usage,
-    /api/gemini-context-usage, /api/local-models 를 담당합니다.
+    /api/antigravity-context-usage, /api/local-models 를 담당합니다.
 
     반환값: 경로가 처리됐으면 True, 해당 없으면 False.
     caller(server.py의 do_GET)는 False를 받으면 다른 핸들러를 시도합니다.
@@ -289,7 +289,7 @@ def handle_get(handler, path: str, params: dict,
                 installed_targets = []
 
                 gemini_src = source_base / ".gemini"
-                if gemini_src.exists():
+                if antigravity_src.exists():
                     shutil.copytree(gemini_src, target_root / ".gemini", dirs_exist_ok=True)
                     installed_targets.append(".gemini")
 
@@ -377,7 +377,7 @@ def handle_get(handler, path: str, params: dict,
                 'memory_read':  ['하이브 컨텍스트', 'current-work', 'memory.py list', '하이브 컨텍스트 자동 로드'],
                 'memory_write': ['메모리 저장', '하이브 메모리', 'current-work 업데이트', '자동 저장', 'INSERT OR REPLACE'],
                 'orchestrate':  ['오케스트레이션', '스킬 체인', 'vibe-orchestrate', 'skill_orchestrator', '스킬 실행'],
-                'message':      ['메시지 수신', '미읽음 메시지', '→ claude', '→ gemini'],
+                'message':      ['메시지 수신', '미읽음 메시지', '→ claude', '→ antigravity'],
                 'heal':         ['자기치유', 'heal', '스킬 자동 설치'],
                 'hive_ctx':     ['하이브 컨텍스트 자동 주입', '[하이브 컨텍스트]'],
                 'session':      ['세션 스냅샷', '응답 완료', '─── 응답 완료'],
@@ -395,7 +395,7 @@ def handle_get(handler, path: str, params: dict,
                         agent = entry.get('agent', '')
                         task  = entry.get('task', '')
                         ts    = entry.get('timestamp', '')
-                        if agent not in ('Hive', 'Claude', '사용자', 'Gemini'):
+                        if agent not in ('Hive', 'Claude', '사용자', 'Antigravity'):
                             continue
                         event_type = None
                         for etype, keywords in _HIVE_KEYWORDS.items():
@@ -519,7 +519,7 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
-            KNOWN_AGENTS = ['claude', 'gemini', 'codex']
+            KNOWN_AGENTS = ['claude', 'antigravity', 'codex']
             IDLE_SEC = 300  # 5분
 
             # 에이전트 마지막 활동 시각 (hive_mind.db session_logs)
@@ -540,7 +540,7 @@ def handle_get(handler, path: str, params: dict,
             with AGENT_STATUS_LOCK:
                 for a_name, st in AGENT_STATUS.items():
                     a_key = ('claude' if 'claude' in a_name.lower()
-                             else 'gemini' if 'gemini' in a_name.lower()
+                             else 'antigravity' if 'antigravity' in a_name.lower()
                              else 'codex' if 'codex' in a_name.lower()
                              else None)
                     if a_key and st.get('last_seen'):
@@ -659,8 +659,8 @@ def handle_get(handler, path: str, params: dict,
                 )
                 for skill in VIBE_SKILL_NAMES
             },
-            'gemini': {
-                skill: (gemini_skills_dir / skill / 'SKILL.md').exists()
+            'antigravity': {
+                skill: (antigravity_skills_dir / skill / 'SKILL.md').exists()
                 for skill in VIBE_SKILL_NAMES
             },
         }
@@ -850,8 +850,8 @@ def handle_get(handler, path: str, params: dict,
             ).encode('utf-8'))
         return True
 
-    # ── /api/gemini-context-usage ─────────────────────────────────────────
-    elif path == '/api/gemini-context-usage':
+    # ── /api/antigravity-context-usage ─────────────────────────────────────────
+    elif path == '/api/antigravity-context-usage':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
@@ -859,10 +859,10 @@ def handle_get(handler, path: str, params: dict,
         try:
             gemini_chat_dir = Path.home() / '.gemini' / 'tmp' / PROJECT_ROOT.name / 'chats'
             sessions = []
-            if gemini_chat_dir.exists():
-                for json_file in gemini_chat_dir.glob('session-*.json'):
+            if antigravity_chat_dir.exists():
+                for json_file in antigravity_chat_dir.glob('session-*.json'):
                     try:
-                        info = _parse_gemini_session(json_file)
+                        info = _parse_antigravity_session(json_file)
                         if info:
                             sessions.append(info)
                     except Exception:
@@ -873,15 +873,15 @@ def handle_get(handler, path: str, params: dict,
             # [Fix] sessions 리스트 대신 최신 세션의 요약 정보를 반환하여 게이지가 정상 표시되도록 함
             result = {
                 'total_tokens': 0,
-                'context_window': 1048576, # 1M tokens (Gemini 1.5/2.0 standard)
+                'context_window': 1048576, # 1M tokens (Antigravity 1.5/2.0 standard)
                 'percentage': 0,
-                'model': 'gemini'
+                'model': 'antigravity'
             }
             if sessions:
                 latest = sessions[0]
-                # input + output 을 total_tokens로 합산 (Gemini 세션 로그 기준)
+                # input + output 을 total_tokens로 합산 (Antigravity 세션 로그 기준)
                 result['total_tokens'] = latest.get('input_tokens', 0) + latest.get('output_tokens', 0)
-                result['model'] = latest.get('model', 'gemini')
+                result['model'] = latest.get('model', 'antigravity')
                 # 비율 계산
                 if result['context_window'] > 0:
                     result['percentage'] = (result['total_tokens'] / result['context_window']) * 100
@@ -1107,8 +1107,8 @@ def handle_post(handler, path: str, data: dict,
                     'migrated': migrated,
                 }, ensure_ascii=False).encode('utf-8'))
 
-            elif tool == 'gemini':
-                skills_src = BASE_DIR / 'skills' / 'gemini'
+            elif tool == 'antigravity':
+                skills_src = BASE_DIR / 'skills' / 'antigravity'
                 if not skills_src.exists():
                     skills_src = _proj / '.gemini' / 'skills'
                 if not skills_src.exists():
@@ -1120,7 +1120,7 @@ def handle_post(handler, path: str, data: dict,
                 installed = [d.name for d in dest_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
                 handler.wfile.write(json.dumps({
                     'status': 'success',
-                    'message': f"Gemini 스킬 설치 완료 ({len(installed)}개) → {dest_dir}"
+                    'message': f"Antigravity 스킬 설치 완료 ({len(installed)}개) → {dest_dir}"
                 }, ensure_ascii=False).encode('utf-8'))
             else:
                 handler.wfile.write(json.dumps({'status': 'error', 'message': f'지원하지 않는 tool: {tool}'}).encode('utf-8'))
@@ -1158,13 +1158,13 @@ def handle_post(handler, path: str, data: dict,
                     'message': f"Claude 스킬 제거 완료: {', '.join(removed) if removed else '없음'}",
                     'removed': removed
                 }, ensure_ascii=False).encode('utf-8'))
-            elif tool == 'gemini':
+            elif tool == 'antigravity':
                 dest_dir = _proj / '.gemini' / 'skills'
                 if dest_dir.exists():
                     _shutil.rmtree(dest_dir, ignore_errors=True)
                 handler.wfile.write(json.dumps({
                     'status': 'success',
-                    'message': f"Gemini 스킬 제거 완료 → {dest_dir}"
+                    'message': f"Antigravity 스킬 제거 완료 → {dest_dir}"
                 }, ensure_ascii=False).encode('utf-8'))
             else:
                 handler.wfile.write(json.dumps({'status': 'error', 'message': f'지원하지 않는 tool: {tool}'}).encode('utf-8'))

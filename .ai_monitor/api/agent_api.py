@@ -4,7 +4,7 @@
 # 📄 파일명: api/agent_api.py
 # 📝 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러.
 #          server.py에서 /api/agent/* 요청을 이 모듈로 위임합니다.
-#          cli_agent.py의 전역 상태를 통해 Claude Code / Gemini CLI를
+#          cli_agent.py의 전역 상태를 통해 Claude Code / Antigravity CLI를
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
@@ -13,11 +13,11 @@
 # [2026-03-08] Claude: Gemini 세션 실제 작업 표시 — PTY Gemini 현재 지시 내용 보완
 #   - (제거 2026-06-11) _get_gemini_last_task — agy 대화는 비공개 포맷이라 파싱 불가
 #   - server.py pty_sessions에 cwd 필드 추가 → 프로젝트별 세션 파일 정확 매핑
-#   - PTY 병합: status 이미 running이어도 task 비어있으면 Gemini 마지막 지시로 보완
-#   - PTY last_line: 기존 값 있어도 PTY 최신값으로 항상 갱신 (Gemini 응답 실시간 표시)
+#   - PTY 병합: status 이미 running이어도 task 비어있으면 Antigravity 마지막 지시로 보완
+#   - PTY last_line: 기존 값 있어도 PTY 최신값으로 항상 갱신 (Antigravity 응답 실시간 표시)
 # [2026-03-08] Claude: PTY 세션 병합 — handle_terminals()에서 pty_sessions도 반영
 #   - _pty_sessions_getter 콜백 추가: server.py가 set_pty_sessions_getter()로 주입
-#   - PTY로 실행된 Claude/Gemini/Codex도 T1~T8 카드에 running 상태로 표시
+#   - PTY로 실행된 Claude/Antigravity/Codex도 T1~T8 카드에 running 상태로 표시
 # [2026-03-04] Claude: 최초 구현
 #   - handle_run: POST /api/agent/run — CLI 실행 시작 (백그라운드 스레드)
 #   - handle_stop: POST /api/agent/stop — 실행 중인 프로세스 강제 종료
@@ -25,20 +25,20 @@
 #   - handle_runs: GET /api/agent/runs — 최근 실행 히스토리 반환
 # [2026-03-05] Claude: 터미널 상태 감지 범위 확장
 #   - _merge_live_file_status: idle만 → idle+done 슬롯도 running으로 갱신 허용
-#   - handle_terminals 외부 Gemini 매핑: idle만 → idle+done 슬롯도 허용
-#   - 이전 작업이 done으로 끝난 터미널에 새 Gemini 실행이 시작돼도 상황판에 표시
+#   - handle_terminals 외부 Antigravity 매핑: idle만 → idle+done 슬롯도 허용
+#   - 이전 작업이 done으로 끝난 터미널에 새 Antigravity 실행이 시작돼도 상황판에 표시
 # [2026-03-05] Claude: 외부 Gemini 감지 기능 추가
 #   - _detect_external_gemini(): agy conversations/ mtime 스캔 (antigravity_adapter 경유)
 #   - _merge_live_file_status(): agent_live.jsonl 읽어 터미널별 상태 병합
-#   - handle_terminals(): 감지된 외부 Gemini + agent_live.jsonl 상태 오버레이
-#   - 대시보드 API 없이 터미널에서 직접 실행된 Gemini도 상황판에 표시
+#   - handle_terminals(): 감지된 외부 Antigravity + agent_live.jsonl 상태 오버레이
+#   - 대시보드 API 없이 터미널에서 직접 실행된 Antigravity도 상황판에 표시
 # [2026-03-04] Claude: 레이스 컨디션 수정
 #   - _run_gate Lock 추가: 상태 체크 → 스레드 시작 구간을 원자적으로 보호
 #   - 동시 요청 시 중복 실행 방지 (동일 태스크 여러 번 실행 버그 수정)
 # [2026-03-08] Claude: [버그수정] _detect_external_gemini 주석 오류 수정
 #   - 주석 "60초 이내" → "600초(10분) 이내"로 수정 (실제 코드와 일치)
 # [2026-05-02] Codex: PTY 슬롯 heartbeat 엔드포인트 추가
-#   - node-pty 세션을 claude:T1/gemini:T2/codex:T3 단위로 agent_heartbeats에 기록
+#   - node-pty 세션을 claude:T1/antigravity:T2/codex:T3 단위로 agent_heartbeats에 기록
 #   - 사용자가 PTY에 입력한 지시와 최신 출력 줄을 config에 저장하여 하이브 상태 복구 보완
 # [2026-03-05] Claude: 대화형 세션 파이프라인 실시간 추적 추가
 #   - _interactive_stages: hive_hook.py가 업데이트하는 인메모리 stage dict
@@ -214,7 +214,7 @@ def handle_run(handler) -> None:
     """POST /api/agent/run — CLI 자율 실행 시작.
 
     요청 본문:
-        { "task": "지시내용", "cli": "auto|claude|gemini", "cwd": "/path" }
+        { "task": "지시내용", "cli": "auto|claude|antigravity", "cwd": "/path" }
 
     응답:
         성공: { "status": "started", "cli": "claude", "run_id": "abc12345" }
@@ -368,7 +368,7 @@ def handle_runs(handler) -> None:
     _json_response(handler, runs)
 
 
-def _detect_external_gemini() -> list[dict]:
+def _detect_external_antigravity() -> list[dict]:
     """외부 실행 중인 Antigravity(agy) 세션을 감지합니다.
 
     [2026-06-11] agy 전환: 구 Gemini CLI의 ~/.gemini/tmp/{project}/chats/ 는 폐기.
@@ -395,7 +395,7 @@ def _detect_external_gemini() -> list[dict]:
 def _merge_live_file_status(terminals: dict) -> None:
     """agent_live.jsonl의 최근 이벤트를 읽어 터미널별 상태를 병합합니다.
 
-    agent_shell.py(T1~T8.bat)가 직접 실행한 Gemini/Claude 작업은
+    agent_shell.py(T1~T8.bat)가 직접 실행한 Antigravity/Claude 작업은
     cli_agent._terminals 메모리에 반영되지 않습니다.
     이 함수는 agent_live.jsonl의 최근 이벤트를 분석하여
     각 터미널의 실제 상태(running/done/error)를 덮어씁니다.
@@ -494,8 +494,8 @@ def _merge_live_file_status(terminals: dict) -> None:
                     'last_line': '',
                     'pipeline_stage': 'analyzing',  # 분석 단계부터 시작
                     # external 플래그 미설정 — 이 터미널은 현재 프로젝트 소속
-                    # (external=True는 _detect_external_gemini()에서만 설정:
-                    #  다른 프로젝트 Gemini 세션 전용 플래그)
+                    # (external=True는 _detect_external_antigravity()에서만 설정:
+                    #  다른 프로젝트 Antigravity 세션 전용 플래그)
                 })
         else:
             # done 이벤트가 있고 started보다 나중 → 완료 상태
@@ -580,7 +580,7 @@ def handle_terminals(handler) -> None:
     """GET /api/agent/terminals — T1~T8 터미널별 에이전트 상태 반환.
 
     상황판(AgentPanel 상황판 탭)이 3초마다 폴링합니다.
-    외부 터미널에서 직접 실행 중인 Gemini도 감지하여 반영합니다.
+    외부 터미널에서 직접 실행 중인 Antigravity도 감지하여 반영합니다.
 
     응답:
         {
@@ -601,15 +601,15 @@ def handle_terminals(handler) -> None:
     terminals = cli_agent.get_terminals()
 
     # ── agent_live.jsonl 기반 터미널 상태 병합 (agent_shell.py 실행 감지) ───────
-    # T1.bat ~ T8.bat를 통해 agent_shell.py로 실행한 Gemini/Claude는
+    # T1.bat ~ T8.bat를 통해 agent_shell.py로 실행한 Antigravity/Claude는
     # cli_agent._terminals 메모리에 반영되지 않으므로, 로그 파일에서 읽어 병합합니다.
     _merge_live_file_status(terminals)
     _merge_pty_heartbeats(terminals)
 
-    # ── 외부 실행 중인 Gemini 세션 감지 및 오버레이 ──────────────────────────
-    # 대시보드 API를 통하지 않고 직접 터미널에서 실행된 Gemini를 감지합니다.
+    # ── 외부 실행 중인 Antigravity 세션 감지 및 오버레이 ──────────────────────────
+    # 대시보드 API를 통하지 않고 직접 터미널에서 실행된 Antigravity를 감지합니다.
     # 감지된 세션은 이미 idle 상태인 가장 낮은 번호 터미널 슬롯에 매핑합니다.
-    external_sessions = _detect_external_gemini()
+    external_sessions = _detect_external_antigravity()
     if external_sessions:
         import datetime
         for session in external_sessions:
@@ -632,10 +632,10 @@ def handle_terminals(handler) -> None:
             terminals[target_slot].update({
                 'status': 'running',
                 'task': ext_task,
-                'cli': 'gemini',
+                'cli': 'antigravity',
                 'run_id': '',
                 'ts': ts_str,
-                'last_line': f'Gemini CLI 활성 — {session["session_file"]}',
+                'last_line': f'Antigravity CLI 활성 — {session["session_file"]}',
                 'external': True,  # 외부 감지 플래그 (UI 구분용)
             })
 
@@ -686,7 +686,7 @@ def handle_terminals(handler) -> None:
             if task:
                 terminals[tid]['task'] = task
 
-    # ── PTY 세션 병합 — TerminalSlot에서 직접 실행한 Claude/Gemini/Codex 반영 ────
+    # ── PTY 세션 병합 — TerminalSlot에서 직접 실행한 Claude/Antigravity/Codex 반영 ────
     # [변경 2026-03-22] Node PTY 서버의 REST API에서 세션 스냅샷을 조회합니다.
     # cli_agent._terminals이 idle 상태인 슬롯에 한해, PTY에서 에이전트가 실행 중이면
     # status='running'으로 오버라이드하여 상황판 카드가 표시되도록 합니다.
@@ -726,7 +726,7 @@ def handle_terminals(handler) -> None:
                 if not terminals[tid].get('cli'):
                     terminals[tid]['cli'] = agent
 
-                # ── PTY last_line 항상 갱신 — Gemini 응답 출력 실시간 표시 ───────────
+                # ── PTY last_line 항상 갱신 — Antigravity 응답 출력 실시간 표시 ───────────
                 # Why: PTY 세션의 last_line이 가장 최신 출력임.
                 #      기존 last_line 값이 있어도 PTY 값으로 덮어씌워야 실시간 갱신됨.
                 pty_last = info.get('last_line', '')
@@ -951,7 +951,7 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
     - codex:  codex --full-auto [--resume SID]
 
     Args:
-        cli: 에이전트 종류 ("claude" | "gemini" | "codex")
+        cli: 에이전트 종류 ("claude" | "antigravity" | "codex")
         session_id: 기존 세션 ID (--resume용, None이면 새 세션)
         yolo: YOLO 모드 (권한 자동 승인)
         message: 전달할 메시지 (claude -p 인자로 직접 전달)
@@ -969,7 +969,7 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
         # -p 플래그와 메시지를 연속 배치 (-p는 프롬프트를 인자로 받음)
         if message:
             cmd += ['-p', message]
-    elif cli == 'gemini':
+    elif cli == 'antigravity':
         # [2026-06-11] Antigravity(agy) 전환 — 'gemini-3.1-pro' 모델 지정 제거 (6/18 종료로
         # 존재하지 않는 모델, agy 기본 모델 사용). --resume → --conversation, -y → 권한 스킵.
         # [제약] agy TUI는 파이프 stdin 채팅을 보장하지 않음 (실측: -p 파이프 캡처 결함과 동일 계열)
@@ -1062,7 +1062,7 @@ def handle_chat(handler) -> None:
         # CLI 프로세스 spawn
         # Claude: -p 인자로 메시지 전달 → stdin=DEVNULL (파이프 아닌 /dev/null)
         #   → "stdin is not a terminal" 에러 방지
-        # Gemini/Codex: stdin=PIPE로 메시지 전달 (기존 방식 유지)
+        # Antigravity/Codex: stdin=PIPE로 메시지 전달 (기존 방식 유지)
         use_stdin_pipe = (cli != 'claude')
         # stderr=DEVNULL로 변경 — stderr 버퍼 데드락 방지
         # (stderr가 꽉 차면 자식 프로세스가 block → stdout 읽기도 멈춤)
@@ -1084,7 +1084,7 @@ def handle_chat(handler) -> None:
             _chat_sessions[terminal_id]['proc'] = proc
             _chat_sessions[terminal_id]['cli'] = cli
 
-        # Gemini/Codex: stdin에 메시지 전달 후 EOF
+        # Antigravity/Codex: stdin에 메시지 전달 후 EOF
         if use_stdin_pipe:
             proc.stdin.write(message.encode('utf-8'))
             proc.stdin.close()
@@ -1108,7 +1108,7 @@ def handle_chat(handler) -> None:
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
-                # stream-json이 아닌 일반 텍스트 출력 (gemini/codex)
+                # stream-json이 아닌 일반 텍스트 출력 (antigravity/codex)
                 full_text += line + "\n"
                 if not _sse_send({'type': 'text', 'content': line}):
                     break

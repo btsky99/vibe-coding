@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 FILE: scripts/screenshot_analyzer.py
-DESCRIPTION: 멀티모달 버그 감지 — 스크린샷을 Gemini Vision API로 분석하여
+DESCRIPTION: 멀티모달 버그 감지 — 스크린샷을 Antigravity Vision API로 분석하여
              에러 다이얼로그, UI 깨짐, 예외 메시지를 자동 감지합니다.
 
              [동작 원리]
@@ -32,7 +32,7 @@ from src.pg_store import ensure_schema, save_task
 
 DATA_DIR = MONITOR_DIR / 'data'
 
-# Gemini Vision 분석 프롬프트
+# Antigravity Vision 분석 프롬프트
 _ANALYSIS_PROMPT = (
     "이 스크린샷을 분석하세요. 다음을 확인하세요:\n"
     "1. 에러 다이얼로그 (Error, Exception, 오류, 실패 등)\n"
@@ -46,7 +46,7 @@ _ANALYSIS_PROMPT = (
 
 
 def analyze_screenshot(image_base64: str, api_key: str = None) -> dict:
-    """Base64 인코딩된 스크린샷을 Gemini Vision으로 분석합니다.
+    """Base64 인코딩된 스크린샷을 Antigravity Vision으로 분석합니다.
 
     Args:
         image_base64: PNG/JPEG 이미지의 base64 문자열

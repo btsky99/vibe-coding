@@ -74,13 +74,13 @@ REVISION HISTORY:
 # [2026-03-05] - Claude (모듈 분리 — 데드 코드 639줄 제거)
 #   - /api/git/status, /api/git/log: git_api 위임 중복 직접 구현 제거
 #   - /api/memory, /api/project-info: memory_api 위임 중복 구현 제거
-#   - /api/context-usage, /api/gemini-context-usage, /api/local-models: hive_api 중복 제거
+#   - /api/context-usage, /api/antigravity-context-usage, /api/local-models: hive_api 중복 제거
 #   - /api/hive/activity: 데드 코드 제거 + hive_api.py에 핸들러 추가 (실제 동작 버그 수정)
 #   - /api/hive/logs, /api/hive/health, /api/skill-results: 중복 제거
 #   - server.py 4396줄 → 3757줄 (-639줄)
 # [2026-03-04] - Claude (PTY 터미널 자율 에이전트 자동 트리거)
 #   - read_from_ws()에 입력 버퍼 + Enter 인터셉션 추가
-#   - Gemini 터미널: Enter 입력 시 cli_agent.py 자동 백그라운드 라우팅
+#   - Antigravity 터미널: Enter 입력 시 cli_agent.py 자동 백그라운드 라우팅
 #   - Claude 터미널: UserPromptSubmit 훅(hook_bridge.py) 중복 방지로 PTY 인터셉션 스킵
 #   - _ws_init_done 플래그: 세션 시작 직후 자동 주입 명령(set TERMINAL_ID 등) 무시
 # [2026-03-04] - Claude (CLI 오케스트레이터 자율 에이전트 통합)
@@ -112,7 +112,7 @@ REVISION HISTORY:
 #   - /api/ollama/status: wmic(RAM), nvidia-smi(GPU) subprocess 콘솔 창 방지
 #   - run_watchdog(): 워치독 데몬 Popen 콘솔 창 방지
 # [2026-03-01] - Claude (Gemini 세션 감지 기능)
-#   - pty_handler: Gemini/Claude 세션 시작 시 session_logs에 즉시 기록 ("세션 시작 ───")
+#   - pty_handler: Antigravity/Claude 세션 시작 시 session_logs에 즉시 기록 ("세션 시작 ───")
 #   - pty_handler: 세션 종료 시 원인 구분 (PTY 프로세스 종료 vs WebSocket 연결 끊김)
 #   - 강제 종료(SessionEnd 미실행) 시 "프로세스 종료 감지" 로그 자동 생성
 # [2026-02-28] - Claude (배포 버전 경로 버그 수정)
@@ -123,8 +123,8 @@ REVISION HISTORY:
 #   - 좀비 스레드 누수 방지를 위한 전역 소켓 타임아웃(60s) 및 SSE 개별 타임아웃 적용.
 #   - SSE /stream, /api/events/thoughts, /api/events/fs 루프의 연결 해제 감지 로직 강화.
 # [2026-02-27] - Claude (새 기능)
-#   - _parse_gemini_session(): Gemini 세션 JSON 파일 토큰 파서 추가
-#   - /api/gemini-context-usage 엔드포인트 추가
+#   - _parse_antigravity_session(): Antigravity 세션 JSON 파일 토큰 파서 추가
+#   - /api/antigravity-context-usage 엔드포인트 추가
 # [2026-02-26] - Claude (버그 수정)
 ...
 # ... 기존 내용 유지 ...
@@ -988,13 +988,13 @@ def _parse_session_tail(path: Path):
         return None
 
 
-def _parse_gemini_session(path: Path):
-    """Gemini CLI 세션 JSON 파일에서 최신 토큰 usage 정보 추출.
+def _parse_antigravity_session(path: Path):
+    """Antigravity CLI 세션 JSON 파일에서 최신 토큰 usage 정보 추출.
 
     ~/.gemini/tmp/{project}/chats/session-*.json 파일을 읽어
-    가장 최근 gemini 타입 메시지의 tokens 필드를 파싱합니다.
+    가장 최근 antigravity 타입 메시지의 tokens 필드를 파싱합니다.
     tokens 구조: { input, output, cached, thoughts, tool, total }
-    [2026-02-27] Claude: Gemini 컨텍스트 사용량 표시 기능 추가
+    [2026-02-27] Claude: Antigravity 컨텍스트 사용량 표시 기능 추가
     """
     try:
         with open(path, 'r', encoding='utf-8') as f:
@@ -1010,21 +1010,21 @@ def _parse_gemini_session(path: Path):
         input_tokens = output_tokens = cached_tokens = 0
         model = ''
 
-        # 역순으로 gemini 타입 메시지 탐색 → 가장 최신 usage 우선
+        # 역순으로 antigravity 타입 메시지 탐색 → 가장 최신 usage 우선
         for msg in reversed(messages):
-            if msg.get('type') == 'gemini':
+            if msg.get('type') == 'antigravity':
                 tokens = msg.get('tokens', {})
                 if tokens.get('input'):
                     input_tokens  = tokens.get('input', 0)
                     output_tokens = tokens.get('output', 0)
                     cached_tokens = tokens.get('cached', 0)
-                    model = msg.get('model', 'gemini')
+                    model = msg.get('model', 'antigravity')
                     break
 
         return {
             'session_id':   session_id,
             'slug':         session_id[:8],        # 앞 8자리로 슬러그 대체
-            'model':        model or 'gemini',
+            'model':        model or 'antigravity',
             'input_tokens': input_tokens,
             'output_tokens': output_tokens,
             'cache_read':   cached_tokens,
@@ -1032,7 +1032,7 @@ def _parse_gemini_session(path: Path):
             'cwd':          '',
         }
     except Exception as e:
-        print(f"[FILE ERROR] _parse_gemini_session: {e}")
+        print(f"[FILE ERROR] _parse_antigravity_session: {e}")
         return None
 
 
@@ -1538,7 +1538,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     )
                     output = proc.stdout.strip() or proc.stderr.strip()
                     if proc.returncode == 0:
-                        result = {"status": "success", "message": f"Gemini CLI & Claude Desktop에 vibe-coding MCP 등록 완료!\n{output}"}
+                        result = {"status": "success", "message": f"Antigravity CLI & Claude Desktop에 vibe-coding MCP 등록 완료!\n{output}"}
                         break
                     last_error = output or f"등록 실패 (exit code {proc.returncode})"
                 else:
@@ -1586,7 +1586,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     
                     # .gemini 복사
                     gemini_src = source_base / ".gemini"
-                    if gemini_src.exists():
+                    if antigravity_src.exists():
                         shutil.copytree(gemini_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
                     
                     # scripts 복사 — 배포 범용화: SCRIPTS_DIR이 None이면 skip
@@ -1596,7 +1596,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                         
                     # GEMINI.md 복사
                     gemini_md_src = source_base / "GEMINI.md"
-                    if gemini_md_src.exists():
+                    if antigravity_md_src.exists():
                         shutil.copy(gemini_md_src, Path(target_path) / "GEMINI.md")
                         
                     # CLAUDE.md 복사
@@ -1735,12 +1735,12 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode('utf-8'))
 
         # ── [모듈 위임] hive_api — /api/hive/*, /api/orchestrator/*, /api/superpowers/status,
-        #    /api/skill-results, /api/context-usage, /api/gemini-context-usage, /api/local-models ──
+        #    /api/skill-results, /api/context-usage, /api/antigravity-context-usage, /api/local-models ──
         elif (parsed_path.path.startswith('/api/hive/') or
               parsed_path.path.startswith('/api/orchestrator/') or
               parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
                                    '/api/skill-ab-test', '/api/skill/predict',
-                                   '/api/context-usage', '/api/gemini-context-usage',
+                                   '/api/context-usage', '/api/antigravity-context-usage',
                                    '/api/local-models')):
             _params = parse_qs(parsed_path.query)
             from api import hive_api
@@ -1753,7 +1753,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 pty_sessions=_get_node_pty_sessions(),
                 _current_project_root=_current_project_root,
                 _parse_session_tail=_parse_session_tail,
-                _parse_gemini_session=_parse_gemini_session,
+                _parse_antigravity_session=_parse_antigravity_session,
                 run_pg_sql_csv=run_pg_sql_csv
             )
 
@@ -2117,7 +2117,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
             self.end_headers()
             try:
-                KNOWN_AGENTS = ['claude', 'gemini', 'codex']
+                KNOWN_AGENTS = ['claude', 'antigravity', 'codex']
                 IDLE_SEC = 300  # 5분
 
                 # 에이전트 마지막 활동 시각 (Postgres 우선, 파일 레거시 폴백)
@@ -2141,7 +2141,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     for a_name, st in AGENT_STATUS.items():
                         a_key = (
                             'claude' if 'claude' in a_name.lower()
-                            else 'gemini' if 'gemini' in a_name.lower()
+                            else 'antigravity' if 'antigravity' in a_name.lower()
                             else 'codex' if 'codex' in a_name.lower()
                             else None
                         )
@@ -3205,7 +3205,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                     req_role = ''
 
                 # ── 역할별 초기 프롬프트 매핑 ──
-                # Claude/Gemini에 --prompt 또는 초기 입력으로 역할 지시를 전달
+                # Claude/Antigravity에 --prompt 또는 초기 입력으로 역할 지시를 전달
                 _role_prompts = {
                     'developer': '코드 구현과 기능 개발에 집중해줘. 버그 수정, 리팩토링, 새 기능 추가가 주 업무야.',
                     'reviewer': '코드 리뷰어로 활동해줘. /vibe-code-review 스킬을 활용하여 품질, 성능, 보안을 검토해.',
@@ -3499,7 +3499,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 ).encode('utf-8'))
 
         elif parsed_path.path == '/api/screenshot/analyze':
-            # 멀티모달 버그 감지 — 스크린샷을 Gemini Vision API로 분석
+            # 멀티모달 버그 감지 — 스크린샷을 Antigravity Vision API로 분석
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3611,22 +3611,22 @@ class SSEHandler(BaseHTTPRequestHandler):
                         'message': f'Claude 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
                     }, ensure_ascii=False).encode('utf-8'))
 
-                elif tool == 'gemini':
+                elif tool == 'antigravity':
                     # .gemini/skills 를 프로젝트에 복사
                     import shutil as _shutil
                     gemini_skills_src = BASE_DIR / '.gemini' / 'skills'
-                    if not gemini_skills_src.exists():
+                    if not antigravity_skills_src.exists():
                         gemini_skills_src = _proj / '.gemini' / 'skills'
-                    if not gemini_skills_src.exists():
-                        raise Exception('설치 버전에서는 Gemini 스킬이 포함되지 않습니다. 소스 개발 환경에서 사용하세요.')
+                    if not antigravity_skills_src.exists():
+                        raise Exception('설치 버전에서는 Antigravity 스킬이 포함되지 않습니다. 소스 개발 환경에서 사용하세요.')
                     target_dir = _proj / '.gemini' / 'skills'
                     # 소스와 대상이 다를 때만 복사 (설치 버전에서 실제 파일 배포)
-                    if gemini_skills_src.resolve() != target_dir.resolve():
-                        _shutil.copytree(str(gemini_skills_src), str(target_dir), dirs_exist_ok=True)
+                    if antigravity_skills_src.resolve() != target_dir.resolve():
+                        _shutil.copytree(str(antigravity_skills_src), str(target_dir), dirs_exist_ok=True)
                     installed = [d.name for d in target_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
                     self.wfile.write(json.dumps({
                         'status': 'success',
-                        'message': f'Gemini 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
+                        'message': f'Antigravity 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
                     }, ensure_ascii=False).encode('utf-8'))
                 else:
                     self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
@@ -3634,7 +3634,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
 
         elif parsed_path.path == '/api/superpowers/uninstall':
-            # Superpowers 제거 — tool: 'claude' | 'gemini'
+            # Superpowers 제거 — tool: 'claude' | 'antigravity'
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
             self.send_header('Access-Control-Allow-Origin', self._cors_origin())
@@ -3655,9 +3655,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     msg = f"제거 완료: {', '.join(removed)}" if removed else '삭제할 파일 없음'
                     self.wfile.write(json.dumps({'status': 'success', 'message': msg}, ensure_ascii=False).encode('utf-8'))
 
-                elif tool == 'gemini':
-                    # Gemini 스킬은 프로젝트 내에 있어 실제 삭제하지 않고 상태만 반환
-                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Gemini 스킬은 프로젝트 내장형입니다 (삭제 불필요)'}, ensure_ascii=False).encode('utf-8'))
+                elif tool == 'antigravity':
+                    # Antigravity 스킬은 프로젝트 내에 있어 실제 삭제하지 않고 상태만 반환
+                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Antigravity 스킬은 프로젝트 내장형입니다 (삭제 불필요)'}, ensure_ascii=False).encode('utf-8'))
                 else:
                     self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
             except Exception as e:

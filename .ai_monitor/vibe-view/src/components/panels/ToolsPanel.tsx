@@ -26,7 +26,7 @@ interface ToolInfo {
   install_hint: string;
   category: string;
   can_auto_install: boolean;
-  // Phase 2 정직성 라벨 — 실험적 도구(codex/gemini)는 UI에 배지 노출.
+  // Phase 2 정직성 라벨 — 실험적 도구(codex/antigravity)는 UI에 배지 노출.
   experimental?: boolean;
 }
 

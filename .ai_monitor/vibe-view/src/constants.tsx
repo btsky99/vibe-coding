@@ -84,9 +84,9 @@ export const SLASH_COMMANDS: Record<string, SlashCommand[]> = {
     { cmd: '/pr_comments', desc: 'GitHub PR 댓글 가져오기',               category: '작업' },
     { cmd: '/terminal',    desc: '터미널 명령 실행 모드',                  category: '작업' },
   ],
-  // Antigravity CLI(`agy`) — 'gemini' 키는 백엔드/DB 식별자 호환을 위해 유지.
+  // Antigravity CLI(`agy`) — 2026-06-11 식별자 일괄 전환 ('gemini' 키 폐기, DB도 UPDATE).
   // 슬래시 커맨드는 agy 실제 지원 목록에 맞춤 (Gemini CLI 슬래시는 deprecated).
-  gemini: [
+  antigravity: [
     { cmd: '/help',        desc: '전체 도움말 보기',                       category: '도움말' },
     { cmd: '/clear',       desc: '대화 초기화',                            category: '설정' },
   ],

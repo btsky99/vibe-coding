@@ -31,7 +31,7 @@ def draw_dashboard():
     # 화면 지우기 및 시작
     # os.system('cls' if os.name == 'nt' else 'clear')
     
-    print(f"\n{UI.BG_NAVY}{UI.WHITE}{UI.BOLD}  📊 GEMINI CONTEXT MONITOR  {UI.END}")
+    print(f"\n{UI.BG_NAVY}{UI.WHITE}{UI.BOLD}  📊 ANTIGRAVITY CONTEXT MONITOR  {UI.END}")
     print(f"{UI.GRAY}──────────────────────────────────────────────────{UI.END}")
     
     # 1. 컨텍스트 사용량 (Progress Bar)

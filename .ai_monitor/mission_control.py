@@ -316,7 +316,7 @@ class MissionControlApp(QObject):
             self.update_tray_visuals(None)
             # 사이드바 상태 업데이트용 데이터 포맷팅
             ui_status = {name: {"status": "active"} for name in active_names}
-            for name in ["claude", "gemini", "codex"]:
+            for name in ["claude", "antigravity", "codex"]:
                 if name not in ui_status: ui_status[name] = {"status": "idle"}
             self.status_changed.emit(ui_status)
 
@@ -393,7 +393,7 @@ class MissionControlApp(QObject):
         active_names = [a.lower() for a in self.active_agents]
         if "claude" in active_names:
             dot_color = QColor(46, 204, 113) # Green
-        elif "gemini" in active_names:
+        elif "antigravity" in active_names:
             dot_color = QColor(52, 152, 219) # Blue
             
         dot_color.setAlphaF(opacity)

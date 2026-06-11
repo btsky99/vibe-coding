@@ -3,14 +3,14 @@
 # ------------------------------------------------------------------------
 # 📄 파일명: scripts/cli_agent.py
 # 📝 설명: CLI 오케스트레이터 자율 에이전트 핵심 엔진.
-#          Claude Code CLI / Gemini CLI를 비대화형 모드로 실행하여
+#          Claude Code CLI / Antigravity CLI를 비대화형 모드로 실행하여
 #          대시보드에서 직접 자율 작업을 수행합니다.
 #          도커 없이, API 키 없이, 기존 CLI 도구만 사용합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
 # [2026-03-04] Claude: 최초 구현
 #   - CLIAgent 클래스: 라우팅 + subprocess 실행 + 실시간 스트리밍
-#   - 키워드 기반 Claude Code / Gemini CLI 자동 선택
+#   - 키워드 기반 Claude Code / Antigravity CLI 자동 선택
 #   - agent_runs.jsonl 실행 히스토리 영구 저장
 #   - CLI 단독 테스트 지원 (python scripts/cli_agent.py "지시내용")
 # [2026-03-07] Claude: [버그수정] OSC/ANSI 이스케이프 시퀀스 필터링 추가
@@ -35,7 +35,7 @@
 #   - 복잡 코딩 작업은 메인 모델(`codex_main_model`) 또는 Codex CLI 기본 모델 유지
 #   - 구형 `--yolo` 대신 `codex exec --dangerously-bypass-approvals-and-sandbox` 사용
 # [2026-03-22] Codex: Gemini stderr 노이즈 필터 추가
-#   - Gemini CLI 내부 MCP/훅/텔레메트리 로그가 대시보드/터미널 출력에 섞이지 않도록 정리
+#   - Antigravity CLI 내부 MCP/훅/텔레메트리 로그가 대시보드/터미널 출력에 섞이지 않도록 정리
 # ------------------------------------------------------------------------
 """
 
@@ -50,7 +50,7 @@ from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
 
-from antigravity_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import AntigravityCliNoiseFilter
 
 # ANSI/OSC 이스케이프 시퀀스 필터 — Claude CLI가 파이프 환경에서도 출력하는
 # OSC 배경색 쿼리(\x1b]11;rgb:...)와 CSI 색상 코드(\x1b[...m)를 제거합니다.
@@ -145,8 +145,8 @@ CLAUDE_KEYWORDS = [
     'refactor', 'bug', 'error', 'class', 'function', 'component',
     'edit', 'modify', 'update', 'deploy', 'commit', 'push',
 ]
-# Gemini CLI: 설계/분석/검토/정보 조회 등 사고 중심 작업
-GEMINI_KEYWORDS = [
+# Antigravity CLI: 설계/분석/검토/정보 조회 등 사고 중심 작업
+ANTIGRAVITY_KEYWORDS = [
     # 한글 분석/조회
     '설계', '분석', '검토', '브레인', '아키텍처', '계획', '문서',
     '리뷰', '평가', '조사', '정리', '요약', '검색', '찾아봐', '알아봐',
@@ -158,12 +158,12 @@ GEMINI_KEYWORDS = [
 ]
 
 # [2026-03-13] Gemini: 백그라운드/단순 작업 전용 키워드 (저비용 모델로 자동 라우팅용)
-GEMINI_BACKGROUND_KEYWORDS = [
+ANTIGRAVITY_BACKGROUND_KEYWORDS = [
     '정리', '요약', '검색', '찾아봐', '알아봐', '뭐야', '설명', '알려줘', '뭐가', '어디',
     'search', 'find', 'what', 'how', 'why', 'describe', 'summary', 'explain'
 ]
 # [2026-03-13] Gemini: 복잡 설계 작업 전용 키워드 (메인 고성능 모델 유지용)
-GEMINI_COMPLEX_KEYWORDS = [
+ANTIGRAVITY_COMPLEX_KEYWORDS = [
     '설계', '분석', '검토', '브레인', '아키텍처', '계획', '평가', '조사',
     'design', 'analyze', 'review', 'plan', 'architecture'
 ]
@@ -227,7 +227,7 @@ def _config_model(agent_type: str, model_type: str, env_name: str, default: str 
     if env_val:
         return env_val
 
-    # 2. config.json 확인 (nested 구조: gemini_models.main 등)
+    # 2. config.json 확인 (nested 구조: antigravity_models.main 등)
     config = _load_runtime_config()
     agent_config = config.get(f'{agent_type}_models', {})
     model_val = agent_config.get(model_type, '').strip()
@@ -238,14 +238,14 @@ def _config_model(agent_type: str, model_type: str, env_name: str, default: str 
     return default
 
 
-def _select_gemini_model(task: str) -> tuple[str, str]:
-    """Gemini 작업 성격에 따라 메인/백그라운드 모델을 선택합니다."""
+def _select_antigravity_model(task: str) -> tuple[str, str]:
+    """Antigravity 작업 성격에 따라 메인/백그라운드 모델을 선택합니다."""
     main_model = _config_model('gemini', 'main', 'GEMINI_MAIN_MODEL')
     bg_model = _config_model('gemini', 'background', 'GEMINI_BACKGROUND_MODEL')
 
     task_l = task.lower()
-    is_bg = any(kw in task_l for kw in GEMINI_BACKGROUND_KEYWORDS)
-    is_complex = any(kw in task_l for kw in GEMINI_COMPLEX_KEYWORDS)
+    is_bg = any(kw in task_l for kw in ANTIGRAVITY_BACKGROUND_KEYWORDS)
+    is_complex = any(kw in task_l for kw in ANTIGRAVITY_COMPLEX_KEYWORDS)
 
     use_background = is_bg and not is_complex and bool(bg_model)
     selected = bg_model if use_background else main_model
@@ -477,7 +477,7 @@ _terminals: dict = {
     f'T{i}': {
         'status': 'idle',         # idle | running | done | error
         'task': '',               # 마지막 실행 지시 내용
-        'cli': '',                # claude | gemini | codex
+        'cli': '',                # claude | antigravity | codex
         'run_id': '',             # 실행 ID
         'ts': '',                 # 마지막 실행 시각 (ISO 형식)
         'last_line': '',          # 마지막 출력 줄 (워크플로우 단계 감지용)
@@ -512,10 +512,10 @@ def route_task(task: str) -> str:
     """키워드 분석으로 최적 CLI를 자동 선택합니다.
 
     판단 기준:
-    - 분석/조회 성격이 강하면 → gemini
+    - 분석/조회 성격이 강하면 → antigravity
     - 좁은 범위의 테스트/리팩터/검증 작업이면 → codex
     - 그 외 모든 경우 → claude
-    반환값: 'claude' | 'gemini' | 'codex'
+    반환값: 'claude' | 'antigravity' | 'codex'
     """
     cli, _ = route_task_with_reason(task)
     return cli
@@ -525,28 +525,28 @@ def route_task_with_reason(task: str) -> tuple[str, str]:
     """키워드 분석으로 최적 CLI + 선택 이유를 반환합니다.
 
     Returns:
-        (cli, reason): ('claude'|'gemini'|'codex', 선택 이유 문자열)
+        (cli, reason): ('claude'|'antigravity'|'codex', 선택 이유 문자열)
     """
     task_lower = task.lower()
 
     # 매칭된 키워드 수집 (점수 + 근거 동시)
     matched_claude  = [kw for kw in CLAUDE_KEYWORDS  if kw in task_lower]
-    matched_gemini  = [kw for kw in GEMINI_KEYWORDS  if kw in task_lower]
+    matched_antigravity  = [kw for kw in ANTIGRAVITY_KEYWORDS  if kw in task_lower]
     matched_codex_primary = [kw for kw in CODEX_ROUTING_PRIMARY_KEYWORDS if kw in task_lower]
     matched_codex_secondary = [kw for kw in CODEX_ROUTING_SECONDARY_KEYWORDS if kw in task_lower]
     matched_high_context = [kw for kw in HIGH_CONTEXT_ROUTING_KEYWORDS if kw in task_lower]
     claude_score    = len(matched_claude)
-    gemini_score    = len(matched_gemini)
+    antigravity_score    = len(matched_antigravity)
     codex_score     = len(matched_codex_primary) * 2 + len(matched_codex_secondary)
     has_explicit_files = bool(_TASK_FILE_RE.search(task))
 
-    if gemini_score > claude_score:
-        reason = f"분석/조회 감지 ({', '.join(matched_gemini[:3])})"
-        return 'gemini', reason
+    if antigravity_score > claude_score:
+        reason = f"분석/조회 감지 ({', '.join(matched_antigravity[:3])})"
+        return 'antigravity', reason
 
     codex_enabled = _is_codex_enabled()
     if codex_enabled and not matched_high_context:
-        if matched_codex_primary and codex_score >= max(claude_score, gemini_score):
+        if matched_codex_primary and codex_score >= max(claude_score, antigravity_score):
             reason = f"Codex 좁은 실행 작업 감지 ({', '.join((matched_codex_primary + matched_codex_secondary)[:3])})"
             return 'codex', reason
         if has_explicit_files and matched_codex_secondary:
@@ -587,7 +587,7 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
     """
     global _output_queue
     all_lines = []
-    gemini_filter = GeminiCliNoiseFilter() if cli == 'gemini' else None
+    antigravity_filter = AntigravityCliNoiseFilter() if cli == 'antigravity' else None
 
     def _write_live(event: dict):
         """agent_live.jsonl에 이벤트를 기록합니다 (포트 9000 UI용)."""
@@ -655,8 +655,8 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
                 except ImportError:
                     pass  # osc_parser 없으면 스킵
                 line = _ANSI_ESCAPE.sub('', _raw_text).rstrip()
-                if gemini_filter is not None:
-                    line = gemini_filter.filter_line(line)
+                if antigravity_filter is not None:
+                    line = antigravity_filter.filter_line(line)
                     if line is None:
                         continue
                 if cli == 'codex' and _is_codex_noise_line(line):
@@ -669,7 +669,7 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
                 # stdout 파싱은 키워드 오탐(running, check, done 등)이 빈번하고
                 # forward-only 제한으로 수정→분석 역행이 불가능하여 부정확했음.
                 # 대화형 세션: hive_hook.py가 단계를 관리 → agent_api._interactive_stages
-                # 외부 실행(Gemini CLI): stdout 파싱 없이 idle/done만 표시
+                # 외부 실행(Antigravity CLI): stdout 파싱 없이 idle/done만 표시
                 if line.strip():
                     with _terminals_lock:
                         if terminal_id in _terminals:
@@ -704,13 +704,17 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
 
     Args:
         task: 실행할 지시 내용
-        cli: 'auto' | 'claude' | 'gemini' — auto면 route_task()로 자동 선택
+        cli: 'auto' | 'claude' | 'antigravity' — auto면 route_task()로 자동 선택
         working_dir: 작업 디렉토리 (None이면 PROJECT_ROOT 사용)
         terminal_id: 요청한 터미널 식별자 (상황판 터미널별 구분에 사용)
 
     Returns:
         실행 결과 dict (status, cli, output_lines, run_id 포함)
     """
+    # [호환성] 레거시 식별자 정규화 — 구 config/외부 호출이 'gemini'를 넘겨도 동작
+    if cli == 'gemini':
+        cli = 'antigravity'
+
     global _current_process, _run_status, _current_run, _output_queue
 
     run_id = str(uuid.uuid4())[:8]
@@ -722,11 +726,11 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
     if cli == 'auto':
         cli, routing_reason = route_task_with_reason(task)
 
-    # 모델 선택: Gemini / Codex는 작업 성격에 따라 모델을 분기합니다.
+    # 모델 선택: Antigravity / Codex는 작업 성격에 따라 모델을 분기합니다.
     selected_model = None
-    if cli == 'gemini':
-        selected_model, gemini_reason = _select_gemini_model(task)
-        routing_reason = (routing_reason or "Gemini 분석") + f" ({gemini_reason})"
+    if cli == 'antigravity':
+        selected_model, antigravity_reason = _select_antigravity_model(task)
+        routing_reason = (routing_reason or "Antigravity 분석") + f" ({antigravity_reason})"
     elif cli == 'codex':
         selected_model, codex_reason = _select_codex_model(task)
         routing_reason = (routing_reason or 'Codex 실행') + f' ({codex_reason})'
@@ -800,7 +804,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         if cli == 'claude':
             # Claude Code CLI: -p 플래그로 비대화형(print) 모드 실행
             cmd = [_CLAUDE_CMD, '-p', prepared_task, '--dangerously-skip-permissions']
-        elif cli == 'gemini':
+        elif cli == 'antigravity':
             # [2026-06-11] Antigravity(agy) 비대화형 — 어댑터 경유.
             # [알려진 결함] agy 1.0.7 -p는 파이프 환경에서 응답 미출력 (어댑터 헤더 참조).
             # 빈 출력으로 끝나면 아래 스트리밍 루프가 출력 0줄로 정상 종료 — 호출부 status로 식별됨.
@@ -811,11 +815,11 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
                 cmd.extend(['-m', selected_model])
             cmd.append(prepared_task)
         else:
-            raise ValueError(f'알 수 없는 CLI: {cli} (지원: claude | gemini | codex)')
+            raise ValueError(f'알 수 없는 CLI: {cli} (지원: claude | antigravity | codex)')
 
         # ── subprocess 실행 ───────────────────────────────────────────────
         # Windows 환경: CREATE_NO_WINDOW로 콘솔 창 팝업 방지
-        # shell=True: Windows에서 .cmd 확장자(claude.cmd, gemini.cmd 등 npm 설치 CLI)를
+        # shell=True: Windows에서 .cmd 확장자(claude.cmd, antigravity.cmd 등 npm 설치 CLI)를
         #             PATH에서 찾으려면 shell=True가 필요함. 리스트를 문자열로 변환 필요.
         # 실시간 stdout 스트리밍이 필요하므로 DETACHED_PROCESS는 사용하지 않습니다.
         creationflags = 0
@@ -860,7 +864,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         # ── 워치독 타이머: 최대 실행 시간(10분) 초과 시 프로세스 자동 종료 ──────
         # readline()이 subprocess 멈춤으로 영원히 블로킹되는 '중간 멈춤' 버그 방지.
         # 10분 내 완료되지 않으면 프로세스 트리 전체를 kill하여 readline()의 EOF를 강제 유도.
-        MAX_RUN_SECONDS = 600  # 10분 — 대부분의 Claude/Gemini 작업에 충분한 시간
+        MAX_RUN_SECONDS = 600  # 10분 — 대부분의 Claude/Antigravity 작업에 충분한 시간
 
         def _watchdog(target_proc: subprocess.Popen, rid: str) -> None:
             """MAX_RUN_SECONDS 후에도 프로세스가 살아있으면 강제 종료합니다."""
@@ -1135,10 +1139,10 @@ def get_recent_runs(limit: int = 20) -> list[dict]:
 # ─── CLI 단독 테스트 진입점 ───────────────────────────────────────────────────
 if __name__ == '__main__':
     """직접 실행 시 테스트 모드:
-    python scripts/cli_agent.py "지시내용" [claude|gemini|codex|auto]
+    python scripts/cli_agent.py "지시내용" [claude|antigravity|codex|auto]
     """
     if len(sys.argv) < 2:
-        print('사용법: python scripts/cli_agent.py "지시내용" [claude|gemini|codex|auto]')
+        print('사용법: python scripts/cli_agent.py "지시내용" [claude|antigravity|codex|auto]')
         sys.exit(1)
 
     task_input = sys.argv[1]

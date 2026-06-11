@@ -4,14 +4,14 @@
  * DESCRIPTION: 아이소메트릭 오피스 에이전트 캐릭터 SVG 컴포넌트.
  *              LEGO 스타일 조립 구조 (Parts-based Composition).
  * REVISION HISTORY:
- * - 2026-04-10 Gemini: LEGO 조립형 모듈 구조로 전면 개편
+ * - 2026-04-10 Antigravity: LEGO 조립형 모듈 구조로 전면 개편
  * ------------------------------------------------------------------------
  */
 
 export type AgentStatus = 'idle' | 'working' | 'meeting' | 'error';
 
 export interface IsoAgentProps {
-  agentType: 'claude' | 'gemini' | 'codex' | 'ceo' | 'unknown';
+  agentType: 'claude' | 'antigravity' | 'codex' | 'ceo' | 'unknown';
   name: string;
   status: AgentStatus;
   x?: number;
@@ -144,7 +144,7 @@ function RobotCharacter({ config, status, ledColor }: { config: any; status: Age
 
 const AGENT_CONFIG = {
   claude:  { headShape: 'square' as const,   bodyColor: '#2d1f4a', accentColor: '#a78bfa', label: 'C' },
-  gemini:  { headShape: 'cylinder' as const, bodyColor: '#0f2e22', accentColor: '#34d399', label: 'G' },
+  antigravity:  { headShape: 'cylinder' as const, bodyColor: '#0f2e22', accentColor: '#34d399', label: 'G' },
   codex:   { headShape: 'diamond' as const,  bodyColor: '#0f2535', accentColor: '#22d3ee', label: '/' },
   unknown: { headShape: 'square' as const,   bodyColor: '#1a2435', accentColor: '#64748b', label: '?' },
   ceo:     { headShape: 'square' as const,   bodyColor: '#4a3520', accentColor: '#fbbf24', label: '★' },
@@ -211,7 +211,7 @@ export function IsoAgent({ agentType, name, status, x = 0, y = 0, onClick, level
 export function detectAgentType(name: string): IsoAgentProps['agentType'] {
   const n = name.toLowerCase();
   if (n.includes('claude')) return 'claude';
-  if (n.includes('gemini')) return 'gemini';
+  if (n.includes('antigravity')) return 'antigravity';
   if (n.includes('codex')) return 'codex';
   if (n.includes('ceo')) return 'ceo';
   return 'unknown';

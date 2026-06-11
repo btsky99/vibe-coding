@@ -12,20 +12,20 @@ REVISION HISTORY:
 # ------------------------------------------------------------------------
 # 파일명: scripts/agent_shell.py
 # 설명: 터미널 전용 자율 에이전트 인터랙티브 쉘.
-#       각 터미널에서 직접 지시를 입력하면 Claude/Gemini/Codex CLI가 자동 실행되고
+#       각 터미널에서 직접 지시를 입력하면 Claude/Antigravity/Codex CLI가 자동 실행되고
 #       출력을 실시간으로 터미널에 스트리밍합니다.
 #
 # 사용법:
 #   python scripts/agent_shell.py                         # 자동 라우팅
 #   python scripts/agent_shell.py --cli claude            # 항상 Claude
-#   python scripts/agent_shell.py --cli gemini            # 항상 Gemini
+#   python scripts/agent_shell.py --cli antigravity            # 항상 Antigravity
 #   python scripts/agent_shell.py --cli codex             # 항상 Codex (YOLO 자율 모드)
 #   python scripts/agent_shell.py --terminal T2           # 터미널 ID 지정
 #
 # 변경 이력 (REVISION HISTORY):
 # [2026-03-04] Claude: 최초 구현
 #   - 인터랙티브 REPL: 지시 입력 -> CLI 자동 선택 -> 실시간 스트리밍 출력
-#   - --cli: auto(기본) / claude / gemini
+#   - --cli: auto(기본) / claude / antigravity
 #   - --terminal: 터미널 ID 표시 (T1, T2 등)
 #   - agent_live.jsonl 동시 기록: 대시보드에서도 실시간 확인 가능
 #   - Ctrl+C: 실행 중 에이전트 중단 지원
@@ -56,7 +56,7 @@ from pathlib import Path
 from urllib import request as _urllib_req
 from urllib.error import URLError
 
-from antigravity_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import AntigravityCliNoiseFilter
 
 # ANSI/OSC 이스케이프 시퀀스 필터 — cli_agent.py와 동일한 패턴
 # live 파일에 ANSI 코드가 저장되면 대시보드 파싱 노이즈가 생기므로 제거
@@ -79,7 +79,7 @@ _CLAUDE_KW = [
     'code', 'fix', 'implement', 'write', 'create', 'test', 'build',
     'refactor', 'bug', 'error', 'class', 'function', 'component',
 ]
-_GEMINI_KW = [
+_ANTIGRAVITY_KW = [
     '설계', '분석', '검토', '브레인', '아키텍처', '계획', '문서',
     '리뷰', '평가', '조사', '정리', '요약',
     'design', 'analyze', 'review', 'plan', 'architecture',
@@ -158,7 +158,7 @@ def _route(task):
     반환값:
       'orchestrator' - 복합 지시 (서버 API 경유)
       'claude'       - 코드 구현/수정
-      'gemini'       - 설계/분석
+      'antigravity'       - 설계/분석
     """
     if FORCE_ORCHESTRATION:
         return 'orchestrator'
@@ -168,8 +168,8 @@ def _route(task):
     if any(kw in t for kw in _ORCH_KW):
         return 'orchestrator'
     c = sum(1 for kw in _CLAUDE_KW if kw in t)
-    g = sum(1 for kw in _GEMINI_KW if kw in t)
-    return 'gemini' if g > c else 'claude'
+    g = sum(1 for kw in _ANTIGRAVITY_KW if kw in t)
+    return 'antigravity' if g > c else 'claude'
 
 
 def _call_api(task: str, terminal_id: str = 'T?') -> bool:
@@ -252,7 +252,7 @@ def run_agent(task, cli='auto', terminal_id='T?'):
 
     # [수정 2026-04-06] 바이브 코딩(Vibe Coding) 전용 환경 식별
     # VS Code 내부 터미널에서 실행될 경우 상속되는 변수들을 정화하여,
-    # Gemini CLI가 "No installer is available for IDE" 경고를 내보내지 않도록 함.
+    # Antigravity CLI가 "No installer is available for IDE" 경고를 내보내지 않도록 함.
     env = os.environ.copy()
     env['TERM_PROGRAM'] = 'vibe-coding'
     env.pop('TERM_PROGRAM_VERSION', None)
@@ -275,13 +275,13 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     use_shell = False
     if os.name == 'nt':
         # CREATE_NO_WINDOW만 사용: DETACHED_PROCESS를 같이 쓰면
-        # stdout PIPE 연결이 끊어져 Claude/Gemini 출력이 터미널에 안 나옴.
+        # stdout PIPE 연결이 끊어져 Claude/Antigravity 출력이 터미널에 안 나옴.
         kw['creationflags'] = subprocess.CREATE_NO_WINDOW
         use_shell = True
         cmd = subprocess.list2cmdline(cmd)
 
     rc = 1
-    gemini_filter = GeminiCliNoiseFilter() if chosen == 'gemini' else None
+    antigravity_filter = AntigravityCliNoiseFilter() if chosen == 'antigravity' else None
     try:
         proc = subprocess.Popen(
             cmd,
@@ -300,8 +300,8 @@ def run_agent(task, cli='auto', terminal_id='T?'):
             if raw:
                 # ANSI/OSC 이스케이프 제거 후 live 파일 기록 (대시보드 파싱 노이즈 방지)
                 line = _ANSI_ESCAPE.sub('', raw.decode('utf-8', errors='replace')).rstrip()
-                if gemini_filter is not None:
-                    line = gemini_filter.filter_line(line)
+                if antigravity_filter is not None:
+                    line = antigravity_filter.filter_line(line)
                     if line is None:
                         continue
                 print(line)

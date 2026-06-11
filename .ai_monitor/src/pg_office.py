@@ -17,7 +17,7 @@ from src.pg_base import _sql_json, _sql_text, execute, query_rows
 
 # 기본 프로필 시드 스키마 버전 — 이 값을 올리면 재시드 시 기본 프로필의 모델/역할이
 # 자동 업그레이드된다. 사용자가 생성한 커스텀 프로필은 절대 건드리지 않는다.
-_OFFICE_PROFILE_SCHEMA_VERSION = 2  # v2: Gemini 3.1 / GPT-5.3-Codex 최신 모델 반영
+_OFFICE_PROFILE_SCHEMA_VERSION = 2  # v2: Antigravity 3.1 / GPT-5.3-Codex 최신 모델 반영
 
 # 기본 프로필 씨드 — 경영진(대표) + 코딩 부서. useWorkspaceProfiles.ts의 DEFAULT_PROFILE과 동일
 _DEFAULT_OFFICE_PROFILE = {
@@ -47,9 +47,9 @@ _DEFAULT_OFFICE_PROFILE = {
             "agents": [
                 {"id": "a1", "name": "기획자",     "role": "planner",   "cli": "claude", "model": "claude-opus-4-6",   "skills": ["brainstorm", "write-plan"], "avatar": "clipboard-list", "yolo": True, "order": 0},
                 {"id": "a2", "name": "아키텍트",   "role": "architect", "cli": "claude", "model": "claude-opus-4-6",   "skills": ["brainstorm"],               "avatar": "blocks",         "yolo": True, "order": 1},
-                {"id": "a3", "name": "프론트엔드", "role": "frontend",  "cli": "gemini", "model": "gemini-3.1-pro",       "skills": ["code"],                     "avatar": "monitor",        "yolo": True, "order": 2},
+                {"id": "a3", "name": "프론트엔드", "role": "frontend",  "cli": "antigravity", "model": "",       "skills": ["code"],                     "avatar": "monitor",        "yolo": True, "order": 2},
                 {"id": "a4", "name": "백엔드",     "role": "backend",   "cli": "claude", "model": "claude-sonnet-4-6",    "skills": ["code"],                     "avatar": "server",         "yolo": True, "order": 3},
-                {"id": "a5", "name": "풀스택",     "role": "fullstack", "cli": "gemini", "model": "gemini-3.1-flash",     "skills": ["code"],                     "avatar": "layers",         "yolo": True, "order": 4},
+                {"id": "a5", "name": "풀스택",     "role": "fullstack", "cli": "antigravity", "model": "",     "skills": ["code"],                     "avatar": "layers",         "yolo": True, "order": 4},
                 {"id": "a6", "name": "코드 리뷰어","role": "reviewer",  "cli": "claude", "model": "claude-opus-4-6",      "skills": ["code-review"],              "avatar": "search-check",   "yolo": True, "order": 5},
                 {"id": "a7", "name": "QA 테스터",  "role": "qa",        "cli": "codex",  "model": "gpt-5.3-codex-spark",  "skills": ["tdd"],                      "avatar": "test-tubes",     "yolo": True, "order": 6},
                 {"id": "a8", "name": "보안 담당",  "role": "security",  "cli": "claude", "model": "claude-opus-4-6",      "skills": ["security"],                 "avatar": "shield",         "yolo": True, "order": 7},

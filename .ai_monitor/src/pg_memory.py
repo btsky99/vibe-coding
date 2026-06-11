@@ -137,7 +137,7 @@ def get_memory(key: str) -> dict | None:
 
 # 작성자 식별자 정규화 — 모호한 기본값('unknown','agent',빈값)일 때 env 우선 승격.
 # 우선순위: 명시된 author(모호 아님) > HIVE_AGENT_ID env > 'unknown'
-# 포맷: 소문자화 + 공백 제거 (예: 'claude-t1', 'gemini', 'user')
+# 포맷: 소문자화 + 공백 제거 (예: 'claude-t1', 'antigravity', 'user')
 _AMBIGUOUS_AUTHORS = {'', 'unknown', 'agent', 'none', 'null'}
 
 

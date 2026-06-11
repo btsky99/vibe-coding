@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 FILE: scripts/antigravity_hook.py
-DESCRIPTION: Gemini CLI hook integration.
+DESCRIPTION: Antigravity CLI hook integration.
              대시보드 유지, 하이브 로그 기록, HIVEMIND.md 갱신, JSON 훅 응답 반환.
 
 REVISION HISTORY:
 - 2026-03-17 Claude: BeforeAgent에서 작업 시작 시 pg_logs + pg_thoughts 자동 기록 추가
-  - 다른 에이전트가 Gemini가 뭘 하는지 하이브에서 볼 수 있도록 강제
+  - 다른 에이전트가 Antigravity가 뭘 하는지 하이브에서 볼 수 있도록 강제
   - 하이브 마인드 핵심 원칙: 모든 에이전트 활동은 공유되어야 함
 """
 
@@ -35,7 +35,7 @@ for path in (MONITOR_DIR, SCRIPT_DIR):
 
 
 # [2026-03-18 Claude] stdout/stderr 분리 순서 수정
-# Gemini CLI 훅 프로토콜: stdout에 JSON 응답만 출력해야 함
+# Antigravity CLI 훅 프로토콜: stdout에 JSON 응답만 출력해야 함
 # 기존 문제: sys.stdout = sys.stderr 후 stderr를 교체하면 stdout이 stale 참조를 가리킴
 # 수정: stderr를 먼저 래핑한 뒤 stdout을 리다이렉트
 
@@ -128,7 +128,7 @@ def _hook_response(decision: str = "allow", context: str | None = None) -> None:
 
 def _send_heartbeat(status: str = "active", task: str = "Thinking...") -> None:
     try:
-        data = json.dumps({"agent": "Gemini", "status": status, "task": task}).encode("utf-8")
+        data = json.dumps({"agent": "Antigravity", "status": status, "task": task}).encode("utf-8")
         request = urllib.request.Request(
             "http://localhost:9000/api/agents/heartbeat",
             data=data,
@@ -188,7 +188,7 @@ def _refresh_hivemind_doc(force: bool = False) -> None:
         pass
 
 
-def _read_gemini_messages(agent_name: str) -> list[dict]:
+def _read_antigravity_messages(agent_name: str) -> list[dict]:
     try:
         from itcp import receive as itcp_receive
         # [2026-03-18 Claude] 터미널 ID 전달 — 같은 에이전트 간 자기 메시지 제외
@@ -218,7 +218,7 @@ def _send_session_summary() -> None:
                     continue
                 if not str(entry.get("timestamp", "")).startswith(today):
                     continue
-                if entry.get("agent") != "Gemini":
+                if entry.get("agent") != "Antigravity":
                     continue
                 task = str(entry.get("task", ""))
                 if any(marker in task for marker in ("[edit done]", "[create done]", "[run done]", "[commit]")):
@@ -234,9 +234,9 @@ def _send_session_summary() -> None:
         from itcp import send as itcp_send
 
         itcp_send(
-            from_terminal="gemini",
+            from_terminal="antigravity",
             to_terminal="claude",
-            content=f"[Gemini session summary {today}]\n{summary}",
+            content=f"[Antigravity session summary {today}]\n{summary}",
             channel="hive",
             msg_type="session_summary",
         )
@@ -298,7 +298,7 @@ def _extract_result_text(tool_result) -> str:
     if isinstance(tool_result, str):
         return _snippet(tool_result)
     if isinstance(tool_result, dict):
-        # Gemini CLI의 run_shell_command 결과는 stdout, stderr, output 등을 포함할 수 있음
+        # Antigravity CLI의 run_shell_command 결과는 stdout, stderr, output 등을 포함할 수 있음
         for key in ("stdout", "output", "content", "message", "result", "stderr"):
             value = tool_result.get(key)
             if value:
@@ -318,7 +318,7 @@ def _register_prompt_task(prompt: str) -> None:
             "title": _snippet(prompt, 80),
             "description": prompt[:500],
             "status": "in_progress",
-            "assigned_to": "gemini",
+            "assigned_to": "antigravity",
             "priority": "medium",
             "created_by": "user",
             "created_at": datetime.now().isoformat(),
@@ -331,14 +331,14 @@ def _register_prompt_task(prompt: str) -> None:
 def _build_additional_context(prompt: str) -> str:
     sections: list[str] = []
 
-    unread = _read_gemini_messages("gemini")
+    unread = _read_antigravity_messages("antigravity")
     if unread:
         # [2026-03-27 Claude] 무한루프 방지: 자기참조/중복 메시지 필터링
-        # 1) Gemini 자신이 보낸 메시지 (session_summary, task_result 등) 제외
-        # 2) dispatcher broadcast 중 Gemini에게 이미 직접 전달된 태스크 중복 제외
+        # 1) Antigravity 자신이 보낸 메시지 (session_summary, task_result 등) 제외
+        # 2) dispatcher broadcast 중 Antigravity에게 이미 직접 전달된 태스크 중복 제외
         # 3) 검증 결과(verify_result)로 인한 재진입 방지
         _SELF_MSG_TYPES = {"session_summary", "response"}
-        _SELF_CONTENT_MARKERS = {"[TASK-RESULT]", "[VERIFY-RESULT]", "[Gemini session summary"}
+        _SELF_CONTENT_MARKERS = {"[TASK-RESULT]", "[VERIFY-RESULT]", "[Antigravity session summary"}
         filtered = []
         for message in unread:
             sender = message.get("from_agent") or message.get("from") or "?"
@@ -346,7 +346,7 @@ def _build_additional_context(prompt: str) -> str:
             content = message.get("content", "")
 
             # 자기가 보낸 메시지 무시
-            if sender.lower() == "gemini":
+            if sender.lower() == "antigravity":
                 continue
 
             # 결과/응답 메시지 무시 (재진입 루프 방지)
@@ -358,7 +358,7 @@ def _build_additional_context(prompt: str) -> str:
                 continue
 
             # dispatcher broadcast 중 이미 직접 수신된 태스크 중복 제거
-            # (broadcast to_agent='all' + 직접 send to_agent='gemini' 이중 수신 방지)
+            # (broadcast to_agent='all' + 직접 send to_agent='antigravity' 이중 수신 방지)
             to_agent = message.get("to_agent", "")
             if sender == "dispatcher" and to_agent == "all" and "[DISPATCH]" in content:
                 continue
@@ -370,7 +370,7 @@ def _build_additional_context(prompt: str) -> str:
             sender = message.get("from_agent") or message.get("from") or "?"
             msg_type = message.get("channel") or message.get("msg_type") or message.get("type") or "info"
             content = message.get("content", "")
-            lines.append(f"- [{sender} -> gemini] ({msg_type}) {content}")
+            lines.append(f"- [{sender} -> antigravity] ({msg_type}) {content}")
         if lines:
             sections.append("[Claude messages]\n" + "\n".join(lines))
 
@@ -387,7 +387,7 @@ def _log_tool_start(log_task, tool_name: str, tool_input) -> None:
     if tool_name in ("write_file", "create_file", "overwrite_file"):
         file_path = _tool_path(tool_input)
         preview = _snippet(_tool_content(tool_input), 60)
-        log_task("Gemini", f"[create start] {_short_path(file_path)} :: {preview or '(empty)'}")
+        log_task("Antigravity", f"[create start] {_short_path(file_path)} :: {preview or '(empty)'}")
         return
 
     if tool_name in ("replace", "edit_file", "str_replace"):
@@ -399,13 +399,13 @@ def _log_tool_start(log_task, tool_name: str, tool_input) -> None:
             parts.append(f"from={old_text}")
         if new_text:
             parts.append(f"to={new_text}")
-        log_task("Gemini", " | ".join(parts))
+        log_task("Antigravity", " | ".join(parts))
         return
 
     if tool_name in ("run_shell_command", "shell", "bash", "execute_command"):
         command = _tool_command(tool_input).strip()
         if command and not any(command.startswith(prefix) for prefix in SKIP_SHELL_PREFIXES):
-            log_task("Gemini", f"[run start] {_short_cmd(command)}")
+            log_task("Antigravity", f"[run start] {_short_cmd(command)}")
 
 
 def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_result) -> None:
@@ -416,9 +416,9 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
         file_path = _tool_path(tool_input)
         content = _tool_content(tool_input)
         line_count = len(content.splitlines()) if content else 0
-        log_task("Gemini", f"[create done] {_short_path(file_path)} lines={line_count}")
+        log_task("Antigravity", f"[create done] {_short_path(file_path)} lines={line_count}")
         log_thought(
-            "gemini",
+            "antigravity",
             "file-write",
             {
                 "type": "action",
@@ -434,9 +434,9 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
     if tool_name in ("replace", "edit_file", "str_replace"):
         file_path = _tool_path(tool_input)
         suffix = f" -> {result_text}" if result_text else ""
-        log_task("Gemini", f"[edit done] {_short_path(file_path)}{suffix}")
+        log_task("Antigravity", f"[edit done] {_short_path(file_path)}{suffix}")
         log_thought(
-            "gemini",
+            "antigravity",
             "file-edit",
             {
                 "type": "action",
@@ -454,9 +454,9 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
         if not command or any(command.startswith(prefix) for prefix in SKIP_SHELL_PREFIXES):
             return
         if "git commit" in command:
-            log_task("Gemini", f"[commit] {_short_cmd(command)}")
+            log_task("Antigravity", f"[commit] {_short_cmd(command)}")
             log_thought(
-                "gemini",
+                "antigravity",
                 "git",
                 {
                     "type": "decision",
@@ -466,7 +466,7 @@ def _log_tool_finish(log_task, log_thought, tool_name: str, tool_input, tool_res
             )
             return
         suffix = f" -> {result_text}" if result_text else ""
-        log_task("Gemini", f"[run done] {_short_cmd(command, 60)}{suffix}")
+        log_task("Antigravity", f"[run done] {_short_cmd(command, 60)}{suffix}")
 
 
 def main() -> None:
@@ -497,7 +497,7 @@ def main() -> None:
         SESSION_HAD_ERROR = False
 
         # [2026-03-27 Claude] 세션 히스토리 자동 수리 (백그라운드)
-        # Gemini CLI가 이미지 파일 read_file 시 result에 inlineData + functionResponse
+        # Antigravity CLI가 이미지 파일 read_file 시 result에 inlineData + functionResponse
         # 2개 파트를 넣어 API 400 에러 유발 → 세션 시작 시 자동 정리
         _repair_script = SCRIPT_DIR / "antigravity_session_repair.py"
         if _repair_script.exists():
@@ -538,11 +538,11 @@ def main() -> None:
         _refresh_hivemind_doc(force=False)
 
     elif event == "SessionEnd":
-        log_task("Gemini", "Session end")
+        log_task("Antigravity", "Session end")
         try:
             from src.pg_store import bulk_update_tasks
 
-            bulk_update_tasks("gemini", ["pending", "in_progress"], "done")
+            bulk_update_tasks("antigravity", ["pending", "in_progress"], "done")
         except Exception:
             pass
         # [2026-06-11] _report_completed_itcp_work 제거 — auto_dispatcher 폐기로

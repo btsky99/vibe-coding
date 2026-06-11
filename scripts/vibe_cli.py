@@ -87,7 +87,7 @@ def _psql_fallback(sql: str) -> bool:
 def _detect_agent() -> str:
     """현재 환경에서 에이전트 이름을 자동 감지합니다."""
     terminal_id = os.environ.get('TERMINAL_ID', '')
-    for name in ['claude', 'gemini', 'codex']:
+    for name in ['claude', 'antigravity', 'codex']:
         if name in terminal_id.lower():
             return name
     return 'unknown'

@@ -12,6 +12,7 @@ DESCRIPTION: agent_api.py 단위 테스트.
              - HTTP 핸들러는 간단한 Mock 객체로 대체
 
 REVISION HISTORY:
+- 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-06-11 Claude: TestGetGeminiLastTask 삭제 — agy 전환으로 대상 함수 제거 (비공개 포맷)
 - 2026-03-09 Claude: 최초 작성 — 버그픽스 a6bd38a, 6f05536 재발 방지 커버리지
 """
@@ -196,7 +197,7 @@ class TestMergeLiveFileStatus:
 
         self._write_events([
             {"type": "started", "terminal_id": "T4", "task": "오래된 작업",
-             "cli": "gemini", "run_id": "r_old", "ts": old_ts},
+             "cli": "antigravity", "run_id": "r_old", "ts": old_ts},
         ])
         terminals = {f"T{i}": {"status": "idle", "task": "", "cli": "", "run_id": "", "ts": "", "last_line": ""} for i in range(1, 9)}
 
@@ -250,9 +251,9 @@ class TestInteractiveStageCLIType:
         )
         monkeypatch.setattr(agent_api, "_CLI_AGENT_AVAILABLE", True)
 
-        # _merge_live_file_status와 _detect_external_gemini는 빈 결과 반환
+        # _merge_live_file_status와 _detect_external_antigravity는 빈 결과 반환
         monkeypatch.setattr(agent_api, "_merge_live_file_status", lambda t: None)
-        monkeypatch.setattr(agent_api, "_detect_external_gemini", lambda: [])
+        monkeypatch.setattr(agent_api, "_detect_external_antigravity", lambda: [])
 
         handler = MagicMock()
         handler.wfile.write = MagicMock()
@@ -283,7 +284,7 @@ class TestInteractiveStageCLIType:
         )
         monkeypatch.setattr(agent_api, "_CLI_AGENT_AVAILABLE", True)
         monkeypatch.setattr(agent_api, "_merge_live_file_status", lambda t: None)
-        monkeypatch.setattr(agent_api, "_detect_external_gemini", lambda: [])
+        monkeypatch.setattr(agent_api, "_detect_external_antigravity", lambda: [])
 
         handler = MagicMock()
         agent_api.handle_terminals(handler)

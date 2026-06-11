@@ -5,7 +5,7 @@
  * REVISION HISTORY:
  * - 2026-02-27 Claude: 벡터 DB/ChromaDB 탭 제거 — 사고 추적 전용으로 단순화
  * - 2026-02-26 Claude: 탭 구조 추가 + 벡터 메모리 검색 UI 구현
- * - 2026-02-26 Gemini-1: 초기 Thought Trace 시각화 컴포넌트 생성
+ * - 2026-02-26 Antigravity-1: 초기 Thought Trace 시각화 컴포넌트 생성
  */
 
 import React, { useState } from 'react';

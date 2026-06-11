@@ -36,7 +36,7 @@ interface UseOfficeChatReturn {
  * 오피스 전용 채팅 훅.
  * /api/agent/chat SSE로 CLI와 실시간 통신한다.
  * @param terminalId 오피스 터미널 ID ("O1", "O2", ...)
- * @param cli 에이전트 CLI ("claude" | "gemini" | "codex")
+ * @param cli 에이전트 CLI ("claude" | "antigravity" | "codex")
  * @param yolo 자율 실행 모드
  */
 export function useOfficeChat(

@@ -18,7 +18,7 @@ const PTY_BASE = '';
 export interface PtySession {
   id: string;           // T1, T2, ...
   running: boolean;
-  agent: string;        // 'claude', 'gemini', 'codex'
+  agent: string;        // 'claude', 'antigravity', 'codex'
   slotName: string;
   lastLine: string;
   mainModel: string;

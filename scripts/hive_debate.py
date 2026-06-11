@@ -27,7 +27,7 @@ from scripts.hive_bridge import log_task, log_thought  # noqa: E402
 
 
 VALID_MESSAGE_TYPES = {"proposal", "critique", "synthesis", "vote"}
-DEFAULT_PARTICIPANTS = ["gemini", "claude"]
+DEFAULT_PARTICIPANTS = ["antigravity", "claude"]
 
 
 @dataclass

@@ -1,7 +1,7 @@
 """
 FILE: scripts/agent_protocol.py
 DESCRIPTION: 에이전트 간 협업을 위한 RFC 관리 + 하이브 토론 참여 프로토콜.
-             Gemini와 Claude 간의 명확한 역할 분담, 작업 승인, 토론 참여를 지원합니다.
+             Antigravity와 Claude 간의 명확한 역할 분담, 작업 승인, 토론 참여를 지원합니다.
 
 REVISION HISTORY:
 - 2026-02-26 Gemini-1: 초기 구현 (하이브 에볼루션 v5.0 Task 5)
@@ -108,8 +108,8 @@ class DebateParticipant:
             "제안의 취약점·보안 위험·엣지 케이스를 비판적으로 분석하고,\n"
             "반드시 대안적 해결 방법을 함께 제시하십시오."
         ),
-        "gemini": (
-            "당신은 Gemini입니다. 전체 설계와 오케스트레이션을 담당하는 AI입니다.\n"
+        "antigravity": (
+            "당신은 Antigravity입니다. 전체 설계와 오케스트레이션을 담당하는 AI입니다.\n"
             "시스템 전체 아키텍처 관점에서 제안을 평가하고,\n"
             "확장성과 통합 용이성 측면의 의견을 제시하십시오."
         ),
@@ -192,7 +192,7 @@ class DebateParticipant:
     def build_prompt(self, debate_id: int) -> str:
         """주어진 토론의 컨텍스트를 에이전트가 이해할 수 있는 프롬프트 문자열로 변환합니다.
 
-        반환된 문자열을 Claude/Gemini CLI의 입력으로 사용하면
+        반환된 문자열을 Claude/Antigravity CLI의 입력으로 사용하면
         에이전트가 토론 맥락을 파악하고 의견을 생성할 수 있습니다.
         """
         debate = self.get_debate(debate_id)

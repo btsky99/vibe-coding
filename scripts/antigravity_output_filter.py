@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 FILE: scripts/antigravity_output_filter.py
-DESCRIPTION: Gemini CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터.
+DESCRIPTION: Antigravity CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터.
 
 REVISION HISTORY:
 - 2026-03-22 Codex: 최초 작성
-  - Gemini CLI가 stderr로 출력하는 MCP/훅/텔레메트리 노이즈를 사용자 출력에서 제외
+  - Antigravity CLI가 stderr로 출력하는 MCP/훅/텔레메트리 노이즈를 사용자 출력에서 제외
   - 실제 응답 본문은 유지하고, 디버그/상태 로그만 필터링
 """
 
 from __future__ import annotations
 
 
-class GeminiCliNoiseFilter:
-    """Gemini CLI가 섞어 출력하는 내부 상태 로그를 줄 단위로 제거합니다."""
+class AntigravityCliNoiseFilter:
+    """Antigravity CLI가 섞어 출력하는 내부 상태 로그를 줄 단위로 제거합니다."""
 
     _PREFIXES = (
         "Created execution plan for ",

@@ -4,6 +4,8 @@ DESCRIPTION: harness_verify.py V2 검증 스크립트의 단위 테스트.
              V1 검사(문서 구조)와 V2 검사(feature_list, progress, self-eval, contract)를 모두 커버.
 
 REVISION HISTORY:
+- 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8) —
+  GEMINI.md는 harness_verify.py가 검증하는 실제 문서 파일명이므로 보존
 - 2026-03-29 Codex: 최초 생성 — V1 검사 3개 테스트
 - 2026-03-30 Claude: V2 업그레이드 — V2 검사 항목 테스트 추가
 """
@@ -63,7 +65,7 @@ def _seed_minimal_repo(root: Path) -> None:
                 "description": "테스트 기능",
                 "acceptance_criteria": ["동작한다"],
                 "assigned_to": "claude",
-                "evaluated_by": "gemini",
+                "evaluated_by": "antigravity",
                 "passes": True,
             }
         ]
@@ -162,7 +164,7 @@ def test_verify_passes_eval_separated(tmp_path):
                 "description": "테스트",
                 "acceptance_criteria": ["ok"],
                 "assigned_to": "claude",
-                "evaluated_by": "gemini",  # 분리됨
+                "evaluated_by": "antigravity",  # 분리됨
                 "passes": False,
             }
         ]
@@ -184,7 +186,7 @@ def test_verify_warns_contract_missing_for_active_p0(tmp_path):
                 "description": "중요 기능",
                 "acceptance_criteria": ["ok"],
                 "assigned_to": "claude",
-                "evaluated_by": "gemini",
+                "evaluated_by": "antigravity",
                 "passes": False,  # 미완성
             }
         ]
@@ -206,7 +208,7 @@ def test_verify_passes_contract_exists(tmp_path):
                 "description": "중요 기능",
                 "acceptance_criteria": ["ok"],
                 "assigned_to": "claude",
-                "evaluated_by": "gemini",
+                "evaluated_by": "antigravity",
                 "passes": False,
             }
         ]

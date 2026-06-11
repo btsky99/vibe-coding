@@ -125,8 +125,8 @@ def _detect_agent(commit_body: str) -> str:
     body_lower = commit_body.lower()
     if 'claude' in body_lower:
         return 'claude'
-    if 'gemini' in body_lower:
-        return 'gemini'
+    if 'antigravity' in body_lower:
+        return 'antigravity'
     if 'codex' in body_lower or 'gpt' in body_lower:
         return 'codex'
     return 'claude'  # 기본값

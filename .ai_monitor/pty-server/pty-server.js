@@ -25,7 +25,7 @@ const PTY_PORT = parseInt(process.env.PTY_PORT || '9001', 10);
 const PYTHON_HTTP_PORT = parseInt(process.env.HTTP_PORT || '9000', 10);
 const PROJECT_ROOT = process.env.PROJECT_ROOT || path.resolve(__dirname, '..', '..');
 
-// Git Bash 경로 — Gemini/Codex는 bash에서 실행해야 셸 호환성 문제 방지
+// Git Bash 경로 — Antigravity/Codex는 bash에서 실행해야 셸 호환성 문제 방지
 const BASH_EXE = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
 const fs = require('fs');
 const BASH_AVAILABLE = fs.existsSync(BASH_EXE);
@@ -205,7 +205,7 @@ function normalizeCodexStream(data) {
 
 function getSubmitEnterSequence(_agent) {
   // Telegram/REST injection should mirror the frontend terminal path:
-  // a single Enter submits once. The old double-CR path could leave Codex/Gemini
+  // a single Enter submits once. The old double-CR path could leave Codex/Antigravity
   // waiting for one more manual Enter on subsequent prompts.
   return '\r';
 }
@@ -473,7 +473,7 @@ function getCodexMainModel() {
  * 프론트엔드 TerminalSlot.tsx에서 WebSocket 연결이 들어오면
  * node-pty로 셸을 spawn하고 양방향 스트리밍을 설정합니다.
  *
- * URL 형식: /pty/slot{0-31}?agent={claude|gemini|codex}&cwd={path}&cols=80&rows=24&yolo=false&model=...&name=...
+ * URL 형식: /pty/slot{0-31}?agent={claude|antigravity|codex}&cwd={path}&cols=80&rows=24&yolo=false&model=...&name=...
  *
  * 프로토콜:
  *   Client → Server: 일반 텍스트(키 입력) 또는 JSON({type:'resize',cols,rows})
@@ -534,9 +534,9 @@ function handlePtyConnectionLegacy(ws, req) {
 
     // ── 셸 선택 ───────────────────────────────────────────────────────
     // Claude: cmd.exe (정상 동작)
-    // Gemini/Codex/Shell(개발용): Git Bash (CMD에서 실행 시 셸 호환성 에러 발생)
+    // Antigravity/Codex/Shell(개발용): Git Bash (CMD에서 실행 시 셸 호환성 에러 발생)
     let shell, shellArgs;
-    if ((agent === 'gemini' || agent === 'codex' || agent === 'shell') && BASH_AVAILABLE) {
+    if ((agent === 'antigravity' || agent === 'codex' || agent === 'shell') && BASH_AVAILABLE) {
       shell = BASH_EXE;
       shellArgs = ['--login'];
     } else {
@@ -561,7 +561,7 @@ function handlePtyConnectionLegacy(ws, req) {
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
-    } else if (agent === 'gemini') {
+    } else if (agent === 'antigravity') {
       // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`agy${yoloFlag}\n`);
@@ -802,7 +802,7 @@ function handlePtyConnectionLegacy(ws, req) {
 
 // ── 자율 에이전트 라우팅 (빈 셸 터미널용) ─────────────────────────────────
 /**
- * PTY 터미널에 에이전트(claude/gemini 등)가 실행되지 않은 빈 셸에서
+ * PTY 터미널에 에이전트(claude/antigravity 등)가 실행되지 않은 빈 셸에서
  * 사용자 입력을 cli_agent.py로 자동 라우팅합니다.
  * 에이전트가 이미 실행 중인 경우 라우팅하지 않습니다.
  */
@@ -874,7 +874,7 @@ function handlePersistentPtyConnection(ws, req) {
     }
 
     let shell, shellArgs;
-    if ((agent === 'gemini' || agent === 'codex') && BASH_AVAILABLE) {
+    if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
       shell = BASH_EXE;
       shellArgs = ['--login'];
     } else {
@@ -897,7 +897,7 @@ function handlePersistentPtyConnection(ws, req) {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
       ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}${modelFlag}\r\n`);
-    } else if (agent === 'gemini') {
+    } else if (agent === 'antigravity') {
       // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. agy는 --model 미지원이라 무시.
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`agy${yoloFlag}\n`);
@@ -1225,7 +1225,7 @@ app.get('/api/pty/models', (req, res) => {
       { id: 'claude-haiku-4-5', label: 'Haiku 4.5 (경량)' },
     ],
     // 2026-04 기준 최신 모델. useCliModels.ts 폴백과 반드시 동기화 유지.
-    gemini: [
+    antigravity: [
       { id: 'gemini-3.1-pro', label: '3.1 Pro (최강)' },
       { id: 'gemini-3.1-flash', label: '3.1 Flash (빠름)' },
       { id: 'gemini-3.1-flash-lite', label: '3.1 Flash-Lite (저지연)' },
@@ -1371,7 +1371,8 @@ app.post('/api/pty/write/:id', (req, res) => {
  * 본 정책(TTL/배지)에서는 slotId가 'O'로 시작하면 자연 제외.
  */
 app.post('/api/pty/office/spawn', (req, res) => {
-  const agent = (req.body && req.body.agent) || 'claude';
+  let agent = (req.body && req.body.agent) || 'claude';
+  if (agent === 'gemini') agent = 'antigravity'; // 레거시 식별자 정규화 (2026-06-11 일괄 전환)
   const isYolo = !!(req.body && req.body.yolo);
   const requestedCwd = req.body && req.body.cwd;
   const cwd = (requestedCwd && fs.existsSync(requestedCwd)) ? requestedCwd : PROJECT_ROOT;
@@ -1398,7 +1399,7 @@ app.post('/api/pty/office/spawn', (req, res) => {
 
   // 셸 선택
   let shell, shellArgs;
-  if ((agent === 'gemini' || agent === 'codex') && BASH_AVAILABLE) {
+  if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
     shell = BASH_EXE;
     shellArgs = ['--login'];
   } else {
@@ -1422,7 +1423,7 @@ app.post('/api/pty/office/spawn', (req, res) => {
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
-    } else if (agent === 'gemini') {
+    } else if (agent === 'antigravity') {
       // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       ptyProcess.write(`agy${yoloFlag}\n`);

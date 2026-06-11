@@ -19,7 +19,7 @@ interface MemoryPanelProps {
 
 /**
  * MemoryPanel
- * - 에이전트(Claude / Gemini / User)가 작성한 공유 지식 항목을 조회·추가·수정·삭제
+ * - 에이전트(Claude / Antigravity / User)가 작성한 공유 지식 항목을 조회·추가·수정·삭제
  * - 검색어 기반 실시간 필터링 + 5초 폴링으로 최신 상태 유지
  * - memShowAll 상태로 전체 보기 / 현재 프로젝트만 보기 토글 지원
  */
@@ -31,7 +31,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   // 전체 보기(true) vs 현재 프로젝트만(false) 토글
   const [memShowAll, setMemShowAll] = useState(true);
 
-  // B.2 — 작성자 필터 (예: 'claude', 'gemini'). 빈값이면 전체.
+  // B.2 — 작성자 필터 (예: 'claude', 'antigravity'). 빈값이면 전체.
   const [memAuthorFilter, setMemAuthorFilter] = useState('');
 
   // C.1 — 제텔카스텐(zettel_notes) 지식 포함 여부. 기본 on으로 에이전트가
@@ -221,7 +221,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
           >
             <option value="">작성자: 전체</option>
             <option value="claude">claude 계열</option>
-            <option value="gemini">gemini 계열</option>
+            <option value="antigravity">antigravity 계열</option>
             <option value="codex">codex 계열</option>
             <option value="user">user</option>
             <option value="unknown">unknown</option>
@@ -340,7 +340,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
                   className={`px-1.5 py-0.5 rounded text-[8px] font-bold ml-auto ${
                     entry.author === 'claude'
                       ? 'bg-green-500/15 text-green-400'
-                      : entry.author === 'gemini'
+                      : entry.author === 'antigravity'
                       ? 'bg-blue-500/15 text-blue-400'
                       : 'bg-white/10 text-white/50'
                   }`}
@@ -407,7 +407,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
               className="bg-[#3c3c3c] border border-white/5 rounded px-1 py-1 text-[10px] focus:outline-none cursor-pointer"
             >
               <option value="claude">Claude</option>
-              <option value="gemini">Gemini</option>
+              <option value="antigravity">Antigravity</option>
               <option value="user">User</option>
             </select>
           </div>

@@ -18,12 +18,12 @@ import { API_BASE } from '../../constants';
 // 에이전트 이모지 + 색상 + 이름
 const TERMINAL_INFO: Record<number, { emoji: string; agent: string; color: string; border: string }> = {
   1: { emoji: '🤖', agent: 'Claude', color: 'text-purple-400', border: 'border-purple-500/30' },
-  2: { emoji: '🟢', agent: 'Gemini', color: 'text-emerald-400', border: 'border-emerald-500/30' },
+  2: { emoji: '🟢', agent: 'Antigravity', color: 'text-emerald-400', border: 'border-emerald-500/30' },
   3: { emoji: '🤖', agent: 'Claude', color: 'text-purple-400', border: 'border-purple-500/30' },
-  4: { emoji: '🟢', agent: 'Gemini', color: 'text-emerald-400', border: 'border-emerald-500/30' },
+  4: { emoji: '🟢', agent: 'Antigravity', color: 'text-emerald-400', border: 'border-emerald-500/30' },
   5: { emoji: '🔵', agent: 'Codex', color: 'text-cyan-400', border: 'border-cyan-500/30' },
   6: { emoji: '🤖', agent: 'Claude', color: 'text-purple-400', border: 'border-purple-500/30' },
-  7: { emoji: '🟢', agent: 'Gemini', color: 'text-emerald-400', border: 'border-emerald-500/30' },
+  7: { emoji: '🟢', agent: 'Antigravity', color: 'text-emerald-400', border: 'border-emerald-500/30' },
   8: { emoji: '🔵', agent: 'Codex', color: 'text-cyan-400', border: 'border-cyan-500/30' },
 };
 

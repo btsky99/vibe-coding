@@ -13,17 +13,17 @@ import { HiveHealth, OrchestratorStatus, MemoryEntry } from '../../types';
 import { API_BASE } from '../../constants';
 
 // 작성자 태그 색상 매핑 — B.2 작성자 식별 강화와 맞물리는 시각적 구분.
-// claude 계열은 초록, gemini 계열은 파랑, user는 보라, 기타(unknown/legacy)는 회색.
+// claude 계열은 초록, antigravity 계열은 파랑, user는 보라, 기타(unknown/legacy)는 회색.
 function authorBadgeClass(author: string): string {
   const a = (author || '').toLowerCase();
   if (a.startsWith('claude')) return 'bg-green-500/15 text-green-400';
-  if (a.startsWith('gemini')) return 'bg-blue-500/15 text-blue-400';
+  if (a.startsWith('antigravity')) return 'bg-blue-500/15 text-blue-400';
   if (a.startsWith('codex')) return 'bg-purple-500/15 text-purple-400';
   if (a === 'user') return 'bg-cyan-500/15 text-cyan-400';
   return 'bg-white/10 text-white/50';
 }
 
-// 작성자 LLM 계열 추출 — 'claude-t1' → 'claude', 'gemini:terminal-3' → 'gemini'
+// 작성자 LLM 계열 추출 — 'claude-t1' → 'claude', 'antigravity:terminal-3' → 'antigravity'
 function authorFamily(author: string): string {
   const a = (author || '').toLowerCase();
   const cut = a.split(/[-:]/, 2)[0];
@@ -214,7 +214,7 @@ export default function HivePanel() {
           {/* ── B.3 + C.1 최근 공유 메모리 카드 ── */}
           {/* 에이전트별 누적 메모 분포 + hive/zettel source 집계 + 최근 5건. */}
           {recentMemory.length > 0 && (() => {
-            // 작성자 계열별 집계 (claude / gemini / codex / user / unknown 등)
+            // 작성자 계열별 집계 (claude / antigravity / codex / user / unknown 등)
             const familyCounts: Record<string, number> = {};
             let hiveCount = 0;
             let zettelCount = 0;

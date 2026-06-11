@@ -5,8 +5,8 @@
  *              PTY 서버의 /api/pty/models에서 동적으로 가져오며,
  *              실패 시 하드코딩 폴백 목록을 반환한다.
  * REVISION HISTORY:
- * - 2026-04-09 Claude: Gemini/Codex 폴백 모델을 2026-04 기준 최신으로 교체.
- *                     Gemini: 2.5 계열 → 3.1 계열 (3.1 Pro / Flash / Flash-Lite).
+ * - 2026-04-09 Claude: Antigravity/Codex 폴백 모델을 2026-04 기준 최신으로 교체.
+ *                     Antigravity: 2.5 계열 → 3.1 계열 (3.1 Pro / Flash / Flash-Lite).
  *                     Codex: o3/o4-mini/gpt-4.1 → gpt-5.3-codex / gpt-5.4-mini.
  * - 2026-04-08 Claude: 초기 생성 — 오피스 워크스페이스 프로필 모델 선택용
  * ------------------------------------------------------------------------
@@ -29,7 +29,7 @@ const FALLBACK_MODELS: CliModelMap = {
     { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (균형)' },
     { id: 'claude-haiku-4-5', label: 'Haiku 4.5 (경량)' },
   ],
-  gemini: [
+  antigravity: [
     { id: 'gemini-3.1-pro', label: '3.1 Pro (최강)' },
     { id: 'gemini-3.1-flash', label: '3.1 Flash (빠름)' },
     { id: 'gemini-3.1-flash-lite', label: '3.1 Flash-Lite (저지연)' },

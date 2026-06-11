@@ -106,10 +106,10 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "category": "ai-agent",
     },
     {
-        "id": "gemini",
-        "name": "Gemini CLI",
-        "description": "Google Gemini AI 코딩 에이전트",
-        "check_commands": [["gemini", "--version"]],
+        "id": "antigravity",
+        "name": "Antigravity CLI",
+        "description": "Google Antigravity AI 코딩 에이전트",
+        "check_commands": [["antigravity", "--version"]],
         "check_paths": [],
         "install_script": "install_npm_tool.py",
         "install_args": ["--package", "@google/gemini-cli", "--name", "Gemini CLI"],
@@ -122,7 +122,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "id": "nodejs",
         "name": "Node.js / npm",
-        "description": "JavaScript 런타임 — Codex, Gemini CLI 등의 사전 요구사항",
+        "description": "JavaScript 런타임 — Codex, Antigravity CLI 등의 사전 요구사항",
         "check_commands": [["node", "--version"]],
         "check_paths": [],
         "install_script": "install_nodejs.py",
@@ -149,11 +149,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "install_hint": "내장 PostgreSQL의 psql.exe를 사용자 PATH에 자동 등록합니다.",
         "category": "database",
     },
-    # ── Python 개발 도구 (Gemini 추천) ────────────────────────────────
+    # ── Python 개발 도구 (Antigravity 추천) ────────────────────────────────
     {
         "id": "ruff",
         "name": "Ruff",
-        "description": "Python 린팅 + 포맷팅 (Rust 기반, 초고속) — Gemini 추천",
+        "description": "Python 린팅 + 포맷팅 (Rust 기반, 초고속) — Antigravity 추천",
         "check_commands": [["ruff", "--version"], [sys.executable, "-m", "ruff", "--version"]],
         "check_paths": [],
         "install_script": "install_dev_tools.py",
@@ -165,7 +165,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "id": "pytest",
         "name": "pytest",
-        "description": "Python 단위 테스트 프레임워크 — Gemini 추천",
+        "description": "Python 단위 테스트 프레임워크 — Antigravity 추천",
         "check_commands": [["pytest", "--version"], [sys.executable, "-m", "pytest", "--version"]],
         "check_paths": [],
         "install_script": "install_dev_tools.py",
@@ -836,8 +836,8 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
         ),
     },
     {
-        "id": "gemini-rules",
-        "agent": "Gemini CLI",
+        "id": "antigravity-rules",
+        "agent": "Antigravity CLI",
         "category": "rules",
         "description": "GEMINI.md 자동 생성",
         "prompt": (

@@ -13,7 +13,7 @@
 
 // ── 타입 ──────────────────────────────────────────────────────────────────
 
-export type AgentCli = 'claude' | 'gemini' | 'codex';
+export type AgentCli = 'claude' | 'antigravity' | 'codex';
 
 export interface AgentSlot {
   id: string;

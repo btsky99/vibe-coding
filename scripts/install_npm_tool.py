@@ -1,7 +1,7 @@
 """
 FILE: scripts/install_npm_tool.py
 DESCRIPTION: npm 글로벌 패키지 설치 스크립트.
-             Claude CLI, Gemini CLI, Codex CLI 등 npm 기반 AI 도구를
+             Claude CLI, Antigravity CLI, Codex CLI 등 npm 기반 AI 도구를
              원클릭으로 설치한다. Node.js/npm 사전 설치 필요.
 
              사용법:

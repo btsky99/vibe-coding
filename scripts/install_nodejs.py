@@ -2,7 +2,7 @@
 FILE: scripts/install_nodejs.py
 DESCRIPTION: Node.js LTS 자동 설치 스크립트 (Windows).
              winget을 우선 시도하고, 없으면 공식 MSI 인스톨러를 다운로드하여 실행.
-             Claude CLI, Gemini CLI, Codex CLI 등 npm 기반 도구의 사전 요구사항.
+             Claude CLI, Antigravity CLI, Codex CLI 등 npm 기반 도구의 사전 요구사항.
 
 REVISION HISTORY:
 - 2026-04-05 Claude Opus 4.6: 최초 생성 — Node.js 원클릭 설치 지원

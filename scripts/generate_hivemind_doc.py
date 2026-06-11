@@ -178,7 +178,7 @@ def get_agent_flow_mermaid() -> str:
         """
     )
     if not rows:
-        return "graph LR\n    gemini[\"gemini\"] -->|idle| claude[\"claude\"]"
+        return "graph LR\n    antigravity[\"antigravity\"] -->|idle| claude[\"claude\"]"
 
     lines = ["graph LR"]
     seen_nodes: set[str] = set()

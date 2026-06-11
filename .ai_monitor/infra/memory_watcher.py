@@ -1,6 +1,6 @@
 """
 FILE: infra/memory_watcher.py
-DESCRIPTION: 에이전트 메모리(Claude Code / Gemini CLI) 파일 감시 + PostgreSQL
+DESCRIPTION: 에이전트 메모리(Claude Code / Antigravity CLI) 파일 감시 + PostgreSQL
              hive_memory 자동 동기화 워처. 임베딩 유틸(fastembed 기반)과
              레거시 파일 메모리 경로 탐색 헬퍼도 함께 제공합니다.
 
@@ -70,7 +70,7 @@ from infra.embed_service import embed, cosine_sim  # noqa: F401
 # ── 에이전트 메모리 워처 ─────────────────────────────────────────────────────
 class MemoryWatcher(threading.Thread):
     """
-    Claude Code / Gemini CLI 의 메모리 파일을 감시하여
+    Claude Code / Antigravity CLI 의 메모리 파일을 감시하여
     변경 발생 시 PostgreSQL hive_memory 테이블에 자동 동기화하는 백그라운드 워처.
 
     - Claude Code : ~/.claude/projects/*/memory/*.md
@@ -97,8 +97,8 @@ class MemoryWatcher(threading.Thread):
         while True:
             try:
                 self._scan_claude_memories()
-                self._scan_gemini_logs()
-                self._scan_gemini_chats()
+                self._scan_antigravity_logs()
+                self._scan_antigravity_chats()
                 # 10분마다 PostgreSQL hive_memory → MEMORY.md 역방향 동기화 실행
                 _sync_tick += 1
                 if _sync_tick >= 40:
@@ -127,7 +127,7 @@ class MemoryWatcher(threading.Thread):
 
     # ── 내부: 역방향 동기화 (PostgreSQL hive_memory → MEMORY.md) ────────────
     def _sync_to_claude_memory(self) -> None:
-        """Gemini·외부 에이전트가 DB에 쓴 항목을 Claude Code auto-memory 파일에
+        """Antigravity·외부 에이전트가 DB에 쓴 항목을 Claude Code auto-memory 파일에
         역동기화한다. claude:T* 키(Claude가 직접 쓴 메모리)는 제외하여 순환 방지.
         MEMORY.md 의 '## 하이브 공유 메모리' 섹션을 교체/추가한다.
         """
@@ -262,12 +262,12 @@ class MemoryWatcher(threading.Thread):
                 except Exception as e:
                     print(f"[MemoryWatcher] Claude 파일 오류 {md_file}: {e}")
 
-    # ── Gemini logs.json 스캔 (최신 세션 요약) ─────────────────────────────
-    def _scan_gemini_logs(self) -> None:
+    # ── Antigravity logs.json 스캔 (최신 세션 요약) ─────────────────────────────
+    def _scan_antigravity_logs(self) -> None:
         gemini_tmp = Path.home() / '.gemini' / 'tmp'
-        if not gemini_tmp.exists():
+        if not antigravity_tmp.exists():
             return
-        for proj_dir in gemini_tmp.iterdir():
+        for proj_dir in antigravity_tmp.iterdir():
             if not proj_dir.is_dir():
                 continue
             logs_file = proj_dir / 'logs.json'
@@ -297,9 +297,9 @@ class MemoryWatcher(threading.Thread):
                     continue
 
                 proj_name = proj_dir.name
-                tid = self._terminal_id(f"gemini:{proj_name}")
+                tid = self._terminal_id(f"antigravity:{proj_name}")
                 lines = [
-                    f"[Gemini 세션: {latest_session[:8]}…] 프로젝트: {proj_name}",
+                    f"[Antigravity 세션: {latest_session[:8]}…] 프로젝트: {proj_name}",
                     f"최근 사용자 메시지 ({len(msgs)}개):",
                 ]
                 for m in msgs:
@@ -308,22 +308,22 @@ class MemoryWatcher(threading.Thread):
                     lines.append(f"- [{ts}] {text}")
 
                 self._upsert(
-                    key=f"gemini:T{tid}:{proj_name}:log",
-                    title=f"[GEMINI T{tid}] {proj_name} 활동 로그",
+                    key=f"antigravity:T{tid}:{proj_name}:log",
+                    title=f"[ANTIGRAVITY T{tid}] {proj_name} 활동 로그",
                     content='\n'.join(lines),
-                    author=f"gemini:terminal-{tid}",
-                    tags=['gemini', f'terminal-{tid}', proj_name, 'log'],
+                    author=f"antigravity:terminal-{tid}",
+                    tags=['antigravity', f'terminal-{tid}', proj_name, 'log'],
                     project_id=proj_name,
                 )
             except Exception as e:
-                print(f"[MemoryWatcher] Gemini logs 오류 {logs_file}: {e}")
+                print(f"[MemoryWatcher] Antigravity logs 오류 {logs_file}: {e}")
 
-    # ── Gemini chats 세션 파일 스캔 ────────────────────────────────────────
-    def _scan_gemini_chats(self) -> None:
+    # ── Antigravity chats 세션 파일 스캔 ────────────────────────────────────────
+    def _scan_antigravity_chats(self) -> None:
         gemini_tmp = Path.home() / '.gemini' / 'tmp'
-        if not gemini_tmp.exists():
+        if not antigravity_tmp.exists():
             return
-        for proj_dir in gemini_tmp.iterdir():
+        for proj_dir in antigravity_tmp.iterdir():
             if not proj_dir.is_dir():
                 continue
             chats_dir = proj_dir / 'chats'
@@ -361,9 +361,9 @@ class MemoryWatcher(threading.Thread):
                             break
 
                 proj_name = proj_dir.name
-                tid = self._terminal_id(f"gemini:{proj_name}")
+                tid = self._terminal_id(f"antigravity:{proj_name}")
                 content = (
-                    f"[Gemini 채팅 세션] 프로젝트: {proj_name}\n"
+                    f"[Antigravity 채팅 세션] 프로젝트: {proj_name}\n"
                     f"파일: {latest.name}\n"
                     f"메시지 수: {len(msgs)}\n"
                 )
@@ -371,12 +371,12 @@ class MemoryWatcher(threading.Thread):
                     content += f"마지막 응답 요약:\n{summary_parts[0]}"
 
                 self._upsert(
-                    key=f"gemini:T{tid}:{proj_name}:chat",
-                    title=f"[GEMINI T{tid}] {proj_name} 채팅",
+                    key=f"antigravity:T{tid}:{proj_name}:chat",
+                    title=f"[ANTIGRAVITY T{tid}] {proj_name} 채팅",
                     content=content,
-                    author=f"gemini:terminal-{tid}",
-                    tags=['gemini', f'terminal-{tid}', proj_name, 'chat'],
+                    author=f"antigravity:terminal-{tid}",
+                    tags=['antigravity', f'terminal-{tid}', proj_name, 'chat'],
                     project_id=proj_name,
                 )
             except Exception as e:
-                print(f"[MemoryWatcher] Gemini chat 오류 {latest}: {e}")
+                print(f"[MemoryWatcher] Antigravity chat 오류 {latest}: {e}")

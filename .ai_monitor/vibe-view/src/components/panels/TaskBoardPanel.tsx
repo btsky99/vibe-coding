@@ -34,10 +34,10 @@ const AGENT_ROLES: Record<string, {
   Icon: React.ComponentType<{ className?: string }>;
 }> = {
   'claude-T1': { label: 'Claude', title: 'Engineer', description: 'Founding Full-Stack Engineer', Icon: Code2 },
-  'gemini-T2': { label: 'Gemini', title: 'Architect', description: 'Design & Orchestration', Icon: Globe },
+  'antigravity-T2': { label: 'Antigravity', title: 'Architect', description: 'Design & Orchestration', Icon: Globe },
   'codex-T3': { label: 'Codex', title: 'QA Engineer', description: 'Sandbox & Validation', Icon: Wrench },
   claude: { label: 'Claude', title: 'Engineer', description: 'Precision Logic', Icon: Code2 },
-  gemini: { label: 'Gemini', title: 'Architect', description: 'Research & Design', Icon: Globe },
+  antigravity: { label: 'Antigravity', title: 'Architect', description: 'Research & Design', Icon: Globe },
   codex: { label: 'Codex', title: 'QA Engineer', description: 'Execution & Verify', Icon: Wrench },
 };
 
@@ -618,7 +618,7 @@ export default function TaskBoardPanel() {
                           {terminal?.cli && (
                             <span
                               className={`rounded-md px-1.5 py-1 text-[10px] font-bold ${
-                                terminal.cli === 'gemini'
+                                terminal.cli === 'antigravity'
                                   ? 'bg-blue-500/15 text-blue-300'
                                   : 'bg-green-500/15 text-green-300'
                               }`}

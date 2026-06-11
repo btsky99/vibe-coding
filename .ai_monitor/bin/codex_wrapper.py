@@ -3,7 +3,7 @@
 FILE: .ai_monitor/bin/codex_wrapper.py
 DESCRIPTION: Codex CLI용 고성능 래퍼. 
              - 시각적 메뉴(Dashbord) 제공
-             - 타 AI 도구(Gemini, Claude) 연동/설치 기능 탑재
+             - 타 AI 도구(Antigravity, Claude) 연동/설치 기능 탑재
              - MCP 서버 연동 자동화
 
 REVISION HISTORY:
@@ -11,7 +11,7 @@ REVISION HISTORY:
 REVISION HISTORY:
 - 2026-03-08 Claude: ITCP 자동 수신 로직 추가
   - _itcp_auto_receive(): 세션 시작 시 pg_messages에서 미읽음 메시지 자동 수신
-  - Claude/Gemini는 UserPromptSubmit 훅으로 자동 수신하지만
+  - Claude/Antigravity는 UserPromptSubmit 훅으로 자동 수신하지만
     Codex는 훅 시스템이 없으므로 래퍼 진입 시점에 직접 호출합니다.
 """
 
@@ -132,7 +132,7 @@ def show_dashboard():
 
     table.add_row("1. Chat (REPL)", "AI 에이전트와 대화형 터미널 세션을 시작합니다.")
     table.add_row("2. YOLO Mode", "자율적으로 과업을 완수하는 에이전트를 가동합니다.")
-    table.add_row("3. Install to AI", "Gemini CLI나 Claude에 Codex 도구를 설치합니다.")
+    table.add_row("3. Install to AI", "Antigravity CLI나 Claude에 Codex 도구를 설치합니다.")
     table.add_row("4. Hive Mind View", "현재 프로젝트의 하이브 마인드 지식 베이스를 확인합니다.")
     table.add_row("q. Exit", "Codex CLI를 종료합니다.")
 
@@ -152,14 +152,14 @@ def show_dashboard():
     elif choice == "q":
         console.print("[bold red]Codex를 종료합니다.[/bold red]")
 
-# ── AI 도구(Gemini, Claude) 설치 로직 ──────────────────────────────────────────
+# ── AI 도구(Antigravity, Claude) 설치 로직 ──────────────────────────────────────────
 # Codex를 각 AI 도구의 MCP 서버로 실제 등록합니다.
 # Gemini: ~/.gemini/settings.json의 mcpServers 섹션에 추가
 # Claude Desktop: %APPDATA%/Claude/claude_desktop_config.json의 mcpServers 섹션에 추가
 def install_to_ai():
     console.print(Panel("[bold green]Codex AI 도구 설치 마법사[/bold green]"))
 
-    target = Prompt.ask("설치할 대상을 선택하세요", choices=["gemini", "claude", "all"], default="all")
+    target = Prompt.ask("설치할 대상을 선택하세요", choices=["antigravity", "claude", "all"], default="all")
 
     # MCP 서버로 등록할 Codex 서버의 실행 정보
     # terminal_agent.py를 MCP stdio 서버로 래핑하여 등록합니다.
@@ -174,27 +174,27 @@ def install_to_ai():
         }
     }
 
-    if target in ["gemini", "all"]:
-        _install_to_gemini(mcp_entry)
+    if target in ["antigravity", "all"]:
+        _install_to_antigravity(mcp_entry)
 
     if target in ["claude", "all"]:
         _install_to_claude(mcp_entry)
 
 
-def _install_to_gemini(mcp_entry: dict):
+def _install_to_antigravity(mcp_entry: dict):
     """Gemini CLI ~/.gemini/settings.json에 vibe-coding MCP 서버를 등록합니다."""
     gemini_settings = Path.home() / ".gemini" / "settings.json"
 
-    console.print("[cyan]Gemini CLI 연동을 시도합니다...[/cyan]")
+    console.print("[cyan]Antigravity CLI 연동을 시도합니다...[/cyan]")
 
-    if not gemini_settings.exists():
-        console.print(f"[yellow]⚠ Gemini CLI 설정 파일을 찾을 수 없습니다: {gemini_settings}[/yellow]")
-        console.print("[yellow]  Gemini CLI가 설치되어 있지 않을 수 있습니다.[/yellow]")
+    if not antigravity_settings.exists():
+        console.print(f"[yellow]⚠ Antigravity CLI 설정 파일을 찾을 수 없습니다: {antigravity_settings}[/yellow]")
+        console.print("[yellow]  Antigravity CLI가 설치되어 있지 않을 수 있습니다.[/yellow]")
         return
 
     try:
         # 기존 설정 읽기
-        with open(gemini_settings, "r", encoding="utf-8") as f:
+        with open(antigravity_settings, "r", encoding="utf-8") as f:
             settings = json.load(f)
 
         # mcpServers 섹션이 없으면 생성
@@ -205,14 +205,14 @@ def _install_to_gemini(mcp_entry: dict):
         settings["mcpServers"]["vibe-coding"] = mcp_entry
 
         # 파일에 다시 씁니다 (들여쓰기 2칸, UTF-8)
-        with open(gemini_settings, "w", encoding="utf-8") as f:
+        with open(antigravity_settings, "w", encoding="utf-8") as f:
             json.dump(settings, f, ensure_ascii=False, indent=2)
 
-        console.print(f"[green]✔ Gemini CLI에 vibe-coding MCP 서버가 등록되었습니다.[/green]")
-        console.print(f"  [dim]파일: {gemini_settings}[/dim]")
+        console.print(f"[green]✔ Antigravity CLI에 vibe-coding MCP 서버가 등록되었습니다.[/green]")
+        console.print(f"  [dim]파일: {antigravity_settings}[/dim]")
 
     except Exception as e:
-        console.print(f"[bold red]✗ Gemini CLI 설치 실패:[/bold red] {e}")
+        console.print(f"[bold red]✗ Antigravity CLI 설치 실패:[/bold red] {e}")
 
 
 def _install_to_claude(mcp_entry: dict):
@@ -282,13 +282,13 @@ def main():
     parser = argparse.ArgumentParser(description="Codex CLI - Vibe Coding AI Agent")
     parser.add_argument("task", nargs="?", help="에이전트에게 내릴 지시 내용")
     parser.add_argument("--yolo", "-y", action="store_true", help="자율 모드(YOLO)로 실행합니다.")
-    parser.add_argument("--cli", default="auto", choices=["auto", "claude", "gemini"], help="사용할 기반 모델")
-    parser.add_argument("--install", action="store_true", help="AI 도구(Gemini, Claude)에 Codex를 설치합니다.")
+    parser.add_argument("--cli", default="auto", choices=["auto", "claude", "antigravity"], help="사용할 기반 모델")
+    parser.add_argument("--install", action="store_true", help="AI 도구(Antigravity, Claude)에 Codex를 설치합니다.")
 
     args, unknown = parser.parse_known_args()
 
     # 세션 시작 시 ITCP 미읽음 메시지 자동 수신
-    # Claude/Gemini는 훅으로 자동 처리되지만 Codex는 여기서 직접 호출
+    # Claude/Antigravity는 훅으로 자동 처리되지만 Codex는 여기서 직접 호출
     _itcp_auto_receive()
     _print_harness_v2_snapshot()
 

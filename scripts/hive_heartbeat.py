@@ -100,7 +100,7 @@ def _run_claude(task: dict, project_dir: str) -> tuple[str, int]:
         return f"타임아웃 ({CLI_TIMEOUT}초 초과)", 1
 
 
-def _run_gemini(task: dict, project_dir: str) -> tuple[str, int]:
+def _run_antigravity(task: dict, project_dir: str) -> tuple[str, int]:
     """Antigravity CLI(agy)로 태스크 실행 — 어댑터 경유 (gemini CLI는 2026-06-18 종료)."""
     prompt = (
         f"다음 태스크를 수행하세요:\n\n"
@@ -147,8 +147,8 @@ def _run_codex(task: dict, project_dir: str) -> tuple[str, int]:
 _ADAPTERS = {
     'claude': _run_claude,
     'claude-T1': _run_claude,
-    'gemini': _run_gemini,
-    'gemini-T2': _run_gemini,
+    'antigravity': _run_antigravity,
+    'antigravity-T2': _run_antigravity,
     'codex': _run_codex,
     'codex-T3': _run_codex,
 }

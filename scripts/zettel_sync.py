@@ -366,7 +366,7 @@ _DOC_EXCLUDE = {'.zettel-vault', 'node_modules', '.git', 'dist', 'build'}
 # 문서 제목 한글 매핑
 _DOC_TITLE_KO = {
     'CLAUDE': '클로드 에이전트 설정',
-    'GEMINI': '제미나이 에이전트 설정',
+    'ANTIGRAVITY': '안티그라비티 에이전트 설정',
     'CODEX_GUIDE': '코덱스 에이전트 가이드',
     'AGENTS': '에이전트 목록',
     'HIVEMIND': '하이브 마인드 설계',

@@ -19,7 +19,7 @@ import type { OfficeChatMessage } from '../../hooks/useOfficeChat';
 
 const AGENT_COLORS: Record<string, string> = {
   claude: '#a78bfa',
-  gemini: '#34d399',
+  antigravity: '#34d399',
   codex: '#22d3ee',
 };
 

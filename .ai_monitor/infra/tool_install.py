@@ -1,6 +1,6 @@
 """
 FILE: infra/tool_install.py
-DESCRIPTION: CLI 도구(Gemini/Claude Code/Codex) 설치 상태 + 백그라운드 npm
+DESCRIPTION: CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm
              install 상태 머신. 로컬 PATH에서 실행 파일 탐지, 버전 조회,
              npm 실행 파일 해석, 설치 상태 스냅샷 관리, 설치 프로세스
              기동 + 출력 파이프 감시까지 한 묶음으로 제공합니다.
@@ -28,10 +28,10 @@ from pathlib import Path
 
 # ── 지원 도구 메타 ──────────────────────────────────────────────────────────
 TOOL_INSTALL_TARGETS: dict[str, dict] = {
-    'gemini': {
+    'antigravity': {
         'package': '@google/gemini-cli',
-        'display': 'Gemini CLI',
-        'command': 'gemini',
+        'display': 'Antigravity CLI',
+        'command': 'antigravity',
     },
     'claude': {
         'package': '@anthropic-ai/claude-code',

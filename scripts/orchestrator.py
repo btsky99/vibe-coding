@@ -9,7 +9,7 @@ REVISION HISTORY:
   - DEAD_THRESHOLD_SEC 이상 활동 없는 에이전트는 후보에서 완전 제외
   - 살아있는 에이전트 0명이면 None 반환 → 호출자가 'all' 유지하도록
   - auto_assign_tasks: best is None 분기 추가
-  - 원인: 36일째 비활성인 gemini에게 위키 태스크 9건이 자동 배정되어 영원히 적체
+  - 원인: 36일째 비활성인 antigravity에게 위키 태스크 9건이 자동 배정되어 영원히 적체
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 import sys
@@ -88,15 +88,15 @@ def _load_runtime_config() -> dict:
 def _known_agents() -> list[str]:
     """현재 PC 설정을 반영한 활성 에이전트 목록을 반환합니다.
 
-    gemini/codex는 실험적 단계이므로 config에서 명시적으로 활성화한 경우만 포함.
+    antigravity/codex는 실험적 단계이므로 config에서 명시적으로 활성화한 경우만 포함.
     """
     agents = ['claude']  # claude는 항상 포함
 
     config = _load_runtime_config()
 
-    # gemini/codex: 기본 비활성 (실험적) — config 키로만 켬
+    # antigravity/codex: 기본 비활성 (실험적) — config 키로만 켬
     if bool(config.get('gemini_enabled', False)):
-        agents.append('gemini')
+        agents.append('antigravity')
     if bool(config.get('codex_enabled', False)):
         agents.append('codex')
 
@@ -166,7 +166,7 @@ def _save_tasks(tasks: list) -> None:
 def get_agent_last_seen() -> dict:
     """
     Postgres 세션 로그에서 에이전트별 마지막 활동 시각 조회.
-    반환: {'claude': '2026-02-23T12:00:00', 'gemini': None, ...}
+    반환: {'claude': '2026-02-23T12:00:00', 'antigravity': None, ...}
     """
     agents = _known_agents()
     try:

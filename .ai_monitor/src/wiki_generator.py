@@ -7,7 +7,7 @@
 """코드 노드 데이터를 기반으로 LLM 위키를 자동 생성하는 엔진.
 
 파일/모듈/노드(함수·클래스) 3계층 위키를 지원.
-에이전트(Claude/Gemini/Codex CLI)가 hive_tasks에서 체크아웃하여 위키를 작성하고,
+에이전트(Claude/Antigravity/Codex CLI)가 hive_tasks에서 체크아웃하여 위키를 작성하고,
 결과를 PUT /api/codegraph/wiki로 저장하는 구조.
 """
 import hashlib

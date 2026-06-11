@@ -2,12 +2,12 @@
  * ------------------------------------------------------------------------
  * 📄 파일명: TerminalSlot.tsx
  * 📝 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트.
- *          에이전트 선택 카드(Claude/Gemini), XTerm.js 터미널 실행, 자율 에이전트
+ *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
  * - 2026-03-26 Claude: xterm.js 스크롤 전면 수정 — scrollback 10000줄, smoothScrollDuration 100ms,
  *                      scrollOnUserInput true 추가. 컨테이너 overflow-hidden 제거로 xterm 내장 스크롤바 활성화.
- *                      Gemini/Codex 긴 출력 시 이전 내용 확인 불가 문제 해결.
+ *                      Antigravity/Codex 긴 출력 시 이전 내용 확인 불가 문제 해결.
  * - 2026-03-20 Claude: 장시간 idle 시 WS 끊김 → 자동 재연결 + 서버 ping/pong keepalive.
  *                      onclose에서 지수 백오프(1s~30s, 최대 10회)로 자동 재연결. 서버에 ping_interval=30s 추가.
  * - 2026-03-15 Claude: 절전/노트북 덮개 복귀 시 WebSocket 자동 재연결 — visibilitychange 이벤트 감지.
@@ -55,7 +55,7 @@ interface TerminalSlotProps {
   locks: Record<string, string>;
   messages: AgentMessage[];
   tasks: Task[];
-  geminiUsage: any;
+  antigravityUsage: any;
   // Claude Code 세션 컨텍스트 사용량 — 컬러 블록 바 표시용
   claudeUsage: {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
@@ -76,12 +76,12 @@ interface TerminalSlotProps {
   slotName?: string;
   // 오피스 워크스페이스 프로필: 선택된 모델 ID
   slotModel?: string;
-  // 오피스 워크스페이스 프로필: 선택된 CLI (claude/gemini/codex)
+  // 오피스 워크스페이스 프로필: 선택된 CLI (claude/antigravity/codex)
   slotCli?: string;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, geminiUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
 }: TerminalSlotProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
@@ -135,9 +135,9 @@ export default function TerminalSlot({
   // 오피스 프로필 사용자 이름 (없으면 T1 등 기본값)
   const displayName = slotName || terminalId;
 
-  // 이 슬롯의 에이전트 타입 (claude / gemini / codex)
+  // 이 슬롯의 에이전트 타입 (claude / antigravity / codex)
   // [버그수정 2026-03-08] Codex가 'claude'로 분류되어 T1 데이터를 T3에 표시하는 문제 수정
-  const agentType = activeAgent.toLowerCase().includes('gemini') ? 'gemini'
+  const agentType = activeAgent.toLowerCase().includes('antigravity') ? 'antigravity'
     : activeAgent.toLowerCase().includes('codex') ? 'codex'
     : 'claude';
 
@@ -454,7 +454,7 @@ export default function TerminalSlot({
   const inProgressTask = myPendingTasks.find(t => t.status === 'in_progress');
   // pipelineStage도 agentStatus 판단에 반영 — hook에서 modifying/analyzing 단계면 WORKING 표시
   const isActiveStage = ['analyzing', 'modifying', 'verifying'].includes(pipelineStage);
-  // termData.status === 'running': 외부 Gemini 감지(_detect_external_gemini) 포함, 서버가 실행 중으로 판단한 경우 RUNNING 표시
+  // termData.status === 'running': 외부 Antigravity 감지(_detect_external_antigravity) 포함, 서버가 실행 중으로 판단한 경우 RUNNING 표시
   const isServerRunning = termData.status === 'running' || termData.status === 'started';
   const agentStatus = isActiveStage ? 'WORKING' : inProgressTask ? 'WORKING' : recentLog ? 'RUNNING' : isServerRunning ? 'RUNNING' : 'IDLE';
   const statusColor = agentStatus === 'WORKING' ? 'text-yellow-400' : agentStatus === 'RUNNING' ? 'text-green-400' : 'text-[#858585]';
@@ -584,20 +584,20 @@ export default function TerminalSlot({
               </div>
             )}
 
-            {/* Gemini 컨텍스트 사용량 표시 (에이전트가 gemini일 때만) */}
-            {activeAgent.toLowerCase().includes('gemini') && geminiUsage && (
+            {/* Antigravity 컨텍스트 사용량 표시 (에이전트가 antigravity일 때만) */}
+            {activeAgent.toLowerCase().includes('antigravity') && antigravityUsage && (
               <div className="flex items-center gap-2 mr-2 px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[9px] text-accent animate-in fade-in duration-500">
                 <div className="flex flex-col items-end leading-none gap-0.5">
                   <span className="font-bold opacity-80 uppercase text-[8px]">Context</span>
-                  <span className="font-black">{((geminiUsage.total_tokens ?? 0) / 1000).toFixed(1)}K / {((geminiUsage.context_window ?? 0) / 1000).toFixed(1)}K</span>
+                  <span className="font-black">{((antigravityUsage.total_tokens ?? 0) / 1000).toFixed(1)}K / {((antigravityUsage.context_window ?? 0) / 1000).toFixed(1)}K</span>
                 </div>
                 <div className="w-12 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
                   <div
-                    className={`h-full transition-all duration-1000 ${geminiUsage.percentage > 80 ? 'bg-red-500' : geminiUsage.percentage > 50 ? 'bg-yellow-500' : 'bg-accent'}`}
-                    style={{ width: `${Math.min(100, geminiUsage.percentage)}%` }}
+                    className={`h-full transition-all duration-1000 ${antigravityUsage.percentage > 80 ? 'bg-red-500' : antigravityUsage.percentage > 50 ? 'bg-yellow-500' : 'bg-accent'}`}
+                    style={{ width: `${Math.min(100, antigravityUsage.percentage)}%` }}
                   />
                 </div>
-                <span className="font-bold w-6 text-right">{Math.round(geminiUsage.percentage ?? 0)}%</span>
+                <span className="font-bold w-6 text-right">{Math.round(antigravityUsage.percentage ?? 0)}%</span>
               </div>
             )}
 
@@ -1154,13 +1154,13 @@ export default function TerminalSlot({
                 </p>
                 <div className="flex flex-col w-full gap-2 mt-4">
                   <button
-                    onClick={() => launchAgent('gemini', false)}
+                    onClick={() => launchAgent('antigravity', false)}
                     className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
                   >
                     Antigravity 일반 모드
                   </button>
                   <button
-                    onClick={() => launchAgent('gemini', true)}
+                    onClick={() => launchAgent('antigravity', true)}
                     className="w-full py-2.5 bg-indigo-400/20 hover:bg-indigo-400/40 text-indigo-300 rounded-xl text-[11px] font-black transition-all border border-indigo-400/30 flex items-center justify-center gap-2 shadow-lg shadow-indigo-400/10"
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" /> Antigravity 욜로(YOLO)

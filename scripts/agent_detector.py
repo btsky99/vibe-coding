@@ -12,7 +12,7 @@
 #          [지원 에이전트]
 #          - Claude Code (claude, claude-code)
 #          - Codex (codex)
-#          - Gemini CLI (gemini)
+#          - Antigravity CLI (antigravity)
 #          - Aider (aider)
 #          - GitHub Copilot (copilot)
 #          - Cursor (cursor)
@@ -45,7 +45,7 @@ except ImportError:
 AGENT_SIGNATURES: dict[str, str] = {
     'claude': 'ClaudeCode',
     'codex': 'Codex',
-    'gemini': 'Gemini',
+    'antigravity': 'Antigravity',
     'aider': 'Aider',
     'copilot': 'GithubCopilot',
     'cursor': 'Cursor',
@@ -111,7 +111,7 @@ def detect_all_agents() -> list[dict]:
         # psutil 없으면 환경변수 기반 감지만 시도
         terminal_id = os.environ.get('TERMINAL_ID', '')
         if terminal_id:
-            # TERMINAL_ID 포맷: "claude-T1", "gemini-T2" 등
+            # TERMINAL_ID 포맷: "claude-T1", "antigravity-T2" 등
             for pattern, agent_type in AGENT_SIGNATURES.items():
                 if pattern in terminal_id.lower():
                     agents.append({

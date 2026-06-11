@@ -353,7 +353,7 @@ class HiveWatchdog:
                 self._add_log("ℹ️ [계층3] 실패 로그 3건 미만 — 분석 불필요")
                 return False
 
-            # 2. Gemini API 호출
+            # 2. Antigravity API 호출
             prompt = (
                 "다음은 AI 에이전트 시스템의 최근 실패/에러 로그 목록입니다. "
                 "반복되는 근본 원인을 3개 이내로 분석하고, 각각에 대해 "
@@ -385,7 +385,7 @@ class HiveWatchdog:
             MARKER = "## 🤖 계층3 LLM 분석 결과"
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
             section = f"\n\n---\n\n{MARKER} (자동 업데이트: {now})\n\n"
-            section += "> 워치독 계층3이 Gemini API로 실패 로그를 분석한 결과입니다.\n\n"
+            section += "> 워치독 계층3이 Antigravity API로 실패 로그를 분석한 결과입니다.\n\n"
             section += text.strip() + "\n"
 
             content = skill_file.read_text(encoding="utf-8")

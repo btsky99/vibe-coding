@@ -110,8 +110,8 @@ PTY_PORT: int = int(os.environ.get("PTY_PORT", "9001"))  # Node PTY 서버 포�
 
 # ── 터미널별 기본 CLI 매핑 (서버에서 실제 정보 가져오기 실패 시 폴백) ──
 _DEFAULT_CLI_MAP = {
-    1: "claude", 2: "gemini", 3: "codex", 4: "gemini",
-    5: "codex", 6: "claude", 7: "gemini", 8: "codex",
+    1: "claude", 2: "antigravity", 3: "codex", 4: "antigravity",
+    5: "codex", 6: "claude", 7: "antigravity", 8: "codex",
 }
 
 def _get_terminal_cli_map() -> dict[int, str]:
@@ -146,7 +146,7 @@ TERMINAL_CLI_MAP = _DEFAULT_CLI_MAP  # 초기값 (BotManager.load_bots()에서 �
 # ── 에이전트 이모지 ──
 AGENT_EMOJI = {
     "claude": "\U0001f916",   # 🤖
-    "gemini": "\U0001f7e2",   # 🟢
+    "antigravity": "\U0001f7e2",   # 🟢
     "codex": "\U0001f535",    # 🔵
     "user": "\U0001f464",     # 👤
     "system": "\u2699\ufe0f", # ⚙️
@@ -340,7 +340,7 @@ class AgentBot:
     [인스턴스 변수]
     - tid: 터미널 번호 (1~8)
     - token: 봇 토큰
-    - cli: 에이전트 이름 ("claude", "gemini", "codex")
+    - cli: 에이전트 이름 ("claude", "antigravity", "codex")
     - app: python-telegram-bot Application
     - private_chat_id: /start로 감지된 개인 채팅 ID
     - _output_buffer: PTY 출력 버퍼 (3초 묶어보내기)
@@ -536,10 +536,10 @@ class AgentBot:
                 return False
 
     async def _stream_claude_response(self, prompt: str, chat_id: int, placeholder_msg_id: int) -> None:
-        """CLI 에이전트(claude/gemini/codex)를 spawn하고 실시간 텔레그램 전송.
+        """CLI 에이전트(claude/antigravity/codex)를 spawn하고 실시간 텔레그램 전송.
 
         [cokacdir 패턴 Python 구현 — 멀티 에이전트 대응]
-        1. claude/gemini/codex CLI를 spawn (--resume SESSION_ID)
+        1. claude/antigravity/codex CLI를 spawn (--resume SESSION_ID)
         2. stdin에 프롬프트 write → close (EOF)
         3. stdout 한 줄씩 파싱 → 텔레그램 메시지 편집 (실시간 타이핑)
         4. done 수신 시 session_id 저장 (멀티턴 대화 유지)
@@ -563,7 +563,7 @@ class AgentBot:
         #   → list2cmdline()은 Python 표준 라이브러리가 제공하는 Windows 전용 안전 쿼팅
         #   → 공백/특수문자/따옴표 포함 인자도 올바르게 이스케이프
         # Claude: -p 인자로 메시지 직접 전달, stdin=DEVNULL
-        # Gemini/Codex: stdin=PIPE로 메시지 전달
+        # Antigravity/Codex: stdin=PIPE로 메시지 전달
         import subprocess as _sp_mod
         cli = self.cli or "claude"
         use_stdin = (cli != "claude")
@@ -572,10 +572,15 @@ class AgentBot:
             if self._session_id:
                 cmd_parts += ["--resume", self._session_id]
             cmd_parts += ["-p", prompt]
-        elif cli == "gemini":
-            cmd_parts = ["gemini", "-m", "gemini-2.5-pro"]
+        elif cli == "antigravity":
+            # [2026-06-11] agy 전환 — 'gemini-2.5-pro' 모델 지정 제거 (소멸 예정 모델).
+            # [제약] agy TUI는 파이프 stdin 채팅 미보장 (antigravity_adapter 실측 주석 참조)
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from antigravity_adapter import find_agy
+            cmd_parts = [find_agy()]
             if self._session_id:
-                cmd_parts += ["--resume", self._session_id]
+                cmd_parts += ["--conversation", self._session_id]
         elif cli == "codex":
             cmd_parts = ["codex", "--full-auto"]
             if self._session_id:
@@ -599,7 +604,7 @@ class AgentBot:
             )
             self._claude_proc = proc
 
-            # Gemini/Codex: stdin에 프롬프트 전달 후 EOF
+            # Antigravity/Codex: stdin에 프롬프트 전달 후 EOF
             if use_stdin:
                 proc.stdin.write(prompt.encode("utf-8"))
                 await proc.stdin.drain()
@@ -925,7 +930,7 @@ class AgentBot:
         """/send <agent> <msg> — ITCP로 특정 에이전트에게 메시지"""
         args = context.args or []
         if len(args) < 2:
-            await update.message.reply_text("사용법: /send <claude|gemini|codex> <메시지>")
+            await update.message.reply_text("사용법: /send <claude|antigravity|codex> <메시지>")
             return
         target = args[0].lower()
         content = " ".join(args[1:])
@@ -1021,7 +1026,7 @@ class AgentBot:
 
         if chat.type == ChatType.PRIVATE:
             # ── 개인 채팅: 모든 에이전트 cokacdir 패턴으로 직접 spawn ──
-            # claude/gemini/codex 모두 CLI를 직접 spawn + --resume으로 세션 유지
+            # claude/antigravity/codex 모두 CLI를 직접 spawn + --resume으로 세션 유지
             if self._is_terminal_alive():
                 relayed = await self._relay_to_live_pty(text, chat.id, user_label)
                 if relayed:
@@ -1256,7 +1261,7 @@ class AgentBot:
             self._streaming = False
 
     async def _stream_agent_response(self, text: str, chat_id: int, user_label: str) -> None:
-        """cokacdir 패턴: 모든 에이전트(claude/gemini/codex)를 CLI spawn + 실시간 스트리밍."""
+        """cokacdir 패턴: 모든 에이전트(claude/antigravity/codex)를 CLI spawn + 실시간 스트리밍."""
         if self._streaming:
             await self._safe_send(
                 chat_id,
@@ -1350,7 +1355,7 @@ class BotManager:
 
     [ITCP → 그룹채팅 미러링]
     pg_messages에 새 메시지가 오면, 발신자 터미널의 봇이 그룹채팅에 해당 메시지를 자기 이름으로 발화.
-    예: Claude(T1)이 Gemini(T2)에게 보낸 메시지 → T1봇이 그룹에 "T1(Claude): ..." 전송
+    예: Claude(T1)이 Antigravity(T2)에게 보낸 메시지 → T1봇이 그룹에 "T1(Claude): ..." 전송
     이로써 그룹채팅에서 봇끼리 대화하는 것처럼 보입니다.
     """
 
