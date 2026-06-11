@@ -52,3 +52,6 @@ tests/office/test_office_report.md
 
 # 스케줄러 락 파일 (런타임 산출물 — 세션마다 생성/갱신)
 .claude/scheduled_tasks.lock
+
+# Subagent 로컬 메모리 (세션별 자동 생성 — 머신 종속이라 공유 금지)
+.claude/agent-memory/
