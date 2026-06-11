@@ -35,7 +35,7 @@ from datetime import datetime
 def _find_antigravity_chat_dirs() -> list[Path]:
     """Antigravity CLI 세션 저장 디렉터리 탐색"""
     home = Path.home()
-    gemini_tmp = home / ".gemini" / "tmp"
+    antigravity_tmp = home / ".gemini" / "tmp"
     dirs = []
     if antigravity_tmp.exists():
         for project_dir in antigravity_tmp.iterdir():

@@ -183,7 +183,7 @@ def install_to_ai():
 
 def _install_to_antigravity(mcp_entry: dict):
     """Gemini CLI ~/.gemini/settings.json에 vibe-coding MCP 서버를 등록합니다."""
-    gemini_settings = Path.home() / ".gemini" / "settings.json"
+    antigravity_settings = Path.home() / ".gemini" / "settings.json"
 
     console.print("[cyan]Antigravity CLI 연동을 시도합니다...[/cyan]")
 

@@ -51,6 +51,7 @@ REVISION HISTORY:
 """
 
 from __future__ import annotations
+import re  # [2026-06-11] 잠복 버그 수정 — 여러 함수가 전역 re 사용하나 지역 import(1곳)뿐이었음
 
 import asyncio
 import json

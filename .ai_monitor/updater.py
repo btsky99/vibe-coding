@@ -52,16 +52,35 @@ def _get_token(data_dir):
 
 
 def _fetch_latest_release(token):
-    """GitHub Releases API에서 최신 릴리즈 정보를 가져옵니다."""
-    req = Request(API_URL)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("User-Agent", "vibe-coding-updater")
-    if token:
-        req.add_header("Authorization", f"token {token}")
-    try:
+    """GitHub Releases API에서 최신 릴리즈 정보를 가져옵니다.
+
+    [과거사고 2026-06-11] private 리포 시절 발급한 토큰이 설치 PC의
+    github_token.txt / GITHUB_TOKEN에 남아 만료(401/403)되면 업데이트 감지가
+    영구 무음 실패 → "설치 버전에서 업데이트가 안 뜸". 공개 리포는 토큰이
+    필요 없으므로 인증 실패 시 반드시 토큰 없이 1회 재시도한다.
+    """
+    def _request(use_token):
+        req = Request(API_URL)
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("User-Agent", "vibe-coding-updater")
+        if use_token and token:
+            req.add_header("Authorization", f"token {token}")
         with urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except (URLError, HTTPError, TimeoutError) as e:
+
+    try:
+        return _request(use_token=True)
+    except HTTPError as e:
+        if token and e.code in (401, 403):
+            logger.warning("토큰 인증 실패(%s) — 만료/회수된 토큰 추정, 토큰 없이 재시도", e.code)
+            try:
+                return _request(use_token=False)
+            except (URLError, HTTPError, TimeoutError) as e2:
+                logger.warning("Update check failed (tokenless retry): %s", e2)
+                return None
+        logger.warning("Update check failed: %s", e)
+        return None
+    except (URLError, TimeoutError) as e:
         logger.warning("Update check failed: %s", e)
         return None
 
@@ -233,10 +252,12 @@ def check_and_update(data_dir):
     token = _get_token(data_dir)
     release = _fetch_latest_release(token)
     if release is None:
-        try:
-            ready_file.unlink()
-        except Exception:
-            pass
+        # [진단] 무음 실패 금지 — 설치 PC에서 "업데이트 안 뜸" 원인 추적용 상태 기록.
+        # /api/check-update-ready가 version 없는 파일은 삭제하지 않고 그대로 반환한다.
+        with open(ready_file, "w", encoding="utf-8") as f:
+            json.dump({"ready": False, "downloading": False,
+                       "last_error": "릴리즈 조회 실패 — 네트워크 또는 토큰 문제 (cli 로그 참조)",
+                       "last_check": time.strftime("%Y-%m-%dT%H:%M:%S")}, f)
         return
 
     latest_tag = release.get("tag_name", "")
@@ -253,6 +274,10 @@ def check_and_update(data_dir):
     asset_url = _find_asset_url(release)
     if not asset_url:
         logger.warning("Release %s has no update asset.", latest_tag)
+        with open(ready_file, "w", encoding="utf-8") as f:
+            json.dump({"ready": False, "downloading": False,
+                       "last_error": f"릴리즈 {latest_tag}에 업데이트 에셋 없음",
+                       "last_check": time.strftime("%Y-%m-%dT%H:%M:%S")}, f)
         return
 
     # 다운로드 중 상태 알림

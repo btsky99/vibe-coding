@@ -1585,9 +1585,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                     source_base = BASE_DIR.parent
                     
                     # .gemini 복사
-                    gemini_src = source_base / ".gemini"
+                    antigravity_src = source_base / ".gemini"
                     if antigravity_src.exists():
-                        shutil.copytree(gemini_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
+                        shutil.copytree(antigravity_src, Path(target_path) / ".gemini", dirs_exist_ok=True)
                     
                     # scripts 복사 — 배포 범용화: SCRIPTS_DIR이 None이면 skip
                     scripts_src = SCRIPTS_DIR
@@ -1595,9 +1595,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                         shutil.copytree(scripts_src, Path(target_path) / "scripts", dirs_exist_ok=True)
                         
                     # GEMINI.md 복사
-                    gemini_md_src = source_base / "GEMINI.md"
+                    antigravity_md_src = source_base / "GEMINI.md"
                     if antigravity_md_src.exists():
-                        shutil.copy(gemini_md_src, Path(target_path) / "GEMINI.md")
+                        shutil.copy(antigravity_md_src, Path(target_path) / "GEMINI.md")
                         
                     # CLAUDE.md 복사
                     claude_md_src = source_base / "CLAUDE.md"
@@ -2006,10 +2006,14 @@ class SSEHandler(BaseHTTPRequestHandler):
                     # 저장된 업데이트 버전이 현재 버전보다 실제로 높을 때만 알림 표시
                     if file_ver and _parse_ver(file_ver) > _parse_ver(cur_ver):
                         self.wfile.write(json.dumps(data).encode('utf-8'))
-                    else:
+                    elif file_ver:
                         # 같거나 낮은 버전 → 오래된 캐시이므로 삭제
                         update_file.unlink(missing_ok=True)
                         self.wfile.write(json.dumps({"ready": False, "downloading": False}).encode('utf-8'))
+                    else:
+                        # [2026-06-11] version 없는 파일 = updater의 진단 상태(last_error 등)
+                        # — 삭제하지 않고 그대로 반환 (설치 PC '업데이트 안 뜸' 원인 추적용)
+                        self.wfile.write(json.dumps(data).encode('utf-8'))
                 except Exception as e:
                     self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
             else:
@@ -3614,9 +3618,9 @@ class SSEHandler(BaseHTTPRequestHandler):
                 elif tool == 'antigravity':
                     # .gemini/skills 를 프로젝트에 복사
                     import shutil as _shutil
-                    gemini_skills_src = BASE_DIR / '.gemini' / 'skills'
+                    antigravity_skills_src = BASE_DIR / '.gemini' / 'skills'
                     if not antigravity_skills_src.exists():
-                        gemini_skills_src = _proj / '.gemini' / 'skills'
+                        antigravity_skills_src = _proj / '.gemini' / 'skills'
                     if not antigravity_skills_src.exists():
                         raise Exception('설치 버전에서는 Antigravity 스킬이 포함되지 않습니다. 소스 개발 환경에서 사용하세요.')
                     target_dir = _proj / '.gemini' / 'skills'

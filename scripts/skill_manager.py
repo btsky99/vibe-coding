@@ -14,7 +14,7 @@ from datetime import datetime
 
 # 프로젝트 루트 및 스킬 디렉토리 설정
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-GEMINI_SKILLS_DIR = os.path.join(PROJECT_ROOT, '.gemini', 'skills')
+ANTIGRAVITY_SKILLS_DIR = os.path.join(PROJECT_ROOT, '.gemini', 'skills')
 
 def list_local_skills():
     """

@@ -102,7 +102,10 @@ Source: ".ai_monitor\dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppE
 ; 아이콘 파일 — 자동 업데이트 후에도 바로가기 아이콘이 유지되도록 별도 배포
 Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Claude Code 상태줄 스크립트 — 설치 PC의 %USERPROFILE%\.claude\ 에 복사
-Source: "statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignoreversion
+; [과거사고] c330a45에서 루트 statusline.py를 scripts/로 이동 후 이 경로 미갱신 →
+; CI "Build installer" 실패 → v3.7.230 릴리즈 미게시 → 설치 버전 업데이트 알림 중단.
+; 파일 이동 시 vibe-coding.spec / build-release.yml --add-data / 이 .iss 3곳 동기화 필수.
+Source: "scripts\statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignoreversion
 ; Playwright CLI 설치 스크립트 (앱 내부 AI 도구 메뉴에서 수동 실행용)
 Source: "scripts\install_playwright_cli.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 

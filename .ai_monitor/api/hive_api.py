@@ -288,9 +288,9 @@ def handle_get(handler, path: str, params: dict,
                 target_root = Path(target_path)
                 installed_targets = []
 
-                gemini_src = source_base / ".gemini"
+                antigravity_src = source_base / ".gemini"
                 if antigravity_src.exists():
-                    shutil.copytree(gemini_src, target_root / ".gemini", dirs_exist_ok=True)
+                    shutil.copytree(antigravity_src, target_root / ".gemini", dirs_exist_ok=True)
                     installed_targets.append(".gemini")
 
                 claude_src = source_base / ".claude"
@@ -649,7 +649,7 @@ def handle_get(handler, path: str, params: dict,
         _proj = _current_project_root()
         claude_skills_dir   = _proj / '.claude' / 'skills'
         claude_commands_dir = _proj / '.claude' / 'commands'  # 구 시스템 (마이그레이션 감지용)
-        gemini_skills_dir   = _proj / '.gemini' / 'skills'
+        antigravity_skills_dir   = _proj / '.gemini' / 'skills'
         result = {
             'claude': {
                 # Skills 2.0 경로 우선 감지, 구 경로도 설치로 인정 (하위 호환)
@@ -857,7 +857,7 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
-            gemini_chat_dir = Path.home() / '.gemini' / 'tmp' / PROJECT_ROOT.name / 'chats'
+            antigravity_chat_dir = Path.home() / '.gemini' / 'tmp' / PROJECT_ROOT.name / 'chats'
             sessions = []
             if antigravity_chat_dir.exists():
                 for json_file in antigravity_chat_dir.glob('session-*.json'):

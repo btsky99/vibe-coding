@@ -264,7 +264,7 @@ class MemoryWatcher(threading.Thread):
 
     # ── Antigravity logs.json 스캔 (최신 세션 요약) ─────────────────────────────
     def _scan_antigravity_logs(self) -> None:
-        gemini_tmp = Path.home() / '.gemini' / 'tmp'
+        antigravity_tmp = Path.home() / '.gemini' / 'tmp'
         if not antigravity_tmp.exists():
             return
         for proj_dir in antigravity_tmp.iterdir():
@@ -320,7 +320,7 @@ class MemoryWatcher(threading.Thread):
 
     # ── Antigravity chats 세션 파일 스캔 ────────────────────────────────────────
     def _scan_antigravity_chats(self) -> None:
-        gemini_tmp = Path.home() / '.gemini' / 'tmp'
+        antigravity_tmp = Path.home() / '.gemini' / 'tmp'
         if not antigravity_tmp.exists():
             return
         for proj_dir in antigravity_tmp.iterdir():
