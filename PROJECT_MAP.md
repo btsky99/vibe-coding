@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 19:42
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 20:12
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -43,7 +43,7 @@
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `agent_api.py` | 1430 | CLI 에이전트 관리 API (/api/agent/*) |
+| `agent_api.py` | 1360 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 226 |  |
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
@@ -90,7 +90,7 @@
 ### 에이전트/터미널
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `cli_agent.py` | 1160 | Claude/Gemini/Codex CLI 자율 오케스트레이션 엔진 |
+| `cli_agent.py` | 1164 | Claude/Antigravity/Codex CLI 자율 오케스트레이션 엔진 |
 | `agent_shell.py` | 414 | 인터랙티브 자율 에이전트 쉘 (REPL) |
 | `terminal_agent.py` | 391 | 멀티터미널 자율 에이전트 디스패처 |
 | `agent_launcher.py` | 227 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
@@ -114,6 +114,7 @@
 | `hive_hook.py` | 940 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
 | `hook_bridge.py` | 497 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
+| `antigravity_hook.py` | 566 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
 
 ### 통신/ITCP
 | 파일 | 줄 수 | 설명 |
@@ -136,7 +137,7 @@
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `skill_orchestrator.py` | 463 | 스킬 체인 상태 추적 (hive_skill_chains 테이블 기반) |
-| `skill_manager.py` | 129 | Gemini/Claude 스킬 통합 관리자 |
+| `skill_manager.py` | 129 | Antigravity/Claude 스킬 통합 관리자 |
 | `skill_analyzer.py` | 359 | 반복 패턴 감지 + 자기치유 스킬 업데이트 |
 | `skill_predictor.py` | 187 | 마르코프 체인 기반 다음 스킬 예측 |
 | `skill_ab_test.py` | 208 | 스킬 A/B 테스트 + 성능 분석 |
@@ -158,7 +159,7 @@
 | `lock_manager.py` | 103 | 파일 수정 충돌 방지 잠금 (JSON 기반) |
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
-| `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
+| `screenshot_analyzer.py` | 154 | Antigravity Vision 기반 스크린샷 버그 감지 |
 | `generate_project_map.py` | 492 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
@@ -172,14 +173,13 @@
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `antigravity_adapter.py` | 138 |  |
-| `antigravity_hook.py` | 566 |  |
 | `antigravity_output_filter.py` | 78 |  |
 | `antigravity_session_repair.py` | 216 |  |
 | `build_verify.py` | 645 |  |
 | `checkpoint.py` | 62 |  |
 | `codex_pg_watcher.py` | 286 |  |
 | `harness_verify.py` | 470 |  |
-| `hive_heartbeat.py` | 330 |  |
+| `hive_heartbeat.py` | 329 |  |
 | `incident.py` | 103 |  |
 | `install_dev_tools.py` | 159 |  |
 | `install_frontend_deps.py` | 195 |  |
@@ -195,14 +195,15 @@
 | `install_system_tool.py` | 208 |  |
 | `intent_map.py` | 175 |  |
 | `lesson.py` | 109 |  |
+| `migrate_antigravity_db.py` | 83 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 156 | Claude Code 상태줄 원본 — 컨텍스트+모델/세션 I/O 2줄 (install_statusline.py가 ~/.claude로 배포) |
+| `statusline.py` | 156 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
 | `sync_manager.py` | 120 |  |
-| `telegram_bridge.py` | 1616 |  |
+| `telegram_bridge.py` | 1621 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
 | `zettel_capture.py` | 500 |  |
 | `zettel_sync.py` | 789 |  |
@@ -248,14 +249,14 @@
 ## 🧪 테스트 (tests/)
 | 파일 | 줄 수 | 테스트 대상 |
 |------|------|------------|
-| `test_agent_api.py` | 383 | api/agent_api.py |
+| `test_agent_api.py` | 295 | api/agent_api.py |
 | `test_codex_harness_v2.py` | 86 |  |
-| `test_codex_orchestration.py` | 89 |  |
+| `test_codex_orchestration.py` | 92 |  |
 | `test_codex_pg_watcher.py` | 108 |  |
-| `test_harness_verify.py` | 216 |  |
+| `test_harness_verify.py` | 218 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
-| `test_itcp_fallback.py` | 225 | scripts/itcp.py 폴백 경로 |
-| `test_new_api_modules.py` | 354 |  |
+| `test_itcp_fallback.py` | 226 | scripts/itcp.py 폴백 경로 |
+| `test_new_api_modules.py` | 355 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 123 |  |
 | `test_self_heal_2.py` | 223 |  |
@@ -298,4 +299,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-11 19:42
+> 자동 생성 완료: 2026-06-11 20:12

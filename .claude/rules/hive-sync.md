@@ -26,6 +26,6 @@ python scripts/memory.py             # 지식 공유
 ```
 
 ### 에이전트 역할
-- **Gemini**: 전체 설계 및 오케스트레이션
+- **Antigravity**: 전체 설계 및 오케스트레이션 (구 Gemini — agy 전환 2026-06-11)
 - **Claude**: 정밀 로직 구현 및 프론트엔드 최적화
 - `hive_tasks` 테이블로 진행 상황 공유

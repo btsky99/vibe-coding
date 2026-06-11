@@ -1,5 +1,18 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-06-11] - Antigravity CLI 마이그레이션 완료 (Gemini CLI 6/18 종료 대응)
+
+### 🚀 런타임 전환 (데드라인 크리티컬)
+- **[Feature] antigravity_adapter.py**: agy 호출 격리 레이어 — closed-source 인터페이스 변경 대비 단일 격리점. **알려진 결함**: agy 1.0.7 `-p`는 파이프 환경에서 응답 미출력(콘솔 TUI 전용) → 빈 출력을 명시적 예외로 승격.
+- **[Fix] gemini CLI 직접 실행 전수 제거**: hive_heartbeat / telegram_bridge / agent_api 채팅(소멸 모델 gemini-3.1-pro 지정 제거) — 전부 어댑터 경유.
+- **[Fix] 외부 세션 감지**: 폐기된 `~/.gemini/tmp/*/chats` → `~/.gemini/antigravity-cli/conversations/` mtime 스캔.
+
+### 🔁 식별자 일괄 전환 (옵션 B)
+- **[Refactor] 84파일 507라인 스윕**: 'gemini'→'antigravity' (보존: API 키/모델명/npm 패키지/.gemini 경로/GEMINI.md/레거시 config 키/사실 서술).
+- **[Migration] DB 13컬럼 120건 UPDATE**: 백업 후 트랜잭션 실행. **다른 PC는 `python scripts/migrate_antigravity_db.py` 1회 실행 필요**.
+- **[Docs] 실측 기록**: agy는 `~/.gemini/`·`.gemini/`·`GEMINI.md`를 그대로 사용 — rename 금지 (외부 도구 소유 인터페이스).
+- ⚠️ 다른 PC 첫 `agy` 실행 시 OAuth 재로그인 필요.
+
 ## [2026-06-10] - 자가 치유 2.0 (삽질 빈도 감소 시스템)
 
 ### 🧠 ④ 회상 v2 — pgvector 임베딩 회상

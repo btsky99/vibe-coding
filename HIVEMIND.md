@@ -1,26 +1,20 @@
 # HiveMind Status
 
-Updated: `2026-06-11 19:42:28`
+Updated: `2026-06-11 20:12:32`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: gemini_statusline.py, hivemind.md, project_map.md, scripts/antigravity_hook.py, scripts/antigravity_output_filter.py (+4 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .claude/rules/hive-sync.md, project_map.md, rules.md. Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- gemini_statusline.py
-- hivemind.md
+- .claude/rules/hive-sync.md
 - project_map.md
-- scripts/antigravity_hook.py
-- scripts/antigravity_output_filter.py
-- scripts/antigravity_session_repair.py
-- scripts/run_antigravity_clean.py
-- scripts/statusline.py
-- ... and 1 more
+- rules.md
 
 ## Agent Flow
 ```mermaid
 graph LR
-    gemini["gemini"] -->|idle| claude["claude"]
+    antigravity["antigravity"] -->|idle| claude["claude"]
 ```
 
 ## Recent Thought Stream
