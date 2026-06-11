@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/vibe-coding/scripts/gemini_hook.py",
+            "command": "python D:/vibe-coding/scripts/antigravity_hook.py",
             "timeout": 10000
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/vibe-coding/scripts/gemini_hook.py",
+            "command": "python D:/vibe-coding/scripts/antigravity_hook.py",
             "timeout": 5000
           }
         ]

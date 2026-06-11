@@ -52,7 +52,7 @@ from pathlib import Path
 from urllib import request as urllib_request
 from urllib.error import URLError
 
-from gemini_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import GeminiCliNoiseFilter
 
 # ── 경로 설정 ─────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = Path(__file__).parent

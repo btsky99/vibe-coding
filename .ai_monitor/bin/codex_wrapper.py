@@ -46,7 +46,7 @@ def _itcp_auto_receive() -> None:
     """세션 시작 시 PostgreSQL pg_messages에서 Codex에게 온 미읽음 메시지를 자동 수신합니다.
 
     [설계 의도]
-    Claude/Gemini는 UserPromptSubmit 훅(hive_hook.py, gemini_hook.py)이 매 프롬프트마다
+    Claude/Gemini는 UserPromptSubmit 훅(hive_hook.py, antigravity_hook.py)이 매 프롬프트마다
     자동으로 itcp.receive()를 호출하지만, Codex는 훅 시스템이 없습니다.
     따라서 래퍼 진입 시점(main)에 이 함수를 호출하여 메시지 수신 공백을 보완합니다.
 

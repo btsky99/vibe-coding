@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FILE: scripts/gemini_hook.py
+FILE: scripts/antigravity_hook.py
 DESCRIPTION: Gemini CLI hook integration.
              대시보드 유지, 하이브 로그 기록, HIVEMIND.md 갱신, JSON 훅 응답 반환.
 
@@ -499,7 +499,7 @@ def main() -> None:
         # [2026-03-27 Claude] 세션 히스토리 자동 수리 (백그라운드)
         # Gemini CLI가 이미지 파일 read_file 시 result에 inlineData + functionResponse
         # 2개 파트를 넣어 API 400 에러 유발 → 세션 시작 시 자동 정리
-        _repair_script = SCRIPT_DIR / "gemini_session_repair.py"
+        _repair_script = SCRIPT_DIR / "antigravity_session_repair.py"
         if _repair_script.exists():
             try:
                 subprocess.Popen(

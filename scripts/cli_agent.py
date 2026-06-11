@@ -50,7 +50,7 @@ from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
 
-from gemini_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import GeminiCliNoiseFilter
 
 # ANSI/OSC 이스케이프 시퀀스 필터 — Claude CLI가 파이프 환경에서도 출력하는
 # OSC 배경색 쿼리(\x1b]11;rgb:...)와 CSI 색상 코드(\x1b[...m)를 제거합니다.

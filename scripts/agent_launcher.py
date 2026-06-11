@@ -9,7 +9,7 @@ DESCRIPTION: 통합 에이전트 런처.
 REVISION HISTORY:
 - 2026-03-07 Claude Sonnet 4.6: 최초 생성 — Phase 5 Task 11
 - 2026-03-22 Codex: Gemini 런처 경로 추가
-  - 프로젝트 내부 Gemini 직접 실행을 공통 래퍼(run_gemini_clean.py)로 통일
+  - 프로젝트 내부 Gemini 직접 실행을 공통 래퍼(run_antigravity_clean.py)로 통일
 """
 
 import argparse
@@ -32,8 +32,8 @@ AGENT_CMDS: dict[str, dict[str, list[str]]] = {
         "yolo": ["claude", "--dangerously-skip-permissions"],
     },
     "gemini": {
-        "normal": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_gemini_clean.py")],
-        "yolo": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_gemini_clean.py"), "--yolo"],
+        "normal": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_antigravity_clean.py")],
+        "yolo": [LAUNCHER_PYTHON, str(ROOT / "scripts" / "run_antigravity_clean.py"), "--yolo"],
     },
     "codex": {
         "normal": ["codex", "--no-alt-screen"],

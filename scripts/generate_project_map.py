@@ -91,7 +91,7 @@ FILE_DESCRIPTIONS = {
     "scripts/hive_hook.py": "Claude Code 자동 액션 트레이스 훅 (의도 감지)",
     "scripts/hook_bridge.py": "Claude Code UserPromptSubmit 훅 브릿지",
     "scripts/claude_hook.py": "Claude Code PostToolUse/Stop 훅 핸들러",
-    "scripts/gemini_hook.py": "Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신",
+    "scripts/antigravity_hook.py": "Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신",
 
     # ── scripts/ 통신 ──
     "scripts/itcp.py": "PostgreSQL pg_messages 기반 ITCP 프로토콜",
@@ -283,7 +283,7 @@ def generate():
                            "agent_launcher.py", "agent_detector.py", "agent_protocol.py"],
         "하이브/협업": ["orchestrator.py", "hive_debate.py", "hive_bridge.py",
                         "memory.py", "worktree_manager.py", "generate_hivemind_doc.py", "analyze_hive.py"],
-        "훅/이벤트": ["hive_hook.py", "hook_bridge.py", "claude_hook.py", "gemini_hook.py"],
+        "훅/이벤트": ["hive_hook.py", "hook_bridge.py", "claude_hook.py", "antigravity_hook.py"],
         "통신/ITCP": ["itcp.py", "vibe_mux.py", "vibe_mux_agent.py", "send_message.py"],
         "검증/가드": ["safety_guard.py", "completion_guard.py", "drift_detector.py",
                       "plan_validator.py", "rules_validator.py"],

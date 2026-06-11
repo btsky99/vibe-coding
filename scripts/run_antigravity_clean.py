@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FILE: scripts/run_gemini_clean.py
+FILE: scripts/run_antigravity_clean.py
 DESCRIPTION: Gemini CLI 직접 실행 래퍼.
              프로젝트 경로에서 Gemini CLI를 실행할 때 stderr 노이즈를 로그 파일로 분리합니다.
 
@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gemini_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import GeminiCliNoiseFilter
 
 
 ROOT = Path(__file__).resolve().parent.parent

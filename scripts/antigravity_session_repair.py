@@ -1,5 +1,5 @@
 """
-FILE: scripts/gemini_session_repair.py
+FILE: scripts/antigravity_session_repair.py
 DESCRIPTION: Gemini CLI 세션 히스토리 자동 수리 스크립트.
     Gemini API 에러 "number of function response parts ≠ function call parts"의
     근본 원인을 수정합니다.
@@ -15,9 +15,9 @@ DESCRIPTION: Gemini CLI 세션 히스토리 자동 수리 스크립트.
     functionResponse만 남깁니다.
 
     사용법:
-      python scripts/gemini_session_repair.py           # 스캔 + 자동 수리
-      python scripts/gemini_session_repair.py --scan     # 스캔만 (수정 안 함)
-      python scripts/gemini_session_repair.py --clean    # 깨진 세션 삭제
+      python scripts/antigravity_session_repair.py           # 스캔 + 자동 수리
+      python scripts/antigravity_session_repair.py --scan     # 스캔만 (수정 안 함)
+      python scripts/antigravity_session_repair.py --clean    # 깨진 세션 삭제
 
 REVISION HISTORY:
 - 2026-03-27 Claude: 최초 생성 — Gemini API function call/response 불일치 근본 수정

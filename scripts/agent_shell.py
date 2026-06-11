@@ -56,7 +56,7 @@ from pathlib import Path
 from urllib import request as _urllib_req
 from urllib.error import URLError
 
-from gemini_output_filter import GeminiCliNoiseFilter
+from antigravity_output_filter import GeminiCliNoiseFilter
 
 # ANSI/OSC 이스케이프 시퀀스 필터 — cli_agent.py와 동일한 패턴
 # live 파일에 ANSI 코드가 저장되면 대시보드 파싱 노이즈가 생기므로 제거

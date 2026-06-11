@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-FILE: scripts/gemini_output_filter.py
+FILE: scripts/antigravity_output_filter.py
 DESCRIPTION: Gemini CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터.
 
 REVISION HISTORY:

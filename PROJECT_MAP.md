@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 18:59
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 19:42
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -35,7 +35,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 4658 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4652 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -90,8 +90,8 @@
 ### 에이전트/터미널
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `cli_agent.py` | 1159 | Claude/Gemini/Codex CLI 자율 오케스트레이션 엔진 |
-| `agent_shell.py` | 412 | 인터랙티브 자율 에이전트 쉘 (REPL) |
+| `cli_agent.py` | 1160 | Claude/Gemini/Codex CLI 자율 오케스트레이션 엔진 |
+| `agent_shell.py` | 414 | 인터랙티브 자율 에이전트 쉘 (REPL) |
 | `terminal_agent.py` | 391 | 멀티터미널 자율 에이전트 디스패처 |
 | `agent_launcher.py` | 227 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
 | `agent_detector.py` | 198 | 활성 AI 에이전트 자동 감지 (psutil) |
@@ -114,7 +114,6 @@
 | `hive_hook.py` | 940 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
 | `hook_bridge.py` | 497 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
-| `gemini_hook.py` | 566 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
 
 ### 통신/ITCP
 | 파일 | 줄 수 | 설명 |
@@ -172,11 +171,13 @@
 ### 기타
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
+| `antigravity_adapter.py` | 138 |  |
+| `antigravity_hook.py` | 566 |  |
+| `antigravity_output_filter.py` | 78 |  |
+| `antigravity_session_repair.py` | 216 |  |
 | `build_verify.py` | 645 |  |
 | `checkpoint.py` | 62 |  |
 | `codex_pg_watcher.py` | 286 |  |
-| `gemini_output_filter.py` | 78 |  |
-| `gemini_session_repair.py` | 216 |  |
 | `harness_verify.py` | 470 |  |
 | `hive_heartbeat.py` | 330 |  |
 | `incident.py` | 103 |  |
@@ -196,10 +197,10 @@
 | `lesson.py` | 109 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
-| `run_gemini_clean.py` | 130 |  |
+| `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 185 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
+| `statusline.py` | 110 | Claude Code 상태줄 원본 — 세션 I/O 한 줄만 표시 (install_statusline.py가 ~/.claude로 배포) |
 | `sync_manager.py` | 120 |  |
 | `telegram_bridge.py` | 1616 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
@@ -297,4 +298,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-11 18:59
+> 자동 생성 완료: 2026-06-11 19:42
