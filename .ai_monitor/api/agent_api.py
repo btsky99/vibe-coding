@@ -11,7 +11,7 @@
 # [2026-03-25] Claude: stderr 데드락 수정 — handle_chat() subprocess stderr=DEVNULL
 #   - stderr 버퍼 풀 → 자식 프로세스 block → stdout 멈춤 교착 방지
 # [2026-03-08] Claude: Gemini 세션 실제 작업 표시 — PTY Gemini 현재 지시 내용 보완
-#   - _get_gemini_last_task(): Gemini 세션 JSON에서 마지막 사용자 메시지 추출
+#   - (제거 2026-06-11) _get_gemini_last_task — agy 대화는 비공개 포맷이라 파싱 불가
 #   - server.py pty_sessions에 cwd 필드 추가 → 프로젝트별 세션 파일 정확 매핑
 #   - PTY 병합: status 이미 running이어도 task 비어있으면 Gemini 마지막 지시로 보완
 #   - PTY last_line: 기존 값 있어도 PTY 최신값으로 항상 갱신 (Gemini 응답 실시간 표시)
@@ -28,7 +28,7 @@
 #   - handle_terminals 외부 Gemini 매핑: idle만 → idle+done 슬롯도 허용
 #   - 이전 작업이 done으로 끝난 터미널에 새 Gemini 실행이 시작돼도 상황판에 표시
 # [2026-03-05] Claude: 외부 Gemini 감지 기능 추가
-#   - _detect_external_gemini(): ~/.gemini/tmp/*/chats/ 600초 이내 수정 파일 스캔
+#   - _detect_external_gemini(): agy conversations/ mtime 스캔 (antigravity_adapter 경유)
 #   - _merge_live_file_status(): agent_live.jsonl 읽어 터미널별 상태 병합
 #   - handle_terminals(): 감지된 외부 Gemini + agent_live.jsonl 상태 오버레이
 #   - 대시보드 API 없이 터미널에서 직접 실행된 Gemini도 상황판에 표시
@@ -368,76 +368,28 @@ def handle_runs(handler) -> None:
     _json_response(handler, runs)
 
 
-def _get_gemini_last_task(session_path) -> str:
-    """Gemini 세션 JSON 파일에서 마지막 사용자 메시지 텍스트를 반환합니다.
+def _detect_external_gemini() -> list[dict]:
+    """외부 실행 중인 Antigravity(agy) 세션을 감지합니다.
 
-    세션 파일 구조:
-        { "messages": [ {"type": "user", "content": [{"text": "..."}]}, ... ] }
+    [2026-06-11] agy 전환: 구 Gemini CLI의 ~/.gemini/tmp/{project}/chats/ 는 폐기.
+    agy는 ~/.gemini/antigravity-cli/conversations/*.db|.pb (UUID 평면 구조)라
+    프로젝트 단위 매칭 불가 — 전역 활성 여부만 반환한다 (어댑터 실측 주석 참조).
 
-    사용자 메시지(type='user')를 역순 탐색하여 첫 번째 텍스트를 반환합니다.
-    읽기 실패 시 빈 문자열 반환.
+    반환값: [{ 'project': str, 'session_file': str, 'ts': float, 'last_task': str }, ...]
     """
     try:
-        import json as _json
-        with open(session_path, 'r', encoding='utf-8') as f:
-            data = _json.load(f)
-        msgs = data.get('messages', [])
-        # 역순으로 탐색하여 가장 최근 사용자 메시지 반환
-        for m in reversed(msgs):
-            if m.get('type') == 'user':
-                content = m.get('content', [])
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict):
-                            text = c.get('text', '').strip()
-                            if text:
-                                # 줄바꿈 제거 후 80자 제한
-                                return text.replace('\n', ' ')[:80]
-                elif isinstance(content, str) and content.strip():
-                    return content.strip().replace('\n', ' ')[:80]
+        from antigravity_adapter import detect_external_sessions
+        sessions = detect_external_sessions(within_sec=600)
     except Exception:
-        pass
-    return ''
-
-
-def _detect_external_gemini() -> list[dict]:
-    """~/.gemini/tmp/ 세션 파일을 스캔하여 외부 실행 중인 Gemini 세션을 감지합니다.
-
-    최근 60초 이내에 수정된 세션 파일이 있으면 해당 프로젝트의 Gemini가
-    외부 터미널에서 활성 상태라고 판단합니다.
-
-    반환값: [{ 'project': str, 'session_file': str, 'ts': str, 'last_task': str }, ...]
-    """
-    gemini_tmp = Path.home() / '.gemini' / 'tmp'
-    if not gemini_tmp.exists():
         return []
-
-    active = []
     now = time.time()
-    # 600초(10분) 이내 수정된 세션 파일 탐색
-    for proj_dir in gemini_tmp.iterdir():
-        if not proj_dir.is_dir():
-            continue
-        chats_dir = proj_dir / 'chats'
-        if not chats_dir.exists():
-            continue
-        for sf in sorted(chats_dir.glob('session-*.json'), reverse=True):
-            try:
-                mtime = sf.stat().st_mtime
-                if now - mtime <= 600:  # 600초(10분) 이내 수정 = 활성 세션
-                    # 마지막 사용자 메시지를 task로 함께 반환 (UI에 실제 작업 표시용)
-                    last_task = _get_gemini_last_task(sf)
-                    active.append({
-                        'project': proj_dir.name,
-                        'session_file': sf.name,
-                        'session_path': str(sf),  # PTY 매핑 시 정확한 task 재조회용
-                        'ts': sf.stat().st_mtime,
-                        'last_task': last_task,
-                    })
-                    break  # 프로젝트당 최신 1개만
-            except OSError:
-                continue
-    return active
+    return [{
+        'project': '',  # agy 대화는 프로젝트 메타 미노출 — UI는 빈 값 허용
+        'session_file': Path(s['path']).name,
+        'session_path': s['path'],
+        'ts': now - s['mtime_age_sec'],
+        'last_task': '',  # 대화 내용은 sqlite/pb 포맷 — 파싱 비지원 (포맷 비공개)
+    } for s in sessions[:1]]  # 최신 1건만 (구버전과 동일 정책)
 
 
 def _merge_live_file_status(terminals: dict) -> None:
@@ -764,36 +716,10 @@ def handle_terminals(handler) -> None:
                 if info.get('bg_model'):
                     terminals[tid]['bg_model'] = info['bg_model']
 
-                # ── task 보완: Gemini PTY는 세션 파일에서 마지막 지시 항상 갱신 ──────
-                # Why: PTY 세션은 task 필드가 없으므로 task가 ''이면 아무것도 표시 안 됨.
-                #      Gemini 세션 JSON에서 마지막 사용자 메시지를 읽어 실제 작업을 표시.
-                #      대화가 진행되면서 새 지시가 추가되므로 매 폴링마다 갱신 필요.
-                #      단, cli_agent나 hive_hook이 이미 task를 설정한 경우는 유지.
-                if agent == 'gemini':
-                    # cwd로 프로젝트명 추출 → ~/.gemini/tmp/{project}/chats/ 최신 파일 탐색
-                    cwd = info.get('cwd', '')
-                    pty_task = ''
-                    if cwd:
-                        project_name = Path(cwd).name
-                        gemini_tmp = Path.home() / '.gemini' / 'tmp' / project_name / 'chats'
-                        if gemini_tmp.exists():
-                            # 최신 세션 파일 찾기 (수정 시간 기준)
-                            session_files = sorted(
-                                gemini_tmp.glob('session-*.json'),
-                                key=lambda p: p.stat().st_mtime,
-                                reverse=True,
-                            )
-                            for sf in session_files[:1]:  # 최신 1개만 확인
-                                pty_task = _get_gemini_last_task(sf)
-                                break
-                    # 세션에서 읽은 task가 있으면 항상 갱신 (대화 진행 중 최신 지시 반영)
-                    # 없으면 기존 task 유지 또는 기본 텍스트 설정
-                    if pty_task:
-                        terminals[tid]['task'] = pty_task
-                    elif not terminals[tid].get('task'):
-                        terminals[tid]['task'] = f'[PTY] {agent.upper()} 세션'
-                elif not terminals[tid].get('task'):
-                    # Claude/Codex PTY: 세션 파일 없으므로 기본 텍스트
+                # [2026-06-11] agy 전환: 구 Gemini CLI의 ~/.gemini/tmp/{project}/chats/
+                # 마지막 지시 추출 경로 제거 — agy 대화는 비공개 sqlite/pb 포맷이라 파싱 불가.
+                # 모든 PTY 에이전트가 동일하게 기본 텍스트 사용 (task는 hive_hook이 설정 시 유지).
+                if not terminals[tid].get('task'):
                     terminals[tid]['task'] = f'[PTY] {agent.upper()} 세션'
 
                 # ── cli 배지 보완: running이었던 슬롯에 cli 정보 없으면 채움 ─────────
@@ -1044,11 +970,15 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
         if message:
             cmd += ['-p', message]
     elif cli == 'gemini':
-        cmd = ['gemini', '-m', 'gemini-3.1-pro']
+        # [2026-06-11] Antigravity(agy) 전환 — 'gemini-3.1-pro' 모델 지정 제거 (6/18 종료로
+        # 존재하지 않는 모델, agy 기본 모델 사용). --resume → --conversation, -y → 권한 스킵.
+        # [제약] agy TUI는 파이프 stdin 채팅을 보장하지 않음 (실측: -p 파이프 캡처 결함과 동일 계열)
+        from antigravity_adapter import find_agy
+        cmd = [find_agy()]
         if session_id:
-            cmd += ['--resume', session_id]
+            cmd += ['--conversation', session_id]
         if yolo:
-            cmd.append('-y')
+            cmd.append('--dangerously-skip-permissions')
     elif cli == 'codex':
         cmd = ['codex', '--full-auto']
         if session_id:

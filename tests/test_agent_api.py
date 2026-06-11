@@ -3,7 +3,7 @@
 FILE: tests/test_agent_api.py
 DESCRIPTION: agent_api.py 단위 테스트.
              최근 버그픽스(Codex 슬롯 오류, activeAgent 동기화) 재발 방지 및
-             핵심 로직(_get_gemini_last_task, handle_stage_update, _merge_live_file_status)
+             핵심 로직(handle_stage_update, _merge_live_file_status)
              의 정확성을 검증합니다.
 
              [테스트 전략]
@@ -12,6 +12,7 @@ DESCRIPTION: agent_api.py 단위 테스트.
              - HTTP 핸들러는 간단한 Mock 객체로 대체
 
 REVISION HISTORY:
+- 2026-06-11 Claude: TestGetGeminiLastTask 삭제 — agy 전환으로 대상 함수 제거 (비공개 포맷)
 - 2026-03-09 Claude: 최초 작성 — 버그픽스 a6bd38a, 6f05536 재발 방지 커버리지
 """
 
@@ -39,96 +40,6 @@ _mock_cli_agent._current_run = None
 sys.modules.setdefault("cli_agent", _mock_cli_agent)
 
 import agent_api
-
-
-# ── _get_gemini_last_task 테스트 ───────────────────────────────────────────────
-
-class TestGetGeminiLastTask:
-    """Gemini 세션 JSON에서 마지막 사용자 메시지 추출 로직 검증."""
-
-    def _write_session(self, path: Path, messages: list) -> Path:
-        """테스트용 Gemini 세션 JSON 파일 생성 헬퍼."""
-        session_file = path / "session-test.json"
-        session_file.write_text(
-            json.dumps({"messages": messages}, ensure_ascii=False),
-            encoding="utf-8"
-        )
-        return session_file
-
-    def test_정상_사용자_메시지_반환됨(self, tmp_path):
-        """type='user'인 마지막 메시지의 텍스트가 반환되어야 함."""
-        sf = self._write_session(tmp_path, [
-            {"type": "user", "content": [{"text": "버그 수정해줘"}]},
-            {"type": "assistant", "content": [{"text": "알겠습니다"}]},
-        ])
-        result = agent_api._get_gemini_last_task(sf)
-        assert result == "버그 수정해줘"
-
-    def test_여러_메시지중_마지막_사용자_메시지_반환됨(self, tmp_path):
-        """여러 메시지가 있을 때 가장 최근(마지막) 사용자 메시지가 반환되어야 함."""
-        sf = self._write_session(tmp_path, [
-            {"type": "user", "content": [{"text": "첫 번째 지시"}]},
-            {"type": "assistant", "content": [{"text": "완료"}]},
-            {"type": "user", "content": [{"text": "두 번째 지시"}]},
-            {"type": "assistant", "content": [{"text": "완료"}]},
-        ])
-        result = agent_api._get_gemini_last_task(sf)
-        assert result == "두 번째 지시"
-
-    def test_80자_초과_텍스트_잘려서_반환됨(self, tmp_path):
-        """80자를 넘는 텍스트는 80자로 잘려야 함."""
-        long_text = "가" * 100  # 100자
-        sf = self._write_session(tmp_path, [
-            {"type": "user", "content": [{"text": long_text}]},
-        ])
-        result = agent_api._get_gemini_last_task(sf)
-        assert len(result) == 80
-
-    def test_줄바꿈이_공백으로_치환됨(self, tmp_path):
-        """메시지 내 줄바꿈(\n)은 공백으로 치환되어야 함."""
-        sf = self._write_session(tmp_path, [
-            {"type": "user", "content": [{"text": "줄1\n줄2\n줄3"}]},
-        ])
-        result = agent_api._get_gemini_last_task(sf)
-        assert "\n" not in result
-        assert "줄1 줄2 줄3" == result
-
-    def test_파일없으면_빈문자열_반환됨(self, tmp_path):
-        """존재하지 않는 파일 경로 → 빈 문자열 반환 (예외 없음)."""
-        fake_path = tmp_path / "nonexistent.json"
-        result = agent_api._get_gemini_last_task(fake_path)
-        assert result == ""
-
-    def test_메시지없는_세션_빈문자열_반환됨(self, tmp_path):
-        """messages 키가 비어있으면 빈 문자열 반환."""
-        sf = self._write_session(tmp_path, [])
-        result = agent_api._get_gemini_last_task(sf)
-        assert result == ""
-
-    def test_assistant메시지만_있으면_빈문자열_반환됨(self, tmp_path):
-        """user 메시지 없이 assistant만 있으면 빈 문자열 반환."""
-        sf = self._write_session(tmp_path, [
-            {"type": "assistant", "content": [{"text": "도움이 필요하신가요?"}]},
-        ])
-        result = agent_api._get_gemini_last_task(sf)
-        assert result == ""
-
-    def test_content가_string_타입이어도_처리됨(self, tmp_path):
-        """content가 list가 아닌 string 타입일 때도 처리되어야 함."""
-        session_file = tmp_path / "session-str.json"
-        session_file.write_text(
-            json.dumps({"messages": [{"type": "user", "content": "문자열 컨텐츠"}]}),
-            encoding="utf-8"
-        )
-        result = agent_api._get_gemini_last_task(session_file)
-        assert result == "문자열 컨텐츠"
-
-    def test_손상된_json_파일_빈문자열_반환됨(self, tmp_path):
-        """JSON 파싱 불가 파일 → 빈 문자열 반환 (예외 없음)."""
-        broken = tmp_path / "broken.json"
-        broken.write_text("{broken json content", encoding="utf-8")
-        result = agent_api._get_gemini_last_task(broken)
-        assert result == ""
 
 
 # ── handle_stage_update 테스트 ────────────────────────────────────────────────

@@ -101,23 +101,22 @@ def _run_claude(task: dict, project_dir: str) -> tuple[str, int]:
 
 
 def _run_gemini(task: dict, project_dir: str) -> tuple[str, int]:
-    """Gemini CLI로 태스크 실행."""
+    """Antigravity CLI(agy)로 태스크 실행 — 어댑터 경유 (gemini CLI는 2026-06-18 종료)."""
     prompt = (
         f"다음 태스크를 수행하세요:\n\n"
         f"제목: {task.get('title', '')}\n"
         f"설명: {task.get('description', '')}"
     )
     try:
-        result = subprocess.run(
-            ['gemini', '-p', prompt],
-            capture_output=True, text=True,
-            encoding='utf-8', errors='replace',
-            timeout=CLI_TIMEOUT,
-            cwd=project_dir,
-        )
-        return result.stdout[:2000], result.returncode
+        from antigravity_adapter import run_print, AntigravityPrintCaptureError
+        try:
+            return run_print(prompt, timeout=CLI_TIMEOUT, cwd=project_dir)[:2000], 0
+        except AntigravityPrintCaptureError as e:
+            # [실측 2026-06-11] agy -p 파이프 캡처 결함 — 작업은 수행됐을 수 있으나
+            # 응답 회수 불가. 조용한 빈 성공 대신 명시적 실패로 보고.
+            return f"agy 비대화형 캡처 불가: {e}", 1
     except FileNotFoundError:
-        return "gemini CLI를 찾을 수 없습니다", 1
+        return "agy CLI를 찾을 수 없습니다", 1
     except subprocess.TimeoutExpired:
         return f"타임아웃 ({CLI_TIMEOUT}초 초과)", 1
 
