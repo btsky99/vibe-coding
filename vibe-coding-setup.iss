@@ -127,7 +127,10 @@ Source: ".ai_monitor\bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ig
 ; install_hive_hooks.py가 우선 탐색하는 변수. 값이 .exe이면 EXE 모드(`<exe> hook`),
 ; .py/디렉토리면 Python 모드로 동작한다.
 ; uninsdeletevalue: 제거 시 값 자동 삭제. preservestringtype: REG_EXPAND_SZ 유지.
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "VIBE_HIVE_HOOK"; ValueData: "{app}\{#MyAppExeName}"; Flags: preservestringtype uninsdeletevalue
+; [과거사고 v3.7.226~230] HKLM 무조건 쓰기 → "현재 사용자용 설치"(비관리자 모드)에서 액세스 거부(코드 5)
+; 레지스트리 에러 팝업. IsAdminInstallMode로 분기 — 비관리자는 HKCU\Environment에 동일 변수 등록.
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "VIBE_HIVE_HOOK"; ValueData: "{app}\{#MyAppExeName}"; Flags: preservestringtype uninsdeletevalue; Check: IsAdminInstallMode
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "VIBE_HIVE_HOOK"; ValueData: "{app}\{#MyAppExeName}"; Flags: preservestringtype uninsdeletevalue; Check: not IsAdminInstallMode
 
 [Icons]
 ; 시작 메뉴 — 폴더는 영문(MyAppName), 아이콘 표시명은 한글(MyAppDisplayName)
