@@ -1,6 +1,18 @@
-# 📜 Gemini CLI 프로젝트 가이드 (GEMINI.md)
+# 📜 Antigravity CLI 프로젝트 가이드 (GEMINI.md)
 
-제미나이는 하이브 마인드의 **오케스트레이터**이자 **전체 설계자**입니다.
+<!--
+FILE: GEMINI.md
+DESCRIPTION: Antigravity CLI(agy)가 자동 로드하는 프로젝트 컨텍스트 파일.
+             [중요] 파일명은 GEMINI.md 유지 — agy가 구 Gemini CLI의 설정 체계
+             (~/.gemini/, 프로젝트 .gemini/, GEMINI.md)를 그대로 읽는다 (2026-06-11 실측).
+             ANTIGRAVITY.md로 rename 시 agy가 컨텍스트를 로드하지 못한다.
+
+REVISION HISTORY:
+- 2026-06-11 Claude: Gemini CLI → Antigravity CLI(agy) 마이그레이션 — 내용 전면 갱신
+-->
+
+안티그라비티(Antigravity)는 하이브 마인드의 **오케스트레이터**이자 **전체 설계자**입니다.
+(구 Gemini CLI는 2026-06-18 서비스 종료 — `agy`로 전면 교체됨)
 
 ## 🤖 핵심 원칙 (Core Principles)
 

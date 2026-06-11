@@ -30,7 +30,7 @@ REVISION HISTORY:
 - **검증**: ①agy 설정 디렉토리 경로 ②세션/대화 저장 경로 ③.gemini 인식 여부 3가지 기록
 - **의존성**: 없음
 
-### [ ] Task 2: scripts/antigravity_adapter.py 신설 — 호출 격리 레이어
+### [x] Task 2: scripts/antigravity_adapter.py 신설 — 호출 격리 레이어 (021600f 커밋 완료, 검증 통과 2026-06-11)
 - **파일**: `scripts/antigravity_adapter.py` (신규 ~120줄)
 - **방법**: closed-source 인터페이스 변경 대비 단일 격리점. `find_agy()` (PATH 탐색), `build_print_cmd(prompt, model=None, yolo=False)` (-p/--model/--dangerously-skip-permissions 매핑), `session_dir()` (Task 1 실측 경로). cli_agent.py `_GEMINI_CMD`/`_select_gemini_model` 호출 경로와 server.py:3233 인라인 옵션 매핑을 어댑터 경유로 교체
 - **검증**: `python -c "from antigravity_adapter import build_print_cmd; print(build_print_cmd('hi'))"` + 기존 호출부 grep 0건

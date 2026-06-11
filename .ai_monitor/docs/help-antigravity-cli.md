@@ -1,6 +1,10 @@
-# Gemini CLI 사용 설명서
+# Antigravity CLI (agy) 사용 설명서
 
-> Google의 오픈소스 AI 코딩 에이전트 CLI 도구 (Apache 2.0)
+> Google의 AI 코딩 에이전트 CLI. 구 Gemini CLI의 후속 (Gemini CLI는 2026-06-18 무료/개인 종료).
+> agy는 구 Gemini CLI의 설정 체계(~/.gemini/, 프로젝트 .gemini/, GEMINI.md)를 그대로 사용하며
+> 아래 설명의 대부분 명령/설정이 동일하게 동작한다. 실행 명령만 `gemini` → `agy`로 교체.
+> [알려진 결함, 2026-06-11 실측] `agy -p`는 stdout 파이프/리다이렉트 환경에서 응답을 출력하지
+> 않는다 (콘솔 TUI 전용 렌더) — 비대화형 자동화는 scripts/antigravity_adapter.py 경유 필수.
 
 ---
 
