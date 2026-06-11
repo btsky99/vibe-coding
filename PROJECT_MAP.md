@@ -200,7 +200,7 @@
 | `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 110 | Claude Code 상태줄 원본 — 세션 I/O 한 줄만 표시 (install_statusline.py가 ~/.claude로 배포) |
+| `statusline.py` | 156 | Claude Code 상태줄 원본 — 컨텍스트+모델/세션 I/O 2줄 (install_statusline.py가 ~/.claude로 배포) |
 | `sync_manager.py` | 120 |  |
 | `telegram_bridge.py` | 1616 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
