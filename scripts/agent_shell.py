@@ -246,7 +246,9 @@ def run_agent(task, cli='auto', terminal_id='T?'):
         # Codex CLI: 최신 비대화형 자동 실행 경로
         cmd = ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', direct_task]
     else:
-        cmd = ['gemini', '-p', direct_task]
+        # [2026-06-11] Antigravity(agy) — 어댑터 경유 (gemini CLI는 2026-06-18 종료)
+        from antigravity_adapter import build_print_cmd
+        cmd = build_print_cmd(direct_task)
 
     # [수정 2026-04-06] 바이브 코딩(Vibe Coding) 전용 환경 식별
     # VS Code 내부 터미널에서 실행될 경우 상속되는 변수들을 정화하여,

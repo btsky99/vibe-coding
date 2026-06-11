@@ -128,8 +128,9 @@ def _find_cli(name: str) -> str:
     return name  # 못 찾으면 쉘에 위임
 
 # 모듈 로드 시 한 번만 탐색 (반복 탐색 방지)
+# [2026-06-11] gemini→antigravity: agy 호출은 antigravity_adapter로 격리 (직접 조립 금지)
+from antigravity_adapter import build_print_cmd as _agy_print_cmd
 _CLAUDE_CMD = _find_cli('claude')
-_GEMINI_CMD = _find_cli('gemini')
 _CODEX_CMD = _find_cli('codex')
 
 # ─── 라우팅 키워드 테이블 ─────────────────────────────────────────────────────
@@ -800,10 +801,10 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
             # Claude Code CLI: -p 플래그로 비대화형(print) 모드 실행
             cmd = [_CLAUDE_CMD, '-p', prepared_task, '--dangerously-skip-permissions']
         elif cli == 'gemini':
-            cmd = [_GEMINI_CMD]
-            if selected_model:
-                cmd.extend(['-m', selected_model])
-            cmd.extend(['-p', prepared_task])
+            # [2026-06-11] Antigravity(agy) 비대화형 — 어댑터 경유.
+            # [알려진 결함] agy 1.0.7 -p는 파이프 환경에서 응답 미출력 (어댑터 헤더 참조).
+            # 빈 출력으로 끝나면 아래 스트리밍 루프가 출력 0줄로 정상 종료 — 호출부 status로 식별됨.
+            cmd = _agy_print_cmd(prepared_task, model=selected_model or None)
         elif cli == 'codex':
             cmd = [_CODEX_CMD, 'exec', '--dangerously-bypass-approvals-and-sandbox']
             if selected_model:

@@ -3226,19 +3226,13 @@ class SSEHandler(BaseHTTPRequestHandler):
                     title = f"[Claude Code] {_slot_label}" if _slot_label else "[Claude Code]"
                     cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Claude Code... && claude{yolo_flag}{model_flag}{prompt_flag}"'
                 elif agent in ('gemini', 'antigravity', 'agy'):
-                    # [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환.
-                    # Gemini CLI는 2026-06-18 무료/개인 종료. 'gemini' 식별자는 프론트엔드/DB
-                    # 호환을 위해 그대로 받지만 실제 실행은 agy.exe. 'antigravity'/'agy'
-                    # 별칭도 같은 분기로 받아 5 Phase 마이그레이션 시 식별자 전환에 대비.
-                    # agy 옵션 매핑:
-                    #   --yolo                    → --dangerously-skip-permissions
-                    #   -p "<prompt>"             → -i "<prompt>" (인터랙티브 초기 프롬프트)
-                    #   --cwd <dir>               → 미지원, `cd /d <dir>`로 대체
-                    #   --model <name>            → 미지원, 무시
-                    yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
+                    # [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini'는 레거시 alias.
+                    # [2026-06-11] 옵션 매핑을 antigravity_adapter로 격리 — closed-source CLI
+                    # 인터페이스 변경 시 어댑터 한 곳만 수정 (직접 agy 문자열 조립 금지)
+                    from antigravity_adapter import build_interactive_invocation
                     title = f"[Antigravity] {_slot_label}" if _slot_label else "[Antigravity]"
-                    prompt_flag = f' -i "{_role_prompt}"' if _role_prompt else ""
-                    cmd = f'start "{title}" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Antigravity CLI... && agy{yolo_flag}{prompt_flag}"'
+                    agy_invocation = build_interactive_invocation(yolo=is_yolo, prompt=_role_prompt or None)
+                    cmd = f'start "{title}" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Antigravity CLI... && {agy_invocation}"'
                 elif agent == 'codex':
                     yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
                     # 요청된 모델 우선, 없으면 config에서 읽기
