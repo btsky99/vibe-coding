@@ -90,8 +90,6 @@ INTENT_RULES = [
 SESSION_MODIFIED_FILES: list[str] = []
 SESSION_LAST_TASK: str = ""
 SESSION_HAD_ERROR: bool = False
-SESSION_ASSIGNED_TASKS: list[dict] = []
-SESSION_REVIEW_REQUESTS: list[dict] = []
 
 
 def _stamp_path(name: str) -> Path:
@@ -198,62 +196,6 @@ def _read_gemini_messages(agent_name: str) -> list[dict]:
         return itcp_receive(agent_name, mark_read=True, my_terminal_id=_tid)
     except Exception:
         return []
-
-
-def _remember_itcp_work_items(messages: list[dict]) -> None:
-    global SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
-    try:
-        from itcp import parse_task_reference
-    except Exception:
-        return
-
-    for message in messages:
-        ref = parse_task_reference(message)
-        task_id = ref.get("task_id", "")
-        if not task_id:
-            continue
-        if ref.get("kind") == "review":
-            if not any(item.get("task_id") == task_id for item in SESSION_REVIEW_REQUESTS):
-                SESSION_REVIEW_REQUESTS.append(ref)
-        elif ref.get("kind") == "task":
-            if not any(item.get("task_id") == task_id for item in SESSION_ASSIGNED_TASKS):
-                SESSION_ASSIGNED_TASKS.append(ref)
-
-
-def _report_completed_itcp_work(agent_name: str) -> None:
-    global SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
-    if SESSION_HAD_ERROR:
-        return
-
-    summary_bits = []
-    if SESSION_LAST_TASK:
-        summary_bits.append(_snippet(SESSION_LAST_TASK, 120))
-    if SESSION_MODIFIED_FILES:
-        summary_bits.append("files=" + ", ".join(SESSION_MODIFIED_FILES[-5:]))
-    summary = " | ".join(summary_bits) if summary_bits else "session completed"
-
-    try:
-        from auto_dispatcher import report_task_completion, report_verification_result
-    except Exception:
-        return
-
-    while SESSION_ASSIGNED_TASKS:
-        ref = SESSION_ASSIGNED_TASKS.pop(0)
-        task_id = ref.get("task_id", "")
-        if task_id:
-            report_task_completion(task_id=task_id, author=agent_name, result_summary=summary)
-
-    while SESSION_REVIEW_REQUESTS:
-        ref = SESSION_REVIEW_REQUESTS.pop(0)
-        task_id = ref.get("task_id", "")
-        if task_id:
-            report_verification_result(
-                task_id=task_id,
-                reviewer=agent_name,
-                summary=summary,
-                verdict="approved",
-                author=ref.get("author", ""),
-            )
 
 
 def _send_session_summary() -> None:
@@ -423,7 +365,6 @@ def _build_additional_context(prompt: str) -> str:
 
             filtered.append(message)
 
-        _remember_itcp_work_items(filtered)
         lines = []
         for message in filtered:
             sender = message.get("from_agent") or message.get("from") or "?"
@@ -549,13 +490,11 @@ def main() -> None:
         # [2026-03-18 Claude] BeforeAgent는 최대한 빠르게 JSON만 반환해야 함
         # 무거운 작업(대시보드 체크, DB 기록, 하트비트)은 전부 제거 — 타임아웃 유발 원인
         # 이 작업들은 AfterTool/SessionEnd에서 수행
-        global SESSION_LAST_TASK, SESSION_MODIFIED_FILES, SESSION_HAD_ERROR, SESSION_ASSIGNED_TASKS, SESSION_REVIEW_REQUESTS
+        global SESSION_LAST_TASK, SESSION_MODIFIED_FILES, SESSION_HAD_ERROR
         prompt = str(payload.get("prompt") or "")
         SESSION_LAST_TASK = prompt.strip()
         SESSION_MODIFIED_FILES = []
         SESSION_HAD_ERROR = False
-        SESSION_ASSIGNED_TASKS = []
-        SESSION_REVIEW_REQUESTS = []
 
         # [2026-03-27 Claude] 세션 히스토리 자동 수리 (백그라운드)
         # Gemini CLI가 이미지 파일 read_file 시 result에 inlineData + functionResponse
@@ -606,10 +545,8 @@ def main() -> None:
             bulk_update_tasks("gemini", ["pending", "in_progress"], "done")
         except Exception:
             pass
-        try:
-            _report_completed_itcp_work("gemini")
-        except Exception:
-            pass
+        # [2026-06-11] _report_completed_itcp_work 제거 — auto_dispatcher 폐기로
+        # import가 항상 실패하던 죽은 경로였음 (2차 정리 보류분)
         _send_session_summary()
         _refresh_hivemind_doc(force=True)
 

@@ -37,19 +37,17 @@ def test_build_project_bootstrap_includes_v2_sections(monkeypatch):
 
 
 def test_prepare_codex_context_reuses_project_bootstrap(monkeypatch):
+    # [2026-06-11] refs 반환 제거 반영 — auto_dispatcher 폐기로 단일 prompt 반환
     fake_itcp = types.SimpleNamespace(
         receive=lambda *args, **kwargs: [{"content": "fix bug", "channel": "task"}],
-        parse_task_reference=lambda message: {"task_id": "TASK-1", "kind": "task"},
         build_agent_context=lambda *args, **kwargs: "[Project bootstrap]\nRULES.md summary",
     )
     monkeypatch.setitem(sys.modules, "itcp", fake_itcp)
 
-    prompt, task_refs, review_refs = agent_shell._prepare_codex_context("Implement the fix.")
+    prompt = agent_shell._prepare_codex_context("Implement the fix.")
 
     assert "[Project bootstrap]" in prompt
     assert prompt.endswith("Implement the fix.")
-    assert task_refs == [{"task_id": "TASK-1", "kind": "task"}]
-    assert review_refs == []
 
 
 def test_run_agent_honors_explicit_codex_even_when_orchestration_default(monkeypatch):
@@ -70,7 +68,7 @@ def test_run_agent_honors_explicit_codex_even_when_orchestration_default(monkeyp
         def poll(self):
             return 0
 
-    monkeypatch.setattr(agent_shell, "_prepare_codex_context", lambda task: (task, [], []))
+    monkeypatch.setattr(agent_shell, "_prepare_codex_context", lambda task: task)
     monkeypatch.setattr(agent_shell, "_write_live", lambda event: None)
 
     def fake_popen(cmd, **kwargs):

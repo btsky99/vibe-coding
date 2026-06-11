@@ -3,6 +3,8 @@ FILE: tests/test_codex_orchestration.py
 DESCRIPTION: Codex 라우팅과 오케스트레이터 연동 회귀 테스트.
 
 REVISION HISTORY:
+- 2026-06-11 Claude: auto_dispatcher 폐기 반영 — _dispatcher 모킹 테스트 2개를
+  config 기반 활성화/부하 기반 배정 검증으로 교체 (폐기 전에도 모킹 불완전으로 실패하던 테스트)
 - 2026-03-27 Codex: Codex 자동 라우팅, worktree 우선 경로, 오케스트레이터 Codex 포함 검증 추가
 """
 
@@ -48,30 +50,40 @@ def test_resolve_working_dir_prefers_terminal_worktree(monkeypatch):
 
 
 def test_known_agents_includes_codex_when_enabled(monkeypatch):
-    dispatcher = types.SimpleNamespace(is_codex_enabled=lambda: True)
-    monkeypatch.setattr(orchestrator, "_dispatcher", dispatcher)
+    monkeypatch.setattr(
+        orchestrator, "_load_runtime_config",
+        lambda: {"gemini_enabled": True, "codex_enabled": True},
+    )
 
     agents = orchestrator._known_agents()
 
     assert agents == ["claude", "gemini", "codex"]
 
 
-def test_pick_best_agent_uses_codex_for_test_tasks(monkeypatch):
-    dispatcher = types.SimpleNamespace(
-        is_codex_enabled=lambda: True,
-        detect_task_type=lambda text: "test",
-        score_agent=lambda agent, task_type: {
-            "claude": 0.85,
-            "gemini": 0.65,
-            "codex": 0.9,
-        }[agent],
-    )
-    monkeypatch.setattr(orchestrator, "_dispatcher", dispatcher)
-
+def test_pick_best_agent_returns_none_when_all_dead():
+    # 활동 기록이 전혀 없으면 alive 후보 0명 → None (호출자가 'all' 유지)
     best = orchestrator.pick_best_agent(
         last_seen={"claude": None, "gemini": None, "codex": None},
         task_count={"claude": 0, "gemini": 0, "codex": 0, "all": 0},
         task={"title": "테스트 추가", "description": "회귀 테스트 작성"},
+    )
+
+    assert best is None
+
+
+def test_pick_best_agent_prefers_lower_load(monkeypatch):
+    # 동일 활동성이면 태스크 부하(load_penalty)가 낮은 에이전트 선택
+    from datetime import datetime
+    monkeypatch.setattr(
+        orchestrator, "_load_runtime_config",
+        lambda: {"gemini_enabled": False, "codex_enabled": True},
+    )
+    now_iso = datetime.now().isoformat()
+
+    best = orchestrator.pick_best_agent(
+        last_seen={"claude": now_iso, "codex": now_iso},
+        task_count={"claude": 3, "codex": 0, "all": 0},
+        task={"title": "테스트 추가"},
     )
 
     assert best == "codex"

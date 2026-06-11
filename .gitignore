@@ -49,3 +49,6 @@ vibe_coding.egg-info/
 # 오피스 E2E 반복 테스트 산출물 (실행마다 갱신)
 /test_office_report.md
 tests/office/test_office_report.md
+
+# 스케줄러 락 파일 (런타임 산출물 — 세션마다 생성/갱신)
+.claude/scheduled_tasks.lock

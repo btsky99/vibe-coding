@@ -269,25 +269,18 @@ def _select_codex_model(task: str) -> tuple[str, str]:
     return selected, reason
 
 
-def _prepare_codex_task_context(task: str) -> tuple[str, list[dict], list[dict]]:
-    """Codex does not have repo-managed hooks, so prepare inbox context here."""
+def _prepare_codex_task_context(task: str) -> str:
+    """Codex does not have repo-managed hooks, so prepare inbox context here.
+
+    [2026-06-11] task_refs/review_refs 수집 제거 — 유일한 소비자였던
+    _report_codex_work(auto_dispatcher 보고)가 디스패처 폐기로 죽은 코드였음 (2차 정리 보류분)
+    """
     try:
-        from itcp import receive, parse_task_reference, build_agent_context
+        from itcp import receive, build_agent_context
     except Exception:
-        return task, [], []
+        return task
 
     unread = receive("codex", mark_read=True)
-    task_refs: list[dict] = []
-    review_refs: list[dict] = []
-
-    for message in unread[:5]:
-        ref = parse_task_reference(message)
-        if ref.get("task_id"):
-            if ref.get("kind") == "review":
-                review_refs.append(ref)
-            elif ref.get("kind") == "task":
-                task_refs.append(ref)
-
     extra = build_agent_context(
         "codex",
         include_unread=True,
@@ -297,50 +290,8 @@ def _prepare_codex_task_context(task: str) -> tuple[str, list[dict], list[dict]]
         unread_messages=unread,
     )
     if not extra:
-        return task, task_refs, review_refs
-    prompt = f"{extra}\n\n[Assigned task]\n{task}"
-    return prompt, task_refs, review_refs
-
-
-def _report_codex_work(status: str, task: str, output_lines: list[str], task_refs: list[dict], review_refs: list[dict]) -> None:
-    """Codex lacks hooks, so report completion/verification after process exit."""
-    if status != "done":
-        return
-    try:
-        from auto_dispatcher import report_task_completion, report_verification_result
-    except Exception:
-        return
-
-    def _clip(text: str, limit: int = 120) -> str:
-        compact = " ".join(str(text).split())
-        return compact if len(compact) <= limit else compact[: limit - 3] + "..."
-
-    tail = ""
-    for line in reversed(output_lines[-10:]):
-        if str(line).strip():
-            tail = _clip(str(line), 120)
-            break
-
-    summary_parts = [_clip(task, 120)]
-    if tail:
-        summary_parts.append(f"last_output={tail}")
-    summary = " | ".join(summary_parts)
-
-    for ref in task_refs:
-        task_id = ref.get("task_id", "")
-        if task_id:
-            report_task_completion(task_id=task_id, author="codex", result_summary=summary)
-
-    for ref in review_refs:
-        task_id = ref.get("task_id", "")
-        if task_id:
-            report_verification_result(
-                task_id=task_id,
-                reviewer="codex",
-                summary=summary,
-                verdict="approved",
-                author=ref.get("author", ""),
-            )
+        return task
+    return f"{extra}\n\n[Assigned task]\n{task}"
 
 
 def _extract_task_file_paths(task: str, cwd: str) -> list[Path]:
@@ -779,15 +730,13 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         selected_model, codex_reason = _select_codex_model(task)
         routing_reason = (routing_reason or 'Codex 실행') + f' ({codex_reason})'
 
-    codex_task_refs: list[dict] = []
-    codex_review_refs: list[dict] = []
     codex_locked_files: list[Path] = []
     codex_target_files: list[Path] = []
     codex_guard_lines: list[str] = []
     prepared_task = task
     if cli == 'codex':
         codex_target_files = _extract_task_file_paths(task, cwd)
-        prepared_task, codex_task_refs, codex_review_refs = _prepare_codex_task_context(task)
+        prepared_task = _prepare_codex_task_context(task)
         if codex_target_files:
             rel_targets = []
             for path in codex_target_files:
@@ -1034,7 +983,6 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
             else:
                 output_lines.extend(codex_guard_lines)
             _release_codex_locks(codex_locked_files)
-            _report_codex_work(final_status, task, output_lines, codex_task_refs, codex_review_refs)
 
         result = {
             'id': run_id,

@@ -32,7 +32,8 @@ REVISION HISTORY:
   - vibe_mux 서버에 자동 등록/해제
   - cli_agent.run() 통합: 수신한 텍스트를 자동으로 에이전트에 전달하여 실행
   - PostgreSQL LISTEN 병행: ITCP 메시지도 자동 수신/실행
-  - 결과 ITCP 반환 (auto_dispatcher.report_task_completion)
+  - 결과 ITCP 반환 (발신자 reply_to로 task_result 회신)
+- 2026-06-11 Claude: auto_dispatcher 완료 보고 제거 (디스패처 폐기 — 2차 정리 보류분)
 """
 
 from __future__ import annotations
@@ -385,7 +386,6 @@ def _report_result(
 
     [설계 의도] cmux에서는 결과가 터미널 출력으로 보이지만,
     우리 시스템에서는 ITCP를 통해 발신자에게 구조화된 결과를 전달합니다.
-    이를 통해 auto_dispatcher의 fan-in(결과 수집)이 자동으로 동작합니다.
     """
     output_summary = '\n'.join(result.get('output_lines', [])[-10:])  # 마지막 10줄
     reply_to = str(task_meta.get('reply_to') or from_agent or '').strip()
@@ -413,19 +413,7 @@ def _report_result(
             )
     except Exception as e:
         print(f'[MUX-Agent {terminal_id}] ITCP 결과 반환 실패: {e}')
-
-    # task_id가 있는 디스패치 작업만 dispatcher에 완료 보고
-    if task_id:
-        try:
-            from auto_dispatcher import report_task_completion
-            report_task_completion(
-                task_id=task_id,
-                author=agent,
-                result_summary=output_summary[:500] or result.get('status', 'done'),
-                request_verify=bool(task_meta.get('verifier')),
-            )
-        except Exception:
-            pass  # auto_dispatcher가 없어도 무시
+    # [2026-06-11] dispatcher 완료 보고 블록 제거 — auto_dispatcher 폐기로 죽은 경로 (2차 정리 보류분)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

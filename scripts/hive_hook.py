@@ -86,9 +86,6 @@ _SESSION_LAST_TASK: str = ""         # UserPromptSubmit에서 마지막 지시 �
 _SESSION_HAD_ERROR: bool = False     # Stop reason이 error이면 True
 
 # 단순 조회 명령어 스킵 목록
-_SESSION_ASSIGNED_TASKS: list = []
-_SESSION_REVIEW_REQUESTS: list = []
-
 _SKIP_BASH_PREFIXES = (
     "ls ", "ls\n", "cat ", "head ", "tail ", "echo ",
     "pwd", "git status", "git log", "git diff",
@@ -299,67 +296,6 @@ def _read_messages(agent_name: str) -> list[dict]:
         return _itcp_receive(agent_name, mark_read=True, my_terminal_id=_TERMINAL_ID)
     except Exception:
         return []
-
-
-def _remember_itcp_work_items(messages: list[dict]) -> None:
-    """Track real dispatch/review work items seen in the Claude inbox."""
-    global _SESSION_ASSIGNED_TASKS, _SESSION_REVIEW_REQUESTS
-    try:
-        from itcp import parse_task_reference as _parse_task_reference
-    except Exception:
-        return
-
-    for message in messages:
-        ref = _parse_task_reference(message)
-        task_id = ref.get("task_id", "")
-        if not task_id:
-            continue
-        if ref.get("kind") == "review":
-            if not any(item.get("task_id") == task_id for item in _SESSION_REVIEW_REQUESTS):
-                _SESSION_REVIEW_REQUESTS.append(ref)
-        elif ref.get("kind") == "task":
-            if not any(item.get("task_id") == task_id for item in _SESSION_ASSIGNED_TASKS):
-                _SESSION_ASSIGNED_TASKS.append(ref)
-
-
-def _report_completed_itcp_work(agent_name: str) -> None:
-    """Emit task result / verify result messages for actual assigned work."""
-    global _SESSION_ASSIGNED_TASKS, _SESSION_REVIEW_REQUESTS
-    if _SESSION_HAD_ERROR:
-        return
-
-    summary_bits = []
-    if _SESSION_LAST_TASK:
-        summary_bits.append(_SESSION_LAST_TASK[:120])
-    if _SESSION_MODIFIED_FILES:
-        summary_bits.append("files=" + ", ".join(_SESSION_MODIFIED_FILES[-5:]))
-    summary = " | ".join(summary_bits) if summary_bits else "session completed"
-
-    try:
-        from auto_dispatcher import (
-            report_task_completion as _report_task_completion,
-            report_verification_result as _report_verification_result,
-        )
-    except Exception:
-        return
-
-    while _SESSION_ASSIGNED_TASKS:
-        ref = _SESSION_ASSIGNED_TASKS.pop(0)
-        task_id = ref.get("task_id", "")
-        if task_id:
-            _report_task_completion(task_id=task_id, author=agent_name, result_summary=summary)
-
-    while _SESSION_REVIEW_REQUESTS:
-        ref = _SESSION_REVIEW_REQUESTS.pop(0)
-        task_id = ref.get("task_id", "")
-        if task_id:
-            _report_verification_result(
-                task_id=task_id,
-                reviewer=agent_name,
-                summary=summary,
-                verdict="approved",
-                author=ref.get("author", ""),
-            )
 
 
 def _check_and_install_skills() -> list[str]:
@@ -623,7 +559,6 @@ def main():
         # [2026-03-08] ITCP(itcp.py) 기반으로 전환 — PostgreSQL pg_messages FIRST
         unread = _read_messages("claude")
         if unread:
-            _remember_itcp_work_items(unread)
             # 채널별 이모지 매핑 — 메시지 유형을 시각적으로 구분
             _CHANNEL_EMOJI = {
                 "debug": "🐛", "task": "📋", "review": "🔍",
@@ -651,12 +586,10 @@ def main():
                 log_task("사용자", f"[지시] {short}", _TERMINAL_ID)
 
             # self-reflect: 새 지시 시작 시 마지막 지시 + 파일 목록 리셋
-            global _SESSION_LAST_TASK, _SESSION_MODIFIED_FILES, _SESSION_HAD_ERROR, _SESSION_ASSIGNED_TASKS, _SESSION_REVIEW_REQUESTS
+            global _SESSION_LAST_TASK, _SESSION_MODIFIED_FILES, _SESSION_HAD_ERROR
             _SESSION_LAST_TASK = short
             _SESSION_MODIFIED_FILES = []
             _SESSION_HAD_ERROR = False
-            _SESSION_ASSIGNED_TASKS = []
-            _SESSION_REVIEW_REQUESTS = []
 
             # ── [2026-04-14] 활성 세션 컨텍스트 기록 ──────────────────────────
             # 매 지시마다 DB에 현재 작업 상태를 기록 → 튕겨도 마지막 상태가 남아있음
@@ -919,27 +852,10 @@ def main():
         except Exception:
             pass
 
-        # ── [P4] 자동 피드백 루프: 작업 완료 시 크로스 검증 자동 요청 ─────────
-        # 수정된 파일이 있고, 에러가 아닌 정상 완료일 때만 크로스 검증 요청
-        # auto_dispatcher.request_verification()을 호출하여 다른 에이전트에 검증 위임
-        try:
-            if _SESSION_MODIFIED_FILES and not _SESSION_HAD_ERROR and _SESSION_LAST_TASK:
-                from auto_dispatcher import request_verification as _rv
-                _task_summary = f"{_SESSION_LAST_TASK[:100]} | 수정 파일: {', '.join(_SESSION_MODIFIED_FILES[-5:])}"
-                _rv(
-                    task_id=f"AUTO-{_TERMINAL_ID}-{int(time.time())}",
-                    result_summary=_task_summary,
-                    author="claude",
-                )
-        except Exception:
-            pass  # 디스패처 미설치 등 예외는 조용히 무시
-
         # 오늘의 사용자 지시 + 완료 액션을 shared_memory.db에 갱신
         # → 다음 세션 시작 시 "이전에 뭘 했지?"를 바로 파악 가능
-        try:
-            _report_completed_itcp_work("claude")
-        except Exception:
-            pass
+        # [2026-06-11] 디스패처 잔재(request_verification/_report_completed_itcp_work) 제거 —
+        # auto_dispatcher.py는 폐기되어 import가 항상 실패하던 죽은 경로였음 (2차 정리 보류분)
         _save_session_snapshot()
 
         # [current-work 자동 업데이트] 오늘 완료된 항목을 하이브 메모리에 자동 반영

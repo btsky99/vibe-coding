@@ -29,10 +29,8 @@ if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
 from src.pg_store import get_agent_last_seen as pg_get_agent_last_seen, list_tasks, save_task
-try:
-    import auto_dispatcher as _dispatcher
-except Exception:
-    _dispatcher = None
+# [2026-06-11] auto_dispatcher 의존 제거 — 디스패처 폐기(5차 정리)로 항상 ImportError였음.
+# 에이전트 활성화 판정은 config, 배정 점수는 활동성+부하만 사용 (역량 점수 경로 삭제)
 
 # ─── 설정 상수 ────────────────────────────────────────────────────────────────
 DEFAULT_PORTS = [9000, 8005, 8000]
@@ -96,28 +94,10 @@ def _known_agents() -> list[str]:
 
     config = _load_runtime_config()
 
-    # gemini: 기본 비활성 (실험적)
-    gemini_enabled = False
-    if _dispatcher is not None:
-        try:
-            gemini_enabled = bool(_dispatcher.is_gemini_enabled())
-        except Exception:
-            gemini_enabled = bool(config.get('gemini_enabled', False))
-    else:
-        gemini_enabled = bool(config.get('gemini_enabled', False))
-    if gemini_enabled:
+    # gemini/codex: 기본 비활성 (실험적) — config 키로만 켬
+    if bool(config.get('gemini_enabled', False)):
         agents.append('gemini')
-
-    # codex: 기본 비활성 (실험적)
-    codex_enabled = False
-    if _dispatcher is not None:
-        try:
-            codex_enabled = bool(_dispatcher.is_codex_enabled())
-        except Exception:
-            codex_enabled = bool(config.get('codex_enabled', False))
-    else:
-        codex_enabled = bool(config.get('codex_enabled', False))
-    if codex_enabled:
+    if bool(config.get('codex_enabled', False)):
         agents.append('codex')
 
     return agents
@@ -210,36 +190,17 @@ def get_agent_task_count(tasks: list) -> dict:
     return count
 
 
-def _infer_task_type(task: dict) -> str:
-    """태스크 텍스트에서 auto_dispatcher용 task_type 힌트를 구성합니다."""
-    if _dispatcher is None:
-        return ''
-
-    text = ' '.join(
-        str(task.get(key, '')).strip()
-        for key in ('title', 'description', 'role')
-        if str(task.get(key, '')).strip()
-    )
-    if not text:
-        return ''
-
-    try:
-        return str(_dispatcher.detect_task_type(text))
-    except Exception:
-        return ''
-
-
 def pick_best_agent(last_seen: dict, task_count: dict, task: dict | None = None) -> str | None:
     """
     가장 적합한 에이전트 선택 (미할당 태스크 자동 배정용).
-    기준: 1) 작업 유형과 에이전트 역량 일치도, 2) 최근 활동성, 3) 태스크 부하
+    기준: 1) 최근 활동성, 2) 태스크 부하
+    (역량 일치도 점수는 auto_dispatcher 폐기로 제거 — task 인자는 호환성 유지용)
 
     DEAD_THRESHOLD_SEC(24시간) 이상 활동 없는 에이전트는 후보에서 완전 제외한다.
     살아있는 에이전트가 0명이면 None 반환 — 호출자는 'all' 상태를 유지해야 한다.
     """
     now = datetime.now()
     agents = _known_agents()
-    task_type = _infer_task_type(task or {})
 
     # ⚡ alive 후보 추림: DEAD_THRESHOLD_SEC 이내 활동 기록이 있는 에이전트만
     alive: list[str] = []
@@ -268,15 +229,8 @@ def pick_best_agent(last_seen: dict, task_count: dict, task: dict | None = None)
         except Exception:
             recency_bonus = 0.0
 
-        capability_score = 0.0
-        if _dispatcher is not None and task_type:
-            try:
-                capability_score = float(_dispatcher.score_agent(agent, task_type))
-            except Exception:
-                capability_score = 0.0
-
         load_penalty = task_count.get(agent, 0) * 0.05
-        scores[agent] = capability_score + recency_bonus - load_penalty
+        scores[agent] = recency_bonus - load_penalty
 
     # 점수 높은 에이전트 선택 (동점이면 첫 번째)
     best = max(scores, key=lambda a: scores[a])

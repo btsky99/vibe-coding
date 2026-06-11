@@ -121,25 +121,18 @@ FORCE_ORCHESTRATION = True
 _dashboard_opened = False
 
 
-def _prepare_codex_context(task: str) -> tuple[str, list[dict], list[dict]]:
-    """Codex launches from agent_shell need explicit ITCP inbox injection."""
+def _prepare_codex_context(task: str) -> str:
+    """Codex launches from agent_shell need explicit ITCP inbox injection.
+
+    [2026-06-11] task_refs/review_refs 수집 제거 — 유일한 소비자였던
+    auto_dispatcher 보고 블록이 디스패처 폐기로 죽은 코드였음 (2차 정리 보류분)
+    """
     try:
-        from itcp import receive, parse_task_reference, build_agent_context
+        from itcp import receive, build_agent_context
     except Exception:
-        return task, [], []
+        return task
 
     unread = receive("codex", mark_read=True)
-    task_refs: list[dict] = []
-    review_refs: list[dict] = []
-
-    for message in unread[:5]:
-        ref = parse_task_reference(message)
-        if ref.get("task_id"):
-            if ref.get("kind") == "review":
-                review_refs.append(ref)
-            elif ref.get("kind") == "task":
-                task_refs.append(ref)
-
     extra = build_agent_context(
         "codex",
         include_unread=True,
@@ -149,8 +142,8 @@ def _prepare_codex_context(task: str) -> tuple[str, list[dict], list[dict]]:
         unread_messages=unread,
     )
     if not extra:
-        return task, task_refs, review_refs
-    return f"{extra}\n\n[Assigned task]\n{task}", task_refs, review_refs
+        return task
+    return f"{extra}\n\n[Assigned task]\n{task}"
 
 
 def _wrap_orchestrator_task(task: str) -> str:
@@ -220,10 +213,8 @@ def run_agent(task, cli='auto', terminal_id='T?'):
     else:
         chosen = 'orchestrator' if FORCE_ORCHESTRATION else _route(task)
     direct_task = _wrap_orchestrator_task(task) if chosen == 'orchestrator' else task
-    codex_task_refs: list[dict] = []
-    codex_review_refs: list[dict] = []
     if chosen == 'codex':
-        direct_task, codex_task_refs, codex_review_refs = _prepare_codex_context(direct_task)
+        direct_task = _prepare_codex_context(direct_task)
     ts = datetime.now().isoformat()
     # run_id: handle_live_runs가 이벤트를 묶을 때 필요 (없으면 이벤트 전부 무시됨)
     run_id = str(uuid.uuid4())[:8]
@@ -327,28 +318,6 @@ def run_agent(task, cli='auto', terminal_id='T?'):
         rc = 1
     finally:
         _active_proc = None
-
-    if chosen == 'codex' and rc == 0:
-        try:
-            from auto_dispatcher import report_task_completion, report_verification_result
-
-            summary = task[:120]
-            for ref in codex_task_refs:
-                task_id = ref.get("task_id", "")
-                if task_id:
-                    report_task_completion(task_id=task_id, author="codex", result_summary=summary)
-            for ref in codex_review_refs:
-                task_id = ref.get("task_id", "")
-                if task_id:
-                    report_verification_result(
-                        task_id=task_id,
-                        reviewer="codex",
-                        summary=summary,
-                        verdict="approved",
-                        author=ref.get("author", ""),
-                    )
-        except Exception:
-            pass
 
     status = 'done' if rc == 0 else ('stopped' if rc < 0 else 'error')
     icon = 'OK' if status == 'done' else ('STOP' if status == 'stopped' else 'ERR')

@@ -131,6 +131,8 @@ FILE_DESCRIPTIONS = {
     "scripts/pg_manager.py": "포터블 PostgreSQL 18 + pgvector 통합 관리자",
     "scripts/setup_hive_pg.py": "PostgreSQL 18 + pgvector 자동 설치",
     "scripts/install_codex.py": "Codex CLI npm 설치 및 검증",
+    "scripts/statusline.py": "Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포)",
+    "scripts/install_statusline.py": "상태줄 ~/.claude 멱등 설치기 (PC 간 이식)",
 
     # ── scripts/ 테스트/디버깅 ──
     "scripts/test_pg_logging.py": "PostgreSQL 로깅 테스트",

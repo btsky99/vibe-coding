@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 18:12
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-11 18:59
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -18,7 +18,6 @@
 | `ai_monitor_plan.md` | 하이브 마인드 고도화 및 신규 기능 구현 로드맵 |
 | `memory.md` |  |
 | `progress.md` |  |
-| `test_office_report.md` |  |
 | `docs/API_SPEC.md` | REST API 엔드포인트 및 통신 규격 상세 명세 |
 | `docs/CLAUDE_CODE_AGENT_TEAMS_ANALYSIS.md` |  |
 | `docs/CODEX_HARDENING.md` | Codex 경로 고도화 적용 내용과 재적용 조건 |
@@ -91,8 +90,8 @@
 ### 에이전트/터미널
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `cli_agent.py` | 1211 | Claude/Gemini/Codex CLI 자율 오케스트레이션 엔진 |
-| `agent_shell.py` | 443 | 인터랙티브 자율 에이전트 쉘 (REPL) |
+| `cli_agent.py` | 1159 | Claude/Gemini/Codex CLI 자율 오케스트레이션 엔진 |
+| `agent_shell.py` | 412 | 인터랙티브 자율 에이전트 쉘 (REPL) |
 | `terminal_agent.py` | 391 | 멀티터미널 자율 에이전트 디스패처 |
 | `agent_launcher.py` | 227 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
 | `agent_detector.py` | 198 | 활성 AI 에이전트 자동 감지 (psutil) |
@@ -101,7 +100,7 @@
 ### 하이브/협업
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `orchestrator.py` | 584 | 하이브 태스크 스케줄링 및 에이전트 감시 |
+| `orchestrator.py` | 538 | 하이브 태스크 스케줄링 및 에이전트 감시 |
 | `hive_debate.py` | 428 | 에이전트 간 의견 조율 토론 워크플로우 |
 | `hive_bridge.py` | 184 | PostgreSQL 18 기반 하이브 통합 로깅 |
 | `memory.py` | 317 | PostgreSQL 기반 하이브 메모리 CLI |
@@ -112,17 +111,17 @@
 ### 훅/이벤트
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_hook.py` | 1024 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
+| `hive_hook.py` | 940 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
 | `hook_bridge.py` | 497 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
-| `gemini_hook.py` | 629 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
+| `gemini_hook.py` | 566 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
 
 ### 통신/ITCP
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `itcp.py` | 834 | PostgreSQL pg_messages 기반 ITCP 프로토콜 |
 | `vibe_mux.py` | 619 | cmux-style Named Pipe 멀티플렉서 서버 |
-| `vibe_mux_agent.py` | 524 | 터미널별 MUX 에이전트 수신/실행 루프 |
+| `vibe_mux_agent.py` | 512 | 터미널별 MUX 에이전트 수신/실행 루프 |
 | `send_message.py` | 74 | ITCP 기반 터미널 간 메시지 전송 CLI |
 
 ### 검증/가드
@@ -161,7 +160,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Gemini Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 490 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 492 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -191,16 +190,16 @@
 | `install_playwright_cli.py` | 65 |  |
 | `install_psql.py` | 189 |  |
 | `install_skills.py` | 195 |  |
-| `install_statusline.py` | 112 | Claude Code 상태줄 ~/.claude 멱등 설치 (PC 이식) |
+| `install_statusline.py` | 112 | 상태줄 ~/.claude 멱등 설치기 (PC 간 이식) |
 | `install_system_tool.py` | 208 |  |
-| `intent_map.py` | 177 |  |
+| `intent_map.py` | 175 |  |
 | `lesson.py` | 109 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_gemini_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 185 | 컨텍스트 사용량 상태줄 원본 (install_statusline.py가 배포) |
+| `statusline.py` | 185 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
 | `sync_manager.py` | 120 |  |
 | `telegram_bridge.py` | 1616 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
@@ -249,8 +248,8 @@
 | 파일 | 줄 수 | 테스트 대상 |
 |------|------|------------|
 | `test_agent_api.py` | 383 | api/agent_api.py |
-| `test_codex_harness_v2.py` | 88 |  |
-| `test_codex_orchestration.py` | 77 |  |
+| `test_codex_harness_v2.py` | 86 |  |
+| `test_codex_orchestration.py` | 89 |  |
 | `test_codex_pg_watcher.py` | 108 |  |
 | `test_harness_verify.py` | 216 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
@@ -298,4 +297,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-11 18:12
+> 자동 생성 완료: 2026-06-11 18:59
