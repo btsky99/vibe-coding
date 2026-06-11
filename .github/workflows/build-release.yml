@@ -13,10 +13,12 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # [2026-06-11] Node 20 액션 deprecation 대응 — 2026-06-16부터 GitHub이 Node 24 강제.
+      # 구버전 메이저(checkout@v4 등)는 그 시점에 빌드 깨질 수 있어 Node 24 지원 메이저로 일괄 상향.
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -39,7 +41,7 @@ jobs:
         run: python scripts/harness_verify.py --ci
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
 
@@ -240,7 +242,7 @@ jobs:
         shell: cmd
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "Vibe Coding ${{ steps.version.outputs.tag }}"
