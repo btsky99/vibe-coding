@@ -276,18 +276,6 @@ def cmd_codex(args):
     return 0
 
 
-def cmd_sync(args):
-    """구글 드라이브 동기화 관리"""
-    import subprocess
-    script_path = _SCRIPT_DIR / "sync_manager.py"
-    if not script_path.exists():
-        print("[vibe] sync_manager.py 파일을 찾을 수 없습니다.")
-        return 1
-    
-    # args.sync_action을 sync_manager.py의 인자로 전달
-    cmd = [sys.executable, str(script_path), args.sync_action]
-    return subprocess.run(cmd).returncode
-
 def main():
     parser = argparse.ArgumentParser(
         prog='vibe', 
@@ -297,10 +285,9 @@ def main():
     parser.add_argument('--agent', '-a', help='에이전트 이름')
     subparsers = parser.add_subparsers(dest='command', help='명령어')
 
-    # ... 기존 서브커맨드들 ...
-    # sync
-    p_sync = subparsers.add_parser('sync', help='구글 드라이브 동기화 관리')
-    p_sync.add_argument('sync_action', choices=['setup', 'status'], help='동작 선택 (setup: 연동 설정, status: 상태 확인)')
+    # [정리] vibe sync(Junction 방식)는 제거됨 — 옵시디언 2벌 저장 설계(각 PC 로컬 +
+    # 구글드라이브 비파괴 미러)와 정면 충돌. 실제 동기화는 daemons.py run_zettel_sync가
+    # 전담한다: PG↔로컬 vault 양방향(60초) + 로컬→GDrive mirror_vault(120초).
 
     # notify, set-progress, clear-progress, set-status, clear-status, log, clear-log, sidebar-state
     p_notify = subparsers.add_parser('notify', help='알림 전송')
@@ -348,7 +335,6 @@ def main():
         'notify': cmd_notify, 'set-progress': cmd_set_progress, 'clear-progress': cmd_clear_progress,
         'set-status': cmd_set_status, 'clear-status': cmd_clear_status, 'log': cmd_log,
         'clear-log': cmd_clear_log, 'sidebar-state': cmd_sidebar_state, 'codex': cmd_codex,
-        'sync': cmd_sync
     }
 
     handler = cmds.get(args.command)
