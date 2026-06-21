@@ -7,9 +7,11 @@ DESCRIPTION: Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+�
              (원본은 저장소에서 버전 관리 — 어느 PC에서든 설치 가능하게 하기 위함)
 
 REVISION HISTORY:
-- 2026-06-21 Claude: Braille 스파크라인(⣀⣤⣶⣿) + 위치별 그라데이션 색(사용자 선택/요청).
-                     칸 위치 누적%로 녹→황→적 칠해 화려함+위험구간 가시화. 빈칸은 ⣀ dim baseline.
-                     (도트 ●◐○ → Braille로 재교체: 사용자 미리보기 비교 후 Braille 선택)
+- 2026-06-21 Claude: 히트맵 박스 그리드(■/□)로 최종 확정 — 사용자가 스크린샷으로 지정.
+                     칸마다 위치별 색이 녹→노랑→빨강(256색 HEAT 램프)으로 변하고 0%에서도
+                     색 스케일이 항상 보임. 채움 ■/빈 □으로 사용량. 라인1·2 같은 바 → 2행
+                     그리드처럼 크게(이전 "너무 작다" 해결). (Braille → 박스 재교체)
+- 2026-06-21 Claude: Braille 스파크라인(⣀⣤⣶⣿) + 위치별 그라데이션 색(중간본, 박스로 교체됨).
 - 2026-06-21 Claude: 도트 그래프(●◐○)로 교체 — 가로 부분 블록이 폰트 따라 렌더 실패해
                      "안 뜬다/안 이쁘다" 피드백. 이전 v3.4.3 도트 스타일 복원 시도.
                      (후속: 사용자가 Braille 스파크라인 선택해 재교체)
@@ -47,58 +49,36 @@ FG_MAGENTA = "\033[95m"
 FG_BLUE    = "\033[94m"
 FG_GRAY    = "\033[90m"
 
-# [WHY] Braille 스파크라인(사용자 선택) — 폰트에서 잘 렌더되고 가장 '그래프'다움.
-# 가로 부분 블록(▏▎▍)·원형 도트(●○)는 폰트/취향 문제로 반려됨. Braille는 한 칸을
-# 아래→위 4단계로 채울 수 있어(⣀⣤⣶⣿) 적은 사용량도 첫 칸이 차오르는 게 보인다.
-# 빈 칸은 baseline ⣀를 dim 처리 → 그래프 가로축처럼 보이게(빈 네모보다 덜 휑함).
-FILL_LEVELS = ("⣀", "⣤", "⣶", "⣿")   # 1/4·2/4·3/4·4/4 (아래→위 채움)
-EMPTY_GLYPH = "⣀"                       # 빈 칸 baseline (dim)
+# [WHY] 히트맵 박스 그리드(사용자가 스크린샷으로 지정한 최종 스타일).
+# 칸마다 '위치별' 색이 녹색→노랑→빨강으로 변하고(아래 HEAT 256색 램프), 이 색 스케일은
+# 사용량 0%에서도 항상 보인다. 채움 ■ / 빈칸 □ 으로 사용량을 표시 — 색은 위치, 모양은 채움.
+# 2줄(라인1·라인2) 모두 같은 바를 그려 2행 그리드처럼 크고 읽기 쉽게(이전 "너무 작다" 해결).
+# [참고] ■□ 글리프는 사용자 터미널 폰트에서 렌더 확인됨(스크린샷). 256색은 터미널 지원 전제.
+HEAT = [46, 82, 118, 154, 190, 226, 220, 214, 208, 196]   # 녹→연두→노랑→주황→빨강
+DOT_FILLED = "■"
+DOT_EMPTY  = "□"
 
-GRID_SIZE = 10          # 칸 10개 × 4단계 = 40스텝(2.5% 단위)
+GRID_SIZE = 10          # 칸 10개 — 각 10%, HEAT 길이와 일치
 
 
-def _cells(used_pct: float):
-    """각 칸을 (채워짐?, 글리프)로. 채움은 아래→위 4단계로 양자화."""
+def _fg256(n: int) -> str:
+    return f"\033[38;5;{n}m"
+
+
+def render_bar(used_pct: float) -> str:
+    """히트맵 박스 바(색 포함). 칸 색=위치별 HEAT 램프(항상 표시), 모양=채움 여부."""
     pct = max(0.0, min(100.0, used_pct))
-    filled = pct / 100.0 * GRID_SIZE            # 채워질 칸 수(소수)
-    out = []
-    for i in range(GRID_SIZE):
-        level = filled - i                      # 이 칸이 얼마나 찼나 (0~1+)
-        if level <= 0.0:
-            out.append((False, EMPTY_GLYPH))
-        else:
-            h = min(4, max(1, int(round(level * 4))))   # 1..4 단계
-            out.append((True, FILL_LEVELS[h - 1]))
-    return out
-
-
-def build_bar(used_pct: float) -> str:
-    """색 없는 plain 바(공백 구분) — 들여쓰기 폭 계산용."""
-    return " ".join(g for _, g in _cells(used_pct))
-
-
-def _cell_color(cell_pct: float) -> str:
-    """칸 '위치'(누적 %)별 색 — 그라데이션. 60%↓ 녹 · 80%↓ 황 · 이상 적."""
-    if cell_pct <= 60:
-        return FG_GREEN
-    if cell_pct <= 80:
-        return FG_YELLOW
-    return FG_RED
-
-
-def colorize_bar(used_pct: float) -> str:
-    """[WHY] 단색 대신 칸 위치별 그라데이션 — 채워질수록 녹→황→적으로 변해 더 화려하고
-    위험 구간이 색으로 드러남(사용자 '색상 추가' 요청). 빈 칸은 dim 회색 baseline."""
-    cells = _cells(used_pct)
-    n = len(cells)
+    filled_count = int(pct / 100.0 * GRID_SIZE + 0.5)       # 채워진 칸 수(반올림)
     parts = []
-    for i, (is_filled, g) in enumerate(cells):
-        if not is_filled:
-            parts.append(f"{FG_GRAY}{g}")
-        else:
-            cell_pct = (i + 1) / n * 100.0      # 이 칸이 대표하는 누적 %
-            parts.append(f"{_cell_color(cell_pct)}{g}")
+    for i in range(GRID_SIZE):
+        glyph = DOT_FILLED if i < filled_count else DOT_EMPTY
+        parts.append(f"{_fg256(HEAT[i])}{glyph}")
     return " ".join(parts) + RESET
+
+
+def bar_width() -> int:
+    """바의 표시 폭(칸+공백) — 라인2 정렬/길이 계산용. 색 코드는 폭에 안 들어감."""
+    return GRID_SIZE * 2 - 1
 
 
 def format_tokens(n: int) -> str:
@@ -152,20 +132,15 @@ def main():
 
     model_display = get_model_display(data.get("model", {}))
 
-    # 라인 1: Braille 그래프(그라데이션) + 모델 + 토큰 — 예) ⣤ ⣀ ⣀ …  Opus 4.8 (1M) · 56.5k / 1M (6%)
-    plain_bar     = build_bar(used_pct)
-    bar_colored   = colorize_bar(used_pct)
+    # 라인 1·2: 같은 히트맵 바를 두 줄에 그려 2행 그리드처럼 크고 읽기 쉽게(사용자 지정 스타일).
+    # 색=칸 위치별 녹→황→적(항상 표시), 모양=사용량 채움(■/□). 두 줄 바 폭이 같아 세로 정렬됨.
+    bar = render_bar(used_pct)
     model_colored = f"{FG_CYAN}{BOLD}{model_display}{RESET}"
     token_info    = (f"{FG_WHITE}{format_tokens(used_tokens)} / {format_tokens(ctx_size)}{RESET}"
                      f" {DIM}({used_pct:.0f}%){RESET}")
-    line1 = f"{bar_colored}  {model_colored} {DIM}·{RESET} {token_info}"
+    line1 = f"{bar}  {model_colored} {DIM}·{RESET} {token_info}"
 
-    # 라인 2: 세션 누적 I/O — 라인1 텍스트 아래로 들여써 한 묶음으로 읽히게.
-    # [WHY] 과거의 마젠타 '출력/창 비율' 바는 의미가 모호해 가독성을 해쳤음 → 제거하고
-    # 바 표시 너비만큼 들여쓰기로 정렬 (2줄 구조 자체는 유지). 들여쓰기는 색 없는
-    # plain_bar 길이 기준 — ANSI 코드를 세지 않으려고.
-    indent = " " * (len(plain_bar) + 2)
-
+    # 라인 2: 같은 바 + 세션 누적 I/O.
     parts = []
     if total_input > 0:
         parts.append(f"{FG_GREEN}In{RESET} {FG_WHITE}{format_tokens(total_input)}{RESET}")
@@ -178,11 +153,9 @@ def main():
     if cache_read > 0:
         parts.append(f"{FG_GRAY}캐시재사용{RESET} {FG_WHITE}{format_tokens(cache_read)}{RESET}")
 
-    if parts:
-        sep = f"  {DIM}·{RESET}  "
-        line2 = f"{indent}{sep.join(parts)}"
-    else:
-        line2 = f"{indent}{DIM}No usage data yet{RESET}"
+    sep = f"  {DIM}·{RESET}  "
+    tail = sep.join(parts) if parts else f"{DIM}No usage data yet{RESET}"
+    line2 = f"{bar}  {tail}"
 
     print(line1)
     print(line2)
