@@ -123,6 +123,16 @@ function App() {
   // ─── 파일 목록 강제 새로고침 트리거 (헤더 새로고침 버튼 → FileExplorer) ──
   const [fileRefreshKey, setFileRefreshKey] = useState(0);
 
+  // [2026-06-21] 설치본 빈-패널 사고 대응 — 백엔드가 활성 프로젝트를 못 잡으면(project_unresolved)
+  // 하이브/제텔/태스크가 phantom project_id로 0건 조회된다. 그 상태를 배너로 노출해 폴더 선택을 유도.
+  const [projectUnresolved, setProjectUnresolved] = useState(false);
+  useEffect(() => {
+    fetch(`${API_BASE}/api/config`)
+      .then(r => r.json())
+      .then(cfg => setProjectUnresolved(!!cfg?.project_unresolved))
+      .catch(() => { /* 서버 미실행 시 무시 */ });
+  }, [currentPath]);
+
   // 사이드바 드래그 리사이즈 — document 전역 이벤트로 처리
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -423,6 +433,19 @@ function App() {
         onSwitchProject={(path) => setCurrentPath(path)}
         ptySessionsSummary={vibe.ptySessionsSummary}
       />
+
+      {/* ── 프로젝트 미해석 배너 — 설치본이 활성 프로젝트를 못 잡았을 때 폴더 선택 유도 ── */}
+      {projectUnresolved && (
+        <div className="flex items-center gap-3 px-4 py-2 text-[12px] bg-amber-900/40 border-b border-amber-700/50 text-amber-200">
+          <span>⚠️ 활성 프로젝트가 설정되지 않아 하이브/제텔/태스크가 비어 보입니다.</span>
+          <button
+            onClick={openFolder}
+            className="px-2 py-0.5 rounded bg-amber-700/60 hover:bg-amber-600 text-amber-50"
+          >
+            프로젝트 폴더 선택
+          </button>
+        </div>
+      )}
 
       {/* ── Setup Doctor 배너 — 미완료 설정 항목이 있을 때만 표시 ── */}
       <SetupBanner onNavigate={(tab) => setActiveTab(tab)} />
