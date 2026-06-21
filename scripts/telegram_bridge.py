@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 FILE: scripts/telegram_bridge.py
 DESCRIPTION: Telegram Multi-Bot Bridge — 터미널당 독립 봇 + 그룹채팅 협업.
@@ -106,8 +106,12 @@ try:
 except ImportError:
     pass
 
-SERVER_PORT: int = int(os.environ.get("VIBE_SERVER_PORT", "9000"))
-PTY_PORT: int = int(os.environ.get("PTY_PORT", "9001"))  # Node PTY 서버 포트
+# [2026-06-21] 무상태 IO/포맷 헬퍼는 telegram_helpers.py로 분리 (1500줄 규칙 §2).
+# 가변 전역 상태(GROUP_CHAT_ID/TERMINAL_CLI_MAP 등)는 아래에 잔류.
+from telegram_helpers import (  # noqa: E402 — sys.path 삽입(위) 이후라야 import 가능
+    SERVER_PORT, PTY_PORT, AGENT_EMOJI, MSG_TYPE_EMOJI,
+    _get_emoji, _truncate, _api_get, _api_post, _pty_get, _pty_post, _filter_noise,
+)
 
 # ── 터미널별 기본 CLI 매핑 (서버에서 실제 정보 가져오기 실패 시 폴백) ──
 _DEFAULT_CLI_MAP = {
@@ -144,22 +148,6 @@ def _get_terminal_cli(tid: int) -> str:
 
 TERMINAL_CLI_MAP = _DEFAULT_CLI_MAP  # 초기값 (BotManager.load_bots()에서 동적 업데이트)
 
-# ── 에이전트 이모지 ──
-AGENT_EMOJI = {
-    "claude": "\U0001f916",   # 🤖
-    "antigravity": "\U0001f7e2",   # 🟢
-    "codex": "\U0001f535",    # 🔵
-    "user": "\U0001f464",     # 👤
-    "system": "\u2699\ufe0f", # ⚙️
-}
-
-MSG_TYPE_EMOJI = {
-    "info": "\u2139\ufe0f", "request": "\U0001f4cb",
-    "response": "\u2705", "alert": "\u26a0\ufe0f",
-    "summary": "\U0001f4dd", "handoff": "\U0001f91d",
-    "status": "\U0001f4e1", "broadcast": "\U0001f4e2",
-}
-
 # ── 그룹 채팅 ID ──
 GROUP_CHAT_ID: Optional[int] = None
 _group_str = os.environ.get("TELEGRAM_GROUP_CHAT_ID", "")
@@ -170,161 +158,6 @@ if _group_str:
         pass
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  유틸리티
-# ═══════════════════════════════════════════════════════════════════
-
-def _get_emoji(agent: str) -> str:
-    """에이전트 이름에서 이모지 반환"""
-    agent_lower = agent.lower().split(":")[0] if agent else "system"
-    return AGENT_EMOJI.get(agent_lower, "\U0001f916")
-
-
-def _truncate(text: str, max_len: int = 4000) -> str:
-    """텔레그램 메시지 길이 제한 (4096자 한도)"""
-    return text if len(text) <= max_len else text[:max_len] + "\n... (잘림)"
-
-
-def _api_get(path: str) -> Optional[dict]:
-    """서버 API GET 요청"""
-    import urllib.request
-    try:
-        url = f"http://127.0.0.1:{SERVER_PORT}{path}"
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-
-
-def _api_post(path: str, data: dict) -> Optional[dict]:
-    """서버 API POST 요청"""
-    import urllib.request
-    try:
-        url = f"http://127.0.0.1:{SERVER_PORT}{path}"
-        body = json.dumps(data).encode("utf-8")
-        req = urllib.request.Request(url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-
-
-def _pty_get(path: str) -> Optional[dict]:
-    """Node PTY server API GET."""
-    import urllib.request
-    try:
-        url = f"http://127.0.0.1:{PTY_PORT}{path}"
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-
-
-def _pty_post(path: str, data: dict) -> Optional[dict]:
-    """Node PTY server API POST."""
-    import urllib.request
-    try:
-        url = f"http://127.0.0.1:{PTY_PORT}{path}"
-        body = json.dumps(data).encode("utf-8")
-        req = urllib.request.Request(url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-
-
-def _filter_noise(text: str) -> str:
-    """PTY 출력에서 노이즈 패턴 제거.
-
-    Claude Code 스피너/상태 표시줄, MCP 로그, 디버그 메시지 등
-    텔레그램에 전달할 필요 없는 터미널 아티팩트를 모두 제거한다.
-    """
-    import re
-
-    # Claude Code 스피너 단어 목록 (상태 표시줄에 랜덤으로 표시되는 단어들)
-    _SPINNER_WORDS = (
-        "Gallivanting", "Thinking", "Pondering", "Reasoning",
-        "Considering", "Analyzing", "Processing", "Computing",
-        "Reflecting", "Cogitating", "Deliberating", "Contemplating",
-        "Musing", "Ruminating", "Brainstorming", "Evaluating",
-        "Synthesizing", "Formulating", "Deducing", "Inferring",
-    )
-
-    # 유니코드 스피너 문자 + 단어 + "…" 패턴
-    _spinner_re = re.compile(
-        r'^[\s\u00b7\u2022\u2726\u2727\u273b\u273c\u273d\u2736\u25cf\u25cb\u2735\u2733\u2734]*'
-        r'(?:' + '|'.join(_SPINNER_WORDS) + r')\u2026'
-    )
-
-    # Claude Code 하단 상태 표시줄 관련 패턴
-    _statusbar_re = re.compile(
-        r'(?:Opus|Sonnet|Haiku|Claude)\s*\d[\d.]*.*tokens|'   # "Opus 4.6 … tokens"
-        r'bypass\s+permissions|'                                # "bypass permissions on"
-        r'\u26f6|'                                              # ⛶
-        r'\u23f5\u23f5|'                                        # ⏵⏵
-        r'^\s*\d{1,5}\s*$|'                                     # 단독 숫자 (시퀀스 번호)
-        r'^\s*[\u2500-\u257f]{10,}'                             # 긴 구분선 (────…)
-    )
-
-    # 터미널 제목 시퀀스 (0;…)
-    _title_re = re.compile(r'^0;')
-    _ansi_escape_re = re.compile(
-        r'\x1b(?:'
-        r'\[[0-?]*[ -/]*[@-~]'
-        r'|\][^\x07\x1b]*(?:\x07|\x1b\\)'
-        r'|[@-Z\\-_]'
-        r')'
-    )
-    _codex_noise_re = re.compile(
-        r'^(?:'
-        r'Working(?:\s*\(\d+s\s+esc to interrupt\))?'
-        r'|Wor(?:k(?:i(?:n(?:g\d*)?)?)?)?'
-        r'|gpt-[\w.\-]+\s+\w+\s+\d+%\s+left\s+.+'
-        r'|\d+;\s*vibe-coding'
-        r')\s*$',
-        re.IGNORECASE,
-    )
-
-    lines = []
-    for line in text.splitlines():
-        stripped = _ansi_escape_re.sub('', line).strip()
-        if not stripped:
-            continue
-        # 기존 prefix 필터
-        if any(stripped.startswith(p) for p in (
-            "Loaded cached credentials",
-            "Registering notification handlers",
-            "Server '", "Scheduling MCP",
-            "Executing MCP", "MCP context refresh",
-            "Created execution plan for",
-            "Expanding hook command:",
-            "Hook execution for",
-            "ClearcutLogger:", "Error flushing log events",
-            "Session ID:", "Loading extension:",
-            "[DEBUG]",
-            "(running stop hooks",
-            "(running start hooks",
-        )):
-            continue
-        # 스피너 패턴 (Gallivanting…, Thinking… 등)
-        if _spinner_re.match(stripped):
-            continue
-        # 상태 표시줄 패턴 (토큰 정보, bypass, 구분선 등)
-        if _statusbar_re.search(stripped):
-            continue
-        # 터미널 제목 시퀀스 (0;⠂ Korean greeting conversation 등)
-        if _title_re.match(stripped):
-            continue
-        if stripped == "Find and fix a bug in @filename" or _codex_noise_re.match(stripped):
-            continue
-        # ANSI 이스케이프 제거 후 빈 줄이면 스킵
-        clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', stripped)
-        if not clean.strip():
-            continue
-        lines.append(clean)
-    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════════
