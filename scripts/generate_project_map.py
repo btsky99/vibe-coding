@@ -95,8 +95,6 @@ FILE_DESCRIPTIONS = {
 
     # ── scripts/ 통신 ──
     "scripts/itcp.py": "PostgreSQL pg_messages 기반 ITCP 프로토콜",
-    "scripts/vibe_mux.py": "cmux-style Named Pipe 멀티플렉서 서버",
-    "scripts/vibe_mux_agent.py": "터미널별 MUX 에이전트 수신/실행 루프",
     "scripts/send_message.py": "ITCP 기반 터미널 간 메시지 전송 CLI",
     # ── scripts/ 검증/가드 ──
     "scripts/safety_guard.py": "Bounded Autonomy 위험 명령 탐지 (60+ 패턴)",
@@ -284,12 +282,12 @@ def generate():
         "하이브/협업": ["orchestrator.py", "hive_debate.py", "hive_bridge.py",
                         "memory.py", "worktree_manager.py", "generate_hivemind_doc.py", "analyze_hive.py"],
         "훅/이벤트": ["hive_hook.py", "hook_bridge.py", "claude_hook.py", "antigravity_hook.py"],
-        "통신/ITCP": ["itcp.py", "vibe_mux.py", "vibe_mux_agent.py", "send_message.py"],
+        "통신/ITCP": ["itcp.py", "send_message.py"],
         "검증/가드": ["safety_guard.py", "completion_guard.py", "drift_detector.py",
                       "plan_validator.py", "rules_validator.py"],
         "스킬 관리": ["skill_orchestrator.py", "skill_manager.py", "skill_analyzer.py",
                       "skill_predictor.py", "skill_ab_test.py"],
-        "모니터링": ["hive_watchdog.py", "claude_watchdog.py", "heal_daemon.py"],
+        "모니터링": ["hive_watchdog.py", "claude_watchdog.py"],
         "유틸리티": ["vibe_cli.py", "task.py", "auto_version.py", "auto_release.py",
                      "lock_manager.py", "osc_parser.py", "git_visualizer.py", "screenshot_analyzer.py",
                      "generate_project_map.py"],

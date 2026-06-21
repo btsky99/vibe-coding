@@ -466,10 +466,6 @@ _current_run: dict = {}                            # 현재 실행 중인 태스
 _status_lock = threading.Lock()                    # 상태 동시 접근 보호 락
 _was_stopped = False                               # stop() 호출 여부 추적 플래그
 
-# ─── MUX 에이전트 자동 등록 상태 (P6 Task 35) ────────────────────────────────
-# 터미널별로 MUX 에이전트가 한 번만 등록되도록 추적합니다.
-_mux_registered_terminals: set = set()
-
 # ─── 터미널별 독립 상태 추적 (T1~T8) ─────────────────────────────────────────
 # 각 터미널이 독립적으로 에이전트를 실행할 수 있도록 상태를 분리합니다.
 # 상황판(AgentPanel 상황판 탭)이 이 데이터를 폴링하여 8개 카드를 렌더링합니다.
@@ -752,20 +748,6 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
             prepared_task += "\n\n[Likely target files]\n" + "\n".join(f"- {item}" for item in rel_targets)
         codex_locked_files, lock_messages = _acquire_codex_locks(codex_target_files)
         codex_guard_lines.extend(lock_messages)
-
-    # ── MUX 에이전트 자동 등록 (P6 Task 35) ────────────────────────────────
-    # [설계 의도] 터미널별로 한 번만 MUX에 등록하여, 외부에서 send_text로
-    # 이 터미널에 명령을 주입할 수 있게 합니다.
-    # cli_agent.run()이 호출될 때마다 MUX 등록 여부를 확인하고,
-    # 미등록이면 vibe_mux_agent.start_mux_agent()를 백그라운드로 시작합니다.
-    if terminal_id and terminal_id not in _mux_registered_terminals:
-        try:
-            from vibe_mux_agent import start_mux_agent
-            start_mux_agent(terminal_id, cli)
-            _mux_registered_terminals.add(terminal_id)
-        except Exception as _mux_err:
-            # MUX 등록 실패해도 원래 작업은 계속 진행
-            pass
 
     # 전역 상태 업데이트 (단일 실행 추적용 — 하위 호환)
     now_ts = datetime.now().isoformat()

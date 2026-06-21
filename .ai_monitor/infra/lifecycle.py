@@ -48,7 +48,7 @@ def cleanup_child_procs(child_procs: list, ws_port: int) -> None:
     """child_procs 목록에 등록된 모든 서브프로세스를 강제 종료합니다.
 
     Windows 환경에서 부모 프로세스가 os._exit(0)으로 종료돼도
-    자식 프로세스(hive_watchdog, heal_daemon, telegram_bridge 등)는
+    자식 프로세스(hive_watchdog, telegram_bridge 등)는
     자동으로 죽지 않아 좀비로 남습니다.
     'taskkill /F /T /PID'로 프로세스 트리 전체를 강제 종료합니다.
 

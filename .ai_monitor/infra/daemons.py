@@ -133,28 +133,6 @@ def run_telegram_bridge(env: DaemonEnv) -> None:
         pass
     print(f"[*] Telegram Bridge 자동 시작됨 (PID={proc.pid})")
 
-def run_heal_daemon(env: DaemonEnv) -> None:
-    if not env.scripts_dir:
-        return
-    heal_script = env.scripts_dir / "heal_daemon.py"
-    if heal_script.exists():
-        _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-        if not _python_cmds:
-            print("[!] run_heal_daemon: Python 인터프리터를 찾을 수 없어 힐데몬 스킵")
-            return
-        python_exe = _python_cmds[0]
-        proc = subprocess.Popen(
-            [python_exe, str(heal_script), "--interval", "300"],
-            cwd=str(env.project_root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding='utf-8',
-            errors='replace',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-        )
-        env.child_procs.append(proc)
-        print("[*] 자기치유 데몬(heal_daemon) 자동 시작됨")
-
 def run_codex_pg_watcher(env: DaemonEnv) -> None:
     if not env.scripts_dir:
         return
@@ -314,26 +292,6 @@ def agent_sync_daemon(agent_status: dict, agent_status_lock: threading.Lock) -> 
                 pass
         except Exception:
             pass
-
-def run_mux_server(env: DaemonEnv) -> None:
-    if not env.scripts_dir:
-        return
-    mux_script = env.scripts_dir / "vibe_mux.py"
-    if mux_script.exists():
-        _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-        if not _python_cmds:
-            print("[!] run_mux_server: Python 인터프리터를 찾을 수 없어 MUX 서버 스킵")
-            return
-        python_exe = _python_cmds[0]
-        proc = subprocess.Popen(
-            [python_exe, str(mux_script), "server"],
-            cwd=str(env.project_root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-        )
-        env.child_procs.append(proc)
-        print("[*] MUX 서버(vibe_mux) 자동 시작됨 — Named Pipe: \\\\.\\pipe\\vibe-mux")
 
 # ── 제텔카스텐 Vault 동기화 데몬 (DB ↔ Obsidian 60초 주기) ────────────
 def run_zettel_sync(env: DaemonEnv) -> None:

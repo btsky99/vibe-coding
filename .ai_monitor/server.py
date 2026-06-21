@@ -65,7 +65,7 @@ REVISION HISTORY:
 #   - ensure_postgres_running(): 배포 버전 최초 실행 시 initdb + pg_ctl start 자동 수행
 #   - 서버 기동 시 ensure_postgres_running() 호출하여 PG 자동 초기화/시작
 # [2026-03-11] - Claude (frozen EXE 무한 창 생성 버그 수정 v3.7.47)
-#   - run_watchdog/run_telegram_bridge/run_heal_daemon: sys.executable → _python_runner_cmds()[0]
+#   - run_watchdog/run_telegram_bridge 등: sys.executable → _python_runner_cmds()[0]
 #   - frozen 모드에서 sys.executable = EXE 자신이므로 subprocess 실행 시 EXE가 무한 재귀 생성되던 버그
 #   - Python 인터프리터 미탐색 시 해당 데몬 스킵(경고 출력)
 # [2026-03-08] - Claude (칸반 네이티브 창 실행 API 추가)
@@ -1110,70 +1110,9 @@ def _restore_agent_status_from_db():
 # (모듈 로드 시점에는 PostgreSQL이 아직 기동 중일 수 있음)
 
 
-# ── MUX API 핸들러 — cmux-style 터미널 멀티플렉서 REST 인터페이스 ────────────
-# [2026-03-18] Claude: P6 Task 34 — vibe_mux Named Pipe 서버에 대한 HTTP 래퍼.
-# 대시보드(프론트엔드)가 REST API로 MUX 명령을 보내면, 여기서 Named Pipe를 통해
-# vibe_mux 서버에 전달합니다. MUX 서버 미실행 시 에러를 반환합니다.
-
-def _handle_mux_terminals_get(handler):
-    """GET /api/mux/terminals — 활성 터미널 목록 조회."""
-    try:
-        sys.path.insert(0, str(PROJECT_ROOT / 'scripts'))
-        from vibe_mux import list_terminals
-        result = list_terminals()
-        _send_json_response(handler, result)
-    except Exception as e:
-        _send_json_response(handler, {'ok': False, 'error': f'MUX 서버 연결 실패: {e}'}, status=503)
-
-
-def _handle_mux_send_text(handler, body):
-    """POST /api/mux/send-text — 터미널에 텍스트 전송.
-
-    [요청 본문] {"terminal": "T2", "text": "보안 점검해줘"}
-    [응답] {"ok": true, "result": {"terminal": "T2", "sent": true}}
-    """
-    try:
-        sys.path.insert(0, str(PROJECT_ROOT / 'scripts'))
-        from vibe_mux import send_text
-        terminal = body.get('terminal', '')
-        text = body.get('text', '')
-        from_agent = body.get('from', 'mux')
-        metadata = body.get('metadata', {})
-        if not terminal or not text:
-            _send_json_response(handler, {'ok': False, 'error': 'terminal과 text 필수'}, status=400)
-            return
-        result = send_text(
-            terminal,
-            text,
-            from_agent=str(from_agent or 'mux'),
-            metadata=metadata if isinstance(metadata, dict) else {},
-        )
-        _send_json_response(handler, result)
-    except Exception as e:
-        _send_json_response(handler, {'ok': False, 'error': f'MUX 전송 실패: {e}'}, status=503)
-
-
-def _handle_mux_send_key(handler, body):
-    """POST /api/mux/send-key — 터미널에 특수 키 전송.
-
-    [요청 본문] {"terminal": "T2", "key": "enter"}
-    """
-    try:
-        sys.path.insert(0, str(PROJECT_ROOT / 'scripts'))
-        from vibe_mux import _send_to_mux
-        terminal = body.get('terminal', '')
-        key = body.get('key', '')
-        if not terminal or not key:
-            _send_json_response(handler, {'ok': False, 'error': 'terminal과 key 필수'}, status=400)
-            return
-        result = _send_to_mux({
-            'id': f'api-mux-key',
-            'method': 'surface.send_key',
-            'params': {'terminal': terminal, 'key': key},
-        })
-        _send_json_response(handler, result)
-    except Exception as e:
-        _send_json_response(handler, {'ok': False, 'error': f'MUX 키 전송 실패: {e}'}, status=503)
+# [2026-06-21] Claude: vibe_mux(Named Pipe 터미널 멀티플렉서) 전면 제거.
+# 프론트/백엔드 어디서도 /api/mux/* 를 소비하지 않는 미사용 계층이었음.
+# 에이전트 간 메시징은 itcp(pg_messages) 단일 경로로 통일.
 
 
 def _send_json_response(handler, data, status=200):
@@ -1766,10 +1705,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             vibe_api.handle_sidebar_state(self)
         elif parsed_path.path == '/api/vibe/notifications':
             vibe_api.handle_notifications(self)
-
-        # ── [모듈 위임] MUX API — /api/mux/* (cmux-style 터미널 멀티플렉서) ──
-        elif parsed_path.path == '/api/mux/terminals':
-            _handle_mux_terminals_get(self)
 
         # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
         elif parsed_path.path.startswith('/api/agent/'):
@@ -3023,12 +2958,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             vibe_api.handle_log(self, method='POST')
         elif parsed_path.path == '/api/vibe/log/clear':
             vibe_api.handle_log(self, method='DELETE')
-
-        # ── [모듈 위임 - POST] MUX API — /api/mux/* (cmux-style 텍스트 주입) ──
-        elif parsed_path.path == '/api/mux/send-text':
-            _handle_mux_send_text(self, _body)
-        elif parsed_path.path == '/api/mux/send-key':
-            _handle_mux_send_key(self, _body)
 
         # ── [모듈 위임 - POST] agent_api — /api/agent/run, /api/agent/stop ─
         elif parsed_path.path.startswith('/api/agent/'):
@@ -4393,9 +4322,6 @@ def main():
     def run_telegram_bridge():
         _daemons.run_telegram_bridge(_daemon_env())
 
-    def run_heal_daemon():
-        _daemons.run_heal_daemon(_daemon_env())
-
     def run_codex_pg_watcher():
         _daemons.run_codex_pg_watcher(_daemon_env())
 
@@ -4407,9 +4333,6 @@ def main():
 
     def _agent_sync_daemon():
         _daemons.agent_sync_daemon(AGENT_STATUS, AGENT_STATUS_LOCK)
-
-    def run_mux_server():
-        _daemons.run_mux_server(_daemon_env())
 
     def run_zettel_sync():
         _daemons.run_zettel_sync(_daemon_env())
@@ -4531,7 +4454,6 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             MemoryWatcher(PROJECT_ID).start()
             threading.Thread(target=run_watchdog, daemon=True).start()
             threading.Thread(target=run_telegram_bridge, daemon=True).start()
-            threading.Thread(target=run_heal_daemon, daemon=True).start()
             threading.Thread(target=run_codex_pg_watcher, daemon=True,
                              name='CodexPGWatcher').start()
             threading.Thread(target=run_orchestrator_daemon, daemon=True,
@@ -4540,7 +4462,6 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
                              name='DocGeneratorsDaemon').start()
             threading.Thread(target=_agent_sync_daemon, daemon=True,
                              name='AgentSyncDaemon').start()
-            threading.Thread(target=run_mux_server, daemon=True).start()
             threading.Thread(target=run_zettel_sync, daemon=True,
                              name='ZettelSync').start()
             threading.Thread(target=run_zettel_refine, daemon=True,
