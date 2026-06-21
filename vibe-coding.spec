@@ -102,12 +102,16 @@ a = Analysis(
         # 버전 정보 파일 — frozen 모드에서 server.py가 MEIPASS 루트에서 import함
         # 없으면 ImportError → __version__ = "0.0.0-unknown" → 상단 버전 미표시
         ('.ai_monitor/_version.py', '.'),
+        # [과거사고 v3.7.~240] updater.py 누락 → frozen에서 `from updater import` ImportError →
+        # 자동 업데이트(시작 루프 4053 + 수동 트리거 2016) 전부 조용히 무력화 = "업데이트 안 뜸".
+        # api/src/infra/_version과 동일하게 MEIPASS 루트에 소스를 실어야 sys.path(=MEIPASS) import 성공.
+        ('.ai_monitor/updater.py', '.'),
     ] + _fastembed_datas,
     # hive_hook이 사용하는 stdlib 모듈: server.py가 직접 import 하지 않는 것까지 명시 보강
     # (런타임 동적 import는 PyInstaller 정적 분석에서 누락 가능 → hook EXE 모드에서 ImportError 위험)
     # fastembed/onnxruntime/tokenizers: embed_service가 함수 내부 import — 회상 v2 필수
     hiddenimports=['websockets', 'winpty', 'urllib.request',
-                   'fastembed', 'onnxruntime', 'tokenizers'],
+                   'fastembed', 'onnxruntime', 'tokenizers', 'updater'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

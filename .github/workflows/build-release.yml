@@ -169,6 +169,7 @@ jobs:
             --add-data "infra;infra" \
             --add-data "pty-server;pty-server" \
             --add-data "_version.py;." \
+            --add-data "updater.py;." \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -177,6 +178,7 @@ jobs:
             --hidden-import winpty \
             --hidden-import psycopg2 \
             --hidden-import _version \
+            --hidden-import updater \
             --hidden-import fastembed \
             --hidden-import onnxruntime \
             --hidden-import tokenizers \
@@ -202,6 +204,7 @@ jobs:
             --add-data "infra;infra" \
             --add-data "pty-server;pty-server" \
             --add-data "_version.py;." \
+            --add-data "updater.py;." \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -210,6 +213,7 @@ jobs:
             --hidden-import winpty \
             --hidden-import psycopg2 \
             --hidden-import _version \
+            --hidden-import updater \
             --hidden-import fastembed \
             --hidden-import onnxruntime \
             --hidden-import tokenizers \
