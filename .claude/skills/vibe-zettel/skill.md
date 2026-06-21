@@ -40,7 +40,14 @@ python scripts/zettel_capture.py --mode decision --agent claude --data '{"contex
 
 ## 2. `refine [noteId]` — fleeting → permanent 승격
 
-지정한 노트를 분석하여 permanent로 승격합니다.
+> **🚨 저장소 역할 분리 (절대 규칙) — LLM이 올바로 저장하는 기준**
+> - **PG(PostgreSQL) = LLM의 작업기억 + 진실의 원천.** 세션 요약·로그·휘발성 기록은 전부 여기. fleeting으로 남긴다.
+> - **옵시디언(로컬+GDrive) = 사람이 읽는 "정제된 영구지식"만의 거울.** 진짜 지식만 올라간다.
+> - **세션 요약(`source_ref='session-summary'`)·머지 커밋 노트는 절대 permanent로 승격 금지 + 옵시디언 동기화 제외.** (PG에만 보존)
+> - 자동 승격 데몬(`run_zettel_refine`)도 이 노트들을 제외한다(daemons.py 가드). 수동 refine도 동일하게 금지.
+> - [과거사고 2026-06-21] refine가 fleeting 전부를 24h 후 무차별 승격 → 세션요약 411개가 영구지식·그래프 점령. PG 보존한 채 옵시디언서만 정리.
+
+지정한 노트를 분석하여 permanent로 승격합니다. **단, 위 역할 분리 규칙을 지킨다 — 실제 지식 가치가 있는 노트만 승격.**
 
 1. 현재 노트 내용 조회:
    ```bash
@@ -108,7 +115,7 @@ python scripts/zettel_sync.py --vault "I:/내 드라이브/obsidian/hive-zettel"
 ```
 
 vault 구조:
-- `fleeting/`, `literature/`, `permanent/` — 지식 노트 (자동 캡처)
+- `작업기록/`(fleeting), `참고문헌/`(literature), `영구지식/`(permanent), `_보관/`(archived) — 지식 노트 (자동 캡처)
 - `_project/{프로젝트명}/` — 프로젝트별 문서 (멀티 프로젝트 충돌 방지)
   - 루트 문서: 클로드/제미나이/코덱스 설정, 프로젝트 규칙, 구조 지도 등
   - `docs/` — API 명세서, 하네스 계약, 개발 가이드 등

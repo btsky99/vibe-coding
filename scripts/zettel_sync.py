@@ -263,6 +263,14 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
         include_archived=include_archived,
         limit=10000,
     )
+    # [2026-06-21] 역할 분리 — 휘발성 자동노트(세션 요약/머지 커밋)는 LLM 작업기억이라 PG에만 두고
+    # 사람용 옵시디언 볼트엔 동기화하지 않는다. (옵시디언 = 정제된 지식만, 그래프 오염 방지)
+    # PG에는 그대로 남아 회상/검색에 쓰임. [[project_installed_empty_panels]]
+    def _is_ephemeral(n) -> bool:
+        t = str(n.get('title', '') or '')
+        return (n.get('source_ref') == 'session-summary'
+                or t.startswith('세션 요약') or t.startswith('Merge '))
+    notes = [n for n in notes if not _is_ephemeral(n)]
     removed = _cleanup_stale_note_files(vault_dir, notes)
     if removed:
         print(f'[zettel_sync] 오래된 중복 노트 {removed}개 삭제')

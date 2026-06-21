@@ -414,6 +414,15 @@ def run_zettel_refine(env: DaemonEnv) -> None:
                 cutoff = now - timedelta(hours=24)
                 promoted = 0
                 for n in notes:
+                    # [2026-06-21] 휘발성 자동노트(세션 요약/머지 커밋 등)는 영구 승격 금지.
+                    # [근본사고] refine이 fleeting 전부를 24h 후 permanent로 끌어올려, 세션요약 수백 개가
+                    #   영구지식(옵시디언 그래프)을 점령하던 문제. LLM 작업기억은 PG에만 남기고(fleeting 유지),
+                    #   사람용 옵시디언 영구지식엔 진짜 지식만 올라가도록 분리한다. [[project_installed_empty_panels]]
+                    _title = str(n.get('title', '') or '')
+                    if n.get('source_ref') == 'session-summary' \
+                            or _title.startswith('세션 요약') \
+                            or _title.startswith('Merge '):
+                        continue
                     # created가 문자열이면 파싱
                     created = n.get('created_at') or n.get('created', '')
                     if isinstance(created, str):
