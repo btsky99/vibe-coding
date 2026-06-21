@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 12:57
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 13:47
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -47,7 +47,7 @@
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
 | `git_api.py` | 177 | Git 저장소 관리 API (/api/git/*) |
-| `hive_api.py` | 1175 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `hive_api.py` | 1181 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `memory_api.py` | 327 | 메모리/지식 저장소 API (/api/memory/*) |
 | `office_api.py` | 370 |  |
 | `office_proxy_api.py` | 229 |  |
@@ -197,7 +197,7 @@
 | `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 177 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
+| `statusline.py` | 184 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
 | `telegram_bridge.py` | 1455 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
@@ -295,4 +295,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-21 12:57
+> 자동 생성 완료: 2026-06-21 13:47
