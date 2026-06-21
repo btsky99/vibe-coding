@@ -812,6 +812,44 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
             "  '바이브 코딩처럼' 작업 가능"
         ),
     },
+    # ── 10단계: 상태줄 설치 (Claude Code 커스텀 상태줄 — PC 전역, 다른 PC 호환) ──────
+    {
+        "id": "statusline-install",
+        "agent": "Claude Code",
+        "category": "setup",
+        "description": "⑩ 상태줄 설치 — 컨텍스트 사용량 히트맵 박스 그래프(녹→황→적) + 모델/토큰/세션 I/O를 이 PC의 Claude Code 상태줄에 등록",
+        "prompt": (
+            "【대상】이 PC의 사용자 전역 설정(~/.claude) — 프로젝트가 아니라 PC(터미널) 단위\n\n"
+            "비이브 코딩 커스텀 상태줄을 이 PC에 깔아줘. 깔면 Claude Code 터미널에 컨텍스트\n"
+            "사용량 히트맵 박스 그래프(⛶→⛁, 녹→노랑→빨강 그라데이션)와 모델·토큰·세션 I/O가\n"
+            "표시돼. 개발버전이든 설치(EXE)버전이든 같은 ~/.claude를 읽어 둘 다 동일하게 보인다.\n\n"
+            "【권장 — install_statusline.py 사용】\n"
+            "수동으로 settings.json을 만지지 말고 비이브 코딩이 제공하는 스크립트를 호출해:\n"
+            "  python <비이브-코딩>/scripts/install_statusline.py\n"
+            "이 스크립트가 statusline.py를 ~/.claude로 복사 + settings.json의 statusLine 키를\n"
+            "멱등 머지(백업 포함)한다. dry-run으로 선검증: `--dry-run`, 기존 다른 상태줄 교체: `--force`.\n"
+            "※ --target 없음 — PC 전역 설치라 대상 프로젝트 경로가 필요 없다.\n\n"
+            "【진입점 자동 탐색 우선순위】\n"
+            "비이브 코딩 저장소 루트를 다음 순서로 찾아 그 안의 scripts/install_statusline.py 실행:\n"
+            "  (a) 환경변수 VIBE_HOME — 비이브 코딩 루트 직접 지정\n"
+            "  (b) PATH의 vibe-coding[.exe] 옆/부모/조부모에 scripts/ 있는지 확인\n"
+            "  (c) 표준 설치 경로 후보: C:/Program Files/vibe-coding/,\n"
+            "      %LOCALAPPDATA%/Programs/vibe-coding/, D:/vibe-coding/, C:/vibe-coding/\n"
+            "  (d) 모두 실패 시 중단 — 사용자에게 VIBE_HOME 설정 안내 (추측 금지)\n\n"
+            "【멱등/안전】\n"
+            "  - statusline.py는 항상 저장소 버전으로 덮어씀(원본=저장소)\n"
+            "  - settings.json statusLine: 없으면 추가, 우리 것이면 경로만 갱신,\n"
+            "    다른 커스텀이면 보존(--force로만 교체) — 사용자 설정 유실 금지\n"
+            "  - settings.json은 수정 전 .bak.YYYYMMDDHHmmss 백업\n\n"
+            "【검증 보고】\n"
+            "  - 사용한 vibe-coding 루트 (어떤 우선순위로 찾았는지)\n"
+            "  - ~/.claude/statusline.py 복사 여부 + settings.json statusLine 설정 여부\n"
+            "  - 다음 Claude Code 재시작(또는 다음 렌더)부터 상태줄이 표시된다는 안내\n\n"
+            "【원칙】\n"
+            "- 절대 경로를 직접 박지 말고 자동 탐색 결과 사용 (다른 PC 호환 — 바이브 코딩 본질)\n"
+            "- 256색 터미널 전제(Claude Code 터미널 지원). ⛶/⛁ 글리프가 깨지면 폰트 문제 안내"
+        ),
+    },
     # ── 규칙 파일 생성 (기존) ─────────────────────────────────────────
     {
         "id": "claude-rules",
