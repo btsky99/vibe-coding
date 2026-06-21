@@ -5,6 +5,7 @@ DESCRIPTION: 프로젝트의 행동 원칙(RULES.md) 준수 여부를 자동으�
 
 REVISION HISTORY:
 - 2026-03-06 Gemini: 최초 작성. 헤더 템플릿, 한글 주석 비중, PROJECT_MAP.md 업데이트 체크 기능 구현.
+- 2026-06-21 Claude: .bat 및 .cmd 스크립트 파일의 주석 스타일(rem, ::) 검증 추가.
 """
 
 import os
@@ -24,8 +25,10 @@ def check_header(content, file_path):
     # 확장자에 따른 주석 스타일 확인
     ext = os.path.splitext(file_path)[1]
     header_comment = False
-    if ext in ['.py', '.sh', '.bat']:
+    if ext in ['.py', '.sh']:
         header_comment = '"""' in content or "'''" in content or content.startswith('#')
+    elif ext in ['.bat', '.cmd']:
+        header_comment = 'rem' in content.lower() or '::' in content
     elif ext in ['.js', '.ts', '.tsx', '.css']:
         header_comment = '/*' in content
     elif ext in ['.md', '.html']:
