@@ -362,58 +362,64 @@ def handle_get(handler, path: str, params: dict,
         return True
 
     # ── /api/hive/activity ──────────────────────────────────────────────
-    # task_logs.jsonl에서 하이브 시스템 사용 이벤트만 필터링하여 반환.
-    # 대시보드 AgentPanel 하이브 탭에서 3초 폴링으로 사용.
+    # pg_logs에서 하이브 시스템 사용 이벤트만 분류하여 반환.
+    # 대시보드 TerminalSlot "하이브 상태" 위젯이 3초 폴링으로 사용.
+    # [과거사고] 2026-06-21까지 이 핸들러는 레거시 task_logs.jsonl을 읽었음.
+    #   해당 파일은 PostgreSQL-first 전환(CLAUDE.md 규칙4) 시점 2026-03-01에
+    #   기록이 끊겨 동결 → 위젯이 "오후 03:54"(=3월1일 마지막 이벤트, fmtTime이
+    #   날짜를 숨겨 착시)에 멈추고 memory_write 0건으로 "없음" 표시되는 버그.
+    #   진실의 원천인 pg_logs(실시간)로 교체.
     elif path == '/api/hive/activity':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
-            import re as _re
-            log_path = DATA_DIR / 'task_logs.jsonl'
+            from src.pg_base import query_rows
             hive_events = []
+            # [불변식] dict 삽입 순서 = 분류 우선순위. memory_read를 memory_write보다
+            #   먼저 둬야 '[하이브 컨텍스트] … current-work …'가 read로 잡힌다.
+            # [WHY] memory_write 키워드는 '/memory/'(메모리 .md 파일 경로) +
+            #   제텔/노트 생성으로 잡는다. 과거 키워드('메모리 저장' 등)는 실제
+            #   로그 문구와 불일치해 0건이었음(실측 2026-06-21). 'memory_api'는
+            #   '/memory/'와 안 겹쳐 코드 편집 오탐 없음.
             _HIVE_KEYWORDS = {
-                'memory_read':  ['하이브 컨텍스트', 'current-work', 'memory.py list', '하이브 컨텍스트 자동 로드'],
-                'memory_write': ['메모리 저장', '하이브 메모리', 'current-work 업데이트', '자동 저장', 'INSERT OR REPLACE'],
+                'memory_read':  ['하이브 컨텍스트', 'current-work', 'memory.py list'],
+                'memory_write': ['/memory/', '.zettel-vault', '노트 생성', '제텔', '지식 공유', 'hive_memory', 'zettel_notes', '메모리 저장', '하이브 메모리'],
                 'orchestrate':  ['오케스트레이션', '스킬 체인', 'vibe-orchestrate', 'skill_orchestrator', '스킬 실행'],
-                'message':      ['메시지 수신', '미읽음 메시지', '→ claude', '→ antigravity'],
-                'heal':         ['자기치유', 'heal', '스킬 자동 설치'],
-                'hive_ctx':     ['하이브 컨텍스트 자동 주입', '[하이브 컨텍스트]'],
-                'session':      ['세션 스냅샷', '응답 완료', '─── 응답 완료'],
+                'message':      ['메시지 수신', '미읽음 메시지', '메시지→', '→claude', '→antigravity'],
+                'heal':         ['자기치유', 'heal', '스킬 자동 설치', '인시던트'],
+                'session':      ['세션 스냅샷', '응답 완료', '세션 복구'],
             }
-            if log_path.exists():
-                with open(log_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                        except Exception:
-                            continue
-                        agent = entry.get('agent', '')
-                        task  = entry.get('task', '')
-                        ts    = entry.get('timestamp', '')
-                        if agent not in ('Hive', 'Claude', '사용자', 'Antigravity'):
-                            continue
-                        event_type = None
-                        for etype, keywords in _HIVE_KEYWORDS.items():
-                            if any(kw in task for kw in keywords):
-                                event_type = etype
-                                break
-                        if event_type is None and agent == 'Hive':
-                            event_type = 'hive_ctx'
-                        if event_type is None:
-                            continue
-                        hive_events.append({
-                            'timestamp': ts,
-                            'agent': agent,
-                            'type': event_type,
-                            'task': task[:200],
-                        })
-            hive_events = hive_events[-100:]
-            hive_events.reverse()
+            # 최근 2000건만 스캔(분류 후 100건 반환). pg_logs는 created_at DESC =
+            # 최신 우선 → 프론트의 acts.find()가 곧 최신 이벤트를 집는다(reverse 불필요).
+            rows = query_rows(
+                "SELECT created_at, agent, task FROM pg_logs "
+                "WHERE agent IN ('Hive', 'Claude', '사용자', 'Antigravity') "
+                "ORDER BY created_at DESC LIMIT 2000"
+            )
+            for entry in rows:
+                agent = entry.get('agent', '') or ''
+                task  = entry.get('task', '') or ''
+                ts    = entry.get('created_at', '')
+                ts    = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+                event_type = None
+                for etype, keywords in _HIVE_KEYWORDS.items():
+                    if any(kw in task for kw in keywords):
+                        event_type = etype
+                        break
+                if event_type is None and agent == 'Hive':
+                    event_type = 'hive_ctx'
+                if event_type is None:
+                    continue
+                hive_events.append({
+                    'timestamp': ts,
+                    'agent': agent,
+                    'type': event_type,
+                    'task': task[:200],
+                })
+                if len(hive_events) >= 100:
+                    break
             handler.wfile.write(json.dumps(hive_events, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
