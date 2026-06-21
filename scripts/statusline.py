@@ -55,9 +55,10 @@ FG_GRAY    = "\033[90m"
 # 2줄(라인1·라인2) 모두 같은 바를 그려 2행 그리드처럼 크고 읽기 쉽게(이전 "너무 작다" 해결).
 # [참고] ■□ 글리프는 사용자 터미널 폰트에서 렌더 확인됨(스크린샷). 256색은 터미널 지원 전제.
 HEAT = [46, 82, 118, 154, 190, 226, 220, 214, 208, 196]   # 녹→연두→노랑→주황→빨강
-# [사용자 지정] 글리프는 ⛶(네모서리 박스, 빈칸)·⛁(채움) — 스크린샷에서 직접 고름.
+# [사용자 지정] 글리프 ⛶(빈칸)·⛀(반칸)·⛁(채움) — 스크린샷에서 직접 고른 네모서리 박스 계열.
 # ■/□ 솔리드 사각형은 "스크린샷과 다르다"고 반려됨. ⛶는 원래 상태줄이 쓰던 글리프.
 DOT_FILLED = "⛁"
+DOT_HALF   = "⛀"
 DOT_EMPTY  = "⛶"
 
 GRID_SIZE = 10          # 칸 10개 — 각 10%, HEAT 길이와 일치
@@ -68,12 +69,21 @@ def _fg256(n: int) -> str:
 
 
 def render_bar(used_pct: float) -> str:
-    """히트맵 박스 바(색 포함). 칸 색=위치별 HEAT 램프(항상 표시), 모양=채움 여부."""
+    """히트맵 박스 바(색 포함). 칸 색=위치별 HEAT 램프(항상 표시), 모양=채움 단계.
+    [WHY] 1M 컨텍스트는 실사용이 보통 <5%(예: 2.1k=0.2%)라 '칸당 10% + 정수 채움'이면
+    한 칸도 안 차 "써도 변화 없음"으로 보였음. 반칸 ⛀ + 아주 민감한 임계값으로 조금만 써도
+    첫 칸이 켜지게: 0보다 크기만 하면 반칸, 칸 절반(5%) 넘으면 꽉 참. (칸당 2단계)"""
     pct = max(0.0, min(100.0, used_pct))
-    filled_count = int(pct / 100.0 * GRID_SIZE + 0.5)       # 채워진 칸 수(반올림)
+    filled = pct / 100.0 * GRID_SIZE            # 채워질 칸 수(소수)
     parts = []
     for i in range(GRID_SIZE):
-        glyph = DOT_FILLED if i < filled_count else DOT_EMPTY
+        level = filled - i                      # 이 칸이 얼마나 찼나 (0~1+)
+        if level >= 0.5:
+            glyph = DOT_FILLED
+        elif level > 0.0005:                    # 칸의 0.05%만 써도 반칸(2.1k/1M=0.2%도 보임)
+            glyph = DOT_HALF
+        else:
+            glyph = DOT_EMPTY
         parts.append(f"{_fg256(HEAT[i])}{glyph}")
     return " ".join(parts) + RESET
 
