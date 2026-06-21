@@ -9,9 +9,12 @@ REVISION HISTORY:
 - 2026-03-27 Codex: Codex 자동 라우팅, worktree 우선 경로, 오케스트레이터 Codex 포함 검증 추가
 """
 
+import importlib
 import sys
 import types
 from pathlib import Path
+
+import pytest
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -20,6 +23,25 @@ sys.path.insert(0, str(_PROJECT_ROOT / ".ai_monitor"))
 
 import cli_agent
 import orchestrator
+
+
+@pytest.fixture(autouse=True)
+def _use_real_modules(monkeypatch):
+    """[테스트 격리] test_agent_api.py가 sys.modules에 주입한 mock cli_agent 오염 차단.
+    이 파일 테스트는 실제 cli_agent/orchestrator가 필요한데, 컬렉션 순서상 mock이 먼저 들어와
+    모듈 전역이 MagicMock에 바인딩되던 문제(3건 실패). monkeypatch가 테스트 후 sys.modules를
+    원복하므로 다른 파일(특히 test_agent_api)에는 영향 없음."""
+    global cli_agent, orchestrator
+    for name in ("cli_agent", "orchestrator"):
+        mod = sys.modules.get(name)
+        if mod is None or not hasattr(mod, "__file__"):  # MagicMock엔 __file__ 없음
+            monkeypatch.delitem(sys.modules, name, raising=False)
+    real_ca = importlib.import_module("cli_agent")
+    real_orch = importlib.import_module("orchestrator")
+    monkeypatch.setitem(sys.modules, "cli_agent", real_ca)
+    monkeypatch.setitem(sys.modules, "orchestrator", real_orch)
+    cli_agent = real_ca
+    orchestrator = real_orch
 
 
 def test_route_task_with_reason_prefers_codex_for_narrow_test_work(monkeypatch):

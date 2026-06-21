@@ -254,6 +254,9 @@ class TestInteractiveStageCLIType:
         # _merge_live_file_status와 _detect_external_antigravity는 빈 결과 반환
         monkeypatch.setattr(agent_api, "_merge_live_file_status", lambda t: None)
         monkeypatch.setattr(agent_api, "_detect_external_antigravity", lambda: [])
+        # [테스트 격리] _merge_pty_heartbeats는 실제 agent_heartbeats(로컬 DB)를 읽어 cli를 덮으므로
+        # 모킹하지 않으면 stale 하트비트(codex:T3→antigravity)에 의존해 결과가 비결정적이 됨.
+        monkeypatch.setattr(agent_api, "_merge_pty_heartbeats", lambda t: None)
 
         handler = MagicMock()
         handler.wfile.write = MagicMock()
