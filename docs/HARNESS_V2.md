@@ -49,7 +49,7 @@ REVISION HISTORY:
 │  Layer 1: 컨텍스트 하네스 (Context Harness)               │
 │  ─ 에이전트가 현재 상황을 파악하는 데 필요한 모든 것         │
 │  ─ AGENTS.md, PROJECT_MAP.md, RULES.md                   │
-│  ─ feature_list.json, progress.md                        │
+│  ─ feature_list.json, HIVEMIND.md(자동)                  │
 │  ─ 세션 시작 프로토콜                                     │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 2: 검증 하네스 (Verification Harness)              │
@@ -139,32 +139,17 @@ Step 5: 다음 작업 선택
 - `passes`를 `true`로 변경하려면 **다른 에이전트의 평가**가 필요
 - `last_updated_by`가 `"human"`인 경우 구조 변경 금지
 
-### 1.3 Progress 파일 (진행 상황)
+### 1.3 진행 상황 추적 (progress.md 은퇴 — 2026-06-21)
 
-각 에이전트는 작업 완료 시 진행 상황을 기록한다.
+**[변경]** 과거에는 루트 `progress.md` 파일에 진행 상황을 수기로 기록했으나,
+**HIVEMIND.md(자동 생성) + PostgreSQL(pg_logs/hive_tasks/agent_heartbeats)** 가
+같은 역할을 더 정확히(실시간, 다중 에이전트) 수행하므로 progress.md는 폐기했다.
 
-**파일 위치:** `progress.md` (프로젝트 루트)
+- "어제 뭐 했지" 류 조회 → **DB 우선** (`scripts/analyze_hive.py`, `pg_logs`)
+- 세션 연속성/다음 세션 브리핑 → `active_session_context` + `scripts/checkpoint.py`
+- 진행 상황 스냅샷 문서 → `HIVEMIND.md` (자동 갱신)
 
-**형식:**
-```markdown
-# Progress
-
-## 최종 업데이트: 2026-03-30 14:30 by Claude
-
-### 완료된 작업
-- [F001] 터미널 실시간 모니터링 — 2026-03-30 Claude
-- [F002] 에이전트 상태 패널 — 2026-03-29 Gemini
-
-### 진행 중
-- [F003] 그룹 채팅 UI — Claude 작업 중 (세션 3회차)
-
-### 알려진 이슈
-- PostgreSQL 연결 풀 간헐적 타임아웃 (재현 조건 확인 필요)
-
-### 다음 세션 시작 시 참고사항
-- F003 작업 중 TerminalSlot.tsx:245에서 WebSocket 재연결 로직 수정 필요
-- vibe-view 빌드 시 `npm run build` 먼저 실행할 것
-```
+harness_verify의 `progress-stale` 검사와 itcp 부트스트랩의 progress 주입도 함께 제거됨.
 
 ---
 
@@ -280,7 +265,6 @@ Anthropic 블로그의 핵심 발견: "에이전트가 자신의 작업을 평�
 | `runtime-path-missing` | 핵심 스크립트 누락 | 파일 복구 |
 | `feature-list-missing` | feature_list.json 부재 | 파일 생성 |
 | `feature-list-schema` | feature_list.json 스키마 위반 | 스키마 수정 |
-| `progress-stale` | progress.md 3일 이상 미갱신 | 업데이트 |
 | `self-eval-detected` | Generator=Evaluator 동일 | 평가자 변경 |
 | `contract-missing` | 활성 작업에 스프린트 계약 없음 | 계약 작성 |
 
@@ -307,7 +291,7 @@ Anthropic 블로그의 핵심 발견: "에이전트가 자신의 작업을 평�
 | 단계 | 수행자 | 산출물 |
 |------|--------|--------|
 | PLAN | Gemini (또는 사람) | ai_monitor_plan.md + sprint_contract |
-| WORK | Claude / Codex | 코드 + git commit + progress.md 갱신 |
+| WORK | Claude / Codex | 코드 + git commit + DB 로그(pg_logs/checkpoint) |
 | REVIEW | 다른 에이전트 또는 harness_verify.py | feature_list.json 업데이트 |
 
 ### 3.2 에이전트 간 통신 (ITCP)
@@ -347,10 +331,10 @@ Generator (Claude)
 - 컨텍스트 리셋은 **2시간 이상 연속 작업** 시에만 고려
 
 **세션 전환 시 핸드오프:**
-1. `progress.md`에 현재 상태 기록
+1. `scripts/checkpoint.py`로 현재 상태/의도/다음 단계 기록 (DB)
 2. `feature_list.json` 갱신
 3. git commit으로 체크포인트 생성
-4. 다음 세션은 세션 시작 프로토콜로 시작
+4. 다음 세션은 세션 시작 프로토콜로 시작 (HIVEMIND.md + DB 브리핑)
 
 **컨텍스트 리셋이 필요한 신호:**
 - 같은 버그를 3회 이상 반복 시도
@@ -377,7 +361,6 @@ Generator (Claude)
 - [ ] 모든 P0 기능에 스프린트 계약이 있는가?
 - [ ] Generator ≠ Evaluator가 보장되는가?
 - [ ] `harness_verify.py`가 CI에서 실행되는가?
-- [ ] `progress.md`가 3일 이내에 갱신되었는가?
 - [ ] 세션 시작 프로토콜이 모든 에이전트에서 작동하는가?
 - [ ] ITCP를 통한 에이전트 간 통신이 정상인가?
 
@@ -391,7 +374,6 @@ Generator (Claude)
 | harness_verify.py (5개 검사) | harness_verify.py (10개 검사) | V2 검사 항목 추가 |
 | HARNESS_CHECKS.md | HARNESS_CHECKS.md | V2 기준으로 업데이트 |
 | 없음 | feature_list.json | 신규 |
-| 없음 | progress.md | 신규 |
 | 없음 | sprint_contracts/ | 신규 |
 
 **하위 호환성:** V1의 모든 검사 항목은 V2에 포함. V1 문서는 V2 참조로 리다이렉트.

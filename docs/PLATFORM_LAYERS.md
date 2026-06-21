@@ -81,7 +81,7 @@ REVISION HISTORY:
 | `harness_verify.py` | `scripts/` | 필수 문서·런타임 파일·핫 파일 크기·feature_list 스키마·계약 검증 |
 | Feature List | `feature_list.json` | 프로젝트별 기능 목록 + passes 상태 |
 | Sprint Contracts | `sprint_contracts/` | Generator-Evaluator 합의 계약 |
-| Progress Log | `progress.md` | 세션 간 핸드오프 |
+| Progress Log | `HIVEMIND.md`(자동) + DB(pg_logs/checkpoint) | 세션 간 핸드오프 (progress.md 폐기 2026-06-21) |
 | HARNESS_V2.md | `docs/` | 계약 명세 |
 
 ### 1-B. 하이브 마인드 + 제텔카스텐
@@ -120,7 +120,6 @@ REVISION HISTORY:
 ├── GEMINI.md
 ├── CODEX_GUIDE.md
 ├── feature_list.json       # 프로젝트 고유 기능 목록 (Layer 1 스키마 준수)
-├── progress.md             # Layer 1 스키마 준수
 ├── sprint_contracts/       # Layer 1 스키마 준수
 └── .vibe/
     ├── skills/             # 프로젝트 특화 슬래시 커맨드
@@ -161,7 +160,7 @@ REVISION HISTORY:
 | `.ai_monitor/api/memory_api.py` | Layer 1 로직 | 위치는 Layer 0 안쪽 — 주입 시 분리 필요 |
 | `.claude/skills/`, `.claude/commands/` | Layer 2 (이 리포 자체의) | Claude CLI 전용 — 플랫폼 공통 `.vibe/` 규약 별도 필요 |
 | `HARNESS_V2.md`, `RULES.md` | Layer 1 명세 | 위치는 프로젝트 루트 — 플랫폼 템플릿으로 승격 필요 |
-| `feature_list.json`, `progress.md` | 이 리포의 Layer 2 데이터 | 플랫폼의 "템플릿"과 구분 필요 |
+| `feature_list.json` | 이 리포의 Layer 2 데이터 | 플랫폼의 "템플릿"과 구분 필요 |
 
 ---
 

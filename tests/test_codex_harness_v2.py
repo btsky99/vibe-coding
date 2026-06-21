@@ -20,7 +20,7 @@ import itcp
 
 def test_build_project_bootstrap_includes_v2_sections(monkeypatch):
     monkeypatch.setattr(itcp, "_summarize_feature_list", lambda: "- pending: F006")
-    monkeypatch.setattr(itcp, "_summarize_progress", lambda: "## latest\n진행 중:\n- [F006] Codex")
+    # [2026-06-21] progress.md 은퇴 — _summarize_progress / [Progress snapshot] 섹션 제거됨
     monkeypatch.setattr(itcp, "_summarize_harness_status", lambda: "- status: ok")
     monkeypatch.setattr(itcp, "_read_context_file", lambda *args, **kwargs: "")
     monkeypatch.setattr(itcp, "_run_context_command", lambda args, **kwargs: "abc123 init" if args and args[0] == "git" else "")
@@ -30,7 +30,7 @@ def test_build_project_bootstrap_includes_v2_sections(monkeypatch):
 
     assert "[Session init]" in bootstrap
     assert "[Feature status]" in bootstrap
-    assert "[Progress snapshot]" in bootstrap
+    assert "[Progress snapshot]" not in bootstrap  # progress.md 은퇴로 제거됨
     assert "[Harness status]" in bootstrap
     assert "[Recent commits]" in bootstrap
     assert "[Local codex operator prompt]" in bootstrap

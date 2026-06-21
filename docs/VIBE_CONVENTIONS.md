@@ -29,7 +29,7 @@ REVISION HISTORY:
 |---------|-----|---------|------|
 | `.claude/` | Claude CLI 전용 훅·스킬 (Anthropic 규약) | Claude CLI + Vibe 서버 | Claude CLI 의존 |
 | **`.vibe/`** | 플랫폼 공통 확장 (Claude/Gemini/Codex 공용) | Vibe 서버(+각 CLI가 선택적 참조) | Vibe Coding 자체 |
-| `sprint_contracts/`, `feature_list.json`, `progress.md` | Layer 1 스키마를 따르는 프로젝트 데이터 | Vibe 서버, 하네스 | 하네스 규약 |
+| `sprint_contracts/`, `feature_list.json` | Layer 1 스키마를 따르는 프로젝트 데이터 | Vibe 서버, 하네스 | 하네스 규약 |
 
 `.claude/`에만 의존하면 Claude CLI가 바뀌거나 다른 에이전트가 참여할 때 이식이 어렵다.
 `.vibe/`는 **에이전트 중립** 영역.

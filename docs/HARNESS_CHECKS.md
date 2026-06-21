@@ -28,9 +28,10 @@ REVISION HISTORY:
 |---|---------|------|--------------|
 | 7 | `feature-list-missing` | `feature_list.json` 부재 | 파일을 생성한다. 스키마는 HARNESS_V2.md 참고. |
 | 8 | `feature-list-schema` | 스키마 위반 (필수 필드 누락 등) | 누락된 필드를 추가하고 값을 채운다. |
-| 9 | `progress-stale` | `progress.md` 3일 이상 미갱신 | 현재 상태로 progress.md를 업데이트한다. |
-| 10 | `self-eval-detected` | Generator=Evaluator 동일 (경고) | 다른 에이전트를 Evaluator로 지정한다. |
-| 11 | `contract-missing` | P0/P1 활성 작업에 스프린트 계약 없음 (경고) | `sprint_contracts/` 에 계약 파일을 작성한다. |
+| 9 | `self-eval-detected` | Generator=Evaluator 동일 (경고) | 다른 에이전트를 Evaluator로 지정한다. |
+| 10 | `contract-missing` | P0/P1 활성 작업에 스프린트 계약 없음 (경고) | `sprint_contracts/` 에 계약 파일을 작성한다. |
+
+> `progress-stale`(progress.md) 검사는 2026-06-21 폐기 — 진행상황은 HIVEMIND.md(자동) + DB(pg_logs/checkpoint)로 추적.
 
 ## 수동 검증 방법
 

@@ -445,43 +445,6 @@ def _summarize_feature_list(max_items: int = 4) -> str:
     return "\n".join(lines)
 
 
-def _summarize_progress(max_items: int = 3) -> str:
-    """Summarize the most recent progress.md state for Codex bootstrap."""
-    progress_path = _PROJECT_ROOT / "progress.md"
-    try:
-        text = progress_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return ""
-
-    lines = [line.rstrip() for line in text.splitlines()]
-    updated_line = next((line.strip() for line in lines if line.startswith("## ")), "")
-
-    active_items: list[str] = []
-    in_progress = False
-    section_index = 0
-    for raw in lines:
-        stripped = raw.strip()
-        if stripped.startswith("### "):
-            section_index += 1
-            in_progress = section_index == 2
-            continue
-        if in_progress and stripped.startswith("- "):
-            active_items.append(stripped)
-            if len(active_items) >= max_items:
-                break
-
-    if not updated_line and not active_items:
-        return ""
-
-    result: list[str] = []
-    if updated_line:
-        result.append(updated_line)
-    if active_items:
-        result.append("In progress:")
-        result.extend(active_items)
-    return "\n".join(result)
-
-
 def _summarize_harness_status() -> str:
     """Run harness_verify and return a compact status summary."""
     harness_script = _SCRIPT_DIR / "harness_verify.py"
@@ -528,10 +491,6 @@ def _build_project_bootstrap(agent_name: str) -> str:
     feature_summary = _summarize_feature_list()
     if feature_summary:
         sections.append(f"[Feature status]\n{feature_summary}")
-
-    progress_summary = _summarize_progress()
-    if progress_summary:
-        sections.append(f"[Progress snapshot]\n{progress_summary}")
 
     harness_summary = _summarize_harness_status()
     if harness_summary:

@@ -3,7 +3,7 @@ FILE: scripts/harness_verify.py
 DESCRIPTION: Vibe Coding 하네스 V2 검증 스크립트.
              Claude, Antigravity, Codex 모든 에이전트가 공통 하네스 규칙을 준수하는지 기계적으로 검사한다.
 
-             [V2 검사 항목 — 10개]
+             [V2 검사 항목 — 9개]
              1. required-doc        : 필수 문서 존재 확인
              2. agents-too-long     : AGENTS.md 120줄 제한
              3. agents-link-missing : 필수 참조 링크 확인
@@ -11,9 +11,9 @@ DESCRIPTION: Vibe Coding 하네스 V2 검증 스크립트.
              5. runtime-path-missing: 핵심 런타임 스크립트 존재
              6. hot-file-large      : 주요 파일 크기 초과 경고
              7. feature-list        : feature_list.json 존재 및 스키마 검증
-             8. progress-stale      : progress.md 갱신 주기 확인
-             9. self-eval-detected  : Generator=Evaluator 동일 에이전트 탐지
-             10. contract-missing   : P0/P1 활성 작업에 스프린트 계약 존재 확인
+             8. self-eval-detected  : Generator=Evaluator 동일 에이전트 탐지
+             9. contract-missing    : P0/P1 활성 작업에 스프린트 계약 존재 확인
+             ※ progress-stale(progress.md) 검사는 2026-06-21 폐기 — HIVEMIND.md+DB로 대체
 
              [사용법]
              python scripts/harness_verify.py          # 일반 모드
@@ -85,7 +85,6 @@ REQUIRED_RUNTIME_FILES = [
     "scripts/harness_verify.py",
     "scripts/itcp.py",
     "feature_list.json",
-    "progress.md",
 ]
 
 HOT_FILE_THRESHOLDS = {
@@ -107,10 +106,6 @@ VALID_CATEGORIES = {"functional", "visual", "performance", "security"}
 
 # 유효한 priority 값
 VALID_PRIORITIES = {"P0", "P1", "P2"}
-
-# progress.md 최대 미갱신 허용 일수
-PROGRESS_STALE_DAYS = 3
-
 
 def _read_text(path: Path) -> str:
     """파일을 UTF-8로 읽어 텍스트 반환"""
@@ -309,33 +304,6 @@ def _check_feature_list(root: Path, passes: list, warnings: list, errors: list) 
     return data
 
 
-def _check_progress_stale(root: Path, passes: list, warnings: list) -> None:
-    """[검사 8] progress.md 갱신 주기 확인 (최대 3일)"""
-    prog_path = root / "progress.md"
-    if not prog_path.exists():
-        warnings.append("progress-missing")
-        return
-
-    text = _read_text(prog_path)
-
-    # "최종 업데이트: YYYY-MM-DD" 패턴에서 날짜 추출
-    import re
-    match = re.search(r"최종 업데이트:\s*(\d{4}-\d{2}-\d{2})", text)
-    if not match:
-        warnings.append("progress-no-date")
-        return
-
-    try:
-        last_date = datetime.strptime(match.group(1), "%Y-%m-%d")
-        days_ago = (datetime.now() - last_date).days
-        if days_ago > PROGRESS_STALE_DAYS:
-            warnings.append(f"progress-stale:{days_ago}days")
-        else:
-            passes.append(f"progress-fresh:{days_ago}days")
-    except ValueError:
-        warnings.append("progress-invalid-date")
-
-
 def _check_self_eval(feature_data: dict | None, passes: list, warnings: list) -> None:
     """[검사 9] Generator=Evaluator 동일 에이전트 탐지
     feature_list.json에서 assigned_to == evaluated_by인 경우를 찾는다.
@@ -402,7 +370,6 @@ def verify_repository(root: Path) -> dict[str, list[str]]:
 
     # V2 검사 (7~10)
     feature_data = _check_feature_list(root, passes, warnings, errors)
-    _check_progress_stale(root, passes, warnings)
     _check_self_eval(feature_data, passes, warnings)
     _check_sprint_contracts(root, feature_data, passes, warnings)
 

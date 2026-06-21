@@ -40,8 +40,7 @@ REVISION HISTORY:
 | `docs/HARNESS_V2.md` | 하네스 V2 마스터 명세서 |
 | `docs/HARNESS_CHECKS.md` | 검증 항목 + 대응 방안 |
 | `feature_list.json` | 기능 목록 (프로젝트 분석 후 자동 생성) |
-| `progress.md` | 진행 상황 추적 파일 |
-| `scripts/harness_verify.py` | 하네스 V2 검증 스크립트 (10개 검사) |
+| `scripts/harness_verify.py` | 하네스 V2 검증 스크립트 (진행상황은 HIVEMIND.md+DB로 추적) |
 | `scripts/session_init.py` | 세션 시작 프로토콜 실행기 |
 | `.github/workflows/harness-check.yml` | CI 게이트 워크플로우 |
 
@@ -50,7 +49,6 @@ REVISION HISTORY:
 | 파일 | 조건 |
 |------|------|
 | `scripts/itcp.py` | PostgreSQL 사용 시 |
-| `scripts/auto_dispatcher.py` | 멀티 에이전트(3개+) 사용 시 |
 | `CLAUDE.md` / `GEMINI.md` / `CODEX_GUIDE.md` | 해당 에이전트 사용 시 |
 
 ---
