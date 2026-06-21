@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 10:49
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 12:57
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,7 +34,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 4577 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4630 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
@@ -55,7 +55,7 @@
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
-| `tools_api.py` | 1001 |  |
+| `tools_api.py` | 1039 |  |
 | `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
 | `zettel_api.py` | 209 |  |
@@ -148,7 +148,7 @@
 ### 유틸리티
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `vibe_cli.py` | 359 | cmux 호환 vibe CLI (notify/set-progress/codex) |
+| `vibe_cli.py` | 345 | cmux 호환 vibe CLI (notify/set-progress/codex) |
 | `task.py` | 172 | 하이브 태스크 CLI (create/list/update) |
 | `auto_version.py` | 82 | 버전 자동 증가 (patch +1) 유틸리티 |
 | `auto_release.py` | 77 | 자율 배포(Autonomous Release) 엔진 |
@@ -197,19 +197,18 @@
 | `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 175 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
-| `sync_manager.py` | 120 |  |
+| `statusline.py` | 177 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
 | `telegram_bridge.py` | 1455 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
 | `zettel_capture.py` | 500 |  |
-| `zettel_sync.py` | 789 |  |
+| `zettel_sync.py` | 797 |  |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 837 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 860 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 198 |  |
 | `constants.tsx` | 93 |  |
@@ -246,9 +245,9 @@
 ## 🧪 테스트 (tests/)
 | 파일 | 줄 수 | 테스트 대상 |
 |------|------|------------|
-| `test_agent_api.py` | 295 | api/agent_api.py |
+| `test_agent_api.py` | 298 | api/agent_api.py |
 | `test_codex_harness_v2.py` | 86 |  |
-| `test_codex_orchestration.py` | 92 |  |
+| `test_codex_orchestration.py` | 114 |  |
 | `test_codex_pg_watcher.py` | 108 |  |
 | `test_harness_verify.py` | 218 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
@@ -296,4 +295,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-21 10:49
+> 자동 생성 완료: 2026-06-21 12:57
