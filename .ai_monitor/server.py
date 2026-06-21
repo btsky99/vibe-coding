@@ -762,6 +762,55 @@ if not PROJECTS_FILE.exists():
     with open(PROJECTS_FILE, 'w', encoding='utf-8') as f:
         json.dump([str(Path(__file__).resolve().parent.parent).replace('\\', '/')], f)
 
+# [2026-06-21] frozen(설치본) 프로젝트 컨텍스트 자동 고정 — 회귀 사고 방지.
+# [과거사고] 설치 버전에서 하이브 마인드/제텔카스텐/태스크 패널이 통째로 비어 보이던 버그.
+#   근본 원인: 설치본 config.json(%APPDATA%\VibeCoding)의 last_path가 활성 프로젝트를 안 가리키면
+#   project_id가 install-dir 슬러그(phantom)로 잡혀, project_id로 필터되는 모든 데이터가 0건 조회됨.
+#   (DB는 dev/설치 공유라 데이터는 D--vibe-coding로 멀쩡히 저장돼 있는데 네임스페이스만 어긋남)
+# [대책] 시작 시 PROJECT_ROOT가 실제 프로젝트(.git/CLAUDE.md/GEMINI.md 마커 보유)로 해석됐으면
+#   last_path를 거기에 자동 고정 + projects.json 동기화 → 프론트(FileExplorer가 /api/config last_path로
+#   currentPath 설정)와 백엔드 기본 project_id가 항상 정렬됨. 마커 없는 install-dir 폴백이면
+#   PROJECT_CONTEXT_UNRESOLVED 플래그를 세워 UI가 "프로젝트 선택"을 유도하도록 노출(빈 패널 미스터리 방지).
+PROJECT_CONTEXT_UNRESOLVED = False
+
+def _persist_active_project_context() -> None:
+    """frozen 모드에서 해석된 PROJECT_ROOT를 last_path/projects.json에 고정한다."""
+    global PROJECT_CONTEXT_UNRESOLVED
+    if _find_project_root_marker(PROJECT_ROOT) is None:
+        PROJECT_CONTEXT_UNRESOLVED = True
+        print(
+            f"[project_context] WARN: 활성 프로젝트 미해석 — PROJECT_ROOT={PROJECT_ROOT} (마커 없음). "
+            "대시보드에서 프로젝트 폴더를 선택해야 하이브/제텔/태스크가 채워집니다.",
+            file=sys.stderr,
+        )
+        return
+    try:
+        cfg = {}
+        if CONFIG_FILE.exists():
+            cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+        lp = cfg.get('last_path', '')
+        # last_path가 비었거나 더 이상 존재하지 않는 경로면 현재 실제 PROJECT_ROOT로 고정
+        if not (lp and Path(lp).is_dir()):
+            _norm = str(PROJECT_ROOT).replace('\\', '/')
+            cfg['last_path'] = _norm
+            CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+            _projs = []
+            try:
+                if PROJECTS_FILE.exists():
+                    _projs = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
+            except Exception:
+                _projs = []
+            if _norm in _projs:
+                _projs.remove(_norm)
+            _projs.insert(0, _norm)
+            PROJECTS_FILE.write_text(json.dumps(_projs[:20], ensure_ascii=False, indent=2), encoding='utf-8')
+            print(f"[project_context] 활성 프로젝트 자동 고정: {_norm}", file=sys.stderr)
+    except Exception as _e:
+        print(f"[project_context] last_path 고정 실패: {_e}", file=sys.stderr)
+
+if getattr(sys, 'frozen', False):
+    _persist_active_project_context()
+
 # 락 파일 초기화 (없을 경우)
 if not LOCKS_FILE.exists():
     with open(LOCKS_FILE, 'w', encoding='utf-8') as f:
@@ -1393,6 +1442,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                         config = json.load(f)
                 except: pass
             config.setdefault('vault_dir', str(GLOBAL_VAULT_DIR))
+            # [2026-06-21] 설치본 빈-패널 사고 대응 — 활성 프로젝트 컨텍스트를 프론트에 노출.
+            # project_unresolved=True면 UI가 "프로젝트 폴더를 선택하세요"를 유도(빈 하이브/제텔 패널 방지).
+            config['project_unresolved'] = PROJECT_CONTEXT_UNRESOLVED
+            config['active_project_id'] = _current_project_id()
             self.wfile.write(json.dumps(config).encode('utf-8'))
         elif parsed_path.path == '/api/tool-status':
             self.send_response(200)
