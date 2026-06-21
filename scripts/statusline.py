@@ -7,6 +7,11 @@ DESCRIPTION: Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+�
              (원본은 저장소에서 버전 관리 — 어느 PC에서든 설치 가능하게 하기 위함)
 
 REVISION HISTORY:
+- 2026-06-21 Claude: 라인1·2를 '연속된 한 바'로 변경 — 윗줄(0~50%)+아랫줄(50~100%)=20칸.
+                     [WHY] 두 줄에 '똑같은 바'를 복붙해 2행 공간이 낭비된다는 지적. 같은
+                     컨텍스트를 칸 2배(칸당 10%→5%)로 펼쳐 채움이 더 정밀하게 보이게 함.
+                     윗줄이 먼저 차고 넘치면 아랫줄로 이어짐(위→아래 연속). 색도 전체에 걸쳐
+                     녹(좌상)→적(우하)으로 흐름. 채움 꽉참 임계 5%→2.5%로 2배 민감.
 - 2026-06-21 Claude: 히트맵 박스 그리드(■/□)로 최종 확정 — 사용자가 스크린샷으로 지정.
                      칸마다 위치별 색이 녹→노랑→빨강(256색 HEAT 램프)으로 변하고 0%에서도
                      색 스케일이 항상 보임. 채움 ■/빈 □으로 사용량. 라인1·2 같은 바 → 2행
@@ -51,46 +56,48 @@ FG_GRAY    = "\033[90m"
 
 # [WHY] 히트맵 박스 그리드(사용자가 스크린샷으로 지정한 최종 스타일).
 # 칸마다 '위치별' 색이 녹색→노랑→빨강으로 변하고(아래 HEAT 256색 램프), 이 색 스케일은
-# 사용량 0%에서도 항상 보인다. 채움 ■ / 빈칸 □ 으로 사용량을 표시 — 색은 위치, 모양은 채움.
-# 2줄(라인1·라인2) 모두 같은 바를 그려 2행 그리드처럼 크고 읽기 쉽게(이전 "너무 작다" 해결).
-# [참고] ■□ 글리프는 사용자 터미널 폰트에서 렌더 확인됨(스크린샷). 256색은 터미널 지원 전제.
+# 사용량 0%에서도 항상 보인다. 채움 ⛁ / 빈칸 ⛶ 으로 사용량을 표시 — 색은 위치, 모양은 채움.
+# [핵심] 라인1·2는 '같은 바 복붙'이 아니라 '연속된 한 바'다. 0~100%를 TOTAL_CELLS칸으로
+# 펼쳐 앞 절반은 윗줄(0~50%), 뒤 절반은 아랫줄(50~100%)에 그린다. 같은 컨텍스트지만
+# 칸이 2배라 채움이 더 정밀하게 보인다(이전 "10%=100k 단위라 1M에선 안 변함" 완화).
+# [참고] ⛁⛶ 글리프는 사용자 터미널 폰트에서 렌더 확인됨(스크린샷). 256색은 터미널 지원 전제.
 HEAT = [46, 82, 118, 154, 190, 226, 220, 214, 208, 196]   # 녹→연두→노랑→주황→빨강
 # [사용자 지정] 글리프 ⛶(빈칸)·⛀(반칸)·⛁(채움) — 스크린샷에서 직접 고른 네모서리 박스 계열.
-# ■/□ 솔리드 사각형은 "스크린샷과 다르다"고 반려됨. ⛶는 원래 상태줄이 쓰던 글리프.
 DOT_FILLED = "⛁"
 DOT_HALF   = "⛀"
 DOT_EMPTY  = "⛶"
 
-GRID_SIZE = 10          # 칸 10개 — 각 10%, HEAT 길이와 일치
+# [불변식] TOTAL_CELLS 짝수 — 윗줄/아랫줄로 정확히 반씩 나뉜다. HALF가 한 줄의 칸 수.
+TOTAL_CELLS = 20        # 윗줄10 + 아랫줄10 = 연속 한 바, 칸당 5%
+HALF_CELLS  = TOTAL_CELLS // 2
 
 
 def _fg256(n: int) -> str:
     return f"\033[38;5;{n}m"
 
 
-def render_bar(used_pct: float) -> str:
-    """히트맵 박스 바(색 포함). 칸 색=위치별 HEAT 램프(항상 표시), 모양=채움 단계.
-    [WHY] 1M 컨텍스트는 실사용이 보통 <5%(예: 2.1k=0.2%)라 '칸당 10% + 정수 채움'이면
-    한 칸도 안 차 "써도 변화 없음"으로 보였음. 반칸 ⛀ + 아주 민감한 임계값으로 조금만 써도
-    첫 칸이 켜지게: 0보다 크기만 하면 반칸, 칸 절반(5%) 넘으면 꽉 참. (칸당 2단계)"""
+def render_split_bar(used_pct: float):
+    """0~100%를 TOTAL_CELLS칸 '연속 한 바'로 그려 (윗줄, 아랫줄) 두 글리프열로 반환.
+    [WHY] 두 줄에 같은 바를 복붙하던 걸 폐기 — 같은 컨텍스트를 칸 2배로 펼쳐 윗줄이 먼저
+    차고 넘치면 아랫줄로 이어지게. 칸당 5%(이전 10%)라 채움 변화가 더 정밀하게 보인다.
+    [채움 단계] 반칸 ⛀ + 민감 임계값으로 조금만 써도 첫 칸이 켜짐: 0보다 크면 반칸,
+    칸 절반(2.5%) 넘으면 꽉 참. 색=칸 위치별 HEAT(녹 좌상→적 우하), 모양=채움."""
     pct = max(0.0, min(100.0, used_pct))
-    filled = pct / 100.0 * GRID_SIZE            # 채워질 칸 수(소수)
-    parts = []
-    for i in range(GRID_SIZE):
+    filled = pct / 100.0 * TOTAL_CELLS          # 채워질 칸 수(소수, 0~TOTAL_CELLS)
+    cells = []
+    for i in range(TOTAL_CELLS):
         level = filled - i                      # 이 칸이 얼마나 찼나 (0~1+)
         if level >= 0.5:
             glyph = DOT_FILLED
-        elif level > 0.0005:                    # 칸의 0.05%만 써도 반칸(2.1k/1M=0.2%도 보임)
+        elif level > 0.0005:                    # 칸의 0.05%만 써도 반칸(미세 사용량도 보임)
             glyph = DOT_HALF
         else:
             glyph = DOT_EMPTY
-        parts.append(f"{_fg256(HEAT[i])}{glyph}")
-    return " ".join(parts) + RESET
-
-
-def bar_width() -> int:
-    """바의 표시 폭(칸+공백) — 라인2 정렬/길이 계산용. 색 코드는 폭에 안 들어감."""
-    return GRID_SIZE * 2 - 1
+        heat = HEAT[int(i / TOTAL_CELLS * len(HEAT))]   # 20칸을 10색 HEAT 램프에 매핑
+        cells.append(f"{_fg256(heat)}{glyph}")
+    top = " ".join(cells[:HALF_CELLS]) + RESET
+    bot = " ".join(cells[HALF_CELLS:]) + RESET
+    return top, bot
 
 
 def format_tokens(n: int) -> str:
@@ -144,15 +151,15 @@ def main():
 
     model_display = get_model_display(data.get("model", {}))
 
-    # 라인 1·2: 같은 히트맵 바를 두 줄에 그려 2행 그리드처럼 크고 읽기 쉽게(사용자 지정 스타일).
-    # 색=칸 위치별 녹→황→적(항상 표시), 모양=사용량 채움(■/□). 두 줄 바 폭이 같아 세로 정렬됨.
-    bar = render_bar(used_pct)
+    # 라인 1·2: 0~100%를 한 바로 펼쳐 윗줄(앞 절반)·아랫줄(뒤 절반)에 나눠 그린다.
+    # 윗줄이 먼저 차고 넘치면 아랫줄로 이어짐 → 같은 컨텍스트를 더 정밀하게(칸당 5%).
+    bar_top, bar_bot = render_split_bar(used_pct)
     model_colored = f"{FG_CYAN}{BOLD}{model_display}{RESET}"
     token_info    = (f"{FG_WHITE}{format_tokens(used_tokens)} / {format_tokens(ctx_size)}{RESET}"
                      f" {DIM}({used_pct:.0f}%){RESET}")
-    line1 = f"{bar}  {model_colored} {DIM}·{RESET} {token_info}"
+    line1 = f"{bar_top}  {model_colored} {DIM}·{RESET} {token_info}"
 
-    # 라인 2: 같은 바 + 세션 누적 I/O.
+    # 라인 2: 바 뒷부분(50~100%) + 세션 누적 I/O.
     parts = []
     if total_input > 0:
         parts.append(f"{FG_GREEN}In{RESET} {FG_WHITE}{format_tokens(total_input)}{RESET}")
@@ -167,7 +174,7 @@ def main():
 
     sep = f"  {DIM}·{RESET}  "
     tail = sep.join(parts) if parts else f"{DIM}No usage data yet{RESET}"
-    line2 = f"{bar}  {tail}"
+    line2 = f"{bar_bot}  {tail}"
 
     print(line1)
     print(line2)
