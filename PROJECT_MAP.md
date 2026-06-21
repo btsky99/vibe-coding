@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 15:11
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 19:06
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -55,7 +55,7 @@
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
-| `tools_api.py` | 1039 |  |
+| `tools_api.py` | 1075 |  |
 | `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
 | `zettel_api.py` | 209 |  |
@@ -239,7 +239,7 @@
 | `TaskBoardPanel.tsx` | 703 | 칸반 스타일 태스크 보드 |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 204 |  |
-| `ToolsPanel.tsx` | 350 |  |
+| `ToolsPanel.tsx` | 406 |  |
 | `ZettelkastenPanel.tsx` | 537 |  |
 
 ## 🧪 테스트 (tests/)
@@ -295,4 +295,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-21 15:11
+> 자동 생성 완료: 2026-06-21 19:06

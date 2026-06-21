@@ -5,12 +5,15 @@
  *              시각적으로 표시하고, 원클릭 설치를 지원한다.
  * REVISION HISTORY:
  * - 2026-04-05 Claude Opus 4.6: 최초 생성 — 도구 목록 + 설치 상태 + 카테고리 필터
+ * - 2026-06-21 Claude Opus 4.8: 원클릭 설치 버튼 누락 복구 — can_auto_install 도구(claude/codex/
+ *   antigravity 등)에 POST /api/tools/install을 호출하는 "설치" 버튼 추가. 백엔드/엔드포인트는
+ *   원래 있었으나 UI 버튼이 한 번도 와이어링된 적 없어 사용자가 수동 복붙해야 했음.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import {
   Package, CheckCircle, XCircle, ExternalLink,
-  RefreshCw, Filter, ClipboardCopy, FileText, Check, Settings,
+  RefreshCw, Filter, ClipboardCopy, FileText, Check, Settings, Download, Loader2,
 } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
@@ -72,6 +75,10 @@ const ToolsPanel = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [rulePrompts, setRulePrompts] = useState<RulePrompt[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 설치 진행 중인 도구 ID — 설치는 별도 콘솔 창에서 비동기 실행되므로
+  // 버튼 클릭 직후 "설치 시작됨" 상태만 표시하고, 완료 여부는 새로고침으로 재조회한다.
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [startedId, setStartedId] = useState<string | null>(null);
 
   /* ── 데이터 조회 ── */
   const fetchTools = useCallback(() => {
@@ -104,6 +111,31 @@ const ToolsPanel = () => {
       setCopiedId(prompt.id);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  /* ── 원클릭 설치 ── */
+  const handleInstall = (tool: ToolInfo) => {
+    setInstallingId(tool.id);
+    fetch(`${API_BASE}/api/tools/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: tool.id }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        // success — 새 콘솔에서 설치 진행 중. manual — 자동 스크립트 없음(문서 열기).
+        if (data.status === 'manual' && data.install_url) {
+          window.open(data.install_url, '_blank');
+        }
+        if (data.status === 'error') {
+          console.error('[ToolsPanel] install failed:', data.message);
+          return;
+        }
+        setStartedId(tool.id);
+        setTimeout(() => setStartedId(null), 4000);
+      })
+      .catch(err => console.error('[ToolsPanel] install error:', err))
+      .finally(() => setInstallingId(null));
   };
 
   /* ── 카테고리 추출 ── */
@@ -228,18 +260,42 @@ const ToolsPanel = () => {
                     </div>
                   </div>
 
-                  {/* 우측: 공식 문서 링크만 */}
-                  {tool.install_url && (
-                    <a
-                      href={tool.install_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1 text-[#969696] hover:text-white transition-colors shrink-0 opacity-0 group-hover:opacity-100"
-                      title="공식 문서"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                  {/* 우측: 원클릭 설치 버튼 + 공식 문서 링크 */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* 미설치 + 자동 설치 가능한 도구에만 설치 버튼 노출.
+                        설치는 새 콘솔 창에서 진행되므로 클릭 후 "설치 시작됨"만 표시. */}
+                    {!tool.installed && tool.can_auto_install && (
+                      <button
+                        onClick={() => handleInstall(tool)}
+                        disabled={installingId === tool.id}
+                        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors ${
+                          startedId === tool.id
+                            ? 'bg-green-500/20 text-green-400'
+                            : 'bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50'
+                        }`}
+                        title="새 콘솔 창에서 설치 실행"
+                      >
+                        {installingId === tool.id ? (
+                          <><Loader2 className="w-3 h-3 animate-spin" /> 시작 중</>
+                        ) : startedId === tool.id ? (
+                          <><Check className="w-3 h-3" /> 설치 시작됨</>
+                        ) : (
+                          <><Download className="w-3 h-3" /> 설치</>
+                        )}
+                      </button>
+                    )}
+                    {tool.install_url && (
+                      <a
+                        href={tool.install_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1 text-[#969696] hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                        title="공식 문서"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

@@ -11,6 +11,8 @@ REVISION HISTORY:
 - 2026-04-05 Claude Opus 4.6: 최초 ���성 — 도�� 설치 통합 API
 - 2026-04-05 Claude Opus 4.6: psql, ruff, uv, pytest, pyinstaller 도구 추가 (Gemini 추천 반영)
 - 2026-04-05 Claude Opus 4.6: 전체 도구 install_hint 추가 + Git, Python, TypeScript, Vite, ESLint, Tailwind CSS, Inno Setup, Pillow, Claude/Gemini/Node.js 자동 설치 지원
+- 2026-06-21 Claude Opus 4.8: 세팅 프롬프트 ⑥ AI 에이전트 CLI 설치 추가 — TOOL_REGISTRY엔
+  claude/codex/antigravity 설치가 있었으나 세팅 마법사 흐름(①~⑩)엔 누락돼 있어 보강
 """
 
 import json
@@ -765,6 +767,40 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
             "- 백업 없이 수정 금지 (`settings.local.json.bak.YYYYMMDDHHmmss`)\n"
             "- 멱등성: 같은 진입점을 가리키는 명령은 따옴표/슬래시 차이를 무시하고 중복 제거\n"
             "- 설치 EXE 단독 PC: scripts/ 폴더가 외부에 없어도 `vibe-coding.exe hook`만으로 작동"
+        ),
+    },
+    # ── 6단계: AI 에이전트 CLI 설치 (Claude / Codex / Antigravity) ──────
+    # [2026-06-21 Claude] TOOL_REGISTRY엔 claude/codex/antigravity 원클릭 설치가 있으나
+    #   세팅 마법사 흐름엔 "AI CLI 깔아라" 단계가 없어 사용자가 ① dev-tools만 따라가면
+    #   정작 에이전트 CLI는 안 깔리던 누락. 흐름 안에 명시.
+    {
+        "id": "ai-cli",
+        "agent": "공통 (아무 에이전트)",
+        "category": "setup",
+        "description": "⑥ AI 에이전트 CLI 설치 — Claude Code / Codex / Antigravity(구 Gemini) CLI를 이 PC에 전역 설치",
+        "prompt": (
+            "【대상】이 PC 전역 (AI 에이전트 CLI는 npm -g 전역 설치 — 프로젝트가 아니라 PC 단위)\n\n"
+            "이 PC에 AI 코딩 에이전트 CLI 3종을 설치해줘. 비이브 코딩 하이브는 이 CLI들이\n"
+            "있어야 멀티 에이전트로 동작한다. (대시보드 상단 '도구 설치 상태' 그리드의\n"
+            "원클릭 설치 버튼으로도 동일하게 깔 수 있다 — 그쪽이 편하면 그걸 써도 됨.)\n\n"
+            "【사전 조건】\n"
+            "- Node.js >= 20 + npm (세팅 ① 개발도구 단계에서 설치됨 — 없으면 먼저 깔 것)\n\n"
+            "【설치 대상 (이미 깔린 건 건너뛰기 — `<cmd> --version`으로 먼저 확인)】\n"
+            "  1) Claude Code  — npm install -g @anthropic-ai/claude-code\n"
+            "       검증: claude --version / 인증: claude  (최초 실행 시 OAuth 로그인)\n"
+            "  2) Codex CLI    — npm install -g @openai/codex\n"
+            "       검증: codex --version / 인증: OpenAI API 키 또는 codex 로그인 절차\n"
+            "  3) Antigravity  — npm install -g @google/gemini-cli   (※ 구 Gemini CLI 전환)\n"
+            "       검증: antigravity --version (없으면 gemini --version) / 인증: agy OAuth\n"
+            "       주의: 패키지명은 @google/gemini-cli지만 하이브에선 'Antigravity'로 라벨링한다.\n\n"
+            "【설치 후】\n"
+            "  - 각 CLI를 `--version`으로 ✅/❌ 요약\n"
+            "  - 인증이 필요한 CLI는 사용자에게 로그인 명령을 안내 (자동 로그인 시도 금지)\n\n"
+            "【원칙】\n"
+            "- 이미 설치된 CLI는 재설치하지 않기 (버전만 확인)\n"
+            "- 전역 설치(npm -g)라 관리자 권한이 필요할 수 있음 — 실패 시 권한 안내\n"
+            "- Phase 2 정직성: 현재 자동 디스패처는 Claude만 활성. Codex/Antigravity는\n"
+            "  사용자가 수동 실행할 때만 하이브에 참여한다 (설치는 해두되 기대치는 정직하게)"
         ),
     },
     # ── 9단계: 스킬/Subagent 설치 (외부 프로젝트에 vibe-* 슬래시 명령 + subagent 복사) ──────
