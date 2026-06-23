@@ -1316,16 +1316,18 @@ class SSEHandler(BaseHTTPRequestHandler):
             import psycopg2
             import select
             
-            # 1. 초기 데이터 전송 (최근 50개 - PostgreSQL에서 조회)
+            # 1. 초기 데이터 전송 (최근 50개 - PostgreSQL pg_logs 테이블에서 조회)
             try:
                 rows = run_pg_sql_csv(
-                    "SELECT agent, level, message as trigger, task_id as session_id, "
-                    "metadata->>'terminal_id' as terminal_id, metadata->>'project' as project, "
-                    "metadata->>'raw_status' as status, to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp "
-                    "FROM hive_logs ORDER BY id DESC LIMIT 50"
+                    "SELECT agent, metadata->>'level' as level, task as trigger, metadata->>'session_id' as session_id, "
+                    "terminal_id as terminal_id, project_id as project, "
+                    "status as status, to_char(ts, 'YYYY-MM-DD HH24:MI:SS') as timestamp "
+                    "FROM pg_logs ORDER BY id DESC LIMIT 50"
                 )
                 if rows:
                     for row in reversed(rows):
+                        if not row.get('level'):
+                            row['level'] = 'info'
                         self.wfile.write(f"data: {json.dumps(row, ensure_ascii=False)}\n\n".encode('utf-8'))
                         self.wfile.flush()
             except Exception as e:
@@ -1352,23 +1354,36 @@ class SSEHandler(BaseHTTPRequestHandler):
                         notify = pg_conn.notifies.pop(0)
                         payload = json.loads(notify.payload)
                         
-                        # 프론트엔드 호환 포맷 변환
-                        meta = payload.get('metadata', {})
-                        if isinstance(meta, str): meta = json.loads(meta)
-                        
-                        out_row = {
-                            "agent": payload.get('agent'),
-                            "level": payload.get('level'),
-                            "trigger": payload.get('message'),
-                            "session_id": payload.get('task_id'),
-                            "terminal_id": meta.get('terminal_id'),
-                            "project": meta.get('project'),
-                            "status": meta.get('raw_status'),
-                            "timestamp": payload.get('timestamp')
-                        }
-                        
-                        self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
-                        self.wfile.flush()
+                        table_name = payload.get('table')
+                        if table_name in ('hive_logs', 'pg_logs'):
+                            data = payload.get('data', {})
+                            meta = data.get('metadata', {})
+                            if isinstance(meta, str):
+                                try: meta = json.loads(meta)
+                                except: meta = {}
+                            
+                            agent = data.get('agent')
+                            level = meta.get('level', 'info') if meta else 'info'
+                            trigger = data.get('task') if table_name == 'pg_logs' else data.get('message')
+                            session_id = meta.get('session_id') or meta.get('task_id') if meta else None
+                            terminal_id = data.get('terminal_id') if table_name == 'pg_logs' else (meta.get('terminal_id') if meta else '')
+                            project = data.get('project_id') if table_name == 'pg_logs' else (meta.get('project') if meta else '')
+                            status = data.get('status') if table_name == 'pg_logs' else (meta.get('raw_status') if meta else '')
+                            timestamp = data.get('ts') or data.get('created_at') if table_name == 'pg_logs' else data.get('timestamp')
+                            
+                            out_row = {
+                                "agent": agent,
+                                "level": level,
+                                "trigger": trigger,
+                                "session_id": session_id,
+                                "terminal_id": terminal_id,
+                                "project": project,
+                                "status": status,
+                                "timestamp": timestamp
+                            }
+                            
+                            self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
+                            self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, socket.timeout):
                 pass
             except Exception as e:

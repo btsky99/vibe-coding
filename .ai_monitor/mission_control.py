@@ -119,19 +119,43 @@ class PgListenerThread(QThread):
                         table = ev.get("table")
                         data = ev.get("data", {})
 
-                        # 1. 로그 데이터 처리 (기존)
-                        if table == "hive_logs":
-                            self.log_received.emit(data)
+                        # 1. 로그 데이터 처리 (기존 hive_logs 및 신규 pg_logs 통합 지원)
+                        if table in ("hive_logs", "pg_logs"):
+                            meta = data.get("metadata", {})
+                            if isinstance(meta, str):
+                                try: meta = json.loads(meta)
+                                except: meta = {}
+                            
+                            # pg_logs인 경우 기존 hive_logs 키와 호환되게 변환하여 emit
+                            if table == "pg_logs":
+                                if not meta: meta = {}
+                                if "terminal_id" not in meta:
+                                    meta["terminal_id"] = data.get("terminal_id", "")
+                                if "raw_status" not in meta:
+                                    meta["raw_status"] = data.get("status", "success")
+                                if "project" not in meta:
+                                    meta["project"] = data.get("project_id", "")
+                                
+                                legacy_data = {
+                                    "agent": data.get("agent"),
+                                    "message": data.get("task", ""),
+                                    "metadata": meta
+                                }
+                            else:
+                                legacy_data = data
+                                if isinstance(legacy_data.get("metadata"), str):
+                                    try: legacy_data["metadata"] = json.loads(legacy_data["metadata"])
+                                    except: pass
+
+                            self.log_received.emit(legacy_data)
 
                             # 상태 데이터 처리
-                            meta = data.get("metadata", {})
-                            if isinstance(meta, str): meta = json.loads(meta)
-                            status = meta.get("raw_status")
+                            status = legacy_data.get("metadata", {}).get("raw_status") if legacy_data.get("metadata") else None
                             if status:
                                 self.status_changed.emit({
-                                    "agent": data.get("agent"),
+                                    "agent": legacy_data.get("agent"),
                                     "status": status,
-                                    "terminal_id": meta.get("terminal_id")
+                                    "terminal_id": legacy_data.get("metadata", {}).get("terminal_id", "")
                                 })
 
                         # 2. 토론 데이터 처리
