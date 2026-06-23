@@ -10,6 +10,7 @@ REVISION HISTORY:
 - 2026-03-07 Claude Sonnet 4.6: 최초 생성 — Phase 5 Task 11
 - 2026-03-22 Codex: Gemini 런처 경로 추가
   - 프로젝트 내부 Gemini 직접 실행을 공통 래퍼(run_antigravity_clean.py)로 통일
+- 2026-06-23 Antigravity: Windows venv 환경에서 os.execvp stdout 누수 버그 수정
 """
 
 import argparse
@@ -21,6 +22,11 @@ from pathlib import Path
 
 # 프로젝트 루트 = 이 파일 부모의 부모
 ROOT = Path(__file__).resolve().parent.parent
+
+# Why: scripts/ 디렉토리 내에서 실행 시 sys.path에 프로젝트 루트가 누락되어
+#      scripts.hive_bridge 등의 모듈 임포트 실패를 방지하기 위해 강제 주입합니다.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 CONFIG_PATH = ROOT / ".ai_monitor" / "config.json"
 LAUNCHER_PYTHON = sys.executable or "python"
 
@@ -135,12 +141,14 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
     except Exception as e:
         print(f"[HIVE] Failed to fetch debate context: {e}")
 
-    # 중첩 세션 방지: CLAUDE 관련 환경 변수 제거
-    # Why: Antigravity CLI 등에서 실행 시 상속된 변수가 Claude Code의 중첩 실행 방지 로직을 트리거함.
-    claude_vars = [k for k in os.environ.keys() if "CLAUDE" in k.upper()]
-    if claude_vars:
-        for k in claude_vars:
-            del os.environ[k]
+    # 중첩 세션 방지: Claude Code의 "다른 세션 안에서 실행 불가" 가드만 콕 집어 제거.
+    # [과거사고] 기존엔 `"CLAUDE" in k.upper()`로 CLAUDE가 든 변수를 전부 삭제했는데,
+    #   이러면 CLAUDE_CONFIG_DIR(인증/설정 경로) · CLAUDE_CODE_OAUTH_TOKEN(토큰)까지
+    #   같이 날아가 재로그인이 강제될 수 있음. 다른 런처(cli_agent/terminal_agent/
+    #   agent_shell/run_antigravity_clean/claude.cmd)는 전부 이 3개만 surgical하게 제거 —
+    #   여기만 광범위 삭제라 잠재 위험. 컨벤션 통일 + 인증 보존을 위해 화이트리스트로 한정.
+    for _nest_guard in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT"):
+        os.environ.pop(_nest_guard, None)
 
     cmd = AGENT_CMDS[agent][mode] + extra_args
     if agent == "codex" and "--model" not in extra_args and "-m" not in extra_args:
@@ -162,7 +170,14 @@ def launch(agent: str, mode: str, extra_args: list[str]) -> None:
         raise SystemExit(completed.returncode)
 
     # 에이전트 프로세스 실행 (현재 터미널에서 대화형)
-    os.execvp(cmd[0], cmd)  # execvp: 현재 프로세스를 대체하여 실행
+    # Why: Windows(win32) 환경에서는 os.execvp가 프로세스 대체를 온전히 지원하지 못하고,
+    #      특히 venv 런처 하위에서 stdout/stderr 스트림 핸들이 손실되는 문제가 있음.
+    #      따라서 win32에서는 subprocess.run을 통해 스트림을 유지한 채 실행하고 exit을 통해 프로세스를 종료함.
+    if sys.platform == "win32":
+        completed = subprocess.run(cmd, check=False)
+        sys.exit(completed.returncode)
+    else:
+        os.execvp(cmd[0], cmd)  # execvp: 현재 프로세스를 대체하여 실행
 
 
 def main():

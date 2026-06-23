@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-21 19:06
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-23 23:28
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,9 +34,9 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 4630 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4645 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
-| `mission_control.py` | 434 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
+| `mission_control.py` | 458 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
 
 ### API 모듈 (.ai_monitor/api/)
@@ -92,7 +92,7 @@
 | `cli_agent.py` | 1146 | Claude/Antigravity/Codex CLI 자율 오케스트레이션 엔진 |
 | `agent_shell.py` | 414 | 인터랙티브 자율 에이전트 쉘 (REPL) |
 | `terminal_agent.py` | 391 | 멀티터미널 자율 에이전트 디스패처 |
-| `agent_launcher.py` | 227 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
+| `agent_launcher.py` | 242 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
 | `agent_detector.py` | 198 | 활성 AI 에이전트 자동 감지 (psutil) |
 | `agent_protocol.py` | 373 | RFC 관리 + 하이브 토론 프로토콜 |
 
@@ -197,7 +197,7 @@
 | `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 226 |  |
-| `statusline.py` | 184 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
+| `statusline.py` | 189 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
 | `telegram_bridge.py` | 1455 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
@@ -295,4 +295,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-21 19:06
+> 자동 생성 완료: 2026-06-23 23:28
