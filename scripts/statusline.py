@@ -137,8 +137,13 @@ def main():
     total_input  = ctx.get("total_input_tokens", 0) or 0
     total_output = ctx.get("total_output_tokens", 0) or 0
 
-    # [WHY] 캐시 읽기는 input_tokens에 이미 포함 — 더하면 이중 계산
-    used_tokens = input_tokens + cache_create
+    # [과거사고 2026-06-23] 바가 턴마다 "확 찼다가 1칸으로" 깜빡이던 버그.
+    # [근본원인] Anthropic usage의 세 필드는 '서로 배타적'이다 — input_tokens는 캐시
+    # 미적중분만, cache_read/cache_create는 별도 버킷. 컨텍스트 점유량 = 셋의 합.
+    # 직전(틀린) 코드는 cache_read를 "input에 포함"이라 가정해 빼버렸는데, current_usage는
+    # 직전 호출 1건의 분해라 캐시적중 턴엔 cache_read만 크고 input/create가 0 → used≈0(1칸),
+    # 캐시생성 턴엔 cache_create만 큼 → used 급등. 셋을 다 더해 실제 점유량으로 안정화.
+    used_tokens = input_tokens + cache_create + cache_read
     ctx_size = ctx.get("context_window_size", 0) or 200_000
 
     # [과거사고 2026-06-11] [1m] 1M 컨텍스트 세션인데 Claude Code가 context_window_size를
