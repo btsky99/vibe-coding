@@ -58,9 +58,14 @@ _EXE_NAME = f'vibe-coding-v{_APP_VERSION}'
 
 print(f'[spec] 빌드 버전: {_APP_VERSION}  →  {_EXE_NAME}.exe')
 
+# [경량 소스 업데이트 채널 A안 — 2026-06-24] 진입점을 server.py → boot.py로 전환.
+#   boot.py가 앱 .py를 frozen 대신 관리형 git 체크아웃에서 runpy 실행한다.
+#   [필수동기] boot.py의 `if False:` 의존성 노출 블록 ↔ 아래 hiddenimports ↔ build-release.yml --hidden-import.
+#   [검증불가 경고] 이 전환은 PyInstaller 빌드로만 검증 가능 — CI(workflow_dispatch) 또는 로컬 빌드로
+#   생성 EXE가 정상 부팅(SRC clone/seed + 데몬 + UI)하는지 확인 후에 사용자 배포할 것.
 a = Analysis(
-    ['.ai_monitor\\server.py'],
-    pathex=[],
+    ['.ai_monitor\\boot.py'],
+    pathex=['.ai_monitor'],
     binaries=[
         # winpty 실행 파일 — PtyProcess.spawn()이 내부적으로 이 파일들을 필요로 함
         # winpty.dll/conpty.dll은 PyInstaller가 자동 감지하나 .exe는 수동 포함 필수
@@ -106,12 +111,33 @@ a = Analysis(
         # 자동 업데이트(시작 루프 4053 + 수동 트리거 2016) 전부 조용히 무력화 = "업데이트 안 뜸".
         # api/src/infra/_version과 동일하게 MEIPASS 루트에 소스를 실어야 sys.path(=MEIPASS) import 성공.
         ('.ai_monitor/updater.py', '.'),
+        # [A안 seed] boot.py가 (a)오프라인 최초부팅 시 SRC로 복사, (b)min_exe 게이트 실패 시
+        #   in-place 실행, (c)`hook` 빠른경로 실행에 쓰는 앱 .py 스냅샷. 리포 레이아웃(.ai_monitor/...)
+        #   을 그대로 재현해야 boot가 유효한 체크아웃으로 인식한다. dist/binaries는 MEIPASS 루트에서
+        #   BASE_DIR로 접근하므로 seed에 불포함(순수 .py만 — soft 채널 범위와 일치).
+        ('.ai_monitor/server.py', '_appseed/.ai_monitor'),
+        ('.ai_monitor/soft_updater.py', '_appseed/.ai_monitor'),
+        ('.ai_monitor/boot.py', '_appseed/.ai_monitor'),
+        ('.ai_monitor/updater.py', '_appseed/.ai_monitor'),
+        ('.ai_monitor/_version.py', '_appseed/.ai_monitor'),
+        ('.ai_monitor/api', '_appseed/.ai_monitor/api'),
+        ('.ai_monitor/src', '_appseed/.ai_monitor/src'),
+        ('.ai_monitor/infra', '_appseed/.ai_monitor/infra'),
+        ('scripts', '_appseed/scripts'),
+        ('soft_manifest.json', '_appseed'),
+        # min_exe 게이트 비교 기준(현재 EXE 버전)을 boot/soft_updater가 읽는 위치.
+        ('soft_manifest.json', '.'),
     ] + _fastembed_datas,
     # hive_hook이 사용하는 stdlib 모듈: server.py가 직접 import 하지 않는 것까지 명시 보강
     # (런타임 동적 import는 PyInstaller 정적 분석에서 누락 가능 → hook EXE 모드에서 ImportError 위험)
     # fastembed/onnxruntime/tokenizers: embed_service가 함수 내부 import — 회상 v2 필수
-    hiddenimports=['websockets', 'winpty', 'urllib.request',
-                   'fastembed', 'onnxruntime', 'tokenizers', 'updater'],
+    # [A안] boot.py 진입 시 server.py 자동탐색이 끊기므로 frozen 클로저를 명시 보강.
+    #   boot.py의 `if False:` 블록과 중복이지만 belt+suspenders로 양쪽 유지.
+    #   PySide6/textual은 의도적 제외(dashboard/TUI는 별도 python 서브프로세스 전용).
+    hiddenimports=['websockets', 'winpty', 'urllib.request', 'runpy',
+                   'fastembed', 'onnxruntime', 'tokenizers', 'updater', 'soft_updater',
+                   'webview', 'clr', 'psycopg2', 'watchdog', 'dotenv', 'rich', 'telegram',
+                   'win32com', 'win32api', 'win32con', 'pythoncom', 'numpy', 'filelock', 'PIL'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

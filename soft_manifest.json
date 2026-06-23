@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "channel": "main",
+  "min_exe": "3.7.242",
+  "_doc": "경량 소스 업데이트 채널 게이트. min_exe = 이 소스를 안전히 실행할 수 있는 최소 EXE(_version) 버전. 의존성/C확장/부트스트랩 변경 시 이 값을 새 EXE 버전으로 올려 옛 설치본의 soft 업데이트를 차단(풀빌드 강제)한다. boot.py와 soft_updater.py가 읽는다. 상세: PROJECT_MAP.md, 메모리 project_soft_update_channel."
+}
