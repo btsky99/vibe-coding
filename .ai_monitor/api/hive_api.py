@@ -8,6 +8,7 @@ DESCRIPTION: /api/hive/*, /api/orchestrator/*, /api/install-skills,
              HTTP 응답을 직접 기록합니다.
 
 REVISION HISTORY:
+- 2026-07-04 Claude: /api/agent-quota 신설 — 터미널 헤더 배지용 Claude+Codex 플랜 쿼터 통합 조회
 - 2026-07-03 Claude: /api/context-usage 응답에 quota 필드 추가 — OAuth 쿼터 사용률(%)·리셋 시각
 - 2026-03-01 Claude: server.py에서 분리 — hive/orchestrator/superpowers API 담당
 - 2026-03-22 Claude: 지식그래프(/api/hive/knowledge-graph) 제거 — 실사용 가치 미흡
@@ -740,6 +741,22 @@ def handle_get(handler, path: str, params: dict,
             handler.wfile.write(json.dumps(result, ensure_ascii=False, default=str).encode('utf-8'))
         except Exception as e:
             handler.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        return True
+
+    # ── /api/agent-quota ────────────────────────────────────────────────
+    # 터미널 슬롯 헤더 쿼터 배지용 — 에이전트별 플랜 사용률을 한 번에 반환.
+    # Antigravity는 플랜 쿼터 공개 경로가 없어 미포함 (컨텍스트 게이지로 대체).
+    elif path == '/api/agent-quota':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            from src.codex_quota import get_codex_quota
+            payload = {'claude': get_claude_quota(), 'codex': get_codex_quota()}
+        except Exception as e:
+            payload = {'error': str(e)}
+        handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
         return True
 
     # ── /api/context-usage ───────────────────────────────────────────────

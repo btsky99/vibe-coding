@@ -70,7 +70,7 @@ function App() {
   const {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
-    antigravityUsage, claudeUsage,
+    antigravityUsage, claudeUsage, agentQuota,
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
@@ -675,6 +675,7 @@ function App() {
                   tasks={[]}
                   antigravityUsage={antigravityUsage}
                   claudeUsage={claudeUsage}
+                  agentQuota={agentQuota}
                   agentTerminals={agentTerminals}
                   orchestratorData={skillChain}
                   hiveActivity={hiveActivity}

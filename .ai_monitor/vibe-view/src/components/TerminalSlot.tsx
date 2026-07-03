@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-04 Claude: 헤더 플랜 쿼터 배지 추가 — Claude/Codex 5h 게이지+% · 7d %, 세션 데이터 없어도 상시 표시.
+ *                      기존 컨텍스트 바 2번째 줄 9px 텍스트가 안 보인다는 피드백의 근본 해결 (Antigravity는 기존 컨텍스트 위젯 유지).
  * - 2026-07-03 Claude: 우클릭 메뉴 복사 버튼 미표시/빈 복사 수정 — 선택 텍스트를 드래그 시점에 캐시.
  *                      근본 원인: xterm SelectionService가 onUserInput마다 선택을 지우는데, TUI(claude 등)의
  *                      DSR 커서 질의 자동 응답도 userInput으로 집계돼 우클릭 시점엔 hasSelection()=false.
@@ -95,6 +97,13 @@ interface TerminalSlotProps {
       seven_day_sonnet?: { utilization: number; resets_at: string } | null;
     } | null;
   } | null;
+  // [2026-07-04] 헤더 쿼터 배지 — 에이전트별 플랜 사용률 (/api/agent-quota).
+  // 키: 'claude' | 'codex'. antigravity는 플랜 쿼터 공개 경로가 없어 컨텍스트 게이지 유지.
+  agentQuota?: Record<string, {
+    available: boolean; reason?: string; plan?: string; stale?: boolean; observed_at?: string;
+    five_hour?: { utilization: number; resets_at: string } | null;
+    seven_day?: { utilization: number; resets_at: string } | null;
+  }> | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
   // 오케스트레이터 스킬 체인 데이터 — /api/orchestrator/skill-chain 폴링
@@ -110,7 +119,7 @@ interface TerminalSlotProps {
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
 }: TerminalSlotProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
@@ -630,6 +639,49 @@ export default function TerminalSlot({
                 <span className="font-bold w-6 text-right">{Math.round(antigravityUsage.percentage ?? 0)}%</span>
               </div>
             )}
+
+            {/* [2026-07-04] 플랜 쿼터 배지 — Claude/Codex 슬롯 헤더 상시 표시.
+                세션 JSONL 데이터(ctx) 유무와 무관하게 뜸 — "쿼터는 정상인데 안 보임" 원천 차단.
+                stale=Codex 토큰 만료로 세션 파일 마지막 관측값 폴백 → 흐리게 + ⏱ 표시 */}
+            {(agentType === 'claude' || agentType === 'codex') && (() => {
+              const q = agentQuota?.[agentType];
+              if (!q?.available || !q.five_hour) return null;
+              const col = (u: number) => u >= 80 ? '#f87171' : u >= 60 ? '#facc15' : '#a3e635';
+              const reset = (iso?: string) => {
+                if (!iso) return '';
+                const remain = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+                if (remain <= 0) return '리셋됨';
+                const d = Math.floor(remain / 86400), h = Math.floor((remain % 86400) / 3600), m = Math.floor((remain % 3600) / 60);
+                return d > 0 ? `${d}d ${h}h 후` : h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
+              };
+              const u5 = q.five_hour.utilization;
+              const tip = [
+                `${agentType === 'claude' ? 'Claude' : 'Codex'} 플랜 사용률${q.plan ? ` (${q.plan})` : ''}`,
+                `5h ${Math.round(u5)}% — 리셋 ${reset(q.five_hour.resets_at)}`,
+                q.seven_day ? `7d ${Math.round(q.seven_day.utilization)}% — 리셋 ${reset(q.seven_day.resets_at)}` : '',
+                q.stale ? `⚠ ${q.observed_at ? new Date(q.observed_at).toLocaleString() : ''} 마지막 관측값 — Codex CLI 재실행 시 실시간 갱신` : '',
+              ].filter(Boolean).join('\n');
+              return (
+                <div
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono shrink-0 ${q.stale ? 'opacity-50 bg-white/5 border-white/10 text-[#999]' : 'bg-[#16210f]/80 border-lime-500/20 text-[#ccc]'}`}
+                  title={tip}
+                >
+                  <span className="opacity-60 font-bold">5h</span>
+                  <div className="w-10 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                    <div className="h-full transition-all duration-1000" style={{ width: `${Math.min(100, u5)}%`, backgroundColor: col(u5) }} />
+                  </div>
+                  <span className="font-black" style={{ color: col(u5) }}>{Math.round(u5)}%</span>
+                  {q.seven_day && (
+                    <>
+                      <span className="opacity-30">|</span>
+                      <span className="opacity-60 font-bold">7d</span>
+                      <span className="font-black" style={{ color: col(q.seven_day.utilization) }}>{Math.round(q.seven_day.utilization)}%</span>
+                    </>
+                  )}
+                  {q.stale && <span className="opacity-70">⏱</span>}
+                </div>
+              );
+            })()}
 
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
