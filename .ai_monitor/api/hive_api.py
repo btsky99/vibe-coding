@@ -8,6 +8,7 @@ DESCRIPTION: /api/hive/*, /api/orchestrator/*, /api/install-skills,
              HTTP 응답을 직접 기록합니다.
 
 REVISION HISTORY:
+- 2026-07-03 Claude: /api/context-usage 응답에 quota 필드 추가 — OAuth 쿼터 사용률(%)·리셋 시각
 - 2026-03-01 Claude: server.py에서 분리 — hive/orchestrator/superpowers API 담당
 - 2026-03-22 Claude: 지식그래프(/api/hive/knowledge-graph) 제거 — 실사용 가치 미흡
 """
@@ -21,6 +22,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from src.claude_quota import get_claude_quota
 from src.pg_store import (
     ensure_schema,
     get_agent_last_seen,
@@ -846,6 +848,11 @@ def handle_get(handler, path: str, params: dict,
                     result['last_5h_oldest_ts'] = win.get('oldest_ts', '')
                 except Exception:
                     pass  # 집계 실패해도 기본 바는 표시 가능
+
+            # [2026-07-03] OAuth 쿼터 사용률 — 세션 유무와 무관하게 항상 첨부.
+            # 내부 60s 캐시라 폴링마다 API를 때리지 않음. 실패 시 available=False →
+            # 프론트는 기존 5h 절대값 표시로 폴백.
+            result['quota'] = get_claude_quota()
 
             handler.wfile.write(json.dumps(
                 result, ensure_ascii=False

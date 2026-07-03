@@ -36,6 +36,14 @@ export interface VibeData {
   claudeUsage: {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
     model: string; context_window: number; percentage: number; last_ts: string;
+    // OAuth 쿼터 사용률 — 서버가 /api/oauth/usage에서 조회 (available=false면 프론트 폴백)
+    quota?: {
+      available: boolean; reason?: string; plan?: string;
+      five_hour?: { utilization: number; resets_at: string } | null;
+      seven_day?: { utilization: number; resets_at: string } | null;
+      seven_day_opus?: { utilization: number; resets_at: string } | null;
+      seven_day_sonnet?: { utilization: number; resets_at: string } | null;
+    } | null;
   } | null;
 
   // 하이브 상태

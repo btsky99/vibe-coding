@@ -82,10 +82,18 @@ interface TerminalSlotProps {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
     context_used?: number;  // [2026-04-21] input + cache_read + cache_write (캐시 포함 실제 점유)
     model: string; context_window: number; percentage: number; last_ts: string;
-    // [2026-04-21] 5시간 sliding window 집계 (쿼터 한도 모르므로 절대값만)
+    // [2026-04-21] 5시간 sliding window 집계 (JSONL 절대값 — quota 실패 시 폴백 표시용)
     last_5h_tokens?: number;
     last_5h_messages?: number;
     last_5h_oldest_ts?: string;
+    // [2026-07-03] OAuth 쿼터 사용률 — 5h/7d 한도 대비 % + 리셋 시각 (CodexBar 방식)
+    quota?: {
+      available: boolean; reason?: string; plan?: string;
+      five_hour?: { utilization: number; resets_at: string } | null;
+      seven_day?: { utilization: number; resets_at: string } | null;
+      seven_day_opus?: { utilization: number; resets_at: string } | null;
+      seven_day_sonnet?: { utilization: number; resets_at: string } | null;
+    } | null;
   } | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
@@ -701,6 +709,19 @@ export default function TerminalSlot({
         ];
         const fmtTok = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`;
 
+        // OAuth 쿼터 표시 헬퍼 — resets_at(ISO) → 남은 시간, 사용률 → 경고색
+        const quota = ctx?.quota?.available ? ctx.quota : null;
+        const fmtReset = (iso: string) => {
+          const remain = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+          if (remain <= 0) return '곧 리셋';
+          const d = Math.floor(remain / 86400);
+          const h = Math.floor((remain % 86400) / 3600);
+          const m = Math.floor((remain % 3600) / 60);
+          if (d > 0) return `${d}d ${h}h 후`;
+          return h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
+        };
+        const quotaColor = (u: number) => u >= 80 ? '#f87171' : u >= 60 ? '#facc15' : '#a3e635';
+
         return (
           <div className="relative shrink-0">
             {/* 단일 행 바 (항상 표시) */}
@@ -744,12 +765,30 @@ export default function TerminalSlot({
                 <span>Out: <span className="text-[#ccc]">{fmtTok(outputTok)}</span></span>
                 {cacheWrite > 0 && <span>Cache+: <span className="text-[#4ade80]">{fmtTok(cacheWrite)}</span></span>}
                 {cacheRead > 0 && <span>Cache~: <span className="text-[#22d3ee]">{fmtTok(cacheRead)}</span></span>}
-                {(ctx.last_5h_tokens ?? 0) > 0 && (
+                {quota?.five_hour ? (
+                  // 쿼터 사용률 우선 표시 — 플랜 한도 대비 실제 % + 리셋 카운트다운
+                  <span
+                    className="ml-auto text-[#666]"
+                    title={`플랜 한도 대비 사용률${quota.plan ? ` (${quota.plan})` : ''} — 로컬 5h ${fmtTok(ctx.last_5h_tokens ?? 0)} tokens · ${ctx.last_5h_messages ?? 0}회`}
+                  >
+                    5h <span style={{ color: quotaColor(quota.five_hour.utilization) }}>{Math.round(quota.five_hour.utilization)}%</span>
+                    {quota.five_hour.resets_at && (
+                      <span className="text-[#444] ml-1">({fmtReset(quota.five_hour.resets_at)})</span>
+                    )}
+                    {quota.seven_day && (
+                      <>
+                        <span className="text-[#444] mx-1">·</span>
+                        7d <span style={{ color: quotaColor(quota.seven_day.utilization) }}>{Math.round(quota.seven_day.utilization)}%</span>
+                      </>
+                    )}
+                  </span>
+                ) : (ctx.last_5h_tokens ?? 0) > 0 ? (
+                  // 폴백: 쿼터 API 실패/미가용 시 기존 JSONL 절대값
                   <span className="ml-auto text-[#666]" title="지난 5시간 누적 (cwd 일치 세션)">
                     5h: <span className="text-[#a3e635]">{fmtTok(ctx.last_5h_tokens ?? 0)}</span>
                     <span className="text-[#444] ml-1">· {ctx.last_5h_messages ?? 0}회</span>
                   </span>
-                )}
+                ) : null}
               </div>
             )}
 
@@ -784,8 +823,45 @@ export default function TerminalSlot({
                     </div>
                   </div>
 
-                  {/* ── 5시간 sliding window (쿼터 한도 없음, 절대값만) ── */}
-                  {(ctx.last_5h_tokens ?? 0) > 0 && (
+                  {/* ── 플랜 쿼터 사용률 (OAuth /api/oauth/usage) — 실패 시 절대값 폴백 ── */}
+                  {quota ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[#ccc] font-bold text-[11px]">플랜 쿼터 사용률</span>
+                        {quota.plan && <span className="text-[#555] text-[9px] uppercase">{quota.plan}</span>}
+                      </div>
+                      <div className="space-y-[5px]">
+                        {([
+                          { label: '5시간', win: quota.five_hour },
+                          { label: '7일', win: quota.seven_day },
+                          { label: '7일 Opus', win: quota.seven_day_opus },
+                          { label: '7일 Sonnet', win: quota.seven_day_sonnet },
+                        ] as const).filter(r => r.win).map(r => (
+                          <div key={r.label} className="flex items-center gap-2">
+                            <span className="text-[#999] w-14 shrink-0">{r.label}</span>
+                            <div className="flex-1 h-1.5 bg-[#1a1a2e] rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${Math.min(100, r.win!.utilization)}%`, backgroundColor: quotaColor(r.win!.utilization) }}
+                              />
+                            </div>
+                            <span className="w-9 text-right" style={{ color: quotaColor(r.win!.utilization) }}>
+                              {Math.round(r.win!.utilization)}%
+                            </span>
+                            <span className="text-[#555] w-16 text-right text-[9px]">
+                              {r.win!.resets_at ? fmtReset(r.win!.resets_at) : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {(ctx.last_5h_tokens ?? 0) > 0 && (
+                        <div className="text-[9px] text-[#555] leading-tight mt-1">
+                          로컬 5h 집계: {fmtTok(ctx.last_5h_tokens ?? 0)} tokens · {ctx.last_5h_messages ?? 0}회
+                          {resetLabel && <span> · {resetLabel} 롤오프</span>}
+                        </div>
+                      )}
+                    </div>
+                  ) : (ctx.last_5h_tokens ?? 0) > 0 ? (
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[#ccc] font-bold text-[11px]">5시간 누적 사용량</span>
@@ -795,11 +871,10 @@ export default function TerminalSlot({
                         </span>
                       </div>
                       <div className="text-[9px] text-[#555] leading-tight">
-                        cwd 일치 세션의 지난 5h assistant usage 합계.
-                        쿼터 한도 정보는 Anthropic Admin API 필요.
+                        cwd 일치 세션의 지난 5h assistant usage 합계. (쿼터 API 미가용 — 절대값 폴백)
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {/* ── 카테고리별 사용량 ── */}
                   <div className="pt-1 space-y-[3px]">
