@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-03 Claude: 우클릭 메뉴 복사 버튼 미표시/빈 복사 수정 — 선택 텍스트를 드래그 시점에 캐시.
+ *                      근본 원인: xterm SelectionService가 onUserInput마다 선택을 지우는데, TUI(claude 등)의
+ *                      DSR 커서 질의 자동 응답도 userInput으로 집계돼 우클릭 시점엔 hasSelection()=false.
  * - 2026-03-26 Claude: xterm.js 스크롤 전면 수정 — scrollback 10000줄, smoothScrollDuration 100ms,
  *                      scrollOnUserInput true 추가. 컨테이너 overflow-hidden 제거로 xterm 내장 스크롤바 활성화.
  *                      Antigravity/Codex 긴 출력 시 이전 내용 확인 불가 문제 해결.
@@ -46,6 +49,24 @@ import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
+
+// [WHY] 클립보드 쓰기 공용 헬퍼 — navigator.clipboard 실패 시 execCommand 폴백.
+// WebView2(PyWebView)에서 writeText가 포커스/권한 사유로 거부될 수 있어 폴백 필수.
+// xterm getSelection()은 Windows에서 이미 \r\n으로 join되므로 CRLF 재정규화 불필요.
+async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
 
 interface TerminalSlotProps {
   slotId: number;
@@ -110,9 +131,15 @@ export default function TerminalSlot({
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
 
-  // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
-  // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
+  // 터미널 우클릭 컨텍스트 메뉴 위치 + 복사 대상 텍스트 스냅샷
+  // [WHY] hasSelection 불리언 대신 텍스트 자체를 담는다 — 메뉴가 뜬 뒤 클릭 시점에
+  // getSelection()을 다시 읽으면 TUI의 DSR 응답으로 선택이 이미 지워져 빈 문자열이 복사되는 사고 방지.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; selText: string } | null>(null);
+  // [WHY] xterm은 onUserInput마다 선택을 지운다(TUI 자동 응답 포함) — 우클릭 시점에 선택이
+  // 사라져 있어도 복사가 가능하도록 마지막 비어있지 않은 선택 텍스트를 캐시.
+  const lastSelectionRef = useRef('');
+  // contextmenu 리스너 누적 방지 — 터미널 재시작마다 addEventListener가 쌓이지 않도록 이전 핸들러 보관
+  const ctxMenuHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
 
   // Claude 컨텍스트 바 상세 토글 (클릭 시 In/Out/Cache 2행 표시)
   const [showCtxDetail, setShowCtxDetail] = useState(false);
@@ -244,36 +271,31 @@ export default function TerminalSlot({
       fitAddon.fit();
       termRef.current = term;
 
-      // 클립보드 복사 헬퍼 — navigator.clipboard API 실패 시 execCommand 폴백
-      const copyToClipboard = async (text: string) => {
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch {
-          // pywebview 등 Clipboard API 미지원 환경 폴백
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.left = '-9999px';
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-        }
-      };
-
-      // 텍스트 드래그(선택) 시 자동 클립보드 복사
+      // 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시
+      // [제약] 선택 해제 이벤트에서도 발화하므로 hasSelection 가드 필수 — 캐시를 빈 값으로 덮지 않는다.
       term.onSelectionChange(() => {
         if (term.hasSelection()) {
-          copyToClipboard(term.getSelection());
+          const sel = term.getSelection();
+          if (sel) {
+            lastSelectionRef.current = sel;
+            copyTextToClipboard(sel);
+          }
         }
       });
 
-      // 터미널 우클릭: 컨텍스트 메뉴 표시
-      // 텍스트 선택 유무를 메뉴 state에 전달 → JSX에서 복사/붙여넣기 버튼 구성
-      xtermRef.current.addEventListener('contextmenu', (e) => {
+      // 터미널 우클릭: 컨텍스트 메뉴 표시 — 복사 대상 텍스트를 이 시점에 스냅샷
+      // [WHY] 라이브 선택이 TUI DSR 응답으로 이미 지워졌으면 캐시(lastSelectionRef)로 폴백 —
+      // "드래그 → 우클릭했는데 복사 버튼이 없다" 사고(2026-07-03) 방지.
+      const ctxHandler = (e: MouseEvent) => {
         e.preventDefault();
-        setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() });
-      });
+        const liveSel = term.hasSelection() ? term.getSelection() : '';
+        setCtxMenu({ x: e.clientX, y: e.clientY, selText: liveSel || lastSelectionRef.current });
+      };
+      if (ctxMenuHandlerRef.current) {
+        xtermRef.current.removeEventListener('contextmenu', ctxMenuHandlerRef.current);
+      }
+      xtermRef.current.addEventListener('contextmenu', ctxHandler);
+      ctxMenuHandlerRef.current = ctxHandler;
 
       // ref에 저장하여 모니터링 뷰 토글 시에도 fit() 호출 가능하게
       fitAddonRef.current = fitAddon;
@@ -1041,28 +1063,15 @@ export default function TerminalSlot({
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onMouseLeave={() => setCtxMenu(null)}
         >
-          {ctxMenu.hasSelection && (
+          {ctxMenu.selText && (
             <button
               className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
               onClick={async () => {
+                // [WHY] 클릭 시점 getSelection() 재조회 금지 — 메뉴가 떠 있는 사이 TUI 응답으로
+                // 선택이 지워지면 빈 문자열이 복사됨. 메뉴 오픈 시점 스냅샷(selText)을 사용.
                 try {
-                  const activeTerm = termRef.current;
-                  if (activeTerm) {
-                    const sel = activeTerm.getSelection();
-                    try {
-                      await navigator.clipboard.writeText(sel);
-                    } catch {
-                      const ta = document.createElement('textarea');
-                      ta.value = sel;
-                      ta.style.position = 'fixed';
-                      ta.style.left = '-9999px';
-                      document.body.appendChild(ta);
-                      ta.select();
-                      document.execCommand('copy');
-                      document.body.removeChild(ta);
-                    }
-                    activeTerm.clearSelection();
-                  }
+                  await copyTextToClipboard(ctxMenu.selText);
+                  termRef.current?.clearSelection();
                 } catch (err) { console.error(err); }
                 setCtxMenu(null);
               }}
