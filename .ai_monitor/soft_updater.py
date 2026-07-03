@@ -6,6 +6,8 @@ DESCRIPTION: 경량 소스 업데이트 채널(A안)의 감지/적용 모듈.
   EXE 풀빌드(updater.py)와 독립된 빠른 채널 — 의존성 변경은 min_exe 게이트로 차단된다.
 
 REVISION HISTORY:
+- 2026-07-03 Claude: dev 트리 보호 가드 2겹 추가 — 비frozen 채널 차단 + 로컬 전용 커밋 유실 방지.
+  (사고: dev 트리에서 apply 실행 → reset --hard로 미푸시 커밋 4개 고아화, .soft_rollback로 복구)
 - 2026-06-24 Claude: 최초 작성 — Task 4~5. boot.py가 만든 관리 체크아웃을 갱신한다.
   메모리 project_soft_update_channel / 계획 ai_monitor_plan.md 참조.
 """
@@ -48,6 +50,21 @@ def _git(args, cwd=None, timeout=300):
 
 def _is_checkout(src: Path) -> bool:
     return (src / ".git").exists() and (src / ".ai_monitor" / "server.py").exists()
+
+
+def _channel_block_reason():
+    """soft 채널 활성 자격 검사 — 차단 사유 문자열, 통과면 None.
+    [과거사고 2026-07-03] dev 트리(비frozen)도 git 체크아웃이라 _is_checkout을 통과 →
+      미푸시 커밋 때문에 local≠remote → ready=true 배너 → apply가 dev 트리를
+      reset --hard → 커밋 4개 고아화(.soft_rollback로 복구). 채널은 boot.py가 만든
+      frozen 관리 체크아웃(%LOCALAPPDATA%\\VibeCoding\\app) 전용이다.
+    [예외] VIBE_SRC_DIR 오버라이드는 명시적 opt-in(E2E 테스트/특수 배치) — 허용.
+    """
+    if os.environ.get("VIBE_SRC_DIR", "").strip():
+        return None
+    if not getattr(sys, "frozen", False):
+        return "dev 실행(비frozen) — soft 채널 비활성 (dev 트리 reset 보호)"
+    return None
 
 
 def _local_head(src: Path):
@@ -147,6 +164,12 @@ def check_soft_update(data_dir: Path, src_dir: Path) -> dict:
     src_dir = Path(src_dir)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
 
+    blocked = _channel_block_reason()
+    if blocked:
+        result = {"ready": False, "channel": BRANCH, "last_check": now, "reason": blocked}
+        _write_ready(data_dir, result)
+        return result
+
     if not _is_checkout(src_dir):
         # seed로 부팅된(=.git 없는) 설치본 — apply 시 clone 승격 필요.
         result = {"ready": False, "channel": BRANCH, "last_check": now,
@@ -179,6 +202,10 @@ def apply_soft_update(src_dir: Path) -> dict:
     """
     src_dir = Path(src_dir)
 
+    blocked = _channel_block_reason()
+    if blocked:
+        return {"ok": False, "error": blocked}
+
     if not _is_checkout(src_dir):
         # seed 상태 → clone 승격: 임시로 받아 교체.
         if not shutil.which("git"):
@@ -208,6 +235,13 @@ def apply_soft_update(src_dir: Path) -> dict:
     ok_fetch, _ = _git(["fetch", "origin", BRANCH], cwd=src_dir)
     if not ok_fetch:
         return {"ok": False, "error": "git fetch 실패(네트워크 확인)"}
+    # [유실 방지 불변식] HEAD가 origin/BRANCH의 조상일 때만 reset 허용.
+    #   관리 체크아웃은 로컬 커밋이 없어야 정상 — 조상이 아니면 이 트리에 원격에 없는
+    #   커밋이 있다는 뜻(2026-07-03 dev 트리 사고 유형)이라 reset 시 고아화된다.
+    ok_anc, _ = _git(["merge-base", "--is-ancestor", "HEAD", f"origin/{BRANCH}"], cwd=src_dir)
+    if not ok_anc:
+        return {"ok": False,
+                "error": "로컬 전용 커밋 감지 — 유실 방지를 위해 soft 업데이트 차단(수동 정리 필요)"}
     ok_reset, _ = _git(["reset", "--hard", f"origin/{BRANCH}"], cwd=src_dir)
     if not ok_reset:
         return {"ok": False, "error": "git reset --hard 실패"}

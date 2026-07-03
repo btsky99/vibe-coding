@@ -55,3 +55,6 @@ tests/office/test_office_report.md
 
 # Subagent 로컬 메모리 (세션별 자동 생성 — 머신 종속이라 공유 금지)
 .claude/agent-memory/
+
+# soft 업데이트 런타임 산출물 (apply 직전 SHA 백업 — 관리 체크아웃 전용)
+.soft_rollback

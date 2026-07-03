@@ -4133,8 +4133,9 @@ def main():
 
     # --- 경량 소스 업데이트 채널 폴링 (boot.py A안, non-blocking) ---
     # [WHY] EXE 풀빌드 채널과 별개로 main 커밋 SHA를 주기 폴링 — 순수 .py push를 빠르게 감지.
-    #   설치본이 boot.py로 실행될 때만 SRC가 git 체크아웃이라 의미가 있고, dev/비체크아웃은
-    #   check_soft_update가 ready=false로 조용히 반환한다(부팅 영향 없음).
+    #   [과거사고 2026-07-03] "dev는 체크아웃 아니라 무해" 가정이 틀렸음 — dev 트리도 체크아웃이라
+    #   ready=true 배너→apply가 dev 트리를 reset --hard(미푸시 커밋 4개 고아화). 지금은
+    #   soft_updater._channel_block_reason이 비frozen 실행을 채널에서 차단(VIBE_SRC_DIR opt-in 제외).
     try:
         from soft_updater import check_soft_update as _check_soft
 
