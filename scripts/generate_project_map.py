@@ -52,9 +52,12 @@ FILE_DESCRIPTIONS = {
 
     # ── .ai_monitor/ 코어 ──
     "server.py": "중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동)",
+    "boot.py": "EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행",
+    "soft_updater.py": "경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백",
     "mission_control.py": "CMUX 스타일 시스템 트레이 및 HUD 관제 센터",
     "mission_control_ui.py": "슬라이드인 사이드바 HUD (에이전트 상태 링)",
     "_version.py": "버전 진실의 원천 (__version__)",
+    "soft_manifest.json": "soft 채널 풀빌드 게이트 (min_exe — 의존성 변경 시 소스 업데이트 차단)",
 
     # ── .ai_monitor/api/ ──
     "api/hive_api.py": "하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*)",
@@ -236,13 +239,19 @@ def generate():
     lines.append("### 서버 코어")
     lines.append("| 파일 | 줄 수 | 설명 |")
     lines.append("|------|------|------|")
-    core_files = ['server.py', '_version.py', 'mission_control.py', 'mission_control_ui.py']
+    core_files = ['server.py', 'boot.py', 'soft_updater.py', '_version.py',
+                  'mission_control.py', 'mission_control_ui.py']
     for name in core_files:
         fp = ai_dir / name
         if fp.exists():
             lc = count_lines(fp)
             desc = get_description(name, name)
             lines.append(f"| `{name}` | {lc} | {desc} |")
+    # soft_manifest.json은 리포 루트 파일이지만 boot.py/soft_updater.py와 한 몸의 규약이라 코어 표에 노출
+    _mf = PROJECT_ROOT / 'soft_manifest.json'
+    if _mf.exists():
+        lines.append(f"| `soft_manifest.json` (루트) | {count_lines(_mf)} | "
+                     f"{get_description('soft_manifest.json', 'soft_manifest.json')} |")
 
     lines.append("")
     lines.append("### API 모듈 (.ai_monitor/api/)")
