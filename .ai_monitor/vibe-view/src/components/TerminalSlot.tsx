@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-04 Claude: 복사 버튼 상시 표시 전환 — TUI 마우스 리포팅(DECSET 1000/1006) 중엔 드래그가
+ *                      로컬 선택을 아예 못 만들어 조건부 렌더가 영영 미충족(어제 캐시 수정으론 미커버).
+ *                      선택 없으면 비활성(회색) + Shift+드래그 안내 힌트.
  * - 2026-07-04 Claude: 헤더 플랜 쿼터 배지 추가 — Claude/Codex 5h 게이지+% · 7d %, 세션 데이터 없어도 상시 표시.
  *                      기존 컨텍스트 바 2번째 줄 9px 텍스트가 안 보인다는 피드백의 근본 해결 (Antigravity는 기존 컨텍스트 위젯 유지).
  * - 2026-07-03 Claude: 우클릭 메뉴 복사 버튼 미표시/빈 복사 수정 — 선택 텍스트를 드래그 시점에 캐시.
@@ -151,7 +154,9 @@ export default function TerminalSlot({
   // 터미널 우클릭 컨텍스트 메뉴 위치 + 복사 대상 텍스트 스냅샷
   // [WHY] hasSelection 불리언 대신 텍스트 자체를 담는다 — 메뉴가 뜬 뒤 클릭 시점에
   // getSelection()을 다시 읽으면 TUI의 DSR 응답으로 선택이 이미 지워져 빈 문자열이 복사되는 사고 방지.
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; selText: string } | null>(null);
+  // mouseTracking: TUI가 마우스 리포팅(DECSET 1000/1006)을 켜면 드래그가 로컬 선택을 못 만듦 —
+  // 이때 복사 비활성 사유를 메뉴에 안내하기 위한 플래그 (2026-07-04 사고: 복사 버튼 미표시 재발)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; selText: string; mouseTracking: boolean } | null>(null);
   // [WHY] xterm은 onUserInput마다 선택을 지운다(TUI 자동 응답 포함) — 우클릭 시점에 선택이
   // 사라져 있어도 복사가 가능하도록 마지막 비어있지 않은 선택 텍스트를 캐시.
   const lastSelectionRef = useRef('');
@@ -306,7 +311,10 @@ export default function TerminalSlot({
       const ctxHandler = (e: MouseEvent) => {
         e.preventDefault();
         const liveSel = term.hasSelection() ? term.getSelection() : '';
-        setCtxMenu({ x: e.clientX, y: e.clientY, selText: liveSel || lastSelectionRef.current });
+        // [WHY] enable-mouse-events 클래스 = TUI가 마우스 리포팅 중 — 일반 드래그로는 선택이
+        // 아예 생성되지 않는다(onSelectionChange 미발화). Shift+드래그만 로컬 선택 허용.
+        const mouseTracking = term.element?.classList.contains('enable-mouse-events') ?? false;
+        setCtxMenu({ x: e.clientX, y: e.clientY, selText: liveSel || lastSelectionRef.current, mouseTracking });
       };
       if (ctxMenuHandlerRef.current) {
         xtermRef.current.removeEventListener('contextmenu', ctxMenuHandlerRef.current);
@@ -1190,21 +1198,29 @@ export default function TerminalSlot({
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onMouseLeave={() => setCtxMenu(null)}
         >
-          {ctxMenu.selText && (
-            <button
-              className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
-              onClick={async () => {
-                // [WHY] 클릭 시점 getSelection() 재조회 금지 — 메뉴가 떠 있는 사이 TUI 응답으로
-                // 선택이 지워지면 빈 문자열이 복사됨. 메뉴 오픈 시점 스냅샷(selText)을 사용.
-                try {
-                  await copyTextToClipboard(ctxMenu.selText);
-                  termRef.current?.clearSelection();
-                } catch (err) { console.error(err); }
-                setCtxMenu(null);
-              }}
-            >
-              복사
-            </button>
+          {/* [WHY] 조건부 렌더 금지 — TUI 마우스 리포팅 중엔 선택이 아예 안 생겨 selText가
+              항상 빈 값 → 버튼이 영영 안 뜨던 사고(2026-07-04). 상시 표시 + 비활성 처리로 전환. */}
+          <button
+            disabled={!ctxMenu.selText}
+            className={`w-full text-left px-4 py-1.5 transition-colors ${
+              ctxMenu.selText ? 'hover:bg-white/10' : 'text-white/30 cursor-not-allowed'
+            }`}
+            onClick={async () => {
+              // [WHY] 클릭 시점 getSelection() 재조회 금지 — 메뉴가 떠 있는 사이 TUI 응답으로
+              // 선택이 지워지면 빈 문자열이 복사됨. 메뉴 오픈 시점 스냅샷(selText)을 사용.
+              try {
+                await copyTextToClipboard(ctxMenu.selText);
+                termRef.current?.clearSelection();
+              } catch (err) { console.error(err); }
+              setCtxMenu(null);
+            }}
+          >
+            복사
+          </button>
+          {!ctxMenu.selText && ctxMenu.mouseTracking && (
+            <div className="px-4 py-1 text-[10px] text-white/40 border-t border-white/10">
+              TUI 실행 중엔 Shift+드래그로 선택하세요
+            </div>
           )}
           <button
             className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
