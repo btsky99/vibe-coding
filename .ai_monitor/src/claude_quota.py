@@ -6,6 +6,9 @@ DESCRIPTION: Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량
              API 키 발급·추가 로그인 불필요 (CodexBar steipete/CodexBar 방식 이식).
 
 REVISION HISTORY:
+- 2026-07-04 Claude: 일시 실패 내성 — 429 등 실패 시 배지가 최대 3분씩 사라지던 문제 수정.
+                     마지막 성공값을 stale=True로 계속 서빙 + 429는 Retry-After(없으면 600s)
+                     쿨다운. 실측: 429 발생 후 재호출은 200 — 일시 리밋에 배지 소멸은 과잉 반응.
 - 2026-07-03 Claude: 신규 생성 — JSONL 절대값 집계로는 쿼터 한도 대비 %를 알 수 없던
                      한계 해소. 실패 시 available=False 강등 → 프론트가 기존 표시로 폴백.
 """
@@ -15,6 +18,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 # [외부 의존 가정] 비공개 베타 엔드포인트 — Claude Code CLI 자신이 상태줄 사용량에
@@ -25,14 +29,19 @@ _BETA_HEADER = 'oauth-2025-04-20'
 
 # [WHY] 성공 60s 캐시: 프론트 폴링(수 초 간격)이 그대로 API를 때리면 429 위험.
 # 실패는 180s 쿨다운 — 토큰 만료/오프라인 상태에서 매 폴링마다 재시도하지 않게.
+# 429는 별도 600s — 180s 재시도로는 리밋이 안 풀리는 사례 실측(2026-07-04).
 _TTL_OK = 60.0
 _TTL_FAIL = 180.0
+_TTL_429 = 600.0
 
 # [제약] server.py는 스레드당 요청 처리 — 캐시 접근은 lock 보호.
 # fetch 자체는 lock 밖에서 수행 (10s 타임아웃 동안 다른 요청을 막지 않기 위해).
 # 드물게 중복 fetch가 발생할 수 있으나 읽기 전용 GET이라 무해.
+# _cache['ttl']: 결과 종류별 쿨다운을 기록 시점에 함께 저장 (성공/실패/429 상이).
+# _last_good: 마지막 성공 응답 — 일시 실패 시 stale=True로 계속 서빙해 배지 소멸 방지.
 _lock = threading.Lock()
-_cache: dict = {'ts': 0.0, 'data': None}
+_cache: dict = {'ts': 0.0, 'data': None, 'ttl': _TTL_OK}
+_last_good: dict = {'data': None, 'observed_at': ''}
 
 
 def _read_oauth() -> tuple:
@@ -112,25 +121,42 @@ def get_claude_quota() -> dict:
     now = time.time()
     with _lock:
         cached = _cache['data']
-        if cached is not None:
-            ttl = _TTL_OK if cached.get('available') else _TTL_FAIL
-            if now - _cache['ts'] < ttl:
-                return cached
+        if cached is not None and now - _cache['ts'] < _cache['ttl']:
+            return cached
 
     token, plan_label, reason = _read_oauth()
+    ttl = _TTL_FAIL
     if not token:
         result = {'available': False, 'reason': reason}
     else:
         try:
             windows = _fetch(token)
             result = {'available': True, 'plan': plan_label, **windows}
+            ttl = _TTL_OK
+            with _lock:
+                _last_good['data'] = result
+                _last_good['observed_at'] = datetime.now(timezone.utc).isoformat()
         except urllib.error.HTTPError as e:
             # 401=토큰 무효(파일은 미만료지만 서버가 거부), 429=레이트리밋 등
             result = {'available': False, 'reason': f'http_{e.code}'}
+            if e.code == 429:
+                # Retry-After 존중 — 없거나 파싱 불가면 600s. 60~3600s로 클램프.
+                try:
+                    ttl = min(3600.0, max(60.0, float(e.headers.get('Retry-After') or _TTL_429)))
+                except (TypeError, ValueError):
+                    ttl = _TTL_429
         except Exception as e:
             result = {'available': False, 'reason': type(e).__name__}
+
+    # [WHY] 일시 실패(429/네트워크)로 배지가 사라지면 "안 된다"로 체감됨 —
+    # 마지막 성공값을 stale 표기로 계속 서빙. 단 토큰 부재/만료는 진짜 불가라 강등 유지.
+    if not result.get('available') and _last_good['data'] and token:
+        result = {**_last_good['data'], 'stale': True,
+                  'observed_at': _last_good['observed_at'],
+                  'reason': result.get('reason', '')}
 
     with _lock:
         _cache['data'] = result
         _cache['ts'] = time.time()
+        _cache['ttl'] = ttl
     return result

@@ -107,8 +107,10 @@ interface TerminalSlotProps {
   // 키: 'claude' | 'codex'. antigravity는 플랜 쿼터 공개 경로가 없어 컨텍스트 게이지 유지.
   agentQuota?: Record<string, {
     available: boolean; reason?: string; plan?: string; stale?: boolean; observed_at?: string;
-    five_hour?: { utilization: number; resets_at: string } | null;
-    seven_day?: { utilization: number; resets_at: string } | null;
+    // window_seconds: 창 길이(초). Codex free는 30일 창이라 "5h" 고정 라벨이 오표기 —
+    // 있으면 라벨을 동적 계산(5h/7d/30d), 없으면(Claude·구 스키마) 기존 5h/7d 유지.
+    five_hour?: { utilization: number; resets_at: string; window_seconds?: number } | null;
+    seven_day?: { utilization: number; resets_at: string; window_seconds?: number } | null;
   }> | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
@@ -692,18 +694,27 @@ export default function TerminalSlot({
                 return d > 0 ? `${d}d ${h}h 후` : h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
               };
               const u5 = q.five_hour.utilization;
+              // 창 길이 라벨 — window_seconds가 오면 동적(30d 등), 없으면 관례상 5h/7d
+              const winLabel = (sec: number | undefined, fallback: string) => {
+                if (!sec) return fallback;
+                if (sec >= 2 * 86400) return `${Math.round(sec / 86400)}d`;
+                if (sec >= 3600) return `${Math.round(sec / 3600)}h`;
+                return `${Math.round(sec / 60)}m`;
+              };
+              const l5 = winLabel(q.five_hour.window_seconds, '5h');
+              const l7 = winLabel(q.seven_day?.window_seconds, '7d');
               const tip = [
                 `${agentType === 'claude' ? 'Claude' : 'Codex'} 플랜 사용률${q.plan ? ` (${q.plan})` : ''}`,
-                `5h ${Math.round(u5)}% — 리셋 ${reset(q.five_hour.resets_at)}`,
-                q.seven_day ? `7d ${Math.round(q.seven_day.utilization)}% — 리셋 ${reset(q.seven_day.resets_at)}` : '',
-                q.stale ? `⚠ ${q.observed_at ? new Date(q.observed_at).toLocaleString() : ''} 마지막 관측값 — Codex CLI 재실행 시 실시간 갱신` : '',
+                `${l5} ${Math.round(u5)}% — 리셋 ${reset(q.five_hour.resets_at)}`,
+                q.seven_day ? `${l7} ${Math.round(q.seven_day.utilization)}% — 리셋 ${reset(q.seven_day.resets_at)}` : '',
+                q.stale ? `⚠ ${q.observed_at ? new Date(q.observed_at).toLocaleString() : ''} 마지막 관측값 — 일시 조회 실패, 자동 재시도 중` : '',
               ].filter(Boolean).join('\n');
               return (
                 <div
                   className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono shrink-0 ${q.stale ? 'opacity-50 bg-white/5 border-white/10 text-[#999]' : 'bg-[#16210f]/80 border-lime-500/20 text-[#ccc]'}`}
                   title={tip}
                 >
-                  <span className="opacity-60 font-bold">5h</span>
+                  <span className="opacity-60 font-bold">{l5}</span>
                   <div className="w-10 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
                     <div className="h-full transition-all duration-1000" style={{ width: `${Math.min(100, u5)}%`, backgroundColor: col(u5) }} />
                   </div>
@@ -711,7 +722,7 @@ export default function TerminalSlot({
                   {q.seven_day && (
                     <>
                       <span className="opacity-30">|</span>
-                      <span className="opacity-60 font-bold">7d</span>
+                      <span className="opacity-60 font-bold">{l7}</span>
                       <span className="font-black" style={{ color: col(q.seven_day.utilization) }}>{Math.round(q.seven_day.utilization)}%</span>
                     </>
                   )}

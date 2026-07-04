@@ -7,6 +7,10 @@ DESCRIPTION: Codex CLI(OpenAI)의 플랜 쿼터 사용률(5h/7d %) 공급자.
              hive_api의 /api/agent-quota 응답 'codex' 필드 공급자.
 
 REVISION HISTORY:
+- 2026-07-04 Claude: 실측 스키마 반영 — wham/usage 실응답은 rate_limit(단수).primary_window/
+                     secondary_window + reset_at(epoch)인데 rate_limits.primary/secondary만
+                     찾아 파싱 실패 → 두 달 전 세션 폴백에 갇히던 버그 수정. plan_type은
+                     최상위 키. window_seconds 전달(free 플랜은 30일 창이라 5h 라벨 오표기 방지).
 - 2026-07-04 Claude: 신규 생성 — 터미널 슬롯 헤더 쿼터 배지에 Codex도 표시 (claude_quota와 동일 계약)
 """
 
@@ -39,24 +43,36 @@ def _epoch_to_iso(sec) -> str:
 
 
 def _window_from_rl(rl) -> dict | None:
-    """rate_limits.primary/secondary({used_percent, resets_at, ...}) → claude_quota와 동일 축약형."""
+    """윈도우({used_percent, resets_at|reset_at, ...}) → claude_quota와 동일 축약형.
+
+    [호환성 함정] 세션 jsonl은 resets_at, 실시간 wham/usage는 reset_at(epoch) — 양쪽 다 수용.
+    """
     if not isinstance(rl, dict):
         return None
     used = rl.get('used_percent')
     if used is None:
         return None
-    return {'utilization': used, 'resets_at': _epoch_to_iso(rl.get('resets_at'))}
+    win = {'utilization': used,
+           'resets_at': _epoch_to_iso(rl.get('resets_at') or rl.get('reset_at'))}
+    # 창 길이(초) — free 플랜은 30일 창이라 프론트가 5h 고정 라벨 대신 동적 표기(30d)에 사용
+    if rl.get('limit_window_seconds'):
+        win['window_seconds'] = rl['limit_window_seconds']
+    return win
 
 
-def _shape(rate_limits: dict) -> dict | None:
-    """rate_limits 블록(primary=5h, secondary=7d 관례) → 응답 골격. 형식 불일치 시 None."""
-    five = _window_from_rl(rate_limits.get('primary'))
-    seven = _window_from_rl(rate_limits.get('secondary'))
+def _shape(rate_limits: dict, plan: str = '') -> dict | None:
+    """rate_limits 블록 → 응답 골격. 형식 불일치 시 None.
+
+    [호환성 함정] 키 이름이 소스마다 다름 — 세션 jsonl: primary/secondary,
+    실시간 wham/usage: primary_window/secondary_window. 양쪽 다 시도한다.
+    """
+    five = _window_from_rl(rate_limits.get('primary') or rate_limits.get('primary_window'))
+    seven = _window_from_rl(rate_limits.get('secondary') or rate_limits.get('secondary_window'))
     if five is None and seven is None:
         return None
     return {
         'available': True,
-        'plan': rate_limits.get('plan_type') or '',
+        'plan': plan or rate_limits.get('plan_type') or '',
         'five_hour': five,
         'seven_day': seven,
     }
@@ -96,8 +112,11 @@ def _fetch_api(token: str, account_id: str) -> dict | None:
         data = json.loads(resp.read().decode('utf-8'))
     if not isinstance(data, dict):
         return None
-    for block in (data.get('rate_limits'), data):
-        shaped = _shape(block) if isinstance(block, dict) else None
+    # [실측 2026-07-04] 실제 응답: 최상위 plan_type + rate_limit(단수) 아래 *_window 키.
+    # rate_limits(복수)·최상위 폴백은 스키마 변동 대비 유지.
+    plan = data.get('plan_type') or ''
+    for block in (data.get('rate_limit'), data.get('rate_limits'), data):
+        shaped = _shape(block, plan) if isinstance(block, dict) else None
         if shaped:
             return shaped
     return None
