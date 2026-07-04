@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-04 Claude: TUI 마우스 리포팅 중 드래그 선택 복원 — capture 단계에서 좌클릭 mousedown을
+ *                      shiftKey 합성 이벤트로 재디스패치해 xterm 로컬 선택 강제. "드래그→우클릭 복사→
+ *                      외부 붙여넣기" 워크플로우 복구. 붙여넣기 실패 시 터미널에 안내 출력(무음 실패 제거).
  * - 2026-07-04 Claude: 복사 버튼 상시 표시 전환 — TUI 마우스 리포팅(DECSET 1000/1006) 중엔 드래그가
  *                      로컬 선택을 아예 못 만들어 조건부 렌더가 영영 미충족(어제 캐시 수정으론 미커버).
  *                      선택 없으면 비활성(회색) + Shift+드래그 안내 힌트.
@@ -162,6 +165,8 @@ export default function TerminalSlot({
   const lastSelectionRef = useRef('');
   // contextmenu 리스너 누적 방지 — 터미널 재시작마다 addEventListener가 쌓이지 않도록 이전 핸들러 보관
   const ctxMenuHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
+  // 드래그 선택 강제 핸들러도 동일 사유로 보관 (터미널 재시작 시 교체)
+  const dragSelectHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
 
   // Claude 컨텍스트 바 상세 토글 (클릭 시 In/Out/Cache 2행 표시)
   const [showCtxDetail, setShowCtxDetail] = useState(false);
@@ -304,6 +309,30 @@ export default function TerminalSlot({
           }
         }
       });
+
+      // [WHY] TUI(claude 등)가 마우스 리포팅(DECSET 1000/1002)을 켜면 xterm이 좌클릭 드래그를
+      // TUI로 전달해 로컬 선택이 아예 안 생긴다 → "드래그→우클릭 복사"가 통째로 죽음(2026-07-04 사고).
+      // xterm 내부 SelectionService는 shiftKey 이벤트만 마우스 리포팅 중에도 로컬 선택으로 처리하므로,
+      // capture 단계에서 일반 좌클릭 mousedown을 shiftKey=true 합성 이벤트로 재디스패치해 선택을 강제한다.
+      // [제약] 이로 인해 마우스 리포팅 중 좌클릭은 TUI에 전달되지 않는다 — claude CLI는 좌클릭을
+      // 쓰지 않고(스크롤 휠은 별도 경로라 영향 없음) 사용자 워크플로우(드래그 복사)가 우선.
+      // 합성 이벤트는 shiftKey=true라 첫 가드에서 통과 → 재귀 없음. 일반 셸(리포팅 OFF)은 미개입.
+      const dragSelectHandler = (e: MouseEvent) => {
+        if (e.button !== 0 || e.shiftKey) return;
+        if (!term.element?.classList.contains('enable-mouse-events')) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.target?.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true, cancelable: true, view: window,
+          clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
+          button: 0, buttons: e.buttons, detail: e.detail, shiftKey: true,
+        }));
+      };
+      if (dragSelectHandlerRef.current) {
+        xtermRef.current.removeEventListener('mousedown', dragSelectHandlerRef.current, true);
+      }
+      xtermRef.current.addEventListener('mousedown', dragSelectHandler, true);
+      dragSelectHandlerRef.current = dragSelectHandler;
 
       // 터미널 우클릭: 컨텍스트 메뉴 표시 — 복사 대상 텍스트를 이 시점에 스냅샷
       // [WHY] 라이브 선택이 TUI DSR 응답으로 이미 지워졌으면 캐시(lastSelectionRef)로 폴백 —
@@ -1217,9 +1246,9 @@ export default function TerminalSlot({
           >
             복사
           </button>
-          {!ctxMenu.selText && ctxMenu.mouseTracking && (
+          {!ctxMenu.selText && (
             <div className="px-4 py-1 text-[10px] text-white/40 border-t border-white/10">
-              TUI 실행 중엔 Shift+드래그로 선택하세요
+              드래그로 텍스트를 선택한 뒤 우클릭하세요
             </div>
           )}
           <button
@@ -1231,7 +1260,12 @@ export default function TerminalSlot({
                 if (activeWs && activeWs.readyState === WebSocket.OPEN) {
                   activeWs.send(text);
                 }
-              } catch (err) { console.error(err); }
+              } catch (err) {
+                console.error(err);
+                // [WHY] 무음 실패 금지 — WebView2 클립보드 읽기 권한 거부 시 사용자가 원인을
+                // 알 수 없던 사고(2026-07-04). 로컬 표시 전용 write라 pty로는 전송되지 않는다.
+                termRef.current?.write('\r\n\x1b[33m[클립보드 읽기 실패 — 터미널 클릭 후 Ctrl+V를 사용하세요]\x1b[0m\r\n');
+              }
               setCtxMenu(null);
             }}
           >
