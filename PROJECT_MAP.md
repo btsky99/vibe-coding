@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-04 00:40
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-04 17:02
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -225,7 +225,7 @@
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1326 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1378 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 573 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 140 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -297,4 +297,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-04 00:40
+> 자동 생성 완료: 2026-07-04 17:02
