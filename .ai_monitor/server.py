@@ -3,6 +3,8 @@ FILE: .ai_monitor/server.py
 DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
 
 REVISION HISTORY:
+- 2026-07-04 Claude: /api/agent-quota 디스패치 누락 수정 — hive_api 핸들러만 있고
+                     allowlist 미갱신으로 쿼터 배지가 index.html을 받던 버그
 - 2026-04-30 Claude: Platform Phase 2-3 — _current_project_root/_id 로직을
                      infra/project_context.py로 추출 (서버 외부에서도 재사용 가능)
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
@@ -1754,10 +1756,13 @@ class SSEHandler(BaseHTTPRequestHandler):
         #    /api/skill-results, /api/context-usage, /api/antigravity-context-usage, /api/local-models ──
         elif (parsed_path.path.startswith('/api/hive/') or
               parsed_path.path.startswith('/api/orchestrator/') or
+              # [과거사고 2026-07-04] agent-quota 누락 — hive_api.py에 핸들러만 추가하고
+              # 이 allowlist를 안 갱신해 SPA 폴백(index.html)이 응답 → 쿼터 배지 미표시.
+              # hive_api에 단건 라우트 추가 시 반드시 이 튜플도 동기 갱신.
               parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
                                    '/api/skill-ab-test', '/api/skill/predict',
                                    '/api/context-usage', '/api/antigravity-context-usage',
-                                   '/api/local-models')):
+                                   '/api/agent-quota', '/api/local-models')):
             _params = parse_qs(parsed_path.query)
             from api import hive_api
             hive_api.handle_get(
