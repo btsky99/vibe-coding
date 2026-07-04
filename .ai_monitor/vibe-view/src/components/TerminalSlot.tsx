@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-05 Claude: 드래그 선택 즉시 사라짐 수정 — mousedown만 shift 합성하던 v3.7.243은 앵커만 생기고
+ *                      이동분(mousemove)이 TUI로 새어 리포팅 응답이 선택을 초기화. 드래그 세션 전체
+ *                      (mousedown→mousemove→mouseup)를 shift로 재디스패치해 로컬 선택 확장 유지.
  * - 2026-07-04 Claude: TUI 마우스 리포팅 중 드래그 선택 복원 — capture 단계에서 좌클릭 mousedown을
  *                      shiftKey 합성 이벤트로 재디스패치해 xterm 로컬 선택 강제. "드래그→우클릭 복사→
  *                      외부 붙여넣기" 워크플로우 복구. 붙여넣기 실패 시 터미널에 안내 출력(무음 실패 제거).
@@ -319,16 +322,45 @@ export default function TerminalSlot({
       // [제약] 이로 인해 마우스 리포팅 중 좌클릭은 TUI에 전달되지 않는다 — claude CLI는 좌클릭을
       // 쓰지 않고(스크롤 휠은 별도 경로라 영향 없음) 사용자 워크플로우(드래그 복사)가 우선.
       // 합성 이벤트는 shiftKey=true라 첫 가드에서 통과 → 재귀 없음. 일반 셸(리포팅 OFF)은 미개입.
+      // [과거사고] v3.7.243은 mousedown만 shift로 합성 → 선택 앵커(시작점)만 생기고
+      // 드래그 이동분(mousemove)이 shift 없이 TUI로 새어나가 리포팅 응답이 선택을 즉시 초기화.
+      // 증상(2026-07-05 리포트): "복사는 되는데 드래그하면 하이라이트가 바로 사라짐".
+      // 해결: 드래그 세션 전체(mousedown→mousemove→mouseup)를 shift 이벤트로 재디스패치해
+      // xterm 로컬 선택 확장을 유지하고 원본 이벤트는 stopImmediatePropagation으로 리포팅 경로 차단.
+      const redispatchAsShift = (src: MouseEvent, type: string) =>
+        src.target?.dispatchEvent(new MouseEvent(type, {
+          bubbles: true, cancelable: true, view: window,
+          clientX: src.clientX, clientY: src.clientY, screenX: src.screenX, screenY: src.screenY,
+          button: src.button, buttons: src.buttons, detail: src.detail, shiftKey: true,
+        }));
       const dragSelectHandler = (e: MouseEvent) => {
         if (e.button !== 0 || e.shiftKey) return;
         if (!term.element?.classList.contains('enable-mouse-events')) return;
         e.preventDefault();
         e.stopImmediatePropagation();
-        e.target?.dispatchEvent(new MouseEvent('mousedown', {
-          bubbles: true, cancelable: true, view: window,
-          clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
-          button: 0, buttons: e.buttons, detail: e.detail, shiftKey: true,
-        }));
+        redispatchAsShift(e, 'mousedown');
+        // [불변식] 합성 이벤트는 shiftKey=true라 각 핸들러 첫 가드에서 return → 무한 재귀 없음.
+        // 드래그가 터미널 밖으로 나가도 추적되도록 document capture에 세션 리스너를 건다.
+        const endDrag = () => {
+          document.removeEventListener('mousemove', onMove, true);
+          document.removeEventListener('mouseup', onUp, true);
+        };
+        const onMove = (me: MouseEvent) => {
+          if (me.shiftKey) return;               // 합성 이벤트 — 재진입 차단
+          if (!(me.buttons & 1)) { endDrag(); return; }  // 좌클릭 뗌 → 세션 종료 안전장치
+          me.preventDefault();
+          me.stopImmediatePropagation();
+          redispatchAsShift(me, 'mousemove');
+        };
+        const onUp = (ue: MouseEvent) => {
+          endDrag();
+          if (ue.shiftKey) return;
+          ue.preventDefault();
+          ue.stopImmediatePropagation();
+          redispatchAsShift(ue, 'mouseup');      // 선택 확정
+        };
+        document.addEventListener('mousemove', onMove, true);
+        document.addEventListener('mouseup', onUp, true);
       };
       if (dragSelectHandlerRef.current) {
         xtermRef.current.removeEventListener('mousedown', dragSelectHandlerRef.current, true);
