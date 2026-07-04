@@ -29,8 +29,8 @@ jobs:
       - name: Lint & syntax check (Python)
         run: |
           pip install ruff
-          python -m py_compile .ai_monitor/server.py
-          ruff check .ai_monitor/server.py --select E9,F821,F823
+          python -m py_compile .ai_monitor/server.py .ai_monitor/boot.py .ai_monitor/soft_updater.py
+          ruff check .ai_monitor/server.py .ai_monitor/boot.py .ai_monitor/soft_updater.py --select E9,F821,F823
 
       - name: Pre-build verification (Phase 1 - source check)
         # [2026-03-27 Claude] 빌드 전 검증 Phase 1 — Python 의존성, 버전, 구문, import 사전 확인
@@ -158,6 +158,10 @@ jobs:
           cd .ai_monitor
           WINPTY="${{ steps.winpty.outputs.path }}"
           # [2026-03-24] 배포 범용화: 개발 전용 파일 제거 (skills, scripts, .md 지침서)
+          # [2026-07-04 A안] entry server.py → boot.py 전환 — 앱 .py는 관리 체크아웃에서 runpy 실행.
+          #   _appseed/*는 오프라인 최초부팅/게이트 폴백용 소스 스냅샷 (spec datas와 1:1 동기).
+          #   hidden-import 목록은 boot.py `if False:` 블록 ↔ vibe-coding.spec hiddenimports와 3중 동기 의무
+          #   (과거사고 v3.7.215~218: 한쪽만 갱신 → 설치 EXE ImportError).
           pyinstaller --onefile --noconsole \
             --name "vibe-coding-update-${{ steps.version.outputs.ver }}" \
             --icon bin/vibe_final.ico \
@@ -170,6 +174,17 @@ jobs:
             --add-data "pty-server;pty-server" \
             --add-data "_version.py;." \
             --add-data "updater.py;." \
+            --add-data "../soft_manifest.json;." \
+            --add-data "server.py;_appseed/.ai_monitor" \
+            --add-data "boot.py;_appseed/.ai_monitor" \
+            --add-data "soft_updater.py;_appseed/.ai_monitor" \
+            --add-data "updater.py;_appseed/.ai_monitor" \
+            --add-data "_version.py;_appseed/.ai_monitor" \
+            --add-data "api;_appseed/.ai_monitor/api" \
+            --add-data "src;_appseed/.ai_monitor/src" \
+            --add-data "infra;_appseed/.ai_monitor/infra" \
+            --add-data "../scripts;_appseed/scripts" \
+            --add-data "../soft_manifest.json;_appseed" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -179,11 +194,27 @@ jobs:
             --hidden-import psycopg2 \
             --hidden-import _version \
             --hidden-import updater \
+            --hidden-import soft_updater \
+            --hidden-import runpy \
+            --hidden-import urllib.request \
             --hidden-import fastembed \
             --hidden-import onnxruntime \
             --hidden-import tokenizers \
+            --hidden-import webview \
+            --hidden-import clr \
+            --hidden-import watchdog \
+            --hidden-import dotenv \
+            --hidden-import rich \
+            --hidden-import telegram \
+            --hidden-import win32com \
+            --hidden-import win32api \
+            --hidden-import win32con \
+            --hidden-import pythoncom \
+            --hidden-import numpy \
+            --hidden-import filelock \
+            --hidden-import PIL \
             --collect-data fastembed \
-            server.py
+            boot.py
 
       - name: Build exe (console)
         # [2026-03-21 Claude] noconsole 빌드와 동일한 경로 수정 적용
@@ -193,6 +224,7 @@ jobs:
           cd .ai_monitor
           WINPTY="${{ steps.winpty.outputs.path }}"
           # [2026-03-24] 배포 범용화: noconsole 빌드와 동일하게 개발 전용 파일 제거
+          # [2026-07-04 A안] noconsole 빌드와 동일 — entry boot.py + _appseed + hidden-import 3중 동기.
           pyinstaller --onefile --console \
             --name "vibe-coding-console-${{ steps.version.outputs.ver }}" \
             --icon bin/vibe_final.ico \
@@ -205,6 +237,17 @@ jobs:
             --add-data "pty-server;pty-server" \
             --add-data "_version.py;." \
             --add-data "updater.py;." \
+            --add-data "../soft_manifest.json;." \
+            --add-data "server.py;_appseed/.ai_monitor" \
+            --add-data "boot.py;_appseed/.ai_monitor" \
+            --add-data "soft_updater.py;_appseed/.ai_monitor" \
+            --add-data "updater.py;_appseed/.ai_monitor" \
+            --add-data "_version.py;_appseed/.ai_monitor" \
+            --add-data "api;_appseed/.ai_monitor/api" \
+            --add-data "src;_appseed/.ai_monitor/src" \
+            --add-data "infra;_appseed/.ai_monitor/infra" \
+            --add-data "../scripts;_appseed/scripts" \
+            --add-data "../soft_manifest.json;_appseed" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -214,11 +257,27 @@ jobs:
             --hidden-import psycopg2 \
             --hidden-import _version \
             --hidden-import updater \
+            --hidden-import soft_updater \
+            --hidden-import runpy \
+            --hidden-import urllib.request \
             --hidden-import fastembed \
             --hidden-import onnxruntime \
             --hidden-import tokenizers \
+            --hidden-import webview \
+            --hidden-import clr \
+            --hidden-import watchdog \
+            --hidden-import dotenv \
+            --hidden-import rich \
+            --hidden-import telegram \
+            --hidden-import win32com \
+            --hidden-import win32api \
+            --hidden-import win32con \
+            --hidden-import pythoncom \
+            --hidden-import numpy \
+            --hidden-import filelock \
+            --hidden-import PIL \
             --collect-data fastembed \
-            server.py
+            boot.py
 
       - name: Build sub-window EXEs
         # server.py frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.

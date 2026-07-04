@@ -6,6 +6,7 @@
  *          동일한 데이터 스트림을 사용합니다. 백엔드 API 폴링, SSE 스트림,
  *          에이전트 상태, 하이브 헬스 등 모든 실시간 데이터를 관리합니다.
  * REVISION HISTORY:
+ * - 2026-07-04 Claude: agentQuota 폴링 추가 — 터미널 헤더 쿼터 배지용 (/api/agent-quota, 60s)
  * - 2026-04-03 Claude: App.tsx에서 데이터 폴링 로직 추출 → 커스텀 훅으로 분리
  * ------------------------------------------------------------------------
  */
@@ -36,7 +37,22 @@ export interface VibeData {
   claudeUsage: {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
     model: string; context_window: number; percentage: number; last_ts: string;
+    // OAuth 쿼터 사용률 — 서버가 /api/oauth/usage에서 조회 (available=false면 프론트 폴백)
+    quota?: {
+      available: boolean; reason?: string; plan?: string;
+      five_hour?: { utilization: number; resets_at: string } | null;
+      seven_day?: { utilization: number; resets_at: string } | null;
+      seven_day_opus?: { utilization: number; resets_at: string } | null;
+      seven_day_sonnet?: { utilization: number; resets_at: string } | null;
+    } | null;
   } | null;
+  // 터미널 헤더 쿼터 배지 — 에이전트별 플랜 사용률 (/api/agent-quota, 60s 폴링).
+  // stale=true면 Codex 세션 파일 마지막 관측값 (토큰 만료 폴백) — 배지를 흐리게 표시.
+  agentQuota: Record<string, {
+    available: boolean; reason?: string; plan?: string; stale?: boolean; observed_at?: string;
+    five_hour?: { utilization: number; resets_at: string } | null;
+    seven_day?: { utilization: number; resets_at: string } | null;
+  }> | null;
 
   // 하이브 상태
   hiveHealth: any;
@@ -80,6 +96,7 @@ export function useVibeData(): VibeData {
   const [ptySessionsSummary, setPtySessionsSummary] = useState<VibeData['ptySessionsSummary']>({});
   const [antigravityUsage, setAntigravityUsage] = useState<VibeData['antigravityUsage']>(null);
   const [claudeUsage, setClaudeUsage] = useState<VibeData['claudeUsage']>(null);
+  const [agentQuota, setAgentQuota] = useState<VibeData['agentQuota']>(null);
 
   // ─── 하이브 상태 ──────────────────────────────────────────────────
   const [hiveHealth, setHiveHealth] = useState<any>(null);
@@ -277,6 +294,19 @@ export function useVibeData(): VibeData {
     return () => clearInterval(interval);
   }, []);
 
+  // 에이전트별 플랜 쿼터 폴링 (60초 — 서버 캐시 TTL과 동일해 더 짧아도 무의미)
+  useEffect(() => {
+    const fetchQuota = () => {
+      fetch(`${API_BASE}/api/agent-quota`)
+        .then(res => res.json())
+        .then(data => { if (!data.error) setAgentQuota(data); })
+        .catch((err) => console.error('[useVibeData] agent-quota fetch error:', err));
+    };
+    fetchQuota();
+    const interval = setInterval(fetchQuota, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   // 앱 버전 + 프로젝트명 로드
   useEffect(() => {
     fetch(`${API_BASE}/api/project-info`)
@@ -314,7 +344,7 @@ export function useVibeData(): VibeData {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
     ptySessionsSummary,
-    antigravityUsage, claudeUsage,
+    antigravityUsage, claudeUsage, agentQuota,
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,

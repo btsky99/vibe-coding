@@ -1,108 +1,100 @@
-# Antigravity CLI 마이그레이션 — 잔여 Phase 1~4
+# 구현 계획 — 경량 소스 업데이트 채널 (A안 run-from-source 부트스트랩)
 
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: Gemini CLI → Antigravity CLI(agy) 전면 교체 잔여분 실행 계획.
-             2026-05-24 brainstorm 승인(옵션 B: 식별자 일괄 변경 + DB UPDATE). 데드라인 6/18.
+DESCRIPTION: 설치 EXE를 풀빌드 없이 git push + 버튼 클릭으로 순수 .py 변경 갱신하는 경량 업데이트 채널 구현 계획.
+             2026-06-23 brainstorm 승인 (A안 run-from-source 부트스트랩).
 
 REVISION HISTORY:
-- 2026-06-11 Claude: 잔여분 계획 작성 (이전 계획 '자가 치유 2.0'은 전 태스크 완료로 교체)
+- 2026-06-23 Claude: 신규 계획 작성 (이전 'Antigravity CLI 마이그레이션'은 2026-06-11 전체 완료로 교체)
 -->
 
-> 승인: 2026-05-24 (옵션 B). 메모리: `project_antigravity_migration.md`
-> 현황: Phase 0 PoC ✅ / Phase 1 부분(서버 실행 분기 + UI 라벨) ✅ / agy 1.0.6 설치 확인(2026-06-11)
-> 규모: 코드 97파일 815회 발생, DB 9테이블 식별자 컬럼
-
-## 불변식 (모든 태스크 공통)
-- `GEMINI_API_KEY`/`GOOGLE_API_KEY` 등 **외부 서비스 환경변수 교체 금지** (hive_watchdog.py:331, screenshot_analyzer.py:58)
-- 파일 rename/삭제 시 **vibe-coding.spec datas ↔ CI --add-data 동시 갱신** (과거사고 v3.7.215~218)
-- API/실행 경계에서 레거시 식별자 `'gemini'` alias 수용 유지 (server.py:3228 패턴) — 내부 표준은 `'antigravity'`
-- Phase 단위 별도 커밋 (git bisect 가능), 파일당 1500줄, 표준 헤더
-- DB UPDATE 전 pg_dump 백업 의무
+> 설계 승인: 2026-06-23. 메모리: `project_soft_update_channel.md`
+> 목표: 설치 EXE를 풀빌드 없이 `git push` + 버튼 클릭으로 순수 .py 변경 갱신.
+> 제약: 의존성/C확장 변경은 `soft_manifest.min_exe` 게이트로 풀빌드 강제. dev 트리(D:\vibe-coding)와 관리 체크아웃 분리.
 
 ---
 
-## Phase 1 잔여 — 어댑터 + 문서 기반
+## 마일스톤 A — 부트스트랩 토대 (선행 필수)
 
-### [x] Task 1: agy 런타임 실측 — 설정/세션 디렉토리 + 훅 지원 여부
-- **파일**: (조사 태스크 — 결과를 본 파일 하단 "실측 결과"에 기록)
-- **방법**: `agy -p "1+1?"` 실행 전후 홈/프로젝트 디렉토리 변화 관찰. `agy help` 서브커맨드 조사. 프로젝트 `.gemini/`(commands/rules/settings.json/skills)를 agy가 읽는지 확인
-- **검증**: ①agy 설정 디렉토리 경로 ②세션/대화 저장 경로 ③.gemini 인식 여부 3가지 기록
-- **의존성**: 없음
+### [ ] Task 1: soft_manifest.json 생성 (풀빌드 게이트 규약)
+- 파일: `soft_manifest.json` (repo 루트, 신규)
+- 방법: `{ "min_exe": "<현재 _version>", "channel": "main", "schema": 1 }`. boot.py/soft_updater가 읽을 최소 EXE 버전 게이트. JSON이라 표준 헤더 불가 → PROJECT_MAP에 역할 기재.
+- 검증: `python -c "import json;json.load(open('soft_manifest.json'))"` 통과 + min_exe가 `_version.__version__`과 일치
+- 의존성: 없음
 
-### [x] Task 2: scripts/antigravity_adapter.py 신설 — 호출 격리 레이어 (021600f 커밋 완료, 검증 통과 2026-06-11)
-- **파일**: `scripts/antigravity_adapter.py` (신규 ~120줄)
-- **방법**: closed-source 인터페이스 변경 대비 단일 격리점. `find_agy()` (PATH 탐색), `build_print_cmd(prompt, model=None, yolo=False)` (-p/--model/--dangerously-skip-permissions 매핑), `session_dir()` (Task 1 실측 경로). cli_agent.py `_GEMINI_CMD`/`_select_gemini_model` 호출 경로와 server.py:3233 인라인 옵션 매핑을 어댑터 경유로 교체
-- **검증**: `python -c "from antigravity_adapter import build_print_cmd; print(build_print_cmd('hi'))"` + 기존 호출부 grep 0건
-- **의존성**: Task 1
+### [ ] Task 2: boot.py 신규 — 체크아웃 보장 + seed 폴백
+- 파일: `.ai_monitor/boot.py` (신규)
+- 방법: 표준 헤더 + `resolve_src()` → `%LOCALAPPDATA%\VibeCoding\app`(없으면 `git clone https://github.com/btsky99/vibe-coding`). clone 실패 시 `_seed_from_bundle()` — `sys._MEIPASS`(또는 EXE 옆 datas)에서 SRC로 소스 복사(오프라인 최초 부팅 보장). git 미설치/clone 실패도 seed로 부팅 성립.
+- 검증: dev에서 `python .ai_monitor/boot.py`로 SRC 생성/스킵 분기 로그 확인. SRC에 .ai_monitor/server.py 존재
+- 의존성: Task 1 (manifest 경로 규약 공유)
 
-### [x] Task 3: GEMINI.md 내용 Antigravity 기준 갱신 (rename 취소 — 실측 반영)
-- **파일**: `GEMINI.md` (파일명 유지 — agy가 읽는 컨텍스트 파일), `docs/help-gemini-cli.md`→`help-antigravity-cli.md`(우리 문서라 rename 가능, tools_api 참조 갱신)
-- **방법**: GEMINI.md 본문의 "Gemini CLI" 서술을 Antigravity CLI(agy) 기준으로 갱신. 파일명 유지 사유를 헤더 주석에 명기 (재발 방지)
-- **검증**: GEMINI.md 내 구식 서술 0건, help 문서 참조 경로 유효
-- **의존성**: Task 1 ✅
-
-## Phase 2 — 코드 식별자 일괄 변경 (도메인별 커밋)
-
-### [x] Task 4: scripts/ gemini_* 파일 5종 rename + 참조 갱신
-- **파일**: `gemini_hook.py`→`antigravity_hook.py`, `gemini_output_filter.py`→`antigravity_output_filter.py`, `gemini_session_repair.py`→`antigravity_session_repair.py`, `run_gemini_clean.py`→`run_antigravity_clean.py`, 루트 `gemini_statusline.py`(역할 확인 후 rename 또는 삭제)
-- **방법**: git mv + import/subprocess 호출부 갱신 (`git grep -n "gemini_hook\|gemini_output_filter\|gemini_session_repair\|run_gemini_clean"`). `.gemini/settings.json` 훅 command 경로 + **`~/.gemini/trusted_hooks.json` 동시 갱신** (불일치 시 agy가 훅 차단). spec/CI datas 동기
-- **검증**: `python -m py_compile` 전체 + 구파일명 grep 0건
-- **의존성**: Task 1, 2
-
-### [x] Task 5: scripts/ 식별자 교체 ('gemini'→'antigravity')
-- **파일**: scripts/ 내 gemini 포함 ~30파일 (cli_agent, agent_shell, orchestrator, itcp, hive_*, telegram_bridge 등)
-- **방법**: 에이전트 이름 문자열/키워드/주석 교체. config 키 `gemini_enabled`→`antigravity_enabled` (읽기 시 레거시 키 폴백 1줄). GEMINI_API_KEY/GOOGLE_API_KEY 라인은 제외 목록으로 보호
-- **검증**: py_compile + `pytest tests/ -q --ignore=tests/office` 기준선(4 실패) 유지
-- **의존성**: Task 4
-
-### [x] Task 6: .ai_monitor/ 백엔드 식별자 교체
-- **파일**: server.py, api/ 11파일, src/ 5파일, infra/ 2파일, bin/ 3파일, mission_control*
-- **방법**: Task 5와 동일 규칙. `~/.gemini/tmp` 외부 세션 감지부(agent_api.py:404~)는 Task 1 실측 경로로 교체 (agy 미지원 기능이면 주석으로 비활성 사유 기록)
-- **검증**: py_compile + 서버 부팅 smoke (`python .ai_monitor/server.py` 기동 로그 정상)
-- **의존성**: Task 5
-
-### [x] Task 7: 프론트엔드 교체 + 빌드
-- **파일**: vibe-view/src 26파일 (constants.tsx, types.ts, TerminalSlot, ChatSlot, office/* 등)
-- **방법**: 라벨/타입/아이콘 'gemini'→'antigravity' (Phase 1에서 일부 완료 — 잔존분). API 발신 식별자도 'antigravity'로 통일 (서버는 alias 수용이라 무중단)
-- **검증**: `tsc --noEmit` 0 errors + `vite build` 성공
-- **의존성**: Task 6
-
-### [x] Task 8: tests/ 갱신
-- **파일**: tests/ 내 gemini 참조 파일 (test_itcp_fallback 등 ~10파일)
-- **방법**: 식별자/모킹 교체. 기존 실패 4건(test_agent_api 1 + 오염 3)은 본 작업 비범위 — 악화만 방지
-- **검증**: 단독 실행 기준 전부 통과 (기존 실패 제외)
-- **의존성**: Task 5, 6
-
-## Phase 3 — DB 마이그레이션
-
-### [x] Task 9: 백업 + 식별자 UPDATE
-- **파일**: `scripts/migrate_antigravity_db.py` (신규 ~80줄, 일회성 — 4차 정리 규칙대로 완료 후 삭제 대상 표기)
-- **방법**: ①pg_dump → `backups/pre_antigravity_migration_20260611.sql.gz` ②트랜잭션으로 9테이블 UPDATE: hive_memory.author, hive_sessions.agent, hive_skill_chains.agent, hive_tasks.assigned_to, pg_logs.agent, pg_messages.from_agent/to_agent, task_comments.author, zettel_notes.author — `WHERE col='gemini'` → `'antigravity'` ③건수 리포트
-- **검증**: UPDATE 전후 `SELECT count(*) WHERE col='gemini'` → 0, 'antigravity' 증가분 일치
-- **의존성**: Task 6 (백엔드가 신식별자 읽는 상태에서 실행)
-
-## Phase 4 — 검증 + 문서
-
-### [x] Task 10: 종합 검증
-- **방법**: ①`git grep -in "gemini"` 전수 — 잔존은 보존 목록(GEMINI_API_KEY/GOOGLE_API_KEY, 이력 주석, docs 아카이브)만인지 확인 ②pytest 전체 ③서버 부팅 + Playwright로 UI 라벨 확인 (스크린샷 요청 금지 규칙) ④spec↔CI 동기 재확인
-- **의존성**: Task 7, 8, 9
-
-### [x] Task 11: 문서 + 메모리 갱신
-- **파일**: CHANGELOG.md, PROJECT_MAP.md(재생성), HIVEMIND.md(자동), CLAUDE.md/RULES.md 내 gemini 언급, `.claude/rules/hive-sync.md`(에이전트 역할), 메모리 `project_antigravity_migration.md`
-- **방법**: 사용자 안내 명기: **첫 agy 실행 시 OAuth 재로그인 필요**
-- **검증**: 규칙 8 리포트 출력
-- **의존성**: Task 10
+### [ ] Task 3: boot.py — EXE버전 게이트 + sys.path 주입 + runpy 라우팅
+- 파일: `.ai_monitor/boot.py` (Task 2 이어서)
+- 방법:
+  - `_check_min_exe()`: SRC/soft_manifest.json.min_exe > 현재 `_version` 이면 게이트 — 경고 후 **번들(frozen) 코드로 폴백 실행**(soft 미적용). 의존성 바뀐 소스를 옛 EXE가 안 받게.
+  - `sys.path.insert(0, str(SRC)); sys.path.insert(0, str(SRC/'.ai_monitor'))`
+  - **argv 라우팅(블로커 해결)**: 인자 없음 → `runpy.run_path(SRC/.ai_monitor/server.py, run_name='__main__')`. `boot.py <script.py> [args]`(데몬/도구 재실행) → `runpy.run_path(SRC/<script>, run_name='__main__')` (체크아웃 보장은 메인이 이미 함 → 스킵).
+  - 부팅 예외 캐치 → 직전 SHA 있으면 `git reset --hard <prev>` 후 1회 재시도, 그래도 실패 시 seed 폴백.
+- 검증: `python .ai_monitor/boot.py` → 앱 기동 / `python .ai_monitor/boot.py scripts/hive_bridge.py --help` → 데몬모드 분기
+- 의존성: Task 2
 
 ---
 
-## 의존성 요약
-- Task 1 → 2 → 4 → 5 → 6 → {7, 8, 9} → 10 → 11
-- Task 3 독립 (병렬 가능)
+## 마일스톤 B — 업데이트 채널 (감지/적용)
 
-## 실측 결과 (Task 1 — 2026-06-11)
-- **agy 1.0.7**. 데이터 루트 = `~/.gemini/antigravity-cli/` (conversations/*.db, history.jsonl, cli.log, cache/)
-- **`~/.gemini/`·프로젝트 `.gemini/`를 agy가 그대로 사용** — oauth_creds.json, settings.json(hooks), trusted_hooks.json(우리 gemini_hook.py 신뢰 등록 확인). → **`.gemini/` rename 취소** (GEMINI_API_KEY와 동급의 외부 도구 인터페이스). GEMINI.md도 동일 사유로 **파일명 유지 + 내용만 Antigravity 기준 갱신**
-- **`-p` print 모드는 stdout 파이프/리다이렉트 시 응답 미출력** (exit 0 + 빈 출력. cli.log상 모델 생성은 성공 — 콘솔 TUI 버퍼 전용 렌더). `models`도 동일, `changelog`는 정상. PowerShell 리다이렉트에선 행(>10분). winpty/node-pty는 본 헤드리스 환경 제약으로 미검증 — **앱 런타임의 pty-server(ConPTY) 경유가 비대화형 캡처의 유일한 신뢰 경로**
-- 외부 세션 감지: 구 `~/.gemini/tmp/*/chats` → `~/.gemini/antigravity-cli/conversations/` mtime 스캔으로 교체 (Task 6)
-- 훅 rename 시 **`~/.gemini/trusted_hooks.json` 동시 갱신 필수** — 경로 문자열 불일치 시 agy가 훅을 untrusted로 차단 (Task 4)
+### [ ] Task 4: soft_updater.py 신규 — SHA 감지
+- 파일: `.ai_monitor/soft_updater.py` (신규)
+- 방법: 표준 헤더 + `check_soft_update(data_dir, src_dir)`: GitHub API `GET /repos/btsky99/vibe-coding/commits/main` → remote_sha. 로컬 `git -C SRC rev-parse HEAD` → local_sha. 다르면 `soft_update_ready.json {ready:true, remote_sha, local_sha, last_check}` 기록. 토큰 불필요(public)이나 updater.py 토큰 폴백 패턴 재사용. min_exe 게이트 위반 시 ready=false + reason.
+- 검증: dev 호출 → SHA 일치 시 ready=false, 강제 mismatch 시 ready=true JSON 생성
+- 의존성: Task 1
+
+### [ ] Task 5: soft_updater.py — 적용(apply) + 재시작
+- 파일: `.ai_monitor/soft_updater.py` (Task 4 이어서)
+- 방법: `apply_soft_update(src_dir)`: `git -C SRC fetch origin main` → 현재 SHA 백업(rollback 파일) → `git -C SRC reset --hard origin/main`. 성공 후 updater.py의 `_update.bat` 패턴 유사 `_restart.bat`로 PID 종료 대기 후 EXE 재실행. 설치본 dirty 트리는 `reset --hard`로 흡수.
+- 검증: dev 복제 SRC에서 과거 커밋 → apply → HEAD가 origin/main 전진 + rollback 파일 생성
+- 의존성: Task 4
+
+### [ ] Task 6: server.py — soft-update 엔드포인트 2개 + 폴링 스레드
+- 파일: `.ai_monitor/server.py`
+- 방법: 기존 `/api/check-update-ready`(1980), `/api/apply-update`(2792) 패턴 복제 —
+  - `GET /api/soft-update/check` → `soft_updater.check_soft_update` 백그라운드 트리거 + `soft_update_ready.json` 반환
+  - `POST /api/soft-update/apply` → `soft_updater.apply_soft_update`
+  - 데몬 등록 블록(4047 부근)에 시동 1회 + 주기 폴링 스레드 추가(기존 updater 옆).
+- 검증: 기동 후 `curl /api/soft-update/check` 200 + JSON. **server.py 줄 수 재확인**(현재 4658줄, +40 이내 유지; 초과 시 soft 핸들러를 api/ 모듈로 분리)
+- 의존성: Task 4, Task 5
+
+---
+
+## 마일스톤 C — UI + 빌드 전환
+
+### [ ] Task 7: UI — "소스 업데이트(빠름)" 버튼
+- 파일: `.ai_monitor/vibe-view/src/App.tsx`(배너 391~410), `components/TopMenuBar.tsx`(버튼 503)
+- 방법: 기존 EXE 업데이트 배너/버튼 옆에 soft 채널 상태 추가. `/api/soft-update/check` 폴링 → ready면 "소스 업데이트(빠름)" 버튼 → `/api/soft-update/apply`. 풀빌드(파랑)와 시각 구분(빠름=초록).
+- 검증: `npm run build` 통과 + Playwright로 버튼 렌더/클릭 흐름 확인(스크린샷 금지)
+- 의존성: Task 6
+
+### [ ] Task 8: vibe-coding.spec — entry 전환 + 의존성 hiddenimports 보강
+- 파일: `vibe-coding.spec`
+- 방법: `Analysis([...server.py])` → `Analysis([...boot.py])`. 앱 모듈이 PYZ에서 빠지므로 의존성을 `collect_all('pywebview')` + `collect_submodules('psycopg2'/'websockets'/'winpty'/'fastembed'/'onnxruntime'/'tokenizers')`로 hiddenimports 보강. **datas는 seed용 유지**(현행). `soft_manifest.json` datas 추가. [과거사고 spec↔CI 동기] build-release.yml `--add-data`도 동시 갱신.
+- 검증: 로컬 `pyinstaller vibe-coding.spec --noconfirm` 성공 → 빈 폴더 실행 → SRC clone/seed 후 정상 기동(데몬 포함). app 모듈이 PYZ에 없음 확인
+- 의존성: Task 3
+
+### [ ] Task 9: build-release.yml CI 동기화 + 문서
+- 파일: `.github/workflows/build-release.yml`, `PROJECT_MAP.md`
+- 방법: CI `--add-data`/entry를 spec과 일치. PROJECT_MAP에 boot.py/soft_updater.py/soft_manifest.json 역할 + 줄 수 기재.
+- 검증: CI 빌드 그린 + 생성 EXE 설치본에서 soft 업데이트 1회 왕복(푸시→버튼→갱신) E2E
+- 의존성: Task 8
+
+---
+
+## 실행 순서 요약
+1 → 2 → 3 → (4 → 5 → 6) → 7 → 8 → 9
+- 마일스톤 A(1~3) 먼저: 부트스트랩이 모든 것의 토대.
+- B(4~6)와 C-UI(7)는 A 위에서.
+- spec/CI(8~9)는 boot.py 안정화 후 마지막 — 빌드 깨짐 위험 최소화.
+
+## 리스크 체크포인트
+- **데몬 재귀**: Task 3 argv 라우팅 누락 시 watchdog/orchestrator 전멸 → Task 3 검증에 데몬모드 분기 필수.
+- **오프라인 최초 부팅**: Task 2 seed 폴백 없으면 네트워크 없는 PC 부팅 불가 → 필수.
+- **min_exe 게이트**: Task 3/4 게이트 누락 시 의존성 바뀐 소스를 옛 EXE가 받아 크래시 → 양쪽 모두 검사.

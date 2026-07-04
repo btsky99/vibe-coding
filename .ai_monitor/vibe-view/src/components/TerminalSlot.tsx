@@ -5,6 +5,17 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-04 Claude: TUI 마우스 리포팅 중 드래그 선택 복원 — capture 단계에서 좌클릭 mousedown을
+ *                      shiftKey 합성 이벤트로 재디스패치해 xterm 로컬 선택 강제. "드래그→우클릭 복사→
+ *                      외부 붙여넣기" 워크플로우 복구. 붙여넣기 실패 시 터미널에 안내 출력(무음 실패 제거).
+ * - 2026-07-04 Claude: 복사 버튼 상시 표시 전환 — TUI 마우스 리포팅(DECSET 1000/1006) 중엔 드래그가
+ *                      로컬 선택을 아예 못 만들어 조건부 렌더가 영영 미충족(어제 캐시 수정으론 미커버).
+ *                      선택 없으면 비활성(회색) + Shift+드래그 안내 힌트.
+ * - 2026-07-04 Claude: 헤더 플랜 쿼터 배지 추가 — Claude/Codex 5h 게이지+% · 7d %, 세션 데이터 없어도 상시 표시.
+ *                      기존 컨텍스트 바 2번째 줄 9px 텍스트가 안 보인다는 피드백의 근본 해결 (Antigravity는 기존 컨텍스트 위젯 유지).
+ * - 2026-07-03 Claude: 우클릭 메뉴 복사 버튼 미표시/빈 복사 수정 — 선택 텍스트를 드래그 시점에 캐시.
+ *                      근본 원인: xterm SelectionService가 onUserInput마다 선택을 지우는데, TUI(claude 등)의
+ *                      DSR 커서 질의 자동 응답도 userInput으로 집계돼 우클릭 시점엔 hasSelection()=false.
  * - 2026-03-26 Claude: xterm.js 스크롤 전면 수정 — scrollback 10000줄, smoothScrollDuration 100ms,
  *                      scrollOnUserInput true 추가. 컨테이너 overflow-hidden 제거로 xterm 내장 스크롤바 활성화.
  *                      Antigravity/Codex 긴 출력 시 이전 내용 확인 불가 문제 해결.
@@ -47,6 +58,24 @@ import SlashCommandMenu from './terminal/SlashCommandMenu';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
 
+// [WHY] 클립보드 쓰기 공용 헬퍼 — navigator.clipboard 실패 시 execCommand 폴백.
+// WebView2(PyWebView)에서 writeText가 포커스/권한 사유로 거부될 수 있어 폴백 필수.
+// xterm getSelection()은 Windows에서 이미 \r\n으로 join되므로 CRLF 재정규화 불필요.
+async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
+
 interface TerminalSlotProps {
   slotId: number;
   logs: LogRecord[];
@@ -61,11 +90,28 @@ interface TerminalSlotProps {
     input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
     context_used?: number;  // [2026-04-21] input + cache_read + cache_write (캐시 포함 실제 점유)
     model: string; context_window: number; percentage: number; last_ts: string;
-    // [2026-04-21] 5시간 sliding window 집계 (쿼터 한도 모르므로 절대값만)
+    // [2026-04-21] 5시간 sliding window 집계 (JSONL 절대값 — quota 실패 시 폴백 표시용)
     last_5h_tokens?: number;
     last_5h_messages?: number;
     last_5h_oldest_ts?: string;
+    // [2026-07-03] OAuth 쿼터 사용률 — 5h/7d 한도 대비 % + 리셋 시각 (CodexBar 방식)
+    quota?: {
+      available: boolean; reason?: string; plan?: string;
+      five_hour?: { utilization: number; resets_at: string } | null;
+      seven_day?: { utilization: number; resets_at: string } | null;
+      seven_day_opus?: { utilization: number; resets_at: string } | null;
+      seven_day_sonnet?: { utilization: number; resets_at: string } | null;
+    } | null;
   } | null;
+  // [2026-07-04] 헤더 쿼터 배지 — 에이전트별 플랜 사용률 (/api/agent-quota).
+  // 키: 'claude' | 'codex'. antigravity는 플랜 쿼터 공개 경로가 없어 컨텍스트 게이지 유지.
+  agentQuota?: Record<string, {
+    available: boolean; reason?: string; plan?: string; stale?: boolean; observed_at?: string;
+    // window_seconds: 창 길이(초). Codex free는 30일 창이라 "5h" 고정 라벨이 오표기 —
+    // 있으면 라벨을 동적 계산(5h/7d/30d), 없으면(Claude·구 스키마) 기존 5h/7d 유지.
+    five_hour?: { utilization: number; resets_at: string; window_seconds?: number } | null;
+    seven_day?: { utilization: number; resets_at: string; window_seconds?: number } | null;
+  }> | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
   // 오케스트레이터 스킬 체인 데이터 — /api/orchestrator/skill-chain 폴링
@@ -81,7 +127,7 @@ interface TerminalSlotProps {
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
 }: TerminalSlotProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
@@ -110,9 +156,19 @@ export default function TerminalSlot({
   // 슬래시 커맨드 팝업 표시 여부
   const [showSlashMenu, setShowSlashMenu] = useState(false);
 
-  // 터미널 우클릭 컨텍스트 메뉴 위치 및 선택 유무 상태
-  // null이면 메뉴 닫힘, {x,y,hasSelection}이면 해당 위치에 메뉴 표시
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
+  // 터미널 우클릭 컨텍스트 메뉴 위치 + 복사 대상 텍스트 스냅샷
+  // [WHY] hasSelection 불리언 대신 텍스트 자체를 담는다 — 메뉴가 뜬 뒤 클릭 시점에
+  // getSelection()을 다시 읽으면 TUI의 DSR 응답으로 선택이 이미 지워져 빈 문자열이 복사되는 사고 방지.
+  // mouseTracking: TUI가 마우스 리포팅(DECSET 1000/1006)을 켜면 드래그가 로컬 선택을 못 만듦 —
+  // 이때 복사 비활성 사유를 메뉴에 안내하기 위한 플래그 (2026-07-04 사고: 복사 버튼 미표시 재발)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; selText: string; mouseTracking: boolean } | null>(null);
+  // [WHY] xterm은 onUserInput마다 선택을 지운다(TUI 자동 응답 포함) — 우클릭 시점에 선택이
+  // 사라져 있어도 복사가 가능하도록 마지막 비어있지 않은 선택 텍스트를 캐시.
+  const lastSelectionRef = useRef('');
+  // contextmenu 리스너 누적 방지 — 터미널 재시작마다 addEventListener가 쌓이지 않도록 이전 핸들러 보관
+  const ctxMenuHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
+  // 드래그 선택 강제 핸들러도 동일 사유로 보관 (터미널 재시작 시 교체)
+  const dragSelectHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
 
   // Claude 컨텍스트 바 상세 토글 (클릭 시 In/Out/Cache 2행 표시)
   const [showCtxDetail, setShowCtxDetail] = useState(false);
@@ -244,36 +300,58 @@ export default function TerminalSlot({
       fitAddon.fit();
       termRef.current = term;
 
-      // 클립보드 복사 헬퍼 — navigator.clipboard API 실패 시 execCommand 폴백
-      const copyToClipboard = async (text: string) => {
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch {
-          // pywebview 등 Clipboard API 미지원 환경 폴백
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.left = '-9999px';
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-        }
-      };
-
-      // 텍스트 드래그(선택) 시 자동 클립보드 복사
+      // 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시
+      // [제약] 선택 해제 이벤트에서도 발화하므로 hasSelection 가드 필수 — 캐시를 빈 값으로 덮지 않는다.
       term.onSelectionChange(() => {
         if (term.hasSelection()) {
-          copyToClipboard(term.getSelection());
+          const sel = term.getSelection();
+          if (sel) {
+            lastSelectionRef.current = sel;
+            copyTextToClipboard(sel);
+          }
         }
       });
 
-      // 터미널 우클릭: 컨텍스트 메뉴 표시
-      // 텍스트 선택 유무를 메뉴 state에 전달 → JSX에서 복사/붙여넣기 버튼 구성
-      xtermRef.current.addEventListener('contextmenu', (e) => {
+      // [WHY] TUI(claude 등)가 마우스 리포팅(DECSET 1000/1002)을 켜면 xterm이 좌클릭 드래그를
+      // TUI로 전달해 로컬 선택이 아예 안 생긴다 → "드래그→우클릭 복사"가 통째로 죽음(2026-07-04 사고).
+      // xterm 내부 SelectionService는 shiftKey 이벤트만 마우스 리포팅 중에도 로컬 선택으로 처리하므로,
+      // capture 단계에서 일반 좌클릭 mousedown을 shiftKey=true 합성 이벤트로 재디스패치해 선택을 강제한다.
+      // [제약] 이로 인해 마우스 리포팅 중 좌클릭은 TUI에 전달되지 않는다 — claude CLI는 좌클릭을
+      // 쓰지 않고(스크롤 휠은 별도 경로라 영향 없음) 사용자 워크플로우(드래그 복사)가 우선.
+      // 합성 이벤트는 shiftKey=true라 첫 가드에서 통과 → 재귀 없음. 일반 셸(리포팅 OFF)은 미개입.
+      const dragSelectHandler = (e: MouseEvent) => {
+        if (e.button !== 0 || e.shiftKey) return;
+        if (!term.element?.classList.contains('enable-mouse-events')) return;
         e.preventDefault();
-        setCtxMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() });
-      });
+        e.stopImmediatePropagation();
+        e.target?.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true, cancelable: true, view: window,
+          clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
+          button: 0, buttons: e.buttons, detail: e.detail, shiftKey: true,
+        }));
+      };
+      if (dragSelectHandlerRef.current) {
+        xtermRef.current.removeEventListener('mousedown', dragSelectHandlerRef.current, true);
+      }
+      xtermRef.current.addEventListener('mousedown', dragSelectHandler, true);
+      dragSelectHandlerRef.current = dragSelectHandler;
+
+      // 터미널 우클릭: 컨텍스트 메뉴 표시 — 복사 대상 텍스트를 이 시점에 스냅샷
+      // [WHY] 라이브 선택이 TUI DSR 응답으로 이미 지워졌으면 캐시(lastSelectionRef)로 폴백 —
+      // "드래그 → 우클릭했는데 복사 버튼이 없다" 사고(2026-07-03) 방지.
+      const ctxHandler = (e: MouseEvent) => {
+        e.preventDefault();
+        const liveSel = term.hasSelection() ? term.getSelection() : '';
+        // [WHY] enable-mouse-events 클래스 = TUI가 마우스 리포팅 중 — 일반 드래그로는 선택이
+        // 아예 생성되지 않는다(onSelectionChange 미발화). Shift+드래그만 로컬 선택 허용.
+        const mouseTracking = term.element?.classList.contains('enable-mouse-events') ?? false;
+        setCtxMenu({ x: e.clientX, y: e.clientY, selText: liveSel || lastSelectionRef.current, mouseTracking });
+      };
+      if (ctxMenuHandlerRef.current) {
+        xtermRef.current.removeEventListener('contextmenu', ctxMenuHandlerRef.current);
+      }
+      xtermRef.current.addEventListener('contextmenu', ctxHandler);
+      ctxMenuHandlerRef.current = ctxHandler;
 
       // ref에 저장하여 모니터링 뷰 토글 시에도 fit() 호출 가능하게
       fitAddonRef.current = fitAddon;
@@ -601,6 +679,58 @@ export default function TerminalSlot({
               </div>
             )}
 
+            {/* [2026-07-04] 플랜 쿼터 배지 — Claude/Codex 슬롯 헤더 상시 표시.
+                세션 JSONL 데이터(ctx) 유무와 무관하게 뜸 — "쿼터는 정상인데 안 보임" 원천 차단.
+                stale=Codex 토큰 만료로 세션 파일 마지막 관측값 폴백 → 흐리게 + ⏱ 표시 */}
+            {(agentType === 'claude' || agentType === 'codex') && (() => {
+              const q = agentQuota?.[agentType];
+              if (!q?.available || !q.five_hour) return null;
+              const col = (u: number) => u >= 80 ? '#f87171' : u >= 60 ? '#facc15' : '#a3e635';
+              const reset = (iso?: string) => {
+                if (!iso) return '';
+                const remain = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+                if (remain <= 0) return '리셋됨';
+                const d = Math.floor(remain / 86400), h = Math.floor((remain % 86400) / 3600), m = Math.floor((remain % 3600) / 60);
+                return d > 0 ? `${d}d ${h}h 후` : h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
+              };
+              const u5 = q.five_hour.utilization;
+              // 창 길이 라벨 — window_seconds가 오면 동적(30d 등), 없으면 관례상 5h/7d
+              const winLabel = (sec: number | undefined, fallback: string) => {
+                if (!sec) return fallback;
+                if (sec >= 2 * 86400) return `${Math.round(sec / 86400)}d`;
+                if (sec >= 3600) return `${Math.round(sec / 3600)}h`;
+                return `${Math.round(sec / 60)}m`;
+              };
+              const l5 = winLabel(q.five_hour.window_seconds, '5h');
+              const l7 = winLabel(q.seven_day?.window_seconds, '7d');
+              const tip = [
+                `${agentType === 'claude' ? 'Claude' : 'Codex'} 플랜 사용률${q.plan ? ` (${q.plan})` : ''}`,
+                `${l5} ${Math.round(u5)}% — 리셋 ${reset(q.five_hour.resets_at)}`,
+                q.seven_day ? `${l7} ${Math.round(q.seven_day.utilization)}% — 리셋 ${reset(q.seven_day.resets_at)}` : '',
+                q.stale ? `⚠ ${q.observed_at ? new Date(q.observed_at).toLocaleString() : ''} 마지막 관측값 — 일시 조회 실패, 자동 재시도 중` : '',
+              ].filter(Boolean).join('\n');
+              return (
+                <div
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono shrink-0 ${q.stale ? 'opacity-50 bg-white/5 border-white/10 text-[#999]' : 'bg-[#16210f]/80 border-lime-500/20 text-[#ccc]'}`}
+                  title={tip}
+                >
+                  <span className="opacity-60 font-bold">{l5}</span>
+                  <div className="w-10 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                    <div className="h-full transition-all duration-1000" style={{ width: `${Math.min(100, u5)}%`, backgroundColor: col(u5) }} />
+                  </div>
+                  <span className="font-black" style={{ color: col(u5) }}>{Math.round(u5)}%</span>
+                  {q.seven_day && (
+                    <>
+                      <span className="opacity-30">|</span>
+                      <span className="opacity-60 font-bold">{l7}</span>
+                      <span className="font-black" style={{ color: col(q.seven_day.utilization) }}>{Math.round(q.seven_day.utilization)}%</span>
+                    </>
+                  )}
+                  {q.stale && <span className="opacity-70">⏱</span>}
+                </div>
+              );
+            })()}
+
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
               onClick={() => { const next = !showMonitor; setShowMonitor(next); localStorage.setItem('hive_monitor_enabled', String(next)); }}
@@ -679,6 +809,19 @@ export default function TerminalSlot({
         ];
         const fmtTok = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`;
 
+        // OAuth 쿼터 표시 헬퍼 — resets_at(ISO) → 남은 시간, 사용률 → 경고색
+        const quota = ctx?.quota?.available ? ctx.quota : null;
+        const fmtReset = (iso: string) => {
+          const remain = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+          if (remain <= 0) return '곧 리셋';
+          const d = Math.floor(remain / 86400);
+          const h = Math.floor((remain % 86400) / 3600);
+          const m = Math.floor((remain % 3600) / 60);
+          if (d > 0) return `${d}d ${h}h 후`;
+          return h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
+        };
+        const quotaColor = (u: number) => u >= 80 ? '#f87171' : u >= 60 ? '#facc15' : '#a3e635';
+
         return (
           <div className="relative shrink-0">
             {/* 단일 행 바 (항상 표시) */}
@@ -722,12 +865,30 @@ export default function TerminalSlot({
                 <span>Out: <span className="text-[#ccc]">{fmtTok(outputTok)}</span></span>
                 {cacheWrite > 0 && <span>Cache+: <span className="text-[#4ade80]">{fmtTok(cacheWrite)}</span></span>}
                 {cacheRead > 0 && <span>Cache~: <span className="text-[#22d3ee]">{fmtTok(cacheRead)}</span></span>}
-                {(ctx.last_5h_tokens ?? 0) > 0 && (
+                {quota?.five_hour ? (
+                  // 쿼터 사용률 우선 표시 — 플랜 한도 대비 실제 % + 리셋 카운트다운
+                  <span
+                    className="ml-auto text-[#666]"
+                    title={`플랜 한도 대비 사용률${quota.plan ? ` (${quota.plan})` : ''} — 로컬 5h ${fmtTok(ctx.last_5h_tokens ?? 0)} tokens · ${ctx.last_5h_messages ?? 0}회`}
+                  >
+                    5h <span style={{ color: quotaColor(quota.five_hour.utilization) }}>{Math.round(quota.five_hour.utilization)}%</span>
+                    {quota.five_hour.resets_at && (
+                      <span className="text-[#444] ml-1">({fmtReset(quota.five_hour.resets_at)})</span>
+                    )}
+                    {quota.seven_day && (
+                      <>
+                        <span className="text-[#444] mx-1">·</span>
+                        7d <span style={{ color: quotaColor(quota.seven_day.utilization) }}>{Math.round(quota.seven_day.utilization)}%</span>
+                      </>
+                    )}
+                  </span>
+                ) : (ctx.last_5h_tokens ?? 0) > 0 ? (
+                  // 폴백: 쿼터 API 실패/미가용 시 기존 JSONL 절대값
                   <span className="ml-auto text-[#666]" title="지난 5시간 누적 (cwd 일치 세션)">
                     5h: <span className="text-[#a3e635]">{fmtTok(ctx.last_5h_tokens ?? 0)}</span>
                     <span className="text-[#444] ml-1">· {ctx.last_5h_messages ?? 0}회</span>
                   </span>
-                )}
+                ) : null}
               </div>
             )}
 
@@ -762,8 +923,45 @@ export default function TerminalSlot({
                     </div>
                   </div>
 
-                  {/* ── 5시간 sliding window (쿼터 한도 없음, 절대값만) ── */}
-                  {(ctx.last_5h_tokens ?? 0) > 0 && (
+                  {/* ── 플랜 쿼터 사용률 (OAuth /api/oauth/usage) — 실패 시 절대값 폴백 ── */}
+                  {quota ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[#ccc] font-bold text-[11px]">플랜 쿼터 사용률</span>
+                        {quota.plan && <span className="text-[#555] text-[9px] uppercase">{quota.plan}</span>}
+                      </div>
+                      <div className="space-y-[5px]">
+                        {([
+                          { label: '5시간', win: quota.five_hour },
+                          { label: '7일', win: quota.seven_day },
+                          { label: '7일 Opus', win: quota.seven_day_opus },
+                          { label: '7일 Sonnet', win: quota.seven_day_sonnet },
+                        ] as const).filter(r => r.win).map(r => (
+                          <div key={r.label} className="flex items-center gap-2">
+                            <span className="text-[#999] w-14 shrink-0">{r.label}</span>
+                            <div className="flex-1 h-1.5 bg-[#1a1a2e] rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${Math.min(100, r.win!.utilization)}%`, backgroundColor: quotaColor(r.win!.utilization) }}
+                              />
+                            </div>
+                            <span className="w-9 text-right" style={{ color: quotaColor(r.win!.utilization) }}>
+                              {Math.round(r.win!.utilization)}%
+                            </span>
+                            <span className="text-[#555] w-16 text-right text-[9px]">
+                              {r.win!.resets_at ? fmtReset(r.win!.resets_at) : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {(ctx.last_5h_tokens ?? 0) > 0 && (
+                        <div className="text-[9px] text-[#555] leading-tight mt-1">
+                          로컬 5h 집계: {fmtTok(ctx.last_5h_tokens ?? 0)} tokens · {ctx.last_5h_messages ?? 0}회
+                          {resetLabel && <span> · {resetLabel} 롤오프</span>}
+                        </div>
+                      )}
+                    </div>
+                  ) : (ctx.last_5h_tokens ?? 0) > 0 ? (
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[#ccc] font-bold text-[11px]">5시간 누적 사용량</span>
@@ -773,11 +971,10 @@ export default function TerminalSlot({
                         </span>
                       </div>
                       <div className="text-[9px] text-[#555] leading-tight">
-                        cwd 일치 세션의 지난 5h assistant usage 합계.
-                        쿼터 한도 정보는 Anthropic Admin API 필요.
+                        cwd 일치 세션의 지난 5h assistant usage 합계. (쿼터 API 미가용 — 절대값 폴백)
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {/* ── 카테고리별 사용량 ── */}
                   <div className="pt-1 space-y-[3px]">
@@ -1041,34 +1238,29 @@ export default function TerminalSlot({
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onMouseLeave={() => setCtxMenu(null)}
         >
-          {ctxMenu.hasSelection && (
-            <button
-              className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
-              onClick={async () => {
-                try {
-                  const activeTerm = termRef.current;
-                  if (activeTerm) {
-                    const sel = activeTerm.getSelection();
-                    try {
-                      await navigator.clipboard.writeText(sel);
-                    } catch {
-                      const ta = document.createElement('textarea');
-                      ta.value = sel;
-                      ta.style.position = 'fixed';
-                      ta.style.left = '-9999px';
-                      document.body.appendChild(ta);
-                      ta.select();
-                      document.execCommand('copy');
-                      document.body.removeChild(ta);
-                    }
-                    activeTerm.clearSelection();
-                  }
-                } catch (err) { console.error(err); }
-                setCtxMenu(null);
-              }}
-            >
-              복사
-            </button>
+          {/* [WHY] 조건부 렌더 금지 — TUI 마우스 리포팅 중엔 선택이 아예 안 생겨 selText가
+              항상 빈 값 → 버튼이 영영 안 뜨던 사고(2026-07-04). 상시 표시 + 비활성 처리로 전환. */}
+          <button
+            disabled={!ctxMenu.selText}
+            className={`w-full text-left px-4 py-1.5 transition-colors ${
+              ctxMenu.selText ? 'hover:bg-white/10' : 'text-white/30 cursor-not-allowed'
+            }`}
+            onClick={async () => {
+              // [WHY] 클릭 시점 getSelection() 재조회 금지 — 메뉴가 떠 있는 사이 TUI 응답으로
+              // 선택이 지워지면 빈 문자열이 복사됨. 메뉴 오픈 시점 스냅샷(selText)을 사용.
+              try {
+                await copyTextToClipboard(ctxMenu.selText);
+                termRef.current?.clearSelection();
+              } catch (err) { console.error(err); }
+              setCtxMenu(null);
+            }}
+          >
+            복사
+          </button>
+          {!ctxMenu.selText && (
+            <div className="px-4 py-1 text-[10px] text-white/40 border-t border-white/10">
+              드래그로 텍스트를 선택한 뒤 우클릭하세요
+            </div>
           )}
           <button
             className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
@@ -1079,7 +1271,12 @@ export default function TerminalSlot({
                 if (activeWs && activeWs.readyState === WebSocket.OPEN) {
                   activeWs.send(text);
                 }
-              } catch (err) { console.error(err); }
+              } catch (err) {
+                console.error(err);
+                // [WHY] 무음 실패 금지 — WebView2 클립보드 읽기 권한 거부 시 사용자가 원인을
+                // 알 수 없던 사고(2026-07-04). 로컬 표시 전용 write라 pty로는 전송되지 않는다.
+                termRef.current?.write('\r\n\x1b[33m[클립보드 읽기 실패 — 터미널 클릭 후 Ctrl+V를 사용하세요]\x1b[0m\r\n');
+              }
               setCtxMenu(null);
             }}
           >

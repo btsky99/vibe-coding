@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-06-23 23:28
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-04 22:41
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,10 +34,13 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 4645 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 4732 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
+| `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 458 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
+| `soft_manifest.json` (루트) | 6 | soft 채널 풀빌드 게이트 (min_exe — 의존성 변경 시 소스 업데이트 차단) |
 
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
@@ -47,7 +50,7 @@
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
 | `git_api.py` | 177 | Git 저장소 관리 API (/api/git/*) |
-| `hive_api.py` | 1181 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `hive_api.py` | 1205 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `memory_api.py` | 327 | 메모리/지식 저장소 API (/api/memory/*) |
 | `office_api.py` | 370 |  |
 | `office_proxy_api.py` | 229 |  |
@@ -63,8 +66,10 @@
 ### 데이터 계층 (.ai_monitor/src/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
+| `claude_quota.py` | 162 |  |
 | `code_indexer.py` | 552 |  |
 | `code_search.py` | 200 |  |
+| `codex_quota.py` | 216 |  |
 | `db.py` | 34 |  |
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
@@ -156,7 +161,7 @@
 | `osc_parser.py` | 257 | OSC 시퀀스 파서 (Kitty/RXVT 알림) |
 | `git_visualizer.py` | 65 | Git 워크트리/브랜치 시각화 |
 | `screenshot_analyzer.py` | 154 | Antigravity Vision 기반 스크린샷 버그 감지 |
-| `generate_project_map.py` | 490 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
+| `generate_project_map.py` | 499 | PROJECT_MAP.md 자동 생성 스크립트 (이 파일) |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -208,7 +213,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 860 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 918 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 198 |  |
 | `constants.tsx` | 93 |  |
@@ -223,7 +228,7 @@
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1242 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1439 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 573 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 140 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -295,4 +300,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-06-23 23:28
+> 자동 생성 완료: 2026-07-04 22:41

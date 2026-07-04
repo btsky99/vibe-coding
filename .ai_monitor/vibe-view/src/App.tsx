@@ -70,7 +70,7 @@ function App() {
   const {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
-    antigravityUsage, claudeUsage,
+    antigravityUsage, claudeUsage, agentQuota,
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
@@ -80,6 +80,11 @@ function App() {
     isAgentRunning, setIsAgentRunning,
     currentPath, setCurrentPath,
   } = vibe;
+
+  // ─── 경량 소스 업데이트 채널(boot.py A안) ──────────────────────────────
+  // EXE 풀빌드(updateReady)와 독립된 빠른 .py 갱신 채널. 둘이 동시에 뜨면 풀빌드 우선.
+  const [softUpdate, setSoftUpdate] = useState<{ ready: boolean; remote_sha?: string; reason?: string } | null>(null);
+  const [softApplying, setSoftApplying] = useState(false);
 
   // ─── 레이아웃 상태 ────────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -209,6 +214,33 @@ function App() {
       })
       .catch((err) => alert(`업데이트 요청 실패: ${err}`))
       .finally(() => setUpdateApplying(false));
+  };
+
+  // 경량 소스 업데이트 폴링 — 60초 주기로 main 커밋 SHA 갱신 여부 확인.
+  // 서버가 백그라운드로 원격 SHA를 갱신하고, 여기서는 캐시된 ready 상태만 읽는다.
+  useEffect(() => {
+    const checkSoft = () => {
+      fetch(`${API_BASE}/api/soft-update/check`)
+        .then(res => res.json())
+        .then(data => setSoftUpdate(data?.ready ? data : null))
+        .catch(() => {});
+    };
+    checkSoft();
+    const id = setInterval(checkSoft, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 경량 소스 업데이트 적용 — git reset --hard origin/main + EXE 재시작(boot.py 재진입)
+  const applySoftUpdate = () => {
+    setSoftApplying(true);
+    fetch(`${API_BASE}/api/soft-update/apply`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) setSoftUpdate(null);
+        else alert(`소스 업데이트 실패: ${data.error || '알 수 없는 오류'}`);
+      })
+      .catch((err) => alert(`소스 업데이트 요청 실패: ${err}`))
+      .finally(() => setSoftApplying(false));
   };
 
   // 폴더 열기 — TopMenuBar "파일 → 폴더 열기" 전용 (FileExplorer 자체 버튼과 별개)
@@ -404,6 +436,31 @@ function App() {
             </button>
             <button
               onClick={() => setUpdateReady(null)}
+              className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 소스 업데이트(빠름) 배너 — boot.py 경량 채널. 초록으로 풀빌드(파랑)와 구분 ── */}
+      {/* 풀빌드 업데이트가 동시에 떠 있으면 그쪽을 우선 표시(중복 배너 방지) */}
+      {softUpdate?.ready && !updateReady && (
+        <div className="flex items-center justify-between px-3 py-1 bg-emerald-500/20 border-b border-emerald-500/40 shrink-0 z-50">
+          <span className="text-[10px] text-emerald-400 font-bold">
+            소스 업데이트(빠름) 준비됨 <span className="font-mono">{softUpdate.remote_sha?.slice(0, 7)}</span> — 풀빌드 없이 즉시 반영
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={applySoftUpdate}
+              disabled={softApplying}
+              className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500 text-white hover:bg-emerald-500/80 disabled:opacity-50 transition-colors"
+            >
+              {softApplying ? '적용 중...' : '소스 업데이트'}
+            </button>
+            <button
+              onClick={() => setSoftUpdate(null)}
               className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
             >
               ✕
@@ -618,6 +675,7 @@ function App() {
                   tasks={[]}
                   antigravityUsage={antigravityUsage}
                   claudeUsage={claudeUsage}
+                  agentQuota={agentQuota}
                   agentTerminals={agentTerminals}
                   orchestratorData={skillChain}
                   hiveActivity={hiveActivity}

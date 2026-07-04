@@ -3,6 +3,8 @@ FILE: .ai_monitor/server.py
 DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
 
 REVISION HISTORY:
+- 2026-07-04 Claude: /api/agent-quota 디스패치 누락 수정 — hive_api 핸들러만 있고
+                     allowlist 미갱신으로 쿼터 배지가 index.html을 받던 버그
 - 2026-04-30 Claude: Platform Phase 2-3 — _current_project_root/_id 로직을
                      infra/project_context.py로 추출 (서버 외부에서도 재사용 가능)
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
@@ -564,6 +566,15 @@ else:
 # 무상태 함수는 infra/runtime.py로 옮기고, BASE_DIR/PROJECT_ROOT 글로벌을 바인딩하는
 # 얇은 래퍼만 server.py에 남김.
 from infra import runtime as _runtime
+
+
+def _soft_src_dir() -> Path:
+    """경량 소스 업데이트 채널(boot.py A안)이 관리하는 앱 소스 체크아웃 루트.
+    [불변식] PROJECT_ROOT(=사용자 작업 프로젝트)와 다르다. boot.py가 runpy로 실행하면
+      이 파일(__file__)은 SRC/.ai_monitor/server.py 이므로 parent.parent = SRC(관리 체크아웃).
+      soft_updater는 이 디렉토리에 git fetch/reset 한다.
+    """
+    return Path(__file__).resolve().parent.parent
 
 
 def _python_runner_cmds() -> list[str]:
@@ -1745,10 +1756,13 @@ class SSEHandler(BaseHTTPRequestHandler):
         #    /api/skill-results, /api/context-usage, /api/antigravity-context-usage, /api/local-models ──
         elif (parsed_path.path.startswith('/api/hive/') or
               parsed_path.path.startswith('/api/orchestrator/') or
+              # [과거사고 2026-07-04] agent-quota 누락 — hive_api.py에 핸들러만 추가하고
+              # 이 allowlist를 안 갱신해 SPA 폴백(index.html)이 응답 → 쿼터 배지 미표시.
+              # hive_api에 단건 라우트 추가 시 반드시 이 튜플도 동기 갱신.
               parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
                                    '/api/skill-ab-test', '/api/skill/predict',
                                    '/api/context-usage', '/api/antigravity-context-usage',
-                                   '/api/local-models')):
+                                   '/api/agent-quota', '/api/local-models')):
             _params = parse_qs(parsed_path.query)
             from api import hive_api
             hive_api.handle_get(
@@ -2033,6 +2047,29 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
+
+        elif parsed_path.path == '/api/soft-update/check':
+            # 경량 소스 업데이트 채널(boot.py A안): main 최신 SHA vs 로컬 체크아웃 비교 결과 반환.
+            # [제약] 원격 SHA 조회는 최대 ~10초 → 응답을 막지 않도록 백그라운드로 갱신만 트리거하고
+            #   캐시(soft_update_ready.json)를 즉시 반환. EXE 풀빌드 채널(check-update-ready)과 독립.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                from soft_updater import check_soft_update
+                threading.Thread(target=check_soft_update,
+                                 args=(DATA_DIR, _soft_src_dir()), daemon=True).start()
+            except Exception as e:
+                print(f"[soft-update] check 트리거 실패: {e}")
+            soft_file = DATA_DIR / "soft_update_ready.json"
+            if soft_file.exists():
+                try:
+                    self.wfile.write(soft_file.read_text(encoding="utf-8").encode('utf-8'))
+                except Exception as e:
+                    self.wfile.write(json.dumps({"ready": False, "error": str(e)}).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({"ready": False}).encode('utf-8'))
 
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
@@ -2846,6 +2883,36 @@ class SSEHandler(BaseHTTPRequestHandler):
 
                 # daemon=False: 메인 프로세스가 종료되어도 업데이트 스레드는 완료까지 실행
                 threading.Thread(target=_do_apply, daemon=False).start()
+            except Exception as e:
+                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
+                self.wfile.flush()
+
+        elif parsed_path.path == '/api/soft-update/apply':
+            # 경량 소스 업데이트 적용: git reset --hard origin/main + EXE 재시작(boot.py 재진입).
+            # [제약] apply_soft_update가 성공 시 os._exit로 프로세스를 끝내므로 응답을 먼저 보낸 뒤
+            #   별도 스레드에서 실행한다(EXE 풀빌드 apply와 동일한 응답-우선 패턴).
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json;charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+            self.end_headers()
+            try:
+                from soft_updater import apply_soft_update
+                _src = _soft_src_dir()
+
+                def _do_soft_apply():
+                    time.sleep(0.3)  # 응답이 클라이언트에 도달할 시간 확보 후 reset/재시작
+                    try:
+                        result = apply_soft_update(_src)
+                        if not result.get("ok"):
+                            with open(DATA_DIR / "soft_update_ready.json", "w", encoding="utf-8") as ef:
+                                json.dump({"ready": False, "error": result.get("error", "적용 실패")},
+                                          ef, ensure_ascii=False)
+                    except Exception as ex:
+                        print(f"[soft-update] apply 실패: {ex}")
+
+                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+                self.wfile.flush()
+                threading.Thread(target=_do_soft_apply, daemon=False).start()
             except Exception as e:
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
                 self.wfile.flush()
@@ -4068,6 +4135,26 @@ def main():
         threading.Thread(target=_update_loop, daemon=True).start()
     except ImportError:
         print("[!] Updater module not found, skipping update check.")
+
+    # --- 경량 소스 업데이트 채널 폴링 (boot.py A안, non-blocking) ---
+    # [WHY] EXE 풀빌드 채널과 별개로 main 커밋 SHA를 주기 폴링 — 순수 .py push를 빠르게 감지.
+    #   [과거사고 2026-07-03] "dev는 체크아웃 아니라 무해" 가정이 틀렸음 — dev 트리도 체크아웃이라
+    #   ready=true 배너→apply가 dev 트리를 reset --hard(미푸시 커밋 4개 고아화). 지금은
+    #   soft_updater._channel_block_reason이 비frozen 실행을 채널에서 차단(VIBE_SRC_DIR opt-in 제외).
+    try:
+        from soft_updater import check_soft_update as _check_soft
+
+        def _soft_update_loop():
+            while True:
+                try:
+                    _check_soft(DATA_DIR, _soft_src_dir())
+                except Exception as e:
+                    print(f"[soft-update] poll error: {e}")
+                time.sleep(300)
+
+        threading.Thread(target=_soft_update_loop, daemon=True).start()
+    except Exception as e:
+        print(f"[soft-update] 폴링 스레드 시작 실패: {e}")
 
     # 1. Node.js PTY 서버 시작 + 자동 복구 워치독 (node-pty 기반 — pywinpty 대체)
     # node-pty가 VS Code에서 사용하는 Microsoft 공식 PTY 라이브러리로,
