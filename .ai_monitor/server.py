@@ -203,6 +203,7 @@ import api.heal_api as heal_api
 import api.locks_api as locks_api
 import api.projects_api as projects_api
 import api.message_api as message_api
+import api.launch_api as launch_api
 import string
 import socket
 from collections import deque
@@ -2573,93 +2574,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/launch':
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-
-                agent = data.get('agent')
-                target_dir = data.get('path', 'C:\\')
-                is_yolo = data.get('yolo', False)
-                # ── 오피스 모드 확장 파라미터: 모델, 역할, 슬롯 ──
-                req_model = data.get('model', '')
-                req_role = data.get('role', '')
-                req_slot = data.get('slot', 0)
-
-                # 경로 검증 — 커맨드 인젝션 방지: 실제 존재하는 디렉터리만 허용
-                _resolved_dir = Path(target_dir).resolve()
-                if not _resolved_dir.is_dir():
-                    raise ValueError(f"Invalid directory: {target_dir}")
-                _safe_dir = str(_resolved_dir)
-                # 셸 메타 문자 차단 (& | ; ` $ 등)
-                import re as _re_launch
-                if _re_launch.search(r'[&|;`$<>!]', _safe_dir):
-                    raise ValueError(f"Directory path contains invalid characters: {_safe_dir}")
-
-                # 모델/역할 파라미터 안전 문자 검증
-                if req_model and not _re_launch.match(r'^[a-zA-Z0-9\-_.]+$', req_model):
-                    req_model = ''
-                if req_role and not _re_launch.match(r'^[a-zA-Z0-9_]+$', req_role):
-                    req_role = ''
-
-                # ── 역할별 초기 프롬프트 매핑 ──
-                # Claude/Antigravity에 --prompt 또는 초기 입력으로 역할 지시를 전달
-                _role_prompts = {
-                    'developer': '코드 구현과 기능 개발에 집중해줘. 버그 수정, 리팩토링, 새 기능 추가가 주 업무야.',
-                    'reviewer': '코드 리뷰어로 활동해줘. /vibe-code-review 스킬을 활용하여 품질, 성능, 보안을 검토해.',
-                    'tester': '테스터로 활동해줘. /vibe-tdd 스킬로 테스트를 작성하고, 회귀 버그를 방지해.',
-                    'architect': '설계자로 활동해줘. /vibe-brainstorm 으로 아키텍처를 설계하고, 기술 결정을 문서화해.',
-                }
-                _role_prompt = _role_prompts.get(req_role, '')
-
-                # 슬롯 번호로 터미널 타이틀 구분
-                _slot_label = f"T{req_slot}" if req_slot else ""
-
-                if agent == 'claude':
-                    yolo_flag = " --dangerously-skip-permissions" if is_yolo else ""
-                    # Claude Code는 --prompt 플래그로 초기 프롬프트 전달 가능
-                    prompt_flag = f' -p "{_role_prompt}"' if _role_prompt else ""
-                    # 모델 선택: claude --model opus|sonnet|haiku
-                    model_flag = f' --model {req_model}' if req_model else ""
-                    title = f"[Claude Code] {_slot_label}" if _slot_label else "[Claude Code]"
-                    cmd = f'start "Claude Code" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Claude Code... && claude{yolo_flag}{model_flag}{prompt_flag}"'
-                elif agent in ('gemini', 'antigravity', 'agy'):
-                    # [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini'는 레거시 alias.
-                    # [2026-06-11] 옵션 매핑을 antigravity_adapter로 격리 — closed-source CLI
-                    # 인터페이스 변경 시 어댑터 한 곳만 수정 (직접 agy 문자열 조립 금지)
-                    from antigravity_adapter import build_interactive_invocation
-                    title = f"[Antigravity] {_slot_label}" if _slot_label else "[Antigravity]"
-                    agy_invocation = build_interactive_invocation(yolo=is_yolo, prompt=_role_prompt or None)
-                    cmd = f'start "{title}" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Antigravity CLI... && {agy_invocation}"'
-                elif agent == 'codex':
-                    yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if is_yolo else ""
-                    # 요청된 모델 우선, 없으면 config에서 읽기
-                    model_name = req_model if req_model else _codex_main_model()
-                    if model_name and not _re_launch.match(r'^[a-zA-Z0-9\-_/:.]+$', model_name):
-                        model_name = None
-                    model_flag = f' --model {model_name}' if model_name else ""
-                    title = f"[Codex CLI] {_slot_label}" if _slot_label else "[Codex CLI]"
-                    # Codex는 초기 프롬프트를 위치 인자로 전달
-                    prompt_arg = f' "{_role_prompt}"' if _role_prompt else ""
-                    cmd = f'start "{title}" cmd.exe /k "cd /d "{_safe_dir}" && title {title} && echo Launching Codex CLI... && codex{yolo_flag}{model_flag}{prompt_arg}"'
-                else:
-                    cmd = f'start "Terminal" cmd.exe /k "cd /d "{_safe_dir}""'
-
-                subprocess.Popen(cmd, shell=True)
-
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json;charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-                self.end_headers()
-                self.wfile.write(json.dumps({
-                    "status": "launched", "agent": agent,
-                    "model": req_model, "role": req_role, "slot": req_slot
-                }).encode('utf-8'))
-            except Exception as e:
-                self.send_response(500)
-                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+            launch_api.handle_launch(self, _codex_main_model)
         elif parsed_path.path == '/api/send-command':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
