@@ -206,6 +206,7 @@ import api.message_api as message_api
 import api.launch_api as launch_api
 import api.commands_api as commands_api
 import api.config_api as config_api
+import api.fs_dialog_api as fs_dialog_api
 import string
 import socket
 from collections import deque
@@ -1224,6 +1225,19 @@ GET_PREFIX_ROUTES = [
     ('/api/office/', _g_office),
     ('/api/tools/', _g_tools),
 ]
+
+# GET exact 라우트 테이블 (Phase 2 R1: 파일시스템 다이얼로그 3종)
+# [불변식] do_GET에서 exact 먼저 → prefix 나중 조회(POST와 동형). fs_dialog 3종은
+#   어떤 GET prefix와도 비충돌(browse-folder/drives/dirs). late-binding으로 전역 주입.
+def _g_fs_dialog(h, pp):
+    fs_dialog_api.handle_get(h, pp.path, parse_qs(pp.query),
+                             open_folder_dialog=_open_folder_dialog_subprocess)
+
+GET_ROUTES = {
+    '/api/browse-folder': _g_fs_dialog,
+    '/api/drives': _g_fs_dialog,
+    '/api/dirs': _g_fs_dialog,
+}
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
 # [WHY] do_POST의 if/elif 사슬 중 "인라인 로직 없는 순수 위임" 라우트만 테이블로 이전
@@ -1263,6 +1277,12 @@ def _p_vibe_log(h, pp):          vibe_api.handle_log(h, method='POST')
 def _p_vibe_log_clr(h, pp):      vibe_api.handle_log(h, method='DELETE')
 def _p_files(h, pp):
     files_api.handle_post(h, pp.path, _p_body(h), validate_file_path=_validate_file_path)
+def _p_fs_dialog(h, pp):
+    # [불변식] body 선읽기 금지 — handle_post가 h.rfile을 직접 소비(open-external)하거나
+    #   전혀 안 읽음(select-folder). 전역은 호출 시점 해석(late-binding).
+    fs_dialog_api.handle_post(h, pp.path,
+                              open_folder_dialog=_open_folder_dialog_subprocess,
+                              config_file=CONFIG_FILE)
 
 # prefix 위임 (일부는 body 선읽기)
 def _p_tools(h, pp):
@@ -1302,6 +1322,8 @@ POST_ROUTES = {
     '/api/file-rename': _p_files,
     '/api/files/create': _p_files,
     '/api/files/delete': _p_files,
+    '/api/open-external': _p_fs_dialog,
+    '/api/select-folder': _p_fs_dialog,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1349,7 +1371,12 @@ class SSEHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
 
-        # ── 라우트 테이블 우선 조회(Phase 1: 순수 prefix) → miss 시 아래 elif 폴백 ──
+        # ── 라우트 테이블 우선 조회 → miss 시 아래 elif 폴백 ──
+        # [불변식] exact 먼저 → prefix 나중(POST와 동형). exact-first라 prefix가 exact를 가리지 않음.
+        _exact_g = GET_ROUTES.get(path)
+        if _exact_g is not None:
+            _exact_g(self, parsed_path)
+            return
         for _pfx, _fn in GET_PREFIX_ROUTES:
             if path.startswith(_pfx):
                 _fn(self, parsed_path)
@@ -1484,16 +1511,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/browse-folder':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                selected_path = _open_folder_dialog_subprocess()
-                self.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/config':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1527,20 +1544,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed_path.query)
             tool_name = (query.get('name') or [''])[0].strip().lower()
             self.wfile.write(json.dumps(_get_tool_install_state(tool_name), ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/drives':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            drives = []
-            if os.name == 'nt':
-                for letter in string.ascii_uppercase:
-                    drive = f"{letter}:/"  # 경로 일관성: 항상 포워드 슬래시 사용 (2026-02-27)
-                    if os.path.exists(drive):
-                        drives.append(drive)
-            else:
-                drives = ['/']
-            self.wfile.write(json.dumps(drives).encode('utf-8'))
         elif parsed_path.path in ('/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli'):
             # 터미널 창을 띄워서 npm install -g 실행 — 사용자가 진행 상황을 직접 확인
             _install_map = {
@@ -1743,28 +1746,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 validate_file_path=_validate_file_path,
             )
 
-        elif parsed_path.path == '/api/dirs':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            target_path = query.get('path', [''])[0]
-            dirs = []
-            if target_path and os.path.exists(target_path) and os.path.isdir(target_path):
-                try:
-                    for entry in os.scandir(target_path):
-                        # .으로 시작하는 숨김 폴더 중 주요 설정 폴더는 허용
-                        if entry.is_dir() and (not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github')):
-                            dirs.append({"name": entry.name, "path": entry.path.replace('\\', '/')})
-                except Exception as e:
-                    print(f"[FILE ERROR] /api/dirs scandir: {e}")
-            dirs.sort(key=lambda x: x['name'].lower())
-            try:
-                self.wfile.write(json.dumps(dirs).encode('utf-8'))
-                self.wfile.flush()
-            except Exception as _e:
-                print(f'[/api/dirs write ERROR] {_e}', flush=True)
         elif parsed_path.path == '/api/help':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2084,36 +2065,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        if path == '/api/open-external':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                payload = {}
-                if content_length > 0:
-                    body = self.rfile.read(content_length).decode('utf-8')
-                    payload = json.loads(body or '{}')
-
-                url = str(payload.get('url', '')).strip()
-                parsed_url = urlparse(url)
-                if not url or parsed_url.scheme not in ('http', 'https'):
-                    raise ValueError('Only http/https URLs can be opened externally')
-
-                opened = webbrowser.open(url)
-                self.wfile.write(json.dumps({
-                    "status": "ok",
-                    "opened": bool(opened),
-                    "url": url,
-                }).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({
-                    "status": "error",
-                    "message": str(e),
-                }).encode('utf-8'))
             return
 
         if path == '/api/install-playwright-cli':
@@ -2556,33 +2507,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
                 git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
-
-        elif parsed_path.path == '/api/select-folder':
-            # 폴더 선택 다이얼로그 — tkinter 별도 프로세스 방식
-            # pywebview의 create_file_dialog()는 GUI 스레드 제한으로 HTTP 핸들러에서 호출 불가
-            # 독립 Python 프로세스로 tkinter를 실행하여 안정적으로 동작
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                path = _open_folder_dialog_subprocess()
-                if path:
-                    # 선택된 경로를 설정에도 즉시 저장
-                    config = {}
-                    if CONFIG_FILE.exists():
-                        try:
-                            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                                config = json.load(f)
-                        except: pass
-                    config['last_path'] = path
-                    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, ensure_ascii=False, indent=2)
-                    self.wfile.write(json.dumps({"status": "success", "path": path}).encode('utf-8'))
-                else:
-                    self.wfile.write(json.dumps({"status": "cancelled"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
         elif parsed_path.path == '/api/messages/clear':
             # 메시지 채널 전체 삭제 (대시보드 UI 초기화용)
