@@ -202,6 +202,7 @@ import api.events_api as events_api
 import api.heal_api as heal_api
 import api.locks_api as locks_api
 import api.projects_api as projects_api
+import api.message_api as message_api
 import string
 import socket
 from collections import deque
@@ -2700,95 +2701,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/locks':
             locks_api.handle_lock(self, LOCKS_FILE)
         elif parsed_path.path == '/api/message':
-            # 에이전트 간 메시지 전송 (SQLite 기반)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-
-                # 메시지 객체 생성 (ID: 밀리초 타임스탬프)
-                msg = {
-                    'id': str(int(time.time() * 1000)),
-                    'timestamp': time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    'from': str(data.get('from', 'unknown')),
-                    'to': str(data.get('to', 'all')),
-                    'type': str(data.get('type', 'info')),
-                    'content': str(data.get('content', '')),
-                    'read': False,
-                }
-
-                # SQLite 에 삽입
-                send_message(msg['id'], msg['from'], msg['to'], msg['type'], msg['content'])
-
-                # 활성화된 모든 PTY 세션에 메시지 전송 (터미널 화면에 출력)
-                # 터미널은 \r\n (CRLF)을 필요로 하므로 변환하여 전송합니다.
-                content_to_send = msg['content']
-                content_display = content_to_send.replace('\n', '\r\n')
-                terminal_msg = f"\r\n\x1b[38;5;39m[{msg['from']} \u2192 {msg['to']}] {content_display}\x1b[0m\r\n"
-                
-                # [개선] 메시지가 '>'로 시작하면 명령어로 간주하여 즉시 실행 유도
-                is_manual_cmd = content_to_send.startswith('>')
-                if is_manual_cmd:
-                    cmd_to_exec = content_to_send[1:].strip() + '\r\n'
-                else:
-                    cmd_to_exec = None
-
-                # PTY inject: to 대상 터미널에 메시지 전달
-                # CEO(사람)는 PTY 없으므로 스킵, 나머지 에이전트는 PTY write
-                # office_chat도 에이전트에게 전달 (양방향 통신)
-                _to = msg['to'].lower()
-                if _to not in ('ceo', 'all', 'broadcast', ''):
-                    try:
-                        import urllib.request as _ureq
-                        # /api/pty/sessions 는 {"T1": {"agent":"claude","running":true,...}, ...} 형식 반환
-                        _sessions_url = f'http://127.0.0.1:{WS_PORT}/api/pty/sessions'
-                        with _ureq.urlopen(_sessions_url, timeout=2) as _r:
-                            _sessions = json.loads(_r.read().decode())
-                        # to와 매칭되는 세션 찾기 (agent 필드 기준)
-                        for _slot_id, _sess in (_sessions.items() if isinstance(_sessions, dict) else []):
-                            _agent = str(_sess.get('agent', '')).lower()
-                            _slot_name = str(_sess.get('slot_name', '')).lower()
-                            if not _sess.get('running', False):
-                                continue
-                            if _to in _agent or _agent.startswith(_to) or _to in _slot_name:
-                                _write_url = f'http://127.0.0.1:{WS_PORT}/api/pty/write/{_slot_id}'
-                                _payload = json.dumps({'text': content_to_send}).encode()
-                                _req = _ureq.Request(
-                                    _write_url, data=_payload,
-                                    headers={'Content-Type': 'application/json'},
-                                    method='POST',
-                                )
-                                _ureq.urlopen(_req, timeout=2)
-                                print(f'[msg→PTY] {msg["from"]} → {_slot_id}({_agent}) : {content_to_send[:40]}')
-                                break
-                    except Exception as _e:
-                        print(f'[msg inject error] to={_to} err={_e}')
-
-                # SSE 스트림 (session_logs 테이블) 에도 알림 기록하여 로그 뷰에 반영
-                try:
-                    sys.path.append(str(BASE_DIR))
-                    from src.secure import mask_sensitive_data
-                    from src.db_helper import insert_log
-                    safe_content = mask_sensitive_data(msg['content'])
-                    
-                    insert_log(
-                        session_id=f"msg_{int(time.time())}",
-                        terminal_id="MSG_CHANNEL",
-                        agent=msg['from'],
-                        trigger_msg=f"[메시지→{msg['to']}] {safe_content[:100]}",
-                        project_id="hive",
-                        status="success"
-                    )
-                except Exception as e:
-                    print(f"Error logging message to session_logs: {e}")
-
-                self.wfile.write(json.dumps({'status': 'success', 'msg': msg}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+            message_api.handle_send(self, WS_PORT, BASE_DIR, send_message)
         elif parsed_path.path == '/api/messages/clear':
             # 메시지 채널 전체 삭제 (대시보드 UI 초기화용)
             self.send_response(200)
