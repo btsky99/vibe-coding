@@ -5,6 +5,10 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-05 Claude: 드래그 하이라이트 유지 — 복사는 되지만 파란 영역이 순식간에 사라지던 문제.
+ *                      TUI(claude)의 DSR 자동응답이 userInput으로 집계돼 xterm이 선택을 즉시 clear.
+ *                      onSelectionChange에서 getSelectionPosition 버퍼 절대좌표를 저장 → spurious clear 시
+ *                      select()로 재적용해 유지. 사용자 클릭/복사로 지운 경우(userClearedSelRef)만 복원 제외.
  * - 2026-07-05 Claude: 드래그 선택 즉시 사라짐 수정 — mousedown만 shift 합성하던 v3.7.243은 앵커만 생기고
  *                      이동분(mousemove)이 TUI로 새어 리포팅 응답이 선택을 초기화. 드래그 세션 전체
  *                      (mousedown→mousemove→mouseup)를 shift로 재디스패치해 로컬 선택 확장 유지.
@@ -58,26 +62,9 @@ import { slugifyProjectPath } from '../lib/projectContext';
 import ChatSlot from './ChatSlot';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
+import { copyTextToClipboard, captureSelectRestore } from './terminal/xtermSelection';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
-
-// [WHY] 클립보드 쓰기 공용 헬퍼 — navigator.clipboard 실패 시 execCommand 폴백.
-// WebView2(PyWebView)에서 writeText가 포커스/권한 사유로 거부될 수 있어 폴백 필수.
-// xterm getSelection()은 Windows에서 이미 \r\n으로 join되므로 CRLF 재정규화 불필요.
-async function copyTextToClipboard(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  }
-}
 
 interface TerminalSlotProps {
   slotId: number;
@@ -172,6 +159,15 @@ export default function TerminalSlot({
   const ctxMenuHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
   // 드래그 선택 강제 핸들러도 동일 사유로 보관 (터미널 재시작 시 교체)
   const dragSelectHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
+  // [WHY] 하이라이트 유지용 — TUI(claude)가 DSR 자동응답을 userInput으로 집계해 선택을 만들자마자
+  // 지운다(복사는 캐시로 되지만 파란 영역이 순식간에 사라짐). getSelectionPosition의 버퍼 절대 좌표를
+  // 저장해 두었다가 spurious clear가 오면 select()로 즉시 재적용해 시각적 선택을 유지한다.
+  const selPosRef = useRef<{ col: number; row: number; len: number } | null>(null);
+  // 우리가 유발한 재적용 이벤트 표식 — 재진입 onSelectionChange에서 재복사/재캡처를 건너뛴다(무한루프 방지).
+  const restoringSelRef = useRef(false);
+  // [불변식] 사용자가 새 좌클릭/복사로 의도적으로 선택을 지운 경우에만 true — 이때는 복원하지 않는다.
+  // TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 유일한 신호.
+  const userClearedSelRef = useRef(false);
 
   // Claude 컨텍스트 바 상세 토글 (클릭 시 In/Out/Cache 2행 표시)
   const [showCtxDetail, setShowCtxDetail] = useState(false);
@@ -272,6 +268,10 @@ export default function TerminalSlot({
 
     setIsTerminalMode(true);
     setActiveAgent(agent);
+    // 새 터미널 인스턴스 — 이전 선택 좌표가 남으면 새 버퍼에 spurious 복원될 수 있어 초기화.
+    selPosRef.current = null;
+    restoringSelRef.current = false;
+    userClearedSelRef.current = false;
     // 터미널 재시작 시 localStorage 기반으로 모니터링 뷰 상태 복원
     // closeTerminal이 isTerminalMode만 false로 하므로, showMonitor를 명시적으로 동기화
     setShowMonitor(localStorage.getItem('hive_monitor_enabled') !== 'false');
@@ -303,15 +303,31 @@ export default function TerminalSlot({
       fitAddon.fit();
       termRef.current = term;
 
-      // 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시
+      // 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시 + 하이라이트 유지 복원.
       // [제약] 선택 해제 이벤트에서도 발화하므로 hasSelection 가드 필수 — 캐시를 빈 값으로 덮지 않는다.
       term.onSelectionChange(() => {
+        // 우리가 select()로 유발한 재진입 이벤트 — 재복사/재캡처 없이 통과 (무한루프 차단).
+        if (restoringSelRef.current) { restoringSelRef.current = false; return; }
         if (term.hasSelection()) {
           const sel = term.getSelection();
           if (sel) {
             lastSelectionRef.current = sel;
             copyTextToClipboard(sel);
           }
+          // [복원] 버퍼 절대 좌표 스냅샷 저장 — 상세 계산은 captureSelectRestore 참조.
+          selPosRef.current = captureSelectRestore(term);
+          userClearedSelRef.current = false;
+        } else {
+          // 선택이 사라짐. 사용자가 의도적으로 지웠거나(새 클릭/복사) 저장분이 없으면 그대로 둔다.
+          if (userClearedSelRef.current || !selPosRef.current) {
+            selPosRef.current = null;
+            userClearedSelRef.current = false;
+            return;
+          }
+          // TUI 자동 clear로 판단 → 저장 좌표로 즉시 재적용해 하이라이트 유지.
+          const { col, row, len } = selPosRef.current;
+          restoringSelRef.current = true;
+          term.select(col, row, len);
         }
       });
 
@@ -336,6 +352,9 @@ export default function TerminalSlot({
       const dragSelectHandler = (e: MouseEvent) => {
         if (e.button !== 0 || e.shiftKey) return;
         if (!term.element?.classList.contains('enable-mouse-events')) return;
+        // 새 좌클릭 = 이전 선택을 의도적으로 해제하는 것 → 이번 clear는 복원하지 않는다.
+        // 드래그로 새 선택이 생기면 onSelectionChange(hasSelection)에서 다시 false로 내려간다.
+        userClearedSelRef.current = true;
         e.preventDefault();
         e.stopImmediatePropagation();
         redispatchAsShift(e, 'mousedown');
@@ -1282,6 +1301,9 @@ export default function TerminalSlot({
               // 선택이 지워지면 빈 문자열이 복사됨. 메뉴 오픈 시점 스냅샷(selText)을 사용.
               try {
                 await copyTextToClipboard(ctxMenu.selText);
+                // 복사 후엔 하이라이트가 사라져야 함 — 복원 금지 신호를 켠 뒤 해제.
+                userClearedSelRef.current = true;
+                selPosRef.current = null;
                 termRef.current?.clearSelection();
               } catch (err) { console.error(err); }
               setCtxMenu(null);
