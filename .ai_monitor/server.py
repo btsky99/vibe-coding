@@ -198,6 +198,7 @@ import api.codegraph_api as codegraph_api
 import api.telegram_api as telegram_api
 import api.update_api as update_api
 import api.install_api as install_api
+import api.events_api as events_api
 import string
 import socket
 from collections import deque
@@ -1222,98 +1223,15 @@ class SSEHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
 
-        # ─── 신규: 사고 과정 실시간 스트리밍 ───
+        # ─── SSE 실시간 스트리밍 3종 — api/events_api.py로 분리 (공유 집합/락 참조 주입) ───
         if path == '/api/events/thoughts':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
-            self.end_headers()
-            
-            # 초기 데이터 전송 (메모리에 쌓인 로그)
-            for log in THOUGHT_LOGS:
-                self.wfile.write(f"data: {json.dumps(log, ensure_ascii=False)}\n\n".encode('utf-8'))
-                self.wfile.flush()
-            
-            # 실시간 업데이트를 위해 클라이언트 등록
-            with _SSE_LOCK:
-                THOUGHT_CLIENTS.add(self)
-            try:
-                self.connection.settimeout(None)  # 타임아웃 제거 — 하트비트로 연결 관리
-                while True:
-                    time.sleep(30)
-                    self.wfile.write(b": heartbeat\n\n")
-                    self.wfile.flush()
-            except Exception:
-                pass  # SSE thought 클라이언트 연결 끊김 — finally에서 정리
-            finally:
-                with _SSE_LOCK:
-                    THOUGHT_CLIENTS.discard(self)
+            events_api.stream_thoughts(self, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK)
             return
-
-        # ─── 자율 에이전트 출력 실시간 스트리밍 ───
-        # _agent_broadcast_worker가 cli_agent 큐를 읽어 AGENT_CLIENTS 세트의
-        # 각 클라이언트 전용 큐로 팬아웃 — 다중 연결/재연결 시 이벤트 손실 없음
         if path == '/api/events/agent':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
-            self.end_headers()
-            from queue import Queue as _ClientQueue, Empty as _QEmpty
-            client_q = _ClientQueue(maxsize=0)  # 클라이언트별 전용 큐 (무제한 — done 이벤트 드롭 방지)
-            with _SSE_LOCK:
-                AGENT_CLIENTS.add(client_q)
-            try:
-                self.connection.settimeout(None)
-                while True:
-                    try:
-                        msg = client_q.get(timeout=1.0)
-                        try:
-                            self.wfile.write(f"data: {msg}\n\n".encode('utf-8'))
-                            self.wfile.flush()
-                        except Exception as e:
-                            break  # 클라이언트 연결 끊김
-                    except _QEmpty:
-                        # 큐 비어있으면 하트비트 전송 (연결 유지)
-                        try:
-                            self.wfile.write(b": heartbeat\n\n")
-                            self.wfile.flush()
-                        except Exception as e:
-                            break  # 클라이언트 연결 끊김
-            except Exception as e:
-                pass  # SSE agent 클라이언트 연결 끊김
-            finally:
-                with _SSE_LOCK:
-                    AGENT_CLIENTS.discard(client_q)
+            events_api.stream_agent(self, AGENT_CLIENTS, _SSE_LOCK)
             return
-
-        # ─── 신규: 파일 시스템 변경 이벤트 스트리밍 ───
         if path == '/api/events/fs':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
-            self.end_headers()
-            
-            with _SSE_LOCK:
-                FS_CLIENTS.add(self)
-            try:
-                # SSE 연결 타임아웃 완화 (60초)
-                self.connection.settimeout(60.0)
-                # 연결 유지를 위한 하트비트 루프
-                while True:
-                    time.sleep(30) # 하트비트 주기를 30초로 완화
-                    self.wfile.write(b": heartbeat\n\n")
-                    self.wfile.flush()
-            except Exception as e:
-                pass  # SSE FS 클라이언트 연결 끊김
-            finally:
-                with _SSE_LOCK:
-                    FS_CLIENTS.discard(self)
+            events_api.stream_fs(self, FS_CLIENTS, _SSE_LOCK)
             return
 
         if parsed_path.path == '/stream':
