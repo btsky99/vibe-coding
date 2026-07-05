@@ -1225,6 +1225,94 @@ GET_PREFIX_ROUTES = [
     ('/api/tools/', _g_tools),
 ]
 # ─────────────────────────────────────────────────────────────────────────────
+# POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
+# [WHY] do_POST의 if/elif 사슬 중 "인라인 로직 없는 순수 위임" 라우트만 테이블로 이전
+#   (do_GET Task 2 동형). 인라인 핸들러(dashboard/launch, screenshot/analyze, heartbeat 등)와
+#   복합조건 라우트는 legacy 잔류 → 테이블 miss 시 do_POST 하위 if/elif로 폴백(하이브리드).
+# [불변식/안전] GET과 달리 POST는 exact-prefix 충돌이 있어 이전 대상을 엄격히 제한한다:
+#   - /api/git/rollback·/api/git/diff(인라인) ⊂ /api/git/  → git 계열 전부 legacy 잔류(이전 금지)
+#   - /api/hive/log/pg·/api/hive/thought/pg(인라인) ⊂ /api/hive/ → hive/orchestrator/superpowers 잔류
+#   - /api/office/*(복합조건 프록시), /api/tasks/*(endswith), /api/agents/*/trigger(endswith) 잔류
+#   따라서 이전한 prefix(tools/agent/pty/zettel/codegraph/memory)는 어떤 인라인 exact와도 비충돌(검증됨).
+#   [디스패치 순서] exact 먼저 → prefix 나중 → legacy 폴백. exact-first라서 prefix가 exact를 가리지 않음.
+# [불변식] wrapper는 전역(update_api/_soft_src_dir/_get_node_pty_sessions 등)을 **호출 시점** 해석 —
+#   모듈 뒤쪽에서 정의되는 심볼(_NODE_PTY_REST_URL 등)도 런타임 해석이라 안전(GET 테이블과 동일 규칙).
+def _p_body(h):
+    _cl = int(h.headers.get('Content-Length', 0))
+    return json.loads(h.rfile.read(_cl).decode('utf-8')) if _cl else {}
+
+# exact 위임
+def _p_telegram_config(h, pp): h._handle_telegram_config_post()
+def _p_telegram_test(h, pp):   h._handle_telegram_test()
+def _p_apply_update(h, pp):    update_api.apply_update(h, DATA_DIR)
+def _p_soft_update(h, pp):     update_api.soft_update_apply(h, DATA_DIR, _soft_src_dir())
+def _p_trigger_update(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
+def _p_projects(h, pp):        projects_api.handle_post(h, PROJECTS_FILE)
+def _p_experience(h, pp):      experience_api.handle_post(h, pp.path)
+def _p_config_update(h, pp):   config_api.handle_update(h, CONFIG_FILE, PROJECTS_FILE)
+def _p_launch(h, pp):          launch_api.handle_launch(h, _codex_main_model)
+def _p_send_command(h, pp):    commands_api.handle_send_command(h, _NODE_PTY_REST_URL, _get_node_pty_sessions)
+def _p_locks(h, pp):           locks_api.handle_lock(h, LOCKS_FILE)
+def _p_message(h, pp):         message_api.handle_send(h, WS_PORT, BASE_DIR, send_message)
+def _p_vibe_notify(h, pp):       vibe_api.handle_notify(h)
+def _p_vibe_progress(h, pp):     vibe_api.handle_progress(h, method='POST')
+def _p_vibe_progress_clr(h, pp): vibe_api.handle_progress(h, method='DELETE')
+def _p_vibe_status(h, pp):       vibe_api.handle_status(h, method='POST')
+def _p_vibe_status_clr(h, pp):   vibe_api.handle_status(h, method='DELETE')
+def _p_vibe_log(h, pp):          vibe_api.handle_log(h, method='POST')
+def _p_vibe_log_clr(h, pp):      vibe_api.handle_log(h, method='DELETE')
+def _p_files(h, pp):
+    files_api.handle_post(h, pp.path, _p_body(h), validate_file_path=_validate_file_path)
+
+# prefix 위임 (일부는 body 선읽기)
+def _p_tools(h, pp):
+    from api import tools_api
+    tools_api.handle_post(h, pp.path, _p_body(h))
+def _p_agent(h, pp): agent_api.handle_post(h, pp.path)
+def _p_pty(h, pp):   pty_api.handle_post(h, pp.path)
+def _p_zettel(h, pp):
+    zettel_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+def _p_codegraph(h, pp):
+    codegraph_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+def _p_memory(h, pp):
+    from api import memory_api
+    memory_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+
+POST_ROUTES = {
+    '/api/config/telegram': _p_telegram_config,
+    '/api/telegram/test': _p_telegram_test,
+    '/api/apply-update': _p_apply_update,
+    '/api/soft-update/apply': _p_soft_update,
+    '/api/trigger-update-check': _p_trigger_update,
+    '/api/projects': _p_projects,
+    '/api/experience': _p_experience,
+    '/api/config/update': _p_config_update,
+    '/api/launch': _p_launch,
+    '/api/send-command': _p_send_command,
+    '/api/locks': _p_locks,
+    '/api/message': _p_message,
+    '/api/vibe/notify': _p_vibe_notify,
+    '/api/vibe/progress': _p_vibe_progress,
+    '/api/vibe/progress/clear': _p_vibe_progress_clr,
+    '/api/vibe/status': _p_vibe_status,
+    '/api/vibe/status/clear': _p_vibe_status_clr,
+    '/api/vibe/log': _p_vibe_log,
+    '/api/vibe/log/clear': _p_vibe_log_clr,
+    '/api/save-file': _p_files,
+    '/api/file-rename': _p_files,
+    '/api/files/create': _p_files,
+    '/api/files/delete': _p_files,
+}
+
+POST_PREFIX_ROUTES = [
+    ('/api/tools/', _p_tools),
+    ('/api/agent/', _p_agent),
+    ('/api/pty/', _p_pty),
+    ('/api/zettel/', _p_zettel),
+    ('/api/codegraph/', _p_codegraph),
+    ('/api/memory/', _p_memory),
+]
+# ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
     # ── Telegram 설정 API 핸들러 — api/telegram_api.py로 분리 (2026-04-20) ──────
@@ -1944,13 +2032,17 @@ class SSEHandler(BaseHTTPRequestHandler):
         path = parsed_path.path
         _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
 
-        # ─── Telegram 설정 저장 + 테스트 ───────────────────────────────────
-        if path == '/api/config/telegram':
-            self._handle_telegram_config_post()
+        # ── 라우트 테이블 우선 조회(Phase 1 Task 3) → miss 시 아래 if/elif 폴백 ──
+        # [불변식] exact 먼저 → prefix 나중. POST는 exact-prefix 충돌이 있어 순서 필수
+        #   (예: /api/git/rollback은 인라인 잔류이고 /api/git/는 애초에 테이블 미이전).
+        _exact = POST_ROUTES.get(path)
+        if _exact is not None:
+            _exact(self, parsed_path)
             return
-        elif path == '/api/telegram/test':
-            self._handle_telegram_test()
-            return
+        for _pfx, _fn in POST_PREFIX_ROUTES:
+            if path.startswith(_pfx):
+                _fn(self, parsed_path)
+                return
 
         # ── 오피스 API POST → 오피스 서버 프록시 (launch/restart/status 제외) ──
         if path.startswith('/api/office/') and path not in (
@@ -2341,29 +2433,10 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
             return
 
-        # ── [모듈 위임 - POST] tools_api — /api/tools/install (도구 설치 실행) ─
-        if parsed_path.path.startswith('/api/tools/'):
-            from api import tools_api
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            tools_api.handle_post(self, parsed_path.path, _body)
-
-        # ── [모듈 위임 - POST] files_api — /api/save-file, /api/file-rename, /api/files/* ─
-        elif parsed_path.path in ('/api/save-file', '/api/file-rename', '/api/files/create', '/api/files/delete'):
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            files_api.handle_post(
-                self, parsed_path.path, _body,
-                validate_file_path=_validate_file_path,
-            )
-
-        elif parsed_path.path == '/api/apply-update':
-            update_api.apply_update(self, DATA_DIR)
-
-        elif parsed_path.path == '/api/soft-update/apply':
-            update_api.soft_update_apply(self, DATA_DIR, _soft_src_dir())
-
-        elif parsed_path.path == '/api/agents/heartbeat':
+        # [Phase 1 Task 3] tools/files/apply-update/soft-update/trigger-update/projects/experience/
+        #   config-update/launch/send-command/locks/message/vibe·zettel·codegraph·memory·agent·pty는
+        #   상단 POST_ROUTES/POST_PREFIX_ROUTES로 이전 — 아래는 인라인 로직 + 복합조건 라우트만 잔류.
+        if parsed_path.path == '/api/agents/heartbeat':
             # 에이전트 실시간 상태 보고 수신
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -2405,10 +2478,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/trigger-update-check':
-            # 프론트가 POST로도 호출 — do_GET과 동일 핸들러 재사용.
-            update_api.trigger_update_check(self, DATA_DIR)
-
         elif parsed_path.path == '/api/git/rollback':
             # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
             self.send_response(200)
@@ -2457,8 +2526,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"diff": result.stdout}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/projects':
-            projects_api.handle_post(self, PROJECTS_FILE)
 
         # ── [모듈 위임 - POST] hive_api ──────────────────────────────────
         # /api/hive/approve-skill, /api/orchestrator/skill-chain/update,
@@ -2490,64 +2557,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
                 git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
 
-        # ── [모듈 위임 - POST] vibe_api — /api/vibe/* (cmux 호환 CLI API) ─
-        elif parsed_path.path == '/api/vibe/notify':
-            vibe_api.handle_notify(self)
-        elif parsed_path.path == '/api/vibe/progress':
-            vibe_api.handle_progress(self, method='POST')
-        elif parsed_path.path == '/api/vibe/progress/clear':
-            vibe_api.handle_progress(self, method='DELETE')
-        elif parsed_path.path == '/api/vibe/status':
-            vibe_api.handle_status(self, method='POST')
-        elif parsed_path.path == '/api/vibe/status/clear':
-            vibe_api.handle_status(self, method='DELETE')
-        elif parsed_path.path == '/api/vibe/log':
-            vibe_api.handle_log(self, method='POST')
-        elif parsed_path.path == '/api/vibe/log/clear':
-            vibe_api.handle_log(self, method='DELETE')
-
-        # ── [모듈 위임 - POST] agent_api — /api/agent/run, /api/agent/stop ─
-        elif parsed_path.path.startswith('/api/agent/'):
-            agent_api.handle_post(self, parsed_path.path)
-        elif parsed_path.path.startswith('/api/pty/'):
-            pty_api.handle_post(self, parsed_path.path)
-
-        # ── [모듈 위임 - POST] experience_api — /api/experience ───────
-        elif parsed_path.path == '/api/experience':
-            experience_api.handle_post(self, parsed_path.path)
-
-        # ── [모듈 위임 - POST] zettel_api — /api/zettel/* ─────────────
-        elif parsed_path.path.startswith('/api/zettel/'):
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            zettel_api.handle_post(
-                self, parsed_path.path, _body,
-                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
-            )
-
-        # ── [모듈 위임 - POST] codegraph_api — /api/codegraph/* ──────────
-        elif parsed_path.path.startswith('/api/codegraph/'):
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            codegraph_api.handle_post(
-                self, parsed_path.path, _body,
-                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
-            )
-
-        # ── [모듈 위임 - POST] memory_api ────────────────────────────────
-        # /api/memory/set, /api/memory/delete
-        elif parsed_path.path.startswith('/api/memory/'):
-            from api import memory_api
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            memory_api.handle_post(
-                self, parsed_path.path, _body,
-                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
-            )
-
-        elif parsed_path.path == '/api/config/update':
-            config_api.handle_update(self, CONFIG_FILE, PROJECTS_FILE)
-
         elif parsed_path.path == '/api/select-folder':
             # 폴더 선택 다이얼로그 — tkinter 별도 프로세스 방식
             # pywebview의 create_file_dialog()는 GUI 스레드 제한으로 HTTP 핸들러에서 호출 불가
@@ -2575,14 +2584,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
-        elif parsed_path.path == '/api/launch':
-            launch_api.handle_launch(self, _codex_main_model)
-        elif parsed_path.path == '/api/send-command':
-            commands_api.handle_send_command(self, _NODE_PTY_REST_URL, _get_node_pty_sessions)
-        elif parsed_path.path == '/api/locks':
-            locks_api.handle_lock(self, LOCKS_FILE)
-        elif parsed_path.path == '/api/message':
-            message_api.handle_send(self, WS_PORT, BASE_DIR, send_message)
         elif parsed_path.path == '/api/messages/clear':
             # 메시지 채널 전체 삭제 (대시보드 UI 초기화용)
             self.send_response(200)
