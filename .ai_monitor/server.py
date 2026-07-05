@@ -1233,10 +1233,20 @@ def _g_fs_dialog(h, pp):
     fs_dialog_api.handle_get(h, pp.path, parse_qs(pp.query),
                              open_folder_dialog=_open_folder_dialog_subprocess)
 
+# GET exact 라우트 (Phase 2 R2: 도구 설치 3종) — install_api로 본문 이전, 전역 헬퍼는 주입.
+# [불변식] 전역(_tool_status/_get_tool_install_state/_python_runner_cmds/BASE_DIR/PROJECT_ROOT)은
+#   호출 시점 해석(late-binding). install-*-cli 복합조건은 legacy elif 잔류(R9 예정).
+def _g_tool_status(h, pp):         install_api.tool_status(h, pp, _tool_status)
+def _g_install_tool_status(h, pp): install_api.install_tool_status(h, pp, _get_tool_install_state)
+def _g_register_codex(h, pp):      install_api.register_codex_to_ai(h, _python_runner_cmds, BASE_DIR, PROJECT_ROOT)
+
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
     '/api/dirs': _g_fs_dialog,
+    '/api/tool-status': _g_tool_status,
+    '/api/install-tool-status': _g_install_tool_status,
+    '/api/register-codex-to-ai': _g_register_codex,
 }
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
@@ -1284,6 +1294,15 @@ def _p_fs_dialog(h, pp):
                               open_folder_dialog=_open_folder_dialog_subprocess,
                               config_file=CONFIG_FILE)
 
+# 도구 설치 POST 2종 (Phase 2 R2) — install_api로 본문 이전, 전역 헬퍼 주입.
+# [불변식] body 선읽기 금지 — 각 핸들러가 h.rfile을 직접 소비. late-binding.
+def _p_install_playwright(h, pp):
+    install_api.install_playwright_cli(h, _current_project_root,
+                                       _resolve_playwright_install_script,
+                                       _project_python_runner_cmds)
+def _p_run_script(h, pp):
+    install_api.run_script(h, _current_project_root)
+
 # prefix 위임 (일부는 body 선읽기)
 def _p_tools(h, pp):
     from api import tools_api
@@ -1324,6 +1343,8 @@ POST_ROUTES = {
     '/api/files/delete': _p_files,
     '/api/open-external': _p_fs_dialog,
     '/api/select-folder': _p_fs_dialog,
+    '/api/install-playwright-cli': _p_install_playwright,
+    '/api/run-script': _p_run_script,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1528,85 +1549,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             config['project_unresolved'] = PROJECT_CONTEXT_UNRESOLVED
             config['active_project_id'] = _current_project_id()
             self.wfile.write(json.dumps(config).encode('utf-8'))
-        elif parsed_path.path == '/api/tool-status':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            tool_name = (query.get('name') or [''])[0].strip().lower()
-            self.wfile.write(json.dumps(_tool_status(tool_name), ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/install-tool-status':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            tool_name = (query.get('name') or [''])[0].strip().lower()
-            self.wfile.write(json.dumps(_get_tool_install_state(tool_name), ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path in ('/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli'):
-            # 터미널 창을 띄워서 npm install -g 실행 — 사용자가 진행 상황을 직접 확인
-            _install_map = {
-                '/api/install-gemini-cli': ('gemini', '@google/gemini-cli', 'Gemini CLI'),
-                '/api/install-claude-code': ('claude', '@anthropic-ai/claude-code', 'Claude Code'),
-                '/api/install-codex-cli': ('codex', '@openai/codex', 'Codex CLI'),
-            }
-            _tool_key, _pkg, _display = _install_map[parsed_path.path]
-            try:
-                _npm = _get_npm_executable()
-                if not _npm:
-                    raise FileNotFoundError('npm 실행 파일을 찾을 수 없습니다. Node.js가 설치되어 있는지 확인하세요.')
-                _title = f"[{_display} 설치]"
-                _cmd = (
-                    f'start "{_title}" cmd.exe /k "'
-                    f'title {_title} && '
-                    f'echo ========================================= && '
-                    f'echo   {_display} 설치를 시작합니다... && '
-                    f'echo ========================================= && '
-                    f'echo. && '
-                    f'"{_npm}" install -g {_pkg} && '
-                    f'echo. && echo ✅ {_display} 설치가 완료되었습니다! || '
-                    f'echo. && echo ❌ {_display} 설치에 실패했습니다."'
-                )
-                subprocess.Popen(_cmd, shell=True)
-                result = {'status': 'success', 'message': f'{_display} 설치 터미널이 열렸습니다.'}
-            except Exception as exc:
-                result = {'status': 'error', 'message': str(exc)}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-        elif parsed_path.path == '/api/register-codex-to-ai':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                python_cmds = _python_runner_cmds()
-                wrapper_script = str(BASE_DIR / 'bin' / 'codex_wrapper.py')
-                last_error = ''
-                for python_cmd in python_cmds:
-                    proc = subprocess.run(
-                        [python_cmd, wrapper_script, '--install'],
-                        input='all\n',
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        cwd=str(PROJECT_ROOT),
-                    )
-                    output = proc.stdout.strip() or proc.stderr.strip()
-                    if proc.returncode == 0:
-                        result = {"status": "success", "message": f"Antigravity CLI & Claude Desktop에 vibe-coding MCP 등록 완료!\n{output}"}
-                        break
-                    last_error = output or f"등록 실패 (exit code {proc.returncode})"
-                else:
-                    result = {"status": "error", "message": last_error or "사용 가능한 Python 실행기를 찾지 못했습니다."}
-            except subprocess.TimeoutExpired:
-                result = {"status": "error", "message": "등록 시간 초과 (30초)"}
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+            # [R2] 복합조건(in 튜플) 잔류 — 본문만 install_api로 이전(R9에서 wrapper 테이블화 예정).
+            install_api.handle_install_cli(self, parsed_path.path, _get_npm_executable)
         elif parsed_path.path == '/api/shutdown':
             # 안전한 셧다운: 서버와 자식 프로세스를 정리한 뒤 종료
             # [설계 의도] 프론트엔드 TopMenuBar에서 호출. 확인 다이얼로그를 거친 후에만 도달.
@@ -2065,123 +2010,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        if path == '/api/install-playwright-cli':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                payload = {}
-                if content_length > 0:
-                    payload = json.loads(self.rfile.read(content_length).decode('utf-8') or '{}')
-
-                project_root = _current_project_root()
-                requested_root = str(payload.get('project_path', '')).strip()
-                if requested_root:
-                    requested_path = Path(requested_root).expanduser()
-                    if requested_path.is_dir():
-                        project_root = requested_path.resolve()
-
-                script_path = _resolve_playwright_install_script()
-                if not script_path:
-                    raise RuntimeError('install_playwright_cli.py not found')
-
-                python_cmd = _project_python_runner_cmds(project_root)[0]
-                install_cmd = subprocess.list2cmdline([python_cmd, str(script_path)])
-                cmdline = (
-                    'title Vibe Coding - Playwright Installer && '
-                    'echo Working directory: %CD% && '
-                    'echo. && '
-                    'echo Installing Playwright CLI and Chromium browser... && '
-                    f'{install_cmd} && '
-                    'echo. && echo Playwright installation completed. You can close this window. || '
-                    'echo. && echo Playwright installation failed. Review the log above before closing this window.'
-                )
-                create_new_console = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
-                subprocess.Popen(
-                    ['cmd.exe', '/k', cmdline],
-                    cwd=str(project_root),
-                    close_fds=True,
-                    creationflags=create_new_console,
-                )
-                self.wfile.write(json.dumps({
-                    "status": "success",
-                    "message": f"Playwright installation started for {project_root}. A console window was opened so you can inspect the result.",
-                    "project_path": str(project_root),
-                    "python": python_cmd,
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({
-                    "status": "error",
-                    "message": str(e),
-                }, ensure_ascii=False).encode('utf-8'))
-            return
-
-        # [2026-03-30 Claude] 하네스 V2 스크립트 실행 API
-        # AI 도구 메뉴에서 harness_verify.py, session_init.py 등을 실행
-        if path == '/api/run-script':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                payload = json.loads(self.rfile.read(content_length).decode('utf-8') or '{}') if content_length > 0 else {}
-                script_name = payload.get('script', '')
-                # 허용된 스크립트 목록 및 Claude Code 프롬프트 매핑
-                _ALLOWED_SCRIPTS = {
-                    'harness_verify': {
-                        'script': 'scripts/harness_verify.py',
-                        'args': ['--json'],
-                        'prompt': '해당 프로젝트 폴더에서 Claude Code를 실행한 뒤 다음을 입력하세요:\n\npython scripts/harness_verify.py --json',
-                    },
-                    'session_init': {
-                        'script': 'scripts/session_init.py',
-                        'args': ['--agent', 'claude'],
-                        'prompt': '해당 프로젝트 폴더에서 Claude Code를 실행한 뒤 다음을 입력하세요:\n\npython scripts/session_init.py --agent claude',
-                    },
-                    'harness_init': {
-                        'script': None,
-                        'prompt': '해당 프로젝트 폴더에서 Claude Code를 실행한 뒤 /vibe-harness-init 명령을 입력하세요.',
-                    },
-                }
-                if script_name not in _ALLOWED_SCRIPTS:
-                    raise ValueError(f'허용되지 않은 스크립트: {script_name}')
-                info = _ALLOWED_SCRIPTS[script_name]
-                script_rel = info['script']
-                # EXE(설치) 모드: 스크립트 실행 대신 Claude Code 프롬프트 안내
-                if getattr(sys, 'frozen', False) or script_rel is None:
-                    self.wfile.write(json.dumps({
-                        "status": "prompt",
-                        "output": info['prompt'],
-                    }, ensure_ascii=False).encode('utf-8'))
-                else:
-                    # 개발 모드: 직접 스크립트 실행
-                    project_root = _current_project_root()
-                    script_path = project_root / script_rel
-                    if not script_path.exists():
-                        raise FileNotFoundError(f'{script_rel} not found')
-                    no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                    result = subprocess.run(
-                        [sys.executable, str(script_path)] + info.get('args', []),
-                        capture_output=True, text=True,
-                        encoding='utf-8', errors='replace',
-                        timeout=15, cwd=str(project_root),
-                        creationflags=no_win,
-                    )
-                    self.wfile.write(json.dumps({
-                        "status": "ok" if result.returncode == 0 else "fail",
-                        "output": result.stdout[:2000],
-                        "error": result.stderr[:500] if result.returncode != 0 else "",
-                    }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({
-                    "status": "error",
-                    "message": str(e),
-                }, ensure_ascii=False).encode('utf-8'))
             return
 
         if path == '/api/kanban/launch':
