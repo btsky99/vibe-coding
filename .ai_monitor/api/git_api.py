@@ -7,6 +7,10 @@ DESCRIPTION: /api/git/* 엔드포인트 핸들러 모듈.
 
 REVISION HISTORY:
 - 2026-03-01 Claude: server.py에서 분리 — git API 핸들러 담당
+- 2026-07-06 Claude: do_POST exact 인라인 rollback/diff를 rollback()/diff()로 verbatim 분리(R8).
+  [주의] 아래 handle_post()의 rollback/diff 분기와 동작이 다르다(rollback 성공 message 없음,
+  git_dir 키가 'path' vs 'repo'; diff는 body 미사용·쿼리스트링만). 원본 do_POST의 exact 인라인이
+  prefix 위임(handle_post)보다 먼저 걸렸으므로 그 동작을 보존한다 — 두 경로 수렴은 R9 대상.
 """
 
 import json
@@ -120,6 +124,65 @@ def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
         return True
 
     return False
+
+
+def rollback(handler, BASE_DIR: Path) -> None:
+    """POST /api/git/rollback — 특정 파일 변경 원상복구(git checkout -- 파일).
+    [R8 verbatim] server.py do_POST exact 인라인 이전. body를 직접 소비(Content-Length 만큼).
+    [주의] handle_post()의 rollback 분기와 다름 — git_dir는 'path' 키, 성공 응답에 message 없음.
+      원본 exact 동작 보존(수렴은 R9). body 읽기는 try 내부(원본 위치 그대로).
+    """
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    try:
+        content_length = int(handler.headers['Content-Length'])
+        data = json.loads(handler.rfile.read(content_length).decode('utf-8'))
+        file_path = data.get('file')
+        git_dir = data.get('path', str(BASE_DIR.parent))
+
+        if not file_path:
+            handler.wfile.write(json.dumps({"status": "error", "message": "File path required"}).encode('utf-8'))
+            return
+
+        # git checkout -- "파일명" 실행
+        result = subprocess.run(
+            ['git', 'checkout', '--', file_path],
+            cwd=git_dir, capture_output=True, text=True, timeout=10, encoding='utf-8',
+            creationflags=0x08000000
+        )
+
+        if result.returncode == 0:
+            handler.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+        else:
+            handler.wfile.write(json.dumps({"status": "error", "message": result.stderr.strip()}).encode('utf-8'))
+    except Exception as e:
+        handler.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+
+def diff(handler, params: dict, BASE_DIR: Path) -> None:
+    """POST /api/git/diff — 파일 diff(쿼리스트링 기반, POST body 미사용).
+    [R8 verbatim] server.py do_POST exact 인라인 이전. params=parse_qs(query).
+    [주의] handle_post()의 diff 분기와 파라미터 추출 위치만 다름(헤더 전송 후 추출). 원본 exact 보존.
+    """
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    target_file = params.get('path', [''])[0]
+    git_dir = params.get('git_path', [str(BASE_DIR.parent)])[0]
+
+    try:
+        # git diff "파일명" 실행
+        result = subprocess.run(
+            ['git', 'diff', '--', target_file],
+            cwd=git_dir, capture_output=True, text=True, timeout=5, encoding='utf-8',
+            creationflags=0x08000000
+        )
+        handler.wfile.write(json.dumps({"diff": result.stdout}).encode('utf-8'))
+    except Exception as e:
+        handler.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
 
 def handle_post(handler, path: str, data: dict, BASE_DIR: Path) -> bool:

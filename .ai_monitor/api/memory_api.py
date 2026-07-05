@@ -4,6 +4,8 @@ DESCRIPTION: Postgres-first memory API handlers. recall-smart(임베딩 통합 �
 
 REVISION HISTORY:
 - 2026-06-10 Claude: POST /api/memory/recall-smart 추가 — 자가 치유 2.0 ④ (Task 4)
+- 2026-07-06 Claude: GET /api/memory/db-info 분리(Phase 2 R8). query_rows/PG_PORT/PG_PROJECT_DB는
+  server.py 전역이라 wrapper가 호출 시점 주입(포트/DB 폴백 반영). handle_get 오버로드 대신 전용 함수.
 """
 
 import json
@@ -59,6 +61,30 @@ def handle_get(handler, path: str, params: dict,
         return True
 
     return False
+
+
+def db_info(handler, DATA_DIR: Path, PG_PORT, PG_PROJECT_DB, query_rows) -> None:
+    """GET /api/memory/db-info — 공유 메모리 DB 경로 + hive_memory 항목 수 반환.
+    [WHY] 배포/개발 버전이 어떤 DB를 바라보는지 UI에서 확인(슬러그 불일치 빈 패널 진단용).
+    [불변식] query_rows/PG_PORT/PG_PROJECT_DB는 server.py 전역 — 동적 포트/DB 폴백 후 최신값을
+      봐야 하므로 wrapper가 호출 시점에 주입한다(디폴트 인자 바인딩 금지).
+    """
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    try:
+        ensure_schema(DATA_DIR)
+        rows = query_rows("SELECT COUNT(*) AS count FROM hive_memory;")
+        count = int(rows[0].get('count', 0)) if rows else 0
+        handler.wfile.write(json.dumps({
+            'db_path': f'postgres://localhost:{PG_PORT}/{PG_PROJECT_DB}',
+            'is_local': False,
+            'backend': 'postgres',
+            'count': count,
+        }, ensure_ascii=False).encode('utf-8'))
+    except Exception as e:
+        handler.wfile.write(json.dumps({'error': str(e), 'count': 0}).encode('utf-8'))
 
 
 def _format_recall_summary(query: str, items: list[dict]) -> str:

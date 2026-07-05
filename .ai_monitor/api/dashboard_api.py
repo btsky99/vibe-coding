@@ -11,6 +11,8 @@ REVISION HISTORY:
 - 2026-07-06 Claude: server.py do_GET/do_POST 인라인 4블록 분리(Phase 2 R5). 공유 dict/lock은
   참조 주입 — heartbeat write와 agents read의 동일 identity 유지가 불변식. DB 헬퍼/launch 헬퍼도
   late-binding 주입(HTTP_PORT는 __main__에서 재설정되므로 호출 시점 값 필요). 로직 원본 verbatim.
+- 2026-07-06 Claude: GET '/api/kanban/pg-activity' 인라인 분리(Phase 2 R8). Postgres-first 칸반 —
+  run_pg_sql_csv/current_project_id는 wrapper가 호출 시점 주입(PG_PROJECT_DB late-binding 유지).
 """
 from __future__ import annotations
 
@@ -102,6 +104,35 @@ def kanban_launch(handler, base_dir, http_port, python_runner_cmds) -> None:
         handler.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
     except Exception as e:
         handler.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
+
+def pg_activity(handler, run_pg_sql_csv, current_project_id) -> None:
+    """GET /api/kanban/pg-activity — pg_logs 최근 8시간 터미널별 활동을 그룹화 반환.
+    응답: { "T1": [{agent, task, status, ts}, ...], ... } (터미널당 최대 15개).
+    [불변식] run_pg_sql_csv는 함수 참조로 주입 — 내부에서 PG_PROJECT_DB 전역을 호출 시점 해석하므로
+      동적 포트/DB 폴백 후에도 최신값을 본다. current_project_id는 wrapper가 호출 시점 값을 넘긴다.
+    """
+    _json_headers(handler)
+    try:
+        rows = run_pg_sql_csv(
+            "SELECT terminal_id, agent, task, status, "
+            "to_char(ts, 'HH24:MI:SS') AS ts "
+            "FROM pg_logs "
+            "WHERE ts > NOW() - INTERVAL '8 hours' AND (project_id=%s OR project_id='') "
+            "ORDER BY ts DESC LIMIT 300",
+            (current_project_id,)
+        )
+        # 터미널별 그룹화 (최대 15개/터미널)
+        by_terminal: dict = {}
+        for row in rows:
+            tid = row.get('terminal_id') or 'T0'
+            if tid not in by_terminal:
+                by_terminal[tid] = []
+            if len(by_terminal[tid]) < 15:
+                by_terminal[tid].append(row)
+        handler.wfile.write(json.dumps(by_terminal, ensure_ascii=False).encode('utf-8'))
+    except Exception as e:
+        handler.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
 
 def heartbeat(handler, agent_status, agent_status_lock, record_heartbeat, insert_pg_log) -> None:

@@ -212,6 +212,7 @@ import api.fs_dialog_api as fs_dialog_api
 import api.dashboard_api as dashboard_api
 import api.office_launch_api as office_launch_api
 import api.hive_ingest_api as hive_ingest_api
+import api.screenshot_api as screenshot_api
 import string
 import socket
 from collections import deque
@@ -1267,6 +1268,20 @@ def _g_image_file(h, pp): static_api.image_file(h, pp, _validate_file_path)
 def _g_agents(h, pp):
     dashboard_api.list_agents(h, AGENT_STATUS, AGENT_STATUS_LOCK, list_agent_status)
 
+# GET exact 라우트 (Phase 2 R8: 설정/vibe/칸반/메모리 long-tail) — 인라인 로직 모듈 이전 + 순수위임 3종.
+# [불변식/late-binding] 아래 wrapper는 런타임에 mutation되는 전역(PROJECT_CONTEXT_UNRESOLVED,
+#   GLOBAL_VAULT_DIR, PG_PORT/PG_PROJECT_DB)과 함수(_current_project_id/run_pg_sql_csv/query_rows)를
+#   호출 시점에 해석한다 — 디폴트 인자 바인딩 금지(테이블 정의 시점 값 고정 버그).
+# [순수위임] vibe 3종(sidebar/notifications/skills)은 원본이 이미 1~3줄 모듈 위임 → 테이블 등록만.
+def _g_config(h, pp):
+    config_api.handle_get(h, CONFIG_FILE, GLOBAL_VAULT_DIR,
+                          PROJECT_CONTEXT_UNRESOLVED, _current_project_id())
+def _g_vibe_sidebar(h, pp):        vibe_api.handle_sidebar_state(h)
+def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
+def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)
+def _g_kanban_activity(h, pp):     dashboard_api.pg_activity(h, run_pg_sql_csv, _current_project_id())
+def _g_memory_db_info(h, pp):      memory_api.db_info(h, DATA_DIR, PG_PORT, PG_PROJECT_DB, query_rows)
+
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
@@ -1280,6 +1295,13 @@ GET_ROUTES = {
     '/api/help': _g_help,
     '/api/image-file': _g_image_file,
     '/api/agents': _g_agents,
+    # Phase 2 R8 — 설정/vibe/칸반/메모리 exact. 순수위임(vibe 3종) + 인라인 모듈 이전.
+    '/api/config': _g_config,
+    '/api/vibe/sidebar': _g_vibe_sidebar,
+    '/api/vibe/notifications': _g_vibe_notifications,
+    '/api/vibe/skills': _g_vibe_skills,
+    '/api/kanban/pg-activity': _g_kanban_activity,
+    '/api/memory/db-info': _g_memory_db_info,
 }
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
@@ -1388,6 +1410,15 @@ def _p_hive_thought_pg(h, pp):
 def _p_thoughts_add(h, pp):
     hive_ingest_api.thoughts_add(h, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK, set_memory, PROJECT_ID)
 
+# git exact 2종 + 스크린샷 분석 (Phase 2 R8) — do_POST exact 인라인 verbatim 이전.
+# [불변식/순서] exact-first 디스패치라 아래 '/api/git/' prefix 위임(startswith)보다 먼저 걸린다 —
+#   원본 do_POST에서 git/rollback·git/diff exact 인라인이 git prefix 위임 앞에 있던 순서를 그대로 재현.
+# [주의] git_api.rollback/diff는 handle_post()의 동명 분기와 동작이 다르다(원본 exact 보존, R9 수렴).
+#   diff는 body 미사용·쿼리스트링 방식 → parse_qs(pp.query)를 주입한다.
+def _p_git_rollback(h, pp):    git_api.rollback(h, BASE_DIR)
+def _p_git_diff(h, pp):        git_api.diff(h, parse_qs(pp.query), BASE_DIR)
+def _p_screenshot_analyze(h, pp): screenshot_api.analyze(h, SCRIPTS_DIR, PROJECT_ID)
+
 POST_ROUTES = {
     '/api/config/telegram': _p_telegram_config,
     '/api/telegram/test': _p_telegram_test,
@@ -1427,6 +1458,10 @@ POST_ROUTES = {
     '/api/hive/log/pg': _p_hive_log_pg,
     '/api/hive/thought/pg': _p_hive_thought_pg,
     '/api/thoughts/add': _p_thoughts_add,
+    # git exact 2종 + 스크린샷 (Phase 2 R8). exact-first라 '/api/git/' prefix 위임보다 먼저 걸림.
+    '/api/git/rollback': _p_git_rollback,
+    '/api/git/diff': _p_git_diff,
+    '/api/screenshot/analyze': _p_screenshot_analyze,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1508,23 +1543,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/projects':
             projects_api.handle_get(self, PROJECTS_FILE)
         # [Phase 2 R5] GET /api/agents → GET_ROUTES(_g_agents, dashboard_api)로 이전.
-        elif parsed_path.path == '/api/config':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            config = {}
-            if CONFIG_FILE.exists():
-                try:
-                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                        config = json.load(f)
-                except: pass
-            config.setdefault('vault_dir', str(GLOBAL_VAULT_DIR))
-            # [2026-06-21] 설치본 빈-패널 사고 대응 — 활성 프로젝트 컨텍스트를 프론트에 노출.
-            # project_unresolved=True면 UI가 "프로젝트 폴더를 선택하세요"를 유도(빈 하이브/제텔 패널 방지).
-            config['project_unresolved'] = PROJECT_CONTEXT_UNRESOLVED
-            config['active_project_id'] = _current_project_id()
-            self.wfile.write(json.dumps(config).encode('utf-8'))
+        # [Phase 2 R8] GET /api/config → GET_ROUTES(_g_config, config_api)로 이전.
         elif parsed_path.path in ('/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli'):
             # [R2] 복합조건(in 튜플) 잔류 — 본문만 install_api로 이전(R9에서 wrapper 테이블화 예정).
             install_api.handle_install_cli(self, parsed_path.path, _get_npm_executable)
@@ -1584,10 +1603,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             git_api.handle_get(self, parsed_path.path, _params, BASE_DIR=BASE_DIR)
 
         # ── [모듈 위임] vibe_api — /api/vibe/* (cmux 호환 CLI API) ────────
-        elif parsed_path.path == '/api/vibe/sidebar':
-            vibe_api.handle_sidebar_state(self)
-        elif parsed_path.path == '/api/vibe/notifications':
-            vibe_api.handle_notifications(self)
+        # [Phase 2 R8] /api/vibe/sidebar·/api/vibe/notifications → GET_ROUTES(순수위임) 이전.
 
         # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
         elif parsed_path.path.startswith('/api/agent/'):
@@ -1614,9 +1630,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             experience_api.handle_get(self, parsed_path.path, _params)
 
         # ── [모듈 위임] vibe_skills_api — /api/vibe/skills (Phase 3-2) ───
-        elif parsed_path.path == '/api/vibe/skills':
-            _params = parse_qs(parsed_path.query)
-            vibe_skills_api.handle_get(self, parsed_path.path, _params, PROJECT_ROOT)
+        # [Phase 2 R8] /api/vibe/skills → GET_ROUTES(_g_vibe_skills) 순수위임 이전.
 
         # ── [모듈 위임] zettel_api — /api/zettel/* ────────────────────
         elif parsed_path.path.startswith('/api/zettel/'):
@@ -1711,53 +1725,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         # /api/messages → api/logs_api.py 분리 (Phase 2 R3, 테이블 _g_messages 처리)
         # [2026-03-22] /api/tasks, /api/tasks/kanban, /api/task-logs → tasks_api.py로 위임됨
 
-        elif parsed_path.path == '/api/kanban/pg-activity':
-            # Postgres-First 칸반 데이터: pg_logs에서 최근 8시간 터미널별 활동 조회
-            # 응답: { "T1": [{agent, task, status, ts}, ...], "T2": [...], ... }
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                rows = run_pg_sql_csv(
-                    "SELECT terminal_id, agent, task, status, "
-                    "to_char(ts, 'HH24:MI:SS') AS ts "
-                    "FROM pg_logs "
-                    "WHERE ts > NOW() - INTERVAL '8 hours' AND (project_id=%s OR project_id='') "
-                    "ORDER BY ts DESC LIMIT 300",
-                    (_current_project_id(),)
-                )
-                # 터미널별 그룹화 (최대 15개/터미널)
-                by_terminal: dict = {}
-                for row in rows:
-                    tid = row.get('terminal_id') or 'T0'
-                    if tid not in by_terminal:
-                        by_terminal[tid] = []
-                    if len(by_terminal[tid]) < 15:
-                        by_terminal[tid].append(row)
-                self.wfile.write(json.dumps(by_terminal, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/memory/db-info':
-            # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
-            # 배포 버전에서 어떤 DB를 바라보고 있는지 UI에서 확인할 수 있게 함
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                ensure_schema(DATA_DIR)
-                rows = query_rows("SELECT COUNT(*) AS count FROM hive_memory;")
-                count = int(rows[0].get('count', 0)) if rows else 0
-                self.wfile.write(json.dumps({
-                    'db_path': f'postgres://localhost:{PG_PORT}/{PG_PROJECT_DB}',
-                    'is_local': False,
-                    'backend': 'postgres',
-                    'count': count,
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e), 'count': 0}).encode('utf-8'))
+        # [Phase 2 R8] GET /api/kanban/pg-activity → GET_ROUTES(_g_kanban_activity, dashboard_api).
+        # [Phase 2 R8] GET /api/memory/db-info → GET_ROUTES(_g_memory_db_info, memory_api).
 
         else:
             # do_GET 최후미 폴백 — Vite dist 정적 서빙 → api/static_api.py로 분리(Phase 2 R4).
@@ -1854,59 +1823,13 @@ class SSEHandler(BaseHTTPRequestHandler):
         #   config-update/launch/send-command/locks/message/vibe·zettel·codegraph·memory·agent·pty는
         #   상단 POST_ROUTES/POST_PREFIX_ROUTES로 이전 — 아래는 인라인 로직 + 복합조건 라우트만 잔류.
         # [Phase 2 R5] POST /api/agents/heartbeat → POST_ROUTES(_p_agents_heartbeat, dashboard_api)로 이전.
-        if parsed_path.path == '/api/git/rollback':
-            # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                file_path = data.get('file')
-                git_dir = data.get('path', str(BASE_DIR.parent))
-                
-                if not file_path:
-                    self.wfile.write(json.dumps({"status": "error", "message": "File path required"}).encode('utf-8'))
-                    return
-                
-                # git checkout -- "파일명" 실행
-                result = subprocess.run(
-                    ['git', 'checkout', '--', file_path],
-                    cwd=git_dir, capture_output=True, text=True, timeout=10, encoding='utf-8',
-                    creationflags=0x08000000
-                )
-                
-                if result.returncode == 0:
-                    self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-                else:
-                    self.wfile.write(json.dumps({"status": "error", "message": result.stderr.strip()}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/git/diff':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            target_file = query.get('path', [''])[0]
-            git_dir = query.get('git_path', [str(BASE_DIR.parent)])[0]
-            
-            try:
-                # git diff "파일명" 실행
-                result = subprocess.run(
-                    ['git', 'diff', '--', target_file],
-                    cwd=git_dir, capture_output=True, text=True, timeout=5, encoding='utf-8',
-                    creationflags=0x08000000
-                )
-                self.wfile.write(json.dumps({"diff": result.stdout}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-
+        # [Phase 2 R8] POST /api/git/rollback·/api/git/diff(exact 인라인) →
+        #   POST_ROUTES(_p_git_rollback/_p_git_diff, git_api)로 verbatim 이전. exact-first라 아래
+        #   '/api/git/' prefix 위임보다 먼저 걸림(원본 순서 보존). prefix 위임 블록은 R9 대상 — 유지.
         # ── [모듈 위임 - POST] hive_api ──────────────────────────────────
         # /api/hive/approve-skill, /api/orchestrator/skill-chain/update,
         # /api/orchestrator/run, /api/superpowers/install|uninstall
-        elif (parsed_path.path.startswith('/api/hive/') or
+        if (parsed_path.path.startswith('/api/hive/') or
               parsed_path.path.startswith('/api/orchestrator/') or
               parsed_path.path.startswith('/api/superpowers/')):
             from api import hive_api
@@ -1953,29 +1876,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 trigger_agent=trigger_agent,
             )
 
-        elif parsed_path.path == '/api/screenshot/analyze':
-            # 멀티모달 버그 감지 — 스크린샷을 Antigravity Vision API로 분석
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                image_b64 = data.get('image', '')
-                if not image_b64:
-                    self.wfile.write(json.dumps({'error': 'image (base64) is required'}).encode('utf-8'))
-                elif not SCRIPTS_DIR:
-                    self.wfile.write(json.dumps({'error': '설치 버전에서는 스크린샷 분석 기능을 사용할 수 없습니다'}).encode('utf-8'))
-                else:
-                    scripts_dir = str(SCRIPTS_DIR)
-                    if scripts_dir not in sys.path:
-                        sys.path.insert(0, scripts_dir)
-                    from screenshot_analyzer import analyze_and_create_tasks
-                    result = analyze_and_create_tasks(image_b64, project_id=PROJECT_ID)
-                    self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        # [Phase 2 R8] POST /api/screenshot/analyze → POST_ROUTES(_p_screenshot_analyze, screenshot_api).
 
         else:
             self.send_response(404)
