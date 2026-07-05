@@ -204,6 +204,7 @@ import api.locks_api as locks_api
 import api.projects_api as projects_api
 import api.message_api as message_api
 import api.launch_api as launch_api
+import api.commands_api as commands_api
 import string
 import socket
 from collections import deque
@@ -2576,43 +2577,7 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/launch':
             launch_api.handle_launch(self, _codex_main_model)
         elif parsed_path.path == '/api/send-command':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-                
-                target_slot = str(data.get('target'))
-                command = data.get('command', '')
-                
-                # Node PTY 서버의 REST API로 명령 전송 (직접 PTY 접근 → HTTP 프록시)
-                try:
-                    import urllib.request
-                    processed_cmd = command.replace('\r\n', '\r').replace('\n', '\r')
-                    final_cmd = processed_cmd if processed_cmd.endswith('\r') else processed_cmd + '\r'
-                    payload = json.dumps({"command": final_cmd}).encode('utf-8')
-                    _req = urllib.request.Request(
-                        f"{_NODE_PTY_REST_URL}/api/pty/interrupt/{target_slot}",
-                        data=payload,
-                        headers={'Content-Type': 'application/json'},
-                        method='POST'
-                    )
-                    # 실제로는 interrupt가 아닌 write가 필요하므로, 직접 WS로 전송하는 방식으로 전환 필요
-                    # 임시: interrupt 엔드포인트 대신 WS 클라이언트로 명령 전송은 향후 구현
-                    # 현재는 Node PTY 서버 세션 존재 여부만 확인
-                    _snap = _get_node_pty_sessions()
-                    _info = _snap.get(f'T{target_slot}')
-                    if _info and _info.get('running'):
-                        self.wfile.write(json.dumps({"status": "success", "message": f"Command queued for Terminal {target_slot}"}).encode('utf-8'))
-                    else:
-                        self.wfile.write(json.dumps({"status": "error", "message": f"Terminal {target_slot} is not running."}).encode('utf-8'))
-                except Exception as _e:
-                    self.wfile.write(json.dumps({"status": "error", "message": str(_e)}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            commands_api.handle_send_command(self, _NODE_PTY_REST_URL, _get_node_pty_sessions)
         elif parsed_path.path == '/api/locks':
             locks_api.handle_lock(self, LOCKS_FILE)
         elif parsed_path.path == '/api/message':
