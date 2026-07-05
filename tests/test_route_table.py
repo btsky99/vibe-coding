@@ -10,6 +10,8 @@ DESCRIPTION: server.py 라우트 완전성 가드 — do_GET/do_POST를 if/elif�
 
 REVISION HISTORY:
 - 2026-07-05 Claude: 신규 — 디스패치 테이블 재구조화 Phase 1 Task 1(변경 전 게이트).
+- 2026-07-06 Claude: Phase 2 R9.5 — `path in (...)` 튜플 파싱 추가(복합조건 라우트
+  hive exact8·install-cli3·tasks/memory/files 감지, 기존 사각지대 해소). golden에 22종 편입.
 """
 import re
 from pathlib import Path
@@ -39,6 +41,17 @@ GOLDEN_EXACT = {
     '/api/telegram/test', '/api/thoughts/add', '/api/vibe/log', '/api/vibe/log/clear',
     '/api/vibe/notify', '/api/vibe/progress', '/api/vibe/progress/clear',
     '/api/vibe/status', '/api/vibe/status/clear',
+    # ── 복합조건(path in 튜플) 라우트 — R9.5 in튜플 파싱으로 감지, 기존 사각지대 해소 ──
+    # do_GET: hive exact8 + memory in2 + tasks in4 + files in2 + install-cli in3
+    '/api/superpowers/status', '/api/skill-results', '/api/skill-ab-test',
+    '/api/skill/predict', '/api/context-usage', '/api/antigravity-context-usage',
+    '/api/agent-quota', '/api/local-models',
+    '/api/memory', '/api/project-info',
+    '/api/tasks', '/api/tasks/kanban', '/api/task-logs', '/api/agents/status',
+    '/api/files', '/api/read-file',
+    '/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli',
+    # do_POST: tasks in4
+    '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim',
 }
 GOLDEN_PREFIX = {
     '/api/agent/', '/api/agents/', '/api/codegraph/', '/api/experience', '/api/git/',
@@ -60,6 +73,12 @@ def _extract(source: str):
     # prefix 튜플: ('/...', 형태
     prefix |= {m for m in re.findall(r"^\s*\(\s*'(/[^']+)'\s*,", source, re.M)
                if m.startswith('/api/')}
+    # path in ('/a', '/b', ...) 튜플 — 복합조건 라우트(R9.5). 멀티라인 튜플 지원.
+    # [WHY] hive exact8·install-cli3·tasks/memory/files의 in 튜플은 path==/dict키/startswith
+    #   어디에도 안 걸려 기존 가드 사각지대였다(Critic 지적). in(...) 안 리터럴을 exact로 편입.
+    #   [제약] 튜플 안엔 ')' 문자가 없다는 전제(라우트 문자열엔 괄호 없음) — [^)]+로 멀티라인 캡처.
+    for _tup in re.findall(r"path in \(([^)]+)\)", source):
+        exact |= set(re.findall(r"'(/[^']+)'", _tup))
     return exact, prefix
 
 
