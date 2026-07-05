@@ -210,6 +210,7 @@ import api.commands_api as commands_api
 import api.config_api as config_api
 import api.fs_dialog_api as fs_dialog_api
 import api.dashboard_api as dashboard_api
+import api.office_launch_api as office_launch_api
 import string
 import socket
 from collections import deque
@@ -1347,6 +1348,19 @@ def _p_kanban_launch(h, pp):
 def _p_agents_heartbeat(h, pp):
     dashboard_api.heartbeat(h, AGENT_STATUS, AGENT_STATUS_LOCK, record_heartbeat, insert_pg_log)
 
+# 오피스 독립 서버 실행 POST 3종 (Phase 2 R6) — api/office_launch_api.py로 본문 이전.
+# [불변식] _office_state/_launch_office_server/_restart_office_server는 모듈 뒤쪽(~2156)에서
+#   정의되므로 반드시 late-binding(wrapper 바디에서 호출 시점 해석)으로 주입 — 프록시 라우트와
+#   동일한 OfficeServerState 객체를 공유해야 생존/포트 판정이 갈리지 않는다.
+# [주의] exact 3종을 POST_ROUTES에 등록하면 exact-first 디스패치로 프록시 복합조건(not in 제외)보다
+#   먼저 걸린다 → 프록시의 launch/restart/status 제외 조건은 그대로 둬도 무해(방어적).
+def _p_office_launch(h, pp):
+    office_launch_api.launch(h, _office_state, _launch_office_server, BASE_DIR, _python_runner_cmds)
+def _p_office_restart(h, pp):
+    office_launch_api.restart(h, _restart_office_server)
+def _p_office_status(h, pp):
+    office_launch_api.status(h, _office_state)
+
 # prefix 위임 (일부는 body 선읽기)
 def _p_tools(h, pp):
     from api import tools_api
@@ -1393,6 +1407,9 @@ POST_ROUTES = {
     '/api/dashboard/launch': _p_dashboard_launch,
     '/api/kanban/launch': _p_kanban_launch,
     '/api/agents/heartbeat': _p_agents_heartbeat,
+    '/api/office/launch': _p_office_launch,
+    '/api/office/restart': _p_office_restart,
+    '/api/office/status': _p_office_status,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1803,66 +1820,9 @@ class SSEHandler(BaseHTTPRequestHandler):
         # [Phase 2 R5] POST /api/dashboard/launch·/api/kanban/launch →
         #   POST_ROUTES(_p_dashboard_launch/_p_kanban_launch, dashboard_api)로 이전.
 
-        # ── 오피스 독립 서버 + 창 실행 ──
-        # office_server.py를 별도 프로세스로 시작 → 포트 확인 → dashboard_window.py 실행
-        if path == '/api/office/launch':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                # 이미 오피스 서버가 실행 중이면 재사용
-                if _office_state.alive and _office_state.port:
-                    office_port = _office_state.port
-                else:
-                    office_port = _launch_office_server()
-                # 오피스 대시보드 창 실행 (오피스 서버 포트 전달)
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                dashboard_script = BASE_DIR / 'dashboard_window.py'
-                python_cmds = _python_runner_cmds()
-                if not python_cmds:
-                    raise RuntimeError('Python interpreter not found for office launch')
-                subprocess.Popen(
-                    [python_cmds[0], str(dashboard_script), str(office_port), 'office'],
-                    creationflags=_no_window,
-                    close_fds=True,
-                )
-                self.wfile.write(json.dumps({
-                    "status": "launched",
-                    "office_port": office_port,
-                }).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        # ── 오피스 서버 재시작 ──
-        if path == '/api/office/restart':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                new_port = _restart_office_server()
-                self.wfile.write(json.dumps({
-                    "status": "restarted", "office_port": new_port,
-                }).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        # ── 오피스 서버 상태 조회 ──
-        if path == '/api/office/status':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            alive = _office_state.alive
-            self.wfile.write(json.dumps({
-                "running": alive,
-                "port": _office_state.port if alive else None,
-                "pid": _office_state.proc.pid if alive and _office_state.proc else None,
-            }).encode('utf-8'))
-            return
+        # [Phase 2 R6] POST /api/office/launch·restart·status →
+        #   POST_ROUTES(_p_office_launch/_p_office_restart/_p_office_status, office_launch_api)로 이전.
+        #   프록시 복합조건(위 not in 제외)은 R9에서 처리 예정 — 여기서 건드리지 말 것.
 
         # [2026-03-22] /api/graph/launch 제거 (지식그래프 삭제)
         # [2026-04-18] /api/eval-review/launch 제거 (디스패처 정리)
