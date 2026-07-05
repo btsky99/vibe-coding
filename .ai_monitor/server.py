@@ -200,6 +200,7 @@ import api.update_api as update_api
 import api.install_api as install_api
 import api.events_api as events_api
 import api.heal_api as heal_api
+import api.locks_api as locks_api
 import string
 import socket
 from collections import deque
@@ -2733,60 +2734,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/locks':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-                
-                file_path = data.get('file')
-                agent = data.get('agent', 'Unknown')
-                action = data.get('action', 'lock') # 'lock' or 'unlock'
-                
-                with open(LOCKS_FILE, 'r', encoding='utf-8') as f:
-                    locks = json.load(f)
-                
-                if action == 'lock':
-                    if file_path in locks and locks[file_path] != agent:
-                        self.wfile.write(json.dumps({"status": "conflict", "owner": locks[file_path]}).encode('utf-8'))
-                        return
-                    locks[file_path] = agent
-                    log_msg = f"Locked file: {file_path}"
-                elif action == 'unlock':
-                    if file_path in locks:
-                        del locks[file_path]
-                        log_msg = f"Unlocked file: {file_path}"
-                    else:
-                        log_msg = None
-                
-                with open(LOCKS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(locks, f, ensure_ascii=False, indent=2)
-                
-                # 하이브 로그에 기록
-                if log_msg:
-                    try:
-                        sys.path.append(str(BASE_DIR))
-                        from src.secure import mask_sensitive_data
-                        from src.db_helper import insert_log
-                        safe_msg = mask_sensitive_data(log_msg)
-                        
-                        insert_log(
-                            session_id=f"lock_{int(time.time())}_{agent}",
-                            terminal_id="LOCK_API",
-                            agent=agent,
-                            trigger_msg=safe_msg,
-                            project_id="hive",
-                            status="success"
-                        )
-                    except Exception as e:
-                        print(f"Error logging lock to session_logs: {e}")
-                
-                self.wfile.write(json.dumps({"status": "success", "locks": locks}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            locks_api.handle_lock(self, LOCKS_FILE)
         elif parsed_path.path == '/api/message':
             # 에이전트 간 메시지 전송 (SQLite 기반)
             self.send_response(200)
