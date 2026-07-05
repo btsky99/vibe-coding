@@ -209,6 +209,7 @@ import api.launch_api as launch_api
 import api.commands_api as commands_api
 import api.config_api as config_api
 import api.fs_dialog_api as fs_dialog_api
+import api.dashboard_api as dashboard_api
 import string
 import socket
 from collections import deque
@@ -1258,6 +1259,12 @@ def _g_messages(h, pp):     logs_api.messages(h, get_messages)
 def _g_help(h, pp):       static_api.help_doc(h, pp, Path(__file__).parent / 'docs')
 def _g_image_file(h, pp): static_api.image_file(h, pp, _validate_file_path)
 
+# GET exact 라우트 (Phase 2 R5: 에이전트 상태) — api/dashboard_api.py로 본문 이전.
+# [불변식] AGENT_STATUS/AGENT_STATUS_LOCK은 wrapper 바디에서 전역 참조 → heartbeat writer와
+#   동일 dict identity 주입(사본 금지: 대시보드가 조용히 빈 값 표시). list_agent_status도 late-binding.
+def _g_agents(h, pp):
+    dashboard_api.list_agents(h, AGENT_STATUS, AGENT_STATUS_LOCK, list_agent_status)
+
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
@@ -1270,6 +1277,7 @@ GET_ROUTES = {
     '/api/messages': _g_messages,
     '/api/help': _g_help,
     '/api/image-file': _g_image_file,
+    '/api/agents': _g_agents,
 }
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
@@ -1329,6 +1337,16 @@ def _p_run_script(h, pp):
 # 메시지 채널 초기화 POST (Phase 2 R3) — logs_api로 본문 이전, clear_messages 주입.
 def _p_messages_clear(h, pp): logs_api.clear(h, clear_messages)
 
+# 대시보드/에이전트 POST 3종 (Phase 2 R5) — api/dashboard_api.py로 본문 이전.
+# [불변식] heartbeat는 AGENT_STATUS/LOCK을 전역 참조로 주입 → /api/agents(_g_agents)와 동일 dict.
+#   HTTP_PORT는 __main__에서 슬롯 재설정되므로 wrapper 호출 시점 값 전달(late-binding). body 직접 소비.
+def _p_dashboard_launch(h, pp):
+    dashboard_api.dashboard_launch(h, BASE_DIR, HTTP_PORT, _python_runner_cmds)
+def _p_kanban_launch(h, pp):
+    dashboard_api.kanban_launch(h, BASE_DIR, HTTP_PORT, _python_runner_cmds)
+def _p_agents_heartbeat(h, pp):
+    dashboard_api.heartbeat(h, AGENT_STATUS, AGENT_STATUS_LOCK, record_heartbeat, insert_pg_log)
+
 # prefix 위임 (일부는 body 선읽기)
 def _p_tools(h, pp):
     from api import tools_api
@@ -1372,6 +1390,9 @@ POST_ROUTES = {
     '/api/install-playwright-cli': _p_install_playwright,
     '/api/run-script': _p_run_script,
     '/api/messages/clear': _p_messages_clear,
+    '/api/dashboard/launch': _p_dashboard_launch,
+    '/api/kanban/launch': _p_kanban_launch,
+    '/api/agents/heartbeat': _p_agents_heartbeat,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1452,29 +1473,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"status": "ok", "ts": datetime.now().isoformat()}).encode('utf-8'))
         elif parsed_path.path == '/api/projects':
             projects_api.handle_get(self, PROJECTS_FILE)
-        elif parsed_path.path == '/api/agents':
-            # 실시간 에이전트 상태 목록 반환 (오케스트레이터용)
-            # 인메모리 + PostgreSQL DB 데이터 병합하여 반환
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            with AGENT_STATUS_LOCK:
-                result = dict(AGENT_STATUS)
-            # DB에만 있는 에이전트도 포함 (다른 프로세스가 기록한 경우)
-            try:
-                for row in list_agent_status():
-                    aid = row.get('agent_id', '')
-                    if aid and aid not in result:
-                        result[aid] = {
-                            'status': row.get('status', 'offline'),
-                            'task': row.get('current_task'),
-                            'last_beat': row.get('last_beat'),
-                            'beat_count': row.get('beat_count', 0),
-                        }
-            except Exception:
-                pass
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+        # [Phase 2 R5] GET /api/agents → GET_ROUTES(_g_agents, dashboard_api)로 이전.
         elif parsed_path.path == '/api/config':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1801,63 +1800,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             _proxy_to_office_server(self, method='POST', body=_raw)
             return
 
-        # ─── 칸반 보드 네이티브 창 실행 ──────────────────────────────────────
-        # window.open() 대신 PySide6 네이티브 프로세스를 직접 실행하여
-        # 인터넷 브라우저 창이 아닌 OS 네이티브 데스크톱 창으로 띄웁니다.
-        if path == '/api/dashboard/launch':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                tab = 'agent'
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length > 0:
-                    body = self.rfile.read(content_length).decode('utf-8')
-                    payload = json.loads(body or '{}')
-                    if isinstance(payload, dict):
-                        tab = str(payload.get('tab', 'agent')).strip().lower() or 'agent'
-
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                # Python 스크립트로 대시보드 창 실행
-                dashboard_script = BASE_DIR / 'dashboard_window.py'
-                python_cmds = _python_runner_cmds()
-                if not python_cmds:
-                    raise RuntimeError('Python interpreter not found for dashboard launch')
-                subprocess.Popen(
-                    [python_cmds[0], str(dashboard_script), str(HTTP_PORT), tab],
-                    creationflags=_no_window,
-                    close_fds=True,
-                )
-                self.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        if path == '/api/kanban/launch':
-            # B안 통합: kanban_board.py(PySide6 네이티브) 제거 →
-            # dashboard_window.py + React TaskBoardPanel(?kanban=1)으로 일원화.
-            # 동일한 API(/api/orchestrator/skill-chain 등)를 통해 데이터 일관성 확보.
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                # dashboard_window.py kanban 탭으로 실행
-                dashboard_script = BASE_DIR / 'dashboard_window.py'
-                python_cmds = _python_runner_cmds()
-                if not python_cmds:
-                    raise RuntimeError('Python interpreter not found for kanban launch')
-                subprocess.Popen(
-                    [python_cmds[0], str(dashboard_script), str(HTTP_PORT), 'kanban'],
-                    creationflags=_no_window,
-                    close_fds=True,
-                )
-                self.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
+        # [Phase 2 R5] POST /api/dashboard/launch·/api/kanban/launch →
+        #   POST_ROUTES(_p_dashboard_launch/_p_kanban_launch, dashboard_api)로 이전.
 
         # ── 오피스 독립 서버 + 창 실행 ──
         # office_server.py를 별도 프로세스로 시작 → 포트 확인 → dashboard_window.py 실행
@@ -2037,49 +1981,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         # [Phase 1 Task 3] tools/files/apply-update/soft-update/trigger-update/projects/experience/
         #   config-update/launch/send-command/locks/message/vibe·zettel·codegraph·memory·agent·pty는
         #   상단 POST_ROUTES/POST_PREFIX_ROUTES로 이전 — 아래는 인라인 로직 + 복합조건 라우트만 잔류.
-        if parsed_path.path == '/api/agents/heartbeat':
-            # 에이전트 실시간 상태 보고 수신
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                agent_name = data.get('agent')
-                if not agent_name:
-                    self.wfile.write(json.dumps({"status": "error", "message": "Agent name is required"}).encode('utf-8'))
-                    return
-                
-                agent_status = data.get("status", "active")
-                agent_task = data.get("task")
-                now_ts = time.time()
-                with AGENT_STATUS_LOCK:
-                    AGENT_STATUS[agent_name] = {
-                        "status": agent_status,
-                        "task": agent_task,
-                        "last_seen": now_ts,
-                    }
-                # PostgreSQL에도 영구 기록 (재시작 시 복구용)
-                try:
-                    # heartbeat UPSERT는 항상 실행 (상태 갱신)
-                    record_heartbeat(agent_name, status=agent_status,
-                                     current_task=agent_task)
-                    # pg_logs는 상태 변경 시에만 기록 (무제한 증가 방지)
-                    prev = AGENT_STATUS.get(agent_name, {})
-                    prev_status = prev.get('status')
-                    if prev_status != agent_status:
-                        insert_pg_log(
-                            agent=agent_name, task=agent_task or '',
-                            status=agent_status,
-                            metadata={'source': 'heartbeat', 'prev': prev_status},
-                        )
-                except Exception:
-                    pass  # DB 실패해도 인메모리는 유지
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/git/rollback':
+        # [Phase 2 R5] POST /api/agents/heartbeat → POST_ROUTES(_p_agents_heartbeat, dashboard_api)로 이전.
+        if parsed_path.path == '/api/git/rollback':
             # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
