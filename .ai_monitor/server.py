@@ -199,6 +199,7 @@ import api.telegram_api as telegram_api
 import api.update_api as update_api
 import api.install_api as install_api
 import api.events_api as events_api
+import api.heal_api as heal_api
 import string
 import socket
 from collections import deque
@@ -1731,6 +1732,9 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         elif parsed_path.path == '/api/soft-update/check':
             update_api.soft_update_check(self, DATA_DIR, _soft_src_dir())
+
+        elif parsed_path.path == '/api/heal/metrics':
+            heal_api.handle_get(self, _current_project_id())
 
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
