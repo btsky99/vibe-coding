@@ -205,6 +205,7 @@ import api.projects_api as projects_api
 import api.message_api as message_api
 import api.launch_api as launch_api
 import api.commands_api as commands_api
+import api.config_api as config_api
 import string
 import socket
 from collections import deque
@@ -2508,44 +2509,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             )
 
         elif parsed_path.path == '/api/config/update':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                config = {}
-                if CONFIG_FILE.exists():
-                    try:
-                        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                            config = json.load(f)
-                    except: pass
-                config.update(data)
-                with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(config, f, ensure_ascii=False, indent=2)
-
-                # last_path 변경 시 projects.json에도 동기화 → 다음 서버 시작 시 PROJECT_ROOT 정확히 설정
-                # 배포 버전에서 프로젝트 전환 후 재시작해도 올바른 PROJECT_ROOT를 사용하기 위함
-                if 'last_path' in data and data['last_path']:
-                    try:
-                        _lp = str(data['last_path']).replace('\\', '/')
-                        _projs = []
-                        if PROJECTS_FILE.exists():
-                            _projs = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
-                        if _lp in _projs:
-                            _projs.remove(_lp)
-                        _projs.insert(0, _lp)  # 가장 최근 경로를 0번으로
-                        PROJECTS_FILE.write_text(
-                            json.dumps(_projs[:20], ensure_ascii=False, indent=2),
-                            encoding='utf-8'
-                        )
-                    except Exception:
-                        pass
-
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+            config_api.handle_update(self, CONFIG_FILE, PROJECTS_FILE)
 
         elif parsed_path.path == '/api/select-folder':
             # 폴더 선택 다이얼로그 — tkinter 별도 프로세스 방식
