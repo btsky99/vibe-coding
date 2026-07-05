@@ -196,6 +196,7 @@ import api.office_api as office_api
 import api.experience_api as experience_api
 import api.codegraph_api as codegraph_api
 import api.telegram_api as telegram_api
+import api.update_api as update_api
 import string
 import socket
 from collections import deque
@@ -1992,84 +1993,13 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         elif parsed_path.path == '/api/check-update-ready':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            update_file = DATA_DIR / "update_ready.json"
-            if update_file.exists():
-                try:
-                    with open(update_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    # update_ready.json에 저장된 버전이 현재 실행 중인 버전보다
-                    # 낮거나 같으면 → 이미 해당 버전 이상으로 업데이트된 것이므로
-                    # 파일을 삭제하고 "업데이트 없음" 상태로 반환한다.
-                    # [버그수정] 이전 코드는 == 비교만 했기 때문에 v3.6.9 캐시가
-                    # v3.6.10에서도 "업데이트 있음"으로 잘못 표시되는 문제가 있었음.
-                    file_ver = data.get("version", "").lstrip("v").strip()
-                    cur_ver  = __version__.lstrip("v").strip()
-
-                    def _parse_ver(v):
-                        """'3.6.10' → (3, 6, 10) 정수 튜플로 변환"""
-                        parts = v.split(".")
-                        result = []
-                        for p in parts:
-                            try: result.append(int(p))
-                            except ValueError: result.append(0)
-                        while len(result) < 3:
-                            result.append(0)
-                        return tuple(result)
-
-                    # 저장된 업데이트 버전이 현재 버전보다 실제로 높을 때만 알림 표시
-                    if file_ver and _parse_ver(file_ver) > _parse_ver(cur_ver):
-                        self.wfile.write(json.dumps(data).encode('utf-8'))
-                    elif file_ver:
-                        # 같거나 낮은 버전 → 오래된 캐시이므로 삭제
-                        update_file.unlink(missing_ok=True)
-                        self.wfile.write(json.dumps({"ready": False, "downloading": False}).encode('utf-8'))
-                    else:
-                        # [2026-06-11] version 없는 파일 = updater의 진단 상태(last_error 등)
-                        # — 삭제하지 않고 그대로 반환 (설치 PC '업데이트 안 뜸' 원인 추적용)
-                        self.wfile.write(json.dumps(data).encode('utf-8'))
-                except Exception as e:
-                    self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-            else:
-                self.wfile.write(json.dumps({"ready": False, "downloading": False}).encode('utf-8'))
+            update_api.check_update_ready(self, DATA_DIR, __version__)
 
         elif parsed_path.path == '/api/trigger-update-check':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                from updater import check_and_update
-                threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
-                self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
+            update_api.trigger_update_check(self, DATA_DIR)
 
         elif parsed_path.path == '/api/soft-update/check':
-            # 경량 소스 업데이트 채널(boot.py A안): main 최신 SHA vs 로컬 체크아웃 비교 결과 반환.
-            # [제약] 원격 SHA 조회는 최대 ~10초 → 응답을 막지 않도록 백그라운드로 갱신만 트리거하고
-            #   캐시(soft_update_ready.json)를 즉시 반환. EXE 풀빌드 채널(check-update-ready)과 독립.
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                from soft_updater import check_soft_update
-                threading.Thread(target=check_soft_update,
-                                 args=(DATA_DIR, _soft_src_dir()), daemon=True).start()
-            except Exception as e:
-                print(f"[soft-update] check 트리거 실패: {e}")
-            soft_file = DATA_DIR / "soft_update_ready.json"
-            if soft_file.exists():
-                try:
-                    self.wfile.write(soft_file.read_text(encoding="utf-8").encode('utf-8'))
-                except Exception as e:
-                    self.wfile.write(json.dumps({"ready": False, "error": str(e)}).encode('utf-8'))
-            else:
-                self.wfile.write(json.dumps({"ready": False}).encode('utf-8'))
+            update_api.soft_update_check(self, DATA_DIR, _soft_src_dir())
 
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)
@@ -2820,102 +2750,10 @@ class SSEHandler(BaseHTTPRequestHandler):
             )
 
         elif parsed_path.path == '/api/apply-update':
-            # [업데이트 적용] — 응답 전송 후 비동기로 exe 교체 실행
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-
-            update_file = DATA_DIR / "update_ready.json"
-            if not update_file.exists():
-                self.wfile.write(json.dumps({"success": False, "error": "No update ready"}).encode('utf-8'))
-                self.wfile.flush()
-                return
-
-            try:
-                with open(update_file, "r", encoding="utf-8") as f:
-                    update_data = json.load(f)
-
-                exe_path = update_data.get("exe_path")
-                if not exe_path or not os.path.exists(exe_path):
-                    self.wfile.write(json.dumps({"success": False, "error": "New executable not found", "path": exe_path}).encode('utf-8'))
-                    self.wfile.flush()
-                    return
-
-                # 응답을 먼저 완전히 전송 — os._exit() 전에 클라이언트가 수신하도록 보장
-                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
-                self.wfile.flush()
-                try:
-                    update_file.unlink()
-                except OSError: pass
-
-                from updater import apply_update_from_temp
-                _exe = Path(exe_path)
-
-                def _do_apply():
-                    """응답 전송 완료 후 실행되는 업데이트 스레드.
-                    오류 발생 시 update_ready.json + update_error.log에 기록.
-                    """
-                    # 소켓 버퍼 플러시 대기 (0.3s) — 응답이 클라이언트에 도달할 시간 확보
-                    time.sleep(0.3)
-                    try:
-                        apply_update_from_temp(_exe)
-                    except Exception as ex:
-                        import traceback
-                        err_detail = traceback.format_exc()
-                        print(f"[!] apply_update_from_temp 실패: {ex}\n{err_detail}")
-                        # 에러 로그 파일에 기록 — 디버깅용
-                        try:
-                            with open(DATA_DIR / "update_error.log", "w", encoding="utf-8") as lf:
-                                lf.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {err_detail}\n")
-                        except OSError:
-                            pass
-                        # 실패 시 update_ready.json 복원 — UI에 에러 메시지 표시
-                        try:
-                            _ver = update_data.get("version", _exe.stem)
-                            _update_info = {"ready": True, "downloading": False,
-                                            "version": _ver, "exe_path": str(_exe),
-                                            "error": str(ex)}
-                            with open(DATA_DIR / "update_ready.json", "w", encoding="utf-8") as ef:
-                                json.dump(_update_info, ef)
-                        except OSError:
-                            pass
-
-                # daemon=False: 메인 프로세스가 종료되어도 업데이트 스레드는 완료까지 실행
-                threading.Thread(target=_do_apply, daemon=False).start()
-            except Exception as e:
-                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
-                self.wfile.flush()
+            update_api.apply_update(self, DATA_DIR)
 
         elif parsed_path.path == '/api/soft-update/apply':
-            # 경량 소스 업데이트 적용: git reset --hard origin/main + EXE 재시작(boot.py 재진입).
-            # [제약] apply_soft_update가 성공 시 os._exit로 프로세스를 끝내므로 응답을 먼저 보낸 뒤
-            #   별도 스레드에서 실행한다(EXE 풀빌드 apply와 동일한 응답-우선 패턴).
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                from soft_updater import apply_soft_update
-                _src = _soft_src_dir()
-
-                def _do_soft_apply():
-                    time.sleep(0.3)  # 응답이 클라이언트에 도달할 시간 확보 후 reset/재시작
-                    try:
-                        result = apply_soft_update(_src)
-                        if not result.get("ok"):
-                            with open(DATA_DIR / "soft_update_ready.json", "w", encoding="utf-8") as ef:
-                                json.dump({"ready": False, "error": result.get("error", "적용 실패")},
-                                          ef, ensure_ascii=False)
-                    except Exception as ex:
-                        print(f"[soft-update] apply 실패: {ex}")
-
-                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
-                self.wfile.flush()
-                threading.Thread(target=_do_soft_apply, daemon=False).start()
-            except Exception as e:
-                self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
-                self.wfile.flush()
+            update_api.soft_update_apply(self, DATA_DIR, _soft_src_dir())
 
         elif parsed_path.path == '/api/agents/heartbeat':
             # 에이전트 실시간 상태 보고 수신
@@ -2960,17 +2798,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/trigger-update-check':
-            # 업데이트 확인 트리거 — do_GET과 동일 로직 (프론트엔드가 POST로 호출)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                from updater import check_and_update
-                threading.Thread(target=check_and_update, args=(DATA_DIR,), daemon=True).start()
-                self.wfile.write(json.dumps({"started": True}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"started": False, "reason": str(e)}).encode('utf-8'))
+            # 프론트가 POST로도 호출 — do_GET과 동일 핸들러 재사용.
+            update_api.trigger_update_check(self, DATA_DIR)
 
         elif parsed_path.path == '/api/git/rollback':
             # 특정 파일 변경사항 원상복구 (git checkout -- 파일)
