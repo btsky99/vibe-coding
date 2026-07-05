@@ -200,6 +200,7 @@ import api.update_api as update_api
 import api.install_api as install_api
 import api.events_api as events_api
 import api.logs_api as logs_api
+import api.static_api as static_api
 import api.heal_api as heal_api
 import api.locks_api as locks_api
 import api.projects_api as projects_api
@@ -1250,6 +1251,13 @@ def _g_stream(h, pp):       logs_api.stream(h, PG_PORT, PG_PROJECT_DB, run_pg_sq
 def _g_server_logs(h, pp):  logs_api.server_logs(h, DATA_DIR)
 def _g_messages(h, pp):     logs_api.messages(h, get_messages)
 
+# GET exact 라우트 (Phase 2 R4: 도움말/이미지 2종) — api/static_api.py로 본문 이전, 전역은 주입.
+# [불변식] docs 경로는 server.py의 Path(__file__).parent/'docs'를 넘긴다(static_api의 __file__은
+#   api/ 하위라 경로가 달라짐 — 반드시 주입). _validate_file_path는 late-binding 호출.
+# [주의] 정적서빙 serve()는 exact 테이블 등록 금지 — do_GET 최후미 else 폴백으로만 호출한다.
+def _g_help(h, pp):       static_api.help_doc(h, pp, Path(__file__).parent / 'docs')
+def _g_image_file(h, pp): static_api.image_file(h, pp, _validate_file_path)
+
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
@@ -1260,6 +1268,8 @@ GET_ROUTES = {
     '/stream': _g_stream,
     '/api/server-logs': _g_server_logs,
     '/api/messages': _g_messages,
+    '/api/help': _g_help,
+    '/api/image-file': _g_image_file,
 }
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
@@ -1624,50 +1634,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 validate_file_path=_validate_file_path,
             )
 
-        elif parsed_path.path == '/api/help':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            topic = query.get('topic', [''])[0]
-            docs_dir = Path(__file__).parent / 'docs'
-            help_file = docs_dir / f'help-{topic}.md'
-            if help_file.exists():
-                content = help_file.read_text(encoding='utf-8')
-                self.wfile.write(json.dumps({"content": content}).encode('utf-8'))
-            else:
-                self.wfile.write(json.dumps({"error": "Help topic not found"}).encode('utf-8'))
-            return
-
-        elif parsed_path.path == '/api/image-file':
-            query = parse_qs(parsed_path.query)
-            raw_path = query.get('path', [''])[0]
-            try:
-                target_path = _validate_file_path(raw_path)
-            except ValueError:
-                self.send_response(403)
-                self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-                self.end_headers()
-                return
-            IMAGE_MIME = {
-                'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-                'gif': 'image/gif', 'webp': 'image/webp', 'svg': 'image/svg+xml',
-                'bmp': 'image/bmp', 'ico': 'image/x-icon',
-            }
-            ext = str(target_path).rsplit('.', 1)[-1].lower() if '.' in str(target_path) else ''
-            mime = IMAGE_MIME.get(ext, 'application/octet-stream')
-            if not target_path.exists() or not target_path.is_file():
-                self.send_response(404)
-                self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header('Content-Type', mime)
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            with open(target_path, 'rb') as f:
-                self.wfile.write(f.read())
-
+        # /api/help, /api/image-file → api/static_api.py 분리 (Phase 2 R4, 테이블 _g_help/_g_image_file 처리)
         # [2026-03-22] /api/read-file → files_api.py로 위임됨 (상단 모듈 위임 섹션)
 
         # [2026-03-22 추가] 서버 로그 뷰어 API — server_error.log + pgsql.log 내용 반환
@@ -1760,51 +1727,11 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e), 'count': 0}).encode('utf-8'))
 
         else:
-            # 정적 파일 서비스 로직 (Vite 빌드 결과물)
-            # 요청 경로를 정리
-            path = self.path
-            if path == '/':
-                path = '/index.html'
-
-            # /monitor → 에이전트 상황판 독립 페이지
-            if path.rstrip('/') == '/monitor':
-                path = '/monitor.html'
-            
-            # 쿼리스트링 제거
-            path = path.split('?')[0]
-            
-            filepath = STATIC_DIR / path.lstrip('/')
-            
-            # 파일이 없으면 index.html로 Fallback (SPA 특성)
-            if not filepath.exists() or not filepath.is_file():
-                filepath = STATIC_DIR / 'index.html'
-                
-            if filepath.exists() and filepath.is_file():
-                try:
-                    with open(filepath, 'rb') as f:
-                        content = f.read()
-                    self.send_response(200)
-                    mimetype, _ = mimetypes.guess_type(str(filepath))
-                    if filepath.suffix == '.js':
-                        mimetype = 'application/javascript'
-                    elif filepath.suffix == '.css':
-                        mimetype = 'text/css'
-                    elif filepath.suffix == '.svg':
-                        mimetype = 'image/svg+xml'
-                    self.send_header('Content-Type', mimetype or 'application/octet-stream')
-                    self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-                    self.send_header('Pragma', 'no-cache')
-                    self.send_header('Expires', '0')
-                    self.end_headers()
-                    self.wfile.write(content)
-                except Exception as e:
-                    self.send_response(500)
-                    self.end_headers()
-                    self.wfile.write(str(e).encode('utf-8'))
-            else:
-                self.send_response(404)
-                self.end_headers()
-                self.wfile.write(b"Not Found")
+            # do_GET 최후미 폴백 — Vite dist 정적 서빙 → api/static_api.py로 분리(Phase 2 R4).
+            # [불변식] 이 else는 exact/prefix/legacy 어디에도 안 걸린 모든 GET의 SPA 폴백.
+            #   테이블로 옮기면 미매칭 GET이 404가 되어 SPA 라우팅이 깨진다 — 반드시 최후미 유지.
+            # [경로] STATIC_DIR은 동적 폴백(alt_dist)으로 갱신될 수 있어 호출 시점 값을 주입.
+            static_api.serve(self, parsed_path.path, STATIC_DIR)
 
     def do_OPTIONS(self):
         self.send_response(200)
