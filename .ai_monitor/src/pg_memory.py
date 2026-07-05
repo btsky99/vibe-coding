@@ -597,6 +597,23 @@ def recall_knowledge_summary(query: str, limit: int = 5) -> str:
     if not zettel_rows and not hive_rows:
         return ""
 
+    # [자가치유 피드백 루프] v1 폴백 회상도 반환 항목의 참조 카운트를 증가시킨다.
+    #   [과거 누락] recall-smart(memory_api)만 bump_reference를 호출했는데, 서버 embed
+    #   모델 미로드(is_loaded=False) 시 recall-smart가 fallback을 반환 → hook이 이 v1
+    #   ILIKE 경로로 폴백 → bump가 영영 안 됨. 계측(project_heal_metrics)이 참조율 0.1%로
+    #   이 구멍을 드러냄(회상은 매턴 일어나나 참조 미집계). 여기서 보정.
+    #   bump_reference는 vector 스키마 미준비 시 no-op(안전).
+    try:
+        from src.pg_vector_search import bump_reference
+        _z_ids = [r.get('id') for r in zettel_rows if r.get('id')]
+        _h_keys = [r.get('key') for r in hive_rows if r.get('key')]
+        if _z_ids:
+            bump_reference('zettel_notes', _z_ids)
+        if _h_keys:
+            bump_reference('hive_memory', _h_keys)
+    except Exception:
+        pass  # 참조 집계 실패는 회상 주입을 막지 않는다
+
     lines = [f"[지식 회상] '{query[:50]}'와 관련된 누적 지식 "
              f"{len(zettel_rows) + len(hive_rows)}건 (zettel {len(zettel_rows)} + hive {len(hive_rows)}):"]
 

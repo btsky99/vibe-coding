@@ -185,6 +185,17 @@ def recall_context_summary(query: str, domain: str = '', limit: int = 5) -> str:
     if not results:
         return ""
 
+    # [자가치유 피드백 루프] v1 폴백 회상도 참조 카운트 증가 — recall-smart가 모델
+    #   미로드로 fallback을 반환할 때 이 경로가 실행되므로, 여기서 bump 안 하면
+    #   agent_experience.ref_count가 영영 0(계측 project_heal_metrics로 발견).
+    try:
+        from src.pg_vector_search import bump_reference
+        _ids = [r.get('id') for r in results if r.get('id')]
+        if _ids:
+            bump_reference('agent_experience', _ids)
+    except Exception:
+        pass
+
     lines = [f"[경험 회상] '{query}'와 관련된 과거 작업 {len(results)}건:"]
     for i, r in enumerate(results, 1):
         outcome_icon = '✅' if r['outcome'] == 'success' else '❌' if r['outcome'] == 'fail' else '⚠️'
