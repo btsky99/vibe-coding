@@ -205,14 +205,12 @@ from pathlib import Path
 from src.file_store import (
     delete_memory_entry,
     ensure_legacy_store,
-    get_agent_last_seen_from_sessions,
     get_memory_entry,
     merge_memory_files,
     upsert_memory_entry,
 )
 from src.pg_store import (
     ensure_schema,
-    get_agent_last_seen,
     get_memory,
     list_memory,
     list_tasks,
@@ -1923,144 +1921,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({
                     "skill_registry": [], "terminals": {}, "error": str(e)
                 }, ensure_ascii=False).encode('utf-8'))
-
-        elif parsed_path.path == '/api/orchestrator/status':
-            # 오케스트레이터 현황 — 에이전트 활동 상태, 태스크 분배, 최근 액션 로그 반환
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                KNOWN_AGENTS = ['claude', 'antigravity', 'codex']
-                IDLE_SEC = 300  # 5분
-
-                # 에이전트 마지막 활동 시각 (Postgres 우선, 파일 레거시 폴백)
-                agent_last_seen: dict = get_agent_last_seen(KNOWN_AGENTS)
-                for agent_name, last_seen in get_agent_last_seen_from_sessions(DATA_DIR, KNOWN_AGENTS).items():
-                    if last_seen and (agent_last_seen.get(agent_name) is None or last_seen > agent_last_seen[agent_name]):
-                        agent_last_seen[agent_name] = last_seen
-
-                # 메모리 작성 시각으로 보완 — 더 최신 활동 기록 포함
-                for row in list_memory(top_k=100, project_id=_current_project_id()):
-                    author_lower = str(row.get('author', '')).lower()
-                    last = row.get('updated_at')
-                    for agent_name in KNOWN_AGENTS:
-                        if agent_name in author_lower:
-                            current = agent_last_seen.get(agent_name)
-                            if last and (current is None or last > current):
-                                agent_last_seen[agent_name] = last
-
-                # in-memory AGENT_STATUS 로 보완 (가장 실시간 하트비트)
-                with AGENT_STATUS_LOCK:
-                    for a_name, st in AGENT_STATUS.items():
-                        a_key = (
-                            'claude' if 'claude' in a_name.lower()
-                            else 'antigravity' if 'antigravity' in a_name.lower()
-                            else 'codex' if 'codex' in a_name.lower()
-                            else None
-                        )
-                        if a_key and st.get('last_seen'):
-                            hb_dt = datetime.fromtimestamp(st['last_seen'])
-                            hb_iso = hb_dt.isoformat()
-                            if agent_last_seen.get(a_key) is None or hb_iso > agent_last_seen[a_key]:
-                                agent_last_seen[a_key] = hb_iso
-
-                # ── 터미널별 실시간 에이전트 현황 (PTY 세션 기반) ────────────────
-                # pty_sessions에 저장된 실제 실행 중인 에이전트를 슬롯 1~8 기준으로 반환.
-                # 슬롯이 비어 있으면 빈 문자열, 에이전트 이름이 없으면 'shell'로 표시.
-                terminal_agents: dict = {}
-                pty_active_agents: set = set()  # 현재 PTY에 살아 있는 에이전트 집합
-                _pty_snap = _get_node_pty_sessions()  # Node PTY 서버 REST 조회
-                for slot_num in range(1, 9):
-                    info = _pty_snap.get(f'T{slot_num}')
-                    if info and info.get('running'):
-                        a = info.get('agent', '') or 'shell'
-                        terminal_agents[str(slot_num)] = a
-                        if a in KNOWN_AGENTS:
-                            pty_active_agents.add(a)
-                    else:
-                        terminal_agents[str(slot_num)] = ''
-
-                # 에이전트 상태 — PTY 실행 중이면 무조건 active, 아니면 DB 타임스탬프 fallback
-                now_dt = datetime.now()
-                agent_status = {}
-                for agent, seen in agent_last_seen.items():
-                    if agent in pty_active_agents:
-                        # 현재 PTY 터미널에서 실행 중 → 즉시 active
-                        agent_status[agent] = {'state': 'active', 'last_seen': now_dt.isoformat(), 'idle_sec': 0}
-                    elif seen is None:
-                        agent_status[agent] = {'state': 'unknown', 'last_seen': None, 'idle_sec': None}
-                    else:
-                        try:
-                            seen_dt = datetime.fromisoformat(seen.replace('Z', ''))
-                            idle = int((now_dt - seen_dt).total_seconds())
-                            agent_status[agent] = {
-                                'state': 'idle' if idle > IDLE_SEC else 'active',
-                                'last_seen': seen, 'idle_sec': idle
-                            }
-                        except Exception as e:
-                            agent_status[agent] = {'state': 'unknown', 'last_seen': seen, 'idle_sec': None}
-
-                # 태스크 분배 현황
-                tasks_list: list = []
-                if TASKS_FILE.exists():
-                    with open(TASKS_FILE, 'r', encoding='utf-8') as f:
-                        tasks_list = json.load(f)
-                task_dist: dict = {a: {'pending': 0, 'in_progress': 0, 'done': 0} for a in KNOWN_AGENTS + ['all']}
-                for t in tasks_list:
-                    key = t.get('assigned_to', 'all') if t.get('assigned_to') in task_dist else 'all'
-                    s = t.get('status', 'pending')
-                    if s in task_dist[key]:
-                        task_dist[key][s] += 1
-
-                # 오케스트레이터 최근 액션 로그
-                # orchestrator_log.jsonl 없으면 task_logs.jsonl 폴백으로 표시
-                orch_log = DATA_DIR / 'orchestrator_log.jsonl'
-                recent_actions: list = []
-                if orch_log.exists():
-                    for line in reversed(orch_log.read_text(encoding='utf-8').strip().splitlines()[-20:]):
-                        try:
-                            recent_actions.append(json.loads(line))
-                        except Exception as e:
-                            pass  # orchestrator_log JSONL 개별 행 파싱 실패 허용
-                if not recent_actions:
-                    # task_logs.jsonl에서 최근 20개 폴백 — 에이전트 활동 이력으로 표시
-                    task_log_file = DATA_DIR / 'task_logs.jsonl'
-                    if task_log_file.exists():
-                        lines = task_log_file.read_text(encoding='utf-8').strip().splitlines()
-                        for line in reversed(lines[-20:]):
-                            try:
-                                entry = json.loads(line)
-                                recent_actions.append({
-                                    'action': entry.get('agent', 'agent'),
-                                    'detail': entry.get('task', ''),
-                                    'timestamp': entry.get('timestamp', ''),
-                                })
-                            except Exception as e:
-                                pass  # task_logs JSONL 개별 행 파싱 실패 허용
-
-                # 현재 경고
-                warnings: list = []
-                for agent, st in agent_status.items():
-                    if st['state'] == 'idle' and st.get('idle_sec'):
-                        warnings.append(f"{agent} {st['idle_sec'] // 60}분째 비활성")
-                for agent, dist in task_dist.items():
-                    if agent == 'all': continue
-                    active = dist['pending'] + dist['in_progress']
-                    if active >= 5:
-                        warnings.append(f"{agent} 태스크 {active}개 (과부하)")
-
-                self.wfile.write(json.dumps({
-                    'agent_status': agent_status,
-                    'task_distribution': task_dist,
-                    'recent_actions': recent_actions,
-                    'warnings': warnings,
-                    'terminal_agents': terminal_agents,  # 슬롯별 실시간 에이전트
-                    'timestamp': now_dt.strftime('%Y-%m-%dT%H:%M:%S'),
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
-        # [2026-04-18] /api/dispatcher/* 제거 — 멀티 LLM 디스패처 정리 (실사용 0)
 
         elif parsed_path.path == '/api/memory/db-info':
             # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
