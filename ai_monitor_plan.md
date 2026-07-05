@@ -19,14 +19,14 @@ REVISION HISTORY:
 
 ---
 
-### [ ] Task 1: 완전성 가드 (변경 前 필수)
+### [x] Task 1: 완전성 가드 (변경 前 필수) (완료 5913851)
 - 파일: `tests/test_route_table.py` (신규)
 - 방법: 골든 라우트 집합을 상수로 고정. server.py 소스에서 라우트 리터럴(dict키·path==·startswith)
   추출 → 골든 ⊆ 추출 assert(누락=실패). prefix 비중첩 assert.
 - 검증: 현재 코드에서 pytest 통과(baseline green). 임의 라우트 지우면 실패 확인.
 - 의존성: 없음
 
-### [ ] Task 2: 디스패치 인프라 + do_GET 위임 라우트 이전
+### [x] Task 2: 디스패치 인프라 + do_GET 위임 라우트 이전 (완료 11988ba)
 - 파일: `.ai_monitor/server.py`
 - 방법: GET_ROUTES(dict, exact) + GET_PREFIX_ROUTES(list, 원본순서) 모듈레벨. 단순=lambda,
   body읽는 위임=wrapper. do_GET을 `_set_request_pid→exact→prefix→_do_GET_legacy`로 교체.
@@ -34,15 +34,19 @@ REVISION HISTORY:
 - 검증: 완전성 가드 + pytest 103 + import 스모크.
 - 의존성: Task 1
 
-### [ ] Task 3: do_POST 위임 라우트 이전 (Task 2 동형)
+### [x] Task 3: do_POST 위임 라우트 이전 (Task 2 동형) (완료 6bd7235)
 - 파일: `.ai_monitor/server.py`
 - 방법: POST_ROUTES + POST_PREFIX_ROUTES. body 선읽기 위임(memory/zettel 등)은 wrapper.
 - 검증: 완전성 가드 + pytest 103 + import 스모크.
 - 의존성: Task 2
 
-### [ ] Task 4: 문서/메모리
+### [x] Task 4: 문서/메모리 (완료)
 - 방법: dispatch table 도입 + Phase 2(인라인 40개 이전) 후속 명시.
+- 결과: 메모리 `project_server_split_plan.md`에 Task 2·3 완료 + Phase 2 후속 반영.
 - 의존성: Task 3
+
+> **Phase 1 완료 (2026-07-05).** 디스패치 인프라 착지 + 위임 라우트 이전 완료.
+> 후속: Phase 2 = 복합조건 라우트(hive/tasks) + 인라인 40개 이전 (별도 계획 세션).
 
 ## 범위 고정
 - Phase 1 = 인프라 + 위임 라우트만. 인라인 40개는 Phase 2.
