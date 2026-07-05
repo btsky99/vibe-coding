@@ -1734,7 +1734,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             update_api.soft_update_check(self, DATA_DIR, _soft_src_dir())
 
         elif parsed_path.path == '/api/heal/metrics':
-            heal_api.handle_get(self, _current_project_id())
+            # [설계] 전체(global) 집계 — CLI heal_report와 일치. project_id 슬러그 불일치로
+            #   숫자가 0으로 오도되는 것 방지(설치/dev 슬러그 분기 [[project_installed_empty_panels]]).
+            heal_api.handle_get(self, '')
 
         elif parsed_path.path == '/api/copy-path':
             self.send_response(200)

@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Files,
   GitBranch,
+  HeartPulse,
   LayoutDashboard,
   Package,
   Search,
@@ -149,6 +150,10 @@ const ActivityBar = memo(function ActivityBar({
       <button onClick={() => onTabChange('hive')} className={tabCls('hive')} title="Hive">
         <Activity className="w-5 h-5" />
         {orchWarningCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-orange-500 rounded-full" />}
+      </button>
+
+      <button onClick={() => onTabChange('heal')} className={tabCls('heal')} title="자가치유 계측">
+        <HeartPulse className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('telegram')} className={tabCls('telegram')} title="Telegram Bridge">

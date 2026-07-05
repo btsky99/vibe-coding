@@ -58,6 +58,7 @@ import GitPanel from './components/panels/GitPanel';
 import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
+import HealPanel from './components/panels/HealPanel';
 import SetupBanner from './components/SetupBanner';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
@@ -413,6 +414,7 @@ function App() {
     memory: '공유 메모리',
     hive: '하이브 진단 / 스킬',
     git: 'Git 감시',
+    heal: '자가치유 계측',
   }[activeTab] ?? activeTab;
 
   return (
@@ -580,6 +582,9 @@ function App() {
             ) : activeTab === 'tools' ? (
               /* 개발 도구 설치 관리 패널 — TOOL_REGISTRY 연동 */
               <ToolsPanel />
+            ) : activeTab === 'heal' ? (
+              /* 자가치유 계측 패널 — 4장치 성과+커버리지 진단 */
+              <HealPanel />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.
