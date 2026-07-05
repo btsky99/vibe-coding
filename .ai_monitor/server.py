@@ -3772,6 +3772,15 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
                              name='ZettelRefine').start()
             threading.Thread(target=run_commit_watcher, daemon=True,
                              name='CommitWatcher').start()
+            # [회상 v2 즉시 활성] 기동 시 embed 모델을 백그라운드 워밍 — 백필 데몬의 90초
+            #   대기나 첫 recall miss 전에도 벡터 회상이 되도록. 논블로킹(0.001s 반환).
+            #   [WHY] recall-smart는 미로드면 fallback → 모델이 recall 경로로 안 올라오는
+            #   닭-달걀. 데몬만으론 90초 창(+데몬 사망 시 영구) 비활성 → 여기서 선제 워밍.
+            try:
+                from infra.embed_service import warm_async as _warm_embed
+                _warm_embed()
+            except Exception:
+                pass
             # [자가 치유 2.0 ④] 회상 v2 — embedding IS NULL 행 사후 채움
             threading.Thread(target=run_embedding_backfill, daemon=True,
                              name='EmbedBackfill').start()
