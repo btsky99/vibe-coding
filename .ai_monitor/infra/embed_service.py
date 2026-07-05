@@ -20,6 +20,8 @@ EMBED_DIM = 384
 
 _embedder = None
 _embedder_lock = threading.Lock()
+_warming = False              # 백그라운드 워밍업 진행 중 플래그
+_warming_lock = threading.Lock()
 
 
 def _get_embedder():
@@ -67,6 +69,34 @@ def is_loaded() -> bool:
     run_embedding_backfill 데몬의 워밍업 호출만 담당.
     """
     return _embedder is not None and _embedder is not False
+
+
+def warm_async() -> None:
+    """모델을 백그라운드 스레드에서 로드(논블로킹). 이미 로드/실패/진행중이면 no-op.
+
+    [WHY 닭-달걀 해소] recall-smart는 is_loaded()=False면 fallback을 반환하고 embed_floats를
+      부르지 않는다(동기 블로킹 회피) → 모델이 recall 경로로는 영영 로드 안 됨. 유일 로더인
+      백필 데몬이 죽거나(embed_floats 일시 실패) 아직 안 뜬 환경(기동 90초 내)에서는 회상 v2가
+      영구 비활성. 이 함수를 recall-smart 미로드 게이트에서 호출하면 '이번 요청은 폴백, 다음
+      요청부터 벡터 회상'으로 자가 회복한다.
+    [불변식] _embedder is False(로드 실패 확정)면 재시도 안 함 — fastembed 부재 환경 폭주 방지.
+    """
+    global _warming
+    if _embedder is not None:  # 로드 성공(객체) 또는 실패 확정(False) → 워밍 불필요
+        return
+    with _warming_lock:
+        if _warming or _embedder is not None:
+            return
+        _warming = True
+
+    def _run():
+        global _warming
+        try:
+            _get_embedder()  # 자체 _embedder_lock으로 보호 — 여기선 _warming_lock 미보유
+        finally:
+            _warming = False
+
+    threading.Thread(target=_run, daemon=True, name='embed-warm').start()
 
 
 def embed_floats(text: str) -> list[float] | None:

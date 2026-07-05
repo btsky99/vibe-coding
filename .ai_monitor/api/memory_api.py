@@ -248,14 +248,19 @@ def handle_post(handler, path: str, data: dict,
                 return True
 
             ensure_schema(DATA_DIR)
-            from infra.embed_service import is_loaded, embed_floats
+            from infra.embed_service import is_loaded, embed_floats, warm_async
             from src.pg_vector_search import (
                 vector_available, vector_search, bump_reference,
             )
 
             # [제약] is_loaded 가드 — 모델 미로드 상태에서 embed_floats를 부르면
             # 첫 로드(다운로드 포함)가 핸들러를 수십 초 블로킹. 로드 전엔 v1 폴백.
+            # [닭-달걀 해소] 미로드면 백그라운드 워밍을 트리거 — 이번 요청은 폴백이지만
+            #   다음 요청부터 벡터 회상 활성. 백필 데몬이 죽은/미기동 환경 자가 회복
+            #   (계측 project_heal_metrics로 발견: recall 경로가 모델을 영영 안 올림).
             if not (vector_available() and is_loaded()):
+                if vector_available():
+                    warm_async()
                 handler.wfile.write(json.dumps(
                     {'status': 'success', 'fallback': True, 'items': [],
                      'summary': _recall_fallback_summary(query, limit)},
