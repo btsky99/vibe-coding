@@ -1705,31 +1705,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 validate_file_path=_validate_file_path,
             )
 
-        elif parsed_path.path == '/api/hive/health/repair':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                if not SCRIPTS_DIR:
-                    raise Exception('설치 버전에서는 워치독 기능을 사용할 수 없습니다')
-                watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
-                # CREATE_NO_WINDOW: Python 서브프로세스 콘솔 창 방지
-                _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                result_proc = subprocess.run(
-                    [sys.executable, str(watchdog_script), "--check"],
-                    capture_output=True, text=True, encoding='utf-8',
-                    creationflags=_no_window
-                )
-                output = result_proc.stdout
-                json_start = output.find('{')
-                if json_start != -1:
-                    result = json.loads(output[json_start:])
-                else:
-                    result = {"status": "error", "message": "Failed to parse watchdog output"}
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
         elif parsed_path.path == '/api/dirs':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1899,28 +1874,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(by_terminal, ensure_ascii=False).encode('utf-8'))
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/orchestrator/skill-chain':
-            # 스킬 체인 실행 상태 반환 — skill_chain.db(SQLite) 조회
-            # 응답: {skill_registry: [...], terminals: {T1: {steps:[...]}, ...}}
-            # 대시보드가 3초마다 폴링하여 터미널별 스킬 실행 흐름을 실시간 표시
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                if not SCRIPTS_DIR:
-                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
-                _orch_dir = str(SCRIPTS_DIR)
-                if _orch_dir not in sys.path:
-                    sys.path.insert(0, _orch_dir)
-                from skill_orchestrator import _build_response
-                result = _build_response()
-                self.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({
-                    "skill_registry": [], "terminals": {}, "error": str(e)
-                }, ensure_ascii=False).encode('utf-8'))
 
         elif parsed_path.path == '/api/memory/db-info':
             # 현재 사용 중인 공유 메모리 DB 경로 및 항목 수 반환
@@ -2662,48 +2615,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
             )
 
-        elif parsed_path.path == '/api/hive/approve-skill':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                skill_name = data.get('skill_name')
-                keyword = data.get('keyword', skill_name)
-                
-                if not skill_name:
-                    self.wfile.write(json.dumps({"status": "error", "message": "Skill name is required"}).encode('utf-8'))
-                    return
-
-                skill_dir = PROJECT_ROOT / ".gemini" / "skills" / skill_name
-                skill_dir.mkdir(parents=True, exist_ok=True)
-                
-                skill_file = skill_dir / "SKILL.md"
-                template = f"""# 🧠 스킬: {skill_name}
-
-이 스킬은 '{keyword}' 관련 작업을 최적화하기 위해 자동으로 제안된 스킬입니다.
-
-## 🏁 사용 시점
-- '{keyword}' 키워드가 포함된 작업 요청 시
-- 반복적인 {keyword} 관련 파일 수정이 필요할 때
-
-## 🛠️ 핵심 패턴
-1. 관련 파일 분석
-2. {keyword} 표준 가이드라인 적용
-3. 변경 사항 검증
-
----
-**생성일**: {datetime.now().strftime("%Y-%m-%d")}
-**상태**: 초안 (Draft)
-"""
-                with open(skill_file, "w", encoding="utf-8") as f:
-                    f.write(template)
-                
-                self.wfile.write(json.dumps({"status": "success", "path": str(skill_file)}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/config/update':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -3069,32 +2980,6 @@ class SSEHandler(BaseHTTPRequestHandler):
                 trigger_agent=trigger_agent,
             )
 
-        elif parsed_path.path == '/api/memory/sync':
-            # APPDATA DB → 현재 프로젝트 로컬 DB 동기화
-            # 배포 버전에서 APPDATA DB에 있는 항목을 로컬 DB로 가져옴 (updated_at 기준 최신 우선)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                src_data_dir = DATA_DIR
-                tgt_data_dir = _legacy_memory_data_dir()
-                merged = 0
-                skipped = 0
-                if src_data_dir != tgt_data_dir:
-                    merged, skipped = merge_memory_files(src_data_dir, tgt_data_dir)
-                    msg = f'동기화 완료: {merged}개 병합, {skipped}개 최신 유지'
-                else:
-                    msg = '로컬 저장소와 활성 프로젝트 저장소가 동일하여 동기화 불필요'
-                self.wfile.write(json.dumps(
-                    {'status': 'ok', 'message': msg, 'merged': merged, 'skipped': skipped},
-                    ensure_ascii=False
-                ).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps(
-                    {'status': 'error', 'message': str(e)}
-                ).encode('utf-8'))
-
         elif parsed_path.path == '/api/screenshot/analyze':
             # 멀티모달 버그 감지 — 스크린샷을 Antigravity Vision API로 분석
             self.send_response(200)
@@ -3119,195 +3004,6 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
 
-        elif parsed_path.path == '/api/memory/set':
-            # 공유 메모리 항목 저장/갱신 — key 기준 UPSERT (file store)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-
-                key     = str(data.get('key', '')).strip()[:200]
-                content = str(data.get('content', '')).strip()
-                if not key or not content:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': 'key와 content는 필수입니다'}).encode('utf-8'))
-                    return
-
-                now     = time.strftime('%Y-%m-%dT%H:%M:%S')
-                title   = str(data.get('title', key)).strip()[:300]
-                project_id = str(data.get('project_id', PROJECT_ID)).strip() or PROJECT_ID
-                legacy_dir = _legacy_memory_data_dir()
-                existing = get_memory_entry(legacy_dir, key)
-                # 레거시 파일(shared_memory.json) 포맷은 'project' key로 고정돼 있어 그대로 저장
-                entry = upsert_memory_entry(legacy_dir, {
-                    'key': key,
-                    'title': title,
-                    'content': content,
-                    'tags': data.get('tags', []),
-                    'author': str(data.get('author', 'unknown')),
-                    'project': project_id,
-                    'created_at': existing.get('created_at', now) if existing else now,
-                    'updated_at': now,
-                })
-                self.wfile.write(json.dumps({'status': 'success', 'entry': entry}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/memory/delete':
-            # 공유 메모리 항목 삭제 (key 기준)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-                key = str(data.get('key', '')).strip()
-                delete_memory_entry(_legacy_memory_data_dir(), key)
-                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        elif parsed_path.path == '/api/superpowers/install':
-            # Vibe Coding 자체 스킬 설치 — 외부 GitHub 의존 없이 내장 파일 복사
-            # Claude: skills/claude/vibe-*.md → PROJECT_ROOT/.claude/commands/ (프로젝트별)
-            # Gemini: BASE_DIR 내장 → PROJECT_ROOT/.gemini/skills/ (프로젝트별)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                tool = str(body.get('tool', 'claude'))
-                home = Path.home()
-
-                # 현재 활성 프로젝트 경로 동적 조회 (배포 버전 호환)
-                _proj = _current_project_root()
-
-                if tool == 'claude':
-                    # 내장 스킬 소스 경로: exe 기준 BASE_DIR/../skills/claude/ 또는 개발 환경
-                    import shutil as _shutil
-                    skills_src = BASE_DIR / 'skills' / 'claude'
-                    if not skills_src.exists():
-                        skills_src = _proj / 'skills' / 'claude'
-                    if not skills_src.exists():
-                        raise Exception('내장 스킬 파일을 찾을 수 없습니다 (skills/claude/)')
-                    cmd_dir = _proj / '.claude' / 'commands'
-                    cmd_dir.mkdir(parents=True, exist_ok=True)
-                    installed = []
-                    for md in skills_src.glob('vibe-*.md'):
-                        _shutil.copy(md, cmd_dir / md.name)
-                        installed.append(md.name)
-                    if not installed:
-                        raise Exception('설치할 스킬 파일이 없습니다')
-                    self.wfile.write(json.dumps({
-                        'status': 'success',
-                        'message': f'Claude 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
-                    }, ensure_ascii=False).encode('utf-8'))
-
-                elif tool == 'antigravity':
-                    # .gemini/skills 를 프로젝트에 복사
-                    import shutil as _shutil
-                    antigravity_skills_src = BASE_DIR / '.gemini' / 'skills'
-                    if not antigravity_skills_src.exists():
-                        antigravity_skills_src = _proj / '.gemini' / 'skills'
-                    if not antigravity_skills_src.exists():
-                        raise Exception('설치 버전에서는 Antigravity 스킬이 포함되지 않습니다. 소스 개발 환경에서 사용하세요.')
-                    target_dir = _proj / '.gemini' / 'skills'
-                    # 소스와 대상이 다를 때만 복사 (설치 버전에서 실제 파일 배포)
-                    if antigravity_skills_src.resolve() != target_dir.resolve():
-                        _shutil.copytree(str(antigravity_skills_src), str(target_dir), dirs_exist_ok=True)
-                    installed = [d.name for d in target_dir.iterdir() if d.is_dir() and (d / 'SKILL.md').exists()]
-                    self.wfile.write(json.dumps({
-                        'status': 'success',
-                        'message': f'Antigravity 스킬 설치 완료 ({len(installed)}개): {", ".join(installed)}'
-                    }, ensure_ascii=False).encode('utf-8'))
-                else:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
-
-        elif parsed_path.path == '/api/superpowers/uninstall':
-            # Superpowers 제거 — tool: 'claude' | 'antigravity'
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                tool = str(body.get('tool', 'claude'))
-                home = Path.home()
-                _proj = _current_project_root()  # 현재 활성 프로젝트 경로
-                if tool == 'claude':
-                    # 프로젝트별 설치 경로에서 제거 (배포 버전 호환)
-                    cmd_dir = _proj / '.claude' / 'commands'
-                    removed = []
-                    for md in cmd_dir.glob('vibe-*.md'):
-                        md.unlink()
-                        removed.append(md.name)
-                    msg = f"제거 완료: {', '.join(removed)}" if removed else '삭제할 파일 없음'
-                    self.wfile.write(json.dumps({'status': 'success', 'message': msg}, ensure_ascii=False).encode('utf-8'))
-
-                elif tool == 'antigravity':
-                    # Antigravity 스킬은 프로젝트 내에 있어 실제 삭제하지 않고 상태만 반환
-                    self.wfile.write(json.dumps({'status': 'success', 'message': 'Antigravity 스킬은 프로젝트 내장형입니다 (삭제 불필요)'}, ensure_ascii=False).encode('utf-8'))
-                else:
-                    self.wfile.write(json.dumps({'status': 'error', 'message': '알 수 없는 tool'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False).encode('utf-8'))
-
-        elif parsed_path.path == '/api/orchestrator/skill-chain/update':
-            # 스킬 체인 단계 상태 갱신 — skill_chain.db에 직접 UPDATE
-            # body: {"step": 0, "status": "done", "summary": "...", "terminal_id": 1}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                step = int(body.get('step', 0))
-                status = body.get('status', 'done')
-                summary = body.get('summary', '')
-                terminal_id = int(body.get('terminal_id', 0))
-                if not SCRIPTS_DIR:
-                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
-                _orch_dir = str(SCRIPTS_DIR)
-                if _orch_dir not in sys.path:
-                    sys.path.insert(0, _orch_dir)
-                from skill_orchestrator import cmd_update as _orch_update
-                _orch_update(terminal_id, step, status, summary)
-                self.wfile.write(json.dumps({'status': 'success'}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-
-        elif parsed_path.path == '/api/orchestrator/run':
-            # 오케스트레이터 수동 트리거 — 즉시 한 사이클 조율 수행
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                if not SCRIPTS_DIR:
-                    raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
-                # scripts/orchestrator.py를 subprocess로 실행
-                orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
-                result = subprocess.run(
-                    [sys.executable, orch_script],
-                    capture_output=True, text=True, timeout=15, encoding='utf-8',
-                    creationflags=0x08000000
-                )
-                output = (result.stdout + result.stderr).strip()
-                self.wfile.write(json.dumps({
-                    'status': 'success',
-                    'output': output or '이상 없음',
-                }, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
