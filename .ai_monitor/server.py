@@ -211,6 +211,7 @@ import api.config_api as config_api
 import api.fs_dialog_api as fs_dialog_api
 import api.dashboard_api as dashboard_api
 import api.office_launch_api as office_launch_api
+import api.hive_ingest_api as hive_ingest_api
 import string
 import socket
 from collections import deque
@@ -1375,6 +1376,18 @@ def _p_memory(h, pp):
     from api import memory_api
     memory_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
 
+# 하이브 수집 3종 → api/hive_ingest_api.py (Phase 2 R7)
+# [불변식] _p_thoughts_add는 SSE 팬아웃 writer 측 — THOUGHT_LOGS/THOUGHT_CLIENTS/_SSE_LOCK
+#   3개 전역을 '호출 시점 이름'으로 그대로 넘겨야 events_api.stream_thoughts(broadcaster,
+#   위 1473행)가 등록한 구독자 집합과 동일 객체가 된다. 디폴트 인자 바인딩/사본 금지 —
+#   사본이면 구독자는 붙어있는데 새 thought가 도달 안 함(런타임에만 드러나는 치명 버그).
+def _p_hive_log_pg(h, pp):
+    hive_ingest_api.hive_log_pg(h, log_to_pg)
+def _p_hive_thought_pg(h, pp):
+    hive_ingest_api.hive_thought_pg(h, thought_to_pg)
+def _p_thoughts_add(h, pp):
+    hive_ingest_api.thoughts_add(h, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK, set_memory, PROJECT_ID)
+
 POST_ROUTES = {
     '/api/config/telegram': _p_telegram_config,
     '/api/telegram/test': _p_telegram_test,
@@ -1410,6 +1423,10 @@ POST_ROUTES = {
     '/api/office/launch': _p_office_launch,
     '/api/office/restart': _p_office_restart,
     '/api/office/status': _p_office_status,
+    # 하이브 수집 3종 (Phase 2 R7). exact-first라 아래 '/api/hive/' prefix 위임보다 먼저 걸림.
+    '/api/hive/log/pg': _p_hive_log_pg,
+    '/api/hive/thought/pg': _p_hive_thought_pg,
+    '/api/thoughts/add': _p_thoughts_add,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1827,116 +1844,11 @@ class SSEHandler(BaseHTTPRequestHandler):
         # [2026-03-22] /api/graph/launch 제거 (지식그래프 삭제)
         # [2026-04-18] /api/eval-review/launch 제거 (디스패처 정리)
 
-        # ─── 신규: 사고 과정 로그 추가 (v5.0) ───
-        # ─── 신규: PostgreSQL 통합 로깅 API (v5.0) ───
-        if path == '/api/hive/log/pg':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                log_to_pg(
-                    agent=data.get('agent', 'unknown'),
-                    terminal_id=data.get('terminal_id', 'T0'),
-                    task=data.get('task', ''),
-                    status=data.get('status', 'success')
-                )
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        if path == '/api/hive/thought/pg':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-                # parent_id를 받아 지식 그래프 연결선 생성 지원
-                new_id = thought_to_pg(
-                    agent=data.get('agent', 'unknown'),
-                    skill=data.get('skill', 'general'),
-                    thought=data.get('thought', {}),
-                    parent_id=data.get('parent_id')
-                )
-                self.wfile.write(json.dumps({"status": "success", "id": new_id}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
-
-        if path == '/api/thoughts/add':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                content_length = int(self.headers['Content-Length'])
-                data = json.loads(self.rfile.read(content_length).decode('utf-8'))
-
-                # 데이터 유효성 검사 및 타임스탬프 추가
-                data['timestamp'] = datetime.now().isoformat()
-                THOUGHT_LOGS.append(data)
-                if len(THOUGHT_LOGS) > 100:
-                    THOUGHT_LOGS.pop(0)
-
-                # ── 실시간 SSE 브로드캐스트 ──────────────────────────────
-                msg = f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-                disconnected = []
-                with _SSE_LOCK:
-                    clients_snapshot = list(THOUGHT_CLIENTS)
-                for client in clients_snapshot:
-                    try:
-                        client.wfile.write(msg.encode('utf-8'))
-                        client.wfile.flush()
-                    except Exception:
-                        disconnected.append(client)
-                if disconnected:
-                    with _SSE_LOCK:
-                        for client in disconnected:
-                            THOUGHT_CLIENTS.discard(client)
-
-                # ── 벡터 DB에 영구 저장 ──────────────────────────────────
-                try:
-                    agent   = data.get('agent', 'unknown')
-                    thought = data.get('thought', '')
-                    level   = data.get('level', 'info')
-                    tool    = data.get('tool', '')
-                    step    = data.get('step', '')
-                    ts_ms   = str(int(time.time() * 1000))
-
-                    key     = f"thought:{agent}:{ts_ms}"
-                    title   = f"[{level}] {thought[:80]}"
-                    content = thought
-                    if tool:  content += f"\n🔧 tool: {tool}"
-                    if step:  content += f"\n📍 step: {step}"
-
-                    tags = ['thought', level, agent]
-                    set_memory(
-                        key=key,
-                        title=title,
-                        content=content,
-                        tags=tags,
-                        author=agent,
-                        project_id=PROJECT_ID,
-                        created_at=data['timestamp'],
-                        updated_at=data['timestamp'],
-                    )
-
-                    print(f"🧠 [Thought→DB] {key}")
-                except Exception as db_err:
-                    print(f"[Thought→DB] 저장 실패 (무시): {db_err}")
-                # ─────────────────────────────────────────────────────────
-
-                print(f"🧠 [Thought Trace] New thought captured: {data.get('thought', '')[:50]}...")
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
-            except Exception as e:
-                print(f"[Error] /api/thoughts/add failed: {e}")
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-            return
+        # [Phase 2 R7] POST /api/hive/log/pg·/api/hive/thought/pg·/api/thoughts/add →
+        #   POST_ROUTES(_p_hive_log_pg/_p_hive_thought_pg/_p_thoughts_add, hive_ingest_api)로 이전.
+        #   thoughts/add는 SSE 팬아웃 writer — THOUGHT_LOGS/THOUGHT_CLIENTS/_SSE_LOCK 3개 전역을
+        #   wrapper에서 이름 그대로 주입(events_api.stream_thoughts와 동일 객체 identity 유지).
+        #   exact-first라 아래 '/api/hive/' prefix 프록시/위임보다 먼저 걸림 — 순서 보장.
 
         # [Phase 1 Task 3] tools/files/apply-update/soft-update/trigger-update/projects/experience/
         #   config-update/launch/send-command/locks/message/vibe·zettel·codegraph·memory·agent·pty는
