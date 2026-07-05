@@ -1194,6 +1194,37 @@ def _send_json_response(handler, data, status=200):
     handler.wfile.write(body)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 라우트 디스패치 테이블 (Phase 1: 순수 prefix 위임만)
+# [WHY] do_GET의 if/elif 사슬을 테이블 조회로 점진 전환(brainstorm 승인 C). 복합조건 라우트
+#   (hive: prefix+8exact 혼합 / tasks: endswith)는 회귀 위험이라 아직 legacy elif에 잔류 —
+#   테이블 miss 시 _do_GET 하위 elif로 폴백(하이브리드). 완전성 가드(tests/test_route_table.py)가
+#   재구조화 중 라우트 누락을 방어한다.
+# [불변식] wrapper는 전역(git_api/DATA_DIR/_proxy_to_office_server 등)을 **호출 시점**에 해석 —
+#   모듈에서 나중에 정의되는 심볼(_proxy_to_office_server 등)도 안전(함수 본문 이름 해석은 런타임).
+# [안전] 이 8개 prefix는 서로 비중첩 + 어떤 GET exact 라우트도 이들로 시작하지 않음(검증됨) →
+#   do_GET 최상단에서 prefix-first 조회해도 exact를 가리지 않는다. POST는 exact-prefix 충돌 있어 별도.
+def _g_git(h, pp):        git_api.handle_get(h, pp.path, parse_qs(pp.query), BASE_DIR=BASE_DIR)
+def _g_agent(h, pp):      agent_api.handle_get(h, pp.path)
+def _g_pty(h, pp):        pty_api.handle_get(h, pp.path, parse_qs(pp.query))
+def _g_experience(h, pp): experience_api.handle_get(h, pp.path, parse_qs(pp.query))
+def _g_zettel(h, pp):     zettel_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+def _g_codegraph(h, pp):  codegraph_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+def _g_office(h, pp):     _proxy_to_office_server(h, method='GET')
+def _g_tools(h, pp):
+    from api import tools_api
+    tools_api.handle_get(h, pp.path, parse_qs(pp.query))
+
+GET_PREFIX_ROUTES = [
+    ('/api/git/', _g_git),
+    ('/api/agent/', _g_agent),
+    ('/api/pty/', _g_pty),
+    ('/api/experience', _g_experience),
+    ('/api/zettel/', _g_zettel),
+    ('/api/codegraph/', _g_codegraph),
+    ('/api/office/', _g_office),
+    ('/api/tools/', _g_tools),
+]
+# ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
     # ── Telegram 설정 API 핸들러 — api/telegram_api.py로 분리 (2026-04-20) ──────
@@ -1229,6 +1260,12 @@ class SSEHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         _set_request_pid(parsed_path.query)  # Phase 2-5.2: ?project_id= override
+
+        # ── 라우트 테이블 우선 조회(Phase 1: 순수 prefix) → miss 시 아래 elif 폴백 ──
+        for _pfx, _fn in GET_PREFIX_ROUTES:
+            if path.startswith(_pfx):
+                _fn(self, parsed_path)
+                return
 
         # ─── SSE 실시간 스트리밍 3종 — api/events_api.py로 분리 (공유 집합/락 참조 주입) ───
         if path == '/api/events/thoughts':

@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-05 14:40
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-05 22:03
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,7 +34,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 3881 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 3596 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -47,6 +47,8 @@
 |------|------|------|
 | `agent_api.py` | 1360 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 226 |  |
+| `commands_api.py` | 54 |  |
+| `config_api.py` | 56 |  |
 | `events_api.py` | 103 |  |
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
@@ -54,9 +56,13 @@
 | `heal_api.py` | 30 |  |
 | `hive_api.py` | 1205 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `install_api.py` | 182 |  |
+| `launch_api.py` | 102 |  |
+| `locks_api.py` | 67 |  |
 | `memory_api.py` | 332 | 메모리/지식 저장소 API (/api/memory/*) |
+| `message_api.py` | 92 |  |
 | `office_api.py` | 370 |  |
 | `office_proxy_api.py` | 229 |  |
+| `projects_api.py` | 57 |  |
 | `pty_api.py` | 259 | PTY 터미널 제어 API (/api/pty/*) |
 | `setup_api.py` | 48 |  |
 | `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
@@ -267,6 +273,7 @@
 | `test_new_api_modules.py` | 355 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 123 |  |
+| `test_route_table.py` | 83 |  |
 | `test_self_heal_2.py` | 223 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
@@ -307,4 +314,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-05 14:40
+> 자동 생성 완료: 2026-07-05 22:03
