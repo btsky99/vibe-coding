@@ -201,6 +201,7 @@ import api.install_api as install_api
 import api.events_api as events_api
 import api.heal_api as heal_api
 import api.locks_api as locks_api
+import api.projects_api as projects_api
 import string
 import socket
 from collections import deque
@@ -1330,19 +1331,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "ok", "ts": datetime.now().isoformat()}).encode('utf-8'))
         elif parsed_path.path == '/api/projects':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            projects = []
-            if PROJECTS_FILE.exists():
-                try:
-                    with open(PROJECTS_FILE, 'r', encoding='utf-8') as f:
-                        projects = json.load(f)
-                except: pass
-            
-            # GET 요청이면 목록 반환, POST 처리는 아래 do_POST에서 함
-            self.wfile.write(json.dumps(projects).encode('utf-8'))
+            projects_api.handle_get(self, PROJECTS_FILE)
         elif parsed_path.path == '/api/agents':
             # 실시간 에이전트 상태 목록 반환 (오케스트레이터용)
             # 인메모리 + PostgreSQL DB 데이터 병합하여 반환
@@ -2428,32 +2417,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
         elif parsed_path.path == '/api/projects':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
-                new_path = data.get('path', '').strip().replace('\\', '/')
-                if not new_path:
-                    self.wfile.write(json.dumps({"error": "Invalid path"}).encode('utf-8'))
-                    return
-                
-                projects = []
-                if PROJECTS_FILE.exists():
-                    with open(PROJECTS_FILE, 'r', encoding='utf-8') as f:
-                        projects = json.load(f)
-                
-                if new_path in projects:
-                    projects.remove(new_path)
-                projects.insert(0, new_path) # 최신 프로젝트를 위로
-                projects = projects[:20] # 최대 20개 저장
-                with open(PROJECTS_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(projects, f, ensure_ascii=False, indent=2)
-                
-                self.wfile.write(json.dumps({"status": "success", "projects": projects}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+            projects_api.handle_post(self, PROJECTS_FILE)
 
         # ── [모듈 위임 - POST] hive_api ──────────────────────────────────
         # /api/hive/approve-skill, /api/orchestrator/skill-chain/update,
