@@ -199,6 +199,7 @@ import api.telegram_api as telegram_api
 import api.update_api as update_api
 import api.install_api as install_api
 import api.events_api as events_api
+import api.logs_api as logs_api
 import api.heal_api as heal_api
 import api.locks_api as locks_api
 import api.projects_api as projects_api
@@ -1240,6 +1241,15 @@ def _g_tool_status(h, pp):         install_api.tool_status(h, pp, _tool_status)
 def _g_install_tool_status(h, pp): install_api.install_tool_status(h, pp, _get_tool_install_state)
 def _g_register_codex(h, pp):      install_api.register_codex_to_ai(h, _python_runner_cmds, BASE_DIR, PROJECT_ROOT)
 
+# GET exact 라우트 (Phase 2 R3: 로그/스트림 3종) — api/logs_api.py로 본문 이전, 전역은 주입.
+# [불변식/late-binding] _g_stream은 wrapper 바디에서 PG_PORT/PG_PROJECT_DB를 참조 —
+#   동적 포트 폴백 시 global로 갱신된 최신값을 매 호출 재조회한다. 디폴트 인자 바인딩 금지
+#   (def _g_stream(h, pp, port=PG_PORT) 하면 테이블 정의 시점 값에 고정되는 버그).
+# [구조 유지] logs_api.stream의 psycopg2 직접연결은 풀 미경유 원본 그대로(전환은 별도 작업).
+def _g_stream(h, pp):       logs_api.stream(h, PG_PORT, PG_PROJECT_DB, run_pg_sql_csv)
+def _g_server_logs(h, pp):  logs_api.server_logs(h, DATA_DIR)
+def _g_messages(h, pp):     logs_api.messages(h, get_messages)
+
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
@@ -1247,6 +1257,9 @@ GET_ROUTES = {
     '/api/tool-status': _g_tool_status,
     '/api/install-tool-status': _g_install_tool_status,
     '/api/register-codex-to-ai': _g_register_codex,
+    '/stream': _g_stream,
+    '/api/server-logs': _g_server_logs,
+    '/api/messages': _g_messages,
 }
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
@@ -1303,6 +1316,9 @@ def _p_install_playwright(h, pp):
 def _p_run_script(h, pp):
     install_api.run_script(h, _current_project_root)
 
+# 메시지 채널 초기화 POST (Phase 2 R3) — logs_api로 본문 이전, clear_messages 주입.
+def _p_messages_clear(h, pp): logs_api.clear(h, clear_messages)
+
 # prefix 위임 (일부는 body 선읽기)
 def _p_tools(h, pp):
     from api import tools_api
@@ -1345,6 +1361,7 @@ POST_ROUTES = {
     '/api/select-folder': _p_fs_dialog,
     '/api/install-playwright-cli': _p_install_playwright,
     '/api/run-script': _p_run_script,
+    '/api/messages/clear': _p_messages_clear,
 }
 
 POST_PREFIX_ROUTES = [
@@ -1414,93 +1431,9 @@ class SSEHandler(BaseHTTPRequestHandler):
             events_api.stream_fs(self, FS_CLIENTS, _SSE_LOCK)
             return
 
-        if parsed_path.path == '/stream':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
-            self.end_headers()
-            
-            import psycopg2
-            import select
-            
-            # 1. 초기 데이터 전송 (최근 50개 - PostgreSQL pg_logs 테이블에서 조회)
-            try:
-                rows = run_pg_sql_csv(
-                    "SELECT agent, metadata->>'level' as level, task as trigger, metadata->>'session_id' as session_id, "
-                    "terminal_id as terminal_id, project_id as project, "
-                    "status as status, to_char(ts, 'YYYY-MM-DD HH24:MI:SS') as timestamp "
-                    "FROM pg_logs ORDER BY id DESC LIMIT 50"
-                )
-                if rows:
-                    for row in reversed(rows):
-                        if not row.get('level'):
-                            row['level'] = 'info'
-                        self.wfile.write(f"data: {json.dumps(row, ensure_ascii=False)}\n\n".encode('utf-8'))
-                        self.wfile.flush()
-            except Exception as e:
-                print(f"[SSE-PG] Initial Read Error: {e}")
-
-            # 2. 실시간 LISTEN 루프
-            try:
-                pg_conn = psycopg2.connect(host="localhost", port=PG_PORT, user="postgres", database=PG_PROJECT_DB)
-                pg_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-                cursor = pg_conn.cursor()
-                cursor.execute("LISTEN hive_log_channel;")
-                
-                self.connection.settimeout(60.0) # SSE 연결 타임아웃
-                
-                while True:
-                    if select.select([pg_conn], [], [], 5) == ([], [], []):
-                        # 하트비트 전송
-                        self.wfile.write(b": heartbeat\n\n")
-                        self.wfile.flush()
-                        continue
-                    
-                    pg_conn.poll()
-                    while pg_conn.notifies:
-                        notify = pg_conn.notifies.pop(0)
-                        payload = json.loads(notify.payload)
-                        
-                        table_name = payload.get('table')
-                        if table_name in ('hive_logs', 'pg_logs'):
-                            data = payload.get('data', {})
-                            meta = data.get('metadata', {})
-                            if isinstance(meta, str):
-                                try: meta = json.loads(meta)
-                                except: meta = {}
-                            
-                            agent = data.get('agent')
-                            level = meta.get('level', 'info') if meta else 'info'
-                            trigger = data.get('task') if table_name == 'pg_logs' else data.get('message')
-                            session_id = meta.get('session_id') or meta.get('task_id') if meta else None
-                            terminal_id = data.get('terminal_id') if table_name == 'pg_logs' else (meta.get('terminal_id') if meta else '')
-                            project = data.get('project_id') if table_name == 'pg_logs' else (meta.get('project') if meta else '')
-                            status = data.get('status') if table_name == 'pg_logs' else (meta.get('raw_status') if meta else '')
-                            timestamp = data.get('ts') or data.get('created_at') if table_name == 'pg_logs' else data.get('timestamp')
-                            
-                            out_row = {
-                                "agent": agent,
-                                "level": level,
-                                "trigger": trigger,
-                                "session_id": session_id,
-                                "terminal_id": terminal_id,
-                                "project": project,
-                                "status": status,
-                                "timestamp": timestamp
-                            }
-                            
-                            self.wfile.write(f"data: {json.dumps(out_row, ensure_ascii=False)}\n\n".encode('utf-8'))
-                            self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, socket.timeout):
-                pass
-            except Exception as e:
-                print(f"[SSE-PG] Stream Error: {e}")
-            finally:
-                try: pg_conn.close()
-                except: pass
-        elif parsed_path.path == '/api/heartbeat':
+        # ─── GET /stream(SSE) → api/logs_api.py 분리 (Phase 2 R3) ───
+        #   테이블 _g_stream이 처리(late-binding으로 PG_PORT/PG_PROJECT_DB 최신값 주입).
+        if parsed_path.path == '/api/heartbeat':
             # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json;charset=utf-8')
@@ -1739,35 +1672,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 
         # [2026-03-22 추가] 서버 로그 뷰어 API — server_error.log + pgsql.log 내용 반환
         # 환경설정(보기 메뉴)에서 로그를 실시간으로 확인하고 클립보드 복사 가능
-        elif parsed_path.path == '/api/server-logs':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            # tail 줄 수 (기본 200줄)
-            tail_n = int(query.get('lines', ['200'])[0])
-            log_type = query.get('type', ['server'])[0]  # server | pgsql | task
-            logs_data: dict = {"type": log_type, "lines": [], "path": ""}
-            try:
-                if log_type == 'pgsql':
-                    log_path = DATA_DIR.parent / "pgsql.log"
-                    if not log_path.exists():
-                        log_path = DATA_DIR / "pgsql.log"
-                elif log_type == 'task':
-                    log_path = DATA_DIR / "task_logs.jsonl"
-                else:
-                    log_path = DATA_DIR / "server_error.log"
-                logs_data["path"] = str(log_path)
-                if log_path.exists():
-                    all_lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines()
-                    logs_data["lines"] = all_lines[-tail_n:]
-                else:
-                    logs_data["lines"] = [f"(로그 파일 없음: {log_path})"]
-            except Exception as e:
-                logs_data["lines"] = [f"(로그 읽기 오류: {e})"]
-            body = json.dumps(logs_data, ensure_ascii=False).encode('utf-8')
-            self.wfile.write(body)
+        # /api/server-logs → api/logs_api.py 분리 (Phase 2 R3, 테이블 _g_server_logs 처리)
 
         elif parsed_path.path == '/api/check-update-ready':
             update_api.check_update_ready(self, DATA_DIR, __version__)
@@ -1803,17 +1708,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
-        elif parsed_path.path == '/api/messages':
-            # 에이전트 간 메시지 채널 목록 반환 (최신 100개, SQLite 연동)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            try:
-                msgs = get_messages(100)
-                self.wfile.write(json.dumps(msgs, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+        # /api/messages → api/logs_api.py 분리 (Phase 2 R3, 테이블 _g_messages 처리)
         # [2026-03-22] /api/tasks, /api/tasks/kanban, /api/task-logs → tasks_api.py로 위임됨
 
         elif parsed_path.path == '/api/kanban/pg-activity':
@@ -2336,14 +2231,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
                 git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
 
-        elif parsed_path.path == '/api/messages/clear':
-            # 메시지 채널 전체 삭제 (대시보드 UI 초기화용)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            ok = clear_messages()
-            self.wfile.write(json.dumps({'status': 'ok' if ok else 'error'}).encode('utf-8'))
+        # /api/messages/clear → api/logs_api.py 분리 (Phase 2 R3, 테이블 _p_messages_clear 처리)
         # ── [모듈 위임 - POST] tasks_api — /api/tasks, update, delete, claim, comments, checkout, trigger ─
         elif (parsed_path.path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim')
               or (parsed_path.path.startswith('/api/tasks/') and
