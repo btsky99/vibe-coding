@@ -1303,6 +1303,91 @@ GET_ROUTES = {
     '/api/kanban/pg-activity': _g_kanban_activity,
     '/api/memory/db-info': _g_memory_db_info,
 }
+
+# GET 복합조건 라우트 테이블 (Phase 2 R9) — (조건fn, 핸들러fn) 리스트.
+# [WHY] exact/prefix로 표현 불가한 복합조건(startswith OR, in-튜플, endswith 혼합)을 테이블화.
+#   조건 리터럴을 server.py 본문에 verbatim 보존해 완전성 가드(tests/test_route_table.py)가
+#   startswith/`path ==` 리터럴을 계속 추출하게 한다. dict 키 억지 매핑 금지(Critic 원칙).
+# [디스패치 순서] do_GET 진입부: exact → prefix → cond → legacy. cond는 exact/prefix 뒤라
+#   이미 그 테이블에 등록된 라우트(예: /api/memory/db-info)는 cond보다 먼저 걸린다(순서 보존).
+# [불변식] 조건fn/핸들러fn은 원본 elif verbatim. 전역·모듈은 호출 시점 해석(late-binding).
+# install-cli: in-튜플 3종 (본문은 R2에서 install_api 이전 완료).
+def _cg_install_cli(path):
+    return path in ('/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli')
+def _g_install_cli(h, pp):
+    install_api.handle_install_cli(h, pp.path, _get_npm_executable)
+
+# hive: prefix2 + exact8 혼합 → hive_api 위임.
+# [과거사고 2026-07-04] agent-quota 누락 — hive_api에 핸들러 추가하고 이 allowlist를 안 갱신해
+#   SPA 폴백(index.html)이 응답 → 쿼터 배지 미표시. hive_api 단건 라우트 추가 시 이 튜플도 동기 갱신.
+def _cg_hive(path):
+    return (path.startswith('/api/hive/') or
+            path.startswith('/api/orchestrator/') or
+            path in ('/api/superpowers/status', '/api/skill-results',
+                     '/api/skill-ab-test', '/api/skill/predict',
+                     '/api/context-usage', '/api/antigravity-context-usage',
+                     '/api/agent-quota', '/api/local-models'))
+def _g_hive(h, pp):
+    _params = parse_qs(pp.query)
+    from api import hive_api
+    hive_api.handle_get(
+        h, pp.path, _params,
+        DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
+        PROJECT_ROOT=PROJECT_ROOT, PROJECT_ID=PROJECT_ID,
+        TASKS_FILE=TASKS_FILE, AGENT_STATUS=AGENT_STATUS,
+        AGENT_STATUS_LOCK=AGENT_STATUS_LOCK,
+        pty_sessions=_get_node_pty_sessions(),
+        _current_project_root=_current_project_root,
+        _parse_session_tail=_parse_session_tail,
+        _parse_antigravity_session=_parse_antigravity_session,
+        run_pg_sql_csv=run_pg_sql_csv
+    )
+
+# memory: exact 2종 → memory_api 위임.
+def _cg_memory(path):
+    return path in ('/api/memory', '/api/project-info')
+def _g_memory(h, pp):
+    _params = parse_qs(pp.query)
+    memory_api.handle_get(
+        h, pp.path, _params,
+        DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID, PROJECT_ROOT=PROJECT_ROOT,
+        __version__=__version__,
+    )
+
+# tasks: exact4 + (/api/tasks/ prefix AND endswith '/comments') → tasks_api 위임.
+def _cg_tasks(path):
+    return (path in ('/api/tasks', '/api/tasks/kanban', '/api/task-logs',
+                     '/api/agents/status')
+            or path.startswith('/api/tasks/') and path.endswith('/comments'))
+def _g_tasks(h, pp):
+    _params = parse_qs(pp.query)
+    tasks_api.handle_get(
+        h, pp.path, _params,
+        DATA_DIR=DATA_DIR,
+        list_tasks=list_tasks,
+        current_project_id=_current_project_id(),
+        list_task_comments=list_task_comments,
+        list_agent_status=list_agent_status,
+    )
+
+# files: exact 2종 → files_api 위임.
+def _cg_files(path):
+    return path in ('/api/files', '/api/read-file')
+def _g_files(h, pp):
+    _params = parse_qs(pp.query)
+    files_api.handle_get(
+        h, pp.path, _params,
+        PROJECT_ROOT=_current_project_root(),
+        validate_file_path=_validate_file_path,
+    )
+
+GET_COND_ROUTES: list = [
+    (_cg_install_cli, _g_install_cli),
+    (_cg_hive, _g_hive),
+    (_cg_memory, _g_memory),
+    (_cg_tasks, _g_tasks),
+    (_cg_files, _g_files),
+]
 # ─────────────────────────────────────────────────────────────────────────────
 # POST 라우트 디스패치 테이블 (Phase 1 Task 3: 순수 위임만)
 # [WHY] do_POST의 if/elif 사슬 중 "인라인 로직 없는 순수 위임" 라우트만 테이블로 이전
@@ -1472,6 +1557,80 @@ POST_PREFIX_ROUTES = [
     ('/api/codegraph/', _p_codegraph),
     ('/api/memory/', _p_memory),
 ]
+
+# POST 복합조건 라우트 테이블 (Phase 2 R9) — GET_COND_ROUTES와 동형.
+# [디스패치 순서] do_POST 진입부: exact → prefix → cond → legacy.
+#   office launch/restart/status·git rollback/diff는 POST_ROUTES exact 등록됨 → exact-first로
+#   cond보다 먼저 걸린다. 따라서 office cond의 not-in·git cond의 diff 서브분기는 방어적 중복(원본 보존).
+# office: prefix AND not-in(launch/restart/status) → 오피스 서버 프록시.
+def _cp_office(path):
+    return path.startswith('/api/office/') and path not in (
+        '/api/office/launch', '/api/office/restart', '/api/office/status',
+    )
+def _p_office_proxy(h, pp):
+    _cl = int(h.headers.get('Content-Length', '0') or 0)
+    _raw = h.rfile.read(_cl) if _cl > 0 else None
+    _proxy_to_office_server(h, method='POST', body=_raw)
+
+# hive: prefix3 (hive/orchestrator/superpowers) → hive_api 위임.
+def _cp_hive(path):
+    return (path.startswith('/api/hive/') or
+            path.startswith('/api/orchestrator/') or
+            path.startswith('/api/superpowers/'))
+def _p_hive(h, pp):
+    from api import hive_api
+    content_length = int(h.headers.get('Content-Length', 0))
+    _body = json.loads(h.rfile.read(content_length).decode('utf-8')) if content_length else {}
+    hive_api.handle_post(
+        h, pp.path, _body,
+        DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
+        PROJECT_ROOT=PROJECT_ROOT,
+        _current_project_root=_current_project_root,
+    )
+
+# git: prefix → git_api 위임. diff는 쿼리스트링 방식(body 미사용) 서브분기 원본 보존.
+# [주의] /api/git/diff·/api/git/rollback exact는 POST_ROUTES가 exact-first로 먼저 처리 →
+#   여기 diff 서브분기는 방어적 중복(도달 시엔 handle_post 동명 분기, 원본 elif verbatim).
+def _cp_git(path):
+    return path.startswith('/api/git/')
+def _p_git(h, pp):
+    from api import git_api
+    from urllib.parse import parse_qs as _parse_qs
+    _qs = _parse_qs(pp.query)
+    if pp.path == '/api/git/diff':
+        git_api.handle_post(h, pp.path, _qs, BASE_DIR=BASE_DIR)
+    else:
+        content_length = int(h.headers.get('Content-Length', 0))
+        _body = json.loads(h.rfile.read(content_length).decode('utf-8')) if content_length else {}
+        git_api.handle_post(h, pp.path, _body, BASE_DIR=BASE_DIR)
+
+# tasks: exact4 OR (/api/tasks/ + endswith comments|checkout) OR (/api/agents/ + endswith trigger).
+def _cp_tasks(path):
+    return (path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim')
+            or (path.startswith('/api/tasks/') and
+                (path.endswith('/comments') or path.endswith('/checkout')))
+            or (path.startswith('/api/agents/') and path.endswith('/trigger')))
+def _p_tasks(h, pp):
+    content_length = int(h.headers.get('Content-Length', 0))
+    _body = json.loads(h.rfile.read(content_length).decode('utf-8')) if content_length else {}
+    tasks_api.handle_post(
+        h, pp.path, _body,
+        SESSIONS_FILE=SESSIONS_FILE,
+        save_task=save_task, update_task=update_task, delete_task=delete_task,
+        current_project_id=_current_project_id(),
+        PROJECT_ID=PROJECT_ID,
+        add_task_comment=add_task_comment,
+        atomic_checkout=atomic_checkout,
+        release_checkout=release_checkout,
+        trigger_agent=trigger_agent,
+    )
+
+POST_COND_ROUTES: list = [
+    (_cp_office, _p_office_proxy),
+    (_cp_hive, _p_hive),
+    (_cp_git, _p_git),
+    (_cp_tasks, _p_tasks),
+]
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
@@ -1519,6 +1678,11 @@ class SSEHandler(BaseHTTPRequestHandler):
             if path.startswith(_pfx):
                 _fn(self, parsed_path)
                 return
+        # cond 조회(exact/prefix miss 시) → 복합조건 라우트. miss 시 아래 legacy elif 폴백.
+        for _cond, _cfn in GET_COND_ROUTES:
+            if _cond(path):
+                _cfn(self, parsed_path)
+                return
 
         # ─── SSE 실시간 스트리밍 3종 — api/events_api.py로 분리 (공유 집합/락 참조 주입) ───
         if path == '/api/events/thoughts':
@@ -1544,9 +1708,7 @@ class SSEHandler(BaseHTTPRequestHandler):
             projects_api.handle_get(self, PROJECTS_FILE)
         # [Phase 2 R5] GET /api/agents → GET_ROUTES(_g_agents, dashboard_api)로 이전.
         # [Phase 2 R8] GET /api/config → GET_ROUTES(_g_config, config_api)로 이전.
-        elif parsed_path.path in ('/api/install-gemini-cli', '/api/install-claude-code', '/api/install-codex-cli'):
-            # [R2] 복합조건(in 튜플) 잔류 — 본문만 install_api로 이전(R9에서 wrapper 테이블화 예정).
-            install_api.handle_install_cli(self, parsed_path.path, _get_npm_executable)
+        # [Phase 2 R9] GET install-cli 3종 → GET_COND_ROUTES(_cg_install_cli, _g_install_cli)로 이전.
         elif parsed_path.path == '/api/shutdown':
             # 안전한 셧다운: 서버와 자식 프로세스를 정리한 뒤 종료
             # [설계 의도] 프론트엔드 TopMenuBar에서 호출. 확인 다이얼로그를 거친 후에만 도달.
@@ -1572,114 +1734,16 @@ class SSEHandler(BaseHTTPRequestHandler):
         elif parsed_path.path == '/api/install-skills':
             install_api.install_skills(self, BASE_DIR, SCRIPTS_DIR, ensure_schema)
 
-        # ── [모듈 위임] hive_api — /api/hive/*, /api/orchestrator/*, /api/superpowers/status,
-        #    /api/skill-results, /api/context-usage, /api/antigravity-context-usage, /api/local-models ──
-        elif (parsed_path.path.startswith('/api/hive/') or
-              parsed_path.path.startswith('/api/orchestrator/') or
-              # [과거사고 2026-07-04] agent-quota 누락 — hive_api.py에 핸들러만 추가하고
-              # 이 allowlist를 안 갱신해 SPA 폴백(index.html)이 응답 → 쿼터 배지 미표시.
-              # hive_api에 단건 라우트 추가 시 반드시 이 튜플도 동기 갱신.
-              parsed_path.path in ('/api/superpowers/status', '/api/skill-results',
-                                   '/api/skill-ab-test', '/api/skill/predict',
-                                   '/api/context-usage', '/api/antigravity-context-usage',
-                                   '/api/agent-quota', '/api/local-models')):
-            _params = parse_qs(parsed_path.query)
-            from api import hive_api
-            hive_api.handle_get(
-                self, parsed_path.path, _params,
-                DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
-                PROJECT_ROOT=PROJECT_ROOT, PROJECT_ID=PROJECT_ID,
-                TASKS_FILE=TASKS_FILE, AGENT_STATUS=AGENT_STATUS,
-                AGENT_STATUS_LOCK=AGENT_STATUS_LOCK,
-                pty_sessions=_get_node_pty_sessions(),
-                _current_project_root=_current_project_root,
-                _parse_session_tail=_parse_session_tail,
-                _parse_antigravity_session=_parse_antigravity_session,
-                run_pg_sql_csv=run_pg_sql_csv
-            )
-
-        elif parsed_path.path.startswith('/api/git/'):
-            _params = parse_qs(parsed_path.query)
-            git_api.handle_get(self, parsed_path.path, _params, BASE_DIR=BASE_DIR)
-
-        # ── [모듈 위임] vibe_api — /api/vibe/* (cmux 호환 CLI API) ────────
-        # [Phase 2 R8] /api/vibe/sidebar·/api/vibe/notifications → GET_ROUTES(순수위임) 이전.
-
-        # ── [모듈 위임] agent_api — /api/agent/* ─────────────────────────
-        elif parsed_path.path.startswith('/api/agent/'):
-            agent_api.handle_get(self, parsed_path.path)
-        elif parsed_path.path.startswith('/api/pty/'):
-            pty_api.handle_get(self, parsed_path.path, parse_qs(parsed_path.query))
-
+        # [Phase 2 R9] GET hive(prefix2 /api/hive//api/orchestrator/ + exact8) →
+        #   GET_COND_ROUTES(_cg_hive, _g_hive)로 이전. agent-quota 등 exact8 allowlist는 _cg_hive에 보존.
+        # [Phase 2 R9] /api/git/·/api/agent/·/api/pty/ dead 폴백 제거 — GET_PREFIX_ROUTES 선점(도달 불가).
         # ── Telegram 설정 API ──────────────────────────────────────────
         elif parsed_path.path == '/api/config/telegram':
             self._handle_telegram_config_get()
 
-        # ── [모듈 위임] memory_api — /api/memory, /api/project-info ──────
-        elif parsed_path.path in ('/api/memory', '/api/project-info'):
-            _params = parse_qs(parsed_path.query)
-            memory_api.handle_get(
-                self, parsed_path.path, _params,
-                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID, PROJECT_ROOT=PROJECT_ROOT,
-                __version__=__version__,
-            )
-
-        # ── [모듈 위임] experience_api — /api/experience/* ────────────
-        elif parsed_path.path.startswith('/api/experience'):
-            _params = parse_qs(parsed_path.query)
-            experience_api.handle_get(self, parsed_path.path, _params)
-
-        # ── [모듈 위임] vibe_skills_api — /api/vibe/skills (Phase 3-2) ───
-        # [Phase 2 R8] /api/vibe/skills → GET_ROUTES(_g_vibe_skills) 순수위임 이전.
-
-        # ── [모듈 위임] zettel_api — /api/zettel/* ────────────────────
-        elif parsed_path.path.startswith('/api/zettel/'):
-            _params = parse_qs(parsed_path.query)
-            zettel_api.handle_get(
-                self, parsed_path.path, _params,
-                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
-            )
-
-        # ── [모듈 위임] codegraph_api — /api/codegraph/* ─────────────
-        elif parsed_path.path.startswith('/api/codegraph/'):
-            _params = parse_qs(parsed_path.query)
-            codegraph_api.handle_get(
-                self, parsed_path.path, _params,
-                DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID,
-            )
-
-        # ── 오피스 API → 오피스 서버 프록시 (중복 코드 제거 — 2026-04-13) ──
-        elif parsed_path.path.startswith('/api/office/'):
-            _proxy_to_office_server(self, method='GET')
-
-        # ── [모듈 위임] tasks_api — /api/tasks, /api/task-logs ─────────
-        elif (parsed_path.path in ('/api/tasks', '/api/tasks/kanban', '/api/task-logs',
-                                    '/api/agents/status')
-              or parsed_path.path.startswith('/api/tasks/') and parsed_path.path.endswith('/comments')):
-            _params = parse_qs(parsed_path.query)
-            tasks_api.handle_get(
-                self, parsed_path.path, _params,
-                DATA_DIR=DATA_DIR,
-                list_tasks=list_tasks,
-                current_project_id=_current_project_id(),
-                list_task_comments=list_task_comments,
-                list_agent_status=list_agent_status,
-            )
-
-        # ── [모듈 위임] tools_api — /api/tools/* (도구 설치 상태) ──────
-        elif parsed_path.path.startswith('/api/tools/'):
-            from api import tools_api
-            _params = parse_qs(parsed_path.query)
-            tools_api.handle_get(self, parsed_path.path, _params)
-
-        # ── [모듈 위임] files_api — /api/files, /api/read-file ────────
-        elif parsed_path.path in ('/api/files', '/api/read-file'):
-            _params = parse_qs(parsed_path.query)
-            files_api.handle_get(
-                self, parsed_path.path, _params,
-                PROJECT_ROOT=_current_project_root(),
-                validate_file_path=_validate_file_path,
-            )
+        # [Phase 2 R9] GET memory(exact2)·tasks(exact4 + /api/tasks/ endswith /comments)·files(exact2) →
+        #   GET_COND_ROUTES(_cg_memory/_cg_tasks/_cg_files)로 이전.
+        # [Phase 2 R9] /api/experience·zettel·codegraph·office·tools dead 폴백 제거 — GET_PREFIX_ROUTES 선점(도달 불가).
 
         # /api/help, /api/image-file → api/static_api.py 분리 (Phase 2 R4, 테이블 _g_help/_g_image_file 처리)
         # [2026-03-22] /api/read-file → files_api.py로 위임됨 (상단 모듈 위임 섹션)
@@ -1793,15 +1857,14 @@ class SSEHandler(BaseHTTPRequestHandler):
             if path.startswith(_pfx):
                 _fn(self, parsed_path)
                 return
+        # cond 조회(exact/prefix miss 시) → 복합조건 라우트. miss 시 아래 legacy if/elif 폴백.
+        for _cond, _cfn in POST_COND_ROUTES:
+            if _cond(path):
+                _cfn(self, parsed_path)
+                return
 
-        # ── 오피스 API POST → 오피스 서버 프록시 (launch/restart/status 제외) ──
-        if path.startswith('/api/office/') and path not in (
-            '/api/office/launch', '/api/office/restart', '/api/office/status',
-        ):
-            _cl = int(self.headers.get('Content-Length', '0') or 0)
-            _raw = self.rfile.read(_cl) if _cl > 0 else None
-            _proxy_to_office_server(self, method='POST', body=_raw)
-            return
+        # [Phase 2 R9] POST office 프록시(startswith + not-in launch/restart/status) →
+        #   POST_COND_ROUTES(_cp_office, _p_office_proxy)로 이전. launch/restart/status는 POST_ROUTES exact.
 
         # [Phase 2 R5] POST /api/dashboard/launch·/api/kanban/launch →
         #   POST_ROUTES(_p_dashboard_launch/_p_kanban_launch, dashboard_api)로 이전.
@@ -1826,61 +1889,14 @@ class SSEHandler(BaseHTTPRequestHandler):
         # [Phase 2 R8] POST /api/git/rollback·/api/git/diff(exact 인라인) →
         #   POST_ROUTES(_p_git_rollback/_p_git_diff, git_api)로 verbatim 이전. exact-first라 아래
         #   '/api/git/' prefix 위임보다 먼저 걸림(원본 순서 보존). prefix 위임 블록은 R9 대상 — 유지.
-        # ── [모듈 위임 - POST] hive_api ──────────────────────────────────
-        # /api/hive/approve-skill, /api/orchestrator/skill-chain/update,
-        # /api/orchestrator/run, /api/superpowers/install|uninstall
-        if (parsed_path.path.startswith('/api/hive/') or
-              parsed_path.path.startswith('/api/orchestrator/') or
-              parsed_path.path.startswith('/api/superpowers/')):
-            from api import hive_api
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            hive_api.handle_post(
-                self, parsed_path.path, _body,
-                DATA_DIR=DATA_DIR, SCRIPTS_DIR=SCRIPTS_DIR, BASE_DIR=BASE_DIR,
-                PROJECT_ROOT=PROJECT_ROOT,
-                _current_project_root=_current_project_root,
-            )
+        # [Phase 2 R9] POST hive(prefix3 hive/orchestrator/superpowers)·git(prefix + diff 쿼리스트링 서브분기)·
+        #   tasks(exact4 + /api/tasks/ endswith comments|checkout + /api/agents/ endswith trigger) →
+        #   POST_COND_ROUTES(_cp_hive/_cp_git/_cp_tasks)로 이전. 조건 리터럴은 각 _cp_* 조건fn에 보존.
+        # [Phase 2 R8] POST /api/git/rollback·diff, /api/screenshot/analyze는 POST_ROUTES exact 처리.
 
-        # ── [모듈 위임 - POST] git_api ────────────────────────────────────
-        # /api/git/rollback, /api/git/diff (쿼리스트링 방식)
-        elif parsed_path.path.startswith('/api/git/'):
-            from api import git_api
-            from urllib.parse import parse_qs as _parse_qs
-            # /api/git/diff는 query string 방식이므로 query dict를 data로 전달
-            _qs = _parse_qs(parsed_path.query)
-            if parsed_path.path == '/api/git/diff':
-                git_api.handle_post(self, parsed_path.path, _qs, BASE_DIR=BASE_DIR)
-            else:
-                content_length = int(self.headers.get('Content-Length', 0))
-                _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-                git_api.handle_post(self, parsed_path.path, _body, BASE_DIR=BASE_DIR)
-
-        # /api/messages/clear → api/logs_api.py 분리 (Phase 2 R3, 테이블 _p_messages_clear 처리)
-        # ── [모듈 위임 - POST] tasks_api — /api/tasks, update, delete, claim, comments, checkout, trigger ─
-        elif (parsed_path.path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim')
-              or (parsed_path.path.startswith('/api/tasks/') and
-                  (parsed_path.path.endswith('/comments') or parsed_path.path.endswith('/checkout')))
-              or (parsed_path.path.startswith('/api/agents/') and parsed_path.path.endswith('/trigger'))):
-            content_length = int(self.headers.get('Content-Length', 0))
-            _body = json.loads(self.rfile.read(content_length).decode('utf-8')) if content_length else {}
-            tasks_api.handle_post(
-                self, parsed_path.path, _body,
-                SESSIONS_FILE=SESSIONS_FILE,
-                save_task=save_task, update_task=update_task, delete_task=delete_task,
-                current_project_id=_current_project_id(),
-                PROJECT_ID=PROJECT_ID,
-                add_task_comment=add_task_comment,
-                atomic_checkout=atomic_checkout,
-                release_checkout=release_checkout,
-                trigger_agent=trigger_agent,
-            )
-
-        # [Phase 2 R8] POST /api/screenshot/analyze → POST_ROUTES(_p_screenshot_analyze, screenshot_api).
-
-        else:
-            self.send_response(404)
-            self.end_headers()
+        # 미매칭 POST → 404. 모든 라우트가 exact/prefix/cond 테이블에서 처리됨 — 여기 도달 = 미등록 경로.
+        self.send_response(404)
+        self.end_headers()
 
     def log_message(self, format, *args):
         # 불필요한 콘솔 로그 제거하여 터미널 깔끔하게 유지
