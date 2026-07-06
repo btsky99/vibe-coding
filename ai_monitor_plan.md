@@ -106,7 +106,7 @@ REVISION HISTORY:
 
 ## 파트 C — 소형 헬퍼 흡수
 
-### [ ] Task 13 (R15): 소형 헬퍼 infra 흡수
+### [x] Task 13 (R15): 소형 헬퍼 infra 흡수 ✅
 - 파일: `.ai_monitor/infra/*`✏️, `.ai_monitor/server.py`✏️
 - 방법: `_persist_active_project_context`(67)·`_load_task_logs_into_thoughts`(57)·`_restore_agent_status_from_db`(49)·`_resolve_frozen_project_root`(57) 등 소형 헬퍼를 성격에 맞는 infra 모듈로 이전(project_context/session/lifecycle 등). 착수 전 각 함수 호출부 grep으로 의존성 확인.
 - 검증: 공통 3종.

@@ -508,61 +508,12 @@ if sys.stdout is None or sys.stderr is None:
 # BASE_DIR: 개발 모드 → server.py 위치, 배포(frozen) 모드 → sys._MEIPASS
 # PROJECT_ROOT: 개발 모드 → git 루트, 배포 모드 → cwd/exe-parent에서 마커 탐색,
 #               마커 부재 시 %APPDATA%\VibeCoding\{projects.json,config.json} fallback
-def _find_project_root_marker(start: Path) -> Path | None:
-    """start와 상위 디렉토리에서 .git/CLAUDE.md/GEMINI.md 마커 탐색.
-    찾으면 마커가 있는 디렉토리, 없으면 None.
-    """
-    try:
-        cur = start.resolve()
-    except Exception:
-        return None
-    for _ in range(10):
-        if any((cur / m).exists() for m in ('.git', 'CLAUDE.md', 'GEMINI.md')):
-            return cur
-        if cur.parent == cur:
-            break
-        cur = cur.parent
-    return None
-
-
-def _resolve_frozen_project_root(exe_parent: Path) -> Path:
-    """[회귀 수정] 설치 EXE의 PROJECT_ROOT 결정.
-    1) cwd 마커 탐색 → 사용자가 프로젝트 폴더에서 실행한 경우
-    2) exe_parent 마커 탐색 → 설치 폴더에 마커가 있는 경우(거의 없음)
-    3) %APPDATA%\\VibeCoding\\config.json.last_path
-    4) %APPDATA%\\VibeCoding\\projects.json[0]
-    5) 최종 폴백: exe_parent (잘못된 PROJECT_ID 발생 가능)
-    """
-    found = _find_project_root_marker(Path.cwd())
-    if found is not None:
-        return found
-    found = _find_project_root_marker(exe_parent)
-    if found is not None:
-        return found
-    if os.name == 'nt':
-        _appdata = Path(os.getenv('APPDATA', '')) / 'VibeCoding'
-    else:
-        _appdata = Path.home() / '.vibe-coding'
-    try:
-        cfg_file = _appdata / 'config.json'
-        if cfg_file.exists():
-            cfg = json.loads(cfg_file.read_text(encoding='utf-8'))
-            lp = cfg.get('last_path', '')
-            if lp and Path(lp).is_dir():
-                return Path(lp)
-    except Exception:
-        pass
-    try:
-        projs_file = _appdata / 'projects.json'
-        if projs_file.exists():
-            saved = json.loads(projs_file.read_text(encoding='utf-8'))
-            if isinstance(saved, list) and saved:
-                first = Path(str(saved[0]).replace('/', os.sep))
-                if first.is_dir():
-                    return first
-    except Exception:
-        pass
-    return exe_parent
+# 프로젝트 루트 마커 탐색 + frozen PROJECT_ROOT 해석은 infra/project_context.py로 분리
+# (2026-07-06, Phase 2 Task 13 / R15). [제약] 바로 아래 frozen 초기화 블록에서 호출되므로
+# infra가 sys.path에 오른 뒤(위 postgres_runtime import 시점)여야 함 — 정의 순서 이동 금지.
+from infra.project_context import (
+    resolve_frozen_project_root as _resolve_frozen_project_root,
+)
 
 
 if getattr(sys, 'frozen', False):
@@ -616,37 +567,12 @@ THOUGHT_LOGS = [] # AI 사고 과정 로그 (최근 50개 유지)
 # THOUGHT_CLIENTS는 아래(라인 658 근처)에서 한 번만 선언 — 중복 선언 제거
 
 def _load_task_logs_into_thoughts():
-    """서버 시작 시 task_logs.jsonl의 최근 20개 항목을 THOUGHT_LOGS에 미리 로드합니다.
-    이렇게 해야 클라이언트 접속 즉시 과거 작업 내역이 사고 패널에 표시됩니다.
-
-    [경로 주의] DATA_DIR는 이 함수가 호출되는 시점(서버 코드 상단)에 아직 정의되지 않으므로,
-    frozen(배포) 모드와 개발 모드를 직접 판별하여 올바른 데이터 디렉토리를 사용합니다.
-    - frozen 모드: %APPDATA%\\VibeCoding (Windows) / ~/.vibe-coding (기타)
-    - 개발 모드 : server.py 위치 기준 ./data/
-    """
-    _self = Path(__file__).resolve()
-    _early_data_dir = _self.parent / 'data'
-    log_path = _early_data_dir / 'task_logs.jsonl'
-    if not log_path.exists():
-        return
-    try:
-        lines = [l.strip() for l in log_path.read_text(encoding='utf-8').splitlines() if l.strip()]
-        recent = lines[-20:] # 최근 20개만 로드
-        for line in recent:
-            try:
-                obj = json.loads(line)
-                THOUGHT_LOGS.append({
-                    'agent':     obj.get('agent', 'System'),
-                    'thought':   obj.get('task', ''),
-                    'tool':      None,
-                    'timestamp': obj.get('timestamp', ''),
-                    'level':     'info',
-                })
-            except Exception as e:
-                pass  # 개별 task_log 항목 파싱 실패 허용
-        print(f"[*] ThoughtTrace: {len(recent)}개 task_logs 항목 사전 로드 완료")
-    except Exception as e:
-        print(f"[!] ThoughtTrace 사전 로드 실패: {e}")
+    # 본체는 infra/lifecycle.py로 분리 (2026-07-06, Phase 2 Task 13 / R15).
+    # [제약] early_data_dir는 반드시 server.py 위치 기준 ./data — 원본이 __file__로 계산했고
+    # lifecycle.py의 __file__는 infra/ 라 경로가 오염되므로 여기(server.py)서 계산해 주입.
+    _lifecycle.load_task_logs_into_thoughts(
+        THOUGHT_LOGS, Path(__file__).resolve().parent / 'data'
+    )
 
 # [v3.7.62 수정] 모듈 레벨 즉시 실행 → 서버 시작 후 백그라운드 스레드로 이동.
 # 기존: server.py import 시 파일 IO가 즉시 발생 → 창 뜨기 전에 블로킹.
@@ -799,43 +725,15 @@ if not PROJECTS_FILE.exists():
 #   PROJECT_CONTEXT_UNRESOLVED 플래그를 세워 UI가 "프로젝트 선택"을 유도하도록 노출(빈 패널 미스터리 방지).
 PROJECT_CONTEXT_UNRESOLVED = False
 
-def _persist_active_project_context() -> None:
-    """frozen 모드에서 해석된 PROJECT_ROOT를 last_path/projects.json에 고정한다."""
-    global PROJECT_CONTEXT_UNRESOLVED
-    if _find_project_root_marker(PROJECT_ROOT) is None:
-        PROJECT_CONTEXT_UNRESOLVED = True
-        print(
-            f"[project_context] WARN: 활성 프로젝트 미해석 — PROJECT_ROOT={PROJECT_ROOT} (마커 없음). "
-            "대시보드에서 프로젝트 폴더를 선택해야 하이브/제텔/태스크가 채워집니다.",
-            file=sys.stderr,
-        )
-        return
-    try:
-        cfg = {}
-        if CONFIG_FILE.exists():
-            cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-        lp = cfg.get('last_path', '')
-        # last_path가 비었거나 더 이상 존재하지 않는 경로면 현재 실제 PROJECT_ROOT로 고정
-        if not (lp and Path(lp).is_dir()):
-            _norm = str(PROJECT_ROOT).replace('\\', '/')
-            cfg['last_path'] = _norm
-            CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
-            _projs = []
-            try:
-                if PROJECTS_FILE.exists():
-                    _projs = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
-            except Exception:
-                _projs = []
-            if _norm in _projs:
-                _projs.remove(_norm)
-            _projs.insert(0, _norm)
-            PROJECTS_FILE.write_text(json.dumps(_projs[:20], ensure_ascii=False, indent=2), encoding='utf-8')
-            print(f"[project_context] 활성 프로젝트 자동 고정: {_norm}", file=sys.stderr)
-    except Exception as _e:
-        print(f"[project_context] last_path 고정 실패: {_e}", file=sys.stderr)
+# 활성 프로젝트 컨텍스트 고정은 infra/project_context.py로 분리 (2026-07-06, Phase 2 Task 13 / R15).
+# [불변식] PROJECT_CONTEXT_UNRESOLVED 전역은 server.py가 소유 — infra는 bool(unresolved)만
+# 반환하고, 세팅은 caller가 한다(다른 모듈이 server 전역을 global로 못 씀).
+from infra.project_context import persist_active_project_context as _persist_active_project_context
 
 if getattr(sys, 'frozen', False):
-    _persist_active_project_context()
+    PROJECT_CONTEXT_UNRESOLVED = _persist_active_project_context(
+        PROJECT_ROOT, CONFIG_FILE, PROJECTS_FILE
+    )
 
 # 락 파일 초기화 (없을 경우)
 if not LOCKS_FILE.exists():
@@ -1030,44 +928,10 @@ AGENT_STATUS_LOCK = threading.Lock()
 
 
 def _restore_agent_status_from_db():
-    """서버 시작 시 PostgreSQL agent_heartbeats에서 에이전트 상태를 복구한다.
-
-    재시작해도 이전 에이전트 상태를 유지하여 대시보드가 즉시 현황을 보여준다.
-    5분 이상 heartbeat가 없으면 offline으로 표시한다.
-    """
-    try:
-        rows = list_agent_status()
-        if not rows:
-            return
-        now_ts = time.time()
-        with AGENT_STATUS_LOCK:
-            for row in rows:
-                agent_id = row.get('agent_id', '')
-                if not agent_id:
-                    continue
-                # last_beat ISO 문자열 → timestamp 변환
-                last_beat_str = row.get('last_beat', '')
-                try:
-                    from datetime import datetime
-                    dt = datetime.fromisoformat(last_beat_str)
-                    last_seen_ts = dt.timestamp()
-                except Exception:
-                    last_seen_ts = now_ts - 600  # 파싱 실패 시 10분 전으로 설정
-                # 5분 이상 지났으면 offline
-                age_sec = now_ts - last_seen_ts
-                if age_sec > 300:
-                    status = 'offline'
-                else:
-                    status = row.get('status', 'idle')
-                AGENT_STATUS[agent_id] = {
-                    'status': status,
-                    'task': row.get('current_task'),
-                    'last_seen': last_seen_ts,
-                    'beat_count': row.get('beat_count', 0),
-                }
-        print(f"[*] 에이전트 상태 복구 완료: {len(rows)}개 에이전트 (DB → 메모리)")
-    except Exception as e:
-        print(f"[!] 에이전트 상태 복구 실패 (무시): {e}")
+    # 본체는 infra/lifecycle.py로 분리 (2026-07-06, Phase 2 Task 13 / R15).
+    # [불변식] AGENT_STATUS(가변 dict)·락·list_agent_status를 동일 identity로 주입 —
+    # 사본을 넘기면 대시보드가 조용히 빈 값을 표시한다.
+    _lifecycle.restore_agent_status_from_db(AGENT_STATUS, AGENT_STATUS_LOCK, list_agent_status)
 
 
 # 에이전트 상태 복구는 main()에서 ensure_schema 이후에 호출

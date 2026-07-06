@@ -9,9 +9,14 @@ DESCRIPTION: 프로세스 라이프사이클 정리 함수 모음.
 REVISION HISTORY:
 - 2026-04-20 Claude: server.py L4998~5176 분리 (Task 1.1)
                      원본 함수의 동작/주석 그대로 유지, 글로벌 의존성만 인자화
+- 2026-07-06 Claude: 서버 시작 프리로드/복구 2함수 흡수 (Phase 2 Task 13 / R15)
+                     load_task_logs_into_thoughts / restore_agent_status_from_db.
+                     [제약] early_data_dir는 반드시 caller(server.py) 기준 ./data 경로를
+                     주입 — 여기서 __file__로 계산하면 infra/ 경로로 오염됨.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -181,3 +186,78 @@ def cleanup_postgres(
             pass
     except Exception as e:
         print(f"[PG] PostgreSQL 종료 실패: {e}")
+
+
+def load_task_logs_into_thoughts(thought_logs: list, early_data_dir: Path) -> None:
+    """서버 시작 시 task_logs.jsonl의 최근 20개 항목을 thought_logs에 미리 로드합니다.
+    이렇게 해야 클라이언트 접속 즉시 과거 작업 내역이 사고 패널에 표시됩니다.
+
+    [경로 주의] early_data_dir는 caller(server.py) 기준 ./data 경로를 그대로 받는다.
+    원본은 이 함수가 서버 코드 상단(DATA_DIR 미정의 시점)에서 호출돼 __file__로 직접
+    경로를 계산했으나, infra로 분리되면서 __file__는 infra/ 경로가 되므로 반드시 주입.
+    """
+    log_path = early_data_dir / 'task_logs.jsonl'
+    if not log_path.exists():
+        return
+    try:
+        lines = [l.strip() for l in log_path.read_text(encoding='utf-8').splitlines() if l.strip()]
+        recent = lines[-20:] # 최근 20개만 로드
+        for line in recent:
+            try:
+                obj = json.loads(line)
+                thought_logs.append({
+                    'agent':     obj.get('agent', 'System'),
+                    'thought':   obj.get('task', ''),
+                    'tool':      None,
+                    'timestamp': obj.get('timestamp', ''),
+                    'level':     'info',
+                })
+            except Exception as e:
+                pass  # 개별 task_log 항목 파싱 실패 허용
+        print(f"[*] ThoughtTrace: {len(recent)}개 task_logs 항목 사전 로드 완료")
+    except Exception as e:
+        print(f"[!] ThoughtTrace 사전 로드 실패: {e}")
+
+
+def restore_agent_status_from_db(agent_status: dict, agent_status_lock, list_agent_status) -> None:
+    """서버 시작 시 PostgreSQL agent_heartbeats에서 에이전트 상태를 복구한다.
+
+    재시작해도 이전 에이전트 상태를 유지하여 대시보드가 즉시 현황을 보여준다.
+    5분 이상 heartbeat가 없으면 offline으로 표시한다.
+
+    [불변식] agent_status(가변 dict)·락·list_agent_status는 server.py와 동일 identity로
+    주입받아 그대로 변형한다 — 사본을 만들면 대시보드가 조용히 빈 값을 표시한다.
+    """
+    try:
+        rows = list_agent_status()
+        if not rows:
+            return
+        now_ts = time.time()
+        with agent_status_lock:
+            for row in rows:
+                agent_id = row.get('agent_id', '')
+                if not agent_id:
+                    continue
+                # last_beat ISO 문자열 → timestamp 변환
+                last_beat_str = row.get('last_beat', '')
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(last_beat_str)
+                    last_seen_ts = dt.timestamp()
+                except Exception:
+                    last_seen_ts = now_ts - 600  # 파싱 실패 시 10분 전으로 설정
+                # 5분 이상 지났으면 offline
+                age_sec = now_ts - last_seen_ts
+                if age_sec > 300:
+                    status = 'offline'
+                else:
+                    status = row.get('status', 'idle')
+                agent_status[agent_id] = {
+                    'status': status,
+                    'task': row.get('current_task'),
+                    'last_seen': last_seen_ts,
+                    'beat_count': row.get('beat_count', 0),
+                }
+        print(f"[*] 에이전트 상태 복구 완료: {len(rows)}개 에이전트 (DB → 메모리)")
+    except Exception as e:
+        print(f"[!] 에이전트 상태 복구 실패 (무시): {e}")
