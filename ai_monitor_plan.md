@@ -96,7 +96,7 @@ REVISION HISTORY:
 - 검증: 공통 3종 + **PTY 서버 기동 스모크**(터미널 슬롯 열기 → Node PTY 연결 확인).
 - 의존성: 없음 (파트 A와 독립)
 
-### [ ] Task 12 (R13): infra/session_parse.py 신규 — 세션 파싱
+### [x] Task 12 (R13): infra/session_parse.py 신규 — 세션 파싱 ✅
 - 파일: `.ai_monitor/infra/session_parse.py`🆕, `.ai_monitor/server.py`✏️
 - 방법: `_parse_session_tail`(70)·`_parse_antigravity_session`(64) top-level 함수를 이전(안전 — 클로저 아님). server.py는 import 후 재노출 or 호출부 경로 변경.
 - 검증: 공통 3종.
