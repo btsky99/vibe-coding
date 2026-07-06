@@ -219,6 +219,19 @@ def apply_update_from_temp(new_exe):
     with open(bat_path, "w", encoding="mbcs", errors="replace") as f:
         f.write(bat_content)
 
+    # [v3.7.244 사고 방지] 바로 아래 os._exit(0)는 atexit 정리(cleanup_child_procs/
+    # cleanup_pyinstaller_temp)를 통째로 건너뛴다 → 이 인스턴스의 node PTY 서버가 좀비로 남아
+    # 자기 _MEI\pty-server를 잠그고, _update.bat이 띄우는 새 EXE의 onefile 추출이 잠긴 잔여
+    # _MEI와 충돌해 "Failed to load Python DLL"로 부팅 실패한다. 부트로더는 Python보다 먼저라
+    # 새 인스턴스 내부 정리로는 못 막으므로, 교체되는 '이 프로세스'가 종료 직전 반드시 정리한다.
+    # install 전체가 교체되므로 exclude 없이(자기 _MEI 소속 node 포함) 정리.
+    try:
+        runtime_dir = Path(sys._MEIPASS).parent  # %APPDATA%\VibeCoding\runtime
+        from infra.pty_process import kill_runtime_mei_orphans
+        kill_runtime_mei_orphans(runtime_dir)
+    except Exception as _e:
+        logger.warning("runtime _MEI 좀비 정리 실패 (무시, 업데이트는 계속): %s", _e)
+
     subprocess.Popen(
         ["cmd.exe", "/c", str(bat_path)],
         creationflags=0x08000000,

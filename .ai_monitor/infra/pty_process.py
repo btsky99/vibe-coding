@@ -124,6 +124,102 @@ def kill_orphan_pty_servers(pty_server_state: dict) -> None:
         print(f"[PTY Cleanup] 좀비 정리 실패 (무시): {e}")
 
 
+def kill_runtime_mei_orphans(runtime_dir, exclude_mei: str = '',
+                             only_orphans: bool = False) -> list:
+    """고정 runtime_tmpdir(%APPDATA%\\VibeCoding\\runtime) 하위 _MEI* 추출 폴더에서
+    실행 중인 node.exe(PTY 서버 등)를 강제 종료하고, 종료한 PID 목록을 반환한다.
+
+    [WHY / 과거사고 v3.7.244] onefile 부트로더는 Python 코드보다 **먼저** python DLL을
+    로드한다. 업데이트 시 updater.apply_update_from_temp의 os._exit(0)가 atexit 정리를
+    통째로 건너뛰어, 이전 인스턴스의 node PTY 서버가 좀비로 남아 자기 _MEI\\pty-server를
+    잠근다. 다음(새 EXE) 부팅의 부트로더가 잠긴 잔여 _MEI와 충돌 → python DLL 부분 추출 →
+    "Failed to load Python DLL. LoadLibrary: 지정된 모듈을 찾을 수 없습니다" 부팅 실패 +
+    "Failed to remove temporary directory" 경고. 부트로더 단계라 앱 내부 정리로는 못 막으므로,
+    **이전 프로세스(updater 또는 정상 종료 경로)가 새 EXE 기동 전에 반드시 호출**해야 한다.
+
+    [제약/불변식] node.exe의 ExecutablePath가 runtime_dir 하위인 것만 대상 → 개발 인스턴스
+    (node가 프로젝트 node_modules/pty-server에서 실행)나 무관한 node는 절대 건드리지 않음.
+    exclude_mei가 주어지면 그 _MEI(현재 실행 인스턴스) 소속 node는 보호.
+
+    [only_orphans 모드 — 다중 인스턴스 보호] True면 node의 **부모(vibe-coding.exe)가
+    살아있는 경우 보호**하고, 부모가 죽은 진짜 좀비만 죽인다. 정상 종료/시작 경로에서 사용 —
+    동시에 켜둔 다른 설치 인스턴스의 살아있는 PTY 서버를 몰살하던 v3.7.122 사고 재발 방지.
+    False(업데이터)면 install 전체를 교체 중이므로 부모 생사 무관하게 모두 정리(자기 것 포함).
+
+    [플랫폼] wmic 의존(기존 kill_orphan_pty_servers와 동일 패턴). Win11 24H2+에서 wmic가
+    제거되면 이 함수는 조용히 no-op(전체 try/except) — 그 경우 CIM(Get-CimInstance Win32_Process)
+    전환 필요. 실패해도 기존 동작보다 나빠지지 않음(정리를 안 할 뿐).
+    """
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    rd = str(runtime_dir).replace('/', '\\').rstrip('\\').lower()
+    if not rd:
+        return []
+    killed = []
+    try:
+        # 1) only_orphans면 '살아있는 vibe-coding.exe PID 집합'을 먼저 수집(부모 생존 판정용)
+        live_parents = set()
+        if only_orphans:
+            try:
+                pres = subprocess.run(
+                    ['wmic', 'process', 'where',
+                     "name like 'vibe-coding%'", 'get', 'ProcessId', '/FORMAT:LIST'],
+                    capture_output=True, text=True, encoding='utf-8',
+                    errors='replace', creationflags=_no_window, timeout=5,
+                )
+                for line in pres.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith('ProcessId='):
+                        v = line[len('ProcessId='):].strip()
+                        if v.isdigit():
+                            live_parents.add(v)
+            except Exception:
+                # 부모 목록 수집 실패 시 안전 우선 — 아무도 안 죽임(보호)
+                return []
+
+        # 2) runtime 하위 node.exe 를 ExecutablePath + ParentProcessId 로 조회
+        res = subprocess.run(
+            ['wmic', 'process', 'where', "name='node.exe'",
+             'get', 'ProcessId,ParentProcessId,ExecutablePath', '/FORMAT:LIST'],
+            capture_output=True, text=True, encoding='utf-8',
+            errors='replace', creationflags=_no_window, timeout=5,
+        )
+        _pid = None
+        _ppid = None
+        _path = ''
+        # /FORMAT:LIST는 필드=값 줄을 (빈 줄 구분) 나열 — ProcessId를 쌍 완성 신호로 사용
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if line.startswith('ExecutablePath='):
+                _path = line[len('ExecutablePath='):]
+            elif line.startswith('ParentProcessId='):
+                _ppid = line[len('ParentProcessId='):].strip()
+            elif line.startswith('ProcessId='):
+                _pid = line[len('ProcessId='):].strip()
+                if _pid.isdigit() and _path:
+                    p = _path.replace('/', '\\').lower()
+                    under = p.startswith(rd)
+                    excluded = bool(exclude_mei) and exclude_mei.lower() in p
+                    # only_orphans: 부모가 살아있는 vibe-coding이면 보호(진짜 좀비만 kill)
+                    protected_parent = only_orphans and _ppid in live_parents
+                    if under and not excluded and not protected_parent:
+                        try:
+                            subprocess.call(
+                                ['taskkill', '/F', '/T', '/PID', _pid],
+                                creationflags=_no_window, timeout=5,
+                            )
+                            killed.append(_pid)
+                        except Exception:
+                            pass
+                _pid = None
+                _ppid = None
+                _path = ''
+        if killed:
+            print(f"[cleanup] runtime _MEI 좀비 node 종료: {killed}")
+    except Exception as e:
+        print(f"[cleanup] runtime _MEI 좀비 정리 실패 (무시): {e}")
+    return killed
+
+
 def ensure_pty_node_modules(base_dir) -> None:
     """PTY 서버의 node_modules가 현재 PC에서 유효한지 확인하고, 필요하면 npm rebuild를 실행합니다.
     node-pty는 C++ 네이티브 모듈이라 빌드한 PC의 Node ABI 버전에 종속됩니다.

@@ -100,6 +100,17 @@ def cleanup_pyinstaller_temp() -> None:
         runtime_dir = Path(current_mei).parent if current_mei else None
         if not runtime_dir or not runtime_dir.exists():
             return
+        # [v3.7.244 사고] stale _MEI를 잠근 좀비 node(PTY 서버)를 먼저 죽여야 rmtree가 실제로 성공.
+        # ignore_errors=True rmtree만으로는 잠긴 폴더가 부분 상태로 남아 다음 부팅의 DLL 추출과
+        # 충돌한다. 현재 인스턴스 _MEI 소속 node는 보호(exclude).
+        try:
+            from infra.pty_process import kill_runtime_mei_orphans
+            # only_orphans=True: 부모(vibe-coding.exe)가 죽은 진짜 좀비만 정리 →
+            # 동시 실행 중인 다른 설치 인스턴스의 살아있는 PTY 서버는 보호.
+            kill_runtime_mei_orphans(runtime_dir, exclude_mei=Path(current_mei).name,
+                                     only_orphans=True)
+        except Exception:
+            pass
         for item in runtime_dir.iterdir():
             if item.name.startswith('_MEI') and item.is_dir() and str(item) != current_mei:
                 try:
