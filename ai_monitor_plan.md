@@ -90,7 +90,7 @@ REVISION HISTORY:
 
 ## 파트 B — infra 추출 (안전분만)
 
-### [ ] Task 11 (R10): infra/pty_process.py 신규 — PTY 프로세스 🔴클로저
+### [x] Task 11 (R10): infra/pty_process.py 신규 — PTY 프로세스 🔴클로저 ✅ 1d5e631
 - 파일: `.ai_monitor/infra/pty_process.py`🆕, `.ai_monitor/server.py`✏️
 - 방법: **착수 전 캡처변수 전수조사** — `_kill_orphan_pty_servers`·`_ensure_pty_node_modules`·`_start_node_pty_server`·`_pty_watchdog_loop`·`_get_node_pty_sessions`는 main() 내부 nested 클로저(현재 `_pty_server_state` dict로 우회 중). 각 함수가 캡처하는 외부 변수(WS_PORT, BASE_DIR, _pty_server_state 등) 전부 목록화 → top-level 함수로 승격하며 명시적 파라미터/상태객체로 전환. server.py는 `infra/pty_process.py` import 후 main()에서 상태객체 넘겨 호출.
 - 검증: 공통 3종 + **PTY 서버 기동 스모크**(터미널 슬롯 열기 → Node PTY 연결 확인).
