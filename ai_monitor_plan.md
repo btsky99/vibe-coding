@@ -112,10 +112,13 @@ REVISION HISTORY:
 - 검증: 공통 3종.
 - 의존성: 없음
 
-### [ ] Task 14: Phase 2 마무리 — 문서/메모리/줄수 확인
+### [x] Task 14: Phase 2 마무리 — 문서/메모리/줄수 확인 ✅ (목표 미달 명시)
 - 파일: `project_server_split_plan.md`(메모리)✏️, `PROJECT_MAP.md`(자동생성)
 - 방법: `wc -l .ai_monitor/server.py` 최종 확인(~1950 목표). 메모리에 Phase 2 완료 + 실측 줄수 + Phase 3(R14 이중전역/main 조사) 명시. PROJECT_MAP 자동 재생성.
 - 검증: server.py < 2000줄 확인. pytest 105 최종 통과.
+- **실측(2026-07-06): server.py 3597 → 2383줄 (−1214, −33.8%). ⚠️ 목표 ~1950/게이트 <2000 미달(+433).**
+  단일블록·인라인·헬퍼 추출은 완전 소진 — 남은 부피(legacy elif+main+SSEHandler)는 아키텍처 재구조화라 Phase 3.
+  pytest 105 통과, PROJECT_MAP 재생성 완료. 상세: 메모리 `project_server_split_plan.md` "Phase 2 종결" 섹션.
 - 의존성: Task 1~13
 
 ---
