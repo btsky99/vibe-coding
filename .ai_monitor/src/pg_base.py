@@ -93,6 +93,41 @@ def set_project_db(db_name: str):
             pass
         _pg_conn = None
 
+
+def set_pg_port(port) -> None:
+    """server.py ensure_postgres_running()에서 호출 — 동적 폴백으로 확정된 실제 PG 포트를
+    pg_base 전역에 전파한다. set_project_db(DB)와 대칭인 포트 push 함수.
+
+    [WHY] PG_PORT(위 line 40)는 import 시점 env 1회 평가라, 이미 import된 server 프로세스
+      내부에는 동적 포트 폴백(기본 5433 점유 → 5434 이동)이 반영되지 않는다
+      (os.environ['VIBE_PG_PORT'] write-back은 이후 spawn되는 자식 프로세스의 fresh import에만
+      효과). 그 탓에 psycopg2 단일/풀 커넥션(_get_pg_conn·get_pool_conn)과 psql.exe 폴백
+      (_run_psql)이 전부 stale 5433을 사용 → 폴백 발동 환경에서만 터지는 잠복 연결 버그.
+      이 push 함수로 pg_base.PG_PORT를 단일 진실소스로 만들어 세 소비처를 한 번에 동기화한다.
+    [불변식] 포트가 실제로 바뀔 때만 기존 커넥션을 폐기한다 — 단일 _pg_conn + 풀 _pool 전량.
+      옛 포트로 맺어둔 커넥션을 재사용하면 엉뚱한 인스턴스에 접속(set_project_db 폐기와 동형).
+    [제약] 호출 시점은 부팅 초기 ensure_postgres_running(단일 스레드) 전제라 _pg_conn은 lock
+      없이 접근(set_project_db와 동일). _pool은 API 스레드 접근 가능성 대비 _pool_lock 보호.
+    """
+    global PG_PORT, _pg_conn
+    new_port = str(port)
+    if new_port == PG_PORT:
+        return
+    PG_PORT = new_port
+    if _pg_conn is not None:
+        try:
+            _pg_conn.close()
+        except Exception:
+            pass
+        _pg_conn = None
+    with _pool_lock:
+        for _conn, _db in _pool:
+            try:
+                _conn.close()
+            except Exception:
+                pass
+        _pool.clear()
+
 # ── psycopg2 직접 연결 (psql.exe subprocess 대비 ~50x 빠름) ─────────────────
 # psycopg2-binary가 설치되어 있으면 직접 연결, 없으면 psql.exe subprocess 폴백
 try:

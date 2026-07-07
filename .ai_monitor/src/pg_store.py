@@ -48,6 +48,7 @@ from src.pg_base import (
     query_rows,
     return_pool_conn,
     set_project_db,
+    set_pg_port,
 )
 
 # ── 스키마 DDL + 레거시 마이그레이션 (pg_schema) ────────────────────────────

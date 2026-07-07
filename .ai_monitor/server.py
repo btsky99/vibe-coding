@@ -299,6 +299,10 @@ def ensure_postgres_running() -> None:
         PG_CTL_BIN, INITDB_BIN, _PG_DATA_DIR, PG_PORT
     )
     os.environ['VIBE_PG_PORT'] = str(PG_PORT)
+    # [R14 포트 이중전역 통합] 확정 포트를 pg_base 전역에 push — set_project_db(DB)와 대칭.
+    #   이걸 빼면 psycopg2 풀/psql 폴백이 stale import-time 포트(5433)를 써서, 동적 폴백
+    #   발동 환경에서만 터지는 잠복 연결버그. 아래 run_pg_sql(스키마 초기화) 호출 전에 동기화.
+    _pg_store_mod.set_pg_port(PG_PORT)
     if not PG_CTL_BIN.exists():
         return  # 개발/미설치 환경은 스키마 배치 스킵
     try:
