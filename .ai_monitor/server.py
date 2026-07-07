@@ -1035,6 +1035,80 @@ def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_
 def _g_kanban_activity(h, pp):     dashboard_api.pg_activity(h, run_pg_sql_csv, _current_project_id())
 def _g_memory_db_info(h, pp):      memory_api.db_info(h, DATA_DIR, PG_PORT, PG_PROJECT_DB, query_rows)
 
+# GET exact 라우트 (Phase 2 R16: do_GET 잔여 legacy elif 완전 흡수 → 테이블 완성).
+# [WHY] do_POST는 이미 exact→prefix→cond 뒤 404 폴백뿐(legacy 없음). do_GET만 elif 11종 잔류라
+#   비대칭이었다. 순수위임 6·SSE 3·인라인 3을 모두 wrapper화해 GET_ROUTES로 흡수, do_GET을
+#   exact→prefix→cond→(SPA else 폴백)만 남긴다. else 정적 폴백은 테이블 미등록 유지(아래 [불변식]).
+# [순수위임 6종] 원본 elif가 이미 1줄 모듈 위임 → wrapper는 인자 주입만.
+def _g_projects(h, pp):            projects_api.handle_get(h, PROJECTS_FILE)
+def _g_install_skills(h, pp):      install_api.install_skills(h, BASE_DIR, SCRIPTS_DIR, ensure_schema)
+def _g_config_telegram(h, pp):     h._handle_telegram_config_get()
+def _g_check_update_ready(h, pp):  update_api.check_update_ready(h, DATA_DIR, __version__)
+def _g_trigger_update_chk(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
+def _g_soft_update_check(h, pp):   update_api.soft_update_check(h, DATA_DIR, _soft_src_dir())
+# [불변식] heal은 전체(global) 집계 — project_id 슬러그 불일치로 0 오도 방지(설치/dev 분기).
+def _g_heal_metrics(h, pp):        heal_api.handle_get(h, '')
+
+# SSE 실시간 스트리밍 3종 → api/events_api.py.
+# [불변식] THOUGHT_LOGS/THOUGHT_CLIENTS/AGENT_CLIENTS/FS_CLIENTS/_SSE_LOCK는 전역 참조로 주입 —
+#   POST writer(_p_thoughts_add) 및 fs_watcher/broadcast worker와 동일 객체 identity 유지 필수.
+#   사본 주입 시 구독자는 붙어있는데 이벤트 미도달(런타임에만 드러나는 치명 버그).
+def _g_events_thoughts(h, pp):     events_api.stream_thoughts(h, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK)
+def _g_events_agent(h, pp):        events_api.stream_agent(h, AGENT_CLIENTS, _SSE_LOCK)
+def _g_events_fs(h, pp):           events_api.stream_fs(h, FS_CLIENTS, _SSE_LOCK)
+
+# 인라인 로직 3종 — server.py 고유(프로세스 정리·클립보드·하트비트)라 모듈 분리 대신 wrapper 바디 유지.
+# [불변식] _cors_origin/_cleanup_* 은 handler 메서드·모듈 전역 → 호출 시점 해석(late-binding).
+def _g_heartbeat(h, pp):
+    # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
+    h.send_response(200)
+    h.send_header('Content-Type', 'application/json;charset=utf-8')
+    h.send_header('Access-Control-Allow-Origin', h._cors_origin())
+    h.end_headers()
+    h.wfile.write(json.dumps({"status": "ok", "ts": datetime.now().isoformat()}).encode('utf-8'))
+
+def _g_shutdown(h, pp):
+    # 안전한 셧다운: 서버와 자식 프로세스를 정리한 뒤 종료
+    # [설계 의도] 프론트엔드 TopMenuBar에서 호출. 확인 다이얼로그를 거친 후에만 도달.
+    # 좀비 프로세스 방지를 위해 PTY 세션 정리 후 os._exit() 호출.
+    h.send_response(200)
+    h.send_header('Content-Type', 'application/json;charset=utf-8')
+    h.send_header('Access-Control-Allow-Origin', h._cors_origin())
+    h.end_headers()
+    h.wfile.write(json.dumps({"status": "ok", "message": "서버 종료 중..."}).encode('utf-8'))
+    # 비동기로 0.5초 후 종료 (응답 전송 완료 대기)
+    import threading
+    def _delayed_shutdown():
+        time.sleep(0.5)
+        # 자식 프로세스(PTY 서버, 워치독 등) 먼저 종료 — os._exit()는 atexit 핸들러를 실행하지 않으므로
+        # 여기서 명시적으로 호출해야 node.exe 등이 _MEI 임시 폴더를 해제하여 정리 가능
+        _cleanup_child_procs()
+        time.sleep(1)  # 자식 프로세스 종료 대기 — 파일 핸들 해제 시간 확보
+        # PyInstaller 임시 디렉터리(_MEI*) 잔여물 정리
+        _cleanup_pyinstaller_temp()
+        os._exit(0)
+    threading.Thread(target=_delayed_shutdown, daemon=True).start()
+
+def _g_copy_path(h, pp):
+    h.send_response(200)
+    h.send_header('Content-Type', 'application/json;charset=utf-8')
+    h.send_header('Access-Control-Allow-Origin', h._cors_origin())
+    h.end_headers()
+    query = parse_qs(pp.query)
+    target_path = query.get('path', [''])[0]
+    try:
+        # Windows 클립보드에 경로 복사
+        # CREATE_NO_WINDOW: PowerShell 콘솔 창이 순간 깜빡이는 문제 방지
+        if os.name == 'nt':
+            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            subprocess.run(
+                ['powershell', '-WindowStyle', 'Hidden', '-Command', f'Set-Clipboard -Value "{target_path}"'],
+                check=True, encoding='utf-8', creationflags=_no_window
+            )
+        h.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
+    except Exception as e:
+        h.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
+
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
@@ -1055,6 +1129,20 @@ GET_ROUTES = {
     '/api/vibe/skills': _g_vibe_skills,
     '/api/kanban/pg-activity': _g_kanban_activity,
     '/api/memory/db-info': _g_memory_db_info,
+    # Phase 2 R16 — do_GET 잔여 legacy elif 흡수. 순수위임 6 + SSE 3 + 인라인 3.
+    '/api/projects': _g_projects,
+    '/api/install-skills': _g_install_skills,
+    '/api/config/telegram': _g_config_telegram,
+    '/api/check-update-ready': _g_check_update_ready,
+    '/api/trigger-update-check': _g_trigger_update_chk,
+    '/api/soft-update/check': _g_soft_update_check,
+    '/api/heal/metrics': _g_heal_metrics,
+    '/api/events/thoughts': _g_events_thoughts,
+    '/api/events/agent': _g_events_agent,
+    '/api/events/fs': _g_events_fs,
+    '/api/heartbeat': _g_heartbeat,
+    '/api/shutdown': _g_shutdown,
+    '/api/copy-path': _g_copy_path,
 }
 
 # GET 복합조건 라우트 테이블 (Phase 2 R9) — (조건fn, 핸들러fn) 리스트.
@@ -1437,120 +1525,16 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _cfn(self, parsed_path)
                 return
 
-        # ─── SSE 실시간 스트리밍 3종 — api/events_api.py로 분리 (공유 집합/락 참조 주입) ───
-        if path == '/api/events/thoughts':
-            events_api.stream_thoughts(self, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK)
-            return
-        if path == '/api/events/agent':
-            events_api.stream_agent(self, AGENT_CLIENTS, _SSE_LOCK)
-            return
-        if path == '/api/events/fs':
-            events_api.stream_fs(self, FS_CLIENTS, _SSE_LOCK)
-            return
+        # [Phase 2 R16] SSE 3종·heartbeat·shutdown·copy-path·projects·install-skills·config/telegram·
+        #   check-update-ready·trigger-update-check·soft-update/check·heal/metrics 잔여 elif 11종을
+        #   모두 GET_ROUTES exact로 흡수 완료 → do_GET은 do_POST와 동형(exact→prefix→cond→SPA 폴백).
+        #   조건 리터럴 원본은 각 _g_* wrapper와 GET_ROUTES 키에 verbatim 보존(완전성 가드 대응).
 
-        # ─── GET /stream(SSE) → api/logs_api.py 분리 (Phase 2 R3) ───
-        #   테이블 _g_stream이 처리(late-binding으로 PG_PORT/PG_PROJECT_DB 최신값 주입).
-        if parsed_path.path == '/api/heartbeat':
-            # 하트비트 수신 — 자동 종료 로직 제거됨 (밤새 실행 지원)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "ts": datetime.now().isoformat()}).encode('utf-8'))
-        elif parsed_path.path == '/api/projects':
-            projects_api.handle_get(self, PROJECTS_FILE)
-        # [Phase 2 R5] GET /api/agents → GET_ROUTES(_g_agents, dashboard_api)로 이전.
-        # [Phase 2 R8] GET /api/config → GET_ROUTES(_g_config, config_api)로 이전.
-        # [Phase 2 R9] GET install-cli 3종 → GET_COND_ROUTES(_cg_install_cli, _g_install_cli)로 이전.
-        elif parsed_path.path == '/api/shutdown':
-            # 안전한 셧다운: 서버와 자식 프로세스를 정리한 뒤 종료
-            # [설계 의도] 프론트엔드 TopMenuBar에서 호출. 확인 다이얼로그를 거친 후에만 도달.
-            # 좀비 프로세스 방지를 위해 PTY 세션 정리 후 os._exit() 호출.
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "message": "서버 종료 중..."}).encode('utf-8'))
-            # 비동기로 0.5초 후 종료 (응답 전송 완료 대기)
-            import threading
-            def _delayed_shutdown():
-                time.sleep(0.5)
-                # 자식 프로세스(PTY 서버, 워치독 등) 먼저 종료 — os._exit()는 atexit 핸들러를 실행하지 않으므로
-                # 여기서 명시적으로 호출해야 node.exe 등이 _MEI 임시 폴더를 해제하여 정리 가능
-                _cleanup_child_procs()
-                time.sleep(1)  # 자식 프로세스 종료 대기 — 파일 핸들 해제 시간 확보
-                # PyInstaller 임시 디렉터리(_MEI*) 잔여물 정리
-                _cleanup_pyinstaller_temp()
-                os._exit(0)
-            threading.Thread(target=_delayed_shutdown, daemon=True).start()
-        # [2026-03-22] /api/files → files_api.py로 위임됨 (상단 모듈 위임 섹션)
-        elif parsed_path.path == '/api/install-skills':
-            install_api.install_skills(self, BASE_DIR, SCRIPTS_DIR, ensure_schema)
-
-        # [Phase 2 R9] GET hive(prefix2 /api/hive//api/orchestrator/ + exact8) →
-        #   GET_COND_ROUTES(_cg_hive, _g_hive)로 이전. agent-quota 등 exact8 allowlist는 _cg_hive에 보존.
-        # [Phase 2 R9] /api/git/·/api/agent/·/api/pty/ dead 폴백 제거 — GET_PREFIX_ROUTES 선점(도달 불가).
-        # ── Telegram 설정 API ──────────────────────────────────────────
-        elif parsed_path.path == '/api/config/telegram':
-            self._handle_telegram_config_get()
-
-        # [Phase 2 R9] GET memory(exact2)·tasks(exact4 + /api/tasks/ endswith /comments)·files(exact2) →
-        #   GET_COND_ROUTES(_cg_memory/_cg_tasks/_cg_files)로 이전.
-        # [Phase 2 R9] /api/experience·zettel·codegraph·office·tools dead 폴백 제거 — GET_PREFIX_ROUTES 선점(도달 불가).
-
-        # /api/help, /api/image-file → api/static_api.py 분리 (Phase 2 R4, 테이블 _g_help/_g_image_file 처리)
-        # [2026-03-22] /api/read-file → files_api.py로 위임됨 (상단 모듈 위임 섹션)
-
-        # [2026-03-22 추가] 서버 로그 뷰어 API — server_error.log + pgsql.log 내용 반환
-        # 환경설정(보기 메뉴)에서 로그를 실시간으로 확인하고 클립보드 복사 가능
-        # /api/server-logs → api/logs_api.py 분리 (Phase 2 R3, 테이블 _g_server_logs 처리)
-
-        elif parsed_path.path == '/api/check-update-ready':
-            update_api.check_update_ready(self, DATA_DIR, __version__)
-
-        elif parsed_path.path == '/api/trigger-update-check':
-            update_api.trigger_update_check(self, DATA_DIR)
-
-        elif parsed_path.path == '/api/soft-update/check':
-            update_api.soft_update_check(self, DATA_DIR, _soft_src_dir())
-
-        elif parsed_path.path == '/api/heal/metrics':
-            # [설계] 전체(global) 집계 — CLI heal_report와 일치. project_id 슬러그 불일치로
-            #   숫자가 0으로 오도되는 것 방지(설치/dev 슬러그 분기 [[project_installed_empty_panels]]).
-            heal_api.handle_get(self, '')
-
-        elif parsed_path.path == '/api/copy-path':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json;charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', self._cors_origin())
-            self.end_headers()
-            query = parse_qs(parsed_path.query)
-            target_path = query.get('path', [''])[0]
-            try:
-                # Windows 클립보드에 경로 복사
-                # CREATE_NO_WINDOW: PowerShell 콘솔 창이 순간 깜빡이는 문제 방지
-                if os.name == 'nt':
-                    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                    subprocess.run(
-                        ['powershell', '-WindowStyle', 'Hidden', '-Command', f'Set-Clipboard -Value "{target_path}"'],
-                        check=True, encoding='utf-8', creationflags=_no_window
-                    )
-                self.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-        # /api/messages → api/logs_api.py 분리 (Phase 2 R3, 테이블 _g_messages 처리)
-        # [2026-03-22] /api/tasks, /api/tasks/kanban, /api/task-logs → tasks_api.py로 위임됨
-
-        # [Phase 2 R8] GET /api/kanban/pg-activity → GET_ROUTES(_g_kanban_activity, dashboard_api).
-        # [Phase 2 R8] GET /api/memory/db-info → GET_ROUTES(_g_memory_db_info, memory_api).
-
-        else:
-            # do_GET 최후미 폴백 — Vite dist 정적 서빙 → api/static_api.py로 분리(Phase 2 R4).
-            # [불변식] 이 else는 exact/prefix/legacy 어디에도 안 걸린 모든 GET의 SPA 폴백.
-            #   테이블로 옮기면 미매칭 GET이 404가 되어 SPA 라우팅이 깨진다 — 반드시 최후미 유지.
-            # [경로] STATIC_DIR은 동적 폴백(alt_dist)으로 갱신될 수 있어 호출 시점 값을 주입.
-            static_api.serve(self, parsed_path.path, STATIC_DIR)
+        # do_GET 최후미 폴백 — Vite dist 정적 서빙 → api/static_api.py로 분리(Phase 2 R4).
+        # [불변식] exact/prefix/cond 어디에도 안 걸린 모든 GET의 SPA 폴백. 테이블 등록 금지 —
+        #   미매칭 GET이 404가 되어 SPA 라우팅이 깨진다(반드시 최후미 무조건 실행).
+        # [경로] STATIC_DIR은 동적 폴백(alt_dist)으로 갱신될 수 있어 호출 시점 값을 주입.
+        static_api.serve(self, parsed_path.path, STATIC_DIR)
 
     def do_OPTIONS(self):
         self.send_response(200)
