@@ -271,14 +271,9 @@ PG_PROJECT_DB: str = "postgres"
 from src import pg_store as _pg_store_mod
 _pg_pool = _pg_store_mod._pool
 _pg_pool_lock = _pg_store_mod._pool_lock
-
-
-def _get_pg_conn(db: str = "postgres"):
-    return _pg_store_mod.get_pool_conn(db)
-
-
-def _return_pg_conn(conn, db: str = "postgres") -> None:
-    _pg_store_mod.return_pool_conn(conn, db)
+# [R14] _get_pg_conn/_return_pg_conn 얇은 위임 제거 — run_pg_sql/csv를 pg_base로 이관하며
+#   유일 소비처가 사라져 죽은 코드가 됨. 외부(office_api/pg_tasks)는 pg_store의 동명 함수를
+#   직접 import하므로 영향 없음.
 
 # DB 데이터: %APPDATA%\VibeCoding\pgdata (배포/개발 모두 동일)
 # [2026-04-05 Claude] 개발 모드에서 소스 트리 내 data/ 사용 시 PG 버전 불일치 문제 발생
@@ -324,70 +319,12 @@ def _init_project_db(project_id: str) -> None:
     )
 
 
-def run_pg_sql(sql: str, params: tuple = None, db: str = None):
-    """PostgreSQL SQL 실행. psycopg2 우선, 미설치 시 psql.exe subprocess 폴백.
-
-    params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
-    psycopg2: %s placeholder, psql 폴백: params가 있으면 psycopg2.sql.SQL로 렌더링 후 전달.
-    db=None이면 PG_PROJECT_DB(프로젝트별 DB)를 사용.
-    """
-    if db is None:
-        db = PG_PROJECT_DB
-    # psycopg2 커넥션 풀 사용 (매번 connect 대신 재사용하여 오버헤드 제거)
-    try:
-        import psycopg2
-        conn = _get_pg_conn(db)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                try:
-                    rows = cur.fetchall()
-                    # psql 텍스트 출력과 호환되는 형식으로 반환 (RETURNING id 등)
-                    result = '\n'.join(str(row[0]) for row in rows)
-                    _return_pg_conn(conn, db)
-                    return result
-                except Exception as e:
-                    _return_pg_conn(conn, db)
-                    return ''  # 결과 없음 허용 (INSERT/UPDATE 등 반환값 없는 SQL)
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            # 커넥션 끊김 — 폐기하고 에러로 처리 (다음 호출 시 새 커넥션 생성됨)
-            try:
-                conn.close()
-            except Exception:
-                pass
-            print(f"[Postgres psycopg2 ERROR] 커넥션 끊김, 폐기 후 재시도 필요")
-            return None
-        except Exception as e:
-            # 쿼리 에러 — 커넥션 자체는 살아있을 수 있으므로 풀에 반환
-            _return_pg_conn(conn, db)
-            print(f"[Postgres psycopg2 ERROR] {e}")
-            return None
-    except ImportError:
-        pass  # psycopg2 없으면 subprocess 폴백
-    except Exception as e:
-        print(f"[Postgres psycopg2 ERROR] {e}")
-        return None
-    # psql.exe subprocess 폴백 — params가 있으면 수동 이스케이프 (psql은 parameterized 미지원)
-    if params:
-        def _pg_escape(v):
-            if v is None:
-                return 'NULL'
-            s = str(v).replace("'", "''")
-            return f"'{s}'"
-        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
-    if not PG_BIN.exists():
-        return None
-    try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        res = subprocess.run(
-            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "-c", sql],
-            capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
-        )
-        return res.stdout.strip()
-    except Exception as e:
-        print(f"[Postgres ERROR] {e}")
-        return None
+# [이관 R14] run_pg_sql/csv 본문을 pg_base로 이동 — DB I/O는 데이터 계층에 집중
+#   (architecture.md "DB 쓰기 함수는 pg_store에 집중"). server 측은 얇은 재노출만 유지 →
+#   호출부 무변경(from server import run_pg_sql, wrapper 인자 주입 모두 그대로 동작).
+#   db=None 기본은 pg_base.PG_DB — _init_project_db가 set_project_db로 PG_PROJECT_DB와
+#   동일값 동기화하므로 이관 전(PG_PROJECT_DB 기본)과 동작 동일.
+run_pg_sql = _pg_store_mod.run_pg_sql
 
 _pgmq_available: bool | None = None  # pgmq 확장 존재 여부 캐시 — 한 번 확인 후 재확인 안 함
 
@@ -415,64 +352,8 @@ def thought_to_pg(agent: str, skill: str, thought: dict, parent_id: int = None, 
     """[2026-03-22] 지식그래프 제거됨 — 호출부 호환을 위해 no-op 스텁 유지."""
     return 0
 
-def run_pg_sql_csv(sql: str, params: tuple = None, db: str = None) -> list:
-    """Postgres 쿼리 결과를 dict 리스트로 반환. psycopg2 우선, 없으면 psql --csv 폴백.
-
-    params를 지정하면 parameterized query로 실행 (SQL 인젝션 방지).
-    db=None이면 PG_PROJECT_DB(프로젝트별 DB)를 사용.
-    """
-    if db is None:
-        db = PG_PROJECT_DB
-    # psycopg2 커넥션 풀 사용 (RealDictCursor로 dict 반환)
-    try:
-        import psycopg2
-        import psycopg2.extras
-        conn = _get_pg_conn(db)
-        try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql, params)
-                result = [dict(row) for row in cur.fetchall()]
-                _return_pg_conn(conn, db)
-                return result
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            # 커넥션 끊김 — 폐기 (다음 호출 시 새 커넥션 생성됨)
-            try:
-                conn.close()
-            except Exception:
-                pass
-            print(f"[Postgres psycopg2 CSV ERROR] 커넥션 끊김, 폐기")
-            return []
-        except Exception as e:
-            _return_pg_conn(conn, db)
-            print(f"[Postgres psycopg2 CSV ERROR] {e}")
-            return []
-    except ImportError:
-        pass
-    except Exception as e:
-        print(f"[Postgres psycopg2 CSV ERROR] {e}")
-        return []
-    # psql.exe --csv 폴백 — params가 있으면 수동 이스케이프
-    if params:
-        def _pg_escape(v):
-            if v is None:
-                return 'NULL'
-            s = str(v).replace("'", "''")
-            return f"'{s}'"
-        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
-    if not PG_BIN.exists():
-        return []
-    try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        res = subprocess.run(
-            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "--csv", "-c", sql],
-            capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
-        )
-        import csv, io
-        return list(csv.DictReader(io.StringIO(res.stdout.strip())))
-    except Exception as e:
-        print(f"[Postgres CSV ERROR] {e}")
-        return []
+# [이관 R14] pg_base.run_pg_sql_csv 재노출 (본문 이동, 위 run_pg_sql과 동일 규칙).
+run_pg_sql_csv = _pg_store_mod.run_pg_sql_csv
 
 # ─────────────────────────────────────────────────────────────────────────────
 

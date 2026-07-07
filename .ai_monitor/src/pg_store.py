@@ -47,6 +47,8 @@ from src.pg_base import (
     get_pool_conn,
     query_rows,
     return_pool_conn,
+    run_pg_sql,
+    run_pg_sql_csv,
     set_project_db,
     set_pg_port,
 )

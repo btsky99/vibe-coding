@@ -225,6 +225,125 @@ def return_pool_conn(conn, db: str = "postgres") -> None:
                 pass
 
 
+# ── 범용 SQL 실행 (텍스트/CSV) ──────────────────────────────────────────────
+# [이관 R14] server.py에서 pg_base로 이동 — DB I/O는 데이터 계층에 집중(architecture.md
+#   "DB 쓰기 함수는 pg_store에 집중"). psql 폴백 포트가 이제 set_pg_port로 동기화된
+#   pg_base.PG_PORT(단일 진실소스)를 써서, 흡수 전 잠복하던 stale-포트 회귀가 해소됨.
+# [불변식] db=None → PG_DB(set_project_db로 런타임 동기화되는 현재 프로젝트 DB).
+#   psycopg2 풀 경로는 get_pool_conn/return_pool_conn(동일 모듈) 직접 사용.
+def run_pg_sql(sql: str, params: tuple = None, db: str = None):
+    """PostgreSQL SQL 실행. psycopg2 풀 우선, 미설치 시 psql.exe subprocess 폴백.
+    params 지정 시 parameterized query(psycopg2 %s / psql은 수동 이스케이프).
+    반환: 첫 컬럼을 개행 join한 문자열(psql 텍스트 출력 호환) · '' (반환행 없음) · None(에러).
+    """
+    if db is None:
+        db = PG_DB
+    try:
+        import psycopg2
+        conn = get_pool_conn(db)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                try:
+                    rows = cur.fetchall()
+                    result = '\n'.join(str(row[0]) for row in rows)
+                    return_pool_conn(conn, db)
+                    return result
+                except Exception:
+                    return_pool_conn(conn, db)
+                    return ''  # 반환값 없는 SQL(INSERT/UPDATE 등) 허용
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            try:
+                conn.close()
+            except Exception:
+                pass
+            print("[Postgres psycopg2 ERROR] 커넥션 끊김, 폐기 후 재시도 필요")
+            return None
+        except Exception as e:
+            return_pool_conn(conn, db)
+            print(f"[Postgres psycopg2 ERROR] {e}")
+            return None
+    except ImportError:
+        pass  # psycopg2 없으면 subprocess 폴백
+    except Exception as e:
+        print(f"[Postgres psycopg2 ERROR] {e}")
+        return None
+    if params:
+        def _pg_escape(v):
+            if v is None:
+                return 'NULL'
+            s = str(v).replace("'", "''")
+            return f"'{s}'"
+        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
+    if not PG_BIN.exists():
+        return None
+    try:
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        res = subprocess.run(
+            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "-c", sql],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        return res.stdout.strip()
+    except Exception as e:
+        print(f"[Postgres ERROR] {e}")
+        return None
+
+
+def run_pg_sql_csv(sql: str, params: tuple = None, db: str = None) -> list:
+    """쿼리 결과를 dict 리스트로 반환. psycopg2(RealDictCursor) 우선, psql --csv 폴백.
+    [이관 R14] server.py→pg_base. db=None → PG_DB. 에러 시 빈 리스트.
+    """
+    if db is None:
+        db = PG_DB
+    try:
+        import psycopg2
+        import psycopg2.extras
+        conn = get_pool_conn(db)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, params)
+                result = [dict(row) for row in cur.fetchall()]
+                return_pool_conn(conn, db)
+                return result
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            try:
+                conn.close()
+            except Exception:
+                pass
+            print("[Postgres psycopg2 CSV ERROR] 커넥션 끊김, 폐기")
+            return []
+        except Exception as e:
+            return_pool_conn(conn, db)
+            print(f"[Postgres psycopg2 CSV ERROR] {e}")
+            return []
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[Postgres psycopg2 CSV ERROR] {e}")
+        return []
+    if params:
+        def _pg_escape(v):
+            if v is None:
+                return 'NULL'
+            s = str(v).replace("'", "''")
+            return f"'{s}'"
+        sql = sql.replace('%s', '{}').format(*[_pg_escape(p) for p in params])
+    if not PG_BIN.exists():
+        return []
+    try:
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        res = subprocess.run(
+            [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "--csv", "-c", sql],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            creationflags=_no_window
+        )
+        return list(csv.DictReader(io.StringIO(res.stdout.strip())))
+    except Exception as e:
+        print(f"[Postgres CSV ERROR] {e}")
+        return []
+
+
 def _now_iso() -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%S')
 
