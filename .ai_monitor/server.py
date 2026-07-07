@@ -967,8 +967,10 @@ def _g_git(h, pp):        git_api.handle_get(h, pp.path, parse_qs(pp.query), BAS
 def _g_agent(h, pp):      agent_api.handle_get(h, pp.path)
 def _g_pty(h, pp):        pty_api.handle_get(h, pp.path, parse_qs(pp.query))
 def _g_experience(h, pp): experience_api.handle_get(h, pp.path, parse_qs(pp.query))
-def _g_zettel(h, pp):     zettel_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
-def _g_codegraph(h, pp):  codegraph_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+# [R14] PROJECT_ID는 callee에서 요청 project_id 누락 시의 fallback default — 현재 활성 폴더
+#   슬러그(_current_project_id())를 넘겨 폴더 전환 후에도 기본값이 옛 프로젝트로 새지 않게 한다.
+def _g_zettel(h, pp):     zettel_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
+def _g_codegraph(h, pp):  codegraph_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 def _g_office(h, pp):     _proxy_to_office_server(h, method='GET')
 def _g_tools(h, pp):
     from api import tools_api
@@ -1185,13 +1187,16 @@ def _g_hive(h, pp):
     )
 
 # memory: exact 2종 → memory_api 위임.
+# [R14 버그수정] /api/memory·/api/project-info는 요청 런타임 조회다. static PROJECT_ID/PROJECT_ROOT를
+#   넘기면 memory_api가 부팅 시점 슬러그로 필터·응답 → UI 폴더 전환 후 옛 프로젝트 이름/메모리 반환.
+#   _current_project_id()/_current_project_root()로 현재 활성 폴더를 반영한다(?project_id= override 포함).
 def _cg_memory(path):
     return path in ('/api/memory', '/api/project-info')
 def _g_memory(h, pp):
     _params = parse_qs(pp.query)
     memory_api.handle_get(
         h, pp.path, _params,
-        DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID, PROJECT_ROOT=PROJECT_ROOT,
+        DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id(), PROJECT_ROOT=_current_project_root(),
         __version__=__version__,
     )
 
@@ -1317,12 +1322,12 @@ def _p_tools(h, pp):
 def _p_agent(h, pp): agent_api.handle_post(h, pp.path)
 def _p_pty(h, pp):   pty_api.handle_post(h, pp.path)
 def _p_zettel(h, pp):
-    zettel_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+    zettel_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 def _p_codegraph(h, pp):
-    codegraph_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+    codegraph_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 def _p_memory(h, pp):
     from api import memory_api
-    memory_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=PROJECT_ID)
+    memory_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 
 # 하이브 수집 3종 → api/hive_ingest_api.py (Phase 2 R7)
 # [불변식] _p_thoughts_add는 SSE 팬아웃 writer 측 — THOUGHT_LOGS/THOUGHT_CLIENTS/_SSE_LOCK
@@ -1334,7 +1339,8 @@ def _p_hive_log_pg(h, pp):
 def _p_hive_thought_pg(h, pp):
     hive_ingest_api.hive_thought_pg(h, thought_to_pg)
 def _p_thoughts_add(h, pp):
-    hive_ingest_api.thoughts_add(h, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK, set_memory, PROJECT_ID)
+    # [R14] thought는 memory에 project_id 네임스페이스로 저장 → 현재 활성 폴더 슬러그 사용.
+    hive_ingest_api.thoughts_add(h, THOUGHT_LOGS, THOUGHT_CLIENTS, _SSE_LOCK, set_memory, _current_project_id())
 
 # git exact 2종 + 스크린샷 분석 (Phase 2 R8) — do_POST exact 인라인 verbatim 이전.
 # [불변식/순서] exact-first 디스패치라 아래 '/api/git/' prefix 위임(startswith)보다 먼저 걸린다 —
@@ -1458,8 +1464,10 @@ def _p_tasks(h, pp):
         h, pp.path, _body,
         SESSIONS_FILE=SESSIONS_FILE,
         save_task=save_task, update_task=update_task, delete_task=delete_task,
+        # [R14 버그수정] write/read 모두 current_project_id(동적)로 통일. 기존엔 read는 동적,
+        #   write(save_task)는 static PROJECT_ID라 폴더 전환 후 새 태스크가 옛 슬러그로 저장돼
+        #   목록에 안 뜨던 모순. static PROJECT_ID 인자 제거(tasks_api에서도 미사용화).
         current_project_id=_current_project_id(),
-        PROJECT_ID=PROJECT_ID,
         add_task_comment=add_task_comment,
         atomic_checkout=atomic_checkout,
         release_checkout=release_checkout,

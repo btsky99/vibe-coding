@@ -147,7 +147,7 @@ def handle_get(handler, path: str, params: dict, *,
 
 def handle_post(handler, path: str, data: dict, *,
                 SESSIONS_FILE: Path, save_task, update_task, delete_task,
-                current_project_id: str, PROJECT_ID: str,
+                current_project_id: str,
                 add_task_comment=None, atomic_checkout=None,
                 release_checkout=None, trigger_agent=None) -> bool:
     """POST 요청 처리 — /api/tasks 생성, /api/tasks/update, delete, claim 담당.
@@ -184,7 +184,9 @@ def handle_post(handler, path: str, data: dict, *,
                 'claimed_by': str(data.get('claimed_by', '')),
                 'tags': raw_tags,
             }
-            save_task(task, project_id=PROJECT_ID)
+            # [R14 버그수정] current_project_id(동적) 사용 — GET 목록 필터(37/53)와 동일 슬러그로
+            #   저장해야 폴더 전환 후 생성한 태스크가 같은 프로젝트 목록에 노출된다.
+            save_task(task, project_id=current_project_id)
 
             # SSE 로그에도 반영 (태스크 보드 알림)
             try:
