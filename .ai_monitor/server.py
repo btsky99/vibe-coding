@@ -693,8 +693,8 @@ except ImportError as e:
 # 데이터 디렉토리 생성 보장 및 DB 초기화 (중복 제거 및 위치 조정)
 init_db()
 
-# 정적 파일 경로를 절대 경로로 고정 (404 방지 핵심!)
-STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
+# [R14] STATIC_DIR 초기 대입은 906행으로 일원화 — 여기(구 697) 중복 대입은 698~905 사이
+#   미참조로 906이 즉시 덮어쓰던 죽은 코드라 제거. 906만이 존재검증+alt_dist 폴백을 가진 canonical.
 SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
 LOCKS_FILE = DATA_DIR / "locks.json"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -1642,7 +1642,7 @@ class SSEHandler(BaseHTTPRequestHandler):
 # [제거됨 2026-03-22] pty_sessions, pty_output_buffers, pty_output_seq 글로벌 → Node PTY 서버로 이전
 # Python 서버에서 PTY 세션 정보가 필요한 경우 Node PTY 서버의 REST API를 호출합니다.
 # URL: http://127.0.0.1:{WS_PORT}/api/pty/sessions
-_NODE_PTY_REST_URL = None  # __main__에서 설정됨
+_NODE_PTY_REST_URL = None  # 부팅 기본값 — main()의 _init_and_load_app이 global로 실제 URL 재설정(R14)
 
 # PTY 프로세스 관리 로직은 infra/pty_process.py로 분리 (2026-07-06, Phase 2 Task 11).
 # [WHY] 얇은 위임 유지 — _NODE_PTY_REST_URL은 호출 시점의 모듈 전역 값을 그대로 넘겨
@@ -1754,8 +1754,8 @@ from src.server_utils import find_free_port as _find_free_port
 
 # [수정 2026-03-15 v3.7.68] HTTP/WS 포트는 __main__ 인스턴스 락 획득 후 슬롯 기반으로 확정
 # 모듈 임포트 시점에는 기본값만 설정. 실제 포트는 아래 __main__ 블록에서 덮어씀.
-HTTP_PORT = 9000  # 실제 값은 __main__에서 슬롯 기반으로 재설정됨
-WS_PORT   = 9001  # 실제 값은 __main__에서 슬롯 기반으로 재설정됨
+HTTP_PORT = 9000  # 부팅 기본값 — main()이 슬롯 탐색 후 global로 실제 포트 재설정(R14)
+WS_PORT   = 9001  # 부팅 기본값 — main()이 슬롯 탐색 후 global로 실제 포트 재설정(R14)
 
 # [제거됨 2026-03-22] Python WebSocket PTY 서버 → Node.js pty-server로 대체
 # run_ws_server(), start_ws_server() 함수 제거
@@ -1771,6 +1771,12 @@ def main():
     """메인 엔트리포인트 — pip install 시 `vibe-coding` 명령으로 호출됨.
     기존 `python server.py` 직접 실행도 동일하게 동작.
     """
+    # [R14 이중전역 통합] HTTP_PORT/WS_PORT를 모듈 전역으로 재대입 — global 없으면 아래 슬롯탐색
+    #   대입이 main() 지역변수가 되어 모듈 전역(9000/9001)을 shadowing한다. 그러면 모듈 스코프
+    #   소비자(_p_dashboard_launch/_p_kanban_launch/_p_message/_cors_origin/fs_watcher/cleanup)가
+    #   stale한 9000/9001을 참조 → 포트 폴백(9000 점유 시) 발동하면 wrapper가 틀린 포트를 가리키는
+    #   잠재 버그. global 선언으로 재대입을 실제 전역 갱신으로 만들어 소비자와 값 일치를 보장한다.
+    global HTTP_PORT, WS_PORT
     # ── CLI 인자 처리: --install / --uninstall / --create-shortcut ──
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
@@ -1903,9 +1909,9 @@ def main():
         _http_ok = False
 
     if _http_ok:
-        HTTP_PORT = _preferred_http  # noqa: F811
+        HTTP_PORT = _preferred_http
     else:
-        HTTP_PORT = _find_free_port(9010, max_tries=40)  # noqa: F811
+        HTTP_PORT = _find_free_port(9010, max_tries=40)
         print(f"[!] 포트 {_preferred_http} 사용 중 → 대체 포트 {HTTP_PORT} 사용")
 
     _preferred_ws = HTTP_PORT + 1
@@ -1920,9 +1926,9 @@ def main():
         _ws_ok = False
 
     if _ws_ok:
-        WS_PORT = _preferred_ws  # noqa: F811
+        WS_PORT = _preferred_ws
     else:
-        WS_PORT = _find_free_port(_preferred_ws + 1, max_tries=40)  # noqa: F811
+        WS_PORT = _find_free_port(_preferred_ws + 1, max_tries=40)
         print(f"[!] WS 포트 {_preferred_ws} 사용 중 → 대체 포트 {WS_PORT} 사용")
 
     print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
@@ -2179,6 +2185,10 @@ border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
             """[v3.7.179] 스플래시 표시 상태에서 PG/PTY/HTTP 전체 초기화 수행 후 앱 로드.
             이전: PG+PTY+HTTP 모두 끝난 후 창 생성 → 5~10초 무반응.
             수정: 창 즉시 표시 → 초기화 진행 → 완료 후 앱 전환."""
+            # [R14 이중전역 통합] global 없으면 아래 URL 대입이 이 중첩함수 지역변수가 되어
+            #   모듈 전역 _NODE_PTY_REST_URL(=None)을 shadowing → _get_node_pty_sessions/
+            #   _p_send_command가 None을 참조(PTY 세션 조회 무력화). global로 실제 전역을 갱신.
+            global _NODE_PTY_REST_URL
             import urllib.request as _ureq
 
             def _update_splash(msg):
