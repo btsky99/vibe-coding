@@ -1181,6 +1181,9 @@ def _g_hive(h, pp):
         AGENT_STATUS_LOCK=AGENT_STATUS_LOCK,
         pty_sessions=_get_node_pty_sessions(),
         _current_project_root=_current_project_root,
+        # [R14] PTY 슬롯/Claude 세션 경로가 static PROJECT_ID를 소비 → 폴더 전환 미반영.
+        #   동적 슬러그 ref를 넘겨 hive_api가 현재 활성 폴더 기준으로 매칭하게 한다.
+        _current_project_id=_current_project_id,
         _parse_session_tail=_parse_session_tail,
         _parse_antigravity_session=_parse_antigravity_session,
         run_pg_sql_csv=run_pg_sql_csv

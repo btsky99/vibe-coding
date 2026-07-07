@@ -267,7 +267,7 @@ def handle_get(handler, path: str, params: dict,
                TASKS_FILE: Path, AGENT_STATUS: dict, AGENT_STATUS_LOCK,
                pty_sessions: dict,
                _current_project_root, _parse_session_tail, _parse_antigravity_session,
-               run_pg_sql_csv=None) -> bool:
+               run_pg_sql_csv=None, _current_project_id=None) -> bool:
     """GET 요청 처리 — /api/hive/*, /api/orchestrator/*, /api/install-skills,
     /api/skill-results, /api/context-usage,
     /api/antigravity-context-usage, /api/local-models 를 담당합니다.
@@ -559,10 +559,13 @@ def handle_get(handler, path: str, params: dict,
                             agent_last_seen[a_key] = hb_iso
 
             # 터미널별 실시간 에이전트 현황 (PTY 세션 기반)
+            # [R14] 슬롯 키는 T{n}@{현재슬러그} — 폴더 전환 반영 위해 동적 슬러그. 루프 밖 1회 계산
+            #   (config.json 읽기 8회 방지). _current_project_id 미주입 시 static PROJECT_ID 폴백.
+            _cur_pid = _current_project_id() if _current_project_id else PROJECT_ID
             terminal_agents: dict = {}
             pty_active_agents: set = set()
             for slot_num in range(1, 9):
-                info = _pty_slot_info(pty_sessions, slot_num, PROJECT_ID)
+                info = _pty_slot_info(pty_sessions, slot_num, _cur_pid)
                 if info:
                     a = info.get('agent', '') or 'shell'
                     terminal_agents[str(slot_num)] = a
@@ -771,12 +774,16 @@ def handle_get(handler, path: str, params: dict,
             # 설치 버전(경로 상이)에서 디렉터리를 찾지 못하던 버그 수정.
             # ~/.claude/projects/ 아래 모든 세션을 훑고, 각 세션 메타의
             # 'cwd' 값이 현재 PROJECT_ROOT와 일치하는 것만 선택.
+            # [R14] cwd 비교 기준·1차 접근 슬러그를 동적화 — static이면 폴더 전환 후
+            #   현재 프로젝트 세션을 못 찾는다(2차 전체스캔도 cwd 기준이 틀어져 실패).
+            _cur_root = _current_project_root() if _current_project_root else PROJECT_ROOT
+            _cur_pid = _current_project_id() if _current_project_id else PROJECT_ID
             claude_root = Path.home() / '.claude' / 'projects'
-            current_cwd_norm = str(PROJECT_ROOT).replace('\\', '/').rstrip('/').lower()
+            current_cwd_norm = str(_cur_root).replace('\\', '/').rstrip('/').lower()
             sessions = []
             if claude_root.exists():
-                # 1차 시도: PROJECT_ID로 직접 접근 (기존 동작 유지 · 빠름)
-                primary_dir = claude_root / PROJECT_ID
+                # 1차 시도: 현재 슬러그로 직접 접근 (기존 동작 유지 · 빠름)
+                primary_dir = claude_root / _cur_pid
                 candidate_dirs = []
                 if primary_dir.exists() and primary_dir.is_dir():
                     candidate_dirs.append(primary_dir)
@@ -887,7 +894,9 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
-            antigravity_chat_dir = Path.home() / '.gemini' / 'tmp' / PROJECT_ROOT.name / 'chats'
+            # [R14] 현재 활성 폴더명 기준 — 폴더 전환 후 해당 프로젝트 채팅을 봐야 UI와 일치.
+            _cur_root = _current_project_root() if _current_project_root else PROJECT_ROOT
+            antigravity_chat_dir = Path.home() / '.gemini' / 'tmp' / _cur_root.name / 'chats'
             sessions = []
             if antigravity_chat_dir.exists():
                 for json_file in antigravity_chat_dir.glob('session-*.json'):
@@ -1015,7 +1024,9 @@ def handle_post(handler, path: str, data: dict,
             if not skill_name:
                 handler.wfile.write(json.dumps({"status": "error", "message": "Skill name is required"}).encode('utf-8'))
                 return True
-            skill_dir  = PROJECT_ROOT / ".gemini" / "skills" / skill_name
+            # [R14] 스킬은 현재 활성 프로젝트에 설치 — 폴더 전환 반영.
+            _cur_root = _current_project_root() if _current_project_root else PROJECT_ROOT
+            skill_dir  = _cur_root / ".gemini" / "skills" / skill_name
             skill_dir.mkdir(parents=True, exist_ok=True)
             skill_file = skill_dir / "SKILL.md"
             template = f"""# 스킬: {skill_name}
