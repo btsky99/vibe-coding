@@ -561,3 +561,30 @@ def run_embedding_backfill(env: DaemonEnv) -> None:
     except Exception as e:
         print(f"[!] 임베딩 백필 데몬 시작 실패: {e}")
 
+
+def start_all_daemons(env: DaemonEnv, agent_status: dict,
+                      agent_status_lock: threading.Lock) -> None:
+    """부팅 4단계 — 백그라운드 데몬 스레드 10종을 일괄 기동.
+
+    server.py main()이 run_* 래퍼를 개별 정의/기동하던 것을 한 곳으로 이관(R18).
+    [불변식] env는 caller가 HTTP_PORT 확정 후 생성해 주입 — DaemonEnv late-binding
+      계약 유지(모듈 import 시점 포트 고정 금지). agent_sync_daemon만 env가 아닌
+      (agent_status, lock) 시그니처라 별도 처리.
+    [제약] name= 값은 기존 server.py 스레드명을 verbatim 보존 — 로그/디버깅 추적성
+      및 PTY-Watchdog 등 다른 스레드명과의 관례 일관성. run_watchdog/
+      run_telegram_bridge는 원래 name 미지정이라 그대로 둔다.
+    """
+    def _t(target, args, name=None):
+        threading.Thread(target=target, args=args, name=name, daemon=True).start()
+
+    _t(run_watchdog, (env,))
+    _t(run_telegram_bridge, (env,))
+    _t(run_codex_pg_watcher, (env,), 'CodexPGWatcher')
+    _t(run_orchestrator_daemon, (env,), 'OrchestratorDaemon')
+    _t(run_doc_generators_daemon, (env,), 'DocGeneratorsDaemon')
+    _t(agent_sync_daemon, (agent_status, agent_status_lock), 'AgentSyncDaemon')
+    _t(run_zettel_sync, (env,), 'ZettelSync')
+    _t(run_zettel_refine, (env,), 'ZettelRefine')
+    _t(run_commit_watcher, (env,), 'CommitWatcher')
+    _t(run_embedding_backfill, (env,), 'EmbedBackfill')
+

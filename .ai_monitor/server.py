@@ -1859,6 +1859,8 @@ def main():
     # 재바인딩되므로 함수 정의 시점에 값을 고정하면 안 된다.
     from infra import daemons as _daemons
 
+    # [R18] 데몬 시작은 daemons.start_all_daemons로 일괄 위임 — 개별 run_* 래퍼 제거.
+    # _daemon_env() 팩토리만 유지(HTTP_PORT late-binding — 호출 시점 생성 계약).
     def _daemon_env() -> "_daemons.DaemonEnv":
         return _daemons.DaemonEnv(
             base_dir=BASE_DIR,
@@ -1872,36 +1874,6 @@ def main():
             current_project_root=_current_project_root,
             current_project_id=_current_project_id,
         )
-
-    def run_watchdog():
-        _daemons.run_watchdog(_daemon_env())
-
-    def run_telegram_bridge():
-        _daemons.run_telegram_bridge(_daemon_env())
-
-    def run_codex_pg_watcher():
-        _daemons.run_codex_pg_watcher(_daemon_env())
-
-    def run_orchestrator_daemon():
-        _daemons.run_orchestrator_daemon(_daemon_env())
-
-    def run_doc_generators_daemon():
-        _daemons.run_doc_generators_daemon(_daemon_env())
-
-    def _agent_sync_daemon():
-        _daemons.agent_sync_daemon(AGENT_STATUS, AGENT_STATUS_LOCK)
-
-    def run_zettel_sync():
-        _daemons.run_zettel_sync(_daemon_env())
-
-    def run_zettel_refine():
-        _daemons.run_zettel_refine(_daemon_env())
-
-    def run_commit_watcher():
-        _daemons.run_commit_watcher(_daemon_env())
-
-    def run_embedding_backfill():
-        _daemons.run_embedding_backfill(_daemon_env())
     # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
     try:
         import webview
@@ -1976,34 +1948,20 @@ def main():
                              name='AgentBroadcast').start()
             start_fs_watcher(PROJECT_ROOT)
             MemoryWatcher(PROJECT_ID).start()
-            threading.Thread(target=run_watchdog, daemon=True).start()
-            threading.Thread(target=run_telegram_bridge, daemon=True).start()
-            threading.Thread(target=run_codex_pg_watcher, daemon=True,
-                             name='CodexPGWatcher').start()
-            threading.Thread(target=run_orchestrator_daemon, daemon=True,
-                             name='OrchestratorDaemon').start()
-            threading.Thread(target=run_doc_generators_daemon, daemon=True,
-                             name='DocGeneratorsDaemon').start()
-            threading.Thread(target=_agent_sync_daemon, daemon=True,
-                             name='AgentSyncDaemon').start()
-            threading.Thread(target=run_zettel_sync, daemon=True,
-                             name='ZettelSync').start()
-            threading.Thread(target=run_zettel_refine, daemon=True,
-                             name='ZettelRefine').start()
-            threading.Thread(target=run_commit_watcher, daemon=True,
-                             name='CommitWatcher').start()
-            # [회상 v2 즉시 활성] 기동 시 embed 모델을 백그라운드 워밍 — 백필 데몬의 90초
-            #   대기나 첫 recall miss 전에도 벡터 회상이 되도록. 논블로킹(0.001s 반환).
+            # [회상 v2 즉시 활성] 기동 시 embed 모델을 백그라운드 워밍 — 첫 recall miss 전에도
+            #   벡터 회상이 되도록. 논블로킹(0.001s 반환).
             #   [WHY] recall-smart는 미로드면 fallback → 모델이 recall 경로로 안 올라오는
             #   닭-달걀. 데몬만으론 90초 창(+데몬 사망 시 영구) 비활성 → 여기서 선제 워밍.
+            #   [R18] 데몬 일괄 기동 직전으로 이동 — backfill 데몬은 내부 90초 대기라 순서 무관.
             try:
                 from infra.embed_service import warm_async as _warm_embed
                 _warm_embed()
             except Exception:
                 pass
-            # [자가 치유 2.0 ④] 회상 v2 — embedding IS NULL 행 사후 채움
-            threading.Thread(target=run_embedding_backfill, daemon=True,
-                             name='EmbedBackfill').start()
+            # [R18] 데몬 10종(watchdog/telegram/codex/orchestrator/doc/agent_sync/
+            #   zettel_sync·refine/commit/embedding_backfill) 일괄 기동 — start_all_daemons 위임.
+            #   env는 여기서 생성(HTTP_PORT 확정 후 = late-binding 계약 충족).
+            _daemons.start_all_daemons(_daemon_env(), AGENT_STATUS, AGENT_STATUS_LOCK)
 
             _restore_agent_status_from_db()
 
