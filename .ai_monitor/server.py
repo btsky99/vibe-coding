@@ -1905,27 +1905,10 @@ def main():
     # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
     try:
         import webview
-        official_icon = os.path.join(os.path.dirname(__file__), "bin", "vibe_final.ico")
-        if not os.path.exists(official_icon):
-            official_icon = os.path.join(os.path.dirname(__file__), "bin", "app_icon.ico")
-
-        def force_win32_icon():
-            if os.name == 'nt' and os.path.exists(official_icon):
-                try:
-                    import ctypes
-                    from ctypes import wintypes
-                    time.sleep(2)
-                    hwnd = ctypes.windll.user32.FindWindowW(None, f"바이브 코딩 [{PROJECT_ROOT.name}]")
-                    if hwnd:
-                        hicon = ctypes.windll.user32.LoadImageW(
-                            None, official_icon, 1, 0, 0, 0x00000010 | 0x00000040
-                        )
-                        if hicon:
-                            ctypes.windll.user32.SendMessageW(hwnd, 0x80, 1, hicon)
-                            ctypes.windll.user32.SendMessageW(hwnd, 0x80, 0, hicon)
-                            print(f"[*] Win32 Taskbar Icon Forced: {official_icon}")
-                except Exception as e:
-                    print(f"[!] Win32 Icon Fix Error: {e}")
+        # ── Win32 아이콘 강제 — infra/win32_icon.py로 분리 (Phase 3 R17-4) ──────
+        # base_dir는 server.py __file__ 기준 — bin/ 경로가 infra로 오염되지 않게 주입.
+        from infra.win32_icon import resolve_app_icon, force_win32_icon
+        official_icon = resolve_app_icon(os.path.dirname(__file__))
 
         # ── 스플래시 HTML — infra/splash.py로 분리 (Phase 3 R17-3) ──────────────
         from infra.splash import build_splash_html
@@ -2068,7 +2051,9 @@ def main():
         main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
                               html=_SPLASH_HTML, width=1400, height=900)
 
-        threading.Thread(target=force_win32_icon, daemon=True).start()
+        threading.Thread(target=force_win32_icon,
+                         args=(official_icon, f"바이브 코딩 [{PROJECT_ROOT.name}]"),
+                         daemon=True).start()
 
         # ── WebView2 영구 저장소 경로 ──
         # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
