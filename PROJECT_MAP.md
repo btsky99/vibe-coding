@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-06 22:29
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-08 20:41
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,7 +34,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 2383 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 2273 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -56,7 +56,7 @@
 | `fs_dialog_api.py` | 134 |  |
 | `git_api.py` | 240 | Git 저장소 관리 API (/api/git/*) |
 | `heal_api.py` | 30 |  |
-| `hive_api.py` | 1205 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `hive_api.py` | 1216 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `hive_ingest_api.py` | 139 |  |
 | `install_api.py` | 419 |  |
 | `launch_api.py` | 102 |  |
@@ -72,7 +72,7 @@
 | `screenshot_api.py` | 45 |  |
 | `setup_api.py` | 48 |  |
 | `static_api.py` | 123 |  |
-| `tasks_api.py` | 330 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
+| `tasks_api.py` | 332 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
 | `tools_api.py` | 1075 |  |
 | `update_api.py` | 204 |  |
@@ -92,13 +92,13 @@
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
 | `heal_metrics.py` | 187 |  |
 | `logger.py` | 123 |  |
-| `pg_base.py` | 370 |  |
+| `pg_base.py` | 524 |  |
 | `pg_experience.py` | 226 |  |
 | `pg_incidents.py` | 182 |  |
 | `pg_memory.py` | 632 |  |
 | `pg_office.py` | 296 |  |
 | `pg_schema.py` | 777 |  |
-| `pg_store.py` | 125 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `pg_store.py` | 128 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `pg_tasks.py` | 399 |  |
 | `pg_vector_search.py` | 213 |  |
 | `recall_client.py` | 81 |  |
@@ -321,4 +321,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-06 22:29
+> 자동 생성 완료: 2026-07-08 20:41
