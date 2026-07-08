@@ -1538,7 +1538,22 @@ class SSEHandler(BaseHTTPRequestHandler):
 # [제거됨 2026-03-22] pty_sessions, pty_output_buffers, pty_output_seq 글로벌 → Node PTY 서버로 이전
 # Python 서버에서 PTY 세션 정보가 필요한 경우 Node PTY 서버의 REST API를 호출합니다.
 # URL: http://127.0.0.1:{WS_PORT}/api/pty/sessions
-_NODE_PTY_REST_URL = None  # 부팅 기본값 — main()의 _init_and_load_app이 global로 실제 URL 재설정(R14)
+_NODE_PTY_REST_URL = None  # 부팅 기본값 — app_boot가 set_node_pty_rest_url로 실제 URL 재설정(R14/R20)
+
+
+def set_node_pty_rest_url(url: str) -> None:
+    """[R20] PTY REST URL을 모듈 전역 + pty_api/agent_api에 일괄 반영.
+
+    [WHY] 부팅 로직을 infra/app_boot.py로 이관하면서, 다른 모듈에서는 server.py의
+      모듈 전역 _NODE_PTY_REST_URL을 global로 직접 대입할 수 없다. 소비자
+      (_p_send_command·_get_node_pty_sessions)가 이 전역을 call-time 참조하므로
+      setter로 캡슐화해 app_boot가 콜백으로 호출한다.
+    """
+    global _NODE_PTY_REST_URL
+    _NODE_PTY_REST_URL = url
+    pty_api.set_pty_rest_url(url)
+    agent_api.set_pty_rest_url(url)
+
 
 # PTY 프로세스 관리 로직은 infra/pty_process.py로 분리 (2026-07-06, Phase 2 Task 11).
 # [WHY] 얇은 위임 유지 — _NODE_PTY_REST_URL은 호출 시점의 모듈 전역 값을 그대로 넘겨
@@ -1823,190 +1838,49 @@ def main():
             current_project_root=_current_project_root,
             current_project_id=_current_project_id,
         )
-    # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
-    try:
-        import webview
-        # ── Win32 아이콘 강제 — infra/win32_icon.py로 분리 (Phase 3 R17-4) ──────
-        # base_dir는 server.py __file__ 기준 — bin/ 경로가 infra로 오염되지 않게 주입.
-        from infra.win32_icon import resolve_app_icon, force_win32_icon
-        official_icon = resolve_app_icon(os.path.dirname(__file__))
-
-        # ── 스플래시 HTML — infra/splash.py로 분리 (Phase 3 R17-3) ──────────────
-        from infra.splash import build_splash_html
-        _SPLASH_HTML = build_splash_html(PROJECT_ROOT.name)
-
-        def _init_and_load_app(window):
-            """[v3.7.179] 스플래시 표시 상태에서 PG/PTY/HTTP 전체 초기화 수행 후 앱 로드.
-            이전: PG+PTY+HTTP 모두 끝난 후 창 생성 → 5~10초 무반응.
-            수정: 창 즉시 표시 → 초기화 진행 → 완료 후 앱 전환."""
-            # [R14 이중전역 통합] global 없으면 아래 URL 대입이 이 중첩함수 지역변수가 되어
-            #   모듈 전역 _NODE_PTY_REST_URL(=None)을 shadowing → _get_node_pty_sessions/
-            #   _p_send_command가 None을 참조(PTY 세션 조회 무력화). global로 실제 전역을 갱신.
-            global _NODE_PTY_REST_URL
-            import urllib.request as _ureq
-
-            def _update_splash(msg):
-                try:
-                    window.evaluate_js(
-                        f"document.getElementById('status').textContent='{msg}'"
-                    )
-                except Exception:
-                    pass
-
-            # ── 1단계: PostgreSQL + PTY 병렬 시작 ──
-            _update_splash('데이터베이스 시작 중...')
-            # [R19] PTY 준비(좀비정리+모듈빌드)를 백그라운드로 — 반환 Event를 3단계에서 wait.
-            #   PG 시작과 병렬로 돌아가는 부팅 최적화(v3.7.179) 보존.
-            _pty_prep_done = _pty_process.prepare_pty_async(_pty_server_state, BASE_DIR)
-
-            ensure_postgres_running()
-            atexit.register(_cleanup_postgres)
-
-            # ── 2단계: 프로젝트 DB + 스키마 ──
-            _update_splash('프로젝트 데이터베이스 초기화 중...')
-            _init_project_db(PROJECT_ID)
-            try:
-                import src.pg_store as _pg_mod
-                # [WHY] pg_store 분할(2026-06-10) 후 _SCHEMA_READY는 pg_schema 내부
-                # 상태 — 모듈 속성 직접 대입은 무효라 reset_schema_cache()로 캡슐화
-                _pg_mod.reset_schema_cache()
-                _pg_mod.ensure_schema(DATA_DIR)
-            except Exception as e:
-                print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
-
-            # ── 3단계: PTY 서버 시작 ──
-            _update_splash('터미널 서버 시작 중...')
-            # [R19] 준비 완료 대기 → PTY 서버 기동 → 헬스체크 워치독 시작을 일괄 위임.
-            _pty_process.start_pty_server_and_watchdog(
-                _pty_server_state, BASE_DIR, WS_PORT, HTTP_PORT, PROJECT_ROOT,
-                _child_procs, _pty_prep_done)
-
-            _NODE_PTY_REST_URL = f"http://127.0.0.1:{WS_PORT}"
-            pty_api.set_pty_rest_url(_NODE_PTY_REST_URL)
-            agent_api.set_pty_rest_url(_NODE_PTY_REST_URL)
-
-            # ── 4단계: 데몬 스레드 일괄 시작 ──
-            _update_splash('서비스 시작 중...')
-            threading.Thread(target=_agent_broadcast_worker, daemon=True,
-                             name='AgentBroadcast').start()
-            start_fs_watcher(PROJECT_ROOT)
-            MemoryWatcher(PROJECT_ID).start()
-            # [회상 v2 즉시 활성] 기동 시 embed 모델을 백그라운드 워밍 — 첫 recall miss 전에도
-            #   벡터 회상이 되도록. 논블로킹(0.001s 반환).
-            #   [WHY] recall-smart는 미로드면 fallback → 모델이 recall 경로로 안 올라오는
-            #   닭-달걀. 데몬만으론 90초 창(+데몬 사망 시 영구) 비활성 → 여기서 선제 워밍.
-            #   [R18] 데몬 일괄 기동 직전으로 이동 — backfill 데몬은 내부 90초 대기라 순서 무관.
-            try:
-                from infra.embed_service import warm_async as _warm_embed
-                _warm_embed()
-            except Exception:
-                pass
-            # [R18] 데몬 10종(watchdog/telegram/codex/orchestrator/doc/agent_sync/
-            #   zettel_sync·refine/commit/embedding_backfill) 일괄 기동 — start_all_daemons 위임.
-            #   env는 여기서 생성(HTTP_PORT 확정 후 = late-binding 계약 충족).
-            _daemons.start_all_daemons(_daemon_env(), AGENT_STATUS, AGENT_STATUS_LOCK)
-
-            _restore_agent_status_from_db()
-
-            # ── 5단계: HTTP 서버 시작 ──
-            _update_splash('웹 서버 시작 중...')
-            _actual_port = HTTP_PORT
-            try:
-                _srv = ThreadedHTTPServer(('127.0.0.1', _actual_port), SSEHandler)
-                print(f"[*] Server running on http://localhost:{_actual_port}")
-                threading.Thread(target=_srv.serve_forever, daemon=True).start()
-                threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
-                                 name='ThoughtPreload').start()
-                _http_server_ref[0] = _srv
-            except OSError as e:
-                if 'already in use' in str(e).lower() or '10048' in str(e):
-                    print(f"[!] 포트 {_actual_port} 충돌 → 대체 포트 탐색")
-                    try:
-                        _actual_port = _find_free_port(_actual_port + 10, max_tries=50)
-                        _srv = ThreadedHTTPServer(('127.0.0.1', _actual_port), SSEHandler)
-                        print(f"[*] 대안 포트로 서버 시작: http://localhost:{_actual_port}")
-                        threading.Thread(target=_srv.serve_forever, daemon=True).start()
-                        threading.Thread(target=_load_task_logs_into_thoughts, daemon=True,
-                                         name='ThoughtPreload').start()
-                        _http_server_ref[0] = _srv
-                    except Exception as e2:
-                        print(f"[!] 대안 포트에서도 실패: {e2}")
-                        return
-                else:
-                    print(f"[!] Server Start Error: {e}")
-                    return
-
-            # ── 6단계: 서버 응답 확인 후 앱 로드 ──
-            _update_splash('앱 로딩 중...')
-            for _ in range(50):  # 최대 5초
-                try:
-                    _ureq.urlopen(f'http://127.0.0.1:{_actual_port}/', timeout=0.1)
-                    break
-                except Exception:
-                    time.sleep(0.1)
-            window.load_url(f'http://localhost:{_actual_port}')
-            print(f"[*] 앱 로드 완료 — http://localhost:{_actual_port}")
-
-        print(f"[*] Launching Desktop Window with Splash...")
-        global main_window
-        main_window = webview.create_window(f'바이브 코딩 [{PROJECT_ROOT.name}]',
-                              html=_SPLASH_HTML, width=1400, height=900)
-
-        threading.Thread(target=force_win32_icon,
-                         args=(official_icon, f"바이브 코딩 [{PROJECT_ROOT.name}]"),
-                         daemon=True).start()
-
-        # ── WebView2 영구 저장소 경로 ──
-        # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
-        # %APPDATA%/vibe-coding/<dev|exe>/<프로젝트명>/webview_data 에 영구 저장
-        # 개발/EXE 분리: 스키마 차이로 인한 데이터 손상 방지
-        _appdata = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')
-        _mode = 'exe' if getattr(sys, 'frozen', False) else 'dev'
-        _webview_storage = Path(_appdata) / 'vibe-coding' / _mode / PROJECT_ROOT.name / 'webview_data'
-        _webview_storage.mkdir(parents=True, exist_ok=True)
-        print(f"[*] WebView2 storage: {_webview_storage}")
-
-        # webview.start() 블로킹 — _init_and_load_app이 별도 스레드에서 전체 초기화 수행
-        webview.start(
-            _init_and_load_app,
-            args=[main_window],
-            private_mode=False,
-            storage_path=str(_webview_storage),
-        )
-
-        # ── 창 닫힘 → 정리 ──
-        print("[*] GUI 창이 닫혔습니다. 모든 자식 프로세스 정리 중...")
-        _cleanup_child_procs()
-        _cleanup_postgres()
-        try:
-            if _http_server_ref[0]:
-                _http_server_ref[0].shutdown()
-                _http_server_ref[0].server_close()
-        except Exception:
-            pass
-        try:
-            if _lock_sock:
-                _lock_sock.close()
-        except Exception:
-            pass
-        print("[*] 정리 완료 — 프로세스를 종료합니다.")
-        os._exit(0)
-    except Exception as e:
-        print(f"[!] GUI Error: {e}")
-        open_app_window(f"http://localhost:{HTTP_PORT}")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("[*] Ctrl+C 감지 — 정리 후 종료합니다.")
-            _cleanup_child_procs()
-            try:
-                if _http_server_ref[0]:
-                    _http_server_ref[0].shutdown()
-                    _http_server_ref[0].server_close()
-            except Exception:
-                pass
-            os._exit(0)
+    # ── GUI 부팅은 infra/app_boot.py로 이관 (Phase 3 R20) ──────────────────────
+    # _init_and_load_app + webview 창 생성/시작/종료정리 전체를 run_gui_app으로.
+    # server.py 고유 함수/객체/값은 BootConfig로 명시 주입(main() nested 클로저 대체).
+    # [불변식] _pty_server_state/_child_procs/_http_server_ref는 caller 소유 가변 객체를
+    #   그대로 주입 — 재생성 금지(워치독/정리 코드가 동일 객체 공유). official_icon은
+    #   server.py __file__ 기준(bin/ 경로 오염 방지). window_title은 create_window와
+    #   force_win32_icon이 동일 문자열이어야 hwnd 매칭 성립.
+    from infra.app_boot import BootConfig, run_gui_app
+    from infra.win32_icon import resolve_app_icon
+    from infra.splash import build_splash_html
+    _window_title = f'바이브 코딩 [{PROJECT_ROOT.name}]'
+    run_gui_app(BootConfig(
+        http_port=HTTP_PORT,
+        ws_port=WS_PORT,
+        base_dir=BASE_DIR,
+        data_dir=DATA_DIR,
+        project_root=PROJECT_ROOT,
+        project_id=PROJECT_ID,
+        official_icon=resolve_app_icon(os.path.dirname(__file__)),
+        splash_html=build_splash_html(PROJECT_ROOT.name),
+        window_title=_window_title,
+        pty_server_state=_pty_server_state,
+        child_procs=_child_procs,
+        agent_status=AGENT_STATUS,
+        agent_status_lock=AGENT_STATUS_LOCK,
+        http_server_ref=_http_server_ref,
+        lock_sock=_lock_sock,
+        http_server_factory=ThreadedHTTPServer,
+        handler_cls=SSEHandler,
+        memory_watcher_factory=MemoryWatcher,
+        daemon_env_factory=_daemon_env,
+        find_free_port=_find_free_port,
+        ensure_postgres_running=ensure_postgres_running,
+        cleanup_postgres=_cleanup_postgres,
+        cleanup_child_procs=_cleanup_child_procs,
+        init_project_db=_init_project_db,
+        restore_agent_status=_restore_agent_status_from_db,
+        load_task_logs=_load_task_logs_into_thoughts,
+        agent_broadcast_worker=_agent_broadcast_worker,
+        start_fs_watcher=start_fs_watcher,
+        set_node_pty_rest_url=set_node_pty_rest_url,
+        open_app_window=open_app_window,
+    ))
 
 
 if __name__ == '__main__':

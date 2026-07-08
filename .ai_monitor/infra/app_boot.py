@@ -1,0 +1,243 @@
+"""
+FILE: infra/app_boot.py
+DESCRIPTION: PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고
+             백그라운드 콜백(_init_and_load_app)에서 PG/PTY/HTTP/데몬을 순차 초기화한
+             뒤 앱을 로드한다. 창 종료 시 자식 프로세스/PG/HTTP/락을 정리한다.
+             server.py main()의 GUI try 블록 전체를 이관 — 부팅에 필요한 server.py 고유
+             함수/객체/값은 BootConfig로 명시 주입받는다(R20).
+
+REVISION HISTORY:
+- 2026-07-08 Claude: server.py main() _init_and_load_app + webview 블록 전체 이관
+                     (Phase 3 R20). 로직·주석 verbatim 유지, 심볼만 cfg 참조로 치환.
+                     [불변식] _NODE_PTY_REST_URL은 server.py 모듈 전역이라 여기서 global
+                     대입 불가 → cfg.set_node_pty_rest_url 콜백 경유(소비자 call-time 참조).
+                     [불변식] pty_server_state·child_procs·http_server_ref는 caller가
+                     소유한 가변 객체를 그대로 변형 — 재생성 금지(워치독/정리 코드와 공유).
+                     [제약] PG-PTY 병렬 최적화(v3.7.179): prepare_pty_async가 반환한 Event를
+                     3단계에서 wait — 그 사이 PG를 시작해 부팅 체감 지연을 줄인다.
+"""
+from __future__ import annotations
+
+import atexit
+import os
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+
+@dataclass
+class BootConfig:
+    """부팅에 필요한 server.py 고유 값/객체/콜백 묶음 — main()이 구성해 주입."""
+    # ── 값/가변 객체 ──
+    http_port: int
+    ws_port: int
+    base_dir: Path
+    data_dir: Path
+    project_root: Path
+    project_id: str
+    official_icon: str
+    splash_html: str
+    window_title: str
+    pty_server_state: dict
+    child_procs: list
+    agent_status: dict
+    agent_status_lock: object
+    http_server_ref: list
+    lock_sock: object
+    # ── 클래스/팩토리 ──
+    http_server_factory: Callable   # ThreadedHTTPServer(addr, handler)
+    handler_cls: type               # SSEHandler
+    memory_watcher_factory: Callable  # MemoryWatcher(project_id) → .start()
+    daemon_env_factory: Callable    # () → DaemonEnv (HTTP_PORT late-binding)
+    find_free_port: Callable
+    # ── 콜백 ──
+    ensure_postgres_running: Callable
+    cleanup_postgres: Callable
+    cleanup_child_procs: Callable
+    init_project_db: Callable       # (project_id)
+    restore_agent_status: Callable
+    load_task_logs: Callable        # 스레드 target
+    agent_broadcast_worker: Callable  # 스레드 target
+    start_fs_watcher: Callable      # (project_root)
+    set_node_pty_rest_url: Callable  # (url) — 모듈 전역 + pty/agent api 반영
+    open_app_window: Callable       # (url) GUI 실패 폴백
+
+
+def run_gui_app(cfg: BootConfig) -> None:
+    """스플래시 창 생성 → 백그라운드 초기화 → 앱 로드 → 종료 정리."""
+    # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
+    try:
+        import webview
+        from infra.win32_icon import force_win32_icon
+        from infra import pty_process, daemons
+
+        def _init_and_load_app(window):
+            """[v3.7.179] 스플래시 표시 상태에서 PG/PTY/HTTP 전체 초기화 수행 후 앱 로드.
+            이전: PG+PTY+HTTP 모두 끝난 후 창 생성 → 5~10초 무반응.
+            수정: 창 즉시 표시 → 초기화 진행 → 완료 후 앱 전환."""
+            import urllib.request as _ureq
+
+            def _update_splash(msg):
+                try:
+                    window.evaluate_js(
+                        f"document.getElementById('status').textContent='{msg}'"
+                    )
+                except Exception:
+                    pass
+
+            # ── 1단계: PostgreSQL + PTY 병렬 시작 ──
+            _update_splash('데이터베이스 시작 중...')
+            # [R19] PTY 준비(좀비정리+모듈빌드)를 백그라운드로 — 반환 Event를 3단계에서 wait.
+            #   PG 시작과 병렬로 돌아가는 부팅 최적화(v3.7.179) 보존.
+            _pty_prep_done = pty_process.prepare_pty_async(cfg.pty_server_state, cfg.base_dir)
+
+            cfg.ensure_postgres_running()
+            atexit.register(cfg.cleanup_postgres)
+
+            # ── 2단계: 프로젝트 DB + 스키마 ──
+            _update_splash('프로젝트 데이터베이스 초기화 중...')
+            cfg.init_project_db(cfg.project_id)
+            try:
+                import src.pg_store as _pg_mod
+                # [WHY] pg_store 분할(2026-06-10) 후 _SCHEMA_READY는 pg_schema 내부
+                # 상태 — 모듈 속성 직접 대입은 무효라 reset_schema_cache()로 캡슐화
+                _pg_mod.reset_schema_cache()
+                _pg_mod.ensure_schema(cfg.data_dir)
+            except Exception as e:
+                print(f"[PG] 프로젝트 DB 스키마 초기화 실패: {e}")
+
+            # ── 3단계: PTY 서버 시작 ──
+            _update_splash('터미널 서버 시작 중...')
+            # [R19] 준비 완료 대기 → PTY 서버 기동 → 헬스체크 워치독 시작을 일괄 위임.
+            pty_process.start_pty_server_and_watchdog(
+                cfg.pty_server_state, cfg.base_dir, cfg.ws_port, cfg.http_port,
+                cfg.project_root, cfg.child_procs, _pty_prep_done)
+
+            # [R20] _NODE_PTY_REST_URL 모듈 전역 + pty/agent api 갱신을 setter로 캡슐화.
+            cfg.set_node_pty_rest_url(f"http://127.0.0.1:{cfg.ws_port}")
+
+            # ── 4단계: 데몬 스레드 일괄 시작 ──
+            _update_splash('서비스 시작 중...')
+            threading.Thread(target=cfg.agent_broadcast_worker, daemon=True,
+                             name='AgentBroadcast').start()
+            cfg.start_fs_watcher(cfg.project_root)
+            cfg.memory_watcher_factory(cfg.project_id).start()
+            # [회상 v2 즉시 활성] 기동 시 embed 모델을 백그라운드 워밍 — 첫 recall miss 전에도
+            #   벡터 회상이 되도록. 논블로킹(0.001s 반환).
+            #   [WHY] recall-smart는 미로드면 fallback → 모델이 recall 경로로 안 올라오는
+            #   닭-달걀. 데몬만으론 90초 창(+데몬 사망 시 영구) 비활성 → 여기서 선제 워밍.
+            #   [R18] 데몬 일괄 기동 직전으로 이동 — backfill 데몬은 내부 90초 대기라 순서 무관.
+            try:
+                from infra.embed_service import warm_async as _warm_embed
+                _warm_embed()
+            except Exception:
+                pass
+            # [R18] 데몬 10종(watchdog/telegram/codex/orchestrator/doc/agent_sync/
+            #   zettel_sync·refine/commit/embedding_backfill) 일괄 기동 — start_all_daemons 위임.
+            #   env는 여기서 생성(HTTP_PORT 확정 후 = late-binding 계약 충족).
+            daemons.start_all_daemons(cfg.daemon_env_factory(),
+                                      cfg.agent_status, cfg.agent_status_lock)
+
+            cfg.restore_agent_status()
+
+            # ── 5단계: HTTP 서버 시작 ──
+            _update_splash('웹 서버 시작 중...')
+            _actual_port = cfg.http_port
+            try:
+                _srv = cfg.http_server_factory(('127.0.0.1', _actual_port), cfg.handler_cls)
+                print(f"[*] Server running on http://localhost:{_actual_port}")
+                threading.Thread(target=_srv.serve_forever, daemon=True).start()
+                threading.Thread(target=cfg.load_task_logs, daemon=True,
+                                 name='ThoughtPreload').start()
+                cfg.http_server_ref[0] = _srv
+            except OSError as e:
+                if 'already in use' in str(e).lower() or '10048' in str(e):
+                    print(f"[!] 포트 {_actual_port} 충돌 → 대체 포트 탐색")
+                    try:
+                        _actual_port = cfg.find_free_port(_actual_port + 10, max_tries=50)
+                        _srv = cfg.http_server_factory(('127.0.0.1', _actual_port), cfg.handler_cls)
+                        print(f"[*] 대안 포트로 서버 시작: http://localhost:{_actual_port}")
+                        threading.Thread(target=_srv.serve_forever, daemon=True).start()
+                        threading.Thread(target=cfg.load_task_logs, daemon=True,
+                                         name='ThoughtPreload').start()
+                        cfg.http_server_ref[0] = _srv
+                    except Exception as e2:
+                        print(f"[!] 대안 포트에서도 실패: {e2}")
+                        return
+                else:
+                    print(f"[!] Server Start Error: {e}")
+                    return
+
+            # ── 6단계: 서버 응답 확인 후 앱 로드 ──
+            _update_splash('앱 로딩 중...')
+            for _ in range(50):  # 최대 5초
+                try:
+                    _ureq.urlopen(f'http://127.0.0.1:{_actual_port}/', timeout=0.1)
+                    break
+                except Exception:
+                    time.sleep(0.1)
+            window.load_url(f'http://localhost:{_actual_port}')
+            print(f"[*] 앱 로드 완료 — http://localhost:{_actual_port}")
+
+        print(f"[*] Launching Desktop Window with Splash...")
+        window = webview.create_window(cfg.window_title,
+                              html=cfg.splash_html, width=1400, height=900)
+
+        threading.Thread(target=force_win32_icon,
+                         args=(cfg.official_icon, cfg.window_title),
+                         daemon=True).start()
+
+        # ── WebView2 영구 저장소 경로 ──
+        # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
+        # %APPDATA%/vibe-coding/<dev|exe>/<프로젝트명>/webview_data 에 영구 저장
+        # 개발/EXE 분리: 스키마 차이로 인한 데이터 손상 방지
+        _appdata = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')
+        _mode = 'exe' if getattr(sys, 'frozen', False) else 'dev'
+        _webview_storage = Path(_appdata) / 'vibe-coding' / _mode / cfg.project_root.name / 'webview_data'
+        _webview_storage.mkdir(parents=True, exist_ok=True)
+        print(f"[*] WebView2 storage: {_webview_storage}")
+
+        # webview.start() 블로킹 — _init_and_load_app이 별도 스레드에서 전체 초기화 수행
+        webview.start(
+            _init_and_load_app,
+            args=[window],
+            private_mode=False,
+            storage_path=str(_webview_storage),
+        )
+
+        # ── 창 닫힘 → 정리 ──
+        print("[*] GUI 창이 닫혔습니다. 모든 자식 프로세스 정리 중...")
+        cfg.cleanup_child_procs()
+        cfg.cleanup_postgres()
+        try:
+            if cfg.http_server_ref[0]:
+                cfg.http_server_ref[0].shutdown()
+                cfg.http_server_ref[0].server_close()
+        except Exception:
+            pass
+        try:
+            if cfg.lock_sock:
+                cfg.lock_sock.close()
+        except Exception:
+            pass
+        print("[*] 정리 완료 — 프로세스를 종료합니다.")
+        os._exit(0)
+    except Exception as e:
+        print(f"[!] GUI Error: {e}")
+        cfg.open_app_window(f"http://localhost:{cfg.http_port}")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("[*] Ctrl+C 감지 — 정리 후 종료합니다.")
+            cfg.cleanup_child_procs()
+            try:
+                if cfg.http_server_ref[0]:
+                    cfg.http_server_ref[0].shutdown()
+                    cfg.http_server_ref[0].server_close()
+            except Exception:
+                pass
+            os._exit(0)
