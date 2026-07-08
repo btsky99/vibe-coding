@@ -1927,29 +1927,9 @@ def main():
                 except Exception as e:
                     print(f"[!] Win32 Icon Fix Error: {e}")
 
-        # ── 스플래시 HTML — 진행 상황 텍스트 실시간 업데이트 지원 ──────────────
-        _SPLASH_HTML = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:#0f0f1a;display:flex;align-items:center;justify-content:center;
-height:100vh;font-family:-apple-system,'Segoe UI',sans-serif;color:white}}
-.box{{text-align:center}}
-.logo{{font-size:52px;margin-bottom:12px}}
-.title{{font-size:22px;font-weight:600;margin-bottom:6px}}
-.sub{{font-size:13px;color:#888;margin-bottom:28px;transition:opacity .3s}}
-.proj{{font-size:12px;color:#7c3aed;margin-bottom:28px;
-background:#1a0a3a;padding:4px 12px;border-radius:20px;display:inline-block}}
-.ring{{width:36px;height:36px;border:3px solid #222;border-top-color:#7c3aed;
-border-radius:50%;animation:spin 0.9s linear infinite;margin:0 auto}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-</style></head><body>
-<div class="box">
-  <div class="logo">🚀</div>
-  <div class="title">바이브 코딩</div>
-  <div class="proj">{PROJECT_ROOT.name}</div>
-  <div class="sub" id="status">초기화 준비 중...</div>
-  <div class="ring"></div>
-</div></body></html>"""
+        # ── 스플래시 HTML — infra/splash.py로 분리 (Phase 3 R17-3) ──────────────
+        from infra.splash import build_splash_html
+        _SPLASH_HTML = build_splash_html(PROJECT_ROOT.name)
 
         def _init_and_load_app(window):
             """[v3.7.179] 스플래시 표시 상태에서 PG/PTY/HTTP 전체 초기화 수행 후 앱 로드.
