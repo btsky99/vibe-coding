@@ -1694,89 +1694,14 @@ def main():
     except Exception:
         pass  # 바로가기 생성 실패해도 서버 시작에는 지장 없음
 
-    # ── 단일 인스턴스 락 (최우선 — ensure_postgres_running 이전) ───────────────
-    # [v3.7.179] 단일 인스턴스 전면 전환 — _MAX_INSTANCES 4→1.
-    # 더블클릭으로 2개 창이 뜨고, 하나를 닫으면 터미널이 죽는 치명적 UX 버그 해결.
-    # 이미 실행 중이면 기존 창을 Win32 API로 포커스하고 새 인스턴스는 즉시 종료.
-    import hashlib as _hl
-    # 같은 PROJECT_ROOT라도 개발 모드/설치 EXE/smoke test가 동시에 떠야 하므로
-    # 락 시드를 실행 환경별로 분리한다 (v3.7.225)
-    _lock_seed = str(PROJECT_ROOT)
-    if getattr(sys, 'frozen', False):
-        _lock_seed = f"{_lock_seed}::frozen"
-    if os.environ.get('VIBE_SMOKE_TEST', '').strip() in ('1', 'true', 'on'):
-        _lock_seed = f"{_lock_seed}::smoke"
-    _proj_hash    = int(_hl.md5(_lock_seed.encode()).hexdigest()[:4], 16)
-    _LOCK_PORT    = 19001 + (_proj_hash % 480)
-    _proj_id      = f"{_proj_hash:04x}"
-
-    _lock_sock = None
-    try:
-        _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _sock.bind(('127.0.0.1', _LOCK_PORT))
-        _lock_sock = _sock
-    except OSError:
-        # 이미 실행 중 — 기존 창을 포커스하고 종료
-        print(f"[*] 이미 실행 중인 인스턴스 감지 (락 포트 {_LOCK_PORT})")
-        if os.name == 'nt':
-            try:
-                import ctypes
-                _win_title = f"바이브 코딩 [{PROJECT_ROOT.name}]"
-                _hwnd = ctypes.windll.user32.FindWindowW(None, _win_title)
-                if _hwnd:
-                    ctypes.windll.user32.ShowWindow(_hwnd, 9)        # SW_RESTORE
-                    ctypes.windll.user32.SetForegroundWindow(_hwnd)
-                    print(f"[*] 기존 창 포커스 완료: {_win_title}")
-                else:
-                    print(f"[*] 기존 창을 찾을 수 없습니다 (아직 로딩 중일 수 있음)")
-            except Exception as e:
-                print(f"[!] 창 포커스 실패: {e}")
-        os._exit(0)
-
-    # 좀비 소켓 대비: 락 획득 실패 후 프로세스가 실제로 없으면 강제 회수
-    # (위에서 이미 성공했으므로 여기는 도달하지 않음 — 안전장치)
-
-    print(f"[*] 인스턴스 락 확보 (포트 {_LOCK_PORT})")
-
-    # ── 포트 확정: HTTP 9000, WS 9001 고정 + 충돌 시 대체 탐색 ─────────────────
-    # VIBE_PORT_BASE 환경변수가 있으면 해당 포트부터 시작 (smoke test 격리용)
-    # 단일 인스턴스이므로 슬롯 기반 분배 불필요. 고정 포트 우선 시도.
-    _preferred_http = int(os.environ.get('VIBE_PORT_BASE', '9000'))
-    _http_ok = False
-    try:
-        _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _test_sock.bind(('127.0.0.1', _preferred_http))
-        _test_sock.close()
-        _http_ok = True
-    except OSError:
-        _http_ok = False
-
-    if _http_ok:
-        HTTP_PORT = _preferred_http
-    else:
-        HTTP_PORT = _find_free_port(9010, max_tries=40)
-        print(f"[!] 포트 {_preferred_http} 사용 중 → 대체 포트 {HTTP_PORT} 사용")
-
-    _preferred_ws = HTTP_PORT + 1
-    _ws_ok = False
-    try:
-        _test_sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _test_sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _test_sock2.bind(('127.0.0.1', _preferred_ws))
-        _test_sock2.close()
-        _ws_ok = True
-    except OSError:
-        _ws_ok = False
-
-    if _ws_ok:
-        WS_PORT = _preferred_ws
-    else:
-        WS_PORT = _find_free_port(_preferred_ws + 1, max_tries=40)
-        print(f"[!] WS 포트 {_preferred_ws} 사용 중 → 대체 포트 {WS_PORT} 사용")
-
-    print(f"[*] 서버 포트 확정 — HTTP:{HTTP_PORT}, WS:{WS_PORT}")
+    # ── 단일 인스턴스 락 + 포트 확정 — infra/instance_lock.py로 분리 (Phase 3 R17-2) ──
+    # [불변식] resolve_server_ports 반환값을 반드시 모듈 전역 HTTP_PORT/WS_PORT에
+    # 재대입(위 global 선언) — 모듈 스코프 소비자가 stale 9000/9001을 참조하는
+    # R14 이중전역 버그 재발 방지. 락은 실패 시 내부에서 os._exit(0) 하므로
+    # 반환되면 획득 성공. _lock_sock은 종료 정리(아래 GUI 콜백)에서 close.
+    from infra.instance_lock import acquire_single_instance_lock, resolve_server_ports
+    _lock_sock = acquire_single_instance_lock(PROJECT_ROOT)
+    HTTP_PORT, WS_PORT = resolve_server_ports(_find_free_port)
 
     # ── AppUserModelID 설정 (WebView 생성 전에 필요) ──────────────────────
     if os.name == 'nt':
