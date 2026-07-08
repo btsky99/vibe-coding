@@ -1674,62 +1674,11 @@ def main():
     #   잠재 버그. global 선언으로 재대입을 실제 전역 갱신으로 만들어 소비자와 값 일치를 보장한다.
     global HTTP_PORT, WS_PORT
     # ── CLI 인자 처리: --install / --uninstall / --create-shortcut ──
-    if len(sys.argv) > 1:
-        cmd = sys.argv[1]
-
-        # --install: 바탕화면 바로가기 생성 + PTY 네이티브 모듈 빌드 (원스톱 설치)
-        if cmd in ('--install', '--create-shortcut'):
-            # PTY 서버 네이티브 모듈 빌드 (node-pty — 터미널 기능 핵심)
-            # node -e "require('node-pty')"로 실제 로드 가능 여부 검증 후 필요시만 빌드
-            if cmd == '--install':
-                import shutil as _shutil
-                pty_dir = Path(__file__).resolve().parent / 'pty-server'
-                _need_build = True
-                _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-                if (pty_dir / 'package.json').exists() and _shutil.which('node'):
-                    try:
-                        chk = subprocess.run(['node', '-e', "require('node-pty')"],
-                                             cwd=str(pty_dir), capture_output=True, timeout=10,
-                                             creationflags=_no_win)
-                        if chk.returncode == 0:
-                            _need_build = False
-                            print("[*] 터미널 네이티브 모듈 정상 확인!")
-                    except Exception:
-                        pass
-
-                if _need_build and (pty_dir / 'package.json').exists() and _shutil.which('npm'):
-                    print("[*] 터미널 네이티브 모듈 빌드 중... (1~2분 소요)")
-                    # shell=True: Windows에서 npm은 npm.cmd이므로 shell 경유 필요
-                    r = subprocess.run('npm install', cwd=str(pty_dir), shell=True,
-                                       capture_output=True, text=True, encoding='utf-8',
-                                       errors='replace', timeout=300, creationflags=_no_win)
-                    if r.returncode == 0:
-                        print("[*] 터미널 네이티브 모듈 빌드 완료!")
-                    else:
-                        print(f"[!] npm install 실패: {r.stderr[:300]}")
-                elif _need_build and not _shutil.which('npm'):
-                    print("[!] Node.js가 설치되지 않았습니다. 터미널 기능에 필요합니다.")
-            try:
-                from .create_shortcut import create_shortcut
-            except ImportError:
-                from create_shortcut import create_shortcut
-            create_shortcut()
-            if cmd == '--install':
-                print("\n✅ Vibe Coding 설치가 완료되었습니다!")
-                print("   실행: vibe-coding")
-                print("   제거: vibe-coding --uninstall")
-            return
-
-        # --uninstall: 바탕화면 바로가기 삭제 + pip uninstall 안내
-        if cmd == '--uninstall':
-            try:
-                from .create_shortcut import remove_shortcut
-            except ImportError:
-                from create_shortcut import remove_shortcut
-            remove_shortcut()
-            print("\n🗑️  바로가기를 삭제했습니다.")
-            print("   패키지 완전 제거: pip uninstall vibe-coding -y")
-            return
+    # 로직 본체는 infra/cli_commands.py로 분리 (2026-07-08, Phase 3 R17).
+    # server_dir는 pty-server 경로 계산 기준 — __file__ 부모를 명시 주입.
+    from infra.cli_commands import handle_cli_command
+    if handle_cli_command(sys.argv, Path(__file__).resolve().parent):
+        return
 
     print(f"Vibe Coding {__version__}")
 
