@@ -401,3 +401,79 @@ def pty_watchdog_loop(pty_server_state, health_check, kill_pty_proc,
                     print(f"[PTY Watchdog] 재시작 실패 ({restart_fails}/{MAX_RESTART_FAILS})")
 
         time.sleep(interval)
+
+
+def prepare_pty_async(pty_server_state: dict, base_dir) -> threading.Event:
+    """PTY 준비(좀비 정리 + node_modules 빌드)를 백그라운드로 시작하고 완료 Event 반환.
+
+    [WHY] PG 시작과 병렬로 돌려 부팅 체감 지연을 줄이는 최적화(v3.7.179) — caller는
+      이 Event를 3단계에서 wait 한 뒤 PTY 서버를 띄운다. 반환된 Event 계약을 지켜야
+      PG-PTY 병렬성이 보존된다.
+    """
+    done = threading.Event()
+
+    def _prepare():
+        try:
+            kill_orphan_pty_servers(pty_server_state)
+            ensure_pty_node_modules(base_dir)
+        except Exception as e:
+            print(f"[!] PTY 병렬 준비 오류: {e}")
+        done.set()
+
+    threading.Thread(target=_prepare, daemon=True).start()
+    return done
+
+
+def start_pty_server_and_watchdog(pty_server_state: dict, base_dir, ws_port: int,
+                                  http_port: int, project_root, child_procs: list,
+                                  prep_done: threading.Event) -> None:
+    """PTY 준비 완료를 기다린 뒤 PTY 서버를 띄우고 헬스체크 워치독을 시작한다.
+
+    server.py main() 내부 nested 래퍼(_pty_health_check/_kill_pty_proc/_pty_watchdog_loop)를
+    이관 — WS_PORT/_child_procs 캡처를 ws_port/child_procs 인자로 치환(R19).
+    [불변식] pty_server_state(가변 dict)는 start와 watchdog이 동일 객체를 공유해야
+      프로세스 사망 감지가 성립 — 재생성 금지, caller 주입 dict를 그대로 변형한다.
+    """
+    prep_done.wait(timeout=30)
+    start_node_pty_server(base_dir, ws_port, http_port, project_root,
+                          child_procs, pty_server_state)
+
+    def _health_check() -> bool:
+        """PTY 서버 /health 엔드포인트에 GET 요청 — 2초 내 응답하면 True."""
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{ws_port}/health")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                return data.get('status') == 'ok'
+        except Exception:
+            return False
+
+    def _kill_pty_proc(proc):
+        """행 상태 PTY 프로세스를 강제 종료합니다 (taskkill /T 로 프로세스 트리 전체)."""
+        if proc is None:
+            return
+        try:
+            pid = proc.pid
+            # Windows: 프로세스 트리 전체 강제 종료
+            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            subprocess.run(
+                ['taskkill', '/F', '/T', '/PID', str(pid)],
+                capture_output=True, creationflags=_no_window
+            )
+            print(f"[PTY Watchdog] 행 상태 PTY 서버(PID {pid}) 강제 종료 완료")
+        except Exception as e:
+            print(f"[PTY Watchdog] PTY 프로세스 종료 실패: {e}")
+        # child_procs 목록에서 제거 (중복 kill 방지)
+        try:
+            child_procs.remove(proc)
+        except ValueError:
+            pass
+
+    def _watchdog():
+        pty_watchdog_loop(
+            pty_server_state, _health_check, _kill_pty_proc,
+            lambda: kill_orphan_pty_servers(pty_server_state),
+            lambda: start_node_pty_server(base_dir, ws_port, http_port,
+                                          project_root, child_procs, pty_server_state))
+
+    threading.Thread(target=_watchdog, daemon=True, name='PTY-Watchdog').start()

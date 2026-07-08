@@ -1792,60 +1792,9 @@ def main():
     # 재생성 금지(재생성 시 워치독이 죽은 proc을 못 잡음).
     _pty_server_state = {'proc': None}  # 현재 PTY 서버 프로세스 핸들 (워치독이 참조)
 
-    # PTY 관리 로직은 infra/pty_process.py로 분리 (2026-07-06, Phase 2 Task 11).
-    # main() 스코프에서 캡처하던 변수(_pty_server_state/BASE_DIR/WS_PORT/HTTP_PORT/
-    # PROJECT_ROOT/_child_procs)를 명시적 인자로 주입하는 얇은 래퍼만 남긴다.
-    # 기존 nested 호출부(2417/2550/2551/2686/2687/2711)가 동일 이름으로 그대로 동작.
-    def _kill_orphan_pty_servers():
-        _pty_process.kill_orphan_pty_servers(_pty_server_state)
-
-    def _ensure_pty_node_modules():
-        _pty_process.ensure_pty_node_modules(BASE_DIR)
-
-    def _start_node_pty_server():
-        return _pty_process.start_node_pty_server(
-            BASE_DIR, WS_PORT, HTTP_PORT, PROJECT_ROOT,
-            _child_procs, _pty_server_state)
-
-    def _pty_health_check() -> bool:
-        """PTY 서버 /health 엔드포인트에 GET 요청 — 2초 내 응답하면 True."""
-        try:
-            req = urllib.request.Request(f"http://127.0.0.1:{WS_PORT}/health")
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                return data.get('status') == 'ok'
-        except Exception:
-            return False
-
-    def _kill_pty_proc(proc):
-        """행 상태 PTY 프로세스를 강제 종료합니다 (taskkill /T 로 프로세스 트리 전체)."""
-        if proc is None:
-            return
-        try:
-            pid = proc.pid
-            # Windows: 프로세스 트리 전체 강제 종료
-            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            subprocess.run(
-                ['taskkill', '/F', '/T', '/PID', str(pid)],
-                capture_output=True, creationflags=_no_window
-            )
-            print(f"[PTY Watchdog] 행 상태 PTY 서버(PID {pid}) 강제 종료 완료")
-        except Exception as e:
-            print(f"[PTY Watchdog] PTY 프로세스 종료 실패: {e}")
-        # _child_procs 목록에서 제거 (중복 kill 방지)
-        try:
-            _child_procs.remove(proc)
-        except ValueError:
-            pass
-
-    def _pty_watchdog_loop():
-        # infra/pty_process.py로 분리 (2026-07-06, Phase 2 Task 11).
-        # health_check/kill_pty_proc는 5개 추출 대상 외 nested 클로저(WS_PORT/_child_procs
-        # 캡처)라 main()에 남기고 콜러블로 주입. kill_orphan/start_server는 동일
-        # _pty_server_state를 공유하는 위임 래퍼를 넘겨 상태 일관성을 보장한다.
-        _pty_process.pty_watchdog_loop(
-            _pty_server_state, _pty_health_check, _kill_pty_proc,
-            _kill_orphan_pty_servers, _start_node_pty_server)
+    # [R19] PTY 부팅 시퀀스는 pty_process.prepare_pty_async /
+    #   start_pty_server_and_watchdog로 이관 — main() nested 래퍼 6종 제거.
+    #   _pty_server_state(가변 dict)만 여기서 소유하고 두 함수에 동일 객체로 주입한다.
 
     # ── [v3.7.179] GUI 창 선행 표시 → 백그라운드 초기화 → 앱 로드 ────────────
     # 모든 무거운 초기화(PG, PTY, 데몬, HTTP)를 WebView 콜백에서 실행.
@@ -1906,15 +1855,9 @@ def main():
 
             # ── 1단계: PostgreSQL + PTY 병렬 시작 ──
             _update_splash('데이터베이스 시작 중...')
-            _pty_prep_done = threading.Event()
-            def _prepare_pty():
-                try:
-                    _kill_orphan_pty_servers()
-                    _ensure_pty_node_modules()
-                except Exception as e:
-                    print(f"[!] PTY 병렬 준비 오류: {e}")
-                _pty_prep_done.set()
-            threading.Thread(target=_prepare_pty, daemon=True).start()
+            # [R19] PTY 준비(좀비정리+모듈빌드)를 백그라운드로 — 반환 Event를 3단계에서 wait.
+            #   PG 시작과 병렬로 돌아가는 부팅 최적화(v3.7.179) 보존.
+            _pty_prep_done = _pty_process.prepare_pty_async(_pty_server_state, BASE_DIR)
 
             ensure_postgres_running()
             atexit.register(_cleanup_postgres)
@@ -1933,10 +1876,10 @@ def main():
 
             # ── 3단계: PTY 서버 시작 ──
             _update_splash('터미널 서버 시작 중...')
-            _pty_prep_done.wait(timeout=30)
-            _start_node_pty_server()
-            threading.Thread(target=_pty_watchdog_loop, daemon=True,
-                             name='PTY-Watchdog').start()
+            # [R19] 준비 완료 대기 → PTY 서버 기동 → 헬스체크 워치독 시작을 일괄 위임.
+            _pty_process.start_pty_server_and_watchdog(
+                _pty_server_state, BASE_DIR, WS_PORT, HTTP_PORT, PROJECT_ROOT,
+                _child_procs, _pty_prep_done)
 
             _NODE_PTY_REST_URL = f"http://127.0.0.1:{WS_PORT}"
             pty_api.set_pty_rest_url(_NODE_PTY_REST_URL)
