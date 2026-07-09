@@ -1,129 +1,137 @@
-# 구현 계획 — server.py 디스패치 재구조화 Phase 2 (라우팅 인라인 + infra 안전분)
+# 구현 계획 — 전략 #2a: onefile → onedir 전환 (_MEI 버그 클래스 구조적 전멸)
 
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: server.py do_GET/do_POST 인라인 라우트를 도메인 그룹 모듈로 추출 + 복합조건 wrapper 테이블화
-             + infra 안전분(PTY/세션파싱) + 소형헬퍼 흡수. 목표 3597→~1950줄. 1500은 Phase 3.
+DESCRIPTION: PyInstaller onefile→onedir 전환 + 업데이트 모델을 exe-swap→"setup EXE 사일런트 설치"로 전환.
+             매 부팅 _MEI 추출을 없애 좀비 node/DLL로드실패/temp정리실패 버그 클래스를 뿌리째 제거.
 
 REVISION HISTORY:
-- 2026-07-05 Claude: Phase 2 신규. brainstorm 승인(안전우선). Critic 반영(R11/R12 드롭, R14 Phase3).
+- 2026-07-09 Claude: 신규. 방향 승인(옵션 A, AskUserQuestion). 이전 계획(server.py 분할 Phase 2)은 완료 → 교체.
 -->
 
-> 설계 승인: 2026-07-05 brainstorm(안전우선 범위). 메모리: `project_server_split_plan.md` Phase 2 섹션
-> 목표: server.py 3597 → **~1950줄**. 동작 불변. **1500 최종 도달은 Phase 3**(R14 이중전역 통합 + main 조사).
-> 안전: 하이브리드 폴백 유지 + 완전성 가드(매 라운드) + 라운드별 커밋.
+> **설계 승인**: 2026-07-09 (전략 #2a, 옵션 A onedir). 메모리 `project_update_dll_load_fail.md` 참조.
+> **북극성**: 기능 확장 아님 — 재발 핫스팟(update/pty/build fix 16건)의 공통 뿌리 제거 = 삽질 감소.
+> **핵심 통찰**: 인스톨러가 이미 `CloseApplications=yes`로 "실행 중 앱 닫고 교체+재시작"을 처리 →
+>   업데이트를 "setup /SILENT"로 바꾸면 _update.bat·_MEI 청소·좀비 처리가 통째로 은퇴한다.
 
-## 🚨 매 라운드 공통 안전 절차 (모든 Task에 적용)
-1. **착수 직전 재검증**: `grep -n "def <함수명>" .ai_monitor/server.py` + 실제 줄 수 확인 (R11/R12 드리프트 교훈 — 계획-착수 간 드리프트 실재)
-2. **verbatim 포팅**: 함수 시그니처·동작 불변. 전역 참조는 **함수 바디 내 이름 참조**로 주입 (디폴트 인자 바인딩 금지 — late-binding 함정)
-3. **동일 문자열 다중 블록**: Edit 도구 고유 컨텍스트 매칭 (near-miss 사고 860b657 — 스크립트 순차치환 금지)
-4. **검증 3종**: `pytest tests/test_route_table.py` (완전성 가드) + `pytest tests/ --ignore=tests/office` (105 passed) + `python -c "import ast; ast.parse(open('.ai_monitor/server.py',encoding='utf-8').read())"` (구문/import 스모크)
-5. **라운드별 별도 커밋** (git bisect 가능) + 단계 전환 시 `python scripts/checkpoint.py`
-
----
-
-## 파트 A — 라우팅 인라인 → 도메인 그룹 모듈
-
-### [x] Task 1 (R1): fs_dialog_api.py 신규 — 파일시스템 다이얼로그 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/fs_dialog_api.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: GET `/api/browse-folder`(subprocess 폴더다이얼로그)·`/api/drives`(드라이브스캔)·`/api/dirs`(os.scandir) + POST `/api/select-folder`(tkinter)·`/api/open-external` 인라인 로직을 `handle_get(h, path)`/`handle_post(h, path)`로 이전. server.py는 GET_PREFIX 없는 exact라 GET_ROUTES/POST_ROUTES exact 테이블 + wrapper.
-- 검증: 공통 3종. 폴더 다이얼로그 라우트는 subprocess라 스모크만.
-- 의존성: 없음
-
-### [x] Task 2 (R2): install_api.py 확장 — 도구 설치 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/install_api.py`✏️, `.ai_monitor/server.py`✏️
-- 방법: GET `/api/tool-status`·`/api/install-tool-status`·`/api/install-*-cli`(복합조건 in 3개: gemini/claude/codex)·`/api/register-codex-to-ai` + POST `/api/install-playwright-cli`(52줄)·`/api/run-script`(61줄) 이전. install-*-cli 복합조건은 R9에서 wrapper 처리 예정이므로 이번엔 핸들러 본문만 이전하고 라우트 조건은 legacy 유지.
-- 검증: 공통 3종.
-- 의존성: 없음
-
-### [x] Task 3 (R3): logs_api.py 신규 — 로그/스트림 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/logs_api.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: GET `/stream`(SSE psycopg2 LISTEN/NOTIFY 86줄)·`/api/server-logs`·`/api/messages` + POST `/api/messages/clear` 이전.
-  ⚠️ **/stream late-binding**: `stream(h, pg_port, pg_project_db, run_pg_sql_csv)` 호출 시 server.py wrapper 바디에서 `logs_api.stream(self, PG_PORT, PG_PROJECT_DB, run_pg_sql_csv)`로 **매 호출 시 이름 재조회**. 디폴트 인자로 바인딩 금지.
-- 검증: 공통 3종 + `/stream` SSE 연결 스모크(psycopg2 직접연결 유지 확인, 풀 전환 금지).
-- 의존성: 없음
-
-### [x] Task 4 (R4): static_api.py 신규 — 정적파일 서빙 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/static_api.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: GET else 브랜치 정적서빙(46줄, Vite dist + SPA fallback + MIME)·`/api/image-file`(바이너리 이미지)·`/api/help`(docs md) 이전. else 브랜치는 do_GET 최후미 fallback이라 `handle_static(h, path)`가 마지막 폴백 호출로 남음.
-- 검증: 공통 3종 + 앱 재시작 후 index.html·정적자원 로드 확인(Playwright).
-- 의존성: 없음
-
-### [x] Task 5 (R5): dashboard_api.py 신규 — 대시보드/에이전트 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/dashboard_api.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: GET `/api/agents`(인메모리 AGENT_STATUS + DB 병합 23줄) + POST `/api/dashboard/launch`·`/api/kanban/launch`·`/api/agents/heartbeat`(42줄) 이전. AGENT_STATUS 등 공유 상태는 참조 주입.
-- 검증: 공통 3종.
-- 의존성: 없음
-
-### [x] Task 6 (R6): office_launch_api.py 신규 — 오피스 실행 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/office_launch_api.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: POST `/api/office/launch`·`/api/office/restart`·`/api/office/status`(exact 3개) + office 프록시(복합 `startswith('/api/office/') and path not in (...)`) 이전. 프록시는 `_proxy_to_office_server` 호출 유지. PROJECT_ROOT·_child_procs 등 주입.
-- 검증: 공통 3종.
-- 의존성: 없음
-
-### [x] Task 7 (R7): hive_ingest_api.py 신규 — 하이브 수집 ⚠️SSE ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/api/hive_ingest_api.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: POST `/api/hive/log/pg`(18)·`/api/hive/thought/pg`(19)·`/api/thoughts/add`(SSE 브로드캐스트+벡터DB 69줄) 이전.
-  🔴 **THOUGHT_LOGS·THOUGHT_CLIENTS·_SSE_LOCK을 events_api.py와 동일 identity로 주입** (별도 생성 금지 — 아니면 SSE 팬아웃 조용히 끊김). exact 3개는 POST_ROUTES 테이블에 등록(exact-first라 뒤 hive prefix elif 도달 안 함) + **이전 완료 후 legacy if 블록(2327~2434) 삭제**.
-- 검증: 공통 3종 + **수동 SSE 스모크**: 브라우저에서 thoughts SSE 구독 후 `/api/thoughts/add` POST → 실시간 수신 확인.
-- 의존성: 없음 (events_api.py 공유객체 참조만)
-
-### [x] Task 8 (R8): 기존 모듈 확장 — 잔여 인라인 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `git_api.py`✏️·`screenshot_api.py`🆕·`memory_api.py`✏️·`config_api.py`✏️·`vibe_api.py`✏️, `server.py`✏️
-- 방법: POST `/api/git/rollback`(29)·`/api/git/diff`(19)→git_api / POST `/api/screenshot/analyze`(23)→screenshot_api🆕 / GET `/api/memory/db-info`(19)→memory_api / GET `/api/config`(17)→config_api / GET `/api/vibe/sidebar·notifications·skills`→vibe_api / GET `/api/kanban/pg-activity`(27)→tasks_api or dashboard_api. 각 순수위임/인라인 이전.
-- 검증: 공통 3종.
-- 의존성: 없음
-
-### [x] Task 9 (R9): 복합조건 wrapper 테이블화 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `.ai_monitor/server.py`✏️
-- 방법: 복합조건 라우트(hive prefix2+exact8 / tasks in4+startswith·endswith / office startswith·not-in / files in2 / memory in2 / install-cli in3)를 **server.py 내부에 wrapper 함수**(`_g_hive_composite` 등)로 조건 그대로 감싸 `GET_COND_ROUTES`/`POST_COND_ROUTES` 신규 리스트에 등록. do_GET/do_POST 폴백 순서: **exact→prefix→cond→legacy**. 조건을 dict키로 억지 매핑 금지. wrapper 내부에 `path in (...)` 조건 리터럴 잔류(가드 추출용).
-- 검증: 공통 3종. 복합조건 라우트 각각 수동 curl/스모크(hive/tasks/office 대표 경로).
-- 의존성: Task 1~8 (인라인 이전 완료 후 조건 wrapper화가 깔끔)
-
-### [x] Task 10 (R9.5): 완전성 가드 보강 ✅ (이전 세션 완료 — 산출물 실존 확인)
-- 파일: `tests/test_route_table.py`✏️
-- 방법: `_extract()`에 `path in ('/a', '/b', ...)` 튜플 파싱 추가(install-*-cli 3개·hive 8 exact 사각지대 해소). `*_COND_ROUTES` shadowing 검증(cond 라우트가 기존 prefix 테이블과 중복 커버 안 하는지) 추가. GOLDEN 세트에 신규 감지 라우트 반영.
-- 검증: `pytest tests/test_route_table.py` — 보강 후에도 green. 임의 install-cli 조건 삭제 시 실패 확인.
-- 의존성: Task 9
+## 🚨 매 단계 공통 안전 절차
+1. **로컬 우선**: 릴리즈 파이프라인(build-release.yml)·인스톨러(.iss) 직접 수정은 **로컬 onedir 빌드+smoke 통과 후에만**.
+2. **단계별 커밋 + 체크포인트**: 각 Phase 종료 시 `python scripts/checkpoint.py`. git bisect 가능하게.
+3. **폴백 보존**: 구 exe-swap 경로를 즉시 삭제하지 말고, onedir 검증 완료(Phase E)까지 죽은 코드로 유지 후 은퇴.
+4. **검증 3종**: `pytest tests --ignore=tests/office` + `python scripts/smoke_test.py` + 실제 업데이트 왕복.
+5. **push = 릴리즈**: Phase C 이후 push는 실사용자에게 나감 — 각 push 전 사용자 확인.
 
 ---
 
-## 파트 B — infra 추출 (안전분만)
+## Phase A — onedir 빌드 성립 (로컬, 릴리즈 무영향)
 
-### [x] Task 11 (R10): infra/pty_process.py 신규 — PTY 프로세스 🔴클로저 ✅ 1d5e631
-- 파일: `.ai_monitor/infra/pty_process.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: **착수 전 캡처변수 전수조사** — `_kill_orphan_pty_servers`·`_ensure_pty_node_modules`·`_start_node_pty_server`·`_pty_watchdog_loop`·`_get_node_pty_sessions`는 main() 내부 nested 클로저(현재 `_pty_server_state` dict로 우회 중). 각 함수가 캡처하는 외부 변수(WS_PORT, BASE_DIR, _pty_server_state 등) 전부 목록화 → top-level 함수로 승격하며 명시적 파라미터/상태객체로 전환. server.py는 `infra/pty_process.py` import 후 main()에서 상태객체 넘겨 호출.
-- 검증: 공통 3종 + **PTY 서버 기동 스모크**(터미널 슬롯 열기 → Node PTY 연결 확인).
-- 의존성: 없음 (파트 A와 독립)
+```
+[ ] Task A1: spec를 onefile→onedir로 전환
+    파일: vibe-coding.spec
+    방법: EXE(...)에 exclude_binaries=True 추가 + a.binaries/a.datas 제거,
+          runtime_tmpdir 라인 삭제. 하단에 COLLECT(exe, a.binaries, a.datas, name=<앱폴더>) 추가.
+    검증: pyinstaller vibe-coding.spec --noconfirm → dist/<앱폴더>/ 생성 + <앱>.exe 존재.
 
-### [x] Task 12 (R13): infra/session_parse.py 신규 — 세션 파싱 ✅
-- 파일: `.ai_monitor/infra/session_parse.py`🆕, `.ai_monitor/server.py`✏️
-- 방법: `_parse_session_tail`(70)·`_parse_antigravity_session`(64) top-level 함수를 이전(안전 — 클로저 아님). server.py는 import 후 재노출 or 호출부 경로 변경.
-- 검증: 공통 3종.
-- 의존성: 없음
+[ ] Task A2: onedir 실행 + 리소스 해석 검증
+    파일: (없음 — 실행 검증)
+    방법: dist/<앱폴더>/<앱>.exe 실행. sys._MEIPASS가 onedir 번들 루트를 가리키는지,
+          api/infra/src/vibe-view/dist/pgsql 경로 해석이 정상인지 확인.
+    검증: python scripts/smoke_test.py (onedir exe 대상) — /api/config·hive/health 200.
+    의존: A1
+
+[ ] Task A3: _MEIPASS 의존 코드 onedir 호환 점검
+    파일: .ai_monitor/server.py, boot.py, updater.py, infra/lifecycle.py
+    방법: sys._MEIPASS.parent(runtime_dir) 전제 코드 전수 확인. onedir엔 runtime _MEI 없음 →
+          heal_broken_mei_at_startup/kill_runtime_mei_orphans는 자연 no-op(방어 확인만).
+          boot.py _bundle_seed_root(_appseed)·_version 경로 onedir에서 유효한지 검증.
+    검증: onedir 부팅 로그에 경로 에러 없음 + smoke 통과.
+    의존: A2
+```
+
+## Phase B — 업데이트 모델 전환 (exe-swap → setup 사일런트)
+
+```
+[ ] Task B1: updater 에셋 선택을 setup exe 우선으로
+    파일: .ai_monitor/updater.py (_find_asset_url)
+    방법: 1순위를 vibe-coding-setup-*.exe로. update-*.exe(구 onefile)는 폴백/은퇴.
+    검증: 단위 테스트 — setup 에셋이 있으면 그걸 고름.
+
+[ ] Task B2: apply_update를 "setup /SILENT 실행 후 종료"로 전환
+    파일: .ai_monitor/updater.py (apply_update_from_temp → apply_update_via_installer)
+    방법: 다운로드한 setup을 `/SILENT /SUPPRESSMSGBOXES /NORESTART` 등으로 subprocess 실행 후
+          현재 프로세스는 정상 종료(Inno CloseApplications가 앱 닫고 교체, [Run] postinstall이 재시작).
+          _update.bat/build_update_bat/_MEI kill 경로는 死코드로 남기고 폴백 플래그로만 유지.
+    검증: tests/test_updater_release_path.py 확장 — installer 실행 인자 계약(/SILENT 포함) 단위 테스트.
+    의존: B1
+
+[ ] Task B3: 진행바/상태 흐름 onedir 업데이트에 맞게 점검
+    파일: .ai_monitor/updater.py, vibe-view (updateProgress)
+    방법: setup 다운로드 percent는 그대로 유효. "적용 중" 이후 Inno가 프로세스를 닫으므로
+          프론트 상태 전이(적용→재시작) 문구 확인.
+    검증: 로컬에서 update_ready.json 상태 전이 수동 확인.
+    의존: B2
+```
+
+## Phase C — 인스톨러 + CI onedir화 (릴리즈 파이프라인 수정)
+
+```
+[ ] Task C1: .iss [Files]를 onedir 폴더 전체로
+    파일: vibe-coding-setup.iss
+    방법: 단일 exe Source → `Source: ".ai_monitor\dist\<앱폴더>\*"; DestDir:"{app}";
+          Flags: ignoreversion recursesubdirs createallsubdirs`. MyAppSrcExe 개념 교체.
+          pgsql 등 기존 항목과 충돌/중복 정리.
+    검증: 로컬 ISCC 빌드 → setup 실행 → {app}에 onedir 전체 설치 + 앱 정상 실행.
+    의존: A3
+
+[ ] Task C2: build-release.yml onedir 빌드로 전환
+    파일: .github/workflows/build-release.yml
+    방법: `pyinstaller --onefile` → onedir(spec 사용 권장: `pyinstaller vibe-coding.spec`).
+          --runtime-tmpdir 제거. 업데이트 에셋 = setup exe(이미 빌드). 구 update-*.exe 에셋 제거.
+          spec↔CI add-data 동기화 규칙 유지(메모리 feedback_spec_datas_check).
+    검증: (Phase E에서 실제 CI 빌드로 검증) — 로컬에선 spec 빌드 성공까지.
+    의존: C1
+
+[ ] Task C3: smoke_test / 로컬빌드 스크립트 onedir 경로 대응
+    파일: scripts/smoke_test.py, vibe-coding.spec 관련 헬퍼
+    방법: dist/<파일>.exe → dist/<앱폴더>/<앱>.exe 경로로 갱신.
+    검증: python scripts/smoke_test.py 통과.
+    의존: C2
+```
+
+## Phase D — 기존 onefile 설치본 → onedir 호환 전환
+
+```
+[ ] Task D1: 전환 시나리오 설계 + 문서화
+    파일: (메모리 project_update_dll_load_fail.md 갱신)
+    방법: 현재 onefile 설치본이 v3.7.248 이후 updater로 setup을 받아 /SILENT 실행 →
+          Inno가 {app}에 onedir 설치(단일 exe 자리를 폴더가 대체). AppId 동일 →
+          Inno가 업그레이드로 인식. 구 단일 exe 잔재 정리(uninstall 로직/ignoreversion).
+    검증: 구 onefile 설치 상태에서 신 setup 실행 → onedir로 깔끔히 전환 확인(수동 E2E).
+
+[ ] Task D2: 소프트 업데이트 채널(boot.py) onedir 영향 검증
+    파일: .ai_monitor/boot.py, soft_updater.py
+    방법: _MEIPASS 위치 변화가 managed checkout/_appseed 폴백에 영향 없는지 재확인.
+    검증: onedir에서 boot --boot-selftest 통과 + 소스 업데이트 왕복.
+    의존: D1
+```
+
+## Phase E — E2E 검증 + 릴리즈
+
+```
+[ ] Task E1: 전체 회귀 + 실제 업데이트 왕복
+    방법: pytest(112+) + smoke + "구버전 설치 → 신버전 업데이트 → 재부팅 무에러" 왕복.
+          _MEI/DLL로드실패/temp정리실패가 실제로 안 뜨는지 확인.
+    검증: 3종 그린 + 업데이트 왕복 무에러.
+
+[ ] Task E2: 릴리즈 (사용자 확인 후 push)
+    방법: /vibe-release. CI onedir 빌드 + setup 업로드. 첫 실사용자 전환 모니터.
+    검증: CI 그린 + 릴리즈 에셋(setup) 정상 + 자동 업데이트 감지.
+    의존: E1
+```
 
 ---
 
-## 파트 C — 소형 헬퍼 흡수
-
-### [x] Task 13 (R15): 소형 헬퍼 infra 흡수 ✅
-- 파일: `.ai_monitor/infra/*`✏️, `.ai_monitor/server.py`✏️
-- 방법: `_persist_active_project_context`(67)·`_load_task_logs_into_thoughts`(57)·`_restore_agent_status_from_db`(49)·`_resolve_frozen_project_root`(57) 등 소형 헬퍼를 성격에 맞는 infra 모듈로 이전(project_context/session/lifecycle 등). 착수 전 각 함수 호출부 grep으로 의존성 확인.
-- 검증: 공통 3종.
-- 의존성: 없음
-
-### [x] Task 14: Phase 2 마무리 — 문서/메모리/줄수 확인 ✅ (목표 미달 명시)
-- 파일: `project_server_split_plan.md`(메모리)✏️, `PROJECT_MAP.md`(자동생성)
-- 방법: `wc -l .ai_monitor/server.py` 최종 확인(~1950 목표). 메모리에 Phase 2 완료 + 실측 줄수 + Phase 3(R14 이중전역/main 조사) 명시. PROJECT_MAP 자동 재생성.
-- 검증: server.py < 2000줄 확인. pytest 105 최종 통과.
-- **실측(2026-07-06): server.py 3597 → 2383줄 (−1214, −33.8%). ⚠️ 목표 ~1950/게이트 <2000 미달(+433).**
-  단일블록·인라인·헬퍼 추출은 완전 소진 — 남은 부피(legacy elif+main+SSEHandler)는 아키텍처 재구조화라 Phase 3.
-  pytest 105 통과, PROJECT_MAP 재생성 완료. 상세: 메모리 `project_server_split_plan.md` "Phase 2 종결" 섹션.
-- 의존성: Task 1~13
-
----
-
-## 범위 고정
-- **이번 Phase 2 제외(→ Phase 3)**: R14(run_pg_sql/csv → pg_store, 이중전역 PG_PORT/PG_DB 통합 선행 블로커), main()/SSEHandler 추가 조사, 1500 최종 도달.
-- **드롭(이미 완료)**: R11(embedding→infra/daemons)·R12(fs_watcher→infra/fs_watcher). 착수 전 grep으로 재확인만.
-- 하이브리드 폴백 유지(롤백 안전). 매 라운드 완전성 가드 필수.
+## 리스크 & 마일스톤
+- **최대 리스크**: Phase C/D — 실사용자 설치본의 update 경로 변경. 폴백(구 exe-swap) 유지로 완충.
+- **되돌리기**: Phase A~B는 로컬 전용(무영향). Phase C부터 릴리즈 영향 → push 전 사용자 확인.
+- **1차 목표(이번 세션 가능)**: Phase A(로컬 onedir 빌드 성립) — 릴리즈 무영향, 전환 타당성 실증.
