@@ -146,9 +146,7 @@ class TestTasksApiPost:
             save_task=mock_save,
             update_task=MagicMock(),
             delete_task=MagicMock(),
-            current_project_id='test',
-            PROJECT_ID='test',
-        )
+            current_project_id='test',        )
         assert result is True
         data = handler.response_json
         assert data['status'] == 'success'
@@ -167,9 +165,7 @@ class TestTasksApiPost:
             save_task=MagicMock(),
             update_task=mock_update,
             delete_task=MagicMock(),
-            current_project_id='test',
-            PROJECT_ID='test',
-        )
+            current_project_id='test',        )
         assert result is True
         data = handler.response_json
         assert data['status'] == 'success'
@@ -185,9 +181,7 @@ class TestTasksApiPost:
             save_task=MagicMock(),
             update_task=MagicMock(),
             delete_task=mock_delete,
-            current_project_id='test',
-            PROJECT_ID='test',
-        )
+            current_project_id='test',        )
         assert result is True
         data = handler.response_json
         assert data['status'] == 'success'
@@ -204,9 +198,7 @@ class TestTasksApiPost:
             save_task=MagicMock(),
             update_task=mock_update,
             delete_task=MagicMock(),
-            current_project_id='test',
-            PROJECT_ID='test',
-        )
+            current_project_id='test',        )
         assert result is True
         data = handler.response_json
         assert data['status'] == 'success'

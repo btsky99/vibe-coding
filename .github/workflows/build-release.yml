@@ -40,6 +40,17 @@ jobs:
       - name: Harness verification
         run: python scripts/harness_verify.py --ci
 
+      - name: Run tests (pytest gate)
+        # [2026-07-09 Claude] 전략 #1 — 릴리즈를 pytest로 게이트한다.
+        # 그동안 build-release는 lint/harness만 보고 단위/통합 테스트를 안 돌려,
+        # tasks_api 시그니처 드리프트 같은 회귀가 조용히 썩고(테스트 4개 미검출),
+        # 업데이트/_MEI 경로 회귀("Failed to load Python DLL")가 CI가 아닌 프로덕션에서 발견됐다.
+        # tests/office 는 실행 중 서버가 필요(비격리)해 제외 — 나머지는 전부 hermetic(외부의존 0, 수초).
+        # 실패 시 프론트/EXE 빌드(~5분) 전에 즉시 중단해 시간 낭비 없이 회귀를 잡는다.
+        run: |
+          pip install pytest
+          python -m pytest tests --ignore=tests/office -q
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:

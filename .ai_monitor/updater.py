@@ -187,6 +187,48 @@ def _download_asset(url, dest, token, progress_cb=None):
         return False
 
 
+def build_update_bat(exe_path, old_path, pid, runtime_dir) -> str:
+    """_update.bat 내용을 생성하는 순수 함수 (테스트 가능 — 부수효과 없음).
+
+    [v3.7.248 근본수정] 구 프로세스 완전 사망 후, 새 EXE 기동 '전에' runtime 폴더를 청소한다.
+    setup 새설치는 멀쩡한데 업데이트 버튼만 "Failed to load Python DLL"로 깨지던 원인:
+      인수인계 중 이전 인스턴스의 node PTY 서버가 채 안 죽고 남아 자기 _MEI\\pty-server를 잠그면,
+      새 EXE onefile 부트로더의 추출이 잠긴 잔여물과 충돌 → python DLL 부분 추출 → 부팅 실패 +
+      "Failed to remove temporary directory" 경고. 부트로더는 Python보다 먼저라 앱 내부 정리로
+      원천 차단 불가 → '교체되는 쪽'이 죽고 난 뒤 bat이 정리해 setup 새설치와 같은 깨끗한 상태를 만든다.
+    [안전] node kill은 runtime\\_MEI 경로 + '부모 죽음(고아)'만 대상 → dev/글로벌 node,
+      동시 실행 중인 다른 설치 인스턴스의 살아있는 PTY 서버는 절대 안 건드림(v3.7.122 무차별kill 재발 방지).
+      폴더 삭제도 python*.dll 없는 '깨진 _MEI'만 → 정상 인스턴스(항상 DLL 존재)는 보호.
+    [불변식/테스트 계약] 반환 bat은 순서가 고정: ①구 PID 사망 대기 → ②.old 삭제 →
+      ③runtime 청소(powershell) → ④새 EXE start. ③이 ④보다 먼저여야 깨끗한 추출이 보장된다.
+    """
+    _ps_clean = (
+        f"$rt='{runtime_dir}'; "
+        "Get-CimInstance Win32_Process | Where-Object { "
+        "$_.Name -eq 'node.exe' -and $_.ExecutablePath -like ($rt + '\\_MEI*') "
+        "-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+        "Start-Sleep -Milliseconds 400; "
+        "Get-ChildItem -LiteralPath $rt -Directory -Filter '_MEI*' -ErrorAction SilentlyContinue | "
+        "Where-Object { -not (Test-Path (Join-Path $_.FullName 'python*.dll')) } | "
+        "ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }"
+    )
+    return (
+        "@echo off\n"
+        ":wait\n"
+        f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL\n'
+        "if not errorlevel 1 (\n"
+        "    timeout /t 1 /nobreak >NUL\n"
+        "    goto wait\n"
+        ")\n"
+        f'if exist "{old_path}" del /f /q "{old_path}"\n'
+        f'powershell -NoProfile -Command "{_ps_clean}" >NUL 2>&1\n'
+        "timeout /t 3 /nobreak >NUL\n"
+        f'start "" "{exe_path}"\n'
+        'del /f /q "%~f0"\n'
+    )
+
+
 def apply_update_from_temp(new_exe):
     """현재 실행 중인 exe를 새 버전으로 교체하고 재시작합니다.
     Windows는 실행 중인 exe를 덮어쓸 수 없지만 이름 변경은 허용됩니다.
@@ -221,42 +263,8 @@ def apply_update_from_temp(new_exe):
 
     bat_path = exe_path.parent / "_update.bat"
     pid = os.getpid()
-
-    # [v3.7.248 근본수정] 구 프로세스 완전 사망 후, 새 EXE 기동 '전에' runtime 폴더를 청소한다.
-    # setup 새설치는 멀쩡한데 업데이트 버튼만 "Failed to load Python DLL"로 깨지던 원인:
-    #   인수인계 중 이전 인스턴스의 node PTY 서버가 채 안 죽고 남아 자기 _MEI\pty-server를 잠그면,
-    #   새 EXE onefile 부트로더의 추출이 잠긴 잔여물과 충돌 → python DLL 부분 추출 → 부팅 실패 +
-    #   "Failed to remove temporary directory" 경고. 부트로더는 Python보다 먼저라 앱 내부 정리로
-    #   원천 차단 불가 → '교체되는 쪽'이 죽고 난 뒤 bat이 정리해 setup 새설치와 같은 깨끗한 상태를 만든다.
-    # [안전] node kill은 runtime\_MEI 경로 + '부모 죽음(고아)'만 대상 → dev/글로벌 node,
-    #   동시 실행 중인 다른 설치 인스턴스의 살아있는 PTY 서버는 절대 안 건드림(v3.7.122 무차별kill 재발 방지).
-    #   폴더 삭제도 python*.dll 없는 '깨진 _MEI'만 → 정상 인스턴스(항상 DLL 존재)는 보호.
-    runtime_dir = Path(sys._MEIPASS).parent  # %APPDATA%\VibeCoding\runtime
-    _ps_clean = (
-        f"$rt='{runtime_dir}'; "
-        "Get-CimInstance Win32_Process | Where-Object { "
-        "$_.Name -eq 'node.exe' -and $_.ExecutablePath -like ($rt + '\\_MEI*') "
-        "-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
-        "Start-Sleep -Milliseconds 400; "
-        "Get-ChildItem -LiteralPath $rt -Directory -Filter '_MEI*' -ErrorAction SilentlyContinue | "
-        "Where-Object { -not (Test-Path (Join-Path $_.FullName 'python*.dll')) } | "
-        "ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }"
-    )
-    bat_content = (
-        "@echo off\n"
-        ":wait\n"
-        f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL\n'
-        "if not errorlevel 1 (\n"
-        "    timeout /t 1 /nobreak >NUL\n"
-        "    goto wait\n"
-        ")\n"
-        f'if exist "{old_path}" del /f /q "{old_path}"\n'
-        f'powershell -NoProfile -Command "{_ps_clean}" >NUL 2>&1\n'
-        "timeout /t 3 /nobreak >NUL\n"
-        f'start "" "{exe_path}"\n'
-        'del /f /q "%~f0"\n'
-    )
+    runtime_dir = Path(sys._MEIPASS).parent  # %APPDATA%\VibeCoding\runtime — 아래 청소/kill 공용
+    bat_content = build_update_bat(exe_path, old_path, pid, runtime_dir)
     with open(bat_path, "w", encoding="mbcs", errors="replace") as f:
         f.write(bat_content)
 
