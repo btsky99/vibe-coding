@@ -23,23 +23,23 @@ REVISION HISTORY:
 
 ---
 
-## Phase A — onedir 빌드 성립 (로컬, 릴리즈 무영향)
+## Phase A — onedir 빌드 성립 (로컬, 릴리즈 무영향)  ✅ 완료(커밋 013f0f1)
 
 ```
-[ ] Task A1: spec를 onefile→onedir로 전환
+[x] Task A1: spec를 onefile→onedir로 전환
     파일: vibe-coding.spec
     방법: EXE(...)에 exclude_binaries=True 추가 + a.binaries/a.datas 제거,
           runtime_tmpdir 라인 삭제. 하단에 COLLECT(exe, a.binaries, a.datas, name=<앱폴더>) 추가.
     검증: pyinstaller vibe-coding.spec --noconfirm → dist/<앱폴더>/ 생성 + <앱>.exe 존재.
 
-[ ] Task A2: onedir 실행 + 리소스 해석 검증
+[x] Task A2: onedir 실행 + 리소스 해석 검증
     파일: (없음 — 실행 검증)
     방법: dist/<앱폴더>/<앱>.exe 실행. sys._MEIPASS가 onedir 번들 루트를 가리키는지,
           api/infra/src/vibe-view/dist/pgsql 경로 해석이 정상인지 확인.
     검증: python scripts/smoke_test.py (onedir exe 대상) — /api/config·hive/health 200.
     의존: A1
 
-[ ] Task A3: _MEIPASS 의존 코드 onedir 호환 점검
+[x] Task A3: _MEIPASS 의존 코드 onedir 호환 점검
     파일: .ai_monitor/server.py, boot.py, updater.py, infra/lifecycle.py
     방법: sys._MEIPASS.parent(runtime_dir) 전제 코드 전수 확인. onedir엔 runtime _MEI 없음 →
           heal_broken_mei_at_startup/kill_runtime_mei_orphans는 자연 no-op(방어 확인만).
