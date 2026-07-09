@@ -81,15 +81,21 @@ jobs:
             $ver = "$major.$minor.$patch"
           }
 
-          # 버전이 변경된 경우 → _version.py 업데이트 후 main에 커밋 (무한 루프 방지: [skip ci])
+          # 버전이 변경된 경우 → _version.py 업데이트 (빌드가 새 버전명을 쓰도록 로컬 반영).
+          # [전략 #2a 안전가드] main에 커밋/push는 main push 이벤트에서만 — feat 브랜치
+          #   workflow_dispatch(테스트)에서 브랜치가 오염되거나 잘못 push되는 걸 막는다.
           if ($ver -ne $base) {
             Set-Content -Path ".ai_monitor/_version.py" -Value "__version__ = `"$ver`""
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git config user.name "github-actions[bot]"
-            git add .ai_monitor/_version.py
-            git commit -m "chore(release): auto-bump version to v$ver [skip ci]"
-            git push
-            Write-Host "Auto-bumped: $base -> $ver"
+            if ($env:GITHUB_REF -eq 'refs/heads/main') {
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git config user.name "github-actions[bot]"
+              git add .ai_monitor/_version.py
+              git commit -m "chore(release): auto-bump version to v$ver [skip ci]"
+              git push
+              Write-Host "Auto-bumped(main): $base -> $ver"
+            } else {
+              Write-Host "Auto-bumped(branch, no push): $base -> $ver"
+            }
           }
 
           echo "tag=v$ver" >> $env:GITHUB_OUTPUT
@@ -173,10 +179,12 @@ jobs:
           #   _appseed/*는 오프라인 최초부팅/게이트 폴백용 소스 스냅샷 (spec datas와 1:1 동기).
           #   hidden-import 목록은 boot.py `if False:` 블록 ↔ vibe-coding.spec hiddenimports와 3중 동기 의무
           #   (과거사고 v3.7.215~218: 한쪽만 갱신 → 설치 EXE ImportError).
-          pyinstaller --onefile --noconsole \
-            --name "vibe-coding-update-${{ steps.version.outputs.ver }}" \
+          # [전략 #2a onedir] --onefile 제거 → onedir(폴더+_internal). --runtime-tmpdir도 제거
+          #   (추출 자체가 없어 _MEI/좀비/DLL로드실패 버그 클래스 소멸). --name은 .iss MyOneDirName
+          #   (vibe-coding-v<ver>)과 일치시켜 인스톨러가 dist/<name>/ 폴더를 찾게 한다.
+          pyinstaller --noconsole \
+            --name "vibe-coding-v${{ steps.version.outputs.ver }}" \
             --icon bin/vibe_final.ico \
-            --runtime-tmpdir '%APPDATA%\VibeCoding\runtime' \
             --add-data "src;src" \
             --add-data "bin;bin" \
             --add-data "vibe-view/dist;vibe-view/dist" \
@@ -312,10 +320,25 @@ jobs:
 
       - name: Build installer
         run: |
-          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "vibe-coding-setup.iss" /DMyAppVersion="${{ steps.version.outputs.ver }}" /DMyAppSrcExe="vibe-coding-update-${{ steps.version.outputs.ver }}.exe"
+          REM [onedir] .iss가 MyOneDirName(vibe-coding-v<ver>)으로 onedir 폴더를 참조하므로
+          REM MyAppSrcExe 오버라이드 불필요(제거). MyAppVersion만 전달.
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "vibe-coding-setup.iss" /DMyAppVersion="${{ steps.version.outputs.ver }}"
         shell: cmd
 
+      # [브랜치 검증용] onedir/인스톨러가 실제로 빌드되는지 feat 브랜치 workflow_dispatch로
+      #   검증하되 릴리즈는 안 하도록, 빌드 산출물(setup)을 워크플로 아티팩트로 올린다.
+      #   main push에서는 아래 Create Release가 정식 배포하므로 중복이지만 무해.
+      - name: Upload installer artifact (branch verification)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-coding-setup-${{ steps.version.outputs.ver }}
+          path: .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.ver }}.exe
+          if-no-files-found: error
+
       - name: Create Release
+        # [전략 #2a 안전가드] main push에서만 정식 릴리즈. feat 브랜치 workflow_dispatch(테스트)에서는
+        #   실행하지 않아 미완성 onedir이 실사용자에게 배포되는 사고를 막는다.
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -326,4 +349,3 @@ jobs:
             - 빌드 시간: ${{ github.event.head_commit.timestamp }}
           files: |
             .ai_monitor/dist/vibe-coding-setup-${{ steps.version.outputs.ver }}.exe
-            .ai_monitor/dist/vibe-coding-update-${{ steps.version.outputs.ver }}.exe
