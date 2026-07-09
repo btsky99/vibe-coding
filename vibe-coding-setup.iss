@@ -61,8 +61,10 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 
-; 설치 경로 (기본: C:\Program Files\Vibe Coding)
-DefaultDirName={autopf}\{#MyAppName}
+; [전략 #2a per-user] 설치 경로: %LOCALAPPDATA%\Programs\VibeCoding (사용자 폴더 → admin 불필요).
+;   onedir이 _MEI 추출을 없애 Defender 격리 리스크가 사라져 admin 정당성 소멸 → per-user로 전환.
+;   효과: 업데이트(setup /SILENT)마다 뜨던 UAC 제거 = 완전 무음 업데이트(onedir의 핵심 목적).
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 
@@ -73,12 +75,12 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 
-; 권한 설정 — admin 강제 (Defender 예외 등록 + Program Files 설치 + 구버전 제거 통합)
-; [2026-05-05] lowest → admin: Add-MpPreference가 lowest에서 권한 부족으로 silently 실패
-;              UAC 1회만 받으면 모든 [Run] 단계가 정상 권한으로 동작.
-PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
-; 설치 전 실행 중인 앱 자동 종료 (덮어쓰기 허용)
+; [전략 #2a per-user] admin → lowest. onedir은 _MEI 추출이 없어 Defender 예외 등록(admin 필요)이
+;   불필요해졌다. lowest면 UAC 없이 설치/업데이트 → 무음 업데이트 성립.
+;   [주의] Add-MpPreference([Run])는 lowest에서 실패하지만 SilentlyContinue + onedir이라 무해.
+;   [불변식] VIBE_HIVE_HOOK 레지스트리는 HKCU 분기(Check: not IsAdminInstallMode)가 처리 — 이미 대응됨.
+PrivilegesRequired=lowest
+; 설치 전 실행 중인 앱 자동 종료 (덮어쓰기 허용) — 업데이트 시 실행 중 vibe-coding을 닫고 교체.
 CloseApplications=yes
 CloseApplicationsFilter=*vibe-coding*
 
@@ -187,11 +189,11 @@ begin
   Result := sUnInstallString;
 end;
 
-// ── PyInstaller _MEI* 잔여 디렉터리 정리 ──────────────────────────────
-// PyInstaller --onefile 모드는 실행 시 Temp\_MEI* 폴더에 DLL을 추출.
-// 앱 비정상 종료 시 이 폴더가 남아 다음 실행 시 python311.dll 로드 실패 유발.
-// 설치/업데이트 전에 모든 _MEI* 잔여 폴더를 삭제하여 충돌 방지.
-// [2026-03-22 Claude: 업데이트 시 python311.dll 로드 실패 완전 해결]
+// ── (레거시) PyInstaller _MEI* 잔여 디렉터리 정리 ──────────────────────
+// [2026-07-10 전략 #2a] 신규 빌드는 onedir이라 _MEI 추출 자체가 없다. 이 정리는 이제
+//   '구 onefile 설치본 → onedir 전환' 시 남아있는 레거시 _MEI 잔재를 청소하는 용도로 유지한다.
+//   (구 onefile: 실행 시 %APPDATA%\VibeCoding\runtime\_MEI*에 DLL 추출 → 비정상 종료 시 잔존 →
+//    python DLL 로드 실패 유발. 전환 설치가 이를 제거해 깨끗한 상태에서 onedir로 넘어간다.)
 procedure CleanupMEIDirectories();
 var
   TempDir: String;
