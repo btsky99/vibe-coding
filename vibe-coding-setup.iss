@@ -46,6 +46,9 @@
 #ifndef MyAppSrcExe
   #define MyAppSrcExe    "vibe-coding-v" + MyAppVersion + ".exe"
 #endif
+; [전략 #2a onedir] PyInstaller onedir 결과 폴더/내부 exe명 (spec _EXE_NAME과 일치, 버전 파생).
+;   onedir: dist/<MyOneDirName>/<MyOneDirName>.exe + dist/<MyOneDirName>/_internal/
+#define MyOneDirName   "vibe-coding-v" + MyAppVersion
 #define MySetupName    "vibe-coding-setup-" + MyAppVersion
 
 [Setup]
@@ -97,8 +100,13 @@ Name: "desktopicon";    Description: "바탕화면 바로가기 만들기"; Grou
 Name: "startupicon";    Description: "시작 시 자동 실행";         GroupDescription: "추가 옵션:";  Flags: unchecked
 
 [Files]
-; PyInstaller로 생성된 EXE (단일 파일) — 고정 파일명(vibe-coding.exe)으로 설치
-Source: ".ai_monitor\dist\{#MyAppSrcExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; [전략 #2a onedir] PyInstaller onedir 결과 — 메인 exe + _internal 폴더를 함께 설치.
+;   메인 exe는 고정명(vibe-coding.exe)으로 리네임, _internal은 폴더째 복사. onedir exe는 자기
+;   옆의 _internal을 찾으므로 리네임해도 정상 동작. (구 onefile 단일 exe 방식 폐기 —
+;   매 부팅 _MEI 추출/좀비 node/DLL로드실패 버그 클래스를 구조적으로 제거.)
+;   [불변식] _internal은 반드시 {app}\_internal (exe 형제) — 위치 어긋나면 부팅 실패.
+Source: ".ai_monitor\dist\{#MyOneDirName}\{#MyOneDirName}.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: ".ai_monitor\dist\{#MyOneDirName}\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; 아이콘 파일 — 자동 업데이트 후에도 바로가기 아이콘이 유지되도록 별도 배포
 Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Claude Code 상태줄 스크립트 — 설치 PC의 %USERPROFILE%\.claude\ 에 복사

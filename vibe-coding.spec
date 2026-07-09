@@ -78,6 +78,10 @@ a = Analysis(
     datas=[
         # 프론트엔드 빌드 결과물 (React/Vite) — vite 기본 outDir = vibe-view/dist
         ('.ai_monitor/vibe-view/dist', 'vibe-view/dist'),
+        # [2026-07-09 드리프트 수정] Node PTY 서버 — CI(build-release.yml)는 --add-data "pty-server;pty-server"로
+        #   담는데 spec엔 빠져 있었다(spec↔CI 불일치). onedir 전환(Phase C2)에서 CI가 spec을 쓰게 되면
+        #   이게 없으면 설치본 터미널 불능 → 반드시 포함. node_modules 포함(런타임 필수).
+        ('.ai_monitor/pty-server', 'pty-server'),
         # 서버 보조 스크립트 (워치독, 브릿지, 메모리, 오케스트레이터 등)
         # → 배포 버전 SCRIPTS_DIR = sys._MEIPASS/scripts
         ('scripts', 'scripts'),
