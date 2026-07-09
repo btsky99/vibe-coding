@@ -137,14 +137,15 @@ def apply_update(handler, data_dir: Path) -> None:
         except OSError:
             pass
 
-        from updater import apply_update_from_temp
+        # [전략 #2a] 디스패처 경유 — setup 자산이면 /SILENT 인스톨러, 아니면 구 exe-swap 폴백.
+        from updater import apply_downloaded_update
         _exe = Path(exe_path)
 
         def _do_apply():
             # 소켓 버퍼 플러시 대기 — 응답이 클라이언트에 도달할 시간 확보
             time.sleep(0.3)
             try:
-                apply_update_from_temp(_exe)
+                apply_downloaded_update(_exe)
             except Exception as ex:
                 import traceback
                 err_detail = traceback.format_exc()

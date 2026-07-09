@@ -143,5 +143,59 @@ def test_heal_never_raises_on_bad_runtime(monkeypatch):
     lifecycle.heal_broken_mei_at_startup()
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase B — 업데이트 모델 전환 (exe-swap → setup /SILENT) 계약
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_find_asset_prefers_setup_over_update():
+    """[전략 #2a] setup 자산이 있으면 update-*.exe보다 우선 선택(onedir 인스톨러 모델)."""
+    release = {"assets": [
+        {"name": "vibe-coding-update-3.7.250.exe",
+         "browser_download_url": "http://x/update.exe"},
+        {"name": "vibe-coding-setup-3.7.250.exe",
+         "browser_download_url": "http://x/setup.exe"},
+    ]}
+    assert updater._find_asset_url(release) == "http://x/setup.exe"
+
+
+def test_find_asset_falls_back_to_update_when_no_setup():
+    """setup 자산이 없으면 구 update-*.exe로 폴백(점진 전환 호환)."""
+    release = {"assets": [
+        {"name": "vibe-coding-update-3.7.250.exe",
+         "browser_download_url": "http://x/update.exe"},
+    ]}
+    assert updater._find_asset_url(release) == "http://x/update.exe"
+
+
+def test_is_installer_asset_detection():
+    """파일명 'setup' 포함 여부로 인스톨러/exe-swap 경로가 갈린다."""
+    assert updater.is_installer_asset("vibe-coding-setup-3.7.250.exe") is True
+    assert updater.is_installer_asset(r"C:\x\vibe-coding-update-3.7.250.exe") is False
+
+
+def test_build_installer_cmd_is_silent():
+    """[불변식] 인스톨러 명령은 /SILENT 무인 실행 — 대화상자 없이 교체."""
+    cmd = updater.build_installer_cmd(r"C:\x\vibe-coding-setup-3.7.250.exe")
+    assert cmd[0].endswith("vibe-coding-setup-3.7.250.exe")
+    assert "/SILENT" in cmd
+    assert "/SUPPRESSMSGBOXES" in cmd
+
+
+def test_apply_dispatcher_routes_setup_to_installer(monkeypatch):
+    """디스패처: setup 자산 → 인스톨러 경로, update 자산 → 구 exe-swap 경로."""
+    calls = {"installer": None, "swap": None}
+    monkeypatch.setattr(updater, "apply_update_via_installer",
+                        lambda p: calls.__setitem__("installer", str(p)))
+    monkeypatch.setattr(updater, "apply_update_from_temp",
+                        lambda p: calls.__setitem__("swap", str(p)))
+
+    updater.apply_downloaded_update(r"C:\x\vibe-coding-setup-3.7.250.exe")
+    assert calls["installer"] and calls["swap"] is None
+
+    calls["installer"] = None
+    updater.apply_downloaded_update(r"C:\x\vibe-coding-update-3.7.250.exe")
+    assert calls["swap"] and calls["installer"] is None
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
