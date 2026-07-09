@@ -75,7 +75,7 @@ REVISION HISTORY:
     의존: B2
 ```
 
-## Phase C — 인스톨러 + CI onedir화  (C1/C3 완료 33b532b, C2는 Phase E와 함께 CI검증)
+## Phase C — 인스톨러 + CI onedir화  (C1/C3 완료 33b532b, C2 CI검증 완료 c8d753f, 아티팩트 setup-3.7.250 361MB)
 
 ```
 [x] Task C1: .iss [Files]를 onedir 폴더 전체로
@@ -86,7 +86,7 @@ REVISION HISTORY:
     검증: 로컬 ISCC 빌드 → setup 실행 → {app}에 onedir 전체 설치 + 앱 정상 실행.
     의존: A3
 
-[ ] Task C2: build-release.yml onedir 빌드로 전환
+[x] Task C2: build-release.yml onedir 빌드로 전환
     파일: .github/workflows/build-release.yml
     방법: `pyinstaller --onefile` → onedir(spec 사용 권장: `pyinstaller vibe-coding.spec`).
           --runtime-tmpdir 제거. 업데이트 에셋 = setup exe(이미 빌드). 구 update-*.exe 에셋 제거.
