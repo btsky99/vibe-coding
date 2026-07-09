@@ -48,15 +48,18 @@ REVISION HISTORY:
     의존: A2
 ```
 
-## Phase B — 업데이트 모델 전환 (exe-swap → setup 사일런트)
+## Phase B — 업데이트 모델 전환 (exe-swap → setup 사일런트)  ✅ 완료(커밋 d0d3934, 로컬)
+
+> B1/B2 구현+단위테스트(12개) 완료. B3(진행바/상태)는 검증-only: 다운로드 percent 그대로 유효,
+> 적용 후 Inno가 프로세스 교체 → 프론트 "적용 중" 표시 불변(코드 변경 불필요). 실제 적용은 Phase E.
 
 ```
-[ ] Task B1: updater 에셋 선택을 setup exe 우선으로
+[x] Task B1: updater 에셋 선택을 setup exe 우선으로
     파일: .ai_monitor/updater.py (_find_asset_url)
     방법: 1순위를 vibe-coding-setup-*.exe로. update-*.exe(구 onefile)는 폴백/은퇴.
     검증: 단위 테스트 — setup 에셋이 있으면 그걸 고름.
 
-[ ] Task B2: apply_update를 "setup /SILENT 실행 후 종료"로 전환
+[x] Task B2: apply_update를 "setup /SILENT 실행 후 종료"로 전환
     파일: .ai_monitor/updater.py (apply_update_from_temp → apply_update_via_installer)
     방법: 다운로드한 setup을 `/SILENT /SUPPRESSMSGBOXES /NORESTART` 등으로 subprocess 실행 후
           현재 프로세스는 정상 종료(Inno CloseApplications가 앱 닫고 교체, [Run] postinstall이 재시작).
@@ -64,7 +67,7 @@ REVISION HISTORY:
     검증: tests/test_updater_release_path.py 확장 — installer 실행 인자 계약(/SILENT 포함) 단위 테스트.
     의존: B1
 
-[ ] Task B3: 진행바/상태 흐름 onedir 업데이트에 맞게 점검
+[x] Task B3: 진행바/상태 흐름 onedir 업데이트에 맞게 점검
     파일: .ai_monitor/updater.py, vibe-view (updateProgress)
     방법: setup 다운로드 percent는 그대로 유효. "적용 중" 이후 Inno가 프로세스를 닫으므로
           프론트 상태 전이(적용→재시작) 문구 확인.
