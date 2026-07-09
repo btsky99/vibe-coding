@@ -75,10 +75,10 @@ REVISION HISTORY:
     의존: B2
 ```
 
-## Phase C — 인스톨러 + CI onedir화 (릴리즈 파이프라인 수정)
+## Phase C — 인스톨러 + CI onedir화  (C1/C3 완료 33b532b, C2는 Phase E와 함께 CI검증)
 
 ```
-[ ] Task C1: .iss [Files]를 onedir 폴더 전체로
+[x] Task C1: .iss [Files]를 onedir 폴더 전체로
     파일: vibe-coding-setup.iss
     방법: 단일 exe Source → `Source: ".ai_monitor\dist\<앱폴더>\*"; DestDir:"{app}";
           Flags: ignoreversion recursesubdirs createallsubdirs`. MyAppSrcExe 개념 교체.
@@ -94,7 +94,7 @@ REVISION HISTORY:
     검증: (Phase E에서 실제 CI 빌드로 검증) — 로컬에선 spec 빌드 성공까지.
     의존: C1
 
-[ ] Task C3: smoke_test / 로컬빌드 스크립트 onedir 경로 대응
+[x] Task C3: smoke_test / 로컬빌드 스크립트 onedir 경로 대응
     파일: scripts/smoke_test.py, vibe-coding.spec 관련 헬퍼
     방법: dist/<파일>.exe → dist/<앱폴더>/<앱>.exe 경로로 갱신.
     검증: python scripts/smoke_test.py 통과.
