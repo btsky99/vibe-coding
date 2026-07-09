@@ -1718,6 +1718,14 @@ def main():
     _lock_sock = acquire_single_instance_lock(PROJECT_ROOT)
     HTTP_PORT, WS_PORT = resolve_server_ports(_find_free_port)
 
+    # ── [v3.7.248] 부팅 초기 자가치유 — 업데이트/크래시로 남은 '깨진 _MEI'(python DLL 누락)와
+    #    그걸 잠근 고아 node 선제 청소. 단일 인스턴스 락 획득 후(= 우리가 생존 인스턴스) 실행하여
+    #    누적 잔여물의 "Failed to remove temporary directory" 경고 + 다음 업데이트 DLL 충돌을 예방.
+    try:
+        _lifecycle.heal_broken_mei_at_startup()
+    except Exception:
+        pass
+
     # ── AppUserModelID 설정 (WebView 생성 전에 필요) ──────────────────────
     if os.name == 'nt':
         try:

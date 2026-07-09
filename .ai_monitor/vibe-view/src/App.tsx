@@ -75,6 +75,7 @@ function App() {
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
+    updateProgress, setUpdateProgress,
     activeTaskCount, setActiveTaskCount,
     totalGitChanges, setTotalGitChanges,
     conflictCount, setConflictCount,
@@ -188,8 +189,17 @@ function App() {
             .then(data => {
               if (data?.ready) {
                 setUpdateReady({ version: data.version });
+                setUpdateProgress(null);
                 clearInterval(poll);
                 setUpdateChecking(false);
+              } else if (data?.downloading) {
+                // 다운로드 진행 중 — 진행바 갱신하고 완료까지 폴링 유지(횟수 리셋)
+                setUpdateProgress({
+                  percent: typeof data.percent === 'number' ? data.percent : -1,
+                  downloaded_mb: data.downloaded_mb || 0,
+                  total_mb: data.total_mb || 0,
+                });
+                tries = 0;
               } else if (tries >= 6) {
                 clearInterval(poll);
                 setUpdateChecking(false);
@@ -422,6 +432,33 @@ function App() {
       className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans flex-col"
       onClick={() => setActiveMenu(null)}
     >
+      {/* ── 업데이트 다운로드 진행바 (다운로드 중 & 아직 준비 전) ── */}
+      {updateProgress && !updateReady && (
+        <div className="px-3 py-1 bg-primary/10 border-b border-primary/30 shrink-0 z-50">
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] text-primary font-bold">
+              새 버전 다운로드 중{updateProgress.percent >= 0 ? ` ${updateProgress.percent}%` : '...'}
+              {updateProgress.total_mb > 0 && (
+                <span className="font-mono text-primary/70 ml-1">
+                  ({updateProgress.downloaded_mb}/{updateProgress.total_mb}MB)
+                </span>
+              )}
+            </span>
+          </div>
+          {/* percent -1(총 크기 미상)이면 확정 진행바 대신 좌우 왕복 인디케이터 */}
+          <div className="h-1 w-full bg-primary/15 rounded overflow-hidden">
+            {updateProgress.percent >= 0 ? (
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${updateProgress.percent}%` }}
+              />
+            ) : (
+              <div className="h-full w-1/3 bg-primary/60 animate-pulse" />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── 업데이트 알림 배너 (updateReady 상태일 때만 표시) ── */}
       {updateReady && (
         <div className="flex items-center justify-between px-3 py-1 bg-primary/20 border-b border-primary/40 shrink-0 z-50">

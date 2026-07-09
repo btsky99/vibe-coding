@@ -5,6 +5,10 @@ DESCRIPTION: 자동 업데이트 모듈 — GitHub Releases API로 셀프 업데
   EXE 모드(frozen)에서만 자동 업데이트 실행, 개발 모드에서는 스킵.
 
 REVISION HISTORY:
+- 2026-07-09 Claude: 업데이트 재발 사고 근본수정 (v3.7.248) — ① _update.bat이 구 프로세스 사망 후
+  새 EXE 기동 전에 runtime의 고아 node kill + 깨진 _MEI(python DLL 누락) 삭제 → setup 새설치와
+  동일한 깨끗한 상태 보장(Failed to load Python DLL 원천 차단). ② 다운로드 진행률(percent)을
+  update_ready.json에 기록 → 프론트 진행바.
 - 2026-03-26 Claude: EXE 업데이트 방식으로 복원 (pip 방식 폐기)
   → pip 배포 시 pythonnet/브라우저 폴백 등 호환성 문제 다수 발생하여 EXE로 회귀
   → import 경로는 pip/dev 양쪽 호환 유지
@@ -140,8 +144,12 @@ def _find_asset_url(release):
     return None
 
 
-def _download_asset(url, dest, token):
-    """릴리스 에셋을 dest 경로에 다운로드합니다."""
+def _download_asset(url, dest, token, progress_cb=None):
+    """릴리스 에셋을 dest 경로에 다운로드합니다.
+
+    progress_cb(downloaded_bytes, total_bytes)가 주어지면 청크마다 호출한다.
+    total_bytes는 Content-Length가 없으면 0(진행률 미상) — caller가 방어한다.
+    """
     logger.info("다운로드 시작: %s → %s", url, dest)
     req = Request(url)
     req.add_header("User-Agent", "vibe-coding-updater")
@@ -151,6 +159,11 @@ def _download_asset(url, dest, token):
             req.add_header("Authorization", f"token {token}")
     try:
         with urlopen(req, timeout=120) as resp:
+            # [진행률] S3 리다이렉트 후 최종 응답의 Content-Length. 없으면 0(미상).
+            try:
+                total_size = int(resp.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                total_size = 0
             total = 0
             with open(dest, "wb") as f:
                 while True:
@@ -159,6 +172,11 @@ def _download_asset(url, dest, token):
                         break
                     f.write(chunk)
                     total += len(chunk)
+                    if progress_cb is not None:
+                        try:
+                            progress_cb(total, total_size)
+                        except Exception:
+                            pass  # 진행률 기록 실패는 다운로드를 막지 않음
         if total < 1_000_000:
             logger.error("다운로드 파일 너무 작음 (%d bytes) — 손상 가능성", total)
             return False
@@ -203,6 +221,28 @@ def apply_update_from_temp(new_exe):
 
     bat_path = exe_path.parent / "_update.bat"
     pid = os.getpid()
+
+    # [v3.7.248 근본수정] 구 프로세스 완전 사망 후, 새 EXE 기동 '전에' runtime 폴더를 청소한다.
+    # setup 새설치는 멀쩡한데 업데이트 버튼만 "Failed to load Python DLL"로 깨지던 원인:
+    #   인수인계 중 이전 인스턴스의 node PTY 서버가 채 안 죽고 남아 자기 _MEI\pty-server를 잠그면,
+    #   새 EXE onefile 부트로더의 추출이 잠긴 잔여물과 충돌 → python DLL 부분 추출 → 부팅 실패 +
+    #   "Failed to remove temporary directory" 경고. 부트로더는 Python보다 먼저라 앱 내부 정리로
+    #   원천 차단 불가 → '교체되는 쪽'이 죽고 난 뒤 bat이 정리해 setup 새설치와 같은 깨끗한 상태를 만든다.
+    # [안전] node kill은 runtime\_MEI 경로 + '부모 죽음(고아)'만 대상 → dev/글로벌 node,
+    #   동시 실행 중인 다른 설치 인스턴스의 살아있는 PTY 서버는 절대 안 건드림(v3.7.122 무차별kill 재발 방지).
+    #   폴더 삭제도 python*.dll 없는 '깨진 _MEI'만 → 정상 인스턴스(항상 DLL 존재)는 보호.
+    runtime_dir = Path(sys._MEIPASS).parent  # %APPDATA%\VibeCoding\runtime
+    _ps_clean = (
+        f"$rt='{runtime_dir}'; "
+        "Get-CimInstance Win32_Process | Where-Object { "
+        "$_.Name -eq 'node.exe' -and $_.ExecutablePath -like ($rt + '\\_MEI*') "
+        "-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+        "Start-Sleep -Milliseconds 400; "
+        "Get-ChildItem -LiteralPath $rt -Directory -Filter '_MEI*' -ErrorAction SilentlyContinue | "
+        "Where-Object { -not (Test-Path (Join-Path $_.FullName 'python*.dll')) } | "
+        "ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }"
+    )
     bat_content = (
         "@echo off\n"
         ":wait\n"
@@ -212,6 +252,7 @@ def apply_update_from_temp(new_exe):
         "    goto wait\n"
         ")\n"
         f'if exist "{old_path}" del /f /q "{old_path}"\n'
+        f'powershell -NoProfile -Command "{_ps_clean}" >NUL 2>&1\n'
         "timeout /t 3 /nobreak >NUL\n"
         f'start "" "{exe_path}"\n'
         'del /f /q "%~f0"\n'
@@ -226,9 +267,8 @@ def apply_update_from_temp(new_exe):
     # 새 인스턴스 내부 정리로는 못 막으므로, 교체되는 '이 프로세스'가 종료 직전 반드시 정리한다.
     # install 전체가 교체되므로 exclude 없이(자기 _MEI 소속 node 포함) 정리.
     try:
-        runtime_dir = Path(sys._MEIPASS).parent  # %APPDATA%\VibeCoding\runtime
         from infra.pty_process import kill_runtime_mei_orphans
-        kill_runtime_mei_orphans(runtime_dir)
+        kill_runtime_mei_orphans(runtime_dir)  # 위에서 계산한 runtime_dir 재사용
     except Exception as _e:
         logger.warning("runtime _MEI 좀비 정리 실패 (무시, 업데이트는 계속): %s", _e)
 
@@ -298,7 +338,30 @@ def check_and_update(data_dir):
         json.dump({"version": latest_tag, "ready": False, "downloading": True}, f)
 
     tmp_path = data_dir / "vibe-coding.exe.new"
-    if not _download_asset(asset_url, tmp_path, token):
+
+    # [진행률] 다운로드 중 update_ready.json에 percent를 기록 → 프론트 진행바.
+    # 매 청크마다 파일을 쓰면 과도하므로 1% 단위 변화 또는 0.5초 간격으로 스로틀.
+    _prog_state = {"pct": -1, "ts": 0.0}
+
+    def _write_progress(done, total_bytes):
+        pct = int(done * 100 / total_bytes) if total_bytes else -1
+        now = time.time()
+        if pct == _prog_state["pct"] and (now - _prog_state["ts"]) < 0.5:
+            return
+        _prog_state["pct"] = pct
+        _prog_state["ts"] = now
+        try:
+            with open(ready_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "version": latest_tag, "ready": False, "downloading": True,
+                    "percent": pct,  # -1이면 총 크기 미상(진행바 대신 스피너)
+                    "downloaded_mb": round(done / 1_048_576, 1),
+                    "total_mb": round(total_bytes / 1_048_576, 1) if total_bytes else 0,
+                }, f)
+        except Exception:
+            pass
+
+    if not _download_asset(asset_url, tmp_path, token, progress_cb=_write_progress):
         if tmp_path.exists():
             tmp_path.unlink()
         try:

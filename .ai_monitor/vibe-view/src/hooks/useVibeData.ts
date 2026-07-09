@@ -67,6 +67,9 @@ export interface VibeData {
   setUpdateApplying: React.Dispatch<React.SetStateAction<boolean>>;
   updateChecking: boolean;
   setUpdateChecking: React.Dispatch<React.SetStateAction<boolean>>;
+  // 다운로드 진행률 — percent -1이면 총 크기 미상(스피너). null이면 다운로드 중 아님.
+  updateProgress: { percent: number; downloaded_mb: number; total_mb: number } | null;
+  setUpdateProgress: React.Dispatch<React.SetStateAction<{ percent: number; downloaded_mb: number; total_mb: number } | null>>;
 
   // 배지 카운트
   activeTaskCount: number;
@@ -108,6 +111,7 @@ export function useVibeData(): VibeData {
   const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<{ percent: number; downloaded_mb: number; total_mb: number } | null>(null);
 
   // ─── 배지 카운트 ──────────────────────────────────────────────────
   const [activeTaskCount, setActiveTaskCount] = useState(0);
@@ -328,9 +332,18 @@ export function useVibeData(): VibeData {
         .then(data => {
           if (data?.ready) {
             setUpdateReady({ version: data.version });
+            setUpdateProgress(null);
             if (data.error) alert(`이전 업데이트 적용 실패: ${data.error}`);
+          } else if (data?.downloading) {
+            // 백그라운드 다운로드 진행 중 — 진행바 갱신(배너는 App에서 표시)
+            setUpdateProgress({
+              percent: typeof data.percent === 'number' ? data.percent : -1,
+              downloaded_mb: data.downloaded_mb || 0,
+              total_mb: data.total_mb || 0,
+            });
           } else {
             setUpdateReady(null);
+            setUpdateProgress(null);
           }
         })
         .catch((err) => console.error('[useVibeData] fetch error:', err));
@@ -348,6 +361,7 @@ export function useVibeData(): VibeData {
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
+    updateProgress, setUpdateProgress,
     activeTaskCount, setActiveTaskCount,
     totalGitChanges, setTotalGitChanges,
     conflictCount, setConflictCount,

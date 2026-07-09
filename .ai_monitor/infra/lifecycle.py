@@ -7,6 +7,8 @@ DESCRIPTION: 프로세스 라이프사이클 정리 함수 모음.
              명시적 인자로 주입받습니다.
 
 REVISION HISTORY:
+- 2026-07-09 Claude: heal_broken_mei_at_startup 추가 (v3.7.248) — 종료에만 있던 _MEI 정리를
+  부팅 시점에도 걸어, 업데이트/크래시로 남은 깨진 _MEI + 좀비 node 누적을 자가치유.
 - 2026-04-20 Claude: server.py L4998~5176 분리 (Task 1.1)
                      원본 함수의 동작/주석 그대로 유지, 글로벌 의존성만 인자화
 - 2026-07-06 Claude: 서버 시작 프리로드/복구 2함수 흡수 (Phase 2 Task 13 / R15)
@@ -118,6 +120,56 @@ def cleanup_pyinstaller_temp() -> None:
                     print(f"[cleanup] PyInstaller 임시 디렉터리 삭제: {item.name}")
                 except Exception:
                     pass
+    except Exception:
+        pass
+
+
+def heal_broken_mei_at_startup() -> None:
+    """부팅 초기에 runtime 하위의 '깨진 _MEI'(python DLL 누락) + 그걸 잠근 고아 node를
+    선제 청소한다. 종료(atexit)에만 있던 정리를 시작 시점에도 걸어 누적 자가치유.
+
+    [WHY / v3.7.248] cleanup_pyinstaller_temp는 '정상 종료' 때만 돈다 → 업데이트 인수인계나
+    크래시로 남은 깨진 _MEI + 좀비 node가 다음 부팅에서 청소되지 않고 누적, "Failed to remove
+    temporary directory" 경고와 다음 업데이트의 DLL 추출 충돌을 반복 유발했다. 시작 시점에 한 번
+    치유한다. onefile 부트로더는 Python보다 먼저라 '이번 부팅'의 추출 실패는 못 막지만(그건
+    updater의 _update.bat 청소가 담당), 누적 잔여물 제거로 재발 확률을 크게 낮춘다.
+
+    [안전/불변식] 현재 실행 인스턴스의 _MEI(_MEIPASS)와 python*.dll이 존재하는 정상 _MEI는
+    절대 삭제하지 않는다 — 동시 실행 중인 다른 설치 인스턴스(항상 DLL 보유)를 보호. node kill도
+    only_orphans=True(부모 죽은 좀비만)로 살아있는 형제 인스턴스의 PTY 서버를 지킨다.
+    """
+    if not getattr(sys, 'frozen', False):
+        return  # 개발 모드에는 runtime _MEI 자체가 없음
+    try:
+        import shutil
+        current_mei = getattr(sys, '_MEIPASS', '')
+        runtime_dir = Path(current_mei).parent if current_mei else None
+        if not runtime_dir or not runtime_dir.exists():
+            return
+        # 1) 깨진 _MEI를 잠근 고아 node 먼저 종료(락 해제) — 살아있는 형제 인스턴스는 보호.
+        try:
+            from infra.pty_process import kill_runtime_mei_orphans
+            kill_runtime_mei_orphans(runtime_dir, exclude_mei=Path(current_mei).name,
+                                     only_orphans=True)
+        except Exception:
+            pass
+        # 2) python*.dll 없는 '깨진 _MEI'만 삭제. 정상(DLL 존재) 폴더/현재 폴더는 건드리지 않음.
+        for item in runtime_dir.iterdir():
+            if not (item.name.startswith('_MEI') and item.is_dir()):
+                continue
+            if str(item) == current_mei:
+                continue
+            try:
+                has_dll = any(item.glob('python*.dll'))
+            except Exception:
+                has_dll = True  # 판별 실패 시 보수적으로 보존
+            if has_dll:
+                continue
+            try:
+                shutil.rmtree(str(item), ignore_errors=True)
+                print(f"[startup-heal] 깨진 PyInstaller 임시 폴더 제거: {item.name}")
+            except Exception:
+                pass
     except Exception:
         pass
 
