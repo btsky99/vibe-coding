@@ -101,17 +101,17 @@ REVISION HISTORY:
     의존: C2
 ```
 
-## Phase D — 기존 onefile 설치본 → onedir 호환 전환
+## Phase D — per-user 전환 + 기존 설치본 호환 (396f81b, CI검증중)
 
 ```
-[ ] Task D1: 전환 시나리오 설계 + 문서화
+[x] Task D1: 전환 시나리오 설계 + 문서화
     파일: (메모리 project_update_dll_load_fail.md 갱신)
     방법: 현재 onefile 설치본이 v3.7.248 이후 updater로 setup을 받아 /SILENT 실행 →
           Inno가 {app}에 onedir 설치(단일 exe 자리를 폴더가 대체). AppId 동일 →
           Inno가 업그레이드로 인식. 구 단일 exe 잔재 정리(uninstall 로직/ignoreversion).
     검증: 구 onefile 설치 상태에서 신 setup 실행 → onedir로 깔끔히 전환 확인(수동 E2E).
 
-[ ] Task D2: 소프트 업데이트 채널(boot.py) onedir 영향 검증
+[x] Task D2: 소프트 업데이트 채널(boot.py) onedir 영향 검증
     파일: .ai_monitor/boot.py, soft_updater.py
     방법: _MEIPASS 위치 변화가 managed checkout/_appseed 폴백에 영향 없는지 재확인.
     검증: onedir에서 boot --boot-selftest 통과 + 소스 업데이트 왕복.
