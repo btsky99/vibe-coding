@@ -11,6 +11,11 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-07-10] Claude — [바로가기 복구] onefile→onedir per-user 전환 사고 대응.
+;              구 설치(%LOCALAPPDATA%\VibeCoding\app)에서 신 경로(%LOCALAPPDATA%\Programs\VibeCoding)로
+;              이사하며 바탕화면/시작메뉴 .lnk가 죽은 옛 경로를 계속 가리켜 "아이콘 눌러도 무반응" 사고.
+;              silent 업데이트는 desktopicon(기본 unchecked) task를 안 돌려 새 바로가기도 안 생김.
+;              → [Run]에서 죽은 VibeCoding .lnk를 새 {app}\exe로 repoint + InitializeSetup에서 구 빈 폴더 청소.
 ; [2026-05-26] Claude — [Registry] 섹션 추가: 시스템 환경변수 VIBE_HIVE_HOOK 등록 (B3)
 ;              설치 EXE 단독 PC에서도 install_hive_hooks.py가 자동으로 EXE 경로를
 ;              찾을 수 있도록 HKLM\...\Environment에 vibe-coding.exe 절대경로를 박는다.
@@ -163,6 +168,15 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Com
 ; Claude Code settings.json에 statusLine 자동 설정
 ; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
+; ── 구 설치 바로가기 경로 복구 ──────────────────────────────────────────
+; [과거사고 2026-07-10] onefile(admin, %LOCALAPPDATA%\VibeCoding\app) → onedir(per-user,
+;   %LOCALAPPDATA%\Programs\VibeCoding) 전환 시 exe 경로가 이사. 구 설치의 바탕화면/시작메뉴
+;   .lnk가 죽은 옛 경로를 계속 가리켜 "아이콘 눌러도 무반응" 사고. silent 업데이트는
+;   desktopicon(기본 unchecked) task를 안 돌려 새 바로가기도 생기지 않음.
+;   → Desktop/StartMenu(사용자+공용)에서 VibeCoding을 가리키지만 타깃이 사라진 .lnk를 찾아
+;     새 {app}\exe로 repoint. 정상 타깃(Test-Path True)은 건드리지 않음(멱등).
+;   [불변식] skipifsilent 금지 — 이 복구는 무음 업데이트에서 반드시 실행돼야 함(그게 주 사고 경로).
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$new='{app}\{#MyAppExeName}'; $ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if(($sc.TargetPath -like '*VibeCoding*vibe-coding.exe') -and -not (Test-Path $sc.TargetPath)){{ $sc.TargetPath=$new; $sc.WorkingDirectory=Split-Path $new; if(Test-Path ('{app}\vibe_final.ico')){{ $sc.IconLocation='{app}\vibe_final.ico' }}; $sc.Save() }} }} catch {{}} }}"""; Flags: runhidden; StatusMsg: "구 바로가기 경로 복구 중..."
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppDisplayName} 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -250,6 +264,12 @@ begin
 
   // PyInstaller _MEI* 잔여 폴더 정리 (python311.dll 로드 실패 방지)
   CleanupMEIDirectories();
+
+  // [과거사고 2026-07-10] onefile(구 %LOCALAPPDATA%\VibeCoding\app) → onedir(신 %LOCALAPPDATA%\Programs\VibeCoding)
+  //   전환 후 구 설치 폴더가 exe 없이 빈 껍데기로 남아 죽은 바로가기의 원인이 됨. 잔재 폴더 청소.
+  //   [주의] pgdata는 %APPDATA%(Roaming)\VibeCoding 이라 무관 — 여기서 지우는 건 Local의 구 프로그램 폴더뿐.
+  if DirExists(ExpandConstant('{localappdata}\VibeCoding\app')) then
+    DelTree(ExpandConstant('{localappdata}\VibeCoding\app'), True, True, True);
 
   sUnInstallString := GetUninstallString();
   if sUnInstallString <> '' then begin
