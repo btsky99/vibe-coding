@@ -11,6 +11,11 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-07-10] Claude — [설치/제거 DLL 잠금] onedir 재설치 시 "DeleteFile 실패; 코드 5:
+;              ...\pgsql\bin\libcrypto-3-x64.dll" 사고. 근본원인: vibe-coding.exe만 taskkill →
+;              자식 postgres.exe/node.exe가 고아로 살아남아 pgsql DLL 잠금. onefile은 DLL이 _MEI
+;              추출이라 안 잠겼으나 onedir은 설치폴더 직접 배치라 잠금 노출. → InitializeSetup +
+;              [UninstallRun]에서 '경로가 VibeCoding 설치폴더 밑'인 프로세스만 스코프 종료(KillLockingProcesses).
 ; [2026-07-10] Claude — [바로가기 복구] onefile→onedir per-user 전환 사고 대응.
 ;              구 설치(%LOCALAPPDATA%\VibeCoding\app)에서 신 경로(%LOCALAPPDATA%\Programs\VibeCoding)로
 ;              이사하며 바탕화면/시작메뉴 .lnk가 죽은 옛 경로를 계속 가리켜 "아이콘 눌러도 무반응" 사고.
@@ -180,7 +185,10 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Com
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppDisplayName} 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; 제거 전 실행 중인 프로세스 종료 (고정 파일명 사용)
+; 제거 전 실행 중인 프로세스 종료 — 앱 + 자식 postgres.exe/node.exe(pgsql DLL 잠금 방지).
+; [과거사고 2026-07-10] vibe-coding.exe만 죽이면 자식 postgres가 살아남아 pgsql\bin\*.dll 잠금 →
+;   제거 시 파일 삭제 실패(코드 5). 경로가 VibeCoding 설치폴더 밑인 프로세스만 스코프 종료(개발/타 PG 무관).
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -like '*VibeCoding*' }} | ForEach-Object {{ try {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }} catch {{}} }}"""; Flags: runhidden; RunOnceId: "KillVibeChildren"
 Filename: "taskkill.exe"; Parameters: "/F /IM vibe-coding.exe"; Flags: runhidden; RunOnceId: "KillVibeCoding"
 
 [Code]
@@ -250,6 +258,36 @@ begin
   end;
 end;
 
+// ── 설치폴더에서 도는 잠금 프로세스 전멸 (postgres.exe / node.exe 포함) ──
+// [과거사고 2026-07-10 v3.7.250] onedir 전환 후 재설치 시
+//   "DeleteFile 실패; 코드 5(액세스 거부): ...\pgsql\bin\libcrypto-3-x64.dll" 발생.
+//   [근본원인] InitializeSetup이 vibe-coding.exe 하나만 taskkill → 부모가 띄운
+//     자식 postgres.exe(내장 PG)·node.exe(PTY 서버)가 고아로 살아남아 pgsql DLL을
+//     계속 잠금 → 파일 덮어쓰기 불가. onefile 시절엔 DLL이 %TEMP%\_MEI에 추출돼
+//     설치폴더가 안 잠겼으나, onedir은 DLL이 설치폴더에 직접 놓여 잠금이 그대로 드러남.
+//   [해법] 이미지명(IM)이 아니라 '실행 경로가 VibeCoding 설치폴더 밑'인 프로세스만
+//     골라 죽인다 → 남의 PostgreSQL/Node나 개발 체크아웃(경로가 'vibe-coding' 하이픈,
+//     'VibeCoding'와 불일치)은 절대 안 건드림. -like는 대소문자 무시지만 하이픈 유무로 분리됨.
+//   [불변식] vibe-coding.exe 단독 taskkill만으로는 부족 — 자식 DB/PTY까지 반드시 정리.
+procedure KillLockingProcesses();
+var
+  iResultCode: Integer;
+  sPs: String;
+begin
+  // 경로 기준 스코프 종료: ExecutablePath가 '*VibeCoding*'인 프로세스 전부 강제 종료.
+  //   postgres.exe / node.exe / vibe-coding.exe / vibe-dashboard.exe 모두 포함됨.
+  sPs :=
+    'Get-CimInstance Win32_Process | ' +
+    'Where-Object { $_.ExecutablePath -like ''*VibeCoding*'' } | ' +
+    'ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }';
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command "' + sPs + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+  // 이미지명 폴백(경로 없는 좀비 대비) — 개발 postgres/node는 위 경로필터에서 이미 제외됐고
+  //   여기선 vibe-coding.exe만 IM으로 마무리 (postgres/node를 IM으로 죽이면 개발 것까지 죽으므로 금지).
+  Exec('taskkill.exe', '/F /IM vibe-coding.exe', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+end;
+
 function InitializeSetup(): Boolean;
 var
   iResultCode: Integer;
@@ -257,8 +295,8 @@ var
 begin
   Result := True;
 
-  // 실행 중인 vibe-coding 프로세스 강제 종료 (DLL 잠금 방지)
-  Exec('taskkill.exe', '/F /IM vibe-coding.exe', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+  // 실행 중인 앱 + 자식 프로세스(postgres.exe/node.exe) 강제 종료 (DLL 잠금 방지)
+  KillLockingProcesses();
   // 잠시 대기하여 프로세스 종료 및 파일 잠금 해제 완료 대기
   Sleep(1500);
 
