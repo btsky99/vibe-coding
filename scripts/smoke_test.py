@@ -30,10 +30,17 @@ HEALTH_CHECK_INTERVAL = 1  # 헬스체크 폴링 간격 (초)
 
 
 def find_exe() -> Path | None:
-    """dist/ 디렉토리에서 가장 최근 빌드된 EXE를 찾습니다."""
+    """dist/ 디렉토리에서 가장 최근 빌드된 EXE를 찾습니다.
+
+    [2026-07-09 전략 #2a] onefile은 dist/<name>.exe(최상위), onedir은
+    dist/<name>/<name>.exe(한 단계 하위)에 놓인다. 둘 다 탐색해 onedir 전환 후에도
+    로컬 smoke가 동작하게 한다(구 onefile 빌드와도 하위호환).
+    """
     if not DIST_DIR.exists():
         return None
-    exes = sorted(DIST_DIR.glob('vibe-coding-v*.exe'), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = list(DIST_DIR.glob('vibe-coding-v*.exe'))          # onefile(최상위)
+    candidates += list(DIST_DIR.glob('vibe-coding-v*/vibe-coding-v*.exe'))  # onedir(하위)
+    exes = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
     return exes[0] if exes else None
 
 

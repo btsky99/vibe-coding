@@ -78,6 +78,10 @@ a = Analysis(
     datas=[
         # 프론트엔드 빌드 결과물 (React/Vite) — vite 기본 outDir = vibe-view/dist
         ('.ai_monitor/vibe-view/dist', 'vibe-view/dist'),
+        # [2026-07-09 드리프트 수정] Node PTY 서버 — CI(build-release.yml)는 --add-data "pty-server;pty-server"로
+        #   담는데 spec엔 빠져 있었다(spec↔CI 불일치). onedir 전환(Phase C2)에서 CI가 spec을 쓰게 되면
+        #   이게 없으면 설치본 터미널 불능 → 반드시 포함. node_modules 포함(런타임 필수).
+        ('.ai_monitor/pty-server', 'pty-server'),
         # 서버 보조 스크립트 (워치독, 브릿지, 메모리, 오케스트레이터 등)
         # → 배포 버전 SCRIPTS_DIR = sys._MEIPASS/scripts
         ('scripts', 'scripts'),
@@ -147,19 +151,23 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# [2026-07-09 전략 #2a] onefile → onedir 전환.
+#   [WHY] onefile은 매 부팅 전체를 runtime_tmpdir(\_MEI)에 추출하는데, 번들 내 node PTY 서버가
+#     그 폴더를 잡은 채 오래 살아 → 좀비/DLL로드실패/temp정리실패 버그 클래스의 뿌리(v3.7.244~248).
+#     onedir은 안정된 설치 폴더에서 그대로 실행 → 추출/_MEI/좀비가 구조적으로 불가능.
+#   [불변식] onedir은 EXE(exclude_binaries=True) + COLLECT 조합. runtime_tmpdir 삭제(추출 없음).
+#   [배포] 결과는 dist/<_EXE_NAME>/ 폴더 — 인스톨러(.iss)가 폴더 전체를 담아 배포(Phase C).
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,  # onedir: 바이너리/데이터는 아래 COLLECT가 폴더로 수집
     name=_EXE_NAME,  # 예: vibe-coding-v3.6.5
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir='%APPDATA%\\VibeCoding\\runtime',
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -167,4 +175,14 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['.ai_monitor\\bin\\app_icon.ico'],
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name=_EXE_NAME,  # 출력 폴더: dist/<_EXE_NAME>/
 )

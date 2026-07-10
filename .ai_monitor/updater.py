@@ -119,7 +119,19 @@ def _find_asset_url(release):
     """
     assets = release.get("assets", [])
 
-    # 1순위: vibe-coding-update-*.exe (현재 CI 표준 네이밍)
+    # [전략 #2a / onedir] 1순위: vibe-coding-setup-*.exe — 업데이트를 "Inno 인스톨러 /SILENT 실행"
+    #   모델로 전환(exe-swap 폐기). onedir은 추출/_MEI가 없어 좀비/DLL로드실패 버그 클래스가 사라진다.
+    #   Inno CloseApplications=yes가 실행 중 앱을 닫고 파일 교체+재시작을 담당.
+    #   [주의/미결] setup은 PrivilegesRequired=admin → /SILENT라도 UAC가 뜰 수 있음. Phase C/D에서
+    #   per-user 설치 등으로 UAC 무프롬프트 전환 검토(메모리 project_update_dll_load_fail 참조).
+    #   [폴백] 아래 update-*.exe(구 onefile)는 유지 — setup 자산이 없으면 구 exe-swap 경로로 동작.
+    for asset in assets:
+        name = asset.get("name", "")
+        if name.startswith("vibe-coding-setup-") and name.endswith(".exe"):
+            logger.info("에셋 발견(setup/onedir): %s", name)
+            return asset.get("browser_download_url") or asset.get("url")
+
+    # 2순위: vibe-coding-update-*.exe (구 onefile CI 네이밍 — 폴백/점진 전환)
     for asset in assets:
         name = asset.get("name", "")
         if name.startswith("vibe-coding-update-") and name.endswith(".exe"):
@@ -287,6 +299,56 @@ def apply_update_from_temp(new_exe):
     )
     time.sleep(0.8)
     os._exit(0)
+
+
+def build_installer_cmd(installer_path) -> list:
+    """setup EXE를 사일런트로 실행하는 명령을 만드는 순수 함수 (테스트 가능).
+
+    [WHY / 전략 #2a] onedir 전환 후 업데이트 = Inno setup /SILENT 실행. .iss의
+    CloseApplications=yes가 실행 중 vibe-coding을 닫고 파일 교체 후 재시작(RestartApplications
+    기본 yes)을 담당 → _update.bat·_MEI 청소·좀비 처리가 통째로 불필요해진다.
+    [플래그] /SILENT(진행창만, 대화상자 없음)·/SUPPRESSMSGBOXES(확인/오류 자동)·/NOCANCEL(중단 방지).
+    /VERYSILENT는 진행창까지 숨김 — 사용자에게 최소 피드백을 주려 /SILENT를 택함.
+    """
+    return [str(installer_path), "/SILENT", "/SUPPRESSMSGBOXES", "/NOCANCEL"]
+
+
+def is_installer_asset(path) -> bool:
+    """다운로드 자산이 Inno setup 인스톨러인지(파일명에 'setup' 포함) 판별.
+    [계약] setup 자산 → 인스톨러 /SILENT 경로, 그 외(update-*.exe) → 구 exe-swap 폴백."""
+    return "setup" in Path(path).name.lower()
+
+
+def apply_update_via_installer(installer_path):
+    """setup EXE를 사일런트 실행 후 현재 프로세스를 종료한다. Inno가 앱 교체+재시작 담당.
+
+    [불변식] Popen(detached) → 짧은 대기 → os._exit(0). 우리(vibe-coding)가 살아있으면 Inno
+    CloseApplications가 우리를 닫아야 하는데, 먼저 스스로 빠져 파일 잠금을 풀어주면 교체가 매끄럽다.
+    [미결] admin 인스톨러라 /SILENT라도 UAC 가능 — Phase C/D에서 per-user 설치로 무프롬프트 검토.
+    """
+    installer_path = Path(installer_path)
+    if not installer_path.exists():
+        raise FileNotFoundError(f"인스톨러 파일 없음: {installer_path}")
+    if installer_path.stat().st_size < 1_000_000:
+        raise ValueError(f"인스톨러 너무 작음 ({installer_path.stat().st_size} bytes) — 손상 의심")
+    cmd = build_installer_cmd(installer_path)
+    logger.info("인스톨러 사일런트 실행: %s", cmd)
+    subprocess.Popen(cmd, creationflags=0x08000000, close_fds=True)
+    time.sleep(0.8)
+    os._exit(0)
+
+
+def apply_downloaded_update(asset_path):
+    """다운로드된 업데이트 자산을 적용하는 디스패처.
+
+    setup 인스톨러면 /SILENT 실행(onedir 모델), 아니면 구 exe-swap(onefile 폴백).
+    [WHY 디스패처] 점진 전환 — CI가 setup을 update 자산으로 내보내기 전(구 릴리즈)에도, 이후에도
+    같은 코드가 자산 종류만 보고 올바른 경로를 택해 호환성을 유지한다.
+    """
+    if is_installer_asset(asset_path):
+        apply_update_via_installer(asset_path)
+    else:
+        apply_update_from_temp(Path(asset_path))
 
 
 def check_and_update(data_dir):
