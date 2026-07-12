@@ -5,6 +5,12 @@ DESCRIPTION: 자동 업데이트 모듈 — GitHub Releases API로 셀프 업데
   EXE 모드(frozen)에서만 자동 업데이트 실행, 개발 모드에서는 스킵.
 
 REVISION HISTORY:
+- 2026-07-12 Claude: [코드32 사고 근본수정] setup 인스톨러가 앱 exe로 스왑되던 버그 수정.
+  다운로드 tmp를 항상 vibe-coding.exe.new로 저장 → is_installer_asset이 'setup' 미검출 →
+  onefile로 오판 → apply_update_from_temp가 인스톨러를 {app}\vibe-coding.exe로 스왑 →
+  실행 시 자기 자신 덮어쓰기로 "DeleteFile 실패; 코드32(사용 중)". 수정: _find_asset(dict 반환)로
+  원본 에셋명 판정 + tmp를 vibe-coding-setup.exe.new로 이름지어 인스톨러 여부 보존 +
+  update_ready.json에 is_installer 명시 저장(apply 단계 확정 분기).
 - 2026-07-09 Claude: 업데이트 재발 사고 근본수정 (v3.7.248) — ① _update.bat이 구 프로세스 사망 후
   새 EXE 기동 전에 runtime의 고아 node kill + 깨진 _MEI(python DLL 누락) 삭제 → setup 새설치와
   동일한 깨끗한 상태 보장(Failed to load Python DLL 원천 차단). ② 다운로드 진행률(percent)을
@@ -113,47 +119,58 @@ def _is_newer(latest_tag, current):
         return False
 
 
-def _find_asset_url(release):
-    """릴리스 에셋에서 업데이트용 EXE URL을 찾습니다.
-    CI 빌드 에셋명: vibe-coding-update-X.Y.Z.exe (setup 제외)
-    """
+def _find_asset(release):
+    """릴리스 에셋에서 업데이트용 EXE 에셋 dict를 우선순위대로 선택해 반환.
+
+    [WHY 반환값 = dict] url뿐 아니라 **에셋 이름**이 apply 단계 분기에 필수다. 다운로드 임시
+      파일명은 항상 vibe-coding(-setup).exe.new로 고정되므로, is_installer_asset을 tmp 파일명이
+      아닌 '원본 에셋명'으로 판정해야 setup 인스톨러를 onefile로 오판하지 않는다.
+      (v3.7.252 사고: setup 자산을 vibe-coding.exe.new로 저장 → "setup" 미포함으로 오판 →
+       apply_update_from_temp가 인스톨러를 앱 exe로 스왑 → 실행 시 자기 자신 덮어쓰기 코드32.)
+    CI 빌드 에셋명: vibe-coding-setup-X.Y.Z.exe(onedir) 또는 vibe-coding-update-X.Y.Z.exe(구 onefile)."""
     assets = release.get("assets", [])
 
     # [전략 #2a / onedir] 1순위: vibe-coding-setup-*.exe — 업데이트를 "Inno 인스톨러 /SILENT 실행"
     #   모델로 전환(exe-swap 폐기). onedir은 추출/_MEI가 없어 좀비/DLL로드실패 버그 클래스가 사라진다.
     #   Inno CloseApplications=yes가 실행 중 앱을 닫고 파일 교체+재시작을 담당.
-    #   [주의/미결] setup은 PrivilegesRequired=admin → /SILENT라도 UAC가 뜰 수 있음. Phase C/D에서
-    #   per-user 설치 등으로 UAC 무프롬프트 전환 검토(메모리 project_update_dll_load_fail 참조).
     #   [폴백] 아래 update-*.exe(구 onefile)는 유지 — setup 자산이 없으면 구 exe-swap 경로로 동작.
     for asset in assets:
         name = asset.get("name", "")
         if name.startswith("vibe-coding-setup-") and name.endswith(".exe"):
             logger.info("에셋 발견(setup/onedir): %s", name)
-            return asset.get("browser_download_url") or asset.get("url")
+            return asset
 
     # 2순위: vibe-coding-update-*.exe (구 onefile CI 네이밍 — 폴백/점진 전환)
     for asset in assets:
         name = asset.get("name", "")
         if name.startswith("vibe-coding-update-") and name.endswith(".exe"):
             logger.info("에셋 발견(update): %s", name)
-            return asset.get("browser_download_url") or asset.get("url")
+            return asset
 
-    # 2순위: 정확히 ASSET_NAME과 일치
+    # 3순위: 정확히 ASSET_NAME과 일치
     for asset in assets:
         name = asset.get("name", "")
         if name == ASSET_NAME:
-            return asset.get("browser_download_url") or asset.get("url")
+            return asset
 
-    # 3순위: vibe-coding*.exe 중 setup/console 아닌 것
+    # 4순위: vibe-coding*.exe 중 setup/console 아닌 것
     for asset in assets:
         name = asset.get("name", "")
         if (name.startswith("vibe-coding") and name.endswith(".exe")
                 and "setup" not in name.lower() and "console" not in name.lower()):
             logger.info("에셋 발견(fallback): %s", name)
-            return asset.get("browser_download_url") or asset.get("url")
+            return asset
 
     logger.warning("업데이트 에셋 없음. 에셋 목록: %s", [a.get("name") for a in assets])
     return None
+
+
+def _find_asset_url(release):
+    """_find_asset의 URL만 필요한 호출부용 얇은 래퍼 (기존 계약 유지)."""
+    asset = _find_asset(release)
+    if not asset:
+        return None
+    return asset.get("browser_download_url") or asset.get("url")
 
 
 def _download_asset(url, dest, token, progress_cb=None):
@@ -241,6 +258,41 @@ def build_update_bat(exe_path, old_path, pid, runtime_dir) -> str:
     )
 
 
+def _looks_like_installer(path) -> bool:
+    """[최후방어선] 파일의 PE 버전정보(FileDescription/ProductName)에 'setup'이 있으면 Inno
+    인스톨러로 간주. 분류 로직(is_installer_asset)이 어떻게 오판하든, onefile 스왑 경로가
+    실수로 인스톨러를 앱 exe로 덮어쓰는 브릭 사고(v3.7.252 코드32 — 실행 시 자기 자신
+    덮어쓰기)를 원천 차단한다. 읽기 실패는 전부 안전하게 False(정상 스왑 경로 유지).
+    [제약] Windows version.dll 전용 — 다른 플랫폼/실패 시 False라 무해."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        p = str(path)
+        ver = ctypes.windll.version
+        size = ver.GetFileVersionInfoSizeW(p, None)
+        if not size:
+            return False
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(p, 0, size, buf):
+            return False
+        lplp = ctypes.c_void_p()
+        length = wintypes.UINT()
+        if not ver.VerQueryValueW(buf, "\\VarFileInfo\\Translation",
+                                  ctypes.byref(lplp), ctypes.byref(length)) or not length.value:
+            return False
+        lang, cp = ctypes.cast(lplp, ctypes.POINTER(wintypes.WORD * 2)).contents[:]
+        for field in ("FileDescription", "ProductName"):
+            sub = "\\StringFileInfo\\%04x%04x\\%s" % (lang, cp, field)
+            val = ctypes.c_void_p()
+            vlen = wintypes.UINT()
+            if ver.VerQueryValueW(buf, sub, ctypes.byref(val), ctypes.byref(vlen)) and vlen.value:
+                if "setup" in ctypes.wstring_at(val, vlen.value - 1).lower():
+                    return True
+        return False
+    except Exception:
+        return False
+
+
 def apply_update_from_temp(new_exe):
     """현재 실행 중인 exe를 새 버전으로 교체하고 재시작합니다.
     Windows는 실행 중인 exe를 덮어쓸 수 없지만 이름 변경은 허용됩니다.
@@ -249,6 +301,14 @@ def apply_update_from_temp(new_exe):
     old_path = exe_path.with_suffix(".exe.old")
 
     logger.info("업데이트 적용 시작: %s → %s", new_exe, exe_path)
+
+    # [최후방어선 v3.7.252] 넘겨받은 파일이 실제 Inno 인스톨러면 절대 앱 exe로 스왑하지 않는다.
+    #   (스왑하면 {app}\vibe-coding.exe가 인스톨러가 되어 실행마다 자기 자신 덮어쓰기 코드32로 브릭.)
+    #   분류가 어떤 이유로든 여기로 인스톨러를 보내더라도 인스톨러 경로로 우회해 사고를 막는다.
+    if new_exe.exists() and _looks_like_installer(new_exe):
+        logger.warning("스왑 대상이 Inno 인스톨러로 판별됨 → 인스톨러 경로로 우회: %s", new_exe)
+        apply_update_via_installer(new_exe)
+        return
 
     if not new_exe.exists():
         raise FileNotFoundError(f"새 exe 파일 없음: {new_exe}")
@@ -338,14 +398,20 @@ def apply_update_via_installer(installer_path):
     os._exit(0)
 
 
-def apply_downloaded_update(asset_path):
+def apply_downloaded_update(asset_path, is_installer=None):
     """다운로드된 업데이트 자산을 적용하는 디스패처.
 
     setup 인스톨러면 /SILENT 실행(onedir 모델), 아니면 구 exe-swap(onefile 폴백).
     [WHY 디스패처] 점진 전환 — CI가 setup을 update 자산으로 내보내기 전(구 릴리즈)에도, 이후에도
     같은 코드가 자산 종류만 보고 올바른 경로를 택해 호환성을 유지한다.
+    [불변식] is_installer가 주어지면 그 값을 신뢰(update_ready.json의 명시 플래그). None이면
+      파일명으로 폴백 판정 — 단, 다운로드 파일명이 인스톨러 여부를 보존하도록 이미 이름지어져 있어
+      폴백도 정확하다. (v3.7.252: tmp를 vibe-coding.exe.new로 고정해 setup을 onefile로 오판 →
+      인스톨러가 앱 exe로 스왑되어 실행 시 코드32 사고. 명시 플래그 + 파일명 보존 이중 방어.)
     """
-    if is_installer_asset(asset_path):
+    if is_installer is None:
+        is_installer = is_installer_asset(asset_path)
+    if is_installer:
         apply_update_via_installer(asset_path)
     else:
         apply_update_from_temp(Path(asset_path))
@@ -394,20 +460,28 @@ def check_and_update(data_dir):
 
     logger.info("New version available: %s (current: %s)", latest_tag, APP_VERSION)
 
-    asset_url = _find_asset_url(release)
-    if not asset_url:
+    asset = _find_asset(release)
+    if not asset:
         logger.warning("Release %s has no update asset.", latest_tag)
         with open(ready_file, "w", encoding="utf-8") as f:
             json.dump({"ready": False, "downloading": False,
                        "last_error": f"릴리즈 {latest_tag}에 업데이트 에셋 없음",
                        "last_check": time.strftime("%Y-%m-%dT%H:%M:%S")}, f)
         return
+    asset_url = asset.get("browser_download_url") or asset.get("url")
+    asset_name = asset.get("name", "")
 
     # 다운로드 중 상태 알림
     with open(ready_file, "w", encoding="utf-8") as f:
         json.dump({"version": latest_tag, "ready": False, "downloading": True}, f)
 
-    tmp_path = data_dir / "vibe-coding.exe.new"
+    # [불변식] 임시 파일명이 인스톨러 여부를 보존해야 apply 단계가 오판하지 않는다.
+    #   is_installer_asset은 파일명의 'setup' 포함 여부로만 갈리므로, setup 자산은 반드시
+    #   'setup'을 포함한 이름으로 저장한다. (v3.7.252 코드32 사고 근본수정 — 자산명은
+    #   원본 asset_name으로 판정하고, 최종 update_ready.json에도 is_installer를 명시 저장.)
+    is_installer = is_installer_asset(asset_name)
+    tmp_name = "vibe-coding-setup.exe.new" if is_installer else "vibe-coding.exe.new"
+    tmp_path = data_dir / tmp_name
 
     # [진행률] 다운로드 중 update_ready.json에 percent를 기록 → 프론트 진행바.
     # 매 청크마다 파일을 쓰면 과도하므로 1% 단위 변화 또는 0.5초 간격으로 스로틀.
@@ -445,5 +519,7 @@ def check_and_update(data_dir):
     with open(ready_file, "w", encoding="utf-8") as f:
         json.dump({
             "version": latest_tag, "ready": True, "downloading": False,
-            "exe_path": str(tmp_path)
+            "exe_path": str(tmp_path),
+            # apply 단계가 파일명 추측 대신 이 플래그로 인스톨러/exe-swap을 확정 분기.
+            "is_installer": is_installer,
         }, f)

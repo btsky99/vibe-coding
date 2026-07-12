@@ -197,5 +197,33 @@ def test_apply_dispatcher_routes_setup_to_installer(monkeypatch):
     assert calls["swap"] and calls["installer"] is None
 
 
+def test_apply_explicit_flag_overrides_filename(monkeypatch):
+    """[v3.7.252 사고 회귀방지] is_installer 명시 플래그가 파일명 판정을 이긴다.
+    다운로드 tmp가 인스톨러 여부를 못 담은 이름이어도(구 캐시), 저장된 플래그로 인스톨러 확정."""
+    calls = {"installer": None, "swap": None}
+    monkeypatch.setattr(updater, "apply_update_via_installer",
+                        lambda p: calls.__setitem__("installer", str(p)))
+    monkeypatch.setattr(updater, "apply_update_from_temp",
+                        lambda p: calls.__setitem__("swap", str(p)))
+
+    # 파일명엔 'setup'이 없지만(구 오판 유발 이름) is_installer=True면 인스톨러 경로로 가야 한다.
+    updater.apply_downloaded_update(r"C:\x\vibe-coding.exe.new", is_installer=True)
+    assert calls["installer"] and calls["swap"] is None
+
+
+def test_find_asset_returns_setup_dict_with_name():
+    """[v3.7.252 사고 회귀방지] _find_asset은 원본 에셋명을 담은 dict를 반환 →
+    tmp 파일명이 아닌 원본 이름으로 is_installer_asset 판정이 가능해진다."""
+    release = {"assets": [
+        {"name": "vibe-coding-update-3.7.252.exe",
+         "browser_download_url": "http://x/update.exe"},
+        {"name": "vibe-coding-setup-3.7.252.exe",
+         "browser_download_url": "http://x/setup.exe"},
+    ]}
+    asset = updater._find_asset(release)
+    assert asset["name"] == "vibe-coding-setup-3.7.252.exe"
+    assert updater.is_installer_asset(asset["name"]) is True
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

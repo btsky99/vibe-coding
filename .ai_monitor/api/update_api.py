@@ -5,6 +5,9 @@ DESCRIPTION: 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채�
              모든 함수는 SSEHandler 인스턴스(handler)를 받아 자체적으로 HTTP 응답을 완결한다.
 
 REVISION HISTORY:
+- 2026-07-12 Claude: apply_update가 update_ready.json의 is_installer 플래그를 읽어
+  apply_downloaded_update에 명시 전달 — 파일명 추측 대신 다운로드 시점 판정을 신뢰
+  (setup 인스톨러가 앱 exe로 스왑되던 코드32 사고 근본수정, updater.py와 짝).
 - 2026-07-05 Claude: server.py SSEHandler do_GET/do_POST의 update/soft-update 6블록 분리
   (do_GET: check-update-ready·trigger-update-check·soft-update/check,
    do_POST: apply-update·soft-update/apply·trigger-update-check).
@@ -138,14 +141,19 @@ def apply_update(handler, data_dir: Path) -> None:
             pass
 
         # [전략 #2a] 디스패처 경유 — setup 자산이면 /SILENT 인스톨러, 아니면 구 exe-swap 폴백.
+        # [불변식] is_installer는 다운로드 시점에 원본 에셋명으로 판정돼 update_ready.json에 저장됨.
+        #   여기서 파일명(vibe-coding*.exe.new)으로 재판정하면 setup을 onefile로 오판할 수 있어
+        #   (v3.7.252 코드32 사고) 반드시 저장된 플래그를 신뢰한다. 구 릴리즈 캐시(플래그 부재)는
+        #   None → apply_downloaded_update가 파일명 폴백(보존된 이름이라 정확).
         from updater import apply_downloaded_update
         _exe = Path(exe_path)
+        _is_installer = update_data.get("is_installer")
 
         def _do_apply():
             # 소켓 버퍼 플러시 대기 — 응답이 클라이언트에 도달할 시간 확보
             time.sleep(0.3)
             try:
-                apply_downloaded_update(_exe)
+                apply_downloaded_update(_exe, is_installer=_is_installer)
             except Exception as ex:
                 import traceback
                 err_detail = traceback.format_exc()
