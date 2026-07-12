@@ -296,6 +296,13 @@ def _auto_promote_where_clause() -> str:
     return (
         "zn.note_type = 'fleeting' "
         "AND (zn.archived IS NOT TRUE) "
+        # [노이즈 차단 2026-07-12] 세션요약/머지커밋은 LLM 작업기억(휘발성)이라 영구 승격 금지.
+        #   [근본사고] 세션요약은 auto_link로 링크 degree가 금방 3↑ → 아래 허브형 조건에 걸려
+        #   permanent로 오승격, 영구지식 65%(817건)를 점령. run_zettel_refine(daemons.py)엔 이미
+        #   같은 배제가 있으나 이 auto_promote 경로만 구멍이었음 → 동일 기준으로 일관성 확보.
+        "AND zn.source_ref IS DISTINCT FROM 'session-summary' "
+        "AND zn.title NOT LIKE '세션 요약%' "
+        "AND zn.title NOT LIKE 'Merge %' "
         "AND ("
         f"(zn.created_at < NOW() - INTERVAL '{age_days} days' AND zn.access_count >= {min_access}) "
         "OR EXISTS ("

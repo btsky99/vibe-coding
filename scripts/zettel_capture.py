@@ -286,6 +286,25 @@ def capture_session(agent: str = 'claude') -> dict | None:
     return note
 
 
+def _extract_commit_why(commit_msg: str) -> str:
+    """커밋 본문에서 '무엇을/왜' 핵심 1줄 추출 — '## 변경 이유' 우선, 없으면 '## 변경 내용'.
+
+    [WHY] 파일 카드 '최근 변경'에 커밋 제목만 쌓으면 '뭘 왜 바꿨나'를 알 수 없다.
+      commit-rules.md의 3섹션 본문에서 첫 유효 줄을 뽑아 변경의 지식성을 높인다.
+    [폴백] 3섹션이 없는 커밋(제목만)이면 빈 문자열 → 호출부가 제목만 사용.
+    """
+    headers = ('## 변경 이유', '## 변경 내용', '## Why', '## What')
+    lines = commit_msg.splitlines()
+    for i, line in enumerate(lines):
+        # 헤더 '줄'을 찾아 그 '다음 줄'부터 스캔 — 같은 줄의 '(Why)' 접미를 오추출하지 않도록.
+        if any(line.strip().startswith(h) for h in headers):
+            for nxt in lines[i + 1:]:
+                s = nxt.strip().lstrip('-').strip()
+                if s and not s.startswith('#'):
+                    return s[:80]
+    return ''
+
+
 def capture_file_roles(commit_msg: str, files: list[str] | None = None,
                        agent: str = 'claude') -> list[dict]:
     """커밋 시 변경된 파일의 역할 카드를 자동 생성/업데이트한다.
@@ -303,6 +322,11 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
     now = datetime.now(timezone(timedelta(hours=9)))
     today = now.strftime('%Y-%m-%d')
     results = []
+
+    # [T4] 최근 변경 항목 = 커밋 제목 + '무엇을/왜'(본문에서 추출, 없으면 제목만).
+    _subject = commit_msg.split(chr(10))[0][:80]
+    _why = _extract_commit_why(commit_msg)
+    _change_text = f"{_subject} — {_why}" if _why else _subject
 
     for file_path in files:
         rel = _rel_path(file_path)
@@ -323,7 +347,7 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
             # 기존 카드에 "최근 변경" 이력 추가
             note_id = existing[0]['id']
             old_content = existing[0].get('content', '')
-            change_line = f"- [{today}] {commit_msg.split(chr(10))[0][:80]}"
+            change_line = f"- [{today}] {_change_text}"
 
             if '## 최근 변경' in old_content:
                 # 기존 변경 이력에 추가 (최대 10건 유지)
@@ -343,14 +367,14 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
             if updated:
                 results.append(updated)
         else:
-            # 새 역할 카드 생성
-            role_desc = _guess_file_role(rel)
+            # 새 역할 카드 생성 — [T3] 역할은 파일 헤더 DESCRIPTION 실제 파싱(폴백: 경로 추측)
+            role_desc = _read_file_description(file_path)
             tags = ['파일역할']
             tags.extend(_extract_area_tags([file_path]))
 
             content = f"## 역할\n{role_desc}\n\n"
             content += f"## 파일 경로\n`{rel}`\n\n"
-            content += f"## 최근 변경\n- [{today}] {commit_msg.split(chr(10))[0][:80]}"
+            content += f"## 최근 변경\n- [{today}] {_change_text}"
 
             note = create_note(
                 title=f"📄 {Path(rel).name} — {role_desc[:40]}",
@@ -372,6 +396,110 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
     return results
 
 
+# 파일 지도에 포함할 코드/문서 확장자 화이트리스트 (바이너리/에셋 제외).
+_MAP_EXTS = {'.py', '.ts', '.tsx', '.js', '.jsx', '.md', '.sql', '.css', '.html'}
+
+
+def _list_project_files(base: Path) -> list[str]:
+    """프로젝트의 '진짜 파일' 목록(루트 기준 상대경로, POSIX 슬래시)을 반환한다.
+
+    [1순위] `git ls-files` — gitignore가 정의한 경계를 그대로 신뢰(venv/dist/temp/pgsql 자동 제외).
+      이식성: 어느 git 프로젝트에서든 자기 추적 파일만 나온다. 절대경로 하드코딩 없음.
+    [폴백] git 미설치/비-git 디렉토리 → rglob + _is_noise_file(벤더/빌드 배제).
+    """
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['git', 'ls-files'], cwd=str(base), capture_output=True,
+            text=True, encoding='utf-8', errors='replace', timeout=15,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
+    except Exception:
+        pass
+    # 폴백: 파일시스템 순회 (git 없을 때)
+    rels = []
+    for path in base.rglob('*'):
+        if not path.is_file():
+            continue
+        try:
+            rels.append(str(path.relative_to(base)).replace('\\', '/'))
+        except ValueError:
+            continue
+    return rels
+
+
+def capture_project_map(root: str | None = None, agent: str = 'system',
+                        max_files: int = 400) -> dict | None:
+    """프로젝트 전체 파일 트리 + 파일별 DESCRIPTION 한 줄을 단일 노트로 upsert한다.
+
+    [WHY] 다른 프로젝트가 GDrive 허브에서 이 프로젝트의 구조/파일 역할을 파악할 수 있게,
+      커밋마다 자동 갱신되는 '파일 지도'를 만든다. 수동 PROJECT_MAP.md와 달리 실제 파일 헤더
+      DESCRIPTION에서 생성 → 드리프트 없이 항상 최신. source_ref='project-map' 단일 노트를 upsert.
+    [이식성] root 미지정 시 VIBE_PROJECT_ROOT env → 없으면 이 스크립트의 _PROJECT_ROOT.
+      절대경로 하드코딩 없음. 어느 프로젝트에서 돌려도 자기 트리를 스캔한다.
+    [비대 방지] max_files 상한 + _is_noise_file(dist/vendor 등) 제외 + 코드/문서 확장자만 +
+      디렉토리(최상위)별 그룹 + 파일당 한 줄.
+    """
+    ensure_schema()
+    base = Path(root) if root else Path(
+        os.environ.get('VIBE_PROJECT_ROOT', str(_PROJECT_ROOT)))
+    if not base.is_dir():
+        return None
+
+    # [WHY git ls-files] '프로젝트 파일'의 정답은 git 추적 파일 = 사람이 커밋한 것.
+    #   rglob는 venv/dist/%TEMP%/pgsql 등 벤더·빌드·임시를 쓸어담아 지도를 오염시킨다.
+    #   gitignore가 이미 그 경계를 정의하므로 그대로 신뢰. git 없거나 실패 시 rglob+노이즈필터 폴백.
+    rels = _list_project_files(base)
+    groups: dict[str, list[str]] = {}
+    count = 0
+    for rel in rels:
+        if count >= max_files:
+            break
+        if Path(rel).suffix.lower() not in _MAP_EXTS or _is_noise_file(rel):
+            continue
+        desc = _read_file_description(str(base / rel))
+        top = rel.split('/')[0] if '/' in rel else '(루트)'
+        groups.setdefault(top, []).append(f"- `{rel}` — {desc}")
+        count += 1
+
+    if not groups:
+        return None
+
+    now = datetime.now(timezone(timedelta(hours=9)))
+    lines = [f"프로젝트 파일 구조 지도 — 자동 생성 "
+             f"({now.strftime('%Y-%m-%d %H:%M')}, {count}개 파일)", ""]
+    for top in sorted(groups):
+        lines.append(f"## {top}")
+        lines.extend(groups[top])
+        lines.append("")
+    content = '\n'.join(lines)
+
+    source_ref = 'project-map'
+    existing = query_rows(
+        f"SELECT id FROM zettel_notes WHERE source_ref = {_sql_text(source_ref)} "
+        f"AND project_id = {_sql_text(DEFAULT_PROJECT)} LIMIT 1;"
+    )
+    if existing:
+        from src.zettelkasten import update_note
+        note = update_note(existing[0]['id'], content=content)
+    else:
+        note = create_note(
+            title='🗂️ 프로젝트 파일 지도',
+            content=content,
+            note_type='permanent',
+            author=agent,
+            project_id=DEFAULT_PROJECT,
+            tags=['파일지도', '프로젝트구조'],
+            source_ref=source_ref,
+        )
+        if note:
+            auto_link(note['id'], content=content, tags=['파일지도'], created_by=agent)
+    if note:
+        print(f"[zettel_capture] 파일 지도 노트 upsert: {count}개 파일")
+    return note
+
+
 def _is_noise_file(rel_path: str) -> bool:
     """노이즈 파일 필터 — 역할 카드 생성 대상에서 제외."""
     noise_patterns = [
@@ -383,8 +511,53 @@ def _is_noise_file(rel_path: str) -> bool:
     return any(p in rel_lower for p in noise_patterns)
 
 
+def _read_file_description(file_path: str) -> str:
+    """파일 표준 헤더의 DESCRIPTION 값을 실제로 읽어 역할 설명으로 반환한다.
+
+    [WHY] _guess_file_role은 경로 패턴 추측이라 얕다. CLAUDE.md 규칙5로 모든 코드/문서 파일
+      상단에 DESCRIPTION 헤더가 있으므로 이를 1차 소스로 쓴다(항상 최신 + 저자 의도 반영).
+    [폴백] 헤더 없음/읽기 실패 → _guess_file_role(rel) 경로 추측으로 안전 복귀.
+    [이식성] 절대경로 하드코딩 없음 — 상대 경로면 _PROJECT_ROOT 기준 해석, 절대면 그대로.
+    """
+    rel = _rel_path(file_path)
+    try:
+        p = Path(file_path)
+        if not p.is_absolute():
+            p = _PROJECT_ROOT / file_path
+        if not p.is_file():
+            return _guess_file_role(rel)
+        head = p.read_text(encoding='utf-8', errors='replace').splitlines()[:40]
+    except Exception:
+        return _guess_file_role(rel)
+
+    desc_lines = []
+    capturing = False
+    for line in head:
+        s = line.strip()
+        m = re.search(r'DESCRIPTION\s*[:：]\s*(.*)', s)
+        if m:
+            capturing = True
+            if m.group(1).strip():
+                desc_lines.append(m.group(1).strip())
+            continue
+        if capturing:
+            # 다음 표준 섹션(REVISION HISTORY 등)·헤더 종료 마커에서 중단
+            if (not s or s in ('"""', "'''", '*/', '-->')
+                    or re.match(r'^[#*/\'"\s]*[A-Z][A-Z _-]{2,}\s*[:：]', s)):
+                break
+            cleaned = re.sub(r'^[#*/\s]+', '', line).strip()  # 주석 접두 제거
+            if cleaned:
+                desc_lines.append(cleaned)
+    if not desc_lines:
+        return _guess_file_role(rel)
+    # 첫 문장(마침표 기준) + 80자로 정규화
+    desc = re.split(r'(?<=[.。])\s', ' '.join(desc_lines))[0]
+    return desc[:80].strip() or _guess_file_role(rel)
+
+
 def _guess_file_role(rel_path: str) -> str:
-    """파일 경로에서 역할을 추측한다. 코드를 읽지 않고 경로 패턴만으로 판단."""
+    """파일 경로에서 역할을 추측한다. 코드를 읽지 않고 경로 패턴만으로 판단.
+    [폴백 전용] 표준 헤더가 없는 파일에 대해서만 _read_file_description이 호출한다."""
     p = rel_path.lower().replace('\\', '/')
     if 'server.py' in p:
         return 'HTTP 서버 — 라우팅, SSE, WebSocket, 정적 파일 서빙'
@@ -455,7 +628,8 @@ def _sync_vault():
 def main():
     parser = argparse.ArgumentParser(description='제텔카스텐 자동 캡처 엔진')
     parser.add_argument('--mode', required=True,
-                        choices=['commit', 'fix', 'decision', 'session', 'file-roles'],
+                        choices=['commit', 'fix', 'decision', 'session',
+                                 'file-roles', 'project-map'],
                         help='캡처 모드')
     parser.add_argument('--agent', default='claude', help='에이전트 이름')
     parser.add_argument('--data', default='{}', help='이벤트 데이터 (JSON 문자열)')
@@ -492,6 +666,11 @@ def main():
         capture_file_roles(
             commit_msg=data.get('message', ''),
             files=data.get('files', []),
+            agent=args.agent,
+        )
+    elif args.mode == 'project-map':
+        capture_project_map(
+            root=data.get('root'),
             agent=args.agent,
         )
 

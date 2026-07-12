@@ -1,5 +1,20 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-07-13] - 지식 노트 파이프라인 재설계 (나만의 지식 창고)
+
+### 🧹 노이즈 차단 — 세션요약이 영구지식을 점령하던 사고
+- **[Fix] pg_memory.py `_auto_promote_where_clause`**: 세션요약/머지커밋을 fleeting→permanent 자동승격에서 배제. 세션요약은 auto_link로 링크 degree가 금방 3↑ → 허브형 조건에 걸려 영구지식 **65%(817건)를 점령**하던 근본 구멍. (run_zettel_refine엔 이미 있던 배제를 auto_promote에도 일치.)
+- **[Migration] migrate_archive_session_summaries.py**: 기존 오승격 세션요약 **822건 archived=true** (되돌림 가능). 영구지식 1264→427건으로 정제.
+
+### 📄 파일 지식 1급화
+- **[Feature] zettel_capture.py `_read_file_description`**: 파일 역할 카드의 설명을 경로 추측(`_guess_file_role`)이 아니라 **표준 헤더 DESCRIPTION 실제 파싱**으로 격상(무헤더 시 폴백). CLAUDE.md 규칙5 자산 활용.
+- **[Feature] `_extract_commit_why`**: 파일 카드 "최근 변경"에 커밋 제목만 아닌 **'무엇을/왜'**(커밋 본문 3섹션 첫 줄) 누적.
+- **[Feature] `capture_project_map`**: git 추적 파일 트리 + 파일별 DESCRIPTION → 단일 upsert 노트 `🗂️ 프로젝트 파일 지도`(source_ref='project-map'). 커밋 폴링 데몬 편승 자동 갱신. **이식성**: git ls-files라 어느 프로젝트에서도 자기 트리만 스캔.
+
+### ☁️ GDrive 크로스프로젝트 허브 정제
+- **[Feature] zettel_sync.py `mirror_vault(note_filter=)` + `_is_gdrive_worthy`**: GDrive 미러에서 커밋덤프(git-commit:*)/세션요약 노이즈 제외, 파일카드·지도·결정·지식은 유지. **로컬 vault는 불변**(전체 유지), 허브만 정제.
+- **[Test] test_knowledge_pipeline.py**: 4대 순수 함수 계약 회귀 6건. 전체 125 pass.
+
 ## [2026-06-11] - Antigravity CLI 마이그레이션 완료 (Gemini CLI 6/18 종료 대응)
 
 ### 🚀 런타임 전환 (데드라인 크리티컬)

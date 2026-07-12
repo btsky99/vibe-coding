@@ -382,7 +382,12 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                         # second independent export target. Mirror after refreshing
                         # the local vault so Obsidian folders/canvases/settings stay aligned.
                         _mod.export_to_vault(_vault, project_id=_proj_id)
-                        _mod.mirror_vault(_vault, _gdrive_vault)
+                        # [T7] GDrive = 크로스프로젝트 허브 → 커밋덤프/세션요약 노이즈 제외.
+                        #   로컬 vault(_vault)는 필터 없이 전체 유지, GDrive 미러만 정제.
+                        _mod.mirror_vault(
+                            _vault, _gdrive_vault,
+                            note_filter=lambda p: _mod._is_gdrive_worthy(p, _vault),
+                        )
                     else:
                         if _last_vault is not None:
                             print('[zettel_sync] Google Drive vault 사라짐 — 동기화 일시 중단')
@@ -508,6 +513,13 @@ def run_commit_watcher(env: DaemonEnv) -> None:
                             _mod2 = _ilu2.module_from_spec(_spec2)
                             _spec2.loader.exec_module(_mod2)
                             _mod2.capture_commit(commit_msg, files=files, agent='system')
+                            # [T6] 커밋마다 파일 지도 스냅샷 갱신 편승 — 현재 프로젝트 루트 대상.
+                            #   실패해도 커밋 캡처 자체는 이미 성공했으므로 무시(try 내부 격리 불필요).
+                            try:
+                                _mod2.capture_project_map(root=str(env.project_root),
+                                                          agent='system')
+                            except Exception as _me:
+                                print(f"[commit_watcher] 파일 지도 갱신 오류(무시): {_me}")
                     except Exception as e:
                         print(f"[commit_watcher] 캡처 오류: {e}")
 

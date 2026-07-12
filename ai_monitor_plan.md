@@ -1,140 +1,100 @@
-# 구현 계획 — 전략 #2a: onefile → onedir 전환 (_MEI 버그 클래스 구조적 전멸)
-
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: PyInstaller onefile→onedir 전환 + 업데이트 모델을 exe-swap→"setup EXE 사일런트 설치"로 전환.
-             매 부팅 _MEI 추출을 없애 좀비 node/DLL로드실패/temp정리실패 버그 클래스를 뿌리째 제거.
+DESCRIPTION: 지식 노트(제텔카스텐) 파이프라인 재설계 실행 계획 — 세션요약 노이즈 제거 + 파일지식 1급화 +
+             파일지도 스냅샷 + GDrive 크로스프로젝트 허브. 바이브 프로그램으로 돌리는 모든 프로젝트에
+             적용되는 이식형 "나만의 지식 창고".
 
 REVISION HISTORY:
-- 2026-07-09 Claude: 신규. 방향 승인(옵션 A, AskUserQuestion). 이전 계획(server.py 분할 Phase 2)은 완료 → 교체.
+- 2026-07-12 Claude: 신규. 브레인스토밍 승인(4대 설계) → 마이크로태스크 분해. 이전 onedir 전환 계획은 완료 → 교체.
 -->
 
-> **설계 승인**: 2026-07-09 (전략 #2a, 옵션 A onedir). 메모리 `project_update_dll_load_fail.md` 참조.
-> **북극성**: 기능 확장 아님 — 재발 핫스팟(update/pty/build fix 16건)의 공통 뿌리 제거 = 삽질 감소.
-> **핵심 통찰**: 인스톨러가 이미 `CloseApplications=yes`로 "실행 중 앱 닫고 교체+재시작"을 처리 →
->   업데이트를 "setup /SILENT"로 바꾸면 _update.bat·_MEI 청소·좀비 처리가 통째로 은퇴한다.
+# 구현 계획 — 지식 노트 파이프라인 재설계 (나만의 지식 창고)
 
-## 🚨 매 단계 공통 안전 절차
-1. **로컬 우선**: 릴리즈 파이프라인(build-release.yml)·인스톨러(.iss) 직접 수정은 **로컬 onedir 빌드+smoke 통과 후에만**.
-2. **단계별 커밋 + 체크포인트**: 각 Phase 종료 시 `python scripts/checkpoint.py`. git bisect 가능하게.
-3. **폴백 보존**: 구 exe-swap 경로를 즉시 삭제하지 말고, onedir 검증 완료(Phase E)까지 죽은 코드로 유지 후 은퇴.
-4. **검증 3종**: `pytest tests --ignore=tests/office` + `python scripts/smoke_test.py` + 실제 업데이트 왕복.
-5. **push = 릴리즈**: Phase C 이후 push는 실사용자에게 나감 — 각 push 전 사용자 확인.
+> **설계 승인**: 2026-07-12 (vibe-brainstorm). 메모리 `project_knowledge_vault_redesign.md` 참조.
+> **목표**: GDrive를 서로 다른 프로젝트 지식 소통 허브로. 파일 구조/역할/변경이 진짜 지식으로 쌓이게.
+> **북극성**: 기능 확장 아님 — 잡음(세션요약 65%) 제거 + 파일지식 축적 = 크로스프로젝트 재사용성.
 
----
+## 핵심 통찰 (실측 근거)
+- 영구지식 1264건 중 **65%(817)가 세션요약 노이즈**. 진범 = `pg_memory.py auto_promote_fleeting()`의
+  허브형 조건(링크 degree≥3)에 세션요약이 auto_link로 걸려 permanent 승격. (memory_watcher.py:122 데몬 구동)
+  cf. `run_zettel_refine`(daemons.py:400)은 이미 세션요약 배제 — auto_promote만 구멍.
+- `export_to_vault`(zettel_sync.py:269 `_is_ephemeral`)은 **이미 세션요약을 vault/GDrive에서 제외** →
+  #4의 남은 과제는 **커밋덤프(git-commit:*)까지 걸러 GDrive를 "파일카드·결정·교훈"으로 좁히는 것**.
+- 파일카드(`capture_file_roles`, 261건)의 `_guess_file_role`은 경로 추측만 — 실제 헤더 DESCRIPTION 미사용.
+- `capture_commit`이 이미 `capture_file_roles` 호출(146). 커밋폴링 데몬(daemons.py:510)이 capture_commit 호출.
 
-## Phase A — onedir 빌드 성립 (로컬, 릴리즈 무영향)  ✅ 완료(커밋 013f0f1)
-
-```
-[x] Task A1: spec를 onefile→onedir로 전환
-    파일: vibe-coding.spec
-    방법: EXE(...)에 exclude_binaries=True 추가 + a.binaries/a.datas 제거,
-          runtime_tmpdir 라인 삭제. 하단에 COLLECT(exe, a.binaries, a.datas, name=<앱폴더>) 추가.
-    검증: pyinstaller vibe-coding.spec --noconfirm → dist/<앱폴더>/ 생성 + <앱>.exe 존재.
-
-[x] Task A2: onedir 실행 + 리소스 해석 검증
-    파일: (없음 — 실행 검증)
-    방법: dist/<앱폴더>/<앱>.exe 실행. sys._MEIPASS가 onedir 번들 루트를 가리키는지,
-          api/infra/src/vibe-view/dist/pgsql 경로 해석이 정상인지 확인.
-    검증: python scripts/smoke_test.py (onedir exe 대상) — /api/config·hive/health 200.
-    의존: A1
-
-[x] Task A3: _MEIPASS 의존 코드 onedir 호환 점검
-    파일: .ai_monitor/server.py, boot.py, updater.py, infra/lifecycle.py
-    방법: sys._MEIPASS.parent(runtime_dir) 전제 코드 전수 확인. onedir엔 runtime _MEI 없음 →
-          heal_broken_mei_at_startup/kill_runtime_mei_orphans는 자연 no-op(방어 확인만).
-          boot.py _bundle_seed_root(_appseed)·_version 경로 onedir에서 유효한지 검증.
-    검증: onedir 부팅 로그에 경로 에러 없음 + smoke 통과.
-    의존: A2
-```
-
-## Phase B — 업데이트 모델 전환 (exe-swap → setup 사일런트)  ✅ 완료(커밋 d0d3934, 로컬)
-
-> B1/B2 구현+단위테스트(12개) 완료. B3(진행바/상태)는 검증-only: 다운로드 percent 그대로 유효,
-> 적용 후 Inno가 프로세스 교체 → 프론트 "적용 중" 표시 불변(코드 변경 불필요). 실제 적용은 Phase E.
-
-```
-[x] Task B1: updater 에셋 선택을 setup exe 우선으로
-    파일: .ai_monitor/updater.py (_find_asset_url)
-    방법: 1순위를 vibe-coding-setup-*.exe로. update-*.exe(구 onefile)는 폴백/은퇴.
-    검증: 단위 테스트 — setup 에셋이 있으면 그걸 고름.
-
-[x] Task B2: apply_update를 "setup /SILENT 실행 후 종료"로 전환
-    파일: .ai_monitor/updater.py (apply_update_from_temp → apply_update_via_installer)
-    방법: 다운로드한 setup을 `/SILENT /SUPPRESSMSGBOXES /NORESTART` 등으로 subprocess 실행 후
-          현재 프로세스는 정상 종료(Inno CloseApplications가 앱 닫고 교체, [Run] postinstall이 재시작).
-          _update.bat/build_update_bat/_MEI kill 경로는 死코드로 남기고 폴백 플래그로만 유지.
-    검증: tests/test_updater_release_path.py 확장 — installer 실행 인자 계약(/SILENT 포함) 단위 테스트.
-    의존: B1
-
-[x] Task B3: 진행바/상태 흐름 onedir 업데이트에 맞게 점검
-    파일: .ai_monitor/updater.py, vibe-view (updateProgress)
-    방법: setup 다운로드 percent는 그대로 유효. "적용 중" 이후 Inno가 프로세스를 닫으므로
-          프론트 상태 전이(적용→재시작) 문구 확인.
-    검증: 로컬에서 update_ready.json 상태 전이 수동 확인.
-    의존: B2
-```
-
-## Phase C — 인스톨러 + CI onedir화  (C1/C3 완료 33b532b, C2 CI검증 완료 c8d753f, 아티팩트 setup-3.7.250 361MB)
-
-```
-[x] Task C1: .iss [Files]를 onedir 폴더 전체로
-    파일: vibe-coding-setup.iss
-    방법: 단일 exe Source → `Source: ".ai_monitor\dist\<앱폴더>\*"; DestDir:"{app}";
-          Flags: ignoreversion recursesubdirs createallsubdirs`. MyAppSrcExe 개념 교체.
-          pgsql 등 기존 항목과 충돌/중복 정리.
-    검증: 로컬 ISCC 빌드 → setup 실행 → {app}에 onedir 전체 설치 + 앱 정상 실행.
-    의존: A3
-
-[x] Task C2: build-release.yml onedir 빌드로 전환
-    파일: .github/workflows/build-release.yml
-    방법: `pyinstaller --onefile` → onedir(spec 사용 권장: `pyinstaller vibe-coding.spec`).
-          --runtime-tmpdir 제거. 업데이트 에셋 = setup exe(이미 빌드). 구 update-*.exe 에셋 제거.
-          spec↔CI add-data 동기화 규칙 유지(메모리 feedback_spec_datas_check).
-    검증: (Phase E에서 실제 CI 빌드로 검증) — 로컬에선 spec 빌드 성공까지.
-    의존: C1
-
-[x] Task C3: smoke_test / 로컬빌드 스크립트 onedir 경로 대응
-    파일: scripts/smoke_test.py, vibe-coding.spec 관련 헬퍼
-    방법: dist/<파일>.exe → dist/<앱폴더>/<앱>.exe 경로로 갱신.
-    검증: python scripts/smoke_test.py 통과.
-    의존: C2
-```
-
-## Phase D — per-user 전환 + 기존 설치본 호환 (396f81b, CI검증중)
-
-```
-[x] Task D1: 전환 시나리오 설계 + 문서화
-    파일: (메모리 project_update_dll_load_fail.md 갱신)
-    방법: 현재 onefile 설치본이 v3.7.248 이후 updater로 setup을 받아 /SILENT 실행 →
-          Inno가 {app}에 onedir 설치(단일 exe 자리를 폴더가 대체). AppId 동일 →
-          Inno가 업그레이드로 인식. 구 단일 exe 잔재 정리(uninstall 로직/ignoreversion).
-    검증: 구 onefile 설치 상태에서 신 setup 실행 → onedir로 깔끔히 전환 확인(수동 E2E).
-
-[x] Task D2: 소프트 업데이트 채널(boot.py) onedir 영향 검증
-    파일: .ai_monitor/boot.py, soft_updater.py
-    방법: _MEIPASS 위치 변화가 managed checkout/_appseed 폴백에 영향 없는지 재확인.
-    검증: onedir에서 boot --boot-selftest 통과 + 소스 업데이트 왕복.
-    의존: D1
-```
-
-## Phase E — E2E 검증 + 릴리즈
-
-```
-[ ] Task E1: 전체 회귀 + 실제 업데이트 왕복
-    방법: pytest(112+) + smoke + "구버전 설치 → 신버전 업데이트 → 재부팅 무에러" 왕복.
-          _MEI/DLL로드실패/temp정리실패가 실제로 안 뜨는지 확인.
-    검증: 3종 그린 + 업데이트 왕복 무에러.
-
-[ ] Task E2: 릴리즈 (사용자 확인 후 push)
-    방법: /vibe-release. CI onedir 빌드 + setup 업로드. 첫 실사용자 전환 모니터.
-    검증: CI 그린 + 릴리즈 에셋(setup) 정상 + 자동 업데이트 감지.
-    의존: E1
-```
+## 이식성 제약 (전 프로젝트 공통 — 필수)
+- 절대경로 하드코딩 금지. 경로는 `_rel_path`/env/프로젝트 루트 자동탐지 경유. (`feedback_vibe_essence`)
+- 파일당 1500줄, 표준 헤더, 한글 LLM 관점 주석, project_id 가드 준수.
 
 ---
 
-## 리스크 & 마일스톤
-- **최대 리스크**: Phase C/D — 실사용자 설치본의 update 경로 변경. 폴백(구 exe-swap) 유지로 완충.
-- **되돌리기**: Phase A~B는 로컬 전용(무영향). Phase C부터 릴리즈 영향 → push 전 사용자 확인.
-- **1차 목표(이번 세션 가능)**: Phase A(로컬 onedir 빌드 성립) — 릴리즈 무영향, 전환 타당성 실증.
+## 태스크
+
+### [x] Task 1: auto_promote_fleeting에서 세션요약 승격 차단
+- **파일**: `.ai_monitor/src/pg_memory.py`
+- **방법**: `_auto_promote_where_clause()`에 배제절 추가 —
+  `AND zn.source_ref IS DISTINCT FROM 'session-summary' AND zn.title NOT LIKE '세션 요약%' AND zn.title NOT LIKE 'Merge %'`.
+  (run_zettel_refine의 배제 기준과 일치시켜 일관성 확보.) 주석에 진범/근거 1줄.
+- **검증**: `preview_auto_promote()` 결과에 source_ref='session-summary' 0건 (DB 실측).
+
+### [x] Task 2: 기존 세션요약 818건 아카이브 마이그레이션
+- **파일**: `scripts/migrate_archive_session_summaries.py` (신규, 표준 헤더)
+- **방법**: `UPDATE zettel_notes SET archived=true, updated_at=NOW() WHERE (source_ref='session-summary'
+  OR title LIKE '세션 요약%') AND archived IS NOT TRUE`. `--dry` 옵션으로 대상 건수만 리포트.
+  되돌림 안내(archived=false로 복구 가능) 출력. 현재 프로젝트 DB 대상(포터블 PC별).
+- **검증**: 실행 후 `SELECT count(*) ... WHERE 세션요약 AND note_type='permanent' AND NOT archived` = 0.
+- **의존**: Task 1 완료 후 (승격 재발 없는 상태에서 청소).
+
+### [x] Task 3: 파일 헤더 DESCRIPTION 실제 파싱 (_read_file_description)
+- **파일**: `scripts/zettel_capture.py`
+- **방법**: `_read_file_description(rel)` 신설 — 파일 상단 ~40줄에서 `DESCRIPTION:` 추출(다음 대문자
+  섹션 전까지, 첫 문장/80자 정규화). 헤더 없음/읽기 실패 → 기존 `_guess_file_role(rel)` 폴백.
+  `capture_file_roles` 새 카드의 role_desc를 이 함수로 교체. 경로는 `_rel_path` 경유(이식성).
+- **검증**: 헤더 있는 파일(server.py 등) → 실제 DESCRIPTION 반환, 헤더 없는 파일 → 폴백. pytest.
+
+### [x] Task 4: 변경 요약(무엇을/왜) 누적 (_extract_commit_why)
+- **파일**: `scripts/zettel_capture.py`
+- **방법**: `_extract_commit_why(commit_msg)` 신설 — 커밋 본문 '## 변경 이유' 또는 '## 변경 내용'
+  첫 유효 줄 추출. `capture_file_roles`의 change_line을 `[날짜] {제목} — {why}`로 (why 없으면 제목만).
+- **검증**: 3섹션 커밋 → change_line에 why 포함, 제목만 커밋 → 제목만. pytest.
+- **의존**: Task 3 완료 후 (같은 함수 편집 영역).
+
+### [x] Task 5: 파일 구조 스냅샷 capture_project_map
+- **파일**: `scripts/zettel_capture.py` (500줄 → +~100, 1500 여유. 초과 시 `scripts/zettel_file_knowledge.py` 분리)
+- **방법**: `capture_project_map(root=None, agent='system')` — 프로젝트 루트(미지정 시 자동탐지) 트리
+  순회: 코드 확장자 화이트리스트(.py/.ts/.tsx/.js/.md 등) + `_is_noise_file` 제외 + 디렉토리별 그룹핑 +
+  파일당 `_read_file_description` 한 줄. 단일 노트 upsert(source_ref='project-map',
+  title='🗂️ 프로젝트 파일 지도', note_type='permanent') + auto_link. 비대 방지: 상위 N디렉토리 제한.
+- **검증**: 실행 후 source_ref='project-map' 정확히 1건, content에 트리+설명. 재실행 시 update(중복無). DB 실측.
+
+### [x] Task 6: 커밋 폴링 데몬에 project-map 편승
+- **파일**: `.ai_monitor/infra/daemons.py` (커밋 감지 → capture_commit 호출부 ~510)
+- **방법**: capture_commit 직후 `capture_project_map()` 호출(try/except, 실패 무시). 변경 파일 있을 때만.
+- **검증**: 새 커밋 후 project-map 노트 updated_at 갱신. Task 5 완료 후.
+
+### [x] Task 7: GDrive 크로스공유 화이트리스트
+- **파일**: `scripts/zettel_sync.py`(`mirror_vault`), `.ai_monitor/infra/daemons.py`(`_sync_with_gdrive`)
+- **방법**: GDrive mirror 대상을 크로스프로젝트 가치 노트로 한정 — `mirror_vault(source, target,
+  note_whitelist=None)`에 선택적 predicate 추가. 로컬 vault md의 frontmatter `source_ref`를 읽어
+  `file-role:*`/`project-map`/`decision`/교훈태그면 복사, `git-commit:*`는 skip. **비파괴 유지**(타 프로젝트
+  target-only 파일 보존). `_sync_with_gdrive`에서 이 필터 전달. 로컬 vault 자체는 불변.
+- **검증**: mirror 후 GDrive에 git-commit:* 파일 없음 + file-role/project-map 존재, 로컬 vault 변화 없음. Task 5 후.
+
+### [x] Task 8: 회귀 테스트 + 최종 실측
+- **파일**: `tests/test_knowledge_pipeline.py` (신규)
+- **방법**: Task1(승격 배제 WHERE), Task3(헤더 파싱+폴백), Task4(why 추출), Task5(project-map upsert) 단위 테스트.
+- **검증**: `pytest tests/test_knowledge_pipeline.py` 통과 + 전체 스모크(기존 테스트 회귀 없음). 전 Task 완료 후.
+
+---
+
+## 의존성 요약
+- Task 2 ← Task 1 / Task 4 ← Task 3 / Task 6 ← Task 5 / Task 7 ← Task 5 / Task 8 ← 전체
+- Task 1·3·5는 독립 병렬 가능.
+
+## 완료 정의
+- 세션요약이 더 이상 permanent 승격 안 됨(신규) + 기존 818건 아카이브됨.
+- 파일카드가 실제 헤더 DESCRIPTION + 변경 이유를 담음.
+- `🗂️ 프로젝트 파일 지도` 노트가 커밋마다 자동 갱신.
+- GDrive에 파일카드·지도·결정·교훈만 흐르고 커밋덤프·세션요약 제외.
+- 배포는 `/vibe-release`로 별도 진행(코드 완료 후).

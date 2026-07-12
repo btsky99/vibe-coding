@@ -313,11 +313,42 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
 
 # 동기화 대상 문서 탐색 패턴 (프로젝트 루트 기준)
 # {proj} 는 _sync_project_docs에서 프로젝트 이름으로 치환됨
-def mirror_vault(source_vault: Path, target_vault: Path) -> int:
+# GDrive 크로스공유에서 제외할 노트 source_ref 접두 — 커밋덤프/세션요약은 잡음.
+# [WHY] GDrive = 서로 다른 프로젝트가 지식을 나누는 허브. 커밋 원문 덤프는 프로젝트-지역적
+#   소음이라 다른 프로젝트에 무가치. 파일카드/파일지도/결정/교훈/일반 지식은 유지(=삭제하지 않음).
+_GDRIVE_NOISE_SREF_PREFIXES = ('git-commit:', 'session-summary')
+_NOTE_FOLDERS = ('영구지식', '참고문헌', '작업기록', '_보관')
+
+
+def _is_gdrive_worthy(src_path: Path, source_vault: Path) -> bool:
+    """GDrive 미러 대상 여부 — 노이즈 노트(커밋덤프/세션요약)만 제외, 나머지 전부 허용.
+
+    [설계] 화이트리스트가 아니라 노이즈 블랙리스트 — 일반 지식 노트를 실수로 떨구지 않기 위함.
+      노트 폴더(영구지식 등)의 .md만 frontmatter source_ref로 판정, 구조/설정/문서는 그대로 복사.
+    [보수적] frontmatter 파싱 실패/판단 불가 → True(복사). 잘못 빼는 것보다 잘못 넣는 게 안전.
+    """
+    try:
+        rel = src_path.relative_to(source_vault)
+    except ValueError:
+        return True
+    parts = rel.parts
+    if not parts or parts[0] not in _NOTE_FOLDERS or src_path.suffix.lower() != '.md':
+        return True  # 노트가 아닌 구조/문서/설정 파일은 항상 복사
+    try:
+        fm = _parse_frontmatter(src_path.read_text(encoding='utf-8'))
+    except Exception:
+        return True
+    sref = str(fm.get('source_ref', '') or '')
+    return not any(sref.startswith(p) for p in _GDRIVE_NOISE_SREF_PREFIXES)
+
+
+def mirror_vault(source_vault: Path, target_vault: Path, note_filter=None) -> int:
     """Mirror the local Obsidian vault into a shared Google Drive vault.
 
     The mirror is non-destructive: it copies or updates files from the local vault
     but keeps target-only files so another project or device is not wiped.
+    note_filter(src_path) 가 주어지면 False를 반환하는 파일은 미러에서 제외한다
+    (GDrive 크로스공유 시 커밋덤프 등 노이즈 배제용). 제외돼도 로컬 vault는 그대로 유지.
     """
     source_vault = Path(source_vault).resolve()
     target_vault = Path(target_vault).resolve()
@@ -339,6 +370,10 @@ def mirror_vault(source_vault: Path, target_vault: Path) -> int:
             dst.mkdir(parents=True, exist_ok=True)
             continue
         if not src.is_file():
+            continue
+
+        # [T7] GDrive 노이즈 필터 — 커밋덤프 노트 등은 허브로 내보내지 않음(로컬은 보존).
+        if note_filter is not None and not note_filter(src):
             continue
 
         dst.parent.mkdir(parents=True, exist_ok=True)
