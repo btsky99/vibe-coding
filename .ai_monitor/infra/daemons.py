@@ -378,12 +378,17 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                         if _last_vault != _gdrive_vault:
                             print(f'[zettel_sync] Google Drive vault 감지됨: {_gdrive_vault}')
                             _last_vault = _gdrive_vault
-                        # Google Drive is the shared copy of the local vault, not a
-                        # second independent export target. Mirror after refreshing
-                        # the local vault so Obsidian folders/canvases/settings stay aligned.
-                        _mod.export_to_vault(_vault, project_id=_proj_id)
-                        # [T7] GDrive = 크로스프로젝트 허브 → 커밋덤프/세션요약 노이즈 제외.
-                        #   로컬 vault(_vault)는 필터 없이 전체 유지, GDrive 미러만 정제.
+                        # [크로스-PC 양방향] GDrive 허브 ↔ 이 프로젝트 PG. 순서: 흡수 → 반영 → push.
+                        #   1) GDrive(다른 PC가 올린 '이 프로젝트' 노트) → PG 흡수. project_id 스코프라
+                        #      다른 프로젝트 노트는 흡수 안 함(격리 유지) — GDrive엔 통합 열람으로만 남음.
+                        #   2) PG → 로컬 vault. include_archived=True로 아카이브 상태까지 반영(부활 방지).
+                        #   3) 로컬 vault → GDrive push. _is_gdrive_worthy로 커밋덤프/세션요약 노이즈 제외.
+                        #   [핑퐁 안전] import_from_vault의 mtime + _same_note_payload 가드가 동일내용
+                        #      재쓰기/재흡수를 막아 수렴. 로컬 60초 루프와 include_archived=True로 일치시켜
+                        #      _보관 파일을 두고 두 루프가 다투지 않게 한다(watch_and_sync 호출부 참조).
+                        _mod.import_from_vault(_gdrive_vault, project_id=_proj_id)
+                        _mod.export_to_vault(_vault, project_id=_proj_id,
+                                             include_archived=True)
                         _mod.mirror_vault(
                             _vault, _gdrive_vault,
                             note_filter=lambda p: _mod._is_gdrive_worthy(p, _vault),
@@ -397,7 +402,9 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                 time.sleep(120)
         threading.Thread(target=_sync_with_gdrive, daemon=True,
                          name='ZettelGDrive').start()
-        _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60, bidirectional=True)
+        # include_archived=True — GDrive 루프와 아카이브 표현을 일치시켜 _보관 파일 핑퐁 제거.
+        _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60,
+                            bidirectional=True, include_archived=True)
     except Exception as e:
         print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
 

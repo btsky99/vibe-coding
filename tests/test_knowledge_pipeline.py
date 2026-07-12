@@ -111,3 +111,23 @@ def test_gdrive_filter_excludes_commit_dumps(tmp_path):
     assert zs._is_gdrive_worthy(pmap, v) is True
     assert zs._is_gdrive_worthy(know, v) is True
     assert zs._is_gdrive_worthy(doc, v) is True  # 구조/문서는 항상 복사
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 크로스-PC 양방향 — 시그니처/계약 회귀 (라이브 통합은 별도 검증됨)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_watch_and_sync_accepts_include_archived():
+    """[양방향] watch_and_sync가 include_archived를 받아야 한다 —
+    GDrive 루프와 로컬 루프의 아카이브 표현을 일치시켜 _보관 파일 핑퐁을 막는 핵심 계약."""
+    import inspect
+    import zettel_sync as zs
+    sig = inspect.signature(zs.watch_and_sync)
+    assert 'include_archived' in sig.parameters
+
+
+def test_mirror_vault_accepts_note_filter():
+    """[GDrive 정제] mirror_vault가 note_filter를 받아야 커밋덤프 노이즈를 허브에서 뺄 수 있다."""
+    import inspect
+    import zettel_sync as zs
+    assert 'note_filter' in inspect.signature(zs.mirror_vault).parameters

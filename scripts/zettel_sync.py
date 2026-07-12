@@ -777,6 +777,10 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
                 author=author, project_id=project_id, tags=tags,
                 source_ref=source_ref, custom_id=zettel_id,
             )
+            # [크로스-PC 부활 방지] create_note는 archived 인자가 없다 → 다른 PC에서 아카이브된
+            #   노트가 이 PC에 '처음' 들어오면 활성으로 생성돼 부활한다. 생성 직후 상태 보정.
+            if archived:
+                update_note(zettel_id, archived=True)
 
         imported += 1
 
@@ -785,15 +789,19 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
 
 
 def watch_and_sync(vault_dir: Path, project_id: str = '', interval: int = 60,
-                   bidirectional: bool = False):
-    """주기적 동기화 루프. 데몬 모드로 실행."""
+                   bidirectional: bool = False, include_archived: bool = False):
+    """주기적 동기화 루프. 데몬 모드로 실행.
+    include_archived=True면 export가 아카이브 노트도 _보관 폴더로 내보낸다 — GDrive 양방향에서
+    아카이브 상태를 다른 PC로 전파하고, 두 동기화 루프가 _보관 파일을 두고 다투지 않게 하려면 필수.
+    """
     mode_label = '양방향' if bidirectional else '단방향(PG→Vault)'
     print(f'[zettel_sync] 감시 모드 시작 — {interval}초 간격, {mode_label}, vault={vault_dir}')
     while True:
         try:
             if bidirectional:
                 import_from_vault(vault_dir, project_id=project_id)
-            export_to_vault(vault_dir, project_id=project_id)
+            export_to_vault(vault_dir, project_id=project_id,
+                            include_archived=include_archived)
         except Exception as e:
             print(f'[zettel_sync] 동기화 오류: {e}')
         time.sleep(interval)

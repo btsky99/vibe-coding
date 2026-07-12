@@ -92,9 +92,32 @@ REVISION HISTORY:
 - Task 2 ← Task 1 / Task 4 ← Task 3 / Task 6 ← Task 5 / Task 7 ← Task 5 / Task 8 ← 전체
 - Task 1·3·5는 독립 병렬 가능.
 
-## 완료 정의
+## 완료 정의 (Phase 1)
 - 세션요약이 더 이상 permanent 승격 안 됨(신규) + 기존 818건 아카이브됨.
 - 파일카드가 실제 헤더 DESCRIPTION + 변경 이유를 담음.
 - `🗂️ 프로젝트 파일 지도` 노트가 커밋마다 자동 갱신.
 - GDrive에 파일카드·지도·결정·교훈만 흐르고 커밋덤프·세션요약 제외.
 - 배포는 `/vibe-release`로 별도 진행(코드 완료 후).
+
+---
+
+## Phase 2 — GDrive 크로스-PC 양방향 동기화 (✅ 완료 2026-07-13)
+
+> **설계 승인**: 2026-07-13 (vibe-brainstorm). 결정: ①흡수 범위 = **project_id 스코프**(다른 프로젝트는
+>   다른 이름으로 격리, 같은 프로젝트만 크로스-PC) ②**아카이브 상태 전파**.
+
+### [x] P2-1: GDrive 역방향 흡수 배선
+- `.ai_monitor/infra/daemons.py _sync_with_gdrive` — `import_from_vault(GDrive, project_id=_proj_id)`
+  추가(흡수 → export(include_archived=True) → mirror push 순서). project_id 스코프로 타 프로젝트 격리.
+- **검증**: 라이브 통합 — A(이 프로젝트)흡수·B(타 프로젝트)스킵·C(아카이브)흡수+archived 유지 PASS.
+
+### [x] P2-2: 아카이브 상태 전파 일치
+- `scripts/zettel_sync.py watch_and_sync(include_archived=)` 추가 + 로컬/GDrive 두 루프 True 일치.
+- `import_from_vault` 신규 생성 시 archived면 `update_note(archived=True)` 보정(부활 방지).
+- **검증**: 라이브 C 노트 archived=true 유지 확인.
+
+### [x] P2-3: 회귀 테스트
+- `tests/test_knowledge_pipeline.py` — watch_and_sync/mirror_vault 시그니처 계약 2건. 전체 127 pass.
+
+**Phase 2 완료 정의**: 다른 PC의 같은 프로젝트 지식이 이 PG로 흡수됨(스코프 격리 유지). 아카이브가
+크로스-PC 전파되어 부활 안 됨. 핑퐁/충돌 안전(mtime+동일내용 가드 재사용). GDrive Obsidian = 통합 열람소.

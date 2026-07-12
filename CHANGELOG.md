@@ -13,7 +13,13 @@
 
 ### ☁️ GDrive 크로스프로젝트 허브 정제
 - **[Feature] zettel_sync.py `mirror_vault(note_filter=)` + `_is_gdrive_worthy`**: GDrive 미러에서 커밋덤프(git-commit:*)/세션요약 노이즈 제외, 파일카드·지도·결정·지식은 유지. **로컬 vault는 불변**(전체 유지), 허브만 정제.
-- **[Test] test_knowledge_pipeline.py**: 4대 순수 함수 계약 회귀 6건. 전체 125 pass.
+
+### 🔁 GDrive 크로스-PC 양방향 동기화 (오래된 미해결 완성)
+- **[Feature] daemons.py `_sync_with_gdrive`**: 단방향(로컬→GDrive)에 **역방향 흡수** 추가 — `import_from_vault(GDrive, project_id)`로 다른 PC가 올린 '이 프로젝트' 노트를 이 PG로 흡수. **project_id 스코프**라 다른 프로젝트는 각자 이름으로 격리 유지(GDrive Obsidian에서만 통합 열람).
+- **[Feature] 아카이브 상태 전파**: `watch_and_sync(include_archived=)` 추가 + 양 루프 `include_archived=True` 일치 → 아카이브 노트가 `_보관`으로 export·전파, 다른 PC import가 `archived` 존중. 로컬/GDrive 두 루프의 `_보관` 핑퐁 제거.
+- **[Fix] 부활 방지**: `import_from_vault`가 아카이브 노트를 신규 생성할 때 `create_note`에 archived 인자가 없어 활성으로 부활하던 구멍 → 생성 직후 `update_note(archived=True)` 보정.
+- **[안전] 핑퐁/충돌**: 기존 `import_from_vault`의 mtime + `_same_note_payload` 가드 재사용으로 수렴. 라이브 통합 검증(스코프 격리·아카이브 전파·부활 방지) PASS.
+- **[Test] test_knowledge_pipeline.py**: 순수 함수 계약 8건. 전체 127 pass.
 
 ## [2026-06-11] - Antigravity CLI 마이그레이션 완료 (Gemini CLI 6/18 종료 대응)
 
