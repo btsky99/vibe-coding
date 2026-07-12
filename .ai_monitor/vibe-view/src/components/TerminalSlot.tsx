@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-12 Claude: 선택 하이라이트가 "사라진 채로 굳던" 레이스 근본 수정 — restoringSelRef
+ *                      불리언 플래그가 select() 이벤트 미발화/rAF 병합 시 stuck. 무상태 내용 비교
+ *                      재진입 가드 + 저장 좌표 버퍼 바운드 검증(alt 버퍼 전환/트림 시 폐기)으로 자가 복구.
  * - 2026-07-05 Claude: 드래그 하이라이트 유지 — 복사는 되지만 파란 영역이 순식간에 사라지던 문제.
  *                      TUI(claude)의 DSR 자동응답이 userInput으로 집계돼 xterm이 선택을 즉시 clear.
  *                      onSelectionChange에서 getSelectionPosition 버퍼 절대좌표를 저장 → spurious clear 시
@@ -163,8 +166,6 @@ export default function TerminalSlot({
   // 지운다(복사는 캐시로 되지만 파란 영역이 순식간에 사라짐). getSelectionPosition의 버퍼 절대 좌표를
   // 저장해 두었다가 spurious clear가 오면 select()로 즉시 재적용해 시각적 선택을 유지한다.
   const selPosRef = useRef<{ col: number; row: number; len: number } | null>(null);
-  // 우리가 유발한 재적용 이벤트 표식 — 재진입 onSelectionChange에서 재복사/재캡처를 건너뛴다(무한루프 방지).
-  const restoringSelRef = useRef(false);
   // [불변식] 사용자가 새 좌클릭/복사로 의도적으로 선택을 지운 경우에만 true — 이때는 복원하지 않는다.
   // TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 유일한 신호.
   const userClearedSelRef = useRef(false);
@@ -270,7 +271,6 @@ export default function TerminalSlot({
     setActiveAgent(agent);
     // 새 터미널 인스턴스 — 이전 선택 좌표가 남으면 새 버퍼에 spurious 복원될 수 있어 초기화.
     selPosRef.current = null;
-    restoringSelRef.current = false;
     userClearedSelRef.current = false;
     // 터미널 재시작 시 localStorage 기반으로 모니터링 뷰 상태 복원
     // closeTerminal이 isTerminalMode만 false로 하므로, showMonitor를 명시적으로 동기화
@@ -306,16 +306,18 @@ export default function TerminalSlot({
       // 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시 + 하이라이트 유지 복원.
       // [제약] 선택 해제 이벤트에서도 발화하므로 hasSelection 가드 필수 — 캐시를 빈 값으로 덮지 않는다.
       term.onSelectionChange(() => {
-        // 우리가 select()로 유발한 재진입 이벤트 — 재복사/재캡처 없이 통과 (무한루프 차단).
-        if (restoringSelRef.current) { restoringSelRef.current = false; return; }
         if (term.hasSelection()) {
           const sel = term.getSelection();
+          // [재진입 가드 — 무상태 내용 비교] 복원한 선택은 직전 캐시와 내용이 동일 → 조용히 통과.
+          // 불리언 플래그는 select()가 이벤트를 안 흘리거나 rAF로 뭉치면 stuck → 다음 진짜 clear를
+          // 삼켜 선택이 영영 사라졌다(과거 레이스). 내용 비교는 상태가 없어 stuck 불가.
+          if (sel && sel === lastSelectionRef.current) return;
           if (sel) {
             lastSelectionRef.current = sel;
             copyTextToClipboard(sel);
+            // [복원] 버퍼 절대 좌표 스냅샷 저장 — 상세 계산은 captureSelectRestore 참조.
+            selPosRef.current = captureSelectRestore(term);
           }
-          // [복원] 버퍼 절대 좌표 스냅샷 저장 — 상세 계산은 captureSelectRestore 참조.
-          selPosRef.current = captureSelectRestore(term);
           userClearedSelRef.current = false;
         } else {
           // 선택이 사라짐. 사용자가 의도적으로 지웠거나(새 클릭/복사) 저장분이 없으면 그대로 둔다.
@@ -324,9 +326,14 @@ export default function TerminalSlot({
             userClearedSelRef.current = false;
             return;
           }
-          // TUI 자동 clear로 판단 → 저장 좌표로 즉시 재적용해 하이라이트 유지.
           const { col, row, len } = selPosRef.current;
-          restoringSelRef.current = true;
+          // [바운드 검증 — 자가 복구] 저장 좌표가 버퍼 범위를 벗어나면(TUI의 alt 버퍼 전환·스크롤백
+          // 트림·창 축소) select()가 빈 선택을 만들어 복원이 굳는다 → 저장분 폐기로 영구 실패를 끊는다.
+          if (row < 0 || row >= term.buffer.active.length || col < 0 || col >= term.cols) {
+            selPosRef.current = null;
+            return;
+          }
+          // TUI 자동 clear로 판단 → 저장 좌표로 즉시 재적용해 하이라이트 유지.
           term.select(col, row, len);
         }
       });
