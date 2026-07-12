@@ -7,6 +7,8 @@ DESCRIPTION: /api/files, /api/read-file, /api/save-file, /api/file-rename,
 
 REVISION HISTORY:
 - 2026-03-22 Claude: server.py에서 분리 — files API 핸들러 담당
+- 2026-07-12 Claude: 탐색기 숨김 필터가 '.env' 정확 일치만 허용 → Next.js '.env.local' 등
+                     .env 계열이 안 보이던 문제. '.env*' 접두 전체 노출로 근본 수정.
 """
 
 import json
@@ -46,7 +48,10 @@ def handle_get(handler, path: str, params: dict, *,
             if p.exists() and p.is_dir():
                 for entry in os.scandir(target_path):
                     # 숨김 항목 필터링 (주요 설정 파일 제외)
-                    if not entry.name.startswith('.') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github', '.gitignore', '.env'):
+                    # [과거사고] 정확히 '.env'만 허용해 Next.js 표준인 '.env.local'/'.env.production'/
+                    # '.env.example'이 탐색기에서 통째로 사라짐 (OnS 프로젝트 사고). 특정 프로젝트에
+                    # 종속되지 않게 '.env'로 시작하는 모든 파일을 노출한다 — 바이브 코딩 이식성 원칙.
+                    if not entry.name.startswith('.') or entry.name.startswith('.env') or entry.name in ('.claude', '.ai_monitor', '.gemini', '.github', '.gitignore'):
                         items.append({
                             "name": entry.name,
                             "path": entry.path.replace('\\', '/'),
