@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-09 01:11
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-13 21:31
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,7 +34,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 1887 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 1895 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -52,7 +52,7 @@
 | `dashboard_api.py` | 183 |  |
 | `events_api.py` | 103 |  |
 | `experience_api.py` | 242 |  |
-| `files_api.py` | 211 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
+| `files_api.py` | 216 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
 | `fs_dialog_api.py` | 134 |  |
 | `git_api.py` | 240 | Git 저장소 관리 API (/api/git/*) |
 | `heal_api.py` | 30 |  |
@@ -75,7 +75,7 @@
 | `tasks_api.py` | 332 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
 | `tools_api.py` | 1075 |  |
-| `update_api.py` | 204 |  |
+| `update_api.py` | 213 |  |
 | `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
 | `zettel_api.py` | 209 |  |
@@ -95,7 +95,7 @@
 | `pg_base.py` | 524 |  |
 | `pg_experience.py` | 226 |  |
 | `pg_incidents.py` | 182 |  |
-| `pg_memory.py` | 632 |  |
+| `pg_memory.py` | 639 |  |
 | `pg_office.py` | 296 |  |
 | `pg_schema.py` | 777 |  |
 | `pg_store.py` | 128 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
@@ -216,23 +216,24 @@
 | `intent_map.py` | 175 |  |
 | `lesson.py` | 109 |  |
 | `migrate_antigravity_db.py` | 83 |  |
+| `migrate_archive_session_summaries.py` | 70 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_antigravity_clean.py` | 130 |  |
 | `session_init.py` | 246 |  |
-| `smoke_test.py` | 226 |  |
+| `smoke_test.py` | 233 |  |
 | `statusline.py` | 189 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
 | `telegram_bridge.py` | 1455 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
-| `zettel_capture.py` | 500 |  |
-| `zettel_sync.py` | 797 |  |
+| `zettel_capture.py` | 679 |  |
+| `zettel_sync.py` | 840 |  |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 923 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 960 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 198 |  |
 | `constants.tsx` | 93 |  |
@@ -247,7 +248,7 @@
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1493 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1500 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 573 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 140 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -277,11 +278,13 @@
 | `test_harness_verify.py` | 218 |  |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | scripts/itcp.py 폴백 경로 |
-| `test_new_api_modules.py` | 355 |  |
+| `test_knowledge_pipeline.py` | 133 |  |
+| `test_new_api_modules.py` | 347 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 123 |  |
 | `test_route_table.py` | 102 |  |
 | `test_self_heal_2.py` | 223 |  |
+| `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
 | `FileExplorer.test.tsx` | 128 | FileExplorer 컴포넌트 |
@@ -321,4 +324,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-09 01:11
+> 자동 생성 완료: 2026-07-13 21:31
