@@ -212,39 +212,62 @@ def _note_output_path(vault_dir: Path, note: dict) -> Path:
     return folder / f"{filename}.md"
 
 
-def _cleanup_stale_note_files(vault_dir: Path, notes: list[dict]) -> int:
-    """export 대상 노트의 오래된 중복 파일을 제거한다.
+def _cleanup_stale_note_files(vault_dir: Path, notes: list[dict],
+                              project_id: str = '') -> int:
+    """DB에서 빠진/이동된 노트의 오래된 .md를 제거한다.
 
-    note_type이 바뀌면 같은 zettel_id가 작업기록/영구지식 양쪽에 남을 수 있다.
-    PostgreSQL을 원본으로 보고 현재 DB 기준 표준 경로 1개만 유지한다.
+    [WHY] PostgreSQL을 단일 원본으로 본다. 파일의 상태는 두 가지로 갈린다:
+      - export 대상인데 경로가 바뀐 경우(note_type 변경) → 옛 경로 파일 삭제
+      - export 집합에서 아예 빠진 경우(아카이브/휘발성 세션요약/DB 삭제) → 고아 파일 삭제
+    [과거사고] 세션요약 425개가 영구지식 폴더에 눌러앉아 볼트의 39%를 오염시킴.
+      기존 로직은 expected에 없는 zettel_id를 `if not target: continue`로 건너뛰어(=보존)
+      고아를 영영 못 지웠다. `_is_ephemeral`이 export에서 빼도 파일은 남던 원인.
+    [불변식] 삭제는 **현재 export의 project_id 스코프 안에서만** 한다 — 이 볼트는
+      GDrive로 여러 프로젝트(vibe-coding/crypto/...)가 공유하므로, 한 프로젝트 sync가
+      다른 프로젝트 파일을 고아로 오인해 지우면 안 된다. project_id=''(전체 export)면 제한 없음.
+    [불변식] zettel_id 프론트매터가 없는 파일(사람 수기 노트)과 _project/.obsidian 하위는
+      DB 소유가 아니므로 건드리지 않는다.
     """
     expected = {
         str(note.get('id', '')): _note_output_path(vault_dir, note).resolve()
         for note in notes
         if note.get('id')
     }
-    if not expected:
-        return 0
+    vault_resolved = vault_dir.resolve()
+    # [불변식] _보관은 아카이브 노트의 의도된 목적지 — GDrive 양방향 sync가 include_archived=True로
+    #   여기를 채운다. 기본 auto-sync(include_archived=False)가 지우면 sync 모드마다 파일이
+    #   생성/삭제로 플립플롭하므로 삭제에서 제외한다. _project=파일지도 스냅샷, .obsidian=설정.
+    protected_top = {'_project', '.obsidian', '_보관'}
 
     removed = 0
     for md_file in vault_dir.rglob('*.md'):
         if md_file.name == 'INDEX.md':
             continue
         try:
-            if not md_file.resolve().is_relative_to(vault_dir.resolve()):
-                continue
-            text = md_file.read_text(encoding='utf-8')
-            zettel_id = _parse_frontmatter(text).get('zettel_id', '')
+            rel = md_file.resolve().relative_to(vault_resolved)
         except Exception:
             continue
-        target = expected.get(zettel_id)
-        if not target or md_file.resolve() == target:
+        if rel.parts and rel.parts[0] in protected_top:
             continue
+        try:
+            fm = _parse_frontmatter(md_file.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        zettel_id = fm.get('zettel_id', '')
+        if not zettel_id:
+            continue  # DB 소유가 아닌 수기 노트 — 보존
+        # 프로젝트 스코프 밖 파일은 이번 sync가 판단할 권한이 없다 — 보존.
+        if project_id and fm.get('project_id', '') != project_id:
+            continue
+        target = expected.get(zettel_id)
+        if md_file.resolve() == target:
+            continue  # 표준 경로에 그대로 존재 — 유지
+        # target 없음(export 탈락 고아) 또는 다른 경로(옛 중복) → 삭제
         try:
             md_file.unlink()
             removed += 1
         except Exception as exc:
-            print(f'[zettel_sync] 오래된 중복 노트 삭제 실패: {md_file} ({exc})')
+            print(f'[zettel_sync] 오래된 노트 삭제 실패: {md_file} ({exc})')
     return removed
 
 
@@ -271,9 +294,9 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
         return (n.get('source_ref') == 'session-summary'
                 or t.startswith('세션 요약') or t.startswith('Merge '))
     notes = [n for n in notes if not _is_ephemeral(n)]
-    removed = _cleanup_stale_note_files(vault_dir, notes)
+    removed = _cleanup_stale_note_files(vault_dir, notes, project_id=project_id)
     if removed:
-        print(f'[zettel_sync] 오래된 중복 노트 {removed}개 삭제')
+        print(f'[zettel_sync] 오래된/고아 노트 {removed}개 삭제')
 
     # 전체 링크를 한 번에 로드 (N+1 쿼리 방지)
     all_links = _load_all_links([n['id'] for n in notes])
