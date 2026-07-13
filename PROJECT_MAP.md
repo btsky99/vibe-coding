@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-13 21:31
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-13 23:31
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -227,7 +227,7 @@
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
 | `zettel_capture.py` | 679 |  |
-| `zettel_sync.py` | 840 |  |
+| `zettel_sync.py` | 863 |  |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
 ### 코어
@@ -324,4 +324,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-13 21:31
+> 자동 생성 완료: 2026-07-13 23:31
