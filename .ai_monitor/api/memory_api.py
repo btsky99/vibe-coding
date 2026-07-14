@@ -19,6 +19,7 @@ from src.pg_store import (
     delete_memory,
     migrate_legacy_data,
     promote_to_zettel,
+    insert_pg_log,
 )
 
 
@@ -122,6 +123,24 @@ def _recall_fallback_summary(query: str, limit: int) -> str:
     except Exception:
         pass
     return '\n'.join(parts)
+
+
+def _log_recall_event(status: str, items: int, project_id: str, reason: str = '') -> None:
+    """[계측 #1] recall-smart 결과를 pg_logs에 기록 — 회상 실발화율/적중률 산출용.
+
+    status='hit'(warm 벡터 회상이 실제 발화) / 'fallback'(미warm·임베딩 실패·오류로 폴백).
+    [WHY] 회상 '메커니즘 정상'과 '실제 발화'는 다르다 — 서버 모델이 미warm이면 항상 fallback이라
+      실효 0인데도 '작동 중'처럼 보인다([[lessons.md]] 2026-07-14, [[project_heal_metrics]]).
+      heal_metrics가 이 로그로 최근 실발화율(hit/total)과 적중률(items>0)을 계측한다.
+    [불변식] 훅 지연 금지 — 응답 전송 '후' 호출 + try/except로 어떤 실패도 삼킨다.
+    """
+    try:
+        insert_pg_log(agent='recall', status=status,
+                      task=f"items={items} {reason}".strip(),
+                      project_id=project_id,
+                      metadata={'items': items, 'reason': reason})
+    except Exception:
+        pass
 
 
 def handle_post(handler, path: str, data: dict,
@@ -292,6 +311,8 @@ def handle_post(handler, path: str, data: dict,
                      'summary': _recall_fallback_summary(query, limit)},
                     ensure_ascii=False,
                 ).encode('utf-8'))
+                _log_recall_event('fallback', 0, PROJECT_ID,
+                                  'not_warm' if vector_available() else 'no_vector')
                 return True
 
             vec = embed_floats(query)
@@ -301,6 +322,7 @@ def handle_post(handler, path: str, data: dict,
                      'summary': _recall_fallback_summary(query, limit)},
                     ensure_ascii=False,
                 ).encode('utf-8'))
+                _log_recall_event('fallback', 0, PROJECT_ID, 'embed_fail')
                 return True
 
             # 3개 지식원 통합 검색 → 점수순 병합. 임계 0.45는 vector_search 기본값.
@@ -331,12 +353,14 @@ def handle_post(handler, path: str, data: dict,
                  'summary': _format_recall_summary(query, merged)},
                 ensure_ascii=False, default=str,
             ).encode('utf-8'))
+            _log_recall_event('hit', len(merged), PROJECT_ID)
         except Exception as e:
             # 실패도 폴백 신호로 — 훅이 v1 경로로 즉시 전환
             handler.wfile.write(json.dumps(
                 {'status': 'success', 'fallback': True, 'items': [],
                  'summary': '', 'message': str(e)},
             ).encode('utf-8'))
+            _log_recall_event('fallback', 0, PROJECT_ID, 'error')
         return True
 
     if path == '/api/memory/sync':

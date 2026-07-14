@@ -44,6 +44,12 @@ def main() -> int:
           f"  (전체 {r['total_knowledge']}건)")
     print(f"    참조율         {_bar(r['referenced_pct'])} {r['referenced_pct']}%"
           f"  (참조합 {r['ref_sum']})")
+    _live = r.get("live")
+    if _live:
+        print(f"    실발화율       {_bar(_live['fire_rate_pct'])} {_live['fire_rate_pct']}%"
+              f"  (최근14일 {_live['calls_14d']}회, 적중 {_live['hit_rate_pct']}%)")
+    else:
+        print(f"    실발화율       (계측 대기 — recall-smart 호출 로그 없음)")
     for name, t in r["tables"].items():
         print(f"      - {name:<18} 임베딩 {t['embed_pct']:>5}% / 참조 {t['referenced']}건"
               f" (총 {t['total']})")

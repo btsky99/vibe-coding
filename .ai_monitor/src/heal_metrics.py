@@ -8,6 +8,9 @@ DESCRIPTION: 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부
     예: 사고 재발률 0%라도 표본 15건이면 verdict='🟡 표본 부족'(성공 아님) — 이게 계측의 존재 이유.
 
 REVISION HISTORY:
+- 2026-07-14 Claude: 회상 '실발화율' 계측 추가 — pg_logs(agent='recall') 이벤트로 warm 발화
+  vs 폴백 비율을 잰다. 임베딩 커버리지·참조율이 높아도 미warm이면 실효 0인 사각지대 계측
+  (lessons.md 2026-07-14 교훈 구현). memory_api recall-smart가 결과를 로깅.
 - 2026-07-05 Claude: 신규 — 자가치유 계측 Task 1. 스키마 실검증 반영
   (참조 카운트 컬럼: zettel=access_count / hive_memory·agent_experience=ref_count 로 분기).
   query_rows가 파라미터 바인딩 미지원 → project_id는 작은따옴표 이스케이프 후 인라인.
@@ -73,10 +76,34 @@ def _recall_metrics(project_id: str) -> dict:
         tot += t; emb += e; refd += rd; refsum += rs
     embed_cov = round(100 * emb / tot, 1) if tot else 0.0
     ref_ratio = round(100 * refd / tot, 1) if tot else 0.0
-    # verdict: 임베딩 커버리지(성과 전제) + 참조율(실효성) 이중 판정
-    if embed_cov < 60 or ref_ratio < 5:
+
+    # [실발화 계측] recall-smart가 실제로 warm 벡터 회상을 발화했는지(hit) vs 폴백했는지.
+    #   [WHY] 임베딩 커버리지·참조율이 높아도 서버 모델이 미warm이면 매 호출 fallback이라
+    #     실효 0 — 이 사각지대를 pg_logs(agent='recall') 이벤트로 직접 잰다(lessons.md 2026-07-14).
+    #   호출 로그가 없으면(설치본 구버전/미가동) live=None → verdict에 반영 안 함(과소평가 방지).
+    live = None
+    lr = _one(
+        "SELECT count(*) AS total, "
+        "count(*) FILTER (WHERE status = 'hit') AS hits, "
+        "count(*) FILTER (WHERE status = 'hit' "
+        "  AND coalesce((metadata->>'items')::int, 0) > 0) AS hits_with_items "
+        f"FROM pg_logs WHERE agent = 'recall' "
+        f"AND created_at >= now() - interval '14 days'{pid}"
+    )
+    lr_total = int(lr.get("total", 0) or 0)
+    if lr_total > 0:
+        hits = int(lr.get("hits", 0) or 0)
+        hwi = int(lr.get("hits_with_items", 0) or 0)
+        live = {
+            "calls_14d": lr_total,
+            "fire_rate_pct": round(100 * hits / lr_total, 1),   # warm 실발화율
+            "hit_rate_pct": round(100 * hwi / lr_total, 1),     # 발화+지식반환 비율
+        }
+
+    # verdict: 임베딩 커버리지(성과 전제) + 참조율(실효성) + 실발화율(있을 때) 삼중 판정
+    if embed_cov < 60 or ref_ratio < 5 or (live and live["fire_rate_pct"] < 30):
         verdict = "🔴"
-    elif embed_cov < 80 or ref_ratio < 20:
+    elif embed_cov < 80 or ref_ratio < 20 or (live and live["fire_rate_pct"] < 70):
         verdict = "🟡"
     else:
         verdict = "🟢"
@@ -84,8 +111,11 @@ def _recall_metrics(project_id: str) -> dict:
         "tables": tables,
         "total_knowledge": tot, "embed_coverage_pct": embed_cov,
         "referenced_pct": ref_ratio, "ref_sum": refsum,
+        "live": live,
         "verdict": verdict,
-        "note": "참조율=access_count/ref_count>0 비율. 낮으면 '쌓기만 하고 안 쓰임' 사각지대.",
+        "note": ("참조율=access_count/ref_count>0 비율. "
+                 "live.fire_rate=recall-smart가 warm 발화한 비율(낮으면 모델 미warm=실효0). "
+                 "live=null이면 호출 로그 없음(계측 대기)."),
     }
 
 
