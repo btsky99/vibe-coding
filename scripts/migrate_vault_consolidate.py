@@ -7,6 +7,8 @@ DESCRIPTION: 지식 창고 재점검 일회성 정리 마이그레이션 (2026-0
              ③ 활성 노트 임베딩 구멍 백필(회상 v2 커버리지 복구)
 
 REVISION HISTORY:
+    2026-07-14 Claude(2): step2 dedup을 수렴 루프로 수정 — 슬러그 병합이 (title,project_id)
+      키를 재편해 단일 패스가 중복 10그룹 놓치던 버그(재점검 2회차 발견). dry는 1패스 고정.
     2026-07-14 Claude: 재점검 결과 근본원인(슬러그 분열)이 고아 49건 + dedup 실패
       중복 + 임베딩 구멍의 공통 뿌리로 확인 → 3-in-1 정리. 비파괴(archived 플래그만,
       삭제 없음)라 zettel_backup_20260714.json으로 즉시 롤백 가능.
@@ -63,23 +65,7 @@ def step2_dedup(dry: bool) -> int:
     """② 활성 permanent 중복 병합 — 최신 1건 유지, 나머지 archived."""
     archived_total = 0
 
-    # 2a: source_ref 기반(file-role/project-map) 중복
-    ref_dups = query_rows(
-        "SELECT source_ref, project_id, count(*) c FROM zettel_notes "
-        "WHERE archived = false AND (source_ref LIKE 'file-role:%' OR source_ref = 'project-map') "
-        "GROUP BY source_ref, project_id HAVING count(*) > 1;"
-    )
-    # 2b: 정확한 title 기반(그 외 permanent) 중복 — source_ref로 못 잡는 커밋/설계 노트
-    title_dups = query_rows(
-        "SELECT title, project_id, count(*) c FROM zettel_notes "
-        "WHERE archived = false AND note_type = 'permanent' "
-        "AND (source_ref IS NULL OR (source_ref NOT LIKE 'file-role:%' AND source_ref <> 'project-map')) "
-        "GROUP BY title, project_id HAVING count(*) > 1;"
-    )
-
-    print(f"[②] 중복 그룹: source_ref {len(ref_dups)}개 + title {len(title_dups)}개")
-
-    def _archive_group(where_clause: str, label: str):
+    def _archive_group(where_clause: str):
         nonlocal archived_total
         # 최신(updated_at, id) 1건만 남기고 나머지 archived
         members = query_rows(
@@ -96,21 +82,45 @@ def step2_dedup(dry: bool) -> int:
             )
         archived_total += len(losers)
 
-    for d in ref_dups:
-        _archive_group(
-            f"archived = false AND source_ref = {_sql_text(d['source_ref'])} "
-            f"AND project_id = {_sql_text(d['project_id'])}",
-            d['source_ref'],
+    # [WHY 수렴 루프] step1 슬러그 병합으로 (title, project_id) 키가 바뀌면
+    #   병합 前 스냅샷으로 GROUP BY한 중복 그룹이 재편됨(예: vibe-coding 1건 + D-- 1건이
+    #   병합 後 D-- 2건으로 뭉침). 단일 패스는 재편된 그룹을 못 봐서 중복이 남는다
+    #   (실측: 1패스 후 10그룹 잔존 → 2패스에서 청산). dry-run에서는 실제 archive를
+    #   안 하니 무한 재검출 → 1회만 스캔.
+    passes = 0
+    while True:
+        passes += 1
+        ref_dups = query_rows(
+            "SELECT source_ref, project_id FROM zettel_notes "
+            "WHERE archived = false AND (source_ref LIKE 'file-role:%' OR source_ref = 'project-map') "
+            "GROUP BY source_ref, project_id HAVING count(*) > 1;"
         )
-    for d in title_dups:
-        _archive_group(
-            f"archived = false AND note_type = 'permanent' "
-            f"AND title = {_sql_text(d['title'])} AND project_id = {_sql_text(d['project_id'])} "
-            f"AND (source_ref IS NULL OR (source_ref NOT LIKE 'file-role:%' AND source_ref <> 'project-map'))",
-            d['title'][:40],
+        title_dups = query_rows(
+            "SELECT title, project_id FROM zettel_notes "
+            "WHERE archived = false AND note_type = 'permanent' "
+            "AND (source_ref IS NULL OR (source_ref NOT LIKE 'file-role:%' AND source_ref <> 'project-map')) "
+            "GROUP BY title, project_id HAVING count(*) > 1;"
         )
+        if passes == 1:
+            print(f"[②] 중복 그룹: source_ref {len(ref_dups)}개 + title {len(title_dups)}개")
+        if not ref_dups and not title_dups:
+            break
+        for d in ref_dups:
+            _archive_group(
+                f"archived = false AND source_ref = {_sql_text(d['source_ref'])} "
+                f"AND project_id = {_sql_text(d['project_id'])}"
+            )
+        for d in title_dups:
+            _archive_group(
+                f"archived = false AND note_type = 'permanent' "
+                f"AND title = {_sql_text(d['title'])} AND project_id = {_sql_text(d['project_id'])} "
+                f"AND (source_ref IS NULL OR (source_ref NOT LIKE 'file-role:%' AND source_ref <> 'project-map'))"
+            )
+        if dry:
+            break  # dry는 archive 미적용 → 같은 그룹 무한 재검출 방지
 
-    print(f"    {'(dry) ' if dry else '✓ '}중복 아카이브: {archived_total}건")
+    print(f"    {'(dry) ' if dry else '✓ '}중복 아카이브: {archived_total}건"
+          + (f" ({passes}패스 수렴)" if not dry and passes > 1 else ""))
     return archived_total
 
 
@@ -147,10 +157,31 @@ def step3_backfill_embeddings(dry: bool) -> int:
     return done
 
 
+def step2b_sync_vault(dry: bool) -> int:
+    """②b PG 아카이브 상태를 vault에 반영 — 부활 방지의 핵심.
+
+    [과거사고/근본원인] PG에서만 archived=true로 바꾸면, 활성 폴더(작업기록/영구지식)에
+      남은 stale .md(frontmatter archived:false)를 백그라운드 zettel_sync 데몬의
+      import_from_vault가 다시 읽어 PG를 archived=false로 되살린다(재점검 2회차 실측:
+      21:05 부활 이벤트). export_to_vault(include_archived=False)의 _cleanup_stale_note_files가
+      활성 export 집합에서 빠진 아카이브 노트의 .md를 삭제 → 부활 소스 제거 → 아카이브 고착.
+    [불변식] project_id 스코프 export만 — GDrive 공유 볼트에서 타 프로젝트 파일 오삭제 방지.
+    """
+    sys.path.insert(0, str(_SCRIPT_DIR))
+    from zettel_sync import export_to_vault, DEFAULT_VAULT_DIR
+    if dry:
+        print(f"[②b] (dry) vault 동기화 생략 — 실적용 시 {DEFAULT_VAULT_DIR} 정리")
+        return 0
+    export_to_vault(DEFAULT_VAULT_DIR, project_id=STD_PROJECT, include_archived=False)
+    print(f"[②b] ✓ vault 동기화 완료 — stale .md 제거로 아카이브 고착")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--apply', action='store_true', help='실제 적용(미지정 시 dry-run)')
     ap.add_argument('--skip-embed', action='store_true', help='③ 임베딩 백필 생략')
+    ap.add_argument('--skip-vault', action='store_true', help='②b vault 동기화 생략')
     args = ap.parse_args()
     dry = not args.apply
 
@@ -160,6 +191,8 @@ def main():
 
     step1_consolidate_slug(dry)
     step2_dedup(dry)
+    if not args.skip_vault:
+        step2b_sync_vault(dry)
     if not args.skip_embed:
         step3_backfill_embeddings(dry)
 
