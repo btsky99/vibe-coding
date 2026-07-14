@@ -58,7 +58,43 @@ def step1_consolidate_slug(dry: bool) -> int:
             f"WHERE project_id = {_sql_text(LEGACY_PROJECT)};"
         )
         print(f"    ✓ {n}건 통합 완료")
+    if not dry:
+        purged = _purge_legacy_slug_vault_files()
+        if purged:
+            print(f"    ✓ vault 옛-슬러그 고아 {purged}개 삭제")
     return n
+
+
+def _purge_legacy_slug_vault_files() -> int:
+    """[재발방지] 슬러그 통합 후 vault에 남는 옛-슬러그 .md 고아를 삭제.
+
+    [과거사고] PG 슬러그를 통합해도 vault의 _cleanup_stale_note_files는 project_id
+      스코프라(현재 sync=표준 슬러그) 옛-슬러그 파일을 '권한 밖'으로 보존 → 같은 노트가
+      표준(D--) .md + 옛(vibe-coding) .md 이중 존재. 재점검 2회차에서 39개 발견.
+    [불변식] PG에 LEGACY_PROJECT 노트가 0건임이 전제(step1 UPDATE 후) — 그래야 옛-슬러그
+      파일이 정의상 전부 고아. frontmatter project_id가 정확히 LEGACY인 것만 지운다.
+    """
+    import re
+    sys.path.insert(0, str(_SCRIPT_DIR))
+    from zettel_sync import DEFAULT_VAULT_DIR
+    from pathlib import Path
+    v = Path(DEFAULT_VAULT_DIR)
+    if not v.exists():
+        return 0
+    pat = re.compile(rf"project_id:\s*{re.escape(LEGACY_PROJECT)}\s*$", re.M)
+    removed = 0
+    for md in v.rglob('*.md'):
+        try:
+            head = md.read_text(encoding='utf-8')[:600]
+        except Exception:
+            continue
+        if pat.search(head):
+            try:
+                md.unlink()
+                removed += 1
+            except Exception:
+                pass
+    return removed
 
 
 def step2_dedup(dry: bool) -> int:
