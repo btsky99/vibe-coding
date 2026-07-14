@@ -6,6 +6,8 @@ DESCRIPTION: 제텔카스텐 자동 캡처 엔진.
              자동으로 zettel_notes에 지식 노트를 생성하고 Obsidian vault에 동기화한다.
 
 REVISION HISTORY:
+    2026-07-14 Claude: dedup LOOKUP을 슬러그 변종 관용(_project_match_sql)으로 근본수정 —
+      dev/설치본 VIBE_PROJECT 불일치 재발해도 중복 노트 재축적 방지 (재점검 ④)
     2026-05-02 Codex: DEFAULT_PROJECT를 폴더명 대신 project_id 경로 slug로 변경
     - 서버/DB 표준(D--vibe-coding)과 캡처/Obsidian export 대상이 갈라지는 문제 수정
     2026-04-06 Claude: 초기 구현 — 이벤트별 자동 캡처 + 유사 노트 연결 + vault 동기화
@@ -51,6 +53,26 @@ DEFAULT_PROJECT = os.environ.get(
     'VIBE_PROJECT',
     str(_PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-'),
 )
+
+
+def _project_slug_variants() -> list[str]:
+    """[재발방지] dedup LOOKUP 전용 — 이 프로젝트를 가리키는 동치 슬러그 후보.
+
+    [과거사고] 2026-04~05 슬러그 분열: 같은 파일 노트가 폴더명 슬러그('vibe-coding')와
+      경로 슬러그('D--vibe-coding')로 갈려 source_ref dedup이 project_id 정확일치 조건에서
+      실패 → 📄 hive_api.py x3 등 중복 축적 + 하이브 조회 고아 49건 (migrate_vault_consolidate로 청산).
+    [WHY] 신규 write는 표준 DEFAULT_PROJECT만 쓰되, dedup LOOKUP은 변종까지 훑어야
+      dev/설치본(config.json 분리, project_installed_empty_panels 사고) 간 VIBE_PROJECT 불일치가
+      재발해도 중복이 다시 쌓이지 않음. source_ref(file-role:<경로>)가 파일 단위 식별자라
+      타 프로젝트 오병합 위험 없음.
+    """
+    variants = {DEFAULT_PROJECT, _PROJECT_ROOT.name}
+    return [v for v in variants if v]
+
+
+def _project_match_sql(col: str = 'project_id') -> str:
+    """dedup LOOKUP용 project_id 매칭 절 — 동치 슬러그 IN (...)."""
+    return f"{col} IN ({', '.join(_sql_text(v) for v in _project_slug_variants())})"
 
 # 커밋 타입 → 노트 유형 매핑
 _COMMIT_TYPE_MAP = {
@@ -339,8 +361,8 @@ def capture_file_roles(commit_msg: str, files: list[str] | None = None,
         existing = query_rows(
             f"SELECT id, content FROM zettel_notes "
             f"WHERE source_ref = {_sql_text(source_ref)} "
-            f"AND project_id = {_sql_text(DEFAULT_PROJECT)} "
-            f"LIMIT 1;"
+            f"AND {_project_match_sql()} "
+            f"ORDER BY updated_at DESC NULLS LAST LIMIT 1;"
         )
 
         if existing:
@@ -478,7 +500,7 @@ def capture_project_map(root: str | None = None, agent: str = 'system',
     source_ref = 'project-map'
     existing = query_rows(
         f"SELECT id FROM zettel_notes WHERE source_ref = {_sql_text(source_ref)} "
-        f"AND project_id = {_sql_text(DEFAULT_PROJECT)} LIMIT 1;"
+        f"AND {_project_match_sql()} ORDER BY updated_at DESC NULLS LAST LIMIT 1;"
     )
     if existing:
         from src.zettelkasten import update_note
