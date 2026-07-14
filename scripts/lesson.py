@@ -44,6 +44,28 @@ def _candidates(query_rows, _sql_text):
     )
 
 
+def propose_candidate(lesson: str, why: str = '', dedupe_key: str = '') -> str:
+    """교훈 후보를 hive_memory에 적재(승인 대기). CLI propose + 자동 트리거(incident.py) 공용.
+
+    [WHY 공용화] 재발 사고 같은 '교훈이 필요한 순간'을 코드가 직접 propose하려면
+      subprocess 없이 호출 가능한 함수가 필요. lessons.md 쓰기는 여전히 approve만(게이트 불변).
+    [dedupe] dedupe_key 주면 key=lesson-candidate:{key}로 upsert — 같은 사고가 여러 번
+      재발해도 후보가 1건으로 합쳐져 승인 큐를 오염시키지 않는다. 없으면 타임스탬프 유니크.
+    """
+    from src.pg_store import set_memory
+    from infra.project_context import slugify
+    now = time.strftime('%Y-%m-%dT%H:%M:%S')
+    suffix = dedupe_key.strip() if dedupe_key else time.strftime('%Y%m%d%H%M%S')
+    key = f"{_KEY_PREFIX}{suffix}"
+    body = lesson.strip()
+    if why:
+        body += f"\n근거: {why.strip()}"
+    set_memory(key=key, title=f'교훈 후보: {lesson[:50]}', content=body,
+               tags=['lesson-candidate'], author='claude',
+               project_id=slugify(_PROJECT_ROOT), created_at=now, updated_at=now)
+    return key
+
+
 def main():
     parser = argparse.ArgumentParser(description='세션 교훈 증류 — 승인된 것만 lessons.md로')
     sub = parser.add_subparsers(dest='cmd', required=True)
@@ -60,16 +82,7 @@ def main():
     query_rows, execute, _sql_text = _store()
 
     if args.cmd == 'propose':
-        from src.pg_store import set_memory
-        from infra.project_context import slugify
-        now = time.strftime('%Y-%m-%dT%H:%M:%S')
-        key = f"{_KEY_PREFIX}{time.strftime('%Y%m%d%H%M%S')}"
-        body = args.lesson.strip()
-        if args.why:
-            body += f"\n근거: {args.why.strip()}"
-        set_memory(key=key, title=f'교훈 후보: {args.lesson[:50]}', content=body,
-                   tags=['lesson-candidate'], author='claude',
-                   project_id=slugify(_PROJECT_ROOT), created_at=now, updated_at=now)
+        propose_candidate(args.lesson, args.why)
         print(f"📥 교훈 후보 적재 완료 — 사용자 승인 대기. 승인: lesson.py list → approve <번호>")
         return
 

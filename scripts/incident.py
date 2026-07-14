@@ -68,6 +68,22 @@ def main():
         if result['recurred']:
             print(f"⚠️ 재발 사고 — {result['recurrence_count']}번째 수정 "
                   f"(시그니처 {result['signature']}). 이전 수정이 근본 원인을 못 잡았다는 신호.")
+            # [자가치유 ③ 자동 트리거] 재발 = 회상/이전수정이 못 막은 반복 삽질 →
+            #   교훈 후보를 자동 적재(승인 게이트 유지). 시그니처 dedupe로 재재발해도 1건.
+            #   [WHY 재발만] Stop 훅은 매 턴 발화라 스팸 — 재발은 드물고 '교훈 필요'가 확실한 순간.
+            try:
+                sys.path.insert(0, str(_PROJECT_ROOT / 'scripts'))
+                from lesson import propose_candidate
+                propose_candidate(
+                    lesson=(f"[재발 {result['recurrence_count']}회] {args.error[:60]} — "
+                            f"근본원인 재점검 필요: {args.cause[:80]}"),
+                    why=(f"시그니처 {result['signature']} {result['recurrence_count']}번째 재발. "
+                         f"이전 수정({args.fix[:60]})이 근본을 못 잡음 — 일반화 교훈으로 승격 검토."),
+                    dedupe_key=f"incident-{result['signature']}",
+                )
+                print("   📥 교훈 후보 자동 적재됨 — 승인: python scripts/lesson.py list")
+            except Exception as _e:
+                print(f"   (교훈 자동 적재 실패, 무시: {_e})")
         else:
             print(f"✅ 사고 기록 완료 (시그니처 {result['signature']}) — 재발 시 자동 회상됨")
 
