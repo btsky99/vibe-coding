@@ -5,6 +5,9 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-15 Claude: 1500줄 상한 도달로 3분할 — ClaudeContextBar(컨텍스트 바+상세 팝업),
+ *                      AgentSelectCards(선택 카드 3장+배경 로그), QuotaBadge(헤더 쿼터 배지)를
+ *                      terminal/ 하위로 이동. 로직 무변경, 타입은 자식이 export(순환 없음).
  * - 2026-07-12 Claude: 선택 하이라이트가 "사라진 채로 굳던" 레이스 근본 수정 — restoringSelRef
  *                      불리언 플래그가 select() 이벤트 미발화/rAF 병합 시 stuck. 무상태 내용 비교
  *                      재진입 가드 + 저장 좌표 버퍼 바운드 검증(alt 버퍼 전환/트림 시 폐기)으로 자가 복구.
@@ -51,9 +54,8 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
 import {
-  Terminal, TerminalSquare, X, Zap, ClipboardList, MessageSquare, Cpu, Trash2, Activity, CheckCircle2, Clock, Code2, Orbit
+  Terminal, X, Zap, ClipboardList, MessageSquare, Activity, CheckCircle2, Clock
 } from 'lucide-react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -66,6 +68,9 @@ import ChatSlot from './ChatSlot';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
 import { copyTextToClipboard, captureSelectRestore } from './terminal/xtermSelection';
+import ClaudeContextBar, { type ClaudeUsage } from './terminal/ClaudeContextBar';
+import AgentSelectCards from './terminal/AgentSelectCards';
+import QuotaBadge, { type AgentQuotaInfo } from './terminal/QuotaBadge';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
 
@@ -78,33 +83,11 @@ interface TerminalSlotProps {
   messages: AgentMessage[];
   tasks: Task[];
   antigravityUsage: any;
-  // Claude Code 세션 컨텍스트 사용량 — 컬러 블록 바 표시용
-  claudeUsage: {
-    input_tokens: number; output_tokens: number; cache_read: number; cache_write: number;
-    context_used?: number;  // [2026-04-21] input + cache_read + cache_write (캐시 포함 실제 점유)
-    model: string; context_window: number; percentage: number; last_ts: string;
-    // [2026-04-21] 5시간 sliding window 집계 (JSONL 절대값 — quota 실패 시 폴백 표시용)
-    last_5h_tokens?: number;
-    last_5h_messages?: number;
-    last_5h_oldest_ts?: string;
-    // [2026-07-03] OAuth 쿼터 사용률 — 5h/7d 한도 대비 % + 리셋 시각 (CodexBar 방식)
-    quota?: {
-      available: boolean; reason?: string; plan?: string;
-      five_hour?: { utilization: number; resets_at: string } | null;
-      seven_day?: { utilization: number; resets_at: string } | null;
-      seven_day_opus?: { utilization: number; resets_at: string } | null;
-      seven_day_sonnet?: { utilization: number; resets_at: string } | null;
-    } | null;
-  } | null;
+  // Claude Code 세션 컨텍스트 사용량 — 컬러 블록 바 표시용 (타입: terminal/ClaudeContextBar)
+  claudeUsage: ClaudeUsage | null;
   // [2026-07-04] 헤더 쿼터 배지 — 에이전트별 플랜 사용률 (/api/agent-quota).
   // 키: 'claude' | 'codex'. antigravity는 플랜 쿼터 공개 경로가 없어 컨텍스트 게이지 유지.
-  agentQuota?: Record<string, {
-    available: boolean; reason?: string; plan?: string; stale?: boolean; observed_at?: string;
-    // window_seconds: 창 길이(초). Codex free는 30일 창이라 "5h" 고정 라벨이 오표기 —
-    // 있으면 라벨을 동적 계산(5h/7d/30d), 없으면(Claude·구 스키마) 기존 5h/7d 유지.
-    five_hour?: { utilization: number; resets_at: string; window_seconds?: number } | null;
-    seven_day?: { utilization: number; resets_at: string; window_seconds?: number } | null;
-  }> | null;
+  agentQuota?: Record<string, AgentQuotaInfo> | null;
   // 터미널별 에이전트 파이프라인 상태 — App.tsx에서 /api/agent/terminals 폴링으로 수신
   agentTerminals?: Record<string, any>;
   // 오케스트레이터 스킬 체인 데이터 — /api/orchestrator/skill-chain 폴링
@@ -122,7 +105,6 @@ interface TerminalSlotProps {
 export default function TerminalSlot({
   slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
 }: TerminalSlotProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -169,9 +151,6 @@ export default function TerminalSlot({
   // [불변식] 사용자가 새 좌클릭/복사로 의도적으로 선택을 지운 경우에만 true — 이때는 복원하지 않는다.
   // TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 유일한 신호.
   const userClearedSelRef = useRef(false);
-
-  // Claude 컨텍스트 바 상세 토글 (클릭 시 In/Out/Cache 2행 표시)
-  const [showCtxDetail, setShowCtxDetail] = useState(false);
 
   // 자율 에이전트 모니터링 뷰 표시 여부 — localStorage에서 마지막 상태 복원 (기본값: false)
   // 기본값 false: 터미널 화면 최대 확보, 필요 시 버튼으로 토글
@@ -564,11 +543,6 @@ export default function TerminalSlot({
         return Math.abs(hash) % terminalCount === slotId;
       });
 
-  // 새 로그 도착 시 자동 스크롤
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [slotLogs.length]);
-
   // Git 브랜치 폴링 — 터미널 실행 중일 때 5초마다 현재 브랜치 확인
   useEffect(() => {
     if (!isTerminalMode) return;
@@ -737,57 +711,10 @@ export default function TerminalSlot({
               </div>
             )}
 
-            {/* [2026-07-04] 플랜 쿼터 배지 — Claude/Codex 슬롯 헤더 상시 표시.
-                세션 JSONL 데이터(ctx) 유무와 무관하게 뜸 — "쿼터는 정상인데 안 보임" 원천 차단.
-                stale=Codex 토큰 만료로 세션 파일 마지막 관측값 폴백 → 흐리게 + ⏱ 표시 */}
-            {(agentType === 'claude' || agentType === 'codex') && (() => {
-              const q = agentQuota?.[agentType];
-              if (!q?.available || !q.five_hour) return null;
-              const col = (u: number) => u >= 80 ? '#f87171' : u >= 60 ? '#facc15' : '#a3e635';
-              const reset = (iso?: string) => {
-                if (!iso) return '';
-                const remain = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
-                if (remain <= 0) return '리셋됨';
-                const d = Math.floor(remain / 86400), h = Math.floor((remain % 86400) / 3600), m = Math.floor((remain % 3600) / 60);
-                return d > 0 ? `${d}d ${h}h 후` : h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
-              };
-              const u5 = q.five_hour.utilization;
-              // 창 길이 라벨 — window_seconds가 오면 동적(30d 등), 없으면 관례상 5h/7d
-              const winLabel = (sec: number | undefined, fallback: string) => {
-                if (!sec) return fallback;
-                if (sec >= 2 * 86400) return `${Math.round(sec / 86400)}d`;
-                if (sec >= 3600) return `${Math.round(sec / 3600)}h`;
-                return `${Math.round(sec / 60)}m`;
-              };
-              const l5 = winLabel(q.five_hour.window_seconds, '5h');
-              const l7 = winLabel(q.seven_day?.window_seconds, '7d');
-              const tip = [
-                `${agentType === 'claude' ? 'Claude' : 'Codex'} 플랜 사용률${q.plan ? ` (${q.plan})` : ''}`,
-                `${l5} ${Math.round(u5)}% — 리셋 ${reset(q.five_hour.resets_at)}`,
-                q.seven_day ? `${l7} ${Math.round(q.seven_day.utilization)}% — 리셋 ${reset(q.seven_day.resets_at)}` : '',
-                q.stale ? `⚠ ${q.observed_at ? new Date(q.observed_at).toLocaleString() : ''} 마지막 관측값 — 일시 조회 실패, 자동 재시도 중` : '',
-              ].filter(Boolean).join('\n');
-              return (
-                <div
-                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono shrink-0 ${q.stale ? 'opacity-50 bg-white/5 border-white/10 text-[#999]' : 'bg-[#16210f]/80 border-lime-500/20 text-[#ccc]'}`}
-                  title={tip}
-                >
-                  <span className="opacity-60 font-bold">{l5}</span>
-                  <div className="w-10 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
-                    <div className="h-full transition-all duration-1000" style={{ width: `${Math.min(100, u5)}%`, backgroundColor: col(u5) }} />
-                  </div>
-                  <span className="font-black" style={{ color: col(u5) }}>{Math.round(u5)}%</span>
-                  {q.seven_day && (
-                    <>
-                      <span className="opacity-30">|</span>
-                      <span className="opacity-60 font-bold">{l7}</span>
-                      <span className="font-black" style={{ color: col(q.seven_day.utilization) }}>{Math.round(q.seven_day.utilization)}%</span>
-                    </>
-                  )}
-                  {q.stale && <span className="opacity-70">⏱</span>}
-                </div>
-              );
-            })()}
+            {/* [2026-07-04] 플랜 쿼터 배지 — Claude/Codex 슬롯 헤더 상시 표시 (terminal/QuotaBadge) */}
+            {(agentType === 'claude' || agentType === 'codex') && (
+              <QuotaBadge agentType={agentType} quota={agentQuota?.[agentType]} />
+            )}
 
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
@@ -803,258 +730,8 @@ export default function TerminalSlot({
         )}
       </div>
 
-      {/* ── Claude 컨텍스트 컬러 블록 바 — 클릭 시 상세 팝업 (리팩토링 복원 2026-03-26) ── */}
-      {isTerminalMode && agentType === 'claude' && (() => {
-        const ctx = claudeUsage;
-        const CTX_MAX = ctx?.context_window ?? 200000;
-        const inputTok = ctx?.input_tokens ?? 0;
-        const outputTok = ctx?.output_tokens ?? 0;
-        const cacheRead = ctx?.cache_read ?? 0;
-        const cacheWrite = ctx?.cache_write ?? 0;
-        // [2026-04-21] 실제 컨텍스트 점유 = 현재 턴 input + 캐시 히트 + 캐시 생성.
-        // Claude Code CLI `/context` 와 동일. 서버가 context_used를 주면 그대로 쓰고
-        // 없으면(구 응답) 프론트에서 합산한다.
-        const usedTok = ctx?.context_used ?? (inputTok + cacheRead + cacheWrite);
-        const ctxPct = ctx ? Math.round((usedTok / CTX_MAX) * 100) : 0;
-        const freeTok = Math.max(0, CTX_MAX - usedTok);
-
-        // 각 토큰 타입의 컨텍스트 점유 %
-        const cacheReadPct = Math.min(100, (cacheRead / CTX_MAX) * 100);
-        const cacheWritePct = Math.min(100, (cacheWrite / CTX_MAX) * 100);
-        const inputOnlyPct = Math.max(0, ctxPct - cacheReadPct - cacheWritePct);
-        const freePct = Math.max(0, 100 - ctxPct);
-
-        // 배경 & 경고 색
-        const dangerBg = ctxPct >= 80 ? 'bg-red-950/30 border-red-500/15'
-          : ctxPct >= 60 ? 'bg-yellow-950/30 border-yellow-500/15'
-          : 'bg-[#0d1117] border-white/5';
-        const modelColor = ctxPct >= 80 ? '#f87171' : ctxPct >= 60 ? '#facc15' : '#a3e635';
-
-        // 모델명 단축
-        const modelShort = ctx?.model
-          ? ctx.model.replace(/^claude-/, '').replace(/-(\d)/, ' $1').replace(/-latest$/, '').replace(/-\d{8}$/, '').replace(/\b\w/g, c => c.toUpperCase())
-          : 'Claude';
-        const maxLabel = CTX_MAX >= 1_000_000 ? `${CTX_MAX / 1_000_000}M` : `${CTX_MAX / 1000}k`;
-        const usedLabel = `${Math.round(usedTok / 1000)}k`;
-
-        // 블록 그리드 색상 결정 (100개 블록, 각 1%)
-        const getBlockColor = (idx: number) => {
-          const p = idx + 1;
-          if (p <= cacheReadPct) return '#22d3ee';
-          if (p <= cacheReadPct + cacheWritePct) return '#4ade80';
-          if (p <= cacheReadPct + cacheWritePct + inputOnlyPct) return '#fbbf24';
-          return '#1e2130';
-        };
-
-        // 상대 시간
-        const ctxRelTime = (() => {
-          if (!ctx?.last_ts) return '';
-          const diff = Math.floor((Date.now() - new Date(ctx.last_ts).getTime()) / 1000);
-          if (diff < 60) return `${diff}초 전`;
-          if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
-          if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
-          return `${Math.floor(diff / 86400)}일 전`;
-        })();
-
-        // 카테고리 목록
-        const pureInput = Math.max(0, inputTok - cacheRead - cacheWrite);
-        const categories = [
-          { label: '입력 토큰', tok: pureInput, pct: inputOnlyPct, color: '#fbbf24' },
-          ...(cacheWrite > 0 ? [{ label: '캐시 쓰기', tok: cacheWrite, pct: cacheWritePct, color: '#4ade80' }] : []),
-          ...(cacheRead > 0 ? [{ label: '캐시 읽기', tok: cacheRead, pct: cacheReadPct, color: '#22d3ee' }] : []),
-          { label: '출력 누적', tok: outputTok, pct: Math.round((outputTok / CTX_MAX) * 100), color: '#888' },
-          { label: '여유 공간', tok: freeTok, pct: freePct, color: '#2a2d3a' },
-        ];
-        const fmtTok = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`;
-
-        // OAuth 쿼터 표시 헬퍼 — resets_at(ISO) → 남은 시간, 사용률 → 경고색
-        const quota = ctx?.quota?.available ? ctx.quota : null;
-        const fmtReset = (iso: string) => {
-          const remain = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
-          if (remain <= 0) return '곧 리셋';
-          const d = Math.floor(remain / 86400);
-          const h = Math.floor((remain % 86400) / 3600);
-          const m = Math.floor((remain % 3600) / 60);
-          if (d > 0) return `${d}d ${h}h 후`;
-          return h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
-        };
-        const quotaColor = (u: number) => u >= 80 ? '#f87171' : u >= 60 ? '#facc15' : '#a3e635';
-
-        return (
-          <div className="relative shrink-0">
-            {/* 단일 행 바 (항상 표시) */}
-            <div
-              className={`border-b px-3 py-[3px] flex items-center gap-2 font-mono text-[10px] overflow-hidden cursor-pointer select-none transition-colors hover:brightness-110 ${dangerBg}`}
-              onClick={() => setShowCtxDetail(p => !p)}
-              title="클릭하여 컨텍스트 상세 보기"
-            >
-              {/* 컬러 블록 바: 20개 █, 각 5% */}
-              <div className="flex shrink-0 leading-none">
-                {Array.from({ length: 20 }, (_, idx) => {
-                  const p = (idx + 1) * 5;
-                  const color = p <= cacheReadPct ? '#22d3ee'
-                    : p <= cacheReadPct + cacheWritePct ? '#4ade80'
-                    : p <= ctxPct ? '#fbbf24'
-                    : '#2a2d3a';
-                  return <span key={idx} style={{ color, fontSize: 11, letterSpacing: '-0.5px' }}>█</span>;
-                })}
-              </div>
-              {/* 텍스트: 모델명 (컨텍스트 크기) · 사용량 */}
-              <div className="flex items-center gap-0 whitespace-nowrap flex-1 min-w-0">
-                <span className="font-semibold" style={{ color: modelColor }}>{modelShort}</span>
-                <span className="text-[#555] ml-1 text-[9px]">({maxLabel} context)</span>
-                <span className="text-[#444] mx-1.5">·</span>
-                <span className="text-[#ccc]">{usedLabel}/{maxLabel} tokens ({ctxPct}%)</span>
-                {ctx && ctxRelTime && <span className="text-[#333] ml-2 text-[9px]">{ctxRelTime}</span>}
-                <span className="ml-auto text-[#333] text-[8px]">{showCtxDetail ? '▲' : '▼'}</span>
-              </div>
-              {!ctx && <span className="text-[9px] text-[#333] italic">Claude Code 세션 대기 중...</span>}
-            </div>
-            {/* 데이터 없을 때 2행: No usage data yet */}
-            {!ctx && (
-              <div className="border-b border-white/5 bg-[#0d1117] px-3 py-[2px] font-mono text-[9px] text-[#444] italic">
-                No usage data yet
-              </div>
-            )}
-            {/* 데이터 있을 때 2행: In / Out / Cache+ / Cache~ · 5h 누적 */}
-            {ctx && (
-              <div className="border-b border-white/5 bg-[#0d1117] px-3 py-[2px] font-mono text-[9px] text-[#888] flex items-center gap-3 flex-wrap">
-                <span>In: <span className="text-[#fbbf24]">{fmtTok(inputTok)}</span></span>
-                <span>Out: <span className="text-[#ccc]">{fmtTok(outputTok)}</span></span>
-                {cacheWrite > 0 && <span>Cache+: <span className="text-[#4ade80]">{fmtTok(cacheWrite)}</span></span>}
-                {cacheRead > 0 && <span>Cache~: <span className="text-[#22d3ee]">{fmtTok(cacheRead)}</span></span>}
-                {quota?.five_hour ? (
-                  // 쿼터 사용률 우선 표시 — 플랜 한도 대비 실제 % + 리셋 카운트다운
-                  <span
-                    className="ml-auto text-[#666]"
-                    title={`플랜 한도 대비 사용률${quota.plan ? ` (${quota.plan})` : ''} — 로컬 5h ${fmtTok(ctx.last_5h_tokens ?? 0)} tokens · ${ctx.last_5h_messages ?? 0}회`}
-                  >
-                    5h <span style={{ color: quotaColor(quota.five_hour.utilization) }}>{Math.round(quota.five_hour.utilization)}%</span>
-                    {quota.five_hour.resets_at && (
-                      <span className="text-[#444] ml-1">({fmtReset(quota.five_hour.resets_at)})</span>
-                    )}
-                    {quota.seven_day && (
-                      <>
-                        <span className="text-[#444] mx-1">·</span>
-                        7d <span style={{ color: quotaColor(quota.seven_day.utilization) }}>{Math.round(quota.seven_day.utilization)}%</span>
-                      </>
-                    )}
-                  </span>
-                ) : (ctx.last_5h_tokens ?? 0) > 0 ? (
-                  // 폴백: 쿼터 API 실패/미가용 시 기존 JSONL 절대값
-                  <span className="ml-auto text-[#666]" title="지난 5시간 누적 (cwd 일치 세션)">
-                    5h: <span className="text-[#a3e635]">{fmtTok(ctx.last_5h_tokens ?? 0)}</span>
-                    <span className="text-[#444] ml-1">· {ctx.last_5h_messages ?? 0}회</span>
-                  </span>
-                ) : null}
-              </div>
-            )}
-
-            {/* 상세 팝업: /context 스타일 블록 그리드 + 카테고리 + 5h sliding (클릭 토글) */}
-            {showCtxDetail && ctx && (() => {
-              // 5시간 집계 리셋 시각 계산: oldest_ts + 5h
-              const oldestMs = ctx.last_5h_oldest_ts ? new Date(ctx.last_5h_oldest_ts).getTime() : 0;
-              const resetLabel = oldestMs
-                ? (() => {
-                    const remainSec = Math.max(0, Math.floor((oldestMs + 5 * 3600 * 1000 - Date.now()) / 1000));
-                    if (remainSec <= 0) return '곧 초기화';
-                    const h = Math.floor(remainSec / 3600);
-                    const m = Math.floor((remainSec % 3600) / 60);
-                    return h > 0 ? `${h}h ${m}m 후` : `${m}m 후`;
-                  })()
-                : '';
-              return (
-                <div className="absolute top-full left-0 right-0 z-50 bg-[#0d1117] border-b border-x border-white/10 shadow-2xl font-mono text-[10px] px-3 pt-2 pb-3 space-y-3">
-                  {/* ── 상단 프로그레스 바 — CLI /context 스타일 ── */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[#ccc] font-bold text-[11px]">컨텍스트 창</span>
-                      <span className="text-[#ccc] text-[10px]">
-                        {usedLabel}/{maxLabel} ({ctxPct}%)
-                      </span>
-                    </div>
-                    <div className="h-2 bg-[#1a1a2e] rounded-full overflow-hidden flex">
-                      {/* 캐시 읽기 · 쓰기 · 입력 순서로 쌓인 스택형 프로그레스 */}
-                      <div style={{ width: `${cacheReadPct}%`, backgroundColor: '#22d3ee' }} />
-                      <div style={{ width: `${cacheWritePct}%`, backgroundColor: '#4ade80' }} />
-                      <div style={{ width: `${inputOnlyPct}%`, backgroundColor: '#fbbf24' }} />
-                    </div>
-                  </div>
-
-                  {/* ── 플랜 쿼터 사용률 (OAuth /api/oauth/usage) — 실패 시 절대값 폴백 ── */}
-                  {quota ? (
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[#ccc] font-bold text-[11px]">플랜 쿼터 사용률</span>
-                        {quota.plan && <span className="text-[#555] text-[9px] uppercase">{quota.plan}</span>}
-                      </div>
-                      <div className="space-y-[5px]">
-                        {([
-                          { label: '5시간', win: quota.five_hour },
-                          { label: '7일', win: quota.seven_day },
-                          { label: '7일 Opus', win: quota.seven_day_opus },
-                          { label: '7일 Sonnet', win: quota.seven_day_sonnet },
-                        ] as const).filter(r => r.win).map(r => (
-                          <div key={r.label} className="flex items-center gap-2">
-                            <span className="text-[#999] w-14 shrink-0">{r.label}</span>
-                            <div className="flex-1 h-1.5 bg-[#1a1a2e] rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full"
-                                style={{ width: `${Math.min(100, r.win!.utilization)}%`, backgroundColor: quotaColor(r.win!.utilization) }}
-                              />
-                            </div>
-                            <span className="w-9 text-right" style={{ color: quotaColor(r.win!.utilization) }}>
-                              {Math.round(r.win!.utilization)}%
-                            </span>
-                            <span className="text-[#555] w-16 text-right text-[9px]">
-                              {r.win!.resets_at ? fmtReset(r.win!.resets_at) : ''}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      {(ctx.last_5h_tokens ?? 0) > 0 && (
-                        <div className="text-[9px] text-[#555] leading-tight mt-1">
-                          로컬 5h 집계: {fmtTok(ctx.last_5h_tokens ?? 0)} tokens · {ctx.last_5h_messages ?? 0}회
-                          {resetLabel && <span> · {resetLabel} 롤오프</span>}
-                        </div>
-                      )}
-                    </div>
-                  ) : (ctx.last_5h_tokens ?? 0) > 0 ? (
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[#ccc] font-bold text-[11px]">5시간 누적 사용량</span>
-                        <span className="text-[#888] text-[10px]">
-                          {fmtTok(ctx.last_5h_tokens ?? 0)} tokens · {ctx.last_5h_messages ?? 0}회
-                          {resetLabel && <span className="text-[#555] ml-2">· {resetLabel} 롤오프</span>}
-                        </span>
-                      </div>
-                      <div className="text-[9px] text-[#555] leading-tight">
-                        cwd 일치 세션의 지난 5h assistant usage 합계. (쿼터 API 미가용 — 절대값 폴백)
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* ── 카테고리별 사용량 ── */}
-                  <div className="pt-1 space-y-[3px]">
-                    <div className="text-[#444] text-[9px] mb-1">카테고리별 사용량</div>
-                    {categories.map(cat => (
-                      <div key={cat.label} className="flex items-center gap-1">
-                        <span style={{ color: cat.color, fontSize: 9 }}>█</span>
-                        <span className="text-[#999] w-14">{cat.label}</span>
-                        <span className="text-[#ccc] w-10 text-right">{fmtTok(cat.tok)}</span>
-                        <div className="flex-1 h-1 bg-[#1a1a2e] rounded-full overflow-hidden ml-1">
-                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, cat.pct)}%`, backgroundColor: cat.color }} />
-                        </div>
-                        <span className="text-[#555] w-8 text-right">{Math.round(cat.pct)}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        );
-      })()}
+      {/* ── Claude 컨텍스트 컬러 블록 바 — terminal/ClaudeContextBar로 분리 (2026-07-15) ── */}
+      {isTerminalMode && agentType === 'claude' && <ClaudeContextBar ctx={claudeUsage} />}
 
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
@@ -1346,145 +1023,9 @@ export default function TerminalSlot({
         </div>
       )}
 
-      {/* ── 에이전트 선택 카드 UI (터미널 미실행 + 채팅 모드 아닐 때만 표시) ── */}
+      {/* ── 에이전트 선택 카드 — terminal/AgentSelectCards로 분리 (2026-07-15) ── */}
       {!isTerminalMode && (
-        <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
-          {/* 중앙 에이전트 선택 카드 UI */}
-          <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px]">
-            <div className="flex flex-col md:flex-row gap-6 max-w-4xl w-full">
-
-              {/* Claude Card */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                whileHover={{ scale: 1.02, translateY: -5 }}
-                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-success/50 group relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <Cpu className="w-12 h-12 text-success" />
-                </div>
-                <div className="w-16 h-16 rounded-2xl bg-success/10 flex items-center justify-center mb-2 group-hover:bg-success/20 transition-colors shadow-inner">
-                  <Cpu className="w-8 h-8 text-success" />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">CLAUDE CODE</h3>
-                  <p className="text-[10px] text-success font-bold uppercase tracking-widest opacity-60">High Precision Agent</p>
-                </div>
-                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
-                  Anthropic의 최신 모델을 기반으로 한 정밀 코딩 도구.<br/>복잡한 리팩토링과 설계에 최적화되어 있습니다.
-                </p>
-                <div className="flex flex-col w-full gap-2 mt-4">
-                  <button
-                    onClick={() => launchAgent('claude', false)}
-                    className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
-                  >
-                    Claude 일반 모드
-                  </button>
-                  <button
-                    onClick={() => launchAgent('claude', true)}
-                    className="w-full py-2.5 bg-primary/20 hover:bg-primary/40 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2 shadow-lg shadow-primary/10"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-current" /> Claude 욜로(YOLO)
-                  </button>
-                </div>
-              </motion.div>
-
-              {/* Antigravity Card (식별자 'gemini'는 Phase 1 alias 정책으로 유지) */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-                whileHover={{ scale: 1.02, translateY: -5 }}
-                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-indigo-400/50 group relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <Orbit className="w-12 h-12 text-indigo-400" />
-                </div>
-                <div className="w-16 h-16 rounded-2xl bg-indigo-400/10 flex items-center justify-center mb-2 group-hover:bg-indigo-400/20 transition-colors shadow-inner">
-                  <Orbit className="w-8 h-8 text-indigo-400" />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">ANTIGRAVITY</h3>
-                  <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest opacity-60">Agentic Code Pilot</p>
-                </div>
-                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
-                  Google의 차세대 에이전트 CLI.<br/>비대화형 실행과 멀티스텝 자동화에 최적화됐습니다.
-                </p>
-                <div className="flex flex-col w-full gap-2 mt-4">
-                  <button
-                    onClick={() => launchAgent('antigravity', false)}
-                    className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
-                  >
-                    Antigravity 일반 모드
-                  </button>
-                  <button
-                    onClick={() => launchAgent('antigravity', true)}
-                    className="w-full py-2.5 bg-indigo-400/20 hover:bg-indigo-400/40 text-indigo-300 rounded-xl text-[11px] font-black transition-all border border-indigo-400/30 flex items-center justify-center gap-2 shadow-lg shadow-indigo-400/10"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-current" /> Antigravity 욜로(YOLO)
-                  </button>
-                </div>
-              </motion.div>
-
-              {/* Codex Card */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                whileHover={{ scale: 1.02, translateY: -5 }}
-                className="flex-1 bg-[#252526] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 transition-all hover:border-orange-400/50 group relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <Code2 className="w-12 h-12 text-orange-400" />
-                </div>
-                <div className="w-16 h-16 rounded-2xl bg-orange-400/10 flex items-center justify-center mb-2 group-hover:bg-orange-400/20 transition-colors shadow-inner">
-                  <Code2 className="w-8 h-8 text-orange-400" />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-xl font-black text-white tracking-tighter mb-1">CODEX CLI</h3>
-                  <p className="text-[10px] text-orange-400 font-bold uppercase tracking-widest opacity-60">OpenAI Agentic Coder</p>
-                </div>
-                <p className="text-xs text-[#969696] text-center leading-relaxed h-12 flex items-center">
-                  OpenAI의 자율 코딩 에이전트.<br/>코드 생성·수정·실행을 자동으로 처리합니다.
-                </p>
-                <div className="flex flex-col w-full gap-2 mt-4">
-                  <button
-                    onClick={() => launchAgent('codex', false)}
-                    className="w-full py-2.5 bg-[#3c3c3c] hover:bg-white/10 rounded-xl text-[11px] font-bold transition-all border border-white/5 flex items-center justify-center gap-2 group/btn"
-                  >
-                    Codex 일반 모드
-                  </button>
-                  <button
-                    onClick={() => launchAgent('codex', true)}
-                    className="w-full py-2.5 bg-orange-400/20 hover:bg-orange-400/40 text-orange-400 rounded-xl text-[11px] font-black transition-all border border-orange-400/30 flex items-center justify-center gap-2 shadow-lg shadow-orange-400/10"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-current" /> Codex 욜로(YOLO)
-                  </button>
-                  {/* Codex CLI 미설치 시 npm 전역 설치 버튼 */}
-                  <button
-                    onClick={() => fetch(`${API_BASE}/api/install-codex-cli`, { method: 'POST' })}
-                    className="w-full py-1.5 bg-transparent hover:bg-white/5 rounded-xl text-[10px] font-bold transition-all border border-white/5 text-[#555] hover:text-[#888] flex items-center justify-center gap-1.5"
-                  >
-                    <Code2 className="w-3 h-3" /> Codex CLI 설치 (npm)
-                  </button>
-                </div>
-              </motion.div>
-
-
-
-            </div>
-          </div>
-
-          {/* 배경 로그 (블러 처리하여 생동감 부여) */}
-          <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto font-mono text-[11px] space-y-1 custom-scrollbar opacity-20">
-            {slotLogs.slice(-30).map((log, idx) => (
-              <div key={idx} className="flex items-start gap-2 border-l border-primary/20 pl-2 py-0.5">
-                <span className="text-primary/60 font-bold whitespace-nowrap">[{log.agent}]</span>
-                <span className="flex-1 text-[#aaaaaa] break-all leading-relaxed whitespace-pre-wrap">{log.trigger}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <AgentSelectCards logs={slotLogs} onLaunch={launchAgent} />
       )}
 
       {/* 단축어 편집 모달 팝업 — 별도 컴포넌트로 분리 */}
