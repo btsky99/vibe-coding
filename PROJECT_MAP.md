@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-13 23:31
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-15 19:26
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -62,7 +62,7 @@
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
-| `memory_api.py` | 358 | 메모리/지식 저장소 API (/api/memory/*) |
+| `memory_api.py` | 382 | 메모리/지식 저장소 API (/api/memory/*) |
 | `message_api.py` | 92 |  |
 | `office_api.py` | 370 |  |
 | `office_launch_api.py` | 85 |  |
@@ -90,7 +90,7 @@
 | `db.py` | 34 |  |
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
-| `heal_metrics.py` | 187 |  |
+| `heal_metrics.py` | 217 |  |
 | `logger.py` | 123 |  |
 | `pg_base.py` | 524 |  |
 | `pg_experience.py` | 226 |  |
@@ -198,9 +198,9 @@
 | `checkpoint.py` | 62 |  |
 | `codex_pg_watcher.py` | 286 |  |
 | `harness_verify.py` | 437 |  |
-| `heal_report.py` | 77 |  |
+| `heal_report.py` | 83 |  |
 | `hive_heartbeat.py` | 329 |  |
-| `incident.py` | 103 |  |
+| `incident.py` | 119 |  |
 | `install_dev_tools.py` | 159 |  |
 | `install_frontend_deps.py` | 195 |  |
 | `install_gh_cli.py` | 154 |  |
@@ -214,9 +214,10 @@
 | `install_statusline.py` | 112 | 상태줄 ~/.claude 멱등 설치기 (PC 간 이식) |
 | `install_system_tool.py` | 208 |  |
 | `intent_map.py` | 175 |  |
-| `lesson.py` | 109 |  |
+| `lesson.py` | 122 |  |
 | `migrate_antigravity_db.py` | 83 |  |
 | `migrate_archive_session_summaries.py` | 70 |  |
+| `migrate_vault_consolidate.py` | 240 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_antigravity_clean.py` | 130 |  |
@@ -226,7 +227,7 @@
 | `telegram_bridge.py` | 1455 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
-| `zettel_capture.py` | 679 |  |
+| `zettel_capture.py` | 701 |  |
 | `zettel_sync.py` | 863 |  |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
@@ -324,4 +325,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-13 23:31
+> 자동 생성 완료: 2026-07-15 19:26
