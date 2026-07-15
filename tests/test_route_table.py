@@ -54,7 +54,10 @@ GOLDEN_EXACT = {
     '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim',
 }
 GOLDEN_PREFIX = {
-    '/api/agent/', '/api/agents/', '/api/codegraph/', '/api/experience', '/api/git/',
+    # [8차 정리 2026-07-15] '/api/agents/' prefix 제거 — 유일 사용처였던
+    # /api/agents/*/trigger(리스너 미가동 무기능)가 은퇴됨. exact 라우트
+    # (/api/agents/status, /api/agents/heartbeat)는 유지.
+    '/api/agent/', '/api/codegraph/', '/api/experience', '/api/git/',
     '/api/hive/', '/api/memory/', '/api/office/', '/api/orchestrator/', '/api/pty/',
     '/api/superpowers/', '/api/tasks/', '/api/tools/', '/api/zettel/',
 }

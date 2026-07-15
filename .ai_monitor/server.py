@@ -240,7 +240,6 @@ from src.pg_store import (
     atomic_checkout,
     release_checkout,
     list_agent_status,
-    trigger_agent,
     record_heartbeat,
     insert_pg_log,
 )
@@ -1130,7 +1129,7 @@ GET_COND_ROUTES: list = [
 # [불변식/안전] GET과 달리 POST는 exact-prefix 충돌이 있어 이전 대상을 엄격히 제한한다:
 #   - /api/git/rollback·/api/git/diff(인라인) ⊂ /api/git/  → git 계열 전부 legacy 잔류(이전 금지)
 #   - /api/hive/log/pg·/api/hive/thought/pg(인라인) ⊂ /api/hive/ → hive/orchestrator/superpowers 잔류
-#   - /api/office/*(복합조건 프록시), /api/tasks/*(endswith), /api/agents/*/trigger(endswith) 잔류
+#   - /api/office/*(복합조건 프록시), /api/tasks/*(endswith) 잔류 (agents/*/trigger는 8차 정리로 은퇴)
 #   따라서 이전한 prefix(tools/agent/pty/zettel/codegraph/memory)는 어떤 인라인 exact와도 비충돌(검증됨).
 #   [디스패치 순서] exact 먼저 → prefix 나중 → legacy 폴백. exact-first라서 prefix가 exact를 가리지 않음.
 # [불변식] wrapper는 전역(update_api/_soft_src_dir/_get_node_pty_sessions 등)을 **호출 시점** 해석 —
@@ -1339,12 +1338,12 @@ def _p_git(h, pp):
         _body = json.loads(h.rfile.read(content_length).decode('utf-8')) if content_length else {}
         git_api.handle_post(h, pp.path, _body, BASE_DIR=BASE_DIR)
 
-# tasks: exact4 OR (/api/tasks/ + endswith comments|checkout) OR (/api/agents/ + endswith trigger).
+# tasks: exact4 OR (/api/tasks/ + endswith comments|checkout).
+# [8차 정리 2026-07-15] /api/agents/*/trigger 라우팅 제거 — 리스너 미가동 무기능 경로 은퇴.
 def _cp_tasks(path):
     return (path in ('/api/tasks', '/api/tasks/update', '/api/tasks/delete', '/api/tasks/claim')
             or (path.startswith('/api/tasks/') and
-                (path.endswith('/comments') or path.endswith('/checkout')))
-            or (path.startswith('/api/agents/') and path.endswith('/trigger')))
+                (path.endswith('/comments') or path.endswith('/checkout'))))
 def _p_tasks(h, pp):
     content_length = int(h.headers.get('Content-Length', 0))
     _body = json.loads(h.rfile.read(content_length).decode('utf-8')) if content_length else {}
@@ -1359,7 +1358,6 @@ def _p_tasks(h, pp):
         add_task_comment=add_task_comment,
         atomic_checkout=atomic_checkout,
         release_checkout=release_checkout,
-        trigger_agent=trigger_agent,
     )
 
 POST_COND_ROUTES: list = [

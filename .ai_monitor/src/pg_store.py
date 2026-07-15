@@ -96,7 +96,6 @@ from src.pg_tasks import (
     release_checkout,
     save_state,
     save_task,
-    trigger_agent,
     update_task,
     upsert_skill_chain_row,
 )

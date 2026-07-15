@@ -149,7 +149,7 @@ def handle_post(handler, path: str, data: dict, *,
                 SESSIONS_FILE: Path, save_task, update_task, delete_task,
                 current_project_id: str,
                 add_task_comment=None, atomic_checkout=None,
-                release_checkout=None, trigger_agent=None) -> bool:
+                release_checkout=None) -> bool:
     """POST 요청 처리 — /api/tasks 생성, /api/tasks/update, delete, claim 담당.
 
     반환값: 경로가 처리됐으면 True, 해당 없으면 False.
@@ -310,23 +310,8 @@ def handle_post(handler, path: str, data: dict, *,
             handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
         return True
 
-    # ── POST /api/agents/<id>/trigger ─────────────────────────────────
-    # 수동 하트비트 트리거 — NOTIFY로 에이전트 깨우기
-    m = re.match(r'^/api/agents/([^/]+)/trigger$', path)
-    if m and trigger_agent:
-        handler.send_response(200)
-        handler.send_header('Content-Type', 'application/json;charset=utf-8')
-        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
-        handler.end_headers()
-        try:
-            agent_id = m.group(1)
-            ok = trigger_agent(agent_id)
-            handler.wfile.write(json.dumps({
-                'status': 'success' if ok else 'error',
-                'message': f'{agent_id} 트리거 전송' if ok else 'NOTIFY 전송 실패'
-            }).encode('utf-8'))
-        except Exception as e:
-            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
-        return True
+    # [8차 정리 2026-07-15] /api/agents/<id>/trigger 은퇴 — NOTIFY task_assigned의
+    # 유일 리스너(hive_heartbeat.py)가 어느 시동 경로에도 없어 완전 무기능이었음.
+    # UI 호출자(조직도 재시도 버튼)도 dbc7bbc에서 제거됨.
 
     return False

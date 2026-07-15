@@ -41,7 +41,8 @@ FACADE_NAMES = [
     'upsert_skill_chain_row', 'list_skill_chain_rows',
     'atomic_checkout', 'release_checkout', 'find_tasks_for_agent',
     'add_task_comment', 'list_task_comments',
-    'record_heartbeat', 'list_agent_status', 'trigger_agent',
+    # [8차 정리 2026-07-15] trigger_agent 은퇴 — 리스너 미가동 무기능 NOTIFY 경로
+    'record_heartbeat', 'list_agent_status',
     # pg_experience
     'record_experience', 'get_agent_stats', 'get_experience_history',
     'recall_similar_experience', 'recall_context_summary', 'insert_pg_log',

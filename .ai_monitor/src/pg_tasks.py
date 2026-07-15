@@ -3,8 +3,9 @@
 # 📝 설명: 하이브 태스크(hive_tasks) CRUD + 원자적 체크아웃 + 코멘트 + 하트비트 + 상태 저장
 #          (pg_store.py 분할 4/6)
 # 🕒 변경 이력:
+# [2026-07-15] Claude — [8차 정리] trigger_agent 은퇴 (리스너 미가동 무기능 NOTIFY)
 # [2026-06-10] Claude — pg_store.py 분할로 신설 (1500줄 규칙 준수)
-#   - [제약] atomic_checkout/trigger_agent는 _get_pg_conn()을 락 없이 직접 호출
+#   - [제약] atomic_checkout은 _get_pg_conn()을 락 없이 직접 호출
 #     (분할 전부터의 동작 유지) — psycopg2 autocommit 커넥션 전제.
 # ────────────────────────────────────────────────────────────────────────────
 import threading
@@ -382,18 +383,6 @@ def list_agent_status() -> list[dict]:
     )
 
 
-def trigger_agent(agent_id: str) -> bool:
-    """에이전트에게 NOTIFY 전송 — 수동 하트비트 트리거."""
-    conn = _get_pg_conn()
-    if not conn:
-        return False
-    try:
-        import json as _json
-        payload = _json.dumps({'agent': agent_id, 'trigger': 'manual'})
-        with conn.cursor() as cur:
-            cur.execute(f"NOTIFY task_assigned, '{payload}';")
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"[pg_store] trigger_agent 실패: {e}")
-        return False
+# [8차 정리 2026-07-15] trigger_agent(NOTIFY task_assigned) 은퇴 — 유일 리스너였던
+# scripts/hive_heartbeat.py가 어느 시동 경로에도 배선된 적 없어 실효 0이었음.
+# 에이전트 실행은 전부 PTY/agent_api 경로로 정착. 부활 필요 시 리스너 배선부터.
