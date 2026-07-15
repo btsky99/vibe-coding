@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-15 23:21
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 00:10
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,7 +34,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 1895 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 1893 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -72,7 +72,7 @@
 | `screenshot_api.py` | 45 |  |
 | `setup_api.py` | 48 |  |
 | `static_api.py` | 123 |  |
-| `tasks_api.py` | 332 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
+| `tasks_api.py` | 317 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
 | `tools_api.py` | 1075 |  |
 | `update_api.py` | 213 |  |
@@ -98,8 +98,8 @@
 | `pg_memory.py` | 639 |  |
 | `pg_office.py` | 320 |  |
 | `pg_schema.py` | 777 |  |
-| `pg_store.py` | 128 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
-| `pg_tasks.py` | 399 |  |
+| `pg_store.py` | 127 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
+| `pg_tasks.py` | 388 |  |
 | `pg_vector_search.py` | 213 |  |
 | `recall_client.py` | 86 |  |
 | `secure.py` | 52 |  |
@@ -199,7 +199,6 @@
 | `codex_pg_watcher.py` | 286 |  |
 | `harness_verify.py` | 437 |  |
 | `heal_report.py` | 94 |  |
-| `hive_heartbeat.py` | 329 |  |
 | `incident.py` | 119 |  |
 | `install_dev_tools.py` | 159 |  |
 | `install_frontend_deps.py` | 195 |  |
@@ -281,8 +280,8 @@
 | `test_knowledge_pipeline.py` | 133 |  |
 | `test_new_api_modules.py` | 347 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
-| `test_pg_store_split.py` | 123 |  |
-| `test_route_table.py` | 102 |  |
+| `test_pg_store_split.py` | 124 |  |
+| `test_route_table.py` | 105 |  |
 | `test_self_heal_2.py` | 223 |  |
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
@@ -324,4 +323,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-15 23:21
+> 자동 생성 완료: 2026-07-16 00:10
