@@ -7,7 +7,6 @@ import {
   Files,
   GitBranch,
   HeartPulse,
-  LayoutDashboard,
   Package,
   Search,
   Settings,
@@ -120,11 +119,6 @@ const ActivityBar = memo(function ActivityBar({
       <button onClick={() => onTabChange('tasks')} className={tabCls('tasks')} title="Tasks">
         <ClipboardList className="w-5 h-5" />
         {activeTaskCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-yellow-400 rounded-full" />}
-      </button>
-
-      <button onClick={() => onTabChange('kanban')} className={tabCls('kanban')} title="Task Board">
-        <LayoutDashboard className="w-5 h-5" />
-        {activeTaskCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-blue-400 rounded-full" />}
       </button>
 
       <button onClick={() => onTabChange('memory')} className={tabCls('memory')} title="Shared Memory">

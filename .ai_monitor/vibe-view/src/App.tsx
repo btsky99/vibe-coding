@@ -33,7 +33,7 @@
 
 import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
-import { Menu, ChevronRight, ChevronDown, RotateCw, X, Minimize2, Maximize2, ExternalLink } from 'lucide-react';
+import { Menu, ChevronRight, ChevronDown, RotateCw, X } from 'lucide-react';
 /* ── 공유 상수/타입 ── */
 import { API_BASE, OpenFile, TreeItem } from './constants';
 /* ── 데이터 폴링 커스텀 훅 — ClassicApp/OfficeApp 공유 ── */
@@ -55,7 +55,6 @@ import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
-import TaskBoardPanel from './components/panels/TaskBoardPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
 import HealPanel from './components/panels/HealPanel';
@@ -93,21 +92,6 @@ function App() {
   const [activeTab, setActiveTab] = useState('explorer');
   // activeMenu: 상단 메뉴 드롭다운 활성 상태 — 루트 div 클릭으로 닫기 위해 App에서 관리
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  // 칸반 보드 팝아웃 모드 — 드래그 가능한 플로팅 윈도우로 표시
-  const [isKanbanExpanded, setIsKanbanExpanded] = useState(false);
-  // 칸반 팝업 위치/크기 — 열릴 때마다 화면 중앙에서 시작, 드래그로 자유롭게 이동 가능
-  const initKanbanSize = { width: Math.min(window.innerWidth * 0.85, 1300), height: Math.min(window.innerHeight * 0.82, 820) };
-  const [kanbanPos, setKanbanPos] = useState({
-    x: Math.round((window.innerWidth  - initKanbanSize.width)  / 2),
-    y: Math.round((window.innerHeight - initKanbanSize.height) / 2),
-  });
-  const [kanbanSize, setKanbanSize] = useState(initKanbanSize);
-  const kanbanDragStart = useRef({ x: 0, y: 0 });
-  const kanbanResizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
-  const [isKanbanDragging, setIsKanbanDragging] = useState(false);
-  const [isKanbanResizing, setIsKanbanResizing] = useState(false);
-  // 칸반 전체화면 토글 — 플로팅 창 뷰포트 전체 점유 모드
-  const [isKanbanMaximized, setIsKanbanMaximized] = useState(false);
   // 사이드바 너비 — 드래그 리사이즈로 동적 조절 (최소 150px, 최대 600px)
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const isResizingSidebar = useRef(false);
@@ -551,11 +535,6 @@ function App() {
         <ActivityBar
           activeTab={activeTab}
           onTabChange={(tab) => {
-            // 칸반 보드 + 스킬 결과는 팝업으로 열기 — 좁은 사이드바로는 내용을 보기 어려움
-            if (tab === 'kanban' || tab === 'skills') {
-              setIsKanbanExpanded(true);
-              return;
-            }
             setActiveTab(tab);
             setIsSidebarOpen(true);
           }}
@@ -728,130 +707,8 @@ function App() {
         </div>
       </div>
 
-      {/* ── 칸반 보드 드래그 가능 플로팅 윈도우 — 다른 모니터로도 이동 가능 ── */}
-      {isKanbanExpanded && (
-        <div
-          className={`fixed z-[9999] bg-[#1e1e1e] flex flex-col overflow-hidden shadow-2xl transition-none ${
-            isKanbanMaximized
-              ? 'border-0 rounded-none'
-              : 'border border-white/15 rounded-lg'
-          }`}
-          style={isKanbanMaximized ? {
-            // 전체화면: pywebview 네이티브 창 전체를 점유 (인터넷 브라우저 창 없음)
-            left: 0, top: 0, width: '100vw', height: '100vh',
-            cursor: 'default',
-          } : {
-            left: kanbanPos.x,
-            top: kanbanPos.y,
-            width: kanbanSize.width,
-            height: kanbanSize.height,
-            minWidth: 600,
-            minHeight: 300,
-            cursor: isKanbanDragging ? 'grabbing' : 'default',
-          }}
-          onPointerMove={e => {
-            if (isKanbanDragging) {
-              // 드래그 중 — 윈도우 위치 업데이트
-              setKanbanPos({
-                x: e.clientX - kanbanDragStart.current.x,
-                y: e.clientY - kanbanDragStart.current.y,
-              });
-            } else if (isKanbanResizing) {
-              // 리사이즈 중 — 윈도우 크기 업데이트 (최소 크기 제한)
-              const dw = e.clientX - kanbanResizeStart.current.x;
-              const dh = e.clientY - kanbanResizeStart.current.y;
-              setKanbanSize({
-                width:  Math.max(600, kanbanResizeStart.current.w + dw),
-                height: Math.max(300, kanbanResizeStart.current.h + dh),
-              });
-            }
-          }}
-          onPointerUp={() => { setIsKanbanDragging(false); setIsKanbanResizing(false); }}
-        >
-          {/* 팝아웃 헤더 — grab 커서로 드래그 가능 */}
-          <div
-            className="h-10 px-4 flex items-center justify-between bg-[#252526] border-b border-black/40 shrink-0 select-none"
-            style={{ cursor: isKanbanMaximized ? 'default' : (isKanbanDragging ? 'grabbing' : 'grab') }}
-            onPointerDown={e => {
-              // 전체화면 모드에서는 드래그 비활성화
-              if (isKanbanMaximized) return;
-              setIsKanbanDragging(true);
-              kanbanDragStart.current = {
-                x: e.clientX - kanbanPos.x,
-                y: e.clientY - kanbanPos.y,
-              };
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">
-                오케스트레이션 보드
-              </span>
-              {/* 전체화면이 아닐 때만 드래그 힌트 표시 */}
-              {!isKanbanMaximized && (
-                <span className="text-[9px] text-[#555] select-none">⠿ 드래그로 이동</span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {/* 네이티브 창으로 열기 — PySide6 OS 네이티브 데스크톱 창 실행 (브라우저 창 X) */}
-              <button
-                onPointerDown={e => e.stopPropagation()}
-                onClick={() => {
-                  // window.open() 대신 백엔드 API로 PySide6 kanban_board.py 실행
-                  // — window.open은 인터넷 브라우저 창으로 열리는 문제 해결
-                  fetch(`${API_BASE}/api/kanban/launch`, { method: 'POST' }).catch((err) => console.error('[App] fetch error:', err));
-                }}
-                className="hover:bg-white/10 p-1 rounded transition-colors"
-                title="네이티브 창으로 열기"
-              >
-                <ExternalLink className="w-4 h-4 text-[#aaa]" />
-              </button>
-              {/* 전체화면 토글 — pywebview 네이티브 창 안에서 최대화 (브라우저 창 X) */}
-              <button
-                onPointerDown={e => e.stopPropagation()}
-                onClick={() => setIsKanbanMaximized(v => !v)}
-                className="hover:bg-white/10 p-1 rounded transition-colors"
-                title={isKanbanMaximized ? '창 크기 복원' : '전체화면으로 확장'}
-              >
-                {isKanbanMaximized
-                  ? <Minimize2 className="w-4 h-4 text-[#aaa]" />
-                  : <Maximize2 className="w-4 h-4 text-[#aaa]" />
-                }
-              </button>
-              <button
-                onPointerDown={e => e.stopPropagation()}
-                onClick={() => { setIsKanbanMaximized(false); setIsKanbanExpanded(false); }}
-                className="hover:bg-white/10 p-1 rounded transition-colors"
-                title="닫기"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* 태스크보드 패널 — 플로팅 윈도우 내부 (스킬결과 + 칸반 통합) */}
-          <div className="flex-1 overflow-hidden p-3">
-            <TaskBoardPanel />
-          </div>
-
-          {/* 우하단 리사이즈 핸들 */}
-          <div
-            className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
-            style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.15) 50%)' }}
-            onPointerDown={e => {
-              e.stopPropagation();
-              setIsKanbanResizing(true);
-              kanbanResizeStart.current = {
-                x: e.clientX,
-                y: e.clientY,
-                w: kanbanSize.width,
-                h: kanbanSize.height,
-              };
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-            }}
-          />
-        </div>
-      )}
+      {/* [9차 정리 2026-07-16] 오케스트레이션 보드(칸반 플로팅 창) 은퇴 — 관제 시대 유물.
+          체인 기록(PG hive_skill_chains)과 슬롯 인라인 MonitorView는 유지. */}
 
       {/* ── 파일 퀵 뷰 플로팅 윈도우들 — lazy load (Monaco 포함) ── */}
       <Suspense fallback={null}>
@@ -872,27 +729,9 @@ function App() {
   );
 }
 
-// ─── 칸반 전용 팝아웃 창 컴포넌트 ─────────────────────────────────────────────
-// window.open('?kanban=1')으로 열릴 때 렌더링되는 독립 컴포넌트.
-// 브라우저 네이티브 창으로 열리므로 다른 모니터로 드래그 이동 가능.
-function KanbanOnlyApp() {
-  return (
-    <div className="w-screen h-screen bg-[#1e1e1e] text-[#cccccc] font-sans flex flex-col overflow-hidden">
-      {/* 최소 타이틀바 — 창 이동 구분용 */}
-      <div className="h-8 bg-[#252526] border-b border-black/40 flex items-center px-3 shrink-0 select-none">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-[#bbbbbb]">오케스트레이션 보드</span>
-        <span className="text-[9px] text-[#555] ml-2">— 이 창을 다른 모니터로 드래그하세요</span>
-      </div>
-      {/* 태스크보드 패널 전체 화면 표시 — 네이티브 앱 플로팅과 동일한 컴포넌트 */}
-      <div className="flex-1 overflow-hidden p-3">
-        <TaskBoardPanel />
-      </div>
-    </div>
-  );
-}
-
 // ─── 루트 진입점 — URL 파라미터로 렌더링 모드 분기 ─────────────────────────
-// ?kanban=1 / ?graph=1 쿼리 파라미터에 따라 전용 창 렌더링
+// ?page=dashboard(독립 대시보드 창) / ?page=office(오피스 창) 쿼리 파라미터로 분기.
+// [9차 정리 2026-07-16] ?kanban=1(KanbanOnlyApp) 경로 은퇴 — 오케스트레이션 보드 소멸.
 function DashboardOnlyApp() {
   const params = new URLSearchParams(window.location.search);
   const rawTab = (params.get('tab') || 'hive').toLowerCase();
@@ -939,7 +778,6 @@ function DashboardOnlyApp() {
 
 function Root() {
   const params = new URLSearchParams(window.location.search);
-  if (params.has('kanban')) return <KanbanOnlyApp />;
   if (params.get('page') === 'dashboard') return <DashboardOnlyApp />;
   if (params.get('page') === 'office') return (
     <Suspense fallback={<div className="w-screen h-screen bg-[#0a0a0f] flex items-center justify-center text-white">Loading Office...</div>}>

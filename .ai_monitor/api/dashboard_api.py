@@ -1,13 +1,15 @@
 """
 FILE: api/dashboard_api.py
-DESCRIPTION: 대시보드/에이전트 라우트 4종 — GET /api/agents(인메모리+PG 병합),
-             POST /api/dashboard/launch·/api/kanban/launch(dashboard_window.py 네이티브 창 실행),
+DESCRIPTION: 대시보드/에이전트 라우트 3종 — GET /api/agents(인메모리+PG 병합),
+             POST /api/dashboard/launch(dashboard_window.py 네이티브 창 실행),
              POST /api/agents/heartbeat(하트비트 수신 → 인메모리 dict + PG UPSERT).
              인메모리 공유 상태(AGENT_STATUS dict / AGENT_STATUS_LOCK)는 server.py 전역을
              참조 주입받는다 — heartbeat writer와 /api/agents reader가 반드시 동일 객체를 봐야
              상태가 갈리지 않는다(모듈이 사본을 만들면 대시보드가 조용히 빈 값 표시).
 
 REVISION HISTORY:
+- 2026-07-16 Claude: [9차 정리] kanban_launch/pg_activity 은퇴 — 소비자였던 오케스트레이션
+  보드(TaskBoardPanel)와 server.py 라우트가 은퇴되어 호출자 0. 관제 신규 개발 영구 중단 원칙.
 - 2026-07-06 Claude: server.py do_GET/do_POST 인라인 4블록 분리(Phase 2 R5). 공유 dict/lock은
   참조 주입 — heartbeat write와 agents read의 동일 identity 유지가 불변식. DB 헬퍼/launch 헬퍼도
   late-binding 주입(HTTP_PORT는 __main__에서 재설정되므로 호출 시점 값 필요). 로직 원본 verbatim.
@@ -81,58 +83,6 @@ def dashboard_launch(handler, base_dir, http_port, python_runner_cmds) -> None:
         handler.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))
     except Exception as e:
         handler.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-
-def kanban_launch(handler, base_dir, http_port, python_runner_cmds) -> None:
-    """POST /api/kanban/launch — dashboard_window.py kanban 탭 실행.
-    [WHY] B안 통합: kanban_board.py(PySide6 네이티브) 제거 → dashboard_window.py +
-      React TaskBoardPanel(?kanban=1) 일원화. 동일 API로 데이터 일관성 확보.
-    """
-    _json_headers(handler)
-    try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        # dashboard_window.py kanban 탭으로 실행
-        dashboard_script = base_dir / 'dashboard_window.py'
-        python_cmds = python_runner_cmds()
-        if not python_cmds:
-            raise RuntimeError('Python interpreter not found for kanban launch')
-        subprocess.Popen(
-            [python_cmds[0], str(dashboard_script), str(http_port), 'kanban'],
-            creationflags=_no_window,
-            close_fds=True,
-        )
-        handler.wfile.write(json.dumps({"status": "launched"}).encode('utf-8'))
-    except Exception as e:
-        handler.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-
-
-def pg_activity(handler, run_pg_sql_csv, current_project_id) -> None:
-    """GET /api/kanban/pg-activity — pg_logs 최근 8시간 터미널별 활동을 그룹화 반환.
-    응답: { "T1": [{agent, task, status, ts}, ...], ... } (터미널당 최대 15개).
-    [불변식] run_pg_sql_csv는 함수 참조로 주입 — 내부에서 PG_PROJECT_DB 전역을 호출 시점 해석하므로
-      동적 포트/DB 폴백 후에도 최신값을 본다. current_project_id는 wrapper가 호출 시점 값을 넘긴다.
-    """
-    _json_headers(handler)
-    try:
-        rows = run_pg_sql_csv(
-            "SELECT terminal_id, agent, task, status, "
-            "to_char(ts, 'HH24:MI:SS') AS ts "
-            "FROM pg_logs "
-            "WHERE ts > NOW() - INTERVAL '8 hours' AND (project_id=%s OR project_id='') "
-            "ORDER BY ts DESC LIMIT 300",
-            (current_project_id,)
-        )
-        # 터미널별 그룹화 (최대 15개/터미널)
-        by_terminal: dict = {}
-        for row in rows:
-            tid = row.get('terminal_id') or 'T0'
-            if tid not in by_terminal:
-                by_terminal[tid] = []
-            if len(by_terminal[tid]) < 15:
-                by_terminal[tid].append(row)
-        handler.wfile.write(json.dumps(by_terminal, ensure_ascii=False).encode('utf-8'))
-    except Exception as e:
-        handler.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
 
 def heartbeat(handler, agent_status, agent_status_lock, record_heartbeat, insert_pg_log) -> None:

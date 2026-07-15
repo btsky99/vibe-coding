@@ -918,7 +918,8 @@ def _g_config(h, pp):
 def _g_vibe_sidebar(h, pp):        vibe_api.handle_sidebar_state(h)
 def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
 def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)
-def _g_kanban_activity(h, pp):     dashboard_api.pg_activity(h, run_pg_sql_csv, _current_project_id())
+# [9차 정리 2026-07-16] _g_kanban_activity(/api/kanban/pg-activity) 은퇴 — 소비자였던
+#   오케스트레이션 보드(TaskBoardPanel)가 은퇴되어 프론트 호출자 0.
 def _g_memory_db_info(h, pp):      memory_api.db_info(h, DATA_DIR, PG_PORT, PG_PROJECT_DB, query_rows)
 
 # GET exact 라우트 (Phase 2 R16: do_GET 잔여 legacy elif 완전 흡수 → 테이블 완성).
@@ -1013,7 +1014,6 @@ GET_ROUTES = {
     '/api/vibe/sidebar': _g_vibe_sidebar,
     '/api/vibe/notifications': _g_vibe_notifications,
     '/api/vibe/skills': _g_vibe_skills,
-    '/api/kanban/pg-activity': _g_kanban_activity,
     '/api/memory/db-info': _g_memory_db_info,
     # Phase 2 R16 — do_GET 잔여 legacy elif 흡수. 순수위임 6 + SSE 3 + 인라인 3.
     '/api/projects': _g_projects,
@@ -1184,8 +1184,8 @@ def _p_messages_clear(h, pp): logs_api.clear(h, clear_messages)
 #   HTTP_PORT는 __main__에서 슬롯 재설정되므로 wrapper 호출 시점 값 전달(late-binding). body 직접 소비.
 def _p_dashboard_launch(h, pp):
     dashboard_api.dashboard_launch(h, BASE_DIR, HTTP_PORT, _python_runner_cmds)
-def _p_kanban_launch(h, pp):
-    dashboard_api.kanban_launch(h, BASE_DIR, HTTP_PORT, _python_runner_cmds)
+# [9차 정리 2026-07-16] _p_kanban_launch(/api/kanban/launch) 은퇴 — 오케스트레이션 보드 은퇴로
+#   호출 버튼 소멸. dashboard_window.py kanban 탭도 동시 제거.
 def _p_agents_heartbeat(h, pp):
     dashboard_api.heartbeat(h, AGENT_STATUS, AGENT_STATUS_LOCK, record_heartbeat, insert_pg_log)
 
@@ -1268,7 +1268,6 @@ POST_ROUTES = {
     '/api/run-script': _p_run_script,
     '/api/messages/clear': _p_messages_clear,
     '/api/dashboard/launch': _p_dashboard_launch,
-    '/api/kanban/launch': _p_kanban_launch,
     '/api/agents/heartbeat': _p_agents_heartbeat,
     '/api/office/launch': _p_office_launch,
     '/api/office/restart': _p_office_restart,

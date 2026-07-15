@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 00:10
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 00:28
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,11 +34,11 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 1893 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 1892 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
-| `mission_control.py` | 458 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
+| `mission_control.py` | 414 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
 | `soft_manifest.json` (루트) | 6 | soft 채널 풀빌드 게이트 (min_exe — 의존성 변경 시 소스 업데이트 차단) |
 
@@ -49,7 +49,7 @@
 | `codegraph_api.py` | 226 |  |
 | `commands_api.py` | 54 |  |
 | `config_api.py` | 81 |  |
-| `dashboard_api.py` | 183 |  |
+| `dashboard_api.py` | 133 |  |
 | `events_api.py` | 103 |  |
 | `experience_api.py` | 242 |  |
 | `files_api.py` | 216 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
@@ -233,7 +233,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 960 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 798 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 198 |  |
 | `constants.tsx` | 93 |  |
@@ -241,7 +241,7 @@
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
-| `ActivityBar.tsx` | 181 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
+| `ActivityBar.tsx` | 175 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
 | `ChatSlot.tsx` | 607 |  |
 | `FileExplorer.tsx` | 557 | 파일 시스템 탐색기 (트리/플랫 뷰) |
 | `FilePathText.tsx` | 102 | 파일 경로 렌더링 (클릭 가능 링크화) |
@@ -261,7 +261,6 @@
 | `HealPanel.tsx` | 129 |  |
 | `HivePanel.tsx` | 464 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
 | `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
-| `TaskBoardPanel.tsx` | 474 | 칸반 스타일 태스크 보드 |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 204 |  |
 | `ToolsPanel.tsx` | 406 |  |
@@ -281,7 +280,7 @@
 | `test_new_api_modules.py` | 347 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 124 |  |
-| `test_route_table.py` | 105 |  |
+| `test_route_table.py` | 106 |  |
 | `test_self_heal_2.py` | 223 |  |
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
@@ -323,4 +322,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-16 00:10
+> 자동 생성 완료: 2026-07-16 00:28

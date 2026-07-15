@@ -3,6 +3,8 @@ FILE: .ai_monitor/dashboard_window.py
 DESCRIPTION: 대시보드 독립 창 — PySide6 QWebEngineView 기반. 배포 시 vibe-dashboard.exe로 빌드.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 9차 정리 — kanban 탭 은퇴. 오케스트레이션 보드(TaskBoardPanel/?kanban=1)
+                     은퇴로 진입 경로 소멸. /api/kanban/launch 라우트도 동시 제거됨.
 - 2026-04-09 Claude: 클래식/오피스 창 충돌 및 로딩 지연 수정.
                      (1) QWebEngineProfile과 QWebEnginePage의 parent를 self.webview →
                          self(QMainWindow)로 승격. webview 파괴 시 profile이 page보다
@@ -80,16 +82,10 @@ TITLE_MAP = {
     'git': '바이브 코딩 - Git',
     'mcp': '바이브 코딩 - MCP',
     'hive': '바이브 코딩 - 하이브',
-    # kanban: React TaskBoardPanel 기반 오케스트레이션 보드 (B안 통합)
-    'kanban': '바이브 코딩 - 오케스트레이션 보드',
     # office: 가상 오피스(메타버스) 독립 창
     'office': '바이브 코딩 - 오피스',
 }
-# kanban 탭은 ?kanban=1 파라미터로 KanbanOnlyApp 컴포넌트를 렌더링
-# 그 외 탭은 기존 ?page=dashboard&tab=<name> 경로 사용
-if TAB == 'kanban':
-    DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?kanban=1"
-elif TAB == 'office':
+if TAB == 'office':
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=office"
 else:
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=dashboard&tab={quote(TAB)}"
@@ -117,8 +113,7 @@ class DashboardWindow(QMainWindow):
         project_name = _fetch_project_name()
         title = f"{base_title} [{project_name}]" if project_name else base_title
         self.setWindowTitle(title)
-        # kanban(오케스트레이션 보드)은 기존 kanban_board.py와 동일한 크기로 시작
-        w, h = (1440, 860) if TAB in ('kanban', 'office') else (1400, 900)
+        w, h = (1440, 860) if TAB == 'office' else (1400, 900)
         self.resize(w, h)
 
         screen = QApplication.primaryScreen().geometry()

@@ -25,7 +25,7 @@ GOLDEN_EXACT = {
     '/api/config/telegram', '/api/copy-path', '/api/dirs', '/api/drives',
     '/api/events/agent', '/api/events/fs', '/api/events/thoughts', '/api/heal/metrics',
     '/api/heartbeat', '/api/help', '/api/image-file', '/api/install-skills',
-    '/api/install-tool-status', '/api/kanban/pg-activity', '/api/memory/db-info',
+    '/api/install-tool-status', '/api/memory/db-info',
     '/api/messages', '/api/projects', '/api/register-codex-to-ai', '/api/server-logs',
     '/api/shutdown', '/api/soft-update/check', '/api/tool-status',
     '/api/trigger-update-check', '/api/vibe/notifications', '/api/vibe/sidebar',
@@ -33,7 +33,8 @@ GOLDEN_EXACT = {
     # do_POST
     '/api/agents/heartbeat', '/api/apply-update', '/api/config/update',
     '/api/dashboard/launch', '/api/git/diff', '/api/git/rollback', '/api/hive/log/pg',
-    '/api/hive/thought/pg', '/api/install-playwright-cli', '/api/kanban/launch',
+    # [9차 정리 2026-07-16] /api/kanban/launch·/api/kanban/pg-activity 은퇴 — 보드 UI 소멸
+    '/api/hive/thought/pg', '/api/install-playwright-cli',
     '/api/launch', '/api/locks', '/api/message', '/api/messages/clear',
     '/api/office/launch', '/api/office/restart', '/api/office/status',
     '/api/open-external', '/api/run-script', '/api/screenshot/analyze',
