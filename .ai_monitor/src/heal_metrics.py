@@ -8,6 +8,8 @@ DESCRIPTION: 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부
     예: 사고 재발률 0%라도 표본 15건이면 verdict='🟡 표본 부족'(성공 아님) — 이게 계측의 존재 이유.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: [로드맵 ②] live.callers 분해 — metadata.caller(claude/antigravity)별
+  실발화율. caller 미기록 구버전 로그는 coalesce로 'claude' 귀속(전부 클로드 훅이었음)
 - 2026-07-15 Claude: ① 폴백 사유 분해(fallback_reasons) — load_failed(영구)와 not_warm(일시)
   구분. ② 교훈 카운터 파서 수정 — lesson.py approve의 '## ' 헤딩 형식과 불일치로 1건이 0건 집계
 - 2026-07-14 Claude: 회상 '실발화율' 계측 추가 — pg_logs(agent='recall') 이벤트로 warm 발화
@@ -105,12 +107,30 @@ def _recall_metrics(project_id: str) -> dict:
             f"AND created_at >= now() - interval '14 days'{pid} "
             "GROUP BY 1 ORDER BY n DESC"
         )
+        # [로드맵 ②] 에이전트별 분해 — 전체 fire_rate가 높아도 특정 에이전트(안티그래비티)만
+        #   전부 폴백이면 그 에이전트는 실효 0. coalesce 'claude'는 caller 미기록 구버전 하위호환.
+        caller_rows = query_rows(
+            "SELECT coalesce(metadata->>'caller', 'claude') AS caller, "
+            "count(*) AS total, count(*) FILTER (WHERE status = 'hit') AS hits "
+            "FROM pg_logs WHERE agent = 'recall' "
+            f"AND created_at >= now() - interval '14 days'{pid} "
+            "GROUP BY 1 ORDER BY total DESC"
+        )
+        callers = {}
+        for c in caller_rows:
+            c_total = int(c.get("total", 0) or 0)
+            c_hits = int(c.get("hits", 0) or 0)
+            callers[str(c.get("caller") or "claude")] = {
+                "calls_14d": c_total,
+                "fire_rate_pct": round(100 * c_hits / c_total, 1) if c_total else 0.0,
+            }
         live = {
             "calls_14d": lr_total,
             "fire_rate_pct": round(100 * hits / lr_total, 1),   # warm 실발화율
             "hit_rate_pct": round(100 * hwi / lr_total, 1),     # 발화+지식반환 비율
             "fallback_reasons": {str(r.get("reason") or "(없음)"): int(r.get("n", 0) or 0)
                                  for r in reason_rows},
+            "callers": callers,
         }
 
     # verdict: 임베딩 커버리지(성과 전제) + 참조율(실효성) + 실발화율(있을 때) 삼중 판정
