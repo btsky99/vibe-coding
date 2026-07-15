@@ -4,6 +4,7 @@ DESCRIPTION: 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics�
              터미널에 요약 출력한다. 계산 로직은 갖지 않음(단일 소스 = heal_metrics). `--json` raw 출력.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: 폴백 사유 분해 표시 — load_failed(영구 고장)를 not_warm(일시)과 구분
 - 2026-07-05 Claude: 신규 — 자가치유 계측 Task 2. incident.py stats 스타일 출력.
 """
 import sys
@@ -48,6 +49,10 @@ def main() -> int:
     if _live:
         print(f"    실발화율       {_bar(_live['fire_rate_pct'])} {_live['fire_rate_pct']}%"
               f"  (최근14일 {_live['calls_14d']}회, 적중 {_live['hit_rate_pct']}%)")
+        _fr = _live.get("fallback_reasons") or {}
+        if _fr:
+            # load_failed가 보이면 일시적 미warm이 아니라 영구 고장 — 즉시 조치 신호
+            print(f"      폴백 사유: " + ", ".join(f"{k}×{v}" for k, v in _fr.items()))
     else:
         print(f"    실발화율       (계측 대기 — recall-smart 호출 로그 없음)")
     for name, t in r["tables"].items():

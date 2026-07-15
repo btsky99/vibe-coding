@@ -3,6 +3,8 @@ FILE: api/memory_api.py
 DESCRIPTION: Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: recall-smart 폴백 사유 3분화(no_vector/load_failed/not_warm) — venv
+  fastembed 미설치가 not_warm으로 위장해 실발화 0 원인 추적이 늦었던 사고 재발 방지
 - 2026-06-10 Claude: POST /api/memory/recall-smart 추가 — 자가 치유 2.0 ④ (Task 4)
 - 2026-07-06 Claude: GET /api/memory/db-info 분리(Phase 2 R8). query_rows/PG_PORT/PG_PROJECT_DB는
   server.py 전역이라 wrapper가 호출 시점 주입(포트/DB 폴백 반영). handle_get 오버로드 대신 전용 함수.
@@ -293,7 +295,9 @@ def handle_post(handler, path: str, data: dict,
                 return True
 
             ensure_schema(DATA_DIR)
-            from infra.embed_service import is_loaded, embed_floats, warm_async
+            from infra.embed_service import (
+                is_loaded, is_available, load_error, embed_floats, warm_async,
+            )
             from src.pg_vector_search import (
                 vector_available, vector_search, bump_reference,
             )
@@ -304,15 +308,22 @@ def handle_post(handler, path: str, data: dict,
             #   다음 요청부터 벡터 회상 활성. 백필 데몬이 죽은/미기동 환경 자가 회복
             #   (계측 project_heal_metrics로 발견: recall 경로가 모델을 영영 안 올림).
             if not (vector_available() and is_loaded()):
-                if vector_available():
+                # [과거사고 2026-07-15] 로드 실패 확정(fastembed 미설치 등)이 'not_warm'으로
+                # 위장 — 영구 고장을 일시 미로드로 오판해 원인 추적이 늦었음. 사유 3분화:
+                # no_vector(pgvector 없음) / load_failed(영구, 사유 포함) / not_warm(일시)
+                if not vector_available():
+                    reason = 'no_vector'
+                elif not is_available():
+                    reason = f"load_failed:{load_error()[:80]}"
+                else:
+                    reason = 'not_warm'
                     warm_async()
                 handler.wfile.write(json.dumps(
                     {'status': 'success', 'fallback': True, 'items': [],
                      'summary': _recall_fallback_summary(query, limit)},
                     ensure_ascii=False,
                 ).encode('utf-8'))
-                _log_recall_event('fallback', 0, PROJECT_ID,
-                                  'not_warm' if vector_available() else 'no_vector')
+                _log_recall_event('fallback', 0, PROJECT_ID, reason)
                 return True
 
             vec = embed_floats(query)

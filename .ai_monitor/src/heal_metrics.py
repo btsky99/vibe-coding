@@ -8,6 +8,8 @@ DESCRIPTION: 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부
     예: 사고 재발률 0%라도 표본 15건이면 verdict='🟡 표본 부족'(성공 아님) — 이게 계측의 존재 이유.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: ① 폴백 사유 분해(fallback_reasons) — load_failed(영구)와 not_warm(일시)
+  구분. ② 교훈 카운터 파서 수정 — lesson.py approve의 '## ' 헤딩 형식과 불일치로 1건이 0건 집계
 - 2026-07-14 Claude: 회상 '실발화율' 계측 추가 — pg_logs(agent='recall') 이벤트로 warm 발화
   vs 폴백 비율을 잰다. 임베딩 커버리지·참조율이 높아도 미warm이면 실효 0인 사각지대 계측
   (lessons.md 2026-07-14 교훈 구현). memory_api recall-smart가 결과를 로깅.
@@ -94,10 +96,21 @@ def _recall_metrics(project_id: str) -> dict:
     if lr_total > 0:
         hits = int(lr.get("hits", 0) or 0)
         hwi = int(lr.get("hits_with_items", 0) or 0)
+        # 폴백 사유 분해 — 'load_failed:<err>'는 접두어로 정규화해 집계.
+        # [WHY] fire_rate 0%만으로는 일시(not_warm)와 영구(load_failed) 고장이 구분 안 됨
+        #   (2026-07-15: venv fastembed 미설치가 not_warm으로 위장했던 사고).
+        reason_rows = query_rows(
+            "SELECT split_part(coalesce(metadata->>'reason', '(없음)'), ':', 1) AS reason, "
+            "count(*) AS n FROM pg_logs WHERE agent = 'recall' AND status = 'fallback' "
+            f"AND created_at >= now() - interval '14 days'{pid} "
+            "GROUP BY 1 ORDER BY n DESC"
+        )
         live = {
             "calls_14d": lr_total,
             "fire_rate_pct": round(100 * hits / lr_total, 1),   # warm 실발화율
             "hit_rate_pct": round(100 * hwi / lr_total, 1),     # 발화+지식반환 비율
+            "fallback_reasons": {str(r.get("reason") or "(없음)"): int(r.get("n", 0) or 0)
+                                 for r in reason_rows},
         }
 
     # verdict: 임베딩 커버리지(성과 전제) + 참조율(실효성) + 실발화율(있을 때) 삼중 판정
@@ -189,11 +202,13 @@ def _lesson_metrics() -> dict:
             break
     if path:
         text = path.read_text(encoding="utf-8")
-        # 마지막 '---' 구분선 이후를 교훈 본문으로 간주 (상단은 헤더/운영규칙/HTML주석)
-        tail = text.rsplit("\n---", 1)[-1]
+        # 첫 '---' 구분선 이후를 교훈 본문으로 간주 (상단은 헤더/운영규칙).
+        # [과거사고 2026-07-15] lesson.py approve는 '## 날짜 — 제목' 헤딩을 append하는데
+        # 여기서 '### '만 세어 승인 1건이 0건으로 집계 — 파이프 구멍처럼 보였음.
+        # rsplit(마지막 ---)도 위험: 교훈 본문에 --- 가 들어오면 이전 교훈이 전부 누락됨.
+        tail = text.split("\n---", 1)[-1]
         for line in tail.splitlines():
-            s = line.strip()
-            if s.startswith("### ") or s.startswith("- ") or (s[:2].rstrip(".").isdigit() if s else False):
+            if line.startswith("## "):
                 approved += 1
     verdict = "🔴" if approved == 0 else ("🟡" if approved < 3 else "🟢")
     return {

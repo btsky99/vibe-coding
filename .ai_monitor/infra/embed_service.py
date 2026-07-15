@@ -5,6 +5,8 @@ DESCRIPTION: fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvect
              embed(레거시 bytes)/cosine_sim을 제공한다.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: load_error() 신설 — 로드 실패 사유를 계측에 노출. pythonw(콘솔 없음)에서
+                     print가 유실돼 'fastembed 미설치'가 not_warm으로 위장했던 사각지대 해소
 - 2026-06-10 Claude: memory_watcher.py의 고아 임베딩 헬퍼 이관 + embed_floats 신설
                      (자가 치유 2.0 Task 1)
 """
@@ -22,6 +24,7 @@ _embedder = None
 _embedder_lock = threading.Lock()
 _warming = False              # 백그라운드 워밍업 진행 중 플래그
 _warming_lock = threading.Lock()
+_load_error = ''              # 마지막 로드 실패 사유 — recall-smart 폴백 로그가 계측에 실어 보냄
 
 
 def _get_embedder():
@@ -32,7 +35,7 @@ def _get_embedder():
     [폴백] 로드 실패(오프라인/EXE 누락) 시 False로 마킹해 재시도 폭주 방지 →
     호출부는 None을 받고 기존 ILIKE 회상 경로로 폴백한다.
     """
-    global _embedder
+    global _embedder, _load_error
     if _embedder is None:
         with _embedder_lock:
             if _embedder is None:
@@ -47,7 +50,11 @@ def _get_embedder():
                     _embedder = TextEmbedding(**kwargs)
                     print(f"[Embedding] 모델 로드 완료: {EMBED_MODEL_NAME}")
                 except Exception as e:
+                    # [과거사고 2026-07-15] venv에 fastembed 미설치 → 여기서 False 확정 →
+                    # recall-smart가 영구 'not_warm'으로 위장. pythonw는 print를 버리므로
+                    # 사유를 _load_error에 남겨 계측(pg_logs reason)으로 드러낸다.
                     print(f"[Embedding] 모델 로드 실패: {e}")
+                    _load_error = f"{type(e).__name__}: {e}"
                     _embedder = False  # 실패 표시 (재시도 방지)
     return _embedder if _embedder else None
 
@@ -59,6 +66,11 @@ def is_available() -> bool:
     아직 로드 전(None)이면 True 반환 — 첫 호출이 로드를 트리거하게 둔다.
     """
     return _embedder is not False
+
+
+def load_error() -> str:
+    """마지막 모델 로드 실패 사유 (빈 문자열 = 실패 없음). 로드를 트리거하지 않는다."""
+    return _load_error
 
 
 def is_loaded() -> bool:
