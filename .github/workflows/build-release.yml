@@ -26,8 +26,11 @@ jobs:
           python-version: "3.13"
 
       - name: Install Python dependencies
+        # [2026-07-15] uv 도입 — pip 대비 의존성 해석/설치 수배 빠름 (2026-07 리서치 도입 결정).
+        # --system: CI 러너의 setup-python 환경에 직접 설치 (venv 불필요). 실패 시 pip 폴백.
         run: |
-          pip install -r .ai_monitor/requirements.txt
+          pip install uv
+          uv pip install --system -r .ai_monitor/requirements.txt || pip install -r .ai_monitor/requirements.txt
 
       - name: Lint & syntax check (Python)
         run: |

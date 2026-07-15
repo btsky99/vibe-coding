@@ -70,6 +70,15 @@ vibe-coding = "ai_monitor.server:main"
 # GUI용 (바탕화면 바로가기에서 사용 — 콘솔 창 없이 실행)
 vibe-coding-gui = "ai_monitor.server:main"
 
+# [2026-07-15] ruff 설정 — CI 린트(E9,F821,F823)와 동일 기준 + ruff format 사용 가능.
+# [제약] 기존 코드 일괄 재포맷 금지 — 세션/PC 간 대규모 diff 충돌 유발. 새/수정 파일에만 적용.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E9", "F821", "F823"]
+
 [tool.setuptools.dynamic]
 version = {attr = "ai_monitor._version.__version__"}
 
