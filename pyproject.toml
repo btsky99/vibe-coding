@@ -4,6 +4,7 @@
 #   `vibe-coding` 명령으로 실행. 기존 EXE 빌드와 공존.
 #
 # REVISION HISTORY:
+# - 2026-07-15 Claude: dev extra에 pytest 추가 — 로컬 테스트가 시스템 Python으로 돌던 환경 불일치 해소
 # - 2026-03-26 Claude: 의존성 버전 범위 완화 + pywin32 추가 + 불필요 의존성 제거
 # - 2026-03-25 Claude: 신규 생성 — pip install 배포 전환
 
@@ -53,9 +54,12 @@ codegraph = [
     "tree-sitter-java",
 ]
 # 개발용 (빌드/테스트)
+# [WHY] pytest를 venv에 명시 — 시스템 Python의 pytest로 돌리면 서버 실행 환경(venv)과
+# 다른 site-packages를 검증하게 됨 (2026-07-15 발견: 로컬 pytest가 시스템 3.13에만 존재).
 dev = [
     "pyinstaller>=6.0,<7.0",
     "PySide6>=6.8",
+    "pytest>=8.0",
 ]
 
 [project.scripts]
