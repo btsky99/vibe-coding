@@ -380,6 +380,22 @@ def _build_additional_context(prompt: str) -> str:
             sections.append(rule["context"])
             break
 
+    # ── 회상 v2 주입 (로드맵 ② — hive_hook.py:674 클로드 경로 이식) ──────────
+    # [WHY] BeforeAgent가 기록만 하고 회상은 미주입 → 안티그래비티만 자가치유 루프
+    # 밖에 있었음 (2026-07-14 실측: pg_logs 회상 이벤트 전부 claude). recall_client는
+    # 서버 warm 벡터 회상 우선 + 2초 상한 + 불통 시 v1 폴백 내장이라 BeforeAgent의
+    # 응답 지연 제약(2026-03-18 타임아웃 사고) 안에서 안전.
+    # [불변식] 회상 실패가 훅을 죽이면 안 됨 — Gemini CLI는 훅 비정상 시 hook failed 표시.
+    try:
+        from src.recall_client import smart_recall_summary
+
+        short = prompt.strip().replace("\n", " ")[:120]
+        recall_text = smart_recall_summary(short, limit=5, caller="antigravity")
+        if recall_text:
+            sections.append(recall_text)
+    except Exception:
+        pass
+
     return "\n\n".join(section for section in sections if section)
 
 

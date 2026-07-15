@@ -3,6 +3,8 @@ FILE: api/memory_api.py
 DESCRIPTION: Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: [로드맵 ②] recall-smart caller 필드 계측 — 에이전트별(claude/antigravity)
+  실발화율 분리. 미전송 시 'claude' 하위호환
 - 2026-07-15 Claude: recall-smart 폴백 사유 3분화(no_vector/load_failed/not_warm) — venv
   fastembed 미설치가 not_warm으로 위장해 실발화 0 원인 추적이 늦었던 사고 재발 방지
 - 2026-06-10 Claude: POST /api/memory/recall-smart 추가 — 자가 치유 2.0 ④ (Task 4)
@@ -127,7 +129,8 @@ def _recall_fallback_summary(query: str, limit: int) -> str:
     return '\n'.join(parts)
 
 
-def _log_recall_event(status: str, items: int, project_id: str, reason: str = '') -> None:
+def _log_recall_event(status: str, items: int, project_id: str, reason: str = '',
+                      caller: str = 'claude') -> None:
     """[계측 #1] recall-smart 결과를 pg_logs에 기록 — 회상 실발화율/적중률 산출용.
 
     status='hit'(warm 벡터 회상이 실제 발화) / 'fallback'(미warm·임베딩 실패·오류로 폴백).
@@ -135,12 +138,14 @@ def _log_recall_event(status: str, items: int, project_id: str, reason: str = ''
       실효 0인데도 '작동 중'처럼 보인다([[lessons.md]] 2026-07-14, [[project_heal_metrics]]).
       heal_metrics가 이 로그로 최근 실발화율(hit/total)과 적중률(items>0)을 계측한다.
     [불변식] 훅 지연 금지 — 응답 전송 '후' 호출 + try/except로 어떤 실패도 삼킨다.
+    [로드맵 ②] caller='claude'|'antigravity' — 에이전트별 실발화율 분리. 기본 'claude'는
+      caller 미전송 구버전 recall_client 하위호환 (기존 호출자가 전부 claude 훅이었음).
     """
     try:
         insert_pg_log(agent='recall', status=status,
-                      task=f"items={items} {reason}".strip(),
+                      task=' '.join(p for p in (f"items={items}", reason, f"caller={caller}") if p),
                       project_id=project_id,
-                      metadata={'items': items, 'reason': reason})
+                      metadata={'items': items, 'reason': reason, 'caller': caller})
     except Exception:
         pass
 
@@ -285,6 +290,9 @@ def handle_post(handler, path: str, data: dict,
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
+        # [로드맵 ②] 호출 에이전트 식별 — 미전송이면 'claude' (구버전 recall_client 하위호환).
+        # try 밖에서 추출 — except 경로의 _log_recall_event도 caller를 안전하게 참조.
+        caller = str(data.get('caller') or 'claude').strip()[:24] or 'claude'
         try:
             query = str(data.get('query', '')).strip()
             limit = max(1, min(int(data.get('limit', 5) or 5), 20))
@@ -323,7 +331,7 @@ def handle_post(handler, path: str, data: dict,
                      'summary': _recall_fallback_summary(query, limit)},
                     ensure_ascii=False,
                 ).encode('utf-8'))
-                _log_recall_event('fallback', 0, PROJECT_ID, reason)
+                _log_recall_event('fallback', 0, PROJECT_ID, reason, caller)
                 return True
 
             vec = embed_floats(query)
@@ -333,7 +341,7 @@ def handle_post(handler, path: str, data: dict,
                      'summary': _recall_fallback_summary(query, limit)},
                     ensure_ascii=False,
                 ).encode('utf-8'))
-                _log_recall_event('fallback', 0, PROJECT_ID, 'embed_fail')
+                _log_recall_event('fallback', 0, PROJECT_ID, 'embed_fail', caller)
                 return True
 
             # 3개 지식원 통합 검색 → 점수순 병합. 임계 0.45는 vector_search 기본값.
@@ -364,14 +372,14 @@ def handle_post(handler, path: str, data: dict,
                  'summary': _format_recall_summary(query, merged)},
                 ensure_ascii=False, default=str,
             ).encode('utf-8'))
-            _log_recall_event('hit', len(merged), PROJECT_ID)
+            _log_recall_event('hit', len(merged), PROJECT_ID, caller=caller)
         except Exception as e:
             # 실패도 폴백 신호로 — 훅이 v1 경로로 즉시 전환
             handler.wfile.write(json.dumps(
                 {'status': 'success', 'fallback': True, 'items': [],
                  'summary': '', 'message': str(e)},
             ).encode('utf-8'))
-            _log_recall_event('fallback', 0, PROJECT_ID, 'error')
+            _log_recall_event('fallback', 0, PROJECT_ID, 'error', caller)
         return True
 
     if path == '/api/memory/sync':

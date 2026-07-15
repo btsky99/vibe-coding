@@ -3,6 +3,8 @@
 # 📝 설명: 훅(단명 프로세스)용 회상 클라이언트 — 서버 recall-smart API 우선,
 #          실패 시 회상 v1(ILIKE) 직접 호출 폴백. 자가 치유 2.0 ④ (Task 5).
 # 🕒 변경 이력:
+# [2026-07-15] Claude — [로드맵 ②] caller 파라미터 추가 — 서버 계측이 에이전트별
+#   실발화율을 분리하도록 요청 payload에 호출자 식별 전달. 기본 'claude' 하위호환.
 # [2026-06-10] Claude — 신설
 #   - [제약] 호출자는 hive_hook.py(UserPromptSubmit) — 총 지연 상한 2초.
 #     이 모듈에서 fastembed를 import/로드하는 것 절대 금지 (모델 로드 수십 초).
@@ -51,11 +53,13 @@ def _fallback_summary(query: str, limit: int) -> str:
     return '\n'.join(parts)
 
 
-def smart_recall_summary(query: str, limit: int = 5) -> str:
+def smart_recall_summary(query: str, limit: int = 5, caller: str = 'claude') -> str:
     """통합 회상 — 주입할 텍스트를 반환. 빈 문자열이면 '주입할 것 없음'.
 
     경로: ① 서버 recall-smart(임베딩, 0.45 임계) → ② 서버가 폴백 응답이면
     그 안의 v1 요약 사용 → ③ 서버 자체 불통이면 로컬 v1 직접 호출.
+    caller: 호출 훅의 에이전트 식별자('claude'/'antigravity') — 서버가 pg_logs에
+    기록해 에이전트별 실발화율을 분리 계측 (로드맵 ②). 로컬 폴백 경로는 계측 없음.
     """
     query = (query or '').strip()
     if not query:
@@ -65,7 +69,8 @@ def smart_recall_summary(query: str, limit: int = 5) -> str:
         try:
             req = _urllib_request.Request(
                 f'http://localhost:{port}/api/memory/recall-smart',
-                data=json.dumps({'query': query, 'limit': limit}).encode('utf-8'),
+                data=json.dumps({'query': query, 'limit': limit,
+                                 'caller': caller}).encode('utf-8'),
                 headers={'Content-Type': 'application/json'},
                 method='POST',
             )
