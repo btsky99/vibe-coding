@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-15 20:59
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-15 21:51
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -45,7 +45,7 @@
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `agent_api.py` | 1360 | CLI 에이전트 관리 API (/api/agent/*) |
+| `agent_api.py` | 1373 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 226 |  |
 | `commands_api.py` | 54 |  |
 | `config_api.py` | 81 |  |
@@ -62,7 +62,7 @@
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
-| `memory_api.py` | 393 | 메모리/지식 저장소 API (/api/memory/*) |
+| `memory_api.py` | 401 | 메모리/지식 저장소 API (/api/memory/*) |
 | `message_api.py` | 92 |  |
 | `office_api.py` | 370 |  |
 | `office_launch_api.py` | 85 |  |
@@ -96,12 +96,12 @@
 | `pg_experience.py` | 226 |  |
 | `pg_incidents.py` | 182 |  |
 | `pg_memory.py` | 639 |  |
-| `pg_office.py` | 296 |  |
+| `pg_office.py` | 320 |  |
 | `pg_schema.py` | 777 |  |
 | `pg_store.py` | 128 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `pg_tasks.py` | 399 |  |
 | `pg_vector_search.py` | 213 |  |
-| `recall_client.py` | 81 |  |
+| `recall_client.py` | 86 |  |
 | `secure.py` | 52 |  |
 | `server_utils.py` | 59 |  |
 | `view.py` | 243 |  |
@@ -112,7 +112,7 @@
 ### 에이전트/터미널
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `cli_agent.py` | 1146 | Claude/Antigravity/Codex CLI 자율 오케스트레이션 엔진 |
+| `cli_agent.py` | 1151 | Claude/Antigravity/Codex CLI 자율 오케스트레이션 엔진 |
 | `agent_shell.py` | 414 | 인터랙티브 자율 에이전트 쉘 (REPL) |
 | `terminal_agent.py` | 391 | 멀티터미널 자율 에이전트 디스패처 |
 | `agent_launcher.py` | 242 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
@@ -133,10 +133,10 @@
 ### 훅/이벤트
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_hook.py` | 940 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
-| `hook_bridge.py` | 497 | Claude Code UserPromptSubmit 훅 브릿지 |
+| `hive_hook.py` | 967 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
+| `hook_bridge.py` | 534 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
-| `antigravity_hook.py` | 566 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
+| `antigravity_hook.py` | 582 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
 
 ### 통신/ITCP
 | 파일 | 줄 수 | 설명 |
@@ -325,4 +325,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-15 20:59
+> 자동 생성 완료: 2026-07-15 21:51
