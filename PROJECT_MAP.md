@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-15 19:26
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-15 20:29
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -62,7 +62,7 @@
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
-| `memory_api.py` | 382 | 메모리/지식 저장소 API (/api/memory/*) |
+| `memory_api.py` | 393 | 메모리/지식 저장소 API (/api/memory/*) |
 | `message_api.py` | 92 |  |
 | `office_api.py` | 370 |  |
 | `office_launch_api.py` | 85 |  |
@@ -90,7 +90,7 @@
 | `db.py` | 34 |  |
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
-| `heal_metrics.py` | 217 |  |
+| `heal_metrics.py` | 232 |  |
 | `logger.py` | 123 |  |
 | `pg_base.py` | 524 |  |
 | `pg_experience.py` | 226 |  |
@@ -198,7 +198,7 @@
 | `checkpoint.py` | 62 |  |
 | `codex_pg_watcher.py` | 286 |  |
 | `harness_verify.py` | 437 |  |
-| `heal_report.py` | 83 |  |
+| `heal_report.py` | 88 |  |
 | `hive_heartbeat.py` | 329 |  |
 | `incident.py` | 119 |  |
 | `install_dev_tools.py` | 159 |  |
@@ -325,4 +325,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-15 19:26
+> 자동 생성 완료: 2026-07-15 20:29
