@@ -20,7 +20,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          # [2026-07-15] 3.11 → 3.13 승격 — 로컬 EXE 빌드가 3.13.2로 검증됨(pyinstaller
+          # 6.20, smoke test 7/7). 로컬 검증 환경과 출고물의 런타임 간극 제거가 목적.
+          # [함정] psycopg2-binary는 2.9.10부터 cp313 휠 제공 — requirements.txt 핀 동기 필수.
+          python-version: "3.13"
 
       - name: Install Python dependencies
         run: |

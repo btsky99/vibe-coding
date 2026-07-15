@@ -13,4 +13,5 @@ fastembed
 numpy
 chromadb
 python-dotenv==1.2.1
-psycopg2-binary==2.9.9
+# [2026-07-15] 2.9.9→2.9.11 — Python 3.13 휠(cp313)은 2.9.10부터. CI 3.13 승격과 동기.
+psycopg2-binary==2.9.11

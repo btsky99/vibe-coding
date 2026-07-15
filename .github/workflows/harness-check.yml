@@ -54,7 +54,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          # [2026-07-15] build-release.yml과 동시 3.13 승격 — 로컬 3.13.2와 일치
+          python-version: "3.13"
 
       - name: Install test dependency
         run: pip install pytest
