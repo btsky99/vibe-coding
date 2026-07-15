@@ -8,6 +8,8 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-07-15] Claude: handle_run에 project_id 꼬리표 — 크로스 프로젝트 간섭 수정.
+#   _current_run.project_id로 훅이 "다른 프로젝트 실행 중"을 판별, 로그 메타에도 기록.
 # [2026-03-25] Claude: stderr 데드락 수정 — handle_chat() subprocess stderr=DEVNULL
 #   - stderr 버퍼 풀 → 자식 프로세스 block → stdout 멈춤 교착 방지
 # [2026-03-08] Claude: Gemini 세션 실제 작업 표시 — PTY Gemini 현재 지시 내용 보완
@@ -230,6 +232,15 @@ def handle_run(handler) -> None:
     cli_choice = data.get('cli', 'auto')
     cwd = data.get('cwd', None)
     source = data.get('source', 'dashboard')  # 요청 출처: "dashboard" | "telegram" | "hook"
+    # [2026-07-15] 프로젝트 꼬리표 — hook_bridge가 전달. 없고 cwd만 있으면 슬러그 파생.
+    # 이게 없으면 다른 프로젝트발 지시가 실행/로그 양쪽에서 이 서버 프로젝트로 오인됨.
+    project_id = (data.get('project_id') or '').strip()
+    if not project_id and cwd:
+        try:
+            from infra.project_context import slugify
+            project_id = slugify(Path(cwd))
+        except Exception:
+            project_id = ''
     terminal_id = data.get('terminal_id', 'T1')  # 요청 터미널 식별자 (기본값: T1, T1~T8만 유효)
     # "2" → "T2" 정규화: 숫자만 오면 T 접두사 자동 추가 (hook_bridge TERMINAL_ID 미설정 케이스)
     if terminal_id and terminal_id.isdigit():
@@ -272,6 +283,7 @@ def handle_run(handler) -> None:
             'ts': '',
             'cwd': cwd or '',
             'terminal_id': terminal_id,  # 어느 터미널에서 요청했는지 추적
+            'project_id': project_id,  # 어느 프로젝트발 지시인지 — 409 응답에서 훅이 경계 판정에 사용
             'routing_reason': _routing_reason,  # 모델 선택 근거 (UI 표시용)
             'source': source,  # 요청 출처 (telegram/dashboard/hook)
         }
@@ -291,7 +303,8 @@ def handle_run(handler) -> None:
             record_heartbeat(chosen_cli, status='running', current_task=task[:200])
             insert_pg_log(agent=chosen_cli, task=task[:200], status='started',
                           terminal_id=terminal_id,
-                          metadata={'source': source, 'routing': _routing_reason})
+                          metadata={'source': source, 'routing': _routing_reason,
+                                    'project_id': project_id})
         except Exception:
             pass
 

@@ -3,11 +3,22 @@
 # 📝 설명: 오피스 프로필 CRUD(PostgreSQL SSOT) + 활성 세션 컨텍스트(크래시 복구)
 #          (pg_store.py 분할 6/6)
 # 🕒 변경 이력:
+# [2026-07-15] Claude — active_session_context 프로젝트 경계 추가 (크로스 프로젝트 간섭 사고)
 # [2026-06-10] Claude — set_session_checkpoint 추가 (자가 치유 2.0 ② Task 13)
 # [2026-06-10] Claude — pg_store.py 분할로 신설 (1500줄 규칙 준수)
 # ────────────────────────────────────────────────────────────────────────────
 from infra.project_context import assert_project_id
 from src.pg_base import _sql_json, _sql_text, execute, query_rows
+
+
+def _session_pid_and(project_id: str) -> str:
+    """active_session_context WHERE절용 project_id 경계 조각.
+
+    [과거사고 2026-07-15] 훅이 여러 프로젝트에 공유 등록되는데 이 테이블의
+    매칭이 terminal_id로만 이뤄져 T0끼리 프로젝트를 넘나들며 덮어쓰기/브리핑 오염 발생.
+    project_id가 주어지면 반드시 경계로 강제한다. 빈 값이면 레거시 호환(무필터).
+    """
+    return f" AND project_id = {_sql_text(project_id)}" if project_id else ""
 
 
 # ── 오피스 프로필 CRUD ──────────────────────────────────────────────────────
@@ -192,9 +203,11 @@ def upsert_active_session(terminal_id: str, agent_id: str, task_summary: str,
     files_json = _json.dumps(modified_files or [], ensure_ascii=False)
 
     # 기존 active 레코드가 있으면 업데이트, 없으면 새로 생성
+    # [불변식] 매칭 키 = terminal_id + project_id — 다른 프로젝트의 같은 터미널(T0)과 절대 병합 금지
     existing = query_rows(
         f"SELECT id FROM active_session_context "
-        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active' "
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active'"
+        f"{_session_pid_and(project_id)} "
         f"LIMIT 1;"
     )
     if existing:
@@ -216,7 +229,7 @@ def upsert_active_session(terminal_id: str, agent_id: str, task_summary: str,
         )
 
 
-def update_session_files(terminal_id: str, file_path: str) -> bool:
+def update_session_files(terminal_id: str, file_path: str, project_id: str = '') -> bool:
     """활성 세션의 수정 파일 목록에 파일을 추가한다.
 
     PostToolUse에서 Edit/Write 완료 시 호출.
@@ -229,7 +242,8 @@ def update_session_files(terminal_id: str, file_path: str) -> bool:
         f"  THEN modified_files || to_jsonb({_sql_text(file_path)}::text) "
         f"  ELSE modified_files END, "
         f"updated_at = NOW() "
-        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active';"
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active'"
+        f"{_session_pid_and(project_id)};"
     )
 
 
@@ -246,7 +260,8 @@ def set_session_checkpoint(terminal_id: str, intent: str = '', decision: str = '
     project_id = assert_project_id(project_id, 'set_session_checkpoint')
     existing = query_rows(
         f"SELECT id FROM active_session_context "
-        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active' LIMIT 1;"
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active'"
+        f"{_session_pid_and(project_id)} LIMIT 1;"
     )
     if not existing:
         ok = execute(
@@ -266,31 +281,40 @@ def set_session_checkpoint(terminal_id: str, intent: str = '', decision: str = '
         sets.append(f"decisions = decisions || {_sql_json([decision[:300]])}")
     return execute(
         f"UPDATE active_session_context SET {', '.join(sets)} "
-        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active';"
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active'"
+        f"{_session_pid_and(project_id)};"
     )
 
 
-def complete_active_session(terminal_id: str) -> bool:
-    """활성 세션을 완료 처리한다. Stop 이벤트에서 호출."""
+def complete_active_session(terminal_id: str, project_id: str = '') -> bool:
+    """활성 세션을 완료 처리한다. Stop 이벤트에서 호출.
+
+    [주의] project_id 없이 부르면 같은 터미널 번호의 다른 프로젝트 세션까지
+    닫아버림 — 훅 경유 호출은 반드시 project_id를 전달할 것.
+    """
     return execute(
         f"UPDATE active_session_context SET status = 'done', updated_at = NOW() "
-        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active';"
+        f"WHERE terminal_id = {_sql_text(terminal_id)} AND status = 'active'"
+        f"{_session_pid_and(project_id)};"
     )
 
 
-def get_interrupted_sessions(terminal_id: str = '') -> list[dict]:
+def get_interrupted_sessions(terminal_id: str = '', project_id: str = '') -> list[dict]:
     """미완료(active) 상태인 세션 목록을 반환한다.
 
     새 세션 시작 시 UserPromptSubmit에서 호출.
-    terminal_id 필터는 선택적 — 빈 문자열이면 모든 터미널의 중단 세션 반환.
+    terminal_id/project_id 필터는 선택적 — 빈 문자열이면 무필터(레거시 호환).
+    [과거사고 2026-07-15] project_id 무필터로 다른 프로젝트의 중단 세션이
+    이 프로젝트 복구 브리핑에 섞여 나옴 — 훅 경유 호출은 반드시 project_id 전달.
     """
     where = f"WHERE status = 'active'"
     if terminal_id:
         where += f" AND terminal_id = {_sql_text(terminal_id)}"
+    where += _session_pid_and(project_id)
     return query_rows(
         f"SELECT id, terminal_id, agent_id, task_summary, "
         f"modified_files::text, status, started_at, updated_at, "
-        f"intent, decisions::text AS decisions, next_step "
+        f"intent, decisions::text AS decisions, next_step, project_id "
         f"FROM active_session_context {where} "
         f"ORDER BY updated_at DESC LIMIT 5;"
     )

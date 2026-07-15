@@ -18,6 +18,8 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-07-15 Claude: 크로스 프로젝트 간섭 수정 — 세션 컨텍스트 접근 전부에
+  호출 프로젝트(project_id) 경계 강제. 식별은 __file__이 아닌 stdin cwd 기준.
 - 2026-06-10 Claude: 회상 2블록(경험/지식)을 recall_client.smart_recall_summary로
   통합 — 자가 치유 2.0 ④ Task 6. 서버 임베딩 회상 우선, 불통 시 v1 폴백 내장.
 - 2026-03-01 Claude: Stop 이벤트 세션 자동 스냅샷 저장 추가
@@ -78,6 +80,24 @@ if _scripts_dir not in sys.path:
 # 터미널 ID — hook_bridge.py와 동일한 환경변수 사용 (T1~T8, 기본 T0)
 # 각 터미널에서 `set TERMINAL_ID=T1 && claude` 형태로 실행하면 자동 추적
 _TERMINAL_ID = os.environ.get('TERMINAL_ID', 'T0')
+
+
+def _resolve_caller_project(data: dict) -> tuple[str, str]:
+    """훅을 호출한 세션의 (프로젝트 루트, project_id 슬러그)를 반환.
+
+    [과거사고 2026-07-15] 이 훅 파일은 D:/vibe-coding 원본 하나가 모든 프로젝트의
+    settings.local.json에 공유 등록됨 — __file__ 기준(ROOT_DIR) 식별은 어느 프로젝트에서
+    호출돼도 항상 vibe-coding으로 오인해 active_session_context가 교차 오염됐다.
+    유일한 진실은 Claude Code가 stdin JSON에 넣어주는 cwd(호출 세션의 작업 디렉토리).
+    """
+    raw_cwd = (data.get('cwd') or os.getcwd() or '').strip()
+    try:
+        from infra.project_context import slugify, find_project_root_marker
+        root = find_project_root_marker(Path(raw_cwd)) or Path(raw_cwd)
+        return str(root), slugify(root)
+    except Exception:
+        # infra 임포트 실패(경로 문제 등) 시 슬러그 없이 진행 — 레거시(무필터)와 동일 동작
+        return raw_cwd, ''
 
 # ── Self-Reflect 세션 추적 변수 ────────────────────────────────────────────
 # Stop 이벤트 시 pg_thoughts에 자기반성 기록에 사용 (세션 단위 누적)
@@ -428,6 +448,9 @@ def main():
 
     event = data.get("hook_event_name", "")
 
+    # 호출 프로젝트 경계 — 모든 active_session_context 접근에 이 슬러그를 강제한다
+    _caller_root, _caller_pid = _resolve_caller_project(data)
+
     try:
         from hive_bridge import log_task
     except ImportError:
@@ -492,7 +515,8 @@ def main():
         # 매 프롬프트마다 active_session_context를 확인하여 중단된 세션이 있는지 감지.
         try:
             from src.pg_store import get_interrupted_sessions, complete_active_session
-            _interrupted = get_interrupted_sessions()
+            # [경계] 이 프로젝트의 중단 세션만 브리핑 — 다른 프로젝트 것이 섞이면 혼돈
+            _interrupted = get_interrupted_sessions(project_id=_caller_pid)
             if _interrupted:
                 _resume_lines = ["🔄 [세션 복구] 이전에 중단된 작업이 감지되었습니다:"]
                 for _sess in _interrupted:
@@ -521,7 +545,9 @@ def main():
                         _resume_lines.append(f"       수정 파일: {', '.join(_files[:8])}")
                     _resume_lines.append(f"       마지막 활동: {_updated}")
                     # 이전 세션은 '중단'으로 마킹 (중복 브리핑 방지)
-                    complete_active_session(_sess.get('terminal_id', ''))
+                    # 행 자신의 project_id로 닫는다 — 같은 T번호의 타 프로젝트 세션 오폐쇄 방지
+                    complete_active_session(_sess.get('terminal_id', ''),
+                                            project_id=_sess.get('project_id', '') or _caller_pid)
                 # uncommitted git 변경도 함께 표시
                 try:
                     import subprocess as _sp_git
@@ -600,6 +626,7 @@ def main():
                     agent_id='claude',
                     task_summary=short,
                     modified_files=[],  # 새 지시 시작 → 파일 목록 리셋
+                    project_id=_caller_pid,  # 프로젝트 경계 — T번호 충돌 시 교차 덮어쓰기 방지
                 )
             except Exception:
                 pass  # DB 기록 실패는 훅 흐름 차단 안 함
@@ -779,7 +806,7 @@ def main():
             # [2026-04-14] 활성 세션에 수정 파일 실시간 추가
             try:
                 from src.pg_store import update_session_files
-                update_session_files(_TERMINAL_ID, _short_path(fp))
+                update_session_files(_TERMINAL_ID, _short_path(fp), project_id=_caller_pid)
             except Exception:
                 pass
 
@@ -794,7 +821,7 @@ def main():
             # [2026-04-14] 활성 세션에 생성 파일 실시간 추가
             try:
                 from src.pg_store import update_session_files
-                update_session_files(_TERMINAL_ID, _short_path(fp))
+                update_session_files(_TERMINAL_ID, _short_path(fp), project_id=_caller_pid)
             except Exception:
                 pass
 
@@ -832,7 +859,7 @@ def main():
         # 튕기면 이 코드가 실행 안 됨 → active 상태로 남아 → 다음 세션에서 감지
         try:
             from src.pg_store import complete_active_session
-            complete_active_session(_TERMINAL_ID)
+            complete_active_session(_TERMINAL_ID, project_id=_caller_pid)
         except Exception:
             pass
 

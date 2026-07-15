@@ -4,6 +4,8 @@ FILE: scripts/hook_bridge.py
 DESCRIPTION: Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입.
 
 REVISION HISTORY:
+- 2026-07-15 Claude: 크로스 프로젝트 간섭 수정 — payload에 호출 프로젝트 cwd/project_id
+  탑재 + 409 배너에 타 프로젝트 실행 명시 + 오프라인 폴백에 작업 디렉토리 전달.
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 """
@@ -77,6 +79,26 @@ HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 #   Terminal 2: set TERMINAL_ID=T2 && claude
 # 미지정 시 "T0" 사용
 TERMINAL_ID   = os.environ.get('TERMINAL_ID', 'T0')
+
+
+def _resolve_caller_project(data: dict) -> tuple[str, str]:
+    """훅을 호출한 세션의 (프로젝트 루트, project_id 슬러그)를 반환.
+
+    [과거사고 2026-07-15] 이 훅은 D:/vibe-coding 원본이 모든 프로젝트에 공유 등록됨.
+    payload에 cwd/project_id를 안 실으면 서버 cli_agent가 _PROJECT_ROOT(=vibe-coding)로
+    폴백해 다른 프로젝트의 지시가 vibe-coding 안에서 실행되는 교차 간섭 발생.
+    호출 프로젝트의 진실은 Claude Code stdin JSON의 cwd 뿐이다.
+    """
+    raw_cwd = (data.get('cwd') or os.getcwd() or '').strip()
+    try:
+        _monitor = str(SCRIPT_DIR.parent / '.ai_monitor')
+        if _monitor not in sys.path:
+            sys.path.insert(0, _monitor)
+        from infra.project_context import slugify, find_project_root_marker
+        root = find_project_root_marker(Path(raw_cwd)) or Path(raw_cwd)
+        return str(root), slugify(root)
+    except Exception:
+        return raw_cwd, ''
 
 # --- PID 락 파일 경로 (중복 프로세스 생성 방지) ---
 # [2026-03-18 Claude] 서버·에이전트 프로세스가 매 프롬프트마다 누적 생성되는 버그 수정
@@ -243,14 +265,20 @@ def _notify(msg: str) -> None:
     print(msg, flush=True)
 
 
-def _call_api(prompt: str) -> dict | None:
+def _call_api(prompt: str, cwd: str = '', project_id: str = '') -> dict | None:
     """서버 HTTP API로 에이전트 실행 요청 전송.
     반환: dict(서버 응답) 또는 None(서버 미실행)
+
+    [불변식] cwd/project_id 필수 전달 — 누락 시 서버가 자기 _PROJECT_ROOT에서
+    실행해 다른 프로젝트 지시가 vibe-coding을 오염시킴 (2026-07-15 사고).
     """
     payload = json.dumps({
         'task': prompt,
         'cli': 'auto',
         'terminal_id': TERMINAL_ID,
+        'cwd': cwd,
+        'project_id': project_id,
+        'source': 'hook',
     }).encode('utf-8')
 
     req = urllib_request.Request(
@@ -335,12 +363,13 @@ def _start_server() -> bool:
     return False
 
 
-def _fallback_subprocess(prompt: str) -> None:
+def _fallback_subprocess(prompt: str, working_dir: str = '') -> None:
     """서버 완전 오프라인 시 cli_agent.py를 백그라운드로 실행 (창 점유 없음).
 
     [중복 방지] PID 파일(_AGENT_PID)로 이미 에이전트가 실행 중이면 새로 생성하지 않음.
     서버가 정상 동작하면 이 함수는 호출되지 않음.
     결과는 agent_runs.jsonl / agent_live.jsonl에 저장됨.
+    working_dir: 호출 프로젝트 루트 — 미전달 시 cli_agent가 vibe-coding으로 폴백(교차 간섭).
     """
     # [2026-03-18] PID 파일 기반 중복 방지 — 이미 에이전트가 실행 중이면 스킵
     if _is_already_running(_AGENT_PID):
@@ -352,7 +381,7 @@ def _fallback_subprocess(prompt: str) -> None:
         creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
 
     proc = subprocess.Popen(
-        [sys.executable, str(CLI_AGENT), prompt, 'auto'],
+        [sys.executable, str(CLI_AGENT), prompt, 'auto'] + ([working_dir] if working_dir else []),
         cwd=str(CWD),
         creationflags=creationflags,
         stdout=subprocess.DEVNULL,
@@ -458,15 +487,23 @@ def main():
 
     short_prompt = prompt[:50] + ('...' if len(prompt) > 50 else '')
 
+    # 호출 프로젝트 식별 — 지시에 프로젝트 꼬리표(cwd/project_id)를 반드시 붙인다
+    caller_root, caller_pid = _resolve_caller_project(data)
+
     # 1순위: 서버 HTTP API 호출 (대시보드 SSE 연동)
-    result = _call_api(prompt)
+    result = _call_api(prompt, cwd=caller_root, project_id=caller_pid)
 
     if result is not None:
         # ── 서버 연결 성공 ──────────────────────────────────────────────
         if result.get('error') == 'already_running':
             current = result.get('current', {})
             current_task = current.get('task', '')[:40]
-            _notify(f'[🤖 {TERMINAL_ID}] 에이전트 실행 중: "{current_task}..." — 완료 후 자동 처리됩니다.')
+            current_pid = (current.get('project_id') or '').strip()
+            if current_pid and caller_pid and current_pid != caller_pid:
+                # 다른 프로젝트의 실행이 점유 중 — 이 프로젝트 일이 아님을 명시해 혼동 차단
+                _notify(f'[🤖 {TERMINAL_ID}] 다른 프로젝트({current_pid})의 에이전트가 실행 중이라 이 지시는 대기됩니다.')
+            else:
+                _notify(f'[🤖 {TERMINAL_ID}] 에이전트 실행 중: "{current_task}..." — 완료 후 자동 처리됩니다.')
         else:
             chosen_cli = result.get('cli', 'auto')
             _notify(f'[🤖 {TERMINAL_ID}→{chosen_cli.upper()}] 자율 에이전트 시작됨: "{short_prompt}"')
@@ -477,17 +514,17 @@ def main():
 
         if server_started:
             # 서버 기동 성공 → API 재호출
-            result2 = _call_api(prompt)
+            result2 = _call_api(prompt, cwd=caller_root, project_id=caller_pid)
             if result2 is not None:
                 chosen_cli = result2.get('cli', 'auto')
                 _notify(f'[🤖 {TERMINAL_ID}→{chosen_cli.upper()}] 서버 자동 시작 후 에이전트 시작됨: "{short_prompt}"')
             else:
                 _notify(f'[🤖 {TERMINAL_ID}] 서버 시작됐으나 API 호출 실패 — fallback 실행')
-                _fallback_subprocess(prompt)
+                _fallback_subprocess(prompt, working_dir=caller_root)
         else:
             # 서버 시작 실패 → 동기 fallback (결과를 Claude 컨텍스트로 출력)
             _notify(f'[🤖 {TERMINAL_ID}→오프라인] 에이전트 실행 중 (서버 없음): "{short_prompt}"')
-            _fallback_subprocess(prompt)
+            _fallback_subprocess(prompt, working_dir=caller_root)
 
     # 훅은 0 반환 필수 (non-zero면 Claude가 응답 중단)
     sys.exit(0)

@@ -8,6 +8,8 @@
 #          도커 없이, API 키 없이, 기존 CLI 도구만 사용합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-07-15] Claude: CLI 모드 argv[3]=작업디렉토리 추가 — hook_bridge 오프라인 폴백이
+#   호출 프로젝트 경로를 전달, 미전달 시 _PROJECT_ROOT 폴백으로 인한 교차 간섭 차단.
 # [2026-03-04] Claude: 최초 구현
 #   - CLIAgent 클래스: 라우팅 + subprocess 실행 + 실시간 스트리밍
 #   - 키워드 기반 Claude Code / Antigravity CLI 자동 선택
@@ -1121,14 +1123,17 @@ def get_recent_runs(limit: int = 20) -> list[dict]:
 # ─── CLI 단독 테스트 진입점 ───────────────────────────────────────────────────
 if __name__ == '__main__':
     """직접 실행 시 테스트 모드:
-    python scripts/cli_agent.py "지시내용" [claude|antigravity|codex|auto]
+    python scripts/cli_agent.py "지시내용" [claude|antigravity|codex|auto] [작업디렉토리]
     """
     if len(sys.argv) < 2:
-        print('사용법: python scripts/cli_agent.py "지시내용" [claude|antigravity|codex|auto]')
+        print('사용법: python scripts/cli_agent.py "지시내용" [claude|antigravity|codex|auto] [작업디렉토리]')
         sys.exit(1)
 
     task_input = sys.argv[1]
     cli_choice = sys.argv[2] if len(sys.argv) > 2 else 'auto'
+    # [2026-07-15] 호출 프로젝트 디렉토리 — hook_bridge 오프라인 폴백이 전달.
+    # 없으면 _resolve_working_dir가 _PROJECT_ROOT(vibe-coding)로 폴백해 교차 간섭.
+    work_dir = sys.argv[3] if len(sys.argv) > 3 else None
 
     # 라우팅 결과 먼저 출력
     chosen = route_task(task_input) if cli_choice == 'auto' else cli_choice
@@ -1137,7 +1142,7 @@ if __name__ == '__main__':
     print(f'[cli_agent] 실행 시작...\n{"─" * 50}')
 
     # 실행 (메인 스레드에서 동기 실행)
-    result = run(task_input, cli_choice)
+    result = run(task_input, cli_choice, work_dir)
 
     print(f'\n{"─" * 50}')
     print(f'[cli_agent] 완료: {result["status"]} (ID: {result["id"]})')
