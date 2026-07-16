@@ -1,71 +1,51 @@
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: A+B 묶음 실행 계획 — A. 회상 정밀도 개선(저정보 노이즈 컷) +
-             B. 교훈 파이프 소생(사고 클러스터 자동 증류). 2026-07-16 전반 분석 후속.
+DESCRIPTION: 정리 단계 실행 계획 — telegram_bridge 분할(1500줄 규칙 예방) +
+             ty/psycopg3 도입 검토(사실 수집 → 권고안). A+B+C(8f0443f까지) 완료 후속.
 
 REVISION HISTORY:
-- 2026-07-16 Claude: 신규. 로드맵 ③(a842452) + 포트 대조(1aa84ba) 완료 → 교체.
-  사용자 승인: A+B → C → 정리 → D(메타버스 재논의) 순.
+- 2026-07-16 Claude: 신규. A+B(a34b698)+C(bd1ecbe)+Vite8(8f0443f) 완료 → 교체.
+  사용자 승인 순서: A+B → C → 정리 → D(메타버스 재논의). 이번이 '정리'.
 -->
 
-# 구현 계획 — A. 회상 정밀도 + B. 교훈 파이프 소생
+# 구현 계획 — 정리 단계: telegram_bridge 분할 + ty/psycopg3 검토
 
-> **근거**: 2026-07-16 전반 분석 실측 — ① 회상 노이즈(일반 지시에 무관 지식 0.5 유사도
-> 주입, 이 세션에서 실증), ② 교훈 증류 승인 1건/후보 0건(재발 트리거만 있는데 재발률 0%라
-> 영영 안 발화), ③ 참조율 30%. **북극성**: 삽질 감소 (`project_ultimate_goal`).
+> **근거**: telegram_bridge.py 1455줄 — 상한(1500) 이하지만 권장 분할선(1200) 초과.
+> ty/psycopg3는 2026-07 툴체인 정비의 검토 대기 항목 (Vite8은 8f0443f로 완료).
 
 ## 핵심 사실 (정찰 실측)
-- 노이즈 원인 1: `daemons.py:571` 백필이 빈 설명도 '(빈 내용)'으로 임베딩(무한루프 방지) —
-  저정보 레코드가 일반 쿼리와 0.5+ 매칭. agent_experience 459건 중 저정보 6건 + 커밋덤프성 다수.
-- 노이즈 원인 2: `pg_vector_search.py:157` 임계 0.45 고정 — 짧은 쿼리(저정보)일수록
-  임베딩 변별력이 떨어져 무관 매칭 통과.
-- 교훈 파이프: `lesson.py:47 propose_candidate` 코드 호출 가능 + dedupe 내장.
-  자동 트리거는 `incident.py:71` 재발 시뿐 — 재발률 0%라 영영 무발화.
-- 증류 원료 실증: 30일 파일 클러스터 — hive_hook.py 3건, TerminalSlot.tsx 3건 (jsonb
-  `files` 컬럼, `jsonb_array_elements_text`로 풀어야 함 — json_* 함수는 타입 불일치).
-- [불변식] lessons.md 쓰기는 approve 경로 단 하나 (승인 게이트) — distill은 후보 적재만.
+- `vibe-coding.spec` datas가 `('scripts','scripts')` + `_appseed/scripts` 디렉토리 통째 포함 —
+  scripts/ 신규 파일은 spec 수정 불필요 (v3.7.215~218 누락 사고 조건 아님).
+- telegram_bridge는 `infra/daemons.py:69`가 스크립트 경로 spawn — 모듈 import 참조자 없음.
+  진입점(`scripts/telegram_bridge.py` main)만 유지하면 분할 안전.
+- 가변 전역(TERMINAL_CLI_MAP/GROUP_CHAT_ID)을 AgentBot과 BotManager가 공유 —
+  분할 시 소유 모듈을 하나로 정하고 타 모듈은 모듈 속성 경유로 읽기/쓰기.
 
 ---
 
 ## 태스크
 
-### [x] Task 1 (A1): 검색단 저정보 필터
-- **파일**: `.ai_monitor/src/pg_vector_search.py`
-- **방법**: `_TABLES`에 테이블별 `quality` WHERE 절 추가 — vector_search SQL에 AND 결합.
-  - agent_experience: `length(coalesce(description,'')) >= 20`
-  - hive_memory: `length(coalesce(title,'') || coalesce(content,'')) >= 30`
-  - zettel_notes: `length(coalesce(title,'') || coalesce(content,'')) >= 30`
-  - incident_ledger: 필터 없음 (사고는 짧아도 가치 높음)
-  쿼리 시점 필터라 데이터 마이그레이션 불필요 — '(빈 내용)' placeholder는 남되 안 뜸.
-- **검증**: description='' 경험노트가 vector_search 결과에서 사라짐.
+### [x] Task 1: telegram_bridge 분할 — 완료 (350+1135줄, 컴파일/임포트/심볼 대조 통과)
+- **파일**: `scripts/telegram_agent_bot.py`(신규), `scripts/telegram_bridge.py`(축소)
+- **방법**: AgentBot 클래스 + CLI 매핑/GROUP_CHAT_ID 전역을 telegram_agent_bot.py로 이동
+  (~1080줄). telegram_bridge.py에는 BotManager + 싱글턴 락 + main 잔류 (~420줄).
+  BotManager의 `global TERMINAL_CLI_MAP` 갱신은 `telegram_agent_bot.TERMINAL_CLI_MAP`
+  모듈 속성 대입으로 전환. dotenv 로드는 agent_bot 모듈 상단(GROUP_CHAT_ID env 읽기 전).
+- **검증**: 두 파일 각 1500줄 이하 + `python -c "import telegram_bridge"` 컴파일/임포트 통과.
 
-### [x] Task 2 (A2): 저정보 쿼리 임계 상향
-- **파일**: `.ai_monitor/api/memory_api.py`
-- **방법**: recall-smart 핸들러에서 `min_sim = 0.45 if len(query) >= 20 else 0.60` —
-  vector_search 호출에 `min_similarity=min_sim` 전달. 짧은 일반 지시("그럼 진행해")는
-  더 높은 확신이 있을 때만 주입.
-- **검증**: 저정보 쿼리로 recall-smart POST → 무관 지식 미주입.
+### [x] Task 2: ty/psycopg3 도입 검토 — 완료 (권고: psycopg3 보류·ty 로컬만, 사용자 결정 대기)
+- **방법**: psycopg2 사용 지점 전수(import 방식·psycopg3 비호환 API) + 타입체크 현황 실측
+  → 도입 비용/이득 권고안 보고. 실제 전환은 사용자 결정 후 별도 태스크.
+- **검증**: 권고안에 파일 수·비호환 API 목록·CI 영향 포함.
 
-### [x] Task 3 (B): 사고 클러스터 자동 증류
-- **파일**: `scripts/lesson.py`, `scripts/incident.py`
-- **방법**:
-  1. lesson.py에 `distill_from_incidents(days=30, min_cluster=3)` 신설 — 파일별 사고
-     클러스터(≥3건) 추출 → `propose_candidate(dedupe_key='cluster:'+파일슬러그)`로
-     "[사고다발] {파일} — {n}건: 원인 요약" 후보 적재. CLI `distill` 서브커맨드 추가.
-  2. incident.py record 성공 직후 `distill_from_incidents()` 조용히 호출(예외 삼킴) —
-     매 사고 기록마다 클러스터 재평가, dedupe로 승인 큐 오염 없음.
-- **검증**: `lesson.py distill` 실행 → hive_hook/TerminalSlot 클러스터 후보 2건 적재 →
-  `lesson.py list`에 노출. 재실행 시 중복 미생성(dedupe).
-
-### [x] Task 4: 회귀 + 커밋
-- **방법**: pytest 전체. 저정보 쿼리/정상 쿼리 대조 실측(함수 단위 — recall-smart 서버
-  반영은 앱 재시작 후). Conventional Commits 3단 본문. CHANGELOG/메모리 갱신.
+### [x] Task 3: 회귀 + 커밋 — 완료 (py_compile + 3.12 임포트 스모크 + 데몬 spawn 경로 불변 확인)
+- **방법**: 분할 후 py_compile + import smoke. Conventional Commits 3단 본문 커밋.
 
 ---
 
-## 의존성: Task 1·2·3 병렬 가능, Task 4 ← 전체.
+## 의존성: Task 1·2 병렬 가능, Task 3 ← Task 1.
 
 ## 완료 정의
-- 일반 지시에 무관 지식이 주입되지 않음 (저정보 행 차단 + 짧은 쿼리 임계 0.60).
-- 사고 3건+ 파일 클러스터가 자동으로 교훈 후보가 됨 — 승인 게이트는 불변.
-- 다음: C(회상 활용 계측) → 정리(ty/psycopg3/Vite8, telegram_bridge 분할) → D(메타버스 재논의).
+- telegram_bridge.py가 권장선 이하로 축소, 데몬 spawn 경로/동작 불변.
+- ty/psycopg3 결정에 필요한 사실이 권고안 1건으로 정리됨.
+- 다음: D(메타버스 재논의) — 사용자와 재논의 후 착수.

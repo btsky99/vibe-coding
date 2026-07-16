@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 21:01
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 22:20
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -224,7 +224,8 @@
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 233 |  |
 | `statusline.py` | 189 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
-| `telegram_bridge.py` | 1455 |  |
+| `telegram_agent_bot.py` | 1135 |  |
+| `telegram_bridge.py` | 350 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
 | `zettel_capture.py` | 701 |  |
@@ -323,4 +324,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-16 21:01
+> 자동 생성 완료: 2026-07-16 22:20
