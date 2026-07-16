@@ -6,6 +6,11 @@
 #   /vibe-release 스킬의 Step 0.5에서 호출됨.
 #
 # REVISION HISTORY:
+# - 2026-07-16 Claude: (2) managed checkout을 로컬 HEAD로 fetch+reset 후 기동 —
+#     boot.py가 구 checkout 소스를 실행해 smoke가 푸시 대상 소스를 검증 못 하던
+#     R18~R20 한계 해소. (VIBE_SRC_DIR dev 트리 직결은 frozen 전제와 충돌해 폐기)
+# - 2026-07-16 Claude: 종료 wait를 try로 보호 + kill 에스컬레이션 — TimeoutExpired가
+#     finally를 뚫고 크래시하며 EXE를 고아로 방치하던 결함 수정 (좀비 락 사고 발단).
 # - 2026-04-11 Claude: 최초 생성
 # ────────────────────────────────────────────────────────────────────────────
 """로컬 EXE smoke test — 빌드된 EXE가 정상 기동되는지 검증."""
@@ -95,6 +100,30 @@ def test_api(port: int, path: str, expected_keys: list[str] | None = None) -> tu
         return False, str(e)
 
 
+def _sync_managed_checkout() -> None:
+    """managed checkout(%LOCALAPPDATA%/VibeCoding/app)을 로컬 HEAD로 동기화.
+
+    [제약] 커밋된 내용만 반영됨(fetch는 커밋 단위) — smoke 전에 검증 대상 변경을
+    반드시 커밋할 것. 체크아웃이 없거나 git이 아니면 경고만 하고 기존 동작 유지
+    (이 경우 smoke는 구 소스를 검증하므로 결과 해석에 주의).
+    """
+    base = os.environ.get('LOCALAPPDATA') or str(Path.home())
+    checkout = Path(base) / 'VibeCoding' / 'app'
+    if not (checkout / '.git').exists():
+        print(f'[smoke] ⚠️ managed checkout 없음/비git({checkout}) — 동기화 생략, '
+              f'EXE가 구 소스를 실행할 수 있음')
+        return
+    for args in (['fetch', str(PROJECT_ROOT), 'HEAD'],
+                 ['reset', '--hard', 'FETCH_HEAD']):
+        r = subprocess.run(['git', '-C', str(checkout)] + args,
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            print(f'[smoke] ⚠️ checkout 동기화 실패(git {args[0]}): '
+                  f'{r.stderr.strip()[:200]} — 기존 checkout 소스로 진행')
+            return
+    print(f'[smoke] managed checkout을 로컬 HEAD로 동기화 완료: {checkout}')
+
+
 def run_smoke_test(exe_path: Path) -> bool:
     """EXE를 실행하고 smoke test를 수행합니다."""
     print(f'\n[smoke] EXE 경로: {exe_path}')
@@ -107,6 +136,14 @@ def run_smoke_test(exe_path: Path) -> bool:
     env = os.environ.copy()
     env['VIBE_SMOKE_TEST'] = '1'  # 서버에서 smoke test 모드 감지용
     env['VIBE_PORT_BASE'] = str(SMOKE_PORT_BASE)  # 격리된 포트 대역 강제
+    # [과거사고 2026-07-16 / R18~R20 한계 해소] boot.py는 managed checkout
+    # (%LOCALAPPDATA%/VibeCoding/app — soft 업데이트가 마지막 적용한 구 소스)을 실행
+    # → 동기화 없이는 smoke가 "푸시하려는 내 소스"가 아닌 구 릴리즈 코드로 PASS를 내는
+    # 검증 무효 상태였다. 체크아웃을 로컬 HEAD로 fetch+reset(=soft 업데이트와 동일
+    # 메커니즘의 선적용)해 생산 경로 그대로 현재 소스를 검증한다.
+    # [주의] VIBE_SRC_DIR로 dev 트리를 직접 물리는 방식은 불가 — frozen 전제(내장 PG
+    # 경로 등)와 충돌해 서버가 기동하지 않음 (2026-07-16 실측 60초 무바인딩).
+    _sync_managed_checkout()
 
     # GUI EXE(runw)는 stdout이 없으므로 PIPE 대신 DEVNULL 사용 — 블로킹 방지
     proc = subprocess.Popen(
@@ -214,8 +251,20 @@ def run_smoke_test(exe_path: Path) -> bool:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except Exception:
             pass
-        proc.wait(timeout=10)
-        print('[smoke] 정리 완료')
+        # [과거사고 2026-07-16] 이 wait가 try 밖이라 TimeoutExpired가 finally를 뚫고
+        # 전파 → smoke가 크래시하며 못 죽인 EXE를 조용히 고아로 방치 → 커널 좀비가
+        # 락 포트(19001+해시) 영구 점유. 못 죽였으면 크래시 대신 경고를 크게 남긴다.
+        try:
+            proc.wait(timeout=10)
+            print('[smoke] 정리 완료')
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+                print('[smoke] 정리 완료 (kill 에스컬레이션)')
+            except subprocess.TimeoutExpired:
+                print(f'[smoke] ⚠️ 경고: EXE(PID {proc.pid})가 kill에도 응답 없음 — '
+                      f'커널 좀비 가능성. 수동 확인 필요 (재부팅 전까지 핸들 점유 가능).')
 
 
 def main():

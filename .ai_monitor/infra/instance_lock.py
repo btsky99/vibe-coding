@@ -7,6 +7,8 @@ DESCRIPTION: 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로�
              os._exit(0)으로 새 인스턴스를 즉시 종료한다.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: smoke 락 시드에 PID 추가 — 좀비 EXE의 고정 락 포트 영구 점유로
+                     후속 smoke 전멸하는 사고 재발 방지 (사용자 싱글턴 의미 불변).
 - 2026-07-08 Claude: server.py main() L1697~1779 인스턴스 락 + 포트 확정 블록 분리
                      (Phase 3 R17-2). 로직·주석 verbatim 유지.
                      [불변식] resolve_server_ports가 반환한 (http, ws)를 caller가
@@ -41,7 +43,11 @@ def acquire_single_instance_lock(project_root: Path) -> socket.socket:
     if getattr(sys, 'frozen', False):
         _lock_seed = f"{_lock_seed}::frozen"
     if os.environ.get('VIBE_SMOKE_TEST', '').strip() in ('1', 'true', 'on'):
-        _lock_seed = f"{_lock_seed}::smoke"
+        # [과거사고 2026-07-16] smoke 시드가 고정이라 커널 좀비化된 smoke EXE 1개가
+        # 락 포트를 영구 점유 → 이후 모든 smoke가 "이미 실행 중" exit 0으로 오판.
+        # smoke는 일회성+포트 자동 스캔(9100~)이라 상호 배제 자체가 불필요 — PID를
+        # 섞어 실행마다 고유 락으로 만들어 좀비 내성 확보 (사용자 싱글턴 의미는 불변).
+        _lock_seed = f"{_lock_seed}::smoke::{os.getpid()}"
     _proj_hash    = int(hashlib.md5(_lock_seed.encode()).hexdigest()[:4], 16)
     _LOCK_PORT    = 19001 + (_proj_hash % 480)
     _proj_id      = f"{_proj_hash:04x}"
