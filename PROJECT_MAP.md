@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 20:31
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 21:01
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -62,7 +62,7 @@
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
-| `memory_api.py` | 401 | 메모리/지식 저장소 API (/api/memory/*) |
+| `memory_api.py` | 412 | 메모리/지식 저장소 API (/api/memory/*) |
 | `message_api.py` | 92 |  |
 | `office_api.py` | 370 |  |
 | `office_launch_api.py` | 85 |  |
@@ -90,7 +90,7 @@
 | `db.py` | 34 |  |
 | `db_helper.py` | 106 |  |
 | `file_store.py` | 220 | 파일 기반 레거시 저장소 |
-| `heal_metrics.py` | 252 |  |
+| `heal_metrics.py` | 273 |  |
 | `logger.py` | 123 |  |
 | `pg_base.py` | 524 |  |
 | `pg_experience.py` | 226 |  |
@@ -100,7 +100,7 @@
 | `pg_schema.py` | 777 |  |
 | `pg_store.py` | 127 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `pg_tasks.py` | 388 |  |
-| `pg_vector_search.py` | 213 |  |
+| `pg_vector_search.py` | 224 |  |
 | `recall_client.py` | 83 |  |
 | `secure.py` | 52 |  |
 | `server_locator.py` | 76 |  |
@@ -199,8 +199,8 @@
 | `checkpoint.py` | 62 |  |
 | `codex_pg_watcher.py` | 286 |  |
 | `harness_verify.py` | 437 |  |
-| `heal_report.py` | 94 |  |
-| `incident.py` | 119 |  |
+| `heal_report.py` | 100 |  |
+| `incident.py` | 132 |  |
 | `install_dev_tools.py` | 159 |  |
 | `install_frontend_deps.py` | 195 |  |
 | `install_gh_cli.py` | 154 |  |
@@ -214,7 +214,7 @@
 | `install_statusline.py` | 112 | 상태줄 ~/.claude 멱등 설치기 (PC 간 이식) |
 | `install_system_tool.py` | 208 |  |
 | `intent_map.py` | 175 |  |
-| `lesson.py` | 122 |  |
+| `lesson.py` | 170 |  |
 | `migrate_antigravity_db.py` | 83 |  |
 | `migrate_archive_session_summaries.py` | 70 |  |
 | `migrate_vault_consolidate.py` | 240 |  |
@@ -282,7 +282,7 @@
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 124 |  |
 | `test_route_table.py` | 106 |  |
-| `test_self_heal_2.py` | 223 |  |
+| `test_self_heal_2.py` | 231 |  |
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
@@ -323,4 +323,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-16 20:31
+> 자동 생성 완료: 2026-07-16 21:01
