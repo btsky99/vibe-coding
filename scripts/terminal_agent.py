@@ -4,6 +4,8 @@ FILE: scripts/terminal_agent.py
 DESCRIPTION: 멀티터미널 자율 에이전트 디스패처 (REPL 모드).
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 9000 고정 제거 — server_locator 슬러그 대조로 자기 프로젝트
+  서버 탐색 (멀티 프로젝트 가동 시 타 서버 오접속 방지), 실패 시 기존 9000 폴백.
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 - 2026-03-22 Codex: Gemini stderr 노이즈 필터 추가
   - 내부 MCP/훅 상태 로그는 숨기고 실제 응답만 표시
@@ -62,7 +64,25 @@ CWD         = SCRIPT_DIR.parent
 DATA_DIR    = CWD / '.ai_monitor' / 'data'
 LIVE_FILE   = DATA_DIR / 'agent_live.jsonl'
 
-SERVER_PORT = int(os.environ.get('VIBE_SERVER_PORT', '9000'))
+# [과거사고 2026-07-16] 9000 고정은 멀티 프로젝트 동시 가동 시 타 프로젝트 서버 —
+# server_locator로 실행 cwd의 슬러그 대조 우선, 산출 불가 환경은 기존 9000 폴백.
+def _resolve_server_port() -> int:
+    env_port = os.environ.get('VIBE_SERVER_PORT')
+    if env_port:
+        return int(env_port)
+    try:
+        _monitor = str(SCRIPT_DIR.parent / '.ai_monitor')
+        if _monitor not in sys.path:
+            sys.path.insert(0, _monitor)
+        from src.server_locator import find_server_port, slug_for_cwd
+        port = find_server_port(project_id=slug_for_cwd())
+        if port:
+            return port
+    except Exception:
+        pass
+    return 9000
+
+SERVER_PORT = _resolve_server_port()
 API_URL     = f'http://localhost:{SERVER_PORT}/api/agent/run'
 HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
 

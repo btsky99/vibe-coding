@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 19:00
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-16 20:20
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -45,7 +45,7 @@
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `agent_api.py` | 1405 | CLI 에이전트 관리 API (/api/agent/*) + 코덱스 회상 주입 |
+| `agent_api.py` | 1405 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 226 |  |
 | `commands_api.py` | 54 |  |
 | `config_api.py` | 81 |  |
@@ -101,8 +101,9 @@
 | `pg_store.py` | 127 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `pg_tasks.py` | 388 |  |
 | `pg_vector_search.py` | 213 |  |
-| `recall_client.py` | 86 |  |
+| `recall_client.py` | 83 |  |
 | `secure.py` | 52 |  |
+| `server_locator.py` | 76 |  |
 | `server_utils.py` | 59 |  |
 | `view.py` | 243 |  |
 | `wiki_generator.py` | 381 |  |
@@ -113,8 +114,8 @@
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `cli_agent.py` | 1151 | Claude/Antigravity/Codex CLI 자율 오케스트레이션 엔진 |
-| `agent_shell.py` | 414 | 인터랙티브 자율 에이전트 쉘 (REPL) |
-| `terminal_agent.py` | 391 | 멀티터미널 자율 에이전트 디스패처 |
+| `agent_shell.py` | 431 | 인터랙티브 자율 에이전트 쉘 (REPL) |
+| `terminal_agent.py` | 411 | 멀티터미널 자율 에이전트 디스패처 |
 | `agent_launcher.py` | 242 | 통합 에이전트 런처 (NORMAL/YOLO 모드) |
 | `agent_detector.py` | 198 | 활성 AI 에이전트 자동 감지 (psutil) |
 | `agent_protocol.py` | 373 | RFC 관리 + 하이브 토론 프로토콜 |
@@ -133,10 +134,10 @@
 ### 훅/이벤트
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_hook.py` | 967 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
-| `hook_bridge.py` | 534 | Claude Code UserPromptSubmit 훅 브릿지 |
+| `hive_hook.py` | 991 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
+| `hook_bridge.py` | 573 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
-| `antigravity_hook.py` | 582 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
+| `antigravity_hook.py` | 595 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
 
 ### 통신/ITCP
 | 파일 | 줄 수 | 설명 |
@@ -322,4 +323,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-16 19:00
+> 자동 생성 완료: 2026-07-16 20:20

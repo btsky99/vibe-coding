@@ -4,6 +4,8 @@ FILE: scripts/agent_shell.py
 DESCRIPTION: 터미널 전용 자율 에이전트 인터랙티브 쉘.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 포트 탐색에 프로젝트 대조 — server_locator 슬러그 매칭 우선
+  (멀티 프로젝트 가동 시 타 프로젝트 서버 오접속 방지), 실패 시 기존 스캔 폴백.
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 - 2026-03-22 Codex: Gemini stderr 노이즈 필터 추가
   - MCP/훅/텔레메트리 상태 로그가 사용자 출력에 섞이지 않도록 정리
@@ -100,10 +102,25 @@ _ORCH_KW = [
 # [수정 2026-03-15 v3.7.67] 실행 중인 서버 포트 자동 탐색 (9000~9019 스캔)
 # VIBE_SERVER_PORT 환경변수가 있으면 우선 사용, 없으면 9000번대에서 응답하는 포트 탐색
 def _find_active_server_port(start: int = 9000, count: int = 20) -> int:
-    """9000번대에서 실제 응답하는 서버 포트를 찾아 반환합니다."""
+    """9000번대에서 실제 응답하는 서버 포트를 찾아 반환합니다.
+
+    [과거사고 2026-07-16] '첫 응답' 채택은 멀티 프로젝트 동시 가동 시 타 프로젝트
+    서버를 잡음 — server_locator로 실행 cwd의 슬러그 대조 우선, 산출 불가 환경
+    (외부 프로젝트 등)은 기존 스캔 폴백 유지.
+    """
     env_port = os.environ.get('VIBE_SERVER_PORT')
     if env_port:
         return int(env_port)
+    try:
+        _monitor = str(_ROOT / '.ai_monitor')
+        if _monitor not in sys.path:
+            sys.path.insert(0, _monitor)
+        from src.server_locator import find_server_port, slug_for_cwd
+        port = find_server_port(project_id=slug_for_cwd(), start=start, count=count)
+        if port:
+            return port
+    except Exception:
+        pass
     for port in range(start, start + count):
         try:
             _urllib_req.urlopen(f'http://localhost:{port}/api/hive/health', timeout=0.3)

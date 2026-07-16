@@ -101,6 +101,10 @@ def _resolve_caller_project(data: dict) -> tuple[str, str]:
         # infra 임포트 실패(경로 문제 등) 시 슬러그 없이 진행 — 레거시(무필터)와 동일 동작
         return raw_cwd, ''
 
+# ── 호출 프로젝트/서버 전역 (main이 stdin cwd로 설정, 훅은 단명 프로세스) ────
+_CALLER_PID: str = ''         # 호출 세션의 project_id 슬러그 — stage 서버 대조용
+_STAGE_PORT: int | None = None  # _update_pipeline_stage 1회 해석 캐시
+
 # ── Self-Reflect 세션 추적 변수 ────────────────────────────────────────────
 # Stop 이벤트 시 pg_thoughts에 자기반성 기록에 사용 (세션 단위 누적)
 _SESSION_MODIFIED_FILES: list = []   # PostToolUse에서 수정된 파일 경로 누적
@@ -132,7 +136,18 @@ def _update_pipeline_stage(stage: str, task: str = '') -> None:
     """
     try:
         import urllib.request as _req
-        from datetime import datetime as _dt
+        # [과거사고 2026-07-16] 9000 하드코딩 — 멀티 프로젝트 가동 시 stage가 타 프로젝트
+        # 서버(9000=ons)로 가서 엉뚱한 대시보드에 표시됨. 자기 프로젝트 서버만 채택,
+        # 없으면 전송 생략(타 서버 오염 금지). 훅은 단명 프로세스라 1회 해석 캐시.
+        global _STAGE_PORT
+        if _STAGE_PORT is None:
+            try:
+                from src.server_locator import find_server_port
+                _STAGE_PORT = find_server_port(project_id=_CALLER_PID) or 0
+            except Exception:
+                _STAGE_PORT = 0
+        if not _STAGE_PORT:
+            return
         # cli 타입을 함께 전송 — backend가 에이전트 종류를 정확히 식별하기 위함
         # [2026-03-08] Codex가 T3 슬롯에서 claude 타입으로 잘못 표시되던 버그 수정
         _cli_type = os.environ.get('VIBE_CLI_TYPE', 'claude')  # codex_wrapper.py 등이 설정
@@ -143,7 +158,7 @@ def _update_pipeline_stage(stage: str, task: str = '') -> None:
             'cli': _cli_type,
         }).encode('utf-8')
         req = _req.Request(
-            'http://localhost:9000/api/agent/stage',
+            f'http://127.0.0.1:{_STAGE_PORT}/api/agent/stage',
             data=payload,
             headers={'Content-Type': 'application/json'},
             method='POST',
@@ -452,6 +467,9 @@ def main():
 
     # 호출 프로젝트 경계 — 모든 active_session_context 접근에 이 슬러그를 강제한다
     _caller_root, _caller_pid = _resolve_caller_project(data)
+    # stage 업데이트(_update_pipeline_stage)가 자기 프로젝트 서버를 찾도록 전역 공유
+    global _CALLER_PID
+    _CALLER_PID = _caller_pid
 
     try:
         from hive_bridge import log_task

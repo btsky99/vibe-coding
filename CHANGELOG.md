@@ -8,6 +8,14 @@
 - **[제약 해소] VIBE_SERVER_PORT setdefault**: 서버 자신은 이 env 미보유(데몬 자식에게만 주입) → 자기 바인드 포트로 setdefault해 recall_client 포트 스캔 생략. 멀티 프로젝트 동시 가동(9000=ons, 9010=vibe-coding) 환경에서도 **자기 프로젝트 지식만** 주입됨을 실측 확인.
 - **[Test] 전체 127 pass** + recall_client→recall-smart→pg_logs 계측 엔드투엔드 실측.
 
+### 🔌 포트 스캔 프로젝트 대조 전면화 (잔여 구멍 청산)
+- **[Feature] src/server_locator.py 신설**: 9000번대 서버 탐색 공용 모듈 — /api/project-info 슬러그 대조 + 127.0.0.1 병렬 프로브. recall_client 수정(ab0f1a3)의 로직을 공용화.
+- **[Fix] recall_client.py**: 자체 탐색 제거, server_locator 패스스루 (중복 금지).
+- **[Fix] hive_hook.py `_update_pipeline_stage`**: 9000 하드코딩 제거 — 파이프라인 stage가 타 프로젝트 대시보드로 가던 구멍. 자기 서버 없으면 전송 생략.
+- **[Fix] hook_bridge.py**: `_server_port_for` 신설 — /api/agent/run 호출과 `_start_server` 대기 판정을 자기 프로젝트 서버 기준으로 (타 서버만 살아있으면 '자기 서버 기동'으로 정상 진행).
+- **[Fix] agent_shell.py / terminal_agent.py**: 첫 응답/9000 고정 → 슬러그 대조 우선, 실패 시 기존 동작 폴백.
+- **[검증] 실환경(9000=ons, 9010=vibe 동시 가동)**: 6개 진입점 전부 자기 서버(9010) 채택 + 유령 슬러그 시 오염 방지 확인. pytest 127 pass ×3.
+
 
 ## [2026-07-13] - 지식 노트 파이프라인 재설계 (나만의 지식 창고)
 

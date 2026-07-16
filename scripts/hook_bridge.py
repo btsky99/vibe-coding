@@ -4,6 +4,9 @@ FILE: scripts/hook_bridge.py
 DESCRIPTION: Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 포트 선택에도 프로젝트 경계 — _server_port_for(슬러그 대조) 경유로
+  API 호출, 자기 서버 없으면 자동 시작 경로. payload 꼬리표(c95b2ec)만으로는 타 프로젝트
+  서버 '도착' 자체를 못 막던 잔여 구멍 청산.
 - 2026-07-15 Claude: 크로스 프로젝트 간섭 수정 — payload에 호출 프로젝트 cwd/project_id
   탑재 + 409 배너에 타 프로젝트 실행 명시 + 오프라인 폴백에 작업 디렉토리 전달.
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
@@ -72,6 +75,29 @@ def _find_active_server_port(start: int = 9000, count: int = 20) -> int:
 SERVER_PORT = _find_active_server_port()
 API_URL     = f'http://localhost:{SERVER_PORT}/api/agent/run'
 HEALTH_URL  = f'http://localhost:{SERVER_PORT}/api/hive/health'
+
+# [과거사고 2026-07-16] 위 모듈 상수는 '첫 응답 포트'라 멀티 프로젝트 가동 시 타 프로젝트
+# 서버를 가리킬 수 있음 — 실제 API 호출은 아래 프로젝트 대조 헬퍼를 경유한다.
+# (모듈 상수는 슬러그 산출 불가 환경의 폴백으로만 유지 — 하위호환)
+_PORT_CACHE: dict = {}  # project_id → 확정 포트 (양성 결과만 캐시 — 서버 기동 재탐색 허용)
+
+
+def _server_port_for(project_id: str = '') -> int | None:
+    """호출 프로젝트의 서버 포트. 자기 서버 없으면 None (타 서버 오염 금지)."""
+    cached = _PORT_CACHE.get(project_id)
+    if cached:
+        return cached
+    try:
+        _monitor = str(SCRIPT_DIR.parent / '.ai_monitor')
+        if _monitor not in sys.path:
+            sys.path.insert(0, _monitor)
+        from src.server_locator import find_server_port
+        port = find_server_port(project_id=project_id)
+    except Exception:
+        port = SERVER_PORT  # 공용 모듈 불가 — 기존 첫 응답 동작 유지
+    if port:
+        _PORT_CACHE[project_id] = port
+    return port
 
 # --- 터미널 ID ---
 # 각 터미널 실행 전 환경변수로 지정:
@@ -272,6 +298,13 @@ def _call_api(prompt: str, cwd: str = '', project_id: str = '') -> dict | None:
     [불변식] cwd/project_id 필수 전달 — 누락 시 서버가 자기 _PROJECT_ROOT에서
     실행해 다른 프로젝트 지시가 vibe-coding을 오염시킴 (2026-07-15 사고).
     """
+    # [과거사고 2026-07-16] 포트도 프로젝트 대조 — payload 꼬리표(c95b2ec)만으로는
+    # 타 프로젝트 서버에 도착하는 것 자체를 못 막았음. 자기 서버 없으면 None 반환
+    # → 호출부가 '서버 미실행' 경로(자동 시작→재시도)로 처리.
+    port = _server_port_for(project_id)
+    if port is None:
+        return None
+
     payload = json.dumps({
         'task': prompt,
         'cli': 'auto',
@@ -282,7 +315,7 @@ def _call_api(prompt: str, cwd: str = '', project_id: str = '') -> dict | None:
     }).encode('utf-8')
 
     req = urllib_request.Request(
-        API_URL,
+        f'http://127.0.0.1:{port}/api/agent/run',
         data=payload,
         headers={'Content-Type': 'application/json'},
         method='POST',
@@ -305,8 +338,14 @@ def _call_api(prompt: str, cwd: str = '', project_id: str = '') -> dict | None:
         return None
 
 
-def _is_server_alive() -> bool:
-    """서버 헬스체크. 응답하면 True."""
+def _is_server_alive(project_id: str = '') -> bool:
+    """서버 헬스체크. project_id 전달 시 그 프로젝트의 서버가 살아있는지 판정.
+
+    [과거사고 2026-07-16] 첫 응답 포트(HEALTH_URL) 판정은 타 프로젝트 서버만 살아있어도
+    True — _start_server 대기 루프가 자기 서버 기동 전에 조기 탈출하던 구멍.
+    """
+    if project_id:
+        return _server_port_for(project_id) is not None
     try:
         with urllib_request.urlopen(HEALTH_URL, timeout=1) as r:
             return r.status == 200
@@ -314,7 +353,7 @@ def _is_server_alive() -> bool:
         return False
 
 
-def _start_server() -> bool:
+def _start_server(project_id: str = '') -> bool:
     """서버가 꺼져있으면 백그라운드로 자동 시작합니다.
 
     [중복 방지] PID 파일(_SERVER_PID)로 이미 실행 중인 서버가 있으면 새로 생성하지 않음.
@@ -330,7 +369,7 @@ def _start_server() -> bool:
         import time
         for _ in range(10):
             time.sleep(0.5)
-            if _is_server_alive():
+            if _is_server_alive(project_id):
                 return True
         return False
 
@@ -357,7 +396,7 @@ def _start_server() -> bool:
     import time
     for _ in range(10):
         time.sleep(0.5)
-        if _is_server_alive():
+        if _is_server_alive(project_id):
             return True
 
     return False
@@ -510,7 +549,7 @@ def main():
     else:
         # ── 서버 미실행 → 자동 시작 시도 후 재연결, 실패 시 동기 fallback
         _notify(f'[🤖 {TERMINAL_ID}] 백엔드 오프라인 — 자동 시작 중...')
-        server_started = _start_server()
+        server_started = _start_server(caller_pid)
 
         if server_started:
             # 서버 기동 성공 → API 재호출

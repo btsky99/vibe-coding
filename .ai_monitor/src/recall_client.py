@@ -16,59 +16,19 @@
 #   - [불변식] 어떤 실패에서도 예외를 밖으로 던지지 않는다 — 훅 전체 중단 금지.
 # ────────────────────────────────────────────────────────────────────────────
 import json
-import os
 import urllib.request as _urllib_request
-from concurrent.futures import ThreadPoolExecutor
+
+# [WHY] 포트 탐색은 server_locator로 공용화(2026-07-16) — 훅/브릿지/런처 전원이
+# 같은 project-info 슬러그 대조를 쓴다. 이 모듈은 회상 요약 조립만 담당.
+from src.server_locator import HOST as _HOST, find_server_port
 
 _RECALL_TIMEOUT = 2.0  # 훅 지연 상한 — 서버가 이 안에 못 주면 v1 폴백
-
-# [WHY] 'localhost'는 Windows에서 ::1→127.0.0.1 이중 시도로 닫힌 포트당 ~0.8초 소모
-# (2026-07-16 실측 — 순차 대조 스캔 6.6초로 훅 상한 2초 초과). 127.0.0.1 고정 +
-# 병렬 프로브로 전체 스캔 0.3초 상한.
-_HOST = '127.0.0.1'
-
-
-def _probe_port(port: int) -> tuple[int, str] | None:
-    """포트 생존 확인 + 그 서버의 활성 project_id 슬러그 반환. 불통이면 None."""
-    try:
-        _urllib_request.urlopen(
-            f'http://{_HOST}:{port}/api/hive/health', timeout=0.3)
-    except Exception:
-        return None
-    try:
-        with _urllib_request.urlopen(
-                f'http://{_HOST}:{port}/api/project-info', timeout=0.3) as r:
-            info = json.loads(r.read().decode('utf-8'))
-        return port, str(info.get('project_id') or '')
-    except Exception:
-        return port, ''  # 구버전 서버(project-info 없음) — 생존만 보고
 
 
 def _find_active_server_port(start: int = 9000, count: int = 20,
                              project_id: str = '') -> int | None:
-    """응답하는 서버 포트 탐색. project_id 전달 시 그 프로젝트의 서버만 채택.
-
-    [과거사고 2026-07-16] 멀티 프로젝트 동시 가동(9000=ons, 9010=vibe-coding)에서
-    '첫 응답 포트' 채택이 타 프로젝트 서버에 붙어 회상 오주입 + 계측 오기록.
-    서버별 PG DB 자체가 다르므로(vibe_d__ons에는 vibe-coding 지식이 없음) recall-smart에
-    스코프 파라미터를 추가해도 해결 불가 — 포트 선택 단계에서 대조해야 한다.
-    [하위호환] project_id 미전달('')이면 기존 '첫 응답' 동작 유지 (외부 프로젝트 CLI 등
-    슬러그 산출 실패 환경). 매칭 실패 시 None → 호출부가 로컬 v1 폴백.
-    """
-    env_port = os.getenv('VIBE_SERVER_PORT')
-    if env_port:
-        try:
-            return int(env_port)  # 서버가 자식/자신에게 주입한 값 — 자기 프로젝트 보장
-        except ValueError:
-            pass
-    with ThreadPoolExecutor(max_workers=count) as ex:
-        alive = [r for r in ex.map(_probe_port, range(start, start + count)) if r]
-    if project_id:
-        for port, pid in alive:
-            if pid == project_id:
-                return port
-        return None  # 살아있는 서버가 전부 타 프로젝트 — 로컬 v1 폴백이 옳음
-    return alive[0][0] if alive else None
+    """server_locator 패스스루 — 매칭 실패 시 None → 호출부가 로컬 v1 폴백."""
+    return find_server_port(project_id=project_id, start=start, count=count)
 
 
 def _fallback_summary(query: str, limit: int) -> str:
