@@ -8,6 +8,7 @@ DESCRIPTION: 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부
     예: 사고 재발률 0%라도 표본 15건이면 verdict='🟡 표본 부족'(성공 아님) — 이게 계측의 존재 이유.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: [C 계측] 주입 집중도(injection) 추가 — 참조율 30% 규명 지표 (top10 점유율)
 - 2026-07-15 Claude: [로드맵 ②] live.callers 분해 — metadata.caller(claude/antigravity)별
   실발화율. caller 미기록 구버전 로그는 coalesce로 'claude' 귀속(전부 클로드 훅이었음)
 - 2026-07-15 Claude: ① 폴백 사유 분해(fallback_reasons) — load_failed(영구)와 not_warm(일시)
@@ -124,6 +125,25 @@ def _recall_metrics(project_id: str) -> dict:
                 "calls_14d": c_total,
                 "fire_rate_pct": round(100 * c_hits / c_total, 1) if c_total else 0.0,
             }
+        # [C 계측 2026-07-16] 주입 집중도 — 참조율 30%의 진짜 의미 규명: 지식 70%가
+        # '죽은' 게 아니라 회상이 소수 항목에 집중된 것일 수 있다. top10 점유율이 높으면
+        # 회상 다양성 부족(같은 지식만 반복 주입) 신호. keys 미기록 구버전 이벤트는 자동 제외.
+        injection = None
+        key_rows = query_rows(
+            "SELECT k.value AS item, count(*) AS n "
+            "FROM pg_logs, jsonb_array_elements_text(metadata->'keys') AS k "
+            "WHERE agent = 'recall' AND status = 'hit' "
+            f"AND created_at >= now() - interval '14 days'{pid} "
+            "GROUP BY 1 ORDER BY n DESC"
+        )
+        if key_rows:
+            total_inj = sum(int(r.get("n", 0) or 0) for r in key_rows)
+            top10 = sum(int(r.get("n", 0) or 0) for r in key_rows[:10])
+            injection = {
+                "unique_items": len(key_rows),
+                "injections_14d": total_inj,
+                "top10_share_pct": round(100 * top10 / total_inj, 1) if total_inj else 0.0,
+            }
         live = {
             "calls_14d": lr_total,
             "fire_rate_pct": round(100 * hits / lr_total, 1),   # warm 실발화율
@@ -131,6 +151,7 @@ def _recall_metrics(project_id: str) -> dict:
             "fallback_reasons": {str(r.get("reason") or "(없음)"): int(r.get("n", 0) or 0)
                                  for r in reason_rows},
             "callers": callers,
+            "injection": injection,
         }
 
     # verdict: 임베딩 커버리지(성과 전제) + 참조율(실효성) + 실발화율(있을 때) 삼중 판정

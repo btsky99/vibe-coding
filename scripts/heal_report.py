@@ -4,6 +4,7 @@ DESCRIPTION: 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics�
              터미널에 요약 출력한다. 계산 로직은 갖지 않음(단일 소스 = heal_metrics). `--json` raw 출력.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: [C 계측] 주입 집중도 표시 — 유니크/주입수/top10 점유율
 - 2026-07-15 Claude: [로드맵 ②] 에이전트별(callers) 실발화율 표시 — 안티그래비티 주입 실효 확인용
 - 2026-07-15 Claude: 폴백 사유 분해 표시 — load_failed(영구 고장)를 not_warm(일시)과 구분
 - 2026-07-05 Claude: 신규 — 자가치유 계측 Task 2. incident.py stats 스타일 출력.
@@ -59,6 +60,11 @@ def main() -> int:
             # 전체 fire_rate가 높아도 특정 에이전트만 전부 폴백이면 그 에이전트는 실효 0
             print(f"      에이전트별: " + ", ".join(
                 f"{k} {v['fire_rate_pct']}% ({v['calls_14d']}회)" for k, v in _cl.items()))
+        _inj = _live.get("injection")
+        if _inj:
+            # top10 점유율↑ = 소수 지식만 반복 주입(다양성 부족) — 참조율 30%의 규명 지표
+            print(f"      주입 집중도: 유니크 {_inj['unique_items']}개 / 주입 {_inj['injections_14d']}건"
+                  f" / top10 점유 {_inj['top10_share_pct']}%")
     else:
         print(f"    실발화율       (계측 대기 — recall-smart 호출 로그 없음)")
     for name, t in r["tables"].items():

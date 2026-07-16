@@ -132,7 +132,7 @@ def _recall_fallback_summary(query: str, limit: int) -> str:
 
 
 def _log_recall_event(status: str, items: int, project_id: str, reason: str = '',
-                      caller: str = 'claude') -> None:
+                      caller: str = 'claude', keys: list | None = None) -> None:
     """[계측 #1] recall-smart 결과를 pg_logs에 기록 — 회상 실발화율/적중률 산출용.
 
     status='hit'(warm 벡터 회상이 실제 발화) / 'fallback'(미warm·임베딩 실패·오류로 폴백).
@@ -147,7 +147,10 @@ def _log_recall_event(status: str, items: int, project_id: str, reason: str = ''
         insert_pg_log(agent='recall', status=status,
                       task=' '.join(p for p in (f"items={items}", reason, f"caller={caller}") if p),
                       project_id=project_id,
-                      metadata={'items': items, 'reason': reason, 'caller': caller})
+                      metadata={'items': items, 'reason': reason, 'caller': caller,
+                                # [C 계측 2026-07-16] 주입 항목 identity — heal_metrics가
+                                # 주입 집중도(소수 지식 반복 주입 여부)를 계측 (참조율 30% 규명)
+                                'keys': keys or []})
     except Exception:
         pass
 
@@ -378,7 +381,9 @@ def handle_post(handler, path: str, data: dict,
                  'summary': _format_recall_summary(query, merged)},
                 ensure_ascii=False, default=str,
             ).encode('utf-8'))
-            _log_recall_event('hit', len(merged), PROJECT_ID, caller=caller)
+            _log_recall_event('hit', len(merged), PROJECT_ID, caller=caller,
+                              keys=[f"{r['kind']}:{r.get('id') or r.get('key')}"
+                                    for r in merged])
         except Exception as e:
             # 실패도 폴백 신호로 — 훅이 v1 경로로 즉시 전환
             handler.wfile.write(json.dumps(
