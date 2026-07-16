@@ -8,6 +8,8 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-07-16] Claude: [로드맵 ③] handle_chat 코덱스 회상 주입 — codex는 훅이 없어
+#   중계 시점 접두 주입이 상한선. claude/antigravity는 자체 훅 주입이라 제외(이중 주입 금지).
 # [2026-07-15] Claude: handle_run에 project_id 꼬리표 — 크로스 프로젝트 간섭 수정.
 #   _current_run.project_id로 훅이 "다른 프로젝트 실행 중"을 판별, 로그 메타에도 기록.
 # [2026-03-25] Claude: stderr 데드락 수정 — handle_chat() subprocess stderr=DEVNULL
@@ -1001,6 +1003,28 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
     return cmd
 
 
+def _codex_recall_prefix(message: str, server_port: int) -> str:
+    """코덱스 중계분에 접두할 회상 v2 요약 — 실패/무관련이면 '' (주입 생략).
+
+    [WHY] 코덱스는 훅 시스템이 없어 자동 회상 주입이 구조적으로 불가 —
+      대시보드/오피스 공용 중계 지점(handle_chat)이 유일한 주입 통로 (로드맵 ③).
+      hive_hook(claude)·antigravity_hook(BeforeAgent)과 같은 recall_client 경로를
+      재사용해 3에이전트 회상이 한 곳(recall-smart)으로 수렴한다.
+    [제약] 서버 자신은 VIBE_SERVER_PORT env 미보유(daemons.py:115는 자식에게만 주입)
+      → 자기 바인드 포트를 setdefault해 recall_client의 포트 스캔(최악 0.3초×20) 생략.
+    [불변식] 어떤 실패도 채팅 중계를 중단시키지 않는다 — 전부 삼키고 '' 반환.
+      recall_client 자체도 2초 상한 + 3단 폴백 내장 (hive_hook과 동일 계약).
+    """
+    try:
+        import os
+        os.environ.setdefault('VIBE_SERVER_PORT', str(server_port))
+        from src.recall_client import smart_recall_summary
+        short = message.strip().replace('\n', ' ')[:120]
+        return smart_recall_summary(short, limit=5, caller='codex')
+    except Exception:
+        return ''
+
+
 def handle_chat(handler) -> None:
     """POST /api/agent/chat — CLI spawn + SSE 실시간 스트리밍.
 
@@ -1099,7 +1123,15 @@ def handle_chat(handler) -> None:
 
         # Antigravity/Codex: stdin에 메시지 전달 후 EOF
         if use_stdin_pipe:
-            proc.stdin.write(message.encode('utf-8'))
+            # [로드맵 ③] 회상 주입은 stdin 중계분에만 — history/_bus_append는 원문 유지
+            # (채팅 UI/텔레그램에 회상 블록 노출 금지). codex 한정: claude/antigravity는
+            # 자체 훅이 이미 주입하므로 여기서 또 하면 이중 주입.
+            relay_text = message
+            if cli == 'codex':
+                prefix = _codex_recall_prefix(message, handler.server.server_address[1])
+                if prefix:
+                    relay_text = f"[하이브 회상 — 과거 지식]\n{prefix}\n---\n{message}"
+            proc.stdin.write(relay_text.encode('utf-8'))
             proc.stdin.close()
 
         # 히스토리에 사용자 메시지 추가 + 메시지 버스 기록 (텔레그램 동기화)

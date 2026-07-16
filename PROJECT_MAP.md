@@ -45,7 +45,7 @@
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `agent_api.py` | 1373 | CLI 에이전트 관리 API (/api/agent/*) |
+| `agent_api.py` | 1405 | CLI 에이전트 관리 API (/api/agent/*) + 코덱스 회상 주입 |
 | `codegraph_api.py` | 226 |  |
 | `commands_api.py` | 54 |  |
 | `config_api.py` | 81 |  |

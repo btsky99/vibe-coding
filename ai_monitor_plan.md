@@ -1,83 +1,74 @@
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: 로드맵 ② 안티그래비티 훅 회상 주입 이식 실행 계획 — recall-smart caller 계측 +
-             antigravity_hook BeforeAgent 회상 주입 + 에이전트별 실발화율 분리 계측.
+DESCRIPTION: 로드맵 ③ 코덱스 래퍼 회상 주입 실행 계획 — handle_chat(대시보드/오피스 공용
+             프롬프트 중계 지점)에서 cli=='codex'일 때만 회상 v2 요약을 stdin 전달분에 접두.
 
 REVISION HISTORY:
-- 2026-07-15 Claude: 신규. 지식창고 재설계(P1+P2) 완료 → 교체. 클로드 루프 100%(①, a165156) 후속.
+- 2026-07-16 Claude: 신규. 로드맵 ②(안티그래비티 회상 주입, db089a6) 완료 → 교체. A안 승인됨.
 -->
 
-# 구현 계획 — 로드맵 ② 안티그래비티 훅 회상 주입 이식
+# 구현 계획 — 로드맵 ③ 코덱스 래퍼 회상 주입
 
-> **근거**: 2026-07-14 합의 로드맵 (`project_claude_loop_100` 메모리). ① 클로드 루프 100% 실측 검증
-> 완료(a165156, recall 전부 warm hit) → ② 안티그래비티는 antigravity_hook.py(BeforeAgent) 구조가
-> 이미 있으나 **기록만 하고 회상 주입 미구현** — 저비용 이식 대상.
-> **북극성**: 에이전트 확장이 아니라 이미 굴러가는 자가치유 루프의 실효율 완성 (`project_ultimate_goal`).
+> **근거**: 2026-07-14 합의 로드맵 (`project_claude_loop_100` 메모리). ①(a165156)·②(db089a6)
+> 실측 검증 완료 → ③ 코덱스는 훅 시스템이 없어 **대시보드 프롬프트 중계 시점 래퍼 주입이 상한선**.
+> **북극성**: 에이전트 확장이 아니라 자가치유 루프 실효율 완성 (`project_ultimate_goal`).
 
-## 핵심 사실 (정찰 실측, 2026-07-15)
-- 원형: `scripts/hive_hook.py:584,674` — 프롬프트 앞 120자로 `smart_recall_summary(short, limit=5)`
-  1회 호출, 결과 텍스트를 컨텍스트로 주입. 예외는 전부 삼킴(훅 중단 금지).
-- 이식처: `scripts/antigravity_hook.py:489` BeforeAgent — `_build_additional_context()`가 ITCP 수신
-  + 의도 감지만 수행. `sys.path`에 `.ai_monitor` 이미 등록(32-34행) → `from src.recall_client import` 가능.
-  [제약] BeforeAgent는 빨라야 함(2026-03-18 타임아웃 사고) — recall_client 자체가 2초 상한 + 폴백 내장이라 허용.
-- 계측: `memory_api.py:130 _log_recall_event`가 서버 쪽에서 pg_logs(agent='recall') 기록 —
-  호출자 구분 없음. `heal_metrics.py:87-114`는 metadata JSON 키(items/reason)만 파싱 → metadata에
-  `caller` 추가는 기존 집계 무파괴.
+## 핵심 사실 (정찰 실측, 2026-07-16)
+- 중계 지점: `.ai_monitor/api/agent_api.py:1004 handle_chat` (POST /api/agent/chat) —
+  클래식 ChatSlot.tsx + 오피스 useOfficeChat.ts **공용**. 오피스 Phase 5 통로 이미 존재.
+- 코덱스 전달: `stdin=PIPE`(agent_api.py:1100-1103) — 메시지 앞 접두 주입 안전.
+- 재사용 부품: `src/recall_client.smart_recall_summary(query, limit, caller)` — 2초 상한
+  + 3단 폴백 + 예외 전부 삼킴. ②에서 caller 계측(memory_api.py:295) + heal_report
+  에이전트별 분해 완비 → `caller='codex'`만 넘기면 계측 자동.
+- [제약] 서버 프로세스 자신은 `VIBE_SERVER_PORT` env 미보유(daemons.py:115는 자식에게만
+  주입) → recall_client가 포트 스캔(보통 9000 즉답, 최악 0.3초×20). handler.server의
+  실제 바인드 포트로 setdefault해 스캔 생략.
+- [불변식] claude(hive_hook)/antigravity(BeforeAgent 훅)는 이미 회상 주입됨 —
+  handle_chat에서는 **codex만** 주입 (이중 주입 금지).
+- agent_api.py 현재 1373줄 — +~25줄로 1500 한계 무위반.
 
 ---
 
 ## 태스크
 
-### [x] Task 1: recall-smart에 caller 계측 필드 추가
-- **파일**: `.ai_monitor/api/memory_api.py`
-- **방법**: `/api/memory/recall-smart` 핸들러에서 `caller = str(data.get('caller') or 'claude')[:24]`
-  추출 (기본 'claude' = 기존 호출자 하위호환). `_log_recall_event(status, items, project_id, reason, caller)`
-  시그니처 확장 — metadata에 `'caller': caller` 추가. task 문자열은 형식 유지(heal_metrics 무관하지만
-  사람 열람용으로 `caller=` 접미 허용).
-- **검증**: 기존 호출(캐럴러 없음) → metadata.caller='claude', caller='antigravity' 전달 → 그대로 기록.
+### [x] Task 1: handle_chat에 코덱스 회상 주입
+- **파일**: `.ai_monitor/api/agent_api.py`
+- **방법**:
+  1. 모듈 헬퍼 `_codex_recall_prefix(message: str, server_port: int) -> str` 신설 —
+     `os.environ.setdefault('VIBE_SERVER_PORT', str(server_port))` 후
+     `from src.recall_client import smart_recall_summary` (지연 import, 훅 스타일)로
+     `smart_recall_summary(message[:120], limit=5, caller='codex')` 호출.
+     요약이 비면 `''` 반환. 어떤 예외도 삼킴(채팅 중계 중단 금지).
+  2. `handle_chat`에서 stdin 쓰기 직전(`use_stdin_pipe` 블록):
+     `cli == 'codex'`이고 prefix가 있으면
+     `relay = f"[하이브 회상 — 과거 지식]\n{prefix}\n---\n{message}"` 를 stdin에 쓴다.
+  3. `history` 및 `_bus_append`에는 **원문 message 유지** (UI/텔레그램에 회상 블록 노출 금지).
+- **검증**: `wc -l` ≤ 1500. 주입은 stdin 한 곳만(원문/주입본 분리 육안 확인).
 
-### [x] Task 2: recall_client.smart_recall_summary에 caller 파라미터
-- **파일**: `.ai_monitor/src/recall_client.py`
-- **방법**: `smart_recall_summary(query, limit=5, caller='claude')` — 요청 payload에 `'caller': caller`
-  포함. 로컬 v1 폴백 경로는 서버 미경유라 계측 없음(기존과 동일, 변경 없음).
-- **검증**: hive_hook 기존 호출 무변경 동작(기본값). 시그니처 하위호환.
-- **의존**: Task 1과 독립 (병렬 가능).
-
-### [x] Task 3: antigravity_hook BeforeAgent 회상 주입
-- **파일**: `scripts/antigravity_hook.py`
-- **방법**: `_build_additional_context(prompt)`에 회상 섹션 추가 — hive_hook.py:584 패턴대로
-  `short = prompt.strip().replace("\n", " ")[:120]`, `smart_recall_summary(short, limit=5,
-  caller='antigravity')` 호출, 결과 있으면 `sections.append(...)`. try/except로 전부 삼킴
-  (Gemini CLI는 훅 JSON 오염/지연 시 hook failed — 회상 실패가 훅을 못 죽이게).
-  표준 헤더 REVISION HISTORY 갱신.
-- **검증**: `echo '{"hook_event_name":"BeforeAgent","prompt":"..."}' | python scripts/antigravity_hook.py`
-  → stdout JSON `hookSpecificOutput.additionalContext`에 회상 텍스트 포함.
-- **의존**: Task 2 완료 후.
-
-### [x] Task 4: heal_metrics 에이전트별 실발화 분해 (heal_report.py 표시 포함)
-- **파일**: `.ai_monitor/src/heal_metrics.py`
-- **방법**: `_recall_metrics`의 live 블록에 `callers` 분해 추가 —
-  `SELECT coalesce(metadata->>'caller','claude') AS caller, count(*) ... GROUP BY 1` (14일 창, hit/total).
-  기존 fire_rate/hit_rate 집계는 무변경.
-- **검증**: heal_report 실행 시 live.callers에 claude/antigravity 별 수치 노출.
+### [x] Task 2: 회귀 + 실측 검증
 - **의존**: Task 1 완료 후.
+- **방법**: `pytest tests/` 전체(기존 127개 무파괴 확인). 서버 재기동 후 실측:
+  코덱스 슬롯(T3)에 메시지 전송 → `pg_logs`에서 `agent='recall' AND metadata->>'caller'='codex'`
+  이벤트 확인 + heal_report 에이전트별 분해에 codex 행 등장 확인.
+  (서버 미가동/코덱스 CLI 부재 시: recall-smart를 caller='codex'로 직접 POST해 계측 경로만 확증)
 
-### [x] Task 5: 실측 검증 + 회귀 — 2026-07-15 완료: 훅 주입 hit(items=5, caller=antigravity DB 실측), pytest 127 통과, heal_report 에이전트별 분해(claude 60%/antigravity 100%) 노출
-- **방법**: ① 서버 기동 상태에서 Task 3 검증 커맨드 실행 → pg_logs에
-  `agent='recall' AND metadata->>'caller'='antigravity'` 행 생성 확인 (DB 실측).
-  ② `pytest tests/` 전체 회귀. ③ `python scripts/heal_report.py`로 callers 분해 출력 확인.
-- **의존**: 전체 완료 후.
+### [x] Task 3: 마무리 — 커밋 + 메모리 갱신
+- **의존**: Task 2 완료 후.
+- **방법**: Conventional Commits 3단 본문 커밋(`feat(agent): 로드맵 ③ 코덱스 회상 주입`).
+  `project_claude_loop_100.md` 메모리에 ③ 완료 기록(주입 지점 = handle_chat,
+  3에이전트 회상 경로 수렴 완성). `python scripts/hive_bridge.py` + checkpoint 기록.
 
 ---
 
 ## 의존성 요약
-- Task 3 ← Task 2 / Task 4 ← Task 1 / Task 5 ← 전체. Task 1·2는 병렬 가능.
+- Task 1 → Task 2 → Task 3 순차.
 
 ## 완료 정의
-- 안티그래비티 BeforeAgent가 프롬프트마다 회상 v2를 주입받음 (서버 warm 시 벡터 회상, 불통 시 v1 폴백).
-- pg_logs 회상 이벤트가 caller로 구분되어 heal_report에서 에이전트별 실발화율이 보임.
-- 기존 클로드 훅 경로는 무변경 동작 (하위호환).
-- 배포는 `/vibe-release`로 별도 진행 (미배포 지식창고 재설계 c3ce0c9와 함께 나감).
+- 대시보드/오피스 채팅에서 코덱스로 보내는 모든 메시지에 회상 v2가 접두 주입됨
+  (서버 warm 시 벡터 회상, 불통 시 v1 폴백, 요약 없으면 무주입).
+- pg_logs 회상 이벤트에 caller='codex'가 기록되어 heal_report 에이전트별 분해에 노출.
+- claude/antigravity 채팅 경로는 무변경 (이중 주입 없음).
+- 이로써 3에이전트(claude 훅 / antigravity 훅 / codex 래퍼) 회상 경로 수렴 — 클로드 루프 100% 로드맵 종결.
 
 ## 남은 로드맵
-③ 코덱스 래퍼 주입 — 오피스 Phase 5(채팅→agent_api 브릿지)가 통로. 이 계획 범위 아님.
+- ③ 완료 후: 메타버스 재개 여부 재논의 (2026-07-14 합의).

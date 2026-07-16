@@ -1,5 +1,14 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-07-16] - 로드맵 ③ 코덱스 회상 주입 (클로드 루프 100% 종결)
+
+### 🧠 코덱스 래퍼 회상 주입 — 3에이전트 회상 경로 수렴
+- **[Feature] agent_api.py `_codex_recall_prefix` + `handle_chat`**: 코덱스는 훅 시스템이 없어 대시보드/오피스 공용 중계 지점(POST /api/agent/chat)에서 **stdin 전달분에만** 회상 v2 요약을 접두 주입. history/텔레그램 버스는 원문 유지(UI 노출 금지). claude(hive_hook)/antigravity(BeforeAgent)는 자체 훅 주입이라 제외 — 이중 주입 방지.
+- **[계측] caller='codex'**: ②에서 완비된 recall-smart caller 계측에 자동 편승 — heal_report 에이전트별 분해에 codex 행 등장 (실측: hit items=5).
+- **[제약 해소] VIBE_SERVER_PORT setdefault**: 서버 자신은 이 env 미보유(데몬 자식에게만 주입) → 자기 바인드 포트로 setdefault해 recall_client 포트 스캔 생략. 멀티 프로젝트 동시 가동(9000=ons, 9010=vibe-coding) 환경에서도 **자기 프로젝트 지식만** 주입됨을 실측 확인.
+- **[Test] 전체 127 pass** + recall_client→recall-smart→pg_logs 계측 엔드투엔드 실측.
+
+
 ## [2026-07-13] - 지식 노트 파이프라인 재설계 (나만의 지식 창고)
 
 ### 🧹 노이즈 차단 — 세션요약이 영구지식을 점령하던 사고
