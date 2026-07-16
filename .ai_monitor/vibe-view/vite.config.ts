@@ -31,15 +31,20 @@ export default defineConfig({
     emptyOutDir: false,
     // [v3.7.62] 1MB 단일 번들 → 청크 분할로 초기 로드 속도 개선
     // Monaco Editor(~800kB)를 별도 청크로 분리해 첫 화면 렌더링을 앞당김
+    // [Vite 8 마이그레이션 2026-07-16] Rolldown은 객체형 manualChunks 미지원 →
+    // codeSplitting.groups로 전환(advancedChunks는 8.1에서 deprecated). 정규식 끝의 [\\/]가 필수 — /react/만 쓰면
+    // react-icons/react-markdown까지 vendor-react로 빨려들어감. 그룹은 선착순 매칭.
     rollupOptions: {
       output: {
-        manualChunks: {
-          // React 코어 — 가장 먼저 로드되어야 하는 필수 런타임
-          'vendor-react': ['react', 'react-dom'],
-          // Monaco Editor — 무거운 에디터, 지연 로드 허용
-          'vendor-monaco': ['@monaco-editor/react', 'monaco-editor'],
-          // 아이콘 라이브러리
-          'vendor-icons': ['lucide-react'],
+        codeSplitting: {
+          groups: [
+            // Monaco Editor — 무거운 에디터, 지연 로드 허용
+            { name: 'vendor-monaco', test: /node_modules[\\/](monaco-editor|@monaco-editor)[\\/]/ },
+            // React 코어 — 가장 먼저 로드되어야 하는 필수 런타임
+            { name: 'vendor-react', test: /node_modules[\\/](react|react-dom)[\\/]/ },
+            // 아이콘 라이브러리
+            { name: 'vendor-icons', test: /node_modules[\\/]lucide-react[\\/]/ },
+          ],
         },
       },
     },
