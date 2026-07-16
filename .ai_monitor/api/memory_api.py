@@ -3,6 +3,8 @@ FILE: api/memory_api.py
 DESCRIPTION: Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 짧은 쿼리(<20자) 임계 0.60 상향 — 일반 지시에 무관 지식이
+  0.5+ 유사도로 주입되던 회상 노이즈 컷 (A2)
 - 2026-07-15 Claude: [로드맵 ②] recall-smart caller 필드 계측 — 에이전트별(claude/antigravity)
   실발화율 분리. 미전송 시 'claude' 하위호환
 - 2026-07-15 Claude: recall-smart 폴백 사유 3분화(no_vector/load_failed/not_warm) — venv
@@ -345,6 +347,9 @@ def handle_post(handler, path: str, data: dict,
                 return True
 
             # 3개 지식원 통합 검색 → 점수순 병합. 임계 0.45는 vector_search 기본값.
+            # [2026-07-16] 짧은 쿼리(저정보)는 임계 0.60 상향 — "그럼 진행해" 같은 일반
+            # 지시가 임베딩 변별력 부족으로 무관 지식과 0.5+ 매칭되던 노이즈 컷.
+            min_sim = 0.45 if len(query) >= 20 else 0.60
             kind_tables = [
                 ('zettel', 'zettel_notes'),
                 ('memory', 'hive_memory'),
@@ -352,7 +357,8 @@ def handle_post(handler, path: str, data: dict,
             ]
             merged = []
             for kind, table in kind_tables:
-                for row in vector_search(table, vec, project_id=PROJECT_ID, limit=limit):
+                for row in vector_search(table, vec, project_id=PROJECT_ID,
+                                         limit=limit, min_similarity=min_sim):
                     row['kind'] = kind
                     row['sim'] = float(row.get('sim') or 0)
                     row['score'] = float(row.get('score') or 0)

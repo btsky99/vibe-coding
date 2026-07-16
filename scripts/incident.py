@@ -87,6 +87,19 @@ def main():
         else:
             print(f"✅ 사고 기록 완료 (시그니처 {result['signature']}) — 재발 시 자동 회상됨")
 
+        # [자가치유 ③ 2026-07-16] 클러스터 증류 — 재발 트리거는 재발률 0%라 영영 무발화
+        # (승인 교훈 1건에서 파이프 정지). 매 기록마다 파일 클러스터(30일 3건+)를 재평가 —
+        # dedupe('cluster:파일') upsert라 승인 큐 오염 없음. 실패는 기록을 방해하지 않는다.
+        try:
+            sys.path.insert(0, str(_PROJECT_ROOT / 'scripts'))
+            from lesson import distill_from_incidents
+            new_keys = distill_from_incidents()
+            if new_keys:
+                print(f"   📥 사고다발 클러스터 {len(new_keys)}건 교훈 후보 갱신 — "
+                      f"승인: python scripts/lesson.py list")
+        except Exception:
+            pass
+
     elif args.cmd == 'search':
         results = search_incidents(args.query, project_id=project_id)
         if args.json:

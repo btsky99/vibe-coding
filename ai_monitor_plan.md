@@ -1,74 +1,71 @@
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: 로드맵 ③ 코덱스 래퍼 회상 주입 실행 계획 — handle_chat(대시보드/오피스 공용
-             프롬프트 중계 지점)에서 cli=='codex'일 때만 회상 v2 요약을 stdin 전달분에 접두.
+DESCRIPTION: A+B 묶음 실행 계획 — A. 회상 정밀도 개선(저정보 노이즈 컷) +
+             B. 교훈 파이프 소생(사고 클러스터 자동 증류). 2026-07-16 전반 분석 후속.
 
 REVISION HISTORY:
-- 2026-07-16 Claude: 신규. 로드맵 ②(안티그래비티 회상 주입, db089a6) 완료 → 교체. A안 승인됨.
+- 2026-07-16 Claude: 신규. 로드맵 ③(a842452) + 포트 대조(1aa84ba) 완료 → 교체.
+  사용자 승인: A+B → C → 정리 → D(메타버스 재논의) 순.
 -->
 
-# 구현 계획 — 로드맵 ③ 코덱스 래퍼 회상 주입
+# 구현 계획 — A. 회상 정밀도 + B. 교훈 파이프 소생
 
-> **근거**: 2026-07-14 합의 로드맵 (`project_claude_loop_100` 메모리). ①(a165156)·②(db089a6)
-> 실측 검증 완료 → ③ 코덱스는 훅 시스템이 없어 **대시보드 프롬프트 중계 시점 래퍼 주입이 상한선**.
-> **북극성**: 에이전트 확장이 아니라 자가치유 루프 실효율 완성 (`project_ultimate_goal`).
+> **근거**: 2026-07-16 전반 분석 실측 — ① 회상 노이즈(일반 지시에 무관 지식 0.5 유사도
+> 주입, 이 세션에서 실증), ② 교훈 증류 승인 1건/후보 0건(재발 트리거만 있는데 재발률 0%라
+> 영영 안 발화), ③ 참조율 30%. **북극성**: 삽질 감소 (`project_ultimate_goal`).
 
-## 핵심 사실 (정찰 실측, 2026-07-16)
-- 중계 지점: `.ai_monitor/api/agent_api.py:1004 handle_chat` (POST /api/agent/chat) —
-  클래식 ChatSlot.tsx + 오피스 useOfficeChat.ts **공용**. 오피스 Phase 5 통로 이미 존재.
-- 코덱스 전달: `stdin=PIPE`(agent_api.py:1100-1103) — 메시지 앞 접두 주입 안전.
-- 재사용 부품: `src/recall_client.smart_recall_summary(query, limit, caller)` — 2초 상한
-  + 3단 폴백 + 예외 전부 삼킴. ②에서 caller 계측(memory_api.py:295) + heal_report
-  에이전트별 분해 완비 → `caller='codex'`만 넘기면 계측 자동.
-- [제약] 서버 프로세스 자신은 `VIBE_SERVER_PORT` env 미보유(daemons.py:115는 자식에게만
-  주입) → recall_client가 포트 스캔(보통 9000 즉답, 최악 0.3초×20). handler.server의
-  실제 바인드 포트로 setdefault해 스캔 생략.
-- [불변식] claude(hive_hook)/antigravity(BeforeAgent 훅)는 이미 회상 주입됨 —
-  handle_chat에서는 **codex만** 주입 (이중 주입 금지).
-- agent_api.py 현재 1373줄 — +~25줄로 1500 한계 무위반.
+## 핵심 사실 (정찰 실측)
+- 노이즈 원인 1: `daemons.py:571` 백필이 빈 설명도 '(빈 내용)'으로 임베딩(무한루프 방지) —
+  저정보 레코드가 일반 쿼리와 0.5+ 매칭. agent_experience 459건 중 저정보 6건 + 커밋덤프성 다수.
+- 노이즈 원인 2: `pg_vector_search.py:157` 임계 0.45 고정 — 짧은 쿼리(저정보)일수록
+  임베딩 변별력이 떨어져 무관 매칭 통과.
+- 교훈 파이프: `lesson.py:47 propose_candidate` 코드 호출 가능 + dedupe 내장.
+  자동 트리거는 `incident.py:71` 재발 시뿐 — 재발률 0%라 영영 무발화.
+- 증류 원료 실증: 30일 파일 클러스터 — hive_hook.py 3건, TerminalSlot.tsx 3건 (jsonb
+  `files` 컬럼, `jsonb_array_elements_text`로 풀어야 함 — json_* 함수는 타입 불일치).
+- [불변식] lessons.md 쓰기는 approve 경로 단 하나 (승인 게이트) — distill은 후보 적재만.
 
 ---
 
 ## 태스크
 
-### [x] Task 1: handle_chat에 코덱스 회상 주입
-- **파일**: `.ai_monitor/api/agent_api.py`
+### [x] Task 1 (A1): 검색단 저정보 필터
+- **파일**: `.ai_monitor/src/pg_vector_search.py`
+- **방법**: `_TABLES`에 테이블별 `quality` WHERE 절 추가 — vector_search SQL에 AND 결합.
+  - agent_experience: `length(coalesce(description,'')) >= 20`
+  - hive_memory: `length(coalesce(title,'') || coalesce(content,'')) >= 30`
+  - zettel_notes: `length(coalesce(title,'') || coalesce(content,'')) >= 30`
+  - incident_ledger: 필터 없음 (사고는 짧아도 가치 높음)
+  쿼리 시점 필터라 데이터 마이그레이션 불필요 — '(빈 내용)' placeholder는 남되 안 뜸.
+- **검증**: description='' 경험노트가 vector_search 결과에서 사라짐.
+
+### [x] Task 2 (A2): 저정보 쿼리 임계 상향
+- **파일**: `.ai_monitor/api/memory_api.py`
+- **방법**: recall-smart 핸들러에서 `min_sim = 0.45 if len(query) >= 20 else 0.60` —
+  vector_search 호출에 `min_similarity=min_sim` 전달. 짧은 일반 지시("그럼 진행해")는
+  더 높은 확신이 있을 때만 주입.
+- **검증**: 저정보 쿼리로 recall-smart POST → 무관 지식 미주입.
+
+### [x] Task 3 (B): 사고 클러스터 자동 증류
+- **파일**: `scripts/lesson.py`, `scripts/incident.py`
 - **방법**:
-  1. 모듈 헬퍼 `_codex_recall_prefix(message: str, server_port: int) -> str` 신설 —
-     `os.environ.setdefault('VIBE_SERVER_PORT', str(server_port))` 후
-     `from src.recall_client import smart_recall_summary` (지연 import, 훅 스타일)로
-     `smart_recall_summary(message[:120], limit=5, caller='codex')` 호출.
-     요약이 비면 `''` 반환. 어떤 예외도 삼킴(채팅 중계 중단 금지).
-  2. `handle_chat`에서 stdin 쓰기 직전(`use_stdin_pipe` 블록):
-     `cli == 'codex'`이고 prefix가 있으면
-     `relay = f"[하이브 회상 — 과거 지식]\n{prefix}\n---\n{message}"` 를 stdin에 쓴다.
-  3. `history` 및 `_bus_append`에는 **원문 message 유지** (UI/텔레그램에 회상 블록 노출 금지).
-- **검증**: `wc -l` ≤ 1500. 주입은 stdin 한 곳만(원문/주입본 분리 육안 확인).
+  1. lesson.py에 `distill_from_incidents(days=30, min_cluster=3)` 신설 — 파일별 사고
+     클러스터(≥3건) 추출 → `propose_candidate(dedupe_key='cluster:'+파일슬러그)`로
+     "[사고다발] {파일} — {n}건: 원인 요약" 후보 적재. CLI `distill` 서브커맨드 추가.
+  2. incident.py record 성공 직후 `distill_from_incidents()` 조용히 호출(예외 삼킴) —
+     매 사고 기록마다 클러스터 재평가, dedupe로 승인 큐 오염 없음.
+- **검증**: `lesson.py distill` 실행 → hive_hook/TerminalSlot 클러스터 후보 2건 적재 →
+  `lesson.py list`에 노출. 재실행 시 중복 미생성(dedupe).
 
-### [x] Task 2: 회귀 + 실측 검증
-- **의존**: Task 1 완료 후.
-- **방법**: `pytest tests/` 전체(기존 127개 무파괴 확인). 서버 재기동 후 실측:
-  코덱스 슬롯(T3)에 메시지 전송 → `pg_logs`에서 `agent='recall' AND metadata->>'caller'='codex'`
-  이벤트 확인 + heal_report 에이전트별 분해에 codex 행 등장 확인.
-  (서버 미가동/코덱스 CLI 부재 시: recall-smart를 caller='codex'로 직접 POST해 계측 경로만 확증)
-
-### [x] Task 3: 마무리 — 커밋 + 메모리 갱신
-- **의존**: Task 2 완료 후.
-- **방법**: Conventional Commits 3단 본문 커밋(`feat(agent): 로드맵 ③ 코덱스 회상 주입`).
-  `project_claude_loop_100.md` 메모리에 ③ 완료 기록(주입 지점 = handle_chat,
-  3에이전트 회상 경로 수렴 완성). `python scripts/hive_bridge.py` + checkpoint 기록.
+### [x] Task 4: 회귀 + 커밋
+- **방법**: pytest 전체. 저정보 쿼리/정상 쿼리 대조 실측(함수 단위 — recall-smart 서버
+  반영은 앱 재시작 후). Conventional Commits 3단 본문. CHANGELOG/메모리 갱신.
 
 ---
 
-## 의존성 요약
-- Task 1 → Task 2 → Task 3 순차.
+## 의존성: Task 1·2·3 병렬 가능, Task 4 ← 전체.
 
 ## 완료 정의
-- 대시보드/오피스 채팅에서 코덱스로 보내는 모든 메시지에 회상 v2가 접두 주입됨
-  (서버 warm 시 벡터 회상, 불통 시 v1 폴백, 요약 없으면 무주입).
-- pg_logs 회상 이벤트에 caller='codex'가 기록되어 heal_report 에이전트별 분해에 노출.
-- claude/antigravity 채팅 경로는 무변경 (이중 주입 없음).
-- 이로써 3에이전트(claude 훅 / antigravity 훅 / codex 래퍼) 회상 경로 수렴 — 클로드 루프 100% 로드맵 종결.
-
-## 남은 로드맵
-- ③ 완료 후: 메타버스 재개 여부 재논의 (2026-07-14 합의).
+- 일반 지시에 무관 지식이 주입되지 않음 (저정보 행 차단 + 짧은 쿼리 임계 0.60).
+- 사고 3건+ 파일 클러스터가 자동으로 교훈 후보가 됨 — 승인 게이트는 불변.
+- 다음: C(회상 활용 계측) → 정리(ty/psycopg3/Vite8, telegram_bridge 분할) → D(메타버스 재논의).

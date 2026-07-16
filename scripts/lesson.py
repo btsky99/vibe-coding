@@ -6,6 +6,8 @@ DESCRIPTION: 세션 교훈 증류 CLI — propose(후보 적재) / list / approv
              .claude/rules/lessons.md append) / reject. 자가 치유 2.0 ③ (Task 16).
 
 REVISION HISTORY:
+- 2026-07-16 Claude: distill_from_incidents 신설 — 사고 파일 클러스터(30일 3건+) 자동
+  증류. 재발-only 트리거가 재발률 0%로 영영 무발화하던 파이프 소생 (B)
 - 2026-06-10 Claude: 최초 구현
   - [불변식] lessons.md 쓰기는 approve 경로 단 하나 — 승인 게이트.
     CLAUDE.md 본문 자동 수정은 어떤 경로로도 금지 (brainstorm 승인 결정).
@@ -66,12 +68,48 @@ def propose_candidate(lesson: str, why: str = '', dedupe_key: str = '') -> str:
     return key
 
 
+def distill_from_incidents(days: int = 30, min_cluster: int = 3) -> list[str]:
+    """사고 장부의 파일별 클러스터(≥min_cluster건)를 교훈 후보로 자동 증류.
+
+    [WHY] 기존 자동 트리거는 '재발'뿐인데 재발률 0%라 영영 무발화 — 승인 교훈 1건에서
+      멈춘 파이프의 소생 (2026-07-16 전반 분석). 같은 파일에서 사고가 반복되면 그 파일에
+      구조적 함정이 있다는 신호 — 재발 전에 교훈화한다.
+    [불변식] 후보 적재만 — lessons.md 쓰기는 approve 게이트 불변.
+    [dedupe] 'cluster:{파일}' 키 upsert — 사고가 더 쌓이면 같은 후보가 갱신될 뿐
+      승인 큐를 오염시키지 않는다.
+    [제약] files는 jsonb — jsonb_array_elements_text 필수 (json_* 함수는 타입 불일치 에러).
+    """
+    query_rows, _execute, _sql_text = _store()
+    rows = query_rows(f"""
+        SELECT f.value AS file, count(*) AS n,
+               string_agg(DISTINCT left(root_cause, 60), ' / ') AS causes
+        FROM incident_ledger, jsonb_array_elements_text(files) AS f
+        WHERE created_at > now() - interval '{int(days)} days'
+        GROUP BY 1 HAVING count(*) >= {int(min_cluster)}
+        ORDER BY 2 DESC;
+    """)
+    keys = []
+    for r in rows:
+        fpath = str(r['file']).strip()
+        slug = fpath.replace('/', '-').replace('\\', '-').replace('.', '_')
+        keys.append(propose_candidate(
+            lesson=(f"[사고다발] {fpath} — {days}일 내 사고 {r['n']}건. "
+                    f"이 파일 수정 전 incident.py search로 과거 원인 필독"),
+            why=f"원인들: {r['causes']}",
+            dedupe_key=f"cluster:{slug}",
+        ))
+    return keys
+
+
 def main():
     parser = argparse.ArgumentParser(description='세션 교훈 증류 — 승인된 것만 lessons.md로')
     sub = parser.add_subparsers(dest='cmd', required=True)
     p_prop = sub.add_parser('propose', help='교훈 후보 제안 (파일 미변경)')
     p_prop.add_argument('lesson', help='교훈 본문 (1~3줄)')
     p_prop.add_argument('--why', default='', help='이 교훈이 나온 근거(사건)')
+    p_dist = sub.add_parser('distill', help='사고 장부 클러스터 → 교훈 후보 자동 증류')
+    p_dist.add_argument('--days', type=int, default=30)
+    p_dist.add_argument('--min-cluster', type=int, default=3)
     sub.add_parser('list', help='대기 중인 후보 목록')
     p_appr = sub.add_parser('approve', help='후보 승인 → lessons.md append')
     p_appr.add_argument('num', type=int, help='list에 표시된 번호')
@@ -84,6 +122,16 @@ def main():
     if args.cmd == 'propose':
         propose_candidate(args.lesson, args.why)
         print(f"📥 교훈 후보 적재 완료 — 사용자 승인 대기. 승인: lesson.py list → approve <번호>")
+        return
+
+    if args.cmd == 'distill':
+        keys = distill_from_incidents(days=args.days, min_cluster=args.min_cluster)
+        if keys:
+            print(f"📥 사고 클러스터 {len(keys)}건 → 교훈 후보 적재 (승인 대기): ")
+            for k in keys:
+                print(f"   - {k}")
+        else:
+            print(f"클러스터 없음 — 최근 {args.days}일 내 같은 파일 사고 {args.min_cluster}건+ 미발견")
         return
 
     cands = _candidates(query_rows, _sql_text)

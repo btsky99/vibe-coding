@@ -186,18 +186,26 @@ def test_live_vector_schema_and_threshold():
     assert vector_available()
 
     # 테스트 행 심기 — 직교 벡터 2개로 임계 필터 검증
+    # [2026-07-16] quality 필터(title+content ≥ 30자) 도입 — 픽스처가 통과하도록
+    # 본문 확장 + 저정보 행(b)이 자기 임베딩으로도 차단되는 회귀 검증 추가 (A1).
     execute("DELETE FROM hive_memory WHERE key LIKE 'test:selfheal2:%';")
     execute("INSERT INTO hive_memory (key, title, content, project_id, created_at, updated_at) "
-            "VALUES ('test:selfheal2:a', '테스트A', '내용', 'test_proj', "
+            "VALUES ('test:selfheal2:a', '테스트A', '임계 필터 검증용 본문 — 삼십자 이상을 채우는 설명 텍스트', 'test_proj', "
+            "'2026-06-10T00:00:00', '2026-06-10T00:00:00');")
+    execute("INSERT INTO hive_memory (key, title, content, project_id, created_at, updated_at) "
+            "VALUES ('test:selfheal2:b', '짧음', '내용', 'test_proj', "
             "'2026-06-10T00:00:00', '2026-06-10T00:00:00');")
     base = [0.0] * 384
     near = list(base); near[0] = 1.0; near[1] = 0.1          # 쿼리와 거의 동일
     qvec = list(base); qvec[0] = 1.0
     ortho = list(base); ortho[383] = 1.0                      # 직교 — sim≈0
     assert upsert_embedding('hive_memory', 'test:selfheal2:a', near)
+    assert upsert_embedding('hive_memory', 'test:selfheal2:b', near)
 
     hits = vector_search('hive_memory', qvec, project_id='test_proj', limit=5)
     assert any(h['key'] == 'test:selfheal2:a' for h in hits), "0.45 이상인데 누락"
+    # 저정보 행은 유사도 만점이어도 차단 — 회상 노이즈 컷 (quality 필터)
+    assert not any(h['key'] == 'test:selfheal2:b' for h in hits), "저정보 행이 quality 필터를 뚫음"
 
     misses = vector_search('hive_memory', ortho, project_id='test_proj', limit=5)
     assert not any(h['key'] == 'test:selfheal2:a' for h in misses), "임계 미달인데 주입"

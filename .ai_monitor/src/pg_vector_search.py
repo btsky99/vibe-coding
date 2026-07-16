@@ -3,6 +3,8 @@
 # 📝 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 +
 #          참조 피드백. 자가 치유 2.0의 기반 공사 (Task 2).
 # 🕒 변경 이력:
+# [2026-07-16] Claude — _TABLES에 quality 필터 추가 — 백필의 '(빈 내용)' placeholder
+#   임베딩이 일반 쿼리와 0.5+ 매칭되던 회상 노이즈를 검색 시점에 차단 (A1)
 # [2026-06-10] Claude — 신설 (brainstorm 승인안 ④)
 #   - [불변식] 모든 함수는 vector 확장 미설치 DB에서 조용히 비활성(no-op/[]) —
 #     기존 ILIKE 회상 경로를 절대 깨지 않는다 (그레이스풀 디그레이드).
@@ -27,12 +29,17 @@ _VECTOR_READY: bool | None = None
 # 회상 대상 테이블 화이트리스트 — 테이블별 검색 설정
 # ref: 참조 횟수 컬럼(피드백 루프), time: 시간감쇠 기준, text: 임베딩 원문
 _TABLES = {
+    # [2026-07-16] quality: 검색 시점 저정보 행 차단 — 백필이 빈 텍스트를 '(빈 내용)'
+    # placeholder로 임베딩하는 구조(무한루프 방지) 때문에 저정보 레코드가 일반 쿼리와
+    # 0.5+ 유사도로 매칭되던 회상 노이즈의 직접 수정. 데이터 마이그레이션 불필요.
+    # incident_ledger는 필터 없음 — 사고는 짧아도 회상 가치가 높다.
     'zettel_notes': {
         'pk': 'id',
         'text': "title || ' ' || LEFT(content, 400)",
         'ref': 'access_count',
         'time': "updated_at",
         'select': "id, title, LEFT(content, 200) AS content, note_type, author, project_id",
+        'quality': "length(coalesce(title,'') || coalesce(content,'')) >= 30",
     },
     'hive_memory': {
         'pk': 'key',
@@ -41,6 +48,7 @@ _TABLES = {
         # TEXT 컬럼 안전 캐스트 — 빈 문자열이면 NOW()로 간주(감쇠 0)
         'time': "CASE WHEN updated_at <> '' THEN updated_at::timestamptz ELSE NOW() END",
         'select': "key, title, LEFT(content, 200) AS content, author, project_id",
+        'quality': "length(coalesce(title,'') || coalesce(content,'')) >= 30",
     },
     'agent_experience': {
         'pk': 'id',
@@ -48,6 +56,7 @@ _TABLES = {
         'ref': 'ref_count',
         'time': "created_at",
         'select': "id, agent_id, task_type, domain, outcome, LEFT(description, 200) AS description",
+        'quality': "length(coalesce(description,'')) >= 20",
     },
     # 사고 장부 — ref에 recurrence_count 사용: 재발 잦은 사고일수록 회상 우선순위 ↑
     # [주의] bump_reference를 이 테이블에 쓰면 재발 카운트가 오염됨 — 호출 금지
@@ -167,6 +176,8 @@ def vector_search(table: str, query_vec: list[float], project_id: str = '',
         return []
     cfg = _TABLES[table]
     proj_filter = f"AND project_id = {_sql_text(project_id)}" if project_id else ""
+    # 저정보 행 차단(_TABLES.quality) — 회상 노이즈 컷 (2026-07-16)
+    quality_filter = f"AND {cfg['quality']}" if cfg.get('quality') else ""
     qv = _vec_literal(query_vec)
     sql = f"""
         SELECT {cfg['select']},
@@ -178,7 +189,7 @@ def vector_search(table: str, query_vec: list[float], project_id: str = '',
                    (1 - (embedding <=> {qv})) AS sim,
                    GREATEST(0.0, EXTRACT(EPOCH FROM (NOW() - ({cfg['time']}))) / 86400.0) AS age_days
             FROM {table}
-            WHERE embedding IS NOT NULL {proj_filter}
+            WHERE embedding IS NOT NULL {proj_filter} {quality_filter}
         ) ranked
         WHERE sim >= {float(min_similarity)}
         ORDER BY score DESC
