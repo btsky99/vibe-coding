@@ -5,6 +5,8 @@ DESCRIPTION: Antigravity CLI hook integration.
              대시보드 유지, 하이브 로그 기록, HIVEMIND.md 갱신, JSON 훅 응답 반환.
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 회상 주입에 프로젝트 경계 — stdin cwd 슬러그를 recall 경로에 전달
+  (포트 스캔이 첫 응답=타 프로젝트 서버를 잡던 구멍 수정, hive_hook과 동일 패턴).
 - 2026-03-17 Claude: BeforeAgent에서 작업 시작 시 pg_logs + pg_thoughts 자동 기록 추가
   - 다른 에이전트가 Antigravity가 뭘 하는지 하이브에서 볼 수 있도록 강제
   - 하이브 마인드 핵심 원칙: 모든 에이전트 활동은 공유되어야 함
@@ -328,7 +330,7 @@ def _register_prompt_task(prompt: str) -> None:
         pass
 
 
-def _build_additional_context(prompt: str) -> str:
+def _build_additional_context(prompt: str, caller_pid: str = "") -> str:
     sections: list[str] = []
 
     unread = _read_antigravity_messages("antigravity")
@@ -390,7 +392,10 @@ def _build_additional_context(prompt: str) -> str:
         from src.recall_client import smart_recall_summary
 
         short = prompt.strip().replace("\n", " ")[:120]
-        recall_text = smart_recall_summary(short, limit=5, caller="antigravity")
+        # [과거사고 2026-07-16] caller_pid 미전달 시 포트 스캔이 첫 응답 서버를 잡아
+        # 멀티 프로젝트 가동 중 타 프로젝트 지식이 주입됨 — 자기 서버만 채택.
+        recall_text = smart_recall_summary(short, limit=5, caller="antigravity",
+                                           project_id=caller_pid)
         if recall_text:
             sections.append(recall_text)
     except Exception:
@@ -528,7 +533,15 @@ def main() -> None:
                 pass
 
         # ITCP 수신 + 의도 감지만 수행 (가벼움)
-        additional_context = _build_additional_context(prompt)
+        # [과거사고 2026-07-16] 호출 세션의 프로젝트 슬러그(stdin cwd 기반)를 회상 경로에
+        # 전달 — hive_hook._resolve_caller_project와 동일 패턴. 실패 시 ''(기존 동작).
+        try:
+            from infra.project_context import slugify, find_project_root_marker
+            _raw_cwd = str(payload.get("cwd") or os.getcwd() or "").strip()
+            _caller_pid = slugify(find_project_root_marker(Path(_raw_cwd)) or Path(_raw_cwd))
+        except Exception:
+            _caller_pid = ""
+        additional_context = _build_additional_context(prompt, _caller_pid)
 
         if additional_context:
             _hook_response(decision="allow", context=additional_context)

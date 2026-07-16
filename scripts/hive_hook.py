@@ -18,6 +18,8 @@ DESCRIPTION: Claude Code 자동 액션 트레이스 훅 핸들러.
              - Stop             : 응답 완료 구분선
 
 REVISION HISTORY:
+- 2026-07-16 Claude: 회상 주입에도 프로젝트 경계 — smart_recall_summary에 _caller_pid
+  전달 (포트 스캔이 첫 응답=타 프로젝트 서버를 잡던 구멍, c95b2ec의 잔여분).
 - 2026-07-15 Claude: 크로스 프로젝트 간섭 수정 — 세션 컨텍스트 접근 전부에
   호출 프로젝트(project_id) 경계 강제. 식별은 __file__이 아닌 stdin cwd 기준.
 - 2026-06-10 Claude: 회상 2블록(경험/지식)을 recall_client.smart_recall_summary로
@@ -698,7 +700,11 @@ def main():
             # ("ok 진행해" → "Initial commit" 회상 같은 오작동의 직접 수정).
             try:
                 from src.recall_client import smart_recall_summary
-                _recall_text = smart_recall_summary(short, limit=5)
+                # [과거사고 2026-07-16] project_id 미전달 시 포트 스캔이 '첫 응답 서버'를
+                # 잡아 멀티 프로젝트 가동(9000=ons, 9010=vibe-coding) 중 타 프로젝트
+                # 지식이 주입됐음 — _caller_pid(stdin cwd 기반, 452행)로 자기 서버만 채택.
+                _recall_text = smart_recall_summary(short, limit=5,
+                                                    project_id=_caller_pid)
                 if _recall_text:
                     print(_recall_text, flush=True)
             except Exception:
