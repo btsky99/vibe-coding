@@ -762,6 +762,31 @@ def handle_get(handler, path: str, params: dict,
         handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
         return True
 
+    # ── /api/heartbeat ──────────────────────────────────────────────────
+    # 자율 heartbeat 상태 — 대시보드 헤더 토글 칩용 (텔레그램 /auto status와 동일 소스)
+    elif path == '/api/heartbeat':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            from infra.heartbeat_daemon import AGENT_ID, DAILY_LIMIT, load_hb_state
+            from src.pg_store import find_tasks_for_agent
+            s = load_hb_state()
+            payload = {
+                'enabled': bool(s.get('enabled')),
+                'daily_count': int(s.get('daily_count', 0)),
+                'daily_limit': DAILY_LIMIT,
+                'consecutive_fails': int(s.get('consecutive_fails', 0)),
+                'last_cycle_at': s.get('last_cycle_at') or '',
+                'last_result': s.get('last_result') or '',
+                'pending': len(find_tasks_for_agent(AGENT_ID)),
+            }
+        except Exception as e:
+            payload = {'error': str(e)}
+        handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+        return True
+
     # ── /api/context-usage ───────────────────────────────────────────────
     elif path == '/api/context-usage':
         handler.send_response(200)
@@ -1011,6 +1036,30 @@ def handle_post(handler, path: str, data: dict,
 
     반환값: 처리됐으면 True, 해당 없으면 False.
     """
+
+    # ── /api/heartbeat/toggle ────────────────────────────────────────────
+    # 자율 heartbeat on/off — scripts/auto.py·텔레그램 /auto와 동일 계약
+    # (on 시 consecutive_fails 리셋 + NOTIFY 즉시 기상)
+    if path == '/api/heartbeat/toggle':
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.end_headers()
+        try:
+            from infra.heartbeat_daemon import load_hb_state, save_hb_state
+            enabled = bool(data.get('enabled'))
+            s = load_hb_state()
+            s['enabled'] = enabled
+            if enabled:
+                s['consecutive_fails'] = 0
+            save_hb_state(s)
+            if enabled:
+                from src.pg_base import execute
+                execute('NOTIFY hive_heartbeat;')
+            handler.wfile.write(json.dumps({'status': 'success', 'enabled': enabled}).encode('utf-8'))
+        except Exception as e:
+            handler.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        return True
 
     # ── /api/hive/approve-skill ──────────────────────────────────────────
     if path == '/api/hive/approve-skill':

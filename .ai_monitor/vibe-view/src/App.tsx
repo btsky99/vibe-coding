@@ -124,6 +124,29 @@ function App() {
       .catch(() => { /* 서버 미실행 시 무시 */ });
   }, [currentPath]);
 
+  // [2026-07-17] 자율 heartbeat 헤더 토글 칩 — 관제 패널이 아닌 런처급 스위치
+  // (관제 신규 개발 중단 원칙 준수 — 상세 이력은 pg_logs/hive_tasks 열람으로)
+  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number } | null>(null);
+  const fetchHeartbeat = () => {
+    fetch(`${API_BASE}/api/heartbeat`)
+      .then(r => r.json())
+      .then(d => { if (!d.error) setHeartbeat(d); })
+      .catch(() => { /* 서버 미실행 시 무시 */ });
+  };
+  useEffect(() => {
+    fetchHeartbeat();
+    const t = setInterval(fetchHeartbeat, 30000);
+    return () => clearInterval(t);
+  }, []);
+  const toggleHeartbeat = () => {
+    if (!heartbeat) return;
+    fetch(`${API_BASE}/api/heartbeat/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !heartbeat.enabled }),
+    }).then(() => fetchHeartbeat()).catch(() => {});
+  };
+
   // 사이드바 드래그 리사이즈 — document 전역 이벤트로 처리
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -648,6 +671,24 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {/* 자율 heartbeat 토글 — 클릭 한 번으로 on/off (scripts/auto.py·텔레그램 /auto와 동일 스위치) */}
+              <button
+                onClick={toggleHeartbeat}
+                className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-bold border transition-all ${
+                  heartbeat?.enabled
+                    ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.25)]'
+                    : 'bg-black/30 border-white/10 text-[#858585] hover:text-white hover:border-white/25'
+                }`}
+                title={heartbeat
+                  ? `자율 클로드 ${heartbeat.enabled ? 'ON' : 'OFF'} — 오늘 ${heartbeat.daily_count}/${heartbeat.daily_limit}건 · 대기 ${heartbeat.pending}건 (클릭으로 전환)`
+                  : '자율 클로드 — 서버 연결 대기'}
+              >
+                <span className={heartbeat?.enabled ? 'animate-pulse' : ''}>🫀</span>
+                <span>{heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
+                {heartbeat && heartbeat.pending > 0 && (
+                  <span className="px-1 rounded-full bg-amber-500/20 text-amber-300">{heartbeat.pending}</span>
+                )}
+              </button>
               {/* 파일 목록 새로고침 — fileRefreshKey 증가로 FileExplorer에 신호 */}
               <button
                 onClick={() => setFileRefreshKey(k => k + 1)}
