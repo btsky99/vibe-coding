@@ -7,6 +7,9 @@ DESCRIPTION: 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로�
              os._exit(0)으로 새 인스턴스를 즉시 종료한다.
 
 REVISION HISTORY:
+- 2026-07-17 Claude: 포트 폴백 9010 하드코딩 수정 — VIBE_PORT_BASE 명시 시 대역 내(+1)
+                     탐색. 좀비의 9100 점유 시 smoke 서버가 9010번대로 새어 스캔 실패하던
+                     "무바인딩" 오판의 근본 원인.
 - 2026-07-16 Claude: smoke 락 시드에 PID 추가 — 좀비 EXE의 고정 락 포트 영구 점유로
                      후속 smoke 전멸하는 사고 재발 방지 (사용자 싱글턴 의미 불변).
 - 2026-07-08 Claude: server.py main() L1697~1779 인스턴스 락 + 포트 확정 블록 분리
@@ -105,7 +108,12 @@ def resolve_server_ports(find_free_port) -> tuple[int, int]:
     if _http_ok:
         http_port = _preferred_http
     else:
-        http_port = find_free_port(9010, max_tries=40)
+        # [과거사고 2026-07-17] 폴백이 9010 하드코딩이라 smoke(VIBE_PORT_BASE=9100)에서
+        # 9100이 좀비 EXE에 점유되면 서버가 9010번대로 새어 나가 기동 — smoke_test는
+        # 9100~9120만 스캔하므로 "무바인딩"으로 오판(어젯밤 3연속 FAIL의 실체).
+        # VIBE_PORT_BASE 명시 시 폴백도 그 대역 안(+1부터)에서 탐색해 격리를 유지한다.
+        _fallback_base = _preferred_http + 1 if 'VIBE_PORT_BASE' in os.environ else 9010
+        http_port = find_free_port(_fallback_base, max_tries=40)
         print(f"[!] 포트 {_preferred_http} 사용 중 → 대체 포트 {http_port} 사용")
 
     _preferred_ws = http_port + 1
