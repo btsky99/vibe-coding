@@ -1053,7 +1053,8 @@ def _cg_hive(path):
             path in ('/api/superpowers/status', '/api/skill-results',
                      '/api/skill-ab-test', '/api/skill/predict',
                      '/api/context-usage', '/api/antigravity-context-usage',
-                     '/api/agent-quota', '/api/local-models'))
+                     '/api/agent-quota', '/api/local-models',
+                     '/api/heartbeat/status'))
 def _g_hive(h, pp):
     _params = parse_qs(pp.query)
     from api import hive_api
@@ -1309,7 +1310,8 @@ def _p_office_proxy(h, pp):
 def _cp_hive(path):
     return (path.startswith('/api/hive/') or
             path.startswith('/api/orchestrator/') or
-            path.startswith('/api/superpowers/'))
+            path.startswith('/api/superpowers/') or
+            path == '/api/heartbeat/toggle')
 def _p_hive(h, pp):
     from api import hive_api
     content_length = int(h.headers.get('Content-Length', 0))

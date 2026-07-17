@@ -762,9 +762,12 @@ def handle_get(handler, path: str, params: dict,
         handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
         return True
 
-    # ── /api/heartbeat ──────────────────────────────────────────────────
+    # ── /api/heartbeat/status ───────────────────────────────────────────
     # 자율 heartbeat 상태 — 대시보드 헤더 토글 칩용 (텔레그램 /auto status와 동일 소스)
-    elif path == '/api/heartbeat':
+    # [과거사고 2026-07-17] 최초 구현이 이 경로를 '/api/heartbeat'로 잡았다가 server.py의
+    #   liveness 엔드포인트(_g_heartbeat, exact-first)에 완전히 가려져 칩이 영구 OFF.
+    #   '/api/heartbeat'는 useVibeData·hive_watchdog가 쓰는 생존신호 → 절대 재점유 금지.
+    elif path == '/api/heartbeat/status':
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())

@@ -128,7 +128,7 @@ function App() {
   // (관제 신규 개발 중단 원칙 준수 — 상세 이력은 pg_logs/hive_tasks 열람으로)
   const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number } | null>(null);
   const fetchHeartbeat = () => {
-    fetch(`${API_BASE}/api/heartbeat`)
+    fetch(`${API_BASE}/api/heartbeat/status`)
       .then(r => r.json())
       .then(d => { if (!d.error) setHeartbeat(d); })
       .catch(() => { /* 서버 미실행 시 무시 */ });
