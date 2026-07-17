@@ -1,0 +1,448 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 📄 파일명: infra/heartbeat_daemon.py
+# 📝 설명: 자율 클로드 심장 박동 데몬 — 사람이 부르지 않아도 주기적으로 깨어나
+#          hive_tasks(assigned_to='claude-auto')를 체크아웃·수행하고, 없으면
+#          incident_ledger 재발 사고에서 개선 태스크를 자가 발굴한다.
+#          샌드박스 = worktree 격리 + deny 권한 프로파일 이중벽.
+# 🕒 변경 이력:
+# [2026-07-17] Claude — 신규 (브레인스토밍 승인: project_heartbeat_daemon.md)
+#   - [WHY] --dangerously-skip-permissions 대신 --settings deny 프로파일 주입 —
+#     자율 실행이어도 push/merge/삭제류는 CLI 레벨에서 차단 (프롬프트 의존 금지).
+#   - [WHY] 싱글턴은 socket bind 락 — PG advisory lock은 v3.7.142 무한 대기 사고
+#     전례, 파일 락은 좀비 잔류 문제. 소켓은 프로세스 사망 시 OS가 즉시 해제.
+#   - [제약] run_loop는 daemon=True 스레드에서 호출됨 (daemons.run_heartbeat 경유).
+#     블로킹 루프 허용. 자식 claude 프로세스는 사이클 내에서 완결(타임아웃 킬)되므로
+#     env.child_procs에 등록하지 않는다.
+#   - [불변식] 실패 태스크는 status='blocked'로 릴리즈 — 'failed'는
+#     find_tasks_for_agent 제외 목록에 없어 무한 재시도 루프가 된다.
+#   - [불변식] 가드(킬스위치/일일 상한/쿼터/연속 실패)는 매 사이클 DB에서 재로드 —
+#     텔레그램 /auto off가 다른 프로세스에서 상태를 바꾸기 때문.
+# ─────────────────────────────────────────────────────────────────────────────
+import json
+import socket
+import subprocess
+import time
+from datetime import date
+from pathlib import Path
+
+# ── 상수 (가드 기본값) ───────────────────────────────────────────────────────
+STATE_KEY = 'heartbeat'
+AGENT_ID = 'claude-auto'
+NOTIFY_CHANNEL = 'hive_heartbeat'
+POLL_INTERVAL_SEC = 600          # LISTEN 유실 대비 안전망 폴링
+DISABLED_RECHECK_SEC = 30        # 꺼짐 상태에서 킬스위치 재확인 주기
+TASK_TIMEOUT_SEC = 1800          # claude -p 행업 시 프로세스 트리 킬
+DAILY_LIMIT = 5                  # 하루 최대 수행 태스크 수
+QUOTA_LIMIT_PCT = 80.0           # 플랜 사용률 임계 — 초과 시 사이클 스킵
+FAIL_LIMIT = 2                   # 연속 실패 시 자율 모드 자동 정지
+DISCOVERED_CAP = 100             # 자가 발굴 중복 방지 시그니처 보관 상한
+OUTBOX_CAP = 30                  # 텔레그램 미소비 보고 보관 상한
+# [WHY] 9019 고정 — 서버 HTTP(9000-9007)·오피스(9010번대)와 겹치지 않는 대역.
+# dev 서버와 설치본 EXE가 동시에 떠도 heartbeat는 딱 하나만 살아남게 하는 락.
+SINGLETON_LOCK_PORT = 9019
+
+# ── 샌드박스 권한 프로파일 ───────────────────────────────────────────────────
+# [WHY] 파일로 배포하지 않고 상수→런타임 materialize — .ai_monitor/config/ 신규
+# 디렉토리를 만들면 spec datas + CI --add-data 양쪽 갱신이 필요(v3.7.215~218 사고).
+# data_dir은 이미 런타임 쓰기 경로라 frozen 모드에서도 안전.
+# [제약] deny 규칙은 Bash 접두 매칭 — 워크트리 밖 파일 파손은 defaultMode가
+# cwd 밖 편집을 자동 승인하지 않는 성질 + 워크트리 격리로 막는다.
+SANDBOX_SETTINGS = {
+    "permissions": {
+        "defaultMode": "acceptEdits",
+        "deny": [
+            "Bash(git push:*)",
+            "Bash(git push)",
+            "Bash(gh pr merge:*)",
+            "Bash(git merge:*)",
+            "Bash(git rebase:*)",
+            "Bash(git tag:*)",
+            "Bash(git reset --hard:*)",
+            "Bash(git worktree:*)",
+            "Bash(rm -rf:*)",
+            "Bash(rmdir:*)",
+            "Bash(Remove-Item:*)",
+            "Bash(del:*)",
+            "Bash(pyinstaller:*)",
+        ],
+    },
+}
+
+# 자율 태스크 수행 프롬프트 골격 — {title}/{description} 치환.
+# [WHY] push·버전·머지 금지는 deny 프로파일이 강제하지만, 지시문에도 명시해
+# 모델이 차단당하며 헤매는 낭비 턴을 줄인다 (이중벽의 안내판 역할).
+TASK_PROMPT = """[자율 모드] 아래 태스크를 이 워크트리 안에서만 수행하라.
+
+## 태스크
+제목: {title}
+내용:
+{description}
+
+## 제약 (위반 시 도구가 차단됨)
+- 이 워크트리(cwd) 밖의 파일을 수정하지 마라.
+- git push / merge / rebase / tag / 버전 증가 / 릴리즈 금지 — 커밋까지만.
+- 완료 시 Conventional Commits 형식(한글 3단 본문)으로 커밋하라.
+- 마지막 출력은 3줄 요약: 수정 파일 / 원인(Why) / 수정 내용(How).
+"""
+
+
+# ── 상태 모델 (hive_state KV 재사용) ─────────────────────────────────────────
+
+def _default_state() -> dict:
+    return {
+        'enabled': False,
+        'daily_date': '',
+        'daily_count': 0,
+        'consecutive_fails': 0,
+        'discovered': [],        # 자가 발굴한 incident 시그니처 (중복 재제안 방지)
+        'outbox': [],            # 텔레그램 봇이 소비하는 보고 큐 [{ts, text}]
+        'last_cycle_at': '',
+        'last_result': '',
+    }
+
+
+def load_hb_state() -> dict:
+    from src.pg_store import load_state
+    raw = load_state(STATE_KEY, default=None)
+    state = _default_state()
+    if isinstance(raw, dict):
+        state.update(raw)
+    return state
+
+
+def save_hb_state(state: dict) -> None:
+    from src.pg_store import save_state
+    save_state(STATE_KEY, state)
+
+
+def _report(state: dict, text: str) -> None:
+    """보고 1건을 아웃박스에 적재 — 소비자는 텔레그램 봇(별도 프로세스, hive_state 폴링)."""
+    state['outbox'] = (state.get('outbox') or [])[-(OUTBOX_CAP - 1):]
+    state['outbox'].append({'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'text': text[:1500]})
+    print(f"[heartbeat] {text}")
+
+
+# ── 가드 계층 ────────────────────────────────────────────────────────────────
+
+def _quota_pct() -> float:
+    """플랜 사용률(%) 최대값. 조회 불가 시 -1 — 불가를 초과로 오판해 영구 정지되는 것 방지."""
+    try:
+        from src.claude_quota import get_claude_quota
+        q = get_claude_quota()
+        if not q.get('available'):
+            return -1.0
+        pcts = []
+        for key in ('five_hour', 'seven_day'):
+            win = q.get(key) or {}
+            if isinstance(win.get('utilization'), (int, float)):
+                pcts.append(float(win['utilization']))
+        return max(pcts) if pcts else -1.0
+    except Exception:
+        return -1.0
+
+
+def guard_check(state: dict) -> tuple[bool, str]:
+    """사이클 진입 가드. (통과 여부, 사유). 일일 카운터는 날짜 바뀌면 여기서 리셋."""
+    if not state.get('enabled'):
+        return False, 'disabled'
+    today = date.today().isoformat()
+    if state.get('daily_date') != today:
+        state['daily_date'] = today
+        state['daily_count'] = 0
+    if int(state.get('daily_count', 0)) >= DAILY_LIMIT:
+        return False, f'daily_limit({DAILY_LIMIT})'
+    if int(state.get('consecutive_fails', 0)) >= FAIL_LIMIT:
+        # [불변식] 연속 실패 정지는 enabled 자체를 내림 — /auto on으로만 재개 (자동 재개 금지)
+        state['enabled'] = False
+        return False, f'fail_limit({FAIL_LIMIT})'
+    pct = _quota_pct()
+    if pct >= QUOTA_LIMIT_PCT:
+        return False, f'quota({pct:.0f}%)'
+    return True, ''
+
+
+def _acquire_singleton() -> socket.socket | None:
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('127.0.0.1', SINGLETON_LOCK_PORT))
+        sock.listen(1)
+        return sock
+    except OSError:
+        return None
+
+
+# ── 워크트리 샌드박스 ────────────────────────────────────────────────────────
+
+def _git(worktree_or_root: Path, *args: str, timeout: int = 60) -> tuple[bool, str]:
+    try:
+        r = subprocess.run(
+            ['git', '-C', str(worktree_or_root), *args],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=timeout,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+        )
+        return r.returncode == 0, (r.stdout or r.stderr or '').strip()
+    except Exception as e:
+        return False, str(e)
+
+
+def worktree_path(project_root: Path) -> Path:
+    return project_root.parent / (project_root.name + '-auto')
+
+
+def ensure_worktree(project_root: Path, task_id: str) -> Path | None:
+    """영구 워크트리 보장 + 태스크 전용 브랜치 준비. 실패 시 None.
+
+    [WHY] switch -C(강제 재생성) — 같은 태스크 재실행 시 이전 부분 작업을 버리고
+    main에서 새로 시작. 실패 태스크는 blocked로 재시도 안 되므로 유실 위험 없음.
+    [불변식] reset --hard + clean -fd는 데몬만 수행 (에이전트에겐 deny) —
+    이전 사이클의 더티 잔류물이 다음 태스크 커밋에 섞이는 오염 방지.
+    """
+    wt = worktree_path(project_root)
+    if not wt.exists():
+        ok, out = _git(project_root, 'worktree', 'add', str(wt), '-b', 'auto/base', 'main')
+        if not ok and 'already exists' not in out:
+            # auto/base 브랜치만 남은 반쪽 상태 재시도 (worktree remove 후 재생성은 위험 — 수동 개입 유도)
+            ok2, out2 = _git(project_root, 'worktree', 'add', str(wt), 'auto/base')
+            if not ok2:
+                print(f"[heartbeat] worktree 생성 실패: {out} / {out2}")
+                return None
+    _git(wt, 'reset', '--hard')
+    _git(wt, 'clean', '-fd')
+    ok, out = _git(wt, 'switch', '-C', f'auto/task-{task_id}', 'main')
+    if not ok:
+        print(f"[heartbeat] 브랜치 준비 실패: {out}")
+        return None
+    return wt
+
+
+def materialize_settings(data_dir: Path) -> Path:
+    # [과거사고] 상대 data_dir을 그대로 쓰면 subprocess cwd(워크트리) 기준으로
+    # 해석돼 settings 미발견 → claude 즉시 exit 1 (2026-07-17 스모크에서 실측)
+    path = (data_dir / 'heartbeat_settings.json').resolve()
+    path.write_text(json.dumps(SANDBOX_SETTINGS, ensure_ascii=False, indent=2), encoding='utf-8')
+    return path
+
+
+# ── claude -p 실행기 ─────────────────────────────────────────────────────────
+
+def run_claude_task(worktree: Path, task: dict, settings_path: Path,
+                    timeout: int = TASK_TIMEOUT_SEC) -> tuple[bool, str]:
+    """워크트리 안에서 claude를 1회 실행. (성공 여부, 결과 요약).
+
+    [제약] shell=True 필수 — Windows에서 claude.CMD는 cmd.exe 경유해야 함
+    (agent_api._build_chat_cmd와 동일 제약). 타임아웃 시 taskkill /T로 트리 전체 킬 —
+    shell=True는 cmd.exe가 부모라 proc.kill()만으로는 claude 자식이 고아로 남는다.
+    """
+    prompt = TASK_PROMPT.format(
+        title=str(task.get('title', ''))[:200],
+        description=str(task.get('description', ''))[:4000],
+    )
+    # [과거사고] 프롬프트를 -p 인자로 주면 shell=True 경유 cmd.exe가 멀티라인 인자를
+    # 첫 줄에서 절단(2026-07-17 스모크 실측: 태스크 본문 증발) → 반드시 stdin 파이프로.
+    cmd = ['claude', '--output-format', 'json', '--settings', str(settings_path), '-p']
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            cwd=str(worktree), shell=True, text=True, encoding='utf-8', errors='replace',
+        )
+        try:
+            out, _ = proc.communicate(input=prompt, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                           capture_output=True,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+            return False, f'타임아웃({timeout}s) — 프로세스 킬'
+    except Exception as e:
+        return False, f'실행 실패: {e}'
+    try:
+        payload = json.loads((out or '').strip() or '{}')
+        result_text = str(payload.get('result', ''))[:2000]
+        is_error = bool(payload.get('is_error')) or proc.returncode != 0
+        return (not is_error), (result_text or f'exit={proc.returncode}')
+    except json.JSONDecodeError:
+        # --output-format json인데 JSON이 아니면 비정상 종료로 간주
+        return False, f'출력 파싱 실패 (exit={proc.returncode}): {(out or "")[:300]}'
+
+
+def _commit_delta(worktree: Path) -> str:
+    ok, out = _git(worktree, 'log', '--oneline', 'main..HEAD')
+    if not ok or not out:
+        return '커밋 없음'
+    lines = out.splitlines()
+    return f'{len(lines)}개 커밋: ' + '; '.join(lines[:3])
+
+
+# ── 자가 발굴 (source='self') ────────────────────────────────────────────────
+
+def discover_task(project_id: str, state: dict) -> dict | None:
+    """incident_ledger의 재발 사고(recurrence_count>=2)에서 하드닝 태스크 1건 발굴.
+
+    [WHY] 재발 사고 우선 — '한 번 고쳤는데 또 터진' 지점이 가드/테스트 부재의
+    확실한 증거라 자가 발굴 후보 중 오탐이 가장 적다.
+    [불변식] error_signature를 state['discovered']에 영구 보관 — 사용자가 태스크를
+    지워도 같은 사고를 무한 재제안하지 않는다 (Critic 반영).
+    """
+    from src.pg_base import _sql_text, query_rows
+    seen = set(state.get('discovered') or [])
+    proj_filter = f"AND project_id = {_sql_text(project_id)}" if project_id else ''
+    rows = query_rows(f"""
+        SELECT error_signature, LEFT(error_text, 300) AS error_text,
+               root_cause, fix_description, recurrence_count
+        FROM incident_ledger
+        WHERE recurrence_count >= 2 {proj_filter}
+        ORDER BY last_seen_at DESC LIMIT 10;
+    """)
+    for row in rows:
+        sig = str(row.get('error_signature', ''))
+        if not sig or sig in seen:
+            continue
+        state['discovered'] = ((state.get('discovered') or []) + [sig])[-DISCOVERED_CAP:]
+        from src.pg_store import save_task
+        task = {
+            'id': f'auto-{sig[:16]}-{int(time.time())}',
+            'title': f"[자가발굴] 재발 사고 하드닝: {str(row.get('root_cause', ''))[:60]}",
+            'description': (
+                f"재발 {row.get('recurrence_count')}회 사고의 재발 방지 가드/테스트를 추가하라.\n\n"
+                f"에러: {row.get('error_text', '')}\n"
+                f"근본 원인: {row.get('root_cause', '')}\n"
+                f"기존 수정법: {row.get('fix_description', '')}\n\n"
+                f"할 일: 같은 실수를 커밋 전에 잡아낼 회귀 테스트 또는 코드 가드를 추가하고, "
+                f"불변식 주석([과거사고])을 해당 지점에 남겨라."
+            ),
+            'assigned_to': AGENT_ID,
+            'priority': 'medium',
+            'created_by': AGENT_ID,
+            'source': 'self',
+            'project_id': project_id,
+        }
+        return save_task(task, project_id=project_id, source='self')
+    return None
+
+
+# ── 사이클 + 메인 루프 ───────────────────────────────────────────────────────
+
+def _cycle(project_root: Path, data_dir: Path, project_id: str) -> None:
+    """1사이클: 가드 → 체크아웃(없으면 발굴) → 샌드박스 실행 → 릴리즈 + 보고."""
+    from src.pg_experience import insert_pg_log
+    from src.pg_store import add_task_comment, atomic_checkout, find_tasks_for_agent, release_checkout
+
+    state = load_hb_state()
+    ok, reason = guard_check(state)
+    if not ok:
+        if reason.startswith('fail_limit'):
+            _report(state, f'⛔ 연속 실패 {FAIL_LIMIT}회 — 자율 모드 자동 정지. /auto on으로 재개')
+        save_hb_state(state)   # 날짜 리셋/자동 정지 반영
+        return
+
+    pending = find_tasks_for_agent(AGENT_ID, project_id)
+    task = pending[0] if pending else discover_task(project_id, state)
+    if not task:
+        state['last_cycle_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+        state['last_result'] = 'idle'
+        save_hb_state(state)
+        return
+
+    task_id = str(task.get('id', ''))
+    checked = atomic_checkout(AGENT_ID, task_id)
+    if not checked:
+        save_hb_state(state)
+        return
+
+    wt = ensure_worktree(project_root, task_id)
+    if not wt:
+        release_checkout(task_id, 'blocked', 'worktree 준비 실패')
+        state['consecutive_fails'] = int(state.get('consecutive_fails', 0)) + 1
+        _report(state, f'❌ [{task_id}] worktree 준비 실패')
+        save_hb_state(state)
+        return
+
+    settings_path = materialize_settings(data_dir)
+    _report(state, f"🤖 자율 작업 시작: {task.get('title', '')[:80]}")
+    save_hb_state(state)
+
+    success, summary = run_claude_task(wt, checked, settings_path)
+    delta = _commit_delta(wt)
+
+    state = load_hb_state()   # 실행 중 /auto off 등 외부 변경 반영 후 갱신
+    if success:
+        state['daily_count'] = int(state.get('daily_count', 0)) + 1
+        state['consecutive_fails'] = 0
+        release_checkout(task_id, 'done', summary[:2000])
+        _report(state, f"✅ [{task.get('title', '')[:60]}] 완료 — {delta}\n브랜치 auto/task-{task_id} (머지는 사람 판단)\n{summary[:400]}")
+    else:
+        state['consecutive_fails'] = int(state.get('consecutive_fails', 0)) + 1
+        # [불변식] 'failed' 금지 — find_tasks_for_agent가 다시 집어 무한 재시도됨
+        release_checkout(task_id, 'blocked', summary[:2000])
+        _report(state, f"❌ [{task.get('title', '')[:60]}] 실패 — {summary[:400]}")
+    state['last_cycle_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+    state['last_result'] = 'done' if success else 'fail'
+    save_hb_state(state)
+
+    add_task_comment(task_id, AGENT_ID, summary[:1000], project_id)
+    insert_pg_log(agent=AGENT_ID, task=f"heartbeat: {task.get('title', '')[:100]}",
+                  status='success' if success else 'error', project_id=project_id,
+                  metadata={'task_id': task_id, 'commits': delta})
+
+
+def _wait_for_wake(listen_state: dict, timeout_sec: float) -> None:
+    """NOTIFY 수신 또는 timeout까지 대기 (하이브리드). LISTEN 실패 시 sleep 폴백.
+
+    [제약] pg_base 공유 커넥션을 쓰지 않고 전용 커넥션 — LISTEN은 세션 소속이라
+    공유 커넥션의 재연결/트랜잭션에 구독이 소리 없이 증발한다.
+    """
+    conn = listen_state.get('conn')
+    if conn is None:
+        try:
+            import psycopg2
+            from src import pg_base
+            conn = psycopg2.connect(
+                host='127.0.0.1', port=int(pg_base.PG_PORT), user=pg_base.PG_USER,
+                dbname=pg_base.PG_DB, connect_timeout=5,
+            )
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(f'LISTEN {NOTIFY_CHANNEL};')
+            listen_state['conn'] = conn
+        except Exception:
+            listen_state['conn'] = None
+            time.sleep(min(timeout_sec, 60))
+            return
+    try:
+        import select
+        select.select([conn], [], [], timeout_sec)
+        conn.poll()
+        conn.notifies.clear()
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        listen_state['conn'] = None
+
+
+def run_loop(get_project_root, data_dir: Path, get_project_id) -> None:
+    """데몬 진입점 — daemons.run_heartbeat가 daemon 스레드에서 호출.
+
+    get_project_root/get_project_id: callable — 프로젝트 전환(set_project_db)
+    반영을 위해 매 사이클 재평가 (DaemonEnv late-binding 계약과 동형).
+    """
+    lock = _acquire_singleton()
+    if lock is None:
+        print(f"[heartbeat] 다른 인스턴스가 이미 실행 중 (port {SINGLETON_LOCK_PORT}) — 이 프로세스는 대기하지 않고 종료")
+        return
+    print("[heartbeat] 자율 루프 시작 (기본 꺼짐 — /auto on으로 활성화)")
+    listen_state: dict = {'conn': None}
+    while True:
+        try:
+            state = load_hb_state()
+            if not state.get('enabled'):
+                time.sleep(DISABLED_RECHECK_SEC)
+                continue
+            _cycle(Path(get_project_root()), data_dir, str(get_project_id() or ''))
+            _wait_for_wake(listen_state, POLL_INTERVAL_SEC)
+        except Exception as e:
+            # [WHY] 루프는 어떤 예외에도 죽지 않는다 — 데몬 스레드 재시작 수단이 없음
+            print(f"[heartbeat] 사이클 예외 (루프 계속): {e}")
+            time.sleep(60)

@@ -198,6 +198,7 @@ class AgentBot:
         self.app.add_handler(CommandHandler("history", self._cmd_history))
         self.app.add_handler(CommandHandler("send", self._cmd_send))
         self.app.add_handler(CommandHandler("broadcast", self._cmd_broadcast))
+        self.app.add_handler(CommandHandler("auto", self._cmd_auto))
         for slot in range(1, 9):
             self.app.add_handler(CommandHandler(f"t{slot}", self._cmd_direct_slot))
         self.app.add_handler(MessageHandler(
@@ -719,6 +720,68 @@ class AgentBot:
             )
         except Exception as e:
             await update.message.reply_text(f"❌ 이력 실패: {e}")
+
+    # ── 자율 heartbeat 제어 (/auto) ──
+    # [WHY] JSON 중괄호는 .format 충돌로 {{ }} 이스케이프 — 값은 val 자리만 치환.
+    _HB_TOGGLE_SQL = """
+INSERT INTO hive_state (state_key, payload, updated_at)
+VALUES ('heartbeat', '{{"enabled": {val}, "consecutive_fails": 0}}'::jsonb, now()::text)
+ON CONFLICT (state_key) DO UPDATE SET
+    payload = hive_state.payload || '{{"enabled": {val}, "consecutive_fails": 0}}'::jsonb,
+    updated_at = now()::text;
+"""
+    _HB_STATUS_SQL = (
+        "SELECT COALESCE(payload->>'enabled','false'), COALESCE(payload->>'daily_count','0'), "
+        "COALESCE(payload->>'consecutive_fails','0'), COALESCE(payload->>'last_cycle_at','-'), "
+        "COALESCE(payload->>'last_result','-') "
+        "FROM hive_state WHERE state_key = 'heartbeat';"
+    )
+
+    async def _cmd_auto(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/auto on|off|status — 자율 heartbeat 데몬(서버 프로세스) 제어.
+
+        [WHY] 서버 HTTP가 아닌 hive_state 직접 쓰기(psql 경유) — 서버가 죽어 있어도
+        킬스위치를 내릴 수 있어야 한다 (다음 부팅 시 데몬이 상태를 읽고 따름).
+        [WHY] on 시 consecutive_fails 리셋 — 연속 실패 자동 정지 후 /auto on 재개가
+        가드에 다시 걸려 즉시 꺼지는 잠금 상태 방지.
+        """
+        if not itcp:
+            await update.message.reply_text("❌ ITCP 없음")
+            return
+        arg = (context.args[0].lower() if context.args else "status")
+        if arg in ("on", "off"):
+            sql = self._HB_TOGGLE_SQL.format(val="true" if arg == "on" else "false")
+            if arg == "on":
+                sql += "NOTIFY hive_heartbeat;"  # 폴링 대기 없이 즉시 1사이클
+            ok, out = itcp._run_psql(sql)
+            if ok:
+                await update.message.reply_text(
+                    "🫀 자율 모드 ON — 태스크 소비/자가 발굴 시작" if arg == "on"
+                    else "⏹ 자율 모드 OFF"
+                )
+            else:
+                await update.message.reply_text(f"❌ 상태 변경 실패: {out[:200]}")
+            return
+        # status
+        ok, out = itcp._run_psql(self._HB_STATUS_SQL)
+        if not ok:
+            await update.message.reply_text(f"❌ 조회 실패: {out[:200]}")
+            return
+        if not out.strip():
+            await update.message.reply_text("🫀 상태 기록 없음 — 기본 꺼짐 (/auto on으로 시작)")
+            return
+        try:
+            enabled, daily, fails, last_at, last_res = out.strip().split(",")[:5]
+        except ValueError:
+            await update.message.reply_text(f"❌ 상태 파싱 실패: {out[:200]}")
+            return
+        icon = "🟢 ON" if enabled == "true" else "🔴 OFF"
+        await update.message.reply_text(
+            f"🫀 *자율 클로드 상태*\n"
+            f"모드: {icon}\n오늘 수행: {daily}건\n연속 실패: {fails}\n"
+            f"마지막 사이클: {last_at} ({last_res})",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     async def _cmd_send(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/send <agent> <msg> — ITCP로 특정 에이전트에게 메시지"""

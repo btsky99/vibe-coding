@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-17 21:14
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-17 21:57
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -41,6 +41,12 @@
 | `mission_control.py` | 414 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
 | `soft_manifest.json` (루트) | 6 | soft 채널 풀빌드 게이트 (min_exe — 의존성 변경 시 소스 업데이트 차단) |
+
+### 인프라 (.ai_monitor/infra/) — 일부만 등재
+| 파일 | 줄 수 | 설명 |
+|------|------|------|
+| `daemons.py` | 628 | 백그라운드 데몬 러너 11종 일괄 기동 (워치독/텔레그램/제텔/heartbeat 등) |
+| `heartbeat_daemon.py` | 448 | 자율 클로드 심장 박동 — hive_tasks 소비+자가 발굴, worktree 샌드박스+deny 프로파일, 기본 꺼짐(/auto on) |
 
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
@@ -224,8 +230,8 @@
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 282 |  |
 | `statusline.py` | 189 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
-| `telegram_agent_bot.py` | 1135 |  |
-| `telegram_bridge.py` | 350 |  |
+| `telegram_agent_bot.py` | 1198 |  |
+| `telegram_bridge.py` | 401 |  |
 | `telegram_helpers.py` | 195 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
 | `zettel_capture.py` | 701 |  |
@@ -324,4 +330,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-17 21:14
+> 자동 생성 완료: 2026-07-17 21:57

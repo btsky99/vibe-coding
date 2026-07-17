@@ -581,6 +581,24 @@ def run_embedding_backfill(env: DaemonEnv) -> None:
         print(f"[!] 임베딩 백필 데몬 시작 실패: {e}")
 
 
+def run_heartbeat(env: DaemonEnv) -> None:
+    """자율 클로드 심장 박동 데몬 — 본체는 infra/heartbeat_daemon.py.
+
+    [WHY] 기본 꺼짐(hive_state 'heartbeat'.enabled=False) — 자율 실행은 반드시
+    텔레그램 /auto on의 명시적 옵트인 후에만. 루프 자체는 항상 돌지만
+    enabled=False면 30초 재확인만 반복(무비용).
+    [제약] frozen(EXE) 모드는 실행 대상이 앱 자신의 소스가 아니라 사용자 프로젝트 —
+    current_project_root() late-binding으로 프로젝트 전환을 따라간다.
+    """
+    try:
+        time.sleep(60)  # 서버 안정화 + PG 기동 대기 (embed_backfill과 동일 관례)
+        sys.path.insert(0, str(env.base_dir))
+        from infra.heartbeat_daemon import run_loop
+        run_loop(env.current_project_root, env.data_dir, env.current_project_id)
+    except Exception as e:
+        print(f"[!] heartbeat 데몬 시작 실패: {e}")
+
+
 def start_all_daemons(env: DaemonEnv, agent_status: dict,
                       agent_status_lock: threading.Lock) -> None:
     """부팅 4단계 — 백그라운드 데몬 스레드 10종을 일괄 기동.
@@ -606,4 +624,5 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     _t(run_zettel_refine, (env,), 'ZettelRefine')
     _t(run_commit_watcher, (env,), 'CommitWatcher')
     _t(run_embedding_backfill, (env,), 'EmbedBackfill')
+    _t(run_heartbeat, (env,), 'Heartbeat')
 

@@ -35,6 +35,7 @@ REVISION HISTORY:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -175,6 +176,7 @@ class BotManager:
 
         log.info(f"ITCP→그룹 폴링 시작 (last_id={self._last_pg_id})")
 
+        hb_tick = 0  # heartbeat 아웃박스는 2초 틱 15회(≈30초)마다 확인 — psql 호출 절약
         while True:
             try:
                 msgs = itcp.history(limit=20)
@@ -235,7 +237,56 @@ class BotManager:
             except Exception as e:
                 log.error(f"ITCP 그룹 폴링 오류: {e}")
 
+            hb_tick += 1
+            if hb_tick >= 15:
+                hb_tick = 0
+                try:
+                    await self._flush_heartbeat_outbox()
+                except Exception as e:
+                    log.debug(f"heartbeat 아웃박스 방출 오류: {e}")
+
             await asyncio.sleep(2.0)
+
+    # [WHY] 읽기+클리어를 단일 UPDATE..RETURNING으로 — 별도 SELECT 후 클리어 사이에
+    # 데몬이 append하면 유실된다. encode(base64)+개행 제거는 psql CSV가 멀티라인
+    # JSON을 따옴표 이스케이프하는 문제 회피 (단일 토큰으로 수신).
+    _HB_OUTBOX_SQL = (
+        "WITH old AS (SELECT payload->'outbox' AS ob FROM hive_state WHERE state_key='heartbeat') "
+        "UPDATE hive_state SET payload = payload || '{\"outbox\": []}'::jsonb, updated_at = now()::text "
+        "WHERE state_key='heartbeat' AND COALESCE(payload->'outbox','[]'::jsonb) <> '[]'::jsonb "
+        "RETURNING replace(encode(convert_to((SELECT ob::text FROM old), 'UTF8'), 'base64'), E'\\n', '');"
+    )
+
+    async def _flush_heartbeat_outbox(self) -> None:
+        """자율 heartbeat 데몬의 보고(hive_state 'heartbeat'.outbox)를 그룹채팅으로 방출.
+
+        [제약] 데몬은 상태 전체를 read-modify-write — 클리어와 데몬 저장이 겹치면
+        같은 보고가 한 번 더 올 수 있다 (중복 허용이 유실보다 낫다는 선택).
+        """
+        if not itcp:
+            return
+        ok, out = itcp._run_psql(self._HB_OUTBOX_SQL)
+        if not ok or not out.strip():
+            return
+        # [함정] --tuples-only여도 psql은 UPDATE 커맨드 태그('UPDATE 0')를 stdout에
+        # 남긴다 (실측) — base64 데이터 라인만 골라낸다.
+        lines = [ln.strip().strip('"') for ln in out.strip().splitlines()
+                 if ln.strip() and not ln.strip().startswith("UPDATE ")]
+        if not lines:
+            return
+        import base64
+        try:
+            items = json.loads(base64.b64decode(lines[0]).decode("utf-8"))
+        except Exception as e:
+            log.debug(f"heartbeat 아웃박스 파싱 실패: {e}")
+            return
+        bot = next(iter(self.bots.values()), None)
+        if not bot or not isinstance(items, list):
+            return
+        for item in items[-10:]:
+            text = str((item or {}).get("text", "")).strip()
+            if text:
+                await bot.send_to_group(f"🫀 *자율 클로드*\n{text}")
 
     async def run(self) -> None:
         """모든 봇 + 폴링 루프를 asyncio로 동시 실행.
