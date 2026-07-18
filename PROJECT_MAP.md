@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-17 21:57
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-18 19:45
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -34,7 +34,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 1892 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 1894 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 285 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -42,27 +42,22 @@
 | `mission_control_ui.py` | 495 | 슬라이드인 사이드바 HUD (에이전트 상태 링) |
 | `soft_manifest.json` (루트) | 6 | soft 채널 풀빌드 게이트 (min_exe — 의존성 변경 시 소스 업데이트 차단) |
 
-### 인프라 (.ai_monitor/infra/) — 일부만 등재
-| 파일 | 줄 수 | 설명 |
-|------|------|------|
-| `daemons.py` | 628 | 백그라운드 데몬 러너 11종 일괄 기동 (워치독/텔레그램/제텔/heartbeat 등) |
-| `heartbeat_daemon.py` | 448 | 자율 클로드 심장 박동 — hive_tasks 소비+자가 발굴, worktree 샌드박스+deny 프로파일, 기본 꺼짐(/auto on) |
-
 ### API 모듈 (.ai_monitor/api/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `agent_api.py` | 1405 | CLI 에이전트 관리 API (/api/agent/*) |
-| `codegraph_api.py` | 226 |  |
+| `_common.py` | 49 |  |
+| `agent_api.py` | 1388 | CLI 에이전트 관리 API (/api/agent/*) |
+| `codegraph_api.py` | 220 |  |
 | `commands_api.py` | 54 |  |
 | `config_api.py` | 81 |  |
 | `dashboard_api.py` | 133 |  |
 | `events_api.py` | 103 |  |
-| `experience_api.py` | 242 |  |
+| `experience_api.py` | 224 |  |
 | `files_api.py` | 216 | 파일 API (/api/files/*, /api/read-file, /api/save-file) — server.py에서 분리 |
 | `fs_dialog_api.py` | 134 |  |
 | `git_api.py` | 240 | Git 저장소 관리 API (/api/git/*) |
 | `heal_api.py` | 30 |  |
-| `hive_api.py` | 1216 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `hive_api.py` | 1259 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `hive_ingest_api.py` | 139 |  |
 | `install_api.py` | 419 |  |
 | `launch_api.py` | 102 |  |
@@ -74,17 +69,17 @@
 | `office_launch_api.py` | 85 |  |
 | `office_proxy_api.py` | 229 |  |
 | `projects_api.py` | 57 |  |
-| `pty_api.py` | 259 | PTY 터미널 제어 API (/api/pty/*) |
+| `pty_api.py` | 246 | PTY 터미널 제어 API (/api/pty/*) |
 | `screenshot_api.py` | 45 |  |
 | `setup_api.py` | 48 |  |
 | `static_api.py` | 123 |  |
-| `tasks_api.py` | 317 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
+| `tasks_api.py` | 302 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 164 |  |
-| `tools_api.py` | 1075 |  |
+| `tools_api.py` | 1068 |  |
 | `update_api.py` | 213 |  |
-| `vibe_api.py` | 312 | Vibe CLI 상태 관리 API (/api/vibe/*) |
+| `vibe_api.py` | 295 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
-| `zettel_api.py` | 209 |  |
+| `zettel_api.py` | 203 |  |
 
 ### 데이터 계층 (.ai_monitor/src/)
 | 모듈 | 줄 수 | 설명 |
@@ -93,11 +88,11 @@
 | `code_indexer.py` | 552 |  |
 | `code_search.py` | 200 |  |
 | `codex_quota.py` | 216 |  |
-| `db.py` | 34 |  |
-| `db_helper.py` | 106 |  |
-| `file_store.py` | 220 | 파일 기반 레거시 저장소 |
+| `db.py` | 42 |  |
+| `db_helper.py` | 114 |  |
+| `file_store.py` | 229 | 파일 기반 레거시 저장소 |
 | `heal_metrics.py` | 273 |  |
-| `logger.py` | 123 |  |
+| `logger.py` | 130 |  |
 | `pg_base.py` | 524 |  |
 | `pg_experience.py` | 226 |  |
 | `pg_incidents.py` | 182 |  |
@@ -108,10 +103,9 @@
 | `pg_tasks.py` | 388 |  |
 | `pg_vector_search.py` | 224 |  |
 | `recall_client.py` | 83 |  |
-| `secure.py` | 52 |  |
+| `secure.py` | 59 |  |
 | `server_locator.py` | 76 |  |
 | `server_utils.py` | 59 |  |
-| `view.py` | 243 |  |
 | `wiki_generator.py` | 381 |  |
 | `zettelkasten.py` | 459 |  |
 
@@ -201,6 +195,7 @@
 | `antigravity_adapter.py` | 138 |  |
 | `antigravity_output_filter.py` | 78 |  |
 | `antigravity_session_repair.py` | 216 |  |
+| `auto.py` | 76 |  |
 | `build_verify.py` | 645 |  |
 | `checkpoint.py` | 62 |  |
 | `codex_pg_watcher.py` | 286 |  |
@@ -241,25 +236,25 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 798 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 839 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
-| `types.ts` | 198 |  |
+| `types.ts` | 206 |  |
 | `constants.tsx` | 93 |  |
 
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
-| `ActivityBar.tsx` | 175 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
+| `ActivityBar.tsx` | 183 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
 | `ChatSlot.tsx` | 607 |  |
 | `FileExplorer.tsx` | 557 | 파일 시스템 탐색기 (트리/플랫 뷰) |
-| `FilePathText.tsx` | 102 | 파일 경로 렌더링 (클릭 가능 링크화) |
+| `FilePathText.tsx` | 110 | 파일 경로 렌더링 (클릭 가능 링크화) |
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
 | `TerminalSlot.tsx` | 924 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 573 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
-| `VibeEditor.tsx` | 140 | 코드 에디터 래퍼 (Monaco Editor) |
+| `VibeEditor.tsx` | 141 | 코드 에디터 래퍼 (Monaco Editor) |
 
 ### 패널 컴포넌트 (components/panels/)
 | 패널 | 줄 수 | 설명 |
@@ -293,7 +288,7 @@
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
-| `FileExplorer.test.tsx` | 128 | FileExplorer 컴포넌트 |
+| `FileExplorer.test.tsx` | 136 | FileExplorer 컴포넌트 |
 
 ## 🤖 Claude 통합 (.claude/)
 ### Skills (.claude/skills/) — Slash 명령 워크플로우
@@ -330,4 +325,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-17 21:57
+> 자동 생성 완료: 2026-07-18 19:45
