@@ -17,6 +17,14 @@
 #     find_tasks_for_agent 제외 목록에 없어 무한 재시도 루프가 된다.
 #   - [불변식] 가드(킬스위치/일일 상한/쿼터/연속 실패)는 매 사이클 DB에서 재로드 —
 #     텔레그램 /auto off가 다른 프로세스에서 상태를 바꾸기 때문.
+# [2026-07-18] Claude — P0 품질 게이트 2종 (deny 프로파일만으론 못 막는 사각):
+#   - [WHY] claude가 성공(is_error=false) 보고해도 산출물을 데몬이 독립 검증 —
+#     첫 실전 테스트에서 자동생성 파일(HIVEMIND.md) 수정 + 무검증 커밋 사고.
+#   - [WHY] 구문 검증은 subprocess `python -m py_compile`가 아니라 builtin compile() —
+#     frozen EXE 모드에선 sys.executable이 앱 EXE라 `-m py_compile`이 안 뜬다.
+#     인프로세스 compile()은 프로즌/개발 양쪽에서 동일 동작.
+#   - [WHY] 게이트 차단은 되돌림(reset) 없이 blocked 릴리즈만 — 격리 브랜치라
+#     머지 안 되면 무해하고, 다음 사이클 ensure_worktree의 reset+switch -C가 청소.
 # ─────────────────────────────────────────────────────────────────────────────
 import json
 import socket
@@ -40,6 +48,18 @@ OUTBOX_CAP = 30                  # 텔레그램 미소비 보고 보관 상한
 # [WHY] 9019 고정 — 서버 HTTP(9000-9007)·오피스(9010번대)와 겹치지 않는 대역.
 # dev 서버와 설치본 EXE가 동시에 떠도 heartbeat는 딱 하나만 살아남게 하는 락.
 SINGLETON_LOCK_PORT = 9019
+
+# [P0 게이트] 오토가 건드리면 안 되는 자동생성/산출물 경로 조각 (커밋 파일 경로를
+# lower-case로 substring 매칭). deny 프로파일(Bash 접두)로는 Edit/Write 도구를 못 막아
+# 여기서 커밋 후 결정적으로 검사한다. 손으로 관리하는 문서(PROJECT_MAP 등)는 제외 —
+# 과잉 차단 시 정당한 문서 태스크까지 blocked 되므로 '명백한 생성물'만 등재.
+FORBIDDEN_PATH_MARKERS = (
+    'dist/',              # 번들 산출물 (vibe-view/dist 등)
+    'hivemind.md',        # generate_hivemind_doc.py 자동생성 — 수정해도 재생성 시 덮어써짐
+    '.min.js', '.min.css',
+    'package-lock.json', 'uv.lock', 'poetry.lock',
+    '_version.py',        # 배포 파이프라인(vibe-release) 전용 — 자율 버전 증가 금지
+)
 
 # ── 샌드박스 권한 프로파일 ───────────────────────────────────────────────────
 # [WHY] 파일로 배포하지 않고 상수→런타임 materialize — .ai_monitor/config/ 신규
@@ -274,6 +294,61 @@ def _commit_delta(worktree: Path) -> str:
     return f'{len(lines)}개 커밋: ' + '; '.join(lines[:3])
 
 
+# ── P0 품질 게이트 (커밋 산출물 독립 검증) ───────────────────────────────────
+
+def _changed_files(worktree: Path) -> list[str]:
+    """main 대비 이 브랜치가 바꾼 파일 경로 목록 (커밋된 것 기준)."""
+    ok, out = _git(worktree, 'diff', '--name-only', 'main..HEAD')
+    return out.splitlines() if ok and out else []
+
+
+def _forbidden_changes(changed: list[str]) -> list[str]:
+    """변경 파일 중 자동생성/금지 경로에 걸리는 것 반환 (blocked 사유용)."""
+    bad = []
+    for p in changed:
+        pl = p.replace('\\', '/').lower()
+        if any(marker in pl for marker in FORBIDDEN_PATH_MARKERS):
+            bad.append(p)
+    return bad
+
+
+def _syntax_gate(worktree: Path, changed: list[str]) -> tuple[bool, str]:
+    """변경된 .py 파일을 builtin compile()로 파싱 검증. (통과, 실패 사유).
+
+    [WHY] subprocess가 아닌 인프로세스 compile — frozen EXE에선 `python -m py_compile`이
+    sys.executable=앱 EXE라 동작 안 함. compile()은 import 부작용도 없어 안전(파싱만).
+    """
+    for p in changed:
+        if not p.endswith('.py'):
+            continue
+        fp = worktree / p
+        if not fp.exists():   # 삭제/이동된 파일은 검증 대상 아님
+            continue
+        try:
+            compile(fp.read_text(encoding='utf-8', errors='replace'), str(fp), 'exec')
+        except SyntaxError as e:
+            return False, f'{p}:{e.lineno} {e.msg}'
+    return True, ''
+
+
+def _quality_gate(worktree: Path) -> str:
+    """커밋 후 산출물 검증. 통과면 '' , 실패면 blocked 사유 문자열.
+
+    [불변식] 순서 고정 — 금지경로 먼저(값싼 검사), 통과 시 구문 검증. 둘 중 하나라도
+    걸리면 즉시 사유 반환. 되돌림은 호출부가 하지 않음 (헤더 [2026-07-18] 참조).
+    """
+    changed = _changed_files(worktree)
+    if not changed:
+        return '커밋 산출물 없음 — 변경 파일 0'   # claude가 아무것도 안 함 = 실패로 간주
+    bad = _forbidden_changes(changed)
+    if bad:
+        return f'자동생성/금지 경로 수정: {", ".join(bad[:5])}'
+    ok, reason = _syntax_gate(worktree, changed)
+    if not ok:
+        return f'구문 오류: {reason}'
+    return ''
+
+
 # ── 자가 발굴 (source='self') ────────────────────────────────────────────────
 
 def discover_task(project_id: str, state: dict) -> dict | None:
@@ -364,6 +439,14 @@ def _cycle(project_root: Path, data_dir: Path, project_id: str) -> None:
 
     success, summary = run_claude_task(wt, checked, settings_path)
     delta = _commit_delta(wt)
+
+    # [P0] claude가 성공 보고해도 커밋 산출물을 데몬이 독립 검증 — 자동생성 파일
+    # 수정/구문 오류를 done으로 통과시키지 않는다. 게이트 실패는 실행 실패와 동급 처리.
+    if success:
+        gate_reason = _quality_gate(wt)
+        if gate_reason:
+            success = False
+            summary = f'[게이트 차단] {gate_reason}\n(claude 보고 요약: {summary[:300]})'
 
     state = load_hb_state()   # 실행 중 /auto off 등 외부 변경 반영 후 갱신
     if success:
