@@ -25,6 +25,11 @@
 #     인프로세스 compile()은 프로즌/개발 양쪽에서 동일 동작.
 #   - [WHY] 게이트 차단은 되돌림(reset) 없이 blocked 릴리즈만 — 격리 브랜치라
 #     머지 안 되면 무해하고, 다음 사이클 ensure_worktree의 reset+switch -C가 청소.
+# [2026-07-18] Claude — P1 리포트/발굴 개선:
+#   - [P1-③] 완료 리포트에 변경 파일 목록·개수·브랜치 구조화 (머지 판단 근거 제공).
+#   - [P1-④] discover_task 3소스 디스패처화: 재발사고 → 미하드닝 사고 → 표준 헤더 누락.
+#     [설계결정] TODO/FIXME(노이즈)·1500줄 분할(자율 리팩터 위험)은 의도 제외 — 신호
+#     높은 소스만. discover_task 시그니처에 project_root 추가(헤더 스캔용 ls-files).
 # ─────────────────────────────────────────────────────────────────────────────
 import json
 import socket
@@ -351,49 +356,127 @@ def _quality_gate(worktree: Path) -> str:
 
 # ── 자가 발굴 (source='self') ────────────────────────────────────────────────
 
-def discover_task(project_id: str, state: dict) -> dict | None:
-    """incident_ledger의 재발 사고(recurrence_count>=2)에서 하드닝 태스크 1건 발굴.
+def _record_discovered(state: dict, sig: str) -> None:
+    """발굴 시그니처를 단일 풀에 영구 보관 — 사용자가 태스크를 지워도 무한 재제안 방지.
 
-    [WHY] 재발 사고 우선 — '한 번 고쳤는데 또 터진' 지점이 가드/테스트 부재의
-    확실한 증거라 자가 발굴 후보 중 오탐이 가장 적다.
-    [불변식] error_signature를 state['discovered']에 영구 보관 — 사용자가 태스크를
-    지워도 같은 사고를 무한 재제안하지 않는다 (Critic 반영).
+    [불변식] 모든 소스(재발/미하드닝/헤더)가 이 한 풀을 공유 — 소스별로 나누면
+    같은 파일/사고가 소스 경계를 넘나들며 중복 제안될 수 있다.
+    """
+    state['discovered'] = ((state.get('discovered') or []) + [sig])[-DISCOVERED_CAP:]
+
+
+def _discover_incident(project_id: str, state: dict, recurrence_min: int,
+                       unhardened: bool) -> dict | None:
+    """incident_ledger에서 하드닝 태스크 1건 발굴.
+
+    unhardened=True: 아직 fix_description이 없는 미하드닝 사고 (재발 안 했어도).
+    [WHY] root_cause NOT NULL 필터 — 분석조차 안 된 일회성 에러까지 태스크화하면
+    노이즈 폭주. '원인은 규명됐는데 재발방지책만 없는' 건으로 한정해 신호 유지.
     """
     from src.pg_base import _sql_text, query_rows
+    from src.pg_store import save_task
     seen = set(state.get('discovered') or [])
     proj_filter = f"AND project_id = {_sql_text(project_id)}" if project_id else ''
+    unhardened_filter = (
+        "AND (fix_description IS NULL OR fix_description = '') "
+        "AND root_cause IS NOT NULL AND root_cause <> ''"
+    ) if unhardened else ''
     rows = query_rows(f"""
         SELECT error_signature, LEFT(error_text, 300) AS error_text,
                root_cause, fix_description, recurrence_count
         FROM incident_ledger
-        WHERE recurrence_count >= 2 {proj_filter}
+        WHERE recurrence_count >= {int(recurrence_min)} {unhardened_filter} {proj_filter}
         ORDER BY last_seen_at DESC LIMIT 10;
     """)
+    kind = '미하드닝 사고' if unhardened else '재발 사고'
     for row in rows:
         sig = str(row.get('error_signature', ''))
         if not sig or sig in seen:
             continue
-        state['discovered'] = ((state.get('discovered') or []) + [sig])[-DISCOVERED_CAP:]
-        from src.pg_store import save_task
+        _record_discovered(state, sig)
+        occurred = ('아직 재발방지책이 없는' if unhardened
+                    else f"재발 {row.get('recurrence_count')}회")
         task = {
             'id': f'auto-{sig[:16]}-{int(time.time())}',
-            'title': f"[자가발굴] 재발 사고 하드닝: {str(row.get('root_cause', ''))[:60]}",
+            'title': f"[자가발굴] {kind} 하드닝: {str(row.get('root_cause', ''))[:60]}",
             'description': (
-                f"재발 {row.get('recurrence_count')}회 사고의 재발 방지 가드/테스트를 추가하라.\n\n"
+                f"{occurred} 사고의 재발 방지 가드/테스트를 추가하라.\n\n"
                 f"에러: {row.get('error_text', '')}\n"
                 f"근본 원인: {row.get('root_cause', '')}\n"
-                f"기존 수정법: {row.get('fix_description', '')}\n\n"
+                f"기존 수정법: {row.get('fix_description', '') or '(없음 — 미하드닝)'}\n\n"
                 f"할 일: 같은 실수를 커밋 전에 잡아낼 회귀 테스트 또는 코드 가드를 추가하고, "
                 f"불변식 주석([과거사고])을 해당 지점에 남겨라."
             ),
-            'assigned_to': AGENT_ID,
-            'priority': 'medium',
-            'created_by': AGENT_ID,
-            'source': 'self',
-            'project_id': project_id,
+            'assigned_to': AGENT_ID, 'priority': 'medium',
+            'created_by': AGENT_ID, 'source': 'self', 'project_id': project_id,
         }
         return save_task(task, project_id=project_id, source='self')
     return None
+
+
+# 표준 헤더(규칙 #5) 존재 판정 마커 — 표준형(FILE:/DESCRIPTION:)과 박스형(📄 파일명) 모두.
+_HEADER_MARKERS = ('FILE:', 'DESCRIPTION:', '파일명')
+# 헤더 발굴 제외 — 자동생성/서드파티/관례상 헤더 불필요 파일.
+_HEADER_SKIP = ('dist/', 'migrations/', 'node_modules/', '/test', 'test_',
+                '__init__.py', 'setup.py', 'conftest.py')
+
+
+def _discover_missing_header(project_root: Path, project_id: str, state: dict) -> dict | None:
+    """표준 파일 헤더가 없는 추적 .py 1건 발굴 (규칙 #5 자동 이행).
+
+    [제약] 추적 파일(git ls-files)만 대상 — dist/ 등 비추적 산출물은 애초 제외.
+    첫 파일 600자만 읽어 마커 검사 → 없으면 태스크화하고 즉시 반환(early-exit).
+    """
+    from src.pg_store import save_task
+    seen = set(state.get('discovered') or [])
+    ok, out = _git(project_root, 'ls-files', '*.py')
+    if not ok or not out:
+        return None
+    for rel in out.splitlines():
+        rl = rel.replace('\\', '/').lower()
+        if any(s in rl for s in _HEADER_SKIP):
+            continue
+        # [불변식] 게이트 금지경로(_version.py 등)는 발굴 제외 — 태스크화해도 claude
+        # 수정 후 _quality_gate가 blocked 처리해 헛사이클+연속실패만 유발한다.
+        if _forbidden_changes([rel]):
+            continue
+        sig = f'header:{rel}'
+        if sig in seen:
+            continue
+        try:
+            head = (project_root / rel).read_text(encoding='utf-8', errors='replace')[:600]
+        except Exception:
+            continue
+        if any(m in head for m in _HEADER_MARKERS):
+            continue   # 헤더 있음
+        _record_discovered(state, sig)
+        task = {
+            'id': f'auto-hdr-{abs(hash(rel)) % 10_000_000}-{int(time.time())}',
+            'title': f"[자가발굴] 표준 헤더 추가: {rel}",
+            'description': (
+                f"{rel} 파일 상단에 규칙 #5 표준 헤더(FILE/DESCRIPTION/REVISION HISTORY)를 추가하라.\n"
+                f"DESCRIPTION은 이 파일의 역할을 LLM이 1초 안에 판단하게 1~2줄로. "
+                f"코드 로직은 절대 변경 금지 — 헤더 주석만 추가하고 커밋하라."
+            ),
+            'assigned_to': AGENT_ID, 'priority': 'low',
+            'created_by': AGENT_ID, 'source': 'self', 'project_id': project_id,
+        }
+        return save_task(task, project_id=project_id, source='self')
+    return None
+
+
+def discover_task(project_root: Path, project_id: str, state: dict) -> dict | None:
+    """자가 발굴 디스패처 — 소스 우선순위대로 첫 성공 1건 반환.
+
+    우선순위: ①재발 사고(오탐 최소) → ②미하드닝 사고 → ③표준 헤더 누락.
+    [설계결정 2026-07-18] TODO/FIXME 스캔(노이즈)·1500줄 분할(자율 리팩터 위험)은
+    의도적으로 제외 — 자율 데몬이 밤새 잡일/사고를 양산하지 않게 신호 높은 소스만.
+    """
+    return (
+        _discover_incident(project_id, state, recurrence_min=2, unhardened=False)
+        or _discover_incident(project_id, state, recurrence_min=1, unhardened=True)
+        or _discover_missing_header(project_root, project_id, state)
+    )
 
 
 # ── 사이클 + 메인 루프 ───────────────────────────────────────────────────────
@@ -412,7 +495,7 @@ def _cycle(project_root: Path, data_dir: Path, project_id: str) -> None:
         return
 
     pending = find_tasks_for_agent(AGENT_ID, project_id)
-    task = pending[0] if pending else discover_task(project_id, state)
+    task = pending[0] if pending else discover_task(project_root, project_id, state)
     if not task:
         state['last_cycle_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         state['last_result'] = 'idle'
@@ -448,17 +531,34 @@ def _cycle(project_root: Path, data_dir: Path, project_id: str) -> None:
             success = False
             summary = f'[게이트 차단] {gate_reason}\n(claude 보고 요약: {summary[:300]})'
 
+    # [P1-③] 완료 리포트 구조화 — 텔레그램/아웃박스 소비자가 머지 판단에 필요한
+    # '무엇이 바뀌었나'를 한눈에. changed는 게이트가 이미 커밋을 검증한 후라 신뢰 가능.
+    changed = _changed_files(wt)
+    files_line = (
+        f"📝 변경 {len(changed)}개: {', '.join(changed[:8])}"
+        + (f" 외 {len(changed) - 8}개" if len(changed) > 8 else '')
+    ) if changed else '📝 변경 파일 없음'
+    title60 = task.get('title', '')[:60]
+
     state = load_hb_state()   # 실행 중 /auto off 등 외부 변경 반영 후 갱신
     if success:
         state['daily_count'] = int(state.get('daily_count', 0)) + 1
         state['consecutive_fails'] = 0
         release_checkout(task_id, 'done', summary[:2000])
-        _report(state, f"✅ [{task.get('title', '')[:60]}] 완료 — {delta}\n브랜치 auto/task-{task_id} (머지는 사람 판단)\n{summary[:400]}")
+        _report(state, (
+            f"✅ [{title60}] 완료\n"
+            f"📦 {delta}\n{files_line}\n"
+            f"🌿 브랜치 auto/task-{task_id} (머지는 사람 판단)\n"
+            f"{summary[:300]}"
+        ))
     else:
         state['consecutive_fails'] = int(state.get('consecutive_fails', 0)) + 1
         # [불변식] 'failed' 금지 — find_tasks_for_agent가 다시 집어 무한 재시도됨
         release_checkout(task_id, 'blocked', summary[:2000])
-        _report(state, f"❌ [{task.get('title', '')[:60]}] 실패 — {summary[:400]}")
+        _report(state, (
+            f"❌ [{title60}] 실패/차단\n{files_line}\n"
+            f"사유: {summary[:350]}"
+        ))
     state['last_cycle_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
     state['last_result'] = 'done' if success else 'fail'
     save_hb_state(state)
