@@ -132,17 +132,14 @@ class TestTasksApiGet:
 class TestTasksApiPost:
     """tasks_api.handle_post 테스트."""
 
-    def test_create_task(self, tmp_path):
+    def test_create_task(self):
         """POST /api/tasks — 새 태스크를 생성해야 한다."""
-        sessions_file = tmp_path / 'sessions.jsonl'
-        sessions_file.write_text('', encoding='utf-8')
         mock_save = MagicMock()
 
         handler = MockHandler()
         result = tasks_api.handle_post(
             handler, '/api/tasks',
             {'title': '새 작업', 'assigned_to': 'claude', 'priority': 'high'},
-            SESSIONS_FILE=sessions_file,
             save_task=mock_save,
             update_task=MagicMock(),
             delete_task=MagicMock(),
@@ -161,7 +158,6 @@ class TestTasksApiPost:
         result = tasks_api.handle_post(
             handler, '/api/tasks/update',
             {'id': '1', 'status': 'done'},
-            SESSIONS_FILE=Path('/tmp/s.jsonl'),
             save_task=MagicMock(),
             update_task=mock_update,
             delete_task=MagicMock(),
@@ -177,7 +173,6 @@ class TestTasksApiPost:
         result = tasks_api.handle_post(
             handler, '/api/tasks/delete',
             {'id': '1'},
-            SESSIONS_FILE=Path('/tmp/s.jsonl'),
             save_task=MagicMock(),
             update_task=MagicMock(),
             delete_task=mock_delete,
@@ -194,7 +189,6 @@ class TestTasksApiPost:
         result = tasks_api.handle_post(
             handler, '/api/tasks/claim',
             {'id': '1', 'terminal_id': 'T3'},
-            SESSIONS_FILE=Path('/tmp/s.jsonl'),
             save_task=MagicMock(),
             update_task=mock_update,
             delete_task=MagicMock(),
