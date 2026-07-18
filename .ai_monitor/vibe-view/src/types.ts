@@ -1,4 +1,12 @@
-﻿export interface LogRecord {
+﻿/**
+ * ------------------------------------------------------------------------
+ * 📄 파일명: types.ts
+ * 📝 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답
+ *          스키마. 백엔드 pg_store 스키마와 대응하는 형상.
+ * REVISION HISTORY:
+ * - 2026-07-18 Claude: 헤더 누락 보강 (코드 품질 점검 규칙 5 준수)
+ */
+export interface LogRecord {
     session_id: string;
     terminal_id: string;
     project_id: string;

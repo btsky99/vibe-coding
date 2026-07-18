@@ -3,11 +3,12 @@ import Editor from '@monaco-editor/react';
 import { API_BASE } from '../constants';
 
 /**
- * 🎨 VibeEditor: Monaco Editor 기반의 코드 편집기 컴포넌트
- * - VS Code 스타일의 코드 하이라이팅 및 주석 색상 강화 테마 적용
- * - 자동 언어 감지 및 편집 내용 실시간 반영 지원
- * - 저장(Save) API 연동 포함
+ * ------------------------------------------------------------------------
+ * 📄 파일명: VibeEditor.tsx
+ * 📝 설명: Monaco Editor 기반 코드 편집기 — VS Code 스타일 하이라이팅/주석 색상 강화,
+ *          자동 언어 감지, 편집 실시간 반영, 저장(Save) API 연동.
  * REVISION HISTORY:
+ * - 2026-07-18 Claude: 헤더 표준형식 정규화 (📄 파일명 마커 추가 — 규칙 5 준수)
  * - 2026-03-15 Claude: handleEditorDidMount try-catch 래핑 — Monaco 마운트 예외가
  *                      상위로 전파되어 ErrorBoundary를 트리거하는 문제 방어.
  */

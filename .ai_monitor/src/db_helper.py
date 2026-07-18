@@ -1,3 +1,11 @@
+# ────────────────────────────────────────────────────────────────────────────
+# 📄 파일명: src/db_helper.py
+# 📝 설명: 세션 로그 기록 헬퍼 — pg_store(upsert_session_log/list_session_logs)로
+#          위임하는 얇은 래퍼. itcp 메시지 전송은 지연 import.
+# 🕒 변경 이력:
+# [2026-07-18] Claude — 헤더 누락 보강 (코드 품질 점검 규칙 5 준수)
+#   - [제약] itcp는 scripts/ 에 있어 pip 설치 환경엔 없음 → ImportError 시 no-op 폴백.
+# ────────────────────────────────────────────────────────────────────────────
 import sys
 import time
 from pathlib import Path

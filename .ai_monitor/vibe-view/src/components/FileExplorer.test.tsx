@@ -1,3 +1,11 @@
+/**
+ * ------------------------------------------------------------------------
+ * 📄 파일명: FileExplorer.test.tsx
+ * 📝 설명: FileExplorer 컴포넌트 단위 테스트 (vitest + @testing-library/react).
+ *          fetch / lucide-react / react-icons 모킹 기반.
+ * REVISION HISTORY:
+ * - 2026-07-18 Claude: 헤더 누락 보강 (코드 품질 점검 규칙 5 준수)
+ */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import FileExplorer from './FileExplorer';

@@ -1,3 +1,11 @@
+/**
+ * ------------------------------------------------------------------------
+ * 📄 파일명: FilePathText.tsx
+ * 📝 설명: 텍스트 내 파일 경로를 정규식으로 감지해 클릭 가능한 링크 세그먼트로 분리 렌더.
+ *          로그/채팅의 경로 클릭 → 에디터 열기 연동에 사용.
+ * REVISION HISTORY:
+ * - 2026-07-18 Claude: 헤더 누락 보강 (코드 품질 점검 규칙 5 준수)
+ */
 interface FilePathTextProps {
   text: string;
   onPathClick?: (path: string) => void;
