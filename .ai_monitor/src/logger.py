@@ -12,7 +12,6 @@ import json
 import uuid
 import datetime
 from pathlib import Path
-from filelock import FileLock
 
 # 상위 폴더를 sys.path에 추가하여 src 모듈 임포트 가능하도록 설정
 AI_MONITOR_DIR = Path(__file__).resolve().parent.parent
@@ -22,8 +21,8 @@ from src.db_helper import insert_log
 
 DATA_DIR = AI_MONITOR_DIR / "data"
 CONFIG_FILE = AI_MONITOR_DIR / "config.json"
-SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
-LOCK_FILE = DATA_DIR / "sessions.lock"
+# [은퇴 2026-07-18] SESSIONS_FILE/LOCK_FILE(sessions.jsonl) 죽은 상수 제거 —
+#   로깅은 전부 insert_log→PostgreSQL 경로. 파일은 아무도 안 읽음(TUI view.py 레거시만).
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 

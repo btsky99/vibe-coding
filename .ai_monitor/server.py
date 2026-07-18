@@ -579,7 +579,8 @@ init_db()
 
 # [R14] STATIC_DIR 초기 대입은 906행으로 일원화 — 여기(구 697) 중복 대입은 698~905 사이
 #   미참조로 906이 즉시 덮어쓰던 죽은 코드라 제거. 906만이 존재검증+alt_dist 폴백을 가진 canonical.
-SESSIONS_FILE = DATA_DIR / "sessions.jsonl"
+# [은퇴 2026-07-18] SESSIONS_FILE(sessions.jsonl) 정의 제거 — tasks_api write-only 미러
+#   철거로 미참조. 로깅은 pg_logs 단일 경로.
 LOCKS_FILE = DATA_DIR / "locks.json"
 CONFIG_FILE = DATA_DIR / "config.json"
 # 에이전트 간 메시지 채널 파일
@@ -1350,7 +1351,6 @@ def _p_tasks(h, pp):
     _body = json.loads(h.rfile.read(content_length).decode('utf-8')) if content_length else {}
     tasks_api.handle_post(
         h, pp.path, _body,
-        SESSIONS_FILE=SESSIONS_FILE,
         save_task=save_task, update_task=update_task, delete_task=delete_task,
         # [R14 버그수정] write/read 모두 current_project_id(동적)로 통일. 기존엔 read는 동적,
         #   write(save_task)는 static PROJECT_ID라 폴더 전환 후 새 태스크가 옛 슬러그로 저장돼
