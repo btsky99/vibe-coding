@@ -573,15 +573,8 @@ def _get_python_cmd() -> str:
     return sys.executable
 
 
-def _json_response(handler, data: Any, status: int = 200) -> None:
-    """JSON 응답을 전송하는 헬퍼."""
-    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json;charset=utf-8")
-    handler.send_header("Access-Control-Allow-Origin", handler._cors_origin())
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
+# [중복통합 2026-07-18] _json_response는 api/_common.py로 통합 — 패스스루 재노출.
+from api._common import json_response as _json_response
 
 
 # ═══════════════════════════════════════════════════════════════════════

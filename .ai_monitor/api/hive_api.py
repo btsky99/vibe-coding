@@ -118,17 +118,8 @@ def _sum_usage_since(jsonl_files: list, since_epoch: float) -> dict:
     return result
 
 
-def _json_response(handler, data: dict | list, status: int = 200) -> None:
-    """JSON 응답을 전송하는 공통 헬퍼 함수.
-
-    매 핸들러에서 반복되는 응답 헤더 작성 코드를 단순화합니다.
-    ensure_ascii=False로 한글 깨짐 방지.
-    """
-    handler.send_response(status)
-    handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
-    handler.end_headers()
-    handler.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+# [중복통합 2026-07-18] _json_response는 api/_common.py로 통합 — 패스스루 재노출.
+from api._common import json_response as _json_response
 
 
 def _parse_iso_dt(value: str | None) -> datetime | None:

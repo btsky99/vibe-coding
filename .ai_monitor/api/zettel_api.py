@@ -6,7 +6,6 @@ REVISION HISTORY:
     2026-04-05 — 초기 구현
 """
 
-import json
 from pathlib import Path
 
 from src.pg_store import ensure_schema
@@ -17,13 +16,8 @@ from src.zettelkasten import (
 )
 
 
-def _json_response(handler, data: dict | list, status: int = 200):
-    """공용 JSON 응답 헬퍼."""
-    handler.send_response(status)
-    handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
-    handler.end_headers()
-    handler.wfile.write(json.dumps(data, ensure_ascii=False, default=str).encode('utf-8'))
+# [중복통합 2026-07-18] _json_response는 api/_common.py로 통합 — 패스스루 재노출.
+from api._common import json_response as _json_response
 
 
 def _error(handler, msg: str, status: int = 400):

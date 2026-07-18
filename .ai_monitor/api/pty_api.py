@@ -70,22 +70,9 @@ def _node_post(path: str, data: dict = None, timeout: float = 5.0):
         return {'error': str(e)}
 
 
-def _json_response(handler, payload, status=200) -> None:
-    handler.send_response(status)
-    handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
-    handler.end_headers()
-    handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
-
-
-def _read_body(handler):
-    content_length = int(handler.headers.get('Content-Length', 0))
-    if not content_length:
-        return {}
-    raw = handler.rfile.read(content_length)
-    if not raw:
-        return {}
-    return json.loads(raw.decode('utf-8'))
+# [중복통합 2026-07-18] _json_response/_read_body는 api/_common.py로 통합 — 패스스루 재노출.
+# [동작변경] 기존 pty 사본은 malformed JSON에서 예외를 던졌으나 통합본은 방어형({}) — 회귀 아닌 개선.
+from api._common import json_response as _json_response, read_body as _read_body
 
 
 def _resolve_target(data) -> str:

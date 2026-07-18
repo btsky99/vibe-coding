@@ -32,25 +32,8 @@ import json
 import time
 
 
-def _json_response(handler, data, status=200):
-    """JSON 응답 공통 헬퍼 — agent_api.py와 동일 패턴."""
-    handler.send_response(status)
-    handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
-    handler.end_headers()
-    handler.wfile.write(json.dumps(data, ensure_ascii=False, default=str).encode('utf-8'))
-
-
-def _read_body(handler) -> dict:
-    """POST/DELETE 요청 본문(JSON) 파싱."""
-    try:
-        content_length = int(handler.headers.get('Content-Length', 0))
-        if content_length > 0:
-            raw = handler.rfile.read(content_length).decode('utf-8')
-            return json.loads(raw)
-    except Exception as e:
-        print(f"[vibe_api] JSON 파싱 실패: {e}")
-    return {}
+# [중복통합 2026-07-18] _json_response/_read_body는 api/_common.py로 통합 — 패스스루 재노출.
+from api._common import json_response as _json_response, read_body as _read_body
 
 
 def _run_sql(handler, sql, params=None):
