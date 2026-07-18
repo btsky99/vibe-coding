@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-18 20:45
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-19 08:08
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -280,7 +280,7 @@
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | scripts/itcp.py 폴백 경로 |
 | `test_knowledge_pipeline.py` | 133 |  |
-| `test_new_api_modules.py` | 347 |  |
+| `test_new_api_modules.py` | 341 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 124 |  |
 | `test_route_table.py` | 106 |  |
@@ -325,4 +325,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-18 20:45
+> 자동 생성 완료: 2026-07-19 08:08
