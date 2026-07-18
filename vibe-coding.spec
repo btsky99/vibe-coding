@@ -85,7 +85,9 @@ a = Analysis(
         # 서버 보조 스크립트 (워치독, 브릿지, 메모리, 오케스트레이터 등)
         # → 배포 버전 SCRIPTS_DIR = sys._MEIPASS/scripts
         ('scripts', 'scripts'),
-        # 내부 Python 모듈 (db_helper, db, logger, secure, view)
+        # 내부 Python 모듈 (db_helper, db, logger, secure)
+        # [2026-07-18] view.py(textual TUI) 은퇴 제거 — sessions.jsonl 유일 reader였고
+        #   라이브 대시보드는 dashboard_window.py(PySide6). 디렉토리 통째 번들이라 datas 무변경.
         ('.ai_monitor/src', 'src'),
         # Claude 스킬 템플릿 파일 (vibe-*.md)
         # → /api/superpowers/install 시 현재 프로젝트 .claude/skills/ 에 복사
