@@ -6,7 +6,7 @@
  * - 2026-07-19 Claude: 신규 — LAN 브리지 Phase 1 Task 9 (파일 전송 UI). 채팅은 Phase 2.
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Wifi, WifiOff, ShieldAlert, Send, Link2, RefreshCw, MessageSquare } from 'lucide-react';
+import { Wifi, WifiOff, ShieldAlert, Send, Link2, RefreshCw, MessageSquare, FolderOpen } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
 interface Peer { peer_id: string; name: string; ip: string; http_port: number }
@@ -61,6 +61,13 @@ export default function LanPanel() {
     }).then(r => r.json());
     setFlash(r.ok ? `✅ ${target.name} 페어링 완료` : `❌ ${r.error || '페어링 실패'}`);
     setTarget(null); setInputCode(''); refresh();
+  };
+
+  // [WHY] PyWebView 네이티브 앱이라 <input type=file>은 경로를 못 주고(보안상 fakepath),
+  //   전송엔 실제 절대경로가 필요. 백엔드 tkinter 파일 다이얼로그(/api/browse-file)로 경로 획득.
+  const browseFile = async () => {
+    const r = await fetch(`${API_BASE}/api/browse-file`).then(r => r.json()).catch(() => ({}));
+    if (r.path) setSendPath(r.path);
   };
 
   const doSend = async () => {
@@ -201,9 +208,15 @@ export default function LanPanel() {
       {st.running && (st.trusted || []).length > 0 && (
         <div className="bg-black/20 rounded p-2 space-y-2">
           <div className="font-medium flex items-center gap-1"><Send className="w-3.5 h-3.5" /> 파일 전송</div>
-          <input value={sendPath} onChange={e => setSendPath(e.target.value)}
-            placeholder="보낼 파일의 전체 경로 (예: D:\\문서\\a.zip)"
-            className="w-full bg-black/40 rounded px-2 py-1 text-[12px] font-mono outline-none" />
+          <div className="flex gap-2">
+            <input value={sendPath} onChange={e => setSendPath(e.target.value)}
+              placeholder="보낼 파일 경로 — 찾아보기 또는 직접 입력"
+              className="flex-1 bg-black/40 rounded px-2 py-1 text-[12px] font-mono outline-none" />
+            <button onClick={browseFile}
+              className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-[12px] flex items-center gap-1 shrink-0">
+              <FolderOpen className="w-3.5 h-3.5" /> 찾아보기
+            </button>
+          </div>
           <div className="text-[11px] text-[#888]">
             대상: {sendPeer ? (st.trusted || []).find(t => t.peer_id === sendPeer)?.name || sendPeer : '위에서 전송 대상 선택'}
           </div>

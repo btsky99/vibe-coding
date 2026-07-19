@@ -111,3 +111,27 @@ def open_folder_dialog_subprocess(python_cmd: str) -> str:
         creationflags=_no_win,
     )
     return result.stdout.strip()
+
+
+def open_file_dialog_subprocess(python_cmd: str) -> str:
+    """tkinter 파일 선택 다이얼로그를 별도 프로세스에서 실행.
+
+    [WHY] LAN 파일 전송이 경로를 손으로 타이핑해야만 하는 문제(찾아보기 부재) 해소.
+      폴더용 open_folder_dialog_subprocess와 동일 패턴 — pywebview GUI 스레드에서
+      tkinter 직접 호출 시 충돌하므로 독립 프로세스로 우회한다(검증된 방식).
+    [제약] askdirectory가 아니라 askopenfilename — 전송할 '파일 1개'를 고른다.
+      취소 시 빈 문자열. EXE 빌드에선 호출자가 python_runner_cmds()[0]를 넘겨야 함.
+    """
+    script = (
+        "import tkinter as tk; from tkinter import filedialog; "
+        "root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True); "
+        "path = filedialog.askopenfilename(title='전송할 파일 선택'); "
+        "print(path if path else '')"
+    )
+    _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    result = subprocess.run(
+        [python_cmd, '-c', script],
+        capture_output=True, text=True, timeout=60,
+        creationflags=_no_win,
+    )
+    return result.stdout.strip()

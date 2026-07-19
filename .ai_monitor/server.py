@@ -443,6 +443,11 @@ def _open_folder_dialog_subprocess() -> str:
     # EXE 빌드에서 sys.executable은 vibe-coding.exe → 실제 Python을 인자로 전달
     return _runtime.open_folder_dialog_subprocess(_python_runner_cmds()[0])
 
+
+def _open_file_dialog_subprocess() -> str:
+    # [WHY] LAN 파일 전송 '찾아보기'용 — 폴더가 아닌 파일 1개 선택. EXE에선 실제 Python 전달.
+    return _runtime.open_file_dialog_subprocess(_python_runner_cmds()[0])
+
 # [제거됨 2026-03-22] websockets import → Node.js ws 라이브러리로 대체
 
 # 전역 상태 관리
@@ -881,7 +886,8 @@ GET_PREFIX_ROUTES = [
 #   어떤 GET prefix와도 비충돌(browse-folder/drives/dirs). late-binding으로 전역 주입.
 def _g_fs_dialog(h, pp):
     fs_dialog_api.handle_get(h, pp.path, parse_qs(pp.query),
-                             open_folder_dialog=_open_folder_dialog_subprocess)
+                             open_folder_dialog=_open_folder_dialog_subprocess,
+                             open_file_dialog=_open_file_dialog_subprocess)
 
 # GET exact 라우트 (Phase 2 R2: 도구 설치 3종) — install_api로 본문 이전, 전역 헬퍼는 주입.
 # [불변식] 전역(_tool_status/_get_tool_install_state/_python_runner_cmds/BASE_DIR/PROJECT_ROOT)은
@@ -1003,6 +1009,7 @@ def _g_copy_path(h, pp):
 
 GET_ROUTES = {
     '/api/browse-folder': _g_fs_dialog,
+    '/api/browse-file': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
     '/api/dirs': _g_fs_dialog,
     '/api/tool-status': _g_tool_status,

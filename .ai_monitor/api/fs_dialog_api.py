@@ -19,10 +19,11 @@ import webbrowser
 from urllib.parse import urlparse
 
 
-def handle_get(h, path, query, *, open_folder_dialog):
-    """GET 파일시스템 라우트 3종 디스패치.
+def handle_get(h, path, query, *, open_folder_dialog, open_file_dialog=None):
+    """GET 파일시스템 라우트 4종 디스패치.
 
     - open_folder_dialog: server._open_folder_dialog_subprocess (호출 시점 주입)
+    - open_file_dialog: server._open_file_dialog_subprocess (LAN 파일전송 '찾아보기')
     - query: parse_qs 결과 dict (dirs에서만 사용)
     """
     if path == '/api/browse-folder':
@@ -32,6 +33,18 @@ def handle_get(h, path, query, *, open_folder_dialog):
         h.end_headers()
         try:
             selected_path = open_folder_dialog()
+            h.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
+        except Exception as e:
+            h.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+    elif path == '/api/browse-file':
+        # [WHY] LAN 파일전송은 파일 1개 경로가 필요 — 폴더 다이얼로그와 별도.
+        #   open_file_dialog 미주입(구버전 호출) 시 500 대신 빈 경로로 안전 폴백.
+        h.send_response(200)
+        h.send_header('Content-Type', 'application/json;charset=utf-8')
+        h.send_header('Access-Control-Allow-Origin', h._cors_origin())
+        h.end_headers()
+        try:
+            selected_path = open_file_dialog() if open_file_dialog else ''
             h.wfile.write(json.dumps({"path": selected_path}).encode('utf-8'))
         except Exception as e:
             h.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
