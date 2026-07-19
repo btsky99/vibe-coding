@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-19 20:35
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-19 21:02
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -60,7 +60,7 @@
 | `hive_api.py` | 1267 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `hive_ingest_api.py` | 139 |  |
 | `install_api.py` | 421 |  |
-| `lan_api.py` | 240 | +auto-share(자동공유 관문: 토글·민감필터·dedup·레이트리밋) |
+| `lan_api.py` | 240 |  |
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
@@ -309,6 +309,7 @@
 | `vibe-orchestrate` | Vibe Coding 통합 컨트롤 타워. 하이브 컨텍스트 로드 + 요청 분석 + 스킬 체인 자동 실행 + 자기치유. |
 | `vibe-release` | EXE 빌드 릴리즈 파이프라인. 버전 증가 → 커밋 → 푸시 → GitHub Actions가 자동으로 EXE 빌드 + Release 생성. |
 | `vibe-security` | OWASP Top 10 기반 보안 취약점을 4단계로 점검합니다. 배포 전 필수 보안 검토. |
+| `vibe-share` | LAN 자동 공유 — 작업한 파일과 세션 요약을 같은 네트워크의 페어링된 내 다른 PC로 전송. |
 | `vibe-tdd` | RED-GREEN-REFACTOR 사이클로 테스트 주도 개발을 진행합니다. |
 | `vibe-write-plan` | 승인된 아이디어를 마이크로태스크로 분해하여 ai_monitor_plan.md에 저장합니다. |
 | `vibe-zettel` | 제텔카스텐 지식 관리 스킬. 노트 캡처, 정제(fleeting→permanent 승격), 유사 노트 연결, 검색, Obsidian 동기화. |
@@ -331,4 +332,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-19 20:35
+> 자동 생성 완료: 2026-07-19 21:02
