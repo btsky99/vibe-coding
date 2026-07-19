@@ -141,8 +141,8 @@ export default function LanPanel() {
         <div className="bg-blue-950/40 border border-blue-700/40 rounded p-2 space-y-2">
           <div className="text-[12px]">{target.name}의 코드 입력</div>
           <div className="flex gap-2">
-            <input value={inputCode} onChange={e => setInputCode(e.target.value)} placeholder="6자리"
-              className="flex-1 bg-black/40 rounded px-2 py-1 font-mono tracking-widest outline-none" maxLength={6} />
+            <input value={inputCode} onChange={e => setInputCode(e.target.value.toUpperCase())} placeholder="코드 8자"
+              className="flex-1 bg-black/40 rounded px-2 py-1 font-mono tracking-widest outline-none" maxLength={8} />
             <button onClick={doConnect} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-[12px]">연결</button>
             <button onClick={() => setTarget(null)} className="px-2 py-1 bg-white/10 rounded text-[12px]">취소</button>
           </div>

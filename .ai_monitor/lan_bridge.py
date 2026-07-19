@@ -16,11 +16,13 @@ REVISION HISTORY:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
@@ -32,12 +34,19 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from src.lan_peers import LanPeers
+from src.lan_peers import LanPeers, derive_key, make_pair_proof, verify_pair_proof
 from src.lan_discovery import LanDiscovery, DISCOVERY_PORT
 
 HTTP_PORT_START = 9020
 FIREWALL_RULE = 'VibeCoding-LAN'
 _NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+# [보안C3] 본문 크기 상한 — 미인증 경로가 무제한 read로 메모리 고갈되는 것 차단.
+MAX_CTRL_BYTES = 256 * 1024                 # 페어링/제어 라우트(작은 JSON)
+MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024     # 파일 수신 상한 2GB
+# [보안C1] 페어링 창 수명·시도 한도 — 브루트포스 구조적 봉쇄.
+PAIR_TTL_SEC = 90
+PAIR_MAX_ATTEMPTS = 5
 
 # 모듈 전역 — Handler가 참조. 단일 프로세스라 락 불필요(핸들러 스레드는 읽기 위주,
 # pending_code만 로컬 라우트에서 교체되고 이는 순간적).
@@ -46,10 +55,18 @@ STATE: dict = {
     'disc': None,        # LanDiscovery
     'port': 0,           # 실제 HTTP 포트
     'firewall_ok': False,
-    'pending_code': None,  # 페어링 개시 시 표시한 코드 (상대 요청 검증용)
+    'pending_code': None,   # 페어링 개시 시 표시한 코드 (상대 요청 검증용)
+    'pending_at': 0.0,      # 코드 생성 시각 (TTL)
+    'pending_attempts': 0,  # 실패 시도 카운트 (브루트포스 차단)
     'inbox': None,       # Path — 수신 파일 저장 루트
     'name': '',
 }
+
+
+def _seclog(msg: str) -> None:
+    """[보안W3] 보안 이벤트를 stderr에 기록 — 페어링/인증 실패를 은폐하지 않는다.
+    log_message는 억제하되 이 함수로 실패만 남겨 브루트포스를 가시화."""
+    print(f'[lan_bridge][sec] {time.strftime("%H:%M:%S")} {msg}', file=sys.stderr, flush=True)
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -101,15 +118,24 @@ def ensure_firewall(tcp_port: int, udp_port: int) -> bool:
 
 
 # ── 파일명 sanitize (경로 traversal 차단) ────────────────────────────────
+_RESERVED_NAMES = ({'CON', 'PRN', 'AUX', 'NUL'}
+                   | {f'COM{i}' for i in range(1, 10)}
+                   | {f'LPT{i}' for i in range(1, 10)})
+
+
 def sanitize_filename(name: str) -> str:
-    """수신 파일명을 안전화 — 경로 분리자·상위참조·제어문자 제거. 항상 basename만 남긴다.
+    """수신 파일명을 안전화 — 경로 분리자·상위참조·제어문자·Windows 예약명 제거.
 
     [보안] '../../etc/passwd', 'C:\\evil', 절대경로가 inbox 밖으로 못 나가게. 빈 결과는 대체명.
+    [불변식] 멱등이어야 함 — send_file이 sanitize된 이름으로 토큰을 서명하고, recv-file이
+    unquote→sanitize한 결과와 정확히 일치해야 인증 통과(재적용해도 같은 값).
     """
     name = unquote(name or '')
     name = name.replace('\\', '/').split('/')[-1]     # 경로 성분 제거 → basename
     name = ''.join(c for c in name if c.isprintable() and c not in '<>:"|?*')
-    name = name.strip().lstrip('.')                    # 선행 '.' 제거(숨김/상위참조 방지)
+    name = name.strip().lstrip('.').rstrip('. ')       # 선·후행 '.'/공백 제거(숨김·Windows 함정)
+    if name.split('.')[0].upper() in _RESERVED_NAMES:  # CON/NUL/COM1 등 장치명 회피
+        name = '_' + name
     return name or 'received.bin'
 
 
@@ -126,11 +152,16 @@ def send_file(peer_id: str, filepath: str) -> dict:
     path = Path(filepath)
     if not path.is_file():
         return {'ok': False, 'error': f'파일 없음: {filepath}'}
-    token = peers.make_token(peer_id)
+    raw = path.read_bytes()
+    # [W1 일관성] 송·수신 모두 sanitize된 파일명으로 서명/검증 — sanitize는 멱등이라
+    # 수신측 unquote→sanitize 결과와 정확히 일치한다(불일치 시 인증 실패).
+    safe_name = sanitize_filename(path.name)
+    body_hash = hashlib.sha256(raw).hexdigest()
+    token = peers.make_token(peer_id, body_hash, safe_name)
     url = f"http://{target['ip']}:{target['http_port']}/lan/recv-file"
-    req = Request(url, data=path.read_bytes(), method='POST', headers={
+    req = Request(url, data=raw, method='POST', headers={
         'X-Peer-Id': peers.self_id, 'X-Token': token or '',
-        'X-Filename': quote(path.name), 'Content-Type': 'application/octet-stream',
+        'X-Filename': quote(safe_name), 'Content-Type': 'application/octet-stream',
     })
     try:
         with urlopen(req, timeout=60) as resp:
@@ -156,8 +187,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _body(self) -> bytes:
-        n = int(self.headers.get('Content-Length', 0) or 0)
+    def _body(self, max_bytes: int = MAX_CTRL_BYTES) -> bytes | None:
+        """Content-Length만큼 읽되 상한 초과·음수는 None으로 거부(C3).
+
+        [보안C3] int(...)이 음수면 rfile.read(-1)=EOF까지 무한 읽기 → OOM. 음수/초과를
+        읽기 전에 차단한다. None 반환 시 호출부가 413으로 응답.
+        """
+        try:
+            n = int(self.headers.get('Content-Length', 0) or 0)
+        except ValueError:
+            return None
+        if n < 0 or n > max_bytes:
+            return None
         return self.rfile.read(n) if n else b''
 
     # ── GET ──────────────────────────────────────────────────────────
@@ -189,13 +230,18 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/lan/pair-begin', '/lan/pair-connect', '/lan/send'):
             if not self._is_local():
                 self._json({'error': 'local only'}, 403); return
-            body = json.loads(self._body() or b'{}')
+            raw = self._body(MAX_CTRL_BYTES)
+            if raw is None:
+                self._json({'error': '본문 크기 초과'}, 413); return
+            body = json.loads(raw or b'{}')
             if path == '/lan/pair-begin':
-                # 개시자: 6자리 코드 생성·표시. 상대의 pair-request가 이 코드로 검증됨.
+                # 개시자: 코드 생성·표시 + 창 오픈(TTL·시도카운터 리셋). 상대 proof가 이 코드로 검증됨.
                 STATE['pending_code'] = LanPeers.generate_pair_code()
+                STATE['pending_at'] = time.time()
+                STATE['pending_attempts'] = 0
                 self._json({'code': STATE['pending_code'], 'self_id': peers.self_id})
             elif path == '/lan/pair-connect':
-                # 입력자: 상대(ip/port)에게 pair-request 전송. 코드 일치 시 shared_key 수령·저장.
+                # 입력자: 코드에서 키 파생 + 상대에게 proof 전송. 키는 네트워크로 안 나감.
                 self._json(self._pair_connect(body))
             elif path == '/lan/send':
                 self._json(send_file(body.get('peer_id', ''), body.get('path', '')))
@@ -203,7 +249,11 @@ class Handler(BaseHTTPRequestHandler):
 
         # ② 인증 필요 라우트 (외부 피어)
         if path == '/lan/pair-request':
-            self._json(self._pair_request(json.loads(self._body() or b'{}')))
+            raw = self._body(MAX_CTRL_BYTES)
+            if raw is None:
+                _seclog(f'pair-request 본문 초과 from {self.client_address[0]}')
+                self._json({'error': '본문 크기 초과'}, 413); return
+            self._json(self._pair_request(json.loads(raw or b'{}')))
         elif path == '/lan/recv-file':
             self._json(self._recv_file())
         else:
@@ -211,13 +261,19 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── 페어링: 입력자 측 ────────────────────────────────────────────
     def _pair_connect(self, body: dict) -> dict:
+        """코드에서 키를 파생하고 상대에게 init-proof 전송. 상대 ack-proof를 검증해야 신뢰 등록.
+
+        [보안C2] shared_key = derive_key(code)로 로컬 계산 — 네트워크엔 proof(HMAC)만 나감.
+        """
         peers: LanPeers = STATE['peers']
         ip, port, code = body.get('ip'), body.get('http_port'), body.get('code')
         if not (ip and port and code):
             return {'ok': False, 'error': 'ip/http_port/code 필요'}
+        key = derive_key(code)
+        proof = make_pair_proof(code, 'init', peers.self_id)
         url = f'http://{ip}:{port}/lan/pair-request'
         req = Request(url, data=json.dumps({
-            'code': code, 'peer_id': peers.self_id, 'name': STATE['name'],
+            'peer_id': peers.self_id, 'name': STATE['name'], 'proof': proof,
         }).encode(), method='POST', headers={'Content-Type': 'application/json'})
         try:
             with urlopen(req, timeout=15) as resp:
@@ -226,35 +282,61 @@ class Handler(BaseHTTPRequestHandler):
             return {'ok': False, 'error': str(e)}
         if not res.get('ok'):
             return res
-        # 상대가 준 shared_key로 상대를 신뢰 등록(대칭키).
-        peers.add_peer(res['self_id'], res.get('name', ''), res['shared_key'])
+        # [보안] 상대의 ack-proof를 코드로 검증 — 코드를 모르는 가짜 응답자(MITM)를 배제.
+        if not verify_pair_proof(code, 'ack', res.get('self_id', ''), res.get('proof', '')):
+            return {'ok': False, 'error': '상대 응답 검증 실패(코드 불일치 또는 위조)'}
+        peers.add_peer(res['self_id'], res.get('name', ''), key)
         return {'ok': True, 'peer_id': res['self_id'], 'name': res.get('name', '')}
 
     # ── 페어링: 개시자 측 (상대의 요청 수신) ────────────────────────
     def _pair_request(self, body: dict) -> dict:
+        """상대 init-proof를 pending_code로 검증. [C1] TTL·시도 한도로 브루트포스 차단."""
         peers: LanPeers = STATE['peers']
-        if not STATE['pending_code']:
+        code = STATE['pending_code']
+        src = self.client_address[0]
+        if not code:
             return {'ok': False, 'error': '페어링 대기 중 아님'}
-        if body.get('code') != STATE['pending_code']:
-            return {'ok': False, 'error': '코드 불일치'}
+        # [C1] TTL 만료 → 창 폐기.
+        if time.time() - STATE['pending_at'] > PAIR_TTL_SEC:
+            STATE['pending_code'] = None
+            _seclog(f'페어링 창 TTL 만료 — 폐기 (from {src})')
+            return {'ok': False, 'error': '페어링 코드 만료'}
         peer_id, name = body.get('peer_id'), body.get('name', '')
         if not peer_id:
             return {'ok': False, 'error': 'peer_id 없음'}
-        shared_key = LanPeers.new_shared_key()
-        peers.add_peer(peer_id, name, shared_key)
-        STATE['pending_code'] = None   # 일회성 — 재사용 방지
+        if not verify_pair_proof(code, 'init', peer_id, body.get('proof', '')):
+            # [C1] 실패 카운트 — 한도 초과 시 창 폐기(무제한 시도 봉쇄).
+            STATE['pending_attempts'] += 1
+            _seclog(f'페어링 proof 실패 {STATE["pending_attempts"]}/{PAIR_MAX_ATTEMPTS} (from {src})')
+            if STATE['pending_attempts'] >= PAIR_MAX_ATTEMPTS:
+                STATE['pending_code'] = None
+                _seclog(f'페어링 시도 한도 초과 — 창 폐기 (from {src})')
+            return {'ok': False, 'error': '코드 불일치'}
+        # 성공: 같은 코드로 파생한 키로 상대 신뢰 등록 + ack-proof 응답. 창은 일회성 소진.
+        key = derive_key(code)
+        peers.add_peer(peer_id, name, key)
+        STATE['pending_code'] = None
         return {'ok': True, 'self_id': peers.self_id, 'name': STATE['name'],
-                'shared_key': shared_key}
+                'proof': make_pair_proof(code, 'ack', peers.self_id)}
 
     # ── 파일 수신 ────────────────────────────────────────────────────
     def _recv_file(self) -> dict:
+        """토큰(헤더)이 body_hash·filename까지 서명했는지 검증 후 저장. [W1/W2] 크기 상한·바인딩."""
         peers: LanPeers = STATE['peers']
         peer_id = self.headers.get('X-Peer-Id', '')
         token = self.headers.get('X-Token', '')
-        if not peers.verify_token(peer_id, token):
-            return {'ok': False, 'error': '인증 실패'}
-        raw = self._body()
         fname = sanitize_filename(self.headers.get('X-Filename', ''))
+        # [C3/W2] 본문을 상한 내에서만 읽음. 초과·음수는 413.
+        raw = self._body(MAX_FILE_BYTES)
+        if raw is None:
+            _seclog(f'recv-file 크기 초과 from {self.client_address[0]}')
+            self.send_response(413); self.end_headers()
+            return {'ok': False, 'error': '파일 크기 초과'}
+        body_hash = hashlib.sha256(raw).hexdigest()
+        # [W1] 토큰 서명 범위 = peer_id:nonce:ts:body_hash:filename → 캡처-변조 재전송 차단.
+        if not peers.verify_token(peer_id, token, body_hash, fname):
+            _seclog(f'recv-file 인증 실패 peer={peer_id[:8]} from {self.client_address[0]}')
+            return {'ok': False, 'error': '인증 실패'}
         peer_name = next((p['name'] for p in peers.list_peers() if p['peer_id'] == peer_id),
                          peer_id)
         dest_dir = STATE['inbox'] / sanitize_filename(peer_name)
