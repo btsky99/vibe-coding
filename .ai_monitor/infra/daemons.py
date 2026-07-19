@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 from infra import runtime
 
 
@@ -48,16 +49,16 @@ def run_watchdog(env: DaemonEnv) -> None:
             print("[!] run_watchdog: Python 인터프리터를 찾을 수 없어 워치독 스킵")
             return
         python_exe = _python_cmds[0]
-        proc = subprocess.Popen(
+        # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
+        child = proc.popen(
             [python_exe, str(watchdog_script), "--data-dir", str(env.data_dir)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding='utf-8',
             errors='replace',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         )
-        env.child_procs.append(proc)
+        env.child_procs.append(child)
 
 
 def run_lan_bridge(env: DaemonEnv) -> None:
@@ -81,13 +82,13 @@ def run_lan_bridge(env: DaemonEnv) -> None:
     if not _python_cmds:
         print("[!] run_lan_bridge: Python 인터프리터를 찾을 수 없어 LAN 브리지 스킵")
         return
-    proc = subprocess.Popen(
+    # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
+    child = proc.popen(
         [_python_cmds[0], str(bridge_script), "--data-dir", str(env.data_dir)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         encoding='utf-8', errors='replace',
-        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
     )
-    env.child_procs.append(proc)
+    env.child_procs.append(child)
 
 
 _tg_bridge_launched = [False]
@@ -106,10 +107,9 @@ def run_telegram_bridge(env: DaemonEnv) -> None:
     if tg_pid_file.exists():
         try:
             old_pid = int(tg_pid_file.read_text().strip())
-            check = subprocess.run(
+            check = proc.run(
                 ['tasklist', '/FI', f'PID eq {old_pid}', '/NH'],
                 capture_output=True, text=True, timeout=5,
-                creationflags=0x08000000,
             )
             if str(old_pid) in check.stdout and 'python' in check.stdout.lower():
                 print(f"[*] Telegram Bridge 이미 실행 중 (PID={old_pid}) — 스킵")
@@ -146,7 +146,8 @@ def run_telegram_bridge(env: DaemonEnv) -> None:
     child_env['VIBE_SERVER_PORT'] = str(env.http_port)
     tg_log.parent.mkdir(parents=True, exist_ok=True)
     log_handle = open(tg_log, 'a', encoding='utf-8')
-    proc = subprocess.Popen(
+    # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
+    child = proc.popen(
         [python_exe, str(tg_script)],
         cwd=str(env.project_root),
         stdout=log_handle,
@@ -154,15 +155,14 @@ def run_telegram_bridge(env: DaemonEnv) -> None:
         env=child_env,
         encoding='utf-8',
         errors='replace',
-        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
     )
-    proc._vibe_log_handle = log_handle
-    env.child_procs.append(proc)
+    child._vibe_log_handle = log_handle
+    env.child_procs.append(child)
     try:
-        tg_pid_file.write_text(str(proc.pid))
+        tg_pid_file.write_text(str(child.pid))
     except Exception:
         pass
-    print(f"[*] Telegram Bridge 자동 시작됨 (PID={proc.pid})")
+    print(f"[*] Telegram Bridge 자동 시작됨 (PID={child.pid})")
 
 def run_codex_pg_watcher(env: DaemonEnv) -> None:
     if not env.scripts_dir:
@@ -174,16 +174,16 @@ def run_codex_pg_watcher(env: DaemonEnv) -> None:
             print("[!] run_codex_pg_watcher: Python interpreter not found")
             return
         python_exe = _python_cmds[0]
-        proc = subprocess.Popen(
+        # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
+        child = proc.popen(
             [python_exe, str(watcher_script), "--interval", "5"],
             cwd=str(env.project_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             encoding='utf-8',
             errors='replace',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
-        env.child_procs.append(proc)
+        env.child_procs.append(child)
         print("[*] Codex pg_logs watcher started")
 
 def run_orchestrator_daemon(env: DaemonEnv) -> None:
@@ -197,7 +197,7 @@ def run_orchestrator_daemon(env: DaemonEnv) -> None:
         pid_file = env.data_dir / "orchestrator.pid"
         def _pid_is_alive(pid: int) -> bool:
             try:
-                result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+                result = proc.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
                 return result.returncode == 0 and f'"{pid}"' in result.stdout
             except Exception:
                 return False
@@ -214,20 +214,22 @@ def run_orchestrator_daemon(env: DaemonEnv) -> None:
             print("[!] run_orchestrator_daemon: Python 인터프리터를 찾을 수 없어 오케스트레이터 스킵")
             return
         python_exe = _python_cmds[0]
-        proc = subprocess.Popen(
+        # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피.
+        # [필수] 중첩 _pid_is_alive가 proc.run(모듈)을 참조 — outer proc 지역화 시
+        #   free variable 조기참조 NameError. child로 rename해 모듈 proc 노출 유지.
+        child = proc.popen(
             [python_exe, str(orch_script), "--daemon", "--interval", "60"],
             cwd=str(env.project_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             encoding='utf-8',
             errors='replace',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
-        env.child_procs.append(proc)
+        env.child_procs.append(child)
         print("[*] 하이브 오케스트레이터 데몬(orchestrator) 자동 시작됨")
 
         try:
-            pid_file.write_text(str(proc.pid), encoding='utf-8')
+            pid_file.write_text(str(child.pid), encoding='utf-8')
         except Exception:
             pass
 
@@ -250,12 +252,11 @@ def run_doc_generators_daemon(env: DaemonEnv) -> None:
         # PROJECT_MAP.md 갱신
         if pm_script.exists():
             try:
-                subprocess.run(
+                proc.run(
                     [python_exe, str(pm_script)],
                     cwd=str(env.project_root),
                     timeout=120,
                     capture_output=True,
-                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
                 )
                 print("[*] PROJECT_MAP.md 자동 갱신 완료")
             except Exception as e:
@@ -264,12 +265,11 @@ def run_doc_generators_daemon(env: DaemonEnv) -> None:
         # HIVEMIND.md 갱신
         if hv_script.exists():
             try:
-                subprocess.run(
+                proc.run(
                     [python_exe, str(hv_script)],
                     cwd=str(env.project_root),
                     timeout=120,
                     capture_output=True,
-                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
                 )
                 print("[*] HIVEMIND.md 자동 갱신 완료")
             except Exception as e:
@@ -352,9 +352,18 @@ def run_zettel_sync(env: DaemonEnv) -> None:
         _vault.mkdir(parents=True, exist_ok=True)
 
         # 기존 .zettel-vault 마이그레이션 (최초 1회)
+        # [과거사고] 2026-07-19: config vault_dir이 레거시 .zettel-vault와 동일 경로로
+        #   설정된 환경에서 copytree(old, vault)가 디렉토리를 자기 자신에 복사 →
+        #   Obsidian이 파일을 잡고 있어 WinError 32 → line 360 마커가 안 찍혀
+        #   매 데몬 시작마다 재시도(server.log 67회 폭주). 두 경로가 같으면(=이미 활성
+        #   vault면) 마이그레이션할 게 없으므로 건너뛴다.
         import shutil as _shutil
         _old_vault = env.current_project_root() / '.zettel-vault'
-        if _old_vault.exists() and not (_vault / '_migrated').exists():
+        try:
+            _same_path = _old_vault.resolve() == _vault.resolve()
+        except Exception:
+            _same_path = str(_old_vault) == str(_vault)
+        if _old_vault.exists() and not _same_path and not (_vault / '_migrated').exists():
             try:
                 _shutil.copytree(str(_old_vault), str(_vault), dirs_exist_ok=True)
                 (_vault / '_migrated').touch()
@@ -496,14 +505,13 @@ def run_commit_watcher(env: DaemonEnv) -> None:
     [v3.7.179] git hook 없이도 커밋 노트가 자동 생성됨."""
     try:
         time.sleep(60)  # 서버 안정화 대기
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         # 마지막으로 처리한 커밋 해시
         _last_hash = None
         try:
-            r = subprocess.run(
+            r = proc.run(
                 ['git', 'rev-parse', 'HEAD'],
                 cwd=str(env.project_root), capture_output=True, text=True,
-                timeout=5, creationflags=_no_window,
+                timeout=5,
             )
             if r.returncode == 0:
                 _last_hash = r.stdout.strip()
@@ -513,10 +521,10 @@ def run_commit_watcher(env: DaemonEnv) -> None:
         while True:
             try:
                 time.sleep(60)
-                r = subprocess.run(
+                r = proc.run(
                     ['git', 'rev-parse', 'HEAD'],
                     cwd=str(env.project_root), capture_output=True, text=True,
-                    timeout=5, creationflags=_no_window,
+                    timeout=5,
                 )
                 if r.returncode != 0:
                     continue
@@ -525,19 +533,17 @@ def run_commit_watcher(env: DaemonEnv) -> None:
                     continue
 
                 # 새 커밋 감지 — 커밋 메시지 + 변경 파일 조회
-                r2 = subprocess.run(
+                r2 = proc.run(
                     ['git', 'log', '-1', '--pretty=format:%B', current_hash],
                     cwd=str(env.project_root), capture_output=True, text=True,
                     timeout=5, encoding='utf-8', errors='replace',
-                    creationflags=_no_window,
                 )
                 commit_msg = r2.stdout.strip() if r2.returncode == 0 else ''
 
-                r3 = subprocess.run(
+                r3 = proc.run(
                     ['git', 'diff-tree', '--no-commit-id', '--name-only', '-r', current_hash],
                     cwd=str(env.project_root), capture_output=True, text=True,
                     timeout=5, encoding='utf-8', errors='replace',
-                    creationflags=_no_window,
                 )
                 files = [f for f in r3.stdout.strip().split('\n') if f] if r3.returncode == 0 else []
 
