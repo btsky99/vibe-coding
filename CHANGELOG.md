@@ -1,5 +1,13 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-07-19] - 라이브 프로젝트 전환 (무재시작)
+
+### 🔀 프로젝트 라이브 전환
+- **[Fix/Feature] server.py `_switch_project` + `POST /api/switch-project`**: '프로젝트 폴더 선택' 시 재시작 없이 DB 커넥션/컨텍스트/배너/패널을 전환. 근본원인 = PROJECT_CONTEXT_UNRESOLVED/DB커넥션/PROJECT_ROOT가 부팅 1회 고정, 런타임 재초기화 없음(폴더 선택해도 last_path만 저장돼 패널 빔+배너 잔존).
+- **[안전] 전환 실패 시 이전 프로젝트로 롤백** — 반쪽 상태로 앱 불능 방지. DB 전환은 set_project_db가 단일/db-키잉 풀 커넥션을 새 DB로 유도(교차오염 없음).
+- **[라이브 추종] zettel_sync.py watch_and_sync `resolve` 콜러블**: 매 사이클 vault/project_id 재해석 → 데몬 재시작 없이 전환 추종. 옛 스코프로 새 DB를 정리해 노트를 오삭제하던 위험 차단.
+- **[프론트] App.tsx openFolder**: select-folder 후 switch-project를 await한 뒤 경로 갱신(배너 정합성).
+
 ## [2026-07-19] - LAN 자동 공유 (클로드 자율 발송)
 
 ### 📤 LAN 자동 공유 (A안)
