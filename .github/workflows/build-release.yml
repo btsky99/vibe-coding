@@ -199,8 +199,10 @@ jobs:
             --add-data "pty-server;pty-server" \
             --add-data "_version.py;." \
             --add-data "updater.py;." \
+            --add-data "lan_bridge.py;." \
             --add-data "../soft_manifest.json;." \
             --add-data "server.py;_appseed/.ai_monitor" \
+            --add-data "lan_bridge.py;_appseed/.ai_monitor" \
             --add-data "boot.py;_appseed/.ai_monitor" \
             --add-data "soft_updater.py;_appseed/.ai_monitor" \
             --add-data "updater.py;_appseed/.ai_monitor" \
@@ -262,8 +264,10 @@ jobs:
             --add-data "pty-server;pty-server" \
             --add-data "_version.py;." \
             --add-data "updater.py;." \
+            --add-data "lan_bridge.py;." \
             --add-data "../soft_manifest.json;." \
             --add-data "server.py;_appseed/.ai_monitor" \
+            --add-data "lan_bridge.py;_appseed/.ai_monitor" \
             --add-data "boot.py;_appseed/.ai_monitor" \
             --add-data "soft_updater.py;_appseed/.ai_monitor" \
             --add-data "updater.py;_appseed/.ai_monitor" \

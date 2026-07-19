@@ -117,11 +117,17 @@ a = Analysis(
         # 자동 업데이트(시작 루프 4053 + 수동 트리거 2016) 전부 조용히 무력화 = "업데이트 안 뜸".
         # api/src/infra/_version과 동일하게 MEIPASS 루트에 소스를 실어야 sys.path(=MEIPASS) import 성공.
         ('.ai_monitor/updater.py', '.'),
+        # [필수] lan_bridge.py는 daemons.run_lan_bridge가 subprocess로 실행하는 스크립트 —
+        #   import 그래프에 없어 PyInstaller 정적분석이 못 잡는다. 개별 datas로 실어야
+        #   frozen에서 base_dir/lan_bridge.py 실행 가능(누락 시 브리지 조용히 미기동).
+        #   [동기] build-release.yml --add-data "lan_bridge.py;." 도 함께 갱신.
+        ('.ai_monitor/lan_bridge.py', '.'),
         # [A안 seed] boot.py가 (a)오프라인 최초부팅 시 SRC로 복사, (b)min_exe 게이트 실패 시
         #   in-place 실행, (c)`hook` 빠른경로 실행에 쓰는 앱 .py 스냅샷. 리포 레이아웃(.ai_monitor/...)
         #   을 그대로 재현해야 boot가 유효한 체크아웃으로 인식한다. dist/binaries는 MEIPASS 루트에서
         #   BASE_DIR로 접근하므로 seed에 불포함(순수 .py만 — soft 채널 범위와 일치).
         ('.ai_monitor/server.py', '_appseed/.ai_monitor'),
+        ('.ai_monitor/lan_bridge.py', '_appseed/.ai_monitor'),
         ('.ai_monitor/soft_updater.py', '_appseed/.ai_monitor'),
         ('.ai_monitor/boot.py', '_appseed/.ai_monitor'),
         ('.ai_monitor/updater.py', '_appseed/.ai_monitor'),
