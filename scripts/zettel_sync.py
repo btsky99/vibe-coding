@@ -812,15 +812,28 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
 
 
 def watch_and_sync(vault_dir: Path, project_id: str = '', interval: int = 60,
-                   bidirectional: bool = False, include_archived: bool = False):
+                   bidirectional: bool = False, include_archived: bool = False,
+                   resolve=None):
     """주기적 동기화 루프. 데몬 모드로 실행.
     include_archived=True면 export가 아카이브 노트도 _보관 폴더로 내보낸다 — GDrive 양방향에서
     아카이브 상태를 다른 PC로 전파하고, 두 동기화 루프가 _보관 파일을 두고 다투지 않게 하려면 필수.
+
+    [WHY resolve] 라이브 프로젝트 전환(무재시작) 추종용 콜러블 — () -> (vault_dir, project_id).
+      매 사이클 현재 프로젝트를 재해석한다. 전환 시 서버 DB 커넥션은 새 프로젝트로 바뀌는데
+      이 루프가 옛 project_id/vault를 계속 쓰면 새 DB를 옛 스코프로 건드려 노트를 오삭제할
+      위험(스코프 밖 stale 파일 정리)이 있다 → resolve로 스코프를 DB와 항상 정렬한다.
+      미지정 시 고정 인자 사용(기존 동작 불변).
     """
     mode_label = '양방향' if bidirectional else '단방향(PG→Vault)'
     print(f'[zettel_sync] 감시 모드 시작 — {interval}초 간격, {mode_label}, vault={vault_dir}')
     while True:
         try:
+            if resolve is not None:
+                _v, _p = resolve()
+                if _v:
+                    vault_dir = Path(_v)
+                if _p is not None:
+                    project_id = _p
             if bidirectional:
                 import_from_vault(vault_dir, project_id=project_id)
             export_to_vault(vault_dir, project_id=project_id,

@@ -377,6 +377,21 @@ def run_zettel_sync(env: DaemonEnv) -> None:
         _proj_id = env.current_project_id()
         print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project_id={_proj_id}, 60초 양방향')
 
+        # [라이브 전환 추종] 매 사이클 현재 vault/project_id를 재해석 — 무재시작 프로젝트 전환 시
+        #   서버 DB 커넥션이 새 프로젝트로 바뀌므로 이 루프의 스코프도 함께 따라가야 한다
+        #   (옛 스코프로 새 DB를 정리하면 노트 오삭제 위험). env.current_project_id는 라이브 콜러블.
+        def _resolve_current():
+            _v = env.global_vault_dir
+            try:
+                if env.config_file.exists():
+                    _c = json.loads(env.config_file.read_text(encoding='utf-8'))
+                    _uv = _c.get('vault_dir', '')
+                    if _uv:
+                        _v = Path(_uv)
+            except Exception:
+                pass
+            return _v, env.current_project_id()
+
         # Google Drive vault — 자동 탐지 + config.json 오버라이드
         # PC마다 드라이브 레터(I:/G:/H:…)와 언어(내 드라이브/My Drive)가 달라
         # 고정 경로를 쓰면 다른 PC에서 동작하지 않는다.
@@ -444,7 +459,8 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                          name='ZettelGDrive').start()
         # include_archived=True — GDrive 루프와 아카이브 표현을 일치시켜 _보관 파일 핑퐁 제거.
         _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60,
-                            bidirectional=True, include_archived=True)
+                            bidirectional=True, include_archived=True,
+                            resolve=_resolve_current)
     except Exception as e:
         print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
 

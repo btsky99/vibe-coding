@@ -284,6 +284,7 @@ _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
 # [2026-04-21] server.py L230~536 (ensure_postgres_running + _init_project_db)
 # 블록 분리. PG_PORT/PG_PROJECT_DB 글로벌 mutation은 caller 래퍼가 담당.
 from infra import postgres_runtime as _postgres_runtime
+from infra import proc as _proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 
 def ensure_postgres_running() -> None:
@@ -316,6 +317,81 @@ def _init_project_db(project_id: str) -> None:
     PG_PROJECT_DB = _postgres_runtime.create_project_db(
         project_id, run_pg_sql, _set_project_db
     )
+
+
+def _switch_project(path: str) -> dict:
+    """실행 중 프로젝트를 재시작 없이 전환한다(라이브 스위치).
+
+    [WHY] 부팅 시 1회 고정되던 활성 프로젝트(DB 커넥션/PROJECT_ROOT/UNRESOLVED 플래그)를
+      폴더 선택 즉시 재초기화. 기존엔 폴더를 골라도 last_path만 저장되고 서버는 옛 프로젝트를
+      계속 봐서 패널이 비고 배너가 안 사라지는 사고(2026-07-19).
+    [불변식] DB 전환은 set_project_db가 단일 _pg_conn + db-키잉된 풀을 모두 새 DB로 유도하므로
+      교차오염 없음. reset_schema_cache→ensure_schema로 새 DB 스키마 보장.
+    [롤백] 전환 중 실패하면 이전 프로젝트로 되돌린다 — 반쪽 상태로 앱이 불능이 되지 않게.
+    반환: {ok, project_id} | {ok:false, error}.
+    """
+    global PROJECT_ROOT, PROJECT_CONTEXT_UNRESOLVED, _FS_OBSERVER
+    from src.pg_store import reset_schema_cache as _reset_schema_cache
+    p = Path(str(path).replace('\\', '/'))
+    if not p.is_dir():
+        return {'ok': False, 'error': f'존재하지 않는 폴더: {path}'}
+    prev_root = PROJECT_ROOT
+    prev_id = _current_project_id()
+    try:
+        # ① last_path + projects.json MRU 저장 (다음 부팅에도 유지)
+        _norm = str(p).replace('\\', '/')
+        cfg = {}
+        if CONFIG_FILE.exists():
+            try:
+                cfg = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+            except Exception:
+                cfg = {}
+        cfg['last_path'] = _norm
+        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+        try:
+            _projs = json.loads(PROJECTS_FILE.read_text(encoding='utf-8')) if PROJECTS_FILE.exists() else []
+        except Exception:
+            _projs = []
+        if _norm in _projs:
+            _projs.remove(_norm)
+        _projs.insert(0, _norm)
+        PROJECTS_FILE.write_text(json.dumps(_projs[:20], ensure_ascii=False, indent=2), encoding='utf-8')
+
+        # ② 새 슬러그 확정 — last_path 저장 후라 _current_project_id()가 새 값을 돌려준다.
+        PROJECT_ROOT = p
+        new_id = _current_project_id()
+
+        # ③ DB 전환 + 스키마 보장 (커넥션은 set_project_db가 폐기→재연결 유도)
+        _init_project_db(new_id)
+        _reset_schema_cache()
+        ensure_schema(DATA_DIR)
+
+        # ④ 배너 해제 — 명시적 선택은 마커 유무와 무관하게 '해석됨'으로 본다.
+        PROJECT_CONTEXT_UNRESOLVED = False
+
+        # ⑤ fs 감시 재지정 (best-effort — 실패해도 전환 자체는 성공 처리)
+        try:
+            if _FS_OBSERVER is not None:
+                _FS_OBSERVER.stop()
+        except Exception as _e:
+            print(f'[switch] fs 옵저버 정지 실패(무시): {_e}')
+        try:
+            start_fs_watcher(str(p))
+        except Exception as _e:
+            print(f'[switch] fs 옵저버 재시작 실패(무시): {_e}')
+
+        print(f'[switch] 프로젝트 라이브 전환: {prev_id} → {new_id} ({_norm})')
+        return {'ok': True, 'project_id': new_id, 'path': _norm}
+    except Exception as e:
+        # 롤백 — 이전 프로젝트 DB로 복구
+        try:
+            PROJECT_ROOT = prev_root
+            _init_project_db(prev_id)
+            _reset_schema_cache()
+            ensure_schema(DATA_DIR)
+        except Exception as _re:
+            print(f'[switch] 롤백도 실패(치명): {_re}')
+        return {'ok': False, 'error': f'전환 실패(이전 프로젝트로 롤백): {e}'}
 
 
 # [이관 R14] run_pg_sql/csv 본문을 pg_base로 이동 — DB I/O는 데이터 계층에 집중
@@ -492,8 +568,16 @@ def _agent_broadcast_worker():
     _fs_watcher.agent_broadcast_worker(AGENT_CLIENTS, _SSE_LOCK)
 
 
+# [WHY 전역 보관] 라이브 프로젝트 전환(_switch_project) 시 옛 루트를 감시하던 옵저버를
+#   멈추고 새 루트로 재시작해야 한다. app_boot는 반환값을 버려서 핸들이 유실되므로
+#   여기서 모듈 전역에 잡아둔다(전환 재지정 전용).
+_FS_OBSERVER = None
+
+
 def start_fs_watcher(root_path):
-    return _fs_watcher.start_fs_watcher(root_path, FS_CLIENTS, _SSE_LOCK, DATA_DIR)
+    global _FS_OBSERVER
+    _FS_OBSERVER = _fs_watcher.start_fs_watcher(root_path, FS_CLIENTS, _SSE_LOCK, DATA_DIR)
+    return _FS_OBSERVER
 # ----------------------------------------------
 
 # [제거됨 2026-03-22] winpty/pywinpty → Node.js node-pty 마이크로서비스로 대체
@@ -995,13 +1079,11 @@ def _g_copy_path(h, pp):
     query = parse_qs(pp.query)
     target_path = query.get('path', [''])[0]
     try:
-        # Windows 클립보드에 경로 복사
-        # CREATE_NO_WINDOW: PowerShell 콘솔 창이 순간 깜빡이는 문제 방지
+        # Windows 클립보드에 경로 복사 (PowerShell 콘솔 깜빡임은 _proc가 CREATE_NO_WINDOW로 차단)
         if os.name == 'nt':
-            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            subprocess.run(
+            _proc.run(
                 ['powershell', '-WindowStyle', 'Hidden', '-Command', f'Set-Clipboard -Value "{target_path}"'],
-                check=True, encoding='utf-8', creationflags=_no_window
+                check=True, encoding='utf-8'
             )
         h.wfile.write(json.dumps({"status": "success", "message": "Path copied to clipboard"}).encode('utf-8'))
     except Exception as e:
@@ -1180,6 +1262,12 @@ def _p_fs_dialog(h, pp):
                               open_folder_dialog=_open_folder_dialog_subprocess,
                               config_file=CONFIG_FILE)
 
+def _p_switch_project(h, pp):
+    # 라이브 프로젝트 전환 — {path} 받아 재시작 없이 DB/컨텍스트 전환.
+    body = _p_body(h) or {}
+    res = _switch_project(body.get('path', ''))
+    _send_json_response(h, res, status=200 if res.get('ok') else 400)
+
 # 도구 설치 POST 2종 (Phase 2 R2) — install_api로 본문 이전, 전역 헬퍼 주입.
 # [불변식] body 선읽기 금지 — 각 핸들러가 h.rfile을 직접 소비. late-binding.
 def _p_install_playwright(h, pp):
@@ -1277,6 +1365,7 @@ POST_ROUTES = {
     '/api/files/delete': _p_files,
     '/api/open-external': _p_fs_dialog,
     '/api/select-folder': _p_fs_dialog,
+    '/api/switch-project': _p_switch_project,
     '/api/install-playwright-cli': _p_install_playwright,
     '/api/run-script': _p_run_script,
     '/api/messages/clear': _p_messages_clear,

@@ -262,21 +262,39 @@ function App() {
       .finally(() => setSoftApplying(false));
   };
 
+  // 프로젝트 라이브 전환 — 선택한 폴더로 서버 프로젝트(DB/컨텍스트/배너)를 재시작 없이 전환.
+  // [WHY] 예전엔 setCurrentPath만 해 last_path만 저장되고 서버는 옛 프로젝트를 계속 봐서
+  //   패널이 비고 배너가 안 사라졌다(2026-07-19). switch-project를 await한 뒤 setCurrentPath해야
+  //   config 재조회(projectUnresolved effect)가 전환된 상태를 읽어 배너가 정확히 갱신된다.
+  const activateProject = async (path: string) => {
+    const clean = path.trim().replace(/\\/g, '/');
+    try {
+      await fetch(`${API_BASE}/api/switch-project`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: clean }),
+      });
+    } catch {
+      // 전환 API 실패해도 경로 표시는 갱신(다음 폴링/재시작에 반영).
+    }
+    setCurrentPath(clean);
+  };
+
   // 폴더 열기 — TopMenuBar "파일 → 폴더 열기" 전용 (FileExplorer 자체 버튼과 별개)
   const openFolder = async () => {
     try {
       if ((window as any).pywebview?.api?.select_folder) {
         const data = await (window as any).pywebview.api.select_folder();
-        if (data.status === 'success' && data.path) setCurrentPath(data.path);
+        if (data.status === 'success' && data.path) await activateProject(data.path);
         return;
       }
       const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
       const data = await res.json();
-      if (data.status === 'success' && data.path) setCurrentPath(data.path);
+      if (data.status === 'success' && data.path) await activateProject(data.path);
     } catch {
       // 다이얼로그 실패 시 prompt 폴백
       const path = prompt('프로젝트 폴더 경로를 입력하세요:', currentPath);
-      if (path) setCurrentPath(path.trim().replace(/\\/g, '/'));
+      if (path) await activateProject(path);
     }
   };
 
