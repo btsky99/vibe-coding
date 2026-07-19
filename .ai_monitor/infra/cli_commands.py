@@ -19,6 +19,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 
 def handle_cli_command(argv: list, server_dir: Path) -> bool:
     """--install / --uninstall / --create-shortcut 처리.
@@ -39,12 +41,10 @@ def handle_cli_command(argv: list, server_dir: Path) -> bool:
             import shutil as _shutil
             pty_dir = server_dir / 'pty-server'
             _need_build = True
-            _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
             if (pty_dir / 'package.json').exists() and _shutil.which('node'):
                 try:
-                    chk = subprocess.run(['node', '-e', "require('node-pty')"],
-                                         cwd=str(pty_dir), capture_output=True, timeout=10,
-                                         creationflags=_no_win)
+                    chk = proc.run(['node', '-e', "require('node-pty')"],
+                                   cwd=str(pty_dir), capture_output=True, timeout=10)
                     if chk.returncode == 0:
                         _need_build = False
                         print("[*] 터미널 네이티브 모듈 정상 확인!")
@@ -54,9 +54,9 @@ def handle_cli_command(argv: list, server_dir: Path) -> bool:
             if _need_build and (pty_dir / 'package.json').exists() and _shutil.which('npm'):
                 print("[*] 터미널 네이티브 모듈 빌드 중... (1~2분 소요)")
                 # shell=True: Windows에서 npm은 npm.cmd이므로 shell 경유 필요
-                r = subprocess.run('npm install', cwd=str(pty_dir), shell=True,
-                                   capture_output=True, text=True, encoding='utf-8',
-                                   errors='replace', timeout=300, creationflags=_no_win)
+                r = proc.run('npm install', cwd=str(pty_dir), shell=True,
+                             capture_output=True, text=True, encoding='utf-8',
+                             errors='replace', timeout=300)
                 if r.returncode == 0:
                     print("[*] 터미널 네이티브 모듈 빌드 완료!")
                 else:

@@ -19,8 +19,9 @@ REVISION HISTORY:
 from __future__ import annotations
 
 import json
-import subprocess
 import time
+
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 
 def _json_headers(handler) -> None:
@@ -69,15 +70,13 @@ def dashboard_launch(handler, base_dir, http_port, python_runner_cmds) -> None:
             if isinstance(payload, dict):
                 tab = str(payload.get('tab', 'agent')).strip().lower() or 'agent'
 
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         # Python 스크립트로 대시보드 창 실행
         dashboard_script = base_dir / 'dashboard_window.py'
         python_cmds = python_runner_cmds()
         if not python_cmds:
             raise RuntimeError('Python interpreter not found for dashboard launch')
-        subprocess.Popen(
+        proc.popen(
             [python_cmds[0], str(dashboard_script), str(http_port), tab],
-            creationflags=_no_window,
             close_fds=True,
         )
         handler.wfile.write(json.dumps({"status": "launched", "tab": tab}).encode('utf-8'))

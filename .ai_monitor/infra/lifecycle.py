@@ -25,6 +25,10 @@ import sys
 import time
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+# [주의] cleanup_child_procs의 for proc 루프는 이 모듈 proc을 지역 shadow하나,
+#   그 함수는 subprocess.call만 쓰고 헬퍼를 안 써서 무해(call은 헬퍼 미제공 → 미변환).
+
 
 def graceful_shutdown_pty_server(ws_port: int) -> None:
     """Node PTY 서버에 graceful shutdown 요청을 보냅니다.
@@ -191,7 +195,6 @@ def cleanup_postgres(
         return
     if not pg_data_dir.exists():
         return
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
 
     # ── 자기 인스턴스의 커넥션 풀 먼저 정리 ──
     # 풀에 남은 연결이 pg_stat_activity에 잡혀 "다른 인스턴스 있음"으로 오판 방지
@@ -231,18 +234,18 @@ def cleanup_postgres(
 
     try:
         # fast 모드: 클라이언트 연결 즉시 끊고 종료 (smart보다 빠름)
-        subprocess.run(
+        proc.run(
             [str(pg_ctl_bin), "stop", "-D", str(pg_data_dir), "-m", "fast"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window, timeout=10
+            timeout=10
         )
         print("[PG] PostgreSQL 정상 종료 완료")
     except subprocess.TimeoutExpired:
         # 강제 종료
         try:
-            subprocess.run(
+            proc.run(
                 [str(pg_ctl_bin), "stop", "-D", str(pg_data_dir), "-m", "immediate"],
-                capture_output=True, creationflags=_no_window, timeout=5
+                capture_output=True, timeout=5
             )
             print("[PG] PostgreSQL 강제 종료 완료")
         except Exception:

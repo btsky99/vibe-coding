@@ -37,10 +37,10 @@ if str(BASE_DIR) not in sys.path:
 
 from src.lan_peers import LanPeers, derive_key, make_pair_proof, verify_pair_proof
 from src.lan_discovery import LanDiscovery, DISCOVERY_PORT
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 HTTP_PORT_START = 9020
 FIREWALL_RULE = 'VibeCoding-LAN'
-_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
 
 # [보안C3] 본문 크기 상한 — 미인증 경로가 무제한 read로 메모리 고갈되는 것 차단.
 MAX_CTRL_BYTES = 256 * 1024                 # 페어링/제어 라우트(작은 JSON)
@@ -108,15 +108,15 @@ def ensure_firewall(tcp_port: int, udp_port: int) -> bool:
     [블로커] 이게 없으면 Windows Defender가 인바운드를 막아 '됐다는데 연결 안 됨' 사고.
     """
     try:
-        subprocess.run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule',
-                        f'name={FIREWALL_RULE}'],
-                       capture_output=True, text=True, creationflags=_NO_WINDOW)
+        proc.run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule',
+                  f'name={FIREWALL_RULE}'],
+                 capture_output=True, text=True)
         ok = True
         for proto, port in (('TCP', tcp_port), ('UDP', udp_port)):
-            r = subprocess.run(['netsh', 'advfirewall', 'firewall', 'add', 'rule',
-                                f'name={FIREWALL_RULE}', 'dir=in', 'action=allow',
-                                f'protocol={proto}', f'localport={port}'],
-                               capture_output=True, text=True, creationflags=_NO_WINDOW)
+            r = proc.run(['netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                          f'name={FIREWALL_RULE}', 'dir=in', 'action=allow',
+                          f'protocol={proto}', f'localport={port}'],
+                         capture_output=True, text=True)
             ok = ok and (r.returncode == 0)
         return ok
     except Exception:

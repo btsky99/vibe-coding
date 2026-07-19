@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse, parse_qs
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 # server.py가 setup() 호출로 office_api 핸들러를 주입한다.
 # 직접 import하면 순환 참조 가능 + 일부 API 모듈은 server.py에서 lazy import됨.
 _office_api = None
@@ -159,13 +161,12 @@ def launch_office_server(state: OfficeServerState) -> int:
         raise RuntimeError('Python 인터프리터를 찾을 수 없음')
 
     office_script = state.base_dir / 'office_server.py'
-    state.proc = subprocess.Popen(
+    state.proc = proc.popen(
         [python_cmds[0], str(office_script),
          '--classic-port', str(state.http_port_getter()),
          '--port-start', '9010'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
     )
     state.child_procs.append(state.proc)
 

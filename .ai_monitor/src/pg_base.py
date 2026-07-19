@@ -20,6 +20,10 @@ import threading
 import time
 from pathlib import Path
 
+# [경로] 모든 caller가 `from src.pg_base`로 진입 → .ai_monitor가 sys.path에 있어
+#   sibling 패키지 infra도 해석됨(순환 없음: infra.proc는 subprocess/sys만 의존).
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 # ── PostgreSQL 바이너리 경로 — frozen(EXE) / 개발 모드 분기 ───────────────────
 # frozen 모드: installer가 {app}\pgsql\ 에 설치한 바이너리 사용
 # 개발 모드:   소스 트리 내 .ai_monitor/bin/pgsql/ 사용
@@ -278,11 +282,9 @@ def run_pg_sql(sql: str, params: tuple = None, db: str = None):
     if not PG_BIN.exists():
         return None
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        res = subprocess.run(
+        res = proc.run(
             [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "-c", sql],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
         )
         return res.stdout.strip()
     except Exception as e:
@@ -332,11 +334,9 @@ def run_pg_sql_csv(sql: str, params: tuple = None, db: str = None) -> list:
     if not PG_BIN.exists():
         return []
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        res = subprocess.run(
+        res = proc.run(
             [str(PG_BIN), "-p", str(PG_PORT), "-U", "postgres", "-d", db, "--csv", "-c", sql],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
         )
         return list(csv.DictReader(io.StringIO(res.stdout.strip())))
     except Exception as e:
@@ -372,7 +372,6 @@ def _parse_json_text(value, default):
 def _run_psql(sql: str, csv_output: bool = False, timeout: int = 15) -> tuple[bool, str]:
     if not PG_BIN.exists():
         return False, 'psql.exe not found'
-    no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     env = {**os.environ, 'PGCLIENTENCODING': 'UTF8'}
     cmd = [
         str(PG_BIN), '-X', '-q', '-v', 'ON_ERROR_STOP=1',
@@ -381,7 +380,7 @@ def _run_psql(sql: str, csv_output: bool = False, timeout: int = 15) -> tuple[bo
     if csv_output:
         cmd.append('--csv')
     try:
-        result = subprocess.run(
+        result = proc.run(
             cmd,
             input=sql,
             capture_output=True,
@@ -389,7 +388,6 @@ def _run_psql(sql: str, csv_output: bool = False, timeout: int = 15) -> tuple[bo
             encoding='utf-8',
             errors='replace',
             timeout=timeout,
-            creationflags=no_window,
             env=env,
         )
         if result.returncode != 0:
@@ -414,14 +412,12 @@ def _ensure_pg_running() -> bool:
     pg_manager = PROJECT_ROOT / 'scripts' / 'pg_manager.py'
     if not pg_manager.exists():
         return False
-    no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     try:
-        subprocess.Popen(
+        proc.popen(
             ['python', str(pg_manager), 'start'],
             cwd=str(PROJECT_ROOT),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=no_window,
         )
     except Exception:
         return False

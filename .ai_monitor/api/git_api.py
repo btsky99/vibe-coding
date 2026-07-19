@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 
 def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
     """GET 요청 처리 — /api/git/status, /api/git/log 담당.
@@ -36,11 +38,9 @@ def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
         git_path = params.get('path', [''])[0].strip() or str(BASE_DIR.parent)
         try:
             # git status --porcelain=v1 -b: 머신 파싱용 간결 포맷
-            # creationflags=0x08000000: CREATE_NO_WINDOW — 콘솔 창 방지
-            result = subprocess.run(
+            result = proc.run(
                 ['git', 'status', '--porcelain=v1', '-b'],
                 cwd=git_path, capture_output=True, text=True, timeout=5, encoding='utf-8',
-                creationflags=0x08000000
             )
             if result.returncode != 0:
                 handler.wfile.write(json.dumps(
@@ -107,10 +107,9 @@ def handle_get(handler, path: str, params: dict, BASE_DIR: Path) -> bool:
         git_path = params.get('path', [''])[0].strip() or str(BASE_DIR.parent)
         n = min(int(params.get('n', ['10'])[0]), 50)  # 최대 50개 제한
         try:
-            result = subprocess.run(
+            result = proc.run(
                 ['git', 'log', f'--format=%h\x1f%s\x1f%an\x1f%ar', f'-n{n}'],
                 cwd=git_path, capture_output=True, text=True, timeout=5, encoding='utf-8',
-                creationflags=0x08000000
             )
             commits = []
             for line in result.stdout.strip().splitlines():
@@ -147,10 +146,9 @@ def rollback(handler, BASE_DIR: Path) -> None:
             return
 
         # git checkout -- "파일명" 실행
-        result = subprocess.run(
+        result = proc.run(
             ['git', 'checkout', '--', file_path],
             cwd=git_dir, capture_output=True, text=True, timeout=10, encoding='utf-8',
-            creationflags=0x08000000
         )
 
         if result.returncode == 0:
@@ -175,10 +173,9 @@ def diff(handler, params: dict, BASE_DIR: Path) -> None:
 
     try:
         # git diff "파일명" 실행
-        result = subprocess.run(
+        result = proc.run(
             ['git', 'diff', '--', target_file],
             cwd=git_dir, capture_output=True, text=True, timeout=5, encoding='utf-8',
-            creationflags=0x08000000
         )
         handler.wfile.write(json.dumps({"diff": result.stdout}).encode('utf-8'))
     except Exception as e:
@@ -203,10 +200,9 @@ def handle_post(handler, path: str, data: dict, BASE_DIR: Path) -> bool:
             if not file_path:
                 handler.wfile.write(json.dumps({"status": "error", "message": "file 필드 필수"}).encode('utf-8'))
                 return True
-            result = subprocess.run(
+            result = proc.run(
                 ['git', 'checkout', '--', file_path],
                 cwd=repo_path, capture_output=True, text=True, timeout=10, encoding='utf-8',
-                creationflags=0x08000000
             )
             if result.returncode == 0:
                 handler.wfile.write(json.dumps({"status": "success", "message": f"{file_path} 복구 완료"}).encode('utf-8'))
@@ -227,10 +223,9 @@ def handle_post(handler, path: str, data: dict, BASE_DIR: Path) -> bool:
         try:
             target_file = data.get('path', [''])[0] if isinstance(data, dict) and 'path' in data else ''
             git_dir     = data.get('git_path', [str(BASE_DIR.parent)])[0] if isinstance(data, dict) else str(BASE_DIR.parent)
-            result = subprocess.run(
+            result = proc.run(
                 ['git', 'diff', '--', target_file],
                 cwd=git_dir, capture_output=True, text=True, timeout=5, encoding='utf-8',
-                creationflags=0x08000000
             )
             handler.wfile.write(json.dumps({"diff": result.stdout}).encode('utf-8'))
         except Exception as e:

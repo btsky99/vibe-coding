@@ -23,6 +23,10 @@ import threading
 import time
 import urllib.request
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+# [주의] pty_server_state['proc']는 dict 키라 모듈 proc과 무관. 단, 지역변수/파라미터로
+#   proc을 쓰던 함수(start_node_pty_server, _kill_pty_proc)는 child로 rename해 충돌 회피.
+
 
 def get_node_pty_sessions(rest_url: str | None) -> dict:
     """Node PTY 서버에서 세션 정보를 REST로 조회합니다.
@@ -46,15 +50,14 @@ def kill_orphan_pty_servers(pty_server_state: dict) -> None:
     (개발용/설치버전)의 PTY 서버까지 죽여서 터미널 전부 사망하는 버그.
     수정: WMIC CommandLine에서 PTY_PORT 환경변수를 확인하여 자기 WS 포트와
     동일한 PTY 서버만 정리. 다른 인스턴스의 PTY 서버는 건드리지 않음."""
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     try:
         # CommandLine + ProcessId를 함께 조회하여 포트 기반 필터링
-        result = subprocess.run(
+        result = proc.run(
             ['wmic', 'process', 'where',
              "CommandLine like '%pty-server.js%' and Name='node.exe'",
              'get', 'ProcessId,CommandLine', '/FORMAT:LIST'],
             capture_output=True, text=True, encoding='utf-8',
-            errors='replace', creationflags=_no_window, timeout=5
+            errors='replace', timeout=5
         )
         # /FORMAT:LIST 출력: CommandLine=... \n ProcessId=... 쌍으로 파싱
         _current_pid = None
@@ -87,12 +90,12 @@ def kill_orphan_pty_servers(pty_server_state: dict) -> None:
                     elif _my_pty_pid is None:
                         # 부모 PID를 확인하여 자기 자식인지 판별
                         try:
-                            ppid_res = subprocess.run(
+                            ppid_res = proc.run(
                                 ['wmic', 'process', 'where',
                                  f'ProcessId={target_pid}',
                                  'get', 'ParentProcessId', '/FORMAT:LIST'],
                                 capture_output=True, text=True, encoding='utf-8',
-                                errors='replace', creationflags=_no_window, timeout=3
+                                errors='replace', timeout=3
                             )
                             for ppid_line in ppid_res.stdout.splitlines():
                                 ppid_line = ppid_line.strip()
@@ -111,9 +114,9 @@ def kill_orphan_pty_servers(pty_server_state: dict) -> None:
 
                     if target_pid is not None:
                         try:
-                            subprocess.run(
+                            proc.run(
                                 ['taskkill', '/F', '/T', '/PID', str(target_pid)],
-                                capture_output=True, creationflags=_no_window, timeout=5
+                                capture_output=True, timeout=5
                             )
                             print(f"[PTY Cleanup] 좀비 PTY 서버(PID {target_pid}) 정리 완료")
                         except Exception:
@@ -150,6 +153,7 @@ def kill_runtime_mei_orphans(runtime_dir, exclude_mei: str = '',
     제거되면 이 함수는 조용히 no-op(전체 try/except) — 그 경우 CIM(Get-CimInstance Win32_Process)
     전환 필요. 실패해도 기존 동작보다 나빠지지 않음(정리를 안 할 뿐).
     """
+    # [보존] subprocess.call(아래 taskkill)은 헬퍼 미제공이라 미변환 → _no_window 유지 필수.
     _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     rd = str(runtime_dir).replace('/', '\\').rstrip('\\').lower()
     if not rd:
@@ -160,11 +164,11 @@ def kill_runtime_mei_orphans(runtime_dir, exclude_mei: str = '',
         live_parents = set()
         if only_orphans:
             try:
-                pres = subprocess.run(
+                pres = proc.run(
                     ['wmic', 'process', 'where',
                      "name like 'vibe-coding%'", 'get', 'ProcessId', '/FORMAT:LIST'],
                     capture_output=True, text=True, encoding='utf-8',
-                    errors='replace', creationflags=_no_window, timeout=5,
+                    errors='replace', timeout=5,
                 )
                 for line in pres.stdout.splitlines():
                     line = line.strip()
@@ -177,11 +181,11 @@ def kill_runtime_mei_orphans(runtime_dir, exclude_mei: str = '',
                 return []
 
         # 2) runtime 하위 node.exe 를 ExecutablePath + ParentProcessId 로 조회
-        res = subprocess.run(
+        res = proc.run(
             ['wmic', 'process', 'where', "name='node.exe'",
              'get', 'ProcessId,ParentProcessId,ExecutablePath', '/FORMAT:LIST'],
             capture_output=True, text=True, encoding='utf-8',
-            errors='replace', creationflags=_no_window, timeout=5,
+            errors='replace', timeout=5,
         )
         _pid = None
         _ppid = None
@@ -238,13 +242,11 @@ def ensure_pty_node_modules(base_dir) -> None:
 
     # node-pty 네이티브 모듈이 현재 Node.js에서 실제로 로드 가능한지 검증
     # 파일 존재만 확인하면 안 됨: pip install로 복사된 바이너리는 빌드 PC의 Node ABI라 호환 안 됨
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     try:
-        check = subprocess.run(
+        check = proc.run(
             ['node', '-e', "require('node-pty')"],
             cwd=str(pty_server_dir),
             capture_output=True, text=True, timeout=10,
-            creationflags=_no_window,
         )
         if check.returncode == 0:
             return  # 네이티브 모듈이 현재 Node에서 정상 로드됨
@@ -252,15 +254,13 @@ def ensure_pty_node_modules(base_dir) -> None:
         pass  # 검증 실패 → 재빌드 필요
 
     print("[*] PTY 서버 네이티브 모듈 빌드 중... (최초 1회, 1~2분 소요)")
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     try:
         # shell=True: Windows에서 npm은 npm.cmd이므로 shell 경유 필요
-        result = subprocess.run(
+        result = proc.run(
             'npm install',
             cwd=str(pty_server_dir), shell=True,
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             timeout=300,  # 5분 타임아웃
-            creationflags=_no_window,
         )
         if result.returncode == 0:
             print("[*] PTY 서버 네이티브 모듈 빌드 완료!")
@@ -307,7 +307,9 @@ def start_node_pty_server(base_dir, ws_port, http_port, project_root,
         return None
 
     try:
-        proc = subprocess.Popen(
+        # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 충돌 회피.
+        #   pty_server_state['proc']는 dict 키라 그대로 유지(외부 계약).
+        child = proc.popen(
             cmd,
             env=pty_env,
             cwd=str(pty_server_dir),
@@ -316,23 +318,22 @@ def start_node_pty_server(base_dir, ws_port, http_port, project_root,
             text=True,
             encoding='utf-8',
             errors='replace',
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
-        child_procs.append(proc)
-        pty_server_state['proc'] = proc
-        print(f"[*] Node PTY Server started (PID {proc.pid}) on port {ws_port}")
+        child_procs.append(child)
+        pty_server_state['proc'] = child
+        print(f"[*] Node PTY Server started (PID {child.pid}) on port {ws_port}")
 
         # PTY 서버 stdout을 백그라운드로 읽어서 로그 출력
         def _read_pty_stdout():
             try:
-                for line in proc.stdout:
+                for line in child.stdout:
                     line = line.strip()
                     if line:
                         print(f"[node-pty] {line}")
             except Exception:
                 pass
         threading.Thread(target=_read_pty_stdout, daemon=True).start()
-        return proc
+        return child
 
     except FileNotFoundError:
         print("[!] Node.js가 설치되지 않았습니다. 터미널 기능이 비활성화됩니다.")
@@ -448,24 +449,24 @@ def start_pty_server_and_watchdog(pty_server_state: dict, base_dir, ws_port: int
         except Exception:
             return False
 
-    def _kill_pty_proc(proc):
-        """행 상태 PTY 프로세스를 강제 종료합니다 (taskkill /T 로 프로세스 트리 전체)."""
-        if proc is None:
+    def _kill_pty_proc(child):
+        """행 상태 PTY 프로세스를 강제 종료합니다 (taskkill /T 로 프로세스 트리 전체).
+        [파라미터 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼) 참조를 파라미터가 가리지 않게."""
+        if child is None:
             return
         try:
-            pid = proc.pid
+            pid = child.pid
             # Windows: 프로세스 트리 전체 강제 종료
-            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            subprocess.run(
+            proc.run(
                 ['taskkill', '/F', '/T', '/PID', str(pid)],
-                capture_output=True, creationflags=_no_window
+                capture_output=True
             )
             print(f"[PTY Watchdog] 행 상태 PTY 서버(PID {pid}) 강제 종료 완료")
         except Exception as e:
             print(f"[PTY Watchdog] PTY 프로세스 종료 실패: {e}")
         # child_procs 목록에서 제거 (중복 kill 방지)
         try:
-            child_procs.remove(proc)
+            child_procs.remove(child)
         except ValueError:
             pass
 

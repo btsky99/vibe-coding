@@ -13,9 +13,10 @@ REVISION HISTORY:
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 
 def python_runner_cmds(base_dir: Path, project_root: Path) -> list[str]:
@@ -104,11 +105,9 @@ def open_folder_dialog_subprocess(python_cmd: str) -> str:
         "path = filedialog.askdirectory(title='프로젝트 폴더 선택'); "
         "print(path if path else '')"
     )
-    _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-    result = subprocess.run(
+    result = proc.run(
         [python_cmd, '-c', script],
         capture_output=True, text=True, timeout=60,
-        creationflags=_no_win,
     )
     return result.stdout.strip()
 
@@ -128,10 +127,8 @@ def open_file_dialog_subprocess(python_cmd: str) -> str:
         "path = filedialog.askopenfilename(title='전송할 파일 선택'); "
         "print(path if path else '')"
     )
-    _no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-    result = subprocess.run(
+    result = proc.run(
         [python_cmd, '-c', script],
         capture_output=True, text=True, timeout=60,
-        creationflags=_no_win,
     )
     return result.stdout.strip()

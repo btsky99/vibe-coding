@@ -25,6 +25,8 @@ import threading
 import time
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 
 # ── 지원 도구 메타 ──────────────────────────────────────────────────────────
 TOOL_INSTALL_TARGETS: dict[str, dict] = {
@@ -77,17 +79,16 @@ def tool_status(name: str) -> dict:
 
     version = ''
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-        proc = subprocess.run(
+        # [지역변수 rename] proc→completed: 모듈 proc(콘솔숨김 헬퍼)와 충돌 회피
+        completed = proc.run(
             [exe_path, '--version'],
             capture_output=True,
             text=True,
             encoding='utf-8',
             errors='replace',
             timeout=10,
-            creationflags=_no_window,
         )
-        output = (proc.stdout or proc.stderr or '').strip()
+        output = (completed.stdout or completed.stderr or '').strip()
         version = output.splitlines()[0] if output else ''
     except Exception:
         version = ''
@@ -238,10 +239,10 @@ def start_tool_install(name: str) -> dict:
     display_name = tool_meta['display']
     package_name = tool_meta['package']
     command_name = tool_meta['command']
-    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000) if os.name == 'nt' else 0
 
     try:
-        proc = subprocess.Popen(
+        # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 충돌 회피
+        child = proc.popen(
             [npm_exe, 'install', '-g', package_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -249,7 +250,6 @@ def start_tool_install(name: str) -> dict:
             text=True,
             encoding='utf-8',
             errors='replace',
-            creationflags=creationflags,
         )
     except Exception as exc:
         failed = _set_state(
@@ -273,13 +273,13 @@ def start_tool_install(name: str) -> dict:
         logs=[f'Running npm install -g {package_name}'],
         started_at=_now(),
         finished_at='',
-        pid=proc.pid,
+        pid=child.pid,
         exit_code=None,
     )
 
     watcher = threading.Thread(
         target=_watch_install,
-        args=(name, proc, command_name, display_name),
+        args=(name, child, command_name, display_name),
         daemon=True,
     )
     watcher.start()

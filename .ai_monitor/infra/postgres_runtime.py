@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 
 # ── 공용 배치 스키마 SQL ────────────────────────────────────────────────────
 # 기동 성능 최적화: 13개 CREATE 문을 1개 psql 실행으로 묶음 (~5초 단축).
@@ -132,7 +134,6 @@ def start_server(pg_ctl_bin: Path, initdb_bin: Path, pg_data_dir: Path, pg_port:
         print(f"[PG] pg_ctl.exe 없음 → PG 자동시작 스킵 ({pg_ctl_bin})")
         return pg_port
 
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     pg_log = pg_data_dir.parent / "pgsql.log"
 
     # 1) initdb — pgdata 없으면 최초 DB 클러스터 생성
@@ -140,11 +141,10 @@ def start_server(pg_ctl_bin: Path, initdb_bin: Path, pg_data_dir: Path, pg_port:
         print(f"[PG] pgdata 없음 → initdb 실행: {pg_data_dir}")
         pg_data_dir.mkdir(parents=True, exist_ok=True)
         try:
-            res = subprocess.run(
+            res = proc.run(
                 [str(initdb_bin), "-D", str(pg_data_dir),
                  "-U", "postgres", "-E", "UTF8", "--no-locale"],
                 capture_output=True, text=True, encoding='utf-8', errors='replace',
-                creationflags=_no_window
             )
             if res.returncode != 0:
                 print(f"[PG] initdb 오류:\n{res.stderr}")
@@ -165,10 +165,9 @@ def start_server(pg_ctl_bin: Path, initdb_bin: Path, pg_data_dir: Path, pg_port:
 
     # 2) 실행 여부 확인 — pg_ctl status
     try:
-        status_res = subprocess.run(
+        status_res = proc.run(
             [str(pg_ctl_bin), "status", "-D", str(pg_data_dir)],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
         )
         if "server is running" in status_res.stdout:
             print("[PG] 이미 실행 중")
@@ -213,21 +212,21 @@ def start_server(pg_ctl_bin: Path, initdb_bin: Path, pg_data_dir: Path, pg_port:
     # 3) pg_ctl start (Windows 전용 PIPE 상속 버그 회피 — DEVNULL 사용)
     print(f"[PG] PostgreSQL 시작 중 (port={pg_port})...")
     try:
-        subprocess.run(
+        proc.run(
             [str(pg_ctl_bin), "start", "-D", str(pg_data_dir),
              "-l", str(pg_log), "-o", f"-p {pg_port}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=_no_window, timeout=15
+            timeout=15
         )
         # ready 폴링 (최대 5초)
         _pg_ready = False
         for _i in range(50):
             time.sleep(0.1)
             try:
-                _chk = subprocess.run(
+                _chk = proc.run(
                     [str(pg_ctl_bin), "status", "-D", str(pg_data_dir)],
                     capture_output=True, text=True, encoding='utf-8', errors='replace',
-                    creationflags=_no_window, timeout=1
+                    timeout=1
                 )
                 if "server is running" in _chk.stdout:
                     _pg_ready = True

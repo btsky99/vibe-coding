@@ -22,6 +22,8 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 REPO = "btsky99/vibe-coding"
 BRANCH = "main"
 REPO_URL = f"https://github.com/{REPO}.git"
@@ -31,17 +33,15 @@ READY_FILE = "soft_update_ready.json"
 
 logger = logging.getLogger("soft_updater")
 
-_NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-
 
 def _git(args, cwd=None, timeout=300):
     """git 실행 → (ok, stdout). git 미설치/실패는 (False, '')."""
     if not shutil.which("git"):
         return False, ""
     try:
-        r = subprocess.run(["git"] + args, cwd=cwd and str(cwd),
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout, creationflags=_NO_WIN)
+        r = proc.run(["git"] + args, cwd=cwd and str(cwd),
+                     capture_output=True, text=True, encoding="utf-8",
+                     errors="replace", timeout=timeout)
         return r.returncode == 0, (r.stdout or "").strip()
     except Exception as e:
         logger.warning("git %s 실패: %s", args[:1], e)
@@ -277,8 +277,7 @@ def _restart(src_dir: Path, new_head: str = "") -> dict:
     try:
         with open(bat, "w", encoding="mbcs", errors="replace") as f:
             f.write(content)
-        subprocess.Popen(["cmd.exe", "/c", str(bat)],
-                         creationflags=0x08000000, close_fds=True)
+        proc.popen(["cmd.exe", "/c", str(bat)], close_fds=True)
         time.sleep(0.6)
     except Exception as e:
         return {"ok": False, "error": f"재시작 스크립트 실패: {e}", "new_head": new_head}

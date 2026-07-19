@@ -17,7 +17,8 @@ REVISION HISTORY:
 from __future__ import annotations
 
 import json
-import subprocess
+
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 
 def _json_headers(handler) -> None:
@@ -42,14 +43,12 @@ def launch(handler, office_state, launch_office_server, base_dir, python_runner_
         else:
             office_port = launch_office_server()
         # 오피스 대시보드 창 실행 (오피스 서버 포트 전달)
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         dashboard_script = base_dir / 'dashboard_window.py'
         python_cmds = python_runner_cmds()
         if not python_cmds:
             raise RuntimeError('Python interpreter not found for office launch')
-        subprocess.Popen(
+        proc.popen(
             [python_cmds[0], str(dashboard_script), str(office_port), 'office'],
-            creationflags=_no_window,
             close_fds=True,
         )
         handler.wfile.write(json.dumps({

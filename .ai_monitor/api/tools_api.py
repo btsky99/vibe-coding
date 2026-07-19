@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 # ── 경로 설정 ──────────────────────────────────────────────────────────
 # [2026-04-13] Claude: frozen(EXE) 모드에서 _PROJECT_ROOT가 EXE 설치 경로를 가리키던 버그 수정
 #   - 기존: _PROJECT_ROOT = EXE 폴더 → .claude/, scripts/, CLAUDE.md 못 찾음 (11/23 도구만 감지)
@@ -428,9 +430,8 @@ def _check_tool_installed(tool: dict) -> dict:
             # npx 명령은 vibe-view 디렉토리에서 실행
             cwd = _npx_cwd if (exe_name == "npx" and _npx_cwd) else None
 
-            result = subprocess.run(
+            result = proc.run(
                 resolved_cmd, capture_output=True, text=True, timeout=10,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 cwd=cwd,
                 encoding="utf-8", errors="replace",
             )
@@ -446,9 +447,8 @@ def _check_tool_installed(tool: dict) -> dict:
         for path in tool.get("check_paths", []):
             if os.path.exists(path):
                 try:
-                    result = subprocess.run(
+                    result = proc.run(
                         [path, "--version"], capture_output=True, text=True, timeout=10,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                         encoding="utf-8", errors="replace",
                     )
                     if result.returncode == 0:

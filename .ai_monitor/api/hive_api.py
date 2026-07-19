@@ -23,6 +23,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 from src.claude_quota import get_claude_quota
 from src.pg_store import (
     ensure_schema,
@@ -337,12 +338,9 @@ def handle_get(handler, path: str, params: dict,
             if not SCRIPTS_DIR:
                 raise Exception('설치 버전에서는 워치독 기능을 사용할 수 없습니다')
             watchdog_script = SCRIPTS_DIR / "hive_watchdog.py"
-            # CREATE_NO_WINDOW: Python 서브프로세스 콘솔 창 방지
-            _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            result_proc = subprocess.run(
+            result_proc = proc.run(
                 [sys.executable, str(watchdog_script), "--check"],
                 capture_output=True, text=True, encoding='utf-8',
-                creationflags=_no_window
             )
             output = result_proc.stdout
             json_start = output.find('{')
@@ -975,13 +973,11 @@ def handle_get(handler, path: str, params: dict,
         handler.end_headers()
         import urllib.request as _urllib
         result = {"hardware": {"ram_gb": 0, "gpus": []}, "models": [], "ollama_available": False, "error": None}
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
         # RAM 감지 (Windows wmic)
         try:
-            mem = subprocess.run(
+            mem = proc.run(
                 ['wmic', 'OS', 'get', 'TotalVisibleMemorySize', '/value'],
                 capture_output=True, text=True, encoding='utf-8', timeout=5,
-                creationflags=_no_window
             )
             for line in mem.stdout.split('\n'):
                 if 'TotalVisibleMemorySize=' in line:
@@ -991,10 +987,9 @@ def handle_get(handler, path: str, params: dict,
             pass
         # GPU 감지 (nvidia-smi)
         try:
-            gpu = subprocess.run(
+            gpu = proc.run(
                 ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
                 capture_output=True, text=True, encoding='utf-8', timeout=5,
-                creationflags=_no_window
             )
             if gpu.returncode == 0:
                 for line in gpu.stdout.strip().split('\n'):
@@ -1144,10 +1139,9 @@ def handle_post(handler, path: str, data: dict,
             if not SCRIPTS_DIR:
                 raise Exception('설치 버전에서는 오케스트레이터 기능을 사용할 수 없습니다')
             orch_script = str(SCRIPTS_DIR / 'orchestrator.py')
-            result = subprocess.run(
+            result = proc.run(
                 [sys.executable, orch_script],
                 capture_output=True, text=True, timeout=15, encoding='utf-8',
-                creationflags=0x08000000
             )
             output = (result.stdout + result.stderr).strip()
             handler.wfile.write(json.dumps({
