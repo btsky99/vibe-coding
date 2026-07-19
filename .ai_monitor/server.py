@@ -862,7 +862,7 @@ def _g_tools(h, pp):
     tools_api.handle_get(h, pp.path, parse_qs(pp.query))
 def _g_lan(h, pp):
     from api import lan_api
-    lan_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR)
+    lan_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 
 GET_PREFIX_ROUTES = [
     ('/api/git/', _g_git),
@@ -1290,7 +1290,7 @@ POST_ROUTES = {
 
 def _p_lan(h, pp):
     from api import lan_api
-    lan_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR)
+    lan_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 
 POST_PREFIX_ROUTES = [
     ('/api/tools/', _p_tools),

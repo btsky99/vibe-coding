@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
@@ -47,6 +48,8 @@ MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024     # 파일 수신 상한 2GB
 # [보안C1] 페어링 창 수명·시도 한도 — 브루트포스 구조적 봉쇄.
 PAIR_TTL_SEC = 90
 PAIR_MAX_ATTEMPTS = 5
+# [Phase2] 채팅 메시지 상한 — 텍스트 채팅이라 8KB로 충분, DoS 방어.
+CHAT_MAX_BYTES = 8 * 1024
 
 # 모듈 전역 — Handler가 참조. 단일 프로세스라 락 불필요(핸들러 스레드는 읽기 위주,
 # pending_code만 로컬 라우트에서 교체되고 이는 순간적).
@@ -60,6 +63,9 @@ STATE: dict = {
     'pending_attempts': 0,  # 실패 시도 카운트 (브루트포스 차단)
     'inbox': None,       # Path — 수신 파일 저장 루트
     'name': '',
+    # [Phase2] 채팅 수신 버퍼 — server(lan_api)가 chat-drain으로 꺼내 DB에 옮길 때까지의 전달버퍼.
+    # [제약] 영구성은 DB(lan_messages)가 책임. 이 큐는 drain 전 재시작 시 유실 가능(전달버퍼 한정).
+    'chat_inbox': deque(maxlen=500),
 }
 
 
@@ -170,6 +176,31 @@ def send_file(peer_id: str, filepath: str) -> dict:
         return {'ok': False, 'error': str(e)}
 
 
+# ── 채팅 송신 (로컬 트리거 → 상대에게 POST) ──────────────────────────────
+def send_chat(peer_id: str, content: str) -> dict:
+    """신뢰 피어에게 텍스트 메시지 전송. body_hash=sha256(content)로 토큰 서명(파일과 동일 규약)."""
+    peers: LanPeers = STATE['peers']
+    disc: LanDiscovery = STATE['disc']
+    if not peers.is_trusted(peer_id):
+        return {'ok': False, 'error': '페어링되지 않은 상대'}
+    if not content or len(content.encode('utf-8')) > CHAT_MAX_BYTES:
+        return {'ok': False, 'error': '빈 메시지 또는 8KB 초과'}
+    target = next((p for p in disc.get_peers() if p['peer_id'] == peer_id), None)
+    if not target:
+        return {'ok': False, 'error': '상대가 오프라인'}
+    body_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+    token = peers.make_token(peer_id, body_hash, '')
+    url = f"http://{target['ip']}:{target['http_port']}/lan/chat-recv"
+    req = Request(url, data=json.dumps({'content': content}).encode(), method='POST', headers={
+        'X-Peer-Id': peers.self_id, 'X-Token': token or '', 'Content-Type': 'application/json',
+    })
+    try:
+        with urlopen(req, timeout=15) as resp:
+            return {'ok': resp.status == 200}
+    except URLError as e:
+        return {'ok': False, 'error': str(e)}
+
+
 # ── HTTP 핸들러 ──────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
 
@@ -218,6 +249,13 @@ class Handler(BaseHTTPRequestHandler):
                 'online': STATE['disc'].get_peers(),
                 'trusted': peers.list_peers(),
             })
+        elif path == '/lan/chat-drain':
+            # 로컬(server)이 수신 버퍼를 통째로 꺼내 DB로 옮긴다. 큐는 비워짐(1회성).
+            if not self._is_local():
+                self._json({'error': 'local only'}, 403); return
+            msgs = list(STATE['chat_inbox'])
+            STATE['chat_inbox'].clear()
+            self._json({'messages': msgs})
         else:
             self._json({'error': 'not found'}, 404)
 
@@ -227,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
         peers: LanPeers = STATE['peers']
 
         # ① 로컬 전용 라우트
-        if path in ('/lan/pair-begin', '/lan/pair-connect', '/lan/send'):
+        if path in ('/lan/pair-begin', '/lan/pair-connect', '/lan/send', '/lan/chat-send'):
             if not self._is_local():
                 self._json({'error': 'local only'}, 403); return
             raw = self._body(MAX_CTRL_BYTES)
@@ -245,6 +283,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self._pair_connect(body))
             elif path == '/lan/send':
                 self._json(send_file(body.get('peer_id', ''), body.get('path', '')))
+            elif path == '/lan/chat-send':
+                self._json(send_chat(body.get('peer_id', ''), body.get('content', '')))
             return
 
         # ② 인증 필요 라우트 (외부 피어)
@@ -256,6 +296,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._pair_request(json.loads(raw or b'{}')))
         elif path == '/lan/recv-file':
             self._json(self._recv_file())
+        elif path == '/lan/chat-recv':
+            self._json(self._chat_recv())
         else:
             self._json({'error': 'not found'}, 404)
 
@@ -343,6 +385,32 @@ class Handler(BaseHTTPRequestHandler):
         dest_dir.mkdir(parents=True, exist_ok=True)
         (dest_dir / fname).write_bytes(raw)
         return {'ok': True, 'saved': fname, 'bytes': len(raw)}
+
+    # ── 채팅 수신 ────────────────────────────────────────────────────
+    def _chat_recv(self) -> dict:
+        """토큰(body_hash=sha256(content))으로 인증 후 수신 버퍼에 적재. server가 drain해 DB로."""
+        peers: LanPeers = STATE['peers']
+        peer_id = self.headers.get('X-Peer-Id', '')
+        token = self.headers.get('X-Token', '')
+        raw = self._body(CHAT_MAX_BYTES + 1024)   # content 8KB + JSON 봉투 여유
+        if raw is None:
+            _seclog(f'chat-recv 크기 초과 from {self.client_address[0]}')
+            return {'ok': False, 'error': '메시지 크기 초과'}
+        try:
+            content = str(json.loads(raw or b'{}').get('content', ''))
+        except json.JSONDecodeError:
+            return {'ok': False, 'error': 'JSON 파싱 실패'}
+        if not content or len(content.encode('utf-8')) > CHAT_MAX_BYTES:
+            return {'ok': False, 'error': '빈 메시지 또는 초과'}
+        body_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        if not peers.verify_token(peer_id, token, body_hash, ''):
+            _seclog(f'chat-recv 인증 실패 peer={peer_id[:8]} from {self.client_address[0]}')
+            return {'ok': False, 'error': '인증 실패'}
+        STATE['chat_inbox'].append({
+            'from_peer': peer_id, 'content': content,
+            'ts': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        })
+        return {'ok': True}
 
 
 # ── 부팅 ─────────────────────────────────────────────────────────────────

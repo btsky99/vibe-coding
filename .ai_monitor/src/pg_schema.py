@@ -280,6 +280,21 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
             );
         """)
 
+        # LAN 브리지 Phase 2: 기기간 채팅 이력 — office_chat과 별도 테이블(혼용 금지).
+        # [WHY project_id] 브리지는 project_id 무지(이식성)라 저장을 server.py(lan_api)가 담당,
+        #   현재 프로젝트 컨텍스트로 기록한다. 대부분 단일 프로젝트 사용이라 수용된 트레이드오프.
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS lan_messages (
+                id SERIAL PRIMARY KEY,
+                from_peer TEXT NOT NULL DEFAULT '',
+                to_peer TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+                project_id TEXT NOT NULL DEFAULT ''
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_lan_messages ON lan_messages (project_id, from_peer, to_peer, id);")
+
         # Task 4: NOTIFY 트리거 — 태스크 할당 시 에이전트 자동 깨우기
         execute_raw("""
             CREATE OR REPLACE FUNCTION notify_task_assigned()

@@ -16,6 +16,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from src.server_utils import send_json
+from src.pg_lan import save_lan_message, get_lan_messages
 
 
 def _bridge_port(data_dir: Path) -> int | None:
@@ -47,26 +48,51 @@ def _proxy(data_dir: Path, method: str, subpath: str, body: dict | None = None) 
         return {'running': False, 'error': f'브리지 통신 실패: {e}'}
 
 
-def handle_get(handler, path: str, params: dict, *, DATA_DIR) -> bool:
-    """GET /api/lan/status — 브리지 상태(온라인 피어·신뢰목록·방화벽·페어링코드)."""
+def _self_id(dd: Path) -> str:
+    """브리지 status에서 이 기기 self_id 획득 — 채팅 DB 저장/조회의 '나' 식별자."""
+    return _proxy(dd, 'GET', 'status').get('self_id', '')
+
+
+def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> bool:
+    """GET /api/lan/{status,chat}."""
+    dd = Path(DATA_DIR)
     if path == '/api/lan/status':
-        send_json(handler, _proxy(Path(DATA_DIR), 'GET', 'status'))
+        send_json(handler, _proxy(dd, 'GET', 'status'))
+        return True
+    if path == '/api/lan/chat':
+        peer_id = params.get('peer_id', [''])[0]
+        since = params.get('since', ['0'])[0]
+        self_id = _self_id(dd)
+        # ① 브리지 수신버퍼를 비우며 내 DB로 옮긴다(브리지는 project_id 무지 → 여기서 저장).
+        drained = _proxy(dd, 'GET', 'chat-drain')
+        for m in drained.get('messages', []):
+            save_lan_message(m.get('from_peer', ''), self_id, m.get('content', ''), PROJECT_ID)
+        # ② DB에서 나↔peer 대화를 since 커서로 증분 반환.
+        rows = get_lan_messages(self_id, peer_id, since, PROJECT_ID) if peer_id else []
+        send_json(handler, {'self_id': self_id, 'messages': rows})
         return True
     return False
 
 
-def handle_post(handler, path: str, data: dict, *, DATA_DIR) -> bool:
-    """POST /api/lan/{pair-begin,pair-connect,send} — 페어링 개시/연결/파일전송 트리거."""
+def handle_post(handler, path: str, data: dict, *, DATA_DIR, PROJECT_ID='') -> bool:
+    """POST /api/lan/{pair-begin,pair-connect,send,chat-send}."""
     dd = Path(DATA_DIR)
     if path == '/api/lan/pair-begin':
         send_json(handler, _proxy(dd, 'POST', 'pair-begin', {}))
         return True
     if path == '/api/lan/pair-connect':
-        # body: {ip, http_port, code}
-        send_json(handler, _proxy(dd, 'POST', 'pair-connect', data or {}))
+        send_json(handler, _proxy(dd, 'POST', 'pair-connect', data or {}))   # {ip, http_port, code}
         return True
     if path == '/api/lan/send':
-        # body: {peer_id, path}
-        send_json(handler, _proxy(dd, 'POST', 'send', data or {}))
+        send_json(handler, _proxy(dd, 'POST', 'send', data or {}))           # {peer_id, path}
+        return True
+    if path == '/api/lan/chat-send':
+        peer_id = (data or {}).get('peer_id', '')
+        content = (data or {}).get('content', '')
+        res = _proxy(dd, 'POST', 'chat-send', {'peer_id': peer_id, 'content': content})
+        if res.get('ok'):
+            # 내 발신분도 내 DB에 기록(양쪽이 각자 자기 DB에 이력 보유).
+            save_lan_message(_self_id(dd), peer_id, content, PROJECT_ID)
+        send_json(handler, res)
         return True
     return False
