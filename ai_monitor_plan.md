@@ -3,6 +3,7 @@ FILE: ai_monitor_plan.md
 DESCRIPTION: 라이브 프로젝트 전환(무재시작) 구현 계획 — 폴더 선택 즉시 DB/컨텍스트/패널 전환.
 
 REVISION HISTORY:
+- 2026-07-19 Claude: ✅ 전체 완료 — 구현 a54ba4a + 배포 v3.7.268(8171d93, CI 성공). 체크박스 갱신.
 - 2026-07-19 Claude: 신규. LAN 자동공유(v3.7.267) 완료 → 교체. 브레인스토밍 승인(라이브 전환).
 -->
 
@@ -18,7 +19,7 @@ REVISION HISTORY:
 
 ## Phase 1 — 백엔드 라이브 전환 관문
 
-[ ] Task 1: server.py `_switch_project(path)` 구현
+[x] Task 1: server.py `_switch_project(path)` 구현
     방법: ① dir 검증 ② last_path 저장 + projects.json MRU ③ _pg_conn_lock 안에서
           _init_project_db(새슬러그)(DB 생성+set_project_db+커넥션리셋) + ensure_schema
           ④ PROJECT_ROOT 전역 갱신 + PROJECT_CONTEXT_UNRESOLVED=False
@@ -27,7 +28,7 @@ REVISION HISTORY:
     검증: 존재 dir→전환+ok, 없는 경로→에러+상태불변.
     의존성: 없음
 
-[ ] Task 2: POST /api/switch-project 라우트 등록
+[x] Task 2: POST /api/switch-project 라우트 등록
     파일: server.py POST 라우트 테이블
     방법: {path} 받아 _switch_project 호출, JSON 반환.
     검증: curl로 전환 호출 200.
@@ -35,7 +36,7 @@ REVISION HISTORY:
 
 ## Phase 2 — 데몬 라이브 추종 (재시작 없이)
 
-[ ] Task 3: zettel_sync 매 사이클 project/vault 재해석
+[x] Task 3: zettel_sync 매 사이클 project/vault 재해석
     파일: infra/daemons.py run_zettel_sync
     방법: _proj_id/_vault/_old_vault 해석을 루프 밖→루프 안으로 이동(또는 콜러블 재호출).
           전환 후 다음 60초 사이클부터 새 프로젝트 vault로 동기화.
@@ -44,7 +45,7 @@ REVISION HISTORY:
 
 ## Phase 3 — 프론트 배선
 
-[ ] Task 4: App.tsx openFolder → switch-project 호출
+[x] Task 4: App.tsx openFolder → switch-project 호출
     파일: vibe-view/src/App.tsx
     방법: select-folder 성공(+prompt 폴백) 후 POST /api/switch-project 호출 →
           ok면 setCurrentPath + config/패널 리페치(projectUnresolved effect가 이미 재조회).
@@ -54,12 +55,12 @@ REVISION HISTORY:
 
 ## Phase 4 — 검증 + 배포
 
-[ ] Task 5: 로컬 검증
+[x] Task 5: 로컬 검증
     방법: dev 서버에서 switch-project 정상/롤백/없는경로 케이스 + py_compile/ruff/tsc.
     검증: 케이스 통과.
     의존성: Task 1~4
 
-[ ] Task 6: /vibe-release 배포
+[x] Task 6: /vibe-release 배포
     방법: Step0~0.5 + 버전증가 + 커밋 + 푸시 + CI.
     검증: CI 성공 + Release.
     의존성: Task 5
