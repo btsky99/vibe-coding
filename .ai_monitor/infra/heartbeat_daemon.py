@@ -38,6 +38,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 # ── 상수 (가드 기본값) ───────────────────────────────────────────────────────
 STATE_KEY = 'heartbeat'
 AGENT_ID = 'claude-auto'
@@ -200,11 +202,10 @@ def _acquire_singleton() -> socket.socket | None:
 
 def _git(worktree_or_root: Path, *args: str, timeout: int = 60) -> tuple[bool, str]:
     try:
-        r = subprocess.run(
+        r = proc.run(
             ['git', '-C', str(worktree_or_root), *args],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
             timeout=timeout,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
         return r.returncode == 0, (r.stdout or r.stderr or '').strip()
     except Exception as e:
@@ -267,31 +268,30 @@ def run_claude_task(worktree: Path, task: dict, settings_path: Path,
     # 첫 줄에서 절단(2026-07-17 스모크 실측: 태스크 본문 증발) → 반드시 stdin 파이프로.
     cmd = ['claude', '--output-format', 'json', '--settings', str(settings_path), '-p']
     try:
-        proc = subprocess.Popen(
+        # [WHY] shell=True면 cmd.exe가 부모 — proc.popen이 CREATE_NO_WINDOW를 주입해
+        # 대기 태스크 처리마다 백그라운드 cmd 창이 번쩍이는 걸 막는다(데몬은 무음 전제).
+        # 지역변수명은 child로 — 모듈 proc(래퍼)와 충돌 방지.
+        child = proc.popen(
             cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             cwd=str(worktree), shell=True, text=True, encoding='utf-8', errors='replace',
-            # [WHY] shell=True면 cmd.exe가 부모라, 콘솔 숨김을 안 걸면 대기 태스크 처리마다
-            # 백그라운드에서 검은 cmd 창이 번쩍인다. 데몬은 사용자 몰래 도는 게 전제라 강제 숨김.
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
         try:
-            out, _ = proc.communicate(input=prompt, timeout=timeout)
+            out, _ = child.communicate(input=prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
-            subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
-                           capture_output=True,
-                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+            proc.run(['taskkill', '/F', '/T', '/PID', str(child.pid)],
+                     capture_output=True)
             return False, f'타임아웃({timeout}s) — 프로세스 킬'
     except Exception as e:
         return False, f'실행 실패: {e}'
     try:
         payload = json.loads((out or '').strip() or '{}')
         result_text = str(payload.get('result', ''))[:2000]
-        is_error = bool(payload.get('is_error')) or proc.returncode != 0
-        return (not is_error), (result_text or f'exit={proc.returncode}')
+        is_error = bool(payload.get('is_error')) or child.returncode != 0
+        return (not is_error), (result_text or f'exit={child.returncode}')
     except json.JSONDecodeError:
         # --output-format json인데 JSON이 아니면 비정상 종료로 간주
-        return False, f'출력 파싱 실패 (exit={proc.returncode}): {(out or "")[:300]}'
+        return False, f'출력 파싱 실패 (exit={child.returncode}): {(out or "")[:300]}'
 
 
 def _commit_delta(worktree: Path) -> str:

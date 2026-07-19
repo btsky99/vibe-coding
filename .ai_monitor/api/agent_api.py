@@ -107,6 +107,7 @@ FORCE_ORCHESTRATION = True
 # 구조: { "T1": { "session_id": "abc...", "proc": subprocess|None, "history": [...], "cli": "claude" } }
 import subprocess as _sp
 import asyncio as _asyncio
+from infra import proc as _proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 _chat_sessions: dict = {}
 _chat_sessions_lock = threading.Lock()
@@ -1087,7 +1088,9 @@ def handle_chat(handler) -> None:
         # stderr=DEVNULL로 변경 — stderr 버퍼 데드락 방지
         # (stderr가 꽉 차면 자식 프로세스가 block → stdout 읽기도 멈춤)
         # shell=True 필수 — Windows에서 claude.CMD 등 .cmd 파일은 cmd.exe 경유 필요
-        proc = _sp.Popen(
+        # [과거사고] 여기 creationflags 누락 시 채팅 메시지 전송마다 shell=True cmd.exe 창이
+        # 번쩍였다(2026-07-19 발견). _proc.popen이 CREATE_NO_WINDOW를 자동 주입해 차단.
+        proc = _proc.popen(
             cmd,
             stdin=_sp.PIPE if use_stdin_pipe else _sp.DEVNULL,
             stdout=_sp.PIPE,
@@ -1245,11 +1248,10 @@ def handle_chat_stop(handler) -> None:
             try:
                 # Windows: taskkill /T /F로 프로세스 트리 종료
                 # [WHY] os.system은 항상 cmd.exe를 새로 띄워 채팅 stop마다 검은 창이 번쩍인다.
-                # subprocess.run + CREATE_NO_WINDOW로 콘솔 없이 조용히 트리 킬.
+                # _proc.run(콘솔 숨김 주입)으로 콘솔 없이 조용히 트리 킬.
                 if sys.platform == 'win32':
-                    _sp.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
-                            capture_output=True,
-                            creationflags=getattr(_sp, 'CREATE_NO_WINDOW', 0x08000000))
+                    _proc.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                              capture_output=True)
                 else:
                     proc.kill()
                 session['proc'] = None

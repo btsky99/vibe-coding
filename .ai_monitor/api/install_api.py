@@ -23,6 +23,8 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import parse_qs
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 
 def install_skills(handler, base_dir: Path, scripts_dir, ensure_schema) -> None:
     """GET /api/install-skills?path=<대상> — 스킬셋 복사 + PROJECT_MAP 보장 + DB 초기화.
@@ -272,21 +274,21 @@ def register_codex_to_ai(handler, python_runner_cmds_fn, base_dir: Path, project
         wrapper_script = str(base_dir / 'bin' / 'codex_wrapper.py')
         last_error = ''
         for python_cmd in python_cmds:
-            proc = subprocess.run(
+            # [WHY] 사용자 눈에 안 보이는 백그라운드 등록 호출 — proc.run이 콘솔 숨김 주입.
+            # 지역변수명은 completed로 — 모듈 proc(래퍼) 및 dict result와 충돌 방지.
+            completed = proc.run(
                 [python_cmd, wrapper_script, '--install'],
                 input='all\n',
                 capture_output=True,
                 text=True,
                 timeout=30,
                 cwd=str(project_root),
-                # [WHY] 사용자 눈에 안 보이는 백그라운드 등록 호출 — 숨김 없으면 cmd 창 번쩍임.
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
             )
-            output = proc.stdout.strip() or proc.stderr.strip()
-            if proc.returncode == 0:
+            output = completed.stdout.strip() or completed.stderr.strip()
+            if completed.returncode == 0:
                 result = {"status": "success", "message": f"Antigravity CLI & Claude Desktop에 vibe-coding MCP 등록 완료!\n{output}"}
                 break
-            last_error = output or f"등록 실패 (exit code {proc.returncode})"
+            last_error = output or f"등록 실패 (exit code {completed.returncode})"
         else:
             result = {"status": "error", "message": last_error or "사용 가능한 Python 실행기를 찾지 못했습니다."}
     except subprocess.TimeoutExpired:
@@ -401,13 +403,11 @@ def run_script(handler, current_project_root_fn) -> None:
             script_path = project_root / script_rel
             if not script_path.exists():
                 raise FileNotFoundError(f'{script_rel} not found')
-            no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            result = subprocess.run(
+            result = proc.run(
                 [sys.executable, str(script_path)] + info.get('args', []),
                 capture_output=True, text=True,
                 encoding='utf-8', errors='replace',
                 timeout=15, cwd=str(project_root),
-                creationflags=no_win,
             )
             handler.wfile.write(json.dumps({
                 "status": "ok" if result.returncode == 0 else "fail",
