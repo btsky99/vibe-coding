@@ -860,6 +860,9 @@ def _g_office(h, pp):     _proxy_to_office_server(h, method='GET')
 def _g_tools(h, pp):
     from api import tools_api
     tools_api.handle_get(h, pp.path, parse_qs(pp.query))
+def _g_lan(h, pp):
+    from api import lan_api
+    lan_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR)
 
 GET_PREFIX_ROUTES = [
     ('/api/git/', _g_git),
@@ -870,6 +873,7 @@ GET_PREFIX_ROUTES = [
     ('/api/codegraph/', _g_codegraph),
     ('/api/office/', _g_office),
     ('/api/tools/', _g_tools),
+    ('/api/lan/', _g_lan),
 ]
 
 # GET exact 라우트 테이블 (Phase 2 R1: 파일시스템 다이얼로그 3종)
@@ -1284,6 +1288,10 @@ POST_ROUTES = {
     '/api/screenshot/analyze': _p_screenshot_analyze,
 }
 
+def _p_lan(h, pp):
+    from api import lan_api
+    lan_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR)
+
 POST_PREFIX_ROUTES = [
     ('/api/tools/', _p_tools),
     ('/api/agent/', _p_agent),
@@ -1291,6 +1299,7 @@ POST_PREFIX_ROUTES = [
     ('/api/zettel/', _p_zettel),
     ('/api/codegraph/', _p_codegraph),
     ('/api/memory/', _p_memory),
+    ('/api/lan/', _p_lan),
 ]
 
 # POST 복합조건 라우트 테이블 (Phase 2 R9) — GET_COND_ROUTES와 동형.

@@ -59,6 +59,37 @@ def run_watchdog(env: DaemonEnv) -> None:
         )
         env.child_procs.append(proc)
 
+
+def run_lan_bridge(env: DaemonEnv) -> None:
+    """LAN 브리지(lan_bridge.py) 별도 프로세스 기동 — config lan_bridge_enabled=True일 때만.
+
+    [WHY 기본 꺼짐] 브리지는 0.0.0.0을 노출하므로 사용자가 명시적으로 켤 때만 뜬다.
+    [frozen 함정] sys.executable은 frozen 모드에서 앱EXE라 스크립트 실행 불가 →
+      python_runner_cmds가 개발/EXE 모드별 실제 인터프리터를 해석(watchdog과 동일 패턴).
+    [불변식] Popen 자식은 child_procs.append — cleanup_child_procs가 이 리스트만 종료.
+    """
+    try:
+        cfg = json.loads(env.config_file.read_text(encoding='utf-8')) if env.config_file.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        cfg = {}
+    if not cfg.get('lan_bridge_enabled', False):
+        return
+    bridge_script = env.base_dir / 'lan_bridge.py'
+    if not bridge_script.exists():
+        return
+    _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
+    if not _python_cmds:
+        print("[!] run_lan_bridge: Python 인터프리터를 찾을 수 없어 LAN 브리지 스킵")
+        return
+    proc = subprocess.Popen(
+        [_python_cmds[0], str(bridge_script), "--data-dir", str(env.data_dir)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding='utf-8', errors='replace',
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+    )
+    env.child_procs.append(proc)
+
+
 _tg_bridge_launched = [False]
 def run_telegram_bridge(env: DaemonEnv) -> None:
     if _tg_bridge_launched[0]:
@@ -625,4 +656,5 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     _t(run_commit_watcher, (env,), 'CommitWatcher')
     _t(run_embedding_backfill, (env,), 'EmbedBackfill')
     _t(run_heartbeat, (env,), 'Heartbeat')
+    _t(run_lan_bridge, (env,), 'LanBridge')
 
