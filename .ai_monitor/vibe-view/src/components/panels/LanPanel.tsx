@@ -5,12 +5,13 @@
  * 🕒 변경 이력:
  * - 2026-07-19 Claude: 신규 — LAN 브리지 Phase 1 Task 9 (파일 전송 UI). 채팅은 Phase 2.
  */
-import { useEffect, useState, useCallback } from 'react';
-import { Wifi, WifiOff, ShieldAlert, Send, Link2, RefreshCw } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Wifi, WifiOff, ShieldAlert, Send, Link2, RefreshCw, MessageSquare } from 'lucide-react';
 import { API_BASE } from '../../constants';
 
 interface Peer { peer_id: string; name: string; ip: string; http_port: number }
 interface Trusted { peer_id: string; name: string; paired_at: string }
+interface ChatMsg { id: number; from_peer: string; to_peer: string; content: string; ts: string }
 interface LanStatus {
   running: boolean; firewall_ok?: boolean; self_id?: string; name?: string;
   pending_code?: string | null; online?: Peer[]; trusted?: Trusted[]; error?: string;
@@ -24,6 +25,10 @@ export default function LanPanel() {
   const [sendPeer, setSendPeer] = useState('');
   const [sendPath, setSendPath] = useState('');
   const [flash, setFlash] = useState('');
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const sinceRef = useRef(0);      // 마지막 수신 메시지 id — 증분 폴링 커서
+  const selfRef = useRef('');      // 내 peer_id (메시지 좌/우 정렬 판정)
 
   const refresh = useCallback(() => {
     fetch(`${API_BASE}/api/lan/status`).then(r => r.json()).then(setSt).catch(() => {});
@@ -57,6 +62,37 @@ export default function LanPanel() {
       body: JSON.stringify({ peer_id: sendPeer, path: sendPath }),
     }).then(r => r.json());
     setFlash(r.ok ? `✅ 전송 완료` : `❌ ${r.error || '전송 실패'}`);
+  };
+
+  // [WHY] 전송 대상 피어가 정해지면 그 피어와의 대화를 2초 증분 폴링. 피어 전환 시 커서/목록 리셋.
+  useEffect(() => {
+    if (!sendPeer) { setMessages([]); sinceRef.current = 0; return; }
+    setMessages([]); sinceRef.current = 0;
+    const poll = () => {
+      fetch(`${API_BASE}/api/lan/chat?peer_id=${encodeURIComponent(sendPeer)}&since=${sinceRef.current}`)
+        .then(r => r.json()).then((d: { self_id?: string; messages?: ChatMsg[] }) => {
+          if (d.self_id) selfRef.current = d.self_id;
+          const ms = d.messages || [];
+          if (ms.length) {
+            sinceRef.current = ms[ms.length - 1].id;
+            setMessages(prev => [...prev, ...ms]);
+          }
+        }).catch(() => {});
+    };
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => clearInterval(t);
+  }, [sendPeer]);
+
+  const sendChat = async () => {
+    const text = chatInput.trim();
+    if (!sendPeer || !text) return;
+    setChatInput('');
+    // 발신분은 다음 폴링에서 DB를 통해 돌아옴(내 DB에도 저장됨) — 낙관적 append 안 함(중복 방지).
+    await fetch(`${API_BASE}/api/lan/chat-send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peer_id: sendPeer, content: text }),
+    }).catch(() => {});
   };
 
   return (
@@ -163,6 +199,39 @@ export default function LanPanel() {
             className="w-full py-1 bg-green-700/70 hover:bg-green-700 disabled:opacity-40 rounded text-[12px]">
             전송
           </button>
+        </div>
+      )}
+
+      {/* 채팅 — 전송대상 피어 선택 시 */}
+      {st.running && sendPeer && (
+        <div className="bg-black/20 rounded p-2 space-y-2">
+          <div className="font-medium flex items-center gap-1">
+            <MessageSquare className="w-3.5 h-3.5" />
+            {(st.trusted || []).find(t => t.peer_id === sendPeer)?.name || '채팅'}
+          </div>
+          <div className="h-48 overflow-y-auto space-y-1 bg-black/30 rounded p-2">
+            {messages.length === 0 && <div className="text-[#666] text-[12px]">아직 메시지가 없어요.</div>}
+            {messages.map(m => {
+              const mine = m.from_peer === selfRef.current;
+              return (
+                <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded px-2 py-1 text-[12px] ${mine ? 'bg-blue-600/60' : 'bg-white/10'}`}>
+                    {/* [보안] React 텍스트 노드 — 자동 escape(XSS 차단). dangerouslySetInnerHTML 금지 */}
+                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    <div className="text-[9px] text-white/40 text-right">{m.ts.slice(11, 16)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-2">
+            <input value={chatInput} onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') sendChat(); }}
+              placeholder="메시지 입력 후 Enter"
+              className="flex-1 bg-black/40 rounded px-2 py-1 text-[12px] outline-none" />
+            <button onClick={sendChat} disabled={!chatInput.trim()}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-[12px]">보내기</button>
+          </div>
         </div>
       )}
     </div>
