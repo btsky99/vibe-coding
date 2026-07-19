@@ -13,6 +13,8 @@ import json
 import math
 import subprocess
 from pathlib import Path
+
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QScrollArea, QFrame, QApplication, QPushButton)
 from PySide6.QtGui import (QColor, QPainter, QBrush, QPen, QFont,
@@ -298,9 +300,8 @@ class ModeToggle(QWidget):
         self._current_mode = mode
         # agent_launcher.py로 저장 (서브프로세스 호출)
         if _LAUNCHER.exists():
-            subprocess.Popen(
+            proc.popen(
                 [sys.executable, str(_LAUNCHER), "--set-mode", mode],
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
             )
         else:
             # 런처가 없으면 직접 파일 수정

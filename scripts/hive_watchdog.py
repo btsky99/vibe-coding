@@ -45,6 +45,7 @@ MONITOR_DIR = ROOT_DIR / '.ai_monitor'
 if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 (경로삽입 후라야 import 가능)
 from src.pg_store import ensure_schema, save_state, cleanup_expired_memory
 
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
@@ -150,15 +151,13 @@ class HiveWatchdog:
         self._add_log("🔄 server.py 자동 재시작 시도...")
         try:
             # 새 프로세스로 server.py 실행 (부모 프로세스와 독립)
-            # CREATE_NO_WINDOW: Windows에서 콘솔 창이 팝업되지 않도록 방지
-            # 미설정 시 서버 재시작마다 가시 콘솔 창이 생성되어 무한 창 생성 버그 발생
-            _creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            subprocess.Popen(
+            # [번쩍임 방지] proc.popen이 CREATE_NO_WINDOW를 자동 주입 — 미설정 시 서버 재시작마다
+            #   가시 콘솔 창이 생성되어 무한 창 생성 버그 발생.
+            proc.popen(
                 [sys.executable, str(server_py)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 close_fds=True,
-                creationflags=_creationflags,
             )
             # 3초 대기 후 실제로 응답하는지 확인
             time.sleep(3)
@@ -417,16 +416,13 @@ class HiveWatchdog:
         self._add_log("🔧 메모리 동기화 복구 시도 중...")
         try:
             memory_script = PROJECT_ROOT / "scripts" / "memory.py"
-            # CREATE_NO_WINDOW: 워치독(백그라운드 프로세스)에서 subprocess 실행 시
-            # Windows가 새 콘솔 창을 생성하지 않도록 방지
-            _no_window = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            subprocess.run(
+            # [번쩍임 방지] 워치독(백그라운드)에서 proc.run이 CREATE_NO_WINDOW 자동 주입.
+            proc.run(
                 [sys.executable, str(memory_script), "sync"],
                 capture_output=True, text=True, check=True,
                 # encoding 명시: Windows CP949 환경에서 이모지 포함 출력 시
                 # UnicodeDecodeError → Thread-1 crash 방지 (Bug 1 수정)
                 encoding='utf-8', errors='replace',
-                creationflags=_no_window
             )
             self._add_log("✅ 메모리 동기화 완료")
             self.status["memory_sync_ok"] = True  # 성공 시 상태 반영
@@ -540,10 +536,9 @@ if __name__ == "__main__":
                 if _old_pid != _my_pid:
                     try:
                         if os.name == 'nt':
-                            _r = subprocess.run(
+                            _r = proc.run(
                                 ['tasklist', '/FI', f'PID eq {_old_pid}', '/FO', 'CSV'],
                                 capture_output=True, text=True, timeout=3,
-                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
                             )
                             _alive = str(_old_pid) in _r.stdout
                         else:
