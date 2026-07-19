@@ -39,6 +39,15 @@ export default function LanPanel() {
 
   const isTrusted = (pid: string) => (st.trusted || []).some(t => t.peer_id === pid);
 
+  const enableBridge = async () => {
+    // config에 플래그 저장(부분 병합) — 브리지는 서버 부팅 때 기동되므로 재시작 후 활성.
+    await fetch(`${API_BASE}/api/config/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lan_bridge_enabled: true }),
+    }).catch(() => {});
+    setFlash('✅ 설정 저장됨 — 앱을 재시작하면 LAN 브리지가 켜집니다 (방화벽 위해 관리자 권한 권장)');
+  };
+
   const beginPair = async () => {
     const r = await fetch(`${API_BASE}/api/lan/pair-begin`, { method: 'POST' }).then(r => r.json());
     if (r.code) setMyCode(r.code);
@@ -108,9 +117,12 @@ export default function LanPanel() {
       </div>
 
       {!st.running && (
-        <div className="bg-yellow-900/30 border border-yellow-700/50 rounded p-2 text-yellow-200 text-[12px]">
-          브리지가 꺼져 있어요. <code>config.json</code>의 <code>lan_bridge_enabled: true</code> 설정 후
-          앱을 재시작하세요.
+        <div className="bg-yellow-900/30 border border-yellow-700/50 rounded p-2 text-yellow-200 text-[12px] space-y-2">
+          <div>LAN 브리지가 꺼져 있어요. 켜면 같은 네트워크의 다른 바이브코딩과 파일·채팅을 주고받을 수 있어요.</div>
+          <button onClick={enableBridge}
+            className="px-3 py-1 bg-yellow-600/80 hover:bg-yellow-600 rounded text-white text-[12px]">
+            브리지 켜기 (재시작 필요)
+          </button>
         </div>
       )}
 
