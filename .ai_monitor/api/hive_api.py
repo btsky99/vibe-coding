@@ -767,6 +767,18 @@ def handle_get(handler, path: str, params: dict,
             from infra.heartbeat_daemon import AGENT_ID, DAILY_LIMIT, load_hb_state
             from src.pg_store import find_tasks_for_agent
             s = load_hb_state()
+            # [워치독] loop_beat_at은 데몬 run_loop이 매 iteration(최대 60초) 갱신 →
+            #   3분 이상 안 바뀌면 스레드 hang(예: 죽은 LISTEN conn에 갇힘)으로 판정.
+            #   last_cycle_at은 게이트에 막히면 안 갱신되므로 '멈춤' 감지에 못 쓴다(과거 15h 미감지).
+            import datetime as _dt
+            _beat = s.get('loop_beat_at') or ''
+            _stale = False
+            if _beat:
+                try:
+                    _age = (_dt.datetime.now() - _dt.datetime.strptime(_beat, '%Y-%m-%dT%H:%M:%S')).total_seconds()
+                    _stale = _age > 180
+                except ValueError:
+                    pass
             payload = {
                 'enabled': bool(s.get('enabled')),
                 'daily_count': int(s.get('daily_count', 0)),
@@ -774,6 +786,8 @@ def handle_get(handler, path: str, params: dict,
                 'consecutive_fails': int(s.get('consecutive_fails', 0)),
                 'last_cycle_at': s.get('last_cycle_at') or '',
                 'last_result': s.get('last_result') or '',
+                'loop_beat_at': _beat,
+                'stale': _stale,
                 'pending': len(find_tasks_for_agent(AGENT_ID)),
             }
         except Exception as e:

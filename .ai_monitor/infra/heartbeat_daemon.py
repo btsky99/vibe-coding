@@ -576,6 +576,11 @@ def _wait_for_wake(listen_state: dict, timeout_sec: float) -> None:
     공유 커넥션의 재연결/트랜잭션에 구독이 소리 없이 증발한다.
     """
     conn = listen_state.get('conn')
+    # [방어] 죽은 커넥션(절전/네트워크 단절 후)이면 재생성 유도 — stale conn으로 select가
+    # 영원히 안 깨는 hang(15시간 사고)을 차단한다.
+    if conn is not None and getattr(conn, 'closed', 0):
+        conn = None
+        listen_state['conn'] = None
     if conn is None:
         try:
             import psycopg2
@@ -594,7 +599,10 @@ def _wait_for_wake(listen_state: dict, timeout_sec: float) -> None:
             return
     try:
         import select
-        select.select([conn], [], [], timeout_sec)
+        # [방어] timeout을 60초로 캡 — 죽은 conn이 select를 안 깨워도 최대 60초 내 run_loop로
+        # 복귀해 loop_beat 갱신 + conn 재평가한다. POLL_INTERVAL(600)은 상한일 뿐, 태스크 할당
+        # 즉시성은 NOTIFY가 담당하므로 짧은 캡이 즉시성을 해치지 않는다.
+        select.select([conn], [], [], min(timeout_sec, 60.0))
         conn.poll()
         conn.notifies.clear()
     except Exception:
@@ -620,6 +628,13 @@ def run_loop(get_project_root, data_dir: Path, get_project_id) -> None:
     while True:
         try:
             state = load_hb_state()
+            # [계측] liveness 하트비트 — enabled/게이트와 무관하게 '스레드가 돈다'를 기록한다.
+            # [과거사고] last_cycle_at은 쿼터/enabled 게이트에 막히면 안 갱신돼 '멈춤(hang)'과
+            #   '정상 대기'를 구분 못 함 → 데몬 스레드가 _wait_for_wake의 죽은 LISTEN conn에
+            #   15시간 갇혔는데 아무도 몰랐다(계측 부재). loop_beat_at은 매 iteration 갱신되므로
+            #   이게 멈추면 진짜 hang → stale 워치독(heartbeat status API)이 감지한다.
+            state['loop_beat_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+            save_hb_state(state)
             if not state.get('enabled'):
                 time.sleep(DISABLED_RECHECK_SEC)
                 continue

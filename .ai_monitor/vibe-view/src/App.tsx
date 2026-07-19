@@ -127,7 +127,7 @@ function App() {
 
   // [2026-07-17] 자율 heartbeat 헤더 토글 칩 — 관제 패널이 아닌 런처급 스위치
   // (관제 신규 개발 중단 원칙 준수 — 상세 이력은 pg_logs/hive_tasks 열람으로)
-  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number } | null>(null);
+  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number; stale?: boolean; loop_beat_at?: string } | null>(null);
   const fetchHeartbeat = () => {
     fetch(`${API_BASE}/api/heartbeat/status`)
       .then(r => r.json())
@@ -680,16 +680,22 @@ function App() {
               <button
                 onClick={toggleHeartbeat}
                 className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-bold border transition-all ${
-                  heartbeat?.enabled
+                  heartbeat?.stale
+                    ? 'bg-red-500/20 border-red-400/50 text-red-300 shadow-[0_0_8px_rgba(248,113,113,0.3)]'
+                    : heartbeat?.enabled
                     ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.25)]'
                     : 'bg-black/30 border-white/10 text-[#858585] hover:text-white hover:border-white/25'
                 }`}
                 title={heartbeat
-                  ? `자율 클로드 ${heartbeat.enabled ? 'ON' : 'OFF'} — 오늘 ${heartbeat.daily_count}/${heartbeat.daily_limit}건 · 대기 ${heartbeat.pending}건 (클릭으로 전환)`
+                  ? (heartbeat.stale
+                    ? `⚠️ 자율 데몬 응답 없음(hang 의심) — 마지막 박동 ${heartbeat.loop_beat_at || '?'}. 앱 재시작 필요`
+                    : `자율 클로드 ${heartbeat.enabled ? 'ON' : 'OFF'} — 오늘 ${heartbeat.daily_count}/${heartbeat.daily_limit}건 · 대기 ${heartbeat.pending}건 (클릭으로 전환)`)
                   : '자율 클로드 — 서버 연결 대기'}
               >
-                <span className={heartbeat?.enabled ? 'animate-pulse' : ''}>🫀</span>
-                <span>{heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
+                <span className={heartbeat?.stale ? '' : heartbeat?.enabled ? 'animate-pulse' : ''}>
+                  {heartbeat?.stale ? '⚠️' : '🫀'}
+                </span>
+                <span>{heartbeat?.stale ? 'AUTO 멈춤' : heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
                 {heartbeat && heartbeat.pending > 0 && (
                   <span className="px-1 rounded-full bg-amber-500/20 text-amber-300">{heartbeat.pending}</span>
                 )}
