@@ -20,6 +20,11 @@ PROJECT_ROOT = AI_MONITOR_DIR.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 PYTHON_BIN = AI_MONITOR_DIR / "venv" / "Scripts" / "python.exe"
 
+# [WHY] windowed 부모(Codex/Antigravity stdio MCP 클라이언트)가 python 자식을 띄우면
+# Windows가 새 콘솔을 할당해 cmd 창이 번쩍인다. MCP 도구 호출마다 반복되므로 전 호출에
+# 콘솔 숨김을 강제. 비Windows에선 속성이 없어 0 → 무해.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 TOOLS = [
     {
@@ -244,6 +249,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                 text=True,
                 timeout=120,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
             )
             return result.stdout or result.stderr or "(no output)"
         except subprocess.TimeoutExpired:
@@ -271,6 +277,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                 text=True,
                 timeout=30,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
             )
             return result.stdout or result.stderr or "(no memory items)"
         except Exception as exc:
@@ -290,6 +297,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                  "codex", to_terminal, content, channel],
                 capture_output=True, text=True, timeout=10,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
                 env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
             )
             stdout = result.stdout or ""
@@ -306,6 +314,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                 [str(PYTHON_BIN), str(itcp_script), "receive", terminal],
                 capture_output=True, text=True, timeout=10,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
                 env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
             )
             stdout = result.stdout or ""
@@ -322,6 +331,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                 [str(PYTHON_BIN), str(itcp_script), "history", str(limit)],
                 capture_output=True, text=True, timeout=10,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
                 env={**__import__("os").environ, "PGCLIENTENCODING": "UTF8"},
             )
             stdout = result.stdout or ""
@@ -341,6 +351,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                 [str(PYTHON_BIN), str(memory_script), "get", key],
                 capture_output=True, text=True, timeout=15,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
             )
             return result.stdout.strip() or f"(키 '{key}' 없음)"
         except Exception as exc:
@@ -358,6 +369,7 @@ def handle_tool_call(name: str, args: dict) -> str:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=15,
                 cwd=str(PROJECT_ROOT),
+                creationflags=_NO_WINDOW,
             )
             return result.stdout.strip() or "저장 완료"
         except Exception as exc:

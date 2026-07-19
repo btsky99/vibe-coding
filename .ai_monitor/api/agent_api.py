@@ -1244,9 +1244,12 @@ def handle_chat_stop(handler) -> None:
         if proc and proc.poll() is None:
             try:
                 # Windows: taskkill /T /F로 프로세스 트리 종료
+                # [WHY] os.system은 항상 cmd.exe를 새로 띄워 채팅 stop마다 검은 창이 번쩍인다.
+                # subprocess.run + CREATE_NO_WINDOW로 콘솔 없이 조용히 트리 킬.
                 if sys.platform == 'win32':
-                    import os
-                    os.system(f'taskkill /PID {proc.pid} /T /F >nul 2>&1')
+                    _sp.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                            capture_output=True,
+                            creationflags=getattr(_sp, 'CREATE_NO_WINDOW', 0x08000000))
                 else:
                     proc.kill()
                 session['proc'] = None

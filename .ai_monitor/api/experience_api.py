@@ -162,7 +162,9 @@ def seed_from_git_log(repo_dir: str = '.', since: str = '2026-01-01',
         f'--format={sep}%H||%s||%b', '--stat',
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_dir,
-                            encoding='utf-8', errors='replace')
+                            encoding='utf-8', errors='replace',
+                            # [WHY] POST /api/experience 시드 시 git 자식이 콘솔 없이 돌게 — 창 번쩍임 차단.
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
     if result.returncode != 0:
         return {'seeded': 0, 'skipped': 0, 'errors': 1, 'message': result.stderr}
 

@@ -279,6 +279,8 @@ def register_codex_to_ai(handler, python_runner_cmds_fn, base_dir: Path, project
                 text=True,
                 timeout=30,
                 cwd=str(project_root),
+                # [WHY] 사용자 눈에 안 보이는 백그라운드 등록 호출 — 숨김 없으면 cmd 창 번쩍임.
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
             )
             output = proc.stdout.strip() or proc.stderr.strip()
             if proc.returncode == 0:

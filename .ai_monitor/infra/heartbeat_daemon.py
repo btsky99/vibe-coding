@@ -271,6 +271,9 @@ def run_claude_task(worktree: Path, task: dict, settings_path: Path,
             cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             cwd=str(worktree), shell=True, text=True, encoding='utf-8', errors='replace',
+            # [WHY] shell=True면 cmd.exe가 부모라, 콘솔 숨김을 안 걸면 대기 태스크 처리마다
+            # 백그라운드에서 검은 cmd 창이 번쩍인다. 데몬은 사용자 몰래 도는 게 전제라 강제 숨김.
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
         )
         try:
             out, _ = proc.communicate(input=prompt, timeout=timeout)
