@@ -370,6 +370,13 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("CREATE INDEX IF NOT EXISTS idx_zettel_links_target ON zettel_links (target_id);")
 
         # NOTIFY 트리거 — 노트 변경 시 실시간 알림
+        # [과거사고] 2026-07-19: title을 통째로 payload에 실어 pg_notify 8000바이트 한도를
+        #   초과 → 트리거가 AFTER INSERT/UPDATE 트랜잭션을 롤백시켜 zettel 노트 쓰기가
+        #   연쇄 실패하고 server.log가 'payload string too long'으로 폭주(41MB). 세션 요약처럼
+        #   본문이 title에 들어간 노트가 방아쇠. 게다가 'zettel_change' 채널을 LISTEN하는
+        #   소비자가 코드에 없어 title 전달은 순수 손해였음.
+        # [불변식] payload는 bounded여야 함 — title은 left(...,200)으로 상한 고정.
+        #   소비자가 생겨도 '변경 감지 → id로 재조회'만 하면 되므로 title 원문은 불필요.
         execute_raw("""
             CREATE OR REPLACE FUNCTION notify_zettel_change()
             RETURNS TRIGGER AS $$
@@ -377,7 +384,7 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
                 PERFORM pg_notify('zettel_change',
                     json_build_object(
                         'id', NEW.id,
-                        'title', NEW.title,
+                        'title', left(coalesce(NEW.title, ''), 200),
                         'note_type', NEW.note_type,
                         'author', NEW.author,
                         'updated_at', NEW.updated_at
