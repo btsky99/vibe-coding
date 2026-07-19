@@ -19,6 +19,7 @@ import {
   Search,
   Settings,
   Smartphone,
+  Wifi,
   Zap,
 } from 'lucide-react';
 
@@ -162,6 +163,9 @@ const ActivityBar = memo(function ActivityBar({
         <Smartphone className="w-5 h-5" />
       </button>
 
+      <button onClick={() => onTabChange('lan')} className={tabCls('lan')} title="LAN 공유">
+        <Wifi className="w-5 h-5" />
+      </button>
       <button onClick={() => onTabChange('tools')} className={tabCls('tools')} title="개발 도구">
         <Package className="w-5 h-5" />
       </button>

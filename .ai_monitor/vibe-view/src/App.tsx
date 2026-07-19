@@ -51,6 +51,7 @@ import TerminalSlot from './components/TerminalSlot';
 const OfficeApp = lazy(() => import('./components/office/OfficeApp'));
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import TasksPanel from './components/panels/TasksPanel';
+import LanPanel from './components/panels/LanPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
@@ -432,6 +433,7 @@ function App() {
     hive: '하이브 진단 / 스킬',
     git: 'Git 감시',
     heal: '자가치유 계측',
+    lan: 'LAN 공유',
   }[activeTab] ?? activeTab;
 
   return (
@@ -624,6 +626,9 @@ function App() {
             ) : activeTab === 'heal' ? (
               /* 자가치유 계측 패널 — 4장치 성과+커버리지 진단 */
               <HealPanel />
+            ) : activeTab === 'lan' ? (
+              /* LAN 브리지 패널 — 자동발견·페어링·파일전송 (Phase 1) */
+              <LanPanel />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.
