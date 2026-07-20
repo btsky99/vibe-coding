@@ -30,10 +30,16 @@
 #   - [P1-④] discover_task 3소스 디스패처화: 재발사고 → 미하드닝 사고 → 표준 헤더 누락.
 #     [설계결정] TODO/FIXME(노이즈)·1500줄 분할(자율 리팩터 위험)은 의도 제외 — 신호
 #     높은 소스만. discover_task 시그니처에 project_root 추가(헤더 스캔용 ls-files).
+# [2026-07-20] Claude — 싱글턴 stale-takeover (사고 e9a48f66 후속):
+#   - [WHY] 구버전/hung 인스턴스가 락 포트 9019를 영원히 물면 dev auto가 시작조차 못 함.
+#     run_loop이 bind 실패 시 즉시 return(포기)하던 걸 재시도 루프로 — 주인이 놓는 즉시 인수.
+#   - [WHY] _singleton_watchdog(별도 스레드): 메인 루프가 WATCHDOG_STALL_SEC(>태스크 최대치)
+#     이상 정지하면 소켓만 close해 락 반납. os._exit(앱 통째 종료)는 과잉이라 배제.
 # ─────────────────────────────────────────────────────────────────────────────
 import json
 import socket
 import subprocess
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -55,6 +61,14 @@ OUTBOX_CAP = 30                  # 텔레그램 미소비 보고 보관 상한
 # [WHY] 9019 고정 — 서버 HTTP(9000-9007)·오피스(9010번대)와 겹치지 않는 대역.
 # dev 서버와 설치본 EXE가 동시에 떠도 heartbeat는 딱 하나만 살아남게 하는 락.
 SINGLETON_LOCK_PORT = 9019
+SINGLETON_RETRY_SEC = 60         # bind 실패(다른 인스턴스 점유) 시 포기하지 않고 재시도하는 주기
+WATCHDOG_CHECK_SEC = 60          # 자가반납 워치독 점검 주기
+# [불변식] 반드시 TASK_TIMEOUT_SEC보다 커야 한다 — 정상 태스크 수행 중(run_claude_task,
+#   최대 1800s)엔 last_progress가 갱신되지 않으므로, 이 값이 그보다 작으면 30분짜리
+#   정상 작업을 hung으로 오판해 락을 반납→다른 인스턴스가 인수→이중 heartbeat 실행 사고.
+# [WHY] keepalive(v3.7.270, pg_base)가 죽은 DB 소켓 hang을 ~60초 내 self-heal 하는 1차
+#   방어라, 이 워치독은 keepalive가 못 잡는 다른 hang을 위한 백스톱 — 공격적 짧은 값 불필요.
+WATCHDOG_STALL_SEC = TASK_TIMEOUT_SEC + 600   # =2400s(40분)
 
 # [P0 게이트] 오토가 건드리면 안 되는 자동생성/산출물 경로 조각 (커밋 파일 경로를
 # lower-case로 substring 매칭). deny 프로파일(Bash 접두)로는 Edit/Write 도구를 못 막아
@@ -618,20 +632,72 @@ def _wait_for_wake(listen_state: dict, timeout_sec: float) -> None:
         listen_state['conn'] = None
 
 
+def _singleton_watchdog(holder: dict) -> None:
+    """홀더의 메인 루프 진행(last_progress)을 감시 — WATCHDOG_STALL_SEC 이상 정지하면
+    싱글턴 소켓만 close해 락을 반납한다 (다른 정상 인스턴스가 인수하도록).
+
+    [WHY] os._exit로 프로세스를 죽이지 않는다 — heartbeat는 앱의 여러 데몬 스레드 중
+      하나일 뿐이라, 그거 하나 hung 때문에 멀쩡한 HTTP 서버(9000)/UI까지 나가면 과잉.
+      소켓만 놓으면 하드 상호배제(살아있는 소켓 1개)는 유지되고 앱 본체는 산다.
+    [과거사고 e9a48f66 2026-07-20] 구버전 설치본(v3.7.269)이 절전발 죽은 PG 소켓 hang으로
+      싱글턴 락을 23시간 물고 죽어, dev auto가 시작조차 못 했다 — 이 워치독이 그 hang을
+      스스로 반납해 재발을 막는다(단 keepalive가 1차 방어, 이건 백스톱).
+    [제약] 별도 daemon 스레드 — 메인 루프가 C레벨(recv 등)에 블록돼도 이 스레드는 돈다.
+    [불변식] last_progress는 time.monotonic() 기준 (벽시계/절전 보정 무관). 소켓 close(반납)는
+      이 워치독만, bind(재획득)는 메인 루프만 — 상호배제 담당은 언제나 소켓 1개.
+      holder 딕트 접근은 GIL 하 원자적 get/set만 사용하므로 별도 락 불필요.
+    """
+    while not holder.get('stop'):
+        time.sleep(WATCHDOG_CHECK_SEC)
+        if holder.get('sock') is None:
+            continue   # 이미 반납/미보유 — 메인 루프가 재획득할 때까지 대기
+        age = time.monotonic() - holder.get('last_progress', time.monotonic())
+        if age > WATCHDOG_STALL_SEC:
+            sock = holder.get('sock')
+            holder['sock'] = None   # 먼저 무효화 (재획득 경로가 소켓 없음을 즉시 관측)
+            try:
+                sock.close()
+            except Exception:
+                pass
+            print(f"[heartbeat] 자기 루프 {int(age)}s 정지 감지 — 싱글턴 락 반납 "
+                  f"(다른 인스턴스 인수 허용). hung 스레드는 leaked 가능 — 앱 재시작 권장")
+
+
 def run_loop(get_project_root, data_dir: Path, get_project_id) -> None:
     """데몬 진입점 — daemons.run_heartbeat가 daemon 스레드에서 호출.
 
     get_project_root/get_project_id: callable — 프로젝트 전환(set_project_db)
     반영을 위해 매 사이클 재평가 (DaemonEnv late-binding 계약과 동형).
+
+    [2026-07-20] 락 재시도 + 자가반납 워치독 — 구버전/hung 인스턴스가 싱글턴 포트를
+      영원히 물어 dev auto가 시작조차 못 하던 문제(사고 e9a48f66) 방지.
     """
-    lock = _acquire_singleton()
-    if lock is None:
-        print(f"[heartbeat] 다른 인스턴스가 이미 실행 중 (port {SINGLETON_LOCK_PORT}) — 이 프로세스는 대기하지 않고 종료")
-        return
+    holder: dict = {'sock': None, 'last_progress': time.monotonic(), 'stop': False}
+    # [변경] bind 실패 시 return(즉시 포기) 금지 → 재시도. 현재 주인이 락을 놓는 순간
+    #   (앱 종료/워치독 반납/270 업데이트 재시작) 대기 인스턴스가 SINGLETON_RETRY_SEC 내 인수.
+    _warned = False
+    while holder['sock'] is None:
+        holder['sock'] = _acquire_singleton()
+        if holder['sock'] is None:
+            if not _warned:
+                print(f"[heartbeat] 다른 인스턴스가 락(port {SINGLETON_LOCK_PORT}) 점유 중 — "
+                      f"{SINGLETON_RETRY_SEC}s 간격 재시도(주인이 놓는 즉시 인수)")
+                _warned = True
+            time.sleep(SINGLETON_RETRY_SEC)
     print("[heartbeat] 자율 루프 시작 (기본 꺼짐 — /auto on으로 활성화)")
+    threading.Thread(target=_singleton_watchdog, args=(holder,), daemon=True).start()
     listen_state: dict = {'conn': None}
     while True:
         try:
+            # [변경] 워치독이 락을 반납했으면(hung 판정) 재획득 후에만 진행 — 소켓 없는 채
+            #   heartbeat를 돌리면 다른 인스턴스와 이중 실행 위험. 재획득은 메인 스레드 전담.
+            if holder['sock'] is None:
+                holder['sock'] = _acquire_singleton()
+                if holder['sock'] is None:
+                    time.sleep(SINGLETON_RETRY_SEC)
+                    continue
+            # [계측] monotonic 진행 마커 — 워치독의 hung 판정 기준(벽시계 loop_beat_at과 별개).
+            holder['last_progress'] = time.monotonic()
             state = load_hb_state()
             # [계측] liveness 하트비트 — enabled/게이트와 무관하게 '스레드가 돈다'를 기록한다.
             # [과거사고] last_cycle_at은 쿼터/enabled 게이트에 막히면 안 갱신돼 '멈춤(hang)'과
