@@ -144,6 +144,22 @@ except ImportError:
 _pg_conn = None
 _pg_conn_lock = threading.Lock()
 
+# [과거사고 2026-07-20] 절전/네트워크 단절로 established 커넥션의 TCP 소켓이 죽으면
+#   라이브니스 체크 SELECT 1이 recv()에서 무한 블록(hang)된다 — connect_timeout은 최초
+#   연결에만 적용돼 이미 맺어진 소켓엔 무효. 이 hang이 heartbeat 데몬 run_loop을 16시간
+#   동결(loop_beat_at 00:15 고정)시키고 9019 싱글턴 락을 물고 안 놔 dev/설치본 전 인스턴스
+#   auto를 마비시켰다. TCP keepalive를 켜면 OS 스택이 죽은 피어를 ~30-60s 내 감지해 recv()가
+#   에러를 반환 → 아래 except가 커넥션 폐기·재연결을 유도(무한 hang → 유한 실패 전환).
+# [불변식] psycopg2.connect 두 경로(_get_pg_conn·get_pool_conn)에 동일 적용해야 함 —
+#   한쪽만 고치면 다른 경로가 여전히 죽은 소켓에서 hang(단일 소스로 강제).
+_CONN_RESILIENCE_KW = dict(
+    connect_timeout=5,
+    keepalives=1,
+    keepalives_idle=30,
+    keepalives_interval=10,
+    keepalives_count=3,
+)
+
 
 def _get_pg_conn():
     """psycopg2 커넥션을 반환합니다. 끊겼으면 재연결합니다.
@@ -167,7 +183,7 @@ def _get_pg_conn():
             user=PG_USER,
             dbname=PG_DB,
             options='-c lc_messages=C',
-            connect_timeout=5,
+            **_CONN_RESILIENCE_KW,
         )
         conn.autocommit = True
         _pg_conn = conn
@@ -212,7 +228,9 @@ def get_pool_conn(db: str = "postgres"):
                     except Exception:
                         pass
                     break
-    conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db)
+    # [과거사고 2026-07-20] _get_pg_conn과 동일한 죽은-소켓 hang 취약점 — keepalive 필수.
+    conn = psycopg2.connect(host='127.0.0.1', port=int(PG_PORT), user='postgres', dbname=db,
+                            **_CONN_RESILIENCE_KW)
     conn.autocommit = True
     return conn
 

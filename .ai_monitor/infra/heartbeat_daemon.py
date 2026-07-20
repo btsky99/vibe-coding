@@ -588,9 +588,11 @@ def _wait_for_wake(listen_state: dict, timeout_sec: float) -> None:
         try:
             import psycopg2
             from src import pg_base
+            # [불변식] pg_base와 동일한 keepalive 적용 — LISTEN 전용 커넥션도 절전발 죽은
+            #   소켓에서 poll()이 hang 나지 않게(closed 플래그가 반영 안 되는 half-open 대비).
             conn = psycopg2.connect(
                 host='127.0.0.1', port=int(pg_base.PG_PORT), user=pg_base.PG_USER,
-                dbname=pg_base.PG_DB, connect_timeout=5,
+                dbname=pg_base.PG_DB, **pg_base._CONN_RESILIENCE_KW,
             )
             conn.autocommit = True
             with conn.cursor() as cur:
