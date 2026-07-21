@@ -1,5 +1,16 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-07-22] - LAN 브리지 Phase 3: 원격 Claude 에이전트 실행
+
+### 🎮 같은 LAN 페어링 PC 원격 제어
+- **[Feature] 원격 에이전트 실행**: 페어링된 같은 네트워크 PC에 태스크 전송 → 상대 승인 → 상대가 Claude 에이전트 실행 → 결과를 요청자가 폴링 수신. `임의 셸 아님`(자연어 태스크→claude, 간접 실행).
+- **[보안] 3중 게이트**: ① 페어링 HMAC 토큰(기존 재사용, body_hash 서명·nonce 재전송차단) ② 상대 독립 마스터토글 `lan_remote_exec_enabled` **기본 OFF**(파일/채팅과 별개 — 켠 PC만 수락, OFF면 pending 회수 자체를 안 함) ③ 승인 팝업(요청자+태스크 **전문** 표시).
+- **[편의] 피어별 exec_trust(ask/auto)**: 첫 승인 팝업의 '이 PC 자동승인' 체크 시 이후 팝업 없이 실행(자율 목적). auto여도 감사로그는 항상 기록.
+- **[아키텍처] 브리지=릴레이, server=실행+DB**: 브리지(lan_bridge.py)는 exec 릴레이+버퍼만, 실행은 lan_api가 `agent_api._build_chat_cmd`+`_proc.popen` 재사용(중복 없음), 감사는 PG `lan_exec_log`(server 책임 — 채팅과 동일 원칙).
+- **[안전] TTL/타임아웃/취소**: 승인 대기 5분 TTL 자동거부(자리비움), 실행 30분 타임아웃 강제종료, 취소 라우트. 출력 원문 DB 미저장(요약 2000자 절단).
+- **[제약] 같은 LAN 전용**: UDP 브로드캐스트+사설IP라 다른 네트워크 불가(VPN/릴레이는 별도 스코프).
+- **파일**: lan_bridge.py(exec 라우트/버퍼), api/lan_api.py(/api/lan/exec/*+캡처스레드), src/lan_peers.py(exec_trust), src/pg_lan.py+pg_schema.py(lan_exec_log), LanPanel.tsx(전송/승인팝업/출력뷰/토글).
+
 ## [2026-07-19] - 라이브 프로젝트 전환 (무재시작)
 
 ### 🔀 프로젝트 라이브 전환

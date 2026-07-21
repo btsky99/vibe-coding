@@ -9,6 +9,8 @@ REVISION HISTORY:
 - 2026-07-19 Claude: 신규 — LAN 브리지 Phase 1 Task 1.
 - 2026-07-19 Claude: 보안수정 C2/C1/W1 — shared_key 평문전송 제거(코드→HKDF 파생),
   페어링 proof 교환, 토큰에 body_hash+filename 서명 + nonce 재사용 거부.
+- 2026-07-22 Claude: Phase 3 Task 1 — 피어별 exec_trust(ask|auto) 저장. 원격 에이전트
+  실행 승인 정책. 첫 승인 시 'auto' 선택하면 이후 팝업 없이 실행(감사로그는 유지).
 """
 # [WHY 코드기반 파생] shared_key를 pair 응답으로 평문 전송하면 LAN 스니퍼가 키를 캡처해
 #   토큰을 영구 위조(C2). 대신 shared_key = HKDF(코드) — 코드는 화면→사람→키패드로만 이동하고
@@ -99,9 +101,12 @@ class LanPeers:
 
     # ── 신뢰 저장 ────────────────────────────────────────────────────────
     def add_peer(self, peer_id: str, name: str, shared_key: str) -> None:
+        # [Phase3] exec_trust 기본 'ask' — 원격실행은 최초 요청 시 반드시 승인 팝업.
+        #   'auto'는 사용자가 첫 승인에서 명시적으로 격상해야만 부여(자율 실행 opt-in).
         self._data.setdefault('peers', {})[peer_id] = {
             'name': name, 'shared_key': shared_key,
             'paired_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'exec_trust': 'ask',
         }
         self._save()
 
@@ -113,12 +118,30 @@ class LanPeers:
         return False
 
     def list_peers(self) -> list[dict]:
-        """신뢰 목록 — shared_key는 노출하지 않고 id/name/paired_at만."""
-        return [{'peer_id': pid, 'name': p.get('name', ''), 'paired_at': p.get('paired_at', '')}
+        """신뢰 목록 — shared_key는 노출하지 않고 id/name/paired_at/exec_trust만."""
+        return [{'peer_id': pid, 'name': p.get('name', ''), 'paired_at': p.get('paired_at', ''),
+                 'exec_trust': p.get('exec_trust', 'ask')}
                 for pid, p in self._data.get('peers', {}).items()]
 
     def is_trusted(self, peer_id: str) -> bool:
         return peer_id in self._data.get('peers', {})
+
+    # ── 원격실행 승인 정책 (Phase 3) ─────────────────────────────────────
+    def get_exec_trust(self, peer_id: str) -> str:
+        """'ask'(매번 승인) | 'auto'(첫 승인 후 자동). 미등록/구페어는 'ask' 폴백(안전측)."""
+        p = self._data.get('peers', {}).get(peer_id)
+        return p.get('exec_trust', 'ask') if p else 'ask'
+
+    def set_exec_trust(self, peer_id: str, mode: str) -> bool:
+        """승인 정책 변경. 신뢰 피어에만 적용. mode는 'ask'|'auto'만 허용(그 외 무시)."""
+        if mode not in ('ask', 'auto'):
+            return False
+        p = self._data.get('peers', {}).get(peer_id)
+        if not p:
+            return False
+        p['exec_trust'] = mode
+        self._save()
+        return True
 
     def _key_of(self, peer_id: str) -> str | None:
         p = self._data.get('peers', {}).get(peer_id)

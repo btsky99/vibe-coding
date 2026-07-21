@@ -6,20 +6,32 @@ DESCRIPTION: /api/lan/* 핸들러 — 프론트(127.0.0.1 로컬서버)가 LAN �
 
 REVISION HISTORY:
 - 2026-07-19 Claude: 신규 — LAN 브리지 Phase 1 Task 6. project_id 비의존(이식성).
+- 2026-07-22 Claude: Phase 3 Task 5/6 — 원격 에이전트 실행 전송/승인 API + 출력캡처 스레드.
+  마스터 게이트 lan_remote_exec_enabled(기본 OFF) + 3중 보안. 실행=agent_api 재사용.
 """
 # [WHY 프록시 구조] 프론트 → 로컬서버(lan_api) → 브리지(로컬 9020~). 프론트가 브리지에 직접
 #   붙지 않는 이유: 브리지 포트가 동적이라 프론트가 모르고, 기존 UI는 전부 로컬서버 경유라
 #   경로 일관성 유지. 브리지 꺼짐/살아있음도 여기서 running 플래그로 흡수.
 import hashlib
 import json
+import subprocess as _sp
+import threading
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from src.server_utils import send_json
-from src.pg_lan import save_lan_message, get_lan_messages
+from src.pg_lan import (save_lan_message, get_lan_messages,
+                        save_lan_exec, update_lan_exec_status, get_lan_exec_log)
+
+# [Phase3] 실행 중인 원격 exec 프로세스 — exec_id → Popen. 취소/중복정리용(단일 lan_api 프로세스).
+_EXEC_PROCS: dict = {}
+_EXEC_LOCK = threading.Lock()
+# [Phase3 Task11] 원격 실행 최대 수명 — 무한 실행/방치 프로세스 차단. 초과 시 강제종료.
+_EXEC_TIMEOUT_SEC = 30 * 60
 
 
 def _bridge_port(data_dir: Path) -> int | None:
@@ -147,8 +159,97 @@ def _pick_online_peer(dd: Path, req_peer: str):
     return None, {'reason': 'ambiguous', 'peers': paired}
 
 
+# ── 원격 실행 러너 (Phase 3 Task 6) ──────────────────────────────────
+# [WHY 재사용] agent_api의 명령 빌더(_build_chat_cmd)와 콘솔숨김 popen(_proc.popen)을
+#   그대로 재사용 — claude 실행법 중복 금지([[feedback-no-duplicates]]). 다른 점은 출력 목적지:
+#   handle_chat은 SSE로 브라우저에 보내지만, 여기선 브리지 exec-emit로 요청자에게 역방향 릴레이.
+# [제약] handle_run(싱글턴+SSE)은 caller가 출력을 폴링할 수 없어 부적합 → 전용 캡처 스레드.
+
+def _extract_stream_text(line: str) -> str:
+    """claude stream-json 1줄 → 표시용 텍스트. handle_chat 파싱 미러(assistant/result/plain)."""
+    line = line.strip()
+    if not line:
+        return ''
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        return line + '\n'   # stream-json 아닌 일반 텍스트(폴백)
+    mtype = msg.get('type', '')
+    if mtype == 'assistant':
+        content = msg.get('message', {}).get('content', '')
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            out = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get('type') == 'text':
+                        out.append(block.get('text', ''))
+                    elif block.get('type') == 'tool_use':
+                        out.append(f"\n[도구: {block.get('name', '')}]\n")
+            return ''.join(out)
+    elif mtype == 'result':
+        return ''   # result는 전체 재전송이라 중복 방지(assistant로 이미 스트리밍됨)
+    return ''
+
+
+def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str) -> None:
+    """[대상측] 승인된 태스크를 claude로 실행하며 출력을 브리지로 역방향 푸시.
+
+    [보안] yolo(권한 스킵) — 원격 자율 실행이라 대상에 사람이 대기하지 않음. 승인 팝업이
+    이미 게이트했고 내 PC끼리 전제. 출력 원문은 DB에 안 남기고 요약 절단본만(Critic).
+    """
+    from infra import proc as _proc          # 지연 import(순환 회피)
+    try:
+        from api.agent_api import _build_chat_cmd, _project_root
+    except Exception as e:
+        update_lan_exec_status(exec_id, 'error', f'실행엔진 로드 실패: {e}', project_id)
+        _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                         'chunk': f'[오류] {e}', 'done': True})
+        return
+
+    cmd = _build_chat_cmd('claude', None, yolo=True, message=task)
+    full: list[str] = []
+    try:
+        proc = _proc.popen(cmd, stdin=_sp.DEVNULL, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+                           cwd=_project_root or None, shell=True, encoding=None)
+        with _EXEC_LOCK:
+            _EXEC_PROCS[exec_id] = proc
+        # [Task11] 타임아웃 워치독 — 초과 시 kill. stdout 루프가 break되며 정리로 이어짐.
+        watchdog = threading.Timer(_EXEC_TIMEOUT_SEC,
+                                   lambda: proc.poll() is None and proc.kill())
+        watchdog.daemon = True
+        watchdog.start()
+        update_lan_exec_status(exec_id, 'running', '', project_id)
+        for raw in proc.stdout:
+            text = _extract_stream_text(raw.decode('utf-8', 'replace'))
+            if text:
+                full.append(text)
+                _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                                 'chunk': text, 'done': False})
+        proc.wait(timeout=5)
+        watchdog.cancel()
+        summary = ''.join(full)[-2000:]
+        update_lan_exec_status(exec_id, 'done', summary, project_id)
+        _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                         'chunk': '', 'done': True})
+    except Exception as e:
+        update_lan_exec_status(exec_id, 'error', str(e)[:2000], project_id)
+        _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                         'chunk': f'[실행 오류] {e}', 'done': True})
+    finally:
+        with _EXEC_LOCK:
+            _EXEC_PROCS.pop(exec_id, None)
+
+
+def _start_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str) -> None:
+    """실행 러너를 데몬 스레드로 시작(승인 시 호출). HTTP 핸들러를 막지 않음."""
+    threading.Thread(target=_run_remote_exec, args=(dd, peer_id, exec_id, task, project_id),
+                     daemon=True, name=f'lan-exec-{exec_id[:8]}').start()
+
+
 def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> bool:
-    """GET /api/lan/{status,chat}."""
+    """GET /api/lan/{status,chat,exec/pending,exec/output,exec/log}."""
     dd = Path(DATA_DIR)
     if path == '/api/lan/status':
         send_json(handler, _proxy(dd, 'GET', 'status'))
@@ -164,6 +265,34 @@ def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> 
         # ② DB에서 나↔peer 대화를 since 커서로 증분 반환.
         rows = get_lan_messages(self_id, peer_id, since, PROJECT_ID) if peer_id else []
         send_json(handler, {'self_id': self_id, 'messages': rows})
+        return True
+    if path == '/api/lan/exec/pending':
+        # [Phase3 게이트①] 마스터 토글 OFF면 대기건을 절대 회수하지 않는다(우회 불가한 관문).
+        #   OFF인 PC는 상대가 태스크를 보내도 브리지 큐에 쌓일 뿐 승인 UI에 노출 안 됨.
+        if not _config(dd).get('lan_remote_exec_enabled', False):
+            send_json(handler, {'enabled': False, 'pending': []})
+            return True
+        drained = _proxy(dd, 'GET', 'exec-pending-drain')
+        pending_out = []
+        for item in drained.get('pending', []) or []:
+            exec_id = item.get('exec_id', '')
+            from_peer = item.get('from_peer', '')
+            task = item.get('task', '')
+            save_lan_exec(exec_id, 'in', from_peer, task, 'received', PROJECT_ID)
+            if item.get('exec_trust') == 'auto':
+                # 자동승인 피어 — 팝업 생략하고 즉시 실행(감사로그는 이미 기록됨).
+                _start_exec(dd, from_peer, exec_id, task, PROJECT_ID)
+            else:
+                pending_out.append(item)   # 'ask' — 승인 팝업으로 노출
+        send_json(handler, {'enabled': True, 'pending': pending_out})
+        return True
+    if path == '/api/lan/exec/output':
+        exec_id = params.get('exec_id', [''])[0]
+        drained = _proxy(dd, 'GET', f'exec-output-drain?exec_id={exec_id}')
+        send_json(handler, {'chunks': drained.get('chunks', [])})
+        return True
+    if path == '/api/lan/exec/log':
+        send_json(handler, {'log': get_lan_exec_log(PROJECT_ID, 100)})
         return True
     return False
 
@@ -188,6 +317,57 @@ def handle_post(handler, path: str, data: dict, *, DATA_DIR, PROJECT_ID='') -> b
             # 내 발신분도 내 DB에 기록(양쪽이 각자 자기 DB에 이력 보유).
             save_lan_message(_self_id(dd), peer_id, content, PROJECT_ID)
         send_json(handler, res)
+        return True
+    if path == '/api/lan/exec':
+        # [Phase3 요청자] 태스크 전송. exec_id 생성 → 브리지 → 상대. 감사로그(out) 기록.
+        peer_id = (data or {}).get('peer_id', '')
+        task = (data or {}).get('task', '')
+        if not peer_id or not task.strip():
+            send_json(handler, {'ok': False, 'error': 'peer_id/task 필요'})
+            return True
+        exec_id = uuid.uuid4().hex
+        res = _proxy(dd, 'POST', 'exec-send',
+                     {'peer_id': peer_id, 'exec_id': exec_id, 'task': task})
+        if res.get('ok'):
+            save_lan_exec(exec_id, 'out', peer_id, task, 'running', PROJECT_ID)
+        send_json(handler, {**res, 'exec_id': exec_id})
+        return True
+    if path == '/api/lan/exec/approve':
+        # [Phase3 대상] 승인 팝업의 '승인'. trust='auto'면 이후 자동승인으로 격상.
+        d = data or {}
+        exec_id = d.get('exec_id', '')
+        from_peer = d.get('from_peer', '')
+        task = d.get('task', '')
+        if d.get('trust') == 'auto':
+            _proxy(dd, 'POST', 'exec-trust', {'peer_id': from_peer, 'mode': 'auto'})
+        update_lan_exec_status(exec_id, 'approved', '', PROJECT_ID)
+        _start_exec(dd, from_peer, exec_id, task, PROJECT_ID)
+        send_json(handler, {'ok': True})
+        return True
+    if path == '/api/lan/exec/reject':
+        # [Phase3 대상] 승인 거부 — 상태 기록 + 요청자에게 거부 통지(done).
+        d = data or {}
+        exec_id = d.get('exec_id', '')
+        from_peer = d.get('from_peer', '')
+        update_lan_exec_status(exec_id, 'rejected', '', PROJECT_ID)
+        _proxy(dd, 'POST', 'exec-emit', {'peer_id': from_peer, 'exec_id': exec_id,
+                                         'chunk': '[상대가 실행을 거부함]', 'done': True})
+        send_json(handler, {'ok': True})
+        return True
+    if path == '/api/lan/exec/cancel':
+        # 실행 중 프로세스 강제 종료(대상측). 요청자 취소는 UI에서 폴링 중단.
+        exec_id = (data or {}).get('exec_id', '')
+        with _EXEC_LOCK:
+            proc = _EXEC_PROCS.get(exec_id)
+        killed = False
+        if proc and proc.poll() is None:
+            try:
+                proc.kill(); killed = True
+            except Exception:
+                pass
+        if killed:
+            update_lan_exec_status(exec_id, 'error', '[취소됨]', PROJECT_ID)
+        send_json(handler, {'ok': True, 'killed': killed})
         return True
     if path == '/api/lan/auto-share':
         # [WHY] 클로드 자율 판단 발송의 서버측 관문. 입력 {files:[path...], summary, peer_id?}.

@@ -295,6 +295,24 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         """)
         execute_raw("CREATE INDEX IF NOT EXISTS idx_lan_messages ON lan_messages (project_id, from_peer, to_peer, id);")
 
+        # LAN 브리지 Phase 3: 원격 실행 감사로그 — 누가/무엇을/승인여부/결과를 남긴다.
+        # [WHY 감사 필수] exec_trust=auto(자동승인)여도 이 로그는 항상 기록해 "무엇이 언제
+        #   돌았는지" 추적 가능하게. direction: 'out'=내가 요청, 'in'=내가 실행 대상.
+        execute_raw("""
+            CREATE TABLE IF NOT EXISTS lan_exec_log (
+                id SERIAL PRIMARY KEY,
+                exec_id TEXT NOT NULL DEFAULT '',
+                direction TEXT NOT NULL DEFAULT '',
+                peer_id TEXT NOT NULL DEFAULT '',
+                task TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT '',
+                result_summary TEXT NOT NULL DEFAULT '',
+                ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+                project_id TEXT NOT NULL DEFAULT ''
+            );
+        """)
+        execute_raw("CREATE INDEX IF NOT EXISTS idx_lan_exec_log ON lan_exec_log (project_id, exec_id, id);")
+
         # Task 4: NOTIFY 트리거 — 태스크 할당 시 에이전트 자동 깨우기
         execute_raw("""
             CREATE OR REPLACE FUNCTION notify_task_assigned()
