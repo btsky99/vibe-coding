@@ -54,6 +54,9 @@ CHAT_MAX_BYTES = 8 * 1024
 #   출력 청크는 stream-json 라인 누적이라 64KB(대용량 로그는 청크 분할로 흐름).
 EXEC_TASK_MAX_BYTES = 16 * 1024
 EXEC_OUTPUT_MAX_BYTES = 64 * 1024
+# [보안 W2] 요청자측 동시 출력 스트림 수 상한 — 페어링 피어가 매번 다른 임의 exec_id로
+#   출력을 밀어 exec_output 딕셔너리를 무한 증식시키는 메모리 고갈(DoS) 차단.
+MAX_EXEC_STREAMS = 50
 
 # 모듈 전역 — Handler가 참조. 단일 프로세스라 락 불필요(핸들러 스레드는 읽기 위주,
 # pending_code만 로컬 라우트에서 교체되고 이는 순간적).
@@ -344,7 +347,8 @@ class Handler(BaseHTTPRequestHandler):
             buf = STATE['exec_output'].get(exec_id)
             chunks = list(buf) if buf else []
             if buf is not None:
-                buf.clear()
+                # [W2] 소비 후 스트림 키 제거 — 빈 deque 누적 방지(다음 청크가 재생성).
+                STATE['exec_output'].pop(exec_id, None)
             self._json({'chunks': chunks})
         else:
             self._json({'error': 'not found'}, 404)
@@ -579,6 +583,11 @@ class Handler(BaseHTTPRequestHandler):
             return {'ok': False, 'error': '인증 실패'}
         buf = STATE['exec_output'].get(exec_id)
         if buf is None:
+            # [W2 DoS] 스트림 수 상한 — 초과 시 가장 오래된 키 축출(dict 삽입순서=방치순).
+            if len(STATE['exec_output']) >= MAX_EXEC_STREAMS:
+                oldest = next(iter(STATE['exec_output']), None)
+                if oldest is not None:
+                    STATE['exec_output'].pop(oldest, None)
             buf = deque(maxlen=1000)
             STATE['exec_output'][exec_id] = buf
         buf.append({'chunk': chunk, 'done': done,

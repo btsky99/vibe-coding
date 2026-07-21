@@ -32,6 +32,19 @@ _EXEC_PROCS: dict = {}
 _EXEC_LOCK = threading.Lock()
 # [Phase3 Task11] 원격 실행 최대 수명 — 무한 실행/방치 프로세스 차단. 초과 시 강제종료.
 _EXEC_TIMEOUT_SEC = 30 * 60
+# [보안 W4] 수신 후 이 시간 초과한 대기 요청은 drain 시 폐기 — 토글 OFF 구간에 큐잉된
+#   과거 요청이 토글 ON 순간 일괄(특히 auto 무팝업) 실행되는 버스트를 차단.
+_EXEC_STALE_SEC = 120
+
+
+def _exec_ts_age_sec(ts_str: str) -> float:
+    """브리지 수신 ts('%Y-%m-%dT%H:%M:%S', 로컬) → 경과 초. 파싱 실패 시 0(안전측: 최신 취급)."""
+    if not ts_str:
+        return 0.0
+    try:
+        return max(0.0, time.time() - time.mktime(time.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')))
+    except (ValueError, OverflowError):
+        return 0.0
 
 
 def _bridge_port(data_dir: Path) -> int | None:
@@ -208,11 +221,21 @@ def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id
                                          'chunk': f'[오류] {e}', 'done': True})
         return
 
-    cmd = _build_chat_cmd('claude', None, yolo=True, message=task)
+    # [보안 A03] task를 -p 인자로 셸 명령줄에 실으면 Windows list2cmdline이 cmd.exe 메타문자
+    #   (& | > < ^ %)를 이스케이프하지 않아 하위명령이 분리 실행된다(감사로그↔실제셸 불일치).
+    #   프롬프트를 stdin으로 전달해 명령줄엔 고정 토큰만 남긴다 → task 미노출로 인젝션 원천 차단.
+    #   claude print 모드(-p)는 프롬프트 인자가 없으면 stdin에서 읽는다.
+    cmd = _build_chat_cmd('claude', None, yolo=True, message='')
+    cmd.append('-p')
     full: list[str] = []
     try:
-        proc = _proc.popen(cmd, stdin=_sp.DEVNULL, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+        proc = _proc.popen(cmd, stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
                            cwd=_project_root or None, shell=True, encoding=None)
+        try:
+            proc.stdin.write(task.encode('utf-8'))
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
         with _EXEC_LOCK:
             _EXEC_PROCS[exec_id] = proc
         # [Task11] 타임아웃 워치독 — 초과 시 kill. stdout 루프가 break되며 정리로 이어짐.
@@ -275,6 +298,9 @@ def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> 
         drained = _proxy(dd, 'GET', 'exec-pending-drain')
         pending_out = []
         for item in drained.get('pending', []) or []:
+            # [W4] 오래된(토글 OFF 구간 누적) 요청은 폐기 — 저장/승인/실행 어느 것도 안 함.
+            if _exec_ts_age_sec(item.get('ts', '')) > _EXEC_STALE_SEC:
+                continue
             exec_id = item.get('exec_id', '')
             from_peer = item.get('from_peer', '')
             task = item.get('task', '')

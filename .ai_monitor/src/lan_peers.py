@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -71,6 +72,8 @@ class LanPeers:
         self.path = Path(data_dir) / 'lan_peers.json'
         self._data = self._load()
         self._seen_nonces: dict[str, float] = {}   # nonce -> ts (재사용 거부, window 밖 정리)
+        # [보안 W3] 브리지 ThreadingMixIn 멀티스레드 — nonce 정리+검사+소비 원자화용.
+        self._nonce_lock = threading.Lock()
 
     def _load(self) -> dict:
         if self.path.exists():
@@ -175,14 +178,17 @@ class LanPeers:
                 return False
         except ValueError:
             return False
-        # [보안W1] nonce 재사용 거부 — window 밖 항목은 정리(무한 증가 방지).
-        self._seen_nonces = {n: t for n, t in self._seen_nonces.items()
-                             if now - t <= TOKEN_WINDOW_SEC}
-        if nonce in self._seen_nonces:
-            return False
+        # [W3] MAC을 먼저 검증(순수 계산, 무락 안전) — 유효 토큰만 nonce 소비 단계로 진입.
         msg = f'{peer_id}:{nonce}:{ts}:{body_hash}:{filename}'
         expected = hmac.new(key.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, mac):
             return False
-        self._seen_nonces[nonce] = float(now)   # 검증 성공한 nonce만 소비 등록
+        # [보안W1/W3] nonce 재사용 거부 — 정리+검사+소비를 락으로 원자화(멀티스레드 경합에서
+        #   동일 토큰 2벌 동시전송이 둘 다 통과하는 TOCTOU 차단). window 밖 항목은 정리(무한 증가 방지).
+        with self._nonce_lock:
+            self._seen_nonces = {n: t for n, t in self._seen_nonces.items()
+                                 if now - t <= TOKEN_WINDOW_SEC}
+            if nonce in self._seen_nonces:
+                return False
+            self._seen_nonces[nonce] = float(now)   # 검증 성공한 nonce만 소비 등록
         return True
