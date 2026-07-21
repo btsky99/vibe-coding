@@ -78,6 +78,8 @@ STATE: dict = {
     #   exec_output: 요청자측 — exec_id별 수신 출력청크. server가 output-drain으로 꺼냄.
     'exec_inbox': deque(maxlen=100),
     'exec_output': {},   # exec_id -> deque(maxlen=1000)
+    # [Phase3 리뷰C3] 대상측 — 요청자가 보낸 취소 신호 큐. server가 drain해 해당 프로세스를 kill.
+    'exec_cancel_inbox': deque(maxlen=100),
 }
 
 
@@ -276,6 +278,32 @@ def send_exec_output(peer_id: str, exec_id: str, chunk: str, done: bool) -> dict
         return {'ok': False, 'error': str(e)}
 
 
+# ── 원격 실행: 취소 신호 송신 (요청자 → 대상) ────────────────────────────
+def send_exec_cancel(peer_id: str, exec_id: str) -> dict:
+    """요청자가 실행 취소를 대상에게 전달. body_hash=sha256(exec_id)로 서명(재전송/위조 차단).
+
+    [리뷰C3] 취소는 대상 프로세스를 죽여야 실효 — 요청자 로컬 kill로는 대상 claude(yolo)가 계속 돈다.
+    """
+    peers: LanPeers = STATE['peers']
+    disc: LanDiscovery = STATE['disc']
+    if not peers.is_trusted(peer_id):
+        return {'ok': False, 'error': '페어링되지 않은 상대'}
+    target = next((p for p in disc.get_peers() if p['peer_id'] == peer_id), None)
+    if not target:
+        return {'ok': False, 'error': '상대가 오프라인'}
+    body_hash = hashlib.sha256(exec_id.encode('utf-8')).hexdigest()
+    token = peers.make_token(peer_id, body_hash, exec_id)
+    url = f"http://{target['ip']}:{target['http_port']}/lan/exec-cancel-recv"
+    req = Request(url, data=json.dumps({'exec_id': exec_id}).encode(), method='POST', headers={
+        'X-Peer-Id': peers.self_id, 'X-Token': token or '', 'Content-Type': 'application/json',
+    })
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return {'ok': resp.status == 200}
+    except URLError as e:
+        return {'ok': False, 'error': str(e)}
+
+
 # ── HTTP 핸들러 ──────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
 
@@ -350,6 +378,13 @@ class Handler(BaseHTTPRequestHandler):
                 # [W2] 소비 후 스트림 키 제거 — 빈 deque 누적 방지(다음 청크가 재생성).
                 STATE['exec_output'].pop(exec_id, None)
             self._json({'chunks': chunks})
+        elif path == '/lan/exec-cancel-drain':
+            # [리뷰C3] 대상측 server가 취소 신호를 꺼내 해당 실행 프로세스를 kill. 큐 비워짐.
+            if not self._is_local():
+                self._json({'error': 'local only'}, 403); return
+            ids = [it.get('exec_id', '') for it in STATE['exec_cancel_inbox']]
+            STATE['exec_cancel_inbox'].clear()
+            self._json({'exec_ids': ids})
         else:
             self._json({'error': 'not found'}, 404)
 
@@ -360,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ① 로컬 전용 라우트
         if path in ('/lan/pair-begin', '/lan/pair-connect', '/lan/send', '/lan/chat-send',
-                    '/lan/exec-send', '/lan/exec-emit', '/lan/exec-trust'):
+                    '/lan/exec-send', '/lan/exec-emit', '/lan/exec-trust', '/lan/exec-cancel'):
             if not self._is_local():
                 self._json({'error': 'local only'}, 403); return
             raw = self._body(MAX_CTRL_BYTES)
@@ -392,6 +427,9 @@ class Handler(BaseHTTPRequestHandler):
                 # [Phase3] 승인 정책 변경(ask|auto). 자동승인 격상/회수.
                 ok = peers.set_exec_trust(body.get('peer_id', ''), body.get('mode', 'ask'))
                 self._json({'ok': ok})
+            elif path == '/lan/exec-cancel':
+                # [리뷰C3] 요청자측 트리거 — 대상에게 취소 신호 전달.
+                self._json(send_exec_cancel(body.get('peer_id', ''), body.get('exec_id', '')))
             return
 
         # ② 인증 필요 라우트 (외부 피어)
@@ -409,6 +447,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._exec_recv())
         elif path == '/lan/exec-output':
             self._json(self._exec_output())
+        elif path == '/lan/exec-cancel-recv':
+            self._json(self._exec_cancel_recv())
         else:
             self._json({'error': 'not found'}, 404)
 
@@ -592,6 +632,29 @@ class Handler(BaseHTTPRequestHandler):
             STATE['exec_output'][exec_id] = buf
         buf.append({'chunk': chunk, 'done': done,
                     'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+        return {'ok': True}
+
+    # ── 원격 실행: 취소 신호 수신 (대상측) ───────────────────────────
+    def _exec_cancel_recv(self) -> dict:
+        """취소 신호 수신 — 토큰(body_hash=sha256(exec_id)) 검증 후 취소 큐 적재.
+        실제 kill은 대상 server(lan_api)가 exec-cancel-drain으로 꺼내 수행(브리지=릴레이 불변식)."""
+        peers: LanPeers = STATE['peers']
+        peer_id = self.headers.get('X-Peer-Id', '')
+        token = self.headers.get('X-Token', '')
+        raw = self._body(MAX_CTRL_BYTES)
+        if raw is None:
+            return {'ok': False, 'error': '본문 크기 초과'}
+        try:
+            exec_id = str(json.loads(raw or b'{}').get('exec_id', ''))
+        except json.JSONDecodeError:
+            return {'ok': False, 'error': 'JSON 파싱 실패'}
+        if not exec_id:
+            return {'ok': False, 'error': 'exec_id 필요'}
+        body_hash = hashlib.sha256(exec_id.encode('utf-8')).hexdigest()
+        if not peers.verify_token(peer_id, token, body_hash, exec_id):
+            _seclog(f'exec-cancel 인증 실패 peer={peer_id[:8]} from {self.client_address[0]}')
+            return {'ok': False, 'error': '인증 실패'}
+        STATE['exec_cancel_inbox'].append({'exec_id': exec_id})
         return {'ok': True}
 
 

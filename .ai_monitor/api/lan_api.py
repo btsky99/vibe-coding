@@ -221,21 +221,17 @@ def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id
                                          'chunk': f'[오류] {e}', 'done': True})
         return
 
-    # [보안 A03] task를 -p 인자로 셸 명령줄에 실으면 Windows list2cmdline이 cmd.exe 메타문자
-    #   (& | > < ^ %)를 이스케이프하지 않아 하위명령이 분리 실행된다(감사로그↔실제셸 불일치).
-    #   프롬프트를 stdin으로 전달해 명령줄엔 고정 토큰만 남긴다 → task 미노출로 인젝션 원천 차단.
-    #   claude print 모드(-p)는 프롬프트 인자가 없으면 stdin에서 읽는다.
-    cmd = _build_chat_cmd('claude', None, yolo=True, message='')
-    cmd.append('-p')
+    # [리뷰 C1] task를 -p 인자로 전달 + stdin=DEVNULL — handle_chat의 유일 검증된 claude 실행 패턴.
+    #   [과거사고] claude에 stdin=PIPE로 프롬프트를 주면 'stdin is not a terminal' 실패 이력이 있어
+    #   -p 인자 전달만이 이 코드베이스에서 검증됐다(claude-api 확인). 셸 메타문자 잔여 위험(보안 W1)은
+    #   승인 팝업(태스크 전문 표시)+yolo 전제상 handle_chat과 동일 수준으로 수용 — 임의 실행은 이미 승인됨.
+    cmd = _build_chat_cmd('claude', None, yolo=True, message=task)
     full: list[str] = []
+    proc = None
+    watchdog = None
     try:
-        proc = _proc.popen(cmd, stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+        proc = _proc.popen(cmd, stdin=_sp.DEVNULL, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
                            cwd=_project_root or None, shell=True, encoding=None)
-        try:
-            proc.stdin.write(task.encode('utf-8'))
-            proc.stdin.close()
-        except (BrokenPipeError, OSError):
-            pass
         with _EXEC_LOCK:
             _EXEC_PROCS[exec_id] = proc
         # [Task11] 타임아웃 워치독 — 초과 시 kill. stdout 루프가 break되며 정리로 이어짐.
@@ -251,16 +247,32 @@ def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id
                 _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
                                                  'chunk': text, 'done': False})
         proc.wait(timeout=5)
-        watchdog.cancel()
-        summary = ''.join(full)[-2000:]
-        update_lan_exec_status(exec_id, 'done', summary, project_id)
-        _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
-                                         'chunk': '', 'done': True})
+        # [리뷰 C2] 종료코드 확인 — claude가 인자 오류 등으로 즉시 죽어 출력이 비어도 'done'으로
+        #   오기록되던 무음 실패 차단. stderr=DEVNULL(데드락 회피)이라 코드로만 성패를 판정한다.
+        rc = proc.returncode
+        if rc not in (0, None):
+            note = f'[실행 실패: claude 종료코드 {rc}' + ('' if full else ' — 출력 없음(실행엔진/인자 확인)') + ']'
+            update_lan_exec_status(exec_id, 'error', (''.join(full)[-2000:] or note), project_id)
+            _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                             'chunk': note, 'done': True})
+        else:
+            summary = ''.join(full)[-2000:]
+            update_lan_exec_status(exec_id, 'done', summary, project_id)
+            _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                             'chunk': '', 'done': True})
     except Exception as e:
         update_lan_exec_status(exec_id, 'error', str(e)[:2000], project_id)
         _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
                                          'chunk': f'[실행 오류] {e}', 'done': True})
     finally:
+        # [리뷰 W4] 예외/타임아웃/취소 어느 경로든 자식 프로세스를 반드시 정리(30분 워치독에만 의존 금지).
+        if watchdog is not None:
+            watchdog.cancel()
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         with _EXEC_LOCK:
             _EXEC_PROCS.pop(exec_id, None)
 
@@ -290,6 +302,18 @@ def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> 
         send_json(handler, {'self_id': self_id, 'messages': rows})
         return True
     if path == '/api/lan/exec/pending':
+        # [리뷰C3] 취소 신호 먼저 처리 — 토글 상태와 무관하게 실행 중 프로세스를 죽인다
+        #   (실행 중이면 이미 토글 ON이었던 상태라 여기서 drain해야 취소가 실효).
+        cancels = _proxy(dd, 'GET', 'exec-cancel-drain')
+        for cxid in cancels.get('exec_ids', []) or []:
+            with _EXEC_LOCK:
+                p = _EXEC_PROCS.get(cxid)
+            if p and p.poll() is None:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+            update_lan_exec_status(cxid, 'error', '[요청자 취소]', PROJECT_ID)
         # [Phase3 게이트①] 마스터 토글 OFF면 대기건을 절대 회수하지 않는다(우회 불가한 관문).
         #   OFF인 PC는 상대가 태스크를 보내도 브리지 큐에 쌓일 뿐 승인 UI에 노출 안 됨.
         if not _config(dd).get('lan_remote_exec_enabled', False):
@@ -381,8 +405,13 @@ def handle_post(handler, path: str, data: dict, *, DATA_DIR, PROJECT_ID='') -> b
         send_json(handler, {'ok': True})
         return True
     if path == '/api/lan/exec/cancel':
-        # 실행 중 프로세스 강제 종료(대상측). 요청자 취소는 UI에서 폴링 중단.
+        # [리뷰C3] 요청자측: 대상에게 취소 릴레이 → 대상 server가 drain해 claude(yolo)를 실제 kill.
+        #   로컬 kill만으로는 대상 프로세스가 계속 도는 문제를 해결. peer_id는 프론트가 전달.
         exec_id = (data or {}).get('exec_id', '')
+        peer_id = (data or {}).get('peer_id', '')
+        if peer_id:
+            _proxy(dd, 'POST', 'exec-cancel', {'peer_id': peer_id, 'exec_id': exec_id})
+        # 내 PC가 실행 대상이기도 한 경우(로컬 실행)엔 즉시 kill로 보강.
         with _EXEC_LOCK:
             proc = _EXEC_PROCS.get(exec_id)
         killed = False

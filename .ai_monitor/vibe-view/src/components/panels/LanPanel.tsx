@@ -43,6 +43,13 @@ export default function LanPanel() {
   const [execOut, setExecOut] = useState('');               // 수신 출력 누적
   const [execDone, setExecDone] = useState(false);          // 실행 완료 여부
   const execIdRef = useRef('');                             // 폴링 클로저용
+  const pendingRef = useRef<PendingExec[]>([]);             // [리뷰W7] 병합/만료 계산 소스(업데이터 순수화)
+
+  // [리뷰W7] 대기 목록 갱신을 ref+state 동시 반영 — 업데이터에서 부수효과 분리.
+  const setPendingSynced = useCallback((next: PendingExec[]) => {
+    pendingRef.current = next;
+    setPending(next);
+  }, []);
 
   const refresh = useCallback(() => {
     fetch(`${API_BASE}/api/lan/status`).then(r => r.json()).then(setSt).catch(() => {});
@@ -135,19 +142,20 @@ export default function LanPanel() {
       fetch(`${API_BASE}/api/lan/exec/pending`).then(r => r.json())
         .then((d: { enabled?: boolean; pending?: PendingExec[] }) => {
           setExecEnabled(!!d.enabled);
-          if (!d.enabled) { setPending([]); return; }
+          if (!d.enabled) { setPendingSynced([]); return; }
+          // [리뷰W7] 병합/만료 계산을 ref 기반으로 업데이터 밖에서 수행 → setState는 순수.
           const now = Date.now();
-          setPending(prev => {
-            const seen = new Set(prev.map(p => p.exec_id));
-            const fresh = (d.pending || []).filter(p => !seen.has(p.exec_id))
-              .map(p => ({ ...p, _seenAt: now }));
-            const merged = [...prev, ...fresh];
-            // TTL 초과분은 자동 거부(비동기 통지) 후 목록에서 제외.
-            const expired = merged.filter(p => now - (p._seenAt || now) > PENDING_TTL_MS);
-            expired.forEach(p => { void rejectExec(p); });
+          const seen = new Set(pendingRef.current.map(p => p.exec_id));
+          const fresh = (d.pending || []).filter(p => !seen.has(p.exec_id))
+            .map(p => ({ ...p, _seenAt: now }));
+          let merged = [...pendingRef.current, ...fresh];
+          const expired = merged.filter(p => now - (p._seenAt || now) > PENDING_TTL_MS);
+          if (expired.length) {
             const expIds = new Set(expired.map(p => p.exec_id));
-            return merged.filter(p => !expIds.has(p.exec_id));
-          });
+            merged = merged.filter(p => !expIds.has(p.exec_id));
+            expired.forEach(p => { void rejectExec(p); });   // 자리비움 자동 거부
+          }
+          setPendingSynced(merged);
         }).catch(() => {});
     };
     poll();
@@ -192,7 +200,7 @@ export default function LanPanel() {
   };
 
   const approveExec = async (item: PendingExec) => {
-    setPending(prev => prev.filter(p => p.exec_id !== item.exec_id));
+    setPendingSynced(pendingRef.current.filter(p => p.exec_id !== item.exec_id));
     await fetch(`${API_BASE}/api/lan/exec/approve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ exec_id: item.exec_id, from_peer: item.from_peer,
@@ -202,7 +210,7 @@ export default function LanPanel() {
   };
 
   const rejectExec = async (item: PendingExec) => {
-    setPending(prev => prev.filter(p => p.exec_id !== item.exec_id));
+    setPendingSynced(pendingRef.current.filter(p => p.exec_id !== item.exec_id));
     await fetch(`${API_BASE}/api/lan/exec/reject`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ exec_id: item.exec_id, from_peer: item.from_peer }),
@@ -211,9 +219,10 @@ export default function LanPanel() {
 
   const cancelExec = async () => {
     if (!execId) return;
+    // [리뷰C3] peer_id를 함께 보내 대상 PC의 실행 프로세스를 실제로 중단(로컬 UI만 멈추지 않게).
     await fetch(`${API_BASE}/api/lan/exec/cancel`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ exec_id: execId }),
+      body: JSON.stringify({ exec_id: execId, peer_id: sendPeer }),
     }).catch(() => {});
     setExecDone(true);
   };
@@ -404,9 +413,10 @@ export default function LanPanel() {
             placeholder="예: server.py 띄워서 부팅 에러 있으면 알려줘"
             rows={2}
             className="w-full bg-black/40 rounded px-2 py-1 text-[12px] outline-none resize-y" />
-          <button onClick={sendExec} disabled={!execTask.trim()}
+          {/* [리뷰W6] 진행 중(execId 있고 미완료)엔 재전송 차단 — 이전 exec를 잊고 orphan 스트림 남기는 것 방지 */}
+          <button onClick={sendExec} disabled={!execTask.trim() || (!!execId && !execDone)}
             className="w-full py-1 bg-purple-700/70 hover:bg-purple-700 disabled:opacity-40 rounded text-[12px] flex items-center justify-center gap-1">
-            <Play className="w-3.5 h-3.5" /> 실행 요청
+            <Play className="w-3.5 h-3.5" /> {execId && !execDone ? '실행 중…' : '실행 요청'}
           </button>
           {execId && (
             <div className="space-y-1">
