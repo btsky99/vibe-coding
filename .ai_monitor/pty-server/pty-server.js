@@ -48,6 +48,25 @@ function agentLine(cmd) {
   return IS_WIN ? `chcp 65001 >nul & ${cmd}\r\n` : `${cmd}\n`;
 }
 
+// [세션 격리 2026-07-22] 스폰 터미널 env에서 부모 Claude Code 세션 마커 제거.
+//   [WHY] 앱을 Claude Code 세션 안에서 실행하면(맥 개발 흐름: `python server.py`를 Claude Code
+//   터미널에서 띄움) CLAUDE_CODE_CHILD_SESSION=1 등이 server.py→pty-server→터미널 claude까지
+//   상속된다. 그러면 터미널의 claude가 '자식 세션'으로 판정해 "Transcript saving is off"로
+//   대화 기록을 저장하지 않는다. 각 슬롯은 독립 최상위 세션이어야 하므로 마커를 지워 fresh
+//   세션으로 띄운다. [제약] ANTHROPIC_*(모델/키)와 CLAUDE_CONFIG_DIR은 보존 — 패턴에 안 걸림.
+//   Windows 정상 실행(바로가기)에선 이 변수들이 애초에 없어 no-op → 회귀 없음.
+function cleanClaudeSessionEnv() {
+  const e = Object.assign({}, process.env);
+  for (const k of Object.keys(e)) {
+    if (/^CLAUDE_CODE_/.test(k) || k === 'CLAUDECODE' || k === 'CLAUDE_PID'
+        || k === 'CLAUDE_EFFORT' || k === 'CLAUDE_AGENT_SDK_VERSION'
+        || k === 'CLAUDE_PREVIEW_CLASSIFIER_FLOOR') {
+      delete e[k];
+    }
+  }
+  return e;
+}
+
 // [맥/리눅스 포팅 2026-07-22] node-pty prebuild의 spawn-helper 실행권한 자가치유.
 //   [WHY] node-pty는 fork 시 prebuilds/<platform>-<arch>/spawn-helper 를 posix_spawnp 한다.
 //   이 리포의 node_modules는 +x가 벗겨진 채(0644) 배포돼(npm 추출/복사 과정) 실행권한이 없으면
@@ -552,7 +571,7 @@ function handlePtyConnectionLegacy(ws, req) {
     // ── 환경변수 구성 ─────────────────────────────────────────────────
     // Python 서버와 동일한 환경변수를 PTY 프로세스에 주입합니다.
     // TERMINAL_ID는 외부 약속(slot 번호) 유지 — wrapper/docs가 T1, T2 형식 기대.
-    const env = Object.assign({}, process.env, {
+    const env = Object.assign(cleanClaudeSessionEnv(), {
       PYTHONIOENCODING: 'utf-8',
       LANG: 'ko_KR.UTF-8',
       TERM: 'xterm-256color',
@@ -897,7 +916,7 @@ function handlePersistentPtyConnection(ws, req) {
       return;
     }
 
-    const env = Object.assign({}, process.env, {
+    const env = Object.assign(cleanClaudeSessionEnv(), {
       PYTHONIOENCODING: 'utf-8',
       LANG: 'ko_KR.UTF-8',
       TERM: 'xterm-256color',
@@ -1065,7 +1084,7 @@ function dispatchToAgent(instruction, ptyProcess) {
   const scriptsDir = path.resolve(__dirname, '..', '..', 'scripts');
   const cliAgentPy = path.join(scriptsDir, 'cli_agent.py');
 
-  const childEnv = Object.assign({}, process.env, {
+  const childEnv = Object.assign(cleanClaudeSessionEnv(), {
     CLI_AGENT_JSON_STDOUT: '1'
   });
 
@@ -1432,7 +1451,7 @@ app.post('/api/pty/office/spawn', (req, res) => {
   const slotId = `O${officeId}`;
   const sessionId = sessionKey(projectId, slotId);
 
-  const env = Object.assign({}, process.env, {
+  const env = Object.assign(cleanClaudeSessionEnv(), {
     PYTHONIOENCODING: 'utf-8',
     LANG: 'ko_KR.UTF-8',
     TERM: 'xterm-256color',
