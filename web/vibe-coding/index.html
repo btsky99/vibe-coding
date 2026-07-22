@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<!--
+  FILE: web/vibe-coding/index.html
+  DESCRIPTION: 제품 페이지 — 바이브 코딩(AI 멀티 에이전트 개발 대시보드). 소개·기능·다운로드.
+    다운로드는 로그인 게이트(Site.gateDownload). 최신 릴리즈는 GitHub API로 자동 조회.
+    공용: ../style.css, ../auth.js, ../site.js (SITE_BASE='../').
+  REVISION HISTORY:
+    - 2026-07-22 Claude: 허브 하위 제품 페이지로 분리(기존 루트 랜딩 이관).
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>바이브 코딩 — AI 멀티 에이전트 개발 대시보드</title>
+<link rel="stylesheet" href="../style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="../auth.js"></script>
+<script>window.SITE_BASE='../';</script>
+<script src="../site.js" defer></script>
+</head>
+<body>
+  <nav>
+    <a class="brand" href="../">🌊 바이브 코딩</a>
+    <div class="nav-r" id="navR"></div>
+  </nav>
+
+  <header class="hero">
+    <div class="logo">🌊</div>
+    <h1>바이브 코딩</h1>
+    <div class="tag">AI 멀티 에이전트 하이브 마인드 개발 대시보드</div>
+    <p class="lead">여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막습니다.
+      PostgreSQL 기반 하이브 마인드로 에이전트들이 실시간으로 지식을 공유하는 Windows 데스크톱 앱.</p>
+    <div class="cta">
+      <button class="btn dl" id="winBtn" onclick="dl()">
+        <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small></button>
+      <a class="btn line" href="#features">기능 보기 ↓</a>
+    </div>
+    <div class="verbadge" id="ver">버전 확인 중…</div>
+  </header>
+
+  <section class="sec" id="features">
+    <h2>무엇을 할 수 있나요</h2>
+    <p class="sub">혼자 코딩하지 마세요. 에이전트 팀과 함께.</p>
+    <div class="grid">
+      <div class="feat"><div class="ic">🤝</div><h3>멀티 에이전트 협업</h3>
+        <p>Claude·여러 에이전트가 태스크를 나눠 맡고 서로 소통하며 동시에 개발합니다.</p></div>
+      <div class="feat"><div class="ic">🩹</div><h3>자가 치유</h3>
+        <p>같은 오류가 반복되면 원인을 학습·기록해, 다음엔 삽질 없이 바로 넘어갑니다.</p></div>
+      <div class="feat"><div class="ic">🧠</div><h3>하이브 마인드</h3>
+        <p>PostgreSQL 기반 공유 기억으로 에이전트들이 작업 맥락을 실시간으로 공유합니다.</p></div>
+      <div class="feat"><div class="ic">🗂️</div><h3>지식 관리</h3>
+        <p>제텔카스텐 노트로 세션이 바뀌어도 프로젝트 지식이 축적·연결됩니다.</p></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2>지금 시작하세요</h2>
+    <p>Windows 10/11 · 설치 후 자동 업데이트 · 🍎 macOS 준비 중</p>
+    <div class="cta">
+      <button class="btn dl" onclick="dl()"><span>🪟 다운로드</span><small id="winSize2">최신 버전</small></button>
+    </div>
+  </section>
+
+  <footer>
+    <div>바이브 코딩 · <a href="https://github.com/btsky99/vibe-coding" target="_blank" rel="noopener">GitHub</a></div>
+    <div style="margin-top:6px"><a href="../">← btsky 허브</a></div>
+  </footer>
+
+<script>
+const REPO='btsky99/vibe-coding';
+let dlUrl='https://github.com/btsky99/vibe-coding/releases/latest';
+const fmt=b=>{ if(!b) return ''; const mb=b/1048576; return mb>=1?mb.toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'; };
+function dl(){ Site.gateDownload(dlUrl); }   // 로그인해야 다운로드
+fetch(`https://api.github.com/repos/${REPO}/releases/latest`,{headers:{'Accept':'application/vnd.github+json'}})
+  .then(r=>{ if(!r.ok) throw 0; return r.json(); })
+  .then(rel=>{
+    document.getElementById('ver').innerHTML=`현재 최신 버전 <b>${rel.tag_name||''}</b>`;
+    const a=rel.assets||[], win=a.find(x=>/setup.*\.exe$/i.test(x.name))||a.find(x=>/\.exe$/i.test(x.name));
+    if(win){ dlUrl=win.browser_download_url; const sz=fmt(win.size);
+      document.getElementById('winSize').textContent=sz; document.getElementById('winSize2').textContent=sz+' · 설치'; }
+  })
+  .catch(()=>{ document.getElementById('ver').textContent='버전 정보를 불러오지 못했어요'; });
+window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));
+</script>
+</body>
+</html>

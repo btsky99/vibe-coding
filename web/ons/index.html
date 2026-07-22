@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!--
+  FILE: web/ons/index.html
+  DESCRIPTION: 제품 페이지 — OnS(출장·장착 스케줄 관리 플랫폼). 소개·기능 + 웹앱 링크.
+    OnS는 배포된 웹앱(Vercel)이라 다운로드 대신 '웹 앱 열기'로 연결.
+    공용: ../style.css, ../auth.js, ../site.js (SITE_BASE='../').
+  REVISION HISTORY:
+    - 2026-07-22 Claude: 최초 생성 — btsky99/ons(Next.js+Firebase) 기준.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OnS — 출장·장착 스케줄 관리 플랫폼</title>
+<link rel="stylesheet" href="../style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="../auth.js"></script>
+<script>window.SITE_BASE='../';</script>
+<script src="../site.js" defer></script>
+</head>
+<body>
+  <nav>
+    <a class="brand" href="../">📅 OnS</a>
+    <div class="nav-r" id="navR"></div>
+  </nav>
+
+  <header class="hero">
+    <div class="logo">📅</div>
+    <h1>OnS</h1>
+    <div class="tag">출장·장착 스케줄 관리 플랫폼</div>
+    <p class="lead">출장·장착 업무를 자동화하는 엔터프라이즈 스케줄 관리 시스템.
+      오프라인 우선 설계로 현장에 인터넷이 없어도 끊김 없이, 경로 최적화로 이동 시간까지 줄여줍니다.</p>
+    <div class="cta">
+      <a class="btn dl" href="https://ons-swart.vercel.app" target="_blank" rel="noopener">
+        <span>🌐 웹 앱 열기</span><small>ons-swart.vercel.app</small></a>
+      <a class="btn line" href="#features">기능 보기 ↓</a>
+    </div>
+    <div class="verbadge">✅ 배포중 · 웹 · 모바일(설치형)</div>
+  </header>
+
+  <section class="sec" id="features">
+    <h2>핵심 기능</h2>
+    <p class="sub">현장 업무에 최적화된 스케줄러.</p>
+    <div class="grid">
+      <div class="feat"><div class="ic">📶</div><h3>오프라인 우선</h3>
+        <p>Firebase + IndexedDB 하이브리드로 인터넷이 끊겨도 예약·일정 관리가 그대로 동작.</p></div>
+      <div class="feat"><div class="ic">🗺️</div><h3>경로 최적화</h3>
+        <p>방문 순서·이동 시간 매트릭스를 계산해 하루 동선을 효율적으로 배치.</p></div>
+      <div class="feat"><div class="ic">🗓️</div><h3>예약·일정 관리</h3>
+        <p>출장·장착 예약을 등록·배정하고 진행 상태를 한눈에 추적.</p></div>
+      <div class="feat"><div class="ic">💾</div><h3>백업·복원</h3>
+        <p>데이터 백업/복원과 중복 데이터 관리로 안전하게 운영.</p></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2>바로 사용해보세요</h2>
+    <p>설치 없이 브라우저에서 · 모바일 앱(Capacitor)도 지원</p>
+    <div class="cta">
+      <a class="btn dl" href="https://ons-swart.vercel.app" target="_blank" rel="noopener"><span>🌐 웹 앱 열기</span></a>
+    </div>
+  </section>
+
+  <footer>
+    <div>OnS · <a href="https://github.com/btsky99/ons" target="_blank" rel="noopener">GitHub</a> · Next.js + Firebase</div>
+    <div style="margin-top:6px"><a href="../">← btsky 허브</a></div>
+  </footer>
+
+<script>window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));</script>
+</body>
+</html>

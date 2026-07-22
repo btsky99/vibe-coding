@@ -1,0 +1,110 @@
+/*
+  FILE: web/style.css
+  DESCRIPTION: btsky.pe.kr 공용 디자인 시스템 — 허브/제품 페이지/포털 공통 토큰·컴포넌트.
+    라이트/다크 테마, 내비, 버튼, 카드, 로그인 모달 스타일을 한 곳에 모아 중복 제거.
+  REVISION HISTORY:
+    - 2026-07-22 Claude: 멀티 프로덕트 허브 개편 — 페이지별 반복 CSS를 공용화.
+*/
+:root{
+  --bg:#0b0d10; --card:#14171c; --card2:#1a1e24; --line:#232830; --fg:#e6e9ee;
+  --muted:#8b93a1; --accent:#3ba55d; --accent2:#2d7d46; --amber:#e0a83b; --red:#e0574b;
+  --blue:#4c8bf5; --purple:#a06bf0;
+  --nav:rgba(11,13,16,.8); --shadow:0 8px 32px rgba(0,0,0,.4);
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#f4f6f9; --card:#ffffff; --card2:#f7f9fb; --line:#e6eaef; --fg:#1a1d22;
+         --muted:#5a6472; --nav:rgba(255,255,255,.85); --shadow:0 8px 32px rgba(0,0,0,.10); }
+}
+*{ box-sizing:border-box; margin:0; padding:0; }
+html{ scroll-behavior:smooth; }
+body{ background:var(--bg); color:var(--fg); min-height:100vh;
+  font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif; line-height:1.6; }
+a{ color:inherit; text-decoration:none; }
+
+/* ── 내비 ── */
+nav{ position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
+  padding:14px 6vw; background:var(--nav); backdrop-filter:blur(12px); border-bottom:1px solid var(--line); }
+.brand{ font-weight:800; font-size:18px; display:flex; align-items:center; gap:8px; letter-spacing:-.02em; }
+.nav-r{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.nlink{ padding:8px 16px; border-radius:10px; font-size:14px; font-weight:600; transition:all .12s;
+  cursor:pointer; border:none; background:none; font-family:inherit; color:var(--muted); }
+.nlink:hover{ color:var(--fg); background:var(--card2); }
+.nlink.solid{ color:#fff; background:linear-gradient(180deg,var(--accent),var(--accent2));
+  box-shadow:0 4px 14px rgba(59,165,93,.3); }
+.nlink.solid:hover{ transform:translateY(-1px); background:linear-gradient(180deg,var(--accent),var(--accent2)); }
+
+/* ── 히어로 ── */
+.hero{ text-align:center; padding:72px 6vw 52px;
+  background:radial-gradient(circle at 50% -10%, rgba(59,165,93,.14), transparent 55%); }
+.hero .logo{ font-size:60px; line-height:1; margin-bottom:16px; }
+.hero h1{ font-size:clamp(30px,5vw,50px); font-weight:900; letter-spacing:-.03em; }
+.hero .tag{ color:var(--accent); font-weight:700; margin-top:8px; font-size:clamp(15px,2.2vw,19px); }
+.hero p.lead{ color:var(--muted); max-width:620px; margin:18px auto 0; font-size:16px; }
+
+/* ── 버튼 ── */
+.cta{ display:flex; gap:14px; justify-content:center; align-items:center; margin-top:30px; flex-wrap:wrap; }
+.btn{ display:inline-flex; align-items:center; gap:8px; padding:15px 26px; border-radius:14px; font-weight:700;
+  font-size:16px; transition:transform .12s, box-shadow .12s; cursor:pointer; border:none; font-family:inherit; }
+.btn.dl{ color:#fff; background:linear-gradient(180deg,var(--accent),var(--accent2)); box-shadow:0 6px 20px rgba(59,165,93,.32); }
+.btn.dl:hover{ transform:translateY(-2px); box-shadow:0 10px 28px rgba(59,165,93,.42); }
+.btn.dl small{ font-weight:400; font-size:12px; opacity:.85; }
+.btn.line{ border:1px solid var(--line); color:var(--fg); background:var(--card); }
+.btn.line:hover{ border-color:var(--muted); }
+.verbadge{ display:inline-flex; align-items:center; gap:7px; margin-top:18px; font-size:13px; color:var(--muted);
+  background:var(--card); border:1px solid var(--line); padding:5px 13px; border-radius:999px; }
+.verbadge b{ color:var(--accent); }
+
+/* ── 섹션/그리드/카드 ── */
+.sec{ max-width:1040px; margin:0 auto; padding:20px 6vw 44px; }
+.sec h2{ text-align:center; font-size:26px; font-weight:800; letter-spacing:-.02em; margin-bottom:6px; }
+.sec .sub{ text-align:center; color:var(--muted); margin-bottom:34px; }
+.grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; }
+.card-lg{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:26px; transition:transform .14s, border-color .14s; display:flex; flex-direction:column; }
+.card-lg:hover{ transform:translateY(-3px); border-color:var(--accent); }
+.card-lg .ic{ font-size:38px; }
+.card-lg h3{ font-size:19px; font-weight:800; margin:14px 0 6px; }
+.card-lg p{ color:var(--muted); font-size:14px; flex:1; }
+.card-lg .go{ margin-top:16px; font-weight:700; color:var(--accent); font-size:14px; }
+.chip{ display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; margin-top:2px; }
+.chip.ready{ background:rgba(59,165,93,.15); color:var(--accent); }
+.chip.soon{ background:rgba(224,168,59,.15); color:var(--amber); }
+.feat{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; }
+.feat .ic{ font-size:30px; }
+.feat h3{ font-size:16px; font-weight:800; margin:12px 0 6px; }
+.feat p{ color:var(--muted); font-size:14px; }
+
+/* ── 하단 배너/푸터 ── */
+.band{ max-width:900px; margin:20px auto 56px; padding:38px 6vw; text-align:center;
+  background:linear-gradient(135deg, rgba(59,165,93,.12), rgba(59,165,93,.04));
+  border:1px solid rgba(59,165,93,.25); border-radius:22px; }
+.band h2{ font-size:23px; font-weight:800; }
+.band p{ color:var(--muted); margin:8px 0 20px; }
+.note{ max-width:900px; margin:0 auto 40px; padding:14px 18px; border:1px dashed var(--amber); border-radius:12px;
+  color:var(--muted); font-size:13px; background:rgba(224,168,59,.06); }
+.note b{ color:var(--amber); }
+footer{ border-top:1px solid var(--line); padding:26px 6vw; text-align:center; color:var(--muted); font-size:13px; }
+footer a{ color:var(--accent); }
+
+/* ── 로그인 모달 (site.js가 주입) ── */
+.overlay{ display:none; position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55);
+  align-items:center; justify-content:center; padding:20px; backdrop-filter:blur(3px); }
+.overlay.open{ display:flex; }
+.modal{ background:var(--card); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow);
+  padding:34px 32px; max-width:380px; width:100%; position:relative; }
+.modal .x{ position:absolute; top:14px; right:16px; background:none; border:none; color:var(--muted);
+  font-size:22px; cursor:pointer; line-height:1; }
+.modal .x:hover{ color:var(--fg); }
+.modal .mlogo{ font-size:38px; text-align:center; }
+.modal h2{ text-align:center; font-size:20px; font-weight:800; margin-top:6px; }
+.modal .msub{ text-align:center; color:var(--muted); font-size:13px; margin:4px 0 20px; }
+.modal label{ display:block; font-size:12px; color:var(--muted); margin:12px 0 6px; font-weight:600; }
+.modal input{ width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line);
+  background:var(--card2); color:var(--fg); font-size:14px; font-family:inherit; }
+.modal input:focus{ outline:none; border-color:var(--accent); }
+.modal .go-btn{ width:100%; margin-top:18px; padding:13px; border:none; border-radius:11px; color:#fff; cursor:pointer;
+  background:linear-gradient(180deg,var(--accent),var(--accent2)); font-size:15px; font-weight:700; font-family:inherit; }
+.merr{ color:var(--red); font-size:12px; margin-top:10px; text-align:center; min-height:15px; }
+.mdiv{ display:flex; align-items:center; gap:12px; margin:18px 0 16px; color:var(--muted); font-size:12px; }
+.mdiv::before,.mdiv::after{ content:''; flex:1; height:1px; background:var(--line); }
+#mgwrap{ display:flex; justify-content:center; min-height:44px; }
+#mgnote{ margin-top:8px; font-size:11px; color:var(--amber); text-align:center; line-height:1.5; }

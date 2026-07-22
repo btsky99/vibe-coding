@@ -1,245 +1,74 @@
 <!DOCTYPE html>
 <!--
   FILE: web/index.html
-  DESCRIPTION: btsky.pe.kr 메인 랜딩 (바이브 코딩 소개 + 다운로드 + 로그인/회원가입).
-    로그인은 별도 페이지가 아니라 팝업(모달) — [로그인]/[회원가입] 클릭 시 오버레이로 뜬다.
-    로그인 성공 시 세션 저장 후 ./portal/ (대시보드)로 이동. 인증 로직은 공용 auth.js.
+  DESCRIPTION: btsky.pe.kr 허브(메인) — 여러 제품(바이브 코딩/OnS/크립토 트레이더)으로
+    가는 관문. 제품 카드 그리드 + 역할별 로그인 내비. 각 제품은 하위 페이지로 분리.
+    공용: style.css(디자인), auth.js(인증), site.js(내비+로그인 모달).
   REVISION HISTORY:
-    - 2026-07-22 Claude: 로그인 모달화 + 데모계정 박스 제거. 인증 로직 auth.js로 이관.
+    - 2026-07-22 Claude: 단일 랜딩 → 멀티 프로덕트 허브로 개편.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>바이브 코딩 — AI 멀티 에이전트 개발 대시보드</title>
+<title>btsky — 제품 허브</title>
+<link rel="stylesheet" href="./style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
-<style>
-  :root{
-    --bg:#0b0d10; --card:#14171c; --card2:#1a1e24; --line:#232830; --fg:#e6e9ee;
-    --muted:#8b93a1; --accent:#3ba55d; --accent2:#2d7d46; --amber:#e0a83b; --red:#e0574b;
-    --nav:rgba(11,13,16,.8); --shadow:0 8px 32px rgba(0,0,0,.4);
-  }
-  @media (prefers-color-scheme: light){
-    :root{ --bg:#f4f6f9; --card:#ffffff; --card2:#f7f9fb; --line:#e6eaef; --fg:#1a1d22;
-           --muted:#5a6472; --nav:rgba(255,255,255,.85); --shadow:0 8px 32px rgba(0,0,0,.12); }
-  }
-  *{ box-sizing:border-box; margin:0; padding:0; }
-  html{ scroll-behavior:smooth; }
-  body{ background:var(--bg); color:var(--fg); min-height:100vh;
-    font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif; line-height:1.6; }
-  a{ color:inherit; text-decoration:none; }
-  nav{ position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
-    padding:14px 6vw; background:var(--nav); backdrop-filter:blur(12px); border-bottom:1px solid var(--line); }
-  .brand{ font-weight:800; font-size:18px; display:flex; align-items:center; gap:8px; letter-spacing:-.02em; }
-  .nav-r{ display:flex; align-items:center; gap:10px; }
-  .nlink{ padding:8px 16px; border-radius:10px; font-size:14px; font-weight:600; transition:all .12s; cursor:pointer; border:none; background:none; font-family:inherit; }
-  .nlink.ghost{ color:var(--muted); }
-  .nlink.ghost:hover{ color:var(--fg); background:var(--card2); }
-  .nlink.solid{ color:#fff; background:linear-gradient(180deg,var(--accent),var(--accent2)); box-shadow:0 4px 14px rgba(59,165,93,.3); }
-  .nlink.solid:hover{ transform:translateY(-1px); }
-  .hero{ text-align:center; padding:76px 6vw 60px;
-    background:radial-gradient(circle at 50% -10%, rgba(59,165,93,.14), transparent 55%); }
-  .hero .logo{ font-size:64px; line-height:1; margin-bottom:18px; }
-  .hero h1{ font-size:clamp(30px,5vw,50px); font-weight:900; letter-spacing:-.03em; }
-  .hero .tag{ color:var(--accent); font-weight:700; margin-top:8px; font-size:clamp(15px,2.2vw,19px); }
-  .hero p.lead{ color:var(--muted); max-width:620px; margin:18px auto 0; font-size:16px; }
-  .cta{ display:flex; gap:14px; justify-content:center; align-items:center; margin-top:32px; flex-wrap:wrap; }
-  .btn{ display:inline-flex; align-items:center; gap:8px; padding:15px 26px; border-radius:14px; font-weight:700;
-    font-size:16px; transition:transform .12s, box-shadow .12s; cursor:pointer; border:none; font-family:inherit; }
-  .btn.dl{ color:#fff; background:linear-gradient(180deg,var(--accent),var(--accent2)); box-shadow:0 6px 20px rgba(59,165,93,.32); }
-  .btn.dl:hover{ transform:translateY(-2px); box-shadow:0 10px 28px rgba(59,165,93,.42); }
-  .btn.dl small{ font-weight:400; font-size:12px; opacity:.85; }
-  .btn.line{ border:1px solid var(--line); color:var(--fg); background:var(--card); }
-  .btn.line:hover{ border-color:var(--muted); }
-  .verbadge{ display:inline-flex; align-items:center; gap:7px; margin-top:18px; font-size:13px; color:var(--muted);
-    background:var(--card); border:1px solid var(--line); padding:5px 13px; border-radius:999px; }
-  .verbadge b{ color:var(--accent); }
-  .sec{ max-width:1000px; margin:0 auto; padding:20px 6vw 40px; }
-  .sec h2{ text-align:center; font-size:26px; font-weight:800; letter-spacing:-.02em; margin-bottom:6px; }
-  .sec .sub{ text-align:center; color:var(--muted); margin-bottom:34px; }
-  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
-  .feat{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; }
-  .feat .ic{ font-size:30px; }
-  .feat h3{ font-size:16px; font-weight:800; margin:12px 0 6px; }
-  .feat p{ color:var(--muted); font-size:14px; }
-  .band{ max-width:900px; margin:20px auto 60px; padding:40px 6vw; text-align:center;
-    background:linear-gradient(135deg, rgba(59,165,93,.12), rgba(59,165,93,.04));
-    border:1px solid rgba(59,165,93,.25); border-radius:22px; }
-  .band h2{ font-size:24px; font-weight:800; }
-  .band p{ color:var(--muted); margin:8px 0 22px; }
-  footer{ border-top:1px solid var(--line); padding:26px 6vw; text-align:center; color:var(--muted); font-size:13px; }
-  footer a{ color:var(--accent); }
-  /* ── 로그인 모달 ── */
-  .overlay{ display:none; position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55);
-    align-items:center; justify-content:center; padding:20px; backdrop-filter:blur(3px); }
-  .overlay.open{ display:flex; }
-  .modal{ background:var(--card); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow);
-    padding:34px 32px; max-width:380px; width:100%; position:relative; }
-  .modal .x{ position:absolute; top:14px; right:16px; background:none; border:none; color:var(--muted);
-    font-size:22px; cursor:pointer; line-height:1; }
-  .modal .x:hover{ color:var(--fg); }
-  .modal .mlogo{ font-size:38px; text-align:center; }
-  .modal h2{ text-align:center; font-size:20px; font-weight:800; margin-top:6px; }
-  .modal .msub{ text-align:center; color:var(--muted); font-size:13px; margin:4px 0 20px; }
-  .modal label{ display:block; font-size:12px; color:var(--muted); margin:12px 0 6px; font-weight:600; }
-  .modal input{ width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line);
-    background:var(--card2); color:var(--fg); font-size:14px; font-family:inherit; }
-  .modal input:focus{ outline:none; border-color:var(--accent); }
-  .modal .go{ width:100%; margin-top:18px; padding:13px; border:none; border-radius:11px; color:#fff; cursor:pointer;
-    background:linear-gradient(180deg,var(--accent),var(--accent2)); font-size:15px; font-weight:700; font-family:inherit; }
-  .merr{ color:var(--red); font-size:12px; margin-top:10px; text-align:center; min-height:15px; }
-  .mdiv{ display:flex; align-items:center; gap:12px; margin:18px 0 16px; color:var(--muted); font-size:12px; }
-  .mdiv::before,.mdiv::after{ content:''; flex:1; height:1px; background:var(--line); }
-  #mgwrap{ display:flex; justify-content:center; min-height:44px; }
-  #mgnote{ margin-top:8px; font-size:11px; color:var(--amber); text-align:center; }
-</style>
+<script>window.SITE_BASE='./';</script>
+<script src="./site.js" defer></script>
 </head>
 <body>
   <nav>
-    <a class="brand" href="#top">🌊 바이브 코딩</a>
-    <div class="nav-r" id="navR"><!-- 로그인 상태에 따라 JS가 채움 --></div>
+    <a class="brand" href="./">🧩 btsky</a>
+    <div class="nav-r" id="navR"></div>
   </nav>
 
-  <header class="hero" id="top">
-    <div class="logo">🌊</div>
-    <h1>바이브 코딩</h1>
-    <div class="tag">AI 멀티 에이전트 하이브 마인드 개발 대시보드</div>
-    <p class="lead">여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막습니다.
-      PostgreSQL 기반 하이브 마인드로 에이전트들이 실시간으로 지식을 공유하는 Windows 데스크톱 앱.</p>
-    <div class="cta">
-      <button class="btn dl" id="winBtn" onclick="downloadOrLogin()">
-        <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small></button>
-      <button class="btn line" id="portalBtn" onclick="goPortal()">웹 포털 로그인 →</button>
-    </div>
-    <div class="verbadge" id="ver">버전 확인 중…</div>
+  <header class="hero">
+    <div class="logo">🧩</div>
+    <h1>btsky 제품 허브</h1>
+    <div class="tag">직접 만드는 도구들, 한곳에서</div>
+    <p class="lead">개발 생산성부터 현장 업무 자동화, 트레이딩까지 —
+      btsky가 만든 제품을 다운로드하고 관리하세요.</p>
   </header>
 
-  <section class="sec" id="features">
-    <h2>무엇을 할 수 있나요</h2>
-    <p class="sub">혼자 코딩하지 마세요. 에이전트 팀과 함께.</p>
+  <section class="sec">
+    <h2>제품</h2>
+    <p class="sub">원하는 제품을 선택하세요.</p>
     <div class="grid">
-      <div class="feat"><div class="ic">🤝</div><h3>멀티 에이전트 협업</h3>
-        <p>Claude·여러 에이전트가 태스크를 나눠 맡고 서로 소통하며 동시에 개발합니다.</p></div>
-      <div class="feat"><div class="ic">🩹</div><h3>자가 치유</h3>
-        <p>같은 오류가 반복되면 원인을 학습·기록해, 다음엔 삽질 없이 바로 넘어갑니다.</p></div>
-      <div class="feat"><div class="ic">🧠</div><h3>하이브 마인드</h3>
-        <p>PostgreSQL 기반 공유 기억으로 에이전트들이 작업 맥락을 실시간으로 공유합니다.</p></div>
-      <div class="feat"><div class="ic">🗂️</div><h3>지식 관리</h3>
-        <p>제텔카스텐 노트로 세션이 바뀌어도 프로젝트 지식이 축적·연결됩니다.</p></div>
-    </div>
-  </section>
 
-  <section class="band">
-    <h2>지금 시작하세요</h2>
-    <p>Windows 10/11 · 설치 후 자동 업데이트</p>
-    <div class="cta">
-      <button class="btn dl" id="winBtn2" onclick="downloadOrLogin()">
-        <span>🪟 다운로드</span><small id="winSize2">최신 버전</small></button>
+      <a class="card-lg" href="./vibe-coding/">
+        <div class="ic">🌊</div>
+        <h3>바이브 코딩 <span class="chip ready">배포중</span></h3>
+        <p>AI 멀티 에이전트가 한 팀처럼 협업하는 하이브 마인드 개발 대시보드.
+          오류를 스스로 학습해 재발을 막는 Windows·macOS 데스크톱 앱.</p>
+        <div class="go">다운로드 · 자세히 →</div>
+      </a>
+
+      <a class="card-lg" href="./ons/">
+        <div class="ic">📅</div>
+        <h3>OnS <span class="chip ready">배포중</span></h3>
+        <p>출장·장착 업무를 자동화하는 엔터프라이즈 스케줄 관리 플랫폼.
+          오프라인 우선 설계 + 경로 최적화로 현장에서도 끊김 없이.</p>
+        <div class="go">웹 앱 열기 · 자세히 →</div>
+      </a>
+
+      <a class="card-lg" href="./crypto/">
+        <div class="ic">📈</div>
+        <h3>CipherTrader <span class="chip soon">준비중</span></h3>
+        <p>한국 주식(KOSPI/KOSDAQ) AI 자동매매 시스템. KIS OpenAPI + 시계열 AI +
+          뉴스·공시 감성 분석으로 매매 신호를 생성하는 Windows 앱 (개발 중).</p>
+        <div class="go">미리보기 →</div>
+      </a>
+
     </div>
   </section>
 
   <footer>
-    <div>바이브 코딩 · <a href="https://github.com/btsky99/vibe-coding" target="_blank" rel="noopener">GitHub</a></div>
-    <div style="margin-top:6px">© 2026 btsky · 🍎 macOS 버전 준비 중</div>
+    <div>© 2026 btsky · <a href="https://github.com/btsky99" target="_blank" rel="noopener">GitHub</a></div>
+    <div style="margin-top:6px">문의·관리는 로그인 후 <a href="./portal/">포털</a>에서</div>
   </footer>
 
-  <!-- 로그인 모달(팝업) -->
-  <div class="overlay" id="loginOverlay" onclick="if(event.target===this)closeLogin()">
-    <div class="modal">
-      <button class="x" onclick="closeLogin()" aria-label="닫기">×</button>
-      <div class="mlogo">🗂️</div>
-      <h2>프로젝트 관리 포털</h2>
-      <div class="msub">로그인하고 대시보드로 이동하세요</div>
-      <form onsubmit="return doLogin(event)">
-        <label for="muid">아이디</label>
-        <input id="muid" autocomplete="username" placeholder="아이디">
-        <label for="mpw">비밀번호</label>
-        <input id="mpw" type="password" autocomplete="current-password" placeholder="비밀번호">
-        <button class="go" type="submit">로그인</button>
-        <div class="merr" id="merr"></div>
-      </form>
-      <div class="mdiv">또는</div>
-      <div id="mgwrap"></div>
-      <div id="mgnote"></div>
-    </div>
-  </div>
-
-<script>
-const REPO='btsky99/vibe-coding';
-let dlUrl='https://github.com/btsky99/vibe-coding/releases/latest';  // fetch 성공 시 실제 exe로 교체
-const fmt=b=>{ if(!b) return ''; const mb=b/1048576; return mb>=1?mb.toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'; };
-fetch(`https://api.github.com/repos/${REPO}/releases/latest`,{headers:{'Accept':'application/vnd.github+json'}})
-  .then(r=>{ if(!r.ok) throw 0; return r.json(); })
-  .then(rel=>{
-    document.getElementById('ver').innerHTML=`현재 최신 버전 <b>${rel.tag_name||''}</b>`;
-    const a=rel.assets||[], win=a.find(x=>/setup.*\.exe$/i.test(x.name))||a.find(x=>/\.exe$/i.test(x.name));
-    if(win){ dlUrl=win.browser_download_url;
-      const sz=fmt(win.size); document.getElementById('winSize').textContent=sz;
-      document.getElementById('winSize2').textContent=sz+' · 설치 프로그램'; }
-  })
-  .catch(()=>{ document.getElementById('ver').textContent='버전 정보를 불러오지 못했어요'; });
-
-// ── 다운로드 로그인 게이트: 로그인해야 다운로드 가능 ──
-function startDownload(){ location.href = dlUrl; }
-function downloadOrLogin(){
-  if(App.AUTH.current()){ startDownload(); }   // 로그인 상태 → 바로 다운로드
-  else openLogin('download');                  // 미로그인 → 로그인 유도(성공 후 다운로드)
-}
-
-// ── 로그인 모달 ──
-let gInited=false;
-let pendingAction='portal';   // 로그인 성공 후 동작: 'portal'(대시보드) | 'download'(다운로드)
-function openLogin(intent){
-  pendingAction = intent==='download' ? 'download' : 'portal';
-  document.getElementById('loginOverlay').classList.add('open');
-  document.getElementById('muid').focus();
-  if(!gInited){ gInited=true;
-    App.initGoogle(document.getElementById('mgwrap'), document.getElementById('mgnote'),
-      profile=>{ App.AUTH.loginGoogle(profile); afterLogin(); }); }
-}
-function closeLogin(){ document.getElementById('loginOverlay').classList.remove('open'); document.getElementById('merr').textContent=''; }
-// 로그인 성공 후: 다운로드하러 왔으면 다운로드, 아니면 포털로.
-function afterLogin(){
-  if(pendingAction==='download'){ pendingAction='portal'; closeLogin(); startDownload(); }
-  else location.href='./portal/';
-}
-function doLogin(e){
-  e.preventDefault();
-  const s=App.AUTH.login(document.getElementById('muid').value.trim(), document.getElementById('mpw').value);
-  if(!s){ document.getElementById('merr').textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; return false; }
-  afterLogin();
-  return false;
-}
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeLogin(); });
-
-// ── 로그인 상태에 따른 내비 (관리자만 '관리자 페이지' 버튼 노출) ──
-function updateNav(){
-  const s = App.AUTH.current();
-  const r = document.getElementById('navR');
-  const feat = `<a class="nlink ghost" href="#features">기능</a>`;
-  if(!s){
-    r.innerHTML = feat +
-      `<button class="nlink ghost" onclick="openLogin()">로그인</button>` +
-      `<button class="nlink solid" onclick="openLogin()">회원가입</button>`;
-  } else if(s.role==='admin'){
-    // 관리자 페이지 진입 버튼은 관리자에게만.
-    r.innerHTML = feat +
-      `<a class="nlink solid" href="./portal/">👑 관리자 페이지</a>` +
-      `<button class="nlink ghost" onclick="doLogout()">로그아웃</button>`;
-  } else {
-    r.innerHTML = feat +
-      `<span class="nlink ghost" style="cursor:default">${s.name} 님</span>` +
-      `<button class="nlink ghost" onclick="doLogout()">로그아웃</button>`;
-  }
-  // 히어로 포털 버튼도 상태에 맞게 문구 변경
-  const pb = document.getElementById('portalBtn');
-  if(pb) pb.textContent = !s ? '웹 포털 로그인 →' : (s.role==='admin' ? '관리자 페이지 →' : '내 페이지 →');
-}
-function doLogout(){ App.AUTH.logout(); updateNav(); }
-// 히어로 버튼: 로그인 상태면 포털로, 아니면 로그인 모달.
-function goPortal(){ if(App.AUTH.current()) location.href='./portal/'; else openLogin(); }
-updateNav();
-</script>
+<script>window.addEventListener('DOMContentLoaded', () => Site.renderNav());</script>
 </body>
 </html>
