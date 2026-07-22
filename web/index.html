@@ -98,11 +98,7 @@
 <body>
   <nav>
     <a class="brand" href="#top">🌊 바이브 코딩</a>
-    <div class="nav-r">
-      <a class="nlink ghost" href="#features">기능</a>
-      <button class="nlink ghost" onclick="openLogin()">로그인</button>
-      <button class="nlink solid" onclick="openLogin()">회원가입</button>
-    </div>
+    <div class="nav-r" id="navR"><!-- 로그인 상태에 따라 JS가 채움 --></div>
   </nav>
 
   <header class="hero" id="top">
@@ -114,7 +110,7 @@
     <div class="cta">
       <a class="btn dl" id="winBtn" href="https://github.com/btsky99/vibe-coding/releases/latest">
         <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small></a>
-      <button class="btn line" onclick="openLogin()">웹 포털 로그인 →</button>
+      <button class="btn line" id="portalBtn" onclick="goPortal()">웹 포털 로그인 →</button>
     </div>
     <div class="verbadge" id="ver">버전 확인 중…</div>
   </header>
@@ -201,7 +197,34 @@ function doLogin(e){
   return false;
 }
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeLogin(); });
-// 이미 로그인돼 있으면 바로 포털로 (선택) — 여기선 자동 이동 안 함(랜딩 우선).
+
+// ── 로그인 상태에 따른 내비 (관리자만 '관리자 페이지' 버튼 노출) ──
+function updateNav(){
+  const s = App.AUTH.current();
+  const r = document.getElementById('navR');
+  const feat = `<a class="nlink ghost" href="#features">기능</a>`;
+  if(!s){
+    r.innerHTML = feat +
+      `<button class="nlink ghost" onclick="openLogin()">로그인</button>` +
+      `<button class="nlink solid" onclick="openLogin()">회원가입</button>`;
+  } else if(s.role==='admin'){
+    // 관리자 페이지 진입 버튼은 관리자에게만.
+    r.innerHTML = feat +
+      `<a class="nlink solid" href="./portal/">👑 관리자 페이지</a>` +
+      `<button class="nlink ghost" onclick="doLogout()">로그아웃</button>`;
+  } else {
+    r.innerHTML = feat +
+      `<span class="nlink ghost" style="cursor:default">${s.name} 님</span>` +
+      `<button class="nlink ghost" onclick="doLogout()">로그아웃</button>`;
+  }
+  // 히어로 포털 버튼도 상태에 맞게 문구 변경
+  const pb = document.getElementById('portalBtn');
+  if(pb) pb.textContent = !s ? '웹 포털 로그인 →' : (s.role==='admin' ? '관리자 페이지 →' : '내 페이지 →');
+}
+function doLogout(){ App.AUTH.logout(); updateNav(); }
+// 히어로 버튼: 로그인 상태면 포털로, 아니면 로그인 모달.
+function goPortal(){ if(App.AUTH.current()) location.href='./portal/'; else openLogin(); }
+updateNav();
 </script>
 </body>
 </html>
