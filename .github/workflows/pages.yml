@@ -1,0 +1,41 @@
+# FILE: .github/workflows/pages.yml
+# DESCRIPTION: btsky.pe.kr 다운로드 랜딩 페이지(web/)를 GitHub Pages로 배포.
+#   web/ 하위만 바뀌면 트리거 → build-release.yml(윈도우 EXE 빌드)와 독립.
+#   web/CNAME(btsky.pe.kr)이 아티팩트에 포함돼 커스텀 도메인이 자동 설정된다.
+# REVISION HISTORY:
+#   - 2026-07-22 Claude: 최초 생성 — 정적 페이지 무료 호스팅(웹호스팅 결제 회피).
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# GitHub Pages 배포에 필요한 최소 권한
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시 배포 방지 (마지막 것만 반영)
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web        # web/ 폴더 전체를 사이트 루트로 게시 (index.html + CNAME)
+      - id: deployment
+        uses: actions/deploy-pages@v4
