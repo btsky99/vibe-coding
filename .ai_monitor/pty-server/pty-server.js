@@ -40,6 +40,14 @@ function posixLoginShell() {
   return { shell: sh, shellArgs: ['-l'] };
 }
 
+// [맥/리눅스 포팅 2026-07-22] 에이전트 시작 명령 프리픽스/개행 플랫폼 통일.
+//   [WHY] Windows는 UTF-8 출력 위해 'chcp 65001 >nul &' 프리픽스가 필요하지만 chcp는 맥에 없어
+//   그대로 쓰면 첫 줄이 'command not found: chcp'로 깨지고 에이전트가 실행되지 않는다. 맥/리눅스는
+//   터미널이 기본 UTF-8이라 프리픽스 불필요. 개행도 Windows \r\n / POSIX \n으로 맞춘다.
+function agentLine(cmd) {
+  return IS_WIN ? `chcp 65001 >nul & ${cmd}\r\n` : `${cmd}\n`;
+}
+
 // [맥/리눅스 포팅 2026-07-22] node-pty prebuild의 spawn-helper 실행권한 자가치유.
 //   [WHY] node-pty는 fork 시 prebuilds/<platform>-<arch>/spawn-helper 를 posix_spawnp 한다.
 //   이 리포의 node_modules는 +x가 벗겨진 채(0644) 배포돼(npm 추출/복사 과정) 실행권한이 없으면
@@ -595,7 +603,7 @@ function handlePtyConnectionLegacy(ws, req) {
     // ── 에이전트별 시작 명령 ──────────────────────────────────────────
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
+      ptyProcess.write(agentLine(`claude${yoloFlag}`));
     } else if (agent === 'antigravity') {
       // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
@@ -612,7 +620,7 @@ function handlePtyConnectionLegacy(ws, req) {
       // 원래 슬롯 번호 복원: slotId는 slot번호+1 형식 (예: slot101 → slotId=102 → slotNum=2)
       const slotNum = parseInt(slotId, 10) - 100;
       const termName = `T${slotNum}-${cli}`;
-      ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
+      ptyProcess.write(agentLine(`python -m llm_group_chat terminal --name ${termName} --cli ${cli}`));
     }
 
     // ── 세션 등록 ─────────────────────────────────────────────────────
@@ -933,7 +941,7 @@ function handlePersistentPtyConnection(ws, req) {
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
       const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
-      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}${modelFlag}\r\n`);
+      ptyProcess.write(agentLine(`claude${yoloFlag}${modelFlag}`));
     } else if (agent === 'antigravity') {
       // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. agy는 --model 미지원이라 무시.
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
@@ -947,7 +955,7 @@ function handlePersistentPtyConnection(ws, req) {
       const cli = agent.replace('groupchat-', '');
       const slotNum = parseInt(slotId, 10) - 100;
       const termName = `T${slotNum}-${cli}`;
-      ptyProcess.write(`chcp 65001 >nul & python -m llm_group_chat terminal --name ${termName} --cli ${cli}\r\n`);
+      ptyProcess.write(agentLine(`python -m llm_group_chat terminal --name ${termName} --cli ${cli}`));
     }
 
     const mainModel = requestedModel || (agent === 'claude'
@@ -1461,7 +1469,7 @@ app.post('/api/pty/office/spawn', (req, res) => {
     // 에이전트 시작 명령 — 새 대화를 즉시 시작 (--resume 없이 실행)
     if (agent === 'claude') {
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`chcp 65001 >nul & claude${yoloFlag}\r\n`);
+      ptyProcess.write(agentLine(`claude${yoloFlag}`));
     } else if (agent === 'antigravity') {
       // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
       const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
