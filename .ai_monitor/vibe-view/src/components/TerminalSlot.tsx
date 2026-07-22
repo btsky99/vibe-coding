@@ -67,7 +67,7 @@ import { slugifyProjectPath } from '../lib/projectContext';
 import ChatSlot from './ChatSlot';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
-import { copyTextToClipboard, captureSelectRestore } from './terminal/xtermSelection';
+import { copyTextToClipboard, captureSelectRestore, installClipboardShortcuts } from './terminal/xtermSelection';
 import ClaudeContextBar, { type ClaudeUsage } from './terminal/ClaudeContextBar';
 import AgentSelectCards from './terminal/AgentSelectCards';
 import QuotaBadge, { type AgentQuotaInfo } from './terminal/QuotaBadge';
@@ -138,6 +138,11 @@ export default function TerminalSlot({
   // mouseTracking: TUI가 마우스 리포팅(DECSET 1000/1006)을 켜면 드래그가 로컬 선택을 못 만듦 —
   // 이때 복사 비활성 사유를 메뉴에 안내하기 위한 플래그 (2026-07-04 사고: 복사 버튼 미표시 재발)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; selText: string; mouseTracking: boolean } | null>(null);
+  // [WHY] 아래 명령어 전송 textarea는 xterm과 별개다. 맥 PyWebView(WKWebView) 백엔드는 편집 입력창에
+  // 기본 우클릭 복사/붙여넣기 메뉴를 제공하지 않아(자동완성 항목만 뜸) — textarea 전용 커스텀 메뉴로 보완.
+  // 윈도우 WebView2에선 기본 메뉴가 떠서 안 보이던 차이가 맥 대응 후 드러난 문제.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [inputCtxMenu, setInputCtxMenu] = useState<{ x: number; y: number; hasSel: boolean } | null>(null);
   // [WHY] xterm은 onUserInput마다 선택을 지운다(TUI 자동 응답 포함) — 우클릭 시점에 선택이
   // 사라져 있어도 복사가 가능하도록 마지막 비어있지 않은 선택 텍스트를 캐시.
   const lastSelectionRef = useRef('');
@@ -282,6 +287,12 @@ export default function TerminalSlot({
       term.open(xtermRef.current);
       fitAddon.fit();
       termRef.current = term;
+
+      // 키보드 복붙 단축키 — 맥 ⌘C/⌘V, 윈도우 Ctrl+Shift+C/V (플랫폼 분기는 헬퍼 내부).
+      // [제약] term.textarea는 open() 이후에만 존재 → 반드시 이 위치에서 호출.
+      installClipboardShortcuts(term, () => lastSelectionRef.current, () => {
+        term.write('\r\n\x1b[33m[클립보드 읽기 실패 — 우클릭 메뉴의 붙여넣기를 사용하세요]\x1b[0m\r\n');
+      });
 
       // 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시 + 하이라이트 유지 복원.
       // [제약] 선택 해제 이벤트에서도 발화하므로 hasSelection 가드 필수 — 캐시를 빈 값으로 덮지 않는다.
@@ -479,6 +490,18 @@ export default function TerminalSlot({
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, [ctxMenu]);
+
+  // 입력창 컨텍스트 메뉴도 바깥 클릭/스크롤 시 닫기
+  useEffect(() => {
+    if (!inputCtxMenu) return;
+    const close = () => setInputCtxMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [inputCtxMenu]);
 
   // 모니터링 뷰 토글 시 xterm 터미널 크기 재조정
   // ResizeObserver가 주 역할이며, 이 타이머는 폴백으로 이중 호출해 안정성 확보
@@ -792,8 +815,18 @@ export default function TerminalSlot({
             </div>
             <div className="flex gap-2 items-end relative">
               <textarea
+                ref={inputRef}
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
+                onContextMenu={e => {
+                  // [WHY] 기본 메뉴(맥 WKWebView는 자동완성만 노출) 차단 후 커스텀 메뉴 오픈.
+                  // 선택 여부를 이 시점에 스냅샷 — 메뉴 클릭 시 selectionStart/End는 유지되지만
+                  // 포커스가 흔들려 빈 선택으로 읽히는 경우를 대비해 hasSel을 미리 저장.
+                  e.preventDefault();
+                  const el = inputRef.current;
+                  const hasSel = !!el && el.selectionStart !== el.selectionEnd;
+                  setInputCtxMenu({ x: e.clientX, y: e.clientY, hasSel });
+                }}
                 onCompositionStart={() => {
                   isComposingRef.current = true;
                 }}
@@ -874,20 +907,103 @@ export default function TerminalSlot({
             onClick={async () => {
               try {
                 const text = await navigator.clipboard.readText();
-                const activeWs = wsRef.current;
-                if (activeWs && activeWs.readyState === WebSocket.OPEN) {
-                  activeWs.send(text);
-                }
+                // [WHY] ws.send 직송 금지 — bracketed paste 모드를 우회해 TUI(claude CLI)에서
+                // 멀티라인 붙여넣기가 줄 단위로 즉시 실행됨. term.paste()는 onData 경유로
+                // \x1b[200~ 래핑을 적용한 뒤 같은 ws로 흘러간다.
+                if (text) termRef.current?.paste(text);
               } catch (err) {
                 console.error(err);
                 // [WHY] 무음 실패 금지 — WebView2 클립보드 읽기 권한 거부 시 사용자가 원인을
                 // 알 수 없던 사고(2026-07-04). 로컬 표시 전용 write라 pty로는 전송되지 않는다.
-                termRef.current?.write('\r\n\x1b[33m[클립보드 읽기 실패 — 터미널 클릭 후 Ctrl+V를 사용하세요]\x1b[0m\r\n');
+                termRef.current?.write('\r\n\x1b[33m[클립보드 읽기 실패 — 터미널 클릭 후 Ctrl+V(맥은 ⌘V)를 사용하세요]\x1b[0m\r\n');
               }
               setCtxMenu(null);
             }}
           >
             붙여넣기
+          </button>
+        </div>
+      )}
+
+      {/* 명령어 전송 입력창 우클릭 컨텍스트 메뉴 (맥 WKWebView 기본 메뉴 부재 보완) */}
+      {inputCtxMenu && (
+        <div
+          className="fixed z-[9999] bg-[#2d2d2d] border border-white/20 rounded shadow-xl text-xs text-white min-w-[130px] py-1"
+          style={{ left: inputCtxMenu.x, top: inputCtxMenu.y }}
+          onMouseLeave={() => setInputCtxMenu(null)}
+        >
+          {/* [불변식] value는 inputValue(React 상태)로 제어됨 — 잘라내기/붙여넣기는 반드시 setInputValue로
+              갱신하고, 재렌더 후 selectionStart/End를 requestAnimationFrame으로 복원해야 커서가 튀지 않음. */}
+          <button
+            disabled={!inputCtxMenu.hasSel}
+            className={`w-full text-left px-4 py-1.5 transition-colors ${
+              inputCtxMenu.hasSel ? 'hover:bg-white/10' : 'text-white/30 cursor-not-allowed'
+            }`}
+            onClick={async () => {
+              const el = inputRef.current;
+              if (el) {
+                const sel = el.value.substring(el.selectionStart, el.selectionEnd);
+                if (sel) { try { await copyTextToClipboard(sel); } catch (err) { console.error(err); } }
+              }
+              setInputCtxMenu(null);
+            }}
+          >
+            복사
+          </button>
+          <button
+            disabled={!inputCtxMenu.hasSel}
+            className={`w-full text-left px-4 py-1.5 transition-colors ${
+              inputCtxMenu.hasSel ? 'hover:bg-white/10' : 'text-white/30 cursor-not-allowed'
+            }`}
+            onClick={async () => {
+              const el = inputRef.current;
+              if (el) {
+                const start = el.selectionStart, end = el.selectionEnd;
+                const sel = el.value.substring(start, end);
+                if (sel) {
+                  try { await copyTextToClipboard(sel); } catch (err) { console.error(err); }
+                  const next = el.value.slice(0, start) + el.value.slice(end);
+                  setInputValue(next);
+                  requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start, start); });
+                }
+              }
+              setInputCtxMenu(null);
+            }}
+          >
+            잘라내기
+          </button>
+          <button
+            className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+            onClick={async () => {
+              const el = inputRef.current;
+              try {
+                const text = await navigator.clipboard.readText();
+                if (el && text) {
+                  const start = el.selectionStart, end = el.selectionEnd;
+                  const next = el.value.slice(0, start) + text + el.value.slice(end);
+                  setInputValue(next);
+                  const caret = start + text.length;
+                  requestAnimationFrame(() => { el.focus(); el.setSelectionRange(caret, caret); });
+                }
+              } catch (err) {
+                // [WHY] 무음 실패 금지 — 클립보드 읽기 권한 거부 시 ⌘V 안내 (터미널 메뉴와 동일 정책).
+                console.error(err);
+              }
+              setInputCtxMenu(null);
+            }}
+          >
+            붙여넣기
+          </button>
+          <div className="border-t border-white/10 my-0.5" />
+          <button
+            className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
+            onClick={() => {
+              const el = inputRef.current;
+              if (el) { el.focus(); el.select(); }
+              setInputCtxMenu(null);
+            }}
+          >
+            전체 선택
           </button>
         </div>
       )}

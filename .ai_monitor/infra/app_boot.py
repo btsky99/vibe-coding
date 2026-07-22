@@ -84,10 +84,36 @@ def _install_mac_edit_menu() -> bool:
         main_menu = app.mainMenu()
         if main_menu is None or main_menu.numberOfItems() == 0:
             return False
-        app.setMainMenu_(main_menu)  # 메뉴바 재드로우 강제 → Edit 메뉴 활성화
+
+        # pywebview의 Edit 서브메뉴를 찾아 항상-활성화로 전환.
+        # [WHY] macOS 메뉴는 autoenablesItems=YES(기본)면 first responder가 validate 안 하는 항목을
+        #   비활성화한다. WKWebView 텍스트 입력 포커스 시 paste:/copy: 검증이 어긋나 메뉴 항목이 회색
+        #   처리되면 Cmd+V의 performKeyEquivalent가 매칭돼도 액션이 안 나가 붙여넣기가 실패한다.
+        #   autoenablesItems=NO로 두면 항목이 항상 활성 → Cmd+C/V/X가 responder chain(WKWebView)의
+        #   copy:/paste:/cut:로 라우팅돼 복붙이 동작한다.
+        edit_menu = None
+        for i in range(main_menu.numberOfItems()):
+            it = main_menu.itemAtIndex_(i)
+            sub = it.submenu()
+            if sub is not None and it.title() in ('Edit', '편집'):
+                edit_menu = sub
+                break
+        if edit_menu is None:
+            # pywebview Edit 메뉴가 없으면 직접 생성(네이티브 selector).
+            edit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('편집', None, '')
+            edit_menu = AppKit.NSMenu.alloc().initWithTitle_('편집')
+            for title, sel, key in (('실행 취소', 'undo:', 'z'), ('잘라내기', 'cut:', 'x'),
+                                    ('복사', 'copy:', 'c'), ('붙여넣기', 'paste:', 'v'),
+                                    ('전체 선택', 'selectAll:', 'a')):
+                edit_menu.addItem_(
+                    AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, sel, key))
+            edit_item.setSubmenu_(edit_menu)
+            main_menu.addItem_(edit_item)
+        edit_menu.setAutoenablesItems_(False)  # 복사/붙여넣기 항상 활성화 → Cmd+C/V/X 라우팅
+        app.setMainMenu_(main_menu)  # 메뉴바 재드로우 강제
         return True
     except Exception as e:
-        print(f"[edit-menu] 맥 메뉴바 갱신 실패(무시): {e}")
+        print(f"[edit-menu] 맥 Edit 메뉴 설정 실패(무시): {e}")
         return False
 
 

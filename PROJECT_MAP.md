@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-22 00:05
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-22 19:20
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -35,7 +35,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 1999 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 2000 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 284 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -50,7 +50,7 @@
 | `agent_api.py` | 1393 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 220 |  |
 | `commands_api.py` | 54 |  |
-| `config_api.py` | 81 |  |
+| `config_api.py` | 96 |  |
 | `dashboard_api.py` | 132 |  |
 | `events_api.py` | 103 |  |
 | `experience_api.py` | 226 |  |
@@ -58,10 +58,10 @@
 | `fs_dialog_api.py` | 147 |  |
 | `git_api.py` | 235 | Git 저장소 관리 API (/api/git/*) |
 | `heal_api.py` | 30 |  |
-| `hive_api.py` | 1267 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `hive_api.py` | 1273 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `hive_ingest_api.py` | 139 |  |
 | `install_api.py` | 421 |  |
-| `lan_api.py` | 420 | LAN 브리지 프록시 + 원격 에이전트 실행(Phase3, /api/lan/exec/*) |
+| `lan_api.py` | 475 |  |
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
@@ -70,7 +70,7 @@
 | `office_api.py` | 370 |  |
 | `office_launch_api.py` | 84 |  |
 | `office_proxy_api.py` | 230 |  |
-| `projects_api.py` | 57 |  |
+| `projects_api.py` | 69 |  |
 | `pty_api.py` | 246 | PTY 터미널 제어 API (/api/pty/*) |
 | `screenshot_api.py` | 45 |  |
 | `setup_api.py` | 48 |  |
@@ -95,15 +95,15 @@
 | `file_store.py` | 229 | 파일 기반 레거시 저장소 |
 | `heal_metrics.py` | 273 |  |
 | `lan_discovery.py` | 120 |  |
-| `lan_peers.py` | 188 | 페어링/HMAC토큰 + 피어별 exec_trust(원격실행 승인정책) |
+| `lan_peers.py` | 194 |  |
 | `logger.py` | 130 |  |
 | `pg_base.py` | 538 |  |
 | `pg_experience.py` | 226 |  |
 | `pg_incidents.py` | 182 |  |
-| `pg_lan.py` | 42 |  |
+| `pg_lan.py` | 85 |  |
 | `pg_memory.py` | 639 |  |
 | `pg_office.py` | 320 |  |
-| `pg_schema.py` | 799 |  |
+| `pg_schema.py` | 817 |  |
 | `pg_store.py` | 127 | PostgreSQL 데이터 저장소 (스키마 관리 + 쿼리) |
 | `pg_tasks.py` | 388 |  |
 | `pg_vector_search.py` | 224 |  |
@@ -242,7 +242,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 868 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 881 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 206 |  |
 | `constants.tsx` | 93 |  |
@@ -257,7 +257,7 @@
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 924 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1040 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 573 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 141 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -269,7 +269,7 @@
 | `GitPanel.tsx` | 250 | Git 통합 (브랜치, 스테이징, 커밋) |
 | `HealPanel.tsx` | 129 |  |
 | `HivePanel.tsx` | 464 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
-| `LanPanel.tsx` | 264 |  |
+| `LanPanel.tsx` | 472 |  |
 | `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 204 |  |
@@ -333,4 +333,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-22 00:05
+> 자동 생성 완료: 2026-07-22 19:20
