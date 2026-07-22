@@ -1,140 +1,155 @@
 <!DOCTYPE html>
 <!--
   FILE: web/index.html
-  DESCRIPTION: btsky.pe.kr 다운로드 랜딩 페이지 (A안 — 안내 페이지). GitHub Pages 루트로 게시.
-    GitHub Releases API에서 최신 setup.exe를 런타임에 자동으로 물어와 버튼에 건다.
-    자동 업데이트는 여전히 GitHub이 담당하고, 이 페이지는 '현관문' 역할만 한다.
-    자체 완결(외부 CSS/JS 없음) — 어떤 정적 호스팅에 올려도 그대로 동작.
+  DESCRIPTION: btsky.pe.kr 메인 랜딩 페이지 (바이브 코딩 소개 + 다운로드 + 로그인/회원가입).
+    상단 내비: 좌 브랜드 / 우 [로그인][회원가입](→ ./portal/). 히어로: 소개 + Windows
+    다운로드(최신 릴리즈 자동 조회) + 포털 링크. 기능 섹션 + 푸터.
+    자체 완결(외부 CSS/JS 없음) — GitHub Pages 루트로 게시.
   REVISION HISTORY:
-    - 2026-07-22 Claude: 최초 생성 — REPO 상수만 바꾸면 타 프로젝트 재사용 가능.
+    - 2026-07-22 Claude: 다운로드 단일카드 → 풀 랜딩(내비/히어로/기능/로그인 연결)로 확장.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>바이브 코딩 — 다운로드</title>
+<title>바이브 코딩 — AI 멀티 에이전트 개발 대시보드</title>
 <style>
   :root{
-    --bg:#0b0d10; --card:#14171c; --line:#232830; --fg:#e6e9ee; --muted:#8b93a1;
-    --accent:#3ba55d; --accent2:#2d7d46; --shadow:0 8px 32px rgba(0,0,0,.4);
+    --bg:#0b0d10; --card:#14171c; --card2:#1a1e24; --line:#232830; --fg:#e6e9ee;
+    --muted:#8b93a1; --accent:#3ba55d; --accent2:#2d7d46; --amber:#e0a83b;
+    --nav:rgba(11,13,16,.8); --shadow:0 8px 32px rgba(0,0,0,.4);
   }
   @media (prefers-color-scheme: light){
-    :root{ --bg:#f4f6f9; --card:#ffffff; --line:#e2e6ec; --fg:#1a1d22; --muted:#5a6472;
-           --shadow:0 8px 32px rgba(0,0,0,.08); }
+    :root{ --bg:#f4f6f9; --card:#ffffff; --card2:#f7f9fb; --line:#e6eaef; --fg:#1a1d22;
+           --muted:#5a6472; --nav:rgba(255,255,255,.85); --shadow:0 8px 32px rgba(0,0,0,.08); }
   }
   *{ box-sizing:border-box; margin:0; padding:0; }
-  body{
-    background:var(--bg); color:var(--fg); min-height:100vh;
-    font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif;
-    display:flex; align-items:center; justify-content:center; padding:24px;
-    background-image:radial-gradient(circle at 50% 0%, rgba(59,165,93,.08), transparent 60%);
-  }
-  .card{
-    background:var(--card); border:1px solid var(--line); border-radius:20px;
-    box-shadow:var(--shadow); padding:48px 40px; max-width:520px; width:100%; text-align:center;
-  }
-  .logo{ font-size:52px; line-height:1; margin-bottom:16px; }
-  h1{ font-size:26px; font-weight:800; letter-spacing:-.02em; margin-bottom:6px; }
-  .sub{ color:var(--muted); font-size:14px; margin-bottom:28px; }
-  .ver{
-    display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--muted);
-    background:rgba(59,165,93,.1); border:1px solid rgba(59,165,93,.25);
-    padding:5px 12px; border-radius:999px; margin-bottom:24px;
-  }
-  .ver b{ color:var(--accent); font-weight:700; }
-  .btn{
-    display:block; width:100%; text-decoration:none; color:#fff;
-    background:linear-gradient(180deg,var(--accent),var(--accent2));
-    padding:16px; border-radius:14px; font-size:16px; font-weight:700;
-    transition:transform .12s ease, box-shadow .12s ease; box-shadow:0 4px 16px rgba(59,165,93,.3);
-  }
-  .btn:hover{ transform:translateY(-2px); box-shadow:0 8px 24px rgba(59,165,93,.4); }
-  .btn:active{ transform:translateY(0); }
-  .btn small{ display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:3px; }
-  .btn[aria-disabled="true"]{ pointer-events:none; opacity:.55; filter:grayscale(.4); }
-  .meta{ margin-top:14px; font-size:12px; color:var(--muted); }
-  .os-row{ display:flex; gap:12px; margin-top:20px; }
-  .os-row .btn{ flex:1; }
-  .btn.ghost{
-    background:transparent; color:var(--muted); border:1px dashed var(--line);
-    box-shadow:none; cursor:default;
-  }
-  .btn.ghost:hover{ transform:none; box-shadow:none; }
-  .foot{ margin-top:28px; font-size:12px; color:var(--muted); }
-  .foot a{ color:var(--accent); text-decoration:none; }
+  html{ scroll-behavior:smooth; }
+  body{ background:var(--bg); color:var(--fg); min-height:100vh;
+    font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif; line-height:1.6; }
+  a{ color:inherit; text-decoration:none; }
+  /* ── 내비 ── */
+  nav{ position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 6vw; background:var(--nav); backdrop-filter:blur(12px); border-bottom:1px solid var(--line); }
+  .brand{ font-weight:800; font-size:18px; display:flex; align-items:center; gap:8px; letter-spacing:-.02em; }
+  .nav-r{ display:flex; align-items:center; gap:10px; }
+  .nlink{ padding:8px 16px; border-radius:10px; font-size:14px; font-weight:600; transition:all .12s; }
+  .nlink.ghost{ color:var(--muted); }
+  .nlink.ghost:hover{ color:var(--fg); background:var(--card2); }
+  .nlink.solid{ color:#fff; background:linear-gradient(180deg,var(--accent),var(--accent2));
+    box-shadow:0 4px 14px rgba(59,165,93,.3); }
+  .nlink.solid:hover{ transform:translateY(-1px); }
+  /* ── 히어로 ── */
+  .hero{ text-align:center; padding:76px 6vw 60px;
+    background:radial-gradient(circle at 50% -10%, rgba(59,165,93,.14), transparent 55%); }
+  .hero .logo{ font-size:64px; line-height:1; margin-bottom:18px; }
+  .hero h1{ font-size:clamp(30px,5vw,50px); font-weight:900; letter-spacing:-.03em; }
+  .hero .tag{ color:var(--accent); font-weight:700; margin-top:8px; font-size:clamp(15px,2.2vw,19px); }
+  .hero p.lead{ color:var(--muted); max-width:620px; margin:18px auto 0; font-size:16px; }
+  .cta{ display:flex; gap:14px; justify-content:center; align-items:center; margin-top:32px; flex-wrap:wrap; }
+  .btn{ display:inline-flex; align-items:center; gap:8px; padding:15px 26px; border-radius:14px; font-weight:700;
+    font-size:16px; transition:transform .12s, box-shadow .12s; }
+  .btn.dl{ color:#fff; background:linear-gradient(180deg,var(--accent),var(--accent2)); box-shadow:0 6px 20px rgba(59,165,93,.32); }
+  .btn.dl:hover{ transform:translateY(-2px); box-shadow:0 10px 28px rgba(59,165,93,.42); }
+  .btn.dl small{ font-weight:400; font-size:12px; opacity:.85; }
+  .btn.line{ border:1px solid var(--line); color:var(--fg); background:var(--card); }
+  .btn.line:hover{ border-color:var(--muted); }
+  .verbadge{ display:inline-flex; align-items:center; gap:7px; margin-top:18px; font-size:13px; color:var(--muted);
+    background:var(--card); border:1px solid var(--line); padding:5px 13px; border-radius:999px; }
+  .verbadge b{ color:var(--accent); }
+  /* ── 기능 ── */
+  .sec{ max-width:1000px; margin:0 auto; padding:20px 6vw 40px; }
+  .sec h2{ text-align:center; font-size:26px; font-weight:800; letter-spacing:-.02em; margin-bottom:6px; }
+  .sec .sub{ text-align:center; color:var(--muted); margin-bottom:34px; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
+  .feat{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; }
+  .feat .ic{ font-size:30px; }
+  .feat h3{ font-size:16px; font-weight:800; margin:12px 0 6px; }
+  .feat p{ color:var(--muted); font-size:14px; }
+  /* ── 하단 다운로드 배너 ── */
+  .band{ max-width:900px; margin:20px auto 60px; padding:40px 6vw; text-align:center;
+    background:linear-gradient(135deg, rgba(59,165,93,.12), rgba(59,165,93,.04));
+    border:1px solid rgba(59,165,93,.25); border-radius:22px; }
+  .band h2{ font-size:24px; font-weight:800; }
+  .band p{ color:var(--muted); margin:8px 0 22px; }
+  /* ── 푸터 ── */
+  footer{ border-top:1px solid var(--line); padding:26px 6vw; text-align:center; color:var(--muted); font-size:13px; }
+  footer a{ color:var(--accent); }
 </style>
 </head>
 <body>
-  <main class="card">
+  <nav>
+    <a class="brand" href="#top">🌊 바이브 코딩</a>
+    <div class="nav-r">
+      <a class="nlink ghost" href="#features">기능</a>
+      <a class="nlink ghost" href="./portal/">로그인</a>
+      <a class="nlink solid" href="./portal/">회원가입</a>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
     <div class="logo">🌊</div>
     <h1>바이브 코딩</h1>
-    <p class="sub">AI 멀티 에이전트 하이브 마인드 개발 대시보드</p>
-
-    <div class="ver" id="ver">최신 버전 확인 중…</div>
-
-    <div class="os-row">
-      <a class="btn" id="winBtn" href="#" aria-disabled="true">
-        🪟 Windows 설치
-        <small id="winSize">준비 중…</small>
+    <div class="tag">AI 멀티 에이전트 하이브 마인드 개발 대시보드</div>
+    <p class="lead">여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막습니다.
+      PostgreSQL 기반 하이브 마인드로 에이전트들이 실시간으로 지식을 공유하는 Windows 데스크톱 앱.</p>
+    <div class="cta">
+      <a class="btn dl" id="winBtn" href="https://github.com/btsky99/vibe-coding/releases/latest">
+        <span>🪟 Windows 다운로드</span>
+        <small id="winSize">최신 버전</small>
       </a>
-      <a class="btn ghost" aria-disabled="true">
-        🍎 macOS
-        <small>준비 중</small>
-      </a>
+      <a class="btn line" href="./portal/">웹 포털 열기 →</a>
     </div>
+    <div class="verbadge" id="ver">버전 확인 중…</div>
+  </header>
 
-    <p class="meta" id="meta">Windows 10/11 · 설치 후 자동 업데이트</p>
+  <section class="sec" id="features">
+    <h2>무엇을 할 수 있나요</h2>
+    <p class="sub">혼자 코딩하지 마세요. 에이전트 팀과 함께.</p>
+    <div class="grid">
+      <div class="feat"><div class="ic">🤝</div><h3>멀티 에이전트 협업</h3>
+        <p>Claude·여러 에이전트가 태스크를 나눠 맡고 서로 소통하며 동시에 개발합니다.</p></div>
+      <div class="feat"><div class="ic">🩹</div><h3>자가 치유</h3>
+        <p>같은 오류가 반복되면 원인을 학습·기록해, 다음엔 삽질 없이 바로 넘어갑니다.</p></div>
+      <div class="feat"><div class="ic">🧠</div><h3>하이브 마인드</h3>
+        <p>PostgreSQL 기반 공유 기억으로 에이전트들이 작업 맥락을 실시간으로 공유합니다.</p></div>
+      <div class="feat"><div class="ic">🗂️</div><h3>지식 관리</h3>
+        <p>제텔카스텐 노트로 세션이 바뀌어도 프로젝트 지식이 축적·연결됩니다.</p></div>
+    </div>
+  </section>
 
-    <p class="foot">
-      릴리즈 노트 · 이전 버전 →
-      <a id="allReleases" href="https://github.com/btsky99/vibe-coding/releases" target="_blank" rel="noopener">전체 릴리즈</a>
-    </p>
-  </main>
+  <section class="band">
+    <h2>지금 시작하세요</h2>
+    <p>Windows 10/11 · 설치 후 자동 업데이트</p>
+    <div class="cta">
+      <a class="btn dl" id="winBtn2" href="https://github.com/btsky99/vibe-coding/releases/latest">
+        <span>🪟 다운로드</span><small id="winSize2">최신 버전</small></a>
+    </div>
+  </section>
+
+  <footer>
+    <div id="foot">바이브 코딩 · <a href="https://github.com/btsky99/vibe-coding" target="_blank" rel="noopener">GitHub</a></div>
+    <div style="margin-top:6px">© 2026 btsky · 🍎 macOS 버전 준비 중</div>
+  </footer>
 
 <script>
-// [설정] 다른 프로젝트에 재사용 시 REPO만 교체.
-const REPO = 'btsky99/vibe-coding';
-
-function fmtSize(bytes){
-  if(!bytes) return '';
-  const mb = bytes/1024/1024;
-  return mb >= 1 ? mb.toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
-}
-
-// GitHub Releases API로 최신 릴리즈의 setup.exe 자산을 런타임 조회 → 버전 안 바뀌어도 항상 최신.
-fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-  headers: { 'Accept': 'application/vnd.github+json' }
-})
-.then(r => { if(!r.ok) throw new Error('release fetch failed'); return r.json(); })
-.then(rel => {
-  const tag = rel.tag_name || rel.name || '';
-  document.getElementById('ver').innerHTML = `현재 최신 버전 <b>${tag}</b>`;
-
-  const assets = rel.assets || [];
-  // setup(인스톨러) 우선, 없으면 update(GUI EXE) 폴백
-  const win = assets.find(a => /setup.*\.exe$/i.test(a.name))
-           || assets.find(a => /update.*\.exe$/i.test(a.name))
-           || assets.find(a => /\.exe$/i.test(a.name));
-
-  const btn = document.getElementById('winBtn');
-  if (win) {
-    btn.href = win.browser_download_url;
-    btn.removeAttribute('aria-disabled');
-    document.getElementById('winSize').textContent = fmtSize(win.size) + ' · 설치 프로그램';
-    document.getElementById('meta').textContent =
-      `Windows 10/11 · ${win.name} · 설치 후 자동 업데이트`;
-  } else {
-    document.getElementById('winSize').textContent = '설치 파일 없음';
-  }
-})
-.catch(() => {
-  document.getElementById('ver').textContent = '버전 정보를 불러오지 못했어요';
-  const btn = document.getElementById('winBtn');
-  // 폴백: GitHub 릴리즈 페이지로 직접 이동
-  btn.href = `https://github.com/${REPO}/releases/latest`;
-  btn.removeAttribute('aria-disabled');
-  document.getElementById('winSize').textContent = 'GitHub에서 받기';
-});
+const REPO='btsky99/vibe-coding';
+const fmt=b=>{ if(!b) return ''; const mb=b/1048576; return mb>=1?mb.toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'; };
+fetch(`https://api.github.com/repos/${REPO}/releases/latest`,{headers:{'Accept':'application/vnd.github+json'}})
+  .then(r=>{ if(!r.ok) throw 0; return r.json(); })
+  .then(rel=>{
+    const tag=rel.tag_name||rel.name||'';
+    document.getElementById('ver').innerHTML = `현재 최신 버전 <b>${tag}</b>`;
+    const a=rel.assets||[];
+    const win=a.find(x=>/setup.*\.exe$/i.test(x.name))||a.find(x=>/\.exe$/i.test(x.name));
+    if(win){
+      ['winBtn','winBtn2'].forEach(id=>document.getElementById(id).href=win.browser_download_url);
+      const sz=fmt(win.size);
+      document.getElementById('winSize').textContent=sz;
+      document.getElementById('winSize2').textContent=sz+' · 설치 프로그램';
+    }
+  })
+  .catch(()=>{ document.getElementById('ver').textContent='버전 정보를 불러오지 못했어요'; });
 </script>
 </body>
 </html>
