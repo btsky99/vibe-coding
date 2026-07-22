@@ -11,6 +11,8 @@ REVISION HISTORY:
   페어링 proof 교환, 토큰에 body_hash+filename 서명 + nonce 재사용 거부.
 - 2026-07-22 Claude: Phase 3 Task 1 — 피어별 exec_trust(ask|auto) 저장. 원격 에이전트
   실행 승인 정책. 첫 승인 시 'auto' 선택하면 이후 팝업 없이 실행(감사로그는 유지).
+- 2026-07-22 Claude: Tailscale/VPN 지원 — 피어 레코드에 고정 주소(ip/http_port) 저장.
+  발견(UDP 브로드캐스트)이 서브넷/VPN을 못 넘어도 이 주소로 폴백 통신(_resolve_target).
 """
 # [WHY 코드기반 파생] shared_key를 pair 응답으로 평문 전송하면 LAN 스니퍼가 키를 캡처해
 #   토큰을 영구 위조(C2). 대신 shared_key = HKDF(코드) — 코드는 화면→사람→키패드로만 이동하고
@@ -103,13 +105,17 @@ class LanPeers:
         return ''.join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
 
     # ── 신뢰 저장 ────────────────────────────────────────────────────────
-    def add_peer(self, peer_id: str, name: str, shared_key: str) -> None:
+    def add_peer(self, peer_id: str, name: str, shared_key: str,
+                 ip: str = '', http_port: int = 0) -> None:
         # [Phase3] exec_trust 기본 'ask' — 원격실행은 최초 요청 시 반드시 승인 팝업.
         #   'auto'는 사용자가 첫 승인에서 명시적으로 격상해야만 부여(자율 실행 opt-in).
+        # [Tailscale] ip/http_port = 페어링 시점의 상대 고정 주소. 발견이 서브넷/VPN을 못 넘을 때
+        #   유일한 통신 경로(_resolve_target 폴백). 같은 LAN이면 비어도 발견이 덮으므로 무방.
         self._data.setdefault('peers', {})[peer_id] = {
             'name': name, 'shared_key': shared_key,
             'paired_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
             'exec_trust': 'ask',
+            'ip': ip, 'http_port': int(http_port or 0),
         }
         self._save()
 
@@ -128,6 +134,27 @@ class LanPeers:
 
     def is_trusted(self, peer_id: str) -> bool:
         return peer_id in self._data.get('peers', {})
+
+    # ── 고정 주소 (Tailscale/VPN 폴백) ────────────────────────────────────
+    def set_addr(self, peer_id: str, ip: str, http_port: int) -> bool:
+        """페어링된 피어의 통신 주소를 갱신. 신뢰 피어에만 적용."""
+        p = self._data.get('peers', {}).get(peer_id)
+        if not p:
+            return False
+        p['ip'] = ip
+        p['http_port'] = int(http_port or 0)
+        self._save()
+        return True
+
+    def get_addr(self, peer_id: str) -> dict | None:
+        """저장 주소 → {peer_id, name, ip, http_port}. ip/port 미보유면 None(발견에만 의존)."""
+        p = self._data.get('peers', {}).get(peer_id)
+        if not p:
+            return None
+        ip, port = p.get('ip', ''), int(p.get('http_port', 0) or 0)
+        if not ip or not port:
+            return None
+        return {'peer_id': peer_id, 'name': p.get('name', ''), 'ip': ip, 'http_port': port}
 
     # ── 원격실행 승인 정책 (Phase 3) ─────────────────────────────────────
     def get_exec_trust(self, peer_id: str) -> str:
