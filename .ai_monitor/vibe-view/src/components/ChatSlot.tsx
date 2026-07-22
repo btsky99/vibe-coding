@@ -19,6 +19,7 @@ import {
   ChevronDown, Wrench, Layout, Server, Brain, MessageCircle
 } from 'lucide-react';
 import { API_BASE } from '../constants';
+import { readClipboardText, writeClipboardText } from '../lib/clipboard';
 
 // ── 타입 정의 ──
 
@@ -95,20 +96,9 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
     return () => window.removeEventListener('click', close);
   }, [ctxMenu]);
 
-  // 클립보드 복사 헬퍼 — navigator.clipboard API 실패 시 execCommand 폴백
+  // 클립보드 복사 헬퍼 — lib/clipboard 위임 (pywebview NSPasteboard 브리지 폴백 포함)
   const copyToClipboard = useCallback(async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
+    await writeClipboardText(text);
   }, []);
 
   // localStorage 동기화
@@ -527,7 +517,7 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
               className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
               onClick={async () => {
                 try {
-                  const text = await navigator.clipboard.readText();
+                  const text = await readClipboardText();
                   if (text && inputRef.current) {
                     // 입력창에 붙여넣기 — 현재 커서 위치에 삽입
                     const start = inputRef.current.selectionStart;

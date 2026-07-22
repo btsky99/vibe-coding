@@ -7,6 +7,9 @@ DESCRIPTION: PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래�
              함수/객체/값은 BootConfig로 명시 주입받는다(R20).
 
 REVISION HISTORY:
+- 2026-07-22 Claude: _ClipboardBridge(js_api) 신설 — 맥 WKWebView가 navigator.clipboard를 조용히
+                     거부해 우클릭 복붙 전멸 → NSPasteboard 브리지로 우회. Edit 메뉴 탐색을
+                     서브메뉴 title 기준으로 수정(pywebview 6.x는 아이템 title이 빈 값).
 - 2026-07-08 Claude: server.py main() _init_and_load_app + webview 블록 전체 이관
                      (Phase 3 R20). 로직·주석 verbatim 유지, 심볼만 cfg 참조로 치환.
                      [불변식] _NODE_PTY_REST_URL은 server.py 모듈 전역이라 여기서 global
@@ -66,6 +69,42 @@ class BootConfig:
     open_app_window: Callable       # (url) GUI 실패 폴백
 
 
+class _ClipboardBridge:
+    """pywebview js_api — 프론트가 window.pywebview.api.clip_read/clip_write로 호출.
+
+    [WHY / 맥포팅 2026-07-22] 맥 WKWebView는 async Clipboard API의 권한 프롬프트를 구현하지 않아
+      navigator.clipboard.readText가 NotAllowedError로 조용히 거부됨(윈도우 WebView2는 허용) →
+      우클릭 메뉴 복사/붙여넣기가 맥에서만 전멸. NSPasteboard 직접 접근으로 우회한다.
+    [제약] js_api 호출은 pywebview 워커 스레드에서 실행됨 — NSPasteboard는 XPC 기반이라
+      오프메인 호출이 실무상 안전. 비-맥 플랫폼은 None/False 반환 → 프론트(lib/clipboard.ts)가
+      navigator.clipboard로 폴백(윈도우는 그걸로 충분).
+    """
+
+    def clip_read(self):
+        if sys.platform != 'darwin':
+            return None
+        try:
+            import AppKit
+            pb = AppKit.NSPasteboard.generalPasteboard()
+            s = pb.stringForType_(AppKit.NSPasteboardTypeString)
+            return str(s) if s is not None else ''
+        except Exception as e:
+            print(f"[clipboard] NSPasteboard 읽기 실패: {e}")
+            return None
+
+    def clip_write(self, text):
+        if sys.platform != 'darwin':
+            return False
+        try:
+            import AppKit
+            pb = AppKit.NSPasteboard.generalPasteboard()
+            pb.clearContents()
+            return bool(pb.setString_forType_(str(text or ''), AppKit.NSPasteboardTypeString))
+        except Exception as e:
+            print(f"[clipboard] NSPasteboard 쓰기 실패: {e}")
+            return False
+
+
 def _install_mac_edit_menu() -> bool:
     """[맥] 메뉴바 렌더링을 강제해 pywebview의 Edit 메뉴(복사/붙여넣기)를 활성화한다.
 
@@ -95,7 +134,11 @@ def _install_mac_edit_menu() -> bool:
         for i in range(main_menu.numberOfItems()):
             it = main_menu.itemAtIndex_(i)
             sub = it.submenu()
-            if sub is not None and it.title() in ('Edit', '편집'):
+            # [과거사고 2026-07-22] pywebview 6.x _add_edit_menu는 NSMenuItem엔 title을 안 주고
+            # 서브메뉴에만 'Edit'을 준다 — 아이템 title만 검사하면 탐색이 항상 실패해 중복 '편집'
+            # 메뉴를 만들고, 정작 keyEquivalent(⌘C/⌘V)를 소비하는 진짜 Edit 메뉴는 autoenables
+            # 그대로 남아 회색 항목이 키를 삼켰다(전 플랫폼 무반응). 서브메뉴 title도 함께 검사.
+            if sub is not None and (it.title() in ('Edit', '편집') or sub.title() in ('Edit', '편집')):
                 edit_menu = sub
                 break
         if edit_menu is None:
@@ -251,8 +294,11 @@ def run_gui_app(cfg: BootConfig) -> None:
             print(f"[*] 앱 로드 완료 — http://localhost:{_actual_port}")
 
         print(f"[*] Launching Desktop Window with Splash...")
+        # [WHY] js_api=클립보드 브리지 — 맥 WKWebView의 navigator.clipboard 거부 우회
+        #   (lib/clipboard.ts가 window.pywebview.api.clip_read/clip_write로 호출).
         window = webview.create_window(cfg.window_title,
-                              html=cfg.splash_html, width=1400, height=900)
+                              html=cfg.splash_html, width=1400, height=900,
+                              js_api=_ClipboardBridge())
 
         threading.Thread(target=force_win32_icon,
                          args=(cfg.official_icon, cfg.window_title),

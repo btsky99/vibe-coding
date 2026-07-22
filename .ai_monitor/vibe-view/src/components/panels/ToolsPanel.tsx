@@ -16,6 +16,7 @@ import {
   RefreshCw, Filter, ClipboardCopy, FileText, Check, Settings, Download, Loader2,
 } from 'lucide-react';
 import { API_BASE } from '../../constants';
+import { writeClipboardText } from '../../lib/clipboard';
 
 /* ── 타입 ──────────────────────────────────────────────────────────── */
 
@@ -107,7 +108,7 @@ const ToolsPanel = () => {
     // WebView2/Windows 입력창 호환을 위해 LF → CRLF 정규화.
     // LF만 있으면 일부 입력창(Claude Code CLI 등)이 줄바꿈을 인식 못해 한 줄로 합쳐짐.
     const text = prompt.prompt.replace(/\r\n|\r|\n/g, '\r\n');
-    navigator.clipboard.writeText(text).then(() => {
+    writeClipboardText(text).then(() => {
       setCopiedId(prompt.id);
       setTimeout(() => setCopiedId(null), 2000);
     });

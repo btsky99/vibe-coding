@@ -68,6 +68,7 @@ import ChatSlot from './ChatSlot';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
 import { copyTextToClipboard, captureSelectRestore, installClipboardShortcuts } from './terminal/xtermSelection';
+import { readClipboardText } from '../lib/clipboard';
 import ClaudeContextBar, { type ClaudeUsage } from './terminal/ClaudeContextBar';
 import AgentSelectCards from './terminal/AgentSelectCards';
 import QuotaBadge, { type AgentQuotaInfo } from './terminal/QuotaBadge';
@@ -906,7 +907,7 @@ export default function TerminalSlot({
             className="w-full text-left px-4 py-1.5 hover:bg-white/10 transition-colors"
             onClick={async () => {
               try {
-                const text = await navigator.clipboard.readText();
+                const text = await readClipboardText();
                 // [WHY] ws.send 직송 금지 — bracketed paste 모드를 우회해 TUI(claude CLI)에서
                 // 멀티라인 붙여넣기가 줄 단위로 즉시 실행됨. term.paste()는 onData 경유로
                 // \x1b[200~ 래핑을 적용한 뒤 같은 ws로 흘러간다.
@@ -977,7 +978,7 @@ export default function TerminalSlot({
             onClick={async () => {
               const el = inputRef.current;
               try {
-                const text = await navigator.clipboard.readText();
+                const text = await readClipboardText();
                 if (el && text) {
                   const start = el.selectionStart, end = el.selectionEnd;
                   const next = el.value.slice(0, start) + text + el.value.slice(end);

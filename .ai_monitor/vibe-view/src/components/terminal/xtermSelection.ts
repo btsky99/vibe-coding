@@ -4,32 +4,23 @@
  * 📝 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸.
  *          TerminalSlot.tsx가 1500줄 제한을 넘겨 도메인 단위(클립보드/선택)로 분리.
  * REVISION HISTORY:
+ * - 2026-07-22 Claude: 클립보드 I/O를 lib/clipboard.ts(pywebview NSPasteboard 브리지 폴백)로 위임 —
+ *   맥 WKWebView가 navigator.clipboard를 조용히 거부해 복붙 전멸하던 문제.
  * - 2026-07-22 Claude: installClipboardShortcuts 신설 — 맥 ⌘C/⌘V + 윈도우 Ctrl+Shift+C/V 터미널 복붙 지원.
  * - 2026-07-05 Claude: TerminalSlot.tsx에서 copyTextToClipboard + 선택 좌표 캡처 로직 분리 신설.
  * ------------------------------------------------------------------------
  */
 import type { Terminal as XTerm } from '@xterm/xterm';
+import { readClipboardText, writeClipboardText } from '../../lib/clipboard';
 
 // [WHY] navigator.platform은 deprecated지만 WKWebView/WebView2 양쪽에서 여전히 유효.
 // userAgent 폴백 병행 — 맥 판정이 틀리면 ⌘ 단축키가 통째로 죽으므로 이중 검사.
 const IS_MAC = /Mac/i.test(navigator.platform) || /Macintosh/i.test(navigator.userAgent);
 
-// [WHY] 클립보드 쓰기 공용 헬퍼 — navigator.clipboard 실패 시 execCommand 폴백.
-// WebView2(PyWebView)에서 writeText가 포커스/권한 사유로 거부될 수 있어 폴백 필수.
+// [호환] 기존 호출부(TerminalSlot 등)가 쓰는 이름 유지 — 구현은 lib/clipboard로 위임.
 // xterm getSelection()은 Windows에서 이미 \r\n으로 join되므로 CRLF 재정규화 불필요.
 export async function copyTextToClipboard(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-  }
+  return writeClipboardText(text);
 }
 
 // [WHY] 터미널 키보드 복붙 단축키 설치 — 맥/윈도우 관례가 달라서 플랫폼 분기 필수.
@@ -53,7 +44,7 @@ export function installClipboardShortcuts(
   let pendingPaste: ReturnType<typeof setTimeout> | null = null;
 
   const doPaste = () => {
-    navigator.clipboard.readText()
+    readClipboardText()
       .then(text => { if (text) term.paste(text); })
       .catch(() => onPasteDenied());
   };

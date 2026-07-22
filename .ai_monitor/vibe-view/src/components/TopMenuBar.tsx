@@ -20,6 +20,7 @@ import {
 import { API_BASE } from '../constants';
 import { VscFolderOpened } from 'react-icons/vsc';
 import { slugifyProjectPath } from '../lib/projectContext';
+import { writeClipboardText } from '../lib/clipboard';
 
 // 레이아웃 모드 타입 — App.tsx와 동일하게 유지
 type LayoutMode = '1' | '2' | '3' | '4' | '2x2' | '6' | '8';
@@ -87,7 +88,7 @@ function LogViewerModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   }, [isOpen, logType]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    writeClipboardText(lines.join('\n')).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -259,7 +260,7 @@ const TopMenuBar = memo(function TopMenuBar({
   };
 
   const handleCopyPrompt = (id: string, prompt: string) => {
-    navigator.clipboard.writeText(prompt).then(() => {
+    writeClipboardText(prompt).then(() => {
       setCopiedPromptId(id);
       setTimeout(() => setCopiedPromptId(null), 2000);
     });
