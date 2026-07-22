@@ -30,6 +30,9 @@ REVISION HISTORY:
                      persist_active_project_context. [불변식] persist는 server.py 소유 전역
                      PROJECT_CONTEXT_UNRESOLVED를 직접 못 세우므로 bool(unresolved)만 반환 —
                      세팅은 caller(server.py) 책임.
+- 2026-07-22 Claude: 맥 포팅 — 저장된 last_path/projects.json 검증에 _is_valid_stored_dir 도입.
+                     Windows 절대경로('D:/vibe-coding')가 POSIX에선 상대경로라 정크 폴더로 인해
+                     is_dir()만으론 거짓 통과하던 문제 → is_absolute() 병행 검증으로 자가치유.
 """
 
 from __future__ import annotations
@@ -46,6 +49,24 @@ def slugify(root: Path) -> str:
     return str(root).replace('\\', '/').replace(':', '').replace('/', '--').lstrip('-')
 
 
+def _is_valid_stored_dir(lp: str) -> bool:
+    """저장된 프로젝트 경로 문자열이 이 머신에서 실제 사용 가능한 절대 디렉토리인지 검증.
+
+    [불변식] 반드시 is_absolute() 를 함께 본다 — is_dir()만으로는 부족.
+    [WHY / 과거사고 2026-07 맥포팅] Windows 세션이 저장한 last_path 'D:/vibe-coding'는
+      POSIX에서 **절대경로가 아니라 상대경로**로 해석된다(Path('D:/x').is_absolute()==False).
+      게다가 제텔 동기화가 같은 문자열을 cwd 기준으로 풀어 리포 안에 './D:/vibe-coding'
+      정크 폴더를 만들면 is_dir()이 **거짓 통과**해, 앱이 상대경로 D:/vibe-coding를 프로젝트
+      루트로 채택 → 파일탐색기 빈 목록 + node-pty 'CWD invalid → posix_spawnp failed'.
+      절대경로 요구 시 Windows 드라이브 경로는 POSIX에서 자동 거부되어 default_root로
+      폴백된다(자가치유). Windows에서는 'D:/..'가 절대경로라 기존 동작 그대로 유지된다.
+    """
+    if not lp:
+        return False
+    p = Path(lp)
+    return p.is_absolute() and p.is_dir()
+
+
 def current_project_root(default_root: Path, config_file: Path) -> Path:
     """현재 활성 프로젝트 루트 반환.
 
@@ -56,7 +77,7 @@ def current_project_root(default_root: Path, config_file: Path) -> Path:
         if config_file.exists():
             cfg = json.loads(config_file.read_text(encoding='utf-8'))
             lp = cfg.get('last_path', '')
-            if lp and Path(lp).is_dir():
+            if _is_valid_stored_dir(lp):
                 return Path(lp)
     except Exception as e:
         print(f"[project_context] config 로드 실패: {e}", file=sys.stderr)
@@ -123,7 +144,7 @@ def resolve_frozen_project_root(exe_parent: Path) -> Path:
         if cfg_file.exists():
             cfg = json.loads(cfg_file.read_text(encoding='utf-8'))
             lp = cfg.get('last_path', '')
-            if lp and Path(lp).is_dir():
+            if _is_valid_stored_dir(lp):
                 return Path(lp)
     except Exception:
         pass
@@ -133,7 +154,7 @@ def resolve_frozen_project_root(exe_parent: Path) -> Path:
             saved = json.loads(projs_file.read_text(encoding='utf-8'))
             if isinstance(saved, list) and saved:
                 first = Path(str(saved[0]).replace('/', os.sep))
-                if first.is_dir():
+                if first.is_absolute() and first.is_dir():
                     return first
     except Exception:
         pass
@@ -161,8 +182,9 @@ def persist_active_project_context(
         if config_file.exists():
             cfg = json.loads(config_file.read_text(encoding='utf-8'))
         lp = cfg.get('last_path', '')
-        # last_path가 비었거나 더 이상 존재하지 않는 경로면 현재 실제 project_root로 고정
-        if not (lp and Path(lp).is_dir()):
+        # last_path가 비었거나·존재하지 않거나·타 OS 절대경로(맥의 'D:/..' 등)면 현재 실제
+        # project_root로 고정 — _is_valid_stored_dir가 절대경로+디렉토리 여부를 함께 본다.
+        if not _is_valid_stored_dir(lp):
             _norm = str(project_root).replace('\\', '/')
             cfg['last_path'] = _norm
             config_file.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')

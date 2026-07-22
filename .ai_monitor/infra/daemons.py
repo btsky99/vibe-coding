@@ -9,6 +9,9 @@
 #     main() 후반에 재바인딩되므로 모듈 import 시점 값 고정을 피한다.
 #   - [불변식] subprocess로 띄운 자식은 반드시 env.child_procs에 append —
 #     lifecycle.cleanup_child_procs가 이 리스트만 종료 대상으로 삼는다.
+# [2026-07-22] Claude — 맥 포팅: config vault_dir 검증을 _config_vault_dir로 통합.
+#   Windows 절대경로가 POSIX에서 상대로 풀려 리포 내 정크 vault + FS 이벤트 폭주를
+#   유발 → is_absolute() 검증으로 전역 vault 폴백(중복 2곳 흡수).
 # ─────────────────────────────────────────────────────────────────────────────
 import json
 import os
@@ -22,6 +25,26 @@ from typing import Callable
 
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 from infra import runtime
+
+
+def _config_vault_dir(config_file: Path, default_vault: Path) -> Path:
+    """config.json의 vault_dir이 이 OS에서 유효(절대경로)하면 그 경로, 아니면 default_vault.
+
+    [WHY / 과거사고 2026-07 맥포팅] Windows 세션이 저장한 vault_dir 'D:/vibe-coding/.zettel-vault'는
+      POSIX에서 상대경로로 풀려 리포 안에 './D:/vibe-coding/.zettel-vault' 정크 트리를 만들고,
+      그게 FS 워처와 맞물려 이벤트 폭주를 일으킨다. vault는 mkdir로 생성되므로 존재 검증(is_dir)이
+      아니라 **is_absolute()만** 본다 — 타 OS 절대경로는 POSIX에서 상대로 취급돼 자동 거부되고
+      전역 기본 vault로 폴백된다. Windows에서는 'D:/..'가 절대경로라 기존 동작 유지.
+    """
+    try:
+        if config_file.exists():
+            cfg = json.loads(config_file.read_text(encoding='utf-8'))
+            uv = cfg.get('vault_dir', '')
+            if uv and Path(uv).is_absolute():
+                return Path(uv)
+    except Exception:
+        pass
+    return default_vault
 
 
 @dataclass
@@ -339,16 +362,8 @@ def run_zettel_sync(env: DaemonEnv) -> None:
         _mod = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_mod)
 
-        # config.json에서 사용자 지정 vault 경로 읽기 (없으면 전역 기본값)
-        _vault = env.global_vault_dir
-        try:
-            if env.config_file.exists():
-                _cfg = json.loads(env.config_file.read_text(encoding='utf-8'))
-                _user_vault = _cfg.get('vault_dir', '')
-                if _user_vault:
-                    _vault = Path(_user_vault)
-        except Exception:
-            pass
+        # config.json에서 사용자 지정 vault 경로 읽기 (없거나 타 OS 절대경로면 전역 기본값)
+        _vault = _config_vault_dir(env.config_file, env.global_vault_dir)
         _vault.mkdir(parents=True, exist_ok=True)
 
         # 기존 .zettel-vault 마이그레이션 (최초 1회)
@@ -381,15 +396,7 @@ def run_zettel_sync(env: DaemonEnv) -> None:
         #   서버 DB 커넥션이 새 프로젝트로 바뀌므로 이 루프의 스코프도 함께 따라가야 한다
         #   (옛 스코프로 새 DB를 정리하면 노트 오삭제 위험). env.current_project_id는 라이브 콜러블.
         def _resolve_current():
-            _v = env.global_vault_dir
-            try:
-                if env.config_file.exists():
-                    _c = json.loads(env.config_file.read_text(encoding='utf-8'))
-                    _uv = _c.get('vault_dir', '')
-                    if _uv:
-                        _v = Path(_uv)
-            except Exception:
-                pass
+            _v = _config_vault_dir(env.config_file, env.global_vault_dir)
             return _v, env.current_project_id()
 
         # Google Drive vault — 자동 탐지 + config.json 오버라이드

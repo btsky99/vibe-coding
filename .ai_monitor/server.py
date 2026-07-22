@@ -1009,7 +1009,8 @@ def _g_agents(h, pp):
 # [순수위임] vibe 3종(sidebar/notifications/skills)은 원본이 이미 1~3줄 모듈 위임 → 테이블 등록만.
 def _g_config(h, pp):
     config_api.handle_get(h, CONFIG_FILE, GLOBAL_VAULT_DIR,
-                          PROJECT_CONTEXT_UNRESOLVED, _current_project_id())
+                          PROJECT_CONTEXT_UNRESOLVED, _current_project_id(),
+                          _current_project_root())
 def _g_vibe_sidebar(h, pp):        vibe_api.handle_sidebar_state(h)
 def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
 def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)

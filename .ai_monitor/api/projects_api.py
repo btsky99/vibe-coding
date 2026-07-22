@@ -5,6 +5,8 @@ DESCRIPTION: 최근 프로젝트 목록 API — projects.json에 최근 연 프�
 
 REVISION HISTORY:
 - 2026-07-05 Claude: server.py '/api/projects' GET/POST 블록 분리(long-tail 라운드). 로직 원본 동일.
+- 2026-07-22 Claude: 맥 포팅 — GET에서 타 OS 절대경로(맥의 'D:/..' 상대해석) 항목을 최근
+  목록에서 필터. Windows 세션 커밋 projects.json의 죽은 경로가 드롭다운에 뜨던 문제.
 """
 from __future__ import annotations
 
@@ -23,12 +25,19 @@ def _load(projects_file: Path) -> list:
 
 
 def handle_get(handler, projects_file: Path) -> None:
-    """GET /api/projects — 최근 프로젝트 경로 목록 반환."""
+    """GET /api/projects — 최근 프로젝트 경로 목록 반환.
+
+    [맥포팅 2026-07-22] 타 OS 절대경로(맥에서의 'D:/..')는 POSIX에서 상대경로로 풀려
+      존재하지 않는 폴더를 가리키므로 최근 목록에서 제외한다 — 파일탐색기 드롭다운에 죽은
+      Windows 경로가 뜨는 것 방지. is_absolute()가 이 머신 기준 유효성의 최소 필터.
+    """
     handler.send_response(200)
     handler.send_header('Content-Type', 'application/json;charset=utf-8')
     handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
     handler.end_headers()
-    handler.wfile.write(json.dumps(_load(projects_file)).encode('utf-8'))
+    projects = [p for p in _load(projects_file)
+                if isinstance(p, str) and Path(p).is_absolute()]
+    handler.wfile.write(json.dumps(projects).encode('utf-8'))
 
 
 def handle_post(handler, projects_file: Path) -> None:
@@ -44,7 +53,10 @@ def handle_post(handler, projects_file: Path) -> None:
             handler.wfile.write(json.dumps({"error": "Invalid path"}).encode('utf-8'))
             return
 
-        projects = _load(projects_file)
+        # [맥포팅 2026-07-22] 저장 시 타 OS 절대경로(맥의 'D:/..')를 영구 제거 — 이걸 안 걸면
+        #   POST 응답이 stale Windows 경로를 되돌려줘 프론트 드롭다운에 다시 뜬다(GET 필터만으론 부족).
+        projects = [p for p in _load(projects_file)
+                    if isinstance(p, str) and Path(p).is_absolute()]
         if new_path in projects:
             projects.remove(new_path)
         projects.insert(0, new_path)   # 최신 프로젝트를 위로

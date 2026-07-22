@@ -13,6 +13,9 @@ dist/
 build/
 .ai_monitor/data/
 __pycache__/
+# 맥/리눅스 개발용 venv (PORTING_MAC 0단계) — OS별 바이너리라 커밋 금지
+.ai_monitor/venv/
+venv/
 *.pyc
 .env
 *.spec
