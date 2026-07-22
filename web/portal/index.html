@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<!--
+  FILE: web/portal/index.html
+  DESCRIPTION: btsky.pe.kr 프로젝트 관리 포털 — 로그인(관리자/일반 분리) 프로토타입.
+    [중요] GitHub Pages는 정적 호스팅이라 '진짜' 서버 인증이 불가. 지금은 mock 인증
+    (프론트 전용, localStorage 세션)으로 UX/권한 흐름을 먼저 검증하는 프로토타입이다.
+    실사용 승격 경로: AUTH 객체의 login()/현재사용자와 DB(fetchProjects)만 Supabase로
+    교체하면 됨(아래 [SUPABASE] 주석 지점). 그 외 UI/권한 로직은 그대로 재사용.
+    [보안] 데모 계정 비번은 화면에 노출된 더미값 — 실계정 자격증명 절대 하드코딩 금지.
+  REVISION HISTORY:
+    - 2026-07-22 Claude: 최초 프로토타입 — 관리자(전체)/일반(본인 프로젝트) 뷰 분리.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>바이브 코딩 — 프로젝트 관리 포털</title>
+<style>
+  :root{
+    --bg:#0b0d10; --card:#14171c; --card2:#1a1e24; --line:#252b33; --fg:#e6e9ee;
+    --muted:#8b93a1; --accent:#3ba55d; --accent2:#2d7d46; --amber:#e0a83b; --red:#e0574b;
+    --shadow:0 8px 32px rgba(0,0,0,.4);
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f6f9; --card:#ffffff; --card2:#f7f9fb; --line:#e2e6ec; --fg:#1a1d22;
+           --muted:#5a6472; --shadow:0 8px 32px rgba(0,0,0,.08); }
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--fg); min-height:100vh;
+    font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif; font-size:14px; }
+  /* 프로토타입 배너 */
+  .proto{ background:var(--amber); color:#1a1d22; text-align:center; font-size:12px;
+    font-weight:600; padding:6px 12px; }
+  /* ── 로그인 화면 ── */
+  #login{ min-height:calc(100vh - 30px); display:flex; align-items:center; justify-content:center; padding:24px; }
+  .lcard{ background:var(--card); border:1px solid var(--line); border-radius:20px;
+    box-shadow:var(--shadow); padding:40px 36px; max-width:400px; width:100%; }
+  .logo{ font-size:44px; text-align:center; margin-bottom:12px; }
+  h1{ font-size:22px; font-weight:800; text-align:center; letter-spacing:-.02em; }
+  .sub{ color:var(--muted); font-size:13px; text-align:center; margin:6px 0 24px; }
+  label{ display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; font-weight:600; }
+  input{ width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line);
+    background:var(--card2); color:var(--fg); font-size:14px; }
+  input:focus{ outline:none; border-color:var(--accent); }
+  .btn{ width:100%; margin-top:20px; padding:13px; border:none; border-radius:11px; color:#fff;
+    background:linear-gradient(180deg,var(--accent),var(--accent2)); font-size:15px; font-weight:700;
+    cursor:pointer; transition:transform .1s, box-shadow .1s; box-shadow:0 4px 14px rgba(59,165,93,.3); }
+  .btn:hover{ transform:translateY(-1px); }
+  .err{ color:var(--red); font-size:12px; margin-top:12px; text-align:center; min-height:16px; }
+  .demo{ margin-top:22px; padding:12px; border:1px dashed var(--line); border-radius:10px;
+    font-size:12px; color:var(--muted); line-height:1.7; }
+  .demo b{ color:var(--fg); }
+  /* ── 앱 화면 ── */
+  #app{ display:none; }
+  .top{ display:flex; align-items:center; justify-content:space-between; padding:14px 24px;
+    border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:5; }
+  .top .brand{ font-weight:800; display:flex; align-items:center; gap:8px; }
+  .role{ font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .role.admin{ background:rgba(224,168,59,.15); color:var(--amber); border:1px solid rgba(224,168,59,.4); }
+  .role.user{ background:rgba(59,165,93,.15); color:var(--accent); border:1px solid rgba(59,165,93,.4); }
+  .top-right{ display:flex; align-items:center; gap:14px; font-size:13px; color:var(--muted); }
+  .logout{ background:none; border:1px solid var(--line); color:var(--muted); padding:6px 12px;
+    border-radius:8px; cursor:pointer; font-size:12px; }
+  .logout:hover{ color:var(--fg); border-color:var(--muted); }
+  .wrap{ max-width:1000px; margin:0 auto; padding:28px 24px; }
+  .hi{ font-size:20px; font-weight:800; margin-bottom:4px; }
+  .hi-sub{ color:var(--muted); margin-bottom:24px; }
+  .stats{ display:flex; gap:14px; margin-bottom:26px; flex-wrap:wrap; }
+  .stat{ flex:1; min-width:140px; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:16px 18px; }
+  .stat .n{ font-size:26px; font-weight:800; }
+  .stat .l{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .sect-h{ font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.05em; margin:8px 0 12px; }
+  .plist{ display:flex; flex-direction:column; gap:10px; }
+  .proj{ background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:16px 18px; display:flex; align-items:center; gap:16px; }
+  .proj .pname{ font-weight:700; }
+  .proj .powner{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .proj .grow{ flex:1; }
+  .badge{ font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; white-space:nowrap; }
+  .b-active{ background:rgba(59,165,93,.15); color:var(--accent); }
+  .b-hold{ background:rgba(224,168,59,.15); color:var(--amber); }
+  .b-done{ background:rgba(139,147,161,.15); color:var(--muted); }
+  .bar{ width:120px; height:7px; background:var(--line); border-radius:4px; overflow:hidden; }
+  .bar>i{ display:block; height:100%; background:var(--accent); }
+  .adminbox{ margin-top:30px; background:var(--card); border:1px solid rgba(224,168,59,.3);
+    border-radius:14px; padding:18px; }
+  .adminbox h3{ font-size:14px; margin-bottom:12px; display:flex; align-items:center; gap:6px; }
+  .urow{ display:flex; align-items:center; gap:12px; padding:8px 0; border-top:1px solid var(--line); font-size:13px; }
+  .urow:first-of-type{ border-top:none; }
+  .utag{ font-size:11px; padding:2px 8px; border-radius:6px; background:var(--card2); color:var(--muted); }
+</style>
+</head>
+<body>
+  <div class="proto">🧪 프로토타입 — 실제 서버 인증/DB 미연동 (Supabase 연동 시 실사용 승격). 데모 계정으로 로그인해 보세요.</div>
+
+  <!-- 로그인 -->
+  <div id="login">
+    <form class="lcard" onsubmit="return doLogin(event)">
+      <div class="logo">🗂️</div>
+      <h1>프로젝트 관리 포털</h1>
+      <p class="sub">바이브 코딩 · 통합 관리</p>
+      <label for="uid">아이디</label>
+      <input id="uid" autocomplete="username" placeholder="admin 또는 user">
+      <label for="pw">비밀번호</label>
+      <input id="pw" type="password" autocomplete="current-password" placeholder="비밀번호">
+      <button class="btn" type="submit">로그인</button>
+      <div class="err" id="err"></div>
+      <div class="demo">
+        <b>데모 계정</b> (프로토타입 — 실제 비번 아님)<br>
+        · 관리자: <b>admin</b> / <b>admin123</b> → 모든 프로젝트<br>
+        · 일반: <b>user</b> / <b>user123</b> → 본인 프로젝트만
+      </div>
+    </form>
+  </div>
+
+  <!-- 앱 -->
+  <div id="app">
+    <div class="top">
+      <div class="brand">🗂️ 프로젝트 관리 포털 <span class="role" id="roleBadge"></span></div>
+      <div class="top-right">
+        <span id="whoami"></span>
+        <button class="logout" onclick="logout()">로그아웃</button>
+      </div>
+    </div>
+    <div class="wrap">
+      <div class="hi" id="greet"></div>
+      <div class="hi-sub" id="greetSub"></div>
+      <div class="stats" id="stats"></div>
+      <div class="sect-h">프로젝트</div>
+      <div class="plist" id="plist"></div>
+      <div class="adminbox" id="adminbox" style="display:none">
+        <h3>👑 사용자 관리 <span style="font-weight:400;color:var(--muted);font-size:12px">(관리자 전용)</span></h3>
+        <div id="ulist"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// [SUPABASE 승격 지점 ①] 인증 — 지금은 mock. 실사용 시 supabase.auth.signInWithPassword로 교체.
+// 데모 비번은 노출된 더미값(프로토타입) — 실제 자격증명은 절대 여기 넣지 말 것.
+const USERS = {
+  admin: { pw:'admin123', role:'admin', name:'관리자' },
+  user:  { pw:'user123',  role:'user',  name:'유진수' },
+};
+const AUTH = {
+  login(id, pw){
+    const u = USERS[id];
+    if (u && u.pw === pw) { const s={id, role:u.role, name:u.name};
+      localStorage.setItem('portal_sess', JSON.stringify(s)); return s; }
+    return null;
+  },
+  current(){ try { return JSON.parse(localStorage.getItem('portal_sess')||'null'); } catch { return null; } },
+  logout(){ localStorage.removeItem('portal_sess'); },
+};
+
+// [SUPABASE 승격 지점 ②] 데이터 — 지금은 샘플. 실사용 시 supabase.from('projects').select()로 교체.
+// 관리자는 전체, 일반은 owner==본인만 (RLS로 서버에서 강제하는 게 정석).
+const PROJECTS = [
+  { name:'vibe-coding',  owner:'유진수', status:'active', progress:82 },
+  { name:'파인드라이브 자동화', owner:'유진수', status:'hold',   progress:15 },
+  { name:'다운로드 포털',  owner:'유진수', status:'active', progress:95 },
+  { name:'하이브 대시보드', owner:'관리자', status:'active', progress:60 },
+  { name:'맥 포팅',       owner:'관리자', status:'hold',   progress:5  },
+  { name:'제텔카스텐 정리', owner:'관리자', status:'done',   progress:100 },
+];
+function fetchProjects(sess){
+  return sess.role === 'admin' ? PROJECTS : PROJECTS.filter(p => p.owner === sess.name);
+}
+
+const S = { active:{t:'진행중',c:'b-active'}, hold:{t:'보류',c:'b-hold'}, done:{t:'완료',c:'b-done'} };
+
+function doLogin(e){
+  e.preventDefault();
+  const id = document.getElementById('uid').value.trim();
+  const pw = document.getElementById('pw').value;
+  const sess = AUTH.login(id, pw);
+  if (!sess) { document.getElementById('err').textContent = '아이디 또는 비밀번호가 올바르지 않습니다.'; return false; }
+  render(sess);
+  return false;
+}
+function logout(){ AUTH.logout(); document.getElementById('app').style.display='none';
+  document.getElementById('login').style.display='flex';
+  document.getElementById('uid').value=''; document.getElementById('pw').value=''; document.getElementById('err').textContent=''; }
+
+function render(sess){
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='block';
+  const isAdmin = sess.role==='admin';
+  const rb = document.getElementById('roleBadge');
+  rb.textContent = isAdmin ? '관리자' : '일반';
+  rb.className = 'role ' + (isAdmin?'admin':'user');
+  document.getElementById('whoami').textContent = sess.name + ' 님';
+  document.getElementById('greet').textContent = sess.name + ' 님, 안녕하세요 👋';
+  document.getElementById('greetSub').textContent = isAdmin
+    ? '전체 프로젝트를 관리할 수 있습니다.' : '내가 담당하는 프로젝트입니다.';
+
+  const list = fetchProjects(sess);
+  // 통계
+  const active = list.filter(p=>p.status==='active').length;
+  const done = list.filter(p=>p.status==='done').length;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="n">${list.length}</div><div class="l">${isAdmin?'전체':'내'} 프로젝트</div></div>
+    <div class="stat"><div class="n" style="color:var(--accent)">${active}</div><div class="l">진행중</div></div>
+    <div class="stat"><div class="n" style="color:var(--muted)">${done}</div><div class="l">완료</div></div>`;
+  // 프로젝트 목록
+  document.getElementById('plist').innerHTML = list.map(p=>{
+    const s = S[p.status];
+    return `<div class="proj">
+      <div><div class="pname">${p.name}</div><div class="powner">담당: ${p.owner}</div></div>
+      <div class="grow"></div>
+      <div class="bar"><i style="width:${p.progress}%"></i></div>
+      <span style="font-size:12px;color:var(--muted);width:34px;text-align:right">${p.progress}%</span>
+      <span class="badge ${s.c}">${s.t}</span>
+    </div>`; }).join('');
+  // 관리자 전용 — 사용자 관리(권한 분리 데모)
+  const ab = document.getElementById('adminbox');
+  if (isAdmin){
+    ab.style.display='block';
+    document.getElementById('ulist').innerHTML = Object.entries(USERS).map(([id,u])=>`
+      <div class="urow"><b>${u.name}</b><span class="utag">${id}</span>
+        <span class="utag">${u.role==='admin'?'관리자':'일반'}</span>
+        <div style="flex:1"></div>
+        <span style="color:var(--muted);font-size:12px">${PROJECTS.filter(p=>p.owner===u.name).length}개 담당</span>
+      </div>`).join('');
+  } else { ab.style.display='none'; }
+}
+
+// 세션 유지 — 새로고침해도 로그인 상태 보존
+const existing = AUTH.current();
+if (existing) render(existing);
+</script>
+</body>
+</html>
