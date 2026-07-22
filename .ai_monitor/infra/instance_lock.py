@@ -7,6 +7,11 @@ DESCRIPTION: 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로�
              os._exit(0)으로 새 인스턴스를 즉시 종료한다.
 
 REVISION HISTORY:
+- 2026-07-22 Claude: 멀티 인스턴스 포트 슬롯화 — (프로젝트×환경) 해시로 9000-9008 짝수
+                     베이스를 결정적 배정. dev+설치본 + '서로 다른 프로젝트 설치본 2개'
+                     동시 실행 시 둘 다 9000을 선호해 TOCTOU 경쟁→나중 인스턴스 PTY가
+                     먼저 인스턴스 포트에 얹힘→먼저 창 닫으면 나머지 터미널 전멸하던 사고
+                     수정. 폴백도 9010(오피스 침범)→대역 내(9000-9008) 한정.
 - 2026-07-17 Claude: 포트 폴백 9010 하드코딩 수정 — VIBE_PORT_BASE 명시 시 대역 내(+1)
                      탐색. 좀비의 9100 점유 시 smoke 서버가 9010번대로 새어 스캔 실패하던
                      "무바인딩" 오판의 근본 원인.
@@ -86,62 +91,75 @@ def acquire_single_instance_lock(project_root: Path) -> socket.socket:
     return _lock_sock
 
 
-def resolve_server_ports(find_free_port) -> tuple[int, int]:
+def _server_port_slot_base(project_root: Path | None) -> int:
+    """(프로젝트 × 실행환경)마다 9000-9008 대역의 고유 짝수 베이스를 결정적으로 배정.
+
+    [WHY] 서로 다른 프로젝트의 설치본(frozen) 2개를 동시에 켜는 게 실제 목표인데,
+      둘 다 frozen이라 같은 9000을 선호하면 test-bind→close→real-bind TOCTOU 경쟁으로
+      같은 http/ws를 골라 나중 인스턴스 PTY가 먼저 인스턴스 포트에 얹히고 → 먼저 창을
+      닫으면 나머지 터미널이 통째로 죽는다(2026-07-22 사고). 인스턴스 락과 동일 시드로
+      해시해 슬롯을 미리 갈라두면 경쟁 자체가 성립하지 않는다.
+    [불변식/대역] 5슬롯(9000/9002/9004/9006/9008) — http=짝수, ws=http+1(홀수)이라 쌍이
+      모두 9000-9009 안. 오피스(9010~9018)·heartbeat 싱글턴(9019)과 비충돌이고
+      server_locator 스캔(9000-9019)이 project_id 대조로 자기 서버만 골라낸다.
+    [한계] 5슬롯 mod 해시라 서로 다른 프로젝트가 같은 슬롯에 떨어질 확률 1/5 — 그 경우엔
+      아래 fallback(대역 내 재탐색)이 흡수한다. 6개 이상 동시 실행은 대역 포화라 미지원.
+    """
+    if project_root is None:
+        return 9000
+    _seed = str(project_root)
+    if getattr(sys, 'frozen', False):
+        _seed += '::frozen'
+    _h = int(hashlib.md5(_seed.encode()).hexdigest()[:4], 16)
+    return 9000 + (_h % 5) * 2
+
+
+def _try_bind(port: int) -> bool:
+    """해당 포트가 지금 비어있는지 실제 bind로 확인(즉시 close). TOCTOU 有 — 확정 아님."""
+    try:
+        _s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        _s.bind(('127.0.0.1', port))
+        _s.close()
+        return True
+    except OSError:
+        return False
+
+
+def resolve_server_ports(find_free_port, project_root: Path | None = None) -> tuple[int, int]:
     """HTTP/WS 서버 포트를 확정해 (http_port, ws_port)를 반환한다.
 
     find_free_port: 빈 포트 탐색 함수 (caller가 src.server_utils에서 주입).
+    project_root: 슬롯 해시용. 생략 시 9000 고정(하위호환).
     """
-    # ── 포트 확정: HTTP 9000, WS 9001 고정 + 충돌 시 대체 탐색 ─────────────────
-    # VIBE_PORT_BASE 환경변수가 있으면 해당 포트부터 시작 (smoke test 격리용)
-    # 단일 인스턴스이므로 슬롯 기반 분배 불필요. 고정 포트 우선 시도.
-    #
-    # [과거사고 2026-07-22] 개발버전+설치버전을 '동시에' 켜면 둘 다 9000을 test-bind→
-    #   close→(나중)real-bind 하는 TOCTOU 경쟁으로 같은 http/ws 포트를 골랐다. HTTP는
-    #   app_boot의 +10 폴백이 있으나 그 폴백이 WS_PORT 전역을 재동기화하지 않아, 나중
-    #   인스턴스의 프론트가 먼저 인스턴스의 PTY 서버(ws=9001)에 얹혀 붙는다 → 먼저 창을
-    #   닫으면 graceful_shutdown이 9001 PTY를 죽여 나중 인스턴스 터미널이 통째로 사망.
-    #   시간차를 두면 안 터지던 이유가 이 경쟁 때문.
-    # [해결] 인스턴스 락(_lock_seed)이 'dev 2개' / 'frozen 2개' 동시 기동은 이미 막으므로
-    #   실제로 공존 가능한 조합은 dev+frozen 하나뿐. 그래서 락 시드처럼 환경별로 포트
-    #   베이스를 갈라두면 경쟁 자체가 성립하지 않는다(TOCTOU 무해화). frozen은 외부 도구/
-    #   바로가기가 기대하는 9000 고정, dev만 9004로 이동. 둘 다 server_locator 스캔 범위
-    #   (9000~9019) 안 + 오피스(9010~)·heartbeat(9019)와 비충돌. VIBE_PORT_BASE 명시 시엔
-    #   그 값이 항상 우선(smoke 격리 계약 불변).
-    _default_base = '9000' if getattr(sys, 'frozen', False) else '9004'
-    _preferred_http = int(os.environ.get('VIBE_PORT_BASE', _default_base))
-    _http_ok = False
-    try:
-        _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _test_sock.bind(('127.0.0.1', _preferred_http))
-        _test_sock.close()
-        _http_ok = True
-    except OSError:
-        _http_ok = False
-
-    if _http_ok:
-        http_port = _preferred_http
+    # ── 포트 확정: (프로젝트×환경) 고유 슬롯 우선 + 충돌 시 대역 내 대체 탐색 ────────
+    # VIBE_PORT_BASE 환경변수가 있으면 그 값이 '항상' 우선 (smoke test 격리 계약 불변).
+    if 'VIBE_PORT_BASE' in os.environ:
+        _preferred_http = int(os.environ['VIBE_PORT_BASE'])
     else:
+        # [멀티 인스턴스] dev+설치본 + '서로 다른 프로젝트 설치본 2개'까지 각자 다른 포트를
+        #   선점하도록 프로젝트별 결정적 슬롯 사용 (_server_port_slot_base 참조).
+        _preferred_http = _server_port_slot_base(project_root)
+
+    if _try_bind(_preferred_http):
+        http_port = _preferred_http
+    elif 'VIBE_PORT_BASE' in os.environ:
         # [과거사고 2026-07-17] 폴백이 9010 하드코딩이라 smoke(VIBE_PORT_BASE=9100)에서
         # 9100이 좀비 EXE에 점유되면 서버가 9010번대로 새어 나가 기동 — smoke_test는
-        # 9100~9120만 스캔하므로 "무바인딩"으로 오판(어젯밤 3연속 FAIL의 실체).
-        # VIBE_PORT_BASE 명시 시 폴백도 그 대역 안(+1부터)에서 탐색해 격리를 유지한다.
-        _fallback_base = _preferred_http + 1 if 'VIBE_PORT_BASE' in os.environ else 9010
-        http_port = find_free_port(_fallback_base, max_tries=40)
+        # 9100~9120만 스캔하므로 "무바인딩"으로 오판. 명시 대역 안(+1부터)에서 탐색해 격리 유지.
+        http_port = find_free_port(_preferred_http + 1, max_tries=40)
         print(f"[!] 포트 {_preferred_http} 사용 중 → 대체 포트 {http_port} 사용")
+    else:
+        # [슬롯 충돌 흡수] 선호 슬롯이 점유됨(같은 슬롯 해시 or 외부 점유) → 서버 대역
+        #   9000-9008 짝수만 재탐색. 기존 9010 하드코딩 폴백은 오피스 대역(9010~)을 침범해
+        #   두 번째 설치본이 오피스와 충돌하던 문제가 있어 대역 내로 한정한다.
+        http_port = next((p for p in range(9000, 9009, 2) if _try_bind(p)), 0)
+        if not http_port:
+            http_port = find_free_port(9000, max_tries=10)  # 대역 포화 — 최후 수단
+        print(f"[!] 슬롯 {_preferred_http} 사용 중 → 대역 내 대체 포트 {http_port} 사용")
 
     _preferred_ws = http_port + 1
-    _ws_ok = False
-    try:
-        _test_sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _test_sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _test_sock2.bind(('127.0.0.1', _preferred_ws))
-        _test_sock2.close()
-        _ws_ok = True
-    except OSError:
-        _ws_ok = False
-
-    if _ws_ok:
+    if _try_bind(_preferred_ws):
         ws_port = _preferred_ws
     else:
         ws_port = find_free_port(_preferred_ws + 1, max_tries=40)

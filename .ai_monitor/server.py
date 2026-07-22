@@ -1820,7 +1820,7 @@ def main():
     # 반환되면 획득 성공. _lock_sock은 종료 정리(아래 GUI 콜백)에서 close.
     from infra.instance_lock import acquire_single_instance_lock, resolve_server_ports
     _lock_sock = acquire_single_instance_lock(PROJECT_ROOT)
-    HTTP_PORT, WS_PORT = resolve_server_ports(_find_free_port)
+    HTTP_PORT, WS_PORT = resolve_server_ports(_find_free_port, PROJECT_ROOT)
 
     # ── [v3.7.248] 부팅 초기 자가치유 — 업데이트/크래시로 남은 '깨진 _MEI'(python DLL 누락)와
     #    그걸 잠근 고아 node 선제 청소. 단일 인스턴스 락 획득 후(= 우리가 생존 인스턴스) 실행하여
