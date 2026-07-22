@@ -66,6 +66,31 @@ class BootConfig:
     open_app_window: Callable       # (url) GUI 실패 폴백
 
 
+def _install_mac_edit_menu() -> bool:
+    """[맥] 메뉴바 렌더링을 강제해 pywebview의 Edit 메뉴(복사/붙여넣기)를 활성화한다.
+
+    [WHY / 맥포팅 2026-07-22] pywebview는 이미 Edit 메뉴(cut/copy/paste/selectAll, 네이티브
+      selector — cocoa.py _add_edit_menu)를 만든다. 그런데 이 앱의 스플래시→load_url 부팅
+      흐름에선 메뉴바가 앱 메뉴만 렌더되고 Edit/View가 활성화되지 않아, 채팅 등 일반 HTML
+      입력창에서 Cmd+C/V(복사/붙여넣기)가 먹지 않았다(xterm 터미널은 xterm.js가 JS로 자체 처리해
+      영향 없음). setMainMenu_로 메인 메뉴를 재지정하면 메뉴바가 재드로우되며 Edit 메뉴의
+      키equivalent가 first responder(WKWebView)로 라우팅된다 → 복붙 정상화. 별도 커스텀 메뉴를
+      추가하지 않아 'Edit' 중복을 피한다. [제약] NSMenu 조작은 메인스레드 전용 — caller가 메인
+      런루프(AppHelper.callAfter)로 디스패치한다.
+    """
+    try:
+        import AppKit
+        app = AppKit.NSApplication.sharedApplication()
+        main_menu = app.mainMenu()
+        if main_menu is None or main_menu.numberOfItems() == 0:
+            return False
+        app.setMainMenu_(main_menu)  # 메뉴바 재드로우 강제 → Edit 메뉴 활성화
+        return True
+    except Exception as e:
+        print(f"[edit-menu] 맥 메뉴바 갱신 실패(무시): {e}")
+        return False
+
+
 def run_gui_app(cfg: BootConfig) -> None:
     """스플래시 창 생성 → 백그라운드 초기화 → 앱 로드 → 종료 정리."""
     # ── GUI 창 먼저 표시 → 콜백에서 전체 초기화 수행 ──────────────────────────
@@ -79,6 +104,23 @@ def run_gui_app(cfg: BootConfig) -> None:
             이전: PG+PTY+HTTP 모두 끝난 후 창 생성 → 5~10초 무반응.
             수정: 창 즉시 표시 → 초기화 진행 → 완료 후 앱 전환."""
             import urllib.request as _ureq
+
+            # ── [맥] WKWebView 입력창 복사/붙여넣기 활성화 — Edit 메뉴 주입(메인스레드 필수) ──
+            if sys.platform == 'darwin':
+                def _setup_edit_menu():
+                    # [WHY] NSMenu 조작은 메인스레드 전용 — pywebview가 쓰는 PyObjCTools.AppHelper의
+                    #   callAfter로 메인 런루프에 태워 안전하게 실행. 메뉴바 렌더 안 되는 건 부팅
+                    #   시점(스플래시→load_url) 일회성 문제라, 초기 ~20초 동안만 몇 차례 갱신해
+                    #   load_url 이후 포커스 시점을 확실히 커버한 뒤 종료한다(무한 갱신 불필요).
+                    try:
+                        from PyObjCTools import AppHelper
+                        for _ in range(10):
+                            time.sleep(2)
+                            AppHelper.callAfter(_install_mac_edit_menu)
+                    except Exception as _e:
+                        print(f"[edit-menu] 설치 스레드 오류(무시): {_e}")
+                threading.Thread(target=_setup_edit_menu, daemon=True,
+                                 name='MacEditMenu').start()
 
             def _update_splash(msg):
                 try:
