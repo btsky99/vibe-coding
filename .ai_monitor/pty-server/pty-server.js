@@ -30,6 +30,39 @@ const BASH_EXE = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
 const fs = require('fs');
 const BASH_AVAILABLE = fs.existsSync(BASH_EXE);
 
+// [맥/리눅스 포팅 2026-07-22] BASH_EXE가 Windows 경로라 맥에선 BASH_AVAILABLE=false →
+//   기존 셸 선택은 전부 else의 cmd.exe(맥에 없음)로 떨어져 pty.spawn이 실패했다.
+//   process.platform 분기로 POSIX에선 로그인 셸로 통일한다. Windows 분기는 손대지 않아 회귀 없음.
+const IS_WIN = process.platform === 'win32';
+function posixLoginShell() {
+  // $SHELL 우선(사용자 기본 셸 존중) → 없으면 zsh(맥 기본) → bash. '-l' 로그인 셸로 PATH/rc 로드.
+  const sh = process.env.SHELL || (fs.existsSync('/bin/zsh') ? '/bin/zsh' : '/bin/bash');
+  return { shell: sh, shellArgs: ['-l'] };
+}
+
+// [맥/리눅스 포팅 2026-07-22] node-pty prebuild의 spawn-helper 실행권한 자가치유.
+//   [WHY] node-pty는 fork 시 prebuilds/<platform>-<arch>/spawn-helper 를 posix_spawnp 한다.
+//   이 리포의 node_modules는 +x가 벗겨진 채(0644) 배포돼(npm 추출/복사 과정) 실행권한이 없으면
+//   모든 터미널이 'posix_spawnp failed'로 죽는다. 재설치 때마다 재발할 수 있으므로 매 기동 시
+//   현재 플랫폼 prebuild의 spawn-helper를 실행 가능하게 보정한다. Windows는 conpty라 대상 없음.
+function ensureSpawnHelperExecutable() {
+  if (IS_WIN) return;
+  try {
+    const helper = path.join(__dirname, 'node_modules', 'node-pty', 'prebuilds',
+      `${process.platform}-${process.arch}`, 'spawn-helper');
+    if (fs.existsSync(helper)) {
+      const mode = fs.statSync(helper).mode;
+      if (!(mode & 0o111)) {  // 실행 비트 하나도 없으면 보정
+        fs.chmodSync(helper, 0o755);
+        console.log(`[PTY] spawn-helper 실행권한 보정: ${helper}`);
+      }
+    }
+  } catch (e) {
+    console.log(`[PTY] spawn-helper 권한 보정 실패(무시): ${e.message}`);
+  }
+}
+ensureSpawnHelperExecutable();
+
 // ── 세션 저장소 ───────────────────────────────────────────────────────────
 // Map<sessionId, { pty, socket, agent, yolo, started, cwd, lastLine, mainModel, bgModel, attached, detachedAt, detachTimer }>
 const ptySessions = new Map();
@@ -536,7 +569,9 @@ function handlePtyConnectionLegacy(ws, req) {
     // Claude: cmd.exe (정상 동작)
     // Antigravity/Codex/Shell(개발용): Git Bash (CMD에서 실행 시 셸 호환성 에러 발생)
     let shell, shellArgs;
-    if ((agent === 'antigravity' || agent === 'codex' || agent === 'shell') && BASH_AVAILABLE) {
+    if (!IS_WIN) {
+      ({ shell, shellArgs } = posixLoginShell());
+    } else if ((agent === 'antigravity' || agent === 'codex' || agent === 'shell') && BASH_AVAILABLE) {
       shell = BASH_EXE;
       shellArgs = ['--login'];
     } else {
@@ -552,7 +587,7 @@ function handlePtyConnectionLegacy(ws, req) {
       cwd: cwd,
       env: env,
       // Windows ConPTY 사용 (node-pty 기본값)
-      useConpty: true,
+      useConpty: IS_WIN,
     });
 
     console.log(`[PTY] 세션 시작: T${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
@@ -874,7 +909,9 @@ function handlePersistentPtyConnection(ws, req) {
     }
 
     let shell, shellArgs;
-    if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
+    if (!IS_WIN) {
+      ({ shell, shellArgs } = posixLoginShell());
+    } else if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
       shell = BASH_EXE;
       shellArgs = ['--login'];
     } else {
@@ -888,7 +925,7 @@ function handlePersistentPtyConnection(ws, req) {
       rows: rows,
       cwd: cwd,
       env: env,
-      useConpty: true,
+      useConpty: IS_WIN,
     });
 
     console.log(`[PTY] session started: T${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
@@ -1399,7 +1436,9 @@ app.post('/api/pty/office/spawn', (req, res) => {
 
   // 셸 선택
   let shell, shellArgs;
-  if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
+  if (!IS_WIN) {
+    ({ shell, shellArgs } = posixLoginShell());
+  } else if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
     shell = BASH_EXE;
     shellArgs = ['--login'];
   } else {
@@ -1414,7 +1453,7 @@ app.post('/api/pty/office/spawn', (req, res) => {
       rows: 40,
       cwd: cwd,
       env: env,
-      useConpty: true,
+      useConpty: IS_WIN,
     });
 
     console.log(`[PTY-Office] 세션 시작: ${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
