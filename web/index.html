@@ -108,8 +108,8 @@
     <p class="lead">여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막습니다.
       PostgreSQL 기반 하이브 마인드로 에이전트들이 실시간으로 지식을 공유하는 Windows 데스크톱 앱.</p>
     <div class="cta">
-      <a class="btn dl" id="winBtn" href="https://github.com/btsky99/vibe-coding/releases/latest">
-        <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small></a>
+      <button class="btn dl" id="winBtn" onclick="downloadOrLogin()">
+        <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small></button>
       <button class="btn line" id="portalBtn" onclick="goPortal()">웹 포털 로그인 →</button>
     </div>
     <div class="verbadge" id="ver">버전 확인 중…</div>
@@ -134,8 +134,8 @@
     <h2>지금 시작하세요</h2>
     <p>Windows 10/11 · 설치 후 자동 업데이트</p>
     <div class="cta">
-      <a class="btn dl" id="winBtn2" href="https://github.com/btsky99/vibe-coding/releases/latest">
-        <span>🪟 다운로드</span><small id="winSize2">최신 버전</small></a>
+      <button class="btn dl" id="winBtn2" onclick="downloadOrLogin()">
+        <span>🪟 다운로드</span><small id="winSize2">최신 버전</small></button>
     </div>
   </section>
 
@@ -167,33 +167,48 @@
 
 <script>
 const REPO='btsky99/vibe-coding';
+let dlUrl='https://github.com/btsky99/vibe-coding/releases/latest';  // fetch 성공 시 실제 exe로 교체
 const fmt=b=>{ if(!b) return ''; const mb=b/1048576; return mb>=1?mb.toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'; };
 fetch(`https://api.github.com/repos/${REPO}/releases/latest`,{headers:{'Accept':'application/vnd.github+json'}})
   .then(r=>{ if(!r.ok) throw 0; return r.json(); })
   .then(rel=>{
     document.getElementById('ver').innerHTML=`현재 최신 버전 <b>${rel.tag_name||''}</b>`;
     const a=rel.assets||[], win=a.find(x=>/setup.*\.exe$/i.test(x.name))||a.find(x=>/\.exe$/i.test(x.name));
-    if(win){ ['winBtn','winBtn2'].forEach(id=>document.getElementById(id).href=win.browser_download_url);
+    if(win){ dlUrl=win.browser_download_url;
       const sz=fmt(win.size); document.getElementById('winSize').textContent=sz;
       document.getElementById('winSize2').textContent=sz+' · 설치 프로그램'; }
   })
   .catch(()=>{ document.getElementById('ver').textContent='버전 정보를 불러오지 못했어요'; });
 
+// ── 다운로드 로그인 게이트: 로그인해야 다운로드 가능 ──
+function startDownload(){ location.href = dlUrl; }
+function downloadOrLogin(){
+  if(App.AUTH.current()){ startDownload(); }   // 로그인 상태 → 바로 다운로드
+  else openLogin('download');                  // 미로그인 → 로그인 유도(성공 후 다운로드)
+}
+
 // ── 로그인 모달 ──
 let gInited=false;
-function openLogin(){
+let pendingAction='portal';   // 로그인 성공 후 동작: 'portal'(대시보드) | 'download'(다운로드)
+function openLogin(intent){
+  pendingAction = intent==='download' ? 'download' : 'portal';
   document.getElementById('loginOverlay').classList.add('open');
   document.getElementById('muid').focus();
   if(!gInited){ gInited=true;
     App.initGoogle(document.getElementById('mgwrap'), document.getElementById('mgnote'),
-      profile=>{ App.AUTH.loginGoogle(profile); location.href='./portal/'; }); }
+      profile=>{ App.AUTH.loginGoogle(profile); afterLogin(); }); }
 }
 function closeLogin(){ document.getElementById('loginOverlay').classList.remove('open'); document.getElementById('merr').textContent=''; }
+// 로그인 성공 후: 다운로드하러 왔으면 다운로드, 아니면 포털로.
+function afterLogin(){
+  if(pendingAction==='download'){ pendingAction='portal'; closeLogin(); startDownload(); }
+  else location.href='./portal/';
+}
 function doLogin(e){
   e.preventDefault();
   const s=App.AUTH.login(document.getElementById('muid').value.trim(), document.getElementById('mpw').value);
   if(!s){ document.getElementById('merr').textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; return false; }
-  location.href='./portal/';   // 세션 저장됨 → 포털이 승인상태 확인 후 대시보드/대기 표시
+  afterLogin();
   return false;
 }
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeLogin(); });
