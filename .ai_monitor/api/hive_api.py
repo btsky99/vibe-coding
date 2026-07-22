@@ -762,7 +762,8 @@ def handle_get(handler, path: str, params: dict,
         handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
         handler.end_headers()
         try:
-            from infra.heartbeat_daemon import AGENT_ID, DAILY_LIMIT, load_hb_state
+            from infra.heartbeat_daemon import (AGENT_ID, DAILY_LIMIT,
+                                                load_hb_state, is_active_holder)
             from src.pg_store import find_tasks_for_agent
             s = load_hb_state()
             # [워치독] loop_beat_at은 데몬 run_loop이 매 iteration(최대 60초) 갱신 →
@@ -787,6 +788,11 @@ def handle_get(handler, path: str, params: dict,
                 'loop_beat_at': _beat,
                 'stale': _stale,
                 'pending': len(find_tasks_for_agent(AGENT_ID)),
+                # [①] enabled는 DB 공유값이라 dev+설치본 양쪽이 동일하게 켜져 보이지만,
+                #   실제 auto를 도는 건 9019 락을 쥔 '한' 인스턴스뿐. active_here=False면
+                #   이 인스턴스는 다른 인스턴스가 실행 중이라 대기만 하는 상태 — 프론트가
+                #   초록 ON 대신 '다른 인스턴스에서 실행 중(대기)'로 표시해 침묵 오해를 없앤다.
+                'active_here': is_active_holder(),
             }
         except Exception as e:
             payload = {'error': str(e)}

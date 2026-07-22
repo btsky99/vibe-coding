@@ -127,7 +127,10 @@ function App() {
 
   // [2026-07-17] 자율 heartbeat 헤더 토글 칩 — 관제 패널이 아닌 런처급 스위치
   // (관제 신규 개발 중단 원칙 준수 — 상세 이력은 pg_logs/hive_tasks 열람으로)
-  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number; stale?: boolean; loop_beat_at?: string } | null>(null);
+  // active_here: 이 인스턴스가 9019 싱글턴 락을 쥔 auto 실행 주체인지. enabled는 dev+설치본이
+  //   DB로 공유하는 값이라 양쪽 다 ON으로 보이지만 실제로 도는 건 한쪽뿐 — active_here=false면
+  //   '다른 인스턴스에서 실행 중, 나는 대기'라 초록 ON이 아니라 대기 배지를 띄운다.
+  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number; stale?: boolean; loop_beat_at?: string; active_here?: boolean } | null>(null);
   const fetchHeartbeat = () => {
     fetch(`${API_BASE}/api/heartbeat/status`)
       .then(r => r.json())
@@ -695,11 +698,18 @@ function App() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {/* 자율 heartbeat 토글 — 클릭 한 번으로 on/off (scripts/auto.py·텔레그램 /auto와 동일 스위치) */}
+              {/* hbWaiting: enabled인데 이 인스턴스가 락을 못 쥠 = 다른 인스턴스(개발/설치본)가 실행 주체.
+                  stale > waiting > ON > OFF 우선순위로 배지를 구분한다. */}
+              {(() => {
+              const hbWaiting = !!(heartbeat && heartbeat.enabled && heartbeat.active_here === false && !heartbeat.stale);
+              return (
               <button
                 onClick={toggleHeartbeat}
                 className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-bold border transition-all ${
                   heartbeat?.stale
                     ? 'bg-red-500/20 border-red-400/50 text-red-300 shadow-[0_0_8px_rgba(248,113,113,0.3)]'
+                    : hbWaiting
+                    ? 'bg-amber-500/15 border-amber-400/40 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.25)]'
                     : heartbeat?.enabled
                     ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.25)]'
                     : 'bg-black/30 border-white/10 text-[#858585] hover:text-white hover:border-white/25'
@@ -707,17 +717,20 @@ function App() {
                 title={heartbeat
                   ? (heartbeat.stale
                     ? `⚠️ 자율 데몬 응답 없음(hang 의심) — 마지막 박동 ${heartbeat.loop_beat_at || '?'}. 앱 재시작 필요`
+                    : hbWaiting
+                    ? `자율 클로드 ON이지만 이 인스턴스는 대기 중 — 다른 인스턴스(개발/설치본)가 실행 주체입니다. 그쪽을 닫으면 이 인스턴스가 자동 인수합니다.`
                     : `자율 클로드 ${heartbeat.enabled ? 'ON' : 'OFF'} — 오늘 ${heartbeat.daily_count}/${heartbeat.daily_limit}건 · 대기 ${heartbeat.pending}건 (클릭으로 전환)`)
                   : '자율 클로드 — 서버 연결 대기'}
               >
-                <span className={heartbeat?.stale ? '' : heartbeat?.enabled ? 'animate-pulse' : ''}>
-                  {heartbeat?.stale ? '⚠️' : '🫀'}
+                <span className={heartbeat?.stale || hbWaiting ? '' : heartbeat?.enabled ? 'animate-pulse' : ''}>
+                  {heartbeat?.stale ? '⚠️' : hbWaiting ? '⏸️' : '🫀'}
                 </span>
-                <span>{heartbeat?.stale ? 'AUTO 멈춤' : heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
+                <span>{heartbeat?.stale ? 'AUTO 멈춤' : hbWaiting ? 'AUTO 대기' : heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
                 {heartbeat && heartbeat.pending > 0 && (
                   <span className="px-1 rounded-full bg-amber-500/20 text-amber-300">{heartbeat.pending}</span>
                 )}
               </button>
+              ); })()}
               {/* 파일 목록 새로고침 — fileRefreshKey 증가로 FileExplorer에 신호 */}
               <button
                 onClick={() => setFileRefreshKey(k => k + 1)}

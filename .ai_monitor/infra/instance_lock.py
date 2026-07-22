@@ -94,7 +94,21 @@ def resolve_server_ports(find_free_port) -> tuple[int, int]:
     # ── 포트 확정: HTTP 9000, WS 9001 고정 + 충돌 시 대체 탐색 ─────────────────
     # VIBE_PORT_BASE 환경변수가 있으면 해당 포트부터 시작 (smoke test 격리용)
     # 단일 인스턴스이므로 슬롯 기반 분배 불필요. 고정 포트 우선 시도.
-    _preferred_http = int(os.environ.get('VIBE_PORT_BASE', '9000'))
+    #
+    # [과거사고 2026-07-22] 개발버전+설치버전을 '동시에' 켜면 둘 다 9000을 test-bind→
+    #   close→(나중)real-bind 하는 TOCTOU 경쟁으로 같은 http/ws 포트를 골랐다. HTTP는
+    #   app_boot의 +10 폴백이 있으나 그 폴백이 WS_PORT 전역을 재동기화하지 않아, 나중
+    #   인스턴스의 프론트가 먼저 인스턴스의 PTY 서버(ws=9001)에 얹혀 붙는다 → 먼저 창을
+    #   닫으면 graceful_shutdown이 9001 PTY를 죽여 나중 인스턴스 터미널이 통째로 사망.
+    #   시간차를 두면 안 터지던 이유가 이 경쟁 때문.
+    # [해결] 인스턴스 락(_lock_seed)이 'dev 2개' / 'frozen 2개' 동시 기동은 이미 막으므로
+    #   실제로 공존 가능한 조합은 dev+frozen 하나뿐. 그래서 락 시드처럼 환경별로 포트
+    #   베이스를 갈라두면 경쟁 자체가 성립하지 않는다(TOCTOU 무해화). frozen은 외부 도구/
+    #   바로가기가 기대하는 9000 고정, dev만 9004로 이동. 둘 다 server_locator 스캔 범위
+    #   (9000~9019) 안 + 오피스(9010~)·heartbeat(9019)와 비충돌. VIBE_PORT_BASE 명시 시엔
+    #   그 값이 항상 우선(smoke 격리 계약 불변).
+    _default_base = '9000' if getattr(sys, 'frozen', False) else '9004'
+    _preferred_http = int(os.environ.get('VIBE_PORT_BASE', _default_base))
     _http_ok = False
     try:
         _test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

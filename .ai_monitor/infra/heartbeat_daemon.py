@@ -202,6 +202,25 @@ def guard_check(state: dict) -> tuple[bool, str]:
     return True, ''
 
 
+# [①-active_here] 이 프로세스가 싱글턴 락(9019)을 실제로 쥐고 있는지 공개하는 창.
+# run_loop의 지역 holder를 모듈 스코프에 참조로 걸어, /api/heartbeat/status가 '이 인스턴스가
+# auto 실행 주체인지'를 판별할 수 있게 한다. loop_beat_at은 DB 공유값이라 락을 못 쥔
+# 인스턴스에서도 (주인이 갱신해) 신선해 보이므로 그것만으론 '나만 대기 중'을 구분 못 함 —
+# 프로세스-로컬 소켓 소유 여부가 유일한 확실한 신호다.
+_run_holder: dict | None = None
+
+
+def is_active_holder() -> bool:
+    """이 프로세스가 싱글턴 락을 쥔 auto 실행 주체이면 True.
+
+    [하위호환] 데몬 run_loop이 아직 안 돌았으면(_run_holder=None) True로 본다 —
+    단일 인스턴스 환경에선 '내가 곧 주체'가 기본값이라 대기 배지를 잘못 띄우지 않는다.
+    """
+    if _run_holder is None:
+        return True
+    return _run_holder.get('sock') is not None
+
+
 def _acquire_singleton() -> socket.socket | None:
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -673,6 +692,8 @@ def run_loop(get_project_root, data_dir: Path, get_project_id) -> None:
       영원히 물어 dev auto가 시작조차 못 하던 문제(사고 e9a48f66) 방지.
     """
     holder: dict = {'sock': None, 'last_progress': time.monotonic(), 'stop': False}
+    global _run_holder
+    _run_holder = holder   # [①] is_active_holder가 이 프로세스의 락 보유를 관측하는 통로
     # [변경] bind 실패 시 return(즉시 포기) 금지 → 재시도. 현재 주인이 락을 놓는 순간
     #   (앱 종료/워치독 반납/270 업데이트 재시작) 대기 인스턴스가 SINGLETON_RETRY_SEC 내 인수.
     _warned = False
