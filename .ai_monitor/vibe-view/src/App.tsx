@@ -698,15 +698,19 @@ function App() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {/* 자율 heartbeat 토글 — 클릭 한 번으로 on/off (scripts/auto.py·텔레그램 /auto와 동일 스위치) */}
-              {/* hbWaiting: enabled인데 이 인스턴스가 락을 못 쥠 = 다른 인스턴스(개발/설치본)가 실행 주체.
-                  stale > waiting > ON > OFF 우선순위로 배지를 구분한다. */}
+              {/* hbWaiting: enabled인데 이 인스턴스가 9019 락을 못 쥠 = 다른 인스턴스가 실행 주체(대기).
+                  [과거사고 2026-07-22] 다른 프로젝트 설치본 2개 동시 실행 시, 대기 인스턴스는 자기
+                  PG DB(프로젝트별 분리)의 loop_beat_at을 갱신 못 해 항상 stale → '멈춤(hang)'으로 오표시.
+                  [불변식] '멈춤'은 내가 실행 주체(active_here=true)일 때만. 대기(active_here=false)는
+                  stale이어도 '대기'로 표시. 우선순위: 멈춤(주체+stale) > 대기 > ON > OFF. */}
               {(() => {
-              const hbWaiting = !!(heartbeat && heartbeat.enabled && heartbeat.active_here === false && !heartbeat.stale);
+              const hbWaiting = !!(heartbeat && heartbeat.enabled && heartbeat.active_here === false);
+              const hbStale = !!(heartbeat?.stale && !hbWaiting);
               return (
               <button
                 onClick={toggleHeartbeat}
                 className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-bold border transition-all ${
-                  heartbeat?.stale
+                  hbStale
                     ? 'bg-red-500/20 border-red-400/50 text-red-300 shadow-[0_0_8px_rgba(248,113,113,0.3)]'
                     : hbWaiting
                     ? 'bg-amber-500/15 border-amber-400/40 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.25)]'
@@ -715,17 +719,17 @@ function App() {
                     : 'bg-black/30 border-white/10 text-[#858585] hover:text-white hover:border-white/25'
                 }`}
                 title={heartbeat
-                  ? (heartbeat.stale
+                  ? (hbStale
                     ? `⚠️ 자율 데몬 응답 없음(hang 의심) — 마지막 박동 ${heartbeat.loop_beat_at || '?'}. 앱 재시작 필요`
                     : hbWaiting
-                    ? `자율 클로드 ON이지만 이 인스턴스는 대기 중 — 다른 인스턴스(개발/설치본)가 실행 주체입니다. 그쪽을 닫으면 이 인스턴스가 자동 인수합니다.`
+                    ? `자율 클로드 ON이지만 이 인스턴스는 대기 중 — 다른 인스턴스(개발/설치본/다른 프로젝트)가 실행 주체입니다. 그쪽을 닫으면 이 인스턴스가 자동 인수합니다.`
                     : `자율 클로드 ${heartbeat.enabled ? 'ON' : 'OFF'} — 오늘 ${heartbeat.daily_count}/${heartbeat.daily_limit}건 · 대기 ${heartbeat.pending}건 (클릭으로 전환)`)
                   : '자율 클로드 — 서버 연결 대기'}
               >
-                <span className={heartbeat?.stale || hbWaiting ? '' : heartbeat?.enabled ? 'animate-pulse' : ''}>
-                  {heartbeat?.stale ? '⚠️' : hbWaiting ? '⏸️' : '🫀'}
+                <span className={hbStale || hbWaiting ? '' : heartbeat?.enabled ? 'animate-pulse' : ''}>
+                  {hbStale ? '⚠️' : hbWaiting ? '⏸️' : '🫀'}
                 </span>
-                <span>{heartbeat?.stale ? 'AUTO 멈춤' : hbWaiting ? 'AUTO 대기' : heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
+                <span>{hbStale ? 'AUTO 멈춤' : hbWaiting ? 'AUTO 대기' : heartbeat?.enabled ? 'AUTO ON' : 'AUTO'}</span>
                 {heartbeat && heartbeat.pending > 0 && (
                   <span className="px-1 rounded-full bg-amber-500/20 text-amber-300">{heartbeat.pending}</span>
                 )}
