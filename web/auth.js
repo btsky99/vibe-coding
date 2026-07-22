@@ -53,6 +53,12 @@ window.App = (function () {
   // ── Google Identity Services 버튼 렌더 (컨테이너 element + 콜백 주입) ──
   function initGoogle(containerEl, noteEl, onProfile) {
     if (GOOGLE_CLIENT_ID.startsWith('YOUR_')) { if (noteEl) noteEl.textContent = '⚙️ GOOGLE_CLIENT_ID 설정 후 활성화'; return; }
+    // [승인 오류 방지] GIS는 https 필수(localhost 예외). http 원본은 승인된 원본 목록에 없어
+    //   Google이 '승인 오류'를 띄운다 → 버튼 대신 안내로 대체해 혼란 방지.
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      if (noteEl) noteEl.innerHTML = '🔒 Google 로그인은 <b>https</b> 연결에서만 가능합니다.<br>인증서 발급 후 <b>https://btsky.pe.kr</b> 에서 이용하세요.';
+      return;
+    }
     if (!window.google || !google.accounts || !google.accounts.id) { setTimeout(() => initGoogle(containerEl, noteEl, onProfile), 300); return; }
     google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: r => onProfile(decodeJwt(r.credential)) });
     google.accounts.id.renderButton(containerEl, { theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'ko', width: 300 });
