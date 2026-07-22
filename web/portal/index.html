@@ -1,21 +1,19 @@
 <!DOCTYPE html>
 <!--
   FILE: web/portal/index.html
-  DESCRIPTION: btsky.pe.kr 프로젝트 관리 포털 — 로그인 프로토타입.
-    로그인 3종: (1)관리자 데모 (2)일반 데모 (3)Google 로그인(OAuth, GIS).
-    권한: 관리자=전체+승인권한. 일반/구글=관리자 승인 후에만 접근(승인 전 '대기' 화면).
-    [정적 호스팅] GitHub Pages라 서버 없음 — 승인상태·세션 모두 localStorage(프로토타입).
-    실사용(교차 사용자 승인, 토큰 서버검증, RLS)은 [SUPABASE 승격 지점] 참고.
-    [보안] 데모 비번은 노출된 더미값. 실시크릿 하드코딩 금지(Google은 client_id만 공개값).
+  DESCRIPTION: btsky.pe.kr 프로젝트 관리 대시보드. 로그인은 랜딩(../ 로그인 모달)에서 처리하고,
+    여기는 세션 기반 대시보드만 담당한다. 세션 없으면 랜딩으로 돌려보낸다.
+    권한: 관리자=전체+승인. 일반/구글=관리자 승인 후 접근(미승인 시 '승인 대기' 화면).
+    인증/데이터 로직은 공용 ../auth.js (window.App).
   REVISION HISTORY:
-    - 2026-07-22 Claude: 관리자/일반 뷰 분리 → Google 로그인(GIS) → 일반사용자 관리자 승인 게이트.
+    - 2026-07-22 Claude: 로그인 화면 제거(랜딩 모달로 이관) + 데모박스 제거. auth.js 공용화.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>바이브 코딩 — 프로젝트 관리 포털</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="../auth.js"></script>
 <style>
   :root{
     --bg:#0b0d10; --card:#14171c; --card2:#1a1e24; --line:#252b33; --fg:#e6e9ee;
@@ -29,35 +27,17 @@
   *{ box-sizing:border-box; margin:0; padding:0; }
   body{ background:var(--bg); color:var(--fg); min-height:100vh;
     font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif; font-size:14px; }
-  .proto{ background:var(--amber); color:#1a1d22; text-align:center; font-size:12px;
-    font-weight:600; padding:6px 12px; }
+  .proto{ background:var(--amber); color:#1a1d22; text-align:center; font-size:12px; font-weight:600; padding:6px 12px; }
   .center{ min-height:calc(100vh - 30px); display:flex; align-items:center; justify-content:center; padding:24px; }
-  .lcard{ background:var(--card); border:1px solid var(--line); border-radius:20px;
-    box-shadow:var(--shadow); padding:40px 36px; max-width:400px; width:100%; }
-  .logo{ font-size:44px; text-align:center; margin-bottom:12px; }
-  h1{ font-size:22px; font-weight:800; text-align:center; letter-spacing:-.02em; }
-  .sub{ color:var(--muted); font-size:13px; text-align:center; margin:6px 0 24px; }
-  label{ display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; font-weight:600; }
-  input{ width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line);
-    background:var(--card2); color:var(--fg); font-size:14px; }
-  input:focus{ outline:none; border-color:var(--accent); }
-  .btn{ width:100%; margin-top:20px; padding:13px; border:none; border-radius:11px; color:#fff;
-    background:linear-gradient(180deg,var(--accent),var(--accent2)); font-size:15px; font-weight:700;
-    cursor:pointer; transition:transform .1s, box-shadow .1s; box-shadow:0 4px 14px rgba(59,165,93,.3); }
-  .btn:hover{ transform:translateY(-1px); }
-  .btn.ghost{ background:none; color:var(--muted); border:1px solid var(--line); box-shadow:none; }
-  .err{ color:var(--red); font-size:12px; margin-top:12px; text-align:center; min-height:16px; }
-  .demo{ margin-top:22px; padding:12px; border:1px dashed var(--line); border-radius:10px;
-    font-size:12px; color:var(--muted); line-height:1.7; }
-  .demo b{ color:var(--fg); }
-  .divider{ display:flex; align-items:center; gap:12px; margin:22px 0 18px; color:var(--muted); font-size:12px; }
-  .divider::before,.divider::after{ content:''; flex:1; height:1px; background:var(--line); }
-  #gwrap{ display:flex; justify-content:center; min-height:44px; }
-  .gnote{ margin-top:10px; font-size:11px; color:var(--amber); text-align:center; line-height:1.6; }
-  /* 승인 대기 화면 */
-  .pend-ic{ font-size:52px; text-align:center; margin-bottom:8px; }
-  .pend-msg{ text-align:center; color:var(--muted); font-size:13px; line-height:1.7; margin:10px 0 22px; }
-  .pend-who{ text-align:center; font-weight:700; margin-bottom:4px; }
+  .lcard{ background:var(--card); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow);
+    padding:40px 36px; max-width:400px; width:100%; text-align:center; }
+  .lcard h1{ font-size:22px; font-weight:800; letter-spacing:-.02em; }
+  .pend-ic{ font-size:52px; margin-bottom:8px; }
+  .pend-who{ font-weight:700; margin-bottom:4px; }
+  .pend-msg{ color:var(--muted); font-size:13px; line-height:1.7; margin:10px 0 22px; }
+  .btn{ width:100%; padding:13px; border:none; border-radius:11px; color:#fff; cursor:pointer; font-size:15px; font-weight:700;
+    background:linear-gradient(180deg,var(--accent),var(--accent2)); font-family:inherit; }
+  .btn.ghost{ background:none; color:var(--muted); border:1px solid var(--line); margin-bottom:10px; }
   #app{ display:none; }
   .top{ display:flex; align-items:center; justify-content:space-between; padding:14px 24px;
     border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:5; }
@@ -67,23 +47,19 @@
   .role.user{ background:rgba(59,165,93,.15); color:var(--accent); border:1px solid rgba(59,165,93,.4); }
   .top-right{ display:flex; align-items:center; gap:12px; font-size:13px; color:var(--muted); }
   .avatar{ width:26px; height:26px; border-radius:50%; vertical-align:middle; }
-  .logout{ background:none; border:1px solid var(--line); color:var(--muted); padding:6px 12px;
-    border-radius:8px; cursor:pointer; font-size:12px; }
+  .logout{ background:none; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; }
   .logout:hover{ color:var(--fg); border-color:var(--muted); }
   .wrap{ max-width:1000px; margin:0 auto; padding:28px 24px; }
   .hi{ font-size:20px; font-weight:800; margin-bottom:4px; }
   .hi-sub{ color:var(--muted); margin-bottom:24px; }
   .stats{ display:flex; gap:14px; margin-bottom:26px; flex-wrap:wrap; }
-  .stat{ flex:1; min-width:140px; background:var(--card); border:1px solid var(--line);
-    border-radius:14px; padding:16px 18px; }
+  .stat{ flex:1; min-width:140px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
   .stat .n{ font-size:26px; font-weight:800; }
   .stat .l{ font-size:12px; color:var(--muted); margin-top:2px; }
-  .sect-h{ font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase;
-    letter-spacing:.05em; margin:8px 0 12px; }
+  .sect-h{ font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin:8px 0 12px; }
   .plist{ display:flex; flex-direction:column; gap:10px; }
   .empty{ color:var(--muted); padding:24px; text-align:center; border:1px dashed var(--line); border-radius:14px; }
-  .proj{ background:var(--card); border:1px solid var(--line); border-radius:14px;
-    padding:16px 18px; display:flex; align-items:center; gap:16px; }
+  .proj{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; display:flex; align-items:center; gap:16px; }
   .proj .pname{ font-weight:700; }
   .proj .powner{ font-size:12px; color:var(--muted); margin-top:2px; }
   .proj .grow{ flex:1; }
@@ -93,48 +69,20 @@
   .b-done{ background:rgba(139,147,161,.15); color:var(--muted); }
   .bar{ width:120px; height:7px; background:var(--line); border-radius:4px; overflow:hidden; }
   .bar>i{ display:block; height:100%; background:var(--accent); }
-  .adminbox{ margin-top:30px; background:var(--card); border:1px solid rgba(224,168,59,.3);
-    border-radius:14px; padding:18px; }
+  .adminbox{ margin-top:30px; background:var(--card); border:1px solid rgba(224,168,59,.3); border-radius:14px; padding:18px; }
   .adminbox h3{ font-size:14px; margin:2px 0 12px; display:flex; align-items:center; gap:6px; }
-  .adminbox h3 .cnt{ font-weight:700; font-size:11px; color:var(--amber); background:rgba(224,168,59,.15);
-    padding:1px 8px; border-radius:999px; }
+  .adminbox h3 .cnt{ font-weight:700; font-size:11px; color:var(--amber); background:rgba(224,168,59,.15); padding:1px 8px; border-radius:999px; }
   .urow{ display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); font-size:13px; }
   .urow:first-of-type{ border-top:none; }
   .utag{ font-size:11px; padding:2px 8px; border-radius:6px; background:var(--card2); color:var(--muted); }
-  .approve{ background:var(--accent); color:#fff; border:none; padding:6px 14px; border-radius:8px;
-    font-size:12px; font-weight:700; cursor:pointer; }
+  .approve{ background:var(--accent); color:#fff; border:none; padding:6px 14px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; }
   .approve:hover{ background:var(--accent2); }
-  .revoke{ background:none; color:var(--muted); border:1px solid var(--line); padding:5px 10px;
-    border-radius:8px; font-size:11px; cursor:pointer; }
+  .revoke{ background:none; color:var(--muted); border:1px solid var(--line); padding:5px 10px; border-radius:8px; font-size:11px; cursor:pointer; }
   .sub-h{ font-size:12px; color:var(--muted); font-weight:700; margin:16px 0 4px; }
 </style>
 </head>
 <body>
   <div class="proto">🧪 프로토타입 — 서버 미연동(localStorage). 일반/Google 사용자는 관리자 승인 후 접근됩니다. (Supabase 연동 시 실사용)</div>
-
-  <!-- 로그인 -->
-  <div id="login" class="center">
-    <form class="lcard" onsubmit="return doLogin(event)">
-      <div class="logo">🗂️</div>
-      <h1>프로젝트 관리 포털</h1>
-      <p class="sub">바이브 코딩 · 통합 관리</p>
-      <label for="uid">아이디</label>
-      <input id="uid" autocomplete="username" placeholder="admin 또는 user">
-      <label for="pw">비밀번호</label>
-      <input id="pw" type="password" autocomplete="current-password" placeholder="비밀번호">
-      <button class="btn" type="submit">로그인</button>
-      <div class="err" id="err"></div>
-      <div class="divider">또는</div>
-      <div id="gwrap"></div>
-      <div class="gnote" id="gnote"></div>
-      <div class="demo">
-        <b>데모 계정</b> (프로토타입 — 실제 비번 아님)<br>
-        · 관리자: <b>admin</b> / <b>admin123</b> → 전체 + 승인 권한<br>
-        · 일반: <b>user</b> / <b>user123</b> → <b>관리자 승인 후</b> 접근<br>
-        · Google: 관리자 이메일이면 관리자, 아니면 승인 대기
-      </div>
-    </form>
-  </div>
 
   <!-- 승인 대기 -->
   <div id="pending" class="center" style="display:none">
@@ -144,11 +92,11 @@
       <div class="pend-who" id="pendWho"></div>
       <p class="pend-msg">계정이 등록되었습니다.<br>관리자가 승인하면 포털을 이용할 수 있어요.</p>
       <button class="btn ghost" onclick="refreshPending()">승인됐는지 새로고침</button>
-      <button class="btn" style="margin-top:10px" onclick="logout()">로그아웃</button>
+      <button class="btn" onclick="logout()">로그아웃</button>
     </div>
   </div>
 
-  <!-- 앱 -->
+  <!-- 대시보드 -->
   <div id="app">
     <div class="top">
       <div class="brand">🗂️ 프로젝트 관리 포털 <span class="role" id="roleBadge"></span></div>
@@ -171,92 +119,21 @@
   </div>
 
 <script>
-// ── 설정 ──────────────────────────────────────────────────────────────────────
-const GOOGLE_CLIENT_ID = '832419973036-dt7p4u8oht9uvtlorce1k83rke8bmnau.apps.googleusercontent.com';
-const ADMIN_EMAILS = ['btsky99@gmail.com'];   // Google 로그인 시 관리자로 볼 이메일
-
-// ── 승인 저장소 (프로토타입: localStorage / 실사용: DB approved 컬럼 + RLS) ──────
-// [주의] 정적 사이트라 승인상태가 브라우저 로컬에만 있음 → 실제 교차-사용자 승인은
-//   Supabase 등 백엔드 필요. 지금은 같은 브라우저 안에서 흐름을 시연한다.
-const P_APPROVED='portal_approved', P_PENDING='portal_pending', P_SESS='portal_sess';
-const jget=(k,d)=>{ try{ return JSON.parse(localStorage.getItem(k)||d); }catch{ return JSON.parse(d); } };
-const getApproved=()=>jget(P_APPROVED,'[]');
-const isApproved=id=>getApproved().includes(id);
-function approveId(id){ const a=getApproved(); if(!a.includes(id)){ a.push(id); localStorage.setItem(P_APPROVED,JSON.stringify(a)); } removePending(id); }
-function revokeId(id){ localStorage.setItem(P_APPROVED, JSON.stringify(getApproved().filter(x=>x!==id))); }
-const getPending=()=>jget(P_PENDING,'[]');
-function addPending(s){ const p=getPending(); if(!p.find(x=>x.id===s.id)){ p.push({id:s.id,name:s.name,email:s.email||'',via:s.via}); localStorage.setItem(P_PENDING,JSON.stringify(p)); } }
-function removePending(id){ localStorage.setItem(P_PENDING, JSON.stringify(getPending().filter(x=>x.id!==id))); }
-
-// ── 인증 ([SUPABASE 승격 지점 ①] AUTH.* 를 supabase.auth로 교체) ────────────────
-const USERS = {
-  admin: { pw:'admin123', role:'admin', name:'관리자' },
-  user:  { pw:'user123',  role:'user',  name:'유진수' },
-};
-const AUTH = {
-  login(id, pw){ const u=USERS[id];
-    if (u && u.pw===pw){ const s={id, role:u.role, name:u.name, via:'demo'}; save(s); return s; } return null; },
-  loginGoogle(profile){
-    const role = ADMIN_EMAILS.includes((profile.email||'').toLowerCase()) ? 'admin' : 'user';
-    const s = { id:profile.email, email:profile.email, name:profile.name||profile.email,
-                picture:profile.picture||'', role, via:'google' }; save(s); return s; },
-  current(){ return jget(P_SESS,'null'); },
-  logout(){ localStorage.removeItem(P_SESS); },
-};
-function save(s){ localStorage.setItem(P_SESS, JSON.stringify(s)); }
-
-// ── 데이터 ([SUPABASE 승격 지점 ②] supabase.from('projects').select() + RLS) ─────
-const PROJECTS = [
-  { name:'vibe-coding',  owner:'유진수', status:'active', progress:82 },
-  { name:'파인드라이브 자동화', owner:'유진수', status:'hold',   progress:15 },
-  { name:'다운로드 포털',  owner:'유진수', status:'active', progress:95 },
-  { name:'하이브 대시보드', owner:'관리자', status:'active', progress:60 },
-  { name:'맥 포팅',       owner:'관리자', status:'hold',   progress:5  },
-  { name:'제텔카스텐 정리', owner:'관리자', status:'done',   progress:100 },
-];
-const fetchProjects = sess => sess.role==='admin' ? PROJECTS : PROJECTS.filter(p=>p.owner===sess.name);
+const A = window.App;
 const S = { active:{t:'진행중',c:'b-active'}, hold:{t:'보류',c:'b-hold'}, done:{t:'완료',c:'b-done'} };
 
-// ── Google Identity Services ──
-function initGoogle(){
-  const note=document.getElementById('gnote');
-  if (GOOGLE_CLIENT_ID.startsWith('YOUR_')){ note.textContent='⚙️ Google 로그인은 GOOGLE_CLIENT_ID 설정 후 활성화됩니다.'; return; }
-  if (!window.google||!google.accounts||!google.accounts.id){ setTimeout(initGoogle,300); return; }
-  google.accounts.id.initialize({ client_id:GOOGLE_CLIENT_ID, callback:onGoogle });
-  google.accounts.id.renderButton(document.getElementById('gwrap'),
-    { theme:'outline', size:'large', text:'signin_with', shape:'pill', locale:'ko', width:328 });
-}
-function onGoogle(resp){
-  try{ enter(AUTH.loginGoogle(decodeJwt(resp.credential))); }
-  catch(e){ document.getElementById('err').textContent='Google 로그인 실패: '+e.message; }
-}
-function decodeJwt(t){ const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
-  return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''))); }
-
-// ── 로그인/게이트 ──
-function doLogin(e){ e.preventDefault();
-  const id=document.getElementById('uid').value.trim(), pw=document.getElementById('pw').value;
-  const sess=AUTH.login(id,pw);
-  if(!sess){ document.getElementById('err').textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; return false; }
-  enter(sess); return false;
-}
-// 승인 게이트: 관리자이거나 승인된 사용자만 앱 진입. 아니면 대기 등록 + 대기화면.
+function hideAll(){ document.getElementById('pending').style.display='none'; document.getElementById('app').style.display='none'; }
+// 승인 게이트: 관리자/승인된 사용자만 대시보드, 아니면 대기 등록 + 대기 화면.
 function enter(sess){
   hideAll();
-  if (sess.role==='admin' || isApproved(sess.id)) renderApp(sess);
-  else { addPending(sess); showPending(sess); }
+  if (sess.role==='admin' || A.isApproved(sess.id)) renderApp(sess);
+  else { A.addPending(sess); showPending(sess); }
 }
-function hideAll(){ document.getElementById('login').style.display='none';
-  document.getElementById('pending').style.display='none'; document.getElementById('app').style.display='none'; }
 function showPending(sess){ document.getElementById('pending').style.display='flex';
   document.getElementById('pendWho').textContent = sess.name + (sess.email?` (${sess.email})`:''); }
-function refreshPending(){ const s=AUTH.current(); if(s) enter(s); }
-function logout(){ AUTH.logout(); hideAll();
-  document.getElementById('login').style.display='flex';
-  document.getElementById('uid').value=''; document.getElementById('pw').value=''; document.getElementById('err').textContent='';
-  if (window.google&&google.accounts&&google.accounts.id) google.accounts.id.disableAutoSelect(); }
+function refreshPending(){ const s=A.AUTH.current(); if(s) enter(s); else location.href='../'; }
+function logout(){ A.AUTH.logout(); location.href='../'; }   // 로그아웃 → 랜딩
 
-// ── 대시보드 ──
 function renderApp(sess){
   hideAll(); document.getElementById('app').style.display='block';
   const isAdmin = sess.role==='admin';
@@ -267,7 +144,7 @@ function renderApp(sess){
   document.getElementById('greet').textContent = sess.name+' 님, 안녕하세요 👋';
   document.getElementById('greetSub').textContent = isAdmin?'전체 프로젝트를 관리할 수 있습니다.':'내가 담당하는 프로젝트입니다.';
 
-  const list=fetchProjects(sess);
+  const list=A.fetchProjects(sess);
   const active=list.filter(p=>p.status==='active').length, done=list.filter(p=>p.status==='done').length;
   document.getElementById('stats').innerHTML=`
     <div class="stat"><div class="n">${list.length}</div><div class="l">${isAdmin?'전체':'내'} 프로젝트</div></div>
@@ -282,16 +159,13 @@ function renderApp(sess){
   const ab=document.getElementById('adminbox');
   if (isAdmin){ ab.style.display='block'; renderAdminUsers(); } else ab.style.display='none';
 }
-// 관리자 전용 — 승인 대기 + 승인된 사용자 관리
 function renderAdminUsers(){
-  const pend=getPending(), appr=getApproved();
-  document.getElementById('pendCnt').textContent = pend.length ? `대기 ${pend.length}` : '대기 0';
-  let html='';
-  html += `<div class="sub-h">승인 대기</div>`;
+  const pend=A.getPending(), appr=A.getApproved();
+  document.getElementById('pendCnt').textContent = `대기 ${pend.length}`;
+  let html=`<div class="sub-h">승인 대기</div>`;
   html += pend.length ? pend.map(u=>`
     <div class="urow"><b>${u.name}</b>${u.email?`<span class="utag">${u.email}</span>`:''}
-      <span class="utag">${u.via==='google'?'Google':'일반'}</span>
-      <div style="flex:1"></div>
+      <span class="utag">${u.via==='google'?'Google':'일반'}</span><div style="flex:1"></div>
       <button class="approve" onclick="doApprove('${u.id.replace(/'/g,"")}')">승인</button></div>`).join('')
     : `<div style="color:var(--muted);font-size:12px;padding:8px 0">대기 중인 사용자가 없습니다.</div>`;
   html += `<div class="sub-h">승인됨</div>`;
@@ -301,13 +175,12 @@ function renderAdminUsers(){
     : `<div style="color:var(--muted);font-size:12px;padding:8px 0">아직 승인된 사용자가 없습니다.</div>`;
   document.getElementById('ulist').innerHTML = html;
 }
-function doApprove(id){ approveId(id); renderAdminUsers(); }
-function doRevoke(id){ revokeId(id); renderAdminUsers(); }
+function doApprove(id){ A.approveId(id); renderAdminUsers(); }
+function doRevoke(id){ A.revokeId(id); renderAdminUsers(); }
 
-// 시작 — 세션 복원 + 구글 초기화
-const existing=AUTH.current();
-if (existing) enter(existing);
-initGoogle();
+// 진입: 세션 있으면 대시보드/대기, 없으면 랜딩(로그인 모달)으로.
+const sess = A.AUTH.current();
+if (sess) enter(sess); else location.href='../';
 </script>
 </body>
 </html>
