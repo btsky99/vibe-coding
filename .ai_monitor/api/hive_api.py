@@ -23,6 +23,19 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# ── 자율 클로드 CLI 버전 캐시 (읽기전용 상태 패널용) ──
+# [WHY] `claude --version`은 subprocess라 매 폴링(30초)마다 부르면 낭비 → 프로세스당 1회만.
+_AUTO_CLI_VER = None
+def _auto_cli_version() -> str:
+    global _AUTO_CLI_VER
+    if _AUTO_CLI_VER is None:
+        try:
+            r = subprocess.run(['claude', '--version'], capture_output=True, text=True, timeout=5)
+            _AUTO_CLI_VER = (r.stdout or '').strip() or 'claude CLI'
+        except Exception:
+            _AUTO_CLI_VER = 'claude CLI'
+    return _AUTO_CLI_VER
+
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 from src.claude_quota import get_claude_quota
 from src.pg_store import (
@@ -794,6 +807,21 @@ def handle_get(handler, path: str, params: dict,
                 #   초록 ON 대신 '다른 인스턴스에서 실행 중(대기)'로 표시해 침묵 오해를 없앤다.
                 'active_here': is_active_holder(),
             }
+            # [읽기전용 기록 열람] 현재 작업 + 최근 결과 + CLI 버전 — 자율 클로드 가시성용.
+            #   ('관제 신규 개발 중단' 원칙 준수 — 조작 없이 열람만.)
+            try:
+                from src.pg_base import query_rows
+                _cur = query_rows("SELECT title FROM hive_tasks WHERE assigned_to='claude-auto' "
+                                  "AND status='in_progress' ORDER BY updated_at DESC LIMIT 1;")
+                payload['current_task'] = (_cur[0].get('title') if _cur else '') or ''
+                _rec = query_rows("SELECT title, status, to_char(updated_at,'MM-DD HH24:MI') AS at "
+                                  "FROM hive_tasks WHERE assigned_to='claude-auto' "
+                                  "AND status IN ('done','blocked') ORDER BY updated_at DESC LIMIT 5;")
+                payload['recent'] = _rec or []
+            except Exception:
+                payload['current_task'] = ''
+                payload['recent'] = []
+            payload['model'] = _auto_cli_version()
         except Exception as e:
             payload = {'error': str(e)}
         handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))

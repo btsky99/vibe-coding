@@ -130,7 +130,9 @@ function App() {
   // active_here: 이 인스턴스가 9019 싱글턴 락을 쥔 auto 실행 주체인지. enabled는 dev+설치본이
   //   DB로 공유하는 값이라 양쪽 다 ON으로 보이지만 실제로 도는 건 한쪽뿐 — active_here=false면
   //   '다른 인스턴스에서 실행 중, 나는 대기'라 초록 ON이 아니라 대기 배지를 띄운다.
-  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number; stale?: boolean; loop_beat_at?: string; active_here?: boolean } | null>(null);
+  const [heartbeat, setHeartbeat] = useState<{ enabled: boolean; daily_count: number; daily_limit: number; pending: number; stale?: boolean; loop_beat_at?: string; active_here?: boolean; last_result?: string; consecutive_fails?: number; current_task?: string; model?: string; recent?: { title: string; status: string; at: string }[] } | null>(null);
+  // [읽기전용] 자율 클로드 상태 드로어 열림 여부 — 배지 클릭 시 토글(관제 아님, 열람용).
+  const [autoPanel, setAutoPanel] = useState(false);
   const fetchHeartbeat = () => {
     fetch(`${API_BASE}/api/heartbeat/status`)
       .then(r => r.json())
@@ -706,9 +708,11 @@ function App() {
               {(() => {
               const hbWaiting = !!(heartbeat && heartbeat.enabled && heartbeat.active_here === false);
               const hbStale = !!(heartbeat?.stale && !hbWaiting);
+              const hbStatus = hbStale ? '멈춤' : hbWaiting ? '대기' : heartbeat?.enabled ? 'ON' : 'OFF';
               return (
+              <div className="relative">
               <button
-                onClick={toggleHeartbeat}
+                onClick={() => setAutoPanel(v => !v)}
                 className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-bold border transition-all ${
                   hbStale
                     ? 'bg-red-500/20 border-red-400/50 text-red-300 shadow-[0_0_8px_rgba(248,113,113,0.3)]'
@@ -718,13 +722,7 @@ function App() {
                     ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.25)]'
                     : 'bg-black/30 border-white/10 text-[#858585] hover:text-white hover:border-white/25'
                 }`}
-                title={heartbeat
-                  ? (hbStale
-                    ? `⚠️ 자율 데몬 응답 없음(hang 의심) — 마지막 박동 ${heartbeat.loop_beat_at || '?'}. 앱 재시작 필요`
-                    : hbWaiting
-                    ? `자율 클로드 ON이지만 이 인스턴스는 대기 중 — 다른 인스턴스(개발/설치본/다른 프로젝트)가 실행 주체입니다. 그쪽을 닫으면 이 인스턴스가 자동 인수합니다.`
-                    : `자율 클로드 ${heartbeat.enabled ? 'ON' : 'OFF'} — 오늘 ${heartbeat.daily_count}/${heartbeat.daily_limit}건 · 대기 ${heartbeat.pending}건 (클릭으로 전환)`)
-                  : '자율 클로드 — 서버 연결 대기'}
+                title="자율 클로드 상태 보기 (클릭)"
               >
                 <span className={hbStale || hbWaiting ? '' : heartbeat?.enabled ? 'animate-pulse' : ''}>
                   {hbStale ? '⚠️' : hbWaiting ? '⏸️' : '🫀'}
@@ -734,6 +732,37 @@ function App() {
                   <span className="px-1 rounded-full bg-amber-500/20 text-amber-300">{heartbeat.pending}</span>
                 )}
               </button>
+              {autoPanel && heartbeat && (
+                <div className="absolute right-0 mt-2 w-72 bg-[#14171c] border border-white/10 rounded-xl shadow-2xl p-3 z-[60] text-[11px] text-[#c9cfd8]">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-[12px]">🫀 자율 클로드</span>
+                    <span className={`px-2 py-0.5 rounded-full font-bold ${hbStale ? 'bg-red-500/20 text-red-300' : hbWaiting ? 'bg-amber-500/20 text-amber-300' : heartbeat.enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-[#858585]'}`}>{hbStatus}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <div><span className="text-[#858585]">현재 작업</span> · {heartbeat.current_task || '없음 (대기)'}</div>
+                    <div><span className="text-[#858585]">모델</span> · {heartbeat.model || '—'}</div>
+                    <div><span className="text-[#858585]">오늘</span> · {heartbeat.daily_count}/{heartbeat.daily_limit}건 · 연속실패 {heartbeat.consecutive_fails ?? 0}</div>
+                    <div><span className="text-[#858585]">실행 주체</span> · {heartbeat.active_here === false ? '다른 인스턴스' : '이 인스턴스'}{hbStale ? ' · hang 의심(재시작 권장)' : ''}</div>
+                  </div>
+                  {heartbeat.recent && heartbeat.recent.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-white/10">
+                      <div className="text-[#858585] mb-1">최근 결과</div>
+                      {heartbeat.recent.map((t, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          <span>{t.status === 'done' ? '✅' : '⛔'}</span>
+                          <span className="truncate flex-1">{t.title}</span>
+                          <span className="text-[#6b7280] shrink-0">{t.at}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    onClick={toggleHeartbeat}
+                    className={`w-full mt-2 py-1.5 rounded-lg font-bold transition-all ${heartbeat.enabled ? 'bg-white/10 text-[#858585] hover:text-white' : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'}`}
+                  >{heartbeat.enabled ? '자율 클로드 끄기' : '자율 클로드 켜기'}</button>
+                </div>
+              )}
+              </div>
               ); })()}
               {/* 파일 목록 새로고침 — fileRefreshKey 증가로 FileExplorer에 신호 */}
               <button
