@@ -1,18 +1,19 @@
 <!DOCTYPE html>
 <!--
   FILE: web/portal/index.html
-  DESCRIPTION: btsky.pe.kr 프로젝트 관리 대시보드. 로그인은 랜딩(../ 로그인 모달)에서 처리하고,
-    여기는 세션 기반 대시보드만 담당한다. 세션 없으면 랜딩으로 돌려보낸다.
-    권한: 관리자=전체+승인. 일반/구글=관리자 승인 후 접근(미승인 시 '승인 대기' 화면).
+  DESCRIPTION: btsky.pe.kr 관리 포털 — 사용자 관리(승인/권한) 전용 대시보드.
+    로그인은 랜딩(../ 로그인 모달)에서 처리, 여기는 세션 기반 화면만.
+    관리자=사용자 관리(승인 대기/승인/해제). 일반=승인 후 환영 화면(승인 전=대기).
+    샘플 프로젝트/통계 등 하드코딩 콘텐츠는 제거하고 실제 동작하는 사용자 관리만 유지.
     인증/데이터 로직은 공용 ../auth.js (window.App).
   REVISION HISTORY:
-    - 2026-07-22 Claude: 로그인 화면 제거(랜딩 모달로 이관) + 데모박스 제거. auth.js 공용화.
+    - 2026-07-22 Claude: 로그인 모달화 → 사용자 관리 전용으로 정리(샘플 프로젝트/통계 제거).
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>바이브 코딩 — 프로젝트 관리 포털</title>
+<title>바이브 코딩 — 사용자 관리</title>
 <script src="../auth.js"></script>
 <style>
   :root{
@@ -49,36 +50,28 @@
   .avatar{ width:26px; height:26px; border-radius:50%; vertical-align:middle; }
   .logout{ background:none; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; }
   .logout:hover{ color:var(--fg); border-color:var(--muted); }
-  .wrap{ max-width:1000px; margin:0 auto; padding:28px 24px; }
+  .wrap{ max-width:760px; margin:0 auto; padding:28px 24px; }
   .hi{ font-size:20px; font-weight:800; margin-bottom:4px; }
   .hi-sub{ color:var(--muted); margin-bottom:24px; }
-  .stats{ display:flex; gap:14px; margin-bottom:26px; flex-wrap:wrap; }
-  .stat{ flex:1; min-width:140px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
-  .stat .n{ font-size:26px; font-weight:800; }
-  .stat .l{ font-size:12px; color:var(--muted); margin-top:2px; }
-  .sect-h{ font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin:8px 0 12px; }
-  .plist{ display:flex; flex-direction:column; gap:10px; }
-  .empty{ color:var(--muted); padding:24px; text-align:center; border:1px dashed var(--line); border-radius:14px; }
-  .proj{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; display:flex; align-items:center; gap:16px; }
-  .proj .pname{ font-weight:700; }
-  .proj .powner{ font-size:12px; color:var(--muted); margin-top:2px; }
-  .proj .grow{ flex:1; }
-  .badge{ font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; white-space:nowrap; }
-  .b-active{ background:rgba(59,165,93,.15); color:var(--accent); }
-  .b-hold{ background:rgba(224,168,59,.15); color:var(--amber); }
-  .b-done{ background:rgba(139,147,161,.15); color:var(--muted); }
-  .bar{ width:120px; height:7px; background:var(--line); border-radius:4px; overflow:hidden; }
-  .bar>i{ display:block; height:100%; background:var(--accent); }
-  .adminbox{ margin-top:30px; background:var(--card); border:1px solid rgba(224,168,59,.3); border-radius:14px; padding:18px; }
-  .adminbox h3{ font-size:14px; margin:2px 0 12px; display:flex; align-items:center; gap:6px; }
-  .adminbox h3 .cnt{ font-weight:700; font-size:11px; color:var(--amber); background:rgba(224,168,59,.15); padding:1px 8px; border-radius:999px; }
-  .urow{ display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); font-size:13px; }
+  .panel{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px 22px; }
+  .panel.admin{ border-color:rgba(224,168,59,.3); }
+  .panel h3{ font-size:15px; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .panel h3 .cnt{ font-weight:700; font-size:11px; color:var(--amber); background:rgba(224,168,59,.15); padding:1px 8px; border-radius:999px; }
+  .urow{ display:flex; align-items:center; gap:10px; padding:11px 0; border-top:1px solid var(--line); font-size:13px; }
   .urow:first-of-type{ border-top:none; }
+  .uava{ width:30px; height:30px; border-radius:50%; background:var(--card2); display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .uava img{ width:100%; height:100%; border-radius:50%; }
   .utag{ font-size:11px; padding:2px 8px; border-radius:6px; background:var(--card2); color:var(--muted); }
-  .approve{ background:var(--accent); color:#fff; border:none; padding:6px 14px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; }
+  .approve{ background:var(--accent); color:#fff; border:none; padding:7px 16px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; }
   .approve:hover{ background:var(--accent2); }
-  .revoke{ background:none; color:var(--muted); border:1px solid var(--line); padding:5px 10px; border-radius:8px; font-size:11px; cursor:pointer; }
-  .sub-h{ font-size:12px; color:var(--muted); font-weight:700; margin:16px 0 4px; }
+  .revoke{ background:none; color:var(--muted); border:1px solid var(--line); padding:6px 12px; border-radius:8px; font-size:11px; cursor:pointer; }
+  .revoke:hover{ color:var(--red); border-color:var(--red); }
+  .sub-h{ font-size:12px; color:var(--muted); font-weight:700; margin:18px 0 4px; text-transform:uppercase; letter-spacing:.04em; }
+  .sub-h:first-child{ margin-top:0; }
+  .none{ color:var(--muted); font-size:12px; padding:10px 0; }
+  .welcome{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:34px; text-align:center; }
+  .welcome .ic{ font-size:44px; }
+  .welcome p{ color:var(--muted); margin-top:8px; }
 </style>
 </head>
 <body>
@@ -90,16 +83,16 @@
       <div class="pend-ic">⏳</div>
       <h1>승인 대기 중</h1>
       <div class="pend-who" id="pendWho"></div>
-      <p class="pend-msg">계정이 등록되었습니다.<br>관리자가 승인하면 포털을 이용할 수 있어요.</p>
+      <p class="pend-msg">계정이 등록되었습니다.<br>관리자가 승인하면 접근할 수 있어요.</p>
       <button class="btn ghost" onclick="refreshPending()">승인됐는지 새로고침</button>
       <button class="btn" onclick="logout()">로그아웃</button>
     </div>
   </div>
 
-  <!-- 대시보드 -->
+  <!-- 로그인 후 화면 -->
   <div id="app">
     <div class="top">
-      <div class="brand">🗂️ 프로젝트 관리 포털 <span class="role" id="roleBadge"></span></div>
+      <div class="brand">👥 사용자 관리 <span class="role" id="roleBadge"></span></div>
       <div class="top-right">
         <span id="whoami"></span>
         <button class="logout" onclick="logout()">로그아웃</button>
@@ -108,22 +101,15 @@
     <div class="wrap">
       <div class="hi" id="greet"></div>
       <div class="hi-sub" id="greetSub"></div>
-      <div class="stats" id="stats"></div>
-      <div class="sect-h">프로젝트</div>
-      <div class="plist" id="plist"></div>
-      <div class="adminbox" id="adminbox" style="display:none">
-        <h3>👑 사용자 관리 <span class="cnt" id="pendCnt"></span></h3>
-        <div id="ulist"></div>
-      </div>
+      <div id="content"></div>
     </div>
   </div>
 
 <script>
 const A = window.App;
-const S = { active:{t:'진행중',c:'b-active'}, hold:{t:'보류',c:'b-hold'}, done:{t:'완료',c:'b-done'} };
 
 function hideAll(){ document.getElementById('pending').style.display='none'; document.getElementById('app').style.display='none'; }
-// 승인 게이트: 관리자/승인된 사용자만 대시보드, 아니면 대기 등록 + 대기 화면.
+// 승인 게이트: 관리자/승인된 사용자만 진입, 아니면 대기 등록 + 대기 화면.
 function enter(sess){
   hideAll();
   if (sess.role==='admin' || A.isApproved(sess.id)) renderApp(sess);
@@ -132,7 +118,7 @@ function enter(sess){
 function showPending(sess){ document.getElementById('pending').style.display='flex';
   document.getElementById('pendWho').textContent = sess.name + (sess.email?` (${sess.email})`:''); }
 function refreshPending(){ const s=A.AUTH.current(); if(s) enter(s); else location.href='../'; }
-function logout(){ A.AUTH.logout(); location.href='../'; }   // 로그아웃 → 랜딩
+function logout(){ A.AUTH.logout(); location.href='../'; }
 
 function renderApp(sess){
   hideAll(); document.getElementById('app').style.display='block';
@@ -142,43 +128,39 @@ function renderApp(sess){
   const gtag = sess.via==='google'?' <span class="utag">Google</span>':'';
   document.getElementById('whoami').innerHTML = av+sess.name+' 님'+gtag;
   document.getElementById('greet').textContent = sess.name+' 님, 안녕하세요 👋';
-  document.getElementById('greetSub').textContent = isAdmin?'전체 프로젝트를 관리할 수 있습니다.':'내가 담당하는 프로젝트입니다.';
+  document.getElementById('greetSub').textContent = isAdmin?'가입 사용자를 승인·관리하세요.':'승인된 사용자입니다.';
 
-  const list=A.fetchProjects(sess);
-  const active=list.filter(p=>p.status==='active').length, done=list.filter(p=>p.status==='done').length;
-  document.getElementById('stats').innerHTML=`
-    <div class="stat"><div class="n">${list.length}</div><div class="l">${isAdmin?'전체':'내'} 프로젝트</div></div>
-    <div class="stat"><div class="n" style="color:var(--accent)">${active}</div><div class="l">진행중</div></div>
-    <div class="stat"><div class="n" style="color:var(--muted)">${done}</div><div class="l">완료</div></div>`;
-  document.getElementById('plist').innerHTML = list.length ? list.map(p=>{ const s=S[p.status];
-    return `<div class="proj"><div><div class="pname">${p.name}</div><div class="powner">담당: ${p.owner}</div></div>
-      <div class="grow"></div><div class="bar"><i style="width:${p.progress}%"></i></div>
-      <span style="font-size:12px;color:var(--muted);width:34px;text-align:right">${p.progress}%</span>
-      <span class="badge ${s.c}">${s.t}</span></div>`; }).join('') : '<div class="empty">담당 중인 프로젝트가 없습니다.</div>';
-
-  const ab=document.getElementById('adminbox');
-  if (isAdmin){ ab.style.display='block'; renderAdminUsers(); } else ab.style.display='none';
+  if (isAdmin) renderAdminUsers();
+  else document.getElementById('content').innerHTML =
+    `<div class="welcome"><div class="ic">✅</div><h3 style="margin-top:8px">승인된 계정입니다</h3>
+      <p>관리자 권한이 필요한 기능은 관리자에게 문의하세요.</p></div>`;
 }
+
+// 관리자 — 사용자 관리(승인 대기 / 승인됨)
 function renderAdminUsers(){
   const pend=A.getPending(), appr=A.getApproved();
-  document.getElementById('pendCnt').textContent = `대기 ${pend.length}`;
-  let html=`<div class="sub-h">승인 대기</div>`;
+  const av = u => u.picture ? `<span class="uava"><img src="${u.picture}" referrerpolicy="no-referrer"></span>`
+    : `<span class="uava">${(u.name||'?').slice(0,1)}</span>`;
+  let html = `<div class="panel admin"><h3>👑 사용자 관리 <span class="cnt">대기 ${pend.length}</span></h3>`;
+  html += `<div class="sub-h">승인 대기</div>`;
   html += pend.length ? pend.map(u=>`
-    <div class="urow"><b>${u.name}</b>${u.email?`<span class="utag">${u.email}</span>`:''}
+    <div class="urow">${av(u)}<b>${u.name}</b>${u.email?`<span class="utag">${u.email}</span>`:''}
       <span class="utag">${u.via==='google'?'Google':'일반'}</span><div style="flex:1"></div>
       <button class="approve" onclick="doApprove('${u.id.replace(/'/g,"")}')">승인</button></div>`).join('')
-    : `<div style="color:var(--muted);font-size:12px;padding:8px 0">대기 중인 사용자가 없습니다.</div>`;
+    : `<div class="none">대기 중인 사용자가 없습니다.</div>`;
   html += `<div class="sub-h">승인됨</div>`;
   html += appr.length ? appr.map(id=>`
-    <div class="urow"><b>${id}</b><span class="utag">승인됨</span><div style="flex:1"></div>
+    <div class="urow"><span class="uava">${id.slice(0,1)}</span><b>${id}</b>
+      <span class="utag">승인됨</span><div style="flex:1"></div>
       <button class="revoke" onclick="doRevoke('${id.replace(/'/g,"")}')">해제</button></div>`).join('')
-    : `<div style="color:var(--muted);font-size:12px;padding:8px 0">아직 승인된 사용자가 없습니다.</div>`;
-  document.getElementById('ulist').innerHTML = html;
+    : `<div class="none">아직 승인된 사용자가 없습니다.</div>`;
+  html += `</div>`;
+  document.getElementById('content').innerHTML = html;
 }
 function doApprove(id){ A.approveId(id); renderAdminUsers(); }
 function doRevoke(id){ A.revokeId(id); renderAdminUsers(); }
 
-// 진입: 세션 있으면 대시보드/대기, 없으면 랜딩(로그인 모달)으로.
+// 진입: 세션 있으면 화면, 없으면 랜딩(로그인 모달)으로.
 const sess = A.AUTH.current();
 if (sess) enter(sess); else location.href='../';
 </script>

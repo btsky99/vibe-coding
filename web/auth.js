@@ -39,17 +39,6 @@ window.App = (function () {
   function decodeJwt(t) { const b = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(decodeURIComponent(atob(b).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''))); }
 
-  // ── 데이터(샘플) ──
-  const PROJECTS = [
-    { name: 'vibe-coding',  owner: '유진수', status: 'active', progress: 82 },
-    { name: '파인드라이브 자동화', owner: '유진수', status: 'hold',   progress: 15 },
-    { name: '다운로드 포털',  owner: '유진수', status: 'active', progress: 95 },
-    { name: '하이브 대시보드', owner: '관리자', status: 'active', progress: 60 },
-    { name: '맥 포팅',       owner: '관리자', status: 'hold',   progress: 5  },
-    { name: '제텔카스텐 정리', owner: '관리자', status: 'done',   progress: 100 },
-  ];
-  const fetchProjects = s => s.role === 'admin' ? PROJECTS : PROJECTS.filter(p => p.owner === s.name);
-
   // ── Google Identity Services 버튼 렌더 (컨테이너 element + 콜백 주입) ──
   function initGoogle(containerEl, noteEl, onProfile) {
     if (GOOGLE_CLIENT_ID.startsWith('YOUR_')) { if (noteEl) noteEl.textContent = '⚙️ GOOGLE_CLIENT_ID 설정 후 활성화'; return; }
@@ -65,5 +54,5 @@ window.App = (function () {
   }
 
   return { GOOGLE_CLIENT_ID, ADMIN_EMAILS, USERS, AUTH, isApproved, approveId, revokeId,
-    getApproved, getPending, addPending, removePending, decodeJwt, PROJECTS, fetchProjects, initGoogle };
+    getApproved, getPending, addPending, removePending, decodeJwt, initGoogle };
 })();
