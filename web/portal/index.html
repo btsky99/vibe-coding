@@ -3,14 +3,12 @@
   FILE: web/portal/index.html
   DESCRIPTION: btsky.pe.kr 프로젝트 관리 포털 — 로그인 프로토타입.
     로그인 3종: (1)관리자 데모 (2)일반 데모 (3)Google 로그인(OAuth, GIS).
-    [정적 호스팅] GitHub Pages라 서버 없음. Google 로그인은 Google Identity Services로
-    클라이언트에서 처리 — 구글이 서명한 ID 토큰(JWT)을 받아 이메일/이름을 확인한다.
-    실보안(토큰 서버검증·세션·RLS)은 백엔드 필요 → [SUPABASE 승격 지점] 참고.
-    [보안] 데모 비번은 노출된 더미값. 실계정 자격증명·시크릿 절대 하드코딩 금지
-    (Google은 client_id만 공개값이라 OK — client_secret은 여기 쓰지 않는다).
+    권한: 관리자=전체+승인권한. 일반/구글=관리자 승인 후에만 접근(승인 전 '대기' 화면).
+    [정적 호스팅] GitHub Pages라 서버 없음 — 승인상태·세션 모두 localStorage(프로토타입).
+    실사용(교차 사용자 승인, 토큰 서버검증, RLS)은 [SUPABASE 승격 지점] 참고.
+    [보안] 데모 비번은 노출된 더미값. 실시크릿 하드코딩 금지(Google은 client_id만 공개값).
   REVISION HISTORY:
-    - 2026-07-22 Claude: 최초 프로토타입 — 관리자/일반 뷰 분리.
-    - 2026-07-22 Claude: Google 로그인(GIS) 추가 — 이메일 allowlist로 역할 자동배정.
+    - 2026-07-22 Claude: 관리자/일반 뷰 분리 → Google 로그인(GIS) → 일반사용자 관리자 승인 게이트.
 -->
 <html lang="ko">
 <head>
@@ -33,7 +31,7 @@
     font-family:'Segoe UI','Malgun Gothic',system-ui,sans-serif; font-size:14px; }
   .proto{ background:var(--amber); color:#1a1d22; text-align:center; font-size:12px;
     font-weight:600; padding:6px 12px; }
-  #login{ min-height:calc(100vh - 30px); display:flex; align-items:center; justify-content:center; padding:24px; }
+  .center{ min-height:calc(100vh - 30px); display:flex; align-items:center; justify-content:center; padding:24px; }
   .lcard{ background:var(--card); border:1px solid var(--line); border-radius:20px;
     box-shadow:var(--shadow); padding:40px 36px; max-width:400px; width:100%; }
   .logo{ font-size:44px; text-align:center; margin-bottom:12px; }
@@ -47,16 +45,19 @@
     background:linear-gradient(180deg,var(--accent),var(--accent2)); font-size:15px; font-weight:700;
     cursor:pointer; transition:transform .1s, box-shadow .1s; box-shadow:0 4px 14px rgba(59,165,93,.3); }
   .btn:hover{ transform:translateY(-1px); }
+  .btn.ghost{ background:none; color:var(--muted); border:1px solid var(--line); box-shadow:none; }
   .err{ color:var(--red); font-size:12px; margin-top:12px; text-align:center; min-height:16px; }
   .demo{ margin-top:22px; padding:12px; border:1px dashed var(--line); border-radius:10px;
     font-size:12px; color:var(--muted); line-height:1.7; }
   .demo b{ color:var(--fg); }
-  /* 구분선 "또는" */
   .divider{ display:flex; align-items:center; gap:12px; margin:22px 0 18px; color:var(--muted); font-size:12px; }
   .divider::before,.divider::after{ content:''; flex:1; height:1px; background:var(--line); }
-  /* 구글 버튼 영역 */
   #gwrap{ display:flex; justify-content:center; min-height:44px; }
   .gnote{ margin-top:10px; font-size:11px; color:var(--amber); text-align:center; line-height:1.6; }
+  /* 승인 대기 화면 */
+  .pend-ic{ font-size:52px; text-align:center; margin-bottom:8px; }
+  .pend-msg{ text-align:center; color:var(--muted); font-size:13px; line-height:1.7; margin:10px 0 22px; }
+  .pend-who{ text-align:center; font-weight:700; margin-bottom:4px; }
   #app{ display:none; }
   .top{ display:flex; align-items:center; justify-content:space-between; padding:14px 24px;
     border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:5; }
@@ -94,17 +95,25 @@
   .bar>i{ display:block; height:100%; background:var(--accent); }
   .adminbox{ margin-top:30px; background:var(--card); border:1px solid rgba(224,168,59,.3);
     border-radius:14px; padding:18px; }
-  .adminbox h3{ font-size:14px; margin-bottom:12px; display:flex; align-items:center; gap:6px; }
-  .urow{ display:flex; align-items:center; gap:12px; padding:8px 0; border-top:1px solid var(--line); font-size:13px; }
+  .adminbox h3{ font-size:14px; margin:2px 0 12px; display:flex; align-items:center; gap:6px; }
+  .adminbox h3 .cnt{ font-weight:700; font-size:11px; color:var(--amber); background:rgba(224,168,59,.15);
+    padding:1px 8px; border-radius:999px; }
+  .urow{ display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); font-size:13px; }
   .urow:first-of-type{ border-top:none; }
   .utag{ font-size:11px; padding:2px 8px; border-radius:6px; background:var(--card2); color:var(--muted); }
+  .approve{ background:var(--accent); color:#fff; border:none; padding:6px 14px; border-radius:8px;
+    font-size:12px; font-weight:700; cursor:pointer; }
+  .approve:hover{ background:var(--accent2); }
+  .revoke{ background:none; color:var(--muted); border:1px solid var(--line); padding:5px 10px;
+    border-radius:8px; font-size:11px; cursor:pointer; }
+  .sub-h{ font-size:12px; color:var(--muted); font-weight:700; margin:16px 0 4px; }
 </style>
 </head>
 <body>
-  <div class="proto">🧪 프로토타입 — 실제 서버 인증/DB 미연동 (Supabase 연동 시 실사용 승격). 데모 계정 또는 Google로 로그인해 보세요.</div>
+  <div class="proto">🧪 프로토타입 — 서버 미연동(localStorage). 일반/Google 사용자는 관리자 승인 후 접근됩니다. (Supabase 연동 시 실사용)</div>
 
   <!-- 로그인 -->
-  <div id="login">
+  <div id="login" class="center">
     <form class="lcard" onsubmit="return doLogin(event)">
       <div class="logo">🗂️</div>
       <h1>프로젝트 관리 포털</h1>
@@ -115,18 +124,28 @@
       <input id="pw" type="password" autocomplete="current-password" placeholder="비밀번호">
       <button class="btn" type="submit">로그인</button>
       <div class="err" id="err"></div>
-
       <div class="divider">또는</div>
       <div id="gwrap"></div>
       <div class="gnote" id="gnote"></div>
-
       <div class="demo">
         <b>데모 계정</b> (프로토타입 — 실제 비번 아님)<br>
-        · 관리자: <b>admin</b> / <b>admin123</b> → 모든 프로젝트<br>
-        · 일반: <b>user</b> / <b>user123</b> → 본인 프로젝트만<br>
-        · Google: 로그인한 이메일이 관리자 목록에 있으면 관리자
+        · 관리자: <b>admin</b> / <b>admin123</b> → 전체 + 승인 권한<br>
+        · 일반: <b>user</b> / <b>user123</b> → <b>관리자 승인 후</b> 접근<br>
+        · Google: 관리자 이메일이면 관리자, 아니면 승인 대기
       </div>
     </form>
+  </div>
+
+  <!-- 승인 대기 -->
+  <div id="pending" class="center" style="display:none">
+    <div class="lcard">
+      <div class="pend-ic">⏳</div>
+      <h1>승인 대기 중</h1>
+      <div class="pend-who" id="pendWho"></div>
+      <p class="pend-msg">계정이 등록되었습니다.<br>관리자가 승인하면 포털을 이용할 수 있어요.</p>
+      <button class="btn ghost" onclick="refreshPending()">승인됐는지 새로고침</button>
+      <button class="btn" style="margin-top:10px" onclick="logout()">로그아웃</button>
+    </div>
   </div>
 
   <!-- 앱 -->
@@ -145,47 +164,48 @@
       <div class="sect-h">프로젝트</div>
       <div class="plist" id="plist"></div>
       <div class="adminbox" id="adminbox" style="display:none">
-        <h3>👑 사용자 관리 <span style="font-weight:400;color:var(--muted);font-size:12px">(관리자 전용)</span></h3>
+        <h3>👑 사용자 관리 <span class="cnt" id="pendCnt"></span></h3>
         <div id="ulist"></div>
       </div>
     </div>
   </div>
 
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-// [설정] ──────────────────────────────────────────────────────────────────────
-// Google OAuth 클라이언트 ID. Google Cloud Console에서 발급 후 여기 교체.
-//   (승인된 JavaScript 원본에 https://btsky.pe.kr, https://btsky99.github.io 등록 필수)
-// client_id는 공개값이라 여기 둬도 안전. client_secret은 정적 사이트에 절대 두지 않는다.
+// ── 설정 ──────────────────────────────────────────────────────────────────────
 const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
-// 이 이메일들은 Google 로그인 시 '관리자' 역할. 나머지는 '일반'.
-const ADMIN_EMAILS = ['btsky99@gmail.com'];
+const ADMIN_EMAILS = ['btsky99@gmail.com'];   // Google 로그인 시 관리자로 볼 이메일
 
-// [SUPABASE 승격 지점 ①] 데모 인증 — 실사용 시 supabase.auth로 교체.
+// ── 승인 저장소 (프로토타입: localStorage / 실사용: DB approved 컬럼 + RLS) ──────
+// [주의] 정적 사이트라 승인상태가 브라우저 로컬에만 있음 → 실제 교차-사용자 승인은
+//   Supabase 등 백엔드 필요. 지금은 같은 브라우저 안에서 흐름을 시연한다.
+const P_APPROVED='portal_approved', P_PENDING='portal_pending', P_SESS='portal_sess';
+const jget=(k,d)=>{ try{ return JSON.parse(localStorage.getItem(k)||d); }catch{ return JSON.parse(d); } };
+const getApproved=()=>jget(P_APPROVED,'[]');
+const isApproved=id=>getApproved().includes(id);
+function approveId(id){ const a=getApproved(); if(!a.includes(id)){ a.push(id); localStorage.setItem(P_APPROVED,JSON.stringify(a)); } removePending(id); }
+function revokeId(id){ localStorage.setItem(P_APPROVED, JSON.stringify(getApproved().filter(x=>x!==id))); }
+const getPending=()=>jget(P_PENDING,'[]');
+function addPending(s){ const p=getPending(); if(!p.find(x=>x.id===s.id)){ p.push({id:s.id,name:s.name,email:s.email||'',via:s.via}); localStorage.setItem(P_PENDING,JSON.stringify(p)); } }
+function removePending(id){ localStorage.setItem(P_PENDING, JSON.stringify(getPending().filter(x=>x.id!==id))); }
+
+// ── 인증 ([SUPABASE 승격 지점 ①] AUTH.* 를 supabase.auth로 교체) ────────────────
 const USERS = {
   admin: { pw:'admin123', role:'admin', name:'관리자' },
   user:  { pw:'user123',  role:'user',  name:'유진수' },
 };
 const AUTH = {
-  login(id, pw){
-    const u = USERS[id];
-    if (u && u.pw === pw){ const s={id, role:u.role, name:u.name, via:'demo'};
-      save(s); return s; }
-    return null;
-  },
-  // Google ID 토큰(JWT) 프로필로 세션 생성. 역할은 이메일 allowlist로 결정.
+  login(id, pw){ const u=USERS[id];
+    if (u && u.pw===pw){ const s={id, role:u.role, name:u.name, via:'demo'}; save(s); return s; } return null; },
   loginGoogle(profile){
     const role = ADMIN_EMAILS.includes((profile.email||'').toLowerCase()) ? 'admin' : 'user';
     const s = { id:profile.email, email:profile.email, name:profile.name||profile.email,
-                picture:profile.picture||'', role, via:'google' };
-    save(s); return s;
-  },
-  current(){ try { return JSON.parse(localStorage.getItem('portal_sess')||'null'); } catch { return null; } },
-  logout(){ localStorage.removeItem('portal_sess'); },
+                picture:profile.picture||'', role, via:'google' }; save(s); return s; },
+  current(){ return jget(P_SESS,'null'); },
+  logout(){ localStorage.removeItem(P_SESS); },
 };
-function save(s){ localStorage.setItem('portal_sess', JSON.stringify(s)); }
+function save(s){ localStorage.setItem(P_SESS, JSON.stringify(s)); }
 
-// [SUPABASE 승격 지점 ②] 데이터 — 실사용 시 supabase.from('projects').select() + RLS.
+// ── 데이터 ([SUPABASE 승격 지점 ②] supabase.from('projects').select() + RLS) ─────
 const PROJECTS = [
   { name:'vibe-coding',  owner:'유진수', status:'active', progress:82 },
   { name:'파인드라이브 자동화', owner:'유진수', status:'hold',   progress:15 },
@@ -194,97 +214,99 @@ const PROJECTS = [
   { name:'맥 포팅',       owner:'관리자', status:'hold',   progress:5  },
   { name:'제텔카스텐 정리', owner:'관리자', status:'done',   progress:100 },
 ];
-function fetchProjects(sess){
-  return sess.role === 'admin' ? PROJECTS : PROJECTS.filter(p => p.owner === sess.name);
-}
-
+const fetchProjects = sess => sess.role==='admin' ? PROJECTS : PROJECTS.filter(p=>p.owner===sess.name);
 const S = { active:{t:'진행중',c:'b-active'}, hold:{t:'보류',c:'b-hold'}, done:{t:'완료',c:'b-done'} };
 
-// ── Google Identity Services 초기화 ──
+// ── Google Identity Services ──
 function initGoogle(){
-  const note = document.getElementById('gnote');
-  if (GOOGLE_CLIENT_ID.startsWith('YOUR_')){
-    note.textContent = '⚙️ Google 로그인을 쓰려면 GOOGLE_CLIENT_ID 설정이 필요합니다 (발급 후 자동 활성화).';
-    return;
-  }
-  if (!window.google || !google.accounts || !google.accounts.id){ setTimeout(initGoogle, 300); return; }
-  google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onGoogle });
+  const note=document.getElementById('gnote');
+  if (GOOGLE_CLIENT_ID.startsWith('YOUR_')){ note.textContent='⚙️ Google 로그인은 GOOGLE_CLIENT_ID 설정 후 활성화됩니다.'; return; }
+  if (!window.google||!google.accounts||!google.accounts.id){ setTimeout(initGoogle,300); return; }
+  google.accounts.id.initialize({ client_id:GOOGLE_CLIENT_ID, callback:onGoogle });
   google.accounts.id.renderButton(document.getElementById('gwrap'),
     { theme:'outline', size:'large', text:'signin_with', shape:'pill', locale:'ko', width:328 });
 }
 function onGoogle(resp){
-  try {
-    const profile = decodeJwt(resp.credential); // {email, name, picture, ...}
-    render(AUTH.loginGoogle(profile));
-  } catch(e){ document.getElementById('err').textContent = 'Google 로그인 처리 실패: ' + e.message; }
+  try{ enter(AUTH.loginGoogle(decodeJwt(resp.credential))); }
+  catch(e){ document.getElementById('err').textContent='Google 로그인 실패: '+e.message; }
 }
-// JWT payload(base64url) 디코드 — 클라이언트에서 신원 표시용(서버검증은 백엔드 승격 시).
-function decodeJwt(token){
-  const b = token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
-  const json = decodeURIComponent(atob(b).split('').map(c =>
-    '%' + ('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-  return JSON.parse(json);
-}
+function decodeJwt(t){ const b=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+  return JSON.parse(decodeURIComponent(atob(b).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''))); }
 
-function doLogin(e){
-  e.preventDefault();
-  const id = document.getElementById('uid').value.trim();
-  const pw = document.getElementById('pw').value;
-  const sess = AUTH.login(id, pw);
-  if (!sess){ document.getElementById('err').textContent = '아이디 또는 비밀번호가 올바르지 않습니다.'; return false; }
-  render(sess);
-  return false;
+// ── 로그인/게이트 ──
+function doLogin(e){ e.preventDefault();
+  const id=document.getElementById('uid').value.trim(), pw=document.getElementById('pw').value;
+  const sess=AUTH.login(id,pw);
+  if(!sess){ document.getElementById('err').textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; return false; }
+  enter(sess); return false;
 }
-function logout(){ AUTH.logout(); document.getElementById('app').style.display='none';
+// 승인 게이트: 관리자이거나 승인된 사용자만 앱 진입. 아니면 대기 등록 + 대기화면.
+function enter(sess){
+  hideAll();
+  if (sess.role==='admin' || isApproved(sess.id)) renderApp(sess);
+  else { addPending(sess); showPending(sess); }
+}
+function hideAll(){ document.getElementById('login').style.display='none';
+  document.getElementById('pending').style.display='none'; document.getElementById('app').style.display='none'; }
+function showPending(sess){ document.getElementById('pending').style.display='flex';
+  document.getElementById('pendWho').textContent = sess.name + (sess.email?` (${sess.email})`:''); }
+function refreshPending(){ const s=AUTH.current(); if(s) enter(s); }
+function logout(){ AUTH.logout(); hideAll();
   document.getElementById('login').style.display='flex';
   document.getElementById('uid').value=''; document.getElementById('pw').value=''; document.getElementById('err').textContent='';
-  if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect(); }
+  if (window.google&&google.accounts&&google.accounts.id) google.accounts.id.disableAutoSelect(); }
 
-function render(sess){
-  document.getElementById('login').style.display='none';
-  document.getElementById('app').style.display='block';
+// ── 대시보드 ──
+function renderApp(sess){
+  hideAll(); document.getElementById('app').style.display='block';
   const isAdmin = sess.role==='admin';
-  const rb = document.getElementById('roleBadge');
-  rb.textContent = isAdmin ? '관리자' : '일반';
-  rb.className = 'role ' + (isAdmin?'admin':'user');
-  const av = sess.picture ? `<img class="avatar" src="${sess.picture}" referrerpolicy="no-referrer"> ` : '';
-  const gtag = sess.via==='google' ? ' <span class="utag">Google</span>' : '';
-  document.getElementById('whoami').innerHTML = av + sess.name + ' 님' + gtag;
-  document.getElementById('greet').textContent = sess.name + ' 님, 안녕하세요 👋';
-  document.getElementById('greetSub').textContent = isAdmin
-    ? '전체 프로젝트를 관리할 수 있습니다.' : '내가 담당하는 프로젝트입니다.';
+  const rb=document.getElementById('roleBadge'); rb.textContent=isAdmin?'관리자':'일반'; rb.className='role '+(isAdmin?'admin':'user');
+  const av = sess.picture?`<img class="avatar" src="${sess.picture}" referrerpolicy="no-referrer"> `:'';
+  const gtag = sess.via==='google'?' <span class="utag">Google</span>':'';
+  document.getElementById('whoami').innerHTML = av+sess.name+' 님'+gtag;
+  document.getElementById('greet').textContent = sess.name+' 님, 안녕하세요 👋';
+  document.getElementById('greetSub').textContent = isAdmin?'전체 프로젝트를 관리할 수 있습니다.':'내가 담당하는 프로젝트입니다.';
 
-  const list = fetchProjects(sess);
-  const active = list.filter(p=>p.status==='active').length;
-  const done = list.filter(p=>p.status==='done').length;
-  document.getElementById('stats').innerHTML = `
+  const list=fetchProjects(sess);
+  const active=list.filter(p=>p.status==='active').length, done=list.filter(p=>p.status==='done').length;
+  document.getElementById('stats').innerHTML=`
     <div class="stat"><div class="n">${list.length}</div><div class="l">${isAdmin?'전체':'내'} 프로젝트</div></div>
     <div class="stat"><div class="n" style="color:var(--accent)">${active}</div><div class="l">진행중</div></div>
     <div class="stat"><div class="n" style="color:var(--muted)">${done}</div><div class="l">완료</div></div>`;
-  document.getElementById('plist').innerHTML = list.length ? list.map(p=>{
-    const s = S[p.status];
-    return `<div class="proj">
-      <div><div class="pname">${p.name}</div><div class="powner">담당: ${p.owner}</div></div>
-      <div class="grow"></div>
-      <div class="bar"><i style="width:${p.progress}%"></i></div>
+  document.getElementById('plist').innerHTML = list.length ? list.map(p=>{ const s=S[p.status];
+    return `<div class="proj"><div><div class="pname">${p.name}</div><div class="powner">담당: ${p.owner}</div></div>
+      <div class="grow"></div><div class="bar"><i style="width:${p.progress}%"></i></div>
       <span style="font-size:12px;color:var(--muted);width:34px;text-align:right">${p.progress}%</span>
-      <span class="badge ${s.c}">${s.t}</span>
-    </div>`; }).join('') : '<div class="empty">담당 중인 프로젝트가 없습니다.</div>';
-  const ab = document.getElementById('adminbox');
-  if (isAdmin){
-    ab.style.display='block';
-    document.getElementById('ulist').innerHTML = Object.entries(USERS).map(([id,u])=>`
-      <div class="urow"><b>${u.name}</b><span class="utag">${id}</span>
-        <span class="utag">${u.role==='admin'?'관리자':'일반'}</span>
-        <div style="flex:1"></div>
-        <span style="color:var(--muted);font-size:12px">${PROJECTS.filter(p=>p.owner===u.name).length}개 담당</span>
-      </div>`).join('');
-  } else { ab.style.display='none'; }
-}
+      <span class="badge ${s.c}">${s.t}</span></div>`; }).join('') : '<div class="empty">담당 중인 프로젝트가 없습니다.</div>';
 
-// 세션 유지 + 구글 버튼 초기화
-const existing = AUTH.current();
-if (existing) render(existing);
+  const ab=document.getElementById('adminbox');
+  if (isAdmin){ ab.style.display='block'; renderAdminUsers(); } else ab.style.display='none';
+}
+// 관리자 전용 — 승인 대기 + 승인된 사용자 관리
+function renderAdminUsers(){
+  const pend=getPending(), appr=getApproved();
+  document.getElementById('pendCnt').textContent = pend.length ? `대기 ${pend.length}` : '대기 0';
+  let html='';
+  html += `<div class="sub-h">승인 대기</div>`;
+  html += pend.length ? pend.map(u=>`
+    <div class="urow"><b>${u.name}</b>${u.email?`<span class="utag">${u.email}</span>`:''}
+      <span class="utag">${u.via==='google'?'Google':'일반'}</span>
+      <div style="flex:1"></div>
+      <button class="approve" onclick="doApprove('${u.id.replace(/'/g,"")}')">승인</button></div>`).join('')
+    : `<div style="color:var(--muted);font-size:12px;padding:8px 0">대기 중인 사용자가 없습니다.</div>`;
+  html += `<div class="sub-h">승인됨</div>`;
+  html += appr.length ? appr.map(id=>`
+    <div class="urow"><b>${id}</b><span class="utag">승인됨</span><div style="flex:1"></div>
+      <button class="revoke" onclick="doRevoke('${id.replace(/'/g,"")}')">해제</button></div>`).join('')
+    : `<div style="color:var(--muted);font-size:12px;padding:8px 0">아직 승인된 사용자가 없습니다.</div>`;
+  document.getElementById('ulist').innerHTML = html;
+}
+function doApprove(id){ approveId(id); renderAdminUsers(); }
+function doRevoke(id){ revokeId(id); renderAdminUsers(); }
+
+// 시작 — 세션 복원 + 구글 초기화
+const existing=AUTH.current();
+if (existing) enter(existing);
 initGoogle();
 </script>
 </body>
