@@ -707,7 +707,12 @@ function App() {
                   stale이어도 '대기'로 표시. 우선순위: 멈춤(주체+stale) > 대기 > ON > OFF. */}
               {(() => {
               const hbWaiting = !!(heartbeat && heartbeat.enabled && heartbeat.active_here === false);
-              const hbStale = !!(heartbeat?.stale && !hbWaiting);
+              // [과거사고 2026-07-23] hbStale을 !hbWaiting으로 막았더니, hbWaiting이 enabled=true를
+              //   요구해서 '비주체 + enabled=false + stale' 조합(설치본이 자기 DB의 이틀 묵은
+              //   loop_beat_at을 읽는 상황)이 그대로 '멈춤'으로 샜다 = 위 불변식 위반.
+              //   락을 못 쥔 인스턴스의 stale은 hang 근거가 못 된다(박동 주체가 남이라 당연히 늙음).
+              //   → 게이트를 active_here로 직접 건다. undefined(구버전 서버)는 기존대로 통과.
+              const hbStale = !!(heartbeat?.stale && heartbeat?.active_here !== false);
               const hbStatus = hbStale ? '멈춤' : hbWaiting ? '대기' : heartbeat?.enabled ? 'ON' : 'OFF';
               return (
               <div className="relative">
