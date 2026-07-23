@@ -3,6 +3,8 @@ FILE: ai_monitor_plan.md
 DESCRIPTION: 텔레그램 그룹방 허브화 구현 계획 — 설정저장 버그·메시지 유실·문서전송 부재 해소.
 
 REVISION HISTORY:
+- 2026-07-24 Claude: Task 1~5 전부 완료 표시. 구현은 c768e7b에 이미 있었으나 각 태스크의
+                     '검증'(회귀 테스트)이 비어 있어 tests/test_telegram_hub.py로 채움.
 - 2026-07-23 Claude: 신규. 텔레그램 허브화 브레인스토밍 승인(B안) → 계획.
                      이전 계획(LAN 브리지 Phase 3)은 완료(커밋 098845f, Phase 4 fb1225d) → 교체.
 -->
@@ -10,6 +12,8 @@ REVISION HISTORY:
 # 텔레그램 그룹방 허브화
 
 승인: 2026-07-23 (vibe-brainstorm, B안 = 버그수정 + 문서전송 + 분할).
+**상태: 완료 (2026-07-24)** — 구현 `c768e7b`(+ `696a3b2` 로그 전송 금지, `0d6a6dd` 출처 산출,
+`4afe7c8` UI 설정), 검증 `tests/test_telegram_hub.py` 35케이스.
 
 ## 배경 (왜 하는가)
 
@@ -31,7 +35,9 @@ REVISION HISTORY:
 
 ## 태스크
 
-### [ ] Task 1: `.env` 저장 시 `TELEGRAM_GROUP_CHAT_ID` 삭제 버그 수정
+### [x] Task 1: `.env` 저장 시 `TELEGRAM_GROUP_CHAT_ID` 삭제 버그 수정
+- **완료**: `rewrite_env_telegram_tokens` 순수 함수로 추출 + 제거 조건 축소.
+  검증 5케이스(`test_telegram_hub.py`) — 옛 로직 재현 시 그룹ID가 실제로 사라지는 것 확인.
 - **파일**: `.ai_monitor/api/telegram_api.py` (L86~104)
 - **문제**: L92 `elif not stripped.startswith("TELEGRAM_")` 가 `TELEGRAM_` 접두 라인을
   전부 버린 뒤, 복원은 `TELEGRAM_BOT_T1~T8`만 한다. 대시보드에서 텔레그램 설정을
@@ -43,7 +49,9 @@ REVISION HISTORY:
   `TELEGRAM_GROUP_CHAT_ID`가 값 그대로 남는지 assert. 실제 `.env` 미변경.
 - **의존성**: 없음
 
-### [ ] Task 2: 긴 메시지 분할 헬퍼 `_split_message` 신설
+### [x] Task 2: 긴 메시지 분할 헬퍼 `_split_message` 신설
+- **완료**: `telegram_helpers.py:69`. 검증 6케이스 — 재결합 시 원문 일치, 펜스 짝 보장.
+  ※ `max_parts`는 잘라내기에 관여하지 않는 판단 기준으로 구현됨(계획과 동일).
 - **파일**: `scripts/telegram_helpers.py` (`_truncate` 아래)
 - **문제**: `_truncate(text, 4000)`가 초과분을 **버린다**(L57~59). `_safe_send`가 항상
   이걸 통과시켜(`telegram_agent_bot.py:213`) 긴 응답·리포트가 소리 없이 유실된다.
@@ -56,7 +64,10 @@ REVISION HISTORY:
   ④코드펜스 짝 맞음 ⑤조각 합이 원문을 보존(유실 0)
 - **의존성**: 없음 (Task 1과 병행 가능)
 
-### [ ] Task 3: 파일/문서 전송 신설 + 보안 가드
+### [x] Task 3: 파일/문서 전송 신설 + 보안 가드
+- **완료**: `is_sendable_path`(helpers) + `_safe_send_document`/`send_document_to_*`(bot).
+  차단 목록은 계획보다 넓다 — `696a3b2` 보안사고(로그에 봇 토큰 평문 누적) 이후
+  `.log`/`.dump`/`.sql`/`.bak`을 추가. 검증 13케이스.
 - **파일**: `scripts/telegram_agent_bot.py`, `scripts/telegram_helpers.py`
 - **현황**: `sendDocument`/`InputFile` 사용 **0건** — 텍스트 전용.
 - **방법**:
@@ -72,7 +83,9 @@ REVISION HISTORY:
   일반 파일 허용, 초대용량 거부
 - **의존성**: 없음
 
-### [ ] Task 4: `_safe_send`에 분할 + 자동 파일 전환 적용
+### [x] Task 4: `_safe_send`에 분할 + 자동 파일 전환 적용
+- **완료**: `telegram_agent_bot.py:273`. 계획에 없던 보강 — 파일 전송 실패 시 분할 전송으로
+  폴백해 어떤 경우에도 내용이 사라지지 않는다. 검증 6케이스(3경로 + 폴백 2 + 문서 가드).
 - **파일**: `scripts/telegram_agent_bot.py` (L211 `_safe_send`)
 - **방법**: `_truncate` 단일 호출을 3경로로 교체
   1. limit 이하 → 기존대로 1건
@@ -83,7 +96,7 @@ REVISION HISTORY:
 - **검증**: 3경로 각각 태우기 + Markdown 파싱 실패 폴백이 분할 후에도 동작하는지
 - **의존성**: **Task 2, 3 완료 후**
 
-### [ ] Task 5: ITCP→그룹 미러링 가독성 개선
+### [x] Task 5: ITCP→그룹 미러링 가독성 개선
 - **파일**: `scripts/telegram_bridge.py` (L157~248)
 - **방법**:
   - L211 `_truncate(content, 3800)`, L229~232 `formatted`를 Task 4 경로에 태워 유실 제거
@@ -91,6 +104,11 @@ REVISION HISTORY:
   - 동일 발신자 연속 메시지는 헤더 생략(스팸 감소) — 직전 발신자 캐시 1개
 - **검증**: `scripts/send_message.py`로 ITCP 메시지 발행 → 그룹방 도착 확인(유실·중복 0)
 - **의존성**: **Task 4 완료 후**
+- **완료**: `telegram_bridge.py:170 _poll_itcp_to_group`. 헤더 서명 캐시(`_last_mirror_sig`)로
+  연속 발화 헤더 생략, `_truncate` 제거해 `send_to_group` 경로에 위임.
+  **🔴 단위 테스트 없음** — 헤더/중복 판정이 async 폴링 루프 안에 인라인이라 함수로 떼기 전엔
+  테스트 불가. 순수 함수인 `source_label`만 고정했다(봇 수 < 터미널 수일 때 오표시 재발 방지).
+  실제 그룹방 도착 확인은 봇 토큰이 필요한 수동 검증으로 남는다.
 
 ---
 
@@ -104,7 +122,8 @@ REVISION HISTORY:
 
 ## 완료 기준
 
-- [ ] 대시보드에서 텔레그램 설정을 저장해도 그룹방이 계속 동작
-- [ ] 4000자 초과 응답이 잘리지 않고 전부 도착(분할 또는 파일)
-- [ ] 프로젝트 내 문서를 텔레그램으로 전송 가능, `.env`/키 파일은 거부
-- [ ] T1~T8 에이전트 대화가 그룹방에 유실 없이 보임
+- [x] 대시보드에서 텔레그램 설정을 저장해도 그룹방이 계속 동작 — 테스트로 고정
+- [x] 4000자 초과 응답이 잘리지 않고 전부 도착(분할 또는 파일) — 테스트로 고정
+- [x] 프로젝트 내 문서를 텔레그램으로 전송 가능, `.env`/키 파일은 거부 — 테스트로 고정
+- [x] T1~T8 에이전트 대화가 그룹방에 유실 없이 보임 — 코드 경로 반영,
+      **실물 그룹방 왕복은 수동 검증 필요**(봇 토큰·인터넷 요구, 자동 테스트 미포함)

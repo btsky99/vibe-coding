@@ -144,8 +144,12 @@ def telegram_config_post(handler, project_root: Path) -> None:
     }
 
     [동작]
-    .env에서 TELEGRAM_ 접두사 라인을 모두 제거 후 새로운 멀티봇 형식으로 재작성.
+    .env에서 `TELEGRAM_BOT_T*`/PC_LABEL/GROUP_CHAT_ID **만** 걷어내고 재작성한다.
     마스킹된 토큰("123...") 값은 무시하고 기존 값 유지.
+
+    [주의] 여기 적힌 "TELEGRAM_ 접두사를 모두 제거"가 실제 과거 구현이었고, 그것이
+    GROUP_CHAT_ID 소실 사고의 원인이었다. 재작성 규칙은 rewrite_env_telegram_tokens의
+    불변식 주석을 따르며, 회귀는 tests/test_telegram_hub.py가 고정한다.
     """
     try:
         content_length = int(handler.headers.get('Content-Length', 0))

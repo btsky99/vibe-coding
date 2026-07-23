@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-24 00:19
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-24 08:13
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -35,8 +35,8 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 2000 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
-| `boot.py` | 298 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
+| `server.py` | 2011 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `boot.py` | 302 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 284 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 414 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
@@ -58,7 +58,7 @@
 | `fs_dialog_api.py` | 147 |  |
 | `git_api.py` | 235 | Git 저장소 관리 API (/api/git/*) |
 | `heal_api.py` | 30 |  |
-| `hive_api.py` | 1273 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
+| `hive_api.py` | 1301 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `hive_ingest_api.py` | 139 |  |
 | `install_api.py` | 421 |  |
 | `lan_api.py` | 475 |  |
@@ -76,7 +76,7 @@
 | `setup_api.py` | 48 |  |
 | `static_api.py` | 123 |  |
 | `tasks_api.py` | 302 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
-| `telegram_api.py` | 164 |  |
+| `telegram_api.py` | 223 |  |
 | `tools_api.py` | 1068 |  |
 | `update_api.py` | 213 |  |
 | `vibe_api.py` | 295 | Vibe CLI 상태 관리 API (/api/vibe/*) |
@@ -95,7 +95,7 @@
 | `file_store.py` | 229 | 파일 기반 레거시 저장소 |
 | `heal_metrics.py` | 273 |  |
 | `lan_discovery.py` | 120 |  |
-| `lan_peers.py` | 194 |  |
+| `lan_peers.py` | 221 |  |
 | `logger.py` | 130 |  |
 | `pg_base.py` | 538 |  |
 | `pg_experience.py` | 226 |  |
@@ -231,9 +231,9 @@
 | `session_init.py` | 246 |  |
 | `smoke_test.py` | 282 |  |
 | `statusline.py` | 189 | Claude Code 상태줄 원본 (install_statusline.py가 ~/.claude로 배포) |
-| `telegram_agent_bot.py` | 1198 |  |
-| `telegram_bridge.py` | 401 |  |
-| `telegram_helpers.py` | 195 |  |
+| `telegram_agent_bot.py` | 1347 |  |
+| `telegram_bridge.py` | 466 |  |
+| `telegram_helpers.py` | 324 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
 | `zettel_capture.py` | 701 |  |
 | `zettel_sync.py` | 876 |  |
@@ -242,7 +242,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 881 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 919 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 206 |  |
 | `constants.tsx` | 93 |  |
@@ -269,10 +269,10 @@
 | `GitPanel.tsx` | 250 | Git 통합 (브랜치, 스테이징, 커밋) |
 | `HealPanel.tsx` | 129 |  |
 | `HivePanel.tsx` | 464 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
-| `LanPanel.tsx` | 472 |  |
+| `LanPanel.tsx` | 530 |  |
 | `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
-| `TelegramPanel.tsx` | 204 |  |
+| `TelegramPanel.tsx` | 278 |  |
 | `ToolsPanel.tsx` | 407 |  |
 | `ZettelkastenPanel.tsx` | 537 |  |
 
@@ -292,6 +292,7 @@
 | `test_pg_store_split.py` | 124 |  |
 | `test_route_table.py` | 106 |  |
 | `test_self_heal_2.py` | 231 |  |
+| `test_telegram_hub.py` | 347 | 텔레그램 허브 — .env 그룹ID 보존/분할 유실 0/문서 전송 보안 가드 |
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
@@ -308,7 +309,7 @@
 | `vibe-harness-init` | 하네스 V2를 새 프로젝트에 자동 설치합니다. AGENTS.md / RULES.md / HARNESS_V2.md / |
 | `vibe-heal` | 자기치유 스킬. 반복 오류 패턴을 감지하고 근본 원인을 수정하여 재발을 방지합니다. |
 | `vibe-orchestrate` | Vibe Coding 통합 컨트롤 타워. 하이브 컨텍스트 로드 + 요청 분석 + 스킬 체인 자동 실행 + 자기치유. |
-| `vibe-release` | EXE 빌드 릴리즈 파이프라인. 버전 증가 → 커밋 → 푸시 → GitHub Actions가 자동으로 EXE 빌드 + Release 생성. |
+| `vibe-release` | 설치본 빌드 릴리즈 파이프라인 (Windows .exe + macOS .dmg). 버전 증가 → 커밋 → 푸시 → |
 | `vibe-security` | OWASP Top 10 기반 보안 취약점을 4단계로 점검합니다. 배포 전 필수 보안 검토. |
 | `vibe-share` | LAN 자동 공유 — 작업한 파일과 세션 요약을 같은 네트워크의 페어링된 내 다른 PC로 전송. |
 | `vibe-tdd` | RED-GREEN-REFACTOR 사이클로 테스트 주도 개발을 진행합니다. |
@@ -333,4 +334,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-24 00:19
+> 자동 생성 완료: 2026-07-24 08:13
