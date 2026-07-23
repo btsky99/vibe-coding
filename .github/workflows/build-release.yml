@@ -456,11 +456,21 @@ jobs:
             exit 1
           fi
           echo "icon source: $SRC"
+          file "$SRC"
           mkdir -p /tmp/icon.iconset
-          for s in 16 32 64 128 256 512; do
-            sips -z $s $s "$SRC" --out "/tmp/icon.iconset/icon_${s}x${s}.png" >/dev/null
-            sips -z $((s*2)) $((s*2)) "$SRC" --out "/tmp/icon.iconset/icon_${s}x${s}@2x.png" >/dev/null
+          # 🔴 [과거사고 2026-07-24] vibe_icon.png는 **확장자만 .png이고 실제 내용은 JPEG**다.
+          #   sips는 입력 포맷을 그대로 이어받아 출력하므로("suffix should be jpg" 경고),
+          #   iconset에 JPEG가 들어가 iconutil이 "Failed to generate ICNS"로 거부했다.
+          #   -s format png 로 실제 PNG 인코딩을 강제해야 한다.
+          # [규격] iconutil이 받는 이름은 16/32/128/256/512(+@2x)로 고정이다.
+          #   icon_64x64.png 같은 비규격 이름이 섞여도 실패한다 — 64는 32@2x로 표현된다.
+          for s in 16 32 128 256 512; do
+            sips -s format png -z $s $s "$SRC" \
+              --out "/tmp/icon.iconset/icon_${s}x${s}.png" >/dev/null
+            sips -s format png -z $((s*2)) $((s*2)) "$SRC" \
+              --out "/tmp/icon.iconset/icon_${s}x${s}@2x.png" >/dev/null
           done
+          ls /tmp/icon.iconset
           iconutil -c icns /tmp/icon.iconset -o /tmp/vibe.icns
           ls -la /tmp/vibe.icns
 
