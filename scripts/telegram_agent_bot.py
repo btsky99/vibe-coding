@@ -71,7 +71,15 @@ except ImportError:
 from telegram_helpers import (  # noqa: E402 — sys.path 삽입(위) 이후라야 import 가능
     SERVER_PORT, PTY_PORT,
     _get_emoji, _truncate, _api_get, _api_post, _pty_get, _pty_post, _filter_noise,
+    _split_message, is_sendable_path,
 )
+
+# ── 메시지 길이 정책 ──
+# [WHY] 텔레그램 하드 한도는 4096자. 3900은 코드펜스 보정(최대 +8자)과 봇 프리픽스
+# 여유를 둔 값 — 한도에 붙여놓으면 보정 몇 자 때문에 400 에러가 난다.
+# MAX_PARTS 4: 그 이상 쪼개면 알림 폭탄이라 파일 첨부가 사용자 경험상 낫다는 판단.
+_MSG_LIMIT = 3900
+_MSG_MAX_PARTS = 4
 
 # ── 터미널별 기본 CLI 매핑 (서버에서 실제 정보 가져오기 실패 시 폴백) ──
 _DEFAULT_CLI_MAP = {
@@ -208,9 +216,8 @@ class AgentBot:
 
     # ── 안전 전송 ──
 
-    async def _safe_send(self, chat_id: int, text: str) -> None:
-        """텔레그램 메시지 전송 (Markdown 실패 시 plain text 폴백)"""
-        text = _truncate(text)
+    async def _send_one(self, chat_id: int, text: str) -> None:
+        """단일 조각 전송 (Markdown 실패 시 plain text 폴백)."""
         try:
             await self.app.bot.send_message(
                 chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN,
@@ -221,6 +228,94 @@ class AgentBot:
             except Exception as e:
                 log.error(f"[{self.label}] 전송 실패 (chat={chat_id}): {e}")
 
+    async def _safe_send(self, chat_id: int, text: str) -> None:
+        """텔레그램 메시지 전송 — 길이에 따라 3경로.
+
+        [과거사고 2026-07-23] 이 함수가 `_truncate(text)` 한 줄이라, 4000자를 넘는
+        에이전트 응답·리포트가 `... (잘림)`으로 **조용히 유실**됐다. 사용자가 체감한
+        "텔레그램이 쓸모없다"의 주원인.
+
+        [불변식] 어떤 경로로도 내용이 사라지지 않는다.
+          ① limit 이내      → 그대로 1건
+          ② 조각 ≤ MAX_PARTS → 분할 전송 (조각 간 슬립으로 그룹 레이트 회피)
+          ③ 조각 초과       → 전문을 .txt로 첨부 + 앞부분 미리보기
+            (10조각을 쏘면 알림 폭탄이 되므로 파일 1건이 사용자 경험상 낫다)
+        """
+        parts = _split_message(text, limit=_MSG_LIMIT, max_parts=_MSG_MAX_PARTS)
+        if len(parts) == 1:
+            await self._send_one(chat_id, parts[0])
+            return
+
+        if len(parts) <= _MSG_MAX_PARTS:
+            for i, part in enumerate(parts):
+                await self._send_one(chat_id, part)
+                if i < len(parts) - 1:
+                    # [제약] 그룹은 초당 연속 전송 시 429가 나기 쉬움 — 조각 사이 간격 필수.
+                    await asyncio.sleep(0.3)
+            return
+
+        # ③ 너무 길다 → 파일 첨부. 실패해도 내용이 사라지지 않도록 분할 전송으로 폴백.
+        if await self._send_long_as_file(chat_id, text):
+            return
+        for i, part in enumerate(parts):
+            await self._send_one(chat_id, part)
+            if i < len(parts) - 1:
+                await asyncio.sleep(0.3)
+
+    async def _send_long_as_file(self, chat_id: int, text: str) -> bool:
+        """초장문을 .txt로 저장해 첨부. 성공 시 True.
+
+        [제약] 임시 파일은 프로젝트 하위(data/tmp)에 만든다 — is_sendable_path가
+        프로젝트 루트 밖을 거부하므로 시스템 임시폴더를 쓰면 자기 가드에 막힌다.
+        """
+        tmp_dir = _PROJECT_ROOT / ".ai_monitor" / "data" / "tmp"
+        try:
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            tmp = tmp_dir / f"{self.label}_{stamp}.txt"
+            # [제약] newline="" 필수 — 기본 텍스트 모드는 Windows에서 \n을 \r\n으로
+            # 번역한다. 원문에 이미 \r\n이 있으면(윈도우 명령 출력 등) \r\r\n이 되어
+            # 실제로 내용이 깨진다. 첨부 파일은 원문 바이트 그대로 보존한다.
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        except Exception as e:
+            log.error(f"[{self.label}] 임시 파일 생성 실패: {e}")
+            return False
+
+        preview = _truncate(text, 500)
+        caption = f"{self.emoji} *{self.label}* — 전문 {len(text):,}자\n\n{preview}"
+        ok = await self._safe_send_document(chat_id, tmp, caption=_truncate(caption, 1000))
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return ok
+
+    async def _safe_send_document(self, chat_id: int, path, caption: str = "") -> bool:
+        """파일 전송. 보안 가드를 통과한 경로만 보낸다. 성공 시 True.
+
+        [🔴 보안] 경로 검증 없이 보내면 `.env`(봇 토큰 보관처)가 유출돼 봇이 통째로
+        탈취된다. 반드시 is_sendable_path를 통과시킨다 — 가드는 프로젝트 루트 밖,
+        민감 이름/디렉토리, 과대 용량, 비파일을 거부한다.
+        """
+        allowed, why = is_sendable_path(path, _PROJECT_ROOT)
+        if not allowed:
+            log.warning(f"[{self.label}] 문서 전송 거부: {path} — {why}")
+            await self._send_one(chat_id, f"⛔ 파일을 보낼 수 없습니다 — {why}")
+            return False
+        try:
+            with open(path, "rb") as f:
+                await self.app.bot.send_document(
+                    chat_id=chat_id, document=f,
+                    filename=Path(path).name,
+                    caption=caption or None,
+                    parse_mode=ParseMode.MARKDOWN if caption else None,
+                )
+            return True
+        except Exception as e:
+            log.error(f"[{self.label}] 문서 전송 실패 ({path}): {e}")
+            return False
+
     async def send_to_group(self, text: str) -> None:
         """그룹 채팅에 이 봇 이름으로 메시지 전송"""
         if GROUP_CHAT_ID:
@@ -230,6 +325,18 @@ class AgentBot:
         """개인 채팅에 메시지 전송"""
         if self.private_chat_id:
             await self._safe_send(self.private_chat_id, text)
+
+    async def send_document_to_group(self, path, caption: str = "") -> bool:
+        """그룹 채팅에 파일 전송"""
+        if not GROUP_CHAT_ID:
+            return False
+        return await self._safe_send_document(GROUP_CHAT_ID, path, caption)
+
+    async def send_document_to_private(self, path, caption: str = "") -> bool:
+        """개인 채팅에 파일 전송"""
+        if not self.private_chat_id:
+            return False
+        return await self._safe_send_document(self.private_chat_id, path, caption)
 
     # ── stream-json 방식: claude CLI 직접 spawn + 실시간 스트리밍 ──
 

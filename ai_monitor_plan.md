@@ -1,160 +1,110 @@
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: LAN 브리지 Phase 3 — 원격 Claude 에이전트 실행 구현 계획.
+DESCRIPTION: 텔레그램 그룹방 허브화 구현 계획 — 설정저장 버그·메시지 유실·문서전송 부재 해소.
 
 REVISION HISTORY:
-- 2026-07-22 Claude: 신규. LAN 브리지 Phase 3(원격 에이전트 실행) 브레인스토밍 승인 → 계획.
-                     이전 계획(라이브 프로젝트 전환)은 완료(v3.7.268) → 교체.
+- 2026-07-23 Claude: 신규. 텔레그램 허브화 브레인스토밍 승인(B안) → 계획.
+                     이전 계획(LAN 브리지 Phase 3)은 완료(커밋 098845f, Phase 4 fb1225d) → 교체.
 -->
 
-# LAN 브리지 Phase 3 — 원격 Claude 에이전트 실행
+# 텔레그램 그룹방 허브화
 
-승인: 2026-07-22 (vibe-brainstorm). 같은 LAN 페어링 PC에 태스크 전송 → 상대 승인 → 상대가
-claude 에이전트 실행 → 결과 폴링 반환. 설계 메모리: `project_lan_bridge.md` Phase 3.
+승인: 2026-07-23 (vibe-brainstorm, B안 = 버그수정 + 문서전송 + 분할).
 
-## 아키텍처 불변식 (반드시 준수)
-- **브리지 = 순수 릴레이 + 메모리 버퍼**. 실행·DB 없음 (채팅 아키텍처와 동일 원칙).
-- **server.py(lan_api) = 오케스트레이션 + 실행(agent_api 재사용) + DB(lan_exec_log)**.
-- **실행 엔진 신규 금지** — `agent_api.handle_run`({task,cli,cwd}) 재사용 ([[feedback-no-duplicates]]).
-- **3중 보안 게이트**: ① 페어링 HMAC 토큰(기존) ② 상대 독립토글 `lan_remote_exec_enabled` 기본 OFF
-  ③ 승인 팝업(exec_trust=auto면 스킵). 감사로그는 auto여도 항상 기록.
-- 데이터 흐름(요청자 A → 대상 B):
-  ```
-  A: UI → /api/lan/exec → 브리지 exec-send → [B 브리지] /lan/exec-recv (토큰인증)
-  B: exec_trust=auto? → 즉시승인 : 승인큐 적재
-  B: server가 pending drain → 승인팝업 → 승인 시 agent_api.handle_run 실행
-  B: 실행 출력 → B브리지 로컬 exec-emit → [A 브리지] /lan/exec-output (토큰인증, 역방향 푸시)
-  A: server가 output drain → UI 폴링 표시
-  ```
+## 배경 (왜 하는가)
 
----
+사용자가 T1~T8 봇을 한 방에 모아 **봇끼리 대화하는 채팅방**을 만들려다 실패했다.
+원인은 코드가 아니라 텔레그램의 원천 제약이다 — 공식 FAQ 원문:
 
-## Phase 3A — 신뢰/릴레이 백엔드 (lan_peers, lan_bridge)
+> "bots will not be able to see messages from other bots regardless of mode"
 
-[ ] Task 1: 피어별 exec_trust 저장 추가
-    파일: .ai_monitor/src/lan_peers.py
-    방법: add_peer에 `exec_trust: 'ask'`(기본) 추가. 신규 메서드 get_exec_trust(peer_id)→'ask'|'auto',
-          set_exec_trust(peer_id, mode). list_peers() 반환에 exec_trust 노출(shared_key는 계속 은닉).
-    검증: set→get 왕복 후 lan_peers.json에 exec_trust 저장 확인. 기존 페어는 default 'ask' 폴백.
-    의존성: 없음 (독립 시작 가능)
+따라서 **봇 간 대화는 구현 불가**이며, 이미 존재하는 구조를 살리는 방향으로 간다:
+에이전트는 ITCP(PostgreSQL `pg_messages`)로 대화하고, 브릿지가 그것을 그룹방에
+미러링한다(`telegram_bridge.py:157 _poll_itcp_to_group` — 이미 구현됨).
 
-[ ] Task 2: 브리지 STATE 확장 + 송신 함수
-    파일: .ai_monitor/lan_bridge.py
-    방법: STATE에 exec_inbox(deque, 대상측 수신 태스크), exec_output(dict[exec_id→deque], 요청자측
-          수신 출력) 추가. send_exec(peer_id, exec_id, task) — send_chat 복제, body_hash=sha256(task),
-          POST /lan/exec-recv. send_exec_output(peer_id, exec_id, chunk, done) — 역방향 POST /lan/exec-output.
-          MAX_EXEC_BYTES 상한(태스크 16KB / 출력청크 64KB).
-    검증: 함수 단위 — 미페어링 peer거부, 오프라인 거부 반환값 확인.
-    의존성: 없음
+**역할 분리: 대화하는 곳 = PostgreSQL, 보는 곳 = 텔레그램.**
 
-[ ] Task 3: 브리지 라우트 추가
-    파일: .ai_monitor/lan_bridge.py
-    방법: 로컬전용(_is_local): /lan/exec-send{peer_id,task}→send_exec, /lan/exec-emit{peer_id,exec_id,chunk,done}
-          →send_exec_output, /lan/exec-pending-drain(대상 승인큐 비우기), /lan/exec-output-drain{exec_id}
-          (요청자 출력 비우기), /lan/exec-trust{peer_id,mode}→set_exec_trust.
-          인증필요(토큰): /lan/exec-recv(태스크 수신→exec_trust 조회, auto면 approved 표시, else pending 적재),
-          /lan/exec-output(출력 역방향 수신→exec_output 버퍼). exec-recv 토큰서명=body_hash(task).
-    검증: 2브리지 로컬 기동 — exec-send→exec-recv 토큰통과, 위조토큰 거부, pending-drain으로 태스크 회수.
-    의존성: Task 1, 2 완료 후
+현재 부족한 것: ①설정 저장 시 그룹 ID가 날아가는 지뢰 ②4000자 초과 메시지 유실
+③파일/문서 전송 기능 전무(`sendDocument` 구현 0건).
 
 ---
 
-## Phase 3B — 서버 오케스트레이션 + DB + 실행 (pg_lan, lan_api)
+## 태스크
 
-[ ] Task 4: 감사로그 테이블 + CRUD
-    파일: .ai_monitor/src/pg_lan.py (+ 테이블 생성은 lan_messages와 동일 위치)
-    방법: lan_exec_log 테이블(id, exec_id, direction 'in'|'out', peer_id, task, status
-          'received'|'approved'|'rejected'|'running'|'done'|'error', result_summary, project_id, ts).
-          save_lan_exec(...), update_lan_exec_status(exec_id, status, summary), get_lan_exec_log(...).
-          기존 assert_project_id 가드 + _sql_text 바인딩 패턴 준수. 테이블은 lan_messages를 만드는
-          곳(pg_lan import 시 ensure 또는 postgres_runtime BOOTSTRAP)과 동일 방식으로 생성.
-    검증: save→update→get 왕복, project_id 빈값 dev경고 발생 확인.
-    의존성: 없음 (Phase 3A와 병렬 가능)
+### [ ] Task 1: `.env` 저장 시 `TELEGRAM_GROUP_CHAT_ID` 삭제 버그 수정
+- **파일**: `.ai_monitor/api/telegram_api.py` (L86~104)
+- **문제**: L92 `elif not stripped.startswith("TELEGRAM_")` 가 `TELEGRAM_` 접두 라인을
+  전부 버린 뒤, 복원은 `TELEGRAM_BOT_T1~T8`만 한다. 대시보드에서 텔레그램 설정을
+  저장하는 순간 `TELEGRAM_GROUP_CHAT_ID`가 소멸 → `send_to_group`이 전부 무동작
+  (`telegram_agent_bot.py:226` `if GROUP_CHAT_ID:` 가드에 걸려 **조용히** 스킵).
+- **방법**: 제거 조건을 `TELEGRAM_BOT_T`로 좁힌다. `TELEGRAM_BOT_T*`만 재작성 대상으로
+  걸러내고, 그 외 `TELEGRAM_*` 라인(GROUP_CHAT_ID 및 미래 키)은 `existing_lines`에 보존.
+- **검증**: tmp 경로에 GROUP_CHAT_ID 포함 `.env` 사본 생성 → 저장 로직 통과 →
+  `TELEGRAM_GROUP_CHAT_ID`가 값 그대로 남는지 assert. 실제 `.env` 미변경.
+- **의존성**: 없음
 
-[ ] Task 5: 원격실행 마스터 게이트 + 전송/승인 API
-    파일: .ai_monitor/api/lan_api.py
-    방법: handle_post에 추가 —
-          /api/lan/exec{peer_id,task}: 요청자측. exec_id 생성(uuid) → 브리지 exec-send 프록시 →
-            save_lan_exec(direction='out',status='running').
-          /api/lan/exec/approve{exec_id,trust?}: 대상측. trust='auto'면 set_exec_trust 프록시 →
-            agent_api.handle_run(task) 실행 시작 → update status='approved'/'running'.
-          /api/lan/exec/reject{exec_id}: status='rejected' + 브리지에 거부 통지.
-          handle_get에 추가 —
-          /api/lan/exec/pending: 대상측. **여기서 lan_remote_exec_enabled 게이트** — OFF면 빈 배열
-            즉시 반환(브리지 pending-drain도 스킵). ON이면 exec-pending-drain → 각 건 save_lan_exec
-            (direction='in',status='received') → 미승인 목록 반환. auto인 건은 자동 approve 경로로.
-          /api/lan/exec/output?exec_id&since: 요청자측. exec-output-drain → UI에 청크 반환.
-    검증: 게이트 OFF일 때 pending 항상 빈배열(우회불가). ON일 때 pending 회수→approve→run 흐름.
-    의존성: Task 3, Task 4 완료 후
+### [ ] Task 2: 긴 메시지 분할 헬퍼 `_split_message` 신설
+- **파일**: `scripts/telegram_helpers.py` (`_truncate` 아래)
+- **문제**: `_truncate(text, 4000)`가 초과분을 **버린다**(L57~59). `_safe_send`가 항상
+  이걸 통과시켜(`telegram_agent_bot.py:213`) 긴 응답·리포트가 소리 없이 유실된다.
+  스트리밍 경로에만 분할이 있고(L479~488) 범용 헬퍼는 없다.
+- **방법**: `_split_message(text, limit=3900, max_parts=4) -> list[str]`
+  - 줄 경계 우선 분할, 한 줄이 limit 초과 시 그 줄만 강제 분할
+  - 코드펜스(```) 내부에서 잘리면 조각마다 펜스를 닫고 다시 열어 포맷 보존
+  - `max_parts` 초과분은 Task 4에서 파일로 전환하므로 여기선 조각 리스트만 반환
+- **검증**: 단위 테스트 ①짧은 텍스트 1조각 ②경계값 ③줄바꿈 없는 초장문
+  ④코드펜스 짝 맞음 ⑤조각 합이 원문을 보존(유실 0)
+- **의존성**: 없음 (Task 1과 병행 가능)
 
-[ ] Task 6: 실행 출력 캡처 → 브리지 역방향 전송 (최고 위험)
-    파일: .ai_monitor/api/lan_api.py (+ agent_api 연동 지점 확인)
-    방법: agent_api.handle_run은 subprocess로 stream-json 출력 → 이 출력을 exec_id에 묶어
-          브리지 /lan/exec-emit로 청크 푸시하는 브리지(중계) 스레드/콜백 필요. handle_run의
-          출력 스트림 노출 방식을 먼저 조사 — run_id로 출력 버스(_bus_append?)를 폴링 가능하면
-          그것을 exec_id에 매핑해 폴링→emit. done 시 update_lan_exec_status('done', 요약).
-          **출력 민감정보 최소화**: lan_exec_log.result_summary는 절단/요약만 저장(Critic).
-    검증: A에서 태스크 전송→B승인→B에서 claude 실행→A가 output 폴링으로 출력 수신 확인(E2E).
-    의존성: Task 5 완료 후. ⚠️ handle_run 출력노출 구조 선(先)조사 — 불명확하면 별도 checkpoint.
+### [ ] Task 3: 파일/문서 전송 신설 + 보안 가드
+- **파일**: `scripts/telegram_agent_bot.py`, `scripts/telegram_helpers.py`
+- **현황**: `sendDocument`/`InputFile` 사용 **0건** — 텍스트 전용.
+- **방법**:
+  - `AgentBot._safe_send_document(chat_id, path, caption)` +
+    `send_document_to_group/private` 래퍼 (`app.bot.send_document`)
+  - **🔴 보안 가드 (필수)**: 경로를 자유롭게 받으면 `.env`(봇 토큰 보관처)를 텔레그램으로
+    유출시킬 수 있다. `telegram_helpers.is_sendable_path(path, project_root)` 신설:
+    ① `resolve()` 후 project_root 하위 확인(`..`/심볼릭 탈출 차단)
+    ② 차단 패턴 — `.env*`, `*.key`, `*.pem`, `id_rsa*`, `credentials*`, `.oci/`, `*.pid`
+    ③ 크기 상한 45MB (봇 업로드 한도 50MB 여유)
+  - 거부 시 전송하지 않고 사유를 텍스트로 회신
+- **검증**: `is_sendable_path` 단위 테스트 — `.env` 거부, `../` 탈출 거부, 프로젝트 내
+  일반 파일 허용, 초대용량 거부
+- **의존성**: 없음
 
----
+### [ ] Task 4: `_safe_send`에 분할 + 자동 파일 전환 적용
+- **파일**: `scripts/telegram_agent_bot.py` (L211 `_safe_send`)
+- **방법**: `_truncate` 단일 호출을 3경로로 교체
+  1. limit 이하 → 기존대로 1건
+  2. 초과 & 조각 ≤ max_parts → `_split_message` 순차 전송 (조각 사이 `sleep(0.3)`으로
+     그룹 전송 레이트 회피)
+  3. 조각 초과 → 전문을 임시 `.txt`로 저장해 **Task 3 문서 전송**으로 첨부 + 앞부분 미리보기
+- **불변식**: 어떤 경로로도 **내용이 조용히 사라지지 않는다** (현 `... (잘림)` 소실 제거)
+- **검증**: 3경로 각각 태우기 + Markdown 파싱 실패 폴백이 분할 후에도 동작하는지
+- **의존성**: **Task 2, 3 완료 후**
 
-## Phase 3C — 프론트엔드 (LanPanel)
-
-[ ] Task 7: 태스크 전송 UI
-    파일: .ai_monitor/vibe-view/src/components/LanPanel.tsx
-    방법: 페어링된 온라인 피어 선택 + 태스크 입력창 + '실행 요청' 버튼 → POST /api/lan/exec.
-          기존 파일드롭/채팅 UI 옆에 '원격 실행' 섹션. exec_id 보관해 출력 폴링에 사용.
-    검증: 빌드 PASS(npm run build). 피어 선택→전송 시 네트워크 요청 발생.
-    의존성: Task 5 완료 후 (API 계약 확정)
-
-[ ] Task 8: 승인 팝업 + 자동승인 체크박스
-    파일: .ai_monitor/vibe-view/src/components/LanPanel.tsx
-    방법: /api/lan/exec/pending 주기 폴링(예: 3초) → 대기건 있으면 모달 — 요청자명 + 태스크 **전문**
-          표시(Critic: 요약금지, XSS escape) + [승인][거부] + "이 PC 앞으로 자동승인" 체크박스
-          (체크 시 approve에 trust='auto'). 승인 TTL 카운트다운 표시.
-    검증: 빌드 PASS. 2대 실사용에서 팝업 표시→승인→trust 저장 확인.
-    의존성: Task 5 완료 후
-
-[ ] Task 9: 실행 출력 뷰
-    파일: .ai_monitor/vibe-view/src/components/LanPanel.tsx
-    방법: 전송한 exec_id에 대해 /api/lan/exec/output?since 폴링 → 출력 스트림 표시(터미널 유사),
-          done 시 폴링 종료. [취소] 버튼 → /api/lan/exec/reject 또는 exec-cancel.
-    검증: 빌드 PASS. E2E에서 원격 출력이 실시간 누적 표시.
-    의존성: Task 6, Task 7 완료 후
-
----
-
-## Phase 3D — 게이트/안전장치/배포
-
-[ ] Task 10: 마스터 토글 UI + 기본 OFF
-    파일: LanPanel.tsx + config 기본값
-    방법: config.json lan_remote_exec_enabled 기본 false. LanPanel에 '원격 실행 수락' 토글
-          (/api/config/update). OFF면 이 PC는 pending을 절대 회수 안 함(Task 5 게이트와 짝).
-          첫 ON 시 명확한 경고 문구("이 PC가 페어링된 PC의 태스크를 실행합니다").
-    검증: OFF 상태에서 상대가 태스크 보내도 팝업/실행 없음 확인.
-    의존성: Task 5, Task 8 완료 후
-
-[ ] Task 11: 승인 TTL + 실행 타임아웃 + 취소
-    파일: lan_bridge.py + lan_api.py
-    방법: pending 항목 TTL(예 5분) 경과 시 자동 거부(자리비움 대비). 실행 타임아웃(예 30분) —
-          초과 시 agent_api stop + status='error'. /lan/exec-cancel 라우트로 요청자/대상 양측 취소.
-    검증: TTL 경과 후 pending 자동소멸, 타임아웃 시 프로세스 종료 확인.
-    의존성: Task 5, Task 6 완료 후
-
-[ ] Task 12: 회귀/배포 점검
-    파일: — (검증 전용)
-    방법: lan_bridge.py는 이미 spec datas 개별등록됨(신규 루트 .py 없음 → spec 무변경 예상).
-          route_table 자기검증, 기존 파일/채팅 회귀 없음 확인. wc -l로 lan_bridge.py/lan_api.py
-          1500 제한 점검(초과 시 분리). E2E 2대(발견→페어링→원격실행→출력)까지 최종 검증.
-    검증: 파일/채팅 기존 기능 정상 + 원격실행 E2E PASS + 1500 제한 OK.
-    의존성: 전체 완료 후
+### [ ] Task 5: ITCP→그룹 미러링 가독성 개선
+- **파일**: `scripts/telegram_bridge.py` (L157~248)
+- **방법**:
+  - L211 `_truncate(content, 3800)`, L229~232 `formatted`를 Task 4 경로에 태워 유실 제거
+  - 헤더 포맷 정리 — `발신봇 → 수신자 [채널] 타입`이 한눈에
+  - 동일 발신자 연속 메시지는 헤더 생략(스팸 감소) — 직전 발신자 캐시 1개
+- **검증**: `scripts/send_message.py`로 ITCP 메시지 발행 → 그룹방 도착 확인(유실·중복 0)
+- **의존성**: **Task 4 완료 후**
 
 ---
 
-## 🔴 리스크 / 선조사 항목
-- **Task 6(출력 캡처)이 최고 난도** — `agent_api.handle_run`의 출력 스트림 노출 방식이 불명확하면
-  먼저 조사 후 checkpoint 기록. run_id 출력버스 폴링이 가능한지가 관건.
-- lan_exec_log 테이블 생성 위치 확정 필요(lan_messages가 어디서 CREATE 되는지 선확인).
-- 다른 네트워크 불가(UDP+사설IP) — 이번 스코프 명시적 제외.
-- 와이어 프로토콜 신규 라우트라 구버전 브리지와 혼용 시 exec만 미동작(파일/채팅은 정상) — 무방.
+## 범위 밖 (이번에 하지 않음)
+
+- **포럼 토픽(T1~T8 스레드 분리)** — 그룹을 포럼으로 전환 + `message_thread_id` 배관이
+  전 경로에 필요. 효용 대비 변경폭이 커 별건.
+- **자비스 이전** — 같은 봇 토큰으로 두 PC가 폴링하면 충돌하므로 최종형은 상시 가동
+  서버(자비스)가 브릿지를 전담해야 한다. 인스턴스 확보 전이라 보류.
+- **양방향 명령 확장** — `/t1~/t8`, `/run`, `/auto` 등 9종이 이미 있어 불필요.
+
+## 완료 기준
+
+- [ ] 대시보드에서 텔레그램 설정을 저장해도 그룹방이 계속 동작
+- [ ] 4000자 초과 응답이 잘리지 않고 전부 도착(분할 또는 파일)
+- [ ] 프로젝트 내 문서를 텔레그램으로 전송 가능, `.env`/키 파일은 거부
+- [ ] T1~T8 에이전트 대화가 그룹방에 유실 없이 보임

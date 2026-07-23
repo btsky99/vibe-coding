@@ -55,8 +55,132 @@ def _get_emoji(agent: str) -> str:
 
 
 def _truncate(text: str, max_len: int = 4000) -> str:
-    """텔레그램 메시지 길이 제한 (4096자 한도)"""
+    """텔레그램 메시지 길이 제한 (4096자 한도).
+
+    [주의] 초과분을 **버린다**. 내용 보존이 필요한 경로는 `_split_message`를 쓸 것.
+    미리보기·에러 요약처럼 잘려도 무방한 자리에만 남겨둔다.
+    """
     return text if len(text) <= max_len else text[:max_len] + "\n... (잘림)"
+
+
+_FENCE = "```"
+
+
+def _split_message(text: str, limit: int = 3900, max_parts: int = 4) -> list[str]:
+    """긴 텍스트를 텔레그램 전송 가능한 조각들로 나눈다.
+
+    [WHY] 기존엔 `_truncate`만 있어 4000자 초과분이 **조용히 유실**됐다
+    (`_safe_send`가 항상 통과시킴). 에이전트 응답·리포트가 통째로 잘려나가
+    "텔레그램이 쓸모없다"는 체감의 주원인이었다.
+
+    [불변식] 유실 0 — 원문의 모든 문자가 어느 조각엔가 반드시 들어간다.
+      (단 아래 펜스 보정으로 ``` 가 **추가**될 수 있어 완전한 역복원은 아니다.
+       비교 검증은 "펜스를 제거한 뒤 이어붙이면 원문과 같다"로 한다.)
+      호출부가 파일 전송 전환을 판단할 수 있도록 조각 수는 제한하지 않고 전부 반환한다.
+
+    [제약] 줄 경계를 우선해 자른다. 코드펜스(```) 내부에서 잘리면 텔레그램이
+      Markdown 파싱에 실패해 통째로 plain 폴백되므로, 조각마다 펜스를 닫고 다시 연다.
+
+    max_parts는 판단 기준으로만 쓰이며 잘라내기에는 관여하지 않는다
+    (호출부: len(parts) > max_parts 이면 파일 첨부로 전환).
+    """
+    if len(text) <= limit:
+        return [text]
+
+    parts: list[str] = []
+    buf: list[str] = []
+    size = 0
+
+    def flush() -> None:
+        nonlocal buf, size
+        if buf:
+            parts.append("\n".join(buf))
+            buf, size = [], 0
+
+    for line in text.split("\n"):
+        # 한 줄이 통째로 limit을 넘으면 그 줄만 강제 분할 (URL·로그 한 줄 등)
+        if len(line) > limit:
+            flush()
+            for i in range(0, len(line), limit):
+                parts.append(line[i:i + limit])
+            continue
+        # +1은 join에 들어갈 개행
+        if size + len(line) + (1 if buf else 0) > limit:
+            flush()
+        buf.append(line)
+        size += len(line) + (1 if len(buf) > 1 else 0)
+    flush()
+
+    # 코드펜스 균형 보정 — 홀수 개의 펜스로 끝난 조각은 열린 채로 끝나므로
+    # 그 조각을 닫고 다음 조각을 다시 열어준다.
+    fixed: list[str] = []
+    carry_open = False
+    for p in parts:
+        body = (_FENCE + "\n" + p) if carry_open else p
+        opens = body.count(_FENCE)
+        carry_open = (opens % 2 == 1)
+        if carry_open:
+            body = body + "\n" + _FENCE
+        fixed.append(body)
+    return fixed
+
+
+# ── 문서 전송 가드 ──
+
+# [WHY] 이 목록이 없으면 텔레그램으로 자격증명을 유출시킬 수 있다. 특히 `.env`에는
+# **봇 토큰 자체**가 들어있어, 그것이 유출되면 공격자가 봇을 완전히 탈취한다
+# (= 이 채팅방의 모든 권한). 파일 전송 기능의 존재 이유보다 이 가드가 우선한다.
+_DENY_NAME_PATTERNS = (
+    ".env", ".env.", "credentials", "id_rsa", "id_ed25519",
+    ".pem", ".key", ".pfx", ".p12", ".ppk", "secret", "token",
+)
+_DENY_DIR_PARTS = (".oci", ".ssh", ".aws", "node_modules", ".git")
+MAX_DOC_BYTES = 45 * 1024 * 1024  # 봇 업로드 한도 50MB에 여유
+
+
+def is_sendable_path(path, project_root) -> tuple[bool, str]:
+    """텔레그램으로 보내도 되는 파일인지 판정. (허용여부, 사유) 반환.
+
+    [불변식] 판정은 반드시 `resolve()` 이후에 한다 — `..`나 심볼릭 링크로
+    프로젝트 밖(예: `~/.oci/config`, `~/Downloads/*.key`)을 가리키는 경로를
+    문자열 검사만으로는 못 막는다.
+
+    [제약] 차단은 이름·디렉토리 패턴 기반이라 완벽하지 않다. 그래서 프로젝트 루트
+    하위로 범위를 먼저 좁힌 뒤(1차 방어) 패턴을 적용한다(2차 방어).
+    """
+    p = Path(path)
+    root = Path(project_root)
+    try:
+        p = p.resolve()
+        root = root.resolve()
+    except OSError as e:
+        return False, f"경로 해석 실패: {e}"
+
+    if not p.exists() or not p.is_file():
+        return False, "파일이 존재하지 않음"
+
+    # 1차 방어: 프로젝트 루트 밖은 무조건 거부
+    try:
+        p.relative_to(root)
+    except ValueError:
+        return False, "프로젝트 폴더 밖의 파일은 보낼 수 없음"
+
+    # 2차 방어: 민감 이름/디렉토리
+    low = p.name.lower()
+    if any(pat in low for pat in _DENY_NAME_PATTERNS):
+        return False, f"민감 파일로 분류됨({p.name})"
+    parts_low = {s.lower() for s in p.parts}
+    hit = parts_low & set(_DENY_DIR_PARTS)
+    if hit:
+        return False, f"민감 디렉토리 포함({', '.join(sorted(hit))})"
+
+    size = p.stat().st_size
+    if size > MAX_DOC_BYTES:
+        return False, f"파일이 너무 큼({size / 1024 / 1024:.1f}MB > 45MB)"
+    if size == 0:
+        return False, "빈 파일"
+
+    return True, ""
 
 
 def _api_get(path: str) -> Optional[dict]:

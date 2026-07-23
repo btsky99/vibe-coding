@@ -69,7 +69,7 @@ log = logging.getLogger("telegram_bridge")
 import telegram_agent_bot as agent_bot_mod  # noqa: E402 — sys.path 삽입(위) 이후라야 import 가능
 from telegram_agent_bot import AgentBot, _get_terminal_cli_map  # noqa: E402
 from telegram_helpers import (  # noqa: E402
-    SERVER_PORT, MSG_TYPE_EMOJI, _get_emoji, _truncate,
+    SERVER_PORT, MSG_TYPE_EMOJI, _get_emoji,
 )
 
 
@@ -96,6 +96,9 @@ class BotManager:
         # 터미널 번호 → AgentBot 매핑 (발신자 봇 찾기용)
         self._cli_to_bots: dict[str, list[AgentBot]] = defaultdict(list)
         self._last_pg_id: int = 0
+        # 직전 미러링 발화의 서명 (발신봇, 수신자, 채널, 타입) — 같으면 헤더를 생략해
+        # 그룹방이 반복 헤더로 도배되는 것을 막는다. 1개만 기억하면 충분.
+        self._last_mirror_sig: tuple | None = None
 
     def load_bots(self) -> int:
         """.env에서 봇 토큰 로드, AgentBot 생성. 생성된 봇 수 반환.
@@ -206,9 +209,11 @@ class BotManager:
                     if channel == "telegram_response" and to_agent == "user":
                         target_bot = self._find_bot_for_agent(from_agent, terminal_id)
                         if target_bot and target_bot.private_chat_id:
+                            # [2026-07-23] 여기도 _truncate(3800)로 초과분을 버렸다 —
+                            # send_to_private이 분할/파일 전환을 하므로 원문 그대로 넘긴다.
                             response_text = (
                                 f"{target_bot.emoji} *{target_bot.label} 응답:*\n"
-                                f"{_truncate(content, 3800)}"
+                                f"{content}"
                             )
                             await target_bot.send_to_private(response_text)
                             log.info(f"[{target_bot.label}] 텔레그램 응답 전달 ({len(content)}자)")
@@ -226,12 +231,23 @@ class BotManager:
                         to_str = f" → {_get_emoji(to_agent)} {to_agent}"
                     ch_str = f" [{channel}]" if channel not in ("general", "") else ""
 
-                    formatted = (
-                        f"{sender_bot.emoji} *{sender_bot.label}*{to_str}"
-                        f"{ch_str} {type_emoji}\n{content}"
-                    )
+                    # [WHY] 같은 봇이 같은 상대에게 연속으로 말할 때마다 헤더를 반복하면
+                    # 그룹방이 헤더로 도배된다(에이전트는 연속 발화가 잦다). 직전 발화의
+                    # 서명이 같으면 본문만 보낸다 — 텔레그램이 이미 발신 봇을 표시해주므로
+                    # 누가 말했는지는 여전히 구분된다.
+                    sig = (sender_bot.label, to_agent, channel, msg_type)
+                    if sig == self._last_mirror_sig:
+                        formatted = content
+                    else:
+                        formatted = (
+                            f"{sender_bot.emoji} *{sender_bot.label}*{to_str}"
+                            f"{ch_str} {type_emoji}\n{content}"
+                        )
+                        self._last_mirror_sig = sig
 
-                    # 발신자 봇이 그룹에 발화 → 해당 봇 이름으로 표시
+                    # 발신자 봇이 그룹에 발화 → 해당 봇 이름으로 표시.
+                    # [2026-07-23] send_to_group이 분할/파일 전환을 처리하므로 여기서
+                    # 자르지 않는다 — 과거엔 긴 에이전트 대화가 통째로 유실됐다.
                     await sender_bot.send_to_group(formatted)
 
             except Exception as e:

@@ -60,6 +60,50 @@ def telegram_config_get(handler, project_root: Path, child_procs: list) -> None:
     handler.wfile.write(json.dumps(config, ensure_ascii=False).encode('utf-8'))
 
 
+_TG_SECTION_MARKER = "# Telegram Multi-Bot Bridge"
+
+
+def rewrite_env_telegram_tokens(env_text: str, tokens: dict) -> str:
+    """`.env` 본문에서 TELEGRAM_BOT_T1~T8 블록만 교체한 새 본문을 돌려준다.
+
+    [WHY 순수 함수인가] 원래 이 로직이 handler 안에 인라인돼 있어 테스트가 불가능했고,
+    그래서 아래 두 사고가 실제 저장 시점까지 발견되지 않았다. 문자열→문자열 함수로
+    떼어내 단위 테스트로 회귀를 고정한다.
+
+    [불변식 1] TELEGRAM_BOT_T* 이외의 라인은 무엇도 잃지 않는다.
+      과거사고: 제거 조건이 `startswith("TELEGRAM_")`이라 TELEGRAM_GROUP_CHAT_ID까지
+      지워졌고, 그룹 ID가 비면 send_to_group이 가드에 걸려 **조용히** 전부 무동작했다.
+    [불변식 2] 멱등 — 같은 입력으로 두 번 돌리면 결과가 같다.
+      마커 주석/말미 공백을 걷어내지 않으면 저장할 때마다 헤더가 누적된다.
+    [불변식 3] 마스킹 토큰("123...")은 저장하지 않고 기존 값을 유지한다
+      (UI가 마스킹된 값을 그대로 되돌려보내므로, 이게 없으면 토큰이 파괴된다).
+    """
+    existing_tokens: dict = {}
+    kept: list = []
+    for line in env_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
+            key = stripped.split("=", 1)[0].replace("TELEGRAM_BOT_", "")
+            existing_tokens[key] = stripped.split("=", 1)[1].strip()
+            continue
+        if stripped == _TG_SECTION_MARKER:
+            continue  # [불변식 2] 아래에서 다시 붙이므로 여기선 제거
+        kept.append(line)
+
+    while kept and not kept[-1].strip():  # [불변식 2] 말미 공백 정리
+        kept.pop()
+
+    kept.append("")
+    kept.append(_TG_SECTION_MARKER)
+    for tid in range(1, 9):
+        key = f"T{tid}"
+        new_val = (tokens.get(key) or "").strip()
+        if new_val.endswith("..."):  # [불변식 3]
+            new_val = existing_tokens.get(key, "")
+        kept.append(f"TELEGRAM_BOT_{key}={new_val}")
+    return "\n".join(kept) + "\n"
+
+
 def telegram_config_post(handler, project_root: Path) -> None:
     """POST /api/config/telegram — .env에 멀티봇 텔레그램 설정 저장.
 
@@ -78,32 +122,8 @@ def telegram_config_post(handler, project_root: Path) -> None:
         tokens = body.get("tokens", {})
 
         env_file = project_root / ".env"
-
-        # 기존 .env에서 현재 토큰값 로드 (마스킹 값 복원용)
-        existing_tokens: dict = {}
-        existing_lines: list = []
-        if env_file.exists():
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                stripped = line.strip()
-                if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
-                    key = stripped.split("=", 1)[0].replace("TELEGRAM_BOT_", "")
-                    val = stripped.split("=", 1)[1].strip()
-                    existing_tokens[key] = val
-                elif not stripped.startswith("TELEGRAM_"):
-                    existing_lines.append(line)
-
-        # 텔레그램 멀티봇 설정 추가
-        existing_lines.append("")
-        existing_lines.append("# Telegram Multi-Bot Bridge")
-        for tid in range(1, 9):
-            key = f"T{tid}"
-            new_val = tokens.get(key, "").strip()
-            # 마스킹된 값("123...")이면 기존 값 유지
-            if new_val.endswith("..."):
-                new_val = existing_tokens.get(key, "")
-            existing_lines.append(f"TELEGRAM_BOT_{key}={new_val}")
-
-        env_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+        env_text = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+        env_file.write_text(rewrite_env_telegram_tokens(env_text, tokens), encoding="utf-8")
 
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json;charset=utf-8')
