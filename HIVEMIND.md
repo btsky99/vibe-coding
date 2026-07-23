@@ -1,6 +1,6 @@
 # HiveMind Status
 
-Updated: `2026-07-22 19:20:03`
+Updated: `2026-07-24 00:19:03`
 
 ## Current Focus
 Open plan tasks:
@@ -20,17 +20,11 @@ Open plan tasks:
   파일: .ai_monitor/api/lan_api.py
   방법: handle_post에 추가 —
 
-Alignment: Current work aligns best with Task 7: 태스크 전송 UI. Matched files: .ai_monitor/data/config.json, .ai_monitor/data/projects.json, .ai_monitor/infra/app_boot.py, .ai_monitor/vibe-view/dist/index.html, .ai_monitor/vibe-view/package-lock.json. Unmatched changes still present: hivemind.md, project_map.md.
+Alignment: Current work aligns best with Task 6: 실행 출력 캡처 → 브리지 역방향 전송 (최고 위험). Matched files: .claude/settings.local.json. Unmatched changes still present: hivemind.md, project_map.md.
 Changed files:
-- .ai_monitor/data/config.json
-- .ai_monitor/data/projects.json
-- .ai_monitor/infra/app_boot.py
-- .ai_monitor/vibe-view/dist/index.html
-- .ai_monitor/vibe-view/package-lock.json
-- .ai_monitor/vibe-view/src/components/terminal/xtermselection.ts
-- .ai_monitor/vibe-view/src/components/terminalslot.tsx
+- .claude/settings.local.json
 - hivemind.md
-- ... and 1 more
+- project_map.md
 
 ## Agent Flow
 ```mermaid

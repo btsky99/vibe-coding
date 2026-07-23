@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-22 19:20
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-24 00:19
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -251,15 +251,15 @@
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
 | `ActivityBar.tsx` | 187 | 좌측 아이콘 바 (HiveEngineStatus LED 링 통합) |
-| `ChatSlot.tsx` | 607 |  |
+| `ChatSlot.tsx` | 597 |  |
 | `FileExplorer.tsx` | 557 | 파일 시스템 탐색기 (트리/플랫 뷰) |
 | `FilePathText.tsx` | 110 | 파일 경로 렌더링 (클릭 가능 링크화) |
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1040 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1041 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
-| `TopMenuBar.tsx` | 573 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
+| `TopMenuBar.tsx` | 574 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 141 | 코드 에디터 래퍼 (Monaco Editor) |
 
 ### 패널 컴포넌트 (components/panels/)
@@ -273,7 +273,7 @@
 | `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 204 |  |
-| `ToolsPanel.tsx` | 406 |  |
+| `ToolsPanel.tsx` | 407 |  |
 | `ZettelkastenPanel.tsx` | 537 |  |
 
 ## 🧪 테스트 (tests/)
@@ -333,4 +333,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-22 19:20
+> 자동 생성 완료: 2026-07-24 00:19

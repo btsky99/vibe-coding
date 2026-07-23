@@ -64,7 +64,9 @@
       "Bash(cp \"D:/ons/.claude/settings.local.json\" \"D:/ons/.claude/settings.local.json.bak.20260510\")",
       "Read(//d/ons/.claude/**)",
       "Bash(rm -f .claude/commands/vibe-brainstorm.md .claude/commands/vibe-code-review.md .claude/commands/vibe-debug.md .claude/commands/vibe-execute-plan.md .claude/commands/vibe-heal.md .claude/commands/vibe-orchestrate.md .claude/commands/vibe-release.md .claude/commands/vibe-security.md .claude/commands/vibe-tdd.md .claude/commands/vibe-write-plan.md)",
-      "Bash(rmdir .claude/commands/)"
+      "Bash(rmdir .claude/commands/)",
+      "Bash(brew install *)",
+      "Bash(arch -arm64 brew install --cask utm crystalfetch)"
     ]
   }
 }
