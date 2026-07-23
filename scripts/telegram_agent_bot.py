@@ -116,6 +116,48 @@ def _get_terminal_cli(tid: int) -> str:
 
 TERMINAL_CLI_MAP = _DEFAULT_CLI_MAP  # 초기값 (BotManager.load_bots()에서 모듈 속성 대입으로 동적 업데이트)
 
+# ── PC 식별 라벨 (다중 PC / 자비스 대비) ──
+# [WHY] 같은 그룹방에 여러 대의 PC가 발화하면 양쪽 다 "T1(claude)"로 보여 누구 것인지
+# 구분이 안 된다. 최종적으로 브릿지가 상시 서버(자비스)로 옮겨가면 한 방에 여러 출처가
+# 섞이므로 출처 표기는 필수가 된다.
+# [설계] 기본값은 빈 문자열 = 라벨 없음. 즉 단일 PC 사용자는 표시가 하나도 안 변한다
+# (기존 동작 보존). 다중 PC를 쓸 때만 .env에 TELEGRAM_PC_LABEL을 넣어 켠다.
+PC_LABEL: str = os.environ.get("TELEGRAM_PC_LABEL", "").strip()
+
+
+def _make_label(tid: int, cli: str) -> str:
+    """봇 표시 라벨. PC_LABEL이 설정된 경우에만 출처를 앞에 붙인다."""
+    base = f"T{tid}({cli})"
+    return f"{PC_LABEL}·{base}" if PC_LABEL else base
+
+
+def source_label(terminal_id, agent: str = "") -> str:
+    """**메시지 자체**의 출처(터미널·에이전트)로 표시명을 만든다.
+
+    [WHY] 그룹 미러링 헤더가 `sender_bot.label`을 쓰고 있었는데, 이는 '발화를 대행한
+    봇'이지 '메시지를 만든 터미널'이 아니다. 봇 수(현재 4개) < 터미널 수(8)이면
+    _find_bot_for_agent가 폴백 봇을 고르므로, 터미널 6의 메시지가 T1 이름으로
+    찍히는 오표시가 발생했다. 출처는 메시지에서 뽑아야 항상 정확하다.
+
+    [부수효과] 이 함수를 쓰면 **PC당 봇 1개 구성**이 그대로 성립한다. 봇 하나가
+    모든 터미널을 대신 발화해도 헤더에 진짜 터미널 번호가 찍히기 때문이다
+    (봇을 터미널 수만큼 만들 필요가 없어짐 — 다중 PC/자비스 구성의 전제).
+    """
+    tid = None
+    if terminal_id not in (None, ""):
+        try:
+            tid = int(str(terminal_id).lower().replace("terminal", "").replace("t", "").strip())
+        except (ValueError, AttributeError):
+            tid = None
+    cli = (agent or "").split(":")[0].strip().lower()
+    if tid is not None:
+        cli = cli or TERMINAL_CLI_MAP.get(tid, "claude")
+        base = f"T{tid}({cli})"
+    else:
+        base = cli or "system"
+    return f"{PC_LABEL}·{base}" if PC_LABEL else base
+
+
 # ── 그룹 채팅 ID ──
 GROUP_CHAT_ID: Optional[int] = None
 _group_str = os.environ.get("TELEGRAM_GROUP_CHAT_ID", "")
@@ -154,7 +196,7 @@ class AgentBot:
         self.token = token
         self.cli = TERMINAL_CLI_MAP.get(tid, "claude")
         self.emoji = _get_emoji(self.cli)
-        self.label = f"T{tid}({self.cli})"
+        self.label = _make_label(tid, self.cli)
         self._bot_username: Optional[str] = None
 
         # 개인 채팅 ID — /start 시 자동 저장
@@ -185,7 +227,7 @@ class AgentBot:
         old_label = self.label
         self.cli = cli
         self.emoji = _get_emoji(cli)
-        self.label = f"T{self.tid}({cli})"
+        self.label = _make_label(self.tid, cli)
         log.info(f"[TG] slot remap: {old_label} -> {self.label}")
         return True
 

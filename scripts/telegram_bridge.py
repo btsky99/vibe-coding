@@ -243,12 +243,17 @@ class BotManager:
                     # 그룹방이 헤더로 도배된다(에이전트는 연속 발화가 잦다). 직전 발화의
                     # 서명이 같으면 본문만 보낸다 — 텔레그램이 이미 발신 봇을 표시해주므로
                     # 누가 말했는지는 여전히 구분된다.
-                    sig = (sender_bot.label, to_agent, channel, msg_type)
+                    # [중요] 표시명은 봇이 아니라 **메시지**에서 뽑는다 — sender_bot은
+                    # 발화를 대행할 뿐이라, 봇 수 < 터미널 수이면 폴백 봇이 선택돼
+                    # 엉뚱한 터미널 이름이 찍혔다(터미널6 메시지가 T1로 표시되는 등).
+                    # 이 덕분에 PC당 봇 1개 구성도 그대로 성립한다.
+                    src = agent_bot_mod.source_label(terminal_id, from_agent)
+                    sig = (src, to_agent, channel, msg_type)
                     if sig == self._last_mirror_sig:
                         formatted = content
                     else:
                         formatted = (
-                            f"{sender_bot.emoji} *{sender_bot.label}*{to_str}"
+                            f"{_get_emoji(from_agent)} *{src}*{to_str}"
                             f"{ch_str} {type_emoji}\n{content}"
                         )
                         self._last_mirror_sig = sig
