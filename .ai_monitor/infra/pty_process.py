@@ -290,8 +290,11 @@ def start_node_pty_server(base_dir, ws_port, http_port, project_root,
     pty_env['HTTP_PORT'] = str(http_port)
     pty_env['PROJECT_ROOT'] = str(project_root)
 
-    # 번들된 node.exe 경로 — CI에서 같은 Node 버전으로 빌드된 런타임 (ABI 호환 보장)
-    bundled_node = pty_server_dir / 'node.exe'
+    # 번들된 node 경로 — CI에서 같은 Node 버전으로 빌드된 런타임 (ABI 호환 보장).
+    # [플랫폼] 파일명이 Windows는 node.exe, macOS/Linux는 node. 하드코딩하면 맥에서
+    # 번들 런타임을 못 찾아 시스템 node로 폴백하는데, node-pty는 네이티브 모듈이라
+    # ABI가 어긋나면 터미널이 통째로 죽는다.
+    bundled_node = pty_server_dir / ('node.exe' if os.name == 'nt' else 'node')
 
     if pty_server_exe.exists():
         # 배포 모드: pkg로 빌드된 단독 실행 파일

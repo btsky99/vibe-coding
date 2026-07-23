@@ -252,9 +252,12 @@ if getattr(sys, 'frozen', False):
 else:
     _PG_DIR = Path(__file__).resolve().parent / "bin" / "pgsql"
 
-PG_BIN     = _PG_DIR / "bin" / "psql.exe"
-PG_CTL_BIN = _PG_DIR / "bin" / "pg_ctl.exe"
-INITDB_BIN = _PG_DIR / "bin" / "initdb.exe"
+# [플랫폼] 실행파일 확장자는 Windows에만 붙는다. macOS/Linux는 확장자 없음 —
+# `.exe`를 하드코딩하면 번들 PG가 있어도 전부 "없음"으로 판정돼 DB가 안 뜬다.
+_EXE = ".exe" if os.name == "nt" else ""
+PG_BIN     = _PG_DIR / "bin" / f"psql{_EXE}"
+PG_CTL_BIN = _PG_DIR / "bin" / f"pg_ctl{_EXE}"
+INITDB_BIN = _PG_DIR / "bin" / f"initdb{_EXE}"
 PG_PORT = int(os.environ.get('VIBE_PG_PORT', '5433'))
 
 # ── 프로젝트별 PostgreSQL 데이터베이스 이름 ──
@@ -277,7 +280,15 @@ _pg_pool_lock = _pg_store_mod._pool_lock
 # DB 데이터: %APPDATA%\VibeCoding\pgdata (배포/개발 모두 동일)
 # [2026-04-05 Claude] 개발 모드에서 소스 트리 내 data/ 사용 시 PG 버전 불일치 문제 발생
 # → 배포/개발 모두 %APPDATA% 경로로 통일하여 바이너리 업그레이드 시 충돌 방지
-_PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
+# [플랫폼] APPDATA는 Windows 전용 — 맥에서 os.getenv('APPDATA','')가 ''가 되면
+# Path('') / ... 는 **상대경로** "VibeCoding/pgdata"가 되어 cwd에 DB가 생긴다
+# (앱을 어디서 실행했느냐에 따라 DB가 갈리는 최악의 형태). OS별 표준 위치로 분기.
+if os.name == 'nt':
+    _PG_DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding" / "pgdata"
+elif sys.platform == 'darwin':
+    _PG_DATA_DIR = Path.home() / "Library" / "Application Support" / "VibeCoding" / "pgdata"
+else:
+    _PG_DATA_DIR = Path.home() / ".vibe-coding" / "pgdata"
 
 
 # ── PG 런타임은 infra/postgres_runtime.py로 이관 (단계 8b) ────────────────

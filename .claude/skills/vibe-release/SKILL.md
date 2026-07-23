@@ -1,8 +1,9 @@
 ---
 name: vibe-release
 description: >
-  EXE 빌드 릴리즈 파이프라인. 버전 증가 → 커밋 → 푸시 → GitHub Actions가 자동으로 EXE 빌드 + Release 생성.
-  Use when: "빌드해줘", "배포해줘", "릴리즈", "push해줘", "업데이트 올려줘" 요청 시.
+  설치본 빌드 릴리즈 파이프라인 (Windows .exe + macOS .dmg). 버전 증가 → 커밋 → 푸시 →
+  GitHub Actions가 두 플랫폼을 자동 빌드하고 하나의 Release에 함께 올린다.
+  Use when: "빌드해줘", "배포해줘", "릴리즈", "push해줘", "업데이트 올려줘", "맥용 만들어줘" 요청 시.
   코드 수정 후 배포가 필요한 상황, 버전 올려달라는 요청에도 반드시 이 스킬을 사용하세요.
 allowed-tools: Bash, Read, Write, Edit
 user-invocable: true
@@ -13,6 +14,9 @@ DESCRIPTION: Vibe Coding EXE 릴리즈 스킬.
   /vibe-release 명령으로 호출. 버전 증가 → 커밋 → 푸시하면 CI가 EXE 빌드.
 
 REVISION HISTORY:
+- 2026-07-24 Claude: macOS 빌드 잡(build-mac) 추가에 따른 플랫폼 인지형 개편.
+                     로컬 사전검증(Step 0/0.5)은 Windows에서만 가능하다는 점과,
+                     맥 산출물은 CI에서만 검증된다는 한계를 명시.
 - 2026-05-10 Claude: EXE 빌드 주의사항에 "5. spec ↔ CI command 동기화" 추가.
                      `vibe-coding.spec` datas와 `.github/workflows/build-release.yml`의
                      `--add-data` 인자가 따로 관리되어 한쪽만 갱신하면 설치 EXE에서만
@@ -38,14 +42,42 @@ REVISION HISTORY:
 
 ## 배포 방식
 
-이 프로젝트는 **EXE 빌드 + GitHub Releases** 기반으로 배포합니다.
+이 프로젝트는 **설치본 빌드 + GitHub Releases** 기반으로 배포합니다.
+**2026-07-24부터 Windows와 macOS를 함께 빌드합니다.**
 
 1. `git push origin main` → GitHub Actions가 자동 실행
-2. CI가 PyInstaller + Inno Setup으로 EXE 4종 빌드
-3. GitHub Releases에 자동 업로드
-4. 사용자 앱이 실행 시 자동 업데이트 감지 → EXE 다운로드 + 교체
+2. **`build` 잡 (windows-latest)** — PyInstaller(onedir) + Inno Setup →
+   `vibe-coding-setup-X.Y.Z.exe`. **버전 확정은 이 잡이 단독 수행**(태그 중복 시
+   자동 patch bump 후 `_version.py` 커밋·push)하고 결과를 잡 outputs로 노출한다.
+3. **`build-mac` 잡 (macos-latest, `needs: build`)** — 확정된 버전을 받아
+   PyInstaller(`--windowed`) → `.app`, `hdiutil` → `vibe-coding-X.Y.Z.dmg`.
+   윈도우가 만든 **같은 태그의 릴리즈에 .dmg를 덧붙인다**(새 릴리즈 생성 아님).
+4. 사용자 앱이 실행 시 자동 업데이트 감지 → 다운로드 + 교체
 
 **CI 워크플로**: `.github/workflows/build-release.yml`
+
+### 🔴 두 잡의 관계 — 불변식
+- **버전 bump는 `build` 잡만** 한다. 두 잡이 각자 올리면 버전이 갈라진다.
+  `build-mac`은 `needs.build.outputs.ver`를 받아 `_version.py`에 그대로 기록한다.
+- `build-mac` 실패는 **윈도우 릴리즈를 되돌리지 않는다**(이미 발행됨). 맥만 재시도하면 된다.
+- `build-mac`은 `main` push에서만 동작한다(`if: github.ref == 'refs/heads/main'`).
+
+### 🍎 macOS 빌드에서 Windows와 다른 점 (수정 시 필독)
+| 항목 | Windows | macOS |
+|---|---|---|
+| `--add-data` 구분자 | `;` | **`:`** |
+| winpty 바이너리 4종 | 포함 | **제외**(존재하지 않음) |
+| hidden-import `clr`/`win32*`/`pythoncom` | 포함 | **제외** |
+| 번들 Node 파일명 | `node.exe` | **`node`** |
+| PostgreSQL | EnterpriseDB zip 다운로드 | **Homebrew `postgresql@17` 복사** |
+| 아이콘 | `.ico` | **`.icns`**(CI가 sips/iconutil로 생성) |
+| UPX | 사용 | **`--noupx`**(맥 바이너리 손상) |
+| 패키징 | Inno Setup(`.iss`) | **`hdiutil`로 `.dmg`** |
+
+**🔴 미해결 위험 (맥)**: Homebrew PG 바이너리는 `/opt/homebrew/...` 절대경로로 dylib을
+참조한다. Homebrew가 없는 사용자 맥에서 기동하려면 `install_name_tool`로 참조 재작성이
+추가로 필요할 수 있다. 맥 릴리즈 후 **실기기에서 DB 기동 여부를 반드시 확인**할 것.
+또한 코드서명·공증이 없어 Gatekeeper가 첫 실행을 막는다(우클릭→열기 또는 `xattr -cr` 안내 필요).
 
 ---
 
@@ -63,6 +95,12 @@ REVISION HISTORY:
 ---
 
 ## 실행 절차 (6단계)
+
+> **🖥 플랫폼 전제**: Step 0~0.5의 로컬 사전검증은 **Windows에서 실행할 때만** 유효하다.
+> `pyinstaller vibe-coding.spec`은 winpty를 최상단 import하고 `smoke_test.py`는 `.exe`를
+> glob하므로 **맥에서는 Step 0.5를 건너뛴다**(Step 0의 ruff/py_compile/npm build는 맥에서도 유효).
+> 즉 **맥 산출물은 로컬 사전검증 수단이 없고 CI가 유일한 검증 지점**이다 — 맥 관련 변경은
+> 푸시 후 `build-mac` 잡 로그와 실기기 실행으로 확인해야 한다.
 
 ### Step 0: 로컬 사전 검증 (필수 — 실패 시 중단)
 
@@ -176,14 +214,16 @@ CI 실패 시:
 
 ---
 
-## CI가 빌드하는 EXE 목록
+## CI 릴리즈 산출물
 
-| 파일명 | 설명 |
-|--------|------|
-| `vibe-coding-update-X.Y.Z.exe` | GUI 모드 (콘솔 없음) |
-| `vibe-coding-console-X.Y.Z.exe` | 콘솔 모드 (디버깅용) |
-| `vibe-dashboard.exe` | 대시보드 서브창 |
-| `vibe-coding-setup-X.Y.Z.exe` | Inno Setup 설치버전 (올인원) |
+| 파일명 | 플랫폼 | 설명 |
+|--------|--------|------|
+| `vibe-coding-setup-X.Y.Z.exe` | Windows | Inno Setup 설치본 (올인원, PG 포함) |
+| `vibe-coding-X.Y.Z.dmg` | macOS | `.app` 번들 + Applications 링크 (드래그&드롭) |
+
+> **주의**: 릴리즈에 실제로 첨부되는 것은 위 2개뿐이다. 빌드 과정에서 console exe·
+> `vibe-dashboard.exe` 등이 만들어지지만 릴리즈 자산으로는 올라가지 않는다
+> (`build-release.yml`의 `files:` 목록이 진실의 원천).
 
 ---
 
