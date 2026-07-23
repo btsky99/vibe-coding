@@ -1,5 +1,12 @@
 pycryptodome==3.23.0
-pywinpty==3.0.3
+# [2026-07-24] 플랫폼 마커 필수 — 마커가 없으면 macOS/Linux에서 `pip install -r`이
+# 이 줄에서 실패해 CI 첫 스텝부터 정지한다(pywinpty는 Windows 전용 휠만 존재).
+# pyproject.toml은 pythonnet/pywin32에 이미 마커를 달아뒀는데 이 파일만 누락돼
+# 두 곳이 어긋나 있었다. 새 의존성 추가 시 양쪽 동기 확인할 것.
+pywinpty==3.0.3; sys_platform == 'win32'
+# macOS 네이티브 메뉴/클립보드(app_boot.py의 AppKit·PyObjCTools) 의존성.
+# 코드는 2026-07-22 맥 대응 커밋에서 들어왔으나 의존성 선언이 빠져 있었다.
+pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'
 rich==14.3.3
 textual==8.0.0
 watchdog==6.0.0

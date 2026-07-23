@@ -30,7 +30,7 @@ PG_DB = resolve_project_db(PROJECT_ROOT)
 AGENT_ID = 'claude-auto'          # heartbeat_daemon.AGENT_ID 와 동일해야 함
 AUTO_BRANCH_PREFIX = 'auto/task-'  # heartbeat_daemon 이 태스크마다 만드는 격리 브랜치
 
-_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
 def _run_query(sql: str) -> list[list[str]]:

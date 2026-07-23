@@ -332,7 +332,7 @@ def _extract_task_file_paths(task: str, cwd: str) -> list[Path]:
 def _run_local_check(args: list[str], cwd: str, timeout: int = 60) -> tuple[bool, str]:
     """Run a local validation command and return clipped combined output."""
     try:
-        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         proc = subprocess.run(
             args,
             cwd=cwd,

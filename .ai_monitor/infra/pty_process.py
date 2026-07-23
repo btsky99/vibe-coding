@@ -154,7 +154,7 @@ def kill_runtime_mei_orphans(runtime_dir, exclude_mei: str = '',
     전환 필요. 실패해도 기존 동작보다 나빠지지 않음(정리를 안 할 뿐).
     """
     # [보존] subprocess.call(아래 taskkill)은 헬퍼 미제공이라 미변환 → _no_window 유지 필수.
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     rd = str(runtime_dir).replace('/', '\\').rstrip('\\').lower()
     if not rd:
         return []

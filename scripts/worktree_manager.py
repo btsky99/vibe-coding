@@ -70,7 +70,7 @@ def _save_state(state: dict) -> None:
 
 # ─── Git 헬퍼 ─────────────────────────────────────────────────────────────────
 
-_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 def _git(args: list, cwd: str = None) -> tuple[int, str, str]:
     """git 명령 실행 — (returncode, stdout, stderr) 반환"""

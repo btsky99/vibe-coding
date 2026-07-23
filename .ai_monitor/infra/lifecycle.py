@@ -79,7 +79,7 @@ def cleanup_child_procs(child_procs: list, ws_port: int) -> None:
                 # /F: 강제, /T: 자식 트리 포함
                 subprocess.call(
                     ['taskkill', '/F', '/T', '/PID', str(proc.pid)],
-                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                 )
             else:
                 import signal as _sig

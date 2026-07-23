@@ -45,7 +45,7 @@ if hasattr(sys.stderr, "reconfigure"):
 def _run(cmd: list[str], timeout: int = 10) -> str:
     """서브프로세스를 실행하고 stdout을 반환한다. 실패 시 에러 메시지 반환."""
     try:
-        no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        no_win = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         r = subprocess.run(
             cmd, capture_output=True, text=True,
             encoding='utf-8', errors='replace',

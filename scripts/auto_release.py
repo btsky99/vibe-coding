@@ -32,7 +32,7 @@ def log(msg, status="success"):
 def run_cmd(cmd_list, desc):
     log(f"{desc} 시작...")
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         res = subprocess.run(
             cmd_list, capture_output=True, text=True, encoding='utf-8', 
             errors='replace', creationflags=_no_window

@@ -80,7 +80,7 @@ def _run_psql(sql: str, params: tuple = None) -> str:
     if not os.path.exists(PG_BIN):
         return ''
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         res = subprocess.run(
             [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", PG_DB, "-c", sql],
             capture_output=True, text=True, encoding='utf-8', errors='replace',
@@ -155,7 +155,7 @@ def get_active_debate_context():
     if not os.path.exists(PG_BIN):
         return None
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         res = subprocess.run(
             [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", "postgres", "-c", sql, "--csv"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',

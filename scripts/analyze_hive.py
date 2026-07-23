@@ -25,7 +25,7 @@ PG_DB = resolve_project_db(PROJECT_ROOT)
 def run_query(sql: str):
     """psql을 통해 쿼리를 실행하고 결과를 반환합니다."""
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         res = subprocess.run(
             [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", PG_DB, "-c", sql, "--csv"],
             capture_output=True, text=True, encoding='utf-8', errors='replace',

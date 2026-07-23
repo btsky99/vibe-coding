@@ -70,7 +70,7 @@ def _psql_fallback(sql: str) -> bool:
     if not _PG_BIN.exists():
         return False
     try:
-        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         env = os.environ.copy()
         env['PGCLIENTENCODING'] = 'UTF8'
         result = subprocess.run(

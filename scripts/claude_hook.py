@@ -111,7 +111,7 @@ def _spawn_experience_record(agent: str, commit_msg: str):
     }
     domain = domain_map.get(scope, 'general')
 
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     # recall.py를 재활용하지 않고 직접 DB 호출하는 작은 스크립트 실행
     py_code = (
         f"import sys; sys.path.insert(0, {str(MONITOR_DIR)!r}); "
@@ -135,7 +135,7 @@ def _spawn_experience_record(agent: str, commit_msg: str):
 def _spawn_zettel_capture(mode: str, agent: str, data: dict):
     """제텔카스텐 자동 캡처를 백그라운드로 spawn한다."""
     import json as _json
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     capture_script = str(SCRIPTS_DIR / 'zettel_capture.py')
     try:
         subprocess.Popen(
@@ -275,7 +275,7 @@ def main():
 
     # ── 기본 모드: 백그라운드 프로세스를 spawn하고 즉시 종료 ─────────────────
     #    Windows에서 CREATE_NO_WINDOW로 detach하여 UI를 블로킹하지 않음
-    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         proc = subprocess.Popen(
             [sys.executable, __file__, '--bg-worker'],

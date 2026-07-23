@@ -105,7 +105,7 @@ def _query_rows_psql(sql: str) -> list[dict]:
         _warn(f"psql.exe not found at {PG_BIN}")
         return []
 
-    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     env = {**os.environ, "PGCLIENTENCODING": "UTF8"}
     try:
         result = subprocess.run(

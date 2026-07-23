@@ -150,7 +150,7 @@ def _server_alive() -> bool:
 
 
 def _spawn_background(args: list[str]) -> None:
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform == "win32" else 0
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     subprocess.Popen(
         args,
         cwd=str(ROOT_DIR),

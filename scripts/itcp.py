@@ -93,7 +93,7 @@ def _run_psql(sql: str, timeout: int = 5) -> tuple[bool, str]:
     if not _PG_BIN.exists():
         return False, "psql.exe not found"
 
-    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     env = {**os.environ, "PGCLIENTENCODING": "UTF8"}  # 클라이언트 인코딩 UTF-8 강제
 
     try:
@@ -140,7 +140,7 @@ def _ensure_pg_running() -> bool:
     if not pg_manager.exists():
         return False
 
-    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         subprocess.Popen(
             [sys.executable, str(pg_manager), "start"],
@@ -377,7 +377,7 @@ def _read_context_file(path: Path, max_chars: int = 1200) -> str:
 def _run_context_command(args: list[str], timeout: int = 5, max_chars: int = 1200) -> str:
     """Run a short local helper command and clip stdout for prompt bootstrap."""
     try:
-        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         result = subprocess.run(
             args,
             cwd=str(_PROJECT_ROOT),

@@ -491,7 +491,7 @@ def main():
             import subprocess as _sp_harness
             _harness_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'harness_verify.py')
             if os.path.exists(_harness_script):
-                _no_win_h = getattr(_sp_harness, 'CREATE_NO_WINDOW', 0x08000000)
+                _no_win_h = getattr(_sp_harness, 'CREATE_NO_WINDOW', 0)
                 _harness_r = _sp_harness.run(
                     [sys.executable, _harness_script, '--json'],
                     capture_output=True, text=True,
@@ -571,7 +571,7 @@ def main():
                 # uncommitted git 변경도 함께 표시
                 try:
                     import subprocess as _sp_git
-                    _no_win = getattr(_sp_git, 'CREATE_NO_WINDOW', 0x08000000)
+                    _no_win = getattr(_sp_git, 'CREATE_NO_WINDOW', 0)
                     _git_r = _sp_git.run(
                         ['git', 'diff', '--stat', '--no-color'],
                         capture_output=True, text=True, encoding='utf-8', errors='replace',
@@ -693,7 +693,7 @@ def main():
                         os.path.dirname(os.path.abspath(__file__)), 'plan_validator.py'
                     )
                     if os.path.exists(_val_script) and os.path.exists(_plan_f):
-                        _no_win = getattr(_sp_val, 'CREATE_NO_WINDOW', 0x08000000)
+                        _no_win = getattr(_sp_val, 'CREATE_NO_WINDOW', 0)
                         _val_r = _sp_val.run(
                             [sys.executable, _val_script, _plan_f],
                             capture_output=True, text=True,

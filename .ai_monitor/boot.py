@@ -144,7 +144,11 @@ def _git(args: list, cwd=None, timeout=300) -> bool:
     """git 서브커맨드 실행. git 미설치/실패는 False(예외 전파 안 함)."""
     if not shutil.which("git"):
         return False
-    no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    # [macOS 즉사 방지 2026-07-24] 폴백이 0x08000000이라 POSIX에서도 0이 아닌 값이
+    # creationflags로 전달됐다. POSIX subprocess는 creationflags != 0이면
+    # ValueError를 던지므로, frozen 맥 앱은 부팅 중 이 함수에서 바로 죽는다.
+    # 비윈도우는 반드시 0. (proc.py:18과 동일 관용구 — 새 subprocess 호출 시 재사용할 것)
+    no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     try:
         r = subprocess.run(["git"] + args, cwd=cwd and str(cwd),
                            capture_output=True, text=True, timeout=timeout,
