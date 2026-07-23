@@ -133,6 +133,11 @@ def _split_message(text: str, limit: int = 3900, max_parts: int = 4) -> list[str
 _DENY_NAME_PATTERNS = (
     ".env", ".env.", "credentials", "id_rsa", "id_ed25519",
     ".pem", ".key", ".pfx", ".p12", ".ppk", "secret", "token",
+    # [보안사고 2026-07-23] telegram_bridge.log에 봇 토큰이 평문으로 쌓여 있었다
+    # (httpx가 `/bot<TOKEN>/...` URL을 INFO로 기록). 로그 쪽 근본 원인은 막았지만,
+    # 로그·덤프는 성질상 언제든 비밀을 머금으므로 전송 대상에서 통째로 제외한다(이중 방어).
+    # 당시 이 파일이 전송되지 않은 유일한 이유가 "80MB 초과"였다 — 크기에 의존한 우연.
+    ".log", ".dump", ".sql", ".bak",
 )
 _DENY_DIR_PARTS = (".oci", ".ssh", ".aws", "node_modules", ".git")
 MAX_DOC_BYTES = 45 * 1024 * 1024  # 봇 업로드 한도 50MB에 여유

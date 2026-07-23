@@ -63,6 +63,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("telegram_bridge")
 
+# 🔴 [보안사고 2026-07-23] httpx가 INFO에서 요청 URL 전문을 찍는데, 텔레그램 API는
+# **URL 경로에 봇 토큰을 담는다**(`/bot<TOKEN>/getUpdates`). 그래서 basicConfig(INFO)만으로
+# telegram_bridge.log에 살아있는 봇 토큰이 평문으로 누적됐다(실측 80MB, 토큰 4종 노출).
+# 봇 토큰 유출 = 봇 완전 탈취(그룹방 전 권한)이므로 요청 로그를 WARNING으로 낮춘다.
+# [부수효과] 폴링 1회당 1줄씩 쌓이던 로그 폭증도 함께 해소된다.
+for _noisy in ("httpx", "httpcore", "telegram.request", "telegram.ext.Updater"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 # [불변식] TERMINAL_CLI_MAP/GROUP_CHAT_ID의 소유 모듈은 telegram_agent_bot —
 # `from ... import`로 값을 가져오면 스냅샷 바인딩이라 갱신이 AgentBot에 안 보임.
 # 갱신·조회는 반드시 agent_bot_mod.<이름> 모듈 속성 경유. (.env 로드도 저 모듈이 수행)
