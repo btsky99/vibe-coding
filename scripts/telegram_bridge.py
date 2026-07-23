@@ -38,7 +38,9 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -317,6 +319,26 @@ class BotManager:
             if text:
                 await bot.send_to_group(f"🫀 *자율 클로드*\n{text}")
 
+    async def _announce_presence(self, online: bool) -> None:
+        """이 PC의 접속/종료를 그룹방에 알린다.
+
+        [설계] PC 이름(TELEGRAM_PC_LABEL)이 없으면 호스트명으로 대체한다 — 라벨을
+        설정하지 않은 사용자도 어느 기계인지 알 수 있어야 알림이 의미를 갖는다.
+        (라벨은 '표시 이름'이라 미설정 시 접두를 안 붙이는 게 맞지만, 접속 알림은
+         '어느 기계인가'가 본문의 핵심이라 폴백이 필요하다 — 목적이 다르다.)
+        """
+        bot = next(iter(self.bots.values()), None)
+        if not bot or not agent_bot_mod.GROUP_CHAT_ID:
+            return
+        name = agent_bot_mod.PC_LABEL or socket.gethostname()
+        stamp = time.strftime("%H:%M")
+        if online:
+            slots = ", ".join(f"T{t}" for t in sorted(self.bots)) or "-"
+            text = f"🟢 *{name}* 접속됨 — {slots} · {stamp}"
+        else:
+            text = f"🔴 *{name}* 종료됨 — {stamp}"
+        await bot.send_to_group(text)
+
     async def run(self) -> None:
         """모든 봇 + 폴링 루프를 asyncio로 동시 실행.
 
@@ -351,6 +373,14 @@ class BotManager:
 
         log.info(f"전체 {len(self.bots)}봇 + {len(tasks)} 태스크 실행 중 (대시보드 버스 폴링 포함)")
 
+        # 4) 접속 알림 — 그룹방을 그대로 '접속 현황판'으로 쓴다.
+        # [WHY 대시보드 목록이 아니라 채팅 메시지인가] 텔레그램 봇은 다른 봇의 메시지를
+        # 볼 수 없고(공식 제약), PostgreSQL도 PC마다 분리돼 있어 한 PC가 다른 PC의
+        # 접속 여부를 알아낼 방법이 없다. 반면 사람은 그룹방을 읽을 수 있으므로,
+        # 각 PC가 스스로 알리면 폰에서 누가 살아있는지 한눈에 확인된다.
+        # 자비스(상시 서버)로 옮겨가도 이 방식은 그대로 유효하다.
+        await self._announce_presence(online=True)
+
         # 3) 무한 대기 (Ctrl+C로 종료)
         try:
             await asyncio.Event().wait()
@@ -359,6 +389,12 @@ class BotManager:
         finally:
             # 정리
             log.info("종료 중...")
+            # [순서 불변식] 봇을 내리기 **전에** 종료 알림을 보낸다 — app.stop() 이후엔
+            # 전송이 실패한다. 알림 실패가 정리 절차를 막지 않도록 예외는 삼킨다.
+            try:
+                await self._announce_presence(online=False)
+            except Exception as e:
+                log.debug(f"종료 알림 실패(무시): {e}")
             for t in tasks:
                 t.cancel()
             for tid, bot in sorted(self.bots.items()):
