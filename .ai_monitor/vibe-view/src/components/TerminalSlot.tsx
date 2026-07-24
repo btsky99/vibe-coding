@@ -55,7 +55,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-  Terminal, X, Zap, ClipboardList, MessageSquare, Activity, CheckCircle2, Clock
+  Terminal, X, Zap, ClipboardList, MessageSquare, CheckCircle2, Clock
 } from 'lucide-react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -72,7 +72,8 @@ import { copyTextToClipboard, captureSelectRestore, installClipboardShortcuts } 
 import { readClipboardText } from '../lib/clipboard';
 import ClaudeContextBar, { type ClaudeUsage } from './terminal/ClaudeContextBar';
 import AgentSelectCards from './terminal/AgentSelectCards';
-import QuotaBadge, { type AgentQuotaInfo } from './terminal/QuotaBadge';
+// [2026-07-24] QuotaBadge 컴포넌트 헤더에서 제거 — 타입(AgentQuotaInfo)만 인터페이스용으로 유지.
+import { type AgentQuotaInfo } from './terminal/QuotaBadge';
 import MonitorView from './terminal/MonitorView';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
@@ -777,27 +778,13 @@ export default function TerminalSlot({
               </div>
             )}
 
-            {/* Antigravity 컨텍스트 사용량 표시 (에이전트가 antigravity일 때만) */}
-            {activeAgent.toLowerCase().includes('antigravity') && antigravityUsage && (
-              <div className="flex items-center gap-2 mr-2 px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[9px] text-accent animate-in fade-in duration-500">
-                <div className="flex flex-col items-end leading-none gap-0.5">
-                  <span className="font-bold opacity-80 uppercase text-[8px]">Context</span>
-                  <span className="font-black">{((antigravityUsage.total_tokens ?? 0) / 1000).toFixed(1)}K / {((antigravityUsage.context_window ?? 0) / 1000).toFixed(1)}K</span>
-                </div>
-                <div className="w-12 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5 relative">
-                  <div
-                    className={`h-full transition-all duration-1000 ${antigravityUsage.percentage > 80 ? 'bg-red-500' : antigravityUsage.percentage > 50 ? 'bg-yellow-500' : 'bg-accent'}`}
-                    style={{ width: `${Math.min(100, antigravityUsage.percentage)}%` }}
-                  />
-                </div>
-                <span className="font-bold w-6 text-right">{Math.round(antigravityUsage.percentage ?? 0)}%</span>
-              </div>
-            )}
+            {/* [2026-07-24] Antigravity 컨텍스트 게이지 제거 — 헤더 폭을 잡아먹어 폴더 배지/변경 버튼을
+                밀어내던 문제(사용자 요청). 토큰 사용량은 하단 모니터링/DB로 확인 가능해 헤더에선 불필요. */}
 
-            {/* [2026-07-04] 플랜 쿼터 배지 — Claude/Codex 슬롯 헤더 상시 표시 (terminal/QuotaBadge) */}
-            {(agentType === 'claude' || agentType === 'codex') && (
-              <QuotaBadge agentType={agentType} quota={agentQuota?.[agentType]} />
-            )}
+            {/* [2026-07-24] Claude/Codex 플랜 쿼터 배지(구 QuotaBadge) 제거 — 헤더 폭을 잡아먹어
+                폴더 배지/변경 버튼을 밀어내던 문제(사용자 요청, "컨덱스 빼줘"). 사용률은 하단
+                컨텍스트 바(Claude)·DB로 확인 가능해 헤더 상시 표시는 불필요. agentQuota prop은
+                호환성 위해 시그니처만 유지(미소비). */}
 
             {/* [슬롯별 프로젝트] 프로젝트 뱃지(클릭=이 프로젝트로 패널 전환) + 변경 버튼.
                 isActiveProject면 하이라이트 — 지금 사이드 패널이 이 슬롯 프로젝트를 보고 있다는 표시. */}
@@ -816,15 +803,8 @@ export default function TerminalSlot({
               변경
             </button>
 
-            {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
-            <button
-              onClick={() => { const next = !showMonitor; setShowMonitor(next); localStorage.setItem('hive_monitor_enabled', String(next)); }}
-              className={`px-2 py-0.5 rounded text-[9px] border transition-all font-bold flex items-center gap-1 ${showMonitor ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-              title="자율 에이전트 실시간 모니터링"
-            >
-              <Activity className="w-2.5 h-2.5" />
-              모니터링
-            </button>
+            {/* [2026-07-24] 모니터링 토글 버튼 제거(사용자 요청) — 헤더 혼잡 완화. 미부착 슬롯에선
+                여전히 자동 표시(handleTerminalData setShowMonitor(true) + 1088행 근본수정)되므로 기능 손실 없음. */}
             <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
           </div>
         )}
