@@ -92,24 +92,52 @@ function App() {
   // [WHY] currentPath 전역 하나로는 모든 슬롯이 같은 프로젝트로 뜬다. 슬롯별 오버라이드를 둬서
   //   각 터미널이 다른 프로젝트 cwd로 뜨고, '활성 슬롯'의 프로젝트가 사이드 패널 전체를 지배한다
   //   (활성화는 명시적 버튼 — 암묵적 포커스는 Phase 2-5.2 race window 재발 위험이라 배제).
-  //   미지정 슬롯은 currentPath 상속(하위호환). 영속은 localStorage(WebView2 storage_path).
+  //   미지정 슬롯은 currentPath 상속(하위호환).
+  //   [과거사고 2026-07-24] 영속을 localStorage에만 두면 유실된다: Qt WebEngine의 localStorage는
+  //   project_name(=서버 last_path 폴더명)으로 격리 저장(dashboard_window._resolve_qt_storage_path)돼,
+  //   슬롯 활성화/폴더 열기로 last_path가 바뀌면 재시작 시 다른 저장 버킷을 읽어 슬롯 맵이 통째로
+  //   사라진다 → 모든 슬롯이 currentPath(=마지막 선택 폴더)로 폴백해 "전부 마지막 폴더" 증상.
+  //   근본수정: 슬롯 맵은 인스턴스 단위 데이터이므로 인스턴스 단위로 안정적인 config.json을 단일
+  //   진실로 승격한다(last_path와 동일 위치·수명). localStorage는 빠른 초기 캐시로만 유지.
+  const _parseSlotMap = (raw: unknown): Record<number, string> => {
+    // 파싱 결과는 cwd/PTY spawn으로 직결 — shape 검증 필수(문자열 값만 채택).
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const clean: Record<number, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'string' && v) clean[Number(k)] = v;
+    }
+    return clean;
+  };
   const [slotProjects, setSlotProjects] = useState<Record<number, string>>(() => {
     try {
       const saved = localStorage.getItem('hive_slot_projects');
-      const parsed = saved ? JSON.parse(saved) : {};
-      // [코드리뷰 2026-07-24] 파싱 결과는 cwd/PTY spawn으로 직결 — shape 검증 필수.
-      //   외부/구버전 변형된 localStorage 값이 문자열 아닌 걸 흘려보내지 않도록 string 값만 채택.
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-      const clean: Record<number, string> = {};
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'string' && v) clean[Number(k)] = v;
-      }
-      return clean;
+      return _parseSlotMap(saved ? JSON.parse(saved) : {});
     } catch { return {}; }
   });
   const [activeProjectSlot, setActiveProjectSlot] = useState<number | null>(null);
+  // [권위 소스 로드] 마운트 1회 — config.json.slot_projects가 있으면 localStorage 캐시를 덮어쓴다.
+  //   loaded 가드로 초기 빈 값이 백엔드에 역기록돼 유실되는 것을 막는다(save 이펙트에서 참조).
+  const slotProjectsLoaded = useRef(false);
+  useEffect(() => {
+    fetch(`${API_BASE}/api/config`)
+      .then(r => r.json())
+      .then(cfg => {
+        if (cfg && cfg.slot_projects) setSlotProjects(_parseSlotMap(cfg.slot_projects));
+      })
+      .catch(() => { /* 서버 미실행 시 localStorage 캐시 유지 */ })
+      .finally(() => { slotProjectsLoaded.current = true; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     try { localStorage.setItem('hive_slot_projects', JSON.stringify(slotProjects)); } catch { /* WebView 저장 실패 무시 */ }
+    // [불변식] 권위 소스 로드 완료 전에는 백엔드에 쓰지 않는다 — 마운트 초기값이 config를 덮어써
+    //   저장된 슬롯 맵을 지우는 사고 방지. 로드 후의 변경만 config.json에 영속.
+    if (!slotProjectsLoaded.current) return;
+    fetch(`${API_BASE}/api/config/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot_projects: slotProjects }),
+    }).catch(() => { /* 영속 실패는 localStorage 캐시로 폴백 */ });
   }, [slotProjects]);
   const setSlotProject = (slotId: number, path: string) => {
     setSlotProjects(prev => ({ ...prev, [slotId]: path }));
