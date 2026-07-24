@@ -75,7 +75,17 @@ def acquire_single_instance_lock(project_root: Path) -> socket.socket:
                 _win_title = f"바이브 코딩 [{project_root.name}]"
                 _hwnd = ctypes.windll.user32.FindWindowW(None, _win_title)
                 if _hwnd:
-                    ctypes.windll.user32.ShowWindow(_hwnd, 9)        # SW_RESTORE
+                    # [과거사고 2026-07-25] 여기서 SW_RESTORE(9)를 무조건 걸어, 사용자가
+                    # 최대화해 둔 창이 메시지를 보낼 때마다 이전 크기로 줄어들었다.
+                    # SW_RESTORE는 '최소화 해제'가 아니라 '최대화/최소화 이전 크기로 복원'
+                    # 이라 최대화 창에 걸면 최대화가 풀린다. 유발 경로: hook_bridge가 살아있는
+                    # 서버를 오프라인으로 오판(.server.pid만 조회) → 매 메시지 server.py 재스폰
+                    # → 새 인스턴스가 락에 걸려 이 분기 진입 → 창 축소 → os._exit. 사용자 눈엔
+                    # "채팅 엔터 칠 때마다 창이 작아짐"으로만 보여 원인 추적이 오래 걸렸다.
+                    # [불변식] 창 크기/최대화 상태는 사용자 소유다 — 포커스 목적으로 건드리지
+                    # 않는다. 최소화(IsIconic)된 창만 화면에 되살리면 목적이 충족된다.
+                    if ctypes.windll.user32.IsIconic(_hwnd):
+                        ctypes.windll.user32.ShowWindow(_hwnd, 9)    # SW_RESTORE — 최소화 해제용
                     ctypes.windll.user32.SetForegroundWindow(_hwnd)
                     print(f"[*] 기존 창 포커스 완료: {_win_title}")
                 else:

@@ -363,6 +363,15 @@ def _start_server(project_id: str = '') -> bool:
     if not SERVER_PY.exists():
         return False
 
+    # [과거사고 2026-07-25] 아래 PID 파일 판정은 '훅이 띄운 서버'(.server.pid)만 안다.
+    # 사용자가 앱으로 직접 띄운 서버는 .dev_server.pid에 기록되므로, 9000에 멀쩡히
+    # 응답하는 서버가 있어도 '없음'으로 보고 매 메시지마다 server.py를 새로 스폰했다.
+    # 새 인스턴스는 단일 인스턴스 락에 걸려 즉시 os._exit 하지만, 그 직전 기존 창을
+    # ShowWindow(SW_RESTORE)로 포커스해 사용자의 최대화 창을 축소시켰다(instance_lock.py
+    # 동일 날짜 수정 참조). PID 파일보다 '실제 응답하는 서버가 있는가'가 상위 진실이다.
+    if _is_server_alive(project_id):
+        return True
+
     # [2026-03-18] PID 파일 기반 중복 방지 — 이미 서버가 실행 중이면 스킵
     if _is_already_running(_SERVER_PID):
         # 서버 프로세스는 살아있지만 아직 HTTP 응답이 안 될 수 있음 → 대기
