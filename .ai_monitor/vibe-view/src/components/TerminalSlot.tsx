@@ -737,7 +737,25 @@ export default function TerminalSlot({
         </div>
         {!isTerminalMode ? (
           <div className="flex gap-2 items-center">
-            <span className="text-[9px] text-[#858585] font-bold mr-1">에이전트 선택 대기 중...</span>
+            {/* [폴더 먼저 선택] 실행 전(유휴)에도 프로젝트 폴더를 지정할 수 있게 뱃지+선택 버튼 노출.
+                과거엔 이 버튼이 isTerminalMode(실행중) 헤더에만 있어 "CLI 먼저 실행 → 폴더변경 → 재시작"만 가능했음
+                (사용자 지적 2026-07-24). 미부착 상태의 handlePickProject는 재시작 없이 onPickProject만 호출 →
+                이후 AgentSelectCards의 launchAgent가 갱신된 effectivePath로 PTY를 spawn한다. */}
+            <button
+              onClick={onActivateProject}
+              title="이 프로젝트를 사이드 패널(파일·Git·태스크)에 표시"
+              className={`px-2 py-0.5 rounded text-[9px] border font-bold truncate max-w-[120px] transition-all ${isActiveProject ? 'bg-accent/25 border-accent/60 text-accent' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+            >
+              📁 {effectivePath.split(/[/\\]/).filter(Boolean).pop() || '프로젝트'}
+            </button>
+            <button
+              onClick={handlePickProject}
+              title="실행할 프로젝트 폴더 선택"
+              className="px-1.5 py-0.5 rounded text-[9px] border border-white/5 bg-[#3c3c3c] text-[#cccccc] hover:bg-white/10 transition-all"
+            >
+              폴더 선택
+            </button>
+            <span className="text-[9px] text-[#858585] font-bold ml-1">→ 아래에서 에이전트 선택</span>
           </div>
         ) : (
           <div className="flex gap-2 items-center">
