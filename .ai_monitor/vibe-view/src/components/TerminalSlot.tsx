@@ -579,21 +579,6 @@ export default function TerminalSlot({
     }
   };
 
-  // [실행 전 폴더 선택] 사용자 지적(2026-07-24): 에이전트 카드 클릭 시 vibe-coding으로 즉시
-  //   실행돼버려 "어느 프로젝트로 띄울지" 물어볼 기회가 없었다. 카드 → 네이티브 폴더창 먼저 →
-  //   선택 경로로 spawn. 취소 시 실행 안 함(early return). onPickProject 직후 effectivePath는
-  //   stale이라 launchAgent에 next를 명시 주입(handlePickProject와 동일 패턴).
-  //   onPickProject 부재(폴더선택 미지원 빌드) 시엔 종전대로 즉시 실행 폴백.
-  const handleLaunchWithPick = async (agent: string, yolo: boolean = false) => {
-    if (!onPickProject) { launchAgent(agent, yolo); return; }
-    const picked = await pickFolderDialog();
-    if (!picked) return;  // 취소 → 실행하지 않음
-    const next = picked.replace(/\\/g, '/').trim();
-    if (!next) return;
-    onPickProject(next);
-    launchAgent(agent, yolo, next);
-  };
-
   const handleSend = (text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     const ws = wsRef.current;
@@ -752,10 +737,13 @@ export default function TerminalSlot({
         </div>
         {!isTerminalMode ? (
           <div className="flex gap-2 items-center">
-            {/* [유휴 헤더] 📁 뱃지 = 이 슬롯의 현재 프로젝트를 사이드 패널에 표시(activate)용.
-                폴더 '선택'은 여기서 하지 않는다 — 에이전트 카드 클릭 시 handleLaunchWithPick이
-                항상 네이티브 폴더창을 먼저 띄우기 때문(사용자 지적 2026-07-24: "실행 전 프로젝트
-                선택이 나와야지"). 과거 여기 있던 별도 '폴더 선택' 버튼은 launch-먼저-물음과 중복이라 제거. */}
+            {/* [유휴 헤더 — 폴더 먼저, 실행은 나중] 사용자 최종 의도(2026-07-24): "상단에서 폴더
+                선택 후 카드를 누르면 그 폴더로 실행"돼야 한다. 카드 클릭마다 폴더창을 띄우는 흐름
+                (구 handleLaunchWithPick)은 반대로 매번 물어봐 반려됨. 그래서:
+                  · 📁 뱃지 = 현재 슬롯 프로젝트 표시 + 클릭 시 사이드 패널 activate
+                  · '폴더 선택' 버튼 = handlePickProject로 slotProject 갱신(유휴라 팝업만·재시작 없음)
+                아래 AgentSelectCards의 카드 클릭은 launchAgent 직결 → 팝업 없이 effectivePath로 spawn.
+                (effectivePath는 폴더 선택 후 리렌더로 최신값 반영되므로 next 주입 불필요.) */}
             <button
               onClick={onActivateProject}
               title="이 프로젝트를 사이드 패널(파일·Git·태스크)에 표시"
@@ -763,7 +751,14 @@ export default function TerminalSlot({
             >
               📁 {effectivePath.split(/[/\\]/).filter(Boolean).pop() || '프로젝트'}
             </button>
-            <span className="text-[9px] text-[#858585] font-bold ml-1">아래 카드 선택 → 폴더 지정 후 실행</span>
+            <button
+              onClick={handlePickProject}
+              title="실행할 프로젝트 폴더를 먼저 선택 — 이후 아래 카드를 누르면 이 폴더로 실행됩니다"
+              className="px-1.5 py-0.5 rounded text-[9px] border border-white/5 bg-[#3c3c3c] text-[#cccccc] hover:bg-white/10 transition-all"
+            >
+              폴더 선택
+            </button>
+            <span className="text-[9px] text-[#858585] font-bold ml-1">→ 아래 카드로 실행</span>
           </div>
         ) : (
           <div className="flex gap-2 items-center">
@@ -1104,7 +1099,7 @@ export default function TerminalSlot({
               myPendingTasks={myPendingTasks} hiveActivity={hiveActivity}
             />
           )}
-          <AgentSelectCards logs={slotLogs} onLaunch={handleLaunchWithPick} />
+          <AgentSelectCards logs={slotLogs} onLaunch={launchAgent} />
         </div>
       )}
 
