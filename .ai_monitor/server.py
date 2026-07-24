@@ -414,11 +414,16 @@ run_pg_sql = _pg_store_mod.run_pg_sql
 
 _pgmq_available: bool | None = None  # pgmq 확장 존재 여부 캐시 — 한 번 확인 후 재확인 안 함
 
-def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success"):
-    """pg_logs 테이블에 로그 기록 — parameterized query로 SQL 인젝션 방지"""
+def log_to_pg(agent: str, terminal_id: str, task: str, status: str = "success", project_id: str = None):
+    """pg_logs 테이블에 로그 기록 — parameterized query로 SQL 인젝션 방지.
+
+    [크로스 프로젝트 경계] 호출 세션이 project_id를 넘기면 그것으로 태깅한다(예: ons 터미널이
+    이 vibe-coding 서버로 로그를 보내도 'D--ons'로 기록 → 회상/컨텍스트가 project_id로 필터해
+    서로 안 섞임). 미지정 시 서버 자기 PROJECT_ID로 폴백 — 단일 프로젝트 실행 시 기존 동작 불변."""
+    _pid = project_id or PROJECT_ID
     run_pg_sql(
         "INSERT INTO pg_logs (agent, terminal_id, task, status, project_id) VALUES (%s, %s, %s, %s, %s);",
-        (agent, terminal_id, task, status, PROJECT_ID)
+        (agent, terminal_id, task, status, _pid)
     )
     # PGMQ 확장이 설치된 경우에만 큐 전송 — 없으면 무시 (무한 에러 방지)
     global _pgmq_available

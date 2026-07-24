@@ -217,13 +217,21 @@ def _save_session_snapshot() -> None:
         pass
 
 
-def _inject_hive_context() -> str:
-    """UserPromptSubmit 시 하이브 메모리에서 현재 작업 컨텍스트를 자동 주입합니다."""
+def _inject_hive_context(caller_pid: str = '') -> str:
+    """UserPromptSubmit 시 하이브 메모리에서 현재 작업 컨텍스트를 자동 주입합니다.
+
+    [크로스 프로젝트 경계] caller_pid가 있으면 current-work 조회를 그 프로젝트(+__global__)로
+    스코프한다. 예전엔 show_all=True로 전 프로젝트를 긁어 updated_at 최신 rows[0]을 집었는데,
+    다른 프로젝트(예: ons) 세션이 current-work를 갱신하면 그게 vibe-coding 세션에 '어디까지
+    했지'로 잘못 주입되는 잠복 누수가 있었다."""
     try:
         from datetime import datetime
         from src.pg_store import get_memory, list_memory
 
-        rows = [row for row in list_memory(top_k=20, show_all=True) if str(row.get('key', '')).endswith(':current-work')]
+        # show_all=False + project_id → 현재 프로젝트 + __global__만 (list_memory 32행 필터)
+        _mem_rows = (list_memory(top_k=20, project_id=caller_pid)
+                     if caller_pid else list_memory(top_k=20, show_all=True))
+        rows = [row for row in _mem_rows if str(row.get('key', '')).endswith(':current-work')]
         current_work = rows[0]["content"] if rows else ""
 
         today = datetime.now().strftime("%Y-%m-%d")
@@ -273,8 +281,11 @@ def _inject_hive_context() -> str:
         return ""
 
 
-def _update_current_work(completed_items: list[str]) -> None:
-    """Stop 이벤트 시 오늘 완료된 항목을 current-work 메모리에 자동 반영합니다."""
+def _update_current_work(completed_items: list[str], caller_pid: str = '') -> None:
+    """Stop 이벤트 시 오늘 완료된 항목을 current-work 메모리에 자동 반영합니다.
+
+    [크로스 프로젝트 경계] caller_pid로 조회를 스코프해, 다른 프로젝트의 current-work 행을
+    골라 이 세션의 완료 항목을 덮어쓰는 오염을 막는다(_inject_hive_context와 동일 이유)."""
     try:
         from datetime import datetime
         from src.pg_store import list_memory, set_memory
@@ -282,7 +293,9 @@ def _update_current_work(completed_items: list[str]) -> None:
         if not completed_items:
             return
 
-        rows = [row for row in list_memory(top_k=20, show_all=True) if str(row.get('key', '')).endswith(':current-work')]
+        _mem_rows = (list_memory(top_k=20, project_id=caller_pid)
+                     if caller_pid else list_memory(top_k=20, show_all=True))
+        rows = [row for row in _mem_rows if str(row.get('key', '')).endswith(':current-work')]
         if not rows:
             return
 
@@ -297,7 +310,8 @@ def _update_current_work(completed_items: list[str]) -> None:
             content=content + completed_block,
             tags=rows[0].get("tags", []),
             author=rows[0].get("author", "claude"),
-            project_id=rows[0].get("project_id", "vibe-coding"),
+            # 행에 project_id가 있으면 보존, 없으면 호출 프로젝트로 태깅(레거시 'vibe-coding' 기본 제거)
+            project_id=rows[0].get("project_id") or caller_pid or "vibe-coding",
             created_at=rows[0].get("created_at", ""),
             updated_at=datetime.now().isoformat(),
         )
@@ -472,7 +486,11 @@ def main():
     _CALLER_PID = _caller_pid
 
     try:
+        import hive_bridge
         from hive_bridge import log_task
+        # [크로스 프로젝트 경계] 이 훅의 모든 log_task가 '호출 프로젝트'로 태깅되도록 1회 주입.
+        # 15개 호출부를 개별 수정하면 한 곳만 놓쳐도 오염이 재발(f1c0d4b 회귀 패턴)하므로 관문 1곳에서 강제.
+        hive_bridge.set_caller_project(_caller_pid)
     except ImportError:
         log_task = None
 
@@ -592,7 +610,7 @@ def main():
 
         # [하이브 컨텍스트 자동 주입] 작업 시작 전 current-work + 오늘 활동 자동 로드
         # → Claude가 매번 수동으로 memory.py list를 실행하지 않아도 항상 컨텍스트 보유
-        hive_ctx = _inject_hive_context()
+        hive_ctx = _inject_hive_context(_caller_pid)
         if hive_ctx:
             print(hive_ctx, flush=True)
             if log_task:
@@ -936,7 +954,7 @@ def main():
                             k in _task for k in ["수정 완료", "생성 완료", "커밋 완료", "빌드 완료"]
                         ):
                             _done_items.append(_task[:80])
-            _update_current_work(_done_items)
+            _update_current_work(_done_items, _caller_pid)
         except Exception:
             pass
 

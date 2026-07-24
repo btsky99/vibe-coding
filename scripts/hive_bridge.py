@@ -90,16 +90,36 @@ def _run_psql(sql: str, params: tuple = None) -> str:
     except Exception:
         return ''
 
-def log_task(agent_name, task_summary, terminal_id=None, status="success"):
-    """작업 로그를 PostgreSQL에 기록합니다."""
+# [크로스 프로젝트 경계 — 유일 관문] 훅이 stdin cwd로 해석한 '호출 세션의 project_id'.
+# 훅은 이벤트당 단명 프로세스(단일 스레드)라 모듈 전역 1회 세팅이 안전 —
+# hive_hook.main()이 진입 즉시 set_caller_project(_caller_pid)로 주입한다.
+# [과거사고] f1c0d4b가 세션 함수(update_session_files 등)만 _caller_pid를 넘기게 고치고
+#   log_task는 통째로 빠뜨려, 외부 프로젝트(예: ons) 편집/명령 로그가 계속 서버 자기
+#   PROJECT_ID(=vibe-coding)로 도장 → 회상/하이브 컨텍스트 오염이 재발했다. 이 전역이
+#   그 관문. None이면 서버가 자기 PROJECT_ID로 폴백(단일 프로젝트 실행 시 기존 동작 불변).
+_CALLER_PROJECT_ID = None
+
+def set_caller_project(project_id):
+    """호출 세션의 project_id 슬러그를 모듈 전역에 주입 — 이후 모든 log_task가 상속."""
+    global _CALLER_PROJECT_ID
+    _CALLER_PROJECT_ID = project_id or None
+
+def log_task(agent_name, task_summary, terminal_id=None, status="success", project_id=None):
+    """작업 로그를 PostgreSQL에 기록합니다.
+
+    project_id 미지정 시 set_caller_project로 주입된 호출 프로젝트를 사용한다. 지정·주입
+    모두 없으면(None) 서버가 자기 PROJECT_ID로 도장 — 크로스 프로젝트 오염 방지의 관문."""
     _tid = terminal_id or os.environ.get('TERMINAL_ID', 'T0')
+    _pid = project_id or _CALLER_PROJECT_ID
     data = {
         "agent": agent_name,
         "terminal_id": _tid,
         "task": task_summary,
         "status": status
     }
-    
+    if _pid:
+        data["project_id"] = _pid
+
     # 1. 서버 API 호출 시도
     # [2026-03-22] print → sys.stderr로 변경: Gemini CLI가 stdout을 JSON-RPC 통신에
     # 사용하므로, print가 stdout에 출력되면 function call/response 쌍이 깨져
@@ -110,11 +130,20 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success"):
         _log(f"[POSTGRES] Task logged via API: {task_summary[:50]}...\n")
         return
 
-    # 2. 서버 미가동 시 psql 직접 호출 폴백 — parameterized query로 인젝션 방지
-    if _run_psql(
-        "INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES (%s, %s, %s, %s);",
-        (agent_name, _tid, task_summary, status)
-    ):
+    # 2. 서버 미가동 시 psql 직접 호출 폴백 — parameterized query로 인젝션 방지.
+    # [주의] _pid None일 땐 project_id 컬럼을 아예 빼서 DB 기본값에 맡긴다 — 명시적 NULL을
+    #   넣으면 컬럼 DEFAULT를 덮어써버리므로(폴백 경로에서만 형식이 갈림).
+    if _pid:
+        _ok = _run_psql(
+            "INSERT INTO pg_logs (agent, terminal_id, task, status, project_id) VALUES (%s, %s, %s, %s, %s);",
+            (agent_name, _tid, task_summary, status, _pid)
+        )
+    else:
+        _ok = _run_psql(
+            "INSERT INTO pg_logs (agent, terminal_id, task, status) VALUES (%s, %s, %s, %s);",
+            (agent_name, _tid, task_summary, status)
+        )
+    if _ok:
         _log(f"[POSTGRES] Task logged via PSQL: {task_summary[:50]}...\n")
     else:
         _log(f"[ERROR] Failed to log task to Postgres.\n")

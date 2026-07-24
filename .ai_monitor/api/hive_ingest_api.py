@@ -35,7 +35,10 @@ def hive_log_pg(h, log_to_pg) -> None:
             agent=data.get('agent', 'unknown'),
             terminal_id=data.get('terminal_id', 'T0'),
             task=data.get('task', ''),
-            status=data.get('status', 'success')
+            status=data.get('status', 'success'),
+            # [크로스 프로젝트 경계] 호출 세션이 보낸 project_id를 존중 — 없으면 log_to_pg가
+            # 서버 자기 PROJECT_ID로 폴백. 외부 프로젝트 로그가 이 서버 프로젝트로 오태깅되는 것 차단.
+            project_id=data.get('project_id')
         )
         h.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
     except Exception as e:
