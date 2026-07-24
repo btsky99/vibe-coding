@@ -115,17 +115,35 @@ function App() {
     } catch { return {}; }
   });
   const [activeProjectSlot, setActiveProjectSlot] = useState<number | null>(null);
-  // [권위 소스 로드] 마운트 1회 — config.json.slot_projects가 있으면 localStorage 캐시를 덮어쓴다.
-  //   loaded 가드로 초기 빈 값이 백엔드에 역기록돼 유실되는 것을 막는다(save 이펙트에서 참조).
+  // [권위 소스 로드] 마운트 시 config.json.slot_projects를 읽어 localStorage 캐시를 덮어쓴다.
+  //   loaded 가드로 로드 전 초기 빈 값이 백엔드에 역기록돼 유실되는 것을 막는다(save 이펙트에서 참조).
+  //   [콜드부트 레이스 근본수정 2026-07-24] PyWebView가 서버 기동 前에 UI를 띄우면 첫 /api/config가
+  //   거절된다. 예전엔 .finally로 실패에도 loaded=true를 세워, 권위 소스(config) 없이 bucket-격리된
+  //   localStorage(=last_path 폴더명으로 분리 저장)를 진실로 굳혔다. 그 버킷에 일부 슬롯만 남아 있으면
+  //   (예: t2만) 나머지는 currentPath(=마지막 폴더)로 폴백 → "t1이 t3에서 바꾼 폴더로 뜸" 증상.
+  //   교정: 서버가 응답할 때까지 재시도하고 '도달 성공' 시에만 loaded=true. 실패 중엔 save가 잠긴 채라
+  //   stale 버킷 맵이 config로 역기록되는 사고도 함께 막힌다.
   const slotProjectsLoaded = useRef(false);
   useEffect(() => {
-    fetch(`${API_BASE}/api/config`)
-      .then(r => r.json())
-      .then(cfg => {
-        if (cfg && cfg.slot_projects) setSlotProjects(_parseSlotMap(cfg.slot_projects));
-      })
-      .catch(() => { /* 서버 미실행 시 localStorage 캐시 유지 */ })
-      .finally(() => { slotProjectsLoaded.current = true; });
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const load = (attempt: number) => {
+      fetch(`${API_BASE}/api/config`)
+        .then(r => r.json())
+        .then(cfg => {
+          if (cancelled) return;
+          if (cfg && cfg.slot_projects) setSlotProjects(_parseSlotMap(cfg.slot_projects));
+          slotProjectsLoaded.current = true; // 서버 도달 성공 — 이후 변경만 영속 허용
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // 서버 미기동 — loaded를 세우지 않고 재시도(0.5s 간격, ~10s). save는 계속 잠김.
+          if (attempt < 20) timer = setTimeout(() => load(attempt + 1), 500);
+          else slotProjectsLoaded.current = true; // 최후 방어선: 영구 잠김 방지(신규 선택 저장 보장)
+        });
+    };
+    load(0);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
