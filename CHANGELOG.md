@@ -1,5 +1,21 @@
 # 📜 변경 이력 (CHANGELOG)
 
+## [2026-07-24] - 터미널 슬롯마다 다른 프로젝트 실행
+
+### 🗂️ 단일 앱 안에서 슬롯별 프로젝트 + 활성 슬롯 따라 패널 전환
+- **[Feature] 슬롯별 프로젝트 오버라이드**: 각 터미널 슬롯이 서로 다른 프로젝트 cwd로 PTY를 띄운다. `currentPath` 전역 하나를 모든 슬롯이 공유하던 구조에서, `slotProjects` 맵으로 슬롯마다 프로젝트를 지정. 미지정 슬롯은 전역 프로젝트 상속(하위호환).
+- **[UX] 명시적 활성화**: 슬롯 헤더의 📁 프로젝트 뱃지 클릭 → 그 슬롯 프로젝트가 사이드 패널(파일·Git·태스크·하이브) 전체를 지배. 활성 슬롯은 하이라이트. 암묵적 포커스는 Phase 2-5.2 race window 재발 위험이라 배제.
+- **[안전] 실행 중 변경은 재시작 확인**: PTY cwd는 spawn 시 고정이라, 살아있는 터미널의 프로젝트를 바꾸려면 `confirm` 후 새 cwd로 재연결. `launchAgent(cwdOverride)`로 stale-closure 회피.
+- **[영속] localStorage `hive_slot_projects`**: 앱 재시작 후 슬롯별 프로젝트 복원(WebView2 storage_path).
+- **[백엔드 무변경]**: PTY는 이미 `/pty/slot{id}?cwd=` 슬롯별 cwd 수신, 서버 폴링은 `withProjectId(currentPath)`로 project_id 명시 전달 → 활성화 즉시 패널 재조회(기존 기계 재사용).
+- **파일**: `App.tsx`(slotProjects/activeProjectSlot 상태·배선·FileExplorer 동기), `TerminalSlot.tsx`(slotProject cwd·헤더 UI·재시작 핸들러).
+
+## [2026-07-24] - 크로스 프로젝트 로그 오염 차단
+
+### 🚧 외부 프로젝트 로그가 vibe-coding 회상에 섞이던 누수 봉합 (b5ded87)
+- **[Fix] caller project_id 4계층 관통**: `hive_bridge.log_task`가 project_id를 안 실어 보내고 `server.log_to_pg`가 무조건 자기 PROJECT_ID로 도장하던 것을, 훅→브리지→서버수신→DB기록 전 경로에 호출 프로젝트 슬러그를 관통. f1c0d4b가 세션 함수만 고치고 로그 경로를 빠뜨린 회귀를 봉합.
+- **[정리] 과거 오염 로그 재태깅**: ons 작업이 `D--vibe-coding`으로 잘못 박힌 1105행을 파일 실존 판별로 안전 분류해 `D--ons`로 비파괴 재태깅(vibe-coding 자기 파일은 제외).
+
 ## [2026-07-24] - 텔레그램 그룹방 허브화 회귀 테스트 고정
 
 ### 🧪 조용한 실패 3종을 테스트로 못 박음

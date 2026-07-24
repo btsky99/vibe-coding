@@ -88,6 +88,32 @@ function App() {
   const [softUpdate, setSoftUpdate] = useState<{ ready: boolean; remote_sha?: string; reason?: string } | null>(null);
   const [softApplying, setSoftApplying] = useState(false);
 
+  // ─── 슬롯별 프로젝트 (터미널마다 다른 프로젝트 실행) ───────────────────────
+  // [WHY] currentPath 전역 하나로는 모든 슬롯이 같은 프로젝트로 뜬다. 슬롯별 오버라이드를 둬서
+  //   각 터미널이 다른 프로젝트 cwd로 뜨고, '활성 슬롯'의 프로젝트가 사이드 패널 전체를 지배한다
+  //   (활성화는 명시적 버튼 — 암묵적 포커스는 Phase 2-5.2 race window 재발 위험이라 배제).
+  //   미지정 슬롯은 currentPath 상속(하위호환). 영속은 localStorage(WebView2 storage_path).
+  const [slotProjects, setSlotProjects] = useState<Record<number, string>>(() => {
+    try {
+      const saved = localStorage.getItem('hive_slot_projects');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+  const [activeProjectSlot, setActiveProjectSlot] = useState<number | null>(null);
+  useEffect(() => {
+    try { localStorage.setItem('hive_slot_projects', JSON.stringify(slotProjects)); } catch { /* WebView 저장 실패 무시 */ }
+  }, [slotProjects]);
+  const setSlotProject = (slotId: number, path: string) => {
+    setSlotProjects(prev => ({ ...prev, [slotId]: path }));
+  };
+  // [불변식] 활성화 = 그 슬롯 프로젝트를 currentPath로 승격 → 기존 패널들이 currentPath를 읽어
+  //   자동 재조회. 미지정 슬롯이면 currentPath 유지(전역 프로젝트 그대로).
+  const activateSlotProject = (slotId: number) => {
+    const proj = slotProjects[slotId];
+    if (proj) setCurrentPath(proj);
+    setActiveProjectSlot(slotId);
+  };
+
   // ─── 레이아웃 상태 ────────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('explorer');
@@ -659,7 +685,12 @@ function App() {
             <div className={`flex-1 overflow-hidden flex flex-col ${activeTab === 'explorer' ? '' : 'hidden'}`}>
               <FileExplorer
                 currentPath={currentPath}
-                onPathChange={setCurrentPath}
+                onPathChange={(p) => {
+                  // [슬롯별 프로젝트] 폴더 변경은 currentPath 전환 + 활성 슬롯 프로젝트도 동기 갱신
+                  //   (안 그러면 슬롯 뱃지와 실제 패널이 어긋남).
+                  setCurrentPath(p);
+                  if (activeProjectSlot !== null) setSlotProject(activeProjectSlot, p);
+                }}
                 onOpenFile={handleOpenFile}
                 refreshKey={fileRefreshKey}
               />
@@ -811,6 +842,10 @@ function App() {
                   slotId={slotId}
                   logs={logs}
                   currentPath={currentPath}
+                  slotProject={slotProjects[slotId] ?? currentPath}
+                  isActiveProject={activeProjectSlot === slotId}
+                  onActivateProject={() => activateSlotProject(slotId)}
+                  onPickProject={(p: string) => setSlotProject(slotId, p)}
                   terminalCount={terminalCount}
                   locks={locks}
                   messages={messages}

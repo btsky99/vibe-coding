@@ -102,11 +102,22 @@ interface TerminalSlotProps {
   slotModel?: string;
   // 오피스 워크스페이스 프로필: 선택된 CLI (claude/antigravity/codex)
   slotCli?: string;
+  // [슬롯별 프로젝트] 이 슬롯이 실행할 프로젝트 경로. 미지정 시 App이 currentPath를 넘김(하위호환).
+  //   이 값이 PTY spawn cwd/project_id를 결정 → 슬롯마다 다른 프로젝트로 터미널이 뜬다.
+  slotProject?: string;
+  // 이 슬롯이 현재 사이드 패널을 지배하는 활성 슬롯인지 (헤더 하이라이트용)
+  isActiveProject?: boolean;
+  // "이 프로젝트 보기" — 슬롯 프로젝트를 앱 활성 프로젝트로 승격(패널 전환)
+  onActivateProject?: () => void;
+  // "📁 프로젝트" — 이 슬롯의 프로젝트 경로 지정
+  onPickProject?: (path: string) => void;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject
 }: TerminalSlotProps) {
+  // [슬롯별 프로젝트] cwd/project_id 산출의 단일 기준. 미지정이면 전역 currentPath로 폴백.
+  const effectivePath = slotProject || currentPath;
   const xtermRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -230,7 +241,10 @@ export default function TerminalSlot({
   };
 
   // XTerm 인스턴스 생성 + WebSocket PTY 연결 + ResizeObserver 등록
-  const launchAgent = (agent: string, yolo: boolean = false) => {
+  // [슬롯별 프로젝트] cwdOverride: 프로젝트 변경 재시작 시 새 경로를 명시 주입.
+  //   effectivePath는 이번 렌더 클로저 값이라 onPickProject 직후엔 아직 옛 값(stale) → override로 회피.
+  const launchAgent = (agent: string, yolo: boolean = false, cwdOverride?: string) => {
+    const connectPath = cwdOverride || effectivePath;
     // 기존 터미널이 살아있으면 먼저 정리 — dispose 없이 덮어쓰면
     // 이전 xterm 캔버스가 DOM에 남아 잔상(이중 삼중 출력) 현상 발생
     // [버그수정 2026-03-20] 재연결 타이머 정리 (새 연결 시작 전)
@@ -414,10 +428,11 @@ export default function TerminalSlot({
         resizeObserverRef.current = ro;
       }
       // WebSocket에 yolo/model/name + project_id 상태 전달 (Phase 2-5.3a)
-      const projectId = slugifyProjectPath(currentPath);
+      // [슬롯별 프로젝트] cwd/project_id는 connectPath(슬롯 프로젝트 우선, 재시작 override) 기준 — 슬롯마다 다른 프로젝트로 spawn
+      const projectId = slugifyProjectPath(connectPath);
       const wsParams = new URLSearchParams({
         agent: slotCli || agent,
-        cwd: currentPath,
+        cwd: connectPath,
         cols: term.cols.toString(),
         rows: term.rows.toString(),
         yolo: yolo.toString(),
@@ -432,7 +447,7 @@ export default function TerminalSlot({
         // 재연결 성공 시 카운터 리셋
         wsReconnectAttemptRef.current = 0;
         const modeText = yolo ? "\x1b[38;5;196m[YOLO MODE]\x1b[0m" : "\x1b[38;5;34m[NORMAL MODE]\x1b[0m";
-        term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공 \x1b[38;5;245m[node-pty]\x1b[0m\r\n\x1b[38;5;244m> CWD: ${currentPath}\x1b[0m\r\n\r\n`);
+        term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공 \x1b[38;5;245m[node-pty]\x1b[0m\r\n\x1b[38;5;244m> CWD: ${connectPath}\x1b[0m\r\n\r\n`);
         // WS 연결 직후 현재 터미널 크기를 PTY에 전달
         // ResizeObserver가 WS 연결 전에 fire됐을 경우 누락된 resize를 보정
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
@@ -540,6 +555,24 @@ export default function TerminalSlot({
     resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close(1000);  // 1000=정상종료 → onclose에서 재연결 안 함
     if (termRef.current) termRef.current.dispose();
+  };
+
+  // [슬롯별 프로젝트] 이 슬롯의 프로젝트 폴더 지정. 실행 중이면 재시작 확인 후 새 cwd로 재연결.
+  //   [불변식] PTY cwd는 spawn 시 고정 → 살아있는 터미널의 프로젝트는 재시작 없이 못 바꾼다.
+  //   재연결 시 launchAgent에 next를 명시 주입 — onPickProject 직후 effectivePath는 아직 옛 값(stale).
+  const handlePickProject = () => {
+    if (!onPickProject) return;
+    const picked = window.prompt('이 슬롯에서 실행할 프로젝트 폴더 경로:', effectivePath);
+    if (picked === null) return;  // 취소
+    const next = picked.trim();
+    if (!next || next === slotProject) return;
+    if (hasAttachedTerminal) {
+      if (!window.confirm('프로젝트를 바꾸려면 이 터미널을 재시작해야 합니다. 진행할까요?')) return;
+      onPickProject(next);
+      launchAgent(activeAgent || 'claude', false, next);
+    } else {
+      onPickProject(next);
+    }
   };
 
   const handleSend = (text: string) => {
@@ -740,6 +773,23 @@ export default function TerminalSlot({
             {(agentType === 'claude' || agentType === 'codex') && (
               <QuotaBadge agentType={agentType} quota={agentQuota?.[agentType]} />
             )}
+
+            {/* [슬롯별 프로젝트] 프로젝트 뱃지(클릭=이 프로젝트로 패널 전환) + 변경 버튼.
+                isActiveProject면 하이라이트 — 지금 사이드 패널이 이 슬롯 프로젝트를 보고 있다는 표시. */}
+            <button
+              onClick={onActivateProject}
+              title="이 프로젝트를 사이드 패널(파일·Git·태스크)에 표시"
+              className={`px-2 py-0.5 rounded text-[9px] border font-bold truncate max-w-[120px] transition-all ${isActiveProject ? 'bg-accent/25 border-accent/60 text-accent' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
+            >
+              📁 {effectivePath.split(/[/\\]/).filter(Boolean).pop() || '프로젝트'}
+            </button>
+            <button
+              onClick={handlePickProject}
+              title="이 슬롯의 프로젝트 폴더 변경 (실행 중이면 재시작)"
+              className="px-1.5 py-0.5 rounded text-[9px] border border-white/5 bg-[#3c3c3c] text-[#cccccc] hover:bg-white/10 transition-all"
+            >
+              변경
+            </button>
 
             {/* 자율 에이전트 모니터링 뷰 토글 버튼 — 상태를 localStorage에 저장하여 다음 실행 시 복원 */}
             <button
