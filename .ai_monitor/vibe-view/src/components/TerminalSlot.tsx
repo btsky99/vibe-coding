@@ -64,6 +64,7 @@ import '@xterm/xterm/css/xterm.css';
 import { API_BASE, WS_PORT, Shortcut, defaultShortcuts, SLASH_COMMANDS } from '../constants';
 import { LogRecord, AgentMessage, Task } from '../types';
 import { slugifyProjectPath } from '../lib/projectContext';
+import { pickFolderDialog } from '../lib/folderPicker';
 import ChatSlot from './ChatSlot';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
@@ -560,14 +561,17 @@ export default function TerminalSlot({
   // [슬롯별 프로젝트] 이 슬롯의 프로젝트 폴더 지정. 실행 중이면 재시작 확인 후 새 cwd로 재연결.
   //   [불변식] PTY cwd는 spawn 시 고정 → 살아있는 터미널의 프로젝트는 재시작 없이 못 바꾼다.
   //   재연결 시 launchAgent에 next를 명시 주입 — onPickProject 직후 effectivePath는 아직 옛 값(stale).
-  const handlePickProject = () => {
+  const handlePickProject = async () => {
     if (!onPickProject) return;
-    const picked = window.prompt('이 슬롯에서 실행할 프로젝트 폴더 경로:', effectivePath);
-    if (picked === null) return;  // 취소
-    const next = picked.trim();
+    // [코드리뷰 2026-07-24] window.prompt 재발명 금지 — FileExplorer와 동일한 네이티브 다이얼로그
+    //   공유 헬퍼 사용(검증된 실제 경로만 수신, mac WKWebView prompt 신뢰성 문제 회피).
+    const picked = await pickFolderDialog();
+    if (!picked) return;  // 취소 또는 다이얼로그 불가
+    const next = picked.replace(/\\/g, '/').trim();
     if (!next || next === slotProject) return;
     if (hasAttachedTerminal) {
-      if (!window.confirm('프로젝트를 바꾸려면 이 터미널을 재시작해야 합니다. 진행할까요?')) return;
+      // [불변식] 재시작은 xterm dispose + 새 PTY spawn = 스크롤백 전량 소실. 사용자에게 명시.
+      if (!window.confirm('프로젝트를 바꾸려면 이 터미널을 재시작합니다 (현재 스크롤백은 사라집니다). 진행할까요?')) return;
       onPickProject(next);
       launchAgent(activeAgent || 'claude', false, next);
     } else {

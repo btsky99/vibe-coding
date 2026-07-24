@@ -96,7 +96,15 @@ function App() {
   const [slotProjects, setSlotProjects] = useState<Record<number, string>>(() => {
     try {
       const saved = localStorage.getItem('hive_slot_projects');
-      return saved ? JSON.parse(saved) : {};
+      const parsed = saved ? JSON.parse(saved) : {};
+      // [코드리뷰 2026-07-24] 파싱 결과는 cwd/PTY spawn으로 직결 — shape 검증 필수.
+      //   외부/구버전 변형된 localStorage 값이 문자열 아닌 걸 흘려보내지 않도록 string 값만 채택.
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const clean: Record<number, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string' && v) clean[Number(k)] = v;
+      }
+      return clean;
     } catch { return {}; }
   });
   const [activeProjectSlot, setActiveProjectSlot] = useState<number | null>(null);
@@ -685,12 +693,7 @@ function App() {
             <div className={`flex-1 overflow-hidden flex flex-col ${activeTab === 'explorer' ? '' : 'hidden'}`}>
               <FileExplorer
                 currentPath={currentPath}
-                onPathChange={(p) => {
-                  // [슬롯별 프로젝트] 폴더 변경은 currentPath 전환 + 활성 슬롯 프로젝트도 동기 갱신
-                  //   (안 그러면 슬롯 뱃지와 실제 패널이 어긋남).
-                  setCurrentPath(p);
-                  if (activeProjectSlot !== null) setSlotProject(activeProjectSlot, p);
-                }}
+                onPathChange={setCurrentPath}
                 onOpenFile={handleOpenFile}
                 refreshKey={fileRefreshKey}
               />
@@ -842,7 +845,7 @@ function App() {
                   slotId={slotId}
                   logs={logs}
                   currentPath={currentPath}
-                  slotProject={slotProjects[slotId] ?? currentPath}
+                  slotProject={slotProjects[slotId]}
                   isActiveProject={activeProjectSlot === slotId}
                   onActivateProject={() => activateSlotProject(slotId)}
                   onPickProject={(p: string) => setSlotProject(slotId, p)}
