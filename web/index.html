@@ -2,10 +2,10 @@
 <!--
   FILE: web/index.html
   DESCRIPTION: 파란이발(btsky) 제품 & AI 생태계 허브.
-    바이브 코딩, OnS, CipherTrader 상세 소개 + 구글/깃허브 소셜 로그인 + 파란이발 브랜드.
+    바이브 코딩, OnS, CipherTrader 상세 소개 + 구글/깃허브 소셜 전용 로그인 모달.
   REVISION HISTORY:
     - 2026-07-22 Claude: 단일 랜딩 → 멀티 프로덕트 허브 개편.
-    - 2026-07-26 Gemini: 파란이발 닉네임 적용, 상세 설명 보강, 구글/깃허브 소셜 가입 지원.
+    - 2026-07-26 Gemini: 수동 ID/PW 제거, 구글/깃허브 순수 소셜 가입 지원.
 -->
 <html lang="ko">
 <head>
@@ -48,11 +48,11 @@
         <small>최신 배포판 다운로드</small>
       </a>
       <button class="btn line" onclick="Site.openLogin()">
-        <span>🔑 구글 / GitHub 로그인</span>
+        <span>🔑 구글 / GitHub 소셜 로그인</span>
       </button>
     </div>
     <div class="verbadge">
-      ⚡ 관리자 계정(btsky99) 로그인 시 '👑 관리자' 권한이 자동 부여됩니다
+      ⚡ btsky99 소셜 계정 로그인 시 '👑 파란이발 관리자' 권한이 자동 부여됩니다
     </div>
   </header>
 
@@ -127,11 +127,11 @@
     <div class="faq-list">
       <div class="faq-item">
         <div class="faq-q" onclick="Site.toggleFaq(this)">구글 또는 GitHub 소셜 로그인으로 가입할 수 있나요?</div>
-        <div class="faq-a">네, 우측 상단의 '로그인/시작하기' 버튼을 누르시면 Google 계정 또는 GitHub 계정 클릭 한 번으로 즉시 소셜 가입 및 로그인이 가능합니다.</div>
+        <div class="faq-a">네, 우측 상단의 '소셜 로그인/가입' 버튼을 누르시면 Google 계정 또는 GitHub 계정 클릭 한 번으로 수동 아이디 입력 없이 1초 만에 가입 및 로그인이 진행됩니다.</div>
       </div>
       <div class="faq-item">
         <div class="faq-q" onclick="Site.toggleFaq(this)">관리자 계정(btsky99) 권한은 어떻게 받나요?</div>
-        <div class="faq-a">관리자 아이디인 <b>btsky99</b> 또는 해당 구글/GitHub 이메일 계정으로 로그인하시면 시스템이 자동으로 인식하여 <b>'👑 파란이발 관리자'</b> 권한을 부여합니다.</div>
+        <div class="faq-a">btsky99 구글/GitHub 소셜 계정으로 로그인하시면 시스템이 자동으로 인식하여 <b>'👑 파란이발 관리자'</b> 권한을 즉시 부여합니다.</div>
       </div>
       <div class="faq-item">
         <div class="faq-q" onclick="Site.toggleFaq(this)">바이브 코딩 및 OnS는 어디서 이용할 수 있나요?</div>
