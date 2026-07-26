@@ -2,10 +2,10 @@
 <!--
   FILE: web/index.html
   DESCRIPTION: 파란이발(btsky) 제품 & AI 생태계 허브.
-    바이브 코딩, OnS, CipherTrader 상세 소개 + 구글/깃허브 소셜 전용 로그인 모달.
+    바이브 코딩, OnS, CipherTrader Stock(주식), CipherTrader Crypto(코인) 라인업 + 소셜 로그인.
   REVISION HISTORY:
     - 2026-07-22 Claude: 단일 랜딩 → 멀티 프로덕트 허브 개편.
-    - 2026-07-26 Gemini: 수동 ID/PW 제거, 구글/깃허브 순수 소셜 가입 지원.
+    - 2026-07-26 Gemini: 파란이발 브랜드, 코인 자동매매(crypto-bot) 라인업 카드 추가.
 -->
 <html lang="ko">
 <head>
@@ -18,10 +18,10 @@
 <meta property="og:site_name" content="파란이발 (btsky)">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:title" content="파란이발 (btsky) — 제품 & AI 소프트웨어 허브">
-<meta property="og:description" content="파란이발(btsky)이 직접 개발하고 검증하는 소프트웨어 솔루션 — AI 멀티 에이전트 개발 대시보드, 출장 스케줄 자동화, AI 주식 자동매매.">
+<meta property="og:description" content="파란이발(btsky)이 직접 개발하고 검증하는 소프트웨어 솔루션 — AI 멀티 에이전트 개발 대시보드, 출장 스케줄 자동화, 주식 & 코인 AI 자동매매.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="파란이발 (btsky) — 제품 & AI 소프트웨어 허브">
-<meta name="twitter:description" content="파란이발(btsky)이 직접 개발하고 검증하는 소프트웨어 솔루션 — AI 멀티 에이전트 개발 대시보드, 출장 스케줄 자동화, AI 주식 자동매매.">
+<meta name="twitter:description" content="파란이발(btsky)이 직접 개발하고 검증하는 소프트웨어 솔루션 — AI 멀티 에이전트 개발 대시보드, 출장 스케줄 자동화, 주식 & 코인 AI 자동매매.">
 <link rel="stylesheet" href="./style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
@@ -39,9 +39,9 @@
   <header class="hero">
     <div class="logo">💈</div>
     <h1>파란이발 (btsky) 소프트웨어 허브</h1>
-    <div class="tag">개발 생산성부터 현장 자동화, AI 퀀트 트레이딩까지</div>
+    <div class="tag">개발 생산성부터 현장 자동화, 주식·코인 AI 퀀트 트레이딩까지</div>
     <p class="lead">반복적인 작업을 줄이고, 복잡한 업무를 AI와 자동화 도구로 스마트하게 해결합니다.
-      파란이발이 직접 제작하고 현장에서 검증한 3가지 핵심 소프트웨어를 자유롭게 이용해 보세요.</p>
+      파란이발이 직접 제작하고 현장에서 검증한 4가지 핵심 소프트웨어를 자유롭게 이용해 보세요.</p>
     <div class="cta">
       <a class="btn dl" href="./vibe-coding/">
         <span>🌊 바이브 코딩 바로가기</span>
@@ -56,7 +56,7 @@
     </div>
   </header>
 
-  <!-- 프로덕트 카드 그리드 -->
+  <!-- 프로덕트 카드 그리드 (4종 제품 라인업) -->
   <section class="sec" id="products">
     <h2>파란이발 제품 라인업</h2>
     <p class="sub">각 분야의 필요에 맞춰 정밀하게 설계된 솔루션을 확인해보세요.</p>
@@ -82,11 +82,19 @@
 
       <a class="card-lg" href="./crypto/">
         <div class="ic">📈</div>
-        <h3>CipherTrader <span class="chip soon">준비중</span></h3>
-        <p><b>한국 주식(KOSPI/KOSDAQ) AI 자동매매 시스템</b><br>
+        <h3>CipherTrader Stock <span class="chip soon">준비중</span></h3>
+        <p><b>한국 주식(KOSPI/KOSDAQ) AI 자동매매 (k-quant)</b><br>
           한국투자증권(KIS) OpenAPI 실시간 체결가 수집 + 딥러닝 시계열 예측 + 실시간 뉴스·공시 감성 분석을 결합하여
-          정확한 매수/매도 신호를 생성하는 트레이더 앱입니다.</p>
-        <div class="go">AI 파이프라인 미리보기 →</div>
+          정확한 매수/매도 신호를 생성하는 주식 트레이더입니다.</p>
+        <div class="go">주식 AI 파이프라인 보기 →</div>
+      </a>
+
+      <a class="card-lg" href="./crypto-coin/">
+        <div class="ic">🪙</div>
+        <h3>CipherTrader Crypto <span class="chip ready">배포중</span></h3>
+        <p><b>코인(암호화폐) AI 자동매매 & 수익률봇 (crypto-bot)</b><br>
+          업비트(Upbit), 바이낸스(Binance) 24시간 실시간 시세 수집 + 변동성 돌파 & 시계열 AI 전략 + 텔레그램 수익률 자동 알림봇 솔루션입니다.</p>
+        <div class="go">코인 AI 봇 가이드 보기 →</div>
       </a>
 
     </div>
@@ -123,8 +131,12 @@
   <!-- 상세 자주 묻는 질문 (FAQ) -->
   <section class="sec" id="faq">
     <h2>자주 묻는 질문</h2>
-    <p class="sub">파란이발 서비스 가입, 관리자 로그인, 이용 안내입니다.</p>
+    <p class="sub">파란이발 서비스 가입, 주식/코인 트레이더, 이용 안내입니다.</p>
     <div class="faq-list">
+      <div class="faq-item">
+        <div class="faq-q" onclick="Site.toggleFaq(this)">주식 자동매매(k-quant)와 코인 자동매매(crypto-bot)의 차이는 무엇인가요?</div>
+        <div class="faq-a">주식 트레이더(k-quant)는 KIS OpenAPI를 기반으로 KOSPI/KOSDAQ 주식 및 공시 데이터를 다루며, 코인 트레이더(crypto-bot)는 업비트/바이낸스 24시간 실시간 체결 및 텔레그램 수익률 알림봇 기능을 다룹니다.</div>
+      </div>
       <div class="faq-item">
         <div class="faq-q" onclick="Site.toggleFaq(this)">구글 또는 GitHub 소셜 로그인으로 가입할 수 있나요?</div>
         <div class="faq-a">네, 우측 상단의 '소셜 로그인/가입' 버튼을 누르시면 Google 계정 또는 GitHub 계정 클릭 한 번으로 수동 아이디 입력 없이 1초 만에 가입 및 로그인이 진행됩니다.</div>
@@ -132,10 +144,6 @@
       <div class="faq-item">
         <div class="faq-q" onclick="Site.toggleFaq(this)">관리자 계정(btsky99) 권한은 어떻게 받나요?</div>
         <div class="faq-a">btsky99 구글/GitHub 소셜 계정으로 로그인하시면 시스템이 자동으로 인식하여 <b>'👑 파란이발 관리자'</b> 권한을 즉시 부여합니다.</div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q" onclick="Site.toggleFaq(this)">바이브 코딩 및 OnS는 어디서 이용할 수 있나요?</div>
-        <div class="faq-a">바이브 코딩은 Windows 설치형 데스크톱 앱으로 다운로드하실 수 있으며, OnS는 웹 브라우저 및 모바일 앱으로 즉시 사용하실 수 있습니다.</div>
       </div>
     </div>
   </section>

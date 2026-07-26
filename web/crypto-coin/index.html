@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<!--
+  FILE: web/crypto-coin/index.html
+  DESCRIPTION: 파란이발(btsky) CipherTrader Crypto (코인 AI 자동매매 시스템, btsky99/crypto-bot).
+    업비트·바이낸스 실시간 시세 + AI 퀀트 매매 + 수익률 자동 알림.
+  REVISION HISTORY:
+    - 2026-07-26 Gemini: 코인 자동매매(crypto-bot) 전용 제품 상세 페이지 신규 구축.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CipherTrader Crypto — 코인 AI 자동매매 | 파란이발</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪙</text></svg>">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="파란이발 (btsky)">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:title" content="CipherTrader Crypto — 코인 AI 자동매매 | 파란이발">
+<meta property="og:description" content="파란이발의 업비트·바이낸스 암호화폐 실시간 시세 + 시계열 AI + 수익률 자동 트레이딩 시스템.">
+<link rel="stylesheet" href="../style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="../auth.js"></script>
+<script>window.SITE_BASE='../';</script>
+<script src="../site.js" defer></script>
+</head>
+<body>
+  <nav>
+    <a class="brand" href="../">
+      <span class="brand-icon">💈</span> 파란이발 · CipherTrader Crypto
+    </a>
+    <div class="nav-r" id="navR"></div>
+  </nav>
+
+  <header class="hero">
+    <div class="logo">🪙</div>
+    <h1>CipherTrader Crypto (crypto-bot)</h1>
+    <div class="tag">파란이발의 코인(암호화폐) AI 자동매매 시스템</div>
+    <p class="lead">업비트(Upbit), 바이낸스(Binance) 등 주요 거래소의 실시간 체결 데이터를 24시간 수집하고,
+      딥러닝 시계열 AI 모델과 변동성 돌파 전략을 결합하여 자율 매매를 실행하는 암호화폐 봇 솔루션입니다.</p>
+    <div class="cta">
+      <a class="btn dl" href="https://github.com/btsky99/crypto-bot" target="_blank" rel="noopener">
+        <span>⭐ GitHub (crypto-bot) 저장소</span>
+      </a>
+      <a class="btn line" href="#features">코인 AI 기능 보기 ↓</a>
+    </div>
+    <div class="verbadge" style="border-color:rgba(245,158,11,0.4);color:var(--amber);">
+      🚀 코인 자동매매 봇 (btsky99/crypto-bot) 연동 완료
+    </div>
+  </header>
+
+  <section class="sec" id="features">
+    <h2>24시간 코인 AI 자동매매 기능</h2>
+    <p class="sub">잠든 사이에도 감정을 배제하고 24시간 안정적으로 시장을 감시합니다.</p>
+    <div class="grid">
+      <div class="feat">
+        <div class="ic">🪙</div>
+        <h3>업비트 & 바이낸스 WebSocket 연동</h3>
+        <p>국내외 주요 암호화폐 거래소의 틱/분봉 데이터와 호가잔량을 0.01초 단위로 수집합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🧠</div>
+        <h3>시계열 AI & 변동성 전략</h3>
+        <p>변동성 돌파 및 시계열 AI 딥러닝 모델로 최적의 진입/청산 시그널을 실시간 산출합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">📲</div>
+        <h3>수익률 & 매매 텔레그램 알림봇</h3>
+        <p>주문 체결, 일일 손익, 포트폴리오 비중 변화를 모바일 텔레그램으로 실시간 리포팅합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🛡️</div>
+        <h3>리스크 관리 & 손절 자동화</h3>
+        <p>최대 낙폭(MDD) 방지 알고리즘과 자동 손절매(Stop-Loss) 기능으로 자산을 안전하게 보호합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="note">
+    🪙 <b>안내</b> — CipherTrader Crypto는 <code>btsky99/crypto-bot</code> 레포지토리 기반으로 구동되며,
+    로그인 후 포털에서 최신 라이선스 검증 및 봇 다운로드가 제공됩니다.
+  </section>
+
+  <footer>
+    <div>파란이발 · <a href="https://github.com/btsky99/crypto-bot" target="_blank" rel="noopener">GitHub (crypto-bot)</a></div>
+    <div style="margin-top:8px"><a href="../">← 파란이발 허브 메인으로</a></div>
+  </footer>
+
+<script>window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));</script>
+</body>
+</html>
