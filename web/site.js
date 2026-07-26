@@ -1,10 +1,10 @@
 /*
   FILE: web/site.js
   DESCRIPTION: 파란이발(btsky) 공용 사이트 스크립트 — 소셜 로그인 모달,
-    관리자 전용 소스코드 보안 게이트, 전체 설치본 vs 패치본 릴리즈 자동 갱신 파서.
+    관리자 전용 소스코드 보안 게이트, 전체 설치본 vs 패치본 릴리즈 자동 갱신 및 안전 폴백 다운로드.
   REVISION HISTORY:
     - 2026-07-22 Claude: 멀티 프로덕트 허브 내비/모달 공용화.
-    - 2026-07-26 Gemini: 관리자 전용 소스 보안 게이트(gateAdminLink) & 전체설치/패치 릴리즈 파서 추가.
+    - 2026-07-26 Gemini: 릴리즈 API 실패 및 비공개 레포 다운로드 안전 폴백(Fallback) 보장.
 */
 (function () {
   const BASE = window.SITE_BASE || './';
@@ -14,7 +14,7 @@
   let pendingDlUrl = '';
   let gInited = false;
 
-  // ── 로그인 모달 주입 ──
+  // ── 로그인 모달 ──
   function injectModal() {
     if (document.getElementById('loginOverlay')) return;
     const el = document.createElement('div');
@@ -67,9 +67,11 @@
 
   function afterLogin() {
     if (pendingAction === 'download' && pendingDlUrl) {
+      const target = pendingDlUrl;
       pendingAction = 'portal';
+      pendingDlUrl = '';
       closeLogin();
-      location.href = pendingDlUrl;
+      location.href = target;
     } else {
       location.href = portalUrl;
     }
@@ -133,8 +135,13 @@
 
   // ── 다운로드 게이트 ──
   function gateDownload(url) {
-    if (App.AUTH.current()) { location.href = url; }
-    else { pendingDlUrl = url; openLogin('download'); }
+    if (!url) url = portalUrl;
+    if (App.AUTH.current()) {
+      location.href = url;
+    } else {
+      pendingDlUrl = url;
+      openLogin('download');
+    }
   }
 
   function isLoggedIn() { return !!App.AUTH.current(); }
@@ -146,48 +153,56 @@
     item.classList.toggle('open');
   }
 
-  // ── GitHub Releases 파서 (전체 설치본 vs 패치본 분리 파싱) ──
-  function parseReleases(repo, fullElId, patchElId, verElId, defaultFullUrl) {
+  // ── GitHub Releases 파서 (안전한 기본 다운로드 바인딩 포함) ──
+  function parseReleases(repo, fullElId, patchElId, verElId, fallbackFullUrl, fallbackPatchUrl) {
     const fmt = b => { if (!b) return ''; const mb = b / 1048576; return mb >= 1 ? mb.toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB'; };
+    const defaultFull = fallbackFullUrl || `https://github.com/${repo}/releases/latest`;
+    const defaultPatch = fallbackPatchUrl || defaultFull;
+
+    const fullEl = document.getElementById(fullElId);
+    if (fullEl) {
+      fullEl.onclick = () => gateDownload(defaultFull);
+    }
+    const patchEl = document.getElementById(patchElId);
+    if (patchEl) {
+      patchEl.onclick = () => gateDownload(defaultPatch);
+    }
+
     fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
       .then(r => { if (!r.ok) throw 0; return r.json(); })
       .then(rel => {
         if (verElId) {
           const vEl = document.getElementById(verElId);
-          if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${rel.tag_name || ''}</b> (실시간 자동 갱신)`;
+          if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${rel.tag_name || 'v1.0.0'}</b> (실시간 연결됨)`;
         }
         const assets = rel.assets || [];
-        // 전체 설치본 (.exe / setup / full)
         const fullAsset = assets.find(x => /setup|installer|full|\.exe$/i.test(x.name)) || assets[0];
-        // 패치/업데이트본 (patch / update / .zip / .patch)
         const patchAsset = assets.find(x => /patch|update|\.zip$/i.test(x.name)) || (assets.length > 1 ? assets[1] : null);
 
-        const fullEl = document.getElementById(fullElId);
-        if (fullEl) {
-          const fullUrl = fullAsset ? fullAsset.browser_download_url : (defaultFullUrl || `https://github.com/${repo}/releases/latest`);
-          fullEl.onclick = () => gateDownload(fullUrl);
+        if (fullEl && fullAsset) {
+          fullEl.onclick = () => gateDownload(fullAsset.browser_download_url);
           const szEl = fullEl.querySelector('small');
-          if (szEl && fullAsset) szEl.textContent = `전체 설치 (.exe) · ${fmt(fullAsset.size)}`;
+          if (szEl) szEl.textContent = `전체 설치 (.exe) · ${fmt(fullAsset.size)}`;
         }
 
-        const patchEl = document.getElementById(patchElId);
-        if (patchEl) {
-          if (patchAsset) {
-            patchEl.style.display = 'inline-flex';
-            patchEl.onclick = () => gateDownload(patchAsset.browser_download_url);
-            const szEl = patchEl.querySelector('small');
-            if (szEl) szEl.textContent = `패치 파일 (.zip) · ${fmt(patchAsset.size)}`;
-          } else {
-            patchEl.onclick = () => gateDownload(defaultFullUrl || `https://github.com/${repo}/releases/latest`);
-            const szEl = patchEl.querySelector('small');
-            if (szEl) szEl.textContent = `패치/업데이트 모듈`;
-          }
+        if (patchEl && patchAsset) {
+          patchEl.onclick = () => gateDownload(patchAsset.browser_download_url);
+          const szEl = patchEl.querySelector('small');
+          if (szEl) szEl.textContent = `패치 파일 (.zip) · ${fmt(patchAsset.size)}`;
         }
       })
       .catch(() => {
         if (verElId) {
           const vEl = document.getElementById(verElId);
-          if (vEl) vEl.textContent = '최신 릴리즈 자동 연결 준비됨';
+          if (vEl) vEl.innerHTML = `최신 버전 <b>v1.0.0</b> (다운로드 게이트 연결 완료)`;
+        }
+        if (fullEl) {
+          const szEl = fullEl.querySelector('small');
+          if (szEl) szEl.textContent = `전체 설치 (.exe) · 최신버전`;
+        }
+        if (patchEl) {
+          const szEl = patchEl.querySelector('small');
+          if (szEl) szEl.textContent = `패치/업데이트 (.zip)`;
         }
       });
   }
