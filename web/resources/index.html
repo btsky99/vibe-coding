@@ -4,6 +4,7 @@ FILE: web/resources/index.html
 DESCRIPTION: 파란이빨 AI·개발자 인프라 자원의 공식 사이트, 콘솔, 설치 링크 모음.
 
 REVISION HISTORY:
+- 2026-07-26 Codex: 개발 도구·AI 코딩 CLI/IDE 전용 페이지 진입 항목 추가.
 - 2026-07-26 Codex: 호스팅·도메인/DNS 인프라 묶음을 목록 맨 아래로 배치.
 - 2026-07-26 Codex: Tailscale 공식 설치 및 관리 콘솔 링크 추가.
 -->
@@ -16,7 +17,7 @@ REVISION HISTORY:
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="파란이빨">
 <meta property="og:title" content="AI & 개발자 인프라 자원 리스트 — 파란이빨">
-<meta property="og:description" content="호스팅KR, Vultr, Tailscale, GitHub, Gemini, Claude, ChatGPT, DeepSeek, Ollama, Hugging Face 등 개발자 필수 자원 직링크 리스트.">
+<meta property="og:description" content="Claude Code, Codex, Antigravity, VS Code, Tailscale, GitHub, AI 모델 등 개발자 필수 자원 직링크 리스트.">
 <link rel="stylesheet" href="../style.css?v=20260726_v12">
 <style>
   .search-box {
@@ -181,6 +182,27 @@ REVISION HISTORY:
   </header>
 
   <main class="resource-list" style="max-width:1140px; margin:0 auto; padding: 0 20px 80px 20px;">
+
+    <!-- 개발 도구 전용 페이지 -->
+    <h2 class="cat-header">🛠️ 개발 도구 & AI 코딩 환경</h2>
+    <table class="res-table">
+      <tr class="res-row">
+        <td style="width: 50px;">
+          <div class="res-icon">💻</div>
+        </td>
+        <td>
+          <div class="res-info">
+            <h3>개발 도구 설치 허브 <span class="badge-cat cat-local">CLI / IDE / 필수 런타임</span></h3>
+            <p>Claude Code, Codex, Antigravity, Gemini CLI, VS Code, Git, Node.js, Python, Docker 공식 설치 링크.</p>
+          </div>
+        </td>
+        <td style="width: 260px; text-align: right;">
+          <div class="btn-group-sm">
+            <a href="./developer-tools/" class="btn-sm main-btn">🧰 설치 링크 모아보기</a>
+          </div>
+        </td>
+      </tr>
+    </table>
 
     <!-- 1. 호스팅 & 도메인/DNS -->
     <h2 class="cat-header hosting-order">☁️ 호스팅 & 도메인/DNS 인프라</h2>
