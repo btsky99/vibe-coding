@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- 네온 글로우 효과 -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- 그라데이션 -->
+    <linearGradient id="hexGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00D4FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0088AA;stop-opacity:1" />
+    </linearGradient>
+
+    <linearGradient id="coreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00D4FF;stop-opacity:1" />
+    </linearGradient>
+
+    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:0.8" />
+      <stop offset="50%" style="stop-color:#00D4FF;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#00D4FF;stop-opacity:0" />
+    </radialGradient>
+  </defs>
+
+  <!-- 배경 (투명 또는 다크) -->
+  <rect width="512" height="512" fill="#0A1628" rx="64"/>
+
+  <!-- 외곽 육각형 글로우 -->
+  <polygon
+    points="256,60 426,158 426,354 256,452 86,354 86,158"
+    fill="none"
+    stroke="#00D4FF"
+    stroke-width="3"
+    opacity="0.3"
+    filter="url(#glow-strong)"/>
+
+  <!-- 메인 육각형 -->
+  <polygon
+    points="256,80 406,168 406,344 256,432 106,344 106,168"
+    fill="none"
+    stroke="url(#hexGradient)"
+    stroke-width="4"
+    filter="url(#glow)"/>
+
+  <!-- 내부 육각형 (작은) -->
+  <polygon
+    points="256,140 346,192 346,296 256,348 166,296 166,192"
+    fill="none"
+    stroke="#00D4FF"
+    stroke-width="2"
+    opacity="0.5"/>
+
+  <!-- 중앙 글로우 -->
+  <circle cx="256" cy="256" r="80" fill="url(#centerGlow)"/>
+
+  <!-- 회로 노드들 -->
+  <!-- 상단 노드 -->
+  <circle cx="256" cy="140" r="8" fill="#00D4FF" filter="url(#glow)"/>
+
+  <!-- 상단 좌측 노드 -->
+  <circle cx="166" cy="192" r="8" fill="#00D4FF" filter="url(#glow)"/>
+
+  <!-- 상단 우측 노드 -->
+  <circle cx="346" cy="192" r="8" fill="#00D4FF" filter="url(#glow)"/>
+
+  <!-- 하단 좌측 노드 -->
+  <circle cx="166" cy="296" r="8" fill="#00D4FF" filter="url(#glow)"/>
+
+  <!-- 하단 우측 노드 -->
+  <circle cx="346" cy="296" r="8" fill="#00D4FF" filter="url(#glow)"/>
+
+  <!-- 하단 노드 -->
+  <circle cx="256" cy="348" r="8" fill="#00D4FF" filter="url(#glow)"/>
+
+  <!-- 회로 연결선들 -->
+  <!-- 상단에서 중앙으로 -->
+  <line x1="256" y1="148" x2="256" y2="220" stroke="#00D4FF" stroke-width="2" opacity="0.7"/>
+
+  <!-- 좌상단에서 중앙으로 -->
+  <line x1="172" y1="196" x2="224" y2="232" stroke="#00D4FF" stroke-width="2" opacity="0.7"/>
+
+  <!-- 우상단에서 중앙으로 -->
+  <line x1="340" y1="196" x2="288" y2="232" stroke="#00D4FF" stroke-width="2" opacity="0.7"/>
+
+  <!-- 좌하단에서 중앙으로 -->
+  <line x1="172" y1="292" x2="224" y2="268" stroke="#00D4FF" stroke-width="2" opacity="0.7"/>
+
+  <!-- 우하단에서 중앙으로 -->
+  <line x1="340" y1="292" x2="288" y2="268" stroke="#00D4FF" stroke-width="2" opacity="0.7"/>
+
+  <!-- 하단에서 중앙으로 -->
+  <line x1="256" y1="340" x2="256" y2="292" stroke="#00D4FF" stroke-width="2" opacity="0.7"/>
+
+  <!-- 노드 간 수평 연결 -->
+  <line x1="174" y1="192" x2="338" y2="192" stroke="#00D4FF" stroke-width="1.5" opacity="0.4"/>
+  <line x1="174" y1="296" x2="338" y2="296" stroke="#00D4FF" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- 중앙 코어 -->
+  <circle cx="256" cy="256" r="32" fill="none" stroke="url(#coreGradient)" stroke-width="3" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="16" fill="#00FFFF" filter="url(#glow-strong)"/>
+  <circle cx="256" cy="256" r="8" fill="#FFFFFF"/>
+
+  <!-- 추가 장식 노드 (중간 레벨) -->
+  <circle cx="211" cy="212" r="4" fill="#00D4FF" opacity="0.8"/>
+  <circle cx="301" cy="212" r="4" fill="#00D4FF" opacity="0.8"/>
+  <circle cx="211" cy="288" r="4" fill="#00D4FF" opacity="0.8"/>
+  <circle cx="301" cy="288" r="4" fill="#00D4FF" opacity="0.8"/>
+
+  <!-- 차트 라인 힌트 (하단) -->
+  <polyline
+    points="180,380 210,365 240,375 270,355 300,360 330,350"
+    fill="none"
+    stroke="#00FF88"
+    stroke-width="2"
+    opacity="0.6"
+    filter="url(#glow)"/>
+</svg>
