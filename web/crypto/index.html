@@ -2,27 +2,27 @@
 <!--
   FILE: web/crypto/index.html
   DESCRIPTION: 제품 페이지 — CipherTrader(한국 주식 AI 자동매매 시스템, btsky99/k-quant).
-    아직 공개 릴리즈 전이라 '준비중'. 소개 + GitHub 링크 + 다운로드 예정 안내.
-    [TODO 사용자 확인] 공개 릴리즈 나오면 다운로드 버튼 활성화(gateDownload).
+    아직 공개 릴리즈 전이라 '준비중'. 소개 + GitHub 링크 + 파이프라인 구조도.
     공용: ../style.css, ../auth.js, ../site.js (SITE_BASE='../').
   REVISION HISTORY:
-    - 2026-07-22 Claude: 최초 생성 — k-quant README 기준(KOSPI/KOSDAQ AI 자동매매).
+    - 2026-07-22 Claude: 최초 생성 — k-quant README 기준.
+    - 2026-07-26 Gemini: 차세대 디자인 시스템, AI 트레이딩 파이프라인 visual 맵 적용.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CipherTrader — 한국 주식 AI 자동매매</title>
+<title>CipherTrader — 한국 주식 AI 자동매매 | btsky</title>
 <!-- 소셜 공유 미리보기 카드용 메타태그 (카톡/트위터/디스코드). 이모지 SVG favicon(외부 이미지 미사용). -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="btsky">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:title" content="CipherTrader — 한국 주식 AI 자동매매">
-<meta property="og:description" content="KIS OpenAPI 실시간 시세에 시계열 AI와 뉴스·공시 감성 분석을 결합해 매매 신호를 생성하는 Windows 트레이딩 앱.">
-<meta name="twitter:card" content="summary">
+<meta property="og:description" content="KIS OpenAPI 실시간 시세에 시계열 AI와 뉴스·공시 감성 분석을 결합해 매매 신호를 생성하는 Windows 트레이딩 플랫폼.">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="CipherTrader — 한국 주식 AI 자동매매">
-<meta name="twitter:description" content="KIS OpenAPI 실시간 시세에 시계열 AI와 뉴스·공시 감성 분석을 결합해 매매 신호를 생성하는 Windows 트레이딩 앱.">
+<meta name="twitter:description" content="KIS OpenAPI 실시간 시세에 시계열 AI와 뉴스·공시 감성 분석을 결합해 매매 신호를 생성하는 Windows 트레이딩 플랫폼.">
 <link rel="stylesheet" href="../style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="../auth.js"></script>
@@ -31,47 +31,93 @@
 </head>
 <body>
   <nav>
-    <a class="brand" href="../">📈 CipherTrader</a>
+    <a class="brand" href="../">
+      <span class="brand-icon">📈</span> CipherTrader
+    </a>
     <div class="nav-r" id="navR"></div>
   </nav>
 
   <header class="hero">
     <div class="logo">📈</div>
-    <h1>CipherTrader</h1>
-    <div class="tag">한국 주식(KOSPI/KOSDAQ) AI 자동매매 시스템</div>
-    <p class="lead">KIS OpenAPI 실시간 시세에 시계열 AI와 뉴스·공시 감성 분석을 결합해
-      매매 신호를 생성하는 Windows 데스크톱 트레이딩 앱. 현재 개발 중입니다.</p>
+    <h1>CipherTrader (k-quant)</h1>
+    <div class="tag">한국 주식 (KOSPI / KOSDAQ) AI 자동매매 시스템</div>
+    <p class="lead">한국투자증권(KIS) OpenAPI 실시간 데이터 수집부터 딥러닝 시계열 예측,
+      실시간 뉴스 감성 분석까지 일원화된 퀀트 트레이딩 데스크톱 애플리케이션입니다.</p>
     <div class="cta">
       <a class="btn dl" href="https://github.com/btsky99/k-quant" target="_blank" rel="noopener">
-        <span>⭐ GitHub에서 보기</span></a>
-      <a class="btn line" href="#features">기능 보기 ↓</a>
+        <span>⭐ GitHub (k-quant) 소스 보기</span>
+      </a>
+      <a class="btn line" href="#pipeline">AI 파이프라인 보기 ↓</a>
     </div>
-    <div class="verbadge" style="border-color:rgba(224,168,59,.4);color:var(--amber)">🚧 준비중 · 공개 릴리즈 예정</div>
+    <div class="verbadge" style="border-color: rgba(245,158,11,0.4); color: var(--amber);">
+      🚧 공개 배포 준비 중 · KIS OpenAPI 연동 완료
+    </div>
   </header>
 
+  <!-- 핵심 특징 Grid -->
   <section class="sec" id="features">
-    <h2>무엇을 하나요</h2>
-    <p class="sub">데이터 · AI · 자동매매를 하나로.</p>
+    <h2>데이터 기반 퀀트 트레이딩</h2>
+    <p class="sub">감정이 배제된 정밀한 AI 신호 분석으로 시장을 이깁니다.</p>
     <div class="grid">
-      <div class="feat"><div class="ic">🔌</div><h3>KIS OpenAPI 연동</h3>
-        <p>한국투자증권 REST/WebSocket으로 실시간 시세·분봉을 수집하고 주문을 실행.</p></div>
-      <div class="feat"><div class="ic">🧮</div><h3>시계열 AI 신호</h3>
-        <p>KOSPI/KOSDAQ 일봉·수급 데이터를 학습해 매매 신호를 생성.</p></div>
-      <div class="feat"><div class="ic">📰</div><h3>뉴스·공시 감성</h3>
-        <p>뉴스·공시 텍스트 감성 분석으로 이벤트 리스크와 기회를 포착.</p></div>
-      <div class="feat"><div class="ic">🖥️</div><h3>원스톱 설치</h3>
-        <p>DB·모델·서비스까지 자동 셋업되는 Windows 데스크톱 앱(설치형).</p></div>
+      <div class="feat">
+        <div class="ic">🔌</div>
+        <h3>KIS OpenAPI 실시간 연동</h3>
+        <p>REST API 및 WebSocket을 활용하여 실시간 체결가, 호가, 분봉 데이터를 손실 없이 수집합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🧮</div>
+        <h3>시계열 AI 매매 신호</h3>
+        <p>KOSPI/KOSDAQ 종목의 수급, 기술적 지표, 시계열 AI 모델(Transformer/LSTM)로 매수/매도 포지션을 산출합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">📰</div>
+        <h3>뉴스·공시 감성 분석</h3>
+        <p>실시간 공시 및 뉴스 텍스트를 LLM/NLP 파이프라인으로 분석하여 돌발 리스크와 매수 기회를 즉시 감지합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🖥️</div>
+        <h3>원스톱 셋업 패키지</h3>
+        <p>데이터베이스, 모델 파이프라인, 트레이딩 대시보드가 원클릭으로 구동되는 Windows 설치형 앱입니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- AI 트레이딩 파이프라인 구조도 -->
+  <section class="sec" id="pipeline">
+    <h2>AI 매매 신호 생성 파이프라인</h2>
+    <p class="sub">입력 데이터부터 주문 실행까지 4단계 자동화 체계</p>
+    <div class="eco-box">
+      <div class="eco-grid">
+        <div class="eco-node">
+          <div class="icon">📡</div>
+          <h4>1. 데이터 수집</h4>
+          <p>KIS WebSocket 시세 + DART 공시 API</p>
+        </div>
+        <div class="eco-node">
+          <div class="icon">🧠</div>
+          <h4>2. AI 분석</h4>
+          <p>시계열 모델예측 + 뉴스 감성 점수 산출</p>
+        </div>
+        <div class="eco-node">
+          <div class="icon">⚖️</div>
+          <h4>3. 리스크 검증</h4>
+          <p>포트폴리오 비중 제약 및 손절선 검증</p>
+        </div>
+        <div class="eco-center">
+          ⚡ 최종 검증을 통과한 신호는 KIS OpenAPI를 통해 0.1초 내 전용 계좌로 주문 송신
+        </div>
+      </div>
     </div>
   </section>
 
   <section class="note">
-    🚧 <b>준비중</b> — CipherTrader는 아직 공개 배포 전입니다. 공개 릴리즈가 나오면
-    이 페이지에 다운로드 버튼이 열립니다. (릴리즈 준비되면 다운로드 게이트만 켜면 됨)
+    🚧 <b>안내</b> — CipherTrader는 현재 시스템 안정성 및 백테스팅 고도화 진행 중입니다.
+    공개 릴리즈 배포가 완료되는 대로 이 페이지에서 즉시 다운로드가 활성화됩니다.
   </section>
 
   <footer>
     <div>CipherTrader · <a href="https://github.com/btsky99/k-quant" target="_blank" rel="noopener">GitHub (k-quant)</a></div>
-    <div style="margin-top:6px"><a href="../">← btsky 허브</a></div>
+    <div style="margin-top:8px"><a href="../">← btsky 허브로 돌아가기</a></div>
   </footer>
 
 <script>window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));</script>

@@ -3,25 +3,27 @@
   FILE: web/vibe-coding/index.html
   DESCRIPTION: 제품 페이지 — 바이브 코딩(AI 멀티 에이전트 개발 대시보드). 소개·기능·다운로드.
     다운로드는 로그인 게이트(Site.gateDownload). 최신 릴리즈는 GitHub API로 자동 조회.
+    PostgreSQL 18 기반 하이브 마인드 & 자가치유 2.0 구조도 포함.
     공용: ../style.css, ../auth.js, ../site.js (SITE_BASE='../').
   REVISION HISTORY:
-    - 2026-07-22 Claude: 허브 하위 제품 페이지로 분리(기존 루트 랜딩 이관).
+    - 2026-07-22 Claude: 허브 하위 제품 페이지로 분리.
+    - 2026-07-26 Gemini: 하이브 아키텍처 비주얼, 릴리즈 게이트, 프리미엄 UI 쇄신.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>바이브 코딩 — AI 멀티 에이전트 개발 대시보드</title>
+<title>바이브 코딩 — AI 멀티 에이전트 개발 대시보드 | btsky</title>
 <!-- 소셜 공유 미리보기 카드용 메타태그 (카톡/트위터/디스코드). 이모지 SVG favicon(외부 이미지 미사용). -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="btsky">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:title" content="바이브 코딩 — AI 멀티 에이전트 개발 대시보드">
-<meta property="og:description" content="여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막는 PostgreSQL 기반 하이브 마인드 Windows 앱.">
-<meta name="twitter:card" content="summary">
+<meta property="og:description" content="여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막는 PostgreSQL 18 기반 하이브 마인드 데스크톱 플랫폼.">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="바이브 코딩 — AI 멀티 에이전트 개발 대시보드">
-<meta name="twitter:description" content="여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막는 PostgreSQL 기반 하이브 마인드 Windows 앱.">
+<meta name="twitter:description" content="여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막는 PostgreSQL 18 기반 하이브 마인드 데스크톱 플랫폼.">
 <link rel="stylesheet" href="../style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="../auth.js"></script>
@@ -30,66 +32,114 @@
 </head>
 <body>
   <nav>
-    <a class="brand" href="../">🌊 바이브 코딩</a>
+    <a class="brand" href="../">
+      <span class="brand-icon">🌊</span> 바이브 코딩
+    </a>
     <div class="nav-r" id="navR"></div>
   </nav>
 
   <header class="hero">
     <div class="logo">🌊</div>
-    <h1>바이브 코딩</h1>
+    <h1>바이브 코딩 (Vibe Coding)</h1>
     <div class="tag">AI 멀티 에이전트 하이브 마인드 개발 대시보드</div>
-    <p class="lead">여러 AI 에이전트가 한 팀처럼 협업하고, 오류를 스스로 학습해 재발을 막습니다.
-      PostgreSQL 기반 하이브 마인드로 에이전트들이 실시간으로 지식을 공유하는 Windows 데스크톱 앱.</p>
+    <p class="lead">Claude·Antigravity·Codex 등 이종 AI 에이전트들이 하나의 하이브 마인드로 동기화되어 개발합니다.
+      실행 도중 에러가 발생하면 원인을 스스로 학습하여 다음 개발 시 삽질을 완벽히 차단합니다.</p>
     <div class="cta">
       <button class="btn dl" id="winBtn" onclick="dl()">
-        <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small></button>
-      <a class="btn line" href="#features">기능 보기 ↓</a>
+        <span>🪟 Windows 다운로드</span><small id="winSize">최신 버전</small>
+      </button>
+      <a class="btn line" href="#architecture">아키텍처 보기 ↓</a>
     </div>
-    <div class="verbadge" id="ver">버전 확인 중…</div>
+    <div class="verbadge" id="ver">최신 릴리즈 정보 확인 중…</div>
   </header>
 
+  <!-- 핵심 특징 Grid -->
   <section class="sec" id="features">
     <h2>무엇을 할 수 있나요</h2>
-    <p class="sub">혼자 코딩하지 마세요. 에이전트 팀과 함께.</p>
+    <p class="sub">혼자 코딩하는 시대는 끝났습니다. AI 에이전트 팀과 함께 개발하세요.</p>
     <div class="grid">
-      <div class="feat"><div class="ic">🤝</div><h3>멀티 에이전트 협업</h3>
-        <p>Claude·여러 에이전트가 태스크를 나눠 맡고 서로 소통하며 동시에 개발합니다.</p></div>
-      <div class="feat"><div class="ic">🩹</div><h3>자가 치유</h3>
-        <p>같은 오류가 반복되면 원인을 학습·기록해, 다음엔 삽질 없이 바로 넘어갑니다.</p></div>
-      <div class="feat"><div class="ic">🧠</div><h3>하이브 마인드</h3>
-        <p>PostgreSQL 기반 공유 기억으로 에이전트들이 작업 맥락을 실시간으로 공유합니다.</p></div>
-      <div class="feat"><div class="ic">🗂️</div><h3>지식 관리</h3>
-        <p>제텔카스텐 노트로 세션이 바뀌어도 프로젝트 지식이 축적·연결됩니다.</p></div>
+      <div class="feat">
+        <div class="ic">🤝</div>
+        <h3>멀티 에이전트 협업</h3>
+        <p>각기 다른 장점을 가진 AI 에이전트들이 ITCP 프로토콜로 메시지를 주고받으며 자율적으로 태스크를 해결합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🩹</div>
+        <h3>자가 치유 2.0 (Self-Healing)</h3>
+        <p>동일한 오류 시그니처가 감지되면 원인을 지식 장부에 수집하고, 재발을 방지하는 방어 힌트를 자동으로 주입합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🧠</div>
+        <h3>PostgreSQL 18 지식 기반</h3>
+        <p>세션이 종료되어도 공유 기억(Memory)과 pgvector 벡터 검색으로 프로젝트 맥락이 영구적으로 유지됩니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🗂️</div>
+        <h3>제텔카스텐 지식 통합</h3>
+        <p>아이디어와 코드 컨텍스트를 영구 노트로 축적하고 Obsidian Vault와 이중 동기화합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 하이브 아키텍처 다이어그램 -->
+  <section class="sec" id="architecture">
+    <h2>하이브 마인드 아키텍처</h2>
+    <p class="sub">에이전트 조율부터 데이터 계층까지 견고하게 설계되었습니다.</p>
+    <div class="eco-box">
+      <div class="eco-grid">
+        <div class="eco-node">
+          <div class="icon">🖥️</div>
+          <h4>vibe-view UI</h4>
+          <p>React + Vite + XTerm.js 멀티 슬롯 터미널 대시보드</p>
+        </div>
+        <div class="eco-node">
+          <div class="icon">⚙️</div>
+          <h4>중앙 API & Orchestrator</h4>
+          <p>FastAPI/Python 기반 자율 태스크 스케줄링 및 훅 엔진</p>
+        </div>
+        <div class="eco-node">
+          <div class="icon">🗄️</div>
+          <h4>PostgreSQL 18 DB</h4>
+          <p>pg_messages ITCP 채널, pg_memory, pgvector 실시간 연동</p>
+        </div>
+        <div class="eco-center">
+          💡 에이전트 샌드박스 + 자가치유 루프 + 워크트리(Git Worktree) 격리 환경 통합
+        </div>
+      </div>
     </div>
   </section>
 
   <section class="band">
-    <h2>지금 시작하세요</h2>
-    <p>Windows 10/11 · 설치 후 자동 업데이트 · 🍎 macOS 준비 중</p>
+    <h2>지금 바이브 코딩으로 개발 속도를 높이세요</h2>
+    <p>Windows 10/11 지원 · 원클릭 설치 및 인스톨러 배포 · 🍎 macOS 준비 중</p>
     <div class="cta">
-      <button class="btn dl" onclick="dl()"><span>🪟 다운로드</span><small id="winSize2">최신 버전</small></button>
+      <button class="btn dl" onclick="dl()">
+        <span>🪟 Windows 버전 다운로드</span><small id="winSize2">최신 버전</small>
+      </button>
     </div>
   </section>
 
   <footer>
-    <div>바이브 코딩 · <a href="https://github.com/btsky99/vibe-coding" target="_blank" rel="noopener">GitHub</a></div>
-    <div style="margin-top:6px"><a href="../">← btsky 허브</a></div>
+    <div>바이브 코딩 · <a href="https://github.com/btsky99/vibe-coding" target="_blank" rel="noopener">GitHub 저장소</a></div>
+    <div style="margin-top:8px"><a href="../">← btsky 허브로 돌아가기</a></div>
   </footer>
 
 <script>
 const REPO='btsky99/vibe-coding';
 let dlUrl='https://github.com/btsky99/vibe-coding/releases/latest';
 const fmt=b=>{ if(!b) return ''; const mb=b/1048576; return mb>=1?mb.toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'; };
-function dl(){ Site.gateDownload(dlUrl); }   // 로그인해야 다운로드
+function dl(){ Site.gateDownload(dlUrl); }
+
 fetch(`https://api.github.com/repos/${REPO}/releases/latest`,{headers:{'Accept':'application/vnd.github+json'}})
   .then(r=>{ if(!r.ok) throw 0; return r.json(); })
   .then(rel=>{
-    document.getElementById('ver').innerHTML=`현재 최신 버전 <b>${rel.tag_name||''}</b>`;
+    document.getElementById('ver').innerHTML=`현재 최신 버전 <b>${rel.tag_name||''}</b> (배포 완료)`;
     const a=rel.assets||[], win=a.find(x=>/setup.*\.exe$/i.test(x.name))||a.find(x=>/\.exe$/i.test(x.name));
     if(win){ dlUrl=win.browser_download_url; const sz=fmt(win.size);
-      document.getElementById('winSize').textContent=sz; document.getElementById('winSize2').textContent=sz+' · 설치'; }
+      document.getElementById('winSize').textContent=sz; document.getElementById('winSize2').textContent=sz+' · 설치 파일'; }
   })
-  .catch(()=>{ document.getElementById('ver').textContent='버전 정보를 불러오지 못했어요'; });
+  .catch(()=>{ document.getElementById('ver').textContent='버전 정보를 불러오지 못했어요 (기본 다운로드 사용)'; });
+
 window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));
 </script>
 </body>

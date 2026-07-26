@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-24 08:13
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-26 10:03
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -35,7 +35,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 2011 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `server.py` | 2016 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
 | `boot.py` | 302 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 284 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
@@ -59,7 +59,7 @@
 | `git_api.py` | 235 | Git 저장소 관리 API (/api/git/*) |
 | `heal_api.py` | 30 |  |
 | `hive_api.py` | 1301 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
-| `hive_ingest_api.py` | 139 |  |
+| `hive_ingest_api.py` | 142 |  |
 | `install_api.py` | 421 |  |
 | `lan_api.py` | 475 |  |
 | `launch_api.py` | 102 |  |
@@ -76,7 +76,7 @@
 | `setup_api.py` | 48 |  |
 | `static_api.py` | 123 |  |
 | `tasks_api.py` | 302 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
-| `telegram_api.py` | 223 |  |
+| `telegram_api.py` | 227 |  |
 | `tools_api.py` | 1068 |  |
 | `update_api.py` | 213 |  |
 | `vibe_api.py` | 295 | Vibe CLI 상태 관리 API (/api/vibe/*) |
@@ -130,7 +130,7 @@
 |------|------|------|
 | `orchestrator.py` | 538 | 하이브 태스크 스케줄링 및 에이전트 감시 |
 | `hive_debate.py` | 428 | 에이전트 간 의견 조율 토론 워크플로우 |
-| `hive_bridge.py` | 184 | PostgreSQL 18 기반 하이브 통합 로깅 |
+| `hive_bridge.py` | 213 | PostgreSQL 18 기반 하이브 통합 로깅 |
 | `memory.py` | 317 | PostgreSQL 기반 하이브 메모리 CLI |
 | `worktree_manager.py` | 349 | Git Worktree 격리 관리자 |
 | `generate_hivemind_doc.py` | 323 | HIVEMIND.md 자동 생성기 |
@@ -139,8 +139,8 @@
 ### 훅/이벤트
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_hook.py` | 991 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
-| `hook_bridge.py` | 573 | Claude Code UserPromptSubmit 훅 브릿지 |
+| `hive_hook.py` | 1009 | Claude Code 자동 액션 트레이스 훅 (의도 감지) |
+| `hook_bridge.py` | 582 | Claude Code UserPromptSubmit 훅 브릿지 |
 | `claude_hook.py` | 297 | Claude Code PostToolUse/Stop 훅 핸들러 |
 | `antigravity_hook.py` | 595 | Gemini CLI 훅 + 대시보드 유지 + HIVEMIND.md 갱신 |
 
@@ -242,7 +242,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 919 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 1003 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 206 |  |
 | `constants.tsx` | 93 |  |
@@ -257,7 +257,7 @@
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
 | `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1041 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `TerminalSlot.tsx` | 1096 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 574 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 141 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -292,7 +292,7 @@
 | `test_pg_store_split.py` | 124 |  |
 | `test_route_table.py` | 106 |  |
 | `test_self_heal_2.py` | 231 |  |
-| `test_telegram_hub.py` | 347 | 텔레그램 허브 — .env 그룹ID 보존/분할 유실 0/문서 전송 보안 가드 |
+| `test_telegram_hub.py` | 347 |  |
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
@@ -334,4 +334,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-24 08:13
+> 자동 생성 완료: 2026-07-26 10:03
