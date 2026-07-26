@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>파란이빨 — 실시간 홀로그램 애니메이션 바이킹 룬 로고</title>
+<title>파란이빨 — 라이브 홀로그램 로고 4가지 컬러 추천</title>
 <style>
   body {
     background: #020408;
@@ -14,69 +14,101 @@
     justify-content: center;
     min-height: 100vh;
     margin: 0;
-    padding: 20px;
+    padding: 30px 20px;
   }
-  h1 { font-size: 1.9rem; margin-bottom: 8px; color: #38bdf8; text-align: center; }
-  .subtitle { color: #94a3b8; font-size: 1rem; margin-bottom: 28px; text-align: center; }
-  .hero-card {
-    background: radial-gradient(circle at center, #1e1b4b 0%, #020408 100%);
-    border: 1.5px solid #38bdf8;
-    box-shadow: 0 0 60px rgba(56, 189, 248, 0.35), 0 0 30px rgba(192, 132, 252, 0.25);
-    border-radius: 24px;
-    padding: 42px 36px;
+  h1 { font-size: 2rem; margin-bottom: 8px; color: #38bdf8; text-align: center; }
+  p.subtitle { color: #94a3b8; font-size: 1.05rem; margin-bottom: 36px; text-align: center; }
+  
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 24px;
+    width: 100%;
+    max-width: 1000px;
+  }
+  .card {
+    background: #0d1222;
+    border: 1px solid #1e293b;
+    border-radius: 20px;
+    padding: 28px 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    max-width: 480px;
-    width: 100%;
-    margin-bottom: 30px;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
   }
-  .hero-card img {
-    width: 150px;
-    height: 150px;
-    margin-bottom: 24px;
-    filter: drop-shadow(0 0 24px rgba(56, 189, 248, 0.6));
+  .card:hover {
+    transform: translateY(-6px);
+    border-color: #38bdf8;
+    box-shadow: 0 10px 30px rgba(56, 189, 248, 0.25);
   }
-  .hero-card h2 {
-    background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-size: 1.55rem;
-    margin: 0 0 10px 0;
-    font-weight: 800;
-  }
-  .hero-card p {
-    color: #cbd5e1;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    margin: 0;
-  }
-  .badge-live {
-    background: linear-gradient(135deg, #38bdf8, #a855f7);
-    color: #ffffff;
-    font-size: 0.8rem;
-    padding: 5px 16px;
-    border-radius: 12px;
+  .card img {
+    width: 110px;
+    height: 110px;
     margin-bottom: 20px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-    box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
   }
+  .card h3 {
+    margin: 0 0 8px 0;
+    font-size: 1.2rem;
+    color: #f1f5f9;
+  }
+  .card p {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin: 0;
+    line-height: 1.45;
+  }
+  .badge {
+    color: #ffffff;
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    border-radius: 12px;
+    margin-bottom: 14px;
+    font-weight: 700;
+  }
+  .b1 { background: #0284c7; }
+  .b2 { background: #059669; }
+  .b3 { background: #7c3aed; }
+  .b4 { background: #2563eb; }
 </style>
 </head>
 <body>
 
-  <h1>✨ 파란이빨 (Harald Bluetooth) 라이브 홀로그램 로고</h1>
-  <p class="subtitle">실제로 끊임없이 움직이고 빛나는 SF 홀로그램 애니메이션 이펙트</p>
+  <h1>🔮 파란이빨 라이브 홀로그램 컬러 추천 4종</h1>
+  <p class="subtitle">디자인과 모션 애니메이션은 고정! 원하시는 컬러 팔레트를 골라주세요.</p>
 
-  <div class="hero-card">
-    <span class="badge-live">LIVE 홀로그램 애니메이션 (적용 완료 🔮)</span>
-    <img src="./paranibal_icon.svg?v=20260726_nocrown_animated_v9" alt="LIVE 홀로그램 애니메이션">
-    <h2>하랄드 모션 홀로그램 룬</h2>
-    <p>
-      회전하는 홀로그램 스캔 링, 위아래로 움직이는 레이저 스캔 빔, 은은하게 숨쉬는 룬 문자(ᚼ+ᛒ) 네온 펄스 광채가 실제로 살아 움직입니다!
-    </p>
+  <div class="grid">
+    <!-- Option 1 -->
+    <div class="card">
+      <span class="badge b1">1번 (현재 기본 ⭐)</span>
+      <img src="./hologram_color_v1.svg" alt="1번 시안 & 퍼플">
+      <h3>시안 & 바이올렛 퓨어</h3>
+      <p>투명하고 영롱한 퍼플·시안·블루 3D 라이브 홀로그램 (현재 적용 중)</p>
+    </div>
+
+    <!-- Option 2 -->
+    <div class="card">
+      <span class="badge b2">2번</span>
+      <img src="./hologram_color_v2.svg" alt="2번 네온 에메랄드">
+      <h3>네온 에메랄드 오로라</h3>
+      <p>청량하고 강렬한 에메랄드 그린 & 민트 시안 바이킹 오로라 빛</p>
+    </div>
+
+    <!-- Option 3 -->
+    <div class="card">
+      <span class="badge b3">3번</span>
+      <img src="./hologram_color_v3.svg" alt="3번 로열 퍼플">
+      <h3>로열 퍼플 & 마젠타</h3>
+      <p>고혹적이고 유니크한 딥 퍼플, 마젠타 & 핫핑크 럭셔리 사이버 빛</p>
+    </div>
+
+    <!-- Option 4 -->
+    <div class="card">
+      <span class="badge b4">4번</span>
+      <img src="./hologram_color_v4.svg" alt="4번 코발트 블루">
+      <h3>일렉트릭 코발트 블루</h3>
+      <p>극도로 신뢰감 있고 날카로우며 차가운 딥 하이퍼 코발트 블루 빛</p>
+    </div>
   </div>
 
 </body>

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <radialGradient id="holoSpaceBg1" cx="50%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="55%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020408"/>
+    </radialGradient>
+    <linearGradient id="animHoloGradient1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8">
+        <animate attributeName="stop-color" values="#38bdf8; #818cf8; #c084fc; #38bdf8" dur="4s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="50%" stop-color="#818cf8">
+        <animate attributeName="stop-color" values="#818cf8; #c084fc; #38bdf8; #818cf8" dur="4s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#22d3ee">
+        <animate attributeName="stop-color" values="#22d3ee; #38bdf8; #f472b6; #22d3ee" dur="4s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+    <filter id="liveHoloGlow1" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4.5" result="blur1"/>
+      <feGaussianBlur stdDeviation="1.5" result="blur2"/>
+      <feMerge><feMergeNode in="blur1"/><feMergeNode in="blur2"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <style>
+    @keyframes holoScanRotate1 { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    @keyframes runeGlowPulse1 { 0%, 100% { filter: drop-shadow(0 0 6px #38bdf8); } 50% { filter: drop-shadow(0 0 16px #c084fc); } }
+    @keyframes scanLineMove1 { 0% { transform: translateY(-30px); opacity: 0; } 50% { opacity: 0.8; } 100% { transform: translateY(30px); opacity: 0; } }
+    .holo-ring-rotate1 { transform-origin: 60px 60px; animation: holoScanRotate1 12s linear indefinite; }
+    .holo-ring-reverse1 { transform-origin: 60px 60px; animation: holoScanRotate1 8s linear indefinite reverse; }
+    .rune-glow1 { animation: runeGlowPulse1 2.5s ease-in-out indefinite alternate; }
+    .scan-line1 { animation: scanLineMove1 2.5s ease-in-out indefinite; }
+  </style>
+  <circle cx="60" cy="60" r="54" fill="url(#animHoloGradient1)" opacity="0.3" filter="url(#liveHoloGlow1)"/>
+  <circle cx="60" cy="60" r="50" fill="url(#holoSpaceBg1)" stroke="url(#animHoloGradient1)" stroke-width="3"/>
+  <g class="holo-ring-rotate1">
+    <circle cx="60" cy="60" r="44" fill="none" stroke="url(#animHoloGradient1)" stroke-width="2" stroke-dasharray="18 10 35 15" opacity="0.9" filter="url(#liveHoloGlow1)"/>
+    <circle cx="60" cy="16" r="3" fill="#38bdf8" filter="url(#liveHoloGlow1)"/>
+    <circle cx="60" cy="104" r="3" fill="#c084fc" filter="url(#liveHoloGlow1)"/>
+  </g>
+  <g class="holo-ring-reverse1">
+    <circle cx="60" cy="60" r="40" fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="5 5 12 5" opacity="0.65"/>
+  </g>
+  <g class="scan-line1">
+    <line x1="20" y1="60" x2="100" y2="60" stroke="#38bdf8" stroke-width="1.5" opacity="0.7" filter="url(#liveHoloGlow1)"/>
+  </g>
+  <circle cx="14" cy="60" r="2.5" fill="#38bdf8"/>
+  <circle cx="106" cy="60" r="2.5" fill="#38bdf8"/>
+  <g class="rune-glow1">
+    <path d="M 60 26 L 60 94" stroke="url(#animHoloGradient1)" stroke-width="6.5" stroke-linecap="round" filter="url(#liveHoloGlow1)"/>
+    <path d="M 60 26 L 77 43 L 60 60 L 77 77 L 60 94" stroke="url(#animHoloGradient1)" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#liveHoloGlow1)"/>
+    <path d="M 60 43 L 43 60 M 60 77 L 43 60" stroke="url(#animHoloGradient1)" stroke-width="6.5" stroke-linecap="round" filter="url(#liveHoloGlow1)"/>
+  </g>
+</svg>
