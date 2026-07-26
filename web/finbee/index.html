@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<!--
+  FILE: web/finbee/index.html
+  DESCRIPTION: 파란이발(btsky) 핀비(FinBee) — AI 금융 비서 & 포트폴리오 관리 플랫폼 (btsky99/finbee).
+    27종 AI 에이전트 + Django + React + PostgreSQL 기반 자산 분석.
+  REVISION HISTORY:
+    - 2026-07-26 Gemini: FinBee(핀비) AI 금융 비서 전용 상세 페이지 신규 생성.
+-->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinBee (핀비) — AI 금융 비서 & 포트폴리오 | 파란이발</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐝</text></svg>">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="파란이발 (btsky)">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:title" content="FinBee (핀비) — AI 금융 비서 & 포트폴리오 | 파란이발">
+<meta property="og:description" content="파란이발의 27개 AI 에이전트 기반 자산 종합 분석 및 금융 포트폴리오 관리 플랫폼.">
+<link rel="stylesheet" href="../style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="../auth.js"></script>
+<script>window.SITE_BASE='../';</script>
+<script src="../site.js" defer></script>
+</head>
+<body>
+  <nav>
+    <a class="brand" href="../">
+      <span class="brand-icon">💈</span> 파란이발 · FinBee (핀비)
+    </a>
+    <div class="nav-r" id="navR"></div>
+  </nav>
+
+  <header class="hero">
+    <div class="logo">🐝</div>
+    <h1>FinBee (핀비)</h1>
+    <div class="tag">파란이발의 27개 AI 에이전트 기반 금융 비서 & 포트폴리오 플랫폼</div>
+    <p class="lead">주식, 코인, 현금 자산을 종합적으로 분석하고 모니터링하는 AI 인텔리전스 플랫폼입니다.
+      27개의 전문 AI 에이전트가 포트폴리오 진단, 리스크 분석, 통합 금융 리포팅을 자동으로 수행합니다.</p>
+    <div class="cta">
+      <a class="btn dl" href="https://github.com/btsky99/finbee" target="_blank" rel="noopener">
+        <span>⭐ GitHub (finbee) 저장소</span>
+      </a>
+      <a class="btn line" href="#features">AI 금융 기능 안내 ↓</a>
+    </div>
+    <div class="verbadge">
+      🐝 Django + React + PostgreSQL + 27 AI Agents 연동
+    </div>
+  </header>
+
+  <section class="sec" id="features">
+    <h2>FinBee 핵심 기능</h2>
+    <p class="sub">흩어진 금융 자산을 AI가 하나로 진단하고 분석합니다.</p>
+    <div class="grid">
+      <div class="feat">
+        <div class="ic">🤖</div>
+        <h3>27종 전문 AI 에이전트 크루</h3>
+        <p>자산 배분, 리스크 관리, 뉴스 분석, 수급 진단 등 특화된 27개 AI 에이전트가 종합 리포트를 생성합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">📊</div>
+        <h3>통합 자산 포트폴리오 뷰er</h3>
+        <p>주식, 암호화폐, 실물 자산을 통합하여 한눈에 파악할 수 있는 인텔리전스 대시보드를 제공합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">⚖️</div>
+        <h3>스마트 리밸런싱 알림</h3>
+        <p>시장 변동성에 맞춰 각 자산군의 목표 비중을 유지할 수 있도록 적시 리밸런싱 알림을 제공합니다.</p>
+      </div>
+      <div class="feat">
+        <div class="ic">🗄️</div>
+        <h3>PostgreSQL 빅데이터 데이터베이스</h3>
+        <p>시세 트렌드와 손익 이력을 안전한 고성능 PostgreSQL 데이터베이스에 저장하고 분석합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="note">
+    🐝 <b>안내</b> — FinBee는 <code>btsky99/finbee</code> 기반 금융 인텔리전스 플랫폼입니다.
+  </section>
+
+  <footer>
+    <div>파란이발 · <a href="https://github.com/btsky99/finbee" target="_blank" rel="noopener">GitHub (finbee)</a></div>
+    <div style="margin-top:8px"><a href="../">← 파란이발 허브 메인으로</a></div>
+  </footer>
+
+<script>window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));</script>
+</body>
+</html>
