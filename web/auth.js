@@ -1,16 +1,24 @@
 /*
   FILE: web/auth.js
   DESCRIPTION: 파란이발(btsky) 허브 & 포털 공용 인증 모듈.
-    Google OAuth + GitHub 소셜 로그인 + 가입 승인 대기열(Pending Queue) 자동 동기화.
-    btsky99@gmail.com 및 관리자 아이디 로그인 시 '👑 관리자' 권한 자동 부여 및 회원 승인 제어.
+    Google OAuth + GitHub 소셜 로그인 + 프로젝트별(5대 프로덕트) 접근 권한 제어(Access Control).
+    btsky99@gmail.com 및 관리자 로그인 시 모든 권한 100% 자동 개방.
   REVISION HISTORY:
     - 2026-07-22 Claude: index/portal 공유 인증 모듈 구축.
-    - 2026-07-26 Gemini: 가입 신청 내역 영속화 및 관리자 승인 대기열 연동 강화.
+    - 2026-07-26 Gemini: 프로젝트별(바이브코딩, OnS, 주식AI, 코인AI, 핀비) 개별 접근 권한(perms) 부여 및 검증 로직 추가.
 */
 window.App = (function () {
   const GOOGLE_CLIENT_ID = '832419973036-dt7p4u8oht9uvtlorce1k83rke8bmnau.apps.googleusercontent.com';
   const ADMIN_EMAILS = ['btsky99@gmail.com', 'btsky99', 'paranibal', 'bluebarber'];
   
+  const PRODUCTS = [
+    { key: 'vibe_coding', name: '바이브 코딩', icon: '🌊' },
+    { key: 'ons',         name: 'OnS 스케줄러', icon: '📅' },
+    { key: 'stock',       name: '주식 AI (k-quant)', icon: '📈' },
+    { key: 'crypto',      name: '코인 AI (crypto-bot)', icon: '🪙' },
+    { key: 'finbee',      name: 'FinBee (핀비)', icon: '🐝' }
+  ];
+
   const USERS = {
     admin:     { pw: 'admin123', role: 'admin', name: '파란이발 (관리자)', email: 'btsky99@gmail.com' },
     btsky99:   { pw: 'admin123', role: 'admin', name: '파란이발 (btsky99)', email: 'btsky99@gmail.com' },
@@ -18,26 +26,44 @@ window.App = (function () {
     user:      { pw: 'user123',  role: 'user',  name: '일반 회원', email: 'user@example.com' },
   };
 
-  const K = { sess: 'portal_sess', appr: 'portal_approved', pend: 'portal_pending' };
+  const K = { sess: 'portal_sess', appr: 'portal_approved_v2', pend: 'portal_pending' };
   const jget = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || d); } catch { return JSON.parse(d); } };
   const save = s => localStorage.setItem(K.sess, JSON.stringify(s));
 
-  // ── 승인 및 신청 대기열 저장소 ──
-  const getApproved = () => jget(K.appr, '[]');
+  // ── 승인 및 프로젝트별 권한 저장소 ──
+  // Approved map: { "user_id": ["vibe_coding", "ons", "crypto", ...] }
+  const getApprovedMap = () => jget(K.appr, '{}');
+  
   const isApproved = id => {
     if (!id) return false;
     const lower = id.toLowerCase();
     if (ADMIN_EMAILS.some(a => lower.includes(a))) return true;
-    return getApproved().includes(id);
+    const map = getApprovedMap();
+    return Boolean(map[id]);
   };
   
-  function approveId(id) {
-    const a = getApproved();
-    if (!a.includes(id)) { a.push(id); localStorage.setItem(K.appr, JSON.stringify(a)); }
+  // 제품별 접근 권한 검사
+  const hasProductAccess = (id, productKey) => {
+    if (!id) return false;
+    const lower = id.toLowerCase();
+    if (ADMIN_EMAILS.some(a => lower.includes(a))) return true;
+    const map = getApprovedMap();
+    const userPerms = map[id];
+    if (!userPerms || !Array.isArray(userPerms)) return false;
+    return userPerms.includes(productKey);
+  };
+
+  function approveUserWithPerms(id, allowedProducts) {
+    const map = getApprovedMap();
+    map[id] = Array.isArray(allowedProducts) && allowedProducts.length ? allowedProducts : PRODUCTS.map(p => p.key);
+    localStorage.setItem(K.appr, JSON.stringify(map));
     removePending(id);
   }
+
   function revokeId(id) {
-    localStorage.setItem(K.appr, JSON.stringify(getApproved().filter(x => x !== id)));
+    const map = getApprovedMap();
+    delete map[id];
+    localStorage.setItem(K.appr, JSON.stringify(map));
   }
 
   const getPending = () => jget(K.pend, '[]');
@@ -60,6 +86,7 @@ window.App = (function () {
     }
     localStorage.setItem(K.pend, JSON.stringify(p));
   }
+  
   function removePending(id) {
     localStorage.setItem(K.pend, JSON.stringify(getPending().filter(x => x.id !== id)));
   }
@@ -136,6 +163,6 @@ window.App = (function () {
     google.accounts.id.renderButton(containerEl, { theme: 'filled_blue', size: 'large', text: 'continue_with', shape: 'rectangular', locale: 'ko', width: 280 });
   }
 
-  return { GOOGLE_CLIENT_ID, ADMIN_EMAILS, USERS, AUTH, isApproved, approveId, revokeId,
-    getApproved, getPending, addPending, removePending, decodeJwt, initGoogle };
+  return { GOOGLE_CLIENT_ID, ADMIN_EMAILS, USERS, PRODUCTS, AUTH, isApproved, hasProductAccess, approveUserWithPerms, revokeId,
+    getApprovedMap, getPending, addPending, removePending, decodeJwt, initGoogle };
 })();

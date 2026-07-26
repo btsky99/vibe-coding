@@ -1,278 +1,213 @@
 /*
   FILE: web/site.js
-  DESCRIPTION: 파란이발(btsky) 공용 사이트 스크립트 — 소셜 로그인 모달,
-    관리자 전용 소스코드 보안 게이트, 5개 전체 설치본 파일 다중 연속 자동 다운로드(gateDownloadBundle) 엔진.
+  DESCRIPTION: 파란이발(btsky) 웹 인터랙션, FAQ 및 다운로드 게이트 모듈.
+    소셜 로그인 상태 확인 + 5대 프로젝트별(vibe_coding, ons, stock, crypto, finbee) 개별 접근 권한(hasProductAccess) 연동 게이트.
   REVISION HISTORY:
-    - 2026-07-22 Claude: 멀티 프로덕트 허브 내비/모달 공용화.
-    - 2026-07-26 Gemini: 5개 전체 설치 파일 (.exe + .bin 1~4) 1초 시차 연속 자동 다운로드 번들 엔진 구현.
+    - 2026-07-22 Claude: 최초 생성.
+    - 2026-07-26 Gemini: 프로젝트별 개별 접근 권한(hasProductAccess) 다운로드 게이트 탑재 및 5개 파일 연속 다운로드 바인딩.
 */
-(function () {
-  const BASE = window.SITE_BASE || './';
-  const portalUrl = BASE + 'portal/';
-  const homeUrl = BASE;
-  let pendingAction = 'portal';
-  let pendingDlUrl = '';
-  let pendingDlBundle = null;
-  let gInited = false;
+window.Site = (function () {
+  function renderNav(activeHash) {
+    const navR = document.getElementById('navR');
+    if (!navR) return;
+    
+    const sess = window.App ? window.App.AUTH.current() : null;
+    let html = '';
+    
+    if (sess) {
+      const isAdmin = sess.role === 'admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
+      const label = isAdmin ? '👑 파란이발 관리자' : (sess.name || '회원');
+      html += `<a class="nlink" href="${window.SITE_BASE || './'}portal/">💈 ${label} 포털</a>`;
+      html += `<button class="nlink solid" onclick="Site.logout()">로그아웃</button>`;
+    } else {
+      html += `<button class="nlink solid" onclick="Site.openLogin()">🔑 소셜 로그인 / 가입</button>`;
+    }
+    navR.innerHTML = html;
+  }
 
-  // ── 로그인 모달 ──
-  function injectModal() {
-    if (document.getElementById('loginOverlay')) return;
-    const el = document.createElement('div');
-    el.className = 'overlay'; el.id = 'loginOverlay';
-    el.innerHTML = `
-      <div class="modal">
-        <button class="x" aria-label="닫기">&times;</button>
-        <div class="mlogo">💈</div>
-        <h2>파란이발 로그인</h2>
-        <div class="msub">소셜 계정으로 1초 만에 시작하세요</div>
-
-        <div class="social-btns">
-          <div id="mgwrap"></div>
-          <button type="button" class="btn-github-social" onclick="Site.promptGithub()">
-            <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            <span>GitHub 계정으로 시작하기</span>
+  function openLogin() {
+    const modal = document.createElement('div');
+    modal.className = 'modal-bg';
+    modal.id = 'loginModal';
+    modal.innerHTML = `
+      <div class="modal-card">
+        <button class="modal-close" onclick="Site.closeLogin()">&times;</button>
+        <div class="ic" style="font-size:42px; margin-bottom:8px;">💈</div>
+        <h2>파란이발 계정 로그인</h2>
+        <p class="sub">구글 또는 GitHub 소셜 계정으로 1초 만에 로그인 및 가입 신청이 진행됩니다.</p>
+        
+        <div style="margin:24px 0 16px; display:flex; flex-direction:column; gap:10px; align-items:center;">
+          <div id="g_btn_container"></div>
+          <button class="btn line" style="width:280px; justify-content:center;" onclick="Site.loginGithubPrompt()">
+            <span>🐱 GitHub 계정으로 계속하기</span>
           </button>
         </div>
-        <div id="mgnote"></div>
-      </div>`;
-    document.body.appendChild(el);
-    el.addEventListener('click', e => { if (e.target === el) closeLogin(); });
-    el.querySelector('.x').addEventListener('click', closeLogin);
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLogin(); });
-  }
 
-  function openLogin(intent) {
-    pendingAction = intent === 'download' ? 'download' : 'portal';
-    injectModal();
-    document.getElementById('loginOverlay').classList.add('open');
-    if (!gInited) {
-      gInited = true;
-      App.initGoogle(document.getElementById('mgwrap'), document.getElementById('mgnote'),
-        profile => { App.AUTH.loginGoogle(profile); afterLogin(); });
-    }
-  }
+        <div style="font-size:12.5px; color:var(--muted); margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">
+          👑 <b>btsky99</b> 구글 / GitHub 계정 로그인 시 파란이발 관리자 권한이 자동 연결됩니다.
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
 
-  function promptGithub() {
-    const handle = prompt('GitHub 아이디(유저네임)를 입력해 주세요:', 'btsky99');
-    if (handle) {
-      App.AUTH.loginGithub(handle);
-      afterLogin();
+    if (window.App) {
+      window.App.initGoogle(
+        document.getElementById('g_btn_container'),
+        null,
+        profile => {
+          window.App.AUTH.loginGoogle(profile);
+          Site.closeLogin();
+          location.reload();
+        }
+      );
     }
   }
 
   function closeLogin() {
-    const o = document.getElementById('loginOverlay');
-    if (o) { o.classList.remove('open'); }
+    const modal = document.getElementById('loginModal');
+    if (modal) modal.remove();
   }
 
-  function afterLogin() {
-    if (pendingAction === 'download') {
-      pendingAction = 'portal';
+  function loginGithubPrompt() {
+    const handle = prompt('GitHub 아이디(핸들)를 입력하세요 (예: btsky99):', 'btsky99');
+    if (handle && window.App) {
+      window.App.AUTH.loginGithub(handle);
       closeLogin();
-      if (pendingDlBundle && pendingDlBundle.length) {
-        const bundle = pendingDlBundle;
-        pendingDlBundle = null;
-        downloadBundle(bundle);
-      } else if (pendingDlUrl) {
-        const target = pendingDlUrl;
-        pendingDlUrl = '';
-        location.href = target;
-      } else {
-        location.href = portalUrl;
-      }
-    } else {
-      location.href = portalUrl;
+      location.reload();
     }
   }
 
   function logout() {
-    App.AUTH.logout();
+    if (window.App) window.App.AUTH.logout();
     location.reload();
   }
 
-  // ── 역할별 내비 ──
-  function renderNav(featuresHref) {
-    const r = document.getElementById('navR');
-    if (!r) return;
-    const s = App.AUTH.current();
-    const feat = featuresHref ? `<a class="nlink" href="${featuresHref}">기능</a>` : '';
-    const home = (BASE !== './') ? `<a class="nlink" href="${homeUrl}">← 파란이발 허브</a>` : '';
-    
-    if (!s) {
-      r.innerHTML = home + feat +
-        `<button class="nlink solid" onclick="Site.openLogin()">소셜 로그인 / 가입</button>`;
-    } else if (s.role === 'admin' || (s.id && (s.id.includes('btsky99') || s.id.includes('paranibal')))) {
-      r.innerHTML = home + feat +
-        `<a class="nlink solid" href="${portalUrl}">👑 파란이발 관리자</a>` +
-        `<button class="nlink" onclick="Site.logout()">로그아웃</button>`;
-    } else {
-      r.innerHTML = home + feat +
-        `<span class="nlink" style="cursor:default">${s.name}</span>` +
-        `<a class="nlink" href="${portalUrl}">내 계정</a>` +
-        `<button class="nlink" onclick="Site.logout()">로그아웃</button>`;
+  // ── 프로젝트별 개별 접근 권한 검증 다운로드 게이트 ──
+  function gateDownload(url, productKey) {
+    const sess = window.App ? window.App.AUTH.current() : null;
+    if (!sess) {
+      alert('🔑 파란이발 소셜 로그인 후 다운로드하실 수 있습니다.');
+      openLogin();
+      return;
     }
-    renderAdminGates();
+    
+    // 프로젝트별 권한 검사
+    if (productKey && window.App) {
+      const hasAccess = window.App.hasProductAccess(sess.id, productKey);
+      if (!hasAccess) {
+        alert(`🔒 해당 프로젝트(${productKey}) 이용 권한이 부여되지 않았습니다.\n파란이발 포털(btsky.pe.kr/portal/)에서 관리자(btsky99)에게 권한 신청을 확인해 주세요.`);
+        location.href = (window.SITE_BASE || './') + 'portal/';
+        return;
+      }
+    }
+
+    if (url) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
   }
 
-  // ── 보안 게이트: 소스코드 링크 ──
+  // 5개 바이너리 파일 연속 자동 다운로드
+  function gateDownloadBundle(urls, productKey) {
+    const sess = window.App ? window.App.AUTH.current() : null;
+    if (!sess) {
+      alert('🔑 파란이발 소셜 로그인 후 전체 설치 5개 패키지를 받으실 수 있습니다.');
+      openLogin();
+      return;
+    }
+
+    // 프로젝트별 권한 검사
+    if (productKey && window.App) {
+      const hasAccess = window.App.hasProductAccess(sess.id, productKey);
+      if (!hasAccess) {
+        alert(`🔒 CipherTrader Crypto 프로젝트 이용 권한이 부여되지 않았습니다.\n포털 제어판에서 관리자(btsky99) 승인을 확인해 주세요.`);
+        location.href = (window.SITE_BASE || './') + 'portal/';
+        return;
+      }
+    }
+
+    if (!urls || !urls.length) return;
+    alert(`🚀 CipherTrader v22.6.3 전체 설치 5개 파일(.exe + .bin 1~4) 연속 다운로드를 시작합니다.\n\n(브라우저에서 '다중 파일 다운로드' 팝업이 뜨면 [허용]을 클릭해 주세요)`);
+    
+    urls.forEach((u, idx) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = u;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }, idx * 450);
+    });
+  }
+
+  function toggleFaq(el) {
+    const item = el.parentElement;
+    item.classList.toggle('open');
+  }
+
+  // GitHub Release API 파싱 & 버튼 연결
+  async function parseReleases(repo, fullBtnId, patchBtnId, verInfoId, forceFullUrl, forceReleasesUrl) {
+    const fullBtn = document.getElementById(fullBtnId);
+    const patchBtn = document.getElementById(patchBtnId);
+    const verInfo = document.getElementById(verInfoId);
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases`);
+      if (!res.ok) throw new Error('API Rate Limit or Private Repo');
+      const releases = await res.json();
+      if (!releases || !releases.length) throw new Error('No releases found');
+
+      // 바이너리 자산 파싱
+      let fullRelease = releases.find(r => r.tag_name === 'v22.6.3') || releases[0];
+      let patchRelease = releases.find(r => r.tag_name !== 'v22.6.3') || releases[0];
+
+      if (fullBtn) {
+        const fullAsset = (fullRelease.assets || []).find(a => a.name.endsWith('.exe')) || fullRelease.assets[0];
+        const url = forceFullUrl || (fullAsset ? fullAsset.browser_download_url : fullRelease.html_url);
+        fullBtn.onclick = () => gateDownload(url);
+      }
+
+      if (patchBtn) {
+        const patchAsset = (patchRelease.assets || []).find(a => a.name.endsWith('.zip')) || patchRelease.assets[0];
+        const url = forceReleasesUrl || (patchAsset ? patchAsset.browser_download_url : patchRelease.html_url);
+        patchBtn.onclick = () => gateDownload(url);
+      }
+
+      if (verInfo) {
+        verInfo.innerHTML = `⚡ 최신 릴리즈: <b>${patchRelease.tag_name}</b> (${patchRelease.name || '배포중'}) · 전체 셋업: <b>${fullRelease.tag_name}</b>`;
+      }
+    } catch (e) {
+      if (fullBtn) fullBtn.onclick = () => gateDownload(forceFullUrl || `https://github.com/${repo}/releases`);
+      if (patchBtn) patchBtn.onclick = () => gateDownload(forceReleasesUrl || `https://github.com/${repo}/releases`);
+    }
+  }
+
   function renderAdminGates() {
-    const s = App.AUTH.current();
-    const isAdmin = s && (s.role === 'admin' || (s.id && (s.id.includes('btsky99') || s.id.includes('paranibal'))));
+    const sess = window.App ? window.App.AUTH.current() : null;
+    const isAdmin = sess && (sess.role === 'admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal'))));
+    
     document.querySelectorAll('.admin-only-source').forEach(el => {
       const srcUrl = el.getAttribute('data-src-url');
       if (isAdmin) {
+        el.style.display = 'inline-flex';
         el.href = srcUrl;
         el.target = '_blank';
-        el.rel = 'noopener';
-        el.innerHTML = `<span>👑 소스코드 (관리자 전용)</span>`;
-        el.style.opacity = '1';
-        el.onclick = null;
       } else {
-        el.removeAttribute('href');
-        el.removeAttribute('target');
-        el.innerHTML = `<span>🔒 소스코드 (관리자 전용)</span>`;
-        el.style.opacity = '0.7';
-        el.onclick = (e) => {
-          e.preventDefault();
-          alert('🔒 소스코드 저장소는 파란이발 관리자(btsky99) 로그인 후에만 접근 가능합니다.');
-          openLogin();
-        };
+        el.style.display = 'none';
       }
     });
   }
 
-  // ── 단일 다운로드 게이트 ──
-  function gateDownload(url) {
-    if (!url) url = portalUrl;
-    if (App.AUTH.current()) {
-      location.href = url;
-    } else {
-      pendingDlUrl = url;
-      openLogin('download');
-    }
-  }
+  window.addEventListener('DOMContentLoaded', () => {
+    renderNav();
+    renderAdminGates();
+  });
 
-  // ── 5개 전체 설치파일 다중 연속 자동 다운로드 엔진 ──
-  function downloadBundle(urls) {
-    if (!urls || !urls.length) return;
-    urls.forEach((url, i) => {
-      setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = url.substring(url.lastIndexOf('/') + 1);
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }, i * 450); // 0.45초 시차 연속 다운로드
-    });
-  }
-
-  function gateDownloadBundle(urls) {
-    if (!urls || !urls.length) return;
-    if (App.AUTH.current()) {
-      downloadBundle(urls);
-    } else {
-      pendingDlBundle = urls;
-      openLogin('download');
-    }
-  }
-
-  function isLoggedIn() { return !!App.AUTH.current(); }
-
-  // ── FAQ 토글 ──
-  function toggleFaq(el) {
-    const item = el.closest('.faq-item');
-    if (!item) return;
-    item.classList.toggle('open');
-  }
-
-  // ── 릴리즈 파서 ──
-  function parseReleases(repo, fullElId, patchElId, verElId, fallbackFullUrl, fallbackPatchUrl) {
-    const fmt = b => { if (!b) return ''; const mb = b / 1048576; return mb >= 1 ? mb.toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB'; };
-    
-    const defaultFull = fallbackFullUrl || (repo.includes('crypto') 
-      ? 'https://github.com/btsky99/crypto-bot-releases/releases/tag/v22.6.3' 
-      : `https://github.com/${repo}/releases/latest`);
-      
-    const defaultPatch = fallbackPatchUrl || `https://github.com/${repo}/releases`;
-
-    const fullEl = document.getElementById(fullElId);
-    if (fullEl) {
-      fullEl.onclick = () => gateDownload(defaultFull);
-    }
-    const patchEl = document.getElementById(patchElId);
-    if (patchEl) {
-      patchEl.onclick = () => gateDownload(defaultPatch);
-    }
-
-    if (repo.includes('crypto')) {
-      fetch(`https://api.github.com/repos/btsky99/crypto-bot-releases/releases/tags/v22.6.3`, { headers: { 'Accept': 'application/vnd.github+json' } })
-        .then(r => { if (!r.ok) throw 0; return r.json(); })
-        .then(rel => {
-          const assets = rel.assets || [];
-          const setupExe = assets.find(x => /CipherTrader_Setup.*\.exe$/i.test(x.name)) || assets[0];
-          if (fullEl && setupExe) {
-            fullEl.onclick = () => gateDownload(setupExe.browser_download_url);
-            const szEl = fullEl.querySelector('small');
-            if (szEl) szEl.textContent = `전체 설치 (.exe) · ${fmt(setupExe.size)}`;
-          }
-        })
-        .catch(() => {});
-
-      fetch(`https://api.github.com/repos/btsky99/crypto-bot-releases/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
-        .then(r => { if (!r.ok) throw 0; return r.json(); })
-        .then(rel => {
-          const patchTag = rel.tag_name || 'v22.8.1';
-          if (verElId) {
-            const vEl = document.getElementById(verElId);
-            if (vEl) vEl.innerHTML = `전체 설치 5개 파일 (v22.6.3) | 최신 패치본 <b>${patchTag}</b> (연동됨)`;
-          }
-          const assets = rel.assets || [];
-          const patchAsset = assets.find(x => /patch|update|\.zip$/i.test(x.name)) || assets[0];
-          if (patchEl) {
-            const patchUrl = patchAsset ? patchAsset.browser_download_url : rel.html_url;
-            patchEl.onclick = () => gateDownload(patchUrl);
-            const szEl = patchEl.querySelector('small');
-            if (szEl && patchAsset) {
-              szEl.textContent = `패치 ${patchTag} (.zip) · ${fmt(patchAsset.size)}`;
-            }
-          }
-        })
-        .catch(() => {});
-    } else {
-      fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
-        .then(r => { if (!r.ok) throw 0; return r.json(); })
-        .then(rel => {
-          const tag = rel.tag_name || 'v4.2.0';
-          if (verElId) {
-            const vEl = document.getElementById(verElId);
-            if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${tag}</b> (실시간 연결됨)`;
-          }
-          const assets = rel.assets || [];
-          const fullAsset = assets.find(x => /setup|installer|full|\.exe$/i.test(x.name)) || assets[0];
-          const patchAsset = assets.find(x => /patch|update|\.zip$/i.test(x.name)) || assets[1];
-
-          if (fullEl && fullAsset) {
-            fullEl.onclick = () => gateDownload(fullAsset.browser_download_url);
-            const szEl = fullEl.querySelector('small');
-            if (szEl) szEl.textContent = `전체 설치 ${tag} (.exe) · ${fmt(fullAsset.size)}`;
-          }
-
-          if (patchEl) {
-            if (patchAsset) {
-              patchEl.onclick = () => gateDownload(patchAsset.browser_download_url);
-              const szEl = patchEl.querySelector('small');
-              if (szEl) szEl.textContent = `패치 파일 ${tag} (.zip) · ${fmt(patchAsset.size)}`;
-            } else {
-              patchEl.onclick = () => gateDownload(rel.html_url);
-            }
-          }
-        })
-        .catch(() => {});
-    }
-  }
-
-  window.Site = { openLogin, promptGithub, closeLogin, logout, renderNav, gateDownload, gateDownloadBundle, downloadBundle, isLoggedIn, toggleFaq, parseReleases };
+  return { renderNav, openLogin, closeLogin, loginGithubPrompt, logout, gateDownload, gateDownloadBundle, toggleFaq, parseReleases, renderAdminGates };
 })();

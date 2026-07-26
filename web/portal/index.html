@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <!--
   FILE: web/portal/index.html
-  DESCRIPTION: 파란이발(btsky) 포털 — 계정 관리 및 사용자 승인 제어판.
-    btsky99 계정 및 관리자 로그인 시 '👑 파란이발 관리자' 회원 승인 대기열 및 승인 처리 제어판 활성화.
+  DESCRIPTION: 파란이발(btsky) 포털 — 계정 관리 및 프로젝트별 접근 권한 제어판.
+    btsky99 계정 및 관리자 로그인 시 '👑 파란이발 관리자' 회원 승인 대기열 및 5대 프로젝트별 접근 허용 체크박스 제어판 활성화.
   REVISION HISTORY:
     - 2026-07-22 Claude: 사용자 관리 전용 구축.
-    - 2026-07-26 Gemini: 가입 승인 대기목록 실시간 노출 및 수동 가입신청 등록/승인 기능 완료.
+    - 2026-07-26 Gemini: 프로젝트별(바이브코딩, OnS, 주식AI, 코인AI, 핀비) 개별 접근 권한 선택 승인 UI 완성.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>파란이발 포털 — 계정 & 권한 관리</title>
+<title>파란이발 포털 — 계정 & 프로젝트 권한 관리</title>
 <link rel="icon" href="../assets/paranibal_icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../style.css">
 <script src="../auth.js"></script>
@@ -49,7 +49,7 @@
   .top-right { display: flex; align-items: center; gap: 14px; font-size: 14px; color: var(--muted); }
   .avatar { width: 28px; height: 28px; border-radius: 50%; vertical-align: middle; border: 1px solid var(--line-bright); }
   
-  .wrap-container { max-width: 860px; margin: 0 auto; padding: 36px 6vw; }
+  .wrap-container { max-width: 920px; margin: 0 auto; padding: 36px 6vw; }
   .greet-title { font-size: 25px; font-weight: 800; color: var(--fg-heading); margin-bottom: 6px; }
   .greet-sub { color: var(--muted); margin-bottom: 30px; font-size: 15px; }
   
@@ -61,21 +61,37 @@
   .panel-box h3 { font-size: 18px; font-weight: 800; color: var(--fg-heading); margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; }
   .panel-box h3 .cnt { font-weight: 700; font-size: 12px; color: var(--accent-light); background: rgba(37, 99, 235, 0.15); padding: 2px 10px; border-radius: 999px; }
   
-  .user-row {
-    display: flex; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); font-size: 14px;
+  .user-card-box {
+    background: rgba(255, 255, 255, 0.025); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; margin-bottom: 16px; transition: border-color 0.2s;
   }
-  .user-row:first-of-type { border-top: none; }
+  .user-card-box:hover { border-color: rgba(37, 99, 235, 0.4); }
+  .user-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  
   .uava {
-    width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, 0.05);
+    width: 38px; height: 38px; border-radius: 50%; background: rgba(255, 255, 255, 0.05);
     display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700;
     border: 1px solid var(--line); color: var(--fg-heading); overflow: hidden;
   }
   .uava img { width: 100%; height: 100%; object-fit: cover; }
   .utag { font-size: 12px; padding: 3px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); color: var(--muted); border: 1px solid var(--line); }
   
+  /* 프로젝트 권한 체크박스 그리드 */
+  .perm-checks {
+    display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 16px; padding: 12px 14px;
+    background: rgba(0, 0, 0, 0.2); border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .perm-label {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+    color: var(--fg-heading); cursor: pointer; padding: 4px 10px; border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); transition: all 0.15s;
+  }
+  .perm-label:hover { border-color: var(--accent); background: rgba(37, 99, 235, 0.1); }
+  .perm-label input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
   .btn-approve {
     background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none;
-    padding: 8px 18px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+    padding: 8px 20px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
     box-shadow: 0 4px 12px var(--accent-glow); transition: transform 0.15s;
   }
   .btn-approve:hover { transform: translateY(-1px); }
@@ -86,9 +102,9 @@
   }
   .btn-revoke:hover { color: var(--red); border-color: var(--red); background: rgba(239, 68, 68, 0.08); }
   
-  .sub-h { font-size: 12.5px; color: var(--muted); font-weight: 700; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .sub-h { font-size: 13px; color: var(--accent-light); font-weight: 800; margin: 26px 0 12px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px; }
   .sub-h:first-child { margin-top: 0; }
-  .none-msg { color: var(--muted); font-size: 14px; padding: 14px 0; text-align: center; }
+  .none-msg { color: var(--muted); font-size: 14px; padding: 18px 0; text-align: center; background: rgba(255,255,255,0.01); border-radius: 10px; border: 1px dashed var(--line); }
   
   .welcome-box {
     background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg);
@@ -98,24 +114,27 @@
   .welcome-box h3 { font-size: 22px; font-weight: 800; color: var(--fg-heading); }
   .welcome-box p { color: var(--muted); margin-top: 10px; font-size: 15px; }
 
-  .test-tools {
-    margin-top: 20px; padding: 14px; background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--line); border-radius: 12px;
-    display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--muted);
+  .my-perms {
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px;
+  }
+  .my-perm-chip {
+    padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(37, 99, 235, 0.15); color: var(--accent-light); border: 1px solid rgba(37, 99, 235, 0.3);
   }
 </style>
 </head>
 <body>
   <div class="proto-banner">
-    💈 파란이발 계정 제어판 — 관리자(btsky99) 로그인 시 가입 승인 제어 기능이 활성화됩니다.
+    💈 파란이발 계정 & 프로젝트 권한 제어판 — 회원별 5대 프로젝트 허운 권한을 선택 지정하세요.
   </div>
 
-  <!-- 승인 대기 화면 (일반 회원 신청 시) -->
+  <!-- 승인 대기 화면 -->
   <div id="pending" class="center-layout" style="display:none">
     <div class="portal-card">
       <div class="pend-ic">⏳</div>
-      <h1>승인 대기 중</h1>
+      <h1>가입 승인 대기 중</h1>
       <div class="pend-who" id="pendWho"></div>
-      <p class="pend-msg">가입 및 권한 승인 신청이 관리자에게 전달되었습니다.<br>파란이발 관리자(btsky99)가 승인하면 모든 소프트웨어 이용 권한이 부여됩니다.</p>
+      <p class="pend-msg">가입 및 프로젝트 이용 권한 신청이 전달되었습니다.<br>파란이발 관리자(btsky99)가 승인하면 허용된 프로젝트 이용 권한이 개방됩니다.</p>
       <button class="btn line btn-full" onclick="refreshPending()">🔄 승인 상태 새로고침</button>
       <button class="btn dl btn-full" onclick="logout()">로그아웃</button>
     </div>
@@ -149,9 +168,7 @@ function hideAll(){ document.getElementById('pending').style.display='none'; doc
 function enter(sess){
   hideAll();
   const isAdmin = sess.role==='admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
-  if (isAdmin) {
-    renderApp(sess);
-  } else if (A.isApproved(sess.id)) {
+  if (isAdmin || A.isApproved(sess.id)) {
     renderApp(sess);
   } else {
     A.addPending(sess);
@@ -179,69 +196,132 @@ function renderApp(sess){
   
   document.getElementById('whoami').innerHTML = av + (isAdmin ? '<b>파란이발 (btsky99)님</b>' : sess.name) + viaTag;
   document.getElementById('greet').textContent = (isAdmin ? '파란이발 (btsky99)' : sess.name) + ' 님, 안녕하세요! 👋';
-  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청한 사용자 목록을 확인하고 클릭 한 번으로 승인을 완료하세요.' : '승인 완료된 회원입니다. 파란이발의 소프트웨어 및 다운로드를 이용하실 수 있습니다.';
+  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청한 사용자별로 허용할 5대 프로젝트 권한을 개별 선택하여 승인하세요.' : '승인 완료된 회원입니다. 부여된 프로젝트 이용 권한을 확인하세요.';
 
-  if (isAdmin) renderAdminUsers();
-  else document.getElementById('content').innerHTML =
-    `<div class="welcome-box"><div class="ic">🎉</div><h3>승인된 회원 계정입니다</h3>
-      <p>파란이발 바이브 코딩, OnS 및 모든 다운로드 게이트를 이용하실 수 있습니다.</p></div>`;
+  if (isAdmin) {
+    renderAdminUsers();
+  } else {
+    const approvedMap = A.getApprovedMap();
+    const myPerms = approvedMap[sess.id] || [];
+    const permChips = A.PRODUCTS.map(p => {
+      const has = myPerms.includes(p.key);
+      return `<div class="my-perm-chip" style="opacity:${has?1:0.35}; background:${has?'rgba(37,99,235,0.2)':'rgba(255,255,255,0.03)'}">
+        ${p.icon} ${p.name} ${has?'✅':'🔒'}</div>`;
+    }).join('');
+
+    document.getElementById('content').innerHTML =
+      `<div class="welcome-box"><div class="ic">🎉</div><h3>승인된 회원 계정입니다</h3>
+        <p>파란이발 관리자가 허용한 아래의 프로젝트 이용 권한을 확인하실 수 있습니다.</p>
+        <div class="my-perms">${permChips}</div></div>`;
+  }
 }
 
-// 관리자 — 사용자 승인 대기 목록 & 승인된 회원 제어판
+// 관리자 — 사용자 승인 대기 목록 & 승인된 회원 프로젝트 권한 선택 UI
 function renderAdminUsers(){
-  const pend=A.getPending(), appr=A.getApproved();
+  const pend = A.getPending(), map = A.getApprovedMap(), approvedIds = Object.keys(map);
   const av = u => u.picture ? `<span class="uava"><img src="${u.picture}" referrerpolicy="no-referrer"></span>`
     : `<span class="uava">${(u.name||'?').slice(0,1)}</span>`;
 
   let html = `<div class="panel-box admin">
     <h3>
-      <span>👑 파란이발 회원 승인 제어판</span>
-      <span class="cnt">신청 ${pend.length}명 / 승인 ${appr.length}명</span>
+      <span>👑 파란이발 회원 & 프로젝트 권한 제어판</span>
+      <span class="cnt">신청 ${pend.length}명 / 승인 ${approvedIds.length}명</span>
     </h3>`;
 
-  html += `<div class="sub-h">⏳ 가입 승인 대기 목록 (${pend.length})</div>`;
+  // 1. 가입 승인 대기 목록 (프로젝트 선택 체크박스 포함)
+  html += `<div class="sub-h">⏳ 가입 승인 대기 신청자 (${pend.length})</div>`;
   if (pend.length) {
-    html += pend.map(u => `
-      <div class="user-row">
-        ${av(u)}
-        <div>
-          <b>${u.name}</b> ${u.email ? `<span class="utag">${u.email}</span>` : ''}
-          <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">신청시각: ${u.time || '최근'}</div>
-        </div>
-        <span class="utag">${u.via === 'google' ? 'Google' : (u.via === 'github' ? 'GitHub' : '소셜 계정')}</span>
-        <div style="flex:1"></div>
-        <button class="btn-approve" onclick="doApprove('${u.id.replace(/'/g, "\\'")}')">✅ 승인 완료</button>
-      </div>`).join('');
+    html += pend.map(u => {
+      const uidEsc = u.id.replace(/'/g, "\\'");
+      return `
+        <div class="user-card-box">
+          <div class="user-head">
+            ${av(u)}
+            <div>
+              <b>${u.name}</b> ${u.email ? `<span class="utag">${u.email}</span>` : ''}
+              <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">신청시각: ${u.time || '최근'}</div>
+            </div>
+            <span class="utag">${u.via === 'google' ? 'Google' : (u.via === 'github' ? 'GitHub' : '소셜 계정')}</span>
+          </div>
+          
+          <div style="font-size:12.5px; font-weight:700; color:var(--muted); margin-bottom:6px;">👇 허용할 프로젝트 선택:</div>
+          <div class="perm-checks" id="perms_pend_${u.id}">
+            ${A.PRODUCTS.map(p => `
+              <label class="perm-label">
+                <input type="checkbox" name="p_${u.id}" value="${p.key}" checked>
+                ${p.icon} ${p.name}
+              </label>
+            `).join('')}
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <button class="btn-approve" onclick="doApproveWithSelected('${uidEsc}')">✅ 선택 프로젝트 권한으로 승인</button>
+          </div>
+        </div>`;
+    }).join('');
   } else {
     html += `<div class="none-msg">현재 승인 대기 중인 회원 가입 신청이 없습니다.</div>`;
   }
 
-  html += `<div class="sub-h">✅ 승인된 회원 목록 (${appr.length})</div>`;
-  if (appr.length) {
-    html += appr.map(id => `
-      <div class="user-row">
-        <span class="uava">${id.slice(0, 1)}</span>
-        <b>${id}</b>
-        <span class="utag" style="color:#34d399; border-color:rgba(52,211,153,0.3);">승인 상태</span>
-        <div style="flex:1"></div>
-        <button class="btn-revoke" onclick="doRevoke('${id.replace(/'/g, "\\'")}')">권한 해제</button>
-      </div>`).join('');
+  // 2. 이미 승인된 회원 목록 및 권한 수정
+  html += `<div class="sub-h">✅ 승인 완료된 회원 목록 (${approvedIds.length})</div>`;
+  if (approvedIds.length) {
+    html += approvedIds.map(id => {
+      const currentPerms = map[id] || [];
+      const idEsc = id.replace(/'/g, "\\'");
+      return `
+        <div class="user-card-box">
+          <div class="user-head">
+            <span class="uava">${id.slice(0, 1)}</span>
+            <b>${id}</b>
+            <span class="utag" style="color:#34d399; border-color:rgba(52,211,153,0.3);">승인 상태</span>
+            <div style="flex:1"></div>
+            <button class="btn-revoke" onclick="doRevoke('${idEsc}')">권한 전면 해제</button>
+          </div>
+
+          <div style="font-size:12.5px; font-weight:700; color:var(--muted); margin-bottom:6px;">👇 허용된 프로젝트 (수정 가능):</div>
+          <div class="perm-checks" id="perms_appr_${id}">
+            ${A.PRODUCTS.map(p => {
+              const isChecked = currentPerms.includes(p.key) ? 'checked' : '';
+              return `
+                <label class="perm-label">
+                  <input type="checkbox" name="p_${id}" value="${p.key}" ${isChecked} onchange="updateUserPerms('${idEsc}')">
+                  ${p.icon} ${p.name}
+                </label>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }).join('');
   } else {
     html += `<div class="none-msg">아직 승인된 일반 회원이 없습니다.</div>`;
   }
 
-  // 테스트 신청등록 도구
+  // 테스트 도구
   html += `
-    <div class="test-tools">
-      <span>💡 가입 신청 테스트: 소셜 계정 테스트용 가입 신청서를 등록할 수 있습니다.</span>
-      <button class="btn line" style="padding:4px 12px; font-size:12px;" onclick="addTestPending()">🧪 테스트 가입 신청 추가</button>
+    <div style="margin-top:24px; padding:14px; background:rgba(255,255,255,0.03); border:1px dashed var(--line); border-radius:12px; display:flex; align-items:center; justify-content:space-between;">
+      <span style="font-size:13px; color:var(--muted);">💡 테스트 도구: 소셜 계정 테스트용 가입 신청서를 등록할 수 있습니다.</span>
+      <button class="btn line" style="padding:4px 12px; font-size:12px;" onclick="addTestPending()">🧪 테스트 가입 신청 등록</button>
     </div>
   </div>`;
 
   document.getElementById('content').innerHTML = html;
 }
 
-function doApprove(id){ A.approveId(id); renderAdminUsers(); }
+// 가입 대기자 선택 권한으로 승인
+function doApproveWithSelected(id) {
+  const checkboxes = document.querySelectorAll(`input[name="p_${id}"]:checked`);
+  const selected = Array.from(checkboxes).map(c => c.value);
+  A.approveUserWithPerms(id, selected);
+  renderAdminUsers();
+}
+
+// 승인된 회원 권한 즉시 수정
+function updateUserPerms(id) {
+  const checkboxes = document.querySelectorAll(`input[name="p_${id}"]:checked`);
+  const selected = Array.from(checkboxes).map(c => c.value);
+  A.approveUserWithPerms(id, selected);
+}
+
 function doRevoke(id){ A.revokeId(id); renderAdminUsers(); }
 
 function addTestPending() {
