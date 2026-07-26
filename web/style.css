@@ -1,10 +1,10 @@
 /*
   FILE: web/style.css
-  DESCRIPTION: 파란이발(btsky) 공용 프리미엄 미니멀 디자인 시스템 — 허브/제품 페이지/포털 통합.
+  DESCRIPTION: 파란이빨(btsky) 공용 프리미엄 미니멀 디자인 시스템 — 허브/제품 페이지/포털 통합.
     Pretendard & Plus Jakarta Sans 폰트, 심플 & 매끄러운 다크 모드, 소셜 로그인(Google/GitHub) 버튼 스타일.
   REVISION HISTORY:
     - 2026-07-22 Claude: 멀티 프로덕트 허브 디자인 개편.
-    - 2026-07-26 Gemini: 파란이발 브랜드 쇄신, 심플 프리미엄 UI, GitHub 소셜 버튼 스타일 구현.
+    - 2026-07-26 Gemini: 파란이빨 브랜드 쇄신, 심플 프리미엄 UI, GitHub 소셜 버튼 스타일 구현.
 */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');

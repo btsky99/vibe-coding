@@ -1,6 +1,6 @@
 /*
   FILE: web/site.js
-  DESCRIPTION: 파란이발(btsky) 웹 인터랙션, FAQ 및 다운로드 게이트 모듈.
+  DESCRIPTION: 파란이빨(btsky) 웹 인터랙션, FAQ 및 다운로드 게이트 모듈.
     소셜 로그인 상태 확인 + 5대 프로젝트별(vibe_coding, ons, stock, crypto, finbee) 개별 접근 권한(hasProductAccess) 연동 게이트.
     Windows & 🍎 macOS (.dmg/.zip) 릴리즈 파서 모듈 포함.
   REVISION HISTORY:
@@ -17,7 +17,7 @@ window.Site = (function () {
     
     if (sess) {
       const isAdmin = sess.role === 'admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
-      const label = isAdmin ? '👑 파란이발 관리자' : (sess.name || '회원');
+      const label = isAdmin ? '👑 파란이빨 관리자' : (sess.name || '회원');
       html += `<a class="nlink" href="${window.SITE_BASE || './'}portal/">💈 ${label} 포털</a>`;
       html += `<button class="nlink solid" onclick="Site.logout()">로그아웃</button>`;
     } else {
@@ -34,7 +34,7 @@ window.Site = (function () {
       <div class="modal-card">
         <button class="modal-close" onclick="Site.closeLogin()">&times;</button>
         <div class="ic" style="font-size:42px; margin-bottom:8px;">💈</div>
-        <h2>파란이발 계정 로그인</h2>
+        <h2>파란이빨 계정 로그인</h2>
         <p class="sub">구글 또는 GitHub 소셜 계정으로 1초 만에 로그인 및 가입 신청이 진행됩니다.</p>
         
         <div style="margin:24px 0 16px; display:flex; flex-direction:column; gap:10px; align-items:center;">
@@ -45,7 +45,7 @@ window.Site = (function () {
         </div>
 
         <div style="font-size:12.5px; color:var(--muted); margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">
-          👑 <b>btsky99</b> 구글 / GitHub 계정 로그인 시 파란이발 관리자 권한이 자동 연결됩니다.
+          👑 <b>btsky99</b> 구글 / GitHub 계정 로그인 시 파란이빨 관리자 권한이 자동 연결됩니다.
         </div>
       </div>
     `;
@@ -87,7 +87,7 @@ window.Site = (function () {
   function gateDownload(url, productKey) {
     const sess = window.App ? window.App.AUTH.current() : null;
     if (!sess) {
-      alert('🔑 파란이발 소셜 로그인 후 다운로드하실 수 있습니다.');
+      alert('🔑 파란이빨 소셜 로그인 후 다운로드하실 수 있습니다.');
       openLogin();
       return;
     }
@@ -96,7 +96,7 @@ window.Site = (function () {
     if (productKey && window.App) {
       const hasAccess = window.App.hasProductAccess(sess.id, productKey);
       if (!hasAccess) {
-        alert(`🔒 해당 프로젝트(${productKey}) 이용 권한이 부여되지 않았습니다.\n파란이발 포털(btsky.pe.kr/portal/)에서 관리자(btsky99)에게 권한 신청을 확인해 주세요.`);
+        alert(`🔒 해당 프로젝트(${productKey}) 이용 권한이 부여되지 않았습니다.\n파란이빨 포털(btsky.pe.kr/portal/)에서 관리자(btsky99)에게 권한 신청을 확인해 주세요.`);
         location.href = (window.SITE_BASE || './') + 'portal/';
         return;
       }
@@ -116,7 +116,7 @@ window.Site = (function () {
   function gateDownloadBundle(urls, productKey) {
     const sess = window.App ? window.App.AUTH.current() : null;
     if (!sess) {
-      alert('🔑 파란이발 소셜 로그인 후 전체 설치 5개 패키지를 받으실 수 있습니다.');
+      alert('🔑 파란이빨 소셜 로그인 후 전체 설치 5개 패키지를 받으실 수 있습니다.');
       openLogin();
       return;
     }

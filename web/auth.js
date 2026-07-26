@@ -1,6 +1,6 @@
 /*
   FILE: web/auth.js
-  DESCRIPTION: 파란이발(btsky) 허브 & 포털 공용 인증 모듈.
+  DESCRIPTION: 파란이빨(btsky) 허브 & 포털 공용 인증 모듈.
     Google OAuth + GitHub 소셜 로그인 + Cross-Device (다른 PC/맥) 실시간 가입 승인 및 프로젝트별 권한 동기화.
     btsky99@gmail.com 및 관리자 로그인 시 모든 권한 100% 자동 개방.
   REVISION HISTORY:
@@ -20,9 +20,9 @@ window.App = (function () {
   ];
 
   const USERS = {
-    admin:     { pw: 'admin123', role: 'admin', name: '파란이발 (관리자)', email: 'btsky99@gmail.com' },
-    btsky99:   { pw: 'admin123', role: 'admin', name: '파란이발 (btsky99)', email: 'btsky99@gmail.com' },
-    paranibal: { pw: 'admin123', role: 'admin', name: '파란이발', email: 'btsky99@gmail.com' },
+    admin:     { pw: 'admin123', role: 'admin', name: '파란이빨 (관리자)', email: 'btsky99@gmail.com' },
+    btsky99:   { pw: 'admin123', role: 'admin', name: '파란이빨 (btsky99)', email: 'btsky99@gmail.com' },
+    paranibal: { pw: 'admin123', role: 'admin', name: '파란이빨', email: 'btsky99@gmail.com' },
     user:      { pw: 'user123',  role: 'user',  name: '일반 회원', email: 'user@example.com' },
   };
 
@@ -141,7 +141,7 @@ window.App = (function () {
       }
       if (cleanId && (cleanId.includes('btsky99') || cleanId.includes('admin') || cleanId.includes('paranibal'))) {
         if (pw === 'admin123' || pw === '1234' || pw.length >= 4) {
-          const s = { id: cleanCleanId(cleanId), role: 'admin', name: '파란이발 (관리자)', email: cleanId.includes('@') ? cleanId : 'btsky99@gmail.com', via: 'admin' };
+          const s = { id: cleanCleanId(cleanId), role: 'admin', name: '파란이빨 (관리자)', email: cleanId.includes('@') ? cleanId : 'btsky99@gmail.com', via: 'admin' };
           save(s); return s;
         }
       }
@@ -150,7 +150,7 @@ window.App = (function () {
     loginGoogle(p) {
       const email = (p.email || '').toLowerCase();
       const isAdmin = ADMIN_EMAILS.some(a => email.includes(a)) || email.includes('btsky99');
-      const name = isAdmin ? '파란이발 (btsky99)' : (p.name || p.email);
+      const name = isAdmin ? '파란이빨 (btsky99)' : (p.name || p.email);
       const role = isAdmin ? 'admin' : 'user';
       const s = { id: p.email, email: p.email, name, picture: p.picture || '', role, via: 'google' };
       save(s);
@@ -163,7 +163,7 @@ window.App = (function () {
       const cleanHandle = (handle || 'btsky99').trim();
       const lower = cleanHandle.toLowerCase();
       const isAdmin = lower.includes('btsky99') || lower.includes('paranibal') || lower.includes('admin');
-      const name = isAdmin ? '파란이발 (btsky99)' : `${cleanHandle} 님`;
+      const name = isAdmin ? '파란이빨 (btsky99)' : `${cleanHandle} 님`;
       const role = isAdmin ? 'admin' : 'user';
       const s = {
         id: `github_${cleanHandle}`,

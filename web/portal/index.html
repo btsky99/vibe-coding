@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   FILE: web/portal/index.html
-  DESCRIPTION: 파란이발(btsky) 포털 — 계정 관리 및 프로젝트별 접근 권한 제어판.
-    btsky99 계정 및 관리자 로그인 시 '👑 파란이발 관리자' 회원 승인 대기열 및 5대 프로젝트별 접근 허용 체크박스 제어판 활성화.
+  DESCRIPTION: 파란이빨(btsky) 포털 — 계정 관리 및 프로젝트별 접근 권한 제어판.
+    btsky99 계정 및 관리자 로그인 시 '👑 파란이빨 관리자' 회원 승인 대기열 및 5대 프로젝트별 접근 허용 체크박스 제어판 활성화.
     maptory3 및 승인된 계정 대시보드 강제 통과. 상단 배너 완전 제거.
   REVISION HISTORY:
     - 2026-07-22 Claude: 사용자 관리 전용 구축.
@@ -12,7 +12,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>파란이발 포털 — 계정 & 프로젝트 권한 관리</title>
+<title>파란이빨 포털 — 계정 & 프로젝트 권한 관리</title>
 <link rel="icon" href="../assets/paranibal_icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../style.css">
 <script src="../auth.js?v=20260726_v11"></script>
@@ -126,7 +126,7 @@
       <div class="pend-ic">⏳</div>
       <h1>가입 승인 대기 중</h1>
       <div class="pend-who" id="pendWho"></div>
-      <p class="pend-msg">가입 및 프로젝트 이용 권한 신청이 전달되었습니다.<br>파란이발 관리자(btsky99)가 승인하면 허용된 프로젝트 이용 권한이 개방됩니다.</p>
+      <p class="pend-msg">가입 및 프로젝트 이용 권한 신청이 전달되었습니다.<br>파란이빨 관리자(btsky99)가 승인하면 허용된 프로젝트 이용 권한이 개방됩니다.</p>
       <button class="btn line btn-full" onclick="refreshPending()">🔄 승인 상태 새로고침</button>
       <button class="btn dl btn-full" onclick="logout()">로그아웃</button>
     </div>
@@ -136,12 +136,12 @@
   <div id="app">
     <div class="top-header">
       <div class="brand">
-        <span class="brand-icon">💈</span> 파란이발 제어판
+        <span class="brand-icon">💈</span> 파란이빨 제어판
         <span class="role-badge" id="roleBadge"></span>
       </div>
       <div class="top-right">
         <span id="whoami"></span>
-        <a class="nlink" href="../">← 파란이발 허브</a>
+        <a class="nlink" href="../">← 파란이빨 허브</a>
         <button class="nlink solid" onclick="logout()">로그아웃</button>
       </div>
     </div>
@@ -183,15 +183,15 @@ function renderApp(sess){
   const idStr = String(sess.id || sess.email || '').toLowerCase();
   const isAdmin = sess.role==='admin' || idStr.includes('btsky99') || idStr.includes('paranibal');
   const rb=document.getElementById('roleBadge');
-  rb.textContent = isAdmin ? '👑 파란이발 관리자' : '✅ 승인된 회원';
+  rb.textContent = isAdmin ? '👑 파란이빨 관리자' : '✅ 승인된 회원';
   rb.className = 'role-badge ' + (isAdmin ? 'admin' : 'user');
   
   const av = sess.picture?`<img class="avatar" src="${sess.picture}" referrerpolicy="no-referrer"> `:'';
   const viaTag = sess.via==='google'?' <span class="utag">Google</span>':(sess.via==='github'?' <span class="utag">GitHub</span>':'');
   
-  document.getElementById('whoami').innerHTML = av + (isAdmin ? '<b>파란이발 (btsky99)님</b>' : sess.name) + viaTag;
-  document.getElementById('greet').textContent = (isAdmin ? '파란이발 (btsky99)' : sess.name) + ' 님, 안녕하세요! 👋';
-  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청한 사용자별로 허용할 5대 프로젝트 권한을 개별 선택하여 승인하세요.' : '승인 완료된 회원입니다. 부여된 파란이발 프로젝트 이용 권한을 확인하세요.';
+  document.getElementById('whoami').innerHTML = av + (isAdmin ? '<b>파란이빨 (btsky99)님</b>' : sess.name) + viaTag;
+  document.getElementById('greet').textContent = (isAdmin ? '파란이빨 (btsky99)' : sess.name) + ' 님, 안녕하세요! 👋';
+  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청한 사용자별로 허용할 5대 프로젝트 권한을 개별 선택하여 승인하세요.' : '승인 완료된 회원입니다. 부여된 파란이빨 프로젝트 이용 권한을 확인하세요.';
 
   if (isAdmin) {
     renderAdminUsers();
@@ -206,7 +206,7 @@ function renderApp(sess){
 
     document.getElementById('content').innerHTML =
       `<div class="welcome-box"><div class="ic">🎉</div><h3>승인된 회원 계정입니다</h3>
-        <p>파란이발 관리자가 허용한 아래의 프로젝트 이용 권한을 확인하실 수 있습니다.</p>
+        <p>파란이빨 관리자가 허용한 아래의 프로젝트 이용 권한을 확인하실 수 있습니다.</p>
         <div class="my-perms">${permChips}</div></div>`;
   }
 }
@@ -218,7 +218,7 @@ function renderAdminUsers(){
 
   let html = `<div class="panel-box admin">
     <h3>
-      <span>👑 파란이발 회원 & 프로젝트 권한 제어판</span>
+      <span>👑 파란이빨 회원 & 프로젝트 권한 제어판</span>
       <span class="cnt">신청 ${pend.length}명 / 승인 ${approvedIds.length}명</span>
     </h3>`;
 
