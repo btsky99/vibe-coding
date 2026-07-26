@@ -4,6 +4,7 @@ FILE: web/resources/developer-tools/index.html
 DESCRIPTION: AI 코딩 CLI·IDE와 필수 개발 런타임의 공식 설치 및 문서 링크 허브.
 
 REVISION HISTORY:
+- 2026-07-26 Codex: AI 코딩 CLI·에이전트 영역을 카드 그리드에서 컴팩트 리스트로 변경.
 - 2026-07-26 Codex: Claude Code, Codex, Antigravity, VS Code 등 개발 도구 페이지 최초 작성.
 -->
 <html lang="ko">
@@ -92,6 +93,42 @@ REVISION HISTORY:
     color: #fff;
     border-color: #38bdf8;
   }
+  .ai-tool-list {
+    grid-template-columns: 1fr;
+  }
+  .ai-tool-list .tool-card {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.7fr) minmax(280px, 1.4fr) minmax(220px, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    min-height: 0;
+    padding: 15px 18px;
+  }
+  .ai-tool-list .tool-card h3,
+  .ai-tool-list .tool-card p,
+  .ai-tool-list .tool-card code {
+    margin: 0;
+  }
+  .ai-tool-list .tool-card code {
+    padding: 8px 10px;
+  }
+  .ai-tool-list .tool-links {
+    justify-content: flex-end;
+    margin-top: 0;
+  }
+  .ai-tool-list .no-command {
+    color: #64748b;
+    font-size: 0.8rem;
+  }
+  @media (max-width: 900px) {
+    .ai-tool-list .tool-card {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .ai-tool-list .tool-links {
+      justify-content: flex-start;
+    }
+  }
 </style>
 <script src="../../auth.js"></script>
 <script>window.SITE_BASE='../../';</script>
@@ -117,7 +154,7 @@ REVISION HISTORY:
   <main class="tool-main">
     <section class="tool-section">
       <h2>🤖 AI 코딩 CLI & 에이전트</h2>
-      <div class="tool-grid">
+      <div class="tool-grid ai-tool-list">
         <article class="tool-card">
           <h3>Claude Code</h3>
           <p>Anthropic의 터미널 기반 코딩 에이전트. 프로젝트 분석, 구현, 테스트와 Git 작업을 지원합니다.</p>
@@ -141,6 +178,7 @@ REVISION HISTORY:
         <article class="tool-card">
           <h3>Google Antigravity CLI</h3>
           <p>터미널에서 <code style="display:inline; padding:2px 5px; margin:0;">agy</code> 명령으로 사용하는 Google Antigravity 코딩 에이전트입니다.</p>
+          <span class="no-command">앱 설치 후 <code style="display:inline; padding:2px 5px; margin:0;">agy</code> 사용</span>
           <div class="tool-links">
             <a href="https://antigravity.google/download" target="_blank" rel="noopener" class="tool-link primary">공식 다운로드</a>
             <a href="https://codelabs.developers.google.com/getting-started-agy-ide" target="_blank" rel="noopener" class="tool-link">설치 가이드</a>
