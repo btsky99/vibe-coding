@@ -1,53 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
   <defs>
-    <!-- 배경 그라데이션 (딥 펄 바이올렛/블루) -->
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f172a"/>
-      <stop offset="50%" stop-color="#1e1b4b"/>
-      <stop offset="100%" stop-color="#0284c7"/>
+    <!-- 바이킹 딥 블루 그래디언트 -->
+    <linearGradient id="vikingBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1329"/>
+      <stop offset="50%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
     </linearGradient>
 
-    <!-- 파란 이빨 하이라이트 그라데이션 -->
-    <linearGradient id="toothGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="60%" stop-color="#e0f2fe"/>
-      <stop offset="100%" stop-color="#38bdf8"/>
-    </linearGradient>
-
-    <!-- 블루투스 파란 네온 그라데이션 -->
-    <linearGradient id="blueNeon" x1="0%" y1="0%" x2="100%" y2="100%">
+    <!-- 노르딕 네온 파란 빛 -->
+    <linearGradient id="runeBlue" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38bdf8"/>
       <stop offset="100%" stop-color="#2563eb"/>
     </linearGradient>
 
-    <!-- 글로우 필터 -->
-    <filter id="blueGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
+    <!-- 금빛 왕관 하이라이트 -->
+    <linearGradient id="vikingGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+
+    <filter id="vikingGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
       <feComposite in="SourceGraphic" in2="blur" operator="over"/>
     </filter>
   </defs>
 
-  <!-- 메인 둥근 사각형 배경 -->
-  <rect x="6" y="6" width="108" height="108" rx="30" fill="url(#bgGrad)" stroke="#38bdf8" stroke-width="2.5" stroke-opacity="0.4"/>
+  <!-- 원형 바이킹 룬 방패 배경 -->
+  <circle cx="60" cy="60" r="50" fill="url(#vikingBg)" stroke="url(#runeBlue)" stroke-width="3"/>
+  <circle cx="60" cy="60" r="44" fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4 3" opacity="0.5"/>
 
-  <!-- 은은한 파란 빛 배경 원 -->
-  <circle cx="60" cy="60" r="42" fill="#0284c7" opacity="0.25" filter="url(#blueGlow)"/>
+  <!-- 상단 바이킹 왕관 (Harald Bluetooth Crown) -->
+  <path d="M 44 32 L 48 24 L 60 30 L 72 24 L 76 32 Z" fill="url(#vikingGold)"/>
+  <circle cx="60" cy="22" r="2.5" fill="#fbbf24"/>
 
-  <!-- 파란 이빨 (Blue Tooth) 실루엣 & 캐릭터 엠블럼 -->
-  <!-- M 60 25 C 40 25, 32 40, 34 60 C 35 73, 42 93, 48 95 C 52 96, 56 86, 60 86 C 64 86, 68 96, 72 95 C 78 93, 85 73, 86 60 C 88 40, 80 25, 60 25 Z -->
-  <path d="M 60 22 C 38 22, 30 38, 32 60 C 34 75, 41 94, 48 96 C 53 97, 56 86, 60 86 C 64 86, 67 97, 72 96 C 79 94, 86 75, 88 60 C 90 38, 82 22, 60 22 Z"
-        fill="url(#toothGrad)"
-        filter="url(#blueGlow)"/>
+  <!-- 정통 하랄드 블루투스 룬 문자 (ᚼ + ᛒ Bindrune) -->
+  <!-- 중앙 기둥 및 룬 줄기 -->
+  <path d="M 60 34 L 60 86" stroke="url(#runeBlue)" stroke-width="5" stroke-linecap="round" filter="url(#vikingGlow)"/>
+  <!-- 오른쪽 B 룬 가지 (Bjarkan) -->
+  <path d="M 60 34 L 74 47 L 60 60 L 74 73 L 60 86" stroke="url(#runeBlue)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#vikingGlow)"/>
+  <!-- 왼쪽 H 룬 대각선 (Hagall) -->
+  <path d="M 60 47 L 46 60 M 60 73 L 46 60" stroke="url(#runeBlue)" stroke-width="5" stroke-linecap="round" filter="url(#vikingGlow)"/>
 
-  <!-- 이빨 중앙 블루투스 룬/네온 라인 엠블럼 -->
-  <path d="M 60 36 L 68 44 L 52 58 L 68 72 L 60 80 L 60 36 L 68 50 L 52 66" 
-        stroke="url(#blueNeon)" 
-        stroke-width="4.5" 
-        stroke-linecap="round" 
-        stroke-linejoin="round" 
-        fill="none"/>
-
-  <!-- 반짝임 아이콘 (Top-Right Sparkle) -->
-  <path d="M 86 28 L 88 34 L 94 36 L 88 38 L 86 44 L 84 38 L 78 36 L 84 34 Z" fill="#7dd3fc"/>
-  <circle cx="34" cy="36" r="3" fill="#38bdf8"/>
+  <!-- 바이킹 방패 리벳 (Nordic Shield Studs) -->
+  <circle cx="60" cy="14" r="2" fill="#38bdf8"/>
+  <circle cx="60" cy="106" r="2" fill="#38bdf8"/>
+  <circle cx="14" cy="60" r="2" fill="#38bdf8"/>
+  <circle cx="106" cy="60" r="2" fill="#38bdf8"/>
 </svg>

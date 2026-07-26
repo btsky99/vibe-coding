@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="vk3Bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <!-- 바이킹 왕 방패 실루엣 -->
+  <path d="M 60 12 L 102 28 C 102 70, 78 100, 60 110 C 42 100, 18 70, 18 28 Z" fill="url(#vk3Bg)" stroke="#38bdf8" stroke-width="3"/>
+  <!-- 심플 하랄드 룬 엠블럼 -->
+  <path d="M 60 28 L 72 40 L 48 58 L 72 76 L 60 88 L 60 28 L 72 48 L 48 66" 
+        stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 바이킹 왕관 상징 골드 주얼 -->
+  <polygon points="60,20 64,26 60,32 56,26" fill="#fbbf24"/>
+</svg>
