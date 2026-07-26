@@ -1,10 +1,10 @@
 /*
   FILE: web/site.js
-  DESCRIPTION: 파란이발(btsky) 공용 사이트 스크립트 — 구글 & 깃허브 순수 소셜 로그인 전용 모달,
-    파란이발 브랜딩 내비게이션, 다운로드 로그인 게이트, FAQ 토글 지원.
+  DESCRIPTION: 파란이발(btsky) 공용 사이트 스크립트 — 소셜 로그인 모달,
+    관리자 전용 소스코드 보안 게이트, 전체 설치본 vs 패치본 릴리즈 자동 갱신 파서.
   REVISION HISTORY:
     - 2026-07-22 Claude: 멀티 프로덕트 허브 내비/모달 공용화.
-    - 2026-07-26 Gemini: 파란이발 브랜딩, 순수 소셜 로그인(Google/GitHub) 전용 모달 쇄신 (ID/PW 폼 제거).
+    - 2026-07-26 Gemini: 관리자 전용 소스 보안 게이트(gateAdminLink) & 전체설치/패치 릴리즈 파서 추가.
 */
 (function () {
   const BASE = window.SITE_BASE || './';
@@ -14,7 +14,7 @@
   let pendingDlUrl = '';
   let gInited = false;
 
-  // ── 로그인 모달 주입 (순수 소셜 로그인 전용: 구글 & 깃허브) ──
+  // ── 로그인 모달 주입 ──
   function injectModal() {
     if (document.getElementById('loginOverlay')) return;
     const el = document.createElement('div');
@@ -26,7 +26,6 @@
         <h2>파란이발 로그인</h2>
         <div class="msub">소셜 계정으로 1초 만에 시작하세요</div>
 
-        <!-- 소셜 가입/로그인 2개 버튼 전면 배치 -->
         <div class="social-btns">
           <div id="mgwrap"></div>
           <button type="button" class="btn-github-social" onclick="Site.promptGithub()">
@@ -78,10 +77,10 @@
 
   function logout() {
     App.AUTH.logout();
-    renderNav();
+    location.reload();
   }
 
-  // ── 역할별 내비 (#navR에 채움) ──
+  // ── 역할별 내비 ──
   function renderNav(featuresHref) {
     const r = document.getElementById('navR');
     if (!r) return;
@@ -102,9 +101,37 @@
         `<a class="nlink" href="${portalUrl}">내 계정</a>` +
         `<button class="nlink" onclick="Site.logout()">로그아웃</button>`;
     }
+    renderAdminGates();
   }
 
-  // ── 다운로드 로그인 게이트 ──
+  // ── 보안 게이트: 소스코드 링크는 오직 '관리자(admin/btsky99)'에게만 보임 ──
+  function renderAdminGates() {
+    const s = App.AUTH.current();
+    const isAdmin = s && (s.role === 'admin' || (s.id && (s.id.includes('btsky99') || s.id.includes('paranibal'))));
+    document.querySelectorAll('.admin-only-source').forEach(el => {
+      const srcUrl = el.getAttribute('data-src-url');
+      if (isAdmin) {
+        el.href = srcUrl;
+        el.target = '_blank';
+        el.rel = 'noopener';
+        el.innerHTML = `<span>👑 소스코드 (관리자 전용)</span>`;
+        el.style.opacity = '1';
+        el.onclick = null;
+      } else {
+        el.removeAttribute('href');
+        el.removeAttribute('target');
+        el.innerHTML = `<span>🔒 소스코드 (관리자 전용)</span>`;
+        el.style.opacity = '0.7';
+        el.onclick = (e) => {
+          e.preventDefault();
+          alert('🔒 소스코드 저장소는 파란이발 관리자(btsky99) 로그인 후에만 접근 가능합니다.');
+          openLogin();
+        };
+      }
+    });
+  }
+
+  // ── 다운로드 게이트 ──
   function gateDownload(url) {
     if (App.AUTH.current()) { location.href = url; }
     else { pendingDlUrl = url; openLogin('download'); }
@@ -112,12 +139,58 @@
 
   function isLoggedIn() { return !!App.AUTH.current(); }
 
-  // ── FAQ 토글 유틸리티 ──
+  // ── FAQ 토글 ──
   function toggleFaq(el) {
     const item = el.closest('.faq-item');
     if (!item) return;
     item.classList.toggle('open');
   }
 
-  window.Site = { openLogin, promptGithub, closeLogin, logout, renderNav, gateDownload, isLoggedIn, toggleFaq };
+  // ── GitHub Releases 파서 (전체 설치본 vs 패치본 분리 파싱) ──
+  function parseReleases(repo, fullElId, patchElId, verElId, defaultFullUrl) {
+    const fmt = b => { if (!b) return ''; const mb = b / 1048576; return mb >= 1 ? mb.toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB'; };
+    fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
+      .then(r => { if (!r.ok) throw 0; return r.json(); })
+      .then(rel => {
+        if (verElId) {
+          const vEl = document.getElementById(verElId);
+          if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${rel.tag_name || ''}</b> (실시간 자동 갱신)`;
+        }
+        const assets = rel.assets || [];
+        // 전체 설치본 (.exe / setup / full)
+        const fullAsset = assets.find(x => /setup|installer|full|\.exe$/i.test(x.name)) || assets[0];
+        // 패치/업데이트본 (patch / update / .zip / .patch)
+        const patchAsset = assets.find(x => /patch|update|\.zip$/i.test(x.name)) || (assets.length > 1 ? assets[1] : null);
+
+        const fullEl = document.getElementById(fullElId);
+        if (fullEl) {
+          const fullUrl = fullAsset ? fullAsset.browser_download_url : (defaultFullUrl || `https://github.com/${repo}/releases/latest`);
+          fullEl.onclick = () => gateDownload(fullUrl);
+          const szEl = fullEl.querySelector('small');
+          if (szEl && fullAsset) szEl.textContent = `전체 설치 (.exe) · ${fmt(fullAsset.size)}`;
+        }
+
+        const patchEl = document.getElementById(patchElId);
+        if (patchEl) {
+          if (patchAsset) {
+            patchEl.style.display = 'inline-flex';
+            patchEl.onclick = () => gateDownload(patchAsset.browser_download_url);
+            const szEl = patchEl.querySelector('small');
+            if (szEl) szEl.textContent = `패치 파일 (.zip) · ${fmt(patchAsset.size)}`;
+          } else {
+            patchEl.onclick = () => gateDownload(defaultFullUrl || `https://github.com/${repo}/releases/latest`);
+            const szEl = patchEl.querySelector('small');
+            if (szEl) szEl.textContent = `패치/업데이트 모듈`;
+          }
+        }
+      })
+      .catch(() => {
+        if (verElId) {
+          const vEl = document.getElementById(verElId);
+          if (vEl) vEl.textContent = '최신 릴리즈 자동 연결 준비됨';
+        }
+      });
+  }
+
+  window.Site = { openLogin, promptGithub, closeLogin, logout, renderNav, gateDownload, isLoggedIn, toggleFaq, parseReleases };
 })();

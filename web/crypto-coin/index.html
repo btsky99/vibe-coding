@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!--
   FILE: web/crypto-coin/index.html
-  DESCRIPTION: 파란이발(btsky) CipherTrader Crypto (코인 AI 자동매매 시스템, btsky99/crypto-bot & crypto-bot-releases).
-    업비트·바이낸스 실시간 시세 + AI 퀀트 매매 + 배포 바이너리(crypto-bot-releases) 및 수익률 알림봇(abot).
+  DESCRIPTION: 파란이발(btsky) CipherTrader Crypto (코인 AI 자동매매 시스템).
+    전체 설치버전 vs 패치버전 실시간 릴리즈 파싱 다운로드 분리 + 소스코드 레포 관리자 보안 게이트 적용.
   REVISION HISTORY:
-    - 2026-07-26 Gemini: crypto-bot-releases 바이너리 릴리즈 & abot 연동 세부 가이드 정비.
+    - 2026-07-26 Gemini: 전체 설치본/패치본 다운로드 분리 및 소스코드 레포 관리자 보안 게이트 적용.
 -->
 <html lang="ko">
 <head>
@@ -37,16 +37,23 @@
     <div class="tag">파란이발의 코인(암호화폐) AI 자동매매 & 수익률 봇</div>
     <p class="lead">업비트(Upbit), 바이낸스(Binance) 24시간 실시간 체결 데이터를 수집하고,
       시계열 AI 모델과 변동성 돌파 전략을 통합하여 자율 매매 및 텔레그램 수익률 알림을 구동합니다.</p>
+    
+    <!-- 전체 설치버전 vs 패치버전 분리 다운로드 버튼 -->
     <div class="cta">
-      <a class="btn dl" href="https://github.com/btsky99/crypto-bot-releases" target="_blank" rel="noopener">
-        <span>🪟 배포 바이너리 (crypto-bot-releases)</span>
-      </a>
-      <a class="btn line" href="https://github.com/btsky99/crypto-bot" target="_blank" rel="noopener">
-        <span>⭐ 소스 코드 (crypto-bot)</span>
+      <button class="btn dl" id="fullDlBtn">
+        <span>🪟 전체 설치버전 (.exe)</span>
+        <small>최신 Full Installer</small>
+      </button>
+      <button class="btn line" id="patchDlBtn">
+        <span>⚡ 패치 / 업데이트 (.zip)</span>
+        <small>최신 Patch Package</small>
+      </button>
+      <a class="btn line admin-only-source" data-src-url="https://github.com/btsky99/crypto-bot">
+        <span>🔒 소스코드 (관리자 전용)</span>
       </a>
     </div>
-    <div class="verbadge" style="border-color:rgba(245,158,11,0.4);color:var(--amber);">
-      🚀 릴리즈 패키지(btsky99/crypto-bot-releases) + 코인 봇(crypto-bot) 통합 지원
+    <div class="verbadge" id="verInfo">
+      🚀 btsky99/crypto-bot-releases 릴리즈 연동 중…
     </div>
   </header>
 
@@ -78,17 +85,22 @@
   </section>
 
   <section class="note">
-    🪙 <b>저장소 구성 안내</b><br>
-    • <b>btsky99/crypto-bot-releases</b>: 실행 바이너리 및 라이선스 화이트리스트 릴리즈 전용 레포<br>
-    • <b>btsky99/crypto-bot</b>: CipherTrader Crypto 실시간 AI 엔진 소스 코드 레포<br>
-    • <b>btsky99/abot</b>: 거래소 수익률 알림 텔레그램 봇 레포
+    🔒 <b>보안 및 다운로드 구분 안내</b><br>
+    • <b>전체 설치버전 (.exe)</b>: 최초 설치자를 위한 원스톱 인스톨러 패키지<br>
+    • <b>패치/업데이트 (.zip)</b>: 기존 사용자를 위한 빠른 갱신용 모듈 패키지<br>
+    • <b>소스코드</b>: <code>btsky99/crypto-bot</code> 원본 소스는 파란이발 관리자(btsky99) 전용으로 통제됩니다.
   </section>
 
   <footer>
-    <div>파란이발 · <a href="https://github.com/btsky99/crypto-bot-releases" target="_blank" rel="noopener">GitHub (crypto-bot-releases)</a></div>
+    <div>파란이발 · <a href="https://github.com/btsky99/crypto-bot-releases" target="_blank" rel="noopener">btsky99 Releases</a></div>
     <div style="margin-top:8px"><a href="../">← 파란이발 허브 메인으로</a></div>
   </footer>
 
-<script>window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));</script>
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+  Site.renderNav('#features');
+  Site.parseReleases('btsky99/crypto-bot-releases', 'fullDlBtn', 'patchDlBtn', 'verInfo', 'https://github.com/btsky99/crypto-bot-releases/releases/latest');
+});
+</script>
 </body>
 </html>

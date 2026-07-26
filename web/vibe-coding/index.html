@@ -2,10 +2,10 @@
 <!--
   FILE: web/vibe-coding/index.html
   DESCRIPTION: 파란이발(btsky) 바이브 코딩 제품 상세 페이지.
-    소개·자가치유 2.0·하이브 아키텍처 다이어그램·최신 버전 다운로드.
+    전체 설치버전 vs 패치버전 실시간 릴리즈 파싱 + 소스코드 레포 관리자 보안 게이트 적용.
   REVISION HISTORY:
     - 2026-07-22 Claude: 최초 분리.
-    - 2026-07-26 Gemini: 파란이발 브랜드, 심플 프리미엄 UI, 자가치유 2.0 세부 가이드 강화.
+    - 2026-07-26 Gemini: 전체 설치본/패치본 다운로드 분리 파싱 및 소스코드 보안 게이트 적용.
 -->
 <html lang="ko">
 <head>
@@ -38,13 +38,22 @@
     <div class="tag">파란이발의 AI 멀티 에이전트 하이브 마인드 개발 플랫폼</div>
     <p class="lead">Claude, Antigravity, Codex 등 독립적인 AI 에이전트들이 하나의 팀을 이루어 코딩, 테스트, 자동화를 수행합니다.
       실행 중 에러 시그니처가 감지되면 원인을 자가 학습하여 재발을 막아주는 <b>자가 치유 2.0</b> 시스템을 경험해 보세요.</p>
+    
+    <!-- 전체 설치버전 vs 패치버전 분리 다운로드 버튼 -->
     <div class="cta">
-      <button class="btn dl" id="winBtn" onclick="dl()">
-        <span>🪟 Windows 버전 다운로드</span><small id="winSize">최신 버전</small>
+      <button class="btn dl" id="fullDlBtn">
+        <span>🪟 전체 설치버전 (.exe)</span>
+        <small>최신 Full Installer</small>
       </button>
-      <a class="btn line" href="#features">핵심 기능 보기 ↓</a>
+      <button class="btn line" id="patchDlBtn">
+        <span>⚡ 패치 / 업데이트 (.zip)</span>
+        <small>최신 Patch Package</small>
+      </button>
+      <a class="btn line admin-only-source" data-src-url="https://github.com/btsky99/vibe-coding">
+        <span>🔒 소스코드 (관리자 전용)</span>
+      </a>
     </div>
-    <div class="verbadge" id="ver">최신 배포 정보를 불러오는 중…</div>
+    <div class="verbadge" id="verInfo">최신 릴리즈 정보 파싱 중…</div>
   </header>
 
   <section class="sec" id="features">
@@ -105,8 +114,8 @@
     <h2>지금 파란이발 바이브 코딩을 시작하세요</h2>
     <p>Windows 10 / 11 완벽 지원 · 자동 패치 지원 · 🍎 macOS 준비 중</p>
     <div class="cta">
-      <button class="btn dl" onclick="dl()">
-        <span>🪟 다운로드 (설치 파일)</span><small id="winSize2">최신 배포판</small>
+      <button class="btn dl" onclick="Site.gateDownload(dlUrl)">
+        <span>🪟 바로 다운로드</span>
       </button>
     </div>
   </section>
@@ -117,22 +126,11 @@
   </footer>
 
 <script>
-const REPO='btsky99/vibe-coding';
 let dlUrl='https://github.com/btsky99/vibe-coding/releases/latest';
-const fmt=b=>{ if(!b) return ''; const mb=b/1048576; return mb>=1?mb.toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'; };
-function dl(){ Site.gateDownload(dlUrl); }
-
-fetch(`https://api.github.com/repos/${REPO}/releases/latest`,{headers:{'Accept':'application/vnd.github+json'}})
-  .then(r=>{ if(!r.ok) throw 0; return r.json(); })
-  .then(rel=>{
-    document.getElementById('ver').innerHTML=`현재 최신 버전 <b>${rel.tag_name||''}</b>`;
-    const a=rel.assets||[], win=a.find(x=>/setup.*\.exe$/i.test(x.name))||a.find(x=>/\.exe$/i.test(x.name));
-    if(win){ dlUrl=win.browser_download_url; const sz=fmt(win.size);
-      document.getElementById('winSize').textContent=sz; document.getElementById('winSize2').textContent=sz+' · Windows'; }
-  })
-  .catch(()=>{ document.getElementById('ver').textContent='최신 배포판 다운로드가 준비되어 있습니다'; });
-
-window.addEventListener('DOMContentLoaded', () => Site.renderNav('#features'));
+window.addEventListener('DOMContentLoaded', () => {
+  Site.renderNav('#features');
+  Site.parseReleases('btsky99/vibe-coding', 'fullDlBtn', 'patchDlBtn', 'verInfo', 'https://github.com/btsky99/vibe-coding/releases/latest');
+});
 </script>
 </body>
 </html>
