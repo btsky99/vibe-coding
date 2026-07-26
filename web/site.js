@@ -13,7 +13,7 @@ window.Site = (function () {
     if (!navR) return;
     
     const sess = window.App ? window.App.AUTH.current() : null;
-    let html = '';
+    let html = `<a class="nlink" href="${window.SITE_BASE || './'}resources/" style="margin-right:8px; color:#38bdf8; font-weight:600;">🌐 자원 허브</a>`;
     
     if (sess) {
       const isAdmin = sess.role === 'admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
