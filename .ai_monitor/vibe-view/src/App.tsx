@@ -7,6 +7,7 @@
  *          각 기능 영역은 독립 컴포넌트(TopMenuBar, ActivityBar, FileExplorer,
  *          각 패널)로 분리되어 있습니다.
  * REVISION HISTORY:
+ * - 2026-07-26 Codex: macOS 폴더 브리지 실패 시 서버 다이얼로그로 폴백.
  * - 2026-04-18 Claude: MessageComposer / MessagesPanel 제거 — 레거시 직접 메시징 UI.
  *                      Phase B 원칙(에이전트끼리 직접 통신 X, 메모리 공유 중심)에 맞춰 정리.
  * - 2026-03-22 Codex: 기본 터미널 레이아웃을 2분할에서 3분할로 변경.
@@ -370,8 +371,11 @@ function App() {
     try {
       if ((window as any).pywebview?.api?.select_folder) {
         const data = await (window as any).pywebview.api.select_folder();
-        if (data.status === 'success' && data.path) await activateProject(data.path);
-        return;
+        if (data.status === 'success' && data.path) {
+          await activateProject(data.path);
+          return;
+        }
+        if (data.status === 'cancelled') return;
       }
       const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
       const data = await res.json();

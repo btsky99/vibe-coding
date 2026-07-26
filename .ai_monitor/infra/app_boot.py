@@ -7,6 +7,7 @@ DESCRIPTION: PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래�
              함수/객체/값은 BootConfig로 명시 주입받는다(R20).
 
 REVISION HISTORY:
+- 2026-07-26 Codex: macOS 네이티브 폴더 선택 브리지를 추가해 상단 메뉴 무반응 수정.
 - 2026-07-22 Claude: _ClipboardBridge(js_api) 신설 — 맥 WKWebView가 navigator.clipboard를 조용히
                      거부해 우클릭 복붙 전멸 → NSPasteboard 브리지로 우회. Edit 메뉴 탐색을
                      서브메뉴 title 기준으로 수정(pywebview 6.x는 아이템 title이 빈 값).
@@ -103,6 +104,42 @@ class _ClipboardBridge:
         except Exception as e:
             print(f"[clipboard] NSPasteboard 쓰기 실패: {e}")
             return False
+
+    def select_folder(self):
+        """macOS WKWebView에서 NSOpenPanel을 메인 스레드로 열어 선택 경로를 반환한다."""
+        if sys.platform != 'darwin':
+            return {"status": "unsupported"}
+        try:
+            import threading
+            import AppKit
+            from PyObjCTools import AppHelper
+
+            done = threading.Event()
+            result = {"status": "cancelled"}
+
+            def _show_panel():
+                try:
+                    panel = AppKit.NSOpenPanel.openPanel()
+                    panel.setCanChooseFiles_(False)
+                    panel.setCanChooseDirectories_(True)
+                    panel.setAllowsMultipleSelection_(False)
+                    panel.setPrompt_("선택")
+                    if panel.runModal() == AppKit.NSModalResponseOK:
+                        urls = panel.URLs()
+                        if urls:
+                            result.update({"status": "success", "path": str(urls[0].path())})
+                except Exception as exc:
+                    result.update({"status": "error", "message": str(exc)})
+                finally:
+                    done.set()
+
+            AppHelper.callAfter(_show_panel)
+            if not done.wait(timeout=120):
+                return {"status": "error", "message": "폴더 선택 시간 초과"}
+            return result
+        except Exception as e:
+            print(f"[folder-dialog] NSOpenPanel 실패: {e}")
+            return {"status": "error", "message": str(e)}
 
 
 def _install_mac_edit_menu() -> bool:

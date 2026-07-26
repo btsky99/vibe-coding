@@ -5,6 +5,7 @@
  *              기존 Office 모드를 확장하여 존 기반 월드, 운영 HUD,
  *              선택 에이전트 인스펙터, 이벤트 레일을 함께 제공한다.
  * REVISION HISTORY:
+ * - 2026-07-26 Codex: macOS 폴더 브리지 실패 시 HTTP 선택기로 폴백.
  * - 2026-04-06 Codex: 메타버스 오피스 Phase 1 구조로 재작성
  * - 2026-04-03 Claude: 초기 생성 — 2D 오피스 월드 + HUD 레이아웃
  * ------------------------------------------------------------------------
@@ -102,8 +103,13 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
       const pywebview = (window as any).pywebview;
       if (pywebview?.api?.select_folder) {
         const data = await pywebview.api.select_folder();
-        if (data.status === 'success' && data.path) selectedPath = data.path;
-      } else {
+        if (data.status === 'success' && data.path) {
+          selectedPath = data.path;
+        } else if (data.status === 'cancelled') {
+          return;
+        }
+      }
+      if (!selectedPath) {
         const res = await fetch('/api/select-folder', { method: 'POST' });
         const data = await res.json();
         if (data.status === 'success' && data.path) selectedPath = data.path;

@@ -5,6 +5,7 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-07-26 Codex: 전 에이전트 공통 사용량 바를 터미널 하단에 배치.
  * - 2026-07-15 Claude: 1500줄 상한 도달로 3분할 — ClaudeContextBar(컨텍스트 바+상세 팝업),
  *                      AgentSelectCards(선택 카드 3장+배경 로그), QuotaBadge(헤더 쿼터 배지)를
  *                      terminal/ 하위로 이동. 로직 무변경, 타입은 자식이 export(순환 없음).
@@ -70,7 +71,8 @@ import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
 import { copyTextToClipboard, captureSelectRestore, installClipboardShortcuts } from './terminal/xtermSelection';
 import { readClipboardText } from '../lib/clipboard';
-import ClaudeContextBar, { type ClaudeUsage } from './terminal/ClaudeContextBar';
+import type { ClaudeUsage } from './terminal/ClaudeContextBar';
+import AgentUsageBar from './terminal/AgentUsageBar';
 import AgentSelectCards from './terminal/AgentSelectCards';
 // [2026-07-24] QuotaBadge 컴포넌트 헤더에서 제거 — 타입(AgentQuotaInfo)만 인터페이스용으로 유지.
 import { type AgentQuotaInfo } from './terminal/QuotaBadge';
@@ -810,9 +812,6 @@ export default function TerminalSlot({
         )}
       </div>
 
-      {/* ── Claude 컨텍스트 컬러 블록 바 — terminal/ClaudeContextBar로 분리 (2026-07-15) ── */}
-      {isTerminalMode && agentType === 'claude' && <ClaudeContextBar ctx={claudeUsage} />}
-
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
         <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-[#1e1e1e]">
@@ -1081,6 +1080,17 @@ export default function TerminalSlot({
           )}
           <AgentSelectCards logs={slotLogs} onLaunch={launchAgent} />
         </div>
+      )}
+
+      {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}
+      {isTerminalMode && (
+        <AgentUsageBar
+          agentType={agentType}
+          quota={agentQuota?.[agentType]}
+          claudeUsage={claudeUsage}
+          antigravityUsage={antigravityUsage}
+          onRefresh={() => window.dispatchEvent(new Event('vibe:refresh-usage'))}
+        />
       )}
 
       {/* 단축어 편집 모달 팝업 — 별도 컴포넌트로 분리 */}

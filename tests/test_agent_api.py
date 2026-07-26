@@ -12,6 +12,7 @@ DESCRIPTION: agent_api.py 단위 테스트.
              - HTTP 핸들러는 간단한 Mock 객체로 대체
 
 REVISION HISTORY:
+- 2026-07-26 Codex: 프로젝트 스코프 PTY 선택 회귀 테스트 추가.
 - 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-06-11 Claude: TestGetGeminiLastTask 삭제 — agy 전환으로 대상 함수 제거 (비공개 포맷)
 - 2026-03-09 Claude: 최초 작성 — 버그픽스 a6bd38a, 6f05536 재발 방지 커버리지
@@ -23,6 +24,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch, mock_open
 import pytest
+
 
 # 프로젝트 루트 경로 설정
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -41,6 +43,32 @@ _mock_cli_agent._current_run = None
 sys.modules.setdefault("cli_agent", _mock_cli_agent)
 
 import agent_api
+
+
+class TestProjectScopedPtyIdentity:
+    def test_prefers_requested_project(self):
+        snapshot = {
+            "T1": {"running": False, "agent": ""},
+            "T1@D--old": {"running": True, "agent": "claude", "last_input_at": 10},
+            "T1@D--vibe-coding": {
+                "running": True, "agent": "codex", "last_input_at": 20,
+            },
+        }
+        selected = agent_api._running_pty_for_slot(snapshot, "T1", "D--vibe-coding")
+        assert selected["agent"] == "codex"
+
+    def test_falls_back_to_latest_running_project(self):
+        snapshot = {
+            "T3": {"running": False, "agent": ""},
+            "T3@D--old": {
+                "running": True, "agent": "antigravity", "last_input_at": 10,
+            },
+            "T3@D--CipherTrader": {
+                "running": True, "agent": "claude", "last_input_at": 30,
+            },
+        }
+        selected = agent_api._running_pty_for_slot(snapshot, "T3", "D--missing")
+        assert selected["agent"] == "claude"
 
 
 # ── handle_stage_update 테스트 ────────────────────────────────────────────────

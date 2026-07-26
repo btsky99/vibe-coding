@@ -8,6 +8,7 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-07-26] Codex: 프로젝트 스코프 PTY를 슬롯 상태의 최우선 진실로 병합해 CLI 오인식 수정.
 # [2026-07-16] Claude: [로드맵 ③] handle_chat 코덱스 회상 주입 — codex는 훅이 없어
 #   중계 시점 접두 주입이 상한선. claude/antigravity는 자체 훅 주입이라 제외(이중 주입 금지).
 # [2026-07-15] Claude: handle_run에 project_id 꼬리표 — 크로스 프로젝트 간섭 수정.
@@ -185,6 +186,30 @@ def _get_pty_sessions_from_node() -> dict:
             return json.loads(resp.read().decode('utf-8'))
     except Exception:
         return {}
+
+
+def _running_pty_for_slot(snapshot: dict, tid: str, project_id: str = '') -> dict | None:
+    """``T1@project`` 형식의 실행 세션을 선택하고 빈 레거시 ``T1``은 무시한다."""
+    if not isinstance(snapshot, dict):
+        return None
+    exact = snapshot.get(f'{tid}@{project_id}') if project_id else None
+    if isinstance(exact, dict) and exact.get('running'):
+        return exact
+    candidates = [
+        info for key, info in snapshot.items()
+        if (key == tid or str(key).startswith(f'{tid}@'))
+        and isinstance(info, dict) and info.get('running')
+    ]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            int(item.get('last_input_at') or 0),
+            int(item.get('last_output_at') or 0),
+            str(item.get('started') or ''),
+        ),
+    )
 
 
 # [중복통합 2026-07-18] _json_response/_read_body는 api/_common.py로 통합 — 패스스루 재노출.
@@ -676,7 +701,9 @@ def handle_terminals(handler) -> None:
             # 이전 수정(6f05536)은 신규 슬롯 생성 시에만 cli를 설정했으나,
             # 기존 슬롯은 cli=''인 채로 유지되어 잘못된 배지가 표시되는 문제 수정.
             cli_from_hook = info.get('cli', '')
-            if cli_from_hook and not terminals[tid].get('cli'):
+            # 활성 interactive hook은 heartbeat/live-file보다 최신이다. 실행 PTY가 있으면
+            # 아래 최종 PTY 병합이 다시 교정하므로 여기서는 hook 종류를 항상 반영한다.
+            if cli_from_hook:
                 terminals[tid]['cli'] = cli_from_hook
         # done 단계: stage만 업데이트 (status는 기존 유지)
         elif stage == 'done':
@@ -689,25 +716,32 @@ def handle_terminals(handler) -> None:
     # [변경 2026-03-22] Node PTY 서버의 REST API에서 세션 스냅샷을 조회합니다.
     # cli_agent._terminals이 idle 상태인 슬롯에 한해, PTY에서 에이전트가 실행 중이면
     # status='running'으로 오버라이드하여 상황판 카드가 표시되도록 합니다.
+    from urllib.parse import parse_qs, urlparse
+    raw_path = getattr(handler, 'path', '')
+    request_path = raw_path if isinstance(raw_path, str) else ''
+    project_id = parse_qs(urlparse(request_path).query).get(
+        'project_id', ['']
+    )[0]
     _pty_snap = _get_pty_sessions_from_node()
     if _pty_snap:
         try:
             import datetime as _dt
             for slot_num in range(1, 9):
                 tid = f'T{slot_num}'
-                info = _pty_snap.get(tid)
+                info = _running_pty_for_slot(_pty_snap, tid, project_id)
                 if not info or not info.get('running'):
                     continue
                 agent = info.get('agent', '') or ''
                 if not agent:
                     continue
-                # PTY 세션이 있고 현재 idle/done 상태이면 running으로 표시
-                # (이미 cli_agent가 running으로 표시 중이면 유지)
-                if terminals[tid]['status'] not in ('running',):
-                    terminals[tid]['status'] = 'running'
-                    terminals[tid]['cli'] = agent
-                    terminals[tid]['ts'] = info.get('started', '')
-                    terminals[tid]['pipeline_stage'] = terminals[tid].get('pipeline_stage') or 'analyzing'
+                # 실행 중 PTY가 슬롯의 최우선 진실이다. stale heartbeat/live-file 값은
+                # running 상태여도 실제 에이전트 종류를 덮지 못한다.
+                terminals[tid]['status'] = 'running'
+                terminals[tid]['cli'] = agent
+                terminals[tid]['ts'] = info.get('started', '')
+                terminals[tid]['pipeline_stage'] = terminals[tid].get('pipeline_stage') or 'analyzing'
+                terminals[tid]['project_id'] = info.get('project_id', '')
+                terminals[tid]['cwd'] = info.get('cwd', '')
 
                 # 모델 정보 병합 — TerminalSlot UI에서 사용 모델 배지 표시용
                 if info.get('main_model'):
@@ -720,10 +754,6 @@ def handle_terminals(handler) -> None:
                 # 모든 PTY 에이전트가 동일하게 기본 텍스트 사용 (task는 hive_hook이 설정 시 유지).
                 if not terminals[tid].get('task'):
                     terminals[tid]['task'] = f'[PTY] {agent.upper()} 세션'
-
-                # ── cli 배지 보완: running이었던 슬롯에 cli 정보 없으면 채움 ─────────
-                if not terminals[tid].get('cli'):
-                    terminals[tid]['cli'] = agent
 
                 # ── PTY last_line 항상 갱신 — Antigravity 응답 출력 실시간 표시 ───────────
                 # Why: PTY 세션의 last_line이 가장 최신 출력임.
