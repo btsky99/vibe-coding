@@ -1,10 +1,10 @@
 /*
   FILE: web/site.js
   DESCRIPTION: 파란이발(btsky) 공용 사이트 스크립트 — 소셜 로그인 모달,
-    관리자 전용 소스코드 보안 게이트, 전체 설치본(v22.6.3) & 최신 패치본(v22.8.1 등) 듀얼 버전 파서.
+    관리자 전용 소스코드 보안 게이트, 5개 전체 설치본 파일 다중 연속 자동 다운로드(gateDownloadBundle) 엔진.
   REVISION HISTORY:
     - 2026-07-22 Claude: 멀티 프로덕트 허브 내비/모달 공용화.
-    - 2026-07-26 Gemini: 전체 설치본 & 패치본 듀얼 버전 표시 및 바이브코딩 방식 100% 클릭 즉시 다운로드 바인딩.
+    - 2026-07-26 Gemini: 5개 전체 설치 파일 (.exe + .bin 1~4) 1초 시차 연속 자동 다운로드 번들 엔진 구현.
 */
 (function () {
   const BASE = window.SITE_BASE || './';
@@ -12,6 +12,7 @@
   const homeUrl = BASE;
   let pendingAction = 'portal';
   let pendingDlUrl = '';
+  let pendingDlBundle = null;
   let gInited = false;
 
   // ── 로그인 모달 ──
@@ -66,12 +67,20 @@
   }
 
   function afterLogin() {
-    if (pendingAction === 'download' && pendingDlUrl) {
-      const target = pendingDlUrl;
+    if (pendingAction === 'download') {
       pendingAction = 'portal';
-      pendingDlUrl = '';
       closeLogin();
-      location.href = target;
+      if (pendingDlBundle && pendingDlBundle.length) {
+        const bundle = pendingDlBundle;
+        pendingDlBundle = null;
+        downloadBundle(bundle);
+      } else if (pendingDlUrl) {
+        const target = pendingDlUrl;
+        pendingDlUrl = '';
+        location.href = target;
+      } else {
+        location.href = portalUrl;
+      }
     } else {
       location.href = portalUrl;
     }
@@ -133,13 +142,39 @@
     });
   }
 
-  // ── 다운로드 게이트 ──
+  // ── 단일 다운로드 게이트 ──
   function gateDownload(url) {
     if (!url) url = portalUrl;
     if (App.AUTH.current()) {
       location.href = url;
     } else {
       pendingDlUrl = url;
+      openLogin('download');
+    }
+  }
+
+  // ── 5개 전체 설치파일 다중 연속 자동 다운로드 엔진 ──
+  function downloadBundle(urls) {
+    if (!urls || !urls.length) return;
+    urls.forEach((url, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = url.substring(url.lastIndexOf('/') + 1);
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }, i * 450); // 0.45초 시차 연속 다운로드
+    });
+  }
+
+  function gateDownloadBundle(urls) {
+    if (!urls || !urls.length) return;
+    if (App.AUTH.current()) {
+      downloadBundle(urls);
+    } else {
+      pendingDlBundle = urls;
       openLogin('download');
     }
   }
@@ -153,7 +188,7 @@
     item.classList.toggle('open');
   }
 
-  // ── 듀얼 릴리즈 파서 (전체 설치본 & 패치본 각각 버전 표시 + 100% 다운로드 바인딩) ──
+  // ── 릴리즈 파서 ──
   function parseReleases(repo, fullElId, patchElId, verElId, fallbackFullUrl, fallbackPatchUrl) {
     const fmt = b => { if (!b) return ''; const mb = b / 1048576; return mb >= 1 ? mb.toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB'; };
     
@@ -172,7 +207,6 @@
       patchEl.onclick = () => gateDownload(defaultPatch);
     }
 
-    // 1. 전체 설치버전 파싱 (v22.6.3 고정 설치본)
     if (repo.includes('crypto')) {
       fetch(`https://api.github.com/repos/btsky99/crypto-bot-releases/releases/tags/v22.6.3`, { headers: { 'Accept': 'application/vnd.github+json' } })
         .then(r => { if (!r.ok) throw 0; return r.json(); })
@@ -182,19 +216,18 @@
           if (fullEl && setupExe) {
             fullEl.onclick = () => gateDownload(setupExe.browser_download_url);
             const szEl = fullEl.querySelector('small');
-            if (szEl) szEl.textContent = `전체 설치 v22.6.3 (.exe) · ${fmt(setupExe.size)}`;
+            if (szEl) szEl.textContent = `전체 설치 (.exe) · ${fmt(setupExe.size)}`;
           }
         })
         .catch(() => {});
 
-      // 2. 패치버전 실시간 파싱 (최신 패치 릴리즈 tag_name)
       fetch(`https://api.github.com/repos/btsky99/crypto-bot-releases/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
         .then(r => { if (!r.ok) throw 0; return r.json(); })
         .then(rel => {
           const patchTag = rel.tag_name || 'v22.8.1';
           if (verElId) {
             const vEl = document.getElementById(verElId);
-            if (vEl) vEl.innerHTML = `전체 설치본 <b>v22.6.3</b> | 최신 패치본 <b>${patchTag}</b> (실시간 자동 갱신)`;
+            if (vEl) vEl.innerHTML = `전체 설치 5개 파일 (v22.6.3) | 최신 패치본 <b>${patchTag}</b> (연동됨)`;
           }
           const assets = rel.assets || [];
           const patchAsset = assets.find(x => /patch|update|\.zip$/i.test(x.name)) || assets[0];
@@ -204,26 +237,18 @@
             const szEl = patchEl.querySelector('small');
             if (szEl && patchAsset) {
               szEl.textContent = `패치 ${patchTag} (.zip) · ${fmt(patchAsset.size)}`;
-            } else if (szEl) {
-              szEl.textContent = `최신 패치 ${patchTag} (.zip / -bin)`;
             }
           }
         })
-        .catch(() => {
-          if (verElId) {
-            const vEl = document.getElementById(verElId);
-            if (vEl) vEl.innerHTML = `전체 설치본 <b>v22.6.3</b> | 최신 패치본 <b>v22.8.1</b> (연결 완료)`;
-          }
-        });
+        .catch(() => {});
     } else {
-      // 바이브 코딩 파싱
       fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
         .then(r => { if (!r.ok) throw 0; return r.json(); })
         .then(rel => {
           const tag = rel.tag_name || 'v4.2.0';
           if (verElId) {
             const vEl = document.getElementById(verElId);
-            if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${tag}</b> (실시간 자동 갱신)`;
+            if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${tag}</b> (실시간 연결됨)`;
           }
           const assets = rel.assets || [];
           const fullAsset = assets.find(x => /setup|installer|full|\.exe$/i.test(x.name)) || assets[0];
@@ -242,8 +267,6 @@
               if (szEl) szEl.textContent = `패치 파일 ${tag} (.zip) · ${fmt(patchAsset.size)}`;
             } else {
               patchEl.onclick = () => gateDownload(rel.html_url);
-              const szEl = patchEl.querySelector('small');
-              if (szEl) szEl.textContent = `패치 업데이트 ${tag}`;
             }
           }
         })
@@ -251,5 +274,5 @@
     }
   }
 
-  window.Site = { openLogin, promptGithub, closeLogin, logout, renderNav, gateDownload, isLoggedIn, toggleFaq, parseReleases };
+  window.Site = { openLogin, promptGithub, closeLogin, logout, renderNav, gateDownload, gateDownloadBundle, downloadBundle, isLoggedIn, toggleFaq, parseReleases };
 })();
