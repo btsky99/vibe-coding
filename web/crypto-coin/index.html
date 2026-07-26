@@ -2,16 +2,16 @@
 <!--
   FILE: web/crypto-coin/index.html
   DESCRIPTION: 파란이발(btsky) CipherTrader Crypto (코인 AI 자동매매 시스템).
-    전체 설치버전 5개 파일 (.exe + .bin 1~4) 클릭 1번에 100% 자동 연속 받기 바인딩.
+    전용 코인 AI 브랜드 SVG 아이콘(crypto_coin_icon.svg) 적용.
   REVISION HISTORY:
-    - 2026-07-26 Gemini: 5개 전체 설치 파일 (.exe + .bin 1~4) 1초 시차 연속 자동 다운로드 바인딩.
+    - 2026-07-26 Gemini: 전용 코인 AI 브랜드 SVG 아이콘(crypto_coin_icon.svg) 적용.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CipherTrader Crypto v22.6.3 — 코인 AI 자동매매 | 파란이발</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪙</text></svg>">
+<link rel="icon" href="../assets/crypto_coin_icon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="파란이발 (btsky)">
 <meta property="og:locale" content="ko_KR">
@@ -26,13 +26,15 @@
 <body>
   <nav>
     <a class="brand" href="../">
-      <span class="brand-icon">💈</span> 파란이발 · CipherTrader Crypto
+      <img src="../assets/crypto_coin_icon.svg" alt="CipherTrader Crypto" width="28" height="28" style="vertical-align:middle; border-radius:6px;"> 파란이발 · CipherTrader Crypto
     </a>
     <div class="nav-r" id="navR"></div>
   </nav>
 
   <header class="hero">
-    <div class="logo">🪙</div>
+    <div class="logo">
+      <img src="../assets/crypto_coin_icon.svg" alt="CipherTrader Crypto 로고" width="72" height="72" style="border-radius:18px; object-fit:contain;">
+    </div>
     <h1>CipherTrader Crypto v22.6.3</h1>
     <div class="tag">파란이발의 코인(암호화폐) AI 자동매매 & 수익률 봇</div>
     <p class="lead">업비트(Upbit), 바이낸스(Binance) 24시간 실시간 체결 데이터를 수집하고,
@@ -97,7 +99,6 @@
   </footer>
 
 <script>
-// 5개 전체 설치파일 direct download URL 리스트
 const CRYPTO_V2263_BUNDLE = [
   'https://github.com/btsky99/crypto-bot-releases/releases/download/v22.6.3/CipherTrader_Setup_v22.6.3.exe',
   'https://github.com/btsky99/crypto-bot-releases/releases/download/v22.6.3/CipherTrader_Setup_v22.6.3-1.bin',
@@ -109,7 +110,6 @@ const CRYPTO_V2263_BUNDLE = [
 window.addEventListener('DOMContentLoaded', () => {
   Site.renderNav('#features');
   
-  // 전체 설치버전 버튼 클릭 시 페이지 이동 없이 5개 파일 0.45초 간격으로 자동 받기 바인딩!
   const btn = document.getElementById('fullBundleBtn');
   if (btn) {
     btn.onclick = () => Site.gateDownloadBundle(CRYPTO_V2263_BUNDLE);

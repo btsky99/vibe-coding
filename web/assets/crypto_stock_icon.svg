@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="stockGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="80" height="80" rx="20" fill="url(#stockGrad)"/>
+  <!-- 캔들차트 & 상승 그래프 트렌드 -->
+  <rect x="25" y="45" width="10" height="30" rx="3" fill="#ffffff"/>
+  <line x1="30" y1="35" x2="30" y2="80" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  
+  <rect x="45" y="30" width="10" height="45" rx="3" fill="#ffffff"/>
+  <line x1="50" y1="20" x2="50" y2="80" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="65" y="22" width="10" height="53" rx="3" fill="#ffffff"/>
+  <line x1="70" y1="14" x2="70" y2="80" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- AI 트렌드 라인 -->
+  <path d="M22 60 Q 42 35 78 20" fill="none" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="78" cy="20" r="6" fill="#f59e0b"/>
+</svg>

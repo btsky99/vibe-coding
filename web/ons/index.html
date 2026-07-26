@@ -2,16 +2,17 @@
 <!--
   FILE: web/ons/index.html
   DESCRIPTION: 파란이발(btsky) OnS 출장·장착 스케줄 관리 플랫폼 랜딩.
+    전용 브랜드 SVG 아이콘(ons_icon.svg) 적용.
   REVISION HISTORY:
     - 2026-07-22 Claude: 최초 생성.
-    - 2026-07-26 Gemini: 파란이발 브랜딩 적용, 오프라인 우선 상세 가이드 보강.
+    - 2026-07-26 Gemini: 전용 OnS 브랜드 SVG 아이콘(ons_icon.svg) 적용.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnS — 스마트 출장·장착 스케줄 관리 | 파란이발</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+<link rel="icon" href="../assets/ons_icon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="파란이발 (btsky)">
 <meta property="og:locale" content="ko_KR">
@@ -26,13 +27,15 @@
 <body>
   <nav>
     <a class="brand" href="../">
-      <span class="brand-icon">💈</span> 파란이발 · OnS
+      <img src="../assets/ons_icon.svg" alt="OnS" width="28" height="28" style="vertical-align:middle; border-radius:6px;"> 파란이발 · OnS
     </a>
     <div class="nav-r" id="navR"></div>
   </nav>
 
   <header class="hero">
-    <div class="logo">📅</div>
+    <div class="logo">
+      <img src="../assets/ons_icon.svg" alt="OnS 로고" width="72" height="72" style="border-radius:18px; object-fit:contain;">
+    </div>
     <h1>OnS (On-Site Scheduling)</h1>
     <div class="tag">파란이발의 스마트 출장·장착 스케줄 관리 플랫폼</div>
     <p class="lead">복잡한 출장 장착 스케줄을 자동으로 배정하고 동선을 최적화합니다.
