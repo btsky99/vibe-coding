@@ -1,24 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
   <defs>
-    <!-- 딥 다크 사이버 스페이스 -->
-    <radialGradient id="holoDarkSpace" cx="50%" cy="50%" r="70%">
-      <stop offset="0%" stop-color="#0f172a"/>
-      <stop offset="70%" stop-color="#070a14"/>
-      <stop offset="100%" stop-color="#020408"/>
+    <!-- 바이킹 스페이스 딥 나이트 -->
+    <radialGradient id="vikingShieldBg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="60%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#030712"/>
     </radialGradient>
 
-    <!-- 세련된 시안-퍼플-블루 홀로그램 3D 그래디언트 -->
-    <linearGradient id="pureHolo" x1="0%" y1="0%" x2="100%" y2="100%">
+    <!-- 홀로그램 블루투스 파란 네온 그라데이션 -->
+    <linearGradient id="shieldNeonBlue" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="45%" stop-color="#818cf8"/>
-      <stop offset="80%" stop-color="#c084fc"/>
-      <stop offset="100%" stop-color="#22d3ee"/>
+      <stop offset="50%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#2563eb"/>
     </linearGradient>
 
-    <!-- 은은하고 정교한 홀로그램 글로우 -->
-    <filter id="pureHoloGlow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="3.5" result="blur1"/>
-      <feGaussianBlur stdDeviation="1" result="blur2"/>
+    <!-- 실버 테두리 그라데이션 (노란 왕관 제거 후 단정하고 세련된 실버/블루) -->
+    <linearGradient id="shieldSilver" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="50%" stop-color="#94a3b8"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+
+    <!-- 강렬한 파란 글로우 필터 -->
+    <filter id="blueShieldGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur1"/>
+      <feGaussianBlur stdDeviation="1.5" result="blur2"/>
       <feMerge>
         <feMergeNode in="blur1"/>
         <feMergeNode in="blur2"/>
@@ -27,33 +33,31 @@
     </filter>
   </defs>
 
-  <!-- 메인 은은한 딥 배경 -->
-  <rect x="6" y="6" width="108" height="108" rx="28" fill="url(#holoDarkSpace)" stroke="#1e293b" stroke-width="2"/>
+  <!-- 방패 밖 은은한 글로우 -->
+  <circle cx="60" cy="60" r="54" fill="#0284c7" opacity="0.18" filter="url(#blueShieldGlow)"/>
 
-  <!-- 홀로그램 아우라 빛 반사 (중앙) -->
-  <circle cx="60" cy="60" r="42" fill="url(#pureHolo)" opacity="0.12" filter="url(#pureHoloGlow)"/>
+  <!-- 바이킹 왕 방패 본체 (A안 구조 유지) -->
+  <circle cx="60" cy="60" r="50" fill="url(#vikingShieldBg)" stroke="url(#shieldSilver)" stroke-width="3"/>
 
-  <!-- 심플 테크 홀로그램 투명 링 (스캔 테두리) -->
-  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#pureHolo)" stroke-width="1.8" opacity="0.8" stroke-dasharray="45 15 20 10"/>
-  <circle cx="60" cy="60" r="41" fill="none" stroke="#38bdf8" stroke-width="0.8" stroke-dasharray="4 4" opacity="0.5"/>
+  <!-- 방패 내부 은은한 파란 홀로그램 링 -->
+  <circle cx="60" cy="60" r="44" fill="none" stroke="url(#shieldNeonBlue)" stroke-width="1.8" stroke-dasharray="6 3.5" opacity="0.8"/>
+  <circle cx="60" cy="60" r="41" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.4"/>
 
-  <!-- SF 미니멀 홀로그램 타겟 십자선 (Minimal Holo Reticle) -->
-  <line x1="60" y1="10" x2="60" y2="16" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
-  <line x1="60" y1="104" x2="60" y2="110" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
-  <line x1="10" y1="60" x2="16" y2="60" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
-  <line x1="104" y1="60" x2="110" y2="60" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
+  <!-- 방패 4방향 실버/블루 스터드 -->
+  <circle cx="60" cy="14" r="2.5" fill="#38bdf8"/>
+  <circle cx="60" cy="106" r="2.5" fill="#38bdf8"/>
+  <circle cx="14" cy="60" r="2.5" fill="#38bdf8"/>
+  <circle cx="106" cy="60" r="2.5" fill="#38bdf8"/>
 
-  <!-- 메인 하랄드 블루투스 홀로그램 룬 심볼 (ᚼ + ᛒ) - 완벽한 미니멀리즘 -->
+  <!-- 메인 하랄드 블루투스 룬 (ᚼ + ᛒ Bindrune) - 방패 중앙에 정중앙 배치 -->
   <!-- 중앙 기둥 -->
-  <path d="M 60 28 L 60 92" stroke="url(#pureHolo)" stroke-width="6" stroke-linecap="round" filter="url(#pureHoloGlow)"/>
-  <!-- B 룬 (Bjarkan) -->
-  <path d="M 60 28 L 76 44 L 60 60 L 76 76 L 60 92" stroke="url(#pureHolo)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#pureHoloGlow)"/>
-  <!-- H 룬 (Hagall) -->
-  <path d="M 60 44 L 44 60 M 60 76 L 44 60" stroke="url(#pureHolo)" stroke-width="6" stroke-linecap="round" filter="url(#pureHoloGlow)"/>
+  <path d="M 60 26 L 60 94" stroke="url(#shieldNeonBlue)" stroke-width="6" stroke-linecap="round" filter="url(#blueShieldGlow)"/>
+  <!-- B 룬 (Bjarkan) 가지 -->
+  <path d="M 60 26 L 77 43 L 60 60 L 77 77 L 60 94" stroke="url(#shieldNeonBlue)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#blueShieldGlow)"/>
+  <!-- H 룬 (Hagall) 대각선 -->
+  <path d="M 60 43 L 43 60 M 60 77 L 43 60" stroke="url(#shieldNeonBlue)" stroke-width="6" stroke-linecap="round" filter="url(#blueShieldGlow)"/>
 
-  <!-- 미래형 3D 홀로그램 스캔 포인트 코너 dot -->
-  <circle cx="28" cy="28" r="2" fill="#38bdf8" opacity="0.7"/>
-  <circle cx="92" cy="28" r="2" fill="#c084fc" opacity="0.7"/>
-  <circle cx="28" cy="92" r="2" fill="#c084fc" opacity="0.7"/>
-  <circle cx="92" cy="92" r="2" fill="#38bdf8" opacity="0.7"/>
+  <!-- 반짝이는 사이버 별빛 포인트 -->
+  <circle cx="28" cy="28" r="1.5" fill="#38bdf8"/>
+  <circle cx="92" cy="92" r="1.5" fill="#38bdf8"/>
 </svg>

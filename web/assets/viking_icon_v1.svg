@@ -1,19 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
   <defs>
-    <radialGradient id="holoDarkSpaceV1" cx="50%" cy="50%" r="70%">
-      <stop offset="0%" stop-color="#0f172a"/>
-      <stop offset="70%" stop-color="#070a14"/>
-      <stop offset="100%" stop-color="#020408"/>
+    <radialGradient id="vikingShieldBgV1" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="60%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#030712"/>
     </radialGradient>
-    <linearGradient id="pureHoloV1" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="shieldNeonBlueV1" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="45%" stop-color="#818cf8"/>
-      <stop offset="80%" stop-color="#c084fc"/>
-      <stop offset="100%" stop-color="#22d3ee"/>
+      <stop offset="50%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#2563eb"/>
     </linearGradient>
-    <filter id="pureHoloGlowV1" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="3.5" result="blur1"/>
-      <feGaussianBlur stdDeviation="1" result="blur2"/>
+    <linearGradient id="shieldSilverV1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="50%" stop-color="#94a3b8"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+    <filter id="blueShieldGlowV1" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur1"/>
+      <feGaussianBlur stdDeviation="1.5" result="blur2"/>
       <feMerge>
         <feMergeNode in="blur1"/>
         <feMergeNode in="blur2"/>
@@ -22,15 +26,16 @@
     </filter>
   </defs>
 
-  <rect x="6" y="6" width="108" height="108" rx="28" fill="url(#holoDarkSpaceV1)" stroke="#1e293b" stroke-width="2"/>
-  <circle cx="60" cy="60" r="42" fill="url(#pureHoloV1)" opacity="0.12" filter="url(#pureHoloGlowV1)"/>
-  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#pureHoloV1)" stroke-width="1.8" opacity="0.8" stroke-dasharray="45 15 20 10"/>
-  <circle cx="60" cy="60" r="41" fill="none" stroke="#38bdf8" stroke-width="0.8" stroke-dasharray="4 4" opacity="0.5"/>
+  <circle cx="60" cy="60" r="54" fill="#0284c7" opacity="0.18" filter="url(#blueShieldGlowV1)"/>
+  <circle cx="60" cy="60" r="50" fill="url(#vikingShieldBgV1)" stroke="url(#shieldSilverV1)" stroke-width="3"/>
+  <circle cx="60" cy="60" r="44" fill="none" stroke="url(#shieldNeonBlueV1)" stroke-width="1.8" stroke-dasharray="6 3.5" opacity="0.8"/>
 
-  <line x1="60" y1="10" x2="60" y2="16" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
-  <line x1="60" y1="104" x2="60" y2="110" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
+  <circle cx="60" cy="14" r="2.5" fill="#38bdf8"/>
+  <circle cx="60" cy="106" r="2.5" fill="#38bdf8"/>
+  <circle cx="14" cy="60" r="2.5" fill="#38bdf8"/>
+  <circle cx="106" cy="60" r="2.5" fill="#38bdf8"/>
 
-  <path d="M 60 28 L 60 92" stroke="url(#pureHoloV1)" stroke-width="6" stroke-linecap="round" filter="url(#pureHoloGlowV1)"/>
-  <path d="M 60 28 L 76 44 L 60 60 L 76 76 L 60 92" stroke="url(#pureHoloV1)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#pureHoloGlowV1)"/>
-  <path d="M 60 44 L 44 60 M 60 76 L 44 60" stroke="url(#pureHoloV1)" stroke-width="6" stroke-linecap="round" filter="url(#pureHoloGlowV1)"/>
+  <path d="M 60 26 L 60 94" stroke="url(#shieldNeonBlueV1)" stroke-width="6" stroke-linecap="round" filter="url(#blueShieldGlowV1)"/>
+  <path d="M 60 26 L 77 43 L 60 60 L 77 77 L 60 94" stroke="url(#shieldNeonBlueV1)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#blueShieldGlowV1)"/>
+  <path d="M 60 43 L 43 60 M 60 77 L 43 60" stroke="url(#shieldNeonBlueV1)" stroke-width="6" stroke-linecap="round" filter="url(#blueShieldGlowV1)"/>
 </svg>
