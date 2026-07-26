@@ -2,9 +2,9 @@
 <!--
   FILE: web/crypto-coin/index.html
   DESCRIPTION: 파란이발(btsky) CipherTrader Crypto (코인 AI 자동매매 시스템).
-    전체 설치버전 v22.6.3 (CipherTrader_Setup_v22.6.3.exe) 명시 + 패치버전 실시간 릴리즈 + 소스 보안 게이트.
+    전체 설치버전 v22.6.3 (CipherTrader_Setup_v22.6.3.exe + .bin 1~4) 독립 관리 + 패치본 이원화 + 소스 보안 게이트.
   REVISION HISTORY:
-    - 2026-07-26 Gemini: 최신 전체 설치버전 CipherTrader_Setup_v22.6.3.exe 명시 및 버전 표기 정비.
+    - 2026-07-26 Gemini: 전체 설치본 v22.6.3 (Setup.exe + .bin 1~4) 독립 태그 분리 파싱 및 패치 릴리즈 이원화 관리 적용.
 -->
 <html lang="ko">
 <head>
@@ -16,7 +16,7 @@
 <meta property="og:site_name" content="파란이발 (btsky)">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:title" content="CipherTrader Crypto v22.6.3 — 코인 AI 자동매매 | 파란이발">
-<meta property="og:description" content="파란이발의 업비트·바이낸스 암호화폐 실시간 시세 + 시계열 AI + 수익률 자동 트레이딩 시스템 (v22.6.3).">
+<meta property="og:description" content="파란이발의 업비트·바이낸스 암호화폐 실시간 시세 + 시계열 AI + 수익률 자동 트레이딩 시스템 (v22.6.3 전체 설치본).">
 <link rel="stylesheet" href="../style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="../auth.js"></script>
@@ -38,22 +38,22 @@
     <p class="lead">업비트(Upbit), 바이낸스(Binance) 24시간 실시간 체결 데이터를 수집하고,
       시계열 AI 모델과 변동성 돌파 전략을 통합하여 자율 매매 및 텔레그램 수익률 알림을 구동합니다.</p>
     
-    <!-- 전체 설치버전 v22.6.3 vs 패치버전 분리 다운로드 버튼 -->
+    <!-- 전체 설치버전 v22.6.3 vs 패치버전 독립 다운로드 버튼 -->
     <div class="cta">
       <button class="btn dl" id="fullDlBtn" type="button">
-        <span>🪟 전체 설치버전 (v22.6.3)</span>
-        <small id="fullSz">CipherTrader_Setup_v22.6.3.exe</small>
+        <span>🪟 전체 설치버전 (v22.6.3 풀 패키지)</span>
+        <small id="fullSz">CipherTrader_Setup_v22.6.3.exe + .bin 1~4</small>
       </button>
       <button class="btn line" id="patchDlBtn" type="button">
         <span>⚡ 패치 / 업데이트 패키지</span>
-        <small id="patchSz">최신 Patch Package (.zip)</small>
+        <small id="patchSz">최신 Patch Channel (.zip / -bin)</small>
       </button>
       <a class="btn line admin-only-source" data-src-url="https://github.com/btsky99/crypto-bot">
         <span>🔒 소스코드 (관리자 전용)</span>
       </a>
     </div>
     <div class="verbadge" id="verInfo">
-      🚀 최신 전체 설치버전 <b>v22.6.3</b> (CipherTrader_Setup_v22.6.3.exe) 연결 완료
+      🚀 전체 설치버전 <b>v22.6.3</b> (CipherTrader_Setup_v22.6.3.exe + .bin 1~4 포함) 연결 완료
     </div>
   </header>
 
@@ -85,14 +85,14 @@
   </section>
 
   <section class="note">
-    📦 <b>전체 설치버전 및 패치 파일 상세</b><br>
-    • <b>전체 설치버전 (CipherTrader_Setup_v22.6.3.exe)</b>: 최초 설치자를 위한 v22.6.3 풀 인스톨러 패키지<br>
-    • <b>패치/업데이트 (.zip)</b>: 기존 설치 사용자를 위한 모듈 전용 패키지<br>
+    📦 <b>전체 설치버전 및 패치 파일 독립 구조 안내</b><br>
+    • <b>전체 설치버전 (CipherTrader_Setup_v22.6.3.exe + .bin 1~4)</b>: 최초 설치자를 위한 7.7GB 풀 인스톨러 패키지 (패치 업데이트에 무관하게 v22.6.3 독립 유지)<br>
+    • <b>패치/업데이트 (.zip)</b>: 패치 채널을 통해 최신 휠 및 바이너리를 받는 업데이트 패키지<br>
     • <b>소스코드</b>: <code>btsky99/crypto-bot</code> 원본 소스는 파란이발 관리자(btsky99) 전용으로 통제됩니다.
   </section>
 
   <footer>
-    <div>파란이발 · <a href="https://github.com/btsky99/crypto-bot-releases" target="_blank" rel="noopener">btsky99 Releases</a></div>
+    <div>파란이발 · <a href="https://github.com/btsky99/crypto-bot-releases/releases/tag/v22.6.3" target="_blank" rel="noopener">CipherTrader v22.6.3 전체 설치 릴리즈</a></div>
     <div style="margin-top:8px"><a href="../">← 파란이발 허브 메인으로</a></div>
   </footer>
 
@@ -104,7 +104,7 @@ window.addEventListener('DOMContentLoaded', () => {
     'fullDlBtn',
     'patchDlBtn',
     'verInfo',
-    'https://github.com/btsky99/crypto-bot-releases/releases',
+    'https://github.com/btsky99/crypto-bot-releases/releases/tag/v22.6.3',
     'https://github.com/btsky99/crypto-bot-releases/releases'
   );
 });

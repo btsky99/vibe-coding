@@ -1,10 +1,10 @@
 /*
   FILE: web/site.js
   DESCRIPTION: 파란이발(btsky) 공용 사이트 스크립트 — 소셜 로그인 모달,
-    관리자 전용 소스코드 보안 게이트, 전체 설치본 vs 패치본 릴리즈 자동 갱신 및 안전 폴백 다운로드.
+    관리자 전용 소스코드 보안 게이트, 전체 설치 전용 릴리즈(v22.6.3 .exe+.bin) & 패치 릴리즈 독립 이원화 파서.
   REVISION HISTORY:
     - 2026-07-22 Claude: 멀티 프로덕트 허브 내비/모달 공용화.
-    - 2026-07-26 Gemini: 릴리즈 API 실패 및 비공개 레포 다운로드 안전 폴백(Fallback) 보장.
+    - 2026-07-26 Gemini: 전체 설치 전용 태그(v22.6.3) 고정 유지 및 패치 릴리즈 독립 이원화 파싱 지원.
 */
 (function () {
   const BASE = window.SITE_BASE || './';
@@ -153,11 +153,16 @@
     item.classList.toggle('open');
   }
 
-  // ── GitHub Releases 파서 (안전한 기본 다운로드 바인딩 포함) ──
+  // ── GitHub Releases 파서 (전체 설치 전용 v22.6.3 vs 패치 이원화 관리) ──
   function parseReleases(repo, fullElId, patchElId, verElId, fallbackFullUrl, fallbackPatchUrl) {
     const fmt = b => { if (!b) return ''; const mb = b / 1048576; return mb >= 1 ? mb.toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB'; };
-    const defaultFull = fallbackFullUrl || `https://github.com/${repo}/releases/latest`;
-    const defaultPatch = fallbackPatchUrl || defaultFull;
+    
+    // 기본 전체 설치 전용 태그 URL (패치 업데이트에 무관하게 항상 v22.6.3 설치본 지목)
+    const defaultFull = fallbackFullUrl || (repo.includes('crypto') 
+      ? 'https://github.com/btsky99/crypto-bot-releases/releases/tag/v22.6.3' 
+      : `https://github.com/${repo}/releases/latest`);
+      
+    const defaultPatch = fallbackPatchUrl || `https://github.com/${repo}/releases`;
 
     const fullEl = document.getElementById(fullElId);
     if (fullEl) {
@@ -168,43 +173,48 @@
       patchEl.onclick = () => gateDownload(defaultPatch);
     }
 
-    fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
-      .then(r => { if (!r.ok) throw 0; return r.json(); })
-      .then(rel => {
-        if (verElId) {
-          const vEl = document.getElementById(verElId);
-          if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${rel.tag_name || 'v1.0.0'}</b> (실시간 연결됨)`;
-        }
-        const assets = rel.assets || [];
-        const fullAsset = assets.find(x => /setup|installer|full|\.exe$/i.test(x.name)) || assets[0];
-        const patchAsset = assets.find(x => /patch|update|\.zip$/i.test(x.name)) || (assets.length > 1 ? assets[1] : null);
-
-        if (fullEl && fullAsset) {
-          fullEl.onclick = () => gateDownload(fullAsset.browser_download_url);
-          const szEl = fullEl.querySelector('small');
-          if (szEl) szEl.textContent = `전체 설치 (.exe) · ${fmt(fullAsset.size)}`;
-        }
-
-        if (patchEl && patchAsset) {
-          patchEl.onclick = () => gateDownload(patchAsset.browser_download_url);
-          const szEl = patchEl.querySelector('small');
-          if (szEl) szEl.textContent = `패치 파일 (.zip) · ${fmt(patchAsset.size)}`;
-        }
-      })
-      .catch(() => {
-        if (verElId) {
-          const vEl = document.getElementById(verElId);
-          if (vEl) vEl.innerHTML = `최신 버전 <b>v1.0.0</b> (다운로드 게이트 연결 완료)`;
-        }
-        if (fullEl) {
-          const szEl = fullEl.querySelector('small');
-          if (szEl) szEl.textContent = `전체 설치 (.exe) · 최신버전`;
-        }
-        if (patchEl) {
-          const szEl = patchEl.querySelector('small');
-          if (szEl) szEl.textContent = `패치/업데이트 (.zip)`;
-        }
-      });
+    // 전체 설치버전은 v22.6.3 고정 파싱 시도
+    if (repo.includes('crypto')) {
+      fetch(`https://api.github.com/repos/btsky99/crypto-bot-releases/releases/tags/v22.6.3`, { headers: { 'Accept': 'application/vnd.github+json' } })
+        .then(r => { if (!r.ok) throw 0; return r.json(); })
+        .then(rel => {
+          if (verElId) {
+            const vEl = document.getElementById(verElId);
+            if (vEl) vEl.innerHTML = `전체 설치버전 <b>v22.6.3</b> (CipherTrader_Setup_v22.6.3.exe + .bin 1~4) & 패치채널 독립 관리`;
+          }
+          const assets = rel.assets || [];
+          const setupExe = assets.find(x => /CipherTrader_Setup.*\.exe$/i.test(x.name)) || assets[0];
+          if (fullEl && setupExe) {
+            fullEl.onclick = () => gateDownload(setupExe.browser_download_url);
+            const szEl = fullEl.querySelector('small');
+            if (szEl) szEl.textContent = `CipherTrader_Setup_v22.6.3.exe (${fmt(setupExe.size)})`;
+          }
+        })
+        .catch(() => {
+          if (verElId) {
+            const vEl = document.getElementById(verElId);
+            if (vEl) vEl.innerHTML = `전체 설치버전 <b>v22.6.3</b> (CipherTrader_Setup_v22.6.3.exe + .bin 1~4)`;
+          }
+        });
+    } else {
+      // 바이브 코딩 등 일반 레포지토리 파싱
+      fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { 'Accept': 'application/vnd.github+json' } })
+        .then(r => { if (!r.ok) throw 0; return r.json(); })
+        .then(rel => {
+          if (verElId) {
+            const vEl = document.getElementById(verElId);
+            if (vEl) vEl.innerHTML = `현재 최신 버전 <b>${rel.tag_name || 'v1.0.0'}</b> (실시간 자동 갱신)`;
+          }
+          const assets = rel.assets || [];
+          const fullAsset = assets.find(x => /setup|installer|full|\.exe$/i.test(x.name)) || assets[0];
+          if (fullEl && fullAsset) {
+            fullEl.onclick = () => gateDownload(fullAsset.browser_download_url);
+            const szEl = fullEl.querySelector('small');
+            if (szEl) szEl.textContent = `전체 설치 (.exe) · ${fmt(fullAsset.size)}`;
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   window.Site = { openLogin, promptGithub, closeLogin, logout, renderNav, gateDownload, isLoggedIn, toggleFaq, parseReleases };
