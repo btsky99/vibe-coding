@@ -1,28 +1,27 @@
 <!DOCTYPE html>
 <!--
   FILE: web/index.html
-  DESCRIPTION: btsky.pe.kr 허브(메인) — 여러 제품(바이브 코딩/OnS/CipherTrader)으로
-    가는 관문. 제품 카드 그리드 + 하이브 생태계 비주얼 맵 + FAQ + 역할별 로그인 내비.
-    공용: style.css(디자인 시스템), auth.js(인증), site.js(내비+모달+FAQ).
+  DESCRIPTION: 파란이발(btsky) 제품 & AI 생태계 허브.
+    바이브 코딩, OnS, CipherTrader 상세 소개 + 구글/깃허브 소셜 로그인 + 파란이발 브랜드.
   REVISION HISTORY:
-    - 2026-07-22 Claude: 단일 랜딩 → 멀티 프로덕트 허브로 개편.
-    - 2026-07-26 Gemini: 차세대 허브 전면 리뉴얼 — 생태계 비주얼 맵, FAQ, 프리미엄 UI 쇄신.
+    - 2026-07-22 Claude: 단일 랜딩 → 멀티 프로덕트 허브 개편.
+    - 2026-07-26 Gemini: 파란이발 닉네임 적용, 상세 설명 보강, 구글/깃허브 소셜 가입 지원.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>btsky — 제품 & AI 생태계 허브</title>
-<!-- 소셜 공유 미리보기 카드용 메타태그 (카톡/트위터/디스코드). 이모지 SVG favicon(외부 이미지 미사용). -->
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+<title>파란이발 (btsky) — 제품 & AI 소프트웨어 허브</title>
+<!-- 소셜 공유 미리보기 카드용 메타태그 (카톡/트위터/디스코드). 이모지 SVG favicon. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💈</text></svg>">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="btsky">
+<meta property="og:site_name" content="파란이발 (btsky)">
 <meta property="og:locale" content="ko_KR">
-<meta property="og:title" content="btsky — 제품 & AI 생태계 허브">
-<meta property="og:description" content="개발 생산성부터 현장 자동화, AI 트레이딩까지 — btsky가 만드는 도구들을 다운로드하고 하나의 하이브 생태계로 연결하세요.">
+<meta property="og:title" content="파란이발 (btsky) — 제품 & AI 소프트웨어 허브">
+<meta property="og:description" content="파란이발(btsky)이 직접 개발하고 검증하는 소프트웨어 솔루션 — AI 멀티 에이전트 개발 대시보드, 출장 스케줄 자동화, AI 주식 자동매매.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="btsky — 제품 & AI 생태계 허브">
-<meta name="twitter:description" content="개발 생산성부터 현장 자동화, AI 트레이딩까지 — btsky가 만드는 도구들을 다운로드하고 하나의 하이브 생태계로 연결하세요.">
+<meta name="twitter:title" content="파란이발 (btsky) — 제품 & AI 소프트웨어 허브">
+<meta name="twitter:description" content="파란이발(btsky)이 직접 개발하고 검증하는 소프트웨어 솔루션 — AI 멀티 에이전트 개발 대시보드, 출장 스케줄 자동화, AI 주식 자동매매.">
 <link rel="stylesheet" href="./style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
@@ -32,147 +31,129 @@
 <body>
   <nav>
     <a class="brand" href="./">
-      <span class="brand-icon">🧩</span> btsky
+      <span class="brand-icon">💈</span> 파란이발
     </a>
     <div class="nav-r" id="navR"></div>
   </nav>
 
   <header class="hero">
-    <div class="logo">🧩</div>
-    <h1>btsky 제품 & AI 생태계</h1>
-    <div class="tag">직접 만들고 검증하는 혁신 도구들, 한곳에서</div>
-    <p class="lead">개발 생산성을 혁신하는 AI 멀티 에이전트 대시보드부터 현장 업무 자동화,
-      시계열 AI 자동매매 시스템까지 — btsky의 독자적인 소프트웨어 솔루션을 만나보세요.</p>
+    <div class="logo">💈</div>
+    <h1>파란이발 (btsky) 소프트웨어 허브</h1>
+    <div class="tag">개발 생산성부터 현장 자동화, AI 퀀트 트레이딩까지</div>
+    <p class="lead">반복적인 작업을 줄이고, 복잡한 업무를 AI와 자동화 도구로 스마트하게 해결합니다.
+      파란이발이 직접 제작하고 현장에서 검증한 3가지 핵심 소프트웨어를 자유롭게 이용해 보세요.</p>
     <div class="cta">
       <a class="btn dl" href="./vibe-coding/">
-        <span>🌊 바이브 코딩 다운로드</span>
-        <small>v4.2 최신 릴리즈</small>
+        <span>🌊 바이브 코딩 바로가기</span>
+        <small>최신 배포판 다운로드</small>
       </a>
-      <a class="btn line" href="#ecosystem">생태계 구조 보기 ↓</a>
+      <button class="btn line" onclick="Site.openLogin()">
+        <span>🔑 구글 / GitHub 로그인</span>
+      </button>
     </div>
     <div class="verbadge">
-      ⚡ PostgreSQL 기반 하이브 마인드 & AI 파이프라인 연동 중
+      ⚡ 관리자 계정(btsky99) 로그인 시 '👑 관리자' 권한이 자동 부여됩니다
     </div>
   </header>
 
   <!-- 프로덕트 카드 그리드 -->
   <section class="sec" id="products">
-    <h2>제품 라인업</h2>
-    <p class="sub">필요한 솔루션을 선택하여 지금 바로 사용해보세요.</p>
+    <h2>파란이발 제품 라인업</h2>
+    <p class="sub">각 분야의 필요에 맞춰 정밀하게 설계된 솔루션을 확인해보세요.</p>
     <div class="grid">
 
       <a class="card-lg" href="./vibe-coding/">
         <div class="ic">🌊</div>
         <h3>바이브 코딩 <span class="chip ready">배포중</span></h3>
-        <p>AI 멀티 에이전트가 한 팀처럼 협업하는 하이브 마인드 개발 대시보드.
-          반복 오류를 스스로 학습해 재발을 막는 Windows·macOS 데스크톱 플랫폼.</p>
-        <div class="go">다운로드 · 자세히 보기 →</div>
+        <p><b>AI 멀티 에이전트 하이브 마인드 개발 대시보드</b><br>
+          Claude, Antigravity, Codex 등의 AI 에이전트들이 팀을 이루어 코딩, 테스트, 리팩토링을 수행합니다.
+          동일한 오류가 발생하면 원인을 자동 학습하는 <b>자가 치유 2.0</b> 엔진이 탑재된 데스크톱 앱입니다.</p>
+        <div class="go">다운로드 & 상세 가이드 →</div>
       </a>
 
       <a class="card-lg" href="./ons/">
         <div class="ic">📅</div>
         <h3>OnS <span class="chip ready">배포중</span></h3>
-        <p>출장·장착 업무를 자동화하는 엔터프라이즈 스케줄 관리 플랫폼.
-          오프라인 우선(IndexedDB+Firebase) 설계와 경로 최적화로 현장에서 끊김 없이 지원.</p>
-        <div class="go">웹 앱 열기 · 자세히 보기 →</div>
+        <p><b>출장·장착 엔터프라이즈 스케줄 관리 플랫폼</b><br>
+          현장 작업자의 방문 순서와 동선을 스마트하게 배정하고 최적화합니다.
+          <b>오프라인 우선(IndexedDB+Firebase)</b> 구조로 지하 주차장이나 인터넷이 안 되는 환경에서도 데이터가 유지됩니다.</p>
+        <div class="go">웹 앱 바로 열기 →</div>
       </a>
 
       <a class="card-lg" href="./crypto/">
         <div class="ic">📈</div>
         <h3>CipherTrader <span class="chip soon">준비중</span></h3>
-        <p>한국 주식(KOSPI/KOSDAQ) AI 자동매매 시스템. KIS OpenAPI + 시계열 AI 모델 +
-          뉴스·공시 감성 분석으로 정밀한 매매 신호를 생성하는 데스크톱 트레이더.</p>
-        <div class="go">사전 프리뷰 보기 →</div>
+        <p><b>한국 주식(KOSPI/KOSDAQ) AI 자동매매 시스템</b><br>
+          한국투자증권(KIS) OpenAPI 실시간 체결가 수집 + 딥러닝 시계열 예측 + 실시간 뉴스·공시 감성 분석을 결합하여
+          정확한 매수/매도 신호를 생성하는 트레이더 앱입니다.</p>
+        <div class="go">AI 파이프라인 미리보기 →</div>
       </a>
 
     </div>
   </section>
 
-  <!-- 하이브 생태계 시각 비주얼 맵 -->
+  <!-- 파란이발 하이브 생태계 상세 설명 -->
   <section class="sec" id="ecosystem">
-    <h2>btsky 하이브 생태계</h2>
-    <p class="sub">모든 데이터와 에이전트 지식은 안전하게 연결되고 축적됩니다.</p>
+    <h2>파란이발 하이브 생태계란?</h2>
+    <p class="sub">모든 데이터와 AI 지식은 파란이발의 단일 플랫폼에서 통제되고 연결됩니다.</p>
     <div class="eco-box">
       <div class="eco-grid">
         <div class="eco-node">
           <div class="icon">🤖</div>
-          <h4>AI 멀티 에이전트</h4>
-          <p>Claude · Antigravity · Codex가 태스크를 분담 및 자동 실행</p>
+          <h4>AI 에이전트 오케스트레이션</h4>
+          <p>독자 개발한 ITCP 통신 체계로 에이전트 간 업무 전달 및 실시간 의견 조율</p>
         </div>
         <div class="eco-node">
           <div class="icon">🧠</div>
-          <h4>PostgreSQL 18 지식 베이스</h4>
-          <p>하이브 메모리 & 제ettelkasten 노트로 지식의 장기 영속성 유지</p>
+          <h4>PostgreSQL 18 공유 지식</h4>
+          <p>pgvector 기반 지식 검색과 제텔카스텐 노트를 통해 개발 및 운영 지식 영속화</p>
         </div>
         <div class="eco-node">
-          <div class="icon">📊</div>
-          <h4>현장 & 금융 파이프라인</h4>
-          <p>OnS 스케줄링 데이터 및 CipherTrader 실시간 매매 신호 통합</p>
+          <div class="icon">🛡️</div>
+          <h4>자가 치유 & 자동 보정</h4>
+          <p>명령어 실패 및 빌드 오류 시 시그니처 분석을 통해 재발 방지 가이드 자동 주입</p>
         </div>
         <div class="eco-center">
-          ⚡ 단일 지식 기반(Hive Mind)으로 모든 서비스의 상호 작용 및 자가 치유(Self-Healing) 보장
+          💈 파란이발(btsky) 솔루션은 높은 안전성과 연속성을 보장합니다.
         </div>
       </div>
     </div>
   </section>
 
-  <!-- 핵심 가치 (Why btsky) -->
-  <section class="sec">
-    <h2>btsky가 추구하는 가치</h2>
-    <p class="sub">단순한 도구를 넘어 작업 방식의 패러다임을 바꿉니다.</p>
-    <div class="grid">
-      <div class="feat">
-        <div class="ic">⚡</div>
-        <h3>압도적 생산성</h3>
-        <p>반복적인 작업과 부수적인 관리 비용을 AI 자동화와 오케스트레이션으로 극소화합니다.</p>
-      </div>
-      <div class="feat">
-        <div class="ic">🛡️</div>
-        <h3>자가 치유 & 검증</h3>
-        <p>오류가 발생하면 원인을 자동 분석·학습하여 동일한 실수가 재발하지 않도록 방지합니다.</p>
-      </div>
-      <div class="feat">
-        <div class="ic">📶</div>
-        <h3>오프라인 우선 (Offline-First)</h3>
-        <p>인터넷 연결이 불안정한 환경에서도 핵심 작업과 상태 유지가 중단 없이 수행됩니다.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- 자주 묻는 질문 (FAQ) -->
+  <!-- 상세 자주 묻는 질문 (FAQ) -->
   <section class="sec" id="faq">
     <h2>자주 묻는 질문</h2>
-    <p class="sub">btsky 서비스 사용 및 배포에 관한 주요 답변입니다.</p>
+    <p class="sub">파란이발 서비스 가입, 관리자 로그인, 이용 안내입니다.</p>
     <div class="faq-list">
       <div class="faq-item">
-        <div class="faq-q" onclick="Site.toggleFaq(this)">btsky 제품들은 누구나 다운로드하여 사용할 수 있나요?</div>
-        <div class="faq-a">네, btsky 허브에 가입 및 로그인하신 후 제공되는 다운로드 게이트를 통해 최신 릴리즈 버전을 자유롭게 다운로드하실 수 있습니다.</div>
+        <div class="faq-q" onclick="Site.toggleFaq(this)">구글 또는 GitHub 소셜 로그인으로 가입할 수 있나요?</div>
+        <div class="faq-a">네, 우측 상단의 '로그인/시작하기' 버튼을 누르시면 Google 계정 또는 GitHub 계정 클릭 한 번으로 즉시 소셜 가입 및 로그인이 가능합니다.</div>
       </div>
       <div class="faq-item">
-        <div class="faq-q" onclick="Site.toggleFaq(this)">바이브 코딩(vibe-coding)의 자가 치유(Self-Healing)는 어떻게 작동하나요?</div>
-        <div class="faq-a">개발 및 명령어 실행 도중 발생한 에러 시그니처를 PostgreSQL 18 기반 지식 베이스에 수집하고, 다음 작업 시 유사한 상황을 감지하여 보정 힌트와 자동 회피 조치를 주입합니다.</div>
+        <div class="faq-q" onclick="Site.toggleFaq(this)">관리자 계정(btsky99) 권한은 어떻게 받나요?</div>
+        <div class="faq-a">관리자 아이디인 <b>btsky99</b> 또는 해당 구글/GitHub 이메일 계정으로 로그인하시면 시스템이 자동으로 인식하여 <b>'👑 파란이발 관리자'</b> 권한을 부여합니다.</div>
       </div>
       <div class="faq-item">
-        <div class="faq-q" onclick="Site.toggleFaq(this)">OnS 웹 앱은 모바일에서도 이용 가능한가요?</div>
-        <div class="faq-a">네, OnS는 반응형 웹 디자인뿐만 아니라 PWA 및 Capacitor 모바일 앱 설치 형태를 완벽히 지원하여 현장에서 편리하게 사용하실 수 있습니다.</div>
+        <div class="faq-q" onclick="Site.toggleFaq(this)">바이브 코딩 및 OnS는 어디서 이용할 수 있나요?</div>
+        <div class="faq-a">바이브 코딩은 Windows 설치형 데스크톱 앱으로 다운로드하실 수 있으며, OnS는 웹 브라우저 및 모바일 앱으로 즉시 사용하실 수 있습니다.</div>
       </div>
     </div>
   </section>
 
-  <!-- 하단 시작 밴드 -->
+  <!-- 하단 밴드 -->
   <section class="band">
-    <h2>지금 btsky 도구들과 함께하세요</h2>
-    <p>로그인 후 포털에서 관리 권한 및 최신 소프트웨어를 즉시 확인하실 수 있습니다.</p>
+    <h2>지금 파란이발 도구들을 만나보세요</h2>
+    <p>구글 및 GitHub 소셜 로그인으로 간편하게 시작하고 전용 다운로드 게이트를 이용하세요.</p>
     <div class="cta">
       <button class="btn dl" onclick="Site.openLogin()">
-        <span>🚀 포털 로그인 / 시작하기</span>
+        <span>🔑 소셜 계정으로 시작하기</span>
       </button>
     </div>
   </section>
 
   <footer>
-    <div>© 2026 btsky · <a href="https://github.com/btsky99" target="_blank" rel="noopener">GitHub</a></div>
-    <div style="margin-top:8px">문의 및 권한 관리는 로그인 후 <a href="./portal/">사용자 관리 포털</a>에서 이용하세요.</div>
+    <div>© 2026 파란이발 (btsky) · <a href="https://github.com/btsky99" target="_blank" rel="noopener">GitHub (btsky99)</a></div>
+    <div style="margin-top:8px">문의 및 권한 관리는 로그인 후 <a href="./portal/">사용자 포털</a>에서 가능합니다.</div>
   </footer>
 
 <script>

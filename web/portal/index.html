@@ -1,29 +1,26 @@
 <!DOCTYPE html>
 <!--
   FILE: web/portal/index.html
-  DESCRIPTION: btsky.pe.kr 관리 포털 — 사용자 관리(승인/권한) 전용 대시보드.
-    로그인은 랜딩(../ 로그인 모달)에서 처리, 여기는 세션 기반 화면만.
-    관리자=사용자 관리(승인 대기/승인/해제). 일반=승인 후 환영 화면(승인 전=대기).
-    메인 허브 공용 디자인 시스템(style.css) 토큰 및 Pretendard/Plus Jakarta Sans 폰트 100% 통합.
-    인증/데이터 로직은 공용 ../auth.js (window.App).
+  DESCRIPTION: 파란이발(btsky) 포털 — 계정 관리 및 사용자 승인 제어판.
+    btsky99 계정 및 관리자 이메일 로그인 시 '👑 파란이발 관리자' 승인 자동 활성화.
+    구글 / GitHub 소셜 로그인 계정 지원.
   REVISION HISTORY:
-    - 2026-07-22 Claude: 사용자 관리 전용으로 정리.
-    - 2026-07-26 Gemini: 차세대 디자인 시스템 통합 — 글래스모피즘, 관리자 UI/UX 쇄신.
+    - 2026-07-22 Claude: 사용자 관리 전용 구축.
+    - 2026-07-26 Gemini: 파란이발 브랜딩, 심플 프리미엄 UI, btsky99 관리자 권한 자동 연결 적용.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>btsky 포털 — 사용자 & 권한 관리</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👥</text></svg>">
+<title>파란이발 포털 — 계정 & 권한 관리</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💈</text></svg>">
 <link rel="stylesheet" href="../style.css">
 <script src="../auth.js"></script>
 <style>
   .proto-banner {
-    background: linear-gradient(90deg, rgba(245, 158, 11, 0.2), rgba(239, 68, 68, 0.2));
-    border-bottom: 1px solid rgba(245, 158, 11, 0.4);
-    color: var(--amber); text-align: center; font-size: 13px; font-weight: 600; padding: 8px 16px;
-    backdrop-filter: blur(8px);
+    background: linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(6, 182, 212, 0.2));
+    border-bottom: 1px solid rgba(37, 99, 235, 0.35);
+    color: var(--accent-light); text-align: center; font-size: 13.5px; font-weight: 600; padding: 9px 16px;
   }
   .center-layout {
     min-height: calc(100vh - 40px); display: flex; align-items: center; justify-content: center; padding: 32px 20px;
@@ -37,7 +34,6 @@
   .pend-ic { font-size: 56px; margin-bottom: 12px; display: inline-block; animation: floatSlow 4s infinite ease-in-out; }
   .pend-who { font-size: 16px; font-weight: 700; color: var(--accent-light); margin-bottom: 6px; }
   .pend-msg { color: var(--muted); font-size: 14px; line-height: 1.7; margin: 12px 0 26px; }
-  
   .btn-full { width: 100%; margin-top: 10px; }
 
   #app { display: none; }
@@ -48,27 +44,26 @@
   }
   .top-header .brand { font-weight: 800; font-size: 19px; display: flex; align-items: center; gap: 10px; }
   .role-badge { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; letter-spacing: 0.02em; }
-  .role-badge.admin { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.35); }
-  .role-badge.user { background: rgba(16, 185, 129, 0.15); color: var(--accent-light); border: 1px solid rgba(16, 185, 129, 0.35); }
+  .role-badge.admin { background: rgba(37, 99, 235, 0.2); color: var(--accent-light); border: 1px solid rgba(37, 99, 235, 0.4); }
+  .role-badge.user { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
   
   .top-right { display: flex; align-items: center; gap: 14px; font-size: 14px; color: var(--muted); }
   .avatar { width: 28px; height: 28px; border-radius: 50%; vertical-align: middle; border: 1px solid var(--line-bright); }
   
   .wrap-container { max-width: 860px; margin: 0 auto; padding: 36px 6vw; }
-  .greet-title { font-size: 24px; font-weight: 800; color: var(--fg-heading); margin-bottom: 6px; }
+  .greet-title { font-size: 25px; font-weight: 800; color: var(--fg-heading); margin-bottom: 6px; }
   .greet-sub { color: var(--muted); margin-bottom: 30px; font-size: 15px; }
   
   .panel-box {
     background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg);
     padding: 28px; backdrop-filter: blur(16px); box-shadow: var(--shadow);
   }
-  .panel-box.admin { border-color: rgba(245, 158, 11, 0.3); }
+  .panel-box.admin { border-color: rgba(37, 99, 235, 0.35); }
   .panel-box h3 { font-size: 18px; font-weight: 800; color: var(--fg-heading); margin-bottom: 18px; display: flex; align-items: center; gap: 10px; }
-  .panel-box h3 .cnt { font-weight: 700; font-size: 12px; color: var(--amber); background: rgba(245, 158, 11, 0.15); padding: 2px 10px; border-radius: 999px; }
+  .panel-box h3 .cnt { font-weight: 700; font-size: 12px; color: var(--accent-light); background: rgba(37, 99, 235, 0.15); padding: 2px 10px; border-radius: 999px; }
   
   .user-row {
     display: flex; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); font-size: 14px;
-    transition: background 0.15s;
   }
   .user-row:first-of-type { border-top: none; }
   .uava {
@@ -107,7 +102,7 @@
 </head>
 <body>
   <div class="proto-banner">
-    🧪 프로토타입 포털 — 세션 및 권한 상태는 localStorage 기반으로 구동됩니다. (Supabase 승격 준비 완료)
+    💈 파란이발 계정 제어판 — 관리자(btsky99) 로그인 시 관리 제어 기능이 활성화됩니다.
   </div>
 
   <!-- 승인 대기 화면 -->
@@ -116,7 +111,7 @@
       <div class="pend-ic">⏳</div>
       <h1>승인 대기 중</h1>
       <div class="pend-who" id="pendWho"></div>
-      <p class="pend-msg">계정이 정상 등록되었습니다.<br>관리자의 승인이 진행되면 포털 기능과 다운로드 권한이 즉시 부여됩니다.</p>
+      <p class="pend-msg">계정이 승인 대기 중입니다.<br>파란이발 관리자가 승인하면 즉시 소프트웨어 다운로드 권한이 부여됩니다.</p>
       <button class="btn line btn-full" onclick="refreshPending()">🔄 승인 상태 새로고침</button>
       <button class="btn dl btn-full" onclick="logout()">로그아웃</button>
     </div>
@@ -126,12 +121,12 @@
   <div id="app">
     <div class="top-header">
       <div class="brand">
-        <span class="brand-icon">👥</span> 사용자 관리 포털
+        <span class="brand-icon">💈</span> 파란이발 제어판
         <span class="role-badge" id="roleBadge"></span>
       </div>
       <div class="top-right">
         <span id="whoami"></span>
-        <a class="nlink" href="../">← 허브 메인</a>
+        <a class="nlink" href="../">← 파란이발 허브</a>
         <button class="nlink solid" onclick="logout()">로그아웃</button>
       </div>
     </div>
@@ -149,7 +144,8 @@ function hideAll(){ document.getElementById('pending').style.display='none'; doc
 
 function enter(sess){
   hideAll();
-  if (sess.role==='admin' || A.isApproved(sess.id)) renderApp(sess);
+  const isAdmin = sess.role==='admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
+  if (isAdmin || A.isApproved(sess.id)) renderApp(sess);
   else { A.addPending(sess); showPending(sess); }
 }
 
@@ -163,18 +159,22 @@ function logout(){ A.AUTH.logout(); location.href='../'; }
 
 function renderApp(sess){
   hideAll(); document.getElementById('app').style.display='block';
-  const isAdmin = sess.role==='admin';
-  const rb=document.getElementById('roleBadge'); rb.textContent=isAdmin?'👑 관리자':'✅ 승인된 사용자'; rb.className='role-badge '+(isAdmin?'admin':'user');
+  const isAdmin = sess.role==='admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
+  const rb=document.getElementById('roleBadge');
+  rb.textContent = isAdmin ? '👑 파란이발 관리자' : '✅ 승인된 회원';
+  rb.className = 'role-badge ' + (isAdmin ? 'admin' : 'user');
+  
   const av = sess.picture?`<img class="avatar" src="${sess.picture}" referrerpolicy="no-referrer"> `:'';
-  const gtag = sess.via==='google'?' <span class="utag">Google</span>':'';
-  document.getElementById('whoami').innerHTML = av+sess.name+' 님'+gtag;
-  document.getElementById('greet').textContent = sess.name+' 님, 환영합니다 👋';
-  document.getElementById('greetSub').textContent = isAdmin?'가입 신청 사용자를 검토하고 권한을 관리하세요.':'승인 완료된 계정입니다. 제품 다운로드 및 관리 서비스를 이용하실 수 있습니다.';
+  const viaTag = sess.via==='google'?' <span class="utag">Google</span>':(sess.via==='github'?' <span class="utag">GitHub</span>':'');
+  
+  document.getElementById('whoami').innerHTML = av + (isAdmin ? '<b>파란이발 (btsky99)님</b>' : sess.name) + viaTag;
+  document.getElementById('greet').textContent = (isAdmin ? '파란이발 (btsky99)' : sess.name) + ' 님, 안녕하세요! 👋';
+  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청 사용자를 승인하고 관리자 전용 제어판을 이용하세요.' : '승인 완료된 회원입니다. 파란이발의 소프트웨어 및 다운로드를 이용하실 수 있습니다.';
 
   if (isAdmin) renderAdminUsers();
   else document.getElementById('content').innerHTML =
-    `<div class="welcome-box"><div class="ic">🎉</div><h3>승인된 계정입니다</h3>
-      <p>btsky의 모든 솔루션과 다운로드 게이트를 이용하실 수 있습니다.</p></div>`;
+    `<div class="welcome-box"><div class="ic">🎉</div><h3>승인된 회원 계정입니다</h3>
+      <p>파란이발 바이브 코딩, OnS 및 모든 다운로드 게이트를 이용하실 수 있습니다.</p></div>`;
 }
 
 // 관리자 — 사용자 승인 대기 / 승인 목록 관리 UI
@@ -182,26 +182,27 @@ function renderAdminUsers(){
   const pend=A.getPending(), appr=A.getApproved();
   const av = u => u.picture ? `<span class="uava"><img src="${u.picture}" referrerpolicy="no-referrer"></span>`
     : `<span class="uava">${(u.name||'?').slice(0,1)}</span>`;
-  let html = `<div class="panel-box admin"><h3>👑 가입 사용자 권한 관리 <span class="cnt">대기 ${pend.length}명</span></h3>`;
-  html += `<div class="sub-h">승인 대기 요청 목록</div>`;
+  let html = `<div class="panel-box admin"><h3>👑 파란이발 회원 승인 제어판 <span class="cnt">신청 ${pend.length}명</span></h3>`;
+  html += `<div class="sub-h">승인 신청 목록</div>`;
   html += pend.length ? pend.map(u=>`
     <div class="user-row">${av(u)}<b>${u.name}</b>${u.email?`<span class="utag">${u.email}</span>`:''}
-      <span class="utag">${u.via==='google'?'Google':'일반 계정'}</span><div style="flex:1"></div>
+      <span class="utag">${u.via==='google'?'Google':(u.via==='github'?'GitHub':'일반 계정')}</span><div style="flex:1"></div>
       <button class="btn-approve" onclick="doApprove('${u.id.replace(/'/g,"")}')">승인 승낙</button></div>`).join('')
-    : `<div class="none-msg">대기 중인 사용자 요청이 없습니다.</div>`;
-  html += `<div class="sub-h">현재 승인된 사용자</div>`;
+    : `<div class="none-msg">현재 대기 중인 회원 신청이 없습니다.</div>`;
+  html += `<div class="sub-h">승인된 회원 목록</div>`;
   html += appr.length ? appr.map(id=>`
     <div class="user-row"><span class="uava">${id.slice(0,1)}</span><b>${id}</b>
       <span class="utag">승인 상태</span><div style="flex:1"></div>
       <button class="btn-revoke" onclick="doRevoke('${id.replace(/'/g,"")}')">권한 해제</button></div>`).join('')
-    : `<div class="none-msg">아직 승인 처리된 일반 사용자가 없습니다.</div>`;
+    : `<div class="none-msg">아직 승인된 일반 회원이 없습니다.</div>`;
   html += `</div>`;
   document.getElementById('content').innerHTML = html;
 }
+
 function doApprove(id){ A.approveId(id); renderAdminUsers(); }
 function doRevoke(id){ A.revokeId(id); renderAdminUsers(); }
 
-// 세션 상태 체크 후 진입
+// 세션 체크 후 진입
 const sess = A.AUTH.current();
 if (sess) enter(sess); else location.href='../';
 </script>
