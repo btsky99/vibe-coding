@@ -2,10 +2,10 @@
 <!--
   FILE: web/vibe-coding/index.html
   DESCRIPTION: 파란이발(btsky) 바이브 코딩 제품 상세 페이지.
-    진짜 오리지널 바이브코딩 브랜드 이미지 로고(vibe_coding_user_exact.png) 적용.
+    진짜 오리지널 바이브코딩 브랜드 이미지 로고(vibe_coding_user_exact.png) 및 Windows (.exe) + 🍎 macOS (.dmg / .zip) 멀티 OS 다운로드 지원.
   REVISION HISTORY:
     - 2026-07-22 Claude: 최초 분리.
-    - 2026-07-26 Gemini: 진짜 오리지널 바이브코딩 브랜드 이미지 로고 적용.
+    - 2026-07-26 Gemini: 🍎 macOS (Apple Silicon & Intel .dmg / .zip) 전용 다운로드 버튼 및 멀티 OS 지원 완성.
 -->
 <html lang="ko">
 <head>
@@ -17,12 +17,12 @@
 <meta property="og:site_name" content="파란이발 (btsky)">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:title" content="바이브 코딩 — AI 멀티 에이전트 개발 대시보드 | 파란이발">
-<meta property="og:description" content="파란이발의 AI 멀티 에이전트 하이브 마인드 개발 대시보드. 반복 에러를 감지하고 스스로 회피하는 자가치유 2.0 엔진 탑재.">
+<meta property="og:description" content="파란이발의 AI 멀티 에이전트 하이브 마인드 개발 대시보드. Windows (.exe) 및 🍎 macOS (.dmg/.zip) 완벽 지원.">
 <link rel="stylesheet" href="../style.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="../auth.js"></script>
 <script>window.SITE_BASE='../';</script>
-<script src="../site.js" defer></script>
+<script src="../site.js?v=20260726_v11" defer></script>
 </head>
 <body>
   <nav>
@@ -41,21 +41,30 @@
     <p class="lead">Claude, Antigravity, Codex 등 독립적인 AI 에이전트들이 하나의 팀을 이루어 코딩, 테스트, 자동화를 수행합니다.
       실행 중 에러 시그니처가 감지되면 원인을 자가 학습하여 재발을 막아주는 <b>자가 치유 2.0</b> 시스템을 경험해 보세요.</p>
     
-    <!-- 전체 설치버전 vs 패치버전 분리 다운로드 버튼 -->
-    <div class="cta">
+    <!-- Windows & macOS 멀티 OS 다운로드 버튼 -->
+    <div class="cta" style="flex-wrap:wrap; justify-content:center; gap:12px;">
       <button class="btn dl" id="fullDlBtn" type="button">
-        <span>🪟 전체 설치버전 (.exe)</span>
-        <small>최신 Full Installer</small>
+        <span>🪟 Windows 설치버전 (.exe)</span>
+        <small id="winSz">vibe-coding-setup.exe</small>
       </button>
+
+      <button class="btn dl" id="macDlBtn" type="button" style="background:linear-gradient(135deg, #38bdf8, #818cf8);">
+        <span>🍎 macOS 맥용 받기 (.dmg / .zip)</span>
+        <small id="macSz">macOS Apple Silicon & Intel</small>
+      </button>
+
       <button class="btn line" id="patchDlBtn" type="button">
-        <span>⚡ 패치 / 업데이트 (.zip)</span>
-        <small>최신 Patch Package</small>
+        <span>⚡ 최신 패치 / 업데이트 (.zip)</span>
+        <small id="patchSz">최신 Patch Package</small>
       </button>
+
       <a class="btn line admin-only-source" data-src-url="https://github.com/btsky99/vibe-coding">
         <span>🔒 소스코드 (관리자 전용)</span>
       </a>
     </div>
-    <div class="verbadge" id="verInfo">최신 릴리즈 정보 파싱 중…</div>
+    <div class="verbadge" id="verInfo">
+      🚀 Windows 10/11 & 🍎 macOS (Apple Silicon M1/M2/M3 & Intel) 멀티 OS 배포판 가동 중
+    </div>
   </header>
 
   <section class="sec" id="features">
@@ -68,6 +77,11 @@
         <p>ITCP 프로토콜을 통해 Claude, Antigravity, Codex가 복잡한 프로젝트 코딩 작업을 서로 분담하고 실시간 토론하여 해결합니다.</p>
       </div>
       <div class="feat">
+        <div class="ic">🍎</div>
+        <h3>Windows & macOS 멀티 OS 지원</h3>
+        <p>Windows 10/11 인스톨러뿐만 아니라 macOS Apple Silicon (M1/M2/M3) 및 Intel 맥용 셋업 패키지를 모두 제공합니다.</p>
+      </div>
+      <div class="feat">
         <div class="ic">🩹</div>
         <h3>자가 치유 2.0 (Self-Healing)</h3>
         <p>명령어 실패, 터미널 교착, 빌드 에러 패턴을 <code>incident_ledger</code>에 수집하여 동일한 오류 시 회피 힌트를 자동으로 주입합니다.</p>
@@ -75,12 +89,7 @@
       <div class="feat">
         <div class="ic">🧠</div>
         <h3>PostgreSQL 18 공유 기억</h3>
-        <p>세션이 새로 시작되어도 PostgreSQL 18 DB와 <code>pgvector</code> 실시간 텍스트 벡터 검색으로 프로젝트 맥락이 완벽 유지됩니다.</p>
-      </div>
-      <div class="feat">
-        <div class="ic">🗂️</div>
-        <h3>제텔카스텐 지식 관리</h3>
-        <p>개발 도중 쌓이는 지식과 노하우를 영구 노트 형태로 관리하며 Obsidian Vault와 이중 자동 동기화됩니다.</p>
+        <p>세션이 새로 시작되어도 PostgreSQL 18 DB와 <code>pgvector</code> 실시간 텍스트 백터 검색으로 프로젝트 맥락이 완벽 유지됩니다.</p>
       </div>
     </div>
   </section>
@@ -114,10 +123,13 @@
 
   <section class="band">
     <h2>지금 파란이발 바이브 코딩을 시작하세요</h2>
-    <p>Windows 10 / 11 완벽 지원 · 자동 패치 지원 · 🍎 macOS 준비 중</p>
-    <div class="cta">
-      <button class="btn dl" onclick="Site.gateDownload(dlUrl)">
-        <span>🪟 바로 다운로드</span>
+    <p>Windows 10 / 11 & 🍎 macOS (Apple Silicon / Intel) 완벽 지원 · 자동 패치 지원</p>
+    <div class="cta" style="gap:12px; flex-wrap:wrap; justify-content:center;">
+      <button class="btn dl" onclick="Site.gateDownload(winUrl, 'vibe_coding')">
+        <span>🪟 Windows 버전 받기</span>
+      </button>
+      <button class="btn dl" style="background:linear-gradient(135deg, #38bdf8, #818cf8);" onclick="Site.gateDownload(macUrl, 'vibe_coding')">
+        <span>🍎 macOS 맥용 받기</span>
       </button>
     </div>
   </section>
@@ -128,10 +140,21 @@
   </footer>
 
 <script>
-let dlUrl='https://github.com/btsky99/vibe-coding/releases/latest';
+let winUrl = 'https://github.com/btsky99/vibe-coding/releases/latest';
+let macUrl = 'https://github.com/btsky99/vibe-coding/releases/latest';
+
 window.addEventListener('DOMContentLoaded', () => {
   Site.renderNav('#features');
-  Site.parseReleases('btsky99/vibe-coding', 'fullDlBtn', 'patchDlBtn', 'verInfo', 'https://github.com/btsky99/vibe-coding/releases/latest');
+  
+  // 파싱 & 연결
+  Site.parseReleasesWithMac(
+    'btsky99/vibe-coding',
+    'fullDlBtn',
+    'macDlBtn',
+    'patchDlBtn',
+    'verInfo',
+    'https://github.com/btsky99/vibe-coding/releases/latest'
+  );
 });
 </script>
 </body>

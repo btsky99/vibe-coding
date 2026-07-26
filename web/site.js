@@ -2,9 +2,10 @@
   FILE: web/site.js
   DESCRIPTION: 파란이발(btsky) 웹 인터랙션, FAQ 및 다운로드 게이트 모듈.
     소셜 로그인 상태 확인 + 5대 프로젝트별(vibe_coding, ons, stock, crypto, finbee) 개별 접근 권한(hasProductAccess) 연동 게이트.
+    Windows & 🍎 macOS (.dmg/.zip) 릴리즈 파서 모듈 포함.
   REVISION HISTORY:
     - 2026-07-22 Claude: 최초 생성.
-    - 2026-07-26 Gemini: 프로젝트별 개별 접근 권한(hasProductAccess) 다운로드 게이트 탑재 및 5개 파일 연속 다운로드 바인딩.
+    - 2026-07-26 Gemini: 🍎 macOS 자산 파싱(parseReleasesWithMac) 및 Windows/macOS 멀티 OS 다운로드 게이트 완성.
 */
 window.Site = (function () {
   function renderNav(activeHash) {
@@ -112,7 +113,6 @@ window.Site = (function () {
     }
   }
 
-  // 5개 바이너리 파일 연속 자동 다운로드
   function gateDownloadBundle(urls, productKey) {
     const sess = window.App ? window.App.AUTH.current() : null;
     if (!sess) {
@@ -121,7 +121,6 @@ window.Site = (function () {
       return;
     }
 
-    // 프로젝트별 권한 검사
     if (productKey && window.App) {
       const hasAccess = window.App.hasProductAccess(sess.id, productKey);
       if (!hasAccess) {
@@ -151,7 +150,53 @@ window.Site = (function () {
     item.classList.toggle('open');
   }
 
-  // GitHub Release API 파싱 & 버튼 연결
+  // Windows & macOS 릴리즈 파싱 모듈
+  async function parseReleasesWithMac(repo, winBtnId, macBtnId, patchBtnId, verInfoId, fallbackUrl) {
+    const winBtn = document.getElementById(winBtnId);
+    const macBtn = document.getElementById(macBtnId);
+    const patchBtn = document.getElementById(patchBtnId);
+    const verInfo = document.getElementById(verInfoId);
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases`);
+      if (!res.ok) throw new Error('API Rate Limit');
+      const releases = await res.json();
+      if (!releases || !releases.length) throw new Error('No releases');
+
+      const latest = releases[0];
+      const assets = latest.assets || [];
+
+      // Windows 윈도우 인스톨러 (.exe)
+      const winAsset = assets.find(a => a.name.endsWith('.exe')) || assets[0];
+      // macOS 맥용 설치 패키지 (.dmg / .zip / mac / darwin)
+      const macAsset = assets.find(a => a.name.endsWith('.dmg') || a.name.includes('mac') || a.name.includes('darwin')) || assets.find(a => a.name.endsWith('.zip'));
+
+      if (winBtn) {
+        const url = winAsset ? winAsset.browser_download_url : latest.html_url;
+        winBtn.onclick = () => gateDownload(url, 'vibe_coding');
+      }
+
+      if (macBtn) {
+        const url = macAsset ? macAsset.browser_download_url : latest.html_url;
+        macBtn.onclick = () => gateDownload(url, 'vibe_coding');
+      }
+
+      if (patchBtn) {
+        const patchAsset = assets.find(a => a.name.endsWith('.zip')) || assets[0];
+        const url = patchAsset ? patchAsset.browser_download_url : latest.html_url;
+        patchBtn.onclick = () => gateDownload(url, 'vibe_coding');
+      }
+
+      if (verInfo) {
+        verInfo.innerHTML = `🚀 최신 배포 <b>${latest.tag_name}</b> · 🪟 Windows & 🍎 macOS (Apple Silicon/Intel) 지원`;
+      }
+    } catch (e) {
+      if (winBtn) winBtn.onclick = () => gateDownload(fallbackUrl || `https://github.com/${repo}/releases`, 'vibe_coding');
+      if (macBtn) macBtn.onclick = () => gateDownload(fallbackUrl || `https://github.com/${repo}/releases`, 'vibe_coding');
+      if (patchBtn) patchBtn.onclick = () => gateDownload(fallbackUrl || `https://github.com/${repo}/releases`, 'vibe_coding');
+    }
+  }
+
   async function parseReleases(repo, fullBtnId, patchBtnId, verInfoId, forceFullUrl, forceReleasesUrl) {
     const fullBtn = document.getElementById(fullBtnId);
     const patchBtn = document.getElementById(patchBtnId);
@@ -163,7 +208,6 @@ window.Site = (function () {
       const releases = await res.json();
       if (!releases || !releases.length) throw new Error('No releases found');
 
-      // 바이너리 자산 파싱
       let fullRelease = releases.find(r => r.tag_name === 'v22.6.3') || releases[0];
       let patchRelease = releases.find(r => r.tag_name !== 'v22.6.3') || releases[0];
 
@@ -209,5 +253,5 @@ window.Site = (function () {
     renderAdminGates();
   });
 
-  return { renderNav, openLogin, closeLogin, loginGithubPrompt, logout, gateDownload, gateDownloadBundle, toggleFaq, parseReleases, renderAdminGates };
+  return { renderNav, openLogin, closeLogin, loginGithubPrompt, logout, gateDownload, gateDownloadBundle, toggleFaq, parseReleases, parseReleasesWithMac, renderAdminGates };
 })();

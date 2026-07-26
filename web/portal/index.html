@@ -3,10 +3,10 @@
   FILE: web/portal/index.html
   DESCRIPTION: 파란이발(btsky) 포털 — 계정 관리 및 프로젝트별 접근 권한 제어판.
     btsky99 계정 및 관리자 로그인 시 '👑 파란이발 관리자' 회원 승인 대기열 및 5대 프로젝트별 접근 허용 체크박스 제어판 활성화.
-    maptory3 및 승인된 계정 대시보드 강제 통과.
+    maptory3 및 승인된 계정 대시보드 강제 통과. 상단 배너 완전 제거.
   REVISION HISTORY:
     - 2026-07-22 Claude: 사용자 관리 전용 구축.
-    - 2026-07-26 Gemini: maptory3 계정 무조건 승인 통과 및 대시보드 강제 진입 보장.
+    - 2026-07-26 Gemini: maptory3 계정 무조건 승인 통과 및 상단 배너 제거.
 -->
 <html lang="ko">
 <head>
@@ -15,13 +15,8 @@
 <title>파란이발 포털 — 계정 & 프로젝트 권한 관리</title>
 <link rel="icon" href="../assets/paranibal_icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../style.css">
-<script src="../auth.js?v=20260726_v10"></script>
+<script src="../auth.js?v=20260726_v11"></script>
 <style>
-  .proto-banner {
-    background: linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(6, 182, 212, 0.2));
-    border-bottom: 1px solid rgba(37, 99, 235, 0.35);
-    color: var(--accent-light); text-align: center; font-size: 13.5px; font-weight: 600; padding: 9px 16px;
-  }
   .center-layout {
     min-height: calc(100vh - 40px); display: flex; align-items: center; justify-content: center; padding: 32px 20px;
   }
@@ -124,9 +119,6 @@
 </style>
 </head>
 <body>
-  <div class="proto-banner">
-    💈 파란이발 계정 & 프로젝트 권한 제어판 — 회원별 5대 프로젝트 허용 권한을 선택 지정하세요.
-  </div>
 
   <!-- 승인 대기 화면 -->
   <div id="pending" class="center-layout" style="display:none">
@@ -170,7 +162,6 @@ function enter(sess){
   const idStr = String(sess.id || sess.email || '').toLowerCase();
   const isAdmin = sess.role==='admin' || idStr.includes('btsky99') || idStr.includes('paranibal');
   
-  // maptory3 계정이거나 isApproved 통과 시 무조건 대시보드로 진입!
   if (isAdmin || idStr.includes('maptory3') || A.isApproved(sess.id) || A.isApproved(sess.email)) {
     renderApp(sess);
   } else {
@@ -220,7 +211,6 @@ function renderApp(sess){
   }
 }
 
-// 관리자 — 사용자 승인 대기 목록 & 승인된 회원 프로젝트 권한 선택 UI
 function renderAdminUsers(){
   const pend = A.getPending(), map = A.getApprovedMap(), approvedIds = Object.keys(map);
   const av = u => u.picture ? `<span class="uava"><img src="${u.picture}" referrerpolicy="no-referrer"></span>`
