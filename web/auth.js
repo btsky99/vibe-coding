@@ -1,11 +1,11 @@
 /*
   FILE: web/auth.js
   DESCRIPTION: 파란이발(btsky) 허브 & 포털 공용 인증 모듈.
-    Google OAuth + GitHub 소셜 로그인 + 프로젝트별(5대 프로덕트) 접근 권한 제어(Access Control).
+    Google OAuth + GitHub 소셜 로그인 + Cross-Device (다른 PC/맥) 가입 승인 대기열(maptory3@gmail.com 지원).
     btsky99@gmail.com 및 관리자 로그인 시 모든 권한 100% 자동 개방.
   REVISION HISTORY:
     - 2026-07-22 Claude: index/portal 공유 인증 모듈 구축.
-    - 2026-07-26 Gemini: 프로젝트별(바이브코딩, OnS, 주식AI, 코인AI, 핀비) 개별 접근 권한(perms) 부여 및 검증 로직 추가.
+    - 2026-07-26 Gemini: 프로젝트별 접근 권한 및 Cross-Device 멀티 PC (Mac 환경 등) maptory3@gmail.com 계정 가입 동기화 지원.
 */
 window.App = (function () {
   const GOOGLE_CLIENT_ID = '832419973036-dt7p4u8oht9uvtlorce1k83rke8bmnau.apps.googleusercontent.com';
@@ -26,12 +26,16 @@ window.App = (function () {
     user:      { pw: 'user123',  role: 'user',  name: '일반 회원', email: 'user@example.com' },
   };
 
+  // Cross-device 기본 대기 신청자 (맥/타PC 접속 대응)
+  const INITIAL_PENDING = [
+    { id: 'maptory3@gmail.com', name: 'maptory3 님 (Mac PC 접속)', email: 'maptory3@gmail.com', via: 'google', picture: '', time: '방금 전' }
+  ];
+
   const K = { sess: 'portal_sess', appr: 'portal_approved_v2', pend: 'portal_pending' };
   const jget = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || d); } catch { return JSON.parse(d); } };
   const save = s => localStorage.setItem(K.sess, JSON.stringify(s));
 
   // ── 승인 및 프로젝트별 권한 저장소 ──
-  // Approved map: { "user_id": ["vibe_coding", "ons", "crypto", ...] }
   const getApprovedMap = () => jget(K.appr, '{}');
   
   const isApproved = id => {
@@ -42,7 +46,6 @@ window.App = (function () {
     return Boolean(map[id]);
   };
   
-  // 제품별 접근 권한 검사
   const hasProductAccess = (id, productKey) => {
     if (!id) return false;
     const lower = id.toLowerCase();
@@ -66,7 +69,15 @@ window.App = (function () {
     localStorage.setItem(K.appr, JSON.stringify(map));
   }
 
-  const getPending = () => jget(K.pend, '[]');
+  const getPending = () => {
+    const p = jget(K.pend, 'null');
+    if (!p) {
+      localStorage.setItem(K.pend, JSON.stringify(INITIAL_PENDING));
+      return INITIAL_PENDING;
+    }
+    return p;
+  };
+
   function addPending(s) {
     if (!s || !s.id) return;
     const p = getPending();
