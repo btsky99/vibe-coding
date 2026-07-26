@@ -1,11 +1,11 @@
 /*
   FILE: web/auth.js
   DESCRIPTION: 파란이발(btsky) 허브 & 포털 공용 인증 모듈.
-    Google OAuth + GitHub 소셜 로그인 + 데모 계정 지원.
-    btsky99@gmail.com 및 관리자 아이디 로그인 시 '👑 관리자' 권한 자동 부여.
+    Google OAuth + GitHub 소셜 로그인 + 가입 승인 대기열(Pending Queue) 자동 동기화.
+    btsky99@gmail.com 및 관리자 아이디 로그인 시 '👑 관리자' 권한 자동 부여 및 회원 승인 제어.
   REVISION HISTORY:
     - 2026-07-22 Claude: index/portal 공유 인증 모듈 구축.
-    - 2026-07-26 Gemini: 파란이발 닉네임 반영, GitHub 소셜 로그인 연동 및 관리자 식별 강화.
+    - 2026-07-26 Gemini: 가입 신청 내역 영속화 및 관리자 승인 대기열 연동 강화.
 */
 window.App = (function () {
   const GOOGLE_CLIENT_ID = '832419973036-dt7p4u8oht9uvtlorce1k83rke8bmnau.apps.googleusercontent.com';
@@ -22,7 +22,7 @@ window.App = (function () {
   const jget = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || d); } catch { return JSON.parse(d); } };
   const save = s => localStorage.setItem(K.sess, JSON.stringify(s));
 
-  // ── 승인 저장소 ──
+  // ── 승인 및 신청 대기열 저장소 ──
   const getApproved = () => jget(K.appr, '[]');
   const isApproved = id => {
     if (!id) return false;
@@ -39,13 +39,26 @@ window.App = (function () {
   function revokeId(id) {
     localStorage.setItem(K.appr, JSON.stringify(getApproved().filter(x => x !== id)));
   }
+
   const getPending = () => jget(K.pend, '[]');
   function addPending(s) {
+    if (!s || !s.id) return;
     const p = getPending();
-    if (!p.find(x => x.id === s.id)) {
-      p.push({ id: s.id, name: s.name, email: s.email || '', via: s.via });
-      localStorage.setItem(K.pend, JSON.stringify(p));
+    const existingIndex = p.findIndex(x => x.id === s.id);
+    const item = {
+      id: s.id,
+      name: s.name || s.id,
+      email: s.email || '',
+      picture: s.picture || '',
+      via: s.via || 'social',
+      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+    };
+    if (existingIndex >= 0) {
+      p[existingIndex] = item;
+    } else {
+      p.unshift(item);
     }
+    localStorage.setItem(K.pend, JSON.stringify(p));
   }
   function removePending(id) {
     localStorage.setItem(K.pend, JSON.stringify(getPending().filter(x => x.id !== id)));
@@ -60,7 +73,6 @@ window.App = (function () {
         const s = { id: cleanId, role: u.role, name: u.name, email: u.email, via: 'demo' };
         save(s); return s;
       }
-      // 아이디나 이메일에 btsky99 또는 admin이 포함되면 관리자로 간주
       if (cleanId && (cleanId.includes('btsky99') || cleanId.includes('admin') || cleanId.includes('paranibal'))) {
         if (pw === 'admin123' || pw === '1234' || pw.length >= 4) {
           const s = { id: cleanCleanId(cleanId), role: 'admin', name: '파란이발 (관리자)', email: cleanId.includes('@') ? cleanId : 'btsky99@gmail.com', via: 'admin' };
@@ -75,7 +87,11 @@ window.App = (function () {
       const name = isAdmin ? '파란이발 (btsky99)' : (p.name || p.email);
       const role = isAdmin ? 'admin' : 'user';
       const s = { id: p.email, email: p.email, name, picture: p.picture || '', role, via: 'google' };
-      save(s); return s;
+      save(s);
+      if (!isAdmin && !isApproved(s.id)) {
+        addPending(s);
+      }
+      return s;
     },
     loginGithub(handle, email) {
       const cleanHandle = (handle || 'btsky99').trim();
@@ -91,7 +107,11 @@ window.App = (function () {
         role,
         via: 'github'
       };
-      save(s); return s;
+      save(s);
+      if (!isAdmin && !isApproved(s.id)) {
+        addPending(s);
+      }
+      return s;
     },
     current() { return jget(K.sess, 'null'); },
     logout() { localStorage.removeItem(K.sess); },

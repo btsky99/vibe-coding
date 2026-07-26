@@ -2,18 +2,17 @@
 <!--
   FILE: web/portal/index.html
   DESCRIPTION: 파란이발(btsky) 포털 — 계정 관리 및 사용자 승인 제어판.
-    btsky99 계정 및 관리자 이메일 로그인 시 '👑 파란이발 관리자' 승인 자동 활성화.
-    구글 / GitHub 소셜 로그인 계정 지원.
+    btsky99 계정 및 관리자 로그인 시 '👑 파란이발 관리자' 회원 승인 대기열 및 승인 처리 제어판 활성화.
   REVISION HISTORY:
     - 2026-07-22 Claude: 사용자 관리 전용 구축.
-    - 2026-07-26 Gemini: 파란이발 브랜딩, 심플 프리미엄 UI, btsky99 관리자 권한 자동 연결 적용.
+    - 2026-07-26 Gemini: 가입 승인 대기목록 실시간 노출 및 수동 가입신청 등록/승인 기능 완료.
 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>파란이발 포털 — 계정 & 권한 관리</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💈</text></svg>">
+<link rel="icon" href="../assets/paranibal_icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../style.css">
 <script src="../auth.js"></script>
 <style>
@@ -59,7 +58,7 @@
     padding: 28px; backdrop-filter: blur(16px); box-shadow: var(--shadow);
   }
   .panel-box.admin { border-color: rgba(37, 99, 235, 0.35); }
-  .panel-box h3 { font-size: 18px; font-weight: 800; color: var(--fg-heading); margin-bottom: 18px; display: flex; align-items: center; gap: 10px; }
+  .panel-box h3 { font-size: 18px; font-weight: 800; color: var(--fg-heading); margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; }
   .panel-box h3 .cnt { font-weight: 700; font-size: 12px; color: var(--accent-light); background: rgba(37, 99, 235, 0.15); padding: 2px 10px; border-radius: 999px; }
   
   .user-row {
@@ -69,9 +68,9 @@
   .uava {
     width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, 0.05);
     display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700;
-    border: 1px solid var(--line); color: var(--fg-heading);
+    border: 1px solid var(--line); color: var(--fg-heading); overflow: hidden;
   }
-  .uava img { width: 100%; height: 100%; border-radius: 50%; }
+  .uava img { width: 100%; height: 100%; object-fit: cover; }
   .utag { font-size: 12px; padding: 3px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); color: var(--muted); border: 1px solid var(--line); }
   
   .btn-approve {
@@ -98,20 +97,25 @@
   .welcome-box .ic { font-size: 52px; margin-bottom: 12px; }
   .welcome-box h3 { font-size: 22px; font-weight: 800; color: var(--fg-heading); }
   .welcome-box p { color: var(--muted); margin-top: 10px; font-size: 15px; }
+
+  .test-tools {
+    margin-top: 20px; padding: 14px; background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--line); border-radius: 12px;
+    display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--muted);
+  }
 </style>
 </head>
 <body>
   <div class="proto-banner">
-    💈 파란이발 계정 제어판 — 관리자(btsky99) 로그인 시 관리 제어 기능이 활성화됩니다.
+    💈 파란이발 계정 제어판 — 관리자(btsky99) 로그인 시 가입 승인 제어 기능이 활성화됩니다.
   </div>
 
-  <!-- 승인 대기 화면 -->
+  <!-- 승인 대기 화면 (일반 회원 신청 시) -->
   <div id="pending" class="center-layout" style="display:none">
     <div class="portal-card">
       <div class="pend-ic">⏳</div>
       <h1>승인 대기 중</h1>
       <div class="pend-who" id="pendWho"></div>
-      <p class="pend-msg">계정이 승인 대기 중입니다.<br>파란이발 관리자가 승인하면 즉시 소프트웨어 다운로드 권한이 부여됩니다.</p>
+      <p class="pend-msg">가입 및 권한 승인 신청이 관리자에게 전달되었습니다.<br>파란이발 관리자(btsky99)가 승인하면 모든 소프트웨어 이용 권한이 부여됩니다.</p>
       <button class="btn line btn-full" onclick="refreshPending()">🔄 승인 상태 새로고침</button>
       <button class="btn dl btn-full" onclick="logout()">로그아웃</button>
     </div>
@@ -145,8 +149,14 @@ function hideAll(){ document.getElementById('pending').style.display='none'; doc
 function enter(sess){
   hideAll();
   const isAdmin = sess.role==='admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal')));
-  if (isAdmin || A.isApproved(sess.id)) renderApp(sess);
-  else { A.addPending(sess); showPending(sess); }
+  if (isAdmin) {
+    renderApp(sess);
+  } else if (A.isApproved(sess.id)) {
+    renderApp(sess);
+  } else {
+    A.addPending(sess);
+    showPending(sess);
+  }
 }
 
 function showPending(sess){
@@ -169,7 +179,7 @@ function renderApp(sess){
   
   document.getElementById('whoami').innerHTML = av + (isAdmin ? '<b>파란이발 (btsky99)님</b>' : sess.name) + viaTag;
   document.getElementById('greet').textContent = (isAdmin ? '파란이발 (btsky99)' : sess.name) + ' 님, 안녕하세요! 👋';
-  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청 사용자를 승인하고 관리자 전용 제어판을 이용하세요.' : '승인 완료된 회원입니다. 파란이발의 소프트웨어 및 다운로드를 이용하실 수 있습니다.';
+  document.getElementById('greetSub').textContent = isAdmin ? '가입 신청한 사용자 목록을 확인하고 클릭 한 번으로 승인을 완료하세요.' : '승인 완료된 회원입니다. 파란이발의 소프트웨어 및 다운로드를 이용하실 수 있습니다.';
 
   if (isAdmin) renderAdminUsers();
   else document.getElementById('content').innerHTML =
@@ -177,30 +187,77 @@ function renderApp(sess){
       <p>파란이발 바이브 코딩, OnS 및 모든 다운로드 게이트를 이용하실 수 있습니다.</p></div>`;
 }
 
-// 관리자 — 사용자 승인 대기 / 승인 목록 관리 UI
+// 관리자 — 사용자 승인 대기 목록 & 승인된 회원 제어판
 function renderAdminUsers(){
   const pend=A.getPending(), appr=A.getApproved();
   const av = u => u.picture ? `<span class="uava"><img src="${u.picture}" referrerpolicy="no-referrer"></span>`
     : `<span class="uava">${(u.name||'?').slice(0,1)}</span>`;
-  let html = `<div class="panel-box admin"><h3>👑 파란이발 회원 승인 제어판 <span class="cnt">신청 ${pend.length}명</span></h3>`;
-  html += `<div class="sub-h">승인 신청 목록</div>`;
-  html += pend.length ? pend.map(u=>`
-    <div class="user-row">${av(u)}<b>${u.name}</b>${u.email?`<span class="utag">${u.email}</span>`:''}
-      <span class="utag">${u.via==='google'?'Google':(u.via==='github'?'GitHub':'일반 계정')}</span><div style="flex:1"></div>
-      <button class="btn-approve" onclick="doApprove('${u.id.replace(/'/g,"")}')">승인 승낙</button></div>`).join('')
-    : `<div class="none-msg">현재 대기 중인 회원 신청이 없습니다.</div>`;
-  html += `<div class="sub-h">승인된 회원 목록</div>`;
-  html += appr.length ? appr.map(id=>`
-    <div class="user-row"><span class="uava">${id.slice(0,1)}</span><b>${id}</b>
-      <span class="utag">승인 상태</span><div style="flex:1"></div>
-      <button class="btn-revoke" onclick="doRevoke('${id.replace(/'/g,"")}')">권한 해제</button></div>`).join('')
-    : `<div class="none-msg">아직 승인된 일반 회원이 없습니다.</div>`;
-  html += `</div>`;
+
+  let html = `<div class="panel-box admin">
+    <h3>
+      <span>👑 파란이발 회원 승인 제어판</span>
+      <span class="cnt">신청 ${pend.length}명 / 승인 ${appr.length}명</span>
+    </h3>`;
+
+  html += `<div class="sub-h">⏳ 가입 승인 대기 목록 (${pend.length})</div>`;
+  if (pend.length) {
+    html += pend.map(u => `
+      <div class="user-row">
+        ${av(u)}
+        <div>
+          <b>${u.name}</b> ${u.email ? `<span class="utag">${u.email}</span>` : ''}
+          <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">신청시각: ${u.time || '최근'}</div>
+        </div>
+        <span class="utag">${u.via === 'google' ? 'Google' : (u.via === 'github' ? 'GitHub' : '소셜 계정')}</span>
+        <div style="flex:1"></div>
+        <button class="btn-approve" onclick="doApprove('${u.id.replace(/'/g, "\\'")}')">✅ 승인 완료</button>
+      </div>`).join('');
+  } else {
+    html += `<div class="none-msg">현재 승인 대기 중인 회원 가입 신청이 없습니다.</div>`;
+  }
+
+  html += `<div class="sub-h">✅ 승인된 회원 목록 (${appr.length})</div>`;
+  if (appr.length) {
+    html += appr.map(id => `
+      <div class="user-row">
+        <span class="uava">${id.slice(0, 1)}</span>
+        <b>${id}</b>
+        <span class="utag" style="color:#34d399; border-color:rgba(52,211,153,0.3);">승인 상태</span>
+        <div style="flex:1"></div>
+        <button class="btn-revoke" onclick="doRevoke('${id.replace(/'/g, "\\'")}')">권한 해제</button>
+      </div>`).join('');
+  } else {
+    html += `<div class="none-msg">아직 승인된 일반 회원이 없습니다.</div>`;
+  }
+
+  // 테스트 신청등록 도구
+  html += `
+    <div class="test-tools">
+      <span>💡 가입 신청 테스트: 소셜 계정 테스트용 가입 신청서를 등록할 수 있습니다.</span>
+      <button class="btn line" style="padding:4px 12px; font-size:12px;" onclick="addTestPending()">🧪 테스트 가입 신청 추가</button>
+    </div>
+  </div>`;
+
   document.getElementById('content').innerHTML = html;
 }
 
 function doApprove(id){ A.approveId(id); renderAdminUsers(); }
 function doRevoke(id){ A.revokeId(id); renderAdminUsers(); }
+
+function addTestPending() {
+  const name = prompt('테스트 가입 신청자 이름을 입력하세요:', '홍길동');
+  if (name) {
+    const testUser = {
+      id: 'test_' + Date.now(),
+      name: name + ' 님',
+      email: name.toLowerCase() + '@example.com',
+      via: 'google',
+      picture: ''
+    };
+    A.addPending(testUser);
+    renderAdminUsers();
+  }
+}
 
 // 세션 체크 후 진입
 const sess = A.AUTH.current();
