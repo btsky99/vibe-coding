@@ -2,10 +2,10 @@
 <!--
   FILE: web/index.html
   DESCRIPTION: 파란이발(btsky) 제품 & AI 생태계 허브.
-    전용 브랜드 아이콘(vibe_coding_icon.png, ons_icon.svg, crypto_stock_icon.svg, crypto_coin_icon.svg) 적용.
+    모든 프로덕트(바이브코딩, OnS, 주식AI, 코인AI, 핀비AI) 전용 브랜드 이미지/SVG 아이콘 100% 적용.
   REVISION HISTORY:
-    - 2026-07-22 Claude: 멀티 프로덕트 허브 개편.
-    - 2026-07-26 Gemini: 전용 브랜드 이미지/SVG 아이콘 적용 및 라인업 쇄신.
+    - 2026-07-22 Claude: 단일 랜딩 → 멀티 프로덕트 허브 개편.
+    - 2026-07-26 Gemini: FinBee(핀비) 전용 브랜드 SVG 아이콘(finbee_icon.svg)까지 100% 적용 완수.
 -->
 <html lang="ko">
 <head>
@@ -57,7 +57,7 @@
     </div>
   </header>
 
-  <!-- 프로덕트 카드 그리드 (전용 브랜드 아이콘 이미지 반영) -->
+  <!-- 프로덕트 카드 그리드 (5종 전용 브랜드 아이콘 100% 적용) -->
   <section class="sec" id="products">
     <h2>파란이발 제품 라인업</h2>
     <p class="sub">각 분야의 필요에 맞춰 정밀하게 설계된 전용 솔루션을 확인해보세요.</p>
@@ -107,7 +107,9 @@
       </a>
 
       <a class="card-lg" href="./finbee/">
-        <div class="ic" style="font-size:36px;">🐝</div>
+        <div class="ic">
+          <img src="./assets/finbee_icon.svg" alt="FinBee (핀비)" width="48" height="48" style="border-radius:12px; object-fit:contain;">
+        </div>
         <h3>FinBee (핀비) <span class="chip soon">준비중</span></h3>
         <p><b>27개 AI 에이전트 금융 비서 & 포트폴리오 (finbee)</b><br>
           주식, 암호화폐, 자산을 27개의 전문 AI 에이전트가 종합 분석하고 포트폴리오 진단 및 모니터링을 제공하는 개발 중인 AI 금융 인텔리전스 플랫폼입니다.</p>
