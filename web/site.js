@@ -26,39 +26,39 @@ window.Site = (function () {
   }
 
   function openLogin() {
-    closeLogin();
+    closeLogin(); // 기존 모든 모달 중복 제거
     const modal = document.createElement('div');
     modal.className = 'modal-bg';
     modal.id = 'loginModal';
     modal.innerHTML = `
-      <div class="modal-card" style="max-width:380px; padding:28px 24px; z-index:99999;">
+      <div class="modal-card">
         <button class="modal-close" type="button" onclick="Site.closeLogin()">&times;</button>
-        <div class="ic" style="font-size:38px; margin-bottom:6px;">🛡️</div>
-        <h2 style="font-size:1.3rem; margin-bottom:4px;">파란이빨 계정 로그인</h2>
-        <p class="sub" style="font-size:0.85rem; margin-bottom:20px;">상단 퀵 버튼이나 아래 아이디 입력으로 편리하게 시작하세요.</p>
+        <div class="ic" style="font-size:42px; margin-bottom:8px;">🛡️</div>
+        <h2 style="font-size:1.35rem; margin-bottom:6px; color:#f8fafc;">파란이빨 계정 로그인</h2>
+        <p class="sub" style="font-size:0.88rem; margin-bottom:24px; color:#94a3b8;">소셜 로그인 또는 관리자 계정으로 편리하게 시작하세요.</p>
 
-        <!-- 1. 상단 관리자 1초 퀵 로그인 버튼 (다이렉트 핸들러) -->
-        <button type="button" class="btn" style="width:100%; justify-content:center; background:linear-gradient(135deg, #0284c7, #2563eb); border-color:#38bdf8; padding:12px; font-weight:700; margin-bottom:10px; cursor:pointer;" onclick="Site.doAdminLogin()">
+        <!-- 1. 관리자 1초 퀵 로그인 버튼 -->
+        <button type="button" class="btn" style="width:100%; justify-content:center; background:linear-gradient(135deg, #0284c7, #2563eb); border-color:#38bdf8; padding:13px; font-size:0.95rem; font-weight:700; margin-bottom:12px; cursor:pointer;" onclick="Site.doAdminLogin()">
           <span>👑 btsky99 관리자 1초 즉시 로그인</span>
         </button>
 
         <!-- 2. 소셜 및 GitHub 로그인 -->
-        <div style="display:flex; flex-direction:column; gap:8px; align-items:center; width:100%;">
+        <div style="display:flex; flex-direction:column; gap:10px; align-items:center; width:100%;">
           <div id="g_btn_container" style="width:100%; display:flex; justify-content:center; min-height:40px;"></div>
-          <button type="button" class="btn line" style="width:100%; justify-content:center; padding:10px; cursor:pointer;" onclick="Site.loginGithubPrompt()">
+          <button type="button" class="btn line" style="width:100%; justify-content:center; padding:11px; font-size:0.9rem; cursor:pointer;" onclick="Site.loginGithubPrompt()">
             <span>🐱 GitHub 계정으로 계속하기</span>
           </button>
         </div>
 
-        <div style="position:relative; text-align:center; margin:16px 0 12px 0;">
-          <span style="background:#1e293b; padding:0 8px; font-size:0.75rem; color:var(--muted); position:relative; z-index:1;">또는 아이디 직접 입력</span>
-          <div style="position:absolute; top:50%; left:0; right:0; height:1px; background:var(--line); z-index:0;"></div>
+        <div style="position:relative; text-align:center; margin:20px 0 14px 0;">
+          <span style="background:#0f172a; padding:0 10px; font-size:0.75rem; color:#94a3b8; position:relative; z-index:1;">또는 아이디 직접 입력</span>
+          <div style="position:absolute; top:50%; left:0; right:0; height:1px; background:#334155; z-index:0;"></div>
         </div>
 
         <!-- 3. 아이디 직접 입력 폼 -->
-        <form onsubmit="Site.loginCustom(event)" style="display:flex; flex-direction:column; gap:8px; width:100%;">
-          <input type="text" id="loginCustomId" placeholder="아이디 또는 이메일 (예: btsky99)" style="padding:10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#fff; font-size:0.9rem;" required>
-          <button type="submit" class="btn" style="width:100%; justify-content:center; background:#334155; border-color:#475569; padding:8px; cursor:pointer;">
+        <form onsubmit="Site.loginCustom(event)" style="display:flex; flex-direction:column; gap:10px; width:100%;">
+          <input type="text" id="loginCustomId" placeholder="아이디 또는 이메일 (예: btsky99)" style="padding:12px; border-radius:10px; border:1px solid #334155; background:#070a14; color:#fff; font-size:0.95rem; box-sizing:border-box;" required>
+          <button type="submit" class="btn" style="width:100%; justify-content:center; background:#1e293b; border-color:#475569; padding:10px; cursor:pointer; font-size:0.9rem;">
             <span>🔑 아이디 로그인</span>
           </button>
         </form>
@@ -80,8 +80,7 @@ window.Site = (function () {
   }
 
   function closeLogin() {
-    const modal = document.getElementById('loginModal');
-    if (modal) modal.remove();
+    document.querySelectorAll('.modal-bg, .overlay, #loginModal').forEach(el => el.remove());
   }
 
   function doAdminLogin() {

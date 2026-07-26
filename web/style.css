@@ -333,3 +333,53 @@ footer a:hover { text-decoration: underline; }
 .mdiv { display: flex; align-items: center; gap: 14px; margin: 20px 0 16px; color: var(--muted); font-size: 13px; }
 .mdiv::before, .mdiv::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 #mgnote { margin-top: 6px; font-size: 12px; color: var(--amber); text-align: center; line-height: 1.5; }
+
+/* ── 100% 깨끗한 팝업 모달 ── */
+.modal-bg {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: rgba(3, 7, 18, 0.85) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 999999 !important;
+  padding: 20px !important;
+  box-sizing: border-box !important;
+}
+
+.modal-card {
+  background: #0f172a !important;
+  border: 1.5px solid #38bdf8 !important;
+  border-radius: 24px !important;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 30px rgba(56, 189, 248, 0.3) !important;
+  padding: 32px 26px !important;
+  max-width: 400px !important;
+  width: 100% !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  text-align: center !important;
+  animation: modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+@keyframes modalPopIn {
+  0% { transform: scale(0.9) translateY(10px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.modal-close {
+  position: absolute !important;
+  top: 16px !important;
+  right: 18px !important;
+  background: none !important;
+  border: none !important;
+  color: #94a3b8 !important;
+  font-size: 26px !important;
+  cursor: pointer !important;
+  line-height: 1 !important;
+}
+.modal-close:hover { color: #ffffff !important; }
