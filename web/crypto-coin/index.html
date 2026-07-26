@@ -4,6 +4,7 @@
   DESCRIPTION: 파란이빨(btsky) CipherTrader Crypto (코인 AI 자동매매 시스템).
     CipherTrader 코인 AI 공식 앱 로고(crypto_official_app.png) 복구 적용.
   REVISION HISTORY:
+    - 2026-07-26 Codex: 공개 GitHub Releases API에서 최신 src 패치를 자동 탐색하도록 개선.
     - 2026-07-26 Codex: 전체 설치본과 최신 패치본의 안내·다운로드 경로를 명확히 분리.
     - 2026-07-26 Gemini: CipherTrader 코인 AI 공식 v16 둥근모서리 앱 로고 복구 적용.
 -->
@@ -110,8 +111,42 @@ const CRYPTO_V2263_BUNDLE = [
   'https://github.com/btsky99/crypto-bot-releases/releases/download/v22.6.3/CipherTrader_Setup_v22.6.3-3.bin',
   'https://github.com/btsky99/crypto-bot-releases/releases/download/v22.6.3/CipherTrader_Setup_v22.6.3-4.bin'
 ];
-const CRYPTO_LATEST_PATCH =
+const CRYPTO_PATCH_FALLBACK =
   'https://github.com/btsky99/crypto-bot-releases/releases/download/v22.8.2-src290/src.zip';
+let cryptoPatchUrl = CRYPTO_PATCH_FALLBACK;
+
+async function loadLatestCryptoPatch() {
+  try {
+    const response = await fetch(
+      'https://api.github.com/repos/btsky99/crypto-bot-releases/releases?per_page=30'
+    );
+    if (!response.ok) throw new Error(`GitHub API ${response.status}`);
+
+    const releases = await response.json();
+    const release = releases.find(item =>
+      !item.draft &&
+      item.tag_name.includes('-src') &&
+      item.assets.some(asset => asset.name === 'src.zip' && asset.state === 'uploaded')
+    );
+    if (!release) return;
+
+    const asset = release.assets.find(item => item.name === 'src.zip');
+    cryptoPatchUrl = asset.browser_download_url;
+
+    const patchBtn = document.getElementById('patchDlBtn');
+    const patchLabel = patchBtn ? patchBtn.querySelector('span') : null;
+    const patchSize = document.getElementById('patchSz');
+    const versionInfo = document.getElementById('verInfo');
+    const sizeMb = (asset.size / 1024 / 1024).toFixed(1);
+
+    if (patchLabel) patchLabel.textContent = `⚡ 기존 설치자용 최신 패치 (${release.tag_name})`;
+    if (patchSize) patchSize.textContent = `src.zip · ${sizeMb} MB · 전체 설치본과 별도 다운로드`;
+    if (versionInfo) versionInfo.textContent = `설치본 v22.6.3 · 최신 패치 ${release.tag_name}`;
+  } catch (error) {
+    // GitHub API 제한이나 일시 장애가 생겨도 마지막 검증 패치 링크는 계속 제공한다.
+    console.warn('최신 CipherTrader 패치 조회 실패, 검증된 폴백 사용:', error);
+  }
+}
 
 function handleCryptoDownload() {
   const sess = window.App ? window.App.AUTH.current() : null;
@@ -138,6 +173,7 @@ function handleCryptoDownload() {
 
 window.addEventListener('DOMContentLoaded', () => {
   if (window.Site) window.Site.renderNav('#features');
+  loadLatestCryptoPatch();
   
   const btn = document.getElementById('fullBundleBtn');
   if (btn) {
@@ -153,7 +189,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (window.Site) window.Site.openLogin();
         return;
       }
-      window.open(CRYPTO_LATEST_PATCH, '_blank', 'noopener');
+      window.open(cryptoPatchUrl, '_blank', 'noopener');
     };
   }
 });
