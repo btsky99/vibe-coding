@@ -1,26 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
   <defs>
-    <radialGradient id="holoSpaceV1" cx="50%" cy="50%" r="70%">
-      <stop offset="0%" stop-color="#1e1b4b"/>
-      <stop offset="50%" stop-color="#0f172a"/>
-      <stop offset="100%" stop-color="#030712"/>
+    <radialGradient id="holoDarkSpaceV1" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="70%" stop-color="#070a14"/>
+      <stop offset="100%" stop-color="#020408"/>
     </radialGradient>
-    <linearGradient id="holoPrismV1" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="pureHoloV1" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="25%" stop-color="#f472b6"/>
-      <stop offset="50%" stop-color="#c084fc"/>
-      <stop offset="75%" stop-color="#22d3ee"/>
-      <stop offset="100%" stop-color="#60a5fa"/>
+      <stop offset="45%" stop-color="#818cf8"/>
+      <stop offset="80%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
     </linearGradient>
-    <linearGradient id="goldRoyalV1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fffeb3"/>
-      <stop offset="35%" stop-color="#f59e0b"/>
-      <stop offset="70%" stop-color="#d97706"/>
-      <stop offset="100%" stop-color="#78350f"/>
-    </linearGradient>
-    <filter id="holoGlowV1" x="-35%" y="-35%" width="170%" height="170%">
-      <feGaussianBlur stdDeviation="4.5" result="blur1"/>
-      <feGaussianBlur stdDeviation="1.5" result="blur2"/>
+    <filter id="pureHoloGlowV1" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.5" result="blur1"/>
+      <feGaussianBlur stdDeviation="1" result="blur2"/>
       <feMerge>
         <feMergeNode in="blur1"/>
         <feMergeNode in="blur2"/>
@@ -29,22 +22,15 @@
     </filter>
   </defs>
 
-  <circle cx="60" cy="60" r="55" fill="url(#holoPrismV1)" opacity="0.22" filter="url(#holoGlowV1)"/>
-  <circle cx="60" cy="60" r="50" fill="url(#holoSpaceV1)" stroke="url(#goldRoyalV1)" stroke-width="3.5"/>
-  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#holoPrismV1)" stroke-width="2" opacity="0.85" filter="url(#holoGlowV1)"/>
-  <circle cx="60" cy="60" r="42" fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="5 3 2 3" opacity="0.7"/>
+  <rect x="6" y="6" width="108" height="108" rx="28" fill="url(#holoDarkSpaceV1)" stroke="#1e293b" stroke-width="2"/>
+  <circle cx="60" cy="60" r="42" fill="url(#pureHoloV1)" opacity="0.12" filter="url(#pureHoloGlowV1)"/>
+  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#pureHoloV1)" stroke-width="1.8" opacity="0.8" stroke-dasharray="45 15 20 10"/>
+  <circle cx="60" cy="60" r="41" fill="none" stroke="#38bdf8" stroke-width="0.8" stroke-dasharray="4 4" opacity="0.5"/>
 
-  <line x1="20" y1="42" x2="100" y2="42" stroke="url(#holoPrismV1)" stroke-width="0.6" opacity="0.4"/>
-  <line x1="16" y1="54" x2="104" y2="54" stroke="url(#holoPrismV1)" stroke-width="0.8" opacity="0.5"/>
-  <line x1="16" y1="66" x2="104" y2="66" stroke="url(#holoPrismV1)" stroke-width="0.8" opacity="0.5"/>
-  <line x1="20" y1="78" x2="100" y2="78" stroke="url(#holoPrismV1)" stroke-width="0.6" opacity="0.4"/>
+  <line x1="60" y1="10" x2="60" y2="16" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
+  <line x1="60" y1="104" x2="60" y2="110" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
 
-  <path d="M 40 33 L 45 21 L 53 27 L 60 17 L 67 27 L 75 21 L 80 33 Z" fill="url(#goldRoyalV1)" stroke="#fffeb3" stroke-width="0.8"/>
-  <circle cx="60" cy="17" r="2.8" fill="#f43f5e"/>
-
-  <path d="M 60 36 L 60 88" stroke="url(#holoPrismV1)" stroke-width="6.5" stroke-linecap="round" filter="url(#holoGlowV1)"/>
-  <path d="M 60 36 L 75 49 L 60 62 L 75 75 L 60 88" stroke="url(#holoPrismV1)" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#holoGlowV1)"/>
-  <path d="M 60 49 L 45 62 M 60 75 L 45 62" stroke="url(#holoPrismV1)" stroke-width="6.5" stroke-linecap="round" filter="url(#holoGlowV1)"/>
-
-  <path d="M 98 22 L 101 28 L 107 30 L 101 32 L 98 38 L 95 32 L 89 30 L 95 28 Z" fill="#f472b6"/>
+  <path d="M 60 28 L 60 92" stroke="url(#pureHoloV1)" stroke-width="6" stroke-linecap="round" filter="url(#pureHoloGlowV1)"/>
+  <path d="M 60 28 L 76 44 L 60 60 L 76 76 L 60 92" stroke="url(#pureHoloV1)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#pureHoloGlowV1)"/>
+  <path d="M 60 44 L 44 60 M 60 76 L 44 60" stroke="url(#pureHoloV1)" stroke-width="6" stroke-linecap="round" filter="url(#pureHoloGlowV1)"/>
 </svg>
