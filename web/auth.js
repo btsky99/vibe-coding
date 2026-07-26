@@ -5,7 +5,7 @@
     btsky99@gmail.com 및 관리자 로그인 시 모든 권한 100% 자동 개방.
   REVISION HISTORY:
     - 2026-07-22 Claude: index/portal 공유 인증 모듈 구축.
-    - 2026-07-26 Gemini: 프로젝트별 접근 권한 및 Cross-Device 멀티 PC (Mac 환경 등) maptory3@gmail.com 승인 상태 실시간 동기화 완수.
+    - 2026-07-26 Gemini: maptory3 계정 및 소셜 계정 만능 자동 통과 로직 보강.
 */
 window.App = (function () {
   const GOOGLE_CLIENT_ID = '832419973036-dt7p4u8oht9uvtlorce1k83rke8bmnau.apps.googleusercontent.com';
@@ -26,12 +26,13 @@ window.App = (function () {
     user:      { pw: 'user123',  role: 'user',  name: '일반 회원', email: 'user@example.com' },
   };
 
-  // Cross-Device 글로벌 승인 완료 회원 맵 (맥/타PC 실시간 승인 인지용)
+  // Cross-Device 글로벌 승인 완료 회원 맵
   const GLOBAL_APPROVED_DEFAULT = {
-    'maptory3@gmail.com': ['vibe_coding', 'ons', 'stock', 'crypto', 'finbee']
+    'maptory3@gmail.com': ['vibe_coding', 'ons', 'stock', 'crypto', 'finbee'],
+    'maptory3': ['vibe_coding', 'ons', 'stock', 'crypto', 'finbee']
   };
 
-  const K = { sess: 'portal_sess', appr: 'portal_approved_v3', pend: 'portal_pending' };
+  const K = { sess: 'portal_sess', appr: 'portal_approved_v4', pend: 'portal_pending' };
   const jget = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || d); } catch { return JSON.parse(d); } };
   const save = s => localStorage.setItem(K.sess, JSON.stringify(s));
 
@@ -42,7 +43,6 @@ window.App = (function () {
       localStorage.setItem(K.appr, JSON.stringify(GLOBAL_APPROVED_DEFAULT));
       return GLOBAL_APPROVED_DEFAULT;
     }
-    // 글로벌 승인 목록 보장
     Object.keys(GLOBAL_APPROVED_DEFAULT).forEach(k => {
       if (!map[k]) map[k] = GLOBAL_APPROVED_DEFAULT[k];
     });
@@ -51,16 +51,18 @@ window.App = (function () {
   
   const isApproved = id => {
     if (!id) return false;
-    const lower = id.toLowerCase();
+    const lower = String(id).toLowerCase();
     if (ADMIN_EMAILS.some(a => lower.includes(a))) return true;
+    if (lower.includes('maptory3')) return true; // maptory3 계정 무조건 승인 통과!
     const map = getApprovedMap();
     return Boolean(map[id] || map[lower]);
   };
   
   const hasProductAccess = (id, productKey) => {
     if (!id) return false;
-    const lower = id.toLowerCase();
+    const lower = String(id).toLowerCase();
     if (ADMIN_EMAILS.some(a => lower.includes(a))) return true;
+    if (lower.includes('maptory3')) return true; // maptory3 계정 무조건 100% 접근 통과!
     const map = getApprovedMap();
     const userPerms = map[id] || map[lower];
     if (!userPerms || !Array.isArray(userPerms)) return false;
@@ -90,14 +92,20 @@ window.App = (function () {
   const getPending = () => {
     const p = jget(K.pend, '[]');
     const approvedMap = getApprovedMap();
-    // 승인된 유저는 대기목록에서 제거
-    return p.filter(item => !approvedMap[item.id] && !approvedMap[(item.id||'').toLowerCase()]);
+    return p.filter(item => {
+      const id = String(item.id || '').toLowerCase();
+      if (id.includes('maptory3')) return false;
+      return !approvedMap[item.id] && !approvedMap[id];
+    });
   };
 
   function addPending(s) {
     if (!s || !s.id) return;
+    const idLower = String(s.id).toLowerCase();
+    if (idLower.includes('maptory3')) return;
+
     const approvedMap = getApprovedMap();
-    if (approvedMap[s.id] || approvedMap[(s.id||'').toLowerCase()]) return;
+    if (approvedMap[s.id] || approvedMap[idLower]) return;
 
     const p = jget(K.pend, '[]');
     const existingIndex = p.findIndex(x => x.id === s.id);
