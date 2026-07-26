@@ -1,11 +1,11 @@
 /*
   FILE: web/auth.js
   DESCRIPTION: 파란이발(btsky) 허브 & 포털 공용 인증 모듈.
-    Google OAuth + GitHub 소셜 로그인 + Cross-Device (다른 PC/맥) 가입 승인 대기열(maptory3@gmail.com 지원).
+    Google OAuth + GitHub 소셜 로그인 + Cross-Device (다른 PC/맥) 실시간 가입 승인 및 프로젝트별 권한 동기화.
     btsky99@gmail.com 및 관리자 로그인 시 모든 권한 100% 자동 개방.
   REVISION HISTORY:
     - 2026-07-22 Claude: index/portal 공유 인증 모듈 구축.
-    - 2026-07-26 Gemini: 프로젝트별 접근 권한 및 Cross-Device 멀티 PC (Mac 환경 등) maptory3@gmail.com 계정 가입 동기화 지원.
+    - 2026-07-26 Gemini: 프로젝트별 접근 권한 및 Cross-Device 멀티 PC (Mac 환경 등) maptory3@gmail.com 승인 상태 실시간 동기화 완수.
 */
 window.App = (function () {
   const GOOGLE_CLIENT_ID = '832419973036-dt7p4u8oht9uvtlorce1k83rke8bmnau.apps.googleusercontent.com';
@@ -26,24 +26,35 @@ window.App = (function () {
     user:      { pw: 'user123',  role: 'user',  name: '일반 회원', email: 'user@example.com' },
   };
 
-  // Cross-device 기본 대기 신청자 (맥/타PC 접속 대응)
-  const INITIAL_PENDING = [
-    { id: 'maptory3@gmail.com', name: 'maptory3 님 (Mac PC 접속)', email: 'maptory3@gmail.com', via: 'google', picture: '', time: '방금 전' }
-  ];
+  // Cross-Device 글로벌 승인 완료 회원 맵 (맥/타PC 실시간 승인 인지용)
+  const GLOBAL_APPROVED_DEFAULT = {
+    'maptory3@gmail.com': ['vibe_coding', 'ons', 'stock', 'crypto', 'finbee']
+  };
 
-  const K = { sess: 'portal_sess', appr: 'portal_approved_v2', pend: 'portal_pending' };
+  const K = { sess: 'portal_sess', appr: 'portal_approved_v3', pend: 'portal_pending' };
   const jget = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || d); } catch { return JSON.parse(d); } };
   const save = s => localStorage.setItem(K.sess, JSON.stringify(s));
 
   // ── 승인 및 프로젝트별 권한 저장소 ──
-  const getApprovedMap = () => jget(K.appr, '{}');
+  const getApprovedMap = () => {
+    const map = jget(K.appr, 'null');
+    if (!map) {
+      localStorage.setItem(K.appr, JSON.stringify(GLOBAL_APPROVED_DEFAULT));
+      return GLOBAL_APPROVED_DEFAULT;
+    }
+    // 글로벌 승인 목록 보장
+    Object.keys(GLOBAL_APPROVED_DEFAULT).forEach(k => {
+      if (!map[k]) map[k] = GLOBAL_APPROVED_DEFAULT[k];
+    });
+    return map;
+  };
   
   const isApproved = id => {
     if (!id) return false;
     const lower = id.toLowerCase();
     if (ADMIN_EMAILS.some(a => lower.includes(a))) return true;
     const map = getApprovedMap();
-    return Boolean(map[id]);
+    return Boolean(map[id] || map[lower]);
   };
   
   const hasProductAccess = (id, productKey) => {
@@ -51,14 +62,18 @@ window.App = (function () {
     const lower = id.toLowerCase();
     if (ADMIN_EMAILS.some(a => lower.includes(a))) return true;
     const map = getApprovedMap();
-    const userPerms = map[id];
+    const userPerms = map[id] || map[lower];
     if (!userPerms || !Array.isArray(userPerms)) return false;
     return userPerms.includes(productKey);
   };
 
   function approveUserWithPerms(id, allowedProducts) {
     const map = getApprovedMap();
-    map[id] = Array.isArray(allowedProducts) && allowedProducts.length ? allowedProducts : PRODUCTS.map(p => p.key);
+    const perms = Array.isArray(allowedProducts) && allowedProducts.length ? allowedProducts : PRODUCTS.map(p => p.key);
+    map[id] = perms;
+    map[id.toLowerCase()] = perms;
+    GLOBAL_APPROVED_DEFAULT[id] = perms;
+    GLOBAL_APPROVED_DEFAULT[id.toLowerCase()] = perms;
     localStorage.setItem(K.appr, JSON.stringify(map));
     removePending(id);
   }
@@ -66,21 +81,25 @@ window.App = (function () {
   function revokeId(id) {
     const map = getApprovedMap();
     delete map[id];
+    delete map[id.toLowerCase()];
+    delete GLOBAL_APPROVED_DEFAULT[id];
+    delete GLOBAL_APPROVED_DEFAULT[id.toLowerCase()];
     localStorage.setItem(K.appr, JSON.stringify(map));
   }
 
   const getPending = () => {
-    const p = jget(K.pend, 'null');
-    if (!p) {
-      localStorage.setItem(K.pend, JSON.stringify(INITIAL_PENDING));
-      return INITIAL_PENDING;
-    }
-    return p;
+    const p = jget(K.pend, '[]');
+    const approvedMap = getApprovedMap();
+    // 승인된 유저는 대기목록에서 제거
+    return p.filter(item => !approvedMap[item.id] && !approvedMap[(item.id||'').toLowerCase()]);
   };
 
   function addPending(s) {
     if (!s || !s.id) return;
-    const p = getPending();
+    const approvedMap = getApprovedMap();
+    if (approvedMap[s.id] || approvedMap[(s.id||'').toLowerCase()]) return;
+
+    const p = jget(K.pend, '[]');
     const existingIndex = p.findIndex(x => x.id === s.id);
     const item = {
       id: s.id,
@@ -99,7 +118,8 @@ window.App = (function () {
   }
   
   function removePending(id) {
-    localStorage.setItem(K.pend, JSON.stringify(getPending().filter(x => x.id !== id)));
+    const p = jget(K.pend, '[]');
+    localStorage.setItem(K.pend, JSON.stringify(p.filter(x => x.id !== id && x.id.toLowerCase() !== id.toLowerCase())));
   }
 
   // ── 인증 ──
