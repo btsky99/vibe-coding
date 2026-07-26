@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bgV3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="toothV3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#bae6fd"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="104" height="104" rx="32" fill="url(#bgV3)"/>
+  <!-- 귀엽고 유니크한 젤리 흰색 이빨 -->
+  <path d="M 60 25 C 40 25, 30 38, 32 58 C 34 74, 43 92, 49 94 C 54 95, 57 85, 60 85 C 63 85, 66 95, 71 94 C 77 92, 86 74, 88 58 C 90 38, 80 25, 60 25 Z"
+        fill="url(#toothV3)"/>
+  <!-- 파란 눈/표정 대신 파란 블루투스 스마일/엠블럼 -->
+  <path d="M 60 38 L 67 45 L 53 58 L 67 71 L 60 78 L 60 38" 
+        stroke="#0284c7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 볼에 귀여운 파란 볼터치 -->
+  <ellipse cx="44" cy="58" rx="4" ry="2.5" fill="#38bdf8" opacity="0.6"/>
+  <ellipse cx="76" cy="58" rx="4" ry="2.5" fill="#38bdf8" opacity="0.6"/>
+</svg>

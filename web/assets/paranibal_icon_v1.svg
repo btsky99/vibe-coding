@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bgV1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="toothV1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="104" height="104" rx="28" fill="url(#bgV1)" stroke="#38bdf8" stroke-width="2" stroke-opacity="0.3"/>
+  <!-- 깔끔하고 세련된 미니멀 파란이빨 -->
+  <path d="M 60 24 C 42 24, 34 38, 36 58 C 38 72, 45 92, 51 94 C 55 95, 57 85, 60 85 C 63 85, 65 95, 69 94 C 75 92, 82 72, 84 58 C 86 38, 78 24, 60 24 Z"
+        fill="url(#toothV1)"/>
+  <!-- 내부에 흰색 블루투스 아이콘 -->
+  <path d="M 60 36 L 67 43 L 53 57 L 67 71 L 60 78 L 60 36 L 67 49 L 53 65" 
+        stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

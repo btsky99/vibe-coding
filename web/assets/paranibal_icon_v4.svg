@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bgV4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0369a1"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <!-- 육각형 메인 배지 -->
+  <polygon points="60,10 105,35 105,85 60,110 15,85 15,35" fill="url(#bgV4)" stroke="#38bdf8" stroke-width="2.5"/>
+  <!-- 기하학적 미니멀 이빨 & 블루투스 결합 로고 -->
+  <path d="M 60 30 L 74 44 L 56 60 L 74 76 L 60 90 L 60 30 L 74 48 L 56 66" 
+        stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="60" cy="22" r="4" fill="#38bdf8"/>
+</svg>
