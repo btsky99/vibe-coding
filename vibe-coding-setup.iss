@@ -11,6 +11,15 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-07-28] Claude — [재설치 DLL 잠금 재발] "DeleteFile 실패; 코드 5: {app}\_internal\msvcp140.dll"
+;              (v3.7.302, 특정 PC에서 반복 / 재부팅 후에는 설치 성공). 근본원인 2가지:
+;              ① CloseApplicationsFilter=*vibe-coding* — 이 옵션은 '닫을 앱' 필터가 아니라
+;                 '사용 중인지 검사할 [Files] 파일명' 필터(기본 *.exe,*.dll,*.chm)라서
+;                 _internal\*.dll이 Restart Manager 검사에서 통째로 제외됐음 → 잠금 미감지.
+;              ② KillLockingProcesses가 InitializeSetup 1회뿐 — 언인스톨/압축해제 수십 초 사이
+;                 훅(VIBE_HIVE_HOOK={app}\vibe-coding.exe)이 exe를 재스폰해 잠금 재발.
+;              → 필터를 *.exe,*.dll,*.pyd,*.chm으로 복원 + 종료 폴링(최대 12초) +
+;                 CurStepChanged(ssInstall)에서 파일 복사 직전 재정리.
 ; [2026-07-10] Claude — [설치/제거 DLL 잠금] onedir 재설치 시 "DeleteFile 실패; 코드 5:
 ;              ...\pgsql\bin\libcrypto-3-x64.dll" 사고. 근본원인: vibe-coding.exe만 taskkill →
 ;              자식 postgres.exe/node.exe가 고아로 살아남아 pgsql DLL 잠금. onefile은 DLL이 _MEI
@@ -91,8 +100,15 @@ WizardStyle=modern
 ;   [불변식] VIBE_HIVE_HOOK 레지스트리는 HKCU 분기(Check: not IsAdminInstallMode)가 처리 — 이미 대응됨.
 PrivilegesRequired=lowest
 ; 설치 전 실행 중인 앱 자동 종료 (덮어쓰기 허용) — 업데이트 시 실행 중 vibe-coding을 닫고 교체.
+; [과거사고 2026-07-28 v3.7.302] 재설치 시 "DeleteFile 실패; 코드 5: {app}\_internal\msvcp140.dll".
+;   [근본원인] CloseApplicationsFilter는 '닫을 앱' 필터가 아니라 '사용 중인지 검사할 [Files] 파일명'
+;     필터다(기본값 *.exe,*.dll,*.chm). 이를 '*vibe-coding*'으로 좁혀둬서 _internal\*.dll,
+;     python311.dll, pgsql\bin\*.dll이 Restart Manager 검사 대상에서 통째로 빠졌다 →
+;     그 DLL을 잠근 프로세스를 Inno가 감지·종료조차 못 함 → 교체 실패.
+;   [해법] DLL/PYD까지 검사 대상에 포함. exe만 닫아선 onedir의 잠금을 못 푼다.
+;   [불변식] onedir 구조에서는 DLL이 설치폴더에 직접 놓이므로 필터에서 *.dll을 빼면 안 됨.
 CloseApplications=yes
-CloseApplicationsFilter=*vibe-coding*
+CloseApplicationsFilter=*.exe,*.dll,*.pyd,*.chm
 
 ; 환경변수 변경 시 WM_SETTINGCHANGE 자동 broadcast — VIBE_HIVE_HOOK 등록을 새 셸에 즉시 반영
 ; [2026-05-26] B3 — 외부 프로젝트가 설치 EXE만 있는 PC에서도 hive_hook 자동 발견 가능
@@ -269,23 +285,53 @@ end;
 //     골라 죽인다 → 남의 PostgreSQL/Node나 개발 체크아웃(경로가 'vibe-coding' 하이픈,
 //     'VibeCoding'와 불일치)은 절대 안 건드림. -like는 대소문자 무시지만 하이픈 유무로 분리됨.
 //   [불변식] vibe-coding.exe 단독 taskkill만으로는 부족 — 자식 DB/PTY까지 반드시 정리.
-procedure KillLockingProcesses();
+//   [과거사고 2026-07-28 v3.7.302] 위 대책에도 '_internal\msvcp140.dll' 코드 5 재발.
+//     [근본원인 2] 이 정리가 InitializeSetup 1회뿐이었다. 그 뒤 구버전 언인스톨러(/SILENT) 실행 +
+//       마법사 진행 + 압축 해제까지 수십 초가 흐르는데, 그 사이 프로세스가 '다시 뜨면' 잠금 재발.
+//       설치 EXE 단독 PC는 VIBE_HIVE_HOOK이 {app}\vibe-coding.exe라 그 PC에서 도는 Claude Code
+//       세션이 훅마다 exe를 스폰 → _internal DLL 재잠금. '재부팅하면 설치 성공'이 그 증거
+//       (재부팅 직후엔 백그라운드 세션/데몬/PTY가 아직 없어 재스폰이 없음).
+//     [해법] (a) 고정 Sleep 대신 '실제로 사라질 때까지' 폴링 종료, (b) 파일 복사 직전
+//       CurStepChanged(ssInstall)에서 한 번 더 실행 — 잠금 재발 창(window)을 최소화.
+procedure KillLockingProcesses(AppDir: String);
 var
   iResultCode: Integer;
   sPs: String;
+  sMatch: String;
 begin
   // 경로 기준 스코프 종료: ExecutablePath가 '*VibeCoding*'인 프로세스 전부 강제 종료.
   //   postgres.exe / node.exe / vibe-coding.exe / vibe-dashboard.exe 모두 포함됨.
+  //   AppDir이 주어지면(설치 경로 확정 후) 커스텀 설치 경로도 함께 매칭 — 기본 경로가 아닌
+  //   폴더에 설치한 PC에서 'VibeCoding' 문자열이 경로에 없어 하나도 못 죽이던 구멍을 막는다.
+  sMatch := '$_.ExecutablePath -like ''*VibeCoding*''';
+  if AppDir <> '' then
+    sMatch := sMatch + ' -or $_.ExecutablePath -like ''' + AppDir + '\*''';
+
+  // [불변식] 고정 대기 금지 — Stop-Process -Force는 비동기라 종료 완료를 보장하지 않는다.
+  //   최대 12초까지 '남아있으면 다시 죽인다'를 반복해 실제 소멸을 확인한 뒤 진행한다.
   sPs :=
-    'Get-CimInstance Win32_Process | ' +
-    'Where-Object { $_.ExecutablePath -like ''*VibeCoding*'' } | ' +
-    'ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }';
+    '$deadline = (Get-Date).AddSeconds(12); ' +
+    'do { ' +
+    '  $ps = @(Get-CimInstance Win32_Process | Where-Object { ' + sMatch + ' }); ' +
+    '  if ($ps.Count -eq 0) { break }; ' +
+    '  $ps | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }; ' +
+    '  Start-Sleep -Milliseconds 400 ' +
+    '} while ((Get-Date) -lt $deadline)';
   Exec('powershell.exe',
        '-NoProfile -ExecutionPolicy Bypass -Command "' + sPs + '"',
        '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
   // 이미지명 폴백(경로 없는 좀비 대비) — 개발 postgres/node는 위 경로필터에서 이미 제외됐고
   //   여기선 vibe-coding.exe만 IM으로 마무리 (postgres/node를 IM으로 죽이면 개발 것까지 죽으므로 금지).
   Exec('taskkill.exe', '/F /IM vibe-coding.exe', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+  Exec('taskkill.exe', '/F /IM vibe-dashboard.exe', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+end;
+
+// 파일 교체 직전 재정리 — InitializeSetup 이후 재스폰된 프로세스를 마지막으로 걷어낸다.
+//   [주의] ssInstall은 [Files] 복사 '직전' 단계라 여기가 잠금 해제의 마지막 기회다.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    KillLockingProcesses(ExpandConstant('{app}'));
 end;
 
 function InitializeSetup(): Boolean;
@@ -296,9 +342,9 @@ begin
   Result := True;
 
   // 실행 중인 앱 + 자식 프로세스(postgres.exe/node.exe) 강제 종료 (DLL 잠금 방지)
-  KillLockingProcesses();
-  // 잠시 대기하여 프로세스 종료 및 파일 잠금 해제 완료 대기
-  Sleep(1500);
+  //   이 시점엔 {app}이 미확정이라 경로 인자 없이 'VibeCoding' 문자열 매칭만 수행.
+  //   실제 소멸까지 함수 내부에서 폴링하므로 여기서 고정 Sleep은 불필요(구 Sleep(1500) 제거).
+  KillLockingProcesses('');
 
   // PyInstaller _MEI* 잔여 폴더 정리 (python311.dll 로드 실패 방지)
   CleanupMEIDirectories();
