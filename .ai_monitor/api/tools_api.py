@@ -8,6 +8,8 @@ DESCRIPTION: AI 도구 CLI 설치 관리 API.
              POST /api/tools/install  — 특정 도구 설치 실행 (새 콘솔 창)
 
 REVISION HISTORY:
+- 2026-07-28 Codex: Expose an installer launcher for first-run automatic dependency repair.
+- 2026-07-28 Codex: Accept Gemini CLI as the Antigravity compatibility command.
 - 2026-04-05 Claude Opus 4.6: 최초 ���성 — 도�� 설치 통합 API
 - 2026-04-05 Claude Opus 4.6: psql, ruff, uv, pytest, pyinstaller 도구 추가 (Gemini 추천 반영)
 - 2026-04-05 Claude Opus 4.6: 전체 도구 install_hint 추가 + Git, Python, TypeScript, Vite, ESLint, Tailwind CSS, Inno Setup, Pillow, Claude/Gemini/Node.js 자동 설치 지원
@@ -113,7 +115,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "id": "antigravity",
         "name": "Antigravity CLI",
         "description": "Google Antigravity AI 코딩 에이전트",
-        "check_commands": [["antigravity", "--version"]],
+        "check_commands": [["antigravity", "--version"], ["gemini", "--version"]],
         "check_paths": [],
         "install_script": "install_npm_tool.py",
         "install_args": ["--package", "@google/gemini-cli", "--name", "Gemini CLI"],
@@ -571,6 +573,62 @@ def _get_python_cmd() -> str:
         if venv_python.exists():
             return str(venv_python)
     return sys.executable
+
+
+def launch_tool_installer(tool_id: str) -> dict[str, Any]:
+    """등록된 도구 설치기를 새 콘솔에서 실행하고 구조화된 결과를 반환한다.
+
+    Setup Doctor와 수동 설치 API가 같은 실행 경로를 사용해야 설치 명령, frozen 경로
+    탐색, Python 선택 규칙이 서로 어긋나지 않는다.
+    """
+    tool_def = next((tool for tool in TOOL_REGISTRY if tool["id"] == tool_id), None)
+    if not tool_def:
+        return {"status": "error", "message": f"알 수 없는 도구: {tool_id}"}
+
+    script_name = tool_def.get("install_script")
+    if not script_name:
+        return {
+            "status": "manual",
+            "message": f"{tool_def['name']}은(는) 수동 설치가 필요합니다.",
+            "install_url": tool_def.get("install_url", ""),
+            "install_hint": tool_def.get("install_hint", ""),
+        }
+
+    script_path = _find_install_script(script_name)
+    if not script_path:
+        return {
+            "status": "error",
+            "message": f"설치 스크립트를 찾을 수 없습니다: {script_name}",
+        }
+
+    try:
+        python_cmd = _get_python_cmd()
+        cmd_parts = [python_cmd, str(script_path), *tool_def.get("install_args", [])]
+        install_cmd = subprocess.list2cmdline(cmd_parts)
+        tool_name = tool_def["name"]
+        cmdline = (
+            f"title Vibe Coding - {tool_name} Installer && "
+            f"echo ============================================ && "
+            f"echo   {tool_name} 자동 설치 중... && "
+            f"echo ============================================ && echo. && "
+            f"{install_cmd} && echo. && echo {tool_name} 설치 완료. || "
+            f"echo. && echo {tool_name} 설치 실패. 위 로그를 확인하세요."
+        )
+        subprocess.Popen(
+            ["cmd.exe", "/k", cmdline],
+            cwd=str(_PROJECT_ROOT),
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
+        )
+        return {
+            "status": "success",
+            "message": f"{tool_name} 자동 설치를 시작했습니다.",
+            "tool": tool_id,
+            "script": str(script_path),
+            "python": python_cmd,
+        }
+    except Exception as exc:
+        return {"status": "error", "message": f"설치 실행 실패: {exc}"}
 
 
 # [중복통합 2026-07-18] _json_response는 api/_common.py로 통합 — 패스스루 재노출.

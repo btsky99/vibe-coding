@@ -3,6 +3,8 @@ FILE: .ai_monitor/server.py
 DESCRIPTION: 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리.
 
 REVISION HISTORY:
+- 2026-07-28 Codex: Route first-run automatic dependency installation.
+- 2026-07-28 Codex: Wire the existing Setup Doctor status endpoint into GET routing.
 - 2026-07-04 Claude: /api/agent-quota 디스패치 누락 수정 — hive_api 핸들러만 있고
                      allowlist 미갱신으로 쿼터 배지가 index.html을 받던 버그
 - 2026-04-30 Claude: Platform Phase 2-3 — _current_project_root/_id 로직을
@@ -210,6 +212,7 @@ import api.commands_api as commands_api
 import api.config_api as config_api
 import api.fs_dialog_api as fs_dialog_api
 import api.dashboard_api as dashboard_api
+import api.setup_api as setup_api
 import api.office_launch_api as office_launch_api
 import api.hive_ingest_api as hive_ingest_api
 import api.screenshot_api as screenshot_api
@@ -1047,6 +1050,7 @@ def _g_trigger_update_chk(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
 def _g_soft_update_check(h, pp):   update_api.soft_update_check(h, DATA_DIR, _soft_src_dir())
 # [불변식] heal은 전체(global) 집계 — project_id 슬러그 불일치로 0 오도 방지(설치/dev 분기).
 def _g_heal_metrics(h, pp):        heal_api.handle_get(h, '')
+def _g_setup_status(h, pp):        setup_api.handle_get(h, pp.path, parse_qs(pp.query))
 
 # SSE 실시간 스트리밍 3종 → api/events_api.py.
 # [불변식] THOUGHT_LOGS/THOUGHT_CLIENTS/AGENT_CLIENTS/FS_CLIENTS/_SSE_LOCK는 전역 참조로 주입 —
@@ -1134,6 +1138,7 @@ GET_ROUTES = {
     '/api/trigger-update-check': _g_trigger_update_chk,
     '/api/soft-update/check': _g_soft_update_check,
     '/api/heal/metrics': _g_heal_metrics,
+    '/api/setup/status': _g_setup_status,
     '/api/events/thoughts': _g_events_thoughts,
     '/api/events/agent': _g_events_agent,
     '/api/events/fs': _g_events_fs,
@@ -1324,6 +1329,8 @@ def _p_office_status(h, pp):
 def _p_tools(h, pp):
     from api import tools_api
     tools_api.handle_post(h, pp.path, _p_body(h))
+def _p_setup_auto_install(h, pp):
+    setup_api.handle_post(h, pp.path, _p_body(h))
 def _p_agent(h, pp): agent_api.handle_post(h, pp.path)
 def _p_pty(h, pp):   pty_api.handle_post(h, pp.path)
 def _p_zettel(h, pp):
@@ -1357,6 +1364,7 @@ def _p_git_diff(h, pp):        git_api.diff(h, parse_qs(pp.query), BASE_DIR)
 def _p_screenshot_analyze(h, pp): screenshot_api.analyze(h, SCRIPTS_DIR, PROJECT_ID)
 
 POST_ROUTES = {
+    '/api/setup/auto-install': _p_setup_auto_install,
     '/api/config/telegram': _p_telegram_config,
     '/api/telegram/test': _p_telegram_test,
     '/api/apply-update': _p_apply_update,

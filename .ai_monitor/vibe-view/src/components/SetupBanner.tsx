@@ -6,6 +6,8 @@
  *              "닫기" 시 localStorage에 기록하여 재표시 방지.
  *
  * REVISION HISTORY:
+ * - 2026-07-28 Codex: Start missing core dependency installation automatically on first run.
+ * - 2026-07-28 Codex: Connect missing AI CLI action to the one-click install controls.
  * - 2026-03-27 Claude: 최초 작성. setup_doctor.py 연동 배너.
  */
 
@@ -26,7 +28,7 @@ const CHECK_LABELS: Record<string, string> = {
 const ACTION_LABELS: Record<string, string> = {
   open_telegram_panel: '텔레그램 설정으로 이동',
   install_claude: 'Claude Code를 설치하세요',
-  install_cli: 'AI CLI를 설치하세요',
+  install_cli: 'AI CLI 설치',
 };
 
 interface CheckResult {
@@ -60,7 +62,6 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
     const saved = localStorage.getItem(DISMISS_KEY);
     if (saved === 'true') {
       setDismissed(true);
-      return;
     }
 
     /* 서버에서 진단 결과 가져오기 */
@@ -68,6 +69,13 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       .then(r => r.json())
       .then((data: SetupStatus) => {
         setStatus(data);
+        if (data.checks?.cli_agents?.status === 'missing') {
+          fetch(`${API_BASE}/api/setup/auto-install`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          }).catch(() => { /* 설치 실패는 다음 실행의 진단 배너에서 다시 안내 */ });
+        }
         /* 자동 수리 항목은 5초 후 숨김 */
         if ((data.auto_fixed?.length ?? 0) > 0 && (data.needs_action?.length ?? 0) === 0) {
           setTimeout(() => setShowFixed(false), 5000);
@@ -91,6 +99,8 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   const handleAction = (action: string) => {
     if (action === 'open_telegram_panel' && onNavigate) {
       onNavigate('telegram');
+    } else if (action === 'install_cli' && onNavigate) {
+      onNavigate('tools');
     }
   };
 

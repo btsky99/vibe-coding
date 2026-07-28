@@ -12,6 +12,7 @@ DESCRIPTION: 하이브 마인드 초기 설정 자동 진단 + 수리 엔진.
              5. telegram    — .env 텔레그램 봇 토큰 유무
 
 REVISION HISTORY:
+- 2026-07-28 Codex: Mark partial AI CLI installations as actionable and accept the Gemini compatibility command.
 - 2026-03-27 Claude: 최초 작성. 접근법 C(자동 수리 + 필요할 때만 위자드) 구현.
 """
 
@@ -220,25 +221,26 @@ def check_cli_agents() -> dict:
     missing = []
 
     for name, cmd in agents.items():
+        candidates = [cmd[0]]
+        if name == "antigravity":
+            candidates.append("gemini")
         # shutil.which로 PATH에서 찾기
-        if shutil.which(cmd[0]):
+        if any(shutil.which(candidate) for candidate in candidates):
             found.append(name)
         else:
             # Windows: .cmd 확장자로도 확인
-            if os.name == 'nt' and shutil.which(f"{cmd[0]}.cmd"):
+            if os.name == 'nt' and any(shutil.which(f"{candidate}.cmd") for candidate in candidates):
                 found.append(name)
             else:
                 missing.append(name)
 
     if not missing:
         return _make_result(STATUS_OK, f"CLI 감지: {', '.join(found)}")
-    elif found:
-        return _make_result(STATUS_OK,
-                            f"CLI 감지: {', '.join(found)} (미설치: {', '.join(missing)})")
+    if found:
+        message = f"CLI 감지: {', '.join(found)} (미설치: {', '.join(missing)})"
     else:
-        return _make_result(STATUS_MISSING,
-                            f"CLI 미감지 — {', '.join(missing)} 설치 필요",
-                            action="install_cli")
+        message = f"CLI 미감지 — {', '.join(missing)} 설치 필요"
+    return _make_result(STATUS_MISSING, message, action="install_cli")
 
 
 # ═══════════════════════════════════════════════════════════════════════

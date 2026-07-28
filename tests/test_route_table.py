@@ -9,6 +9,8 @@ DESCRIPTION: server.py 라우트 완전성 가드 — do_GET/do_POST를 if/elif�
     (2026-07-05 projects 추출 near-miss로 확립한 규율.)
 
 REVISION HISTORY:
+- 2026-07-28 Codex: Guard the automatic first-run installer route.
+- 2026-07-28 Codex: Guard the Setup Doctor status route against silent SPA fallback.
 - 2026-07-05 Claude: 신규 — 디스패치 테이블 재구조화 Phase 1 Task 1(변경 전 게이트).
 - 2026-07-06 Claude: Phase 2 R9.5 — `path in (...)` 튜플 파싱 추가(복합조건 라우트
   hive exact8·install-cli3·tasks/memory/files 감지, 기존 사각지대 해소). golden에 22종 편입.
@@ -20,6 +22,7 @@ _SERVER = Path(__file__).resolve().parents[1] / ".ai_monitor" / "server.py"
 
 # ── 골든 라우트 (2026-07-05 HEAD 캡처) — 재구조화 후에도 전부 처리되어야 한다 ──
 GOLDEN_EXACT = {
+    '/api/setup/auto-install',
     # do_GET
     '/api/agents', '/api/browse-folder', '/api/check-update-ready', '/api/config',
     '/api/config/telegram', '/api/copy-path', '/api/dirs', '/api/drives',
@@ -28,6 +31,7 @@ GOLDEN_EXACT = {
     '/api/install-tool-status', '/api/memory/db-info',
     '/api/messages', '/api/projects', '/api/register-codex-to-ai', '/api/server-logs',
     '/api/shutdown', '/api/soft-update/check', '/api/tool-status',
+    '/api/setup/status',
     '/api/trigger-update-check', '/api/vibe/notifications', '/api/vibe/sidebar',
     '/api/vibe/skills', '/stream',
     # do_POST
