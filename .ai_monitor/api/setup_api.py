@@ -4,6 +4,7 @@ DESCRIPTION: Setup Doctor API — 초기 설정 진단 상태를 대시보드에
              GET /api/setup/status → 5가지 항목의 진단 결과 반환.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Run one sequential installer for every missing core AI dependency.
 - 2026-07-28 Codex: Add first-run automatic installation for missing Node.js and AI CLIs.
 - 2026-03-27 Claude: 최초 작성. setup_doctor.py 연동.
 """
@@ -69,26 +70,23 @@ def handle_post(handler, path: str, data: dict | None = None, **kwargs) -> bool:
         for item in tools_api._get_all_status()["tools"]
         if item["id"] in {"nodejs", "claude", "codex", "antigravity"}
     }
-    if not statuses.get("nodejs", {}).get("installed", False):
-        targets = ["nodejs"]
-    else:
-        targets = [
-            tool_id
-            for tool_id in ("claude", "codex", "antigravity")
-            if not statuses.get(tool_id, {}).get("installed", False)
-        ]
+    targets = [
+        tool_id
+        for tool_id in ("nodejs", "claude", "codex", "antigravity")
+        if not statuses.get(tool_id, {}).get("installed", False)
+    ]
 
     launched = []
     skipped = []
     with _AUTO_INSTALL_LOCK:
-        for tool_id in targets:
-            if tool_id in _AUTO_INSTALL_STARTED:
-                skipped.append(tool_id)
-                continue
-            result = tools_api.launch_tool_installer(tool_id)
+        chain_id = "ai-toolchain"
+        if targets and chain_id not in _AUTO_INSTALL_STARTED:
+            result = tools_api.launch_ai_toolchain_installer()
             if result.get("status") == "success":
-                _AUTO_INSTALL_STARTED.add(tool_id)
-                launched.append(tool_id)
+                _AUTO_INSTALL_STARTED.add(chain_id)
+                launched.extend(targets)
+        elif targets:
+            skipped.extend(targets)
 
     body = json.dumps({
         "status": "started" if launched else "idle",

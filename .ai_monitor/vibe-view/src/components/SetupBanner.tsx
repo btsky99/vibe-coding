@@ -6,6 +6,7 @@
  *              "닫기" 시 localStorage에 기록하여 재표시 방지.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Codex: Make Claude and all-AI-CLI actions start installers instead of doing nothing.
  * - 2026-07-28 Codex: Start missing core dependency installation automatically on first run.
  * - 2026-07-28 Codex: Connect missing AI CLI action to the one-click install controls.
  * - 2026-03-27 Claude: 최초 작성. setup_doctor.py 연동 배너.
@@ -53,6 +54,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [showFixed, setShowFixed] = useState(true);
+  const [installingAction, setInstallingAction] = useState<string | null>(null);
 
   /* localStorage 키 — 사용자가 닫으면 다시 안 보임 */
   const DISMISS_KEY = 'setup_banner_dismissed';
@@ -96,11 +98,30 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
     }
   };
 
-  const handleAction = (action: string) => {
+  const handleAction = async (action: string) => {
     if (action === 'open_telegram_panel' && onNavigate) {
       onNavigate('telegram');
-    } else if (action === 'install_cli' && onNavigate) {
-      onNavigate('tools');
+      return;
+    }
+
+    if (action === 'install_claude' || action === 'install_cli') {
+      setInstallingAction(action);
+      try {
+        const endpoint = action === 'install_claude'
+          ? `${API_BASE}/api/tools/install`
+          : `${API_BASE}/api/setup/auto-install`;
+        const body = action === 'install_claude' ? { tool: 'claude' } : {};
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch {
+        if (onNavigate) onNavigate('tools');
+      } finally {
+        window.setTimeout(() => setInstallingAction(null), 1500);
+      }
     }
   };
 
@@ -138,10 +159,13 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
               {check.action && (
                 <button
                   onClick={() => handleAction(check.action!)}
+                  disabled={installingAction === check.action}
                   className="px-2 py-0.5 bg-amber-700/60 hover:bg-amber-600/60 rounded text-xs text-amber-100 flex items-center gap-1"
                 >
                   <Settings className="w-3 h-3" />
-                  {ACTION_LABELS[check.action] || '설정하기'}
+                  {installingAction === check.action
+                    ? '설치 시작 중...'
+                    : (ACTION_LABELS[check.action] || '설정하기')}
                 </button>
               )}
             </span>

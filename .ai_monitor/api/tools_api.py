@@ -8,6 +8,7 @@ DESCRIPTION: AI 도구 CLI 설치 관리 API.
              POST /api/tools/install  — 특정 도구 설치 실행 (새 콘솔 창)
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Add one sequential first-run installer for Node.js and all AI CLIs.
 - 2026-07-28 Codex: Expose an installer launcher for first-run automatic dependency repair.
 - 2026-07-28 Codex: Accept Gemini CLI as the Antigravity compatibility command.
 - 2026-04-05 Claude Opus 4.6: 최초 ���성 — 도�� 설치 통합 API
@@ -629,6 +630,31 @@ def launch_tool_installer(tool_id: str) -> dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "error", "message": f"설치 실행 실패: {exc}"}
+
+
+def launch_ai_toolchain_installer() -> dict[str, Any]:
+    """Node.js와 세 AI CLI의 누락분을 한 콘솔에서 순차 자동 설치한다."""
+    script_path = _find_install_script("install_ai_toolchain.py")
+    if not script_path:
+        return {"status": "error", "message": "AI 도구 자동 설치 스크립트를 찾을 수 없습니다."}
+    try:
+        runner = sys.executable if getattr(sys, "frozen", False) else _get_python_cmd()
+        install_cmd = subprocess.list2cmdline([runner, str(script_path)])
+        cmdline = (
+            "title Vibe Coding - AI Toolchain Auto Installer && "
+            "echo Vibe Coding 필수 도구를 자동으로 확인하고 설치합니다. && echo. && "
+            f"{install_cmd} && echo. && echo 전체 자동 설치가 완료되었습니다. || "
+            "echo. && echo 일부 설치가 실패했습니다. 위 로그를 확인하세요."
+        )
+        subprocess.Popen(
+            ["cmd.exe", "/k", cmdline],
+            cwd=str(_PROJECT_ROOT),
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
+        )
+        return {"status": "success", "message": "필수 AI 도구 자동 설치를 시작했습니다."}
+    except Exception as exc:
+        return {"status": "error", "message": f"AI 도구 자동 설치 실행 실패: {exc}"}
 
 
 # [중복통합 2026-07-18] _json_response는 api/_common.py로 통합 — 패스스루 재노출.

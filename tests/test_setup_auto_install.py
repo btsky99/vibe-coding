@@ -1,6 +1,6 @@
 """
 FILE: tests/test_setup_auto_install.py
-DESCRIPTION: First-run automatic dependency installation API regression tests.
+DESCRIPTION: First-run sequential automatic dependency installation API regression tests.
 
 REVISION HISTORY:
 - 2026-07-28 Codex: Cover Node-first ordering and missing AI CLI launch behavior.
@@ -38,7 +38,7 @@ def _tool(tool_id: str, installed: bool) -> dict:
     return {"id": tool_id, "installed": installed}
 
 
-def test_auto_install_starts_node_before_npm_clis():
+def test_auto_install_starts_one_chain_for_node_and_all_missing_clis():
     handler = _Handler()
     statuses = {
         "tools": [
@@ -53,15 +53,20 @@ def test_auto_install_starts_node_before_npm_clis():
     with (
         patch("api.tools_api._get_all_status", return_value=statuses),
         patch(
-            "api.tools_api.launch_tool_installer",
+            "api.tools_api.launch_ai_toolchain_installer",
             return_value={"status": "success"},
         ) as launch,
     ):
         assert setup_api.handle_post(handler, "/api/setup/auto-install", {})
 
-    launch.assert_called_once_with("nodejs")
+    launch.assert_called_once_with()
     assert handler.status == 202
-    assert json.loads(handler.wfile.getvalue())["launched"] == ["nodejs"]
+    assert json.loads(handler.wfile.getvalue())["launched"] == [
+        "nodejs",
+        "claude",
+        "codex",
+        "antigravity",
+    ]
 
 
 def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
@@ -79,11 +84,11 @@ def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
     with (
         patch("api.tools_api._get_all_status", return_value=statuses),
         patch(
-            "api.tools_api.launch_tool_installer",
+            "api.tools_api.launch_ai_toolchain_installer",
             return_value={"status": "success"},
         ) as launch,
     ):
         assert setup_api.handle_post(handler, "/api/setup/auto-install", {})
 
-    assert [call.args[0] for call in launch.call_args_list] == ["codex", "antigravity"]
+    launch.assert_called_once_with()
     assert json.loads(handler.wfile.getvalue())["launched"] == ["codex", "antigravity"]
