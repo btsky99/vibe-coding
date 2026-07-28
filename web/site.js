@@ -3,6 +3,7 @@
   DESCRIPTION: 파란이빨(btsky) 웹 인터페이스 헬퍼 모듈.
     소셜 로그인 모달, 👑 btsky99 관리자 1초 퀵로그인, GitHub OAuth, 개별 프로젝트 다운로드 권한 검증 및 FAQ 렌더링.
   REVISION HISTORY:
+    - 2026-07-28 Codex: 최신 릴리즈의 버전·파일명·크기를 표시하고 OS별 다운로드를 직접 연결.
     - 2026-07-22 Claude: 공통 UI 스크립트 작성.
     - 2026-07-26 Gemini: 상단 버튼(loginAdminQuick) 클릭 실패 결함 완벽 보강.
 */
@@ -197,26 +198,62 @@ window.Site = (function () {
       .catch(() => {});
   }
 
-  function parseReleasesWithMac(repoPath, exePattern, macPattern, btnEl, infoEl, productKey) {
-    fetch(`https://api.github.com/repos/${repoPath}/releases/latest`)
+  function parseReleasesWithMac(repoPath, winBtnEl, macBtnEl, patchBtnEl, infoEl, productKey) {
+    return fetch(`https://api.github.com/repos/${repoPath}/releases/latest`)
       .then(r => r.json())
       .then(data => {
-        if (!data || !data.assets) return;
-        const exeAsset = data.assets.find(a => a.name.includes(exePattern) || a.name.endsWith('.exe'));
-        const macAsset = data.assets.find(a => a.name.includes(macPattern) || a.name.endsWith('.dmg') || a.name.endsWith('.zip'));
-        
-        if (btnEl) {
-          btnEl.onclick = () => {
-            const exeUrl = exeAsset ? exeAsset.browser_download_url : `https://github.com/${repoPath}/releases`;
-            const macUrl = macAsset ? macAsset.browser_download_url : exeUrl;
-            gateDownloadBundle(exeUrl, macUrl, productKey);
-          };
+        if (!data || !Array.isArray(data.assets)) {
+          throw new Error('latest release assets unavailable');
         }
-        if (infoEl && exeAsset) {
-          infoEl.textContent = `최신 버젼: ${data.tag_name} (Windows .exe / Mac .dmg 지원)`;
+
+        const exeAsset = data.assets.find(asset =>
+          asset.name.startsWith('vibe-coding-setup-') && asset.name.endsWith('.exe')
+        );
+        const macAsset = data.assets.find(asset => asset.name.endsWith('.dmg'));
+        const patchAsset = data.assets.find(asset =>
+          asset.name.endsWith('.zip') && /patch|update/i.test(asset.name)
+        );
+        const releasesUrl = `https://github.com/${repoPath}/releases/latest`;
+        const winDownloadUrl = exeAsset ? exeAsset.browser_download_url : releasesUrl;
+        const macDownloadUrl = macAsset ? macAsset.browser_download_url : releasesUrl;
+
+        if (winBtnEl) {
+          winBtnEl.onclick = () => gateDownload(winDownloadUrl, productKey);
+          const label = winBtnEl.querySelector('small');
+          if (label && exeAsset) {
+            label.textContent = `${exeAsset.name} · ${(exeAsset.size / 1024 / 1024).toFixed(1)} MB`;
+          }
         }
+        if (macBtnEl) {
+          macBtnEl.onclick = () => gateDownload(macDownloadUrl, productKey);
+          const label = macBtnEl.querySelector('small');
+          if (label && macAsset) {
+            label.textContent = `${macAsset.name} · ${(macAsset.size / 1024 / 1024).toFixed(1)} MB`;
+          }
+        }
+        if (patchBtnEl) {
+          patchBtnEl.hidden = !patchAsset;
+          if (patchAsset) {
+            patchBtnEl.onclick = () => gateDownload(patchAsset.browser_download_url, productKey);
+          }
+        }
+        if (infoEl) {
+          const published = data.published_at
+            ? new Date(data.published_at).toLocaleDateString('ko-KR')
+            : '';
+          infoEl.textContent = `최신 버전 ${data.tag_name}${published ? ` · ${published} 배포` : ''}`;
+        }
+        return { winUrl: winDownloadUrl, macUrl: macDownloadUrl, tag: data.tag_name };
       })
-      .catch(() => {});
+      .catch(() => {
+        const releasesUrl = `https://github.com/${repoPath}/releases/latest`;
+        if (winBtnEl) winBtnEl.onclick = () => gateDownload(releasesUrl, productKey);
+        if (macBtnEl) macBtnEl.onclick = () => gateDownload(releasesUrl, productKey);
+        if (infoEl) {
+          infoEl.textContent = '최신 버전 정보를 불러오지 못했습니다. GitHub Releases에서 확인해 주세요.';
+        }
+        return { winUrl: releasesUrl, macUrl: releasesUrl, tag: '' };
+      });
   }
 
   function renderAdminGates() {

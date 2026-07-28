@@ -4,6 +4,7 @@
   DESCRIPTION: 파란이빨(btsky) 바이브 코딩 제품 상세 페이지.
     진짜 오리지널 바이브코딩 브랜드 이미지 로고(vibe_coding_user_exact.png) 및 Windows (.exe) + 🍎 macOS (.dmg / .zip) 멀티 OS 다운로드 지원.
   REVISION HISTORY:
+    - 2026-07-28 Codex: 최신 GitHub Release 버전과 OS별 설치 파일을 다운로드 버튼에 자동 연결.
     - 2026-07-22 Claude: 최초 분리.
     - 2026-07-26 Gemini: 🍎 macOS (Apple Silicon & Intel .dmg / .zip) 전용 다운로드 버튼 및 멀티 OS 지원 완성.
 -->
@@ -22,7 +23,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="../auth.js"></script>
 <script>window.SITE_BASE='../';</script>
-<script src="../site.js?v=20260726_v11" defer></script>
+<script src="../site.js?v=20260728_release_v1" defer></script>
 </head>
 <body>
   <nav>
@@ -149,12 +150,15 @@ window.addEventListener('DOMContentLoaded', () => {
   // 파싱 & 연결
   Site.parseReleasesWithMac(
     'btsky99/vibe-coding',
-    'fullDlBtn',
-    'macDlBtn',
-    'patchDlBtn',
-    'verInfo',
-    'https://github.com/btsky99/vibe-coding/releases/latest'
-  );
+    document.getElementById('fullDlBtn'),
+    document.getElementById('macDlBtn'),
+    document.getElementById('patchDlBtn'),
+    document.getElementById('verInfo'),
+    'vibe_coding'
+  ).then(urls => {
+    winUrl = urls.winUrl;
+    macUrl = urls.macUrl;
+  });
 });
 </script>
 </body>
