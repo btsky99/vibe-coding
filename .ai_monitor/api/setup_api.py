@@ -4,6 +4,7 @@ DESCRIPTION: Setup Doctor API — 초기 설정 진단 상태를 대시보드에
              GET /api/setup/status → 5가지 항목의 진단 결과 반환.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Allow retries and always run the complete prerequisite-first AI chain.
 - 2026-07-29 Codex: Run one sequential installer for every missing core AI dependency.
 - 2026-07-28 Codex: Add first-run automatic installation for missing Node.js and AI CLIs.
 - 2026-03-27 Claude: 최초 작성. setup_doctor.py 연동.
@@ -11,17 +12,12 @@ REVISION HISTORY:
 
 import json
 import sys
-import threading
 from pathlib import Path
 
 # setup_doctor 모듈 import를 위한 경로 설정
 _BASE_DIR = Path(__file__).resolve().parent.parent
 if str(_BASE_DIR) not in sys.path:
     sys.path.insert(0, str(_BASE_DIR))
-
-_AUTO_INSTALL_LOCK = threading.Lock()
-_AUTO_INSTALL_STARTED: set[str] = set()
-
 
 def handle_get(handler, path: str, params: dict = None, **kwargs):
     """GET /api/setup/status 핸들러.
@@ -76,24 +72,22 @@ def handle_post(handler, path: str, data: dict | None = None, **kwargs) -> bool:
         if not statuses.get(tool_id, {}).get("installed", False)
     ]
 
-    launched = []
-    skipped = []
-    with _AUTO_INSTALL_LOCK:
-        chain_id = "ai-toolchain"
-        if targets and chain_id not in _AUTO_INSTALL_STARTED:
-            result = tools_api.launch_ai_toolchain_installer()
-            if result.get("status") == "success":
-                _AUTO_INSTALL_STARTED.add(chain_id)
-                launched.extend(targets)
-        elif targets:
-            skipped.extend(targets)
+    if not targets:
+        result = {"status": "idle", "message": "필수 AI 도구가 이미 설치되어 있습니다."}
+    else:
+        # The UI automatically calls this endpoint once. Keep the API retryable
+        # so a failed prerequisite can be repaired by pressing the action.
+        result = tools_api.launch_ai_toolchain_installer()
+    launched = targets if result.get("status") == "success" else []
 
     body = json.dumps({
-        "status": "started" if launched else "idle",
+        "status": "started" if launched else result.get("status", "error"),
         "launched": launched,
-        "skipped": skipped,
+        "skipped": [],
+        "message": result.get("message", ""),
     }, ensure_ascii=False).encode("utf-8")
-    handler.send_response(202 if launched else 200)
+    response_status = 202 if launched else (200 if result.get("status") == "idle" else 500)
+    handler.send_response(response_status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()

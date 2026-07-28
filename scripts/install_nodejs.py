@@ -5,6 +5,7 @@ DESCRIPTION: Node.js LTS 자동 설치 스크립트 (Windows).
              Claude CLI, Antigravity CLI, Codex CLI 등 npm 기반 도구의 사전 요구사항.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Wait for fallback MSI completion so dependent CLI installs run in order.
 - 2026-04-05 Claude Opus 4.6: 최초 생성 — Node.js 원클릭 설치 지원
 """
 
@@ -84,7 +85,14 @@ def install_via_msi() -> bool:
     print("[설치] MSI 인스톨러 실행 중... (설치 마법사를 따라 진행하세요)")
     try:
         # MSI 실행 (사용자 인터랙션 필요)
-        subprocess.Popen(["msiexec", "/i", str(msi_path)], close_fds=True)
+        result = subprocess.run(
+            ["msiexec", "/i", str(msi_path), "/passive", "/norestart"],
+            timeout=900,
+            close_fds=True,
+        )
+        if result.returncode not in (0, 3010):
+            print(f"[failed] MSI exit code: {result.returncode}")
+            return False
         print("[안내] 설치 마법사가 열렸습니다. 설치를 완료한 후 터미널을 재시작하세요.")
         return True
     except Exception as e:

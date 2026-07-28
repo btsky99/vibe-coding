@@ -6,6 +6,7 @@
  *              "닫기" 시 localStorage에 기록하여 재표시 방지.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Codex: Route every missing AI action through the full prerequisite-first installer.
  * - 2026-07-29 Codex: Make Claude and all-AI-CLI actions start installers instead of doing nothing.
  * - 2026-07-28 Codex: Start missing core dependency installation automatically on first run.
  * - 2026-07-28 Codex: Connect missing AI CLI action to the one-click install controls.
@@ -71,7 +72,10 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       .then(r => r.json())
       .then((data: SetupStatus) => {
         setStatus(data);
-        if (data.checks?.cli_agents?.status === 'missing') {
+        const coreSetupMissing = ['hooks', 'cli_agents'].some(
+          key => data.checks?.[key]?.status === 'missing',
+        );
+        if (coreSetupMissing) {
           fetch(`${API_BASE}/api/setup/auto-install`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -107,16 +111,14 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
     if (action === 'install_claude' || action === 'install_cli') {
       setInstallingAction(action);
       try {
-        const endpoint = action === 'install_claude'
-          ? `${API_BASE}/api/tools/install`
-          : `${API_BASE}/api/setup/auto-install`;
-        const body = action === 'install_claude' ? { tool: 'claude' } : {};
-        const response = await fetch(endpoint, {
+        const response = await fetch(`${API_BASE}/api/setup/auto-install`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: '{}',
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        if (result.status === 'error') throw new Error(result.message || 'install failed');
       } catch {
         if (onNavigate) onNavigate('tools');
       } finally {

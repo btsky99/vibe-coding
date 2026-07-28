@@ -3,6 +3,7 @@ FILE: tests/test_ai_toolchain_installer.py
 DESCRIPTION: Sequential AI toolchain installer regression tests.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Guard synchronous Node MSI fallback before dependent installs.
 - 2026-07-29 Codex: Guard install order and already-installed skip behavior.
 """
 
@@ -43,3 +44,10 @@ def test_installer_skips_existing_tools_and_installs_missing_in_order():
         "@openai/codex",
         "@google/gemini-cli",
     ]
+
+
+def test_node_msi_fallback_waits_for_completion():
+    source = (ROOT / "scripts" / "install_nodejs.py").read_text(encoding="utf-8")
+
+    assert '"/passive", "/norestart"' in source
+    assert 'subprocess.Popen(["msiexec"' not in source

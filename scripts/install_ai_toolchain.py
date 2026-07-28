@@ -3,6 +3,7 @@ FILE: scripts/install_ai_toolchain.py
 DESCRIPTION: Vibe Coding first-run Node.js and AI CLI automatic installer chain.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Verify Node/npm after installation before starting dependent CLIs.
 - 2026-07-29 Codex: Install missing Node.js, Claude, Codex, and Gemini sequentially.
 """
 
@@ -80,7 +81,12 @@ def _install_node_if_missing() -> str | None:
     if result.returncode != 0:
         print("[실패] Node.js 자동 설치가 완료되지 않았습니다.")
         return None
-    return _find_npm()
+    npm = _find_npm()
+    if npm:
+        print(f"[ready] Node.js/npm: {npm}")
+    else:
+        print("[failed] npm was not found after the Node.js installer finished.")
+    return npm
 
 
 def main() -> None:

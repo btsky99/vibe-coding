@@ -3,6 +3,7 @@ FILE: tests/test_setup_auto_install.py
 DESCRIPTION: First-run sequential automatic dependency installation API regression tests.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Verify failed first attempts remain retryable.
 - 2026-07-28 Codex: Cover Node-first ordering and missing AI CLI launch behavior.
 """
 
@@ -48,8 +49,6 @@ def test_auto_install_starts_one_chain_for_node_and_all_missing_clis():
             _tool("antigravity", False),
         ]
     }
-    setup_api._AUTO_INSTALL_STARTED.clear()
-
     with (
         patch("api.tools_api._get_all_status", return_value=statuses),
         patch(
@@ -79,8 +78,6 @@ def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
             _tool("antigravity", False),
         ]
     }
-    setup_api._AUTO_INSTALL_STARTED.clear()
-
     with (
         patch("api.tools_api._get_all_status", return_value=statuses),
         patch(
@@ -92,3 +89,32 @@ def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
 
     launch.assert_called_once_with()
     assert json.loads(handler.wfile.getvalue())["launched"] == ["codex", "antigravity"]
+
+
+def test_auto_install_failure_can_be_retried():
+    statuses = {
+        "tools": [
+            _tool("nodejs", False),
+            _tool("claude", False),
+            _tool("codex", False),
+            _tool("antigravity", False),
+        ]
+    }
+    with (
+        patch("api.tools_api._get_all_status", return_value=statuses),
+        patch(
+            "api.tools_api.launch_ai_toolchain_installer",
+            side_effect=[
+                {"status": "error", "message": "first failed"},
+                {"status": "success", "message": "retry started"},
+            ],
+        ) as launch,
+    ):
+        first = _Handler()
+        second = _Handler()
+        assert setup_api.handle_post(first, "/api/setup/auto-install", {})
+        assert setup_api.handle_post(second, "/api/setup/auto-install", {})
+
+    assert launch.call_count == 2
+    assert first.status == 500
+    assert second.status == 202
