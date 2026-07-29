@@ -6,6 +6,7 @@
  *              "닫기" 시 localStorage에 기록하여 재표시 방지.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Codex: Explain that installed AI CLIs require a first launch and login.
  * - 2026-07-29 Codex: Show and poll per-tool first-run installation progress.
  * - 2026-07-29 Codex: Stop treating missing project hooks as a missing Claude installation.
  * - 2026-07-29 Codex: Route every missing AI action through the full prerequisite-first installer.
@@ -189,7 +190,9 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
                   <Wrench className="w-3 h-3 animate-pulse" />
                 )}
                 {tool.name}: {tool.installed
-                  ? '설치됨'
+                  ? (tool.id === 'nodejs'
+                    ? '설치됨'
+                    : '설치 완료 · 최초 1회 실행/로그인 필요')
                   : (toolchainInstalling ? '확인·설치 중' : '설치 필요')}
               </span>
             ))}

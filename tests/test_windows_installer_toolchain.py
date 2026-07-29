@@ -3,6 +3,7 @@ FILE: tests/test_windows_installer_toolchain.py
 DESCRIPTION: Regression checks for prerequisite-first Windows installer packaging.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Require first-launch/login guidance after CLI installation.
 - 2026-07-29 Codex: Require PTY agents to use resolved absolute Windows CLI paths.
 - 2026-07-29 Codex: Cover bundled Claude resolution and early single-instance protection.
 - 2026-07-29 Codex: Require visible per-tool installation progress in the app.
@@ -65,6 +66,7 @@ def test_first_run_ui_reports_each_core_tool():
     assert "기본 설치팩" in ui
     assert "확인·설치 중" in ui
     assert "설치됨" in ui
+    assert "설치 완료 · 최초 1회 실행/로그인 필요" in ui
     assert "window.setInterval" in ui
 
 
