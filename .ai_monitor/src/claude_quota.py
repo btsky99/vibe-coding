@@ -103,12 +103,21 @@ def _fetch(token: str) -> dict:
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
         data = json.loads(resp.read().decode('utf-8'))
+    known_keys = {'five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'}
+    # New model-specific limits (for example Fable) can arrive without a client update.
+    # Preserve every quota-shaped window so the UI does not silently omit new models.
+    model_windows = {
+        key: window
+        for key, raw in data.items()
+        if key not in known_keys and (window := _window(raw)) is not None
+    }
     return {
         'five_hour': _window(data.get('five_hour')),
         'seven_day': _window(data.get('seven_day')),
         # 플랜에 따라 null — 존재할 때만 프론트가 표시
         'seven_day_opus': _window(data.get('seven_day_opus')),
         'seven_day_sonnet': _window(data.get('seven_day_sonnet')),
+        'model_windows': model_windows,
     }
 
 

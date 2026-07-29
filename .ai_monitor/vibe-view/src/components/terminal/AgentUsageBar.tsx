@@ -38,6 +38,11 @@ const resetLabel = (iso?: string) => {
   return d > 0 ? `${d}일 ${h}시간 후` : h > 0 ? `${h}시간 ${m}분 후` : `${m}분 후`;
 };
 
+const quotaLabel = (key: string) => {
+  const model = key.replace(/^seven_day_/, '').replace(/^weekly_/, '');
+  return model.split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+};
+
 export default function AgentUsageBar({
   agentType,
   quota,
@@ -92,6 +97,16 @@ export default function AgentUsageBar({
 
   const filled = data.available ? Math.ceil(Math.min(100, data.percent) / 10) : 0;
   const color = colorFor(data.percent);
+  const claudeWeekly = agentType === 'claude'
+    ? [
+        ...(quota?.seven_day ? [['모든 모델', quota.seven_day] as const] : []),
+        ...(quota?.seven_day_opus ? [['Opus', quota.seven_day_opus] as const] : []),
+        ...(quota?.seven_day_sonnet ? [['Sonnet', quota.seven_day_sonnet] as const] : []),
+        ...Object.entries(quota?.model_windows || {}).map(
+          ([key, value]) => [quotaLabel(key), value] as const,
+        ),
+      ]
+    : [];
 
   return (
     <div className="relative shrink-0 border-t border-white/5 bg-[#151515] px-2 py-1">
@@ -139,9 +154,17 @@ export default function AgentUsageBar({
             <span>남음</span><span className="text-right text-white/85">{data.available ? `${Math.round(data.remaining)}%` : '-'}</span>
             <span>기준 창</span><span className="text-right text-white/85">{data.window}</span>
             <span>리셋</span><span className="text-right text-white/85">{data.resetAt ? resetLabel(data.resetAt) : '제공되지 않음'}</span>
-            {quota?.seven_day && (
+            {agentType !== 'claude' && quota?.seven_day && (
               <><span>{durationLabel(quota.seven_day.window_seconds, '7d')}</span><span className="text-right text-white/85">{Math.round(quota.seven_day.utilization)}%</span></>
             )}
+            {claudeWeekly.map(([label, window]) => (
+              <span key={label} className="contents">
+                <span>{label} 주간</span>
+                <span className="text-right text-white/85">
+                  {Math.round(window.utilization)}% 사용 · {Math.max(0, 100 - Math.round(window.utilization))}% 남음
+                </span>
+              </span>
+            ))}
           </div>
           {data.detail && <div className="mt-3 pt-2 border-t border-white/5 text-white/40">{data.detail}</div>}
           <button

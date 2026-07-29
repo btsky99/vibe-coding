@@ -53,6 +53,9 @@ export interface VibeData {
     available: boolean; reason?: string; plan?: string; stale?: boolean; observed_at?: string;
     five_hour?: { utilization: number; resets_at: string; window_seconds?: number } | null;
     seven_day?: { utilization: number; resets_at: string; window_seconds?: number } | null;
+    seven_day_opus?: { utilization: number; resets_at: string; window_seconds?: number } | null;
+    seven_day_sonnet?: { utilization: number; resets_at: string; window_seconds?: number } | null;
+    model_windows?: Record<string, { utilization: number; resets_at: string; window_seconds?: number }>;
   }> | null;
 
   // 하이브 상태
