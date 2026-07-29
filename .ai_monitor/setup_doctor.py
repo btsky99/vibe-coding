@@ -12,6 +12,8 @@ DESCRIPTION: 하이브 마인드 초기 설정 자동 진단 + 수리 엔진.
              5. telegram    — .env 텔레그램 봇 토큰 유무
 
 REVISION HISTORY:
+- 2026-07-30 Claude: check_hooks가 그룹 형식(matcher+hooks)을 못 읽어 매 진단마다 flat 훅을
+                     중복 추가하던 사고 수정 — /doctor "Expected array, received undefined" 원인.
 - 2026-07-29 Codex: Detect official Antigravity command `agy`, separately from Gemini.
 - 2026-07-29 Codex: Do not misreport a missing project .claude folder as a missing Claude CLI.
 - 2026-07-28 Codex: Mark partial AI CLI installations as actionable and accept the Gemini compatibility command.
@@ -142,14 +144,94 @@ def check_pg_database() -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 # 필수 훅 정의 — 각 이벤트에 필요한 명령어 목록
+#
+# [WHY 인자 없음] 훅은 이벤트 페이로드를 stdin JSON으로 받는다(hook_bridge.main()의
+# `json.loads(sys.stdin.read())` → `data['prompt']`). 과거엔 `"$PROMPT"`를 argv로 넘겼지만
+# Claude Code는 명령 문자열에 셸 변수 치환을 하지 않아 리터럴 `$PROMPT`가 전달됐고,
+# 받는 쪽은 argv를 아예 읽지 않아 무의미했다. 인자를 늘리려면 stdin 스키마를 쓸 것.
 _REQUIRED_HOOKS: dict[str, list[dict]] = {
     "UserPromptSubmit": [
-        {"type": "command", "command": f"python \"{_PROJECT_ROOT / 'scripts' / 'hook_bridge.py'}\" \"$PROMPT\""}
+        {"type": "command", "command": f"python \"{_PROJECT_ROOT / 'scripts' / 'hook_bridge.py'}\""}
     ],
     "Stop": [
         {"type": "command", "command": f"python \"{_PROJECT_ROOT / 'scripts' / 'claude_hook.py'}\" stop"}
     ],
 }
+
+
+def _as_group(cmd_def: dict) -> dict:
+    """flat 훅 정의를 Claude Code 정식 그룹 형식으로 감싼다.
+
+    [불변식] settings.json의 hooks.<event>는 반드시 {matcher, hooks:[...]} 그룹 배열이다.
+    flat {type, command}를 직접 넣으면 CLI 스키마 검증에서 hooks 키 누락으로 거부된다.
+    """
+    return {"matcher": "", "hooks": [cmd_def]}
+
+
+def _event_commands(entries: list) -> list[str]:
+    """이벤트 배열에서 등록된 command 문자열을 전부 뽑는다 (그룹 안쪽까지).
+
+    [과거사고] 2026-07-30: 옛 구현은 그룹 객체에 대고 바로 `.get("command")`를 읽어
+    항상 ''를 얻었다 → 이미 등록된 hook_bridge/claude_hook을 못 보고 매 진단마다 flat
+    항목을 append → hooks.UserPromptSubmit.1 / hooks.Stop.2에 hooks 키 없는 쓰레기 항목이
+    쌓여 /doctor가 "Expected array, but received undefined"를 보고. 진단 API는 앱 부팅마다
+    SetupBanner가 호출하므로 앱을 켤 때마다 재오염됐다.
+    """
+    out: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("hooks"), list):
+            out.extend(h.get("command", "") for h in entry["hooks"] if isinstance(h, dict))
+        elif "command" in entry:
+            out.append(entry.get("command", ""))
+    return out
+
+
+def _script_names(command: str) -> set[str]:
+    """command 문자열에서 실행되는 .py 스크립트 파일명만 뽑는다.
+
+    [WHY] 오염분과 정상 항목은 인자/인용 부호가 달라(`...hook_bridge.py` vs
+    `"...hook_bridge.py" "$PROMPT"`) 문자열 동등 비교로는 중복을 못 잡는다.
+    같은 스크립트가 두 번 등록되면 훅이 두 번 실행돼 pg_logs `[지시]`가 2줄씩 찍혔다.
+    """
+    return {m.lower() for m in re.findall(r"([\w.-]+\.py)", command)}
+
+
+def _normalize_event(entries: list) -> tuple[list, bool]:
+    """flat 잔재 정리 + 같은 스크립트 중복 등록 제거. (정규화 결과, 변경여부)
+
+    [WHY] 과거 오염분을 사용자가 손으로 지우게 두면 앱 재시작마다 되살아난다 —
+    자동 수리 엔진이므로 형식 정규화까지 여기서 끝낸다.
+    [불변식] 정상 그룹은 원본 그대로 보존한다. 버리는 쪽은 항상 flat 잔재 — 사용자가
+    직접 손본 그룹 항목을 자동 수리가 삭제하는 일은 없어야 한다.
+    """
+    groups = [e for e in entries if isinstance(e, dict) and isinstance(e.get("hooks"), list)]
+    registered: set[str] = set()
+    for g in groups:
+        for h in g["hooks"]:
+            if isinstance(h, dict):
+                registered |= _script_names(h.get("command", ""))
+
+    out: list = []
+    changed = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            changed = True
+            continue
+        if isinstance(entry.get("hooks"), list):
+            out.append(entry)
+            continue
+        # flat 잔재 — 같은 스크립트가 이미 그룹으로 있으면 버리고, 없으면 그룹으로 승격
+        cmd = entry.get("command", "")
+        changed = True
+        if cmd and not (_script_names(cmd) & registered):
+            registered |= _script_names(cmd)
+            out.append({
+                "matcher": entry.get("matcher", ""),
+                "hooks": [{"type": entry.get("type", "command"), "command": cmd}],
+            })
+    return out, changed
 
 
 def check_hooks() -> dict:
@@ -176,19 +258,36 @@ def check_hooks() -> dict:
     hooks = existing.get("hooks", {})
     added = []
 
+    normalized = False
     for event, commands in _REQUIRED_HOOKS.items():
-        if event not in hooks:
-            hooks[event] = commands
+        if event not in hooks or not isinstance(hooks.get(event), list):
+            hooks[event] = [_as_group(c) for c in commands]
             added.append(event)
-        else:
-            # 이벤트는 있지만 필수 명령어가 빠진 경우 추가
-            existing_cmds = [h.get("command", "") for h in hooks[event]]
-            for cmd_def in commands:
-                # hook_bridge.py 또는 claude_hook.py가 포함된 명령어가 있는지 확인
-                key_script = "hook_bridge.py" if "hook_bridge" in cmd_def["command"] else "claude_hook.py"
-                if not any(key_script in c for c in existing_cmds):
-                    hooks[event].append(cmd_def)
-                    added.append(f"{event}(+{key_script})")
+            continue
+
+        # 기존 항목의 형식 정규화 먼저 — 과거 오염분(flat/중복)을 여기서 청산
+        hooks[event], ev_changed = _normalize_event(hooks[event])
+        normalized = normalized or ev_changed
+
+        # 이벤트는 있지만 필수 명령어가 빠진 경우 추가
+        existing_cmds = _event_commands(hooks[event])
+        for cmd_def in commands:
+            # hook_bridge.py 또는 claude_hook.py가 포함된 명령어가 있는지 확인
+            key_script = "hook_bridge.py" if "hook_bridge" in cmd_def["command"] else "claude_hook.py"
+            if not any(key_script in c for c in existing_cmds):
+                hooks[event].append(_as_group(cmd_def))
+                added.append(f"{event}(+{key_script})")
+
+    if not added and normalized:
+        existing["hooks"] = hooks
+        try:
+            settings_path.write_text(
+                json.dumps(existing, indent=2, ensure_ascii=False),
+                encoding='utf-8'
+            )
+            return _make_result(STATUS_FIXED, "훅 형식 정규화 (flat/중복 항목 정리)", auto_fixed=True)
+        except Exception as e:
+            return _make_result(STATUS_ERROR, f"settings.json 쓰기 실패: {e}")
 
     if not added:
         hook_count = sum(len(v) for v in hooks.values())
