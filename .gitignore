@@ -38,6 +38,7 @@ vibe_coding.egg-info/
 
 # 루트 테스트 아티팩트 (Playwright 스크린샷, 리포트)
 /test-results/
+/.tmp-*.png
 /test_chat_*.png
 /test_office_*.png
 /office_check*.png

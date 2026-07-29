@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-26 12:22
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-29 23:27
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -19,6 +19,7 @@
 | `ai_monitor_plan.md` | 하이브 마인드 고도화 및 신규 기능 구현 로드맵 |
 | `memory.md` |  |
 | `docs/API_SPEC.md` | REST API 엔드포인트 및 통신 규격 상세 명세 |
+| `docs/CIPHERTRADER_LLM_MULTI_AGENT_DESIGN.md` |  |
 | `docs/CLAUDE_CODE_AGENT_TEAMS_ANALYSIS.md` |  |
 | `docs/CODEX_HARDENING.md` | Codex 경로 고도화 적용 내용과 재적용 조건 |
 | `docs/CODEX_RUNTIME_SETUP.md` | 설치 후 PC별 Codex 런타임 설정 및 운영 가이드 |
@@ -26,6 +27,7 @@
 | `docs/HARNESS_V1.md` |  |
 | `docs/HARNESS_V2.md` |  |
 | `docs/METAVERSE_OFFICE_DESIGN.md` |  |
+| `docs/MIIX520_SERVER_MIGRATION_PLAN.md` |  |
 | `docs/PLATFORM_LAYERS.md` |  |
 | `docs/TERMINAL3_SCROLL_ISSUE.md` |  |
 | `docs/VIBE_CONVENTIONS.md` |  |
@@ -35,8 +37,8 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` | 2016 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
-| `boot.py` | 302 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
+| `server.py` | 2028 | 중앙 HTTP 서버 (모든 API 라우팅, SSE, PostgreSQL 연동) |
+| `boot.py` | 337 | EXE 진입점 부트스트랩 (A안) — 관리 체크아웃/seed에서 server.py를 runpy 실행 |
 | `soft_updater.py` | 284 | 경량 소스 업데이트 채널 — GitHub SHA 감지 + git reset 적용/롤백 |
 | `_version.py` | 1 | 버전 진실의 원천 (__version__) |
 | `mission_control.py` | 414 | CMUX 스타일 시스템 트레이 및 HUD 관제 센터 |
@@ -47,7 +49,7 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `_common.py` | 49 |  |
-| `agent_api.py` | 1393 | CLI 에이전트 관리 API (/api/agent/*) |
+| `agent_api.py` | 1423 | CLI 에이전트 관리 API (/api/agent/*) |
 | `codegraph_api.py` | 220 |  |
 | `commands_api.py` | 54 |  |
 | `config_api.py` | 96 |  |
@@ -73,11 +75,11 @@
 | `projects_api.py` | 69 |  |
 | `pty_api.py` | 246 | PTY 터미널 제어 API (/api/pty/*) |
 | `screenshot_api.py` | 45 |  |
-| `setup_api.py` | 48 |  |
+| `setup_api.py` | 137 |  |
 | `static_api.py` | 123 |  |
 | `tasks_api.py` | 302 | 태스크 API (/api/tasks/*) — server.py에서 분리 |
 | `telegram_api.py` | 227 |  |
-| `tools_api.py` | 1068 |  |
+| `tools_api.py` | 1152 |  |
 | `update_api.py` | 213 |  |
 | `vibe_api.py` | 295 | Vibe CLI 상태 관리 API (/api/vibe/*) |
 | `vibe_skills_api.py` | 246 |  |
@@ -86,7 +88,7 @@
 ### 데이터 계층 (.ai_monitor/src/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `claude_quota.py` | 162 |  |
+| `claude_quota.py` | 171 |  |
 | `code_indexer.py` | 552 |  |
 | `code_search.py` | 200 |  |
 | `codex_quota.py` | 216 |  |
@@ -208,12 +210,14 @@
 | `harness_verify.py` | 437 |  |
 | `heal_report.py` | 100 |  |
 | `incident.py` | 132 |  |
+| `install_ai_toolchain.py` | 137 |  |
+| `install_antigravity.py` | 48 |  |
 | `install_dev_tools.py` | 159 |  |
 | `install_frontend_deps.py` | 195 |  |
 | `install_gh_cli.py` | 154 |  |
 | `install_harness.py` | 331 |  |
 | `install_hive_hooks.py` | 307 |  |
-| `install_nodejs.py` | 135 |  |
+| `install_nodejs.py` | 143 |  |
 | `install_npm_tool.py` | 92 |  |
 | `install_playwright_cli.py` | 65 |  |
 | `install_psql.py` | 189 |  |
@@ -225,6 +229,7 @@
 | `migrate_antigravity_db.py` | 83 |  |
 | `migrate_archive_session_summaries.py` | 70 |  |
 | `migrate_vault_consolidate.py` | 240 |  |
+| `mobile_agent_bus.py` | 541 |  |
 | `pg_project.py` | 39 |  |
 | `recall.py` | 51 |  |
 | `run_antigravity_clean.py` | 130 |  |
@@ -235,6 +240,7 @@
 | `telegram_bridge.py` | 466 |  |
 | `telegram_helpers.py` | 324 |  |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 테스트 |
+| `tui.py` | 256 |  |
 | `zettel_capture.py` | 701 |  |
 | `zettel_sync.py` | 876 |  |
 
@@ -242,7 +248,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` | 1003 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
+| `App.tsx` | 1007 | 최상위 레이아웃 오케스트레이터 (레이아웃 모드, 사이드바, 폴링 조율) |
 | `main.tsx` | 75 |  |
 | `types.ts` | 206 |  |
 | `constants.tsx` | 93 |  |
@@ -256,8 +262,8 @@
 | `FilePathText.tsx` | 110 | 파일 경로 렌더링 (클릭 가능 링크화) |
 | `FileTreeNode.tsx` | 165 | 파일 트리 노드 (재귀 폴더 확장) |
 | `FloatingWindow.tsx` | 221 | 파일 에디터 부유 창 (드래그/리사이즈) |
-| `SetupBanner.tsx` | 152 |  |
-| `TerminalSlot.tsx` | 1096 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
+| `SetupBanner.tsx` | 234 |  |
+| `TerminalSlot.tsx` | 1118 | 단일 터미널 슬롯 (XTerm.js + WebSocket + 에이전트 선택) |
 | `ThoughtTrace.tsx` | 108 | AI 사고 로그 표시 |
 | `TopMenuBar.tsx` | 574 | VS Code 스타일 메뉴바 (파일/편집/보기/AI 도구) |
 | `VibeEditor.tsx` | 141 | 코드 에디터 래퍼 (Monaco Editor) |
@@ -279,7 +285,9 @@
 ## 🧪 테스트 (tests/)
 | 파일 | 줄 수 | 테스트 대상 |
 |------|------|------------|
-| `test_agent_api.py` | 298 | api/agent_api.py |
+| `test_agent_api.py` | 326 | api/agent_api.py |
+| `test_ai_toolchain_installer.py` | 54 |  |
+| `test_claude_quota.py` | 53 |  |
 | `test_codex_harness_v2.py` | 86 |  |
 | `test_codex_orchestration.py` | 114 |  |
 | `test_codex_pg_watcher.py` | 108 |  |
@@ -290,11 +298,16 @@
 | `test_new_api_modules.py` | 341 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 124 |  |
-| `test_route_table.py` | 106 |  |
+| `test_route_table.py` | 110 |  |
 | `test_self_heal_2.py` | 231 |  |
+| `test_setup_auto_install.py` | 153 |  |
+| `test_setup_banner_install_actions.py` | 33 |  |
+| `test_setup_doctor.py` | 50 |  |
 | `test_telegram_hub.py` | 347 |  |
 | `test_updater_release_path.py` | 229 |  |
 | `test_vibe_cli_codex.py` | 42 |  |
+| `test_vibe_download_page.py` | 30 |  |
+| `test_windows_installer_toolchain.py` | 100 |  |
 | `test_zettel_sync_mirror.py` | 42 |  |
 | `FileExplorer.test.tsx` | 136 | FileExplorer 컴포넌트 |
 
@@ -334,4 +347,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-26 12:22
+> 자동 생성 완료: 2026-07-29 23:27
