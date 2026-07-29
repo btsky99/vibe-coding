@@ -6,6 +6,7 @@
  *   REST API로 Python 서버(agent_api, pty_api)와 세션 정보를 공유합니다.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Codex: Launch Windows AI CLIs by resolved absolute path through ConPTY cmd.
  * - 2026-03-22 Claude: 초기 구현 — Python pywinpty PTY 핸들러 대체
  */
 
@@ -46,6 +47,39 @@ function posixLoginShell() {
 //   터미널이 기본 UTF-8이라 프리픽스 불필요. 개행도 Windows \r\n / POSIX \n으로 맞춘다.
 function agentLine(cmd) {
   return IS_WIN ? `chcp 65001 >nul & ${cmd}\r\n` : `${cmd}\n`;
+}
+
+function resolveWindowsCli(name) {
+  if (!IS_WIN) return name;
+  const names = [`${name}.exe`, `${name}.cmd`, name];
+  const dirs = [
+    ...(process.env.PATH || '').split(path.delimiter),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'VibeCoding', 'nodejs'),
+    path.join(process.env.APPDATA || '', 'npm'),
+    path.join(process.env.LOCALAPPDATA || '', 'agy', 'bin'),
+  ].filter(Boolean);
+  for (const dir of dirs) {
+    for (const file of names) {
+      const candidate = path.resolve(dir, file);
+      if (fs.existsSync(candidate)) return `"${candidate}"`;
+    }
+  }
+  return name;
+}
+
+function interactiveAgentCommand(agent, isYolo, modelName = '') {
+  if (agent === 'claude') {
+    return `${resolveWindowsCli('claude')}${isYolo ? ' --dangerously-skip-permissions' : ''}`;
+  }
+  if (agent === 'antigravity') {
+    return `${resolveWindowsCli('agy')}${isYolo ? ' --dangerously-skip-permissions' : ''}`;
+  }
+  if (agent === 'codex') {
+    const yolo = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
+    const model = modelName ? ` --model ${modelName}` : '';
+    return `${resolveWindowsCli('codex')} --no-alt-screen${yolo}${model}`;
+  }
+  return agent;
 }
 
 // [세션 격리 2026-07-22] 스폰 터미널 env에서 부모 Claude Code 세션 마커 제거.
@@ -598,7 +632,7 @@ function handlePtyConnectionLegacy(ws, req) {
     let shell, shellArgs;
     if (!IS_WIN) {
       ({ shell, shellArgs } = posixLoginShell());
-    } else if ((agent === 'antigravity' || agent === 'codex' || agent === 'shell') && BASH_AVAILABLE) {
+    } else if (agent === 'shell' && BASH_AVAILABLE) {
       shell = BASH_EXE;
       shellArgs = ['--login'];
     } else {
@@ -621,18 +655,12 @@ function handlePtyConnectionLegacy(ws, req) {
 
     // ── 에이전트별 시작 명령 ──────────────────────────────────────────
     if (agent === 'claude') {
-      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(agentLine(`claude${yoloFlag}`));
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     } else if (agent === 'antigravity') {
-      // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
-      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`agy${yoloFlag}\n`);
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     } else if (agent === 'codex') {
-      const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       const modelName = getCodexMainModel();
-      const modelFlag = modelName ? ` --model ${modelName}` : '';
-      // Preserve xterm scrollback for Codex's interactive TUI.
-      ptyProcess.write(`codex --no-alt-screen${yoloFlag}${modelFlag}\n`);
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo, modelName)));
     } else if (agent.startsWith('groupchat-')) {
       // 그룹챗 터미널 — LLM + 그룹 채팅 통합 모드
       const cli = agent.replace('groupchat-', '');
@@ -938,9 +966,6 @@ function handlePersistentPtyConnection(ws, req) {
     let shell, shellArgs;
     if (!IS_WIN) {
       ({ shell, shellArgs } = posixLoginShell());
-    } else if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
-      shell = BASH_EXE;
-      shellArgs = ['--login'];
     } else {
       shell = 'cmd.exe';
       shellArgs = [];
@@ -958,18 +983,13 @@ function handlePersistentPtyConnection(ws, req) {
     console.log(`[PTY] session started: T${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
 
     if (agent === 'claude') {
-      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      const modelFlag = requestedModel ? ` --model ${requestedModel}` : '';
-      ptyProcess.write(agentLine(`claude${yoloFlag}${modelFlag}`));
+      const command = interactiveAgentCommand(agent, isYolo);
+      ptyProcess.write(agentLine(`${command}${requestedModel ? ` --model ${requestedModel}` : ''}`));
     } else if (agent === 'antigravity') {
-      // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. agy는 --model 미지원이라 무시.
-      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`agy${yoloFlag}\n`);
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     } else if (agent === 'codex') {
-      const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
       const modelName = requestedModel || getCodexMainModel();
-      const modelFlag = modelName ? ` --model ${modelName}` : '';
-      ptyProcess.write(`codex --no-alt-screen${yoloFlag}${modelFlag}\n`);
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo, modelName)));
     } else if (agent.startsWith('groupchat-')) {
       const cli = agent.replace('groupchat-', '');
       const slotNum = parseInt(slotId, 10) - 100;
@@ -1465,9 +1485,6 @@ app.post('/api/pty/office/spawn', (req, res) => {
   let shell, shellArgs;
   if (!IS_WIN) {
     ({ shell, shellArgs } = posixLoginShell());
-  } else if ((agent === 'antigravity' || agent === 'codex') && BASH_AVAILABLE) {
-    shell = BASH_EXE;
-    shellArgs = ['--login'];
   } else {
     shell = 'cmd.exe';
     shellArgs = [];
@@ -1487,15 +1504,11 @@ app.post('/api/pty/office/spawn', (req, res) => {
 
     // 에이전트 시작 명령 — 새 대화를 즉시 시작 (--resume 없이 실행)
     if (agent === 'claude') {
-      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(agentLine(`claude${yoloFlag}`));
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     } else if (agent === 'antigravity') {
-      // [2026-05-26] Gemini CLI → Antigravity CLI(`agy`) 전환. 'gemini' 식별자는 alias로 유지.
-      const yoloFlag = isYolo ? ' --dangerously-skip-permissions' : '';
-      ptyProcess.write(`agy${yoloFlag}\n`);
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     } else if (agent === 'codex') {
-      const yoloFlag = isYolo ? ' --dangerously-bypass-approvals-and-sandbox' : '';
-      ptyProcess.write(`codex --no-alt-screen${yoloFlag}\n`);
+      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     }
 
     // 세션 등록

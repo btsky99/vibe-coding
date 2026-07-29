@@ -3,6 +3,7 @@ FILE: tests/test_windows_installer_toolchain.py
 DESCRIPTION: Regression checks for prerequisite-first Windows installer packaging.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Require PTY agents to use resolved absolute Windows CLI paths.
 - 2026-07-29 Codex: Cover bundled Claude resolution and early single-instance protection.
 - 2026-07-29 Codex: Require visible per-tool installation progress in the app.
 - 2026-07-29 Codex: Ensure setup stops source-run watchdog/server/PTY before replacing Node.
@@ -81,3 +82,17 @@ def test_frozen_app_takes_early_single_instance_mutex():
     assert "def _acquire_early_windows_instance_mutex()" in boot
     assert r'"Local\\VibeCoding.MainWindow"' in boot
     assert "_acquire_early_windows_instance_mutex()" in boot
+
+
+def test_pty_resolves_real_windows_cli_before_launch():
+    pty_server = (
+        ROOT / ".ai_monitor" / "pty-server" / "pty-server.js"
+    ).read_text(encoding="utf-8")
+
+    assert "function resolveWindowsCli(name)" in pty_server
+    assert "function interactiveAgentCommand(" in pty_server
+    assert "resolveWindowsCli('claude')" in pty_server
+    assert "resolveWindowsCli('codex')" in pty_server
+    assert "resolveWindowsCli('agy')" in pty_server
+    assert "agent === 'shell' && BASH_AVAILABLE" in pty_server
+    assert "ptyProcess.write(agentLine(interactiveAgentCommand" in pty_server
