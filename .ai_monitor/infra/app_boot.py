@@ -68,6 +68,25 @@ class BootConfig:
     start_fs_watcher: Callable      # (project_root)
     set_node_pty_rest_url: Callable  # (url) — 모듈 전역 + pty/agent api 반영
     open_app_window: Callable       # (url) GUI 실패 폴백
+    # [헤드리스 2026-07-29] 창 없이 서버·데몬만 띄운다. 기본값이 있어 기존 호출부 무영향.
+    # [WHY 필요한가] SSH 세션에는 데스크톱(윈도우 스테이션)이 없어 WebView2 창 생성이 실패한다.
+    #   실측: 원격 상주 노드에서 앱을 띄우면 PostgreSQL·데몬까지는 뜨는데 창 단계에서 죽어
+    #   HTTP 서버(9000번대)가 끝내 안 올라온다 → 원격에서 상태를 볼 수단이 사라진다.
+    headless: bool = False
+
+
+class _HeadlessWindow:
+    """pywebview 창 대역 — _init_and_load_app이 쓰는 두 메서드만 흉내 낸다.
+
+    [제약] 창 객체에서 실제로 쓰이는 것은 evaluate_js(스플래시 문구)와 load_url뿐이다.
+      더 붙이면 진짜 창과의 계약이 벌어져 유지보수가 어려워지므로 의도적으로 최소만 구현한다.
+    """
+
+    def evaluate_js(self, _script: str):
+        return None
+
+    def load_url(self, url: str):
+        print(f'[*] 헤드리스 모드 — 창 없이 서버만 가동: {url}')
 
 
 class _ClipboardBridge:
@@ -329,6 +348,34 @@ def run_gui_app(cfg: BootConfig) -> None:
                     time.sleep(0.1)
             window.load_url(f'http://localhost:{_actual_port}')
             print(f"[*] 앱 로드 완료 — http://localhost:{_actual_port}")
+
+        # ── 헤드리스 분기 ────────────────────────────────────────────────────
+        # [WHY webview.start()를 안 부르는가] 그 호출이 창을 만들고 이벤트 루프를 잡는다.
+        #   데스크톱이 없는 세션에서는 여기서 예외가 나거나 멈춘다. 초기화 본체
+        #   (_init_and_load_app)는 창과 무관하므로 직접 호출하고 프로세스만 살려둔다.
+        if cfg.headless:
+            print('[*] 헤드리스 모드 — GUI 창을 만들지 않습니다.')
+            _init_and_load_app(_HeadlessWindow())
+            print('[*] 헤드리스 가동 중 — Ctrl+C로 종료.')
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                print('[*] 종료 신호 — 정리 중...')
+            cfg.cleanup_child_procs()
+            cfg.cleanup_postgres()
+            try:
+                if cfg.http_server_ref[0]:
+                    cfg.http_server_ref[0].shutdown()
+                    cfg.http_server_ref[0].server_close()
+            except Exception:
+                pass
+            try:
+                if cfg.lock_sock:
+                    cfg.lock_sock.close()
+            except Exception:
+                pass
+            os._exit(0)
 
         print(f"[*] Launching Desktop Window with Splash...")
         # [WHY] js_api=클립보드 브리지 — 맥 WKWebView의 navigator.clipboard 거부 우회

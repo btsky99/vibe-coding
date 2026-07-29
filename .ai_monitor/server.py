@@ -2017,6 +2017,10 @@ def main():
         start_fs_watcher=start_fs_watcher,
         set_node_pty_rest_url=set_node_pty_rest_url,
         open_app_window=open_app_window,
+        # [헤드리스] 데스크톱이 없는 세션(SSH 원격 상주 노드)에서 창 없이 서버만 띄운다.
+        #   환경변수도 받는 이유: 설치본 바로가기/작업 스케줄러처럼 인자를 넘기기
+        #   번거로운 실행 경로에서도 켤 수 있어야 한다.
+        headless=('--headless' in sys.argv or os.environ.get('VIBE_HEADLESS') == '1'),
     ))
 
 
