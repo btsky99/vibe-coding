@@ -3,6 +3,7 @@ FILE: tests/test_setup_auto_install.py
 DESCRIPTION: First-run sequential automatic dependency installation API regression tests.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Cover duplicate request suppression during active installation.
 - 2026-07-29 Codex: Verify failed first attempts remain retryable.
 - 2026-07-28 Codex: Cover Node-first ordering and missing AI CLI launch behavior.
 """
@@ -41,6 +42,7 @@ def _tool(tool_id: str, installed: bool) -> dict:
 
 def test_auto_install_starts_one_chain_for_node_and_all_missing_clis():
     handler = _Handler()
+    setup_api._AUTO_INSTALL_LAST_STARTED = 0.0
     statuses = {
         "tools": [
             _tool("nodejs", False),
@@ -70,6 +72,7 @@ def test_auto_install_starts_one_chain_for_node_and_all_missing_clis():
 
 def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
     handler = _Handler()
+    setup_api._AUTO_INSTALL_LAST_STARTED = 0.0
     statuses = {
         "tools": [
             _tool("nodejs", True),
@@ -92,6 +95,7 @@ def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
 
 
 def test_auto_install_failure_can_be_retried():
+    setup_api._AUTO_INSTALL_LAST_STARTED = 0.0
     statuses = {
         "tools": [
             _tool("nodejs", False),
@@ -118,3 +122,32 @@ def test_auto_install_failure_can_be_retried():
     assert launch.call_count == 2
     assert first.status == 500
     assert second.status == 202
+
+
+def test_auto_install_does_not_open_duplicate_windows():
+    statuses = {
+        "tools": [
+            _tool("nodejs", True),
+            _tool("claude", False),
+            _tool("codex", False),
+            _tool("antigravity", False),
+        ]
+    }
+    setup_api._AUTO_INSTALL_LAST_STARTED = 0.0
+    with (
+        patch("api.tools_api._get_all_status", return_value=statuses),
+        patch(
+            "api.tools_api.launch_ai_toolchain_installer",
+            return_value={"status": "success", "message": "started"},
+        ) as launch,
+        patch("api.setup_api.time.monotonic", side_effect=[1000.0, 1001.0]),
+    ):
+        first = _Handler()
+        second = _Handler()
+        setup_api.handle_post(first, "/api/setup/auto-install", {})
+        setup_api.handle_post(second, "/api/setup/auto-install", {})
+
+    launch.assert_called_once_with()
+    assert first.status == 202
+    assert second.status == 200
+    assert json.loads(second.wfile.getvalue())["status"] == "running"
