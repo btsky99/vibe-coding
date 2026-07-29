@@ -691,6 +691,14 @@ function handlePersistentPtyConnection(ws, req) {
     } else if (agent === 'codex') {
       const modelName = requestedModel || getCodexMainModel();
       ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo, modelName)));
+    } else if (agent === 'tui') {
+      // [WHY 셸에 명령을 써넣나] claude/codex와 같은 방식 — 셸이 이미 떠 있으므로
+      //   TUI가 종료돼도 슬롯이 닫히지 않고 그 자리에서 다른 명령을 이어 칠 수 있다.
+      //   (ssh처럼 직접 spawn하면 TUI 종료 = 슬롯 종료가 되어 되레 불편하다.)
+      // [제약] cwd는 이 세션의 프로젝트 경로다 — tui.py가 그 프로젝트 서버를 찾도록
+      //   상대 경로로 실행한다. PYTHON_EXE는 서버가 주입한 인터프리터 경로.
+      const py = process.env.PYTHON_EXE || 'python';
+      ptyProcess.write(agentLine(`"${py}" scripts/tui.py`));
     } else if (agent.startsWith('groupchat-')) {
       const cli = agent.replace('groupchat-', '');
       const slotNum = parseInt(slotId, 10) - 100;

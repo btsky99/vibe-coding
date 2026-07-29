@@ -163,6 +163,7 @@ export default function AgentSelectCards({ logs, onLaunch }: {
         {/* 원격 노드 카드 — ssh config에 Host가 있을 때만 나타난다 (2026-07-29) */}
         <RemoteHostCards
           onLaunchRemote={(host, mode) => onLaunch('remote', false, undefined, { host, mode })}
+          onLaunchLocal={(mode) => onLaunch(mode, false)}
         />
         </div>
       </div>

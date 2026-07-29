@@ -18,7 +18,7 @@
  */
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Server, Terminal, Cpu, Code2, AlertTriangle } from 'lucide-react';
+import { Server, Terminal, Cpu, Code2, AlertTriangle, Gauge } from 'lucide-react';
 
 interface RemoteHost {
   alias: string;
@@ -38,8 +38,11 @@ const MODE_ICON: Record<string, typeof Terminal> = {
   codex: Code2,
 };
 
-export default function RemoteHostCards({ onLaunchRemote }: {
+export default function RemoteHostCards({ onLaunchRemote, onLaunchLocal }: {
   onLaunchRemote: (alias: string, mode: string) => void;
+  // [WHY 로컬도 여기인가] "상태를 보고 싶다"는 목적에서 이 PC와 원격 노드는 같은 줄에 있다.
+  //   기존 3장(클로드/안티그래비티/코덱스)은 '에이전트를 띄운다'는 다른 목적이라 섞지 않는다.
+  onLaunchLocal: (mode: string) => void;
 }) {
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
   const [modes, setModes] = useState<RemoteMode[]>([]);
@@ -63,18 +66,28 @@ export default function RemoteHostCards({ onLaunchRemote }: {
       .finally(() => setLoaded(true));
   }, []);
 
-  // [WHY 아무것도 안 그리는가] ssh config가 없는 사용자에게 빈 섹션이나 에러를 띄우면
-  //   쓰지도 않는 기능의 노이즈가 된다. 원격 노드가 실제로 있을 때만 존재를 드러낸다.
-  if (!loaded || hosts.length === 0) return null;
+  // [WHY loaded만 보는가] 원격 노드가 없어도 '이 PC 상태판' 버튼은 항상 쓸모가 있다.
+  //   (초기 렌더에서 목록 fetch 전에 깜빡이는 것만 막는다.)
+  if (!loaded) return null;
 
   return (
     <div className="w-full mt-5">
       <div className="flex items-center gap-2 mb-2 px-1">
         <Server className="w-3.5 h-3.5 text-primary/70" />
         <span className="text-[10px] font-black uppercase tracking-widest text-[#888]">
-          원격 노드
+          상태판 · 원격 노드
         </span>
         <div className="flex-1 h-px bg-white/10" />
+      </div>
+
+      {/* 이 PC 상태판 — 터미널 슬롯에서 tui.py를 띄운다 */}
+      <div className="mb-2">
+        <button
+          onClick={() => onLaunchLocal('tui')}
+          className="w-full py-2 bg-primary/15 hover:bg-primary/30 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2"
+        >
+          <Gauge className="w-3.5 h-3.5" /> 이 PC 상태판 열기 (TUI)
+        </button>
       </div>
 
       {!sshAvailable && (
@@ -88,6 +101,7 @@ export default function RemoteHostCards({ onLaunchRemote }: {
         </div>
       )}
 
+      {hosts.length > 0 && (
       <div className="flex flex-wrap gap-2">
         {hosts.map((h) => (
           <motion.div
@@ -122,6 +136,7 @@ export default function RemoteHostCards({ onLaunchRemote }: {
           </motion.div>
         ))}
       </div>
+      )}
     </div>
   );
 }
