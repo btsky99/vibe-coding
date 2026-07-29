@@ -3,6 +3,8 @@ FILE: tests/test_windows_installer_toolchain.py
 DESCRIPTION: Regression checks for prerequisite-first Windows installer packaging.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Require visible per-tool installation progress in the app.
+- 2026-07-29 Codex: Ensure setup stops source-run watchdog/server/PTY before replacing Node.
 - 2026-07-29 Codex: Require official Antigravity installer packaging.
 - 2026-07-29 Codex: Ensure setup bundles Node/npm and runs every AI CLI installer.
 """
@@ -41,3 +43,24 @@ def test_installed_app_exposes_bundled_node_path():
     assert "def _inject_bundled_node_path()" in boot
     assert 'app_dir / "nodejs"' in boot
     assert "_inject_bundled_node_path()" in boot
+
+
+def test_installer_stops_processes_that_can_respawn_bundled_node():
+    installer = (ROOT / "vibe-coding-setup.iss").read_text(encoding="utf-8")
+
+    assert r"\scripts\hive_watchdog.py" in installer
+    assert r"\.ai_monitor\server.py" in installer
+    assert r"\pty-server\pty-server.js" in installer
+
+
+def test_first_run_ui_reports_each_core_tool():
+    api = (ROOT / ".ai_monitor" / "api" / "setup_api.py").read_text(encoding="utf-8")
+    ui = (
+        ROOT / ".ai_monitor" / "vibe-view" / "src" / "components" / "SetupBanner.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert 'core_ids = ("nodejs", "claude", "codex", "antigravity")' in api
+    assert "기본 설치팩" in ui
+    assert "확인·설치 중" in ui
+    assert "설치됨" in ui
+    assert "window.setInterval" in ui

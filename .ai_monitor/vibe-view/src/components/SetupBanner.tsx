@@ -6,6 +6,7 @@
  *              "닫기" 시 localStorage에 기록하여 재표시 방지.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Codex: Show and poll per-tool first-run installation progress.
  * - 2026-07-29 Codex: Stop treating missing project hooks as a missing Claude installation.
  * - 2026-07-29 Codex: Route every missing AI action through the full prerequisite-first installer.
  * - 2026-07-29 Codex: Make Claude and all-AI-CLI actions start installers instead of doing nothing.
@@ -46,6 +47,14 @@ interface SetupStatus {
   checks: Record<string, CheckResult>;
   auto_fixed: string[];
   needs_action: string[];
+  toolchain?: ToolchainItem[];
+}
+
+interface ToolchainItem {
+  id: 'nodejs' | 'claude' | 'codex' | 'antigravity';
+  name: string;
+  installed: boolean;
+  version?: string | null;
 }
 
 interface SetupBannerProps {
@@ -57,16 +66,12 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   const [dismissed, setDismissed] = useState(false);
   const [showFixed, setShowFixed] = useState(true);
   const [installingAction, setInstallingAction] = useState<string | null>(null);
+  const [toolchainInstalling, setToolchainInstalling] = useState(false);
 
   /* localStorage 키 — 사용자가 닫으면 다시 안 보임 */
-  const DISMISS_KEY = 'setup_banner_dismissed';
-
   useEffect(() => {
     /* 이전에 닫았으면 표시 안 함 */
-    const saved = localStorage.getItem(DISMISS_KEY);
-    if (saved === 'true') {
-      setDismissed(true);
-    }
+    localStorage.removeItem('setup_banner_dismissed');
 
     /* 서버에서 진단 결과 가져오기 */
     fetch(`${API_BASE}/api/setup/status`)
@@ -74,6 +79,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       .then((data: SetupStatus) => {
         setStatus(data);
         if (data.checks?.cli_agents?.status === 'missing') {
+          setToolchainInstalling(true);
           fetch(`${API_BASE}/api/setup/auto-install`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -88,16 +94,28 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       .catch(() => { /* 서버 미실행 시 무시 */ });
   }, []);
 
+  useEffect(() => {
+    if (!toolchainInstalling) return;
+    const poll = window.setInterval(() => {
+      fetch(`${API_BASE}/api/setup/status`)
+        .then(r => r.json())
+        .then((data: SetupStatus) => {
+          setStatus(data);
+          if (data.toolchain?.length && data.toolchain.every(tool => tool.installed)) {
+            setToolchainInstalling(false);
+            setInstallingAction(null);
+          }
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(poll);
+  }, [toolchainInstalling]);
+
   /* 렌더링 조건 */
   if (dismissed || !status) return null;
-  if (status.ready && !showFixed) return null;
-  if (status.ready && (status.auto_fixed?.length ?? 0) === 0) return null;
 
   const handleDismiss = () => {
     setDismissed(true);
-    if ((status.needs_action?.length ?? 0) === 0) {
-      localStorage.setItem(DISMISS_KEY, 'true');
-    }
   };
 
   const handleAction = async (action: string) => {
@@ -108,6 +126,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
 
     if (action === 'install_claude' || action === 'install_cli') {
       setInstallingAction(action);
+      setToolchainInstalling(true);
       try {
         const response = await fetch(`${API_BASE}/api/setup/auto-install`, {
           method: 'POST',
@@ -151,6 +170,32 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
         ))}
 
         {/* 조치 필요 항목 */}
+        {status.toolchain && (
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            <strong className="text-gray-100">기본 설치팩</strong>
+            {status.toolchain.map(tool => (
+              <span
+                key={tool.id}
+                title={tool.version || undefined}
+                className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${
+                  tool.installed
+                    ? 'bg-emerald-950/70 text-emerald-300'
+                    : 'bg-amber-950/70 text-amber-200'
+                }`}
+              >
+                {tool.installed ? (
+                  <CheckCircle className="w-3 h-3" />
+                ) : (
+                  <Wrench className="w-3 h-3 animate-pulse" />
+                )}
+                {tool.name}: {tool.installed
+                  ? '설치됨'
+                  : (toolchainInstalling ? '확인·설치 중' : '설치 필요')}
+              </span>
+            ))}
+          </span>
+        )}
+
         {status.needs_action.map(key => {
           const check = status.checks[key];
           return (

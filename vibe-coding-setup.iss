@@ -309,7 +309,11 @@ begin
   //   postgres.exe / node.exe / vibe-coding.exe / vibe-dashboard.exe 모두 포함됨.
   //   AppDir이 주어지면(설치 경로 확정 후) 커스텀 설치 경로도 함께 매칭 — 기본 경로가 아닌
   //   폴더에 설치한 PC에서 'VibeCoding' 문자열이 경로에 없어 하나도 못 죽이던 구멍을 막는다.
-  sMatch := '$_.ExecutablePath -like ''*VibeCoding*''';
+  sMatch :=
+    '$_.ExecutablePath -like ''*VibeCoding*'' ' +
+    '-or $_.CommandLine -like ''*\.ai_monitor\server.py*'' ' +
+    '-or $_.CommandLine -like ''*\scripts\hive_watchdog.py*'' ' +
+    '-or $_.CommandLine -like ''*\pty-server\pty-server.js*''';
   if AppDir <> '' then
     sMatch := sMatch + ' -or $_.ExecutablePath -like ''' + AppDir + '\*''';
 

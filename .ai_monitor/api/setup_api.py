@@ -4,6 +4,7 @@ DESCRIPTION: Setup Doctor API — 초기 설정 진단 상태를 대시보드에
              GET /api/setup/status → 5가지 항목의 진단 결과 반환.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Expose per-tool installation state for the first-run progress UI.
 - 2026-07-29 Codex: Suppress duplicate installer windows without blocking later retries.
 - 2026-07-29 Codex: Allow retries and always run the complete prerequisite-first AI chain.
 - 2026-07-29 Codex: Run one sequential installer for every missing core AI dependency.
@@ -34,7 +35,29 @@ def handle_get(handler, path: str, params: dict = None, **kwargs):
     if path == '/api/setup/status':
         try:
             from setup_doctor import run_all
+            from api import tools_api
+
             result = run_all()
+            core_ids = ("nodejs", "claude", "codex", "antigravity")
+            tool_status = {
+                item["id"]: {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "installed": item["installed"],
+                    "version": item.get("version"),
+                }
+                for item in tools_api._get_all_status()["tools"]
+                if item["id"] in core_ids
+            }
+            result["toolchain"] = [
+                tool_status.get(tool_id, {
+                    "id": tool_id,
+                    "name": tool_id,
+                    "installed": False,
+                    "version": None,
+                })
+                for tool_id in core_ids
+            ]
             body = json.dumps(result, ensure_ascii=False).encode('utf-8')
             handler.send_response(200)
             handler.send_header('Content-Type', 'application/json; charset=utf-8')
