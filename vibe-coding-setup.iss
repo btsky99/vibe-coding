@@ -144,6 +144,9 @@ Source: ".ai_monitor\bin\vibe_final.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "scripts\statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignoreversion
 ; Playwright CLI 설치 스크립트 (앱 내부 AI 도구 메뉴에서 수동 실행용)
 Source: "scripts\install_playwright_cli.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "scripts\install_ai_toolchain.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "scripts\install_nodejs.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: ".ai_monitor\bin\nodejs\*"; DestDir: "{app}\nodejs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
 ; server.py가 frozen 모드에서 Python 서브프로세스 대신 이 EXE들을 직접 실행.
@@ -167,6 +170,8 @@ Source: ".ai_monitor\bin\pgsql\share\*"; DestDir: "{app}\pgsql\share"; Flags: ig
 ; 레지스트리 에러 팝업. IsAdminInstallMode로 분기 — 비관리자는 HKCU\Environment에 동일 변수 등록.
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "VIBE_HIVE_HOOK"; ValueData: "{app}\{#MyAppExeName}"; Flags: preservestringtype uninsdeletevalue; Check: IsAdminInstallMode
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "VIBE_HIVE_HOOK"; ValueData: "{app}\{#MyAppExeName}"; Flags: preservestringtype uninsdeletevalue; Check: not IsAdminInstallMode
+; Make the bundled Node/npm and npm global AI CLI shims available in new terminals.
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{app}\nodejs;{%APPDATA}\npm;{olddata}"; Flags: preservestringtype; Check: NeedsToolchainPath
 
 [Icons]
 ; 시작 메뉴 — 폴더는 영문(MyAppName), 아이콘 표시명은 한글(MyAppDisplayName)
@@ -329,9 +334,42 @@ end;
 // 파일 교체 직전 재정리 — InitializeSetup 이후 재스폰된 프로세스를 마지막으로 걷어낸다.
 //   [주의] ssInstall은 [Files] 복사 '직전' 단계라 여기가 잠금 해제의 마지막 기회다.
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ToolchainResult: Integer;
 begin
   if CurStep = ssInstall then
     KillLockingProcesses(ExpandConstant('{app}'));
+  if CurStep = ssPostInstall then begin
+    WizardForm.StatusLabel.Caption :=
+      'Installing required tools: Node.js/npm -> Claude Code -> Codex -> Gemini CLI';
+    WizardForm.ProgressGauge.Style := npbstMarquee;
+    if not Exec(
+      ExpandConstant('{app}\{#MyAppExeName}'),
+      '"' + ExpandConstant('{app}\scripts\install_ai_toolchain.py') + '"',
+      ExpandConstant('{app}'),
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ToolchainResult
+    ) or (ToolchainResult <> 0) then
+      MsgBox(
+        'Required AI tools could not be installed.' + #13#10 +
+        'Vibe Coding will retry automatically on the next launch.',
+        mbError,
+        MB_OK
+      );
+    WizardForm.ProgressGauge.Style := npbstNormal;
+  end;
+end;
+
+function NeedsToolchainPath(): Boolean;
+var
+  CurrentPath: String;
+  NodePath: String;
+begin
+  NodePath := ExpandConstant('{app}\nodejs');
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', CurrentPath) then
+    CurrentPath := '';
+  Result := Pos(Lowercase(NodePath), Lowercase(CurrentPath)) = 0;
 end;
 
 function InitializeSetup(): Boolean;

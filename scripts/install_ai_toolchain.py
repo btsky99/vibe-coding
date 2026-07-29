@@ -3,6 +3,7 @@ FILE: scripts/install_ai_toolchain.py
 DESCRIPTION: Vibe Coding first-run Node.js and AI CLI automatic installer chain.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Prefer installer-bundled Node/npm for deterministic first installation.
 - 2026-07-29 Codex: Verify Node/npm after installation before starting dependent CLIs.
 - 2026-07-29 Codex: Install missing Node.js, Claude, Codex, and Gemini sequentially.
 """
@@ -63,6 +64,7 @@ def _find_npm() -> str | None:
     if npm:
         return npm
     candidates = [
+        SCRIPT_DIR.parent / "nodejs" / "npm.cmd",
         Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "npm.cmd",
         Path(os.environ.get("APPDATA", "")) / "npm" / "npm.cmd",
     ]

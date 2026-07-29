@@ -331,6 +331,23 @@ jobs:
           REM vibe-kanban.exe 제거됨 — B안 통합: kanban은 vibe-dashboard.exe kanban 탭으로 실행
         shell: cmd
 
+      - name: Bundle Node.js and npm for first-install AI tools
+        # Stage this after PyInstaller so Node is included once, by the installer.
+        shell: pwsh
+        run: |
+          $nodeVersion = "22.16.0"
+          $archive = "$env:TEMP\node-portable.zip"
+          $extract = "$env:TEMP\node-portable"
+          $url = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          $source = Join-Path $extract "node-v$nodeVersion-win-x64"
+          $dest = ".ai_monitor\bin\nodejs"
+          if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+          Copy-Item -Path $source -Destination $dest -Recurse -Force
+          & "$dest\node.exe" --version
+          & "$dest\npm.cmd" --version
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
         shell: cmd

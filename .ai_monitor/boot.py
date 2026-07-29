@@ -6,6 +6,7 @@ DESCRIPTION: 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스�
   의존성(pywebview/psycopg/...)만 frozen 유지되고, 앱 .py는 항상 체크아웃에서 로드된다.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Expose installer-bundled Node/npm and global AI CLI shims on PATH.
 - 2026-06-24 Claude: 최초 작성 — 경량 소스 업데이트 채널(A안) Task 2~3.
   메모리 project_soft_update_channel / 계획 ai_monitor_plan.md 참조.
 """
@@ -18,6 +19,17 @@ import shutil
 import runpy
 import subprocess
 from pathlib import Path
+
+
+def _inject_bundled_node_path() -> None:
+    """Expose bundled Node/npm and npm global command shims to the installed app."""
+    if not getattr(sys, "frozen", False):
+        return
+    app_dir = Path(sys.executable).resolve().parent
+    candidates = [app_dir / "nodejs", Path(os.environ.get("APPDATA", "")) / "npm"]
+    current = os.environ.get("PATH", "").split(os.pathsep)
+    additions = [str(path) for path in candidates if path.is_dir()]
+    os.environ["PATH"] = os.pathsep.join(dict.fromkeys(additions + current))
 
 REPO_URL = "https://github.com/btsky99/vibe-coding.git"
 APP_REL = os.path.join(".ai_monitor", "server.py")  # 체크아웃 기준 메인 엔트리 상대경로
@@ -286,6 +298,7 @@ def _selftest() -> int:
 
 
 def main() -> None:
+    _inject_bundled_node_path()
     args = sys.argv[1:]
     if args and args[0] == "--boot-selftest":
         raise SystemExit(_selftest())
