@@ -6,6 +6,7 @@ DESCRIPTION: 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스�
   의존성(pywebview/psycopg/...)만 frozen 유지되고, 앱 .py는 항상 체크아웃에서 로드된다.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Acquire an early Windows mutex before slow first-run boot work.
 - 2026-07-29 Codex: Expose installer-bundled Node/npm and global AI CLI shims on PATH.
 - 2026-06-24 Claude: 최초 작성 — 경량 소스 업데이트 채널(A안) Task 2~3.
   메모리 project_soft_update_channel / 계획 ai_monitor_plan.md 참조.
@@ -19,6 +20,26 @@ import shutil
 import runpy
 import subprocess
 from pathlib import Path
+
+_EARLY_INSTANCE_MUTEX = None
+
+
+def _acquire_early_windows_instance_mutex() -> None:
+    """Prevent two frozen GUI instances from racing before server.py takes its lock."""
+    global _EARLY_INSTANCE_MUTEX
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    import ctypes
+
+    mutex = ctypes.windll.kernel32.CreateMutexW(
+        None, False, "Local\\VibeCoding.MainWindow"
+    )
+    if not mutex:
+        return
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.kernel32.CloseHandle(mutex)
+        os._exit(0)
+    _EARLY_INSTANCE_MUTEX = mutex
 
 
 def _inject_bundled_node_path() -> None:
@@ -308,6 +329,7 @@ def main() -> None:
     if args and str(args[0]).endswith(".py"):
         _run_daemon_script(args)
         return
+    _acquire_early_windows_instance_mutex()
     _run_main_app(args)
 
 
