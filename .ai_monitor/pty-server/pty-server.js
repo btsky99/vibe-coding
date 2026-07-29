@@ -6,6 +6,10 @@
  *   REST API로 Python 서버(agent_api, pty_api)와 세션 정보를 공유합니다.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Claude: 죽은 handlePtyConnectionLegacy(313줄) 제거 — 1745→1421줄로 1500 규칙 복귀.
+ *                      호출부가 없는데도 살아있는 핸들러와 셸 선택 코드가 똑같아, 원격 분기를
+ *                      그쪽에 넣고 "왜 로컬 cmd가 뜨지"로 헤맸다. 남겨두면 같은 함정이 재발한다.
+ * - 2026-07-29 Claude: 원격 노드 터미널(agent=remote) 지원 — remote_hosts.js로 ssh 별칭 파싱/명령 조립.
  * - 2026-07-29 Codex: Launch Windows AI CLIs by resolved absolute path through ConPTY cmd.
  * - 2026-03-22 Claude: 초기 구현 — Python pywinpty PTY 핸들러 대체
  */
@@ -20,6 +24,9 @@ const WebSocket = require('ws');
 const express = require('express');
 const http = require('http');
 const { spawn } = require('child_process');
+// [2026-07-29] 원격 노드(레노버 APIS 등) 터미널 슬롯용. 접속 정보는 전부 ~/.ssh/config가
+//   소유하므로 이 파일에는 호스트/계정/키 경로가 들어오지 않는다(맥 이전 대비).
+const remoteHosts = require('./remote_hosts');
 
 // ── 설정 ──────────────────────────────────────────────────────────────────
 const PTY_PORT = parseInt(process.env.PTY_PORT || '9001', 10);
@@ -562,334 +569,6 @@ function getCodexMainModel() {
   return process.env.CODEX_MODEL || '';
 }
 
-// ── WebSocket PTY 핸들러 ──────────────────────────────────────────────────
-/**
- * 프론트엔드 TerminalSlot.tsx에서 WebSocket 연결이 들어오면
- * node-pty로 셸을 spawn하고 양방향 스트리밍을 설정합니다.
- *
- * URL 형식: /pty/slot{0-31}?agent={claude|antigravity|codex}&cwd={path}&cols=80&rows=24&yolo=false&model=...&name=...
- *
- * 프로토콜:
- *   Client → Server: 일반 텍스트(키 입력) 또는 JSON({type:'resize',cols,rows})
- *   Server → Client: 일반 텍스트(PTY 출력, ANSI 포함)
- */
-function handlePtyConnectionLegacy(ws, req) {
-  let ptyProcess = null;
-  let sessionId = null;
-  let slotId = null;
-
-  try {
-    // ── URL 파싱 ──────────────────────────────────────────────────────
-    const url = new URL(req.url, `http://127.0.0.1:${PTY_PORT}`);
-    const agent = url.searchParams.get('agent') || '';
-    // CWD 결정: 프론트엔드가 보낸 경로 → PROJECT_ROOT → 사용자 홈 순으로 폴백
-    // pip 설치 환경에서 PROJECT_ROOT가 site-packages 하위라 유효하지 않을 수 있음
-    // 에러 267 (ERROR_DIRECTORY) 방지를 위해 실제 존재하는 디렉토리인지 검증
-    let cwd = url.searchParams.get('cwd') || PROJECT_ROOT;
-    if (!fs.existsSync(cwd)) {
-      console.log(`[PTY] CWD 유효하지 않음: ${cwd} → 사용자 홈으로 폴백`);
-      cwd = os.homedir();
-    }
-    const cols = parseInt(url.searchParams.get('cols') || '80', 10);
-    const rows = parseInt(url.searchParams.get('rows') || '24', 10);
-    const isYolo = url.searchParams.get('yolo') === 'true';
-
-    // ── 세션 ID 계산 (Phase 2-5.3a: 프로젝트 격리 복합 키) ──────────
-    // slotId: 외부 표시/TERMINAL_ID env용 (T1, T8 등 — UI/wrapper 호환)
-    // sessionId: 내부 Map 키 — `{project_id}:{slotId}` (탭별 풀 격리)
-    const projectId = _resolvePidFromQuery(url.searchParams, cwd);
-    const slotMatch = req.url.match(/\/pty\/slot(\d+)/);
-    slotId = slotMatch ? String(parseInt(slotMatch[1], 10) + 1) : String(Date.now());
-    sessionId = sessionKey(projectId, slotId);
-
-    // ── 환경변수 구성 ─────────────────────────────────────────────────
-    // Python 서버와 동일한 환경변수를 PTY 프로세스에 주입합니다.
-    // TERMINAL_ID는 외부 약속(slot 번호) 유지 — wrapper/docs가 T1, T2 형식 기대.
-    const env = Object.assign(cleanClaudeSessionEnv(), {
-      PYTHONIOENCODING: 'utf-8',
-      LANG: 'ko_KR.UTF-8',
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-      PYTHONLEGACYWINDOWSSTDIO: '0',
-      TERMINAL_ID: slotId,
-      // instructor 패키지의 deprecated google.generativeai FutureWarning 억제
-      PYTHONWARNINGS: 'ignore::FutureWarning',
-    });
-
-    // 에이전트별 HIVE_AGENT 환경변수
-    if (agent) {
-      env.HIVE_AGENT = agent;
-    }
-
-    // Claude 비용 최적화: 백그라운드 작업에 Haiku 사용
-    if (agent === 'claude' && !process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
-      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-    }
-
-    // ── 셸 선택 ───────────────────────────────────────────────────────
-    // Claude: cmd.exe (정상 동작)
-    // Antigravity/Codex/Shell(개발용): Git Bash (CMD에서 실행 시 셸 호환성 에러 발생)
-    let shell, shellArgs;
-    if (!IS_WIN) {
-      ({ shell, shellArgs } = posixLoginShell());
-    } else if (agent === 'shell' && BASH_AVAILABLE) {
-      shell = BASH_EXE;
-      shellArgs = ['--login'];
-    } else {
-      shell = 'cmd.exe';
-      shellArgs = [];
-    }
-
-    // ── node-pty 스폰 ─────────────────────────────────────────────────
-    ptyProcess = pty.spawn(shell, shellArgs, {
-      name: 'xterm-256color',
-      cols: cols,
-      rows: rows,
-      cwd: cwd,
-      env: env,
-      // Windows ConPTY 사용 (node-pty 기본값)
-      useConpty: IS_WIN,
-    });
-
-    console.log(`[PTY] 세션 시작: T${slotId} agent=${agent} pid=${ptyProcess.pid} project=${projectId}`);
-
-    // ── 에이전트별 시작 명령 ──────────────────────────────────────────
-    if (agent === 'claude') {
-      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
-    } else if (agent === 'antigravity') {
-      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
-    } else if (agent === 'codex') {
-      const modelName = getCodexMainModel();
-      ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo, modelName)));
-    } else if (agent.startsWith('groupchat-')) {
-      // 그룹챗 터미널 — LLM + 그룹 채팅 통합 모드
-      const cli = agent.replace('groupchat-', '');
-      // 원래 슬롯 번호 복원: slotId는 slot번호+1 형식 (예: slot101 → slotId=102 → slotNum=2)
-      const slotNum = parseInt(slotId, 10) - 100;
-      const termName = `T${slotNum}-${cli}`;
-      ptyProcess.write(agentLine(`python -m llm_group_chat terminal --name ${termName} --cli ${cli}`));
-    }
-
-    // ── 세션 등록 ─────────────────────────────────────────────────────
-    const mainModel = agent === 'claude'
-      ? (process.env.ANTHROPIC_MODEL || 'sonnet-4-6')
-      : '';
-    const bgModel = agent === 'claude'
-      ? (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || '')
-      : '';
-
-    ptySessions.set(sessionId, {
-      pty: ptyProcess,
-      agent: agent,
-      yolo: isYolo,
-      started: new Date().toISOString(),
-      cwd: cwd,
-      lastLine: '',
-      currentTask: agent ? `[PTY] ${String(agent).toUpperCase()} 세션 활성` : '',
-      mainModel: mainModel,
-      bgModel: bgModel,
-      projectId: projectId,
-      slotId: slotId,
-      lastInputAt: Date.now(),
-      lastOutputAt: Date.now(),
-    });
-    ptyOutputBuffers.set(sessionId, []);
-    ptyOutputSeq.set(sessionId, 0);
-
-    // ── 세션 시작 로그 전송 ───────────────────────────────────────────
-    if (agent) {
-      const modeTag = isYolo ? '[YOLO]' : '[일반]';
-      const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
-      sendSessionLog(
-        `pty_start_${sessionId}_${ts}`,
-        agent,
-        `─── ${agent.toUpperCase()} 세션 시작 ${modeTag} ───`,
-        'running'
-      );
-      sendPtyHeartbeat(sessionId, 'running', true);
-    }
-
-    // ── PTY → WebSocket (출력 스트리밍) ───────────────────────────────
-    ptyProcess.onData((data) => {
-      // Codex 스트림 정규화 (이중 CR 보정)
-      const streamData = agent === 'codex' ? normalizeCodexStream(data) : data;
-      if (!streamData) return;
-
-      // WebSocket으로 전송
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(streamData);
-      }
-
-      // 출력 버퍼에 추가 (REST API 조회용)
-      appendPtyOutput(sessionId, streamData);
-
-      // last_line 업데이트 (에이전트 패널 표시용)
-      const session = ptySessions.get(sessionId);
-      if (session) {
-        session.lastOutputAt = Date.now();
-        try {
-          const clean = streamData.replace(ANSI_ESCAPE, '').replace(/\r/g, '\n');
-          const lines = clean.split('\n').filter(l => l.trim().length > 2);
-          if (lines.length > 0) {
-            session.lastLine = lines[lines.length - 1].trim().substring(0, 120);
-            updateSessionTaskFromLine(session, session.lastLine);
-            sendPtyHeartbeat(sessionId, 'running');
-          }
-        } catch (_) {
-          // last_line 업데이트 실패 시 무시 (메인 흐름 보호)
-        }
-      }
-    });
-
-    // ── PTY 종료 감지 ─────────────────────────────────────────────────
-    ptyProcess.onExit(({ exitCode, signal }) => {
-      console.log(`[PTY] 프로세스 종료: T${slotId} code=${exitCode} signal=${signal}`);
-
-      if (agent) {
-        const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
-        sendSessionLog(
-          `pty_end_${sessionId}_${ts}`,
-          agent,
-          `─── ${agent.toUpperCase()} 프로세스 종료 (exit=${exitCode}) ───`,
-          'success'
-        );
-        sendPtyHeartbeat(sessionId, exitCode === 0 ? 'done' : 'error', true);
-      }
-
-      // 세션 정리
-      ptySessions.delete(sessionId);
-      ptyOutputBuffers.delete(sessionId);
-      ptyOutputSeq.delete(sessionId);
-
-      // WebSocket 닫기
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close(1000, 'PTY process exited');
-      }
-    });
-
-    // ── WebSocket → PTY (입력 전달) ───────────────────────────────────
-    // 입력 버퍼: 자율 에이전트 라우팅용 (빈 셸 터미널에서만 사용)
-    let wsInputBuf = [];
-    let wsInitDone = false;
-
-    // 초기화 명령이 끝난 뒤 1.5초 후부터 인터셉션 활성화
-    setTimeout(() => { wsInitDone = true; }, 1500);
-
-    ws.on('message', (message) => {
-      try {
-        const msgStr = typeof message === 'string' ? message : message.toString('utf-8');
-
-        // ── JSON 제어 메시지 처리 (리사이즈) ───────────────────────────
-        if (msgStr.startsWith('{') && msgStr.endsWith('}')) {
-          try {
-            const data = JSON.parse(msgStr);
-            if (data.type === 'resize') {
-              const newCols = parseInt(data.cols, 10) || 80;
-              const newRows = parseInt(data.rows, 10) || 24;
-              ptyProcess.resize(newCols, newRows);
-              return;
-            }
-          } catch (_) {
-            // JSON 파싱 실패 → 일반 입력으로 처리
-          }
-        }
-
-        // idle TTL 워커용: 사용자 키 입력 시각 갱신 (resize 제외)
-        const inputSession = ptySessions.get(sessionId);
-        if (inputSession) inputSession.lastInputAt = Date.now();
-
-        // ── 입력 정규화 및 PTY 전달 ────────────────────────────────────
-        const processed = msgStr.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
-
-        if (processed.includes('\r')) {
-          // Enter 키 포함: 세그먼트별 처리
-          const segments = processed.split('\r');
-          for (let idx = 0; idx < segments.length; idx++) {
-            const segment = segments[idx];
-            if (segment) {
-              // 버퍼에 누적 (자율 에이전트 라우팅용)
-              if (wsInitDone) {
-                if ((segment === '\x7f' || segment === '\x08') && wsInputBuf.length > 0) {
-                  wsInputBuf.pop();
-                } else {
-                  wsInputBuf.push(segment);
-                }
-              }
-              ptyProcess.write(segment);
-            }
-            // Enter 처리
-            if (idx < segments.length - 1) {
-              // 자율 에이전트 라우팅 (빈 셸 터미널에서만)
-              if (wsInitDone && wsInputBuf.length > 0) {
-                const completedLine = wsInputBuf.join('');
-                wsInputBuf = [];
-                const cleaned = completedLine.replace(/[\x00-\x1f\x7f-\x9f]/g, '').trim();
-                const current = ptySessions.get(sessionId);
-                if (current && cleaned.length >= 4) {
-                  updateSessionTaskFromLine(current, cleaned, true);
-                  sendPtyHeartbeat(sessionId, 'running', true);
-                }
-                if (cleaned.length >= 4 && !agent) {
-                  dispatchToAgent(cleaned, ptyProcess);
-                }
-              }
-              const enterStr = getSubmitEnterSequence(agent);
-              ptyProcess.write(enterStr);
-            }
-          }
-        } else {
-          // 일반 문자: 버퍼에 누적 + PTY로 전달
-          if (wsInitDone) {
-            if ((msgStr === '\x7f' || msgStr === '\x08') && wsInputBuf.length > 0) {
-              wsInputBuf.pop();
-            } else if (!processed.includes('\r')) {
-              wsInputBuf.push(msgStr);
-            }
-          }
-          ptyProcess.write(processed);
-        }
-      } catch (err) {
-        console.error(`[WS ERROR] ${err.message}`);
-      }
-    });
-
-    // ── WebSocket 닫힘 처리 ───────────────────────────────────────────
-    ws.on('close', () => {
-      console.log(`[PTY] WebSocket 닫힘: T${slotId}`);
-
-      if (agent) {
-        const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
-        sendSessionLog(
-          `pty_end_${sessionId}_${ts}`,
-          agent,
-          `─── ${agent.toUpperCase()} 연결 종료 (WebSocket 닫힘) ───`,
-          'success'
-        );
-      }
-
-      // PTY 프로세스 종료
-      try {
-        ptyProcess.kill();
-      } catch (_) {}
-
-      // 세션 정리
-      ptySessions.delete(sessionId);
-      ptyOutputBuffers.delete(sessionId);
-      ptyOutputSeq.delete(sessionId);
-    });
-
-    ws.on('error', (err) => {
-      console.error(`[WS ERROR] T${slotId}: ${err.message}`);
-    });
-
-  } catch (err) {
-    console.error(`[PTY] Init Error: ${err.message}`);
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.close(1011, `PTY Init Error: ${err.message}`);
-    }
-  }
-}
-
 // ── 자율 에이전트 라우팅 (빈 셸 터미널용) ─────────────────────────────────
 /**
  * PTY 터미널에 에이전트(claude/antigravity 등)가 실행되지 않은 빈 셸에서
@@ -964,7 +643,29 @@ function handlePersistentPtyConnection(ws, req) {
     }
 
     let shell, shellArgs;
-    if (!IS_WIN) {
+    if (agent === 'remote') {
+      // [원격 슬롯 2026-07-29] 로컬 셸을 거치지 않고 ssh를 직접 spawn한다.
+      // [WHY 로컬 셸 미경유] 셸을 한 겹 두면 별칭이 셸 문자열로 해석돼 주입 여지가 생기고,
+      //   원격 종료 후 로컬 셸이 남아 슬롯이 안 닫힌다. 직접 spawn이면 ssh 종료 = 세션 종료.
+      // [🔴 여기가 살아있는 핸들러다] handlePtyConnectionLegacy에도 같은 셸 선택 코드가
+      //   있지만 그쪽은 아무 데서도 호출되지 않는 죽은 함수다(연결 지점은 이 함수뿐).
+      //   원격 분기를 legacy에 넣고 "왜 로컬 cmd가 뜨지"로 헤맨 적이 있다(당일 실측).
+      const alias = url.searchParams.get('host') || '';
+      const mode = url.searchParams.get('mode') || 'shell';
+      try {
+        const cmd = remoteHosts.buildRemoteCommand(alias, mode);
+        shell = cmd.file;
+        shellArgs = cmd.args;
+      } catch (e) {
+        // [WHY 여기서 직접 안내] 상위 catch는 ws.close만 해서 화면이 조용히 닫힌다.
+        //   사용자는 "터미널이 안 열린다"만 보게 되므로 원인을 터미널에 찍고 닫는다.
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(`\r\n\x1b[31m[원격 접속 실패] ${e.message}\x1b[0m\r\n`);
+          ws.close(1011, 'remote_host_rejected');
+        }
+        return;
+      }
+    } else if (!IS_WIN) {
       ({ shell, shellArgs } = posixLoginShell());
     } else {
       shell = 'cmd.exe';
@@ -1294,6 +995,29 @@ app.delete('/api/pty/sessions', (req, res) => {
     cleaned++;
   }
   res.json({ cleaned, project_id: requestedPid, skipped_office: skippedOffice });
+});
+
+/**
+ * GET /api/pty/remote/hosts
+ * ~/.ssh/config의 Host 별칭 목록 + ssh 실행파일 존재 여부를 반환합니다.
+ * AgentSelectCards가 이 목록으로 원격 노드 카드를 그립니다.
+ *
+ * [WHY sshAvailable을 같이 주는가] ssh가 없으면 spawn이 실패하는데, 프론트가 그걸
+ *   미리 모르면 카드를 눌러본 뒤에야 알게 된다. 레노버가 실제로 OpenSSH Client 없이
+ *   Server만 깔린 상태였다(2026-07-29) — 드문 일이 아니라 사전 표시가 필요하다.
+ */
+app.get('/api/pty/remote/hosts', (req, res) => {
+  try {
+    res.json({
+      sshAvailable: remoteHosts.hasSsh(),
+      hosts: remoteHosts.listHosts(),
+      modes: Object.entries(remoteHosts.MODES).map(([id, m]) => ({ id, label: m.label })),
+    });
+  } catch (e) {
+    // config 파싱 실패가 터미널 패널 전체를 죽이면 안 된다 — 빈 목록으로 degrade.
+    console.error(`[REMOTE] 호스트 목록 실패: ${e.message}`);
+    res.json({ sshAvailable: false, hosts: [], modes: [], error: e.message });
+  }
 });
 
 /**

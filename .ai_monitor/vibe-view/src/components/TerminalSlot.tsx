@@ -247,7 +247,14 @@ export default function TerminalSlot({
   // XTerm 인스턴스 생성 + WebSocket PTY 연결 + ResizeObserver 등록
   // [슬롯별 프로젝트] cwdOverride: 프로젝트 변경 재시작 시 새 경로를 명시 주입.
   //   effectivePath는 이번 렌더 클로저 값이라 onPickProject 직후엔 아직 옛 값(stale) → override로 회피.
-  const launchAgent = (agent: string, yolo: boolean = false, cwdOverride?: string) => {
+  // [원격 슬롯 2026-07-29] remote가 오면 로컬 CLI 대신 ssh 세션으로 붙는다.
+  //   host는 ~/.ssh/config의 별칭이며 백엔드가 화이트리스트로 재검증한다.
+  const launchAgent = (
+    agent: string,
+    yolo: boolean = false,
+    cwdOverride?: string,
+    remote?: { host: string; mode: string },
+  ) => {
     const connectPath = cwdOverride || effectivePath;
     // 기존 터미널이 살아있으면 먼저 정리 — dispose 없이 덮어쓰면
     // 이전 xterm 캔버스가 DOM에 남아 잔상(이중 삼중 출력) 현상 발생
@@ -435,7 +442,9 @@ export default function TerminalSlot({
       // [슬롯별 프로젝트] cwd/project_id는 connectPath(슬롯 프로젝트 우선, 재시작 override) 기준 — 슬롯마다 다른 프로젝트로 spawn
       const projectId = slugifyProjectPath(connectPath);
       const wsParams = new URLSearchParams({
-        agent: slotCli || agent,
+        // [🔴 원격 우선] slotCli(슬롯 기본 CLI)가 설정돼 있어도 원격 실행이면 'remote'가 이겨야 한다.
+        //   slotCli || agent 로 두면 원격 카드를 눌러도 로컬 CLI가 떠 조용히 엉뚱하게 동작한다.
+        agent: remote ? 'remote' : (slotCli || agent),
         cwd: connectPath,
         cols: term.cols.toString(),
         rows: term.rows.toString(),
@@ -443,6 +452,7 @@ export default function TerminalSlot({
         ...(projectId ? { project_id: projectId } : {}),
         ...(slotModel ? { model: slotModel } : {}),
         ...(slotName ? { name: slotName } : {}),
+        ...(remote ? { host: remote.host, mode: remote.mode } : {}),
       });
       const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
@@ -479,7 +489,9 @@ export default function TerminalSlot({
             const currentWs = wsRef.current;
             const isAlreadyConnected = currentWs && currentWs.readyState === WebSocket.OPEN;
             if (termRef.current && !isAlreadyConnected) {
-              launchAgent(agent, false);
+              // [🔴 원격 유지] remote를 안 넘기면 재연결 때 로컬 셸로 조용히 바뀐다.
+              //   끊김은 원격에서 더 흔하므로(네트워크/절전) 이 경로가 실사용에선 정상 경로에 가깝다.
+              launchAgent(agent, false, undefined, remote);
             }
           }, delay);
         }

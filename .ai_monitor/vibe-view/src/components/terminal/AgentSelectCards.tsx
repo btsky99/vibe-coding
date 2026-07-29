@@ -14,10 +14,18 @@ import { motion } from 'framer-motion';
 import { Cpu, Zap, Code2, Orbit } from 'lucide-react';
 import { API_BASE } from '../../constants';
 import { LogRecord } from '../../types';
+import RemoteHostCards from './RemoteHostCards';
 
 export default function AgentSelectCards({ logs, onLaunch }: {
   logs: LogRecord[];
-  onLaunch: (agent: string, yolo: boolean) => void;
+  // [2026-07-29] 원격 슬롯용으로 3·4번째 인자를 옵셔널 추가 — 기존 호출부는 그대로 동작한다.
+  //   remote가 주어지면 슬롯은 로컬 CLI 대신 ssh 세션으로 붙는다.
+  onLaunch: (
+    agent: string,
+    yolo: boolean,
+    cwdOverride?: string,
+    remote?: { host: string; mode: string },
+  ) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -29,8 +37,9 @@ export default function AgentSelectCards({ logs, onLaunch }: {
   return (
     <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
       {/* 중앙 에이전트 선택 카드 UI */}
-      <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px]">
-        <div className="flex flex-col md:flex-row gap-6 max-w-4xl w-full">
+      <div className="absolute inset-0 flex items-center justify-center p-6 z-10 bg-black/20 backdrop-blur-[2px] overflow-y-auto">
+        <div className="flex flex-col max-w-4xl w-full">
+        <div className="flex flex-col md:flex-row gap-6 w-full">
 
           {/* Claude Card */}
           <motion.div
@@ -149,6 +158,12 @@ export default function AgentSelectCards({ logs, onLaunch }: {
             </div>
           </motion.div>
 
+        </div>
+
+        {/* 원격 노드 카드 — ssh config에 Host가 있을 때만 나타난다 (2026-07-29) */}
+        <RemoteHostCards
+          onLaunchRemote={(host, mode) => onLaunch('remote', false, undefined, { host, mode })}
+        />
         </div>
       </div>
 
