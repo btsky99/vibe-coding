@@ -8,6 +8,7 @@ DESCRIPTION: AI 도구 CLI 설치 관리 API.
              POST /api/tools/install  — 특정 도구 설치 실행 (새 콘솔 창)
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Replace Gemini compatibility with official Antigravity CLI.
 - 2026-07-29 Codex: Add one sequential first-run installer for Node.js and all AI CLIs.
 - 2026-07-28 Codex: Expose an installer launcher for first-run automatic dependency repair.
 - 2026-07-28 Codex: Accept Gemini CLI as the Antigravity compatibility command.
@@ -116,12 +117,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "id": "antigravity",
         "name": "Antigravity CLI",
         "description": "Google Antigravity AI 코딩 에이전트",
-        "check_commands": [["antigravity", "--version"], ["gemini", "--version"]],
+        "check_commands": [["agy", "--version"]],
         "check_paths": [],
-        "install_script": "install_npm_tool.py",
-        "install_args": ["--package", "@google/gemini-cli", "--name", "Gemini CLI"],
-        "install_url": "https://github.com/google-gemini/gemini-cli",
-        "install_hint": "npm install -g @google/gemini-cli",
+        "install_script": "install_antigravity.py",
+        "install_url": "https://antigravity.google/cli",
+        "install_hint": "irm https://antigravity.google/cli/install.ps1 | iex",
         "category": "ai-agent",
         # Phase 2 정직성 — 사용자 수동 실행 시만 참여. 자동 디스패처는 라벨링 유지.
         "experimental": True,

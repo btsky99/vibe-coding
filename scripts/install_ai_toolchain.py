@@ -3,6 +3,7 @@ FILE: scripts/install_ai_toolchain.py
 DESCRIPTION: Vibe Coding first-run Node.js and AI CLI automatic installer chain.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Install official Antigravity CLI (`agy`) instead of Gemini CLI.
 - 2026-07-29 Codex: Prefer installer-bundled Node/npm for deterministic first installation.
 - 2026-07-29 Codex: Verify Node/npm after installation before starting dependent CLIs.
 - 2026-07-29 Codex: Install missing Node.js, Claude, Codex, and Gemini sequentially.
@@ -21,7 +22,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 AI_PACKAGES = (
     ("Claude Code", ("claude",), "@anthropic-ai/claude-code"),
     ("Codex", ("codex",), "@openai/codex"),
-    ("Gemini / Antigravity", ("gemini", "antigravity"), "@google/gemini-cli"),
 )
 
 
@@ -114,6 +114,18 @@ def main() -> None:
             failures.append(display_name)
         else:
             print(f"[완료] {display_name}")
+
+    _refresh_windows_path()
+    if _command_exists(("agy",)):
+        print("[skip] Antigravity CLI is already installed.")
+    else:
+        print("[auto install] Antigravity CLI (agy)")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / "install_antigravity.py")],
+            timeout=900,
+        )
+        if result.returncode != 0:
+            failures.append("Antigravity CLI")
 
     if failures:
         print(f"[일부 실패] {', '.join(failures)}")

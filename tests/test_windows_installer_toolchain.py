@@ -3,6 +3,7 @@ FILE: tests/test_windows_installer_toolchain.py
 DESCRIPTION: Regression checks for prerequisite-first Windows installer packaging.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Require official Antigravity installer packaging.
 - 2026-07-29 Codex: Ensure setup bundles Node/npm and runs every AI CLI installer.
 """
 
@@ -27,6 +28,7 @@ def test_installer_runs_full_toolchain_before_first_launch():
 
     assert 'Source: ".ai_monitor\\bin\\nodejs\\*"' in installer
     assert 'Source: "scripts\\install_ai_toolchain.py"' in installer
+    assert 'Source: "scripts\\install_antigravity.py"' in installer
     assert "CurStep = ssPostInstall" in installer
     assert "install_ai_toolchain.py" in installer
     assert "ewWaitUntilTerminated" in installer

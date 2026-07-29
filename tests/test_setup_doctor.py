@@ -3,6 +3,7 @@ FILE: tests/test_setup_doctor.py
 DESCRIPTION: Setup Doctor AI CLI detection regression tests.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Require official Antigravity `agy` detection.
 - 2026-07-28 Codex: Cover partially and fully installed AI CLI states.
 """
 
@@ -37,8 +38,8 @@ def test_all_cli_installations_are_ready():
     assert "action" not in result
 
 
-def test_gemini_command_satisfies_antigravity_compatibility():
-    available = {"claude", "codex", "gemini"}
+def test_agy_command_satisfies_antigravity_detection():
+    available = {"claude", "codex", "agy"}
 
     with patch(
         "setup_doctor.shutil.which",

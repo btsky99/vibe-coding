@@ -146,6 +146,7 @@ Source: "scripts\statusline.py"; DestDir: "{%USERPROFILE}\.claude"; Flags: ignor
 Source: "scripts\install_playwright_cli.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\install_ai_toolchain.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\install_nodejs.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "scripts\install_antigravity.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: ".ai_monitor\bin\nodejs\*"; DestDir: "{app}\nodejs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
@@ -341,7 +342,7 @@ begin
     KillLockingProcesses(ExpandConstant('{app}'));
   if CurStep = ssPostInstall then begin
     WizardForm.StatusLabel.Caption :=
-      'Installing required tools: Node.js/npm -> Claude Code -> Codex -> Gemini CLI';
+      'Installing required tools: Node.js/npm -> Claude Code -> Codex -> Antigravity CLI';
     WizardForm.ProgressGauge.Style := npbstMarquee;
     if not Exec(
       ExpandConstant('{app}\{#MyAppExeName}'),

@@ -6,6 +6,7 @@
  *              "닫기" 시 localStorage에 기록하여 재표시 방지.
  *
  * REVISION HISTORY:
+ * - 2026-07-29 Codex: Stop treating missing project hooks as a missing Claude installation.
  * - 2026-07-29 Codex: Route every missing AI action through the full prerequisite-first installer.
  * - 2026-07-29 Codex: Make Claude and all-AI-CLI actions start installers instead of doing nothing.
  * - 2026-07-28 Codex: Start missing core dependency installation automatically on first run.
@@ -72,10 +73,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       .then(r => r.json())
       .then((data: SetupStatus) => {
         setStatus(data);
-        const coreSetupMissing = ['hooks', 'cli_agents'].some(
-          key => data.checks?.[key]?.status === 'missing',
-        );
-        if (coreSetupMissing) {
+        if (data.checks?.cli_agents?.status === 'missing') {
           fetch(`${API_BASE}/api/setup/auto-install`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

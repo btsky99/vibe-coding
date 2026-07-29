@@ -12,6 +12,8 @@ DESCRIPTION: 하이브 마인드 초기 설정 자동 진단 + 수리 엔진.
              5. telegram    — .env 텔레그램 봇 토큰 유무
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Detect official Antigravity command `agy`, separately from Gemini.
+- 2026-07-29 Codex: Do not misreport a missing project .claude folder as a missing Claude CLI.
 - 2026-07-28 Codex: Mark partial AI CLI installations as actionable and accept the Gemini compatibility command.
 - 2026-03-27 Claude: 최초 작성. 접근법 C(자동 수리 + 필요할 때만 위자드) 구현.
 """
@@ -158,10 +160,10 @@ def check_hooks() -> dict:
     # .claude/settings.json 경로 (프로젝트 루트)
     settings_path = _PROJECT_ROOT / ".claude" / "settings.json"
 
-    if not settings_path.parent.exists():
-        # .claude 디렉터리 자체가 없으면 CLI가 설치되지 않은 것
-        return _make_result(STATUS_MISSING, ".claude 디렉터리 없음 — Claude Code 미설치",
-                            action="install_claude")
+    # Project configuration is independent from the globally installed CLI.
+    # Create the folder and repair hooks below; check_cli_agents() is the sole
+    # authority for deciding whether Claude itself is installed.
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 기존 설정 로드
     existing: dict = {}
@@ -213,7 +215,7 @@ def check_cli_agents() -> dict:
     """claude, antigravity, codex CLI가 시스템에 설치되어 있는지 확인한다."""
     agents = {
         "claude": ["claude", "--version"],
-        "antigravity": ["antigravity", "--version"],
+        "antigravity": ["agy", "--version"],
         "codex": ["codex", "--version"],
     }
 
@@ -222,8 +224,6 @@ def check_cli_agents() -> dict:
 
     for name, cmd in agents.items():
         candidates = [cmd[0]]
-        if name == "antigravity":
-            candidates.append("gemini")
         # shutil.which로 PATH에서 찾기
         if any(shutil.which(candidate) for candidate in candidates):
             found.append(name)

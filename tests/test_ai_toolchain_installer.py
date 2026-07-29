@@ -3,6 +3,7 @@ FILE: tests/test_ai_toolchain_installer.py
 DESCRIPTION: Sequential AI toolchain installer regression tests.
 
 REVISION HISTORY:
+- 2026-07-29 Codex: Require official Antigravity installer after npm-based CLIs.
 - 2026-07-29 Codex: Guard synchronous Node MSI fallback before dependent installs.
 - 2026-07-29 Codex: Guard install order and already-installed skip behavior.
 """
@@ -40,10 +41,10 @@ def test_installer_skips_existing_tools_and_installs_missing_in_order():
     ):
         install_ai_toolchain.main()
 
-    assert [command[-1] for command in calls] == [
+    assert [command[-1] for command in calls[:1]] == [
         "@openai/codex",
-        "@google/gemini-cli",
     ]
+    assert calls[1][-1].endswith("install_antigravity.py")
 
 
 def test_node_msi_fallback_waits_for_completion():
