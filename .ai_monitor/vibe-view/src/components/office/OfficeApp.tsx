@@ -5,6 +5,7 @@
  *              기존 Office 모드를 확장하여 존 기반 월드, 운영 HUD,
  *              선택 에이전트 인스펙터, 이벤트 레일을 함께 제공한다.
  * REVISION HISTORY:
+ * - 2026-07-26 Codex: 선택된 오피스 에이전트의 플랜 사용량 바를 채팅 패널 하단에 연결.
  * - 2026-07-26 Codex: macOS 폴더 브리지 실패 시 HTTP 선택기로 폴백.
  * - 2026-04-06 Codex: 메타버스 오피스 Phase 1 구조로 재작성
  * - 2026-04-03 Claude: 초기 생성 — 2D 오피스 월드 + HUD 레이아웃
@@ -31,6 +32,7 @@ import { useCliModels, getDefaultModel } from '../../hooks/useCliModels';
 import IsometricOffice from './IsometricOffice';
 import OfficeChatPanel from './OfficeChatPanel';
 import { useOfficeChat } from '../../hooks/useOfficeChat';
+import AgentUsageBar from '../terminal/AgentUsageBar';
 
 // HUD 탭 제거됨 — 오피스 우측은 채팅 전용
 
@@ -546,18 +548,27 @@ export default function OfficeApp({ onSwitchToClassic }: OfficeAppProps) {
 
         {/* ── 오른쪽: agent/chat API 채팅 패널 ── */}
         <aside className="flex w-[380px] shrink-0 flex-col border-l border-white/[0.04] bg-[#0a0f18]">
-          <OfficeChatPanel
-            chatMessages={chatHook.messages}
-            selectedAgent={selectedDesk === -1 ? 'ceo' : (activeSlots[selectedDesk]?.cli || 'claude')}
-            selectedSlotName={selectedDesk === -1
-              ? (activeSlots.find(s => s.role?.toLowerCase() === 'ceo')?.name ?? 'CEO')
-              : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
-            terminalId={terminalId}
-            isStreaming={chatHook.isStreaming}
-            sendError={chatHook.sendError}
-            onSendMessage={chatHook.sendMessage}
-            onStopStreaming={chatHook.stopStreaming}
-            onClearChat={chatHook.clearChat}
+          <div className="min-h-0 flex-1">
+            <OfficeChatPanel
+              chatMessages={chatHook.messages}
+              selectedAgent={selectedDesk === -1 ? 'ceo' : (activeSlots[selectedDesk]?.cli || 'claude')}
+              selectedSlotName={selectedDesk === -1
+                ? (activeSlots.find(s => s.role?.toLowerCase() === 'ceo')?.name ?? 'CEO')
+                : (activeSlots[selectedDesk]?.name || `터미널 ${selectedDesk + 1}`)}
+              terminalId={terminalId}
+              isStreaming={chatHook.isStreaming}
+              sendError={chatHook.sendError}
+              onSendMessage={chatHook.sendMessage}
+              onStopStreaming={chatHook.stopStreaming}
+              onClearChat={chatHook.clearChat}
+            />
+          </div>
+          <AgentUsageBar
+            agentType={selectedCli}
+            quota={vibe.agentQuota?.[selectedCli]}
+            claudeUsage={vibe.claudeUsage}
+            antigravityUsage={vibe.antigravityUsage}
+            onRefresh={() => window.dispatchEvent(new Event('vibe:refresh-usage'))}
           />
         </aside>
       </div>
