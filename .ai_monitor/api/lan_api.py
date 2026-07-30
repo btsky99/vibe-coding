@@ -206,32 +206,57 @@ def _extract_stream_text(line: str) -> str:
     return ''
 
 
-def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str) -> None:
-    """[대상측] 승인된 태스크를 claude로 실행하며 출력을 브리지로 역방향 푸시.
+def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str,
+                     target_dir: str = '') -> None:
+    """[대상측] 승인된 태스크를 격리된 작업공간에서 claude로 실행하며 출력을 역방향 푸시.
 
-    [보안] yolo(권한 스킵) — 원격 자율 실행이라 대상에 사람이 대기하지 않음. 승인 팝업이
-    이미 게이트했고 내 PC끼리 전제. 출력 원문은 DB에 안 남기고 요약 절단본만(Critic).
+    [보안 — 2026-07-30 전면 교체] 이전 구현은 `yolo=True`(--dangerously-skip-permissions) +
+    `cwd=_project_root`였다. 3중 게이트가 '누가 요청하나'만 막고 '무엇을 건드리나'는 무제한이라,
+    페어링된 PC가 수신 PC의 프로젝트 루트를 통째로 편집할 수 있었다. 지금은:
+      ① target_dir이 화이트리스트(lan_exec_allowed_dirs) 이하인지 검증 — 미등록이면 실행 거부
+      ② copy 모드면 worktree/사본에서 실행 → 원본이 클로드 시야에 없음
+      ③ yolo 제거, deny 프로파일을 --settings로 주입
+    [제약] direct 모드는 완전 격리가 아니다 — deny는 Bash 접두 매칭이라 절대경로 Edit을 못 막는다
+    (src/lan_sandbox.SANDBOX_SETTINGS 주석 참조). 사용자가 명시적으로 등록한 폴더에만 허용된다.
+    출력 원문은 DB에 안 남기고 요약 절단본만(Critic).
     """
     from infra import proc as _proc          # 지연 import(순환 회피)
+    from src import lan_sandbox
     try:
-        from api.agent_api import _build_chat_cmd, _project_root
+        from api.agent_api import _build_chat_cmd
     except Exception as e:
         update_lan_exec_status(exec_id, 'error', f'실행엔진 로드 실패: {e}', project_id)
         _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
                                          'chunk': f'[오류] {e}', 'done': True})
         return
 
+    # [게이트④ 폴더] 화이트리스트 검증 + 작업공간 준비. 실패 사유는 요청자에게 그대로 알린다
+    #   — '조용히 아무 일도 안 일어남'이 가장 디버깅하기 어려운 실패 모드라서.
+    ws = None
+    try:
+        target, mode = lan_sandbox.resolve_target(_config(dd), target_dir)
+        ws = lan_sandbox.prepare_workspace(target, mode, exec_id, dd)
+        settings_path = str(lan_sandbox.materialize_settings(dd))
+    except lan_sandbox.SandboxError as e:
+        update_lan_exec_status(exec_id, 'error', f'[폴더 거부] {e}', project_id)
+        _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
+                                         'chunk': f'[폴더 거부] {e}', 'done': True})
+        return
+
     # [리뷰 C1] task를 -p 인자로 전달 + stdin=DEVNULL — handle_chat의 유일 검증된 claude 실행 패턴.
     #   [과거사고] claude에 stdin=PIPE로 프롬프트를 주면 'stdin is not a terminal' 실패 이력이 있어
     #   -p 인자 전달만이 이 코드베이스에서 검증됐다(claude-api 확인). 셸 메타문자 잔여 위험(보안 W1)은
     #   승인 팝업(태스크 전문 표시)+yolo 전제상 handle_chat과 동일 수준으로 수용 — 임의 실행은 이미 승인됨.
-    cmd = _build_chat_cmd('claude', None, yolo=True, message=task)
+    cmd = _build_chat_cmd('claude', None, yolo=False, message=task, settings_path=settings_path)
     full: list[str] = []
     proc = None
     watchdog = None
     try:
+        _proxy(dd, 'POST', 'exec-emit', {
+            'peer_id': peer_id, 'exec_id': exec_id, 'done': False,
+            'chunk': f'[샌드박스] {ws.kind} 모드 · 작업 폴더: {ws.cwd}\n'})
         proc = _proc.popen(cmd, stdin=_sp.DEVNULL, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
-                           cwd=_project_root or None, shell=True, encoding=None)
+                           cwd=str(ws.cwd), shell=True, encoding=None)
         with _EXEC_LOCK:
             _EXEC_PROCS[exec_id] = proc
         # [Task11] 타임아웃 워치독 — 초과 시 kill. stdout 루프가 break되며 정리로 이어짐.
@@ -258,8 +283,21 @@ def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id
         else:
             summary = ''.join(full)[-2000:]
             update_lan_exec_status(exec_id, 'done', summary, project_id)
+            # [WHY 변경목록 통지] copy 모드는 원본에 아무것도 반영되지 않는다. 무엇이 바뀌었고
+            #   사본이 어디 있는지 알려주지 않으면 원격 작업 결과가 사본에 갇혀 유실된다.
+            #   반영 여부는 사람이 결정하는 것이 Phase A 계약(자동 머지 금지).
+            tail = ''
+            try:
+                changed = ws.finish(keep=True)
+                if ws.is_copy:
+                    listed = '\n'.join('  ' + c for c in changed[:50]) or '  (변경 없음)'
+                    more = f'\n  … 외 {len(changed) - 50}개' if len(changed) > 50 else ''
+                    tail = (f'\n[변경 파일 {len(changed)}개 — 원본 아닌 사본에 반영됨]\n'
+                            f'{listed}{more}\n[사본 위치] {ws.cwd}\n')
+            except Exception as e:
+                tail = f'\n[변경목록 수집 실패] {e}\n'
             _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
-                                             'chunk': '', 'done': True})
+                                             'chunk': tail, 'done': True})
     except Exception as e:
         update_lan_exec_status(exec_id, 'error', str(e)[:2000], project_id)
         _proxy(dd, 'POST', 'exec-emit', {'peer_id': peer_id, 'exec_id': exec_id,
@@ -277,9 +315,15 @@ def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id
             _EXEC_PROCS.pop(exec_id, None)
 
 
-def _start_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str) -> None:
-    """실행 러너를 데몬 스레드로 시작(승인 시 호출). HTTP 핸들러를 막지 않음."""
-    threading.Thread(target=_run_remote_exec, args=(dd, peer_id, exec_id, task, project_id),
+def _start_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str,
+                target_dir: str = '') -> None:
+    """실행 러너를 데몬 스레드로 시작(승인 시 호출). HTTP 핸들러를 막지 않음.
+
+    [제약] target_dir은 요청자가 보낸 값 — 신뢰하지 않는다. 검증은 _run_remote_exec 진입부의
+    resolve_target이 담당한다(스레드 안에서 실패해도 요청자에게 사유가 emit되도록).
+    """
+    threading.Thread(target=_run_remote_exec,
+                     args=(dd, peer_id, exec_id, task, project_id, target_dir),
                      daemon=True, name=f'lan-exec-{exec_id[:8]}').start()
 
 
@@ -331,7 +375,8 @@ def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> 
             save_lan_exec(exec_id, 'in', from_peer, task, 'received', PROJECT_ID)
             if item.get('exec_trust') == 'auto':
                 # 자동승인 피어 — 팝업 생략하고 즉시 실행(감사로그는 이미 기록됨).
-                _start_exec(dd, from_peer, exec_id, task, PROJECT_ID)
+                #   [보안] auto여도 폴더 화이트리스트는 우회 못 함 — 검증은 러너 진입부.
+                _start_exec(dd, from_peer, exec_id, task, PROJECT_ID, item.get('target_dir', ''))
             else:
                 pending_out.append(item)   # 'ask' — 승인 팝업으로 노출
         send_json(handler, {'enabled': True, 'pending': pending_out})
@@ -343,6 +388,18 @@ def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> 
         return True
     if path == '/api/lan/exec/log':
         send_json(handler, {'log': get_lan_exec_log(PROJECT_ID, 100)})
+        return True
+    if path == '/api/lan/exec/dirs':
+        # [Phase A] 내 PC가 원격실행에 허용한 폴더 목록 + 마스터 토글 상태(UI 관리용).
+        from src.lan_sandbox import allowed_dirs
+        cfg = _config(dd)
+        send_json(handler, {'enabled': bool(cfg.get('lan_remote_exec_enabled', False)),
+                            'dirs': allowed_dirs(cfg)})
+        return True
+    if path == '/api/lan/exec/peer-dirs':
+        # [Phase A] 상대 PC가 허용한 폴더 목록 — 전송 UI의 폴더 선택지.
+        peer_id = params.get('peer_id', [''])[0]
+        send_json(handler, _proxy(dd, 'POST', 'exec-dirs', {'peer_id': peer_id}))
         return True
     return False
 
@@ -372,12 +429,19 @@ def handle_post(handler, path: str, data: dict, *, DATA_DIR, PROJECT_ID='') -> b
         # [Phase3 요청자] 태스크 전송. exec_id 생성 → 브리지 → 상대. 감사로그(out) 기록.
         peer_id = (data or {}).get('peer_id', '')
         task = (data or {}).get('task', '')
+        target_dir = (data or {}).get('target_dir', '')
         if not peer_id or not task.strip():
             send_json(handler, {'ok': False, 'error': 'peer_id/task 필요'})
             return True
+        if not str(target_dir).strip():
+            # [WHY 여기서 막나] 폴더 없이 보내면 상대가 '폴더 거부'로 응답할 뿐이라 왕복 낭비 +
+            #   사용자에게는 그냥 실패로 보인다. 요청자 쪽에서 먼저 걸러 원인을 명확히 알린다.
+            send_json(handler, {'ok': False, 'error': '작업 폴더를 선택하세요 (상대 PC가 허용한 폴더만 가능)'})
+            return True
         exec_id = uuid.uuid4().hex
         res = _proxy(dd, 'POST', 'exec-send',
-                     {'peer_id': peer_id, 'exec_id': exec_id, 'task': task})
+                     {'peer_id': peer_id, 'exec_id': exec_id, 'task': task,
+                      'target_dir': target_dir})
         if res.get('ok'):
             save_lan_exec(exec_id, 'out', peer_id, task, 'running', PROJECT_ID)
         send_json(handler, {**res, 'exec_id': exec_id})
@@ -391,7 +455,7 @@ def handle_post(handler, path: str, data: dict, *, DATA_DIR, PROJECT_ID='') -> b
         if d.get('trust') == 'auto':
             _proxy(dd, 'POST', 'exec-trust', {'peer_id': from_peer, 'mode': 'auto'})
         update_lan_exec_status(exec_id, 'approved', '', PROJECT_ID)
-        _start_exec(dd, from_peer, exec_id, task, PROJECT_ID)
+        _start_exec(dd, from_peer, exec_id, task, PROJECT_ID, d.get('target_dir', ''))
         send_json(handler, {'ok': True})
         return True
     if path == '/api/lan/exec/reject':

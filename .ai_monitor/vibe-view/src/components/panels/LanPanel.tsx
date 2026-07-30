@@ -12,11 +12,14 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Wifi, WifiOff, ShieldAlert, Send, Link2, RefreshCw, MessageSquare, FolderOpen,
   Terminal, Play, Check, X } from 'lucide-react';
 import { API_BASE } from '../../constants';
+import LanExecDirs from './LanExecDirs';
 
 interface Peer { peer_id: string; name: string; ip: string; http_port: number }
 interface Trusted { peer_id: string; name: string; paired_at: string; exec_trust?: string }
 interface ChatMsg { id: number; from_peer: string; to_peer: string; content: string; ts: string }
-interface PendingExec { exec_id: string; from_peer: string; task: string; ts: string; exec_trust?: string; _seenAt?: number }
+interface PendingExec { exec_id: string; from_peer: string; task: string; ts: string; exec_trust?: string; target_dir?: string; _seenAt?: number }
+/** 상대가 공개한 허용 폴더 — 요청 시 이 목록에서만 고를 수 있다(임의 경로 입력 불가). */
+interface PeerDir { path: string; mode: 'copy' | 'direct'; label?: string; exists?: boolean }
 const PENDING_TTL_MS = 5 * 60 * 1000;   // 승인 대기 5분 — 자리비움 시 자동 거부
 interface OutChunk { chunk: string; done: boolean; ts: string }
 interface LanStatus {
@@ -45,6 +48,10 @@ export default function LanPanel() {
   const [pending, setPending] = useState<PendingExec[]>([]); // 승인 대기 요청(대상측)
   const [autoNext, setAutoNext] = useState(false);          // 승인 시 '자동승인 격상' 체크
   const [execTask, setExecTask] = useState('');             // 보낼 태스크(요청자)
+  // [Phase A] 상대가 허용한 폴더 목록 + 선택값. 상대 토글이 꺼져 있으면 peerExecOn=false로 안내.
+  const [peerDirs, setPeerDirs] = useState<PeerDir[]>([]);
+  const [peerExecOn, setPeerExecOn] = useState(true);
+  const [targetDir, setTargetDir] = useState('');
   const [execId, setExecId] = useState('');                 // 현재 요청한 exec_id
   const [execOut, setExecOut] = useState('');               // 수신 출력 누적
   const [execDone, setExecDone] = useState(false);          // 실행 완료 여부
@@ -208,13 +215,30 @@ export default function LanPanel() {
     (st.trusted || []).find(t => t.peer_id === pid)?.name
     || (st.online || []).find(p => p.peer_id === pid)?.name || pid.slice(0, 8);
 
+  // [Phase A] 전송 대상이 바뀌면 그 PC의 허용 폴더를 다시 조회한다.
+  //   [WHY 매번 조회] 상대가 폴더를 추가/삭제하거나 토글을 끈 것을 이쪽이 알 방법이 없다.
+  //   캐시하면 '목록에 있는데 거부됨'이라는 설명 불가능한 실패로 이어진다.
+  useEffect(() => {
+    setPeerDirs([]); setTargetDir(''); setPeerExecOn(true);
+    if (!st.running || !sendPeer) return;
+    fetch(`${API_BASE}/api/lan/exec/peer-dirs?peer_id=${encodeURIComponent(sendPeer)}`)
+      .then(r => r.json())
+      .then((d: { ok?: boolean; enabled?: boolean; dirs?: PeerDir[] }) => {
+        setPeerExecOn(d.enabled !== false);
+        const list = d.dirs || [];
+        setPeerDirs(list);
+        if (list.length === 1) setTargetDir(list[0].path);   // 하나뿐이면 고를 이유가 없다
+      })
+      .catch(() => setPeerDirs([]));
+  }, [st.running, sendPeer]);
+
   const sendExec = async () => {
     const task = execTask.trim();
-    if (!sendPeer || !task) return;
+    if (!sendPeer || !task || !targetDir) return;
     setExecOut(''); setExecDone(false); setExecId('');
     const r = await fetch(`${API_BASE}/api/lan/exec`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ peer_id: sendPeer, task }),
+      body: JSON.stringify({ peer_id: sendPeer, task, target_dir: targetDir }),
     }).then(r => r.json()).catch(() => ({}));
     if (r.ok && r.exec_id) { setExecId(r.exec_id); setExecTask(''); }
     else setFlash(`❌ ${r.error || '실행 요청 실패(상대 오프라인?)'}`);
@@ -225,7 +249,7 @@ export default function LanPanel() {
     await fetch(`${API_BASE}/api/lan/exec/approve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ exec_id: item.exec_id, from_peer: item.from_peer,
-        task: item.task, trust: autoNext ? 'auto' : 'ask' }),
+        task: item.task, target_dir: item.target_dir || '', trust: autoNext ? 'auto' : 'ask' }),
     }).catch(() => {});
     setAutoNext(false);
   };
@@ -304,6 +328,15 @@ export default function LanPanel() {
               <div className="whitespace-pre-wrap break-words text-[12px] bg-black/40 rounded px-2 py-1 max-h-32 overflow-y-auto">
                 {item.task}
               </div>
+              {/* [보안 Phase A] 어느 폴더에서 돌릴지 승인 전에 보여준다 — 태스크 문구만 보고
+                  승인하면 폴더 선택이 사실상 무검증이 된다. 미등록 폴더면 실행 없이 거부되지만
+                  승인자가 '무엇에 동의하는지' 알아야 한다. */}
+              <div className="text-[11px] flex items-start gap-1">
+                <span className="text-[#888] shrink-0">작업 폴더:</span>
+                {item.target_dir
+                  ? <span className="font-mono text-[#9cdcfe] break-all">{item.target_dir}</span>
+                  : <span className="text-yellow-400">지정 없음 — 실행 시 거부됩니다</span>}
+              </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => approveExec(item)}
                   className="flex items-center gap-1 px-2 py-0.5 bg-green-700/80 hover:bg-green-700 rounded text-[12px]">
@@ -336,6 +369,10 @@ export default function LanPanel() {
           </button>
         </div>
       )}
+
+      {/* [Phase A] 허용 폴더 관리 — 브리지가 살아있으면 토글 상태와 무관하게 미리 등록 가능.
+          (토글을 켜기 전에 폴더를 먼저 정해두는 순서가 안전하다) */}
+      {st.running && <LanExecDirs execEnabled={execEnabled} onFlash={setFlash} />}
 
       {/* 페어링 개시 — 내 코드 표시 */}
       {st.running && (
@@ -465,14 +502,45 @@ export default function LanPanel() {
             <Terminal className="w-3.5 h-3.5" /> 원격 실행 — {peerName(sendPeer)}
           </div>
           <div className="text-[11px] text-[#888]">
-            상대 PC의 Claude에게 태스크를 보냅니다. 상대가 승인해야 실행돼요(같은 LAN 전용).
+            상대 PC의 Claude에게 태스크를 보냅니다. 상대가 승인해야 실행돼요.
           </div>
+
+          {/* [Phase A] 작업 폴더 선택 — 상대가 허용한 목록에서만 고른다(임의 경로 입력 불가) */}
+          {!peerExecOn ? (
+            <div className="bg-yellow-900/30 border border-yellow-700/50 rounded px-2 py-1 text-yellow-200 text-[11px]">
+              {peerName(sendPeer)}의 원격 실행 수락이 꺼져 있어요. 그쪽 PC의 LAN 패널에서 켜야 합니다.
+            </div>
+          ) : peerDirs.length === 0 ? (
+            <div className="bg-yellow-900/30 border border-yellow-700/50 rounded px-2 py-1 text-yellow-200 text-[11px]">
+              {peerName(sendPeer)}가 허용한 작업 폴더가 없어요. 그쪽 PC에서 폴더를 등록해야 합니다.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <select value={targetDir} onChange={e => setTargetDir(e.target.value)}
+                className="w-full bg-black/40 rounded px-2 py-1 text-[11px] font-mono outline-none">
+                <option value="">작업 폴더 선택…</option>
+                {peerDirs.map(d => (
+                  <option key={d.path} value={d.path}>
+                    {d.path} {d.mode === 'direct' ? '(직접 편집)' : '(사본)'}
+                  </option>
+                ))}
+              </select>
+              {targetDir && (
+                <div className="text-[10px] text-[#777]">
+                  {peerDirs.find(d => d.path === targetDir)?.mode === 'direct'
+                    ? '원본 폴더를 직접 편집합니다.'
+                    : '사본에서 작업합니다 — 원본은 바뀌지 않고, 변경 파일 목록이 결과에 표시돼요.'}
+                </div>
+              )}
+            </div>
+          )}
+
           <textarea value={execTask} onChange={e => setExecTask(e.target.value)}
             placeholder="예: server.py 띄워서 부팅 에러 있으면 알려줘"
             rows={2}
             className="w-full bg-black/40 rounded px-2 py-1 text-[12px] outline-none resize-y" />
           {/* [리뷰W6] 진행 중(execId 있고 미완료)엔 재전송 차단 — 이전 exec를 잊고 orphan 스트림 남기는 것 방지 */}
-          <button onClick={sendExec} disabled={!execTask.trim() || (!!execId && !execDone)}
+          <button onClick={sendExec} disabled={!execTask.trim() || !targetDir || (!!execId && !execDone)}
             className="w-full py-1 bg-purple-700/70 hover:bg-purple-700 disabled:opacity-40 rounded text-[12px] flex items-center justify-center gap-1">
             <Play className="w-3.5 h-3.5" /> {execId && !execDone ? '실행 중…' : '실행 요청'}
           </button>

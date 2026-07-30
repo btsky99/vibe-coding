@@ -88,26 +88,9 @@ FORBIDDEN_PATH_MARKERS = (
 # data_dir은 이미 런타임 쓰기 경로라 frozen 모드에서도 안전.
 # [제약] deny 규칙은 Bash 접두 매칭 — 워크트리 밖 파일 파손은 defaultMode가
 # cwd 밖 편집을 자동 승인하지 않는 성질 + 워크트리 격리로 막는다.
-SANDBOX_SETTINGS = {
-    "permissions": {
-        "defaultMode": "acceptEdits",
-        "deny": [
-            "Bash(git push:*)",
-            "Bash(git push)",
-            "Bash(gh pr merge:*)",
-            "Bash(git merge:*)",
-            "Bash(git rebase:*)",
-            "Bash(git tag:*)",
-            "Bash(git reset --hard:*)",
-            "Bash(git worktree:*)",
-            "Bash(rm -rf:*)",
-            "Bash(rmdir:*)",
-            "Bash(Remove-Item:*)",
-            "Bash(del:*)",
-            "Bash(pyinstaller:*)",
-        ],
-    },
-}
+# [2026-07-30] 정본은 src/lan_sandbox.SANDBOX_SETTINGS로 이전 — LAN 원격실행과 공유한다.
+#   여기서 재정의하면 프로파일이 갈라져 한쪽만 강화되는 사고가 난다. 재노출만 유지(하위호환).
+from src.lan_sandbox import SANDBOX_SETTINGS   # noqa: E402  (모듈 상단 상수 자리 유지 목적)
 
 # 자율 태스크 수행 프롬프트 골격 — {title}/{description} 치환.
 # [WHY] push·버전·머지 금지는 deny 프로파일이 강제하지만, 지시문에도 명시해
@@ -276,11 +259,15 @@ def ensure_worktree(project_root: Path, task_id: str) -> Path | None:
 
 
 def materialize_settings(data_dir: Path) -> Path:
-    # [과거사고] 상대 data_dir을 그대로 쓰면 subprocess cwd(워크트리) 기준으로
-    # 해석돼 settings 미발견 → claude 즉시 exit 1 (2026-07-17 스모크에서 실측)
-    path = (data_dir / 'heartbeat_settings.json').resolve()
-    path.write_text(json.dumps(SANDBOX_SETTINGS, ensure_ascii=False, indent=2), encoding='utf-8')
-    return path
+    """[위임] 프로파일 생성은 src/lan_sandbox가 정본 — 파일명만 heartbeat 전용으로 유지한다.
+
+    [WHY 위임] 2026-07-30 LAN 원격실행도 같은 deny 프로파일을 쓰게 되면서, 상수가 두 곳에
+    있으면 한쪽만 강화되는 사고가 확정된다. 여기서 재정의하지 말 것.
+    [과거사고] 상대 data_dir을 그대로 쓰면 subprocess cwd(워크트리) 기준으로 해석돼
+    settings 미발견 → claude 즉시 exit 1 (2026-07-17 스모크에서 실측). 정본이 resolve()를 보장한다.
+    """
+    from src.lan_sandbox import materialize_settings as _mat
+    return _mat(data_dir, 'heartbeat_settings.json')
 
 
 # ── claude -p 실행기 ─────────────────────────────────────────────────────────

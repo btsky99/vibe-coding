@@ -969,7 +969,8 @@ else:
     _project_root = str(_BASE_DIR.parent)
 
 
-def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, message: str = '') -> list[str]:
+def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, message: str = '',
+                    settings_path: str | None = None) -> list[str]:
     """에이전트별 CLI 명령 구성 (cokacdir 패턴).
 
     [에이전트별 명령]
@@ -984,6 +985,9 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
         session_id: 기존 세션 ID (--resume용, None이면 새 세션)
         yolo: YOLO 모드 (권한 자동 승인)
         message: 전달할 메시지 (claude -p 인자로 직접 전달)
+        settings_path: --settings로 주입할 권한 프로파일 절대경로 (claude 전용).
+            [WHY] LAN 원격실행이 yolo(권한 전면 스킵) 대신 deny 프로파일로 격리하기 위한 통로.
+            상대경로를 주면 claude가 cwd 기준 해석 후 미발견 시 exit 1 — 반드시 절대경로.
     """
     if cli == 'claude':
         # -p는 프롬프트 텍스트를 인자로 받으므로 다른 플래그를 먼저 배치하고
@@ -991,6 +995,8 @@ def _build_chat_cmd(cli: str, session_id: str | None, yolo: bool = False, messag
         # 잘못된 순서: claude -p --verbose ... message → -p가 --verbose를 프롬프트로 해석
         # 올바른 순서: claude --verbose ... -p message → -p가 실제 메시지를 받음
         cmd = ['claude', '--verbose', '--output-format', 'stream-json']
+        if settings_path:
+            cmd += ['--settings', settings_path]
         if session_id:
             cmd += ['--resume', session_id]
         if yolo:

@@ -39,6 +39,7 @@ if str(BASE_DIR) not in sys.path:
 
 from src.lan_peers import LanPeers, derive_key, make_pair_proof, verify_pair_proof
 from src.lan_discovery import LanDiscovery, DISCOVERY_PORT
+from src.lan_sandbox import allowed_dirs as _allowed_dirs
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 HTTP_PORT_START = 9020
@@ -232,22 +233,52 @@ def send_chat(peer_id: str, content: str) -> dict:
 
 
 # ── 원격 실행: 태스크 송신 (요청자 → 대상) ───────────────────────────────
-def send_exec(peer_id: str, exec_id: str, task: str) -> dict:
-    """신뢰 피어에게 실행 태스크 전송. body_hash=sha256(task)로 토큰 서명(파일/채팅과 동일 규약).
+def _read_config(data_dir) -> dict:
+    """data_dir/config.json 읽기 — 매 호출 새로 읽는다(토글 변경 즉시 반영, 재시작 불필요).
+
+    [WHY 캐시 없음] lan_api._config와 동일 계약. 토글을 끈 뒤에도 캐시가 살아 있으면
+    '껐는데 계속 동작한다'는 최악의 보안 실패 모드가 된다.
+    """
+    if not data_dir:
+        return {}
+    f = Path(data_dir) / 'config.json'
+    try:
+        return json.loads(f.read_text(encoding='utf-8')) if f.exists() else {}
+    except (ValueError, OSError):
+        return {}
+
+
+def _exec_body_hash(task: str, target_dir: str) -> str:
+    """exec 토큰 서명용 해시 — task와 작업폴더를 함께 덮는다.
+
+    [보안 2026-07-30] 이전엔 sha256(task)만 서명해 target_dir이 **서명 밖**에 있었다. 그러면
+    경로상의 공격자가 폴더만 바꿔치기해도 토큰이 그대로 유효해 화이트리스트 선택을 무력화할 수
+    있다(기존 W1 교훈 '서명에 filename 포함'과 같은 계열). NUL 구분자는 연접 모호성 차단용
+    — 없으면 task='a',dir='b'와 task='ab',dir=''가 같은 해시가 된다.
+    [호환성] 와이어 규약 변경 — 구버전 브리지와는 exec만 상호 불가(파일/채팅/페어링은 무영향).
+    """
+    return hashlib.sha256(f'{task}\x00{target_dir}'.encode('utf-8')).hexdigest()
+
+
+def send_exec(peer_id: str, exec_id: str, task: str, target_dir: str = '') -> dict:
+    """신뢰 피어에게 실행 태스크 전송. body_hash=sha256(task\\0target_dir)로 토큰 서명.
 
     [보안] 페어링·토큰만으로는 RCE라, 대상측이 exec-recv에서 exec_trust/승인으로 2차 게이트.
     여기(송신)는 신뢰·오프라인·크기만 확인하고 실제 실행 허가는 대상 책임.
+    폴더 화이트리스트 판정도 대상 책임 — 요청자가 보낸 target_dir은 힌트일 뿐 권한이 아니다.
     """
     peers: LanPeers = STATE['peers']
     if not peers.is_trusted(peer_id):
         return {'ok': False, 'error': '페어링되지 않은 상대'}
     if not task or len(task.encode('utf-8')) > EXEC_TASK_MAX_BYTES:
         return {'ok': False, 'error': '빈 태스크 또는 16KB 초과'}
+    if len(target_dir.encode('utf-8')) > 4096:
+        return {'ok': False, 'error': '작업 폴더 경로가 너무 김'}
     target = _resolve_target(peer_id)
     if not target:
         return {'ok': False, 'error': '상대가 오프라인'}
-    body = json.dumps({'exec_id': exec_id, 'task': task}).encode()
-    body_hash = hashlib.sha256(task.encode('utf-8')).hexdigest()
+    body = json.dumps({'exec_id': exec_id, 'task': task, 'target_dir': target_dir}).encode()
+    body_hash = _exec_body_hash(task, target_dir)
     token = peers.make_token(peer_id, body_hash, exec_id)
     url = f"http://{target['ip']}:{target['http_port']}/lan/exec-recv"
     req = Request(url, data=body, method='POST', headers={
@@ -257,6 +288,34 @@ def send_exec(peer_id: str, exec_id: str, task: str) -> dict:
         with urlopen(req, timeout=15) as resp:
             return {'ok': resp.status == 200, 'exec_id': exec_id}
     except URLError as e:
+        return {'ok': False, 'error': str(e)}
+
+
+def query_exec_dirs(peer_id: str) -> dict:
+    """상대가 원격실행에 허용한 작업 폴더 목록을 조회(요청자 → 대상).
+
+    [WHY 네트워크 조회] 경로를 손으로 입력하게 하면 오타 한 글자에 '폴더 거부'만 돌아와
+    원인을 알 수 없다. 상대가 공개한 목록에서 고르게 해 실패 경로를 UI에서 제거한다.
+    [보안] 노출되는 것은 상대가 **명시적으로 등록한** 폴더의 경로/라벨/모드뿐이다. 디스크
+    탐색 기능이 아니므로 임의 경로 열람으로 확장되지 않는다.
+    """
+    peers: LanPeers = STATE['peers']
+    if not peers.is_trusted(peer_id):
+        return {'ok': False, 'error': '페어링되지 않은 상대'}
+    target = _resolve_target(peer_id)
+    if not target:
+        return {'ok': False, 'error': '상대가 오프라인'}
+    nonce = hashlib.sha256(os.urandom(16)).hexdigest()[:16]
+    body_hash = hashlib.sha256(b'exec-dirs').hexdigest()
+    token = peers.make_token(peer_id, body_hash, nonce)
+    url = f"http://{target['ip']}:{target['http_port']}/lan/exec-dirs-recv"
+    req = Request(url, data=json.dumps({'nonce': nonce}).encode(), method='POST', headers={
+        'X-Peer-Id': peers.self_id, 'X-Token': token or '', 'Content-Type': 'application/json',
+    })
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read() or b'{}')
+    except (URLError, json.JSONDecodeError) as e:
         return {'ok': False, 'error': str(e)}
 
 
@@ -408,7 +467,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # ① 로컬 전용 라우트
         if path in ('/lan/pair-begin', '/lan/pair-connect', '/lan/send', '/lan/chat-send',
-                    '/lan/exec-send', '/lan/exec-emit', '/lan/exec-trust', '/lan/exec-cancel'):
+                    '/lan/exec-send', '/lan/exec-emit', '/lan/exec-trust', '/lan/exec-cancel',
+                    '/lan/exec-dirs'):
             if not self._is_local():
                 self._json({'error': 'local only'}, 403); return
             raw = self._body(MAX_CTRL_BYTES)
@@ -431,7 +491,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/lan/exec-send':
                 # [Phase3] 요청자측 트리거 — 태스크 전송(server가 exec_id 생성해 넘김).
                 self._json(send_exec(body.get('peer_id', ''), body.get('exec_id', ''),
-                                     body.get('task', '')))
+                                     body.get('task', ''), body.get('target_dir', '')))
+            elif path == '/lan/exec-dirs':
+                # [Phase A] 요청자측 트리거 — 상대의 허용 작업폴더 목록 조회.
+                self._json(query_exec_dirs(body.get('peer_id', '')))
             elif path == '/lan/exec-emit':
                 # [Phase3] 대상측 server가 실행 출력청크를 요청자에게 역방향 밀어넣기.
                 self._json(send_exec_output(body.get('peer_id', ''), body.get('exec_id', ''),
@@ -462,6 +525,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._exec_output())
         elif path == '/lan/exec-cancel-recv':
             self._json(self._exec_cancel_recv())
+        elif path == '/lan/exec-dirs-recv':
+            self._json(self._exec_dirs_recv())
         else:
             self._json({'error': 'not found'}, 404)
 
@@ -602,20 +667,51 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or b'{}')
             exec_id = str(body.get('exec_id', ''))
             task = str(body.get('task', ''))
+            target_dir = str(body.get('target_dir', ''))
         except json.JSONDecodeError:
             return {'ok': False, 'error': 'JSON 파싱 실패'}
         if not exec_id or not task:
             return {'ok': False, 'error': 'exec_id/task 필요'}
-        body_hash = hashlib.sha256(task.encode('utf-8')).hexdigest()
+        body_hash = _exec_body_hash(task, target_dir)
         if not peers.verify_token(peer_id, token, body_hash, exec_id):
             _seclog(f'exec-recv 인증 실패 peer={peer_id[:8]} from {self.client_address[0]}')
             return {'ok': False, 'error': '인증 실패'}
         trust = peers.get_exec_trust(peer_id)
+        # [불변식] 브리지는 target_dir을 판정하지 않는다 — 화이트리스트 검증은 lan_api 러너 책임.
+        #   여기서 걸러버리면 '왜 조용히 안 되는지'가 감사로그에 안 남는다.
         STATE['exec_inbox'].append({
-            'exec_id': exec_id, 'from_peer': peer_id, 'task': task,
+            'exec_id': exec_id, 'from_peer': peer_id, 'task': task, 'target_dir': target_dir,
             'exec_trust': trust, 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'),
         })
         return {'ok': True, 'exec_trust': trust}
+
+    # ── 원격 실행: 허용 폴더 목록 응답 (대상측) ──────────────────────
+    def _exec_dirs_recv(self) -> dict:
+        """페어링된 상대에게 내가 허용한 작업 폴더 목록을 응답.
+
+        [보안] ① 토큰 인증 필수 ② 마스터 토글(lan_remote_exec_enabled) OFF면 목록조차 주지 않음
+        — 꺼둔 PC가 폴더 구성을 노출할 이유가 없고, 요청자 UI가 'OFF'를 즉시 알 수 있다.
+        [제약] 브리지는 project_id를 모르지만 config.json은 data_dir 파일이라 읽어도 이식성에
+        영향 없다(lan_peers.json과 동일 계층).
+        """
+        peers: LanPeers = STATE['peers']
+        peer_id = self.headers.get('X-Peer-Id', '')
+        token = self.headers.get('X-Token', '')
+        raw = self._body(MAX_CTRL_BYTES)
+        if raw is None:
+            return {'ok': False, 'error': '본문 크기 초과'}
+        try:
+            nonce = str(json.loads(raw or b'{}').get('nonce', ''))
+        except json.JSONDecodeError:
+            return {'ok': False, 'error': 'JSON 파싱 실패'}
+        body_hash = hashlib.sha256(b'exec-dirs').hexdigest()
+        if not nonce or not peers.verify_token(peer_id, token, body_hash, nonce):
+            _seclog(f'exec-dirs 인증 실패 peer={peer_id[:8]} from {self.client_address[0]}')
+            return {'ok': False, 'error': '인증 실패'}
+        cfg = _read_config(STATE.get('data_dir'))
+        if not cfg.get('lan_remote_exec_enabled', False):
+            return {'ok': True, 'enabled': False, 'dirs': []}
+        return {'ok': True, 'enabled': True, 'dirs': _allowed_dirs(cfg)}
 
     # ── 원격 실행: 출력 수신 (요청자측) ──────────────────────────────
     def _exec_output(self) -> dict:
@@ -697,6 +793,8 @@ def main() -> None:
     STATE.update({
         'peers': peers, 'port': port, 'name': name,
         'inbox': data_dir / 'lan_inbox',
+        'data_dir': data_dir,          # [Phase A] config.json(토글·허용폴더) 조회용
+
         'firewall_ok': ensure_firewall(port, DISCOVERY_PORT),
     })
     disc = LanDiscovery(peers.self_id, port, name=name)
