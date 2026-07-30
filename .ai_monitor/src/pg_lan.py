@@ -44,6 +44,28 @@ def get_lan_messages(self_id: str, peer_id: str, since_id: int = 0,
     )
 
 
+def get_lan_room_messages(since_id: int = 0, project_id: str = '') -> list[dict]:
+    """그룹방 메시지를 id>since_id로 증분 조회(id ASC). 폴링 커서용.
+
+    [설계] 방 = `to_peer='*'`인 메시지 집합. 1:1 대화(to_peer=상대 peer_id)와 저장 자체가
+    분리돼 있어 서로 섞이지 않는다 — 1:1로 보낸 말이 방에 노출되면 사고이므로 쿼리로 가른다.
+    [WHY 별도 함수] get_lan_messages에 self_id/peer_id 조건을 우회하는 분기를 넣으면
+    '누구와의 대화인가'라는 그 함수의 계약이 깨진다.
+    """
+    try:
+        since = int(since_id)
+    except (TypeError, ValueError):
+        since = 0
+    return query_rows(
+        f"SELECT id, from_peer, to_peer, content, "
+        f"to_char(ts, 'YYYY-MM-DD\"T\"HH24:MI:SS') AS ts "
+        f"FROM lan_messages "
+        f"WHERE project_id = {_sql_text(project_id)} AND id > {since} "
+        f"AND to_peer = '*' "
+        f"ORDER BY id ASC LIMIT 500;"
+    )
+
+
 # ── 원격 실행 감사로그 (Phase 3) ─────────────────────────────────────────
 def save_lan_exec(exec_id: str, direction: str, peer_id: str, task: str,
                   status: str, project_id: str = '') -> bool:

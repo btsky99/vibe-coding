@@ -24,8 +24,11 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from src.server_utils import send_json
-from src.pg_lan import (save_lan_message, get_lan_messages,
+from src.pg_lan import (save_lan_message, get_lan_messages, get_lan_room_messages,
                         save_lan_exec, update_lan_exec_status, get_lan_exec_log)
+
+# [그룹방] to_peer 특수값 — 방 메시지는 상대 지정 없이 이 값으로 저장된다(1:1과 저장 분리).
+ROOM_ID = '*'
 
 # [Phase3] 실행 중인 원격 exec 프로세스 — exec_id → Popen. 취소/중복정리용(단일 lan_api 프로세스).
 _EXEC_PROCS: dict = {}
@@ -327,6 +330,19 @@ def _start_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str
                      daemon=True, name=f'lan-exec-{exec_id[:8]}').start()
 
 
+def _drain_chat_inbox(dd: Path, self_id: str, project_id: str) -> None:
+    """브리지 수신버퍼를 1회성으로 비워 DB에 옮긴다. 1:1/그룹방 폴링이 공유하는 헬퍼.
+
+    [불변식] 브리지 chat-drain은 큐를 비우는 1회성 호출이다. 1:1 폴링과 방 폴링이 각자
+    다르게 저장하면 먼저 호출한 쪽이 상대 메시지를 잘못된 스코프로 저장해버린다 →
+    저장 로직을 여기 하나로 모아 어느 쪽이 먼저 폴링해도 결과가 같게 만든다.
+    """
+    drained = _proxy(dd, 'GET', 'chat-drain')
+    for m in drained.get('messages', []) or []:
+        to = ROOM_ID if m.get('scope') == 'room' else self_id
+        save_lan_message(m.get('from_peer', ''), to, m.get('content', ''), project_id)
+
+
 def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> bool:
     """GET /api/lan/{status,chat,exec/pending,exec/output,exec/log}."""
     dd = Path(DATA_DIR)
@@ -338,12 +354,21 @@ def handle_get(handler, path: str, params: dict, *, DATA_DIR, PROJECT_ID='') -> 
         since = params.get('since', ['0'])[0]
         self_id = _self_id(dd)
         # ① 브리지 수신버퍼를 비우며 내 DB로 옮긴다(브리지는 project_id 무지 → 여기서 저장).
-        drained = _proxy(dd, 'GET', 'chat-drain')
-        for m in drained.get('messages', []):
-            save_lan_message(m.get('from_peer', ''), self_id, m.get('content', ''), PROJECT_ID)
+        #   [그룹방] scope='room'이면 to_peer=ROOM_ID로 저장해 방 쿼리에 걸리게 한다. 1:1로
+        #   저장하면 방에 안 보이고, 반대로 하면 1:1 창에 남의 방 메시지가 섞인다.
+        _drain_chat_inbox(dd, self_id, PROJECT_ID)
         # ② DB에서 나↔peer 대화를 since 커서로 증분 반환.
         rows = get_lan_messages(self_id, peer_id, since, PROJECT_ID) if peer_id else []
         send_json(handler, {'self_id': self_id, 'messages': rows})
+        return True
+    if path == '/api/lan/chat/room':
+        # [그룹방] 방 메시지 증분 조회. drain은 1:1과 공유(브리지 버퍼가 하나라 어느 쪽을
+        #   폴링해도 양쪽 메시지가 DB로 넘어가야 한다).
+        since = params.get('since', ['0'])[0]
+        self_id = _self_id(dd)
+        _drain_chat_inbox(dd, self_id, PROJECT_ID)
+        send_json(handler, {'self_id': self_id,
+                            'messages': get_lan_room_messages(since, PROJECT_ID)})
         return True
     if path == '/api/lan/exec/pending':
         # [리뷰C3] 취소 신호 먼저 처리 — 토글 상태와 무관하게 실행 중 프로세스를 죽인다
@@ -423,6 +448,18 @@ def handle_post(handler, path: str, data: dict, *, DATA_DIR, PROJECT_ID='') -> b
         if res.get('ok'):
             # 내 발신분도 내 DB에 기록(양쪽이 각자 자기 DB에 이력 보유).
             save_lan_message(_self_id(dd), peer_id, content, PROJECT_ID)
+        send_json(handler, res)
+        return True
+    if path == '/api/lan/chat-room-send':
+        # [그룹방] 페어링 전원 팬아웃. 일부 피어가 오프라인이어도 나머지에게 가면 성공으로 본다
+        #   — 한 대 꺼진 걸로 방 전체를 막으면 방이 사실상 죽는다(브리지 broadcast_chat과 동일 계약).
+        content = (data or {}).get('content', '')
+        if not str(content).strip():
+            send_json(handler, {'ok': False, 'error': '빈 메시지'})
+            return True
+        res = _proxy(dd, 'POST', 'chat-broadcast', {'content': content})
+        if res.get('ok'):
+            save_lan_message(_self_id(dd), ROOM_ID, content, PROJECT_ID)
         send_json(handler, res)
         return True
     if path == '/api/lan/exec':

@@ -1,6 +1,6 @@
 # 🗺️ Vibe Coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-30 19:34
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-07-30 20:28
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 
 ## 📜 루트 문서
@@ -63,7 +63,7 @@
 | `hive_api.py` | 1301 | 하이브 마인드 오케스트레이션 API (/api/hive/*, /api/orchestrator/*) |
 | `hive_ingest_api.py` | 142 |  |
 | `install_api.py` | 421 |  |
-| `lan_api.py` | 539 |  |
+| `lan_api.py` | 576 |  |
 | `launch_api.py` | 102 |  |
 | `locks_api.py` | 67 |  |
 | `logs_api.py` | 168 |  |
@@ -103,7 +103,7 @@
 | `pg_base.py` | 538 |  |
 | `pg_experience.py` | 226 |  |
 | `pg_incidents.py` | 182 |  |
-| `pg_lan.py` | 85 |  |
+| `pg_lan.py` | 107 |  |
 | `pg_memory.py` | 639 |  |
 | `pg_office.py` | 320 |  |
 | `pg_schema.py` | 817 |  |
@@ -277,7 +277,8 @@
 | `HealPanel.tsx` | 129 |  |
 | `HivePanel.tsx` | 464 | 하이브 시스템 진단 (헬스 체크, 자가 치유) |
 | `LanExecDirs.tsx` | 167 |  |
-| `LanPanel.tsx` | 598 |  |
+| `LanPanel.tsx` | 655 |  |
+| `LanRoomChat.tsx` | 125 |  |
 | `MemoryPanel.tsx` | 469 | 공유 지식 베이스 (PostgreSQL) |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 큐 |
 | `TelegramPanel.tsx` | 278 |  |
@@ -297,6 +298,9 @@
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | scripts/itcp.py 폴백 경로 |
 | `test_knowledge_pipeline.py` | 133 |  |
+| `test_lan_exec_gate.py` | 127 |  |
+| `test_lan_room_chat.py` | 129 |  |
+| `test_lan_sandbox.py` | 193 |  |
 | `test_new_api_modules.py` | 341 |  |
 | `test_orchestrator_monitor.py` | 64 |  |
 | `test_pg_store_split.py` | 124 |  |
@@ -349,4 +353,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-07-30 19:34
+> 자동 생성 완료: 2026-07-30 20:28

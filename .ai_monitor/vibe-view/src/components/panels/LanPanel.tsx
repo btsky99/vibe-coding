@@ -13,6 +13,7 @@ import { Wifi, WifiOff, ShieldAlert, Send, Link2, RefreshCw, MessageSquare, Fold
   Terminal, Play, Check, X } from 'lucide-react';
 import { API_BASE } from '../../constants';
 import LanExecDirs from './LanExecDirs';
+import LanRoomChat from './LanRoomChat';
 
 interface Peer { peer_id: string; name: string; ip: string; http_port: number }
 interface Trusted { peer_id: string; name: string; paired_at: string; exec_trust?: string }
@@ -20,6 +21,8 @@ interface ChatMsg { id: number; from_peer: string; to_peer: string; content: str
 interface PendingExec { exec_id: string; from_peer: string; task: string; ts: string; exec_trust?: string; target_dir?: string; _seenAt?: number }
 /** 상대가 공개한 허용 폴더 — 요청 시 이 목록에서만 고를 수 있다(임의 경로 입력 불가). */
 interface PeerDir { path: string; mode: 'copy' | 'direct'; label?: string; exists?: boolean }
+/** 진행 중/끝난 원격 실행 1건. peer_id를 키로 보관해 여러 대를 동시에 몰 수 있다. */
+interface ExecRun { execId: string; peerId: string; dir: string; out: string; done: boolean }
 const PENDING_TTL_MS = 5 * 60 * 1000;   // 승인 대기 5분 — 자리비움 시 자동 거부
 interface OutChunk { chunk: string; done: boolean; ts: string }
 interface LanStatus {
@@ -52,10 +55,12 @@ export default function LanPanel() {
   const [peerDirs, setPeerDirs] = useState<PeerDir[]>([]);
   const [peerExecOn, setPeerExecOn] = useState(true);
   const [targetDir, setTargetDir] = useState('');
-  const [execId, setExecId] = useState('');                 // 현재 요청한 exec_id
-  const [execOut, setExecOut] = useState('');               // 수신 출력 누적
-  const [execDone, setExecDone] = useState(false);          // 실행 완료 여부
-  const execIdRef = useRef('');                             // 폴링 클로저용
+  // [다중 실행] peer_id → 실행 1건. 백엔드는 exec_id별로 프로세스·작업공간이 분리돼 원래부터
+  //   병렬이었지만 UI가 단일 execId 슬롯이라 한 대씩만 몰 수 있었다. 피어별 맵으로 해소.
+  //   [불변식] 같은 피어에 동시 2건은 여전히 금지 — 이전 exec를 잊고 orphan 스트림을 남기는
+  //   문제(리뷰 W6)는 '피어당 1건'으로 막는다.
+  const [runs, setRuns] = useState<Record<string, ExecRun>>({});
+  const runsRef = useRef<Record<string, ExecRun>>({});      // 폴링 클로저용(최신값 유지)
   const pendingRef = useRef<PendingExec[]>([]);             // [리뷰W7] 병합/만료 계산 소스(업데이터 순수화)
 
   // [리뷰W7] 대기 목록 갱신을 ref+state 동시 반영 — 업데이터에서 부수효과 분리.
@@ -192,24 +197,40 @@ export default function LanPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [st.running]);
 
-  // [Phase3] 원격 실행 출력 폴링(요청자측) — exec_id 있고 완료 전까지 1.5초 증분.
+  useEffect(() => { runsRef.current = runs; }, [runs]);
+
+  // [다중 실행] 진행 중인 모든 exec의 출력을 하나의 인터벌로 폴링한다.
+  //   [WHY 단일 인터벌] 실행별 useEffect를 두면 runs가 바뀔 때마다 effect가 재생성돼
+  //   폴링이 리셋되고, 브리지 exec-output-drain은 1회성이라 그 틈에 청크를 흘릴 수 있다.
+  //   deps=[]로 고정하고 최신 runs는 ref에서 읽는다.
   useEffect(() => {
-    if (!execId || execDone) return;
-    execIdRef.current = execId;
+    if (!st.running) return;
     const poll = () => {
-      fetch(`${API_BASE}/api/lan/exec/output?exec_id=${encodeURIComponent(execIdRef.current)}`)
-        .then(r => r.json()).then((d: { chunks?: OutChunk[] }) => {
-          const chunks = d.chunks || [];
-          if (chunks.length) {
-            setExecOut(prev => prev + chunks.map(c => c.chunk).join(''));
-            if (chunks.some(c => c.done)) setExecDone(true);
-          }
-        }).catch(() => {});
+      const active = Object.values(runsRef.current).filter(r => !r.done);
+      active.forEach(run => {
+        fetch(`${API_BASE}/api/lan/exec/output?exec_id=${encodeURIComponent(run.execId)}`)
+          .then(r => r.json()).then((d: { chunks?: OutChunk[] }) => {
+            const chunks = d.chunks || [];
+            if (!chunks.length) return;
+            setRuns(prev => {
+              const cur = prev[run.peerId];
+              if (!cur || cur.execId !== run.execId) return prev;   // 그새 교체된 실행은 무시
+              return {
+                ...prev,
+                [run.peerId]: {
+                  ...cur,
+                  out: cur.out + chunks.map(c => c.chunk).join(''),
+                  done: cur.done || chunks.some(c => c.done),
+                },
+              };
+            });
+          }).catch(() => {});
+      });
     };
     poll();
     const t = setInterval(poll, 1500);
     return () => clearInterval(t);
-  }, [execId, execDone]);
+  }, [st.running]);
 
   const peerName = (pid: string) =>
     (st.trusted || []).find(t => t.peer_id === pid)?.name
@@ -235,13 +256,16 @@ export default function LanPanel() {
   const sendExec = async () => {
     const task = execTask.trim();
     if (!sendPeer || !task || !targetDir) return;
-    setExecOut(''); setExecDone(false); setExecId('');
+    const peer = sendPeer, dir = targetDir;     // 응답 대기 중 선택이 바뀌어도 이 실행에 고정
     const r = await fetch(`${API_BASE}/api/lan/exec`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ peer_id: sendPeer, task, target_dir: targetDir }),
+      body: JSON.stringify({ peer_id: peer, task, target_dir: dir }),
     }).then(r => r.json()).catch(() => ({}));
-    if (r.ok && r.exec_id) { setExecId(r.exec_id); setExecTask(''); }
-    else setFlash(`❌ ${r.error || '실행 요청 실패(상대 오프라인?)'}`);
+    if (r.ok && r.exec_id) {
+      setRuns(prev => ({ ...prev,
+        [peer]: { execId: r.exec_id, peerId: peer, dir, out: '', done: false } }));
+      setExecTask('');
+    } else setFlash(`❌ ${r.error || '실행 요청 실패(상대 오프라인?)'}`);
   };
 
   const approveExec = async (item: PendingExec) => {
@@ -262,14 +286,14 @@ export default function LanPanel() {
     }).catch(() => {});
   };
 
-  const cancelExec = async () => {
-    if (!execId) return;
+  const cancelExec = async (run: ExecRun) => {
     // [리뷰C3] peer_id를 함께 보내 대상 PC의 실행 프로세스를 실제로 중단(로컬 UI만 멈추지 않게).
     await fetch(`${API_BASE}/api/lan/exec/cancel`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ exec_id: execId, peer_id: sendPeer }),
+      body: JSON.stringify({ exec_id: run.execId, peer_id: run.peerId }),
     }).catch(() => {});
-    setExecDone(true);
+    setRuns(prev => (prev[run.peerId]?.execId === run.execId
+      ? { ...prev, [run.peerId]: { ...prev[run.peerId], done: true } } : prev));
   };
 
   const enableRemoteExec = async () => {
@@ -539,26 +563,59 @@ export default function LanPanel() {
             placeholder="예: server.py 띄워서 부팅 에러 있으면 알려줘"
             rows={2}
             className="w-full bg-black/40 rounded px-2 py-1 text-[12px] outline-none resize-y" />
-          {/* [리뷰W6] 진행 중(execId 있고 미완료)엔 재전송 차단 — 이전 exec를 잊고 orphan 스트림 남기는 것 방지 */}
-          <button onClick={sendExec} disabled={!execTask.trim() || !targetDir || (!!execId && !execDone)}
+          {/* [리뷰W6 유지] 재전송 차단은 '이 피어'에만 적용 — 다른 PC에는 동시에 보낼 수 있다 */}
+          <button onClick={sendExec}
+            disabled={!execTask.trim() || !targetDir || !!(runs[sendPeer] && !runs[sendPeer].done)}
             className="w-full py-1 bg-purple-700/70 hover:bg-purple-700 disabled:opacity-40 rounded text-[12px] flex items-center justify-center gap-1">
-            <Play className="w-3.5 h-3.5" /> {execId && !execDone ? '실행 중…' : '실행 요청'}
+            <Play className="w-3.5 h-3.5" />
+            {runs[sendPeer] && !runs[sendPeer].done ? '이 PC에서 실행 중…' : '실행 요청'}
           </button>
-          {execId && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-[#888]">{execDone ? '완료' : '실행 중…'}</span>
-                {!execDone && (
-                  <button onClick={cancelExec} className="px-2 py-0.5 bg-red-800/60 hover:bg-red-800 rounded">취소</button>
+        </div>
+      )}
+
+      {/* [다중 실행] 진행 중·완료된 실행을 피어별로 모두 표시 — 여러 대를 동시에 몰 수 있으므로
+          '현재 선택한 피어'에 묶이면 다른 대의 결과를 놓친다. 선택과 무관하게 여기 모인다. */}
+      {st.running && Object.keys(runs).length > 0 && (
+        <div className="bg-black/20 rounded p-2 space-y-2">
+          <div className="font-medium flex items-center gap-1 text-purple-200">
+            <Terminal className="w-3.5 h-3.5" /> 원격 실행 현황
+            <span className="text-[#888] text-[11px]">
+              (진행 {Object.values(runs).filter(r => !r.done).length} / 전체 {Object.keys(runs).length})
+            </span>
+          </div>
+          {Object.values(runs).map(run => (
+            <div key={run.execId} className="bg-black/30 rounded p-2 space-y-1">
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="text-purple-300 font-medium">{peerName(run.peerId)}</span>
+                <span className={run.done ? 'text-[#888]' : 'text-green-400'}>
+                  {run.done ? '완료' : '실행 중…'}
+                </span>
+                <span className="font-mono text-[10px] text-[#777] truncate flex-1">{run.dir}</span>
+                {!run.done && (
+                  <button onClick={() => cancelExec(run)}
+                    className="px-2 py-0.5 bg-red-800/60 hover:bg-red-800 rounded shrink-0">취소</button>
+                )}
+                {run.done && (
+                  <button onClick={() => setRuns(prev => {
+                    const next = { ...prev }; delete next[run.peerId]; return next;
+                  })} className="px-2 py-0.5 bg-white/10 hover:bg-white/20 rounded shrink-0">닫기</button>
                 )}
               </div>
               {/* [보안] 출력은 React 텍스트노드 — 자동 escape */}
               <div className="h-40 overflow-y-auto bg-black/40 rounded p-2 text-[12px] font-mono whitespace-pre-wrap break-words">
-                {execOut || <span className="text-[#666]">출력 대기 중…</span>}
+                {run.out || <span className="text-[#666]">출력 대기 중…</span>}
               </div>
             </div>
-          )}
+          ))}
         </div>
+      )}
+
+      {/* [그룹방] 페어링 상대가 있으면 항상 노출 — 피어 선택과 무관하다(전원 대상이라서).
+          [주의] selfId는 selfRef가 아니라 st.self_id — ref는 갱신 시 리렌더를 안 일으켜
+          내/남 메시지 정렬이 첫 렌더 값('')에 고정된다. */}
+      {st.running && (st.trusted || []).length > 0 && (
+        <LanRoomChat peerCount={(st.trusted || []).length} peerName={peerName}
+          selfId={st.self_id || ''} onFlash={setFlash} />
       )}
 
       {/* 채팅 — 전송대상 피어 선택 시 */}

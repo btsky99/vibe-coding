@@ -209,8 +209,22 @@ def send_file(peer_id: str, filepath: str) -> dict:
 
 
 # ── 채팅 송신 (로컬 트리거 → 상대에게 POST) ──────────────────────────────
-def send_chat(peer_id: str, content: str) -> dict:
-    """신뢰 피어에게 텍스트 메시지 전송. body_hash=sha256(content)로 토큰 서명(파일과 동일 규약)."""
+def _chat_body_hash(content: str, scope: str) -> str:
+    """채팅 토큰 서명용 해시. scope를 서명이 덮게 하되 1:1은 기존 규약을 그대로 유지한다.
+
+    [WHY 비대칭] scope를 무조건 해시에 넣으면 구버전 피어와 1:1 채팅까지 깨진다(구버전은
+    sha256(content)를 계산). room일 때만 확장해 하위호환을 보존한다 — 구버전에게 room 메시지를
+    보내면 인증 실패로 거부되는데, 그게 올바른 동작이다(구버전엔 그룹방 개념이 없음).
+    [보안] scope 강등/승격(room↔peer 바꿔치기) 시 해시가 달라져 토큰이 무효 → scope가 서명에
+    묶인다. exec의 target_dir이 서명 밖이라 바꿔치기 가능했던 것과 같은 계열의 함정이다.
+    """
+    if scope == 'room':
+        return hashlib.sha256(f'{content}\x00room'.encode('utf-8')).hexdigest()
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+
+def send_chat(peer_id: str, content: str, scope: str = 'peer') -> dict:
+    """신뢰 피어에게 텍스트 메시지 전송. scope='room'이면 그룹방 메시지로 표시된다."""
     peers: LanPeers = STATE['peers']
     if not peers.is_trusted(peer_id):
         return {'ok': False, 'error': '페어링되지 않은 상대'}
@@ -219,10 +233,13 @@ def send_chat(peer_id: str, content: str) -> dict:
     target = _resolve_target(peer_id)
     if not target:
         return {'ok': False, 'error': '상대가 오프라인'}
-    body_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+    body_hash = _chat_body_hash(content, scope)
     token = peers.make_token(peer_id, body_hash, '')
     url = f"http://{target['ip']}:{target['http_port']}/lan/chat-recv"
-    req = Request(url, data=json.dumps({'content': content}).encode(), method='POST', headers={
+    payload = {'content': content}
+    if scope == 'room':
+        payload['scope'] = 'room'      # [호환] 1:1은 필드 자체를 안 보낸다(구버전 파서 무영향)
+    req = Request(url, data=json.dumps(payload).encode(), method='POST', headers={
         'X-Peer-Id': peers.self_id, 'X-Token': token or '', 'Content-Type': 'application/json',
     })
     try:
@@ -230,6 +247,31 @@ def send_chat(peer_id: str, content: str) -> dict:
             return {'ok': resp.status == 200}
     except URLError as e:
         return {'ok': False, 'error': str(e)}
+
+
+def broadcast_chat(content: str) -> dict:
+    """페어링된 모든 피어에게 그룹방 메시지를 팬아웃.
+
+    [WHY 서버 없는 방] 중앙 릴레이가 없으므로 '방'은 각자가 자기 피어 전원에게 뿌려서 성립한다.
+    A가 B·C에 뿌리고 B가 A·C에 뿌리면 셋 다 전부 보게 된다.
+    [제약 — 반드시 알 것] 방의 완전성은 **페어링의 완전성**에 종속된다. B와 C가 서로 페어링되지
+    않았다면 B의 메시지는 C에게 닿지 않는다(A만 봄). 3대 완전 참여엔 3쌍 페어링이 모두 필요.
+    [불변식] 오프라인 피어는 실패로 집계하되 전체를 실패시키지 않는다 — 한 대가 꺼져 있다고
+    나머지에게 안 가면 방이 사실상 죽는다.
+    """
+    peers: LanPeers = STATE['peers']
+    targets = peers.list_peers()
+    if not targets:
+        return {'ok': False, 'error': '페어링된 상대가 없음'}
+    if not content or len(content.encode('utf-8')) > CHAT_MAX_BYTES:
+        return {'ok': False, 'error': '빈 메시지 또는 8KB 초과'}
+    sent, failed = [], []
+    for p in targets:
+        pid = p.get('peer_id', '')
+        r = send_chat(pid, content, scope='room')
+        (sent if r.get('ok') else failed).append(
+            {'peer_id': pid, 'name': p.get('name', ''), 'error': r.get('error', '')})
+    return {'ok': bool(sent), 'sent': sent, 'failed': failed}
 
 
 # ── 원격 실행: 태스크 송신 (요청자 → 대상) ───────────────────────────────
@@ -468,7 +510,7 @@ class Handler(BaseHTTPRequestHandler):
         # ① 로컬 전용 라우트
         if path in ('/lan/pair-begin', '/lan/pair-connect', '/lan/send', '/lan/chat-send',
                     '/lan/exec-send', '/lan/exec-emit', '/lan/exec-trust', '/lan/exec-cancel',
-                    '/lan/exec-dirs'):
+                    '/lan/exec-dirs', '/lan/chat-broadcast'):
             if not self._is_local():
                 self._json({'error': 'local only'}, 403); return
             raw = self._body(MAX_CTRL_BYTES)
@@ -488,6 +530,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(send_file(body.get('peer_id', ''), body.get('path', '')))
             elif path == '/lan/chat-send':
                 self._json(send_chat(body.get('peer_id', ''), body.get('content', '')))
+            elif path == '/lan/chat-broadcast':
+                # [그룹방] 페어링 전원 팬아웃 — 중앙 릴레이 없이 '방'을 성립시킨다.
+                self._json(broadcast_chat(body.get('content', '')))
             elif path == '/lan/exec-send':
                 # [Phase3] 요청자측 트리거 — 태스크 전송(server가 exec_id 생성해 넘김).
                 self._json(send_exec(body.get('peer_id', ''), body.get('exec_id', ''),
@@ -633,17 +678,21 @@ class Handler(BaseHTTPRequestHandler):
             _seclog(f'chat-recv 크기 초과 from {self.client_address[0]}')
             return {'ok': False, 'error': '메시지 크기 초과'}
         try:
-            content = str(json.loads(raw or b'{}').get('content', ''))
+            parsed = json.loads(raw or b'{}')
+            content = str(parsed.get('content', ''))
+            scope = 'room' if parsed.get('scope') == 'room' else 'peer'
         except json.JSONDecodeError:
             return {'ok': False, 'error': 'JSON 파싱 실패'}
         if not content or len(content.encode('utf-8')) > CHAT_MAX_BYTES:
             return {'ok': False, 'error': '빈 메시지 또는 초과'}
-        body_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        # [보안] scope가 서명에 묶여 있어 강등/승격 바꿔치기는 인증 실패로 떨어진다.
+        body_hash = _chat_body_hash(content, scope)
         if not peers.verify_token(peer_id, token, body_hash, ''):
-            _seclog(f'chat-recv 인증 실패 peer={peer_id[:8]} from {self.client_address[0]}')
+            _seclog(f'chat-recv 인증 실패 peer={peer_id[:8]} scope={scope} '
+                    f'from {self.client_address[0]}')
             return {'ok': False, 'error': '인증 실패'}
         STATE['chat_inbox'].append({
-            'from_peer': peer_id, 'content': content,
+            'from_peer': peer_id, 'content': content, 'scope': scope,
             'ts': time.strftime('%Y-%m-%dT%H:%M:%S'),
         })
         return {'ok': True}
