@@ -42,6 +42,8 @@ REVISION HISTORY:
 | `feature_list.json` | 기능 목록 (프로젝트 분석 후 자동 생성) |
 | `scripts/harness_verify.py` | 하네스 V2 검증 스크립트 (진행상황은 HIVEMIND.md+DB로 추적) |
 | `scripts/session_init.py` | 세션 시작 프로토콜 실행기 |
+| `scripts/generate_project_map.py` | **지도 + 내비게이션 생성기** — 이 저장소 것을 그대로 복사한다. 수정 금지(이식 전제로 작성됨) |
+| `PROJECT_MAP.md` | 위 생성기를 1회 실행해 만든다 (`python scripts/generate_project_map.py`) |
 | `.github/workflows/harness-check.yml` | CI 게이트 워크플로우 |
 
 ### 선택적 설치
@@ -128,6 +130,28 @@ D:\vibe-coding\docs\HARNESS_V2.md를 기반으로 프로젝트명과 에이전�
 #### 3-5. AGENTS.md
 
 에이전트 구성에 맞게 생성. 역할, 강점, 가이드 문서 링크 포함.
+
+#### 3-6. scripts/generate_project_map.py + PROJECT_MAP.md
+
+이 파일은 **커스터마이즈하지 말고 그대로 복사**합니다. 다른 프로젝트에서 동작하도록 이미 설계돼 있어요:
+`.ai_monitor/`가 없으면 범용 스캔 모드로 자동 분기하고, PostgreSQL이 없으면 체크포인트/사고
+섹션을 조용히 생략합니다. 대상 루트는 `VIBE_MAP_ROOT` → cwd(git 저장소) → 스크립트 위치 순으로
+결정되므로 어디서 실행해도 올바른 프로젝트를 갱신합니다.
+
+복사 후 1회 실행해서 `PROJECT_MAP.md`를 만듭니다:
+
+```bash
+python scripts/generate_project_map.py
+```
+
+생성물은 2층 구조입니다:
+- **🧭 현재 상황(내비게이션)** — 브랜치/미커밋/미푸시, 최근 커밋, 최근 체크포인트(어디까지 했나),
+  최근 사고(뭘 고쳤는데 왜 터졌나), 사고다발 파일. LLM이 세션 시작에 **가장 먼저 읽어야 할 블록**.
+- **지도** — 파일별 줄 수 + 설명(각 파일 표준 헤더 `DESCRIPTION:` / `📝`에서 자동 수집) + 🔨 최근 7일 변경 배지.
+
+⚠️ 설명은 절대 PROJECT_MAP.md나 생성기에 손으로 적지 마세요. **파일 헤더가 유일한 원천**입니다.
+(이 저장소에서 하드코딩 dict로 관리하다 103항목 중 19개가 이미 삭제된 파일을 가리키고 설명
+커버리지가 37%까지 떨어진 사고가 있었습니다.)
 
 ### Step 4: CI 설정 (선택)
 

@@ -1,4 +1,10 @@
 """
+FILE: scripts/install_playwright_cli.py
+DESCRIPTION: Playwright CLI 설치 + 브라우저 다운로드 — UI 검증(스크린샷 대신 Playwright 직접 확인)용.
+
+REVISION HISTORY:
+- 2026-07-30 Claude: 표준 헤더 추가 — PROJECT_MAP 설명 자동 수집(헤더 파싱)에서 유일하게 누락되던 파일.
+
 Install Playwright CLI for the current Python interpreter and download browsers.
 
 Usage:
