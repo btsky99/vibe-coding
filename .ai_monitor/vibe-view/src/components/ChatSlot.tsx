@@ -21,6 +21,20 @@ import {
 import { API_BASE } from '../constants';
 import { readClipboardText, writeClipboardText } from '../lib/clipboard';
 
+// ── 메모리 상한 ──
+// [WHY 2026-08-01] messages 배열에 상한이 없어 앱을 오래 켜둘수록 단조 증가했다. 스트리밍
+//   응답 전문이 통째로 남고 tool_use 이벤트마다 항목이 추가돼, WebView2 렌더러가 1.3GB까지
+//   차오르는 주 원인 중 하나였다(앱 재시작하면 줄어들던 이유).
+// [안전] 잘려나간 과거 대화는 유실이 아니다 — 세션 컨텍스트는 CLI 쪽 session_id가 들고 있고
+//   이력은 DB에 남는다. 화면 배열은 표시용 캐시일 뿐이다.
+const MAX_MESSAGES = 300;
+
+/** 배열 끝에 추가하되 상한을 넘으면 오래된 것부터 버린다. 모든 append 지점이 이걸 거칠 것. */
+function appendCapped(prev: ChatMessage[], ...added: ChatMessage[]): ChatMessage[] {
+  const next = [...prev, ...added];
+  return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
+}
+
 // ── 타입 정의 ──
 
 /** 채팅 메시지 — source 필드로 대시보드/텔레그램 발신 구분 */
@@ -199,7 +213,7 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
       content: text,
       ts: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => appendCapped(prev, userMsg));
     setInputValue('');
     setIsStreaming(true);
 
@@ -211,7 +225,7 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
       content: '',
       ts: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, assistantMsg]);
+    setMessages(prev => appendCapped(prev, assistantMsg));
 
     // SSE 연결
     const abort = new AbortController();
@@ -262,7 +276,8 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
                   ts: new Date().toISOString(),
                   toolName: evt.name,
                 };
-                setMessages(prev => [...prev, toolMsg]);
+                // [주의] tool_use는 한 응답에서 수십 건까지 쏟아진다 — 상한이 가장 필요한 지점.
+                setMessages(prev => appendCapped(prev, toolMsg));
               } else if (evt.type === 'session') {
                 setSessionId(evt.session_id);
               } else if (evt.type === 'done') {

@@ -145,7 +145,9 @@ export default function LanPanel() {
           const ms = d.messages || [];
           if (ms.length) {
             sinceRef.current = ms[ms.length - 1].id;
-            setMessages(prev => [...prev, ...ms]);
+            // [메모리] 2초 폴링으로 무한 누적되던 구간 — 표시용 캐시라 잘라도 유실 없음
+            //   (이력은 PG lan_messages에 영구 보관, since 커서로 언제든 재조회 가능).
+            setMessages(prev => [...prev, ...ms].slice(-300));
           }
         }).catch(() => {});
     };

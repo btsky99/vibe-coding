@@ -295,7 +295,11 @@ export default function TerminalSlot({
         fontSize: 13,
         cursorBlink: true,
         // 스크롤 설정 — 이전 출력 확인 가능하도록 충분한 버퍼 확보
-        scrollback: 10000,
+        // [메모리 2026-08-01] 10000 → 3000. xterm은 스크롤백 줄마다 셀 객체를 유지하므로
+        //   슬롯 수만큼 곱해진다. 실측: WebView2 렌더러 1개가 1.3GB까지 차오름(전체 6프로세스
+        //   1,651MB로 앱 사용량의 60%). 3000이면 체감 스크롤은 유지되면서 상한이 1/3로 떨어진다.
+        //   더 거슬러 올라가야 하면 터미널 출력이 아니라 pg_logs/DB를 조회할 것.
+        scrollback: 3000,
         smoothScrollDuration: 100,
         scrollOnUserInput: true
       });
