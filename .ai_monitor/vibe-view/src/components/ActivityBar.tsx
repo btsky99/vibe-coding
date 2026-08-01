@@ -13,6 +13,7 @@ import {
   Brain,
   ClipboardList,
   Files,
+  Gauge,
   GitBranch,
   HeartPulse,
   Package,
@@ -168,6 +169,9 @@ const ActivityBar = memo(function ActivityBar({
       </button>
       <button onClick={() => onTabChange('tools')} className={tabCls('tools')} title="개발 도구">
         <Package className="w-5 h-5" />
+      </button>
+      <button onClick={() => onTabChange('daemons')} className={tabCls('daemons')} title="백그라운드 데몬 on/off">
+        <Gauge className="w-5 h-5" />
       </button>
 
 

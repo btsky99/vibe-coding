@@ -115,8 +115,13 @@ def _sync_managed_checkout() -> None:
         return
     for args in (['fetch', str(PROJECT_ROOT), 'HEAD'],
                  ['reset', '--hard', 'FETCH_HEAD']):
+        # [과거사고 2026-08-01] text=True는 Windows 기본 코덱(cp949)으로 디코딩한다 →
+        # git이 UTF-8 한글 진행 메시지를 뱉으면 communicate의 리더 스레드가
+        # UnicodeDecodeError로 죽고, 실패 시 읽어야 할 stderr가 통째로 사라진다
+        # (returncode는 0이라 smoke는 그대로 PASS → 검증이 눈을 감음). 인코딩 고정 필수.
         r = subprocess.run(['git', '-C', str(checkout)] + args,
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=120,
+                           encoding='utf-8', errors='replace')
         if r.returncode != 0:
             print(f'[smoke] ⚠️ checkout 동기화 실패(git {args[0]}): '
                   f'{r.stderr.strip()[:200]} — 기존 checkout 소스로 진행')

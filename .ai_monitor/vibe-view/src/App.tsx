@@ -60,6 +60,7 @@ import GitPanel from './components/panels/GitPanel';
 import TelegramPanel from './components/panels/TelegramPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
 import HealPanel from './components/panels/HealPanel';
+import DaemonsPanel from './components/panels/DaemonsPanel';
 import SetupBanner from './components/SetupBanner';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
@@ -541,6 +542,7 @@ function App() {
     git: 'Git 감시',
     heal: '자가치유 계측',
     lan: 'LAN 공유',
+    daemons: '백그라운드 데몬',
   }[activeTab] ?? activeTab;
 
   return (
@@ -733,6 +735,9 @@ function App() {
             ) : activeTab === 'heal' ? (
               /* 자가치유 계측 패널 — 4장치 성과+커버리지 진단 */
               <HealPanel />
+            ) : activeTab === 'daemons' ? (
+              /* 백그라운드 데몬 on/off — 저사양 PC에서 상시 데몬 CPU/메모리 회수 */
+              <DaemonsPanel />
             ) : activeTab === 'lan' ? (
               /* LAN 브리지 패널 — 자동발견·페어링·파일전송 (Phase 1) */
               <LanPanel />
