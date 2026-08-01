@@ -5,6 +5,10 @@ DESCRIPTION: 자동 업데이트 모듈 — GitHub Releases API로 셀프 업데
   EXE 모드(frozen)에서만 자동 업데이트 실행, 개발 모드에서는 스킵.
 
 REVISION HISTORY:
+- 2026-08-01 Claude: [업데이트 미감지 근본수정] 버전 비교 기준을 모듈 상수 APP_VERSION →
+  bundle_version()(번들 _version.py)로 교체. boot.py가 체크아웃을 sys.path 최우선으로 넣어
+  `from _version import ...`이 소스 버전을 주던 탓에, soft 채널이 소스만 최신으로 당기면
+  "소스 버전 == 최신 태그"가 되어 EXE 풀빌드 업데이트가 영구 미감지(설치본 3.7.286 정지).
 - 2026-07-12 Claude: [코드32 사고 근본수정] setup 인스톨러가 앱 exe로 스왑되던 버그 수정.
   다운로드 tmp를 항상 vibe-coding.exe.new로 저장 → is_installer_asset이 'setup' 미검출 →
   onefile로 오판 → apply_update_from_temp가 인스톨러를 {app}\vibe-coding.exe로 스왑 →
@@ -46,6 +50,39 @@ API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 ASSET_NAME = "vibe-coding.exe"
 
 logger = logging.getLogger("updater")
+
+
+def bundle_version() -> str:
+    """실제 EXE 번들의 버전 — 풀빌드 업데이트 판단의 **유일한** 기준.
+
+    [WHY 모듈 상수 APP_VERSION과 분리] boot.py(경량 소스 채널 A안)가 관리 체크아웃의 .py를
+      runpy로 실행하며 sys.path 최우선을 체크아웃으로 잡는다 → 위쪽 `from _version import ...`은
+      번들이 아니라 **소스 버전**을 준다. soft 채널이 소스를 최신으로 당겨오면
+      소스 버전 == 최신 릴리즈 태그가 되어 _is_newer가 항상 False → EXE 풀빌드 업데이트가
+      영구히 안 뜬다(번들 의존성은 옛 버전에 멈춘 채로).
+      [과거사고 2026-08-01] 설치본 EXE 3.7.286 + 체크아웃 소스 3.7.313 → "이미 최신"으로
+      오판해 v3.7.313 배너 미표시. 소스만 갱신되는 구조에서는 두 버전이 상시 갈린다.
+    [불변식] frozen이면 _MEIPASS(onedir은 `_internal/`)의 _version.py가 진짜 번들 버전.
+      __file__ 기준 후보는 체크아웃 소스를 가리키므로 **반드시 마지막**에 온다.
+      _MEIPASS가 없으면(비frozen) 후보에서 제외 — Path("")/"_version.py"는 cwd 상대경로가 되어
+      엉뚱한 파일을 읽을 수 있다.
+    """
+    candidates = []
+    mei = getattr(sys, "_MEIPASS", "")
+    if mei:
+        candidates.append(Path(mei) / "_version.py")
+        candidates.append(Path(mei) / "_appseed" / ".ai_monitor" / "_version.py")
+    candidates.append(Path(__file__).resolve().parent / "_version.py")
+    for c in candidates:
+        try:
+            if c.exists():
+                ns: dict = {}
+                exec(c.read_text(encoding="utf-8"), ns)  # noqa: S102 — 신뢰된 번들 파일
+                if ns.get("__version__"):
+                    return str(ns["__version__"])
+        except Exception:
+            continue
+    return APP_VERSION
 
 
 def _get_token(data_dir):
@@ -423,7 +460,11 @@ def check_and_update(data_dir):
     """
     ready_file = data_dir / "update_ready.json"
 
-    if APP_VERSION == "dev":
+    # [불변식] 비교 기준은 **번들 버전**뿐 — APP_VERSION(모듈 import)은 boot.py 체크아웃 소스를
+    #   가리킬 수 있어 soft 채널 적용 후 항상 "최신"으로 오판한다. bundle_version() 참조.
+    cur_ver = bundle_version()
+
+    if cur_ver == "dev":
         logger.info("Dev build detected, skipping update check.")
         return
 
@@ -450,15 +491,16 @@ def check_and_update(data_dir):
         return
 
     latest_tag = release.get("tag_name", "")
-    if not _is_newer(latest_tag, APP_VERSION):
-        logger.info("Already up to date (%s).", APP_VERSION)
+    if not _is_newer(latest_tag, cur_ver):
+        logger.info("Already up to date (bundle=%s, module=%s).", cur_ver, APP_VERSION)
         try:
             ready_file.unlink()
         except Exception:
             pass
         return
 
-    logger.info("New version available: %s (current: %s)", latest_tag, APP_VERSION)
+    logger.info("New version available: %s (bundle: %s, module: %s)",
+                latest_tag, cur_ver, APP_VERSION)
 
     asset = _find_asset(release)
     if not asset:

@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-01 15:37
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-01 21:37
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 10개 · 미푸시 6커밋
+- **브랜치**: `main` · 미커밋 3개 · 미푸시 0커밋
 - **최근 커밋**
+  - `e201f06` 2026-08-01 — fix(test): pty 셸 선택 검사를 현행 계약으로 갱신 — CI 릴리즈 게이트 해제
+  - `e2383d5` 2026-08-01 — build(spec): tkinter 제외 — 로컬 EXE가 Tcl 데이터 부재로 기동 못하던 문제 수정
+  - `4556fff` 2026-08-01 — feat(ui): 백그라운드 데몬 on/off 패널 — v3.7.313
   - `4b4f552` 2026-08-01 — perf(pty): 유휴 claude 세션 회수 — 안 쓰면 내리고 재연결 시 --resume 복원
   - `86ccf4c` 2026-08-01 — perf(daemons): Codex 워처 온디맨드 전환 — 안 쓰면 종료, 쓰면 자동 기동
-  - `7f43fda` 2026-08-01 — feat(daemons): 데몬별 on/off 토글 — 안 쓰는 상시 데몬 비활성화 가능
-  - `b84ae8b` 2026-08-01 — fix(server): 로그 폭주 3종 근절 — to_char 타입 불일치·jsonb 이중 파싱·끊긴 소켓 traceback
-  - `5264006` 2026-08-01 — perf(ui): 메모리 누적 차단 — 터미널 스크롤백 축소 + 채팅 배열 상한
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-01 15:26** 의도: list
@@ -276,7 +276,7 @@
 | `recall.py` | 51 | 경험 회상 스크립트 — 현재 작업과 유사한 과거 경험을 검색하여 출력. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `smoke_test.py` | 287 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
+| `smoke_test.py` 🔨 | 287 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `telegram_agent_bot.py` | 1347 | AgentBot — 터미널 1개 = 텔레그램 봇 1개. 개인채팅 1:1 PTY/stream-json |
 | `telegram_bridge.py` | 466 | Telegram Multi-Bot Bridge 진입점 — BotManager(최대 8봇 생명주기 + |
@@ -298,7 +298,7 @@
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
-| `ActivityBar.tsx` | 191 | 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수, |
+| `ActivityBar.tsx` 🔨 | 191 | 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수, |
 | `ChatSlot.tsx` 🔨 | 612 | 설명: cokacdir 패턴 채팅 UI 컴포넌트. |
 | `FileExplorer.tsx` | 557 | 설명: 파일 탐색기 사이드바 패널 컴포넌트. |
 | `FilePathText.tsx` | 110 | 설명: 텍스트 내 파일 경로를 정규식으로 감지해 클릭 가능한 링크 세그먼트로 분리 렌더. |
@@ -314,7 +314,7 @@
 | 패널 | 줄 수 | 설명 |
 |------|------|------|
 | `AgentTerminalCard.tsx` | 256 | 설명: 자율 에이전트 터미널 카드 컴포넌트. |
-| `DaemonsPanel.tsx` | 143 | 백그라운드 데몬 on/off 패널. GET/POST /api/daemons만 사용하며 판정 로직은 |
+| `DaemonsPanel.tsx` 🔨 | 143 | 백그라운드 데몬 on/off 패널. GET/POST /api/daemons만 사용하며 판정 로직은 |
 | `GitPanel.tsx` | 250 | Git 저장소 실시간 감시 패널 — 브랜치 상태, 파일 변경, 커밋 로그를 5초 폴링으로 표시 |
 | `HealPanel.tsx` | 129 | 자가치유 계측 패널 (읽기 전용). GET /api/heal/metrics를 불러 4장치 |
 | `HivePanel.tsx` | 464 | 하이브 진단 패널 — 에이전트 상태 모니터링 + 시스템 헬스 체크 + 자가 치유 UI. |
@@ -357,7 +357,7 @@
 | `test_updater_release_path.py` | 229 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` 🔨 | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
-| `test_windows_installer_toolchain.py` 🔨 | 100 | Regression checks for prerequisite-first Windows installer packaging. |
+| `test_windows_installer_toolchain.py` 🔨 | 105 | Regression checks for prerequisite-first Windows installer packaging. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
 | `FileExplorer.test.tsx` | 136 | FileExplorer 컴포넌트 |
 
@@ -397,4 +397,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-01 15:37
+> 자동 생성 완료: 2026-08-01 21:37
