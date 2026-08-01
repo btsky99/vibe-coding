@@ -153,7 +153,18 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # [2026-08-01] tkinter 제외 — 로컬 onedir 빌드가 pyi_rth__tkinter에서
+    #   "Tcl data directory _tcl_data not found"로 기동조차 못 하던 문제 해소.
+    #   [근거] 앱 코드는 tkinter를 **모듈 레벨에서 import하지 않는다**. 폴더 다이얼로그는
+    #   infra/runtime.py가 별도 파이썬 프로세스로 실행한다(pywebview GUI 스레드에서
+    #   tkinter를 직접 호출하면 충돌한다고 그 파일 주석에 명시). 즉 frozen 프로세스 안에서
+    #   tkinter가 필요한 경로가 없다. 딸려온 경로는 hiddenimports의 PIL → PIL.ImageTk 뿐이고
+    #   ImageTk/tqdm.tk 사용처는 코드베이스에 없음(검색 확인).
+    #   [부수효과] Tcl/Tk 미포함으로 배포 용량이 줄어든다.
+    #   [제약] CI(build-release.yml)는 spec이 아니라 --onefile 명령을 쓰므로 이 excludes가
+    #   적용되지 않는다. CI 빌드는 현재 정상이라 그대로 두되, CI를 spec 기반으로 바꾸면
+    #   여기 값도 함께 옮겨야 한다.
+    excludes=['tkinter', '_tkinter'],
     noarchive=False,
     optimize=0,
 )
