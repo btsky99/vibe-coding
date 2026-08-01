@@ -4,6 +4,9 @@ FILE: scripts/hook_bridge.py
 DESCRIPTION: Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입.
 
 REVISION HISTORY:
+- 2026-08-02 Claude: 앱이 떠 있으면 server.py를 절대 스폰하지 않는 가드 추가
+  (_is_app_server_running). 앱의 활성 프로젝트가 타 프로젝트일 때 슬러그 대조가
+  실패해 매 메시지마다 2번째 인스턴스를 완전 부팅시켜 터미널이 통째로 죽던 사고 차단.
 - 2026-07-16 Claude: 포트 선택에도 프로젝트 경계 — _server_port_for(슬러그 대조) 경유로
   API 호출, 자기 서버 없으면 자동 시작 경로. payload 꼬리표(c95b2ec)만으로는 타 프로젝트
   서버 '도착' 자체를 못 막던 잔여 구멍 청산.
@@ -132,6 +135,8 @@ def _resolve_caller_project(data: dict) -> tuple[str, str]:
 _LOCK_DIR     = CWD / '.ai_monitor' / 'data'
 _SERVER_PID   = _LOCK_DIR / '.server.pid'
 _AGENT_PID    = _LOCK_DIR / '.agent.pid'
+# 앱(GUI)이 직접 띄운 서버의 PID — 훅이 아니라 server.py가 기록하는 파일이라 소유자가 다르다.
+_DEV_SERVER_PID = _LOCK_DIR / '.dev_server.pid'
 
 
 def _is_process_alive(pid: int) -> bool:
@@ -240,6 +245,22 @@ def _release_lock(pid_path: Path) -> None:
 
 # [RISK#4 수정] PID 재사용 방지 — 최대 유효 시간 (초)
 _PID_MAX_AGE = 3600  # 1시간 이상 된 PID 파일은 stale로 간주
+
+
+def _is_app_server_running() -> bool:
+    """앱(GUI)이 직접 띄운 서버가 살아있는지 — **읽기 전용** 판정.
+
+    [WHY 별도 함수] _is_already_running을 쓰면 안 된다. 그쪽은 stale 판정 시 PID 파일을
+    unlink 하고 .lock 파일을 만드는데, .dev_server.pid의 소유자는 훅이 아니라 server.py다.
+    남의 상태 파일을 훅이 지우면 앱 쪽 판정이 깨진다 — 여기서는 읽기만 한다.
+
+    [형식] server.py는 PID만("4324"), 훅은 "PID 타임스탬프"로 쓴다 → 첫 토큰만 취한다.
+    """
+    try:
+        raw = _DEV_SERVER_PID.read_text(encoding='utf-8').strip().split()
+        return bool(raw) and _is_process_alive(int(raw[0]))
+    except Exception:
+        return False
 
 
 def _is_already_running(pid_path: Path) -> bool:
@@ -371,6 +392,21 @@ def _start_server(project_id: str = '') -> bool:
     # 동일 날짜 수정 참조). PID 파일보다 '실제 응답하는 서버가 있는가'가 상위 진실이다.
     if _is_server_alive(project_id):
         return True
+
+    # [과거사고 2026-08-02 — 터미널 통째 사망] 위 _is_server_alive는 /api/project-info의
+    # **활성 프로젝트 슬러그**로 대조한다. 그래서 앱이 다른 프로젝트(예: D:/ons)를 열어둔
+    # 상태에서 vibe-coding 폴더의 Claude Code가 메시지를 보내면 '내 서버 없음'으로 판정된다.
+    # 그런데 단일 인스턴스 락은 project_root 시드 해시라(instance_lock.py) 슬러그가 다르면
+    # **락에 걸리지 않고 2번째 인스턴스가 끝까지 부팅**한다 — 자체 PTY 서버를 띄우고 9000번대
+    # 포트 슬롯을 경쟁하다가, 한쪽이 닫힐 때 살아있는 터미널 세션이 전부 죽었다.
+    # (동일 경쟁의 선례가 instance_lock.py _server_port_slot_base 주석의 2026-07-22 사고.)
+    #
+    # [불변식] 앱 프로세스가 살아있는 동안 훅은 server.py를 절대 스폰하지 않는다. 앱이 이미
+    # 있는데 헤드리스 서버를 하나 더 띄워야 하는 상황은 존재하지 않는다 — 서버가 남의
+    # 프로젝트를 보고 있다면 그건 '스폰'이 아니라 '이 프로젝트로는 API를 안 쓴다'가 정답이라,
+    # False를 반환해 호출부의 fallback(cli_agent 직접 실행) 경로로 보낸다. 교차 오염도 없다.
+    if _is_app_server_running():
+        return False
 
     # [2026-03-18] PID 파일 기반 중복 방지 — 이미 서버가 실행 중이면 스킵
     if _is_already_running(_SERVER_PID):
@@ -557,7 +593,12 @@ def main():
             _notify(f'[🤖 {TERMINAL_ID}→{chosen_cli.upper()}] 자율 에이전트 시작됨: "{short_prompt}"')
     else:
         # ── 서버 미실행 → 자동 시작 시도 후 재연결, 실패 시 동기 fallback
-        _notify(f'[🤖 {TERMINAL_ID}] 백엔드 오프라인 — 자동 시작 중...')
+        # [WHY 문구 분기] 앱이 떠 있는데 "백엔드 오프라인"이라 찍히면 사용자가 서버 사망으로
+        # 오해한다. 실제로는 앱이 다른 프로젝트를 열고 있어 이 프로젝트용 API가 없을 뿐이다.
+        if _is_app_server_running():
+            _notify(f'[🤖 {TERMINAL_ID}] 앱은 실행 중이나 활성 프로젝트가 달라 API 미사용 — 로컬 실행')
+        else:
+            _notify(f'[🤖 {TERMINAL_ID}] 백엔드 오프라인 — 자동 시작 중...')
         server_started = _start_server(caller_pid)
 
         if server_started:
