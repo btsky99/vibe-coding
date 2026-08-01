@@ -12,6 +12,7 @@ REVISION HISTORY:
                      find_server_port('D--vibe-coding')=None인데 9000은 정상 응답.
 """
 
+import io
 import sys
 from pathlib import Path
 
@@ -110,6 +111,35 @@ def test_app_pid_file_is_never_mutated(monkeypatch, tmp_path):
     assert hb._is_app_server_running() is False
     assert devpid.exists(), "훅이 앱 소유 PID 파일을 삭제했다"
     assert not (tmp_path / ".dev_server.pid.lock").exists(), "훅이 앱 파일에 락을 만들었다"
+
+
+def test_app_alive_skips_offline_fallback(monkeypatch, capsys):
+    """[핵심] 앱이 살아있으면 오프라인 폴백(cli_agent)도 타지 않는다.
+
+    폴백은 claude.exe를 하나 더 띄운다. 사용자는 이미 이 CLI 세션에서 같은 프롬프트로
+    대화 중이므로 한 메시지가 API를 두 번 호출하게 되고(쿼터 이중 소모 + 429 유발),
+    백그라운드 클로드가 전경 세션과 같은 파일을 동시에 고칠 수도 있다.
+    """
+    called = {"fallback": 0, "spawn": 0}
+    monkeypatch.setattr(hb, "_fallback_subprocess",
+                        lambda *a, **k: called.__setitem__("fallback", called["fallback"] + 1))
+    monkeypatch.setattr(hb, "_start_server",
+                        lambda *a, **k: called.__setitem__("spawn", called["spawn"] + 1) or False)
+    monkeypatch.setattr(hb, "_call_api", lambda *a, **k: None)   # 자기 서버 없음
+    monkeypatch.setattr(hb, "_is_app_server_running", lambda: True)
+    monkeypatch.setattr(hb, "_inject_hive_context", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(
+        '{"cwd": "D:/vibe-coding", "prompt": "테스트 프롬프트"}'))
+
+    with pytest.raises(SystemExit) as exc:
+        hb.main()
+
+    assert exc.value.code == 0, "훅은 반드시 0으로 끝나야 한다(non-zero면 Claude 응답이 끊긴다)"
+    assert called["fallback"] == 0, "앱이 살아있는데 폴백이 클로드를 또 띄웠다"
+    assert called["spawn"] == 0, "앱이 살아있는데 server.py 스폰을 시도했다"
+    # [WHY 이 단언] 위 두 카운터만 보면 main()이 다른 경로(SKIP 접두사 등)로 조기 종료해도
+    # 통과한다 — 가드 분기를 실제로 통과했다는 증거로 안내 문구를 확인한다.
+    assert '자율 에이전트 생략' in capsys.readouterr().out
 
 
 def test_app_pid_file_accepts_both_formats(monkeypatch, tmp_path):
