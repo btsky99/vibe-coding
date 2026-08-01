@@ -96,5 +96,10 @@ def test_pty_resolves_real_windows_cli_before_launch():
     assert "resolveWindowsCli('claude')" in pty_server
     assert "resolveWindowsCli('codex')" in pty_server
     assert "resolveWindowsCli('agy')" in pty_server
-    assert "agent === 'shell' && BASH_AVAILABLE" in pty_server
+    # [2026-08-01 갱신] 예전엔 `agent === 'shell' && BASH_AVAILABLE`로 Git Bash를 골랐지만
+    # 맥/리눅스 포팅(2026-07-22) 때 셸 선택이 플랫폼 분기로 재설계됐다(POSIX=로그인 셸,
+    # Windows=cmd.exe). 테스트만 옛 문자열을 붙들고 있어 CI 릴리즈가 pytest 게이트에서
+    # 막혔다(7/30 빌드 실패). 검사 대상을 살아있는 계약으로 옮긴다.
+    assert "function posixLoginShell()" in pty_server
+    assert "shell = 'cmd.exe'" in pty_server
     assert "ptyProcess.write(agentLine(interactiveAgentCommand" in pty_server
