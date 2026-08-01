@@ -187,27 +187,79 @@ def run_telegram_bridge(env: DaemonEnv) -> None:
         pass
     print(f"[*] Telegram Bridge 자동 시작됨 (PID={child.pid})")
 
+# Codex를 '사용 중'으로 볼 시간 창 — 이 시간 안에 히스토리가 갱신됐으면 워처를 띄운다.
+# [WHY 10분] Codex 한 턴의 생각/응답 간격보다 충분히 길어야 대화 중간에 워처가 죽지 않는다.
+_CODEX_ACTIVE_WINDOW_SEC = 10 * 60
+_CODEX_SUPERVISOR_INTERVAL_SEC = 60
+
+
+def _codex_last_activity(codex_home: Path) -> float:
+    """Codex 홈에서 가장 최근 변경 시각(epoch). 없으면 0.
+
+    [WHY 프로세스 목록이 아니라 파일 mtime] 프로세스 스캔은 60초마다 전체 프로세스를 훑어야 해
+      감시 비용이 감시 대상만큼 커진다. 히스토리 파일 stat 2번이면 충분하고, Codex가 실제로
+      기록을 남길 때만 워처가 할 일이 생기므로 신호로도 정확하다.
+    """
+    latest = 0.0
+    for p in (codex_home / 'history.jsonl', codex_home / 'sessions'):
+        try:
+            latest = max(latest, p.stat().st_mtime)
+        except OSError:
+            pass
+    return latest
+
+
 def run_codex_pg_watcher(env: DaemonEnv) -> None:
+    """[온디맨드] Codex를 쓸 때만 워처를 띄우고, 안 쓰면 내려서 CPU/메모리를 회수한다.
+
+    [WHY 2026-08-01] 기존에는 부팅 시 무조건 띄워 5초 주기로 히스토리를 폴링했다. Codex를
+      쓰지 않는 PC에서도 하루 17,280회를 돌아 CPU 15,140초(4.2시간)를 소비했다 — 실측 기준
+      server.py 다음으로 큰 CPU 소비자였다. 저사양 PC에서는 이 고정 비용이 그대로 압박이 된다.
+    [무손실 근거] 워처는 codex_pg_watcher_state.json 의 `seen` 집합(최근 5000키)을 재로딩하므로
+      죽였다 살려도 이미 기록한 항목을 건너뛴다. 중단 중 쌓인 항목은 재기동 후 따라잡는다.
+      이 상태 파일이 사라지면 무손실 보장이 깨지므로 워처의 state 저장을 제거하지 말 것.
+    [불변식] 자식은 반드시 env.child_procs 에 append — cleanup_child_procs가 이 리스트만 종료한다.
+      내려보낼 때는 리스트에서도 제거해야 종료 시 죽은 핸들을 kill하려다 예외가 나지 않는다.
+    """
     if not env.scripts_dir:
         return
     watcher_script = env.scripts_dir / "codex_pg_watcher.py"
-    if watcher_script.exists():
-        _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-        if not _python_cmds:
-            print("[!] run_codex_pg_watcher: Python interpreter not found")
-            return
-        python_exe = _python_cmds[0]
-        # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
-        child = proc.popen(
-            [python_exe, str(watcher_script), "--interval", "5"],
-            cwd=str(env.project_root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding='utf-8',
-            errors='replace',
-        )
-        env.child_procs.append(child)
-        print("[*] Codex pg_logs watcher started")
+    if not watcher_script.exists():
+        return
+    _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
+    if not _python_cmds:
+        print("[!] run_codex_pg_watcher: Python interpreter not found")
+        return
+    python_exe = _python_cmds[0]
+    codex_home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+    child = None
+
+    while True:
+        try:
+            active = (time.time() - _codex_last_activity(codex_home)) < _CODEX_ACTIVE_WINDOW_SEC
+            if child is not None and child.poll() is not None:
+                child = None                      # 스스로 죽은 경우 정리 후 재기동 대상으로
+            if active and child is None:
+                child = proc.popen(
+                    [python_exe, str(watcher_script), "--interval", "5"],
+                    cwd=str(env.project_root),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    encoding='utf-8', errors='replace',
+                )
+                env.child_procs.append(child)
+                print("[*] Codex 활동 감지 — pg_logs 워처 시작")
+            elif not active and child is not None:
+                try:
+                    child.terminate()
+                except OSError:
+                    pass
+                if child in env.child_procs:
+                    env.child_procs.remove(child)
+                child = None
+                print("[*] Codex 유휴 — pg_logs 워처 종료 (활동 시 자동 재시작)")
+        except Exception as e:
+            print(f"[!] codex 워처 감독 오류(무시하고 계속): {e}")
+        time.sleep(_CODEX_SUPERVISOR_INTERVAL_SEC)
 
 def run_orchestrator_daemon(env: DaemonEnv) -> None:
     # 하이브 오케스트레이터 데몬 — assigned_to='all' 태스크를
@@ -669,39 +721,72 @@ def run_heartbeat(env: DaemonEnv) -> None:
 #        또는 환경변수  VIBE_DISABLE_DAEMONS="codex_watcher,telegram"  (테스트/1회성)
 # [제약] lan_bridge는 run_lan_bridge 내부에도 자체 게이트(lan_bridge_enabled)가 있다 —
 #   이중 게이트지만 어느 쪽이든 OFF면 안 뜨므로 안전하다. 내부 게이트를 지우지 말 것.
+# [불변식] 'thread' 값은 실제 기동 스레드명과 반드시 일치 — daemon_status()가 이 이름으로
+#   threading.enumerate()를 조회해 "실행 중" 배지를 만든다. 이름이 어긋나면 UI는 살아있는
+#   데몬을 죽었다고 표시한다. start_all_daemons가 이 값을 name=으로 그대로 쓰므로
+#   레지스트리가 유일한 원천이다(호출부에 스레드명 재작성 금지).
 DAEMON_TOGGLES: dict = {
-    'watchdog':      '하이브 워치독 (프로세스 감시)',
-    'telegram':      '텔레그램 브릿지 (폰에서 지시)',
-    'codex_watcher': 'Codex PG 워처 (Codex 미사용이면 꺼도 됨)',
-    'orchestrator':  '오케스트레이터 데몬',
-    'doc_generators': 'PROJECT_MAP/HIVEMIND 자동 갱신 (30분 주기)',
-    'agent_sync':    '에이전트 상태 동기화',
-    'zettel_sync':   '제텔카스텐 동기화',
-    'zettel_refine': '제텔카스텐 정제',
-    'commit_watcher': '커밋 감시',
-    'embed_backfill': '임베딩 백필 (회상 v2 검색 품질)',
-    'heartbeat':     '자율 클로드 하트비트',
-    'lan_bridge':    'LAN 브리지 (별도 토글 lan_bridge_enabled도 필요)',
+    'watchdog':      {'label': '하이브 워치독 (프로세스 감시)', 'thread': 'Watchdog'},
+    'telegram':      {'label': '텔레그램 브릿지 (폰에서 지시)', 'thread': 'TelegramBridge'},
+    'codex_watcher': {'label': 'Codex PG 워처 (온디맨드 — Codex 쓸 때만 자동 기동)',
+                      'thread': 'CodexPGWatcher'},
+    'orchestrator':  {'label': '오케스트레이터 데몬', 'thread': 'OrchestratorDaemon'},
+    'doc_generators': {'label': 'PROJECT_MAP/HIVEMIND 자동 갱신 (30분 주기)', 'thread': 'DocGeneratorsDaemon'},
+    'agent_sync':    {'label': '에이전트 상태 동기화', 'thread': 'AgentSyncDaemon'},
+    'zettel_sync':   {'label': '제텔카스텐 동기화', 'thread': 'ZettelSync'},
+    'zettel_refine': {'label': '제텔카스텐 정제', 'thread': 'ZettelRefine'},
+    'commit_watcher': {'label': '커밋 감시', 'thread': 'CommitWatcher'},
+    'embed_backfill': {'label': '임베딩 백필 (회상 v2 검색 품질)', 'thread': 'EmbedBackfill'},
+    'heartbeat':     {'label': '자율 클로드 하트비트', 'thread': 'Heartbeat'},
+    'lan_bridge':    {'label': 'LAN 브리지 (별도 토글 lan_bridge_enabled도 필요)', 'thread': 'LanBridge'},
 }
 
 
-def _disabled_daemons(env: DaemonEnv) -> set:
+def _disabled_daemons(config_file: Path) -> set:
     """끄기로 지정된 데몬 키 집합. 설정 파싱 실패는 '아무것도 끄지 않음'으로 흡수한다.
 
     [WHY 실패 시 ON] 설정이 깨졌을 때 데몬이 조용히 안 뜨면 원인 추적이 매우 어렵다.
       기능이 도는 쪽이 안전한 실패 방향.
+    [WHY env가 아니라 Path] HTTP 핸들러(daemons_api)는 main() 로컬인 _daemon_env()에
+      접근할 수 없다. 필요한 것이 config_file 하나뿐이라 DaemonEnv 의존을 끊었다.
     """
     off = set()
     raw = os.environ.get('VIBE_DISABLE_DAEMONS', '')
     off |= {k.strip() for k in raw.split(',') if k.strip()}
     try:
-        cfg = json.loads(env.config_file.read_text(encoding='utf-8')) if env.config_file.exists() else {}
+        cfg = json.loads(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}
         toggles = cfg.get('daemons', {})
         if isinstance(toggles, dict):
             off |= {k for k, v in toggles.items() if v is False}
     except (json.JSONDecodeError, OSError):
         pass
     return off
+
+
+def daemon_status(config_file: Path) -> list:
+    """UI용 데몬 목록 — [{key, label, enabled, running, source}]. 순서는 레지스트리 정의 순.
+
+    [WHY running과 enabled를 따로]  토글은 다음 부팅부터 적용된다(스레드를 런타임에 죽이면
+      subprocess 자식과 PG 커넥션이 고아가 되므로 재기동 방식이 안전). enabled=False인데
+      running=True면 UI가 "재시작 후 적용"을 정확히 안내할 수 있다 — 이 두 값을 합치면
+      사용자는 껐는데 왜 여전히 CPU를 먹는지 알 방법이 없다.
+    [제약] running은 스레드 존재 여부일 뿐 '일하는 중'이 아니다 — embed_backfill/heartbeat는
+      대부분 sleep 상태로 살아있다.
+    """
+    off = _disabled_daemons(config_file)
+    env_off = {k.strip() for k in os.environ.get('VIBE_DISABLE_DAEMONS', '').split(',') if k.strip()}
+    alive = {t.name for t in threading.enumerate()}
+    return [
+        {
+            'key': key,
+            'label': meta['label'],
+            'enabled': key not in off,
+            'running': meta['thread'] in alive,
+            # env: 환경변수로 끈 것은 config를 고쳐도 안 켜진다 → UI에서 토글을 잠근다.
+            'source': 'env' if key in env_off else 'config',
+        }
+        for key, meta in DAEMON_TOGGLES.items()
+    ]
 
 
 def start_all_daemons(env: DaemonEnv, agent_status: dict,
@@ -712,32 +797,34 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     [불변식] env는 caller가 HTTP_PORT 확정 후 생성해 주입 — DaemonEnv late-binding
       계약 유지(모듈 import 시점 포트 고정 금지). agent_sync_daemon만 env가 아닌
       (agent_status, lock) 시그니처라 별도 처리.
-    [제약] name= 값은 기존 server.py 스레드명을 verbatim 보존 — 로그/디버깅 추적성
-      및 PTY-Watchdog 등 다른 스레드명과의 관례 일관성. run_watchdog/
-      run_telegram_bridge는 원래 name 미지정이라 그대로 둔다.
+    [제약] 스레드명은 DAEMON_TOGGLES['thread']가 유일 원천 — 기존 server.py 이름을
+      그대로 옮겨왔고(로그 추적성), watchdog/telegram만 무명이던 것을 이름 부여로
+      승격했다(daemon_status의 실행 중 판정에 이름이 필요). 스레드명에 의존하는
+      외부 코드는 없음을 확인하고 바꿨다.
     """
-    off = _disabled_daemons(env)
+    off = _disabled_daemons(env.config_file)
     skipped = []
 
-    def _t(key, target, args, name=None):
+    def _t(key, target, args):
         """토글 OFF면 스레드를 아예 만들지 않는다(기동 후 내부에서 return하면 스레드가 남음)."""
         if key in off:
             skipped.append(key)
             return
-        threading.Thread(target=target, args=args, name=name, daemon=True).start()
+        threading.Thread(target=target, args=args,
+                         name=DAEMON_TOGGLES[key]['thread'], daemon=True).start()
 
     _t('watchdog', run_watchdog, (env,))
     _t('telegram', run_telegram_bridge, (env,))
-    _t('codex_watcher', run_codex_pg_watcher, (env,), 'CodexPGWatcher')
-    _t('orchestrator', run_orchestrator_daemon, (env,), 'OrchestratorDaemon')
-    _t('doc_generators', run_doc_generators_daemon, (env,), 'DocGeneratorsDaemon')
-    _t('agent_sync', agent_sync_daemon, (agent_status, agent_status_lock), 'AgentSyncDaemon')
-    _t('zettel_sync', run_zettel_sync, (env,), 'ZettelSync')
-    _t('zettel_refine', run_zettel_refine, (env,), 'ZettelRefine')
-    _t('commit_watcher', run_commit_watcher, (env,), 'CommitWatcher')
-    _t('embed_backfill', run_embedding_backfill, (env,), 'EmbedBackfill')
-    _t('heartbeat', run_heartbeat, (env,), 'Heartbeat')
-    _t('lan_bridge', run_lan_bridge, (env,), 'LanBridge')
+    _t('codex_watcher', run_codex_pg_watcher, (env,))
+    _t('orchestrator', run_orchestrator_daemon, (env,))
+    _t('doc_generators', run_doc_generators_daemon, (env,))
+    _t('agent_sync', agent_sync_daemon, (agent_status, agent_status_lock))
+    _t('zettel_sync', run_zettel_sync, (env,))
+    _t('zettel_refine', run_zettel_refine, (env,))
+    _t('commit_watcher', run_commit_watcher, (env,))
+    _t('embed_backfill', run_embedding_backfill, (env,))
+    _t('heartbeat', run_heartbeat, (env,))
+    _t('lan_bridge', run_lan_bridge, (env,))
 
     # [WHY 로그] 데몬이 안 뜬 이유가 로그에 없으면 "왜 텔레그램이 안 되지"를 추적할 방법이 없다.
     #   설정으로 끈 것과 버그로 안 뜬 것을 구분하는 유일한 단서다.
