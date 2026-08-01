@@ -814,7 +814,13 @@ def handle_get(handler, path: str, params: dict,
                 _cur = query_rows("SELECT title FROM hive_tasks WHERE assigned_to='claude-auto' "
                                   "AND status='in_progress' ORDER BY updated_at DESC LIMIT 1;")
                 payload['current_task'] = (_cur[0].get('title') if _cur else '') or ''
-                _rec = query_rows("SELECT title, status, to_char(updated_at,'MM-DD HH24:MI') AS at "
+                # [과거사고 2026-08-01] hive_tasks.updated_at은 timestamp가 아니라 **text**(ISO 문자열).
+                #   to_char(text, ...) 오버로드가 없어 매 폴링마다 쿼리가 통째로 실패했고,
+                #   query_rows가 예외를 삼켜 화면엔 "0건"으로만 보였다(무증상). 대신 server.log에
+                #   에러+HINT 4줄이 폴링 주기마다 쌓여 48시간에 4,800건/로그 61MB로 불어났다.
+                #   → ::timestamptz 캐스트로 오버로드를 맞춘다. 컬럼 타입을 바꾸면 이 값을 문자열로
+                #   비교/저장하는 다른 경로가 깨지므로 쿼리 쪽에서 캐스트하는 편이 안전하다.
+                _rec = query_rows("SELECT title, status, to_char(updated_at::timestamptz,'MM-DD HH24:MI') AS at "
                                   "FROM hive_tasks WHERE assigned_to='claude-auto' "
                                   "AND status IN ('done','blocked') ORDER BY updated_at DESC LIMIT 5;")
                 payload['recent'] = _rec or []

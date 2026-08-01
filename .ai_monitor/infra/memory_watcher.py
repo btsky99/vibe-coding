@@ -147,7 +147,13 @@ class MemoryWatcher(threading.Thread):
             entries = []
             for r in rows:
                 e = dict(r)
-                e['tags'] = json.loads(e.get('tags', '[]'))
+                # [과거사고 2026-08-01] hive_memory.tags는 **jsonb** → psycopg2가 이미 list로
+                #   역직렬화해 넘긴다. 여기서 json.loads(list)를 부르면 TypeError로 함수 전체가
+                #   except로 빠져 역동기화가 10분마다 계속 실패했다(48시간 943건 무한 반복).
+                #   증상이 로그에만 남아 "공유 메모리가 MEMORY.md에 안 들어온다"로 관측됐다.
+                #   → 이미 list면 그대로, 문자열(레거시 text 컬럼 환경)이면 파싱.
+                _tags = e.get('tags') or []
+                e['tags'] = json.loads(_tags) if isinstance(_tags, str) else list(_tags)
                 entries.append(e)
 
             # 섹션 구성

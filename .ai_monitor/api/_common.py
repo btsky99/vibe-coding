@@ -25,12 +25,23 @@ def json_response(handler, data, status: int = 200) -> None:
     [WHY] Content-Length를 명시해 HTTP keep-alive에서 응답 경계가 모호해지지 않게 한다.
     """
     body = json.dumps(data, ensure_ascii=False, default=str).encode('utf-8')
-    handler.send_response(status)
-    handler.send_header('Content-Type', 'application/json;charset=utf-8')
-    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
-    handler.send_header('Content-Length', str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(status)
+        handler.send_header('Content-Type', 'application/json;charset=utf-8')
+        handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+        handler.send_header('Content-Length', str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+    except (ConnectionError, BrokenPipeError):
+        # [과거사고 2026-08-01] 클라이언트(WebView UI)가 응답을 기다리다 fetch를 취소하면
+        #   여기 write가 ConnectionAbortedError(WinError 10053)로 터진다. 이건 정상 상황인데,
+        #   예외가 핸들러 밖으로 나가면 BaseHTTPRequestHandler가 스택 전체를 stderr에 찍는다.
+        #   UI 렌더러가 메모리 압박으로 느려질수록 취소가 늘어 → 48시간에 traceback 7,200건,
+        #   server.log 61MB → 로그 쓰기 I/O가 서버를 더 느리게 만드는 악순환이 됐다.
+        # [WHY 흡수] 상대가 이미 끊은 소켓이라 재시도/에러응답 모두 불가능. 호출자가 할 수 있는
+        #   일이 없으므로 조용히 종료한다. ConnectionError 계열만 좁게 잡아 진짜 버그(직렬화
+        #   실패 등)는 그대로 올라가게 둔다.
+        pass
 
 
 def read_body(handler) -> dict:
