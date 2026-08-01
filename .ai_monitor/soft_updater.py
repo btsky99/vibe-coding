@@ -105,11 +105,30 @@ def _remote_head():
 
 def _exe_version() -> str:
     """현재 EXE(번들)의 _version — min_exe 게이트 비교 기준.
+
     [불변식] SRC가 아니라 번들 버전. frozen은 MEIPASS, dev는 옆 _version.py.
+    [중복 제거 2026-08-01] 같은 로직이 updater.bundle_version()에도 있어 한쪽만 고쳐지는
+      사고가 실제로 났다(updater가 소스 버전을 번들로 오인해 업데이트 영구 미감지).
+      updater를 정본으로 위임하고, import 실패 시에만 아래 로컬 폴백을 쓴다.
+      [예외] boot.py는 앱 모듈을 import하면 안 되므로(PyInstaller가 PYZ에 넣어버려
+      run-from-source 전제가 깨짐) 자체 구현을 유지한다 — 의도된 3번째 사본이다.
     """
-    for c in (Path(getattr(sys, "_MEIPASS", "")) / "_version.py",
-              Path(getattr(sys, "_MEIPASS", "")) / "_appseed" / ".ai_monitor" / "_version.py",
-              Path(__file__).resolve().parent / "_version.py"):
+    try:
+        from updater import bundle_version
+        return bundle_version()
+    except Exception:
+        pass
+    # ── 폴백 ──
+    # [버그수정] _MEIPASS가 없을 때(비frozen) Path("")/"_version.py"는 **cwd 상대경로**가 되어
+    #   작업 디렉토리에 우연히 있는 _version.py를 번들 버전으로 읽는다. VIBE_SRC_DIR opt-in
+    #   경로(E2E 테스트)가 정확히 비frozen이라 실제로 노출되는 결함이었다.
+    candidates = []
+    mei = getattr(sys, "_MEIPASS", "")
+    if mei:
+        candidates.append(Path(mei) / "_version.py")
+        candidates.append(Path(mei) / "_appseed" / ".ai_monitor" / "_version.py")
+    candidates.append(Path(__file__).resolve().parent / "_version.py")
+    for c in candidates:
         try:
             if c.exists():
                 ns: dict = {}
