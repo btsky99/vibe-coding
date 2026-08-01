@@ -659,6 +659,51 @@ def run_heartbeat(env: DaemonEnv) -> None:
         print(f"[!] heartbeat 데몬 시작 실패: {e}")
 
 
+# ── 데몬 토글 레지스트리 ──────────────────────────────────────────────────
+# [WHY 2026-08-01] 실측: 상시 데몬 6종이 ~211MB + CPU를 점유하는데 토글은 lan_bridge 하나뿐이라
+#   안 쓰는 기능도 무조건 떴다. Codex를 안 쓰는 PC에서 codex_pg_watcher가 CPU 15,140초(4.2시간),
+#   텔레그램 미사용 PC에서 telegram_bridge가 35MB를 점유. 저사양 PC에서는 이게 그대로 압박이 된다.
+# [불변식] 기본값은 전부 True — 토글 도입이 기존 동작을 바꾸면 안 된다. 끄는 것은 사용자 선택이며,
+#   기본값을 False로 바꾸려면 그 기능이 죽는다는 것을 사용자가 알고 결정해야 한다.
+# [설정] config.json  {"daemons": {"codex_watcher": false, "telegram": false}}
+#        또는 환경변수  VIBE_DISABLE_DAEMONS="codex_watcher,telegram"  (테스트/1회성)
+# [제약] lan_bridge는 run_lan_bridge 내부에도 자체 게이트(lan_bridge_enabled)가 있다 —
+#   이중 게이트지만 어느 쪽이든 OFF면 안 뜨므로 안전하다. 내부 게이트를 지우지 말 것.
+DAEMON_TOGGLES: dict = {
+    'watchdog':      '하이브 워치독 (프로세스 감시)',
+    'telegram':      '텔레그램 브릿지 (폰에서 지시)',
+    'codex_watcher': 'Codex PG 워처 (Codex 미사용이면 꺼도 됨)',
+    'orchestrator':  '오케스트레이터 데몬',
+    'doc_generators': 'PROJECT_MAP/HIVEMIND 자동 갱신 (30분 주기)',
+    'agent_sync':    '에이전트 상태 동기화',
+    'zettel_sync':   '제텔카스텐 동기화',
+    'zettel_refine': '제텔카스텐 정제',
+    'commit_watcher': '커밋 감시',
+    'embed_backfill': '임베딩 백필 (회상 v2 검색 품질)',
+    'heartbeat':     '자율 클로드 하트비트',
+    'lan_bridge':    'LAN 브리지 (별도 토글 lan_bridge_enabled도 필요)',
+}
+
+
+def _disabled_daemons(env: DaemonEnv) -> set:
+    """끄기로 지정된 데몬 키 집합. 설정 파싱 실패는 '아무것도 끄지 않음'으로 흡수한다.
+
+    [WHY 실패 시 ON] 설정이 깨졌을 때 데몬이 조용히 안 뜨면 원인 추적이 매우 어렵다.
+      기능이 도는 쪽이 안전한 실패 방향.
+    """
+    off = set()
+    raw = os.environ.get('VIBE_DISABLE_DAEMONS', '')
+    off |= {k.strip() for k in raw.split(',') if k.strip()}
+    try:
+        cfg = json.loads(env.config_file.read_text(encoding='utf-8')) if env.config_file.exists() else {}
+        toggles = cfg.get('daemons', {})
+        if isinstance(toggles, dict):
+            off |= {k for k, v in toggles.items() if v is False}
+    except (json.JSONDecodeError, OSError):
+        pass
+    return off
+
+
 def start_all_daemons(env: DaemonEnv, agent_status: dict,
                       agent_status_lock: threading.Lock) -> None:
     """부팅 4단계 — 백그라운드 데몬 스레드 10종을 일괄 기동.
@@ -671,19 +716,36 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
       및 PTY-Watchdog 등 다른 스레드명과의 관례 일관성. run_watchdog/
       run_telegram_bridge는 원래 name 미지정이라 그대로 둔다.
     """
-    def _t(target, args, name=None):
+    off = _disabled_daemons(env)
+    skipped = []
+
+    def _t(key, target, args, name=None):
+        """토글 OFF면 스레드를 아예 만들지 않는다(기동 후 내부에서 return하면 스레드가 남음)."""
+        if key in off:
+            skipped.append(key)
+            return
         threading.Thread(target=target, args=args, name=name, daemon=True).start()
 
-    _t(run_watchdog, (env,))
-    _t(run_telegram_bridge, (env,))
-    _t(run_codex_pg_watcher, (env,), 'CodexPGWatcher')
-    _t(run_orchestrator_daemon, (env,), 'OrchestratorDaemon')
-    _t(run_doc_generators_daemon, (env,), 'DocGeneratorsDaemon')
-    _t(agent_sync_daemon, (agent_status, agent_status_lock), 'AgentSyncDaemon')
-    _t(run_zettel_sync, (env,), 'ZettelSync')
-    _t(run_zettel_refine, (env,), 'ZettelRefine')
-    _t(run_commit_watcher, (env,), 'CommitWatcher')
-    _t(run_embedding_backfill, (env,), 'EmbedBackfill')
-    _t(run_heartbeat, (env,), 'Heartbeat')
-    _t(run_lan_bridge, (env,), 'LanBridge')
+    _t('watchdog', run_watchdog, (env,))
+    _t('telegram', run_telegram_bridge, (env,))
+    _t('codex_watcher', run_codex_pg_watcher, (env,), 'CodexPGWatcher')
+    _t('orchestrator', run_orchestrator_daemon, (env,), 'OrchestratorDaemon')
+    _t('doc_generators', run_doc_generators_daemon, (env,), 'DocGeneratorsDaemon')
+    _t('agent_sync', agent_sync_daemon, (agent_status, agent_status_lock), 'AgentSyncDaemon')
+    _t('zettel_sync', run_zettel_sync, (env,), 'ZettelSync')
+    _t('zettel_refine', run_zettel_refine, (env,), 'ZettelRefine')
+    _t('commit_watcher', run_commit_watcher, (env,), 'CommitWatcher')
+    _t('embed_backfill', run_embedding_backfill, (env,), 'EmbedBackfill')
+    _t('heartbeat', run_heartbeat, (env,), 'Heartbeat')
+    _t('lan_bridge', run_lan_bridge, (env,), 'LanBridge')
+
+    # [WHY 로그] 데몬이 안 뜬 이유가 로그에 없으면 "왜 텔레그램이 안 되지"를 추적할 방법이 없다.
+    #   설정으로 끈 것과 버그로 안 뜬 것을 구분하는 유일한 단서다.
+    if skipped:
+        print(f"[*] 데몬 {len(skipped)}종 비활성(config daemons/VIBE_DISABLE_DAEMONS): "
+              f"{', '.join(sorted(skipped))}")
+    unknown = off - set(DAEMON_TOGGLES)
+    if unknown:
+        print(f"[!] 알 수 없는 데몬 키 무시됨: {', '.join(sorted(unknown))} "
+              f"(가능한 키: {', '.join(sorted(DAEMON_TOGGLES))})")
 
