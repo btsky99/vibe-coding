@@ -17,6 +17,7 @@
 
 import subprocess
 import sys
+import tempfile
 import time
 import json
 import os
@@ -141,6 +142,21 @@ def run_smoke_test(exe_path: Path) -> bool:
     env = os.environ.copy()
     env['VIBE_SMOKE_TEST'] = '1'  # 서버에서 smoke test 모드 감지용
     env['VIBE_PORT_BASE'] = str(SMOKE_PORT_BASE)  # 격리된 포트 대역 강제
+
+    # ── 데이터 디렉토리 격리 (2026-08-01) ──────────────────────────────────
+    # [과거사고] frozen EXE는 %APPDATA%\VibeCoding을 데이터 디렉토리로 쓴다 — 즉 smoke가
+    #   **설치본과 같은 디렉토리**를 공유했다. 실측 피해:
+    #     · soft_update_ready.json 덮어씀 → 설치본이 그 시각에 업데이트를 확인한 것처럼 보여
+    #       "왜 업데이트가 안 뜨지" 오진을 유발
+    #     · orchestrator.pid / telegram_bridge.pid 덮어씀 → 다음에 설치본을 켜면
+    #       run_telegram_bridge가 남의 pid를 보고 "이미 실행 중"으로 판정해 브릿지가 안 뜰 수 있음
+    #   포트는 VIBE_PORT_BASE로 격리했지만 데이터는 공유라 반쪽 격리였다.
+    # [불변식] pgdata는 격리하지 않는다 — PG는 설치본과 공유하는 것이 정상이고(같은 포트로
+    #   접속), 여기서 분리하면 smoke가 빈 DB를 만들며 기동 시간이 크게 늘어난다.
+    smoke_data = Path(tempfile.gettempdir()) / 'vibe-smoke-data'
+    smoke_data.mkdir(parents=True, exist_ok=True)
+    env['VIBE_DATA_DIR'] = str(smoke_data)
+    print(f'[smoke] 데이터 디렉토리 격리: {smoke_data}')
     # [과거사고 2026-07-16 / R18~R20 한계 해소] boot.py는 managed checkout
     # (%LOCALAPPDATA%/VibeCoding/app — soft 업데이트가 마지막 적용한 구 소스)을 실행
     # → 동기화 없이는 smoke가 "푸시하려는 내 소스"가 아닌 구 릴리즈 코드로 PASS를 내는

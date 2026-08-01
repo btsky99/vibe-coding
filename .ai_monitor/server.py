@@ -641,7 +641,18 @@ if __version__ == "0.0.0-unknown":
           file=sys.stderr)
 
 # 데이터 디렉토리: 배포 모드 → %APPDATA%\VibeCoding, 개발 모드 → .ai_monitor/data
-if getattr(sys, 'frozen', False):
+# [격리 2026-08-01] VIBE_DATA_DIR로 강제 지정 가능.
+#   [WHY] smoke_test는 frozen EXE를 띄우므로 **설치본과 같은 %APPDATA%\VibeCoding**을 썼다.
+#   그 결과 테스트가 설치본의 soft_update_ready.json / orchestrator.pid /
+#   telegram_bridge.pid를 덮어썼다. 특히 pid 파일은 run_telegram_bridge가 "이미 실행 중"
+#   판정에 쓰므로, 테스트 후 설치본을 켜면 텔레그램 브릿지가 조용히 안 뜰 수 있다.
+#   포트는 VIBE_PORT_BASE로 이미 격리했으나 데이터 디렉토리는 공유라 반쪽 격리였다.
+#   [실측] 2026-08-01 smoke 실행이 설치본 데이터 디렉토리에 15:36/15:40 흔적을 남겨,
+#   설치본이 그 시각에 업데이트를 확인한 것처럼 보이는 오진까지 유발했다.
+_data_override = os.environ.get('VIBE_DATA_DIR', '').strip()
+if _data_override:
+    DATA_DIR = Path(_data_override)
+elif getattr(sys, 'frozen', False):
     if os.name == 'nt':
         DATA_DIR = Path(os.getenv('APPDATA', '')) / "VibeCoding"
     else:
