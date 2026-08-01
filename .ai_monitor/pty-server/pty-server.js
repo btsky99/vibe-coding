@@ -150,6 +150,44 @@ const PTY_TTL_MS = parseInt(process.env.PTY_TTL_MS || String(60 * 60 * 1000), 10
 const PTY_IDLE_THRESHOLD_MS = parseInt(process.env.PTY_IDLE_THRESHOLD_MS || String(10 * 60 * 1000), 10);
 const PTY_TTL_SWEEP_MS = parseInt(process.env.PTY_TTL_SWEEP_MS || String(5 * 60 * 1000), 10);
 
+// ── 유휴 claude 세션 회수 (온디맨드) ──────────────────────────────────────
+// [WHY] claude.exe는 슬롯당 ~430MB를 쓰는데(실측 2026-08-01), 대기 중인 세션도 같은 양을
+//   점유한다. 실측에서 claude 4개 중 실제 작업 중은 1개뿐 — 3개가 1.3GB를 놀면서 잡고 있었다.
+//   메모리가 포화되면 렌더러 GC가 길어져 WS ping/pong을 놓치고 연결이 끊기며, 그 끊김은
+//   비정상 종료라 세션이 detach 상태로 더 오래 살아남아 상황을 악화시키는 악순환이 된다.
+// [불변식 — 기본 OFF] 0이면 회수하지 않는다. 진행 중 작업을 죽일 위험이 있는 기능이라
+//   사용자가 명시적으로 켤 때만 동작해야 한다. 켜려면 PTY_RECLAIM_IDLE_MS=1200000(20분) 등.
+// [무손실 근거] 죽이기 전 claude 세션 ID를 확보해 두고, 프론트의 기존 자동 재연결이
+//   올라올 때 `--resume <id>`로 복원한다. 대화 맥락은 유지되나 **터미널 화면(스크롤백)은
+//   복원되지 않는다** — 이건 구조적 한계이므로 사용자에게 안내 문구를 남긴다.
+const PTY_RECLAIM_IDLE_MS = parseInt(process.env.PTY_RECLAIM_IDLE_MS || '0', 10);
+
+// sessionId → claude 세션 UUID. 회수 시 기록하고, 다음 스폰이 소비하며 지운다(1회성).
+const pendingResume = new Map();
+
+/**
+ * cwd에 해당하는 claude 프로젝트 디렉토리에서 가장 최근 세션 UUID를 찾는다.
+ * [규약] Claude Code는 ~/.claude/projects/<cwd의 : \ / 를 -로 치환>/<uuid>.jsonl 로 저장한다.
+ *   예) D:\vibe-coding → D--vibe-coding (실측 확인).
+ * [제약] 같은 프로젝트를 여는 슬롯이 여럿이면 최신 mtime만으로는 어느 슬롯 것인지 모호하다.
+ *   그래서 이미 다른 세션이 선점한 UUID(claimed)는 제외한다. 그래도 애매하면 null을 반환해
+ *   **복원을 포기**한다 — 남의 대화를 이어받는 것이 새로 시작하는 것보다 훨씬 나쁘다.
+ */
+function findClaudeSessionId(cwd, claimed) {
+  try {
+    const slug = String(cwd).replace(/[:\\/]/g, '-');
+    const dir = path.join(os.homedir(), '.claude', 'projects', slug);
+    const files = fs.readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .map((f) => ({ id: f.slice(0, -6), mtime: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .filter((f) => !claimed.has(f.id))
+      .sort((a, b) => b.mtime - a.mtime);
+    return files.length ? files[0].id : null;
+  } catch (e) {
+    return null;   // 디렉토리 부재/권한 등 — 복원 없이 새 세션으로 뜬다(기능 저하일 뿐 사고 아님)
+  }
+}
+
 // ANSI 이스케이프 코드 제거용 정규식
 const ANSI_ESCAPE = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
@@ -366,6 +404,26 @@ function scheduleDetachedCleanup(sessionId) {
 //   - !slotId.startsWith('O')  (오피스 풀 면제 — 별도 정책)
 //   - 세션 시작 후 TTL_MS 경과
 //   - lastInputAt/lastOutputAt 모두 IDLE_THRESHOLD_MS 무변화
+/**
+ * 회수(reclaim) 대상 판정 — UI에 **붙어 있지만** 놀고 있는 claude 세션.
+ * 기존 isSessionIdleForCleanup은 detach된 세션만 보므로 열어둔 채 방치된 세션은 못 잡는다.
+ * [불변식] 입력과 출력이 **둘 다** 정지해야 한다. claude가 긴 응답을 생성하는 중에는
+ *   입력이 없어도 출력이 계속 흐르므로, 둘 중 하나라도 최근이면 살아있는 것으로 본다.
+ *   (한쪽만 보면 답변 생성 중인 세션을 죽여 작업이 날아간다.)
+ */
+function isSessionIdleForReclaim(session, now) {
+  if (!PTY_RECLAIM_IDLE_MS) return false;          // 0 = 기능 자체가 꺼짐(기본값)
+  if (!session || session.agent !== 'claude') return false;
+  if (!session.attached) return false;             // detach 건은 기존 TTL 경로가 담당
+  if (String(session.slotId || '').startsWith('O')) return false;   // 오피스 세션 제외
+  const lastIn = Number(session.lastInputAt) || 0;
+  const lastOut = Number(session.lastOutputAt) || 0;
+  if (!lastIn && !lastOut) return false;           // 활동 기록이 아예 없으면 판단 보류
+  if ((now - lastIn) <= PTY_RECLAIM_IDLE_MS) return false;
+  if ((now - lastOut) <= PTY_RECLAIM_IDLE_MS) return false;
+  return true;
+}
+
 function isSessionIdleForCleanup(session, now) {
   if (!session) return false;
   if (session.attached) return false;
@@ -685,7 +743,22 @@ function handlePersistentPtyConnection(ws, req) {
 
     if (agent === 'claude') {
       const command = interactiveAgentCommand(agent, isYolo);
-      ptyProcess.write(agentLine(`${command}${requestedModel ? ` --model ${requestedModel}` : ''}`));
+      // [유휴 회수 복원] 직전에 메모리 회수로 내린 세션이면 --resume으로 대화를 이어받는다.
+      //   1회성 소비 — 남겨두면 다음에 무관한 세션이 남의 대화를 이어받는다.
+      const resumeId = pendingResume.get(sessionId);
+      if (resumeId) {
+        pendingResume.delete(sessionId);
+        // 이 세션의 UUID를 확정 기록 — 다음 회수 라운드의 claimed 계산에 쓰인다.
+        // (세션 레코드는 이 블록 아래에서 set되므로 지연 반영한다)
+        setTimeout(() => {
+          const s = ptySessions.get(sessionId);
+          if (s) s.claudeSessionId = resumeId;
+        }, 0);
+      }
+      const resumeArg = resumeId ? ` --resume ${resumeId}` : '';
+      ptyProcess.write(agentLine(
+        `${command}${resumeArg}${requestedModel ? ` --model ${requestedModel}` : ''}`));
+      if (resumeId) console.log(`[PTY] resume: ${sessionId} <- ${resumeId}`);
     } else if (agent === 'antigravity') {
       ptyProcess.write(agentLine(interactiveAgentCommand(agent, isYolo)));
     } else if (agent === 'codex') {
@@ -1376,11 +1449,44 @@ function startTtlSweepWorker() {
   if (ttlSweepTimer) return;
   ttlSweepTimer = setInterval(() => {
     const now = Date.now();
+    // 이미 다른 세션이 물고 있는 claude UUID — 회수 시 남의 대화를 이어받지 않도록 제외.
+    // [출처 2가지] ① resume으로 복원돼 UUID가 확정된 살아있는 세션 ② 회수됐지만 아직
+    //   재연결되지 않아 배정만 된 것(pendingResume). 후자를 빼면 같은 UUID가 두 슬롯에 배정된다.
+    // [남은 한계] 새로 스폰된(=한 번도 회수된 적 없는) 세션의 UUID는 알 수 없다. 같은 프로젝트를
+    //   여러 슬롯이 열고 동시에 유휴가 되면 최신 mtime 하나만 정확하고 나머지는 null이 되어
+    //   새 세션으로 뜬다 — 오복원(남의 대화 이어받기)보다 안전한 실패 방향이다.
+    const claimed = new Set(pendingResume.values());
+    for (const info of ptySessions.values()) {
+      if (info && info.claudeSessionId) claimed.add(info.claudeSessionId);
+    }
     for (const [key, info] of ptySessions.entries()) {
       if (isSessionIdleForCleanup(info, now)) {
         const idleSec = Math.floor((now - Math.max(Number(info.lastInputAt) || 0, Number(info.lastOutputAt) || 0)) / 1000);
         console.log(`[PTY] TTL cleanup: ${key} idle=${idleSec}s`);
         killSessionPty(key, 'ttl_cleanup');
+        continue;
+      }
+      if (isSessionIdleForReclaim(info, now)) {
+        // [순서 불변식] 반드시 죽이기 **전에** UUID를 확보한다. 죽인 뒤에는 어느 jsonl이
+        //   이 세션 것이었는지 판별할 근거(활동 시각 근접성)가 사라진다.
+        const resumeId = findClaudeSessionId(info.cwd, claimed);
+        const idleMin = Math.floor((now - Math.max(Number(info.lastInputAt) || 0, Number(info.lastOutputAt) || 0)) / 60000);
+        if (resumeId) {
+          pendingResume.set(key, resumeId);
+          claimed.add(resumeId);
+        }
+        try {
+          if (info.socket && info.socket.readyState === 1) {
+            info.socket.send(JSON.stringify({
+              type: 'output',
+              data: `\r\n\x1b[38;5;208m[HIVE] ${idleMin}분 유휴 — 메모리 회수를 위해 claude 세션을 내렸습니다.`
+                + (resumeId ? ' 재연결 시 대화가 이어집니다(화면은 새로 시작).' : ' (복원 ID 미확인 — 새 세션으로 시작)')
+                + `\x1b[0m\r\n`,
+            }));
+          }
+        } catch (e) { /* 통지 실패가 회수를 막을 이유는 없다 */ }
+        console.log(`[PTY] idle reclaim: ${key} idle=${idleMin}m resume=${resumeId || 'none'}`);
+        killSessionPty(key, 'idle_reclaim');
       }
     }
   }, PTY_TTL_SWEEP_MS);
