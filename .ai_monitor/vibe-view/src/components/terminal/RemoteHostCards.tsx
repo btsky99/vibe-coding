@@ -80,13 +80,22 @@ export default function RemoteHostCards({ onLaunchRemote, onLaunchLocal }: {
         <div className="flex-1 h-px bg-white/10" />
       </div>
 
-      {/* 이 PC 상태판 — 터미널 슬롯에서 tui.py를 띄운다 */}
+      {/* 상태판 — 독립 창(?page=status)으로 띄운다.
+          [WHY 슬롯 TUI가 아니라 독립 창인가] 상태판은 옆에 띄워 두고 곁눈질하는 물건이라
+          슬롯을 하나 잡아먹으면 정작 작업할 터미널이 줄어든다. 슬롯 TUI 경로는 SSH로
+          붙었을 때(창을 못 띄우는 환경)를 위해 scripts/tui.py로 그대로 남아 있다. */}
       <div className="mb-2">
         <button
-          onClick={() => onLaunchLocal('tui')}
+          onClick={() => {
+            fetch('/api/dashboard/launch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tab: 'status' }),
+            }).catch(() => onLaunchLocal('tui'));  // 창을 못 띄우면 슬롯 TUI로 폴백
+          }}
           className="w-full py-2 bg-primary/15 hover:bg-primary/30 text-primary rounded-xl text-[11px] font-black transition-all border border-primary/30 flex items-center justify-center gap-2"
         >
-          <Gauge className="w-3.5 h-3.5" /> 이 PC 상태판 열기 (TUI)
+          <Gauge className="w-3.5 h-3.5" /> 상태판 열기 (노드 · 콘솔 창)
         </button>
       </div>
 

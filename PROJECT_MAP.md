@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-01 21:37
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-02 12:57
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,34 +8,33 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 3개 · 미푸시 0커밋
+- **브랜치**: `main` · 미커밋 14개 · 미푸시 0커밋
 - **최근 커밋**
-  - `e201f06` 2026-08-01 — fix(test): pty 셸 선택 검사를 현행 계약으로 갱신 — CI 릴리즈 게이트 해제
-  - `e2383d5` 2026-08-01 — build(spec): tkinter 제외 — 로컬 EXE가 Tcl 데이터 부재로 기동 못하던 문제 수정
-  - `4556fff` 2026-08-01 — feat(ui): 백그라운드 데몬 on/off 패널 — v3.7.313
-  - `4b4f552` 2026-08-01 — perf(pty): 유휴 claude 세션 회수 — 안 쓰면 내리고 재연결 시 --resume 복원
-  - `86ccf4c` 2026-08-01 — perf(daemons): Codex 워처 온디맨드 전환 — 안 쓰면 종료, 쓰면 자동 기동
+  - `9c0011a` 2026-08-02 — fix(hook): 앱 실행 중 오프라인 폴백 생략 — 클로드 이중 실행/API 이중 소모 차단
+  - `e62a7e2` 2026-08-02 — fix(hook): 앱 실행 중 훅의 server.py 중복 스폰 차단 — 터미널 몰살 사고
+  - `0843aad` 2026-08-01 — fix(updater): 번들 버전 읽기 중복 제거 + 빈 _MEIPASS 가드 — 회귀 테스트 8건
+  - `56816d1` 2026-08-01 — chore(release): auto-bump version to v3.7.314 [skip ci]
+  - `b5a4b05` 2026-08-01 — test(smoke): 데이터 디렉토리 격리 계약 회귀 테스트
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-01 22:18** 의도: list
+  - 결정: []
 - **08-01 15:26** 의도: list
   - 결정: []
 - **07-30 22:05** 의도: LAN 샌드박스+그룹방+맵 내비게이션 완료 — 실사용 활성화만 남음
   - 결정: 코드 4커밋 완료(373b148 훅수정 / 61c9af7 폴더샌드박스 / 462d053 그룹방+다중실행 / f61bd0f 맵내비). 업데이트는 버튼 방식 유지 확정(자동적용 기각·되돌림). 테스트 217 passed
   - 다음: ① f61bd0f 푸시 ② 앱 재시작 ③ 초록 소스업데이트 배너 클릭(설치본 반영) ④ LAN 패널서 허용폴더 등록 후 lan_remote_exec_enabled 켜기(현재 False·폴더 미등록) ⑤ Phase B=클로드끼리 대화 스레드(--resume) 미착수
-- **07-30 19:26** 의도: LAN 원격실행 폴더 샌드박스(Phase A) 구현 착수
-  - 결정: 방식3=폴더별 사본/직접 모드 선택 + yolo제거 후 deny프로파일 주입 + 전송계층은 기존 LAN브리지 재사용(텔레그램 버스 기각: 외부서버 경유 보안저하+중복)
-  - 다음: lan_sandbox.py 신설 → lan_api 실행부 교체 → lan_bridge 라우트 → LanPanel UI
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **콘솔창(터미널 슬롯)이 전부 튕김 — node PTY 서버 사망 후 워치독 강제 재시작**
+  - 원인: 앱이 타 프로젝트(D:/ons)를 활성 프로젝트로 열어둔 상태에서 hook_bridge가 /api/project-info 슬러그 대조 실패로 '내 서버 없음' 판정 -> server.py 스폰. 단일 인스턴스 락은 project_root 시드라 슬러그가 다르면 안 걸려
+  - 수정: hook_bridge._start_server에 _is_app_server_running() 가드를 _is_already_running보다 앞에 배치 — 앱 생존 중에는 스폰 금지하고 fallback 경로로. 회귀 테스트 5건(tests/test_hook_server_
+- **새 릴리즈(v3.7.313)를 푸시해도 설치본에 업데이트 배너가 안 뜸**
+  - 원인: updater.py의 from _version import __version__가 boot.py의 sys.path 최우선 체크아웃을 잡아 번들(3.7.312) 대신 소스(3.7.313) 버전을 읽음 → _is_newer 항상 False → update_ready.jso
+  - 수정: bundle_version() 추가(_MEIPASS 우선, __file__ 후보는 마지막)해 check_and_update가 번들 버전으로 비교 (fd35229)
 - **LAN 원격실행이 수신 PC 프로젝트 루트를 무제한 편집 가능 (샌드박스 부재)**
   - 원인: lan_api._run_remote_exec가 yolo=True(--dangerously-skip-permissions) + cwd=_project_root로 claude 실행. 3중 게이트(페어링/토글/승인팝업)는 '누가 요청하나'만 막고 승인 후 '무엇을 건드리나'
   - 수정: src/lan_sandbox.py 신설 — 화이트리스트(resolve() 후 비교로 junction 탈출 차단) + 폴더별 copy/direct 모드 + yolo 제거 후 deny 프로파일 --settings 주입. copy는 git worktree 우선으로 .env 
-- **settings.json hooks: Expected array, but received undefined (UserPromptSubmit.1 / Stop.2)**
-  - 원인: setup_doctor.check_hooks가 이벤트 배열 원소를 flat {type,command}로 가정 — 그룹 {matcher,hooks}에 .get('command')를 읽어 항상 ''를 얻어 기존 훅을 누락으로 오판하고 flat 항목을 append. Setu
-  - 수정: _event_commands로 그룹 안쪽까지 감지 + _as_group으로 nested 기록 + _normalize_event로 기존 flat 잔재 청산, _REQUIRED_HOOKS에서 무의미한 $PROMPT argv 제거, test_setup_doctor.py 회귀
-- **E2E 테스트가 통과했는데 실제로는 기능이 동작 안 함**
-  - 원인: 판정 기준이 느슨했다. 원격 셸 검증에 'Microsoft Windows' 배너를 썼는데 로컬 cmd도 같은 배너를 출력해 거짓 통과
-  - 수정: 원격에서만 나오는 고유값(호스트명)으로 판정 + 로컬 유출 탐지 조건을 별도로 추가
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx` — 30일 내 3건
@@ -77,9 +76,9 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2033 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2067 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` 🔨 | 337 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
-| `soft_updater.py` | 284 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
+| `soft_updater.py` 🔨 | 303 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
 | `mission_control.py` | 414 | AI 에이전트 전용 네이티브 윈도우 관제 센터 (Mission Control) — 시스템 트레이 및 사이드바 HUD 관리. |
 | `mission_control_ui.py` | 496 | 미션 컨트롤 사이드바 HUD UI 컴포넌트 — 에이전트 상태 링 및 실시간 로그 시각화. |
@@ -110,6 +109,7 @@
 | `logs_api.py` | 168 | 로그/메시지/실시간 로그 스트림 라우트 4종 — GET /stream(SSE), GET /api/server-logs, |
 | `memory_api.py` | 412 | Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함. |
 | `message_api.py` | 92 | 에이전트 간 메시지 전송 API — 메시지를 DB(send_message)에 저장하고, 수신 대상 |
+| `nodes_api.py` | 164 | 상태판(독립 창 + tui.py)의 데이터 공급 라우트 4종. |
 | `office_api.py` | 370 | 오피스 모드 전용 API — 프로필 중앙화(PostgreSQL SSOT) + 클래식과 네임스페이스 분리. |
 | `office_launch_api.py` | 84 | 오피스 독립 서버 실행 라우트 3종 — POST /api/office/launch(office_server 프로세스 |
 | `office_proxy_api.py` | 230 | 오피스 서버(office_server.py) 프로세스 관리 + HTTP 프록시. |
@@ -158,6 +158,30 @@
 | `wiki_generator.py` | 381 | 설명: LLM 위키 자동생성 엔진 — code_nodes → 프롬프트 조립 → hive_tasks 등록 |
 | `zettelkasten.py` | 459 | Hive Zettelkasten — 카파시 Append-Review-Rescue + 루만 제텔카스텐 융합 메모 시스템. |
 
+### 인프라 계층 (.ai_monitor/infra/)
+| 모듈 | 줄 수 | 설명 |
+|------|------|------|
+| `app_boot.py` 🔨 | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
+| `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
+| `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
+| `daemons.py` 🔨 | 838 | 설명: 백그라운드 데몬 러너 — 워치독/텔레그램/힐데몬/오케스트레이터/문서 생성/ |
+| `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
+| `fs_watcher.py` | 117 | 파일 시스템 실시간 감시(watchdog) + cli_agent 출력 브로드캐스트 워커. |
+| `heartbeat_daemon.py` 🔨 | 725 | 설명: 자율 클로드 심장 박동 데몬 — 사람이 부르지 않아도 주기적으로 깨어나 |
+| `instance_lock.py` | 179 | 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로직. |
+| `lifecycle.py` | 329 | 프로세스 라이프사이클 정리 함수 모음. |
+| `memory_watcher.py` 🔨 | 388 | 에이전트 메모리(Claude Code / Antigravity CLI) 파일 감시 + PostgreSQL |
+| `node_status.py` | 173 | Tailscale 노드 온/오프라인 상태 조회 + 원격 노드의 CLI(claude/codex) 설치 점검. |
+| `postgres_runtime.py` | 300 | 내장 PostgreSQL 18 기동/초기화 런타임. 배포(frozen) 모드에서 |
+| `proc.py` | 35 | Windows 콘솔 숨김 subprocess 공용 래퍼. 앱의 모든 subprocess 호출이 |
+| `project_context.py` | 204 | Platform Phase 2-3 — 활성 프로젝트 컨텍스트 Resolver. |
+| `pty_process.py` | 483 | Node.js PTY 서버 프로세스 관리 함수 모음. |
+| `runtime.py` | 134 | 시스템 런타임 보조 유틸 — Python 인터프리터 후보 탐색, |
+| `session_parse.py` | 136 | CLI 세션 파일(JSONL/JSON) 토큰 usage 파서 모음. |
+| `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
+| `tool_install.py` | 291 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
+| `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
+
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
 | 파일 | 줄 수 | 설명 |
@@ -184,7 +208,7 @@
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `hive_hook.py` | 1009 | Claude Code 자동 액션 트레이스 훅 핸들러. |
-| `hook_bridge.py` 🔨 | 582 | Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입. |
+| `hook_bridge.py` 🔨 | 634 | Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입. |
 | `claude_hook.py` | 297 | Claude Code 전용 자동 훅 핸들러. |
 | `antigravity_hook.py` | 595 | Antigravity CLI hook integration. |
 
@@ -229,7 +253,7 @@
 | `osc_parser.py` | 257 | 설명: 터미널 출력 스트림에서 OSC(Operating System Command) 시퀀스를 감지하여 |
 | `git_visualizer.py` | 65 | 에이전트가 현재 Git 워크트리, 브랜치 상태 및 최근 이력을 한눈에 파악하게 돕는 시각화 도구. |
 | `screenshot_analyzer.py` | 154 | 멀티모달 버그 감지 — 스크린샷을 Antigravity Vision API로 분석하여 |
-| `generate_project_map.py` 🔨 | 690 | PROJECT_MAP.md 자동 생성 스크립트. |
+| `generate_project_map.py` 🔨 | 706 | PROJECT_MAP.md 자동 생성 스크립트. |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
@@ -276,13 +300,13 @@
 | `recall.py` | 51 | 경험 회상 스크립트 — 현재 작업과 유사한 과거 경험을 검색하여 출력. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `smoke_test.py` 🔨 | 287 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
+| `smoke_test.py` 🔨 | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `telegram_agent_bot.py` | 1347 | AgentBot — 터미널 1개 = 텔레그램 봇 1개. 개인채팅 1:1 PTY/stream-json |
 | `telegram_bridge.py` | 466 | Telegram Multi-Bot Bridge 진입점 — BotManager(최대 8봇 생명주기 + |
 | `telegram_helpers.py` | 324 | telegram_bridge.py에서 분리한 순수 IO/포맷 유틸리티 모음. |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
-| `tui.py` 🔨 | 256 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
+| `tui.py` 🔨 | 343 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `zettel_capture.py` | 701 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` | 876 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
@@ -290,7 +314,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` 🔨 | 1012 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
+| `App.tsx` 🔨 | 1019 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
 | `main.tsx` | 75 | 설명: React 앱 진입점. ErrorBoundary로 전체 트리를 감싸 |
 | `types.ts` | 206 | 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답 |
 | `constants.tsx` | 93 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
@@ -305,6 +329,7 @@
 | `FileTreeNode.tsx` | 165 | 설명: 파일 탐색기의 단일 트리 노드 컴포넌트. |
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
 | `SetupBanner.tsx` 🔨 | 234 | Setup Doctor 진단 결과를 상단 배너로 표시. |
+| `StatusBoard.tsx` | 472 | 설명: 상태판 독립 창(?page=status) 본체. 두 가지를 한 화면에 보여준다. |
 | `TerminalSlot.tsx` 🔨 | 1122 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
 | `TopMenuBar.tsx` | 574 | 설명: VS Code 스타일 상단 메뉴바 컴포넌트. |
@@ -336,8 +361,10 @@
 | `test_codex_harness_v2.py` | 86 | Focused tests for Codex Harness V2 bootstrap and entrypoints. |
 | `test_codex_orchestration.py` | 114 | Codex 라우팅과 오케스트레이터 연동 회귀 테스트. |
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
+| `test_console_scan.py` | 206 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
 | `test_daemon_toggles.py` 🔨 | 279 | 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증. |
 | `test_harness_verify.py` | 218 | harness_verify.py V2 검증 스크립트의 단위 테스트. |
+| `test_hook_server_spawn_guard.py` 🔨 | 158 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | ITCP 폴백 로직 단위 테스트. |
 | `test_knowledge_pipeline.py` | 133 | 지식 노트 파이프라인 재설계 회귀 테스트 — 세션요약 노이즈 차단 + 파일지식 1급화 + |
@@ -353,7 +380,9 @@
 | `test_setup_auto_install.py` 🔨 | 153 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` 🔨 | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` 🔨 | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
+| `test_smoke_isolation.py` 🔨 | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_telegram_hub.py` | 347 | 텔레그램 그룹방 허브화(ai_monitor_plan.md Task 1~4) 회귀 테스트. |
+| `test_updater_bundle_version.py` 🔨 | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
 | `test_updater_release_path.py` | 229 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` 🔨 | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
@@ -397,4 +426,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-01 21:37
+> 자동 생성 완료: 2026-08-02 12:57

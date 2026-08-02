@@ -84,9 +84,13 @@ TITLE_MAP = {
     'hive': '바이브 코딩 - 하이브',
     # office: 가상 오피스(메타버스) 독립 창
     'office': '바이브 코딩 - 오피스',
+    # status: 노드/콘솔 창 상태판. 옆에 띄워 두고 보는 용도라 창을 작게 잡는다.
+    'status': '바이브 코딩 - 상태판',
 }
 if TAB == 'office':
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=office"
+elif TAB == 'status':
+    DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=status"
 else:
     DASHBOARD_URL = f"http://localhost:{HTTP_PORT}/?page=dashboard&tab={quote(TAB)}"
 
@@ -113,7 +117,13 @@ class DashboardWindow(QMainWindow):
         project_name = _fetch_project_name()
         title = f"{base_title} [{project_name}]" if project_name else base_title
         self.setWindowTitle(title)
-        w, h = (1440, 860) if TAB == 'office' else (1400, 900)
+        # 상태판은 곁눈질용 보조 창이라 좁고 길게 — 세컨 모니터 가장자리에 두기 좋은 비율.
+        if TAB == 'office':
+            w, h = 1440, 860
+        elif TAB == 'status':
+            w, h = 720, 900
+        else:
+            w, h = 1400, 900
         self.resize(w, h)
 
         screen = QApplication.primaryScreen().geometry()

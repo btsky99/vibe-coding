@@ -1123,7 +1123,19 @@ def _g_copy_path(h, pp):
     except Exception as e:
         h.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
+# 상태판(독립 창 + tui.py) 데이터 2종 — api/nodes_api.py 위임.
+# [WHY GET 분리] consoles는 CIM 스냅샷(~700ms)이라 무거우므로 remote와 한 응답에 묶지 않는다.
+#   상태판이 두 섹션을 각자 다른 주기로 갱신할 수 있어야 한다(노드 15초 / 콘솔 5초).
+def _g_nodes_remote(h, pp):
+    from api import nodes_api
+    nodes_api.remote(h)
+def _g_nodes_consoles(h, pp):
+    from api import nodes_api
+    nodes_api.consoles(h)
+
 GET_ROUTES = {
+    '/api/nodes/remote': _g_nodes_remote,
+    '/api/nodes/consoles': _g_nodes_consoles,
     '/api/browse-folder': _g_fs_dialog,
     '/api/browse-file': _g_fs_dialog,
     '/api/drives': _g_fs_dialog,
@@ -1333,6 +1345,15 @@ def _p_agents_heartbeat(h, pp):
 #   동일한 OfficeServerState 객체를 공유해야 생존/포트 판정이 갈리지 않는다.
 # [주의] exact 3종을 POST_ROUTES에 등록하면 exact-first 디스패치로 프록시 복합조건(not in 제외)보다
 #   먼저 걸린다 → 프록시의 launch/restart/status 제외 조건은 그대로 둬도 무해(방어적).
+# 상태판 POST 2종 — api/nodes_api.py 위임. 둘 다 본문을 핸들러가 직접 소비한다
+# (위임 규칙: body 선읽기 금지 대상 아님 — nodes_api._read_body가 Content-Length만큼 읽음).
+def _p_nodes_console_kill(h, pp):
+    from api import nodes_api
+    nodes_api.console_kill(h)
+def _p_nodes_check_cli(h, pp):
+    from api import nodes_api
+    nodes_api.check_cli(h)
+
 def _p_office_launch(h, pp):
     office_launch_api.launch(h, _office_state, _launch_office_server, BASE_DIR, _python_runner_cmds)
 def _p_office_restart(h, pp):
@@ -1412,6 +1433,8 @@ POST_ROUTES = {
     '/api/messages/clear': _p_messages_clear,
     '/api/dashboard/launch': _p_dashboard_launch,
     '/api/agents/heartbeat': _p_agents_heartbeat,
+    '/api/nodes/console/kill': _p_nodes_console_kill,
+    '/api/nodes/check-cli': _p_nodes_check_cli,
     '/api/office/launch': _p_office_launch,
     '/api/office/restart': _p_office_restart,
     '/api/office/status': _p_office_status,

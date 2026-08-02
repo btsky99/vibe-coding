@@ -50,6 +50,8 @@ const FloatingWindow = lazy(() => import('./components/FloatingWindow'));
 import TerminalSlot from './components/TerminalSlot';
 /* ── 오피스 모드 컴포넌트 ── */
 const OfficeApp = lazy(() => import('./components/office/OfficeApp'));
+/* ── 상태판 독립 창(?page=status) — 노드/콘솔 창 식별. 메인 번들에 섞이지 않게 lazy ── */
+const StatusBoard = lazy(() => import('./components/StatusBoard'));
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import TasksPanel from './components/panels/TasksPanel';
 import LanPanel from './components/panels/LanPanel';
@@ -996,6 +998,11 @@ function Root() {
   if (params.get('page') === 'office') return (
     <Suspense fallback={<div className="w-screen h-screen bg-[#0a0a0f] flex items-center justify-center text-white">Loading Office...</div>}>
       <OfficeApp />
+    </Suspense>
+  );
+  if (params.get('page') === 'status') return (
+    <Suspense fallback={<div className="w-screen h-screen bg-[#1e1e1e] flex items-center justify-center text-white text-sm">상태판 여는 중…</div>}>
+      <StatusBoard />
     </Suspense>
   );
   // viewMode: localStorage로 마지막 선택 모드 복원

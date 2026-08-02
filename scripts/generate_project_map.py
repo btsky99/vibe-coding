@@ -468,6 +468,22 @@ def generate():
                 lines.append(f"| `{f.name}`{_badge(f.name)} | {lc} | {desc} |")
     lines.append("")
 
+    # [과거사고 2026-08-02] infra/ 섹션이 통째로 빠져 있었다 — proc.py(콘솔 숨김 표준 래퍼),
+    #   daemons.py, pty_process.py 등 부팅·프로세스 핵심 모듈이 지도에 하나도 없어
+    #   다음 세션 LLM이 "그 기능이 어디 있지"를 매번 grep으로 찾아야 했다.
+    lines.append("### 인프라 계층 (.ai_monitor/infra/)")
+    lines.append("| 모듈 | 줄 수 | 설명 |")
+    lines.append("|------|------|------|")
+    infra_dir = ai_dir / "infra"
+    if infra_dir.exists():
+        for f in sorted(infra_dir.iterdir()):
+            if f.is_file() and f.suffix == '.py' and f.name != '__init__.py':
+                rel = f"infra/{f.name}"
+                lc = count_lines(f)
+                desc = get_description(rel, f.name, f)
+                lines.append(f"| `{f.name}`{_badge(f.name)} | {lc} | {desc} |")
+    lines.append("")
+
     # ── 3. Scripts ──
     lines.append("## ⚙️ 스크립트 (scripts/)")
     scripts_dir = PROJECT_ROOT / "scripts"
