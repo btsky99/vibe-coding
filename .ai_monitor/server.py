@@ -1686,8 +1686,33 @@ class SSEHandler(BaseHTTPRequestHandler):
         # [Phase 2 R8] POST /api/git/rollback·diff, /api/screenshot/analyze는 POST_ROUTES exact 처리.
 
         # 미매칭 POST → 404. 모든 라우트가 exact/prefix/cond 테이블에서 처리됨 — 여기 도달 = 미등록 경로.
+        #
+        # [과거사고 2026-08-05] 예전에는 여기서 본문을 읽지 않고 헤더만 보낸 뒤 닫았다.
+        #   BaseHTTPRequestHandler는 HTTP/1.0(Connection: close)이라 응답 직후 소켓을 닫는데,
+        #   수신 버퍼에 안 읽은 요청 본문이 남아 있으면 Windows가 RST를 보낸다. curl은 이미
+        #   응답을 파싱해서 404로 보이지만, 브라우저 fetch는 응답을 버리고 TypeError로 실패한다
+        #   → UI에 원인 불명의 'Failed to fetch'만 뜬다. 실제로 설치본에서 구버전 백엔드가
+        #   신규 라우트(/api/config/discord)를 모르는 상황이 정확히 이렇게 보여서, 라우트
+        #   부재라는 진짜 원인이 네트워크 장애로 오인됐다.
+        # [불변식] 응답 전에 본문을 반드시 비운다. 본문 있는 POST에만 해당되므로 GET 폴백엔 불필요.
+        try:
+            _unread = int(self.headers.get('Content-Length', 0) or 0)
+        except ValueError:
+            _unread = 0
+        # 상한을 두는 이유: 미등록 경로에 대용량 업로드가 오면 버리려고 메모리에 다 담게 된다.
+        while _unread > 0:
+            _chunk = self.rfile.read(min(_unread, 65536))
+            if not _chunk:
+                break
+            _unread -= len(_chunk)
+        _body = json.dumps({'status': 'error', 'error': 'route_not_found', 'path': path},
+                           ensure_ascii=False).encode('utf-8')
         self.send_response(404)
+        self.send_header('Content-Type', 'application/json;charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', self._cors_origin())
+        self.send_header('Content-Length', str(len(_body)))
         self.end_headers()
+        self.wfile.write(_body)
 
     def log_message(self, format, *args):
         # 불필요한 콘솔 로그 제거하여 터미널 깔끔하게 유지

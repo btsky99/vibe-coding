@@ -108,3 +108,28 @@ def test_prefix_non_shadowing():
         for b in pfx:
             if a != b:
                 assert not b.startswith(a), f"prefix 가림: '{a}'가 '{b}'를 선점 (순서 의존)"
+
+
+def _post_fallback_block(source: str) -> str:
+    """do_POST 최후미 404 폴백 블록만 잘라낸다."""
+    start = source.index('# 미매칭 POST → 404.')
+    return source[start:start + 2000]
+
+
+def test_post_404_fallback_drains_request_body():
+    """[과거사고 2026-08-05] 본문을 안 읽고 닫으면 Windows가 RST를 보내 브라우저 fetch가
+    'Failed to fetch'로 실패한다. 404 본문조차 못 읽어 '라우트 없음'이라는 진짜 원인이
+    네트워크 장애로 오인된다(설치본 Discord 설정 저장 실패의 실제 증상).
+    """
+    block = _post_fallback_block(_SERVER.read_text(encoding='utf-8'))
+    drain = block.index('self.rfile.read(')
+    respond = block.index('self.send_response(404)')
+    assert drain < respond, '404 응답 전에 요청 본문을 비워야 한다'
+
+
+def test_post_404_fallback_returns_readable_json():
+    """헤더만 보내고 끝내면 fetch가 response.json()에서 또 터진다 — 원인 문구가 남아야 한다."""
+    block = _post_fallback_block(_SERVER.read_text(encoding='utf-8'))
+    assert 'route_not_found' in block, '미등록 경로임을 본문으로 알려야 한다'
+    assert "self.send_header('Content-Length'" in block, 'Content-Length 없으면 본문을 못 읽는다'
+    assert 'self.wfile.write(' in block
