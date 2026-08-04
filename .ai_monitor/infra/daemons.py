@@ -3,6 +3,7 @@
 # 📝 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/
 #          에이전트 동기화/MUX/제텔 동기화·정제/커밋 감시 (server.py 분할 단계 9)
 # 🕒 변경 이력:
+# [2026-08-04] Codex — 저장된 Bot Token과 T1 채널만으로 사용량 대시보드 자동 기동.
 # [2026-08-04] Codex — Discord T1~Tn을 활성 프로젝트 하나가 아닌 slot_projects에 바인딩.
 # [2026-06-10] Claude — server.py main() 내부 중첩 함수 11개 이관 (~500줄)
 #   - [제약] 모든 함수는 daemon=True 스레드에서 호출됨 — 블로킹 루프 허용.
@@ -117,9 +118,23 @@ def run_lan_bridge(env: DaemonEnv) -> None:
 
 
 def run_discord_dashboard(env: DaemonEnv) -> None:
-    """웹훅이 설정된 경우에만 읽기 전용 Discord 대시보드를 별도 프로세스로 기동한다."""
+    """Webhook 또는 UI에 저장된 공용 Bot으로 Discord 사용량 대시보드를 기동한다."""
     webhook = os.environ.get('DISCORD_WEBHOOK_URL', '').strip()
-    if not webhook or not env.scripts_dir:
+    child_env = os.environ.copy()
+    try:
+        from api.discord_config_api import load_config
+        config = load_config(env.data_dir / 'discord_secrets.dat')
+        channels = config.get('channels') or {}
+        # T1을 기본 상태 채널로 사용하고, T1이 비었으면 첫 등록 채널을 사용한다.
+        dashboard_channel = channels.get('T1') or next(iter(channels.values()), '')
+        if config.get('token') and dashboard_channel:
+            child_env['DISCORD_BOT_TOKEN'] = config['token']
+            child_env['DISCORD_DASHBOARD_CHANNEL_ID'] = dashboard_channel
+    except Exception as error:
+        print(f'[!] Discord dashboard 설정 로드 실패: {type(error).__name__}')
+    has_bot_target = (child_env.get('DISCORD_BOT_TOKEN', '').strip()
+                      and child_env.get('DISCORD_DASHBOARD_CHANNEL_ID', '').strip())
+    if (not webhook and not has_bot_target) or not env.scripts_dir:
         return
     script = env.scripts_dir / 'discord_dashboard.py'
     runners = runtime.python_runner_cmds(env.base_dir, env.project_root)
@@ -132,6 +147,7 @@ def run_discord_dashboard(env: DaemonEnv) -> None:
         [runners[0], str(script), '--server', f'http://127.0.0.1:{env.http_port}',
          '--project-root', str(env.project_root), '--project-id', env.current_project_id()],
         cwd=str(env.project_root), stdout=log_handle, stderr=log_handle,
+        env=child_env,
         encoding='utf-8', errors='replace',
     )
     child._vibe_log_handle = log_handle

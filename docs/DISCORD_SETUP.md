@@ -3,6 +3,7 @@ FILE: docs/DISCORD_SETUP.md
 DESCRIPTION: Vibe Coding Discord 대시보드와 Gateway 환경 설정 계약.
 
 REVISION HISTORY:
+- 2026-08-04 Codex: 별도 webhook 없이 저장된 Bot Token과 T1 채널에 사용량 대시보드 게시
 - 2026-08-03 Codex: Vibe View T1~T3 기본 토큰과 T4~T9 추가 저장 UI 문서화
 - 2026-08-03 Codex: 웹훅, ACL, 터미널·그룹 binding 설정 최초 작성
 - 2026-08-03 Codex: PC별 공용 봇 토큰 1개와 터미널별 채널 ID 저장 흐름으로 교정
@@ -20,14 +21,15 @@ Discord는 단일 bot 연결을 사용한다. 터미널마다 bot token을 만�
 2. Bot 설정에서 Message Content Intent를 활성화한다.
 3. 서버에 bot을 초대하고 대상 채널의 View Channel, Read Message History,
    Send Messages 권한만 허용한다.
-4. 대시보드용 채널에는 webhook 하나를 만든다.
-5. Vibe View 왼쪽 Discord 설정에 공용 bot token, 현재 PC의 Node ID, Discord 서버 ID,
+4. Vibe View 왼쪽 Discord 설정에 공용 bot token, 현재 PC의 Node ID, Discord 서버 ID,
    허용할 사용자 ID, T1~T3의 채널 ID를 입력한다. T4부터는 `추가` 버튼으로
    필요한 슬롯만 만든다. Windows 저장본은 현재 사용자 DPAPI로 암호화되며 API는
    토큰 원문을 반환하지 않는다.
 
 저장 후 앱을 재시작하면 PC마다 Gateway 프로세스 하나가 시작되고 그 PC의 모든
-터미널 binding을 처리한다. `DISCORD_BOT_TOKEN` 단일 환경변수 방식도 하위 호환으로 유지한다.
+터미널 binding을 처리한다. T1 채널에는 Claude/Codex 플랜 잔량과 리셋 시각, Gemini 현재
+컨텍스트 잔량을 보여주는 단일 상태 메시지가 생성되고 주기적으로 갱신된다. 별도 webhook은
+필요하지 않으며 `DISCORD_WEBHOOK_URL` 방식도 하위 호환으로 유지한다.
 
 ## 환경변수
 
