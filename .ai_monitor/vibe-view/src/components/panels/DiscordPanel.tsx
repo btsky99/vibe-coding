@@ -3,6 +3,7 @@
  * DESCRIPTION: Discord 공용 봇 토큰과 현재 PC의 터미널별 채널 binding을 저장한다.
  *
  * REVISION HISTORY:
+ * - 2026-08-04 Codex: 설정 패널 하단에 Bot Token과 서버·사용자·채널 ID 발급 안내 추가.
  * - 2026-08-03 Codex: 다중 Discord API 키 입력·추가·저장 UI 최초 구현.
  * - 2026-08-03 Codex: 공용 봇 1개 + Node ID + T1~T9 채널 ID 구조로 재설계.
  */
@@ -140,6 +141,51 @@ export default function DiscordPanel() {
       {message && <div className={`flex items-center gap-2 rounded border p-3 text-sm ${isError ? 'border-red-500/30 bg-red-500/10 text-red-400' : 'border-green-500/30 bg-green-500/10 text-green-400'}`}>
         {isError ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}{message}
       </div>}
+
+      <section className="space-y-3 rounded border border-indigo-500/20 bg-indigo-500/5 p-4 text-xs leading-relaxed text-gray-300">
+        <h3 className="text-sm font-bold text-white">Discord 값 만드는 방법</h3>
+        <ol className="list-decimal space-y-3 pl-5">
+          <li>
+            <span className="font-semibold text-indigo-300">공용 Bot Token</span>
+            <div className="mt-1 text-gray-400">
+              <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer"
+                className="text-indigo-300 underline hover:text-indigo-200">Discord Developer Portal</a>
+              에서 <b>New Application</b> → 이름 입력 → <b>Bot</b> → <b>Reset Token</b>을 누르고 나온 값을 복사합니다.
+              같은 Bot 화면에서 <b>Message Content Intent</b>도 켭니다. 토큰은 비밀번호이므로 다른 사람에게 보내거나 화면에 공개하지 마세요.
+            </div>
+          </li>
+          <li>
+            <span className="font-semibold text-indigo-300">봇을 서버에 초대</span>
+            <div className="mt-1 text-gray-400">
+              Developer Portal의 <b>OAuth2 → URL Generator</b>에서 <b>bot</b>을 선택하고
+              <b>View Channels, Send Messages, Read Message History</b> 권한을 선택한 뒤 생성된 주소를 열어 서버에 추가합니다.
+            </div>
+          </li>
+          <li>
+            <span className="font-semibold text-indigo-300">개발자 모드 켜기</span>
+            <div className="mt-1 text-gray-400">
+              Discord의 <b>사용자 설정 → 고급 → 개발자 모드</b>를 켭니다. 아래 ID 복사 메뉴는 개발자 모드를 켜야 나타납니다.
+            </div>
+          </li>
+          <li>
+            <span className="font-semibold text-indigo-300">서버 ID</span>
+            <div className="mt-1 text-gray-400">왼쪽 서버 아이콘을 우클릭 → <b>서버 ID 복사</b>.</div>
+          </li>
+          <li>
+            <span className="font-semibold text-indigo-300">사용자 ID</span>
+            <div className="mt-1 text-gray-400">내 프로필이나 사용자 이름을 우클릭 → <b>사용자 ID 복사</b>.</div>
+          </li>
+          <li>
+            <span className="font-semibold text-indigo-300">채널 ID</span>
+            <div className="mt-1 text-gray-400">
+              연결할 텍스트 채널을 우클릭 → <b>채널 ID 복사</b>. T1, T2, T3 입력칸에 서로 다른 채널 ID를 넣으면 각 터미널과 분리됩니다.
+            </div>
+          </li>
+        </ol>
+        <div className="rounded border border-amber-500/20 bg-amber-500/5 p-2 text-amber-200/80">
+          모두 입력한 뒤 <b>저장</b>하고 Vibe Coding 앱을 재시작해야 Discord Gateway가 연결됩니다.
+        </div>
+      </section>
     </div>
   );
 }
