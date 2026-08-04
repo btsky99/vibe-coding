@@ -701,6 +701,9 @@ init_db()
 #   철거로 미참조. 로깅은 pg_logs 단일 경로.
 LOCKS_FILE = DATA_DIR / "locks.json"
 CONFIG_FILE = DATA_DIR / "config.json"
+# connector 릴레이(Discord 등)가 슬롯→프로젝트 폴더를 해석할 때 쓰는 유일한 경로 원천.
+# frozen 모드에서 DATA_DIR이 %APPDATA%로 바뀌므로 모듈이 스스로 유추하면 안 된다.
+agent_api.set_config_file(CONFIG_FILE)
 # 에이전트 간 메시지 채널 파일
 MESSAGES_FILE = DATA_DIR / "messages.jsonl"
 # 에이전트 간 공유 작업 큐 파일 (JSON 배열 — 업데이트/삭제 지원)

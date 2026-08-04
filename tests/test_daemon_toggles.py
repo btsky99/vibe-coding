@@ -3,6 +3,7 @@ FILE: tests/test_daemon_toggles.py
 DESCRIPTION: 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증.
 
 REVISION HISTORY:
+- 2026-08-04 Claude: popen 데몬이 상태판에서 항상 '꺼짐'으로 보이던 오탐 회귀 테스트 추가.
 - 2026-08-04 Codex: Discord 채널이 각 slot_projects의 project_id를 따르는 회귀 테스트 추가.
 - 2026-08-01 Claude: 신규 — 토글이 lan_bridge 하나뿐이라 안 쓰는 데몬도 무조건 뜨던 문제
                      (Codex 미사용 PC에서 codex_pg_watcher가 CPU 4.2시간 소비) 해소분 고정.
@@ -11,6 +12,7 @@ REVISION HISTORY:
 """
 
 import json
+import re
 import sys
 import threading
 from pathlib import Path
@@ -167,6 +169,53 @@ def test_status_running_uses_registry_thread_name(tmp_path, monkeypatch):
     finally:
         started.set()
         t.join(timeout=2)
+
+
+def test_status_running_detects_popen_child_without_thread(tmp_path, monkeypatch):
+    """[과거사고 2026-08-04] popen 데몬은 자식을 띄우고 스레드가 끝난다.
+
+    스레드명만 보면 watchdog/lan_bridge/discord_*/orchestrator가 프로세스는 살아있는데
+    상태판에서 전부 '꺼짐'으로 보인다. 실제로 이 오탐 때문에 Discord 게이트웨이가
+    안 뜬 줄 알고 엉뚱한 곳을 디버깅했다.
+    """
+    monkeypatch.delenv('VIBE_DISABLE_DAEMONS', raising=False)
+    monkeypatch.setattr(daemons, '_DAEMON_CHILDREN', {})
+
+    env = _FakeEnv(tmp_path / 'nope.json')
+    env.child_procs = []
+    child = _FakeChild()
+    daemons._track_child('discord_gateway', env, child)
+
+    st = {d['key']: d for d in daemons.daemon_status(env.config_file)}
+    assert st['discord_gateway']['running'] is True
+    # [불변식] 표시용 레지스트리가 종료 책임을 가져가면 안 된다 — cleanup 대상에도 남아야 함
+    assert env.child_procs == [child]
+
+    child.terminate()          # 자식이 죽으면 즉시 '꺼짐'으로 돌아와야 한다
+    st = {d['key']: d for d in daemons.daemon_status(env.config_file)}
+    assert st['discord_gateway']['running'] is False
+
+
+def test_status_running_ignores_other_daemons_children(tmp_path, monkeypatch):
+    """키가 섞이면 한 데몬의 자식 때문에 다른 데몬이 살아있는 것처럼 보인다."""
+    monkeypatch.delenv('VIBE_DISABLE_DAEMONS', raising=False)
+    monkeypatch.setattr(daemons, '_DAEMON_CHILDREN', {})
+
+    env = _FakeEnv(tmp_path / 'nope.json')
+    env.child_procs = []
+    daemons._track_child('watchdog', env, _FakeChild())
+
+    st = {d['key']: d for d in daemons.daemon_status(env.config_file)}
+    assert st['watchdog']['running'] is True
+    assert st['discord_dashboard']['running'] is False
+
+
+def test_track_child_keys_are_registry_keys():
+    """오타 키로 등록하면 그 데몬은 영원히 '꺼짐' — 레지스트리에 없는 키를 막는다."""
+    source = (_PROJECT_ROOT / '.ai_monitor' / 'infra' / 'daemons.py').read_text(encoding='utf-8')
+    used = set(re.findall(r"_track_child\('([a-z_]+)'", source))
+    assert used, "_track_child 호출이 하나도 없다 — 리팩터링으로 유실됐는지 확인"
+    assert used <= set(daemons.DAEMON_TOGGLES), f"레지스트리에 없는 키: {used - set(daemons.DAEMON_TOGGLES)}"
 
 
 def test_thread_names_are_unique():

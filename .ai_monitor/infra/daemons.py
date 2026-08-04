@@ -3,6 +3,8 @@
 # 📝 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/
 #          에이전트 동기화/MUX/제텔 동기화·정제/커밋 감시 (server.py 분할 단계 9)
 # 🕒 변경 이력:
+# [2026-08-04] Claude — popen 계열 데몬이 상태판에서 항상 '꺼짐'으로 보이던 오탐 수정
+#   (스레드명 단독 판정 → 자식 프로세스 레지스트리 병행).
 # [2026-08-04] Codex — 저장된 Bot Token과 T1 채널만으로 사용량 대시보드 자동 기동.
 # [2026-08-04] Codex — Discord T1~Tn을 활성 프로젝트 하나가 아닌 slot_projects에 바인딩.
 # [2026-06-10] Claude — server.py main() 내부 중첩 함수 11개 이관 (~500줄)
@@ -65,6 +67,38 @@ class DaemonEnv:
     current_project_id: Callable[[], str]
 
 
+# ── 자식 프로세스 레지스트리 (상태판 running 판정용) ─────────────────────────
+# [과거사고 2026-08-04] daemon_status가 running을 threading.enumerate()의 스레드명으로만
+#   판정했다. 그런데 popen 계열 데몬(watchdog/lan_bridge/discord_*/orchestrator)은 자식을
+#   띄우고 즉시 return하므로 스레드가 사라진다 → 실측에서 4종이 프로세스는 살아있는데
+#   상태판은 전부 "꺼짐"이었다. Discord 게이트웨이가 안 뜬 줄 알고 엉뚱한 곳을 팠다.
+# [불변식] 자식은 여전히 env.child_procs 에도 반드시 들어가야 한다 —
+#   lifecycle.cleanup_child_procs 가 그 리스트만 종료 대상으로 삼는다. 레지스트리는
+#   '표시용 별도 인덱스'이지 종료 책임을 가져가지 않는다.
+# [WHY 제거하지 않음] 죽은 자식은 poll()이 None이 아니게 되므로 항목을 지우지 않아도
+#   판정이 정확하다. 재기동 시 같은 키를 덮어쓰면 최신 자식만 남는다.
+_DAEMON_CHILDREN: dict = {}
+_DAEMON_CHILDREN_LOCK = threading.Lock()
+
+
+def _track_child(key: str, env: DaemonEnv, child) -> None:
+    """자식을 종료 대상(child_procs)과 상태판 레지스트리 양쪽에 등록한다."""
+    env.child_procs.append(child)
+    with _DAEMON_CHILDREN_LOCK:
+        _DAEMON_CHILDREN[key] = child
+
+
+def _daemon_child_alive(key: str) -> bool:
+    with _DAEMON_CHILDREN_LOCK:
+        child = _DAEMON_CHILDREN.get(key)
+    if child is None:
+        return False
+    try:
+        return child.poll() is None
+    except Exception:
+        return False
+
+
 def run_watchdog(env: DaemonEnv) -> None:
     if not env.scripts_dir:
         return
@@ -84,7 +118,7 @@ def run_watchdog(env: DaemonEnv) -> None:
             encoding='utf-8',
             errors='replace',
         )
-        env.child_procs.append(child)
+        _track_child('watchdog', env, child)
 
 
 def run_lan_bridge(env: DaemonEnv) -> None:
@@ -114,7 +148,7 @@ def run_lan_bridge(env: DaemonEnv) -> None:
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         encoding='utf-8', errors='replace',
     )
-    env.child_procs.append(child)
+    _track_child('lan_bridge', env, child)
 
 
 def run_discord_dashboard(env: DaemonEnv) -> None:
@@ -151,7 +185,7 @@ def run_discord_dashboard(env: DaemonEnv) -> None:
         encoding='utf-8', errors='replace',
     )
     child._vibe_log_handle = log_handle
-    env.child_procs.append(child)
+    _track_child('discord_dashboard', env, child)
 
 
 def run_discord_gateway(env: DaemonEnv) -> None:
@@ -202,7 +236,7 @@ def run_discord_gateway(env: DaemonEnv) -> None:
         encoding='utf-8', errors='replace',
     )
     child._vibe_log_handle = log_handle
-    env.child_procs.append(child)
+    _track_child('discord_gateway', env, child)
 
 
 def _discord_channel_bindings(config: dict, fallback_project_id: str) -> dict:
@@ -290,7 +324,7 @@ def run_codex_pg_watcher(env: DaemonEnv) -> None:
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     encoding='utf-8', errors='replace',
                 )
-                env.child_procs.append(child)
+                _track_child('codex_watcher', env, child)
                 print("[*] Codex 활동 감지 — pg_logs 워처 시작")
             elif not active and child is not None:
                 try:
@@ -344,7 +378,7 @@ def run_orchestrator_daemon(env: DaemonEnv) -> None:
             encoding='utf-8',
             errors='replace',
         )
-        env.child_procs.append(child)
+        _track_child('orchestrator', env, child)
         print("[*] 하이브 오케스트레이터 데몬(orchestrator) 자동 시작됨")
 
         try:
@@ -768,6 +802,8 @@ def run_heartbeat(env: DaemonEnv) -> None:
 #   threading.enumerate()를 조회해 "실행 중" 배지를 만든다. 이름이 어긋나면 UI는 살아있는
 #   데몬을 죽었다고 표시한다. start_all_daemons가 이 값을 name=으로 그대로 쓰므로
 #   레지스트리가 유일한 원천이다(호출부에 스레드명 재작성 금지).
+# [제약] 스레드명만으로는 부족하다 — popen 후 즉시 return하는 데몬은 스레드가 사라진다.
+#   daemon_status는 _daemon_child_alive()로 자식 프로세스도 함께 본다(위 과거사고 참조).
 DAEMON_TOGGLES: dict = {
     'watchdog':      {'label': '하이브 워치독 (프로세스 감시)', 'thread': 'Watchdog'},
     'discord_dashboard': {'label': 'Discord 읽기 전용 대시보드', 'thread': 'DiscordDashboard'},
@@ -814,8 +850,14 @@ def daemon_status(config_file: Path) -> list:
       subprocess 자식과 PG 커넥션이 고아가 되므로 재기동 방식이 안전). enabled=False인데
       running=True면 UI가 "재시작 후 적용"을 정확히 안내할 수 있다 — 이 두 값을 합치면
       사용자는 껐는데 왜 여전히 CPU를 먹는지 알 방법이 없다.
-    [제약] running은 스레드 존재 여부일 뿐 '일하는 중'이 아니다 — embed_backfill/heartbeat는
+    [제약] running은 존재 여부일 뿐 '일하는 중'이 아니다 — embed_backfill/heartbeat는
       대부분 sleep 상태로 살아있다.
+    [WHY 두 가지를 OR] 데몬은 두 형태가 섞여 있다. 루프를 도는 것은 스레드가 살아있고,
+      외부 스크립트를 popen하는 것은 스레드가 죽고 자식만 남는다. 한쪽만 보면 반드시
+      한 부류를 통째로 오판한다(2026-08-04 사고: popen 계열 4종이 전부 '꺼짐'으로 표시).
+    [알려진 구멍] run_orchestrator_daemon은 이전 인스턴스가 남긴 PID가 살아있으면
+      자식을 띄우지 않고 return한다 — 이 경로는 여기서 알 수 없어 running=False로 보인다.
+      PID 파일 기반 판정은 tasklist 호출이라 UI 폴링 주기에 넣기엔 비싸서 의도적으로 뺐다.
     """
     off = _disabled_daemons(config_file)
     env_off = {k.strip() for k in os.environ.get('VIBE_DISABLE_DAEMONS', '').split(',') if k.strip()}
@@ -825,7 +867,7 @@ def daemon_status(config_file: Path) -> list:
             'key': key,
             'label': meta['label'],
             'enabled': key not in off,
-            'running': meta['thread'] in alive,
+            'running': meta['thread'] in alive or _daemon_child_alive(key),
             # env: 환경변수로 끈 것은 config를 고쳐도 안 켜진다 → UI에서 토글을 잠근다.
             'source': 'env' if key in env_off else 'config',
         }
