@@ -9,7 +9,6 @@ DESCRIPTION: 하이브 마인드 초기 설정 자동 진단 + 수리 엔진.
              2. pg_database — 프로젝트별 DB 존재 여부 확인
              3. hooks       — .claude/settings.json 훅 설정 확인/생성
              4. cli_agents  — claude/antigravity/codex CLI 설치 감지
-             5. telegram    — .env 텔레그램 봇 토큰 유무
 
 REVISION HISTORY:
 - 2026-07-30 Claude: check_hooks가 그룹 형식(matcher+hooks)을 못 읽어 매 진단마다 flat 훅을
@@ -343,34 +342,6 @@ def check_cli_agents() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  5. 텔레그램 봇 토큰
-# ═══════════════════════════════════════════════════════════════════════
-
-def check_telegram() -> dict:
-    """프로젝트 루트의 .env에 텔레그램 봇 토큰이 설정되어 있는지 확인한다."""
-    env_path = _PROJECT_ROOT / ".env"
-
-    if not env_path.exists():
-        return _make_result(STATUS_MISSING, "텔레그램 봇 미설정 (.env 파일 없음)",
-                            action="open_telegram_panel")
-
-    try:
-        text = env_path.read_text(encoding='utf-8')
-    except Exception:
-        return _make_result(STATUS_ERROR, ".env 읽기 실패")
-
-    # TELEGRAM_BOT_T{n}= 패턴에서 실제 토큰(숫자:문자열)이 있는지 확인
-    token_pattern = re.compile(r'^TELEGRAM_BOT_T\d+=(\d+:[A-Za-z0-9_-]+)', re.MULTILINE)
-    tokens = token_pattern.findall(text)
-
-    if tokens:
-        return _make_result(STATUS_OK, f"텔레그램 봇 {len(tokens)}개 설정됨")
-    else:
-        return _make_result(STATUS_MISSING, "텔레그램 봇 토큰 미설정",
-                            action="open_telegram_panel")
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  6. Sub-agent 설정 확인
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -423,7 +394,6 @@ def run_all() -> dict[str, Any]:
                 "pg_database": ...,
                 "hooks": ...,
                 "cli_agents": ...,
-                "telegram": ...,
             },
             "auto_fixed": [...],  # 자동 수리된 항목 이름 목록
             "needs_action": [...],  # 사용자 조치 필요 항목
@@ -434,7 +404,6 @@ def run_all() -> dict[str, Any]:
         "pg_database": check_pg_database(),
         "hooks": check_hooks(),
         "cli_agents": check_cli_agents(),
-        "telegram": check_telegram(),
         "subagents": check_subagents(),
     }
 

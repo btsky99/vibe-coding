@@ -16,7 +16,7 @@
 #   - [불변식] 실패 태스크는 status='blocked'로 릴리즈 — 'failed'는
 #     find_tasks_for_agent 제외 목록에 없어 무한 재시도 루프가 된다.
 #   - [불변식] 가드(킬스위치/일일 상한/쿼터/연속 실패)는 매 사이클 DB에서 재로드 —
-#     텔레그램 /auto off가 다른 프로세스에서 상태를 바꾸기 때문.
+#     외부 제어 API가 다른 프로세스에서 상태를 바꿀 수 있기 때문.
 # [2026-07-18] Claude — P0 품질 게이트 2종 (deny 프로파일만으론 못 막는 사각):
 #   - [WHY] claude가 성공(is_error=false) 보고해도 산출물을 데몬이 독립 검증 —
 #     첫 실전 테스트에서 자동생성 파일(HIVEMIND.md) 수정 + 무검증 커밋 사고.
@@ -57,7 +57,7 @@ DAILY_LIMIT = 5                  # 하루 최대 수행 태스크 수
 QUOTA_LIMIT_PCT = 80.0           # 플랜 사용률 임계 — 초과 시 사이클 스킵
 FAIL_LIMIT = 2                   # 연속 실패 시 자율 모드 자동 정지
 DISCOVERED_CAP = 100             # 자가 발굴 중복 방지 시그니처 보관 상한
-OUTBOX_CAP = 30                  # 텔레그램 미소비 보고 보관 상한
+OUTBOX_CAP = 30                  # 외부 connector 미소비 보고 보관 상한
 # [WHY] 9019 고정 — 서버 HTTP(9000-9007)·오피스(9010번대)와 겹치지 않는 대역.
 # dev 서버와 설치본 EXE가 동시에 떠도 heartbeat는 딱 하나만 살아남게 하는 락.
 SINGLETON_LOCK_PORT = 9019
@@ -119,7 +119,7 @@ def _default_state() -> dict:
         'daily_count': 0,
         'consecutive_fails': 0,
         'discovered': [],        # 자가 발굴한 incident 시그니처 (중복 재제안 방지)
-        'outbox': [],            # 텔레그램 봇이 소비하는 보고 큐 [{ts, text}]
+        'outbox': [],            # 외부 connector가 소비하는 보고 큐 [{ts, text}]
         'last_cycle_at': '',
         'last_result': '',
     }
@@ -140,7 +140,7 @@ def save_hb_state(state: dict) -> None:
 
 
 def _report(state: dict, text: str) -> None:
-    """보고 1건을 아웃박스에 적재 — 소비자는 텔레그램 봇(별도 프로세스, hive_state 폴링)."""
+    """보고 1건을 외부 connector용 아웃박스에 적재한다."""
     state['outbox'] = (state.get('outbox') or [])[-(OUTBOX_CAP - 1):]
     state['outbox'].append({'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'text': text[:1500]})
     print(f"[heartbeat] {text}")
@@ -554,7 +554,7 @@ def _cycle(project_root: Path, data_dir: Path, project_id: str) -> None:
             success = False
             summary = f'[게이트 차단] {gate_reason}\n(claude 보고 요약: {summary[:300]})'
 
-    # [P1-③] 완료 리포트 구조화 — 텔레그램/아웃박스 소비자가 머지 판단에 필요한
+    # [P1-③] 완료 리포트 구조화 — connector/아웃박스 소비자가 머지 판단에 필요한
     # '무엇이 바뀌었나'를 한눈에. changed는 게이트가 이미 커밋을 검증한 후라 신뢰 가능.
     changed = _changed_files(wt)
     files_line = (

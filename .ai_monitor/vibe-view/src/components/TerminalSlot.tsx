@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-08-04 Codex: PTY 출력 청크를 수신 순서대로 직렬화하고 resize를 합쳐 TUI 화면 깨짐 방지.
+ * - 2026-08-04 Codex: 한글 IME 확정값을 다음 이벤트 루프에서 읽고 실제 WS 전송 성공 때만 입력 삭제.
  * - 2026-07-26 Codex: 전 에이전트 공통 사용량 바를 터미널 하단에 배치.
  * - 2026-07-15 Claude: 1500줄 상한 도달로 3분할 — ClaudeContextBar(컨텍스트 바+상세 팝업),
  *                      AgentSelectCards(선택 카드 3장+배경 로그), QuotaBadge(헤더 쿼터 배지)를
@@ -126,6 +128,9 @@ export default function TerminalSlot({
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isComposingRef = useRef(false);
+  // 한글 마지막 글자를 확정하는 Enter도 사용자가 누른 "전송 Enter"다. keydown 시점에는
+  // 아직 조합 중이라 값을 보내면 마지막 글자가 빠지므로 compositionend 뒤 최신 DOM 값을 보낸다.
+  const sendAfterCompositionRef = useRef(false);
   // FitAddon 참조 보관 (모니터링 뷰 토글 시 xterm 재조정용)
   const fitAddonRef = useRef<FitAddon | null>(null);
   // ResizeObserver 참조: 터미널 컨테이너 크기 변화 자동 감지용
@@ -438,7 +443,16 @@ export default function TerminalSlot({
       // 모니터링 뷰 열기/닫기로 컨테이너 높이가 바뀔 때마다 즉시 반응
       const termContainer = xtermRef.current;
       if (termContainer) {
-        const ro = new ResizeObserver(() => fitAddon.fit());
+        // xterm의 canvas 갱신도 컨테이너 관측을 다시 깨울 수 있다. 프레임당 한 번만 fit해서
+        // fit → resize → TUI 전체 redraw가 연쇄 반복되는 것을 막는다.
+        let fitFrame: number | null = null;
+        const ro = new ResizeObserver(() => {
+          if (fitFrame !== null) return;
+          fitFrame = requestAnimationFrame(() => {
+            fitFrame = null;
+            if (termRef.current === term) fitAddon.fit();
+          });
+        });
         ro.observe(termContainer);
         resizeObserverRef.current = ro;
       }
@@ -460,6 +474,19 @@ export default function TerminalSlot({
       });
       const ws = new WebSocket(`ws://${window.location.hostname}:${WS_PORT}/pty/slot${slotId}?${wsParams.toString()}`);
       wsRef.current = ws;
+      // Blob.text()는 비동기다. 이벤트마다 독립 await하면 빠른 TUI 출력에서 뒤 청크가 먼저
+      // xterm에 들어가 ANSI/OSC 시퀀스가 찢어진다. 단일 promise chain으로 수신 순서를 보존한다.
+      let outputQueue = Promise.resolve();
+      let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+      let pendingResize: { cols: number; rows: number } | null = null;
+      let lastSentResize = '';
+
+      const sendResize = (cols: number, rows: number) => {
+        const key = `${cols}x${rows}`;
+        if (key === lastSentResize || ws.readyState !== WebSocket.OPEN) return;
+        lastSentResize = key;
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      };
       ws.onopen = () => {
         setHasAttachedTerminal(true);
         // 재연결 성공 시 카운터 리셋
@@ -468,7 +495,7 @@ export default function TerminalSlot({
         term.write(`\r\n\x1b[38;5;39m[HIVE] ${agent.toUpperCase()} ${modeText} 터미널 연결 성공 \x1b[38;5;245m[node-pty]\x1b[0m\r\n\x1b[38;5;244m> CWD: ${connectPath}\x1b[0m\r\n\r\n`);
         // WS 연결 직후 현재 터미널 크기를 PTY에 전달
         // ResizeObserver가 WS 연결 전에 fire됐을 경우 누락된 resize를 보정
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        sendResize(term.cols, term.rows);
       };
       // [버그수정 2026-03-20] 장시간 idle 시 WS 끊김 → 자동 재연결
       // 원인: OS TCP keepalive 타임아웃 또는 네트워크 일시 단절로 WS가 닫힘.
@@ -479,6 +506,7 @@ export default function TerminalSlot({
       // → 정상 연결 중에도 재연결 시도 가능 (무한 재연결 루프 위험)
       // 수정: wsRef.current?.readyState로 실제 연결 상태를 직접 확인
       ws.onclose = (event) => {
+        if (resizeTimer) clearTimeout(resizeTimer);
         setHasAttachedTerminal(false);
         // code 1000(정상종료) 또는 터미널 모드가 꺼진 경우 재연결하지 않음
         if (event.code === 1000) return;
@@ -500,22 +528,27 @@ export default function TerminalSlot({
           }, delay);
         }
       };
-      ws.onmessage = async (e) => {
-        const data = e.data instanceof Blob ? await e.data.text() : e.data;
-        term.write(data);
+      ws.onmessage = e => {
+        outputQueue = outputQueue.then(async () => {
+          const data = e.data instanceof Blob ? await e.data.text() : String(e.data);
+          if (termRef.current === term && wsRef.current === ws) term.write(data);
+        }).catch(error => {
+          console.error('[PTY] 출력 처리 실패:', error);
+        });
       };
       term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(data));
       // xterm cols/rows가 바뀔 때마다 서버 PTY에 SIGWINCH 전달
       // fitAddon.fit() → term.onResize 순으로 발생하므로 여기서 resize 메시지 전송
       term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
+        pendingResize = { cols, rows };
+        if (resizeTimer) clearTimeout(resizeTimer);
+        // 그리드/모니터 패널 애니메이션 중 생기는 중간 크기는 버리고 최종 크기만 PTY에 전달한다.
+        resizeTimer = setTimeout(() => {
+          resizeTimer = null;
+          if (pendingResize) sendResize(pendingResize.cols, pendingResize.rows);
+          pendingResize = null;
+        }, 80);
       });
-      // 창 크기 변경 시 터미널 재조정 (클린업 포함)
-      const handleResize = () => fitAddon.fit();
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
     }, 50);
   };
 
@@ -599,17 +632,23 @@ export default function TerminalSlot({
   };
 
   const handleSend = (text: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
     const ws = wsRef.current;
     const cleanText = text.replace(/[\r\n]+$/, '');
-    if (!cleanText) return;
+    if (!cleanText) return false;
 
-    const lines = cleanText.replace(/\r\n/g, '\n').split('\n');
-    for (const line of lines) {
-      ws.send(`${line}\r`);
+    try {
+      const lines = cleanText.replace(/\r\n/g, '\n').split('\n');
+      for (const line of lines) {
+        ws.send(`${line}\r`);
+      }
+    } catch (error) {
+      console.error('[PTY] 입력 전송 실패:', error);
+      return false;
     }
     setInputValue('');
     termRef.current?.focus();
+    return true;
   };
 
   // 터미널 실행 중이면 활성 에이전트 이름으로 로그 필터링 (정확한 귀속)
@@ -901,12 +940,22 @@ export default function TerminalSlot({
                 onCompositionStart={() => {
                   isComposingRef.current = true;
                 }}
-                onCompositionEnd={() => {
+                onCompositionEnd={e => {
                   isComposingRef.current = false;
+                  if (sendAfterCompositionRef.current) {
+                    sendAfterCompositionRef.current = false;
+                    // WebView2/IME에 따라 compositionend 뒤 onChange가 한 박자 늦게 온다.
+                    // microtask에서는 마지막 한글이 빠진 과거 값일 수 있어 다음 task의 DOM 값을 읽는다.
+                    setTimeout(() => {
+                      const text = inputRef.current?.value ?? '';
+                      handleSend(text);
+                    }, 0);
+                  }
                 }}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+                      sendAfterCompositionRef.current = true;
                       return;
                     }
                     // 엔터 키 입력 시 즉시 기본 줄바꿈 동작을 차단합니다.

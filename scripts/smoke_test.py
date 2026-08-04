@@ -6,6 +6,7 @@
 #   /vibe-release 스킬의 Step 0.5에서 호출됨.
 #
 # REVISION HISTORY:
+# - 2026-08-04 Codex: API 검사 도우미가 pytest 테스트로 오수집되지 않도록 이름 변경.
 # - 2026-07-16 Claude: (2) managed checkout을 로컬 HEAD로 fetch+reset 후 기동 —
 #     boot.py가 구 checkout 소스를 실행해 smoke가 푸시 대상 소스를 검증 못 하던
 #     R18~R20 한계 해소. (VIBE_SRC_DIR dev 트리 직결은 frozen 전제와 충돌해 폐기)
@@ -85,7 +86,7 @@ def find_server_port(proc: subprocess.Popen, timeout: int = STARTUP_TIMEOUT) -> 
     return None
 
 
-def test_api(port: int, path: str, expected_keys: list[str] | None = None) -> tuple[bool, str]:
+def check_api(port: int, path: str, expected_keys: list[str] | None = None) -> tuple[bool, str]:
     """API 엔드포인트를 호출하고 응답을 검증합니다."""
     url = f'http://127.0.0.1:{port}{path}'
     try:
@@ -148,8 +149,7 @@ def run_smoke_test(exe_path: Path) -> bool:
     #   **설치본과 같은 디렉토리**를 공유했다. 실측 피해:
     #     · soft_update_ready.json 덮어씀 → 설치본이 그 시각에 업데이트를 확인한 것처럼 보여
     #       "왜 업데이트가 안 뜨지" 오진을 유발
-    #     · orchestrator.pid / telegram_bridge.pid 덮어씀 → 다음에 설치본을 켜면
-    #       run_telegram_bridge가 남의 pid를 보고 "이미 실행 중"으로 판정해 브릿지가 안 뜰 수 있음
+    #     · orchestrator.pid 등 운영 PID 파일 덮어씀 → 설치본의 daemon 판정이 오염될 수 있음
     #   포트는 VIBE_PORT_BASE로 격리했지만 데이터는 공유라 반쪽 격리였다.
     # [불변식] pgdata는 격리하지 않는다 — PG는 설치본과 공유하는 것이 정상이고(같은 포트로
     #   접속), 여기서 분리하면 smoke가 빈 DB를 만들며 기동 시간이 크게 늘어난다.
@@ -233,7 +233,7 @@ def run_smoke_test(exe_path: Path) -> bool:
         passed = 0
         failed = 0
         for path, keys in tests:
-            ok, msg = test_api(port, path, keys)
+            ok, msg = check_api(port, path, keys)
             status = 'PASS' if ok else 'FAIL'
             print(f'  [{status}] GET {path} — {msg}')
             if ok:

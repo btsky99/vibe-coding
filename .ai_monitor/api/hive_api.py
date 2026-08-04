@@ -8,6 +8,7 @@ DESCRIPTION: /api/hive/*, /api/orchestrator/*, /api/install-skills,
              HTTP 응답을 직접 기록합니다.
 
 REVISION HISTORY:
+- 2026-08-03 Codex: /api/agent-quota에 provider 공통 작업 크기 권고(advice) 추가
 - 2026-07-04 Claude: /api/agent-quota 신설 — 터미널 헤더 배지용 Claude+Codex 플랜 쿼터 통합 조회
 - 2026-07-03 Claude: /api/context-usage 응답에 quota 필드 추가 — OAuth 쿼터 사용률(%)·리셋 시각
 - 2026-03-01 Claude: server.py에서 분리 — hive/orchestrator/superpowers API 담당
@@ -758,14 +759,18 @@ def handle_get(handler, path: str, params: dict,
         handler.end_headers()
         try:
             from src.codex_quota import get_codex_quota
-            payload = {'claude': get_claude_quota(), 'codex': get_codex_quota()}
+            from src.quota_policy import advise_all
+            providers = {'claude': get_claude_quota(), 'codex': get_codex_quota()}
+            advice = advise_all(providers)
+            payload = {name: {**snapshot, 'advice': advice[name]}
+                       for name, snapshot in providers.items()}
         except Exception as e:
             payload = {'error': str(e)}
         handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
         return True
 
     # ── /api/heartbeat/status ───────────────────────────────────────────
-    # 자율 heartbeat 상태 — 대시보드 헤더 토글 칩용 (텔레그램 /auto status와 동일 소스)
+    # 자율 heartbeat 상태 — 대시보드 헤더 토글 칩용
     # [과거사고 2026-07-17] 최초 구현이 이 경로를 '/api/heartbeat'로 잡았다가 server.py의
     #   liveness 엔드포인트(_g_heartbeat, exact-first)에 완전히 가려져 칩이 영구 OFF.
     #   '/api/heartbeat'는 useVibeData·hive_watchdog가 쓰는 생존신호 → 절대 재점유 금지.
@@ -1081,7 +1086,7 @@ def handle_post(handler, path: str, data: dict,
     """
 
     # ── /api/heartbeat/toggle ────────────────────────────────────────────
-    # 자율 heartbeat on/off — scripts/auto.py·텔레그램 /auto와 동일 계약
+    # 자율 heartbeat on/off — scripts/auto.py와 동일 계약
     # (on 시 consecutive_fails 리셋 + NOTIFY 즉시 기상)
     if path == '/api/heartbeat/toggle':
         handler.send_response(200)

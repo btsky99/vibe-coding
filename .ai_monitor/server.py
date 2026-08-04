@@ -69,7 +69,7 @@ REVISION HISTORY:
 #   - ensure_postgres_running(): 배포 버전 최초 실행 시 initdb + pg_ctl start 자동 수행
 #   - 서버 기동 시 ensure_postgres_running() 호출하여 PG 자동 초기화/시작
 # [2026-03-11] - Claude (frozen EXE 무한 창 생성 버그 수정 v3.7.47)
-#   - run_watchdog/run_telegram_bridge 등: sys.executable → _python_runner_cmds()[0]
+#   - daemon subprocess: sys.executable → _python_runner_cmds()[0]
 #   - frozen 모드에서 sys.executable = EXE 자신이므로 subprocess 실행 시 EXE가 무한 재귀 생성되던 버그
 #   - Python 인터프리터 미탐색 시 해당 데몬 스킵(경고 출력)
 # [2026-03-08] - Claude (칸반 네이티브 창 실행 API 추가)
@@ -197,7 +197,6 @@ import api.vibe_skills_api as vibe_skills_api
 import api.office_api as office_api
 import api.experience_api as experience_api
 import api.codegraph_api as codegraph_api
-import api.telegram_api as telegram_api
 import api.update_api as update_api
 import api.install_api as install_api
 import api.events_api as events_api
@@ -644,8 +643,7 @@ if __version__ == "0.0.0-unknown":
 # [격리 2026-08-01] VIBE_DATA_DIR로 강제 지정 가능.
 #   [WHY] smoke_test는 frozen EXE를 띄우므로 **설치본과 같은 %APPDATA%\VibeCoding**을 썼다.
 #   그 결과 테스트가 설치본의 soft_update_ready.json / orchestrator.pid /
-#   telegram_bridge.pid를 덮어썼다. 특히 pid 파일은 run_telegram_bridge가 "이미 실행 중"
-#   판정에 쓰므로, 테스트 후 설치본을 켜면 텔레그램 브릿지가 조용히 안 뜰 수 있다.
+#   운영 PID 파일을 덮어썼다. 테스트 후 설치본의 daemon 생존 판정이 오염될 수 있었다.
 #   포트는 VIBE_PORT_BASE로 이미 격리했으나 데이터 디렉토리는 공유라 반쪽 격리였다.
 #   [실측] 2026-08-01 smoke 실행이 설치본 데이터 디렉토리에 15:36/15:40 흔적을 남겨,
 #   설치본이 그 시각에 업데이트를 확인한 것처럼 보이는 오진까지 유발했다.
@@ -1043,6 +1041,9 @@ def _g_config(h, pp):
                           PROJECT_CONTEXT_UNRESOLVED, _current_project_id(),
                           _current_project_root())
 def _g_daemons(h, pp):             daemons_api.handle_get(h, CONFIG_FILE)
+def _g_discord_config(h, pp):
+    from api import discord_config_api
+    discord_config_api.handle_get(h, DATA_DIR / 'discord_secrets.dat')
 def _g_vibe_sidebar(h, pp):        vibe_api.handle_sidebar_state(h)
 def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
 def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)
@@ -1057,7 +1058,6 @@ def _g_memory_db_info(h, pp):      memory_api.db_info(h, DATA_DIR, PG_PORT, PG_P
 # [순수위임 6종] 원본 elif가 이미 1줄 모듈 위임 → wrapper는 인자 주입만.
 def _g_projects(h, pp):            projects_api.handle_get(h, PROJECTS_FILE)
 def _g_install_skills(h, pp):      install_api.install_skills(h, BASE_DIR, SCRIPTS_DIR, ensure_schema)
-def _g_config_telegram(h, pp):     h._handle_telegram_config_get()
 def _g_check_update_ready(h, pp):  update_api.check_update_ready(h, DATA_DIR, __version__)
 def _g_trigger_update_chk(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
 def _g_soft_update_check(h, pp):   update_api.soft_update_check(h, DATA_DIR, _soft_src_dir())
@@ -1152,6 +1152,7 @@ GET_ROUTES = {
     # Phase 2 R8 — 설정/vibe/칸반/메모리 exact. 순수위임(vibe 3종) + 인라인 모듈 이전.
     '/api/config': _g_config,
     '/api/daemons': _g_daemons,
+    '/api/config/discord': _g_discord_config,
     '/api/vibe/sidebar': _g_vibe_sidebar,
     '/api/vibe/notifications': _g_vibe_notifications,
     '/api/vibe/skills': _g_vibe_skills,
@@ -1159,7 +1160,6 @@ GET_ROUTES = {
     # Phase 2 R16 — do_GET 잔여 legacy elif 흡수. 순수위임 6 + SSE 3 + 인라인 3.
     '/api/projects': _g_projects,
     '/api/install-skills': _g_install_skills,
-    '/api/config/telegram': _g_config_telegram,
     '/api/check-update-ready': _g_check_update_ready,
     '/api/trigger-update-check': _g_trigger_update_chk,
     '/api/soft-update/check': _g_soft_update_check,
@@ -1282,8 +1282,6 @@ def _p_body(h):
     return json.loads(h.rfile.read(_cl).decode('utf-8')) if _cl else {}
 
 # exact 위임
-def _p_telegram_config(h, pp): h._handle_telegram_config_post()
-def _p_telegram_test(h, pp):   h._handle_telegram_test()
 def _p_apply_update(h, pp):    update_api.apply_update(h, DATA_DIR)
 def _p_soft_update(h, pp):     update_api.soft_update_apply(h, DATA_DIR, _soft_src_dir())
 def _p_trigger_update(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
@@ -1291,6 +1289,9 @@ def _p_projects(h, pp):        projects_api.handle_post(h, PROJECTS_FILE)
 def _p_experience(h, pp):      experience_api.handle_post(h, pp.path)
 def _p_config_update(h, pp):   config_api.handle_update(h, CONFIG_FILE, PROJECTS_FILE)
 def _p_daemons(h, pp):         daemons_api.handle_update(h, CONFIG_FILE)
+def _p_discord_config(h, pp):
+    from api import discord_config_api
+    discord_config_api.handle_post(h, DATA_DIR / 'discord_secrets.dat')
 def _p_launch(h, pp):          launch_api.handle_launch(h, _codex_main_model)
 def _p_send_command(h, pp):    commands_api.handle_send_command(h, _NODE_PTY_REST_URL, _get_node_pty_sessions)
 def _p_locks(h, pp):           locks_api.handle_lock(h, LOCKS_FILE)
@@ -1401,8 +1402,6 @@ def _p_screenshot_analyze(h, pp): screenshot_api.analyze(h, SCRIPTS_DIR, PROJECT
 
 POST_ROUTES = {
     '/api/setup/auto-install': _p_setup_auto_install,
-    '/api/config/telegram': _p_telegram_config,
-    '/api/telegram/test': _p_telegram_test,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,
     '/api/trigger-update-check': _p_trigger_update,
@@ -1410,6 +1409,7 @@ POST_ROUTES = {
     '/api/experience': _p_experience,
     '/api/config/update': _p_config_update,
     '/api/daemons': _p_daemons,
+    '/api/config/discord': _p_discord_config,
     '/api/launch': _p_launch,
     '/api/send-command': _p_send_command,
     '/api/locks': _p_locks,
@@ -1539,19 +1539,6 @@ POST_COND_ROUTES: list = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SSEHandler(BaseHTTPRequestHandler):
-    # ── Telegram 설정 API 핸들러 — api/telegram_api.py로 분리 (2026-04-20) ──────
-    # 본체는 api/telegram_api.py에 모듈 함수로 이전. SSEHandler 메서드는
-    # PROJECT_ROOT/_child_procs를 바인딩하는 얇은 위임만 유지.
-
-    def _handle_telegram_config_get(self):
-        telegram_api.telegram_config_get(self, PROJECT_ROOT, _child_procs)
-
-    def _handle_telegram_config_post(self):
-        telegram_api.telegram_config_post(self, PROJECT_ROOT)
-
-    def _handle_telegram_test(self):
-        telegram_api.telegram_test(self, PROJECT_ROOT)
-
     def _cors_origin(self) -> str:
         """CORS Origin을 localhost/127.0.0.1만 허용하도록 반환합니다.
 
@@ -1589,7 +1576,7 @@ class SSEHandler(BaseHTTPRequestHandler):
                 _cfn(self, parsed_path)
                 return
 
-        # [Phase 2 R16] SSE 3종·heartbeat·shutdown·copy-path·projects·install-skills·config/telegram·
+        # [Phase 2 R16] SSE 3종·heartbeat·shutdown·copy-path·projects·install-skills·
         #   check-update-ready·trigger-update-check·soft-update/check·heal/metrics 잔여 elif 11종을
         #   모두 GET_ROUTES exact로 흡수 완료 → do_GET은 do_POST와 동형(exact→prefix→cond→SPA 폴백).
         #   조건 리터럴 원본은 각 _g_* wrapper와 GET_ROUTES 키에 verbatim 보존(완전성 가드 대응).
@@ -1746,7 +1733,7 @@ def _get_node_pty_sessions() -> dict:
 # _child_procs를 통해 종료 시 자동 kill됩니다.
 _REMOVED_PTY_HANDLER = True  # 마커 — 참조 점검용
 
-# 워치독/Telegram/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
+# 워치독/힐데몬 등 서버가 직접 spawn한 서브프로세스 참조 목록
 # — X 버튼 종료 시 이 목록을 순회하여 모두 taskkill로 강제 종료
 _child_procs: list = []
 

@@ -302,7 +302,7 @@ def run_gui_app(cfg: BootConfig) -> None:
                 _warm_embed()
             except Exception:
                 pass
-            # [R18] 데몬 10종(watchdog/telegram/codex/orchestrator/doc/agent_sync/
+            # [R18] 데몬 일괄(watchdog/codex/orchestrator/doc/agent_sync/
             #   zettel_sync·refine/commit/embedding_backfill) 일괄 기동 — start_all_daemons 위임.
             #   env는 여기서 생성(HTTP_PORT 확정 후 = late-binding 계약 충족).
             daemons.start_all_daemons(cfg.daemon_env_factory(),

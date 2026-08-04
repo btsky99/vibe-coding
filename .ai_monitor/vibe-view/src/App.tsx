@@ -59,10 +59,10 @@ import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
-import TelegramPanel from './components/panels/TelegramPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
 import HealPanel from './components/panels/HealPanel';
 import DaemonsPanel from './components/panels/DaemonsPanel';
+import DiscordPanel from './components/panels/DiscordPanel';
 import SetupBanner from './components/SetupBanner';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
@@ -728,9 +728,6 @@ function App() {
                 currentPath={currentPath}
                 onChangesCount={(c, conf) => { setTotalGitChanges(c); setConflictCount(conf); }}
               />
-            ) : activeTab === 'telegram' ? (
-              /* 텔레그램 브릿지 설정 패널 — 봇 토큰 + T1~T8 채팅 ID 관리 */
-              <TelegramPanel />
             ) : activeTab === 'tools' ? (
               /* 개발 도구 설치 관리 패널 — TOOL_REGISTRY 연동 */
               <ToolsPanel />
@@ -740,6 +737,9 @@ function App() {
             ) : activeTab === 'daemons' ? (
               /* 백그라운드 데몬 on/off — 저사양 PC에서 상시 데몬 CPU/메모리 회수 */
               <DaemonsPanel />
+            ) : activeTab === 'discord' ? (
+              /* Discord T1~T3 기본 토큰 + T4 이후 동적 추가 설정 */
+              <DiscordPanel />
             ) : activeTab === 'lan' ? (
               /* LAN 브리지 패널 — 자동발견·페어링·파일전송 (Phase 1) */
               <LanPanel />
@@ -790,7 +790,7 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {/* 자율 heartbeat 토글 — 클릭 한 번으로 on/off (scripts/auto.py·텔레그램 /auto와 동일 스위치) */}
+              {/* 자율 heartbeat 토글 — 클릭 한 번으로 on/off (scripts/auto.py와 동일 스위치) */}
               {/* hbWaiting: enabled인데 이 인스턴스가 9019 락을 못 쥠 = 다른 인스턴스가 실행 주체(대기).
                   [과거사고 2026-07-22] 다른 프로젝트 설치본 2개 동시 실행 시, 대기 인스턴스는 자기
                   PG DB(프로젝트별 분리)의 loop_beat_at을 갱신 못 해 항상 stale → '멈춤(hang)'으로 오표시.
@@ -958,7 +958,6 @@ function DashboardOnlyApp() {
     memory: 'Shared Memory',
     git: 'Git',
     hive: 'Hive',
-    telegram: 'Telegram Bridge',
   };
 
   const renderPanel = () => {
@@ -969,8 +968,6 @@ function DashboardOnlyApp() {
         return <MemoryPanel />;
       case 'git':
         return <GitPanel currentPath="" onChangesCount={() => {}} />;
-      case 'telegram':
-        return <TelegramPanel />;
       case 'hive':
       default:
         return <HivePanel />;

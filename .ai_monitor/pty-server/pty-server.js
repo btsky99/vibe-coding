@@ -343,7 +343,7 @@ function normalizeCodexStream(data) {
 }
 
 function getSubmitEnterSequence(_agent) {
-  // Telegram/REST injection should mirror the frontend terminal path:
+  // Connector/REST injection should mirror the frontend terminal path:
   // a single Enter submits once. The old double-CR path could leave Codex/Antigravity
   // waiting for one more manual Enter on subsequent prompts.
   return '\r';
@@ -1224,7 +1224,7 @@ app.post('/api/pty/terminate/:id', (req, res) => {
  * 특정 세션의 PTY에 텍스트를 직접 입력합니다.
  * body: { "text": "입력할 텍스트" }
  * query: project_id (Phase 2-5.3a)
- * 텔레그램 브릿지에서 기존 터미널의 Claude Code에 메시지를 주입하는 데 사용.
+ * 외부 connector에서 기존 터미널의 AI CLI에 메시지를 주입하는 데 사용.
  */
 app.post('/api/pty/write/:id', (req, res) => {
   let target = req.params.id.toUpperCase();

@@ -12,6 +12,8 @@ DESCRIPTION: agent_api.py 단위 테스트.
              - HTTP 핸들러는 간단한 Mock 객체로 대체
 
 REVISION HISTORY:
+- 2026-08-04 Codex: connector PTY의 Claude TUI 재그리기 노이즈 정제 회귀 테스트 추가.
+- 2026-08-03 Codex: Discord connector의 버스 전용 양방향 relay 회귀 테스트 추가.
 - 2026-07-26 Codex: 프로젝트 스코프 PTY 선택 회귀 테스트 추가.
 - 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-06-11 Claude: TestGetGeminiLastTask 삭제 — agy 전환으로 대상 함수 제거 (비공개 포맷)
@@ -43,6 +45,78 @@ _mock_cli_agent._current_run = None
 sys.modules.setdefault("cli_agent", _mock_cli_agent)
 
 import agent_api
+
+
+def test_clean_connector_output_removes_claude_tui_redraw_noise():
+    chunks = [
+        '0; Claude Code', '안녕', 'Gusting    for agents', 'i', '*tg', 'ui',
+        'Discombobulating',
+        'Discombobulatingrunning stop hooks 0/2  7s  51 tokens)',
+        'Discombobulating76', '(2s  2 tokens)', '*55', 'n30', 'i64', 'tg7',
+        '안녕! 뭐 도와줄까?',
+        '57.7k / 1M (6%) In 57.7k Out 254 캐시저장 31.4k',
+        'Brewed for 10s', '0; Claude Code',
+    ]
+
+    assert agent_api._clean_connector_output(chunks, '안녕') == '안녕! 뭐 도와줄까?'
+
+
+def test_clean_connector_output_deduplicates_redrawn_answer():
+    chunks = ['답변 본문', '답변 본문', '\x1b]0; Claude Code\x07', '0; Claude Code']
+
+    assert agent_api._clean_connector_output(chunks, '질문') == '답변 본문'
+
+
+def test_connector_bus_relay_publishes_correlated_response(monkeypatch):
+    calls = []
+    ticks = iter(range(1000))
+
+    def node(method, path, payload=None, timeout=5.0):
+        calls.append((method, path, payload))
+        if method == 'POST':
+            return {'status': 'ok'}
+        if 'since=0' in path:
+            return {'latest_seq': 10, 'entries': []}
+        if len([call for call in calls if call[0] == 'GET']) == 2:
+            return {'latest_seq': 11, 'entries': [{'text': 'bus response'}]}
+        return {'latest_seq': 11, 'entries': []}
+
+    published = []
+    monkeypatch.setattr(agent_api, '_node_json', node)
+    monkeypatch.setattr(agent_api.time, 'sleep', lambda _seconds: None)
+    monkeypatch.setattr(agent_api.time, 'monotonic', lambda: next(ticks))
+    monkeypatch.setattr(
+        agent_api, '_bus_append',
+        lambda *args, **kwargs: published.append((args, kwargs)) or 99,
+    )
+
+    agent_api._relay_connector_turn('T1', 'D--vibe-coding', 'hello', 7)
+
+    assert [call for call in calls if call[0] == 'POST'] == [(
+        'POST', '/api/pty/write/1?project_id=D--vibe-coding',
+        {'target': 'T1', 'text': 'hello', 'project_id': 'D--vibe-coding'},
+    )]
+    assert published[-1][0][2] == 'assistant'
+    assert 'bus response' in published[-1][0][3]
+    assert published[-1][1]['reply_to_seq'] == 7
+
+
+def test_connector_bus_relay_marks_not_running_as_error(monkeypatch):
+    published = []
+    monkeypatch.setattr(
+        agent_api, '_node_json',
+        lambda method, *_args, **_kwargs: (
+            {'error': 'not_running'} if method == 'POST' else {'latest_seq': 0}),
+    )
+    monkeypatch.setattr(
+        agent_api, '_bus_append',
+        lambda *args, **kwargs: published.append((args, kwargs)) or 1,
+    )
+
+    agent_api._relay_connector_turn('T2', 'D--ons', 'hello', 8)
+
+    assert published[-1][1]['reply_to_seq'] == 8
+    assert published[-1][1]['error'] == 'not_running'
 
 
 class TestProjectScopedPtyIdentity:

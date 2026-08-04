@@ -983,10 +983,9 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
         }
         _save_run(result)
 
-        # 텔레그램 원격제어: 에이전트 응답을 ITCP에 기록하여 telegram_bridge가 폴링 → 전달
-        # source=telegram인 요청에 대해서만 ITCP 응답을 보냄 (대시보드 요청은 SSE로 이미 전달됨)
+        # 외부 connector 요청은 ITCP 응답 채널에 기록한다. 대시보드 요청은 SSE로 전달된다.
         _source = _current_run.get('source', '')
-        if _source == 'telegram' and output_lines:
+        if _source == 'connector' and output_lines:
             try:
                 import sys as _sys
                 _sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -1003,7 +1002,7 @@ def run(task: str, cli: str = 'auto', working_dir: str | None = None,
                     from_terminal=cli,
                     to_terminal="user",
                     content=summary[:3000],
-                    channel="telegram_response",
+                    channel="connector_response",
                     msg_type="response",
                     terminal_id=terminal_id,
                 )

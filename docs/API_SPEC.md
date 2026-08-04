@@ -2,6 +2,9 @@
 FILE: docs/API_SPEC.md
 DESCRIPTION: Vibe-Coding (AI Monitor) REST API 상세 명세서
 REVISION HISTORY:
+- 2026-08-03 Codex: Discord 터미널별 토큰 설정 GET/POST API 추가
+- 2026-08-03 Codex: Discord API를 공용 토큰·Node ID·터미널별 채널 binding 계약으로 교정
+- 2026-08-03 Codex: 사용량 권고를 포함하는 `/api/agent-quota` 계약 추가
 - 2026-03-19 Gemini: 최초 작성. v5.0 기준 모든 엔드포인트 정리.
 """
 
@@ -69,8 +72,37 @@ Mission Control UI와 cmux 호환 CLI 시스템을 위한 실시간 피드백 AP
 | **POST** | `/api/save-file` | 파일 내용 저장 |
 | **GET** | `/api/config` | 시스템 전역 설정 조회 |
 | **POST** | `/api/config/update` | 시스템 전역 설정 업데이트 |
+| **GET** | `/api/config/discord` | Discord 공용 토큰 설정 여부와 Node/ACL/터미널 채널 binding 조회(토큰 원문 비노출) |
+| **POST** | `/api/config/discord` | Discord 공용 토큰·Node ID·서버/사용자 ACL·T1~T9 채널 binding 저장 |
 | **POST** | `/api/launch` | 특정 에이전트(Claude/Gemini/Codex) 터미널 실행 |
 | **POST** | `/api/shutdown` | 서버 및 관련 프로세스 안전 종료 |
+
+---
+
+## 6. Quota Policy API
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| **GET** | `/api/agent-quota` | Claude/Codex 쿼터 snapshot과 provider별 작업 크기 권고 반환 |
+
+각 provider의 `advice`는 `level`, `recommended_task_size`, `action`, `reason`,
+`blocks_new_work`, `requires_approval`을 제공한다. 초기 guard mode는 `warn`이며 쿼터를
+조회하지 못하면 `level=unavailable`, `blocks_new_work=false`로 fail-open한다.
+
+---
+
+## 7. Connector Runtime API
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| **POST** | `/api/agent/chat/bus` | 외부 connector 발화를 기록하고 백그라운드 소비자에 전달 |
+| **GET** | `/api/agent/chat/feed` | 터미널별 메시지와 `reply_to_seq` 상관 응답을 seq 기준 조회 |
+| **POST** | `/api/pty/write` | 실행 중인 PTY 세션에 검증된 텍스트 입력 |
+| **GET** | `/api/pty/output` | PTY 출력 버퍼를 seq 기준으로 조회 |
+
+외부 connector는 반드시 ACL과 이벤트 중복 방지를 먼저 통과한 뒤 chat bus만 호출한다.
+PTY API는 서버 내부 버스 소비자의 transport adapter 및 로컬 UI가 사용하며, connector가
+직접 호출하지 않는다.
 
 ---
 **기본 포트**: 9000 (설정에 따라 가변)

@@ -5,7 +5,7 @@
  *          메신저 스타일 말풍선으로 에이전트와 대화합니다.
  *          에이전트(Claude/Antigravity/Codex) + 모드(일반/YOLO) + 역할(오케스트레이션/프론트/백엔드) 선택.
  *          /api/agent/chat SSE로 실시간 스트리밍 수신.
- *          텔레그램과 동일한 백엔드를 공유하여 같은 세션 컨텍스트 유지.
+ *          외부 connector와 동일한 백엔드를 공유하여 같은 세션 컨텍스트 유지.
  * REVISION HISTORY:
  * - 2026-03-25 Claude: 우클릭 컨텍스트 메뉴 추가 — 복사/붙여넣기 (pywebview 환경 지원)
  * - 2026-03-24 Claude: 최초 생성 — cokacdir 패턴 채팅 UI
@@ -37,15 +37,15 @@ function appendCapped(prev: ChatMessage[], ...added: ChatMessage[]): ChatMessage
 
 // ── 타입 정의 ──
 
-/** 채팅 메시지 — source 필드로 대시보드/텔레그램 발신 구분 */
+/** 채팅 메시지 — source 필드로 대시보드/외부 connector 발신 구분 */
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   ts: string;
   toolName?: string;  // tool_use일 때 도구 이름
-  source?: 'dashboard' | 'telegram';  // 메시지 발신 채널
-  tgUser?: string;  // 텔레그램 사용자 이름 (source=="telegram"일 때)
+  source?: 'dashboard' | 'connector';
+  actorName?: string;
 }
 
 /** 역할(포커스) 옵션 — 사용자가 터미널마다 선택 */
@@ -144,8 +144,8 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
       .catch(() => {});
   }, [terminalId]);
 
-  // ── 메시지 버스 폴링 (텔레그램 ↔ 대시보드 양방향 동기화) ──
-  // 2초 간격으로 /api/agent/chat/feed 폴링, 텔레그램발 메시지를 채팅에 표시
+  // ── 메시지 버스 폴링 (외부 connector ↔ 대시보드 양방향 동기화) ──
+  // 2초 간격으로 /api/agent/chat/feed 폴링해 원격 메시지를 채팅에 표시
   const busSeqRef = useRef(0);
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -158,22 +158,22 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
           busSeqRef.current = data.latest_seq;
         }
         if (data.messages?.length) {
-          // 텔레그램발 메시지만 추가 (대시보드 발신은 이미 로컬에 있음)
-          const telegramMsgs: ChatMessage[] = data.messages
-            .filter((m: any) => m.source === 'telegram')
+          // 외부 connector 메시지만 추가한다. 대시보드 발신은 이미 로컬에 있다.
+          const connectorMsgs: ChatMessage[] = data.messages
+            .filter((m: any) => m.source === 'connector')
             .map((m: any) => ({
-              id: `tg-${m.seq}`,
+              id: `connector-${m.seq}`,
               role: m.role as ChatMessage['role'],
               content: m.content,
               ts: m.ts,
-              source: 'telegram' as const,
-              tgUser: m.tg_user,
+              source: 'connector' as const,
+              actorName: m.actor_name,
             }));
-          if (telegramMsgs.length > 0) {
+          if (connectorMsgs.length > 0) {
             setMessages(prev => {
               // seq 기반 중복 방지
               const existingIds = new Set(prev.map(m => m.id));
-              const newOnes = telegramMsgs.filter(m => !existingIds.has(m.id));
+              const newOnes = connectorMsgs.filter(m => !existingIds.has(m.id));
               return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
             });
           }
@@ -463,7 +463,7 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
 
         {messages.map(msg => (
           <div key={msg.id} className={`flex ${
-            msg.source === 'telegram' ? 'justify-start' :
+            msg.source === 'connector' ? 'justify-start' :
             msg.role === 'user' ? 'justify-end' : 'justify-start'
           }`}>
             {/* 도구 사용 표시 */}
@@ -474,19 +474,17 @@ export default function ChatSlot({ slotId, currentPath, onSwitchToTerminal }: Ch
                 </div>
                 <div className="text-white/40 font-mono truncate">{msg.content.slice(0, 100)}</div>
               </div>
-            ) : msg.source === 'telegram' && msg.role === 'user' ? (
-              /* 텔레그램발 사용자 메시지 (왼쪽, 보라색 말풍선 + ✈️) */
+            ) : msg.source === 'connector' && msg.role === 'user' ? (
               <div className="max-w-[75%] px-3 py-2 rounded-2xl rounded-bl-sm bg-purple-600/30 border border-purple-500/30 text-purple-100 text-sm whitespace-pre-wrap break-words">
                 <div className="flex items-center gap-1 text-[10px] text-purple-300 mb-1 font-bold">
-                  <span>✈️</span> {msg.tgUser || 'Telegram'}
+                  <span>🌐</span> {msg.actorName || 'Remote'}
                 </div>
                 {msg.content}
               </div>
-            ) : msg.source === 'telegram' && msg.role === 'assistant' ? (
-              /* 텔레그램발 에이전트 응답 (왼쪽, 어두운 말풍선 + ✈️ 뱃지) */
+            ) : msg.source === 'connector' && msg.role === 'assistant' ? (
               <div className="max-w-[85%] px-3 py-2 rounded-2xl rounded-bl-sm bg-[#2d2d2d] border border-purple-500/20 text-[#d4d4d4] text-sm whitespace-pre-wrap break-words font-mono">
                 <div className="flex items-center gap-1 text-[10px] text-purple-300 mb-1">
-                  <span>✈️</span> 텔레그램 응답
+                  <span>🌐</span> 원격 응답
                 </div>
                 {msg.content}
               </div>

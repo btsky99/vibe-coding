@@ -2,11 +2,11 @@
 """
 FILE: scripts/auto.py
 DESCRIPTION: 자율 클로드 heartbeat 터미널 스위치 — on/off/status.
-             텔레그램 /auto 명령과 같은 hive_state 'heartbeat' 플래그를 조작한다.
+             hive_state의 'heartbeat' 플래그를 조작한다.
              (데몬 본체는 .ai_monitor/infra/heartbeat_daemon.py — 서버 프로세스 안에서 가동)
 
 REVISION HISTORY:
-- 2026-07-17 Claude: 신규 — 터미널에서 텔레그램 없이 자율 모드 제어 (사용자 요청)
+- 2026-07-17 Claude: 터미널 자율 모드 제어 최초 구현
 """
 import sys
 from pathlib import Path
@@ -34,7 +34,7 @@ def main() -> int:
     if cmd == 'on':
         s = load_hb_state()
         s['enabled'] = True
-        # [WHY] 연속 실패 자동 정지 후 재개가 가드에 다시 걸리지 않게 리셋 (텔레그램 /auto on과 동일 계약)
+        # [WHY] 연속 실패 자동 정지 후 재개가 가드에 다시 걸리지 않게 리셋
         s['consecutive_fails'] = 0
         save_hb_state(s)
         _wake_now()

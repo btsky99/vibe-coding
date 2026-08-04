@@ -1,8 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # 📄 파일명: infra/daemons.py
-# 📝 설명: 백그라운드 데몬 러너 — 워치독/텔레그램/힐데몬/오케스트레이터/문서 생성/
+# 📝 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/
 #          에이전트 동기화/MUX/제텔 동기화·정제/커밋 감시 (server.py 분할 단계 9)
 # 🕒 변경 이력:
+# [2026-08-04] Codex — Discord T1~Tn을 활성 프로젝트 하나가 아닌 slot_projects에 바인딩.
 # [2026-06-10] Claude — server.py main() 내부 중첩 함수 11개 이관 (~500줄)
 #   - [제약] 모든 함수는 daemon=True 스레드에서 호출됨 — 블로킹 루프 허용.
 #   - [WHY] env(DaemonEnv)는 호출 시점에 server.py 래퍼가 생성 — HTTP_PORT 등이
@@ -25,6 +26,7 @@ from typing import Callable
 
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 from infra import runtime
+from infra.project_context import slugify
 
 
 def _config_vault_dir(config_file: Path, default_vault: Path) -> Path:
@@ -114,78 +116,104 @@ def run_lan_bridge(env: DaemonEnv) -> None:
     env.child_procs.append(child)
 
 
-_tg_bridge_launched = [False]
-def run_telegram_bridge(env: DaemonEnv) -> None:
-    if _tg_bridge_launched[0]:
+def run_discord_dashboard(env: DaemonEnv) -> None:
+    """웹훅이 설정된 경우에만 읽기 전용 Discord 대시보드를 별도 프로세스로 기동한다."""
+    webhook = os.environ.get('DISCORD_WEBHOOK_URL', '').strip()
+    if not webhook or not env.scripts_dir:
         return
-    _tg_bridge_launched[0] = True
-    if not env.scripts_dir:
+    script = env.scripts_dir / 'discord_dashboard.py'
+    runners = runtime.python_runner_cmds(env.base_dir, env.project_root)
+    if not script.exists() or not runners:
         return
-    tg_script = env.scripts_dir / "telegram_bridge.py"
-    env_file = env.project_root / ".env"
-    tg_log = env.data_dir / "telegram_bridge.log"
-    if not tg_script.exists():
-        return
-    tg_pid_file = env.data_dir / "telegram_bridge.pid"
-    if tg_pid_file.exists():
-        try:
-            old_pid = int(tg_pid_file.read_text().strip())
-            check = proc.run(
-                ['tasklist', '/FI', f'PID eq {old_pid}', '/NH'],
-                capture_output=True, text=True, timeout=5,
-            )
-            if str(old_pid) in check.stdout and 'python' in check.stdout.lower():
-                print(f"[*] Telegram Bridge 이미 실행 중 (PID={old_pid}) — 스킵")
-                return
-            else:
-                tg_pid_file.unlink(missing_ok=True)
-        except Exception:
-            tg_pid_file.unlink(missing_ok=True)
-    try:
-        env_content = env_file.read_text(encoding='utf-8') if env_file.exists() else ""
-        has_token = False
-        for line in env_content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("TELEGRAM_BOT_T") and "=" in stripped:
-                token_val = stripped.split("=", 1)[1].strip()
-                if token_val:
-                    has_token = True
-                    break
-            elif stripped.startswith("TELEGRAM_BOT_TOKEN="):
-                token_val = stripped.split("=", 1)[1].strip()
-                if token_val:
-                    has_token = True
-                    break
-        if not has_token:
-            return
-    except Exception:
-        return
-    _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-    if not _python_cmds:
-        print("[!] run_telegram_bridge: Python 인터프리터를 찾을 수 없어 Telegram 브릿지 스킵")
-        return
-    python_exe = _python_cmds[0]
-    child_env = os.environ.copy()
-    child_env['VIBE_SERVER_PORT'] = str(env.http_port)
-    tg_log.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = open(tg_log, 'a', encoding='utf-8')
-    # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
+    log_path = env.data_dir / 'discord_dashboard.log'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = open(log_path, 'a', encoding='utf-8')
     child = proc.popen(
-        [python_exe, str(tg_script)],
-        cwd=str(env.project_root),
-        stdout=log_handle,
-        stderr=log_handle,
-        env=child_env,
-        encoding='utf-8',
-        errors='replace',
+        [runners[0], str(script), '--server', f'http://127.0.0.1:{env.http_port}',
+         '--project-root', str(env.project_root), '--project-id', env.current_project_id()],
+        cwd=str(env.project_root), stdout=log_handle, stderr=log_handle,
+        encoding='utf-8', errors='replace',
     )
     child._vibe_log_handle = log_handle
     env.child_procs.append(child)
+
+
+def run_discord_gateway(env: DaemonEnv) -> None:
+    """공용 봇 토큰 하나로 현재 PC의 모든 터미널 binding을 처리한다.
+
+    UI v2 설정이 있으면 그 값이 정본이며 Gateway를 한 개만 띄운다. 환경변수 계약은
+    UI 설정이 없는 기존 사용자의 하위 호환을 위해 유지한다.
+    """
+    if not env.scripts_dir:
+        return
+    config = {}
     try:
-        tg_pid_file.write_text(str(child.pid))
-    except Exception:
-        pass
-    print(f"[*] Telegram Bridge 자동 시작됨 (PID={child.pid})")
+        from api.discord_config_api import load_config
+        config = load_config(env.data_dir / 'discord_secrets.dat')
+        if env.config_file.exists():
+            app_config = json.loads(env.config_file.read_text(encoding='utf-8'))
+            config['slot_projects'] = app_config.get('slot_projects') or {}
+    except Exception as error:
+        print(f'[!] Discord UI 설정 로드 실패: {type(error).__name__}')
+    child_env = os.environ.copy()
+    if config.get('token'):
+        channels = config.get('channels') or {}
+        child_env['DISCORD_BOT_TOKEN'] = config['token']
+        child_env['VIBE_NODE_ID'] = config['node_id']
+        child_env['DISCORD_GUILD_IDS'] = ','.join(config['guild_ids'])
+        child_env['DISCORD_USER_IDS'] = ','.join(config['user_ids'])
+        child_env['DISCORD_CHANNEL_IDS'] = ','.join(channels.values())
+        child_env['DISCORD_CHANNEL_BINDINGS'] = json.dumps(
+            _discord_channel_bindings(config, env.current_project_id())
+        )
+    required = ('DISCORD_BOT_TOKEN', 'DISCORD_GUILD_IDS', 'DISCORD_CHANNEL_IDS', 'DISCORD_USER_IDS')
+    has_bindings = (child_env.get('DISCORD_CHANNEL_BINDINGS', '').strip()
+                    or child_env.get('DISCORD_GROUP_BINDINGS', '').strip())
+    if not all(child_env.get(key, '').strip() for key in required) or not has_bindings:
+        return
+    script = env.scripts_dir / 'discord_gateway.py'
+    runners = runtime.python_runner_cmds(env.base_dir, env.project_root)
+    if not script.exists() or not runners:
+        return
+    log_path = env.data_dir / 'discord_gateway.log'
+    log_handle = open(log_path, 'a', encoding='utf-8')
+    child_env.pop('DISCORD_TERMINAL_ID', None)
+    child_env['VIBE_SERVER_URL'] = f'http://127.0.0.1:{env.http_port}'
+    child_env['VIBE_PROJECT_ID'] = env.current_project_id()
+    child = proc.popen(
+        [runners[0], str(script)], cwd=str(env.project_root),
+        stdout=log_handle, stderr=log_handle, env=child_env,
+        encoding='utf-8', errors='replace',
+    )
+    child._vibe_log_handle = log_handle
+    env.child_procs.append(child)
+
+
+def _discord_channel_bindings(config: dict, fallback_project_id: str) -> dict:
+    """Bind Discord terminal IDs to the persisted per-slot projects.
+
+    ``slot_projects`` is zero-based while external terminal IDs are one-based.
+    Falling back is intentional for old configurations that predate per-slot
+    project persistence.
+    """
+    channels = config.get('channels') or {}
+    slot_projects = config.get('slot_projects') or {}
+    bindings = {}
+    for terminal, channel in channels.items():
+        terminal_id = str(terminal).upper()
+        project_id = fallback_project_id
+        if terminal_id.startswith('T') and terminal_id[1:].isdigit():
+            slot_index = int(terminal_id[1:]) - 1
+            path = slot_projects.get(str(slot_index), slot_projects.get(slot_index, ''))
+            if isinstance(path, str) and path.strip():
+                project_id = slugify(Path(path.strip()))
+        bindings[str(channel)] = {
+            'node_id': config['node_id'],
+            'terminal_id': terminal_id,
+            'project_id': project_id,
+        }
+    return bindings
+
 
 # Codex를 '사용 중'으로 볼 시간 창 — 이 시간 안에 히스토리가 갱신됐으면 워처를 띄운다.
 # [WHY 10분] Codex 한 턴의 생각/응답 간격보다 충분히 길어야 대화 중간에 워처가 죽지 않는다.
@@ -697,7 +725,7 @@ def run_heartbeat(env: DaemonEnv) -> None:
     """자율 클로드 심장 박동 데몬 — 본체는 infra/heartbeat_daemon.py.
 
     [WHY] 기본 꺼짐(hive_state 'heartbeat'.enabled=False) — 자율 실행은 반드시
-    텔레그램 /auto on의 명시적 옵트인 후에만. 루프 자체는 항상 돌지만
+    자율 실행의 명시적 옵트인 후에만. 루프 자체는 항상 돌지만
     enabled=False면 30초 재확인만 반복(무비용).
     [제약] frozen(EXE) 모드는 실행 대상이 앱 자신의 소스가 아니라 사용자 프로젝트 —
     current_project_root() late-binding으로 프로젝트 전환을 따라간다.
@@ -714,11 +742,10 @@ def run_heartbeat(env: DaemonEnv) -> None:
 # ── 데몬 토글 레지스트리 ──────────────────────────────────────────────────
 # [WHY 2026-08-01] 실측: 상시 데몬 6종이 ~211MB + CPU를 점유하는데 토글은 lan_bridge 하나뿐이라
 #   안 쓰는 기능도 무조건 떴다. Codex를 안 쓰는 PC에서 codex_pg_watcher가 CPU 15,140초(4.2시간),
-#   텔레그램 미사용 PC에서 telegram_bridge가 35MB를 점유. 저사양 PC에서는 이게 그대로 압박이 된다.
 # [불변식] 기본값은 전부 True — 토글 도입이 기존 동작을 바꾸면 안 된다. 끄는 것은 사용자 선택이며,
 #   기본값을 False로 바꾸려면 그 기능이 죽는다는 것을 사용자가 알고 결정해야 한다.
-# [설정] config.json  {"daemons": {"codex_watcher": false, "telegram": false}}
-#        또는 환경변수  VIBE_DISABLE_DAEMONS="codex_watcher,telegram"  (테스트/1회성)
+# [설정] config.json  {"daemons": {"codex_watcher": false}}
+#        또는 환경변수  VIBE_DISABLE_DAEMONS="codex_watcher"  (테스트/1회성)
 # [제약] lan_bridge는 run_lan_bridge 내부에도 자체 게이트(lan_bridge_enabled)가 있다 —
 #   이중 게이트지만 어느 쪽이든 OFF면 안 뜨므로 안전하다. 내부 게이트를 지우지 말 것.
 # [불변식] 'thread' 값은 실제 기동 스레드명과 반드시 일치 — daemon_status()가 이 이름으로
@@ -727,7 +754,8 @@ def run_heartbeat(env: DaemonEnv) -> None:
 #   레지스트리가 유일한 원천이다(호출부에 스레드명 재작성 금지).
 DAEMON_TOGGLES: dict = {
     'watchdog':      {'label': '하이브 워치독 (프로세스 감시)', 'thread': 'Watchdog'},
-    'telegram':      {'label': '텔레그램 브릿지 (폰에서 지시)', 'thread': 'TelegramBridge'},
+    'discord_dashboard': {'label': 'Discord 읽기 전용 대시보드', 'thread': 'DiscordDashboard'},
+    'discord_gateway': {'label': 'Discord 양방향 Gateway', 'thread': 'DiscordGateway'},
     'codex_watcher': {'label': 'Codex PG 워처 (온디맨드 — Codex 쓸 때만 자동 기동)',
                       'thread': 'CodexPGWatcher'},
     'orchestrator':  {'label': '오케스트레이터 데몬', 'thread': 'OrchestratorDaemon'},
@@ -798,7 +826,7 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
       계약 유지(모듈 import 시점 포트 고정 금지). agent_sync_daemon만 env가 아닌
       (agent_status, lock) 시그니처라 별도 처리.
     [제약] 스레드명은 DAEMON_TOGGLES['thread']가 유일 원천 — 기존 server.py 이름을
-      그대로 옮겨왔고(로그 추적성), watchdog/telegram만 무명이던 것을 이름 부여로
+      그대로 옮겨왔고(로그 추적성), watchdog의 무명 스레드를 이름 있는 스레드로
       승격했다(daemon_status의 실행 중 판정에 이름이 필요). 스레드명에 의존하는
       외부 코드는 없음을 확인하고 바꿨다.
     """
@@ -814,7 +842,8 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
                          name=DAEMON_TOGGLES[key]['thread'], daemon=True).start()
 
     _t('watchdog', run_watchdog, (env,))
-    _t('telegram', run_telegram_bridge, (env,))
+    _t('discord_dashboard', run_discord_dashboard, (env,))
+    _t('discord_gateway', run_discord_gateway, (env,))
     _t('codex_watcher', run_codex_pg_watcher, (env,))
     _t('orchestrator', run_orchestrator_daemon, (env,))
     _t('doc_generators', run_doc_generators_daemon, (env,))
@@ -826,7 +855,7 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     _t('heartbeat', run_heartbeat, (env,))
     _t('lan_bridge', run_lan_bridge, (env,))
 
-    # [WHY 로그] 데몬이 안 뜬 이유가 로그에 없으면 "왜 텔레그램이 안 되지"를 추적할 방법이 없다.
+    # [WHY 로그] 데몬이 안 뜬 이유가 로그에 없으면 비활성 원인을 추적할 방법이 없다.
     #   설정으로 끈 것과 버그로 안 뜬 것을 구분하는 유일한 단서다.
     if skipped:
         print(f"[*] 데몬 {len(skipped)}종 비활성(config daemons/VIBE_DISABLE_DAEMONS): "

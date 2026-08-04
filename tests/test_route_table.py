@@ -25,7 +25,7 @@ GOLDEN_EXACT = {
     '/api/setup/auto-install',
     # do_GET
     '/api/agents', '/api/browse-folder', '/api/check-update-ready', '/api/config',
-    '/api/config/telegram', '/api/copy-path', '/api/dirs', '/api/drives',
+    '/api/copy-path', '/api/dirs', '/api/drives',
     '/api/events/agent', '/api/events/fs', '/api/events/thoughts', '/api/heal/metrics',
     '/api/heartbeat', '/api/help', '/api/image-file', '/api/install-skills',
     '/api/install-tool-status', '/api/memory/db-info',
@@ -43,7 +43,7 @@ GOLDEN_EXACT = {
     '/api/office/launch', '/api/office/restart', '/api/office/status',
     '/api/open-external', '/api/run-script', '/api/screenshot/analyze',
     '/api/select-folder', '/api/send-command', '/api/soft-update/apply',
-    '/api/telegram/test', '/api/thoughts/add', '/api/vibe/log', '/api/vibe/log/clear',
+    '/api/thoughts/add', '/api/vibe/log', '/api/vibe/log/clear',
     '/api/vibe/notify', '/api/vibe/progress', '/api/vibe/progress/clear',
     '/api/vibe/status', '/api/vibe/status/clear',
     # ── 복합조건(path in 튜플) 라우트 — R9.5 in튜플 파싱으로 감지, 기존 사각지대 해소 ──

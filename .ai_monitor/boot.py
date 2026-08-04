@@ -73,7 +73,6 @@ if False:  # noqa: SIM223 — 의도적 정적-탐색 전용 블록 (런타임 �
     import watchdog           # 파일 감시
     import dotenv             # .env 로드
     import rich               # 콘솔 출력
-    import telegram           # python-telegram-bot 브릿지
     import websockets         # WS PTY
     import winpty             # 터미널 PTY
     import win32com           # pywin32 — 바로가기/COM

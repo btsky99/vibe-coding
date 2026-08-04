@@ -18,8 +18,8 @@ export interface OfficeChatMessage {
   content: string;
   ts: string;
   toolName?: string;
-  source?: 'dashboard' | 'telegram';
-  tgUser?: string;
+  source?: 'dashboard' | 'connector';
+  actorName?: string;
 }
 
 interface UseOfficeChatReturn {
@@ -72,7 +72,7 @@ export function useOfficeChat(
       .catch(() => {});
   }, [terminalId]);
 
-  // 메시지 버스 폴링 (2초) — 텔레그램 동기화
+  // 메시지 버스 폴링 (2초) — 외부 connector 동기화
   useEffect(() => {
     if (!terminalId) return;
     const interval = setInterval(async () => {
@@ -85,20 +85,20 @@ export function useOfficeChat(
           busSeqRef.current = data.latest_seq;
         }
         if (data.messages?.length) {
-          const telegramMsgs: OfficeChatMessage[] = data.messages
-            .filter((m: any) => m.source === 'telegram')
+          const connectorMsgs: OfficeChatMessage[] = data.messages
+            .filter((m: any) => m.source === 'connector')
             .map((m: any) => ({
-              id: `tg-${m.seq}`,
+              id: `connector-${m.seq}`,
               role: m.role as OfficeChatMessage['role'],
               content: m.content,
               ts: m.ts,
-              source: 'telegram' as const,
-              tgUser: m.tg_user,
+              source: 'connector' as const,
+              actorName: m.actor_name,
             }));
-          if (telegramMsgs.length > 0) {
+          if (connectorMsgs.length > 0) {
             setMessages(prev => {
               const existingIds = new Set(prev.map(m => m.id));
-              const newOnes = telegramMsgs.filter(m => !existingIds.has(m.id));
+              const newOnes = connectorMsgs.filter(m => !existingIds.has(m.id));
               return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
             });
           }

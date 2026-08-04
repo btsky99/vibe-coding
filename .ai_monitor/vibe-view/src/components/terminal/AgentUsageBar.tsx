@@ -97,6 +97,11 @@ export default function AgentUsageBar({
 
   const filled = data.available ? Math.ceil(Math.min(100, data.percent) / 10) : 0;
   const color = colorFor(data.percent);
+  const advice = quota?.advice;
+  const adviceColor = advice?.level === 'weekly_risk' ? '#ef4444'
+    : advice?.level === 'small_only' ? '#f97316'
+    : advice?.level === 'wait_reset' ? '#facc15'
+    : advice?.level === 'large_ok' ? '#22c55e' : '#94a3b8';
   const claudeWeekly = agentType === 'claude'
     ? [
         ...(quota?.seven_day ? [['모든 모델', quota.seven_day] as const] : []),
@@ -167,6 +172,12 @@ export default function AgentUsageBar({
             ))}
           </div>
           {data.detail && <div className="mt-3 pt-2 border-t border-white/5 text-white/40">{data.detail}</div>}
+          {advice && (
+            <div className="mt-3 rounded border border-white/10 bg-black/20 p-2">
+              <div className="font-bold" style={{ color: adviceColor }}>{advice.action}</div>
+              <div className="mt-1 text-white/45">{advice.reason}</div>
+            </div>
+          )}
           <button
             onClick={onRefresh}
             className="mt-3 w-full flex items-center justify-center gap-1 py-1 rounded bg-white/5 hover:bg-white/10 text-white/60"

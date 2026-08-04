@@ -8,6 +8,8 @@
 #          비대화형 모드로 실행하고 결과를 JSON으로 반환합니다.
 #
 # 🕒 변경 이력 (REVISION HISTORY):
+# [2026-08-04] Codex: connector PTY 전달 실패를 상관 응답의 error 필드로 전파.
+# [2026-08-03] Codex: 외부 connector 버스를 현재 PTY 세션과 양방향 중계하는 소비자 추가.
 # [2026-07-26] Codex: 프로젝트 스코프 PTY를 슬롯 상태의 최우선 진실로 병합해 CLI 오인식 수정.
 # [2026-07-16] Claude: [로드맵 ③] handle_chat 코덱스 회상 주입 — codex는 훅이 없어
 #   중계 시점 접두 주입이 상한선. claude/antigravity는 자체 훅 주입이라 제외(이중 주입 금지).
@@ -54,6 +56,7 @@
 """
 
 import json
+import re
 import sys
 import threading
 import time
@@ -113,23 +116,27 @@ from infra import proc as _proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 
 _chat_sessions: dict = {}
 _chat_sessions_lock = threading.Lock()
 
-# ── 채팅 메시지 버스 (대시보드 ↔ 텔레그램 양방향 동기화) ──────────────────────
-# 터미널별 메시지 배열 + 시퀀스 카운터. 양쪽 클라이언트가 since 파라미터로 폴링.
-# 구조: { "T1": [ {seq, source, role, content, ts, tg_user?}, ... ] }
+# ── 플랫폼 중립 채팅 메시지 버스 ────────────────────────────────────────────
+# 터미널별 메시지 배열 + 시퀀스 카운터. connector가 since 파라미터로 폴링한다.
+# 구조: { "T1": [ {seq, source, role, content, ts, actor_name?}, ... ] }
 _chat_bus: dict = {}
 _chat_bus_seq: dict = {}       # 터미널별 다음 시퀀스 번호
 _chat_bus_lock = threading.Lock()
 _CHAT_BUS_MAX = 200            # 터미널당 메시지 상한
+_connector_relay_locks: dict[str, threading.Lock] = {}
+_connector_relay_locks_guard = threading.Lock()
 
-def _bus_append(terminal_id: str, source: str, role: str, content: str, tg_user: str = None) -> int:
+def _bus_append(terminal_id: str, source: str, role: str, content: str,
+                actor_name: str | None = None, reply_to_seq: int | None = None,
+                error: str | None = None) -> int:
     """메시지 버스에 메시지 추가. 200개 초과 시 오래된 것 삭제. seq 반환.
 
     Args:
         terminal_id: "T1"~"T8"
-        source: "dashboard" | "telegram" — 메시지 발신 채널
+        source: "dashboard" | "connector" — 메시지 발신 채널
         role: "user" | "assistant" | "tool" — 발화자 역할
         content: 메시지 본문
-        tg_user: 텔레그램 사용자 이름 (source=="telegram"일 때)
+        actor_name: 외부 connector 사용자 표시 이름
     Returns:
         할당된 시퀀스 번호
     """
@@ -146,13 +153,137 @@ def _bus_append(terminal_id: str, source: str, role: str, content: str, tg_user:
             'content': content,
             'ts': time.strftime('%Y-%m-%dT%H:%M:%S'),
         }
-        if tg_user:
-            msg['tg_user'] = tg_user
+        if actor_name:
+            msg['actor_name'] = actor_name
+        if reply_to_seq is not None:
+            msg['reply_to_seq'] = reply_to_seq
+        if error:
+            msg['error'] = error
         _chat_bus[terminal_id].append(msg)
         # 상한 초과 시 앞에서 삭제
         if len(_chat_bus[terminal_id]) > _CHAT_BUS_MAX:
             _chat_bus[terminal_id] = _chat_bus[terminal_id][-_CHAT_BUS_MAX:]
         return seq
+
+
+def _connector_relay_lock(terminal_id: str) -> threading.Lock:
+    """외부 connector 요청이 한 터미널에서 섞이지 않도록 직렬화한다."""
+    with _connector_relay_locks_guard:
+        return _connector_relay_locks.setdefault(terminal_id, threading.Lock())
+
+
+_CONNECTOR_TUI_NOISE = re.compile(
+    r'^(?:'
+    r'\d+;\s*(?:Claude Code|vibe-coding)|'
+    r'Gusting\s+for\s+agents|'
+    r'Discombobulating(?:\d+|running stop hooks.*|\s*\([^)]*tokens?\))?|'
+    r'Brewed for \d+s|'
+    r'\(?[*]?\d+(?:s\s+\d+\s+tokens?\))?|'
+    r'[a-z]{1,3}\d+|'
+    r'\d+(?:\.\d+)?k\s*/\s*\d+[kKmM].*|'
+    r'In\s+\S+\s+Out\s+\S+.*'
+    r')$',
+    re.IGNORECASE,
+)
+
+
+def _clean_connector_output(chunks: list[str], request_text: str = '') -> str:
+    """대화형 CLI의 화면 재그리기 조각에서 실제 답변 후보만 남긴다.
+
+    Claude/Codex TUI는 한 응답 동안 같은 화면을 수십 번 다시 그린다. PTY의
+    append-only 로그를 그대로 합치면 제목 OSC, 스피너, 토큰 카운터가 답변에 섞이므로
+    connector 경계에서만 보수적으로 제거한다. 원래 터미널 출력에는 손대지 않는다.
+    """
+    kept: list[str] = []
+    seen: set[str] = set()
+    request = request_text.strip()
+    for chunk in chunks:
+        # OSC(BEL/ST 종료)와 CSI를 다시 제거한다. Node 쪽 정규식이 OSC의 ESC만
+        # 지우면 "0; Claude Code" payload가 남을 수 있어 payload 형태도 거른다.
+        clean = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)', '', str(chunk))
+        clean = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', clean)
+        clean = ''.join(ch for ch in clean if ch in '\n\t' or ord(ch) >= 32)
+        for raw_line in clean.replace('\r', '\n').split('\n'):
+            line = re.sub(r'\s+', ' ', raw_line).strip()
+            partial_glyph = bool(re.fullmatch(r'[*]?[A-Za-z]{1,3}', line))
+            if (not line or line == request or partial_glyph
+                    or _CONNECTOR_TUI_NOISE.fullmatch(line)):
+                continue
+            if line not in seen:
+                seen.add(line)
+                kept.append(line)
+    return '\n'.join(kept).strip()
+
+
+def _node_json(method: str, path: str, payload: dict | None = None,
+               timeout: float = 5.0) -> dict:
+    """메시지 버스 소비자만 사용하는 내부 PTY transport adapter."""
+    if not _node_pty_url:
+        return {'error': 'node_pty_unreachable'}
+    body = json.dumps(payload or {}).encode('utf-8') if payload is not None else None
+    request = urllib.request.Request(
+        f'{_node_pty_url}{path}', data=body, method=method,
+        headers={'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+        return json.loads(raw.decode('utf-8')) if raw else {}
+    except urllib.error.HTTPError as error:
+        try:
+            return json.loads(error.read().decode('utf-8'))
+        except Exception:
+            return {'error': f'http_{error.code}'}
+    except Exception as error:
+        return {'error': type(error).__name__}
+
+
+def _relay_connector_turn(terminal_id: str, project_id: str, content: str,
+                          request_seq: int) -> None:
+    """버스 요청을 현재 세션에 전달하고 응답을 다시 버스에 게시한다."""
+    from urllib.parse import quote
+
+    with _connector_relay_lock(terminal_id):
+        target = terminal_id.upper().removeprefix('T')
+        encoded_project = quote(project_id, safe='')
+        suffix = f'&project_id={encoded_project}' if project_id else ''
+        baseline = _node_json(
+            'GET', f'/api/pty/output/{target}?since=0&limit=1{suffix}',
+        )
+        since = int(baseline.get('latest_seq') or 0)
+        project_qs = f'?project_id={encoded_project}' if project_id else ''
+        written = _node_json(
+            'POST', f'/api/pty/write/{target}{project_qs}',
+            {'target': terminal_id, 'text': content, 'project_id': project_id},
+        )
+        if written.get('error'):
+            relay_error = str(written['error'])
+            _bus_append(terminal_id, 'connector', 'assistant',
+                        f"전달 실패: {relay_error}", reply_to_seq=request_seq,
+                        error=relay_error)
+            return
+
+        collected: list[str] = []
+        last_change = time.monotonic()
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            time.sleep(1.5)
+            result = _node_json(
+                'GET', f'/api/pty/output/{target}?since={since}&limit=200{suffix}',
+            )
+            entries = result.get('entries') or []
+            if entries:
+                collected.extend(str(entry.get('text') or '') for entry in entries)
+                since = int(result.get('latest_seq') or since)
+                last_change = time.monotonic()
+            elif collected and time.monotonic() - last_change >= 4:
+                break
+
+        response = _clean_connector_output(collected, content)
+        if not response:
+            response = '요청은 전달됐지만 아직 응답이 없습니다.'
+        _bus_append(terminal_id, 'connector', 'assistant', response[-6000:],
+                    reply_to_seq=request_seq)
 
 # ── PTY 세션 조회 (Node PTY 서버 REST API) ─────────────────────────────────────
 # [변경 2026-03-22] Python pywinpty 직접 접근 → Node PTY 서버 REST 프록시로 전환.
@@ -242,7 +373,7 @@ def handle_run(handler) -> None:
     task = data.get('task', '').strip()
     cli_choice = data.get('cli', 'auto')
     cwd = data.get('cwd', None)
-    source = data.get('source', 'dashboard')  # 요청 출처: "dashboard" | "telegram" | "hook"
+    source = data.get('source', 'dashboard')  # 요청 출처: "dashboard" | "connector" | "hook"
     # [2026-07-15] 프로젝트 꼬리표 — hook_bridge가 전달. 없고 cwd만 있으면 슬러그 파생.
     # 이게 없으면 다른 프로젝트발 지시가 실행/로그 양쪽에서 이 서버 프로젝트로 오인됨.
     project_id = (data.get('project_id') or '').strip()
@@ -273,8 +404,7 @@ def handle_run(handler) -> None:
             return
 
         # 모든 사용자 지시는 오케스트레이터를 먼저 거치도록 강제합니다.
-        # 텔레그램 요청(source=telegram)은 오케스트레이션 우회 — 직접 에이전트 실행
-        if (FORCE_ORCHESTRATION or cli_choice == 'orchestrate') and source != 'telegram':
+        if FORCE_ORCHESTRATION or cli_choice == 'orchestrate':
             task = _wrap_orchestrator_task(task)
             chosen_cli = 'claude'
             cli_choice = 'claude'
@@ -296,7 +426,7 @@ def handle_run(handler) -> None:
             'terminal_id': terminal_id,  # 어느 터미널에서 요청했는지 추적
             'project_id': project_id,  # 어느 프로젝트발 지시인지 — 409 응답에서 훅이 경계 판정에 사용
             'routing_reason': _routing_reason,  # 모델 선택 근거 (UI 표시용)
-            'source': source,  # 요청 출처 (telegram/dashboard/hook)
+            'source': source,  # 요청 출처 (connector/dashboard/hook)
         }
 
     # 백그라운드 스레드에서 실행 (Lock 밖에서 시작해야 run() 내부 Lock 획득 가능)
@@ -1146,7 +1276,7 @@ def handle_chat(handler) -> None:
         # Antigravity/Codex: stdin에 메시지 전달 후 EOF
         if use_stdin_pipe:
             # [로드맵 ③] 회상 주입은 stdin 중계분에만 — history/_bus_append는 원문 유지
-            # (채팅 UI/텔레그램에 회상 블록 노출 금지). codex 한정: claude/antigravity는
+            # (채팅 UI/외부 connector에 회상 블록 노출 금지). codex 한정: claude/antigravity는
             # 자체 훅이 이미 주입하므로 여기서 또 하면 이중 주입.
             relay_text = message
             if cli == 'codex':
@@ -1156,7 +1286,7 @@ def handle_chat(handler) -> None:
             proc.stdin.write(relay_text.encode('utf-8'))
             proc.stdin.close()
 
-        # 히스토리에 사용자 메시지 추가 + 메시지 버스 기록 (텔레그램 동기화)
+        # 히스토리에 사용자 메시지 추가 + connector 공통 메시지 버스 기록
         with _chat_sessions_lock:
             _chat_sessions[terminal_id]['history'].append({
                 'role': 'user', 'content': message, 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')
@@ -1324,12 +1454,12 @@ def handle_chat_history(handler) -> None:
     })
 
 
-# ── 메시지 버스 API (대시보드 ↔ 텔레그램 양방향 동기화) ──────────────────────
+# ── 메시지 버스 API (대시보드 ↔ 외부 connector 양방향 동기화) ───────────────
 
 def handle_chat_feed(handler) -> None:
     """GET /api/agent/chat/feed?terminal_id=T1&since=0 — 메시지 버스 폴링.
 
-    since 이후의 새 메시지를 반환합니다. 대시보드와 텔레그램 양쪽에서 폴링하여
+    since 이후의 새 메시지를 반환합니다. 대시보드와 외부 connector가 폴링하여
     상대방 채널의 메시지를 수신합니다.
 
     응답: { "messages": [...], "latest_seq": N }
@@ -1353,25 +1483,35 @@ def handle_chat_feed(handler) -> None:
 
 
 def handle_chat_bus_post(handler) -> None:
-    """POST /api/agent/chat/bus — 외부 채널(텔레그램)에서 메시지 버스에 기록.
+    """POST /api/agent/chat/bus — 외부 connector에서 메시지 버스에 기록.
 
-    요청 본문: { "terminal_id": "T1", "source": "telegram", "role": "user",
-                "content": "메시지 내용", "tg_user": "홍길동" }
+    요청 본문: { "terminal_id": "T1", "source": "connector", "role": "user",
+                "content": "메시지 내용", "actor_name": "홍길동" }
     응답: { "status": "ok", "seq": N }
     """
     data = _read_body(handler)
     terminal_id = data.get('terminal_id', 'T1')
-    source = data.get('source', 'telegram')
+    source = data.get('source', 'connector')
     role = data.get('role', 'user')
     content = data.get('content', '')
-    tg_user = data.get('tg_user')
+    actor_name = data.get('actor_name')
+    project_id = str(data.get('project_id') or '').strip()
 
     if not content.strip():
         _json_response(handler, {'error': 'empty_content'}, 400)
         return
 
-    seq = _bus_append(terminal_id, source, role, content, tg_user=tg_user)
-    _json_response(handler, {'status': 'ok', 'seq': seq})
+    seq = _bus_append(terminal_id, source, role, content, actor_name=actor_name)
+    if source == 'connector' and role == 'user':
+        threading.Thread(
+            target=_relay_connector_turn,
+            args=(terminal_id, project_id, content, seq),
+            daemon=True,
+            name=f'connector-bus-{terminal_id}',
+        ).start()
+    _json_response(handler, {
+        'status': 'ok', 'seq': seq, 'queued': source == 'connector',
+    })
 
 
 def handle_get(handler, path: str) -> bool:

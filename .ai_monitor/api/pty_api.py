@@ -175,7 +175,7 @@ def handle_post(handler, path: str) -> None:
             _json_response(handler, {'error': 'missing_target'}, 400)
             return
 
-        # body에 project_id가 있으면 우선 사용 (텔레그램 등 외부 호출 호환)
+        # body에 project_id가 있으면 우선 사용 (외부 connector 호출 호환)
         body_pid = str(data.get('project_id') or '').strip()
         if body_pid:
             pid_qs = f'?project_id={body_pid}'

@@ -3,6 +3,7 @@ FILE: tests/test_daemon_toggles.py
 DESCRIPTION: 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증.
 
 REVISION HISTORY:
+- 2026-08-04 Codex: Discord 채널이 각 slot_projects의 project_id를 따르는 회귀 테스트 추가.
 - 2026-08-01 Claude: 신규 — 토글이 lan_bridge 하나뿐이라 안 쓰는 데몬도 무조건 뜨던 문제
                      (Codex 미사용 PC에서 codex_pg_watcher가 CPU 4.2시간 소비) 해소분 고정.
 - 2026-08-01 Claude: daemon_status(UI 상태 조회) + 레지스트리 스레드명 일치 검증 추가.
@@ -20,6 +21,32 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / ".ai_monitor"))
 
 from infra import daemons
+
+
+def test_discord_bindings_follow_each_slot_project():
+    config = {
+        'node_id': 'pc1',
+        'channels': {'T1': 'c1', 'T2': 'c2', 'T3': 'c3'},
+        'slot_projects': {
+            '0': 'D:/vibe-coding',
+            '1': 'D:/ons',
+            '2': 'D:/CipherTrader',
+        },
+    }
+
+    bindings = daemons._discord_channel_bindings(config, 'D--ons')
+
+    assert bindings['c1']['project_id'] == 'D--vibe-coding'
+    assert bindings['c2']['project_id'] == 'D--ons'
+    assert bindings['c3']['project_id'] == 'D--CipherTrader'
+
+
+def test_discord_bindings_fall_back_when_slot_project_is_missing():
+    config = {'node_id': 'pc1', 'channels': {'T2': 'c2'}, 'slot_projects': {}}
+
+    bindings = daemons._discord_channel_bindings(config, 'D--ons')
+
+    assert bindings['c2']['project_id'] == 'D--ons'
 
 
 class _FakeEnv:
@@ -59,14 +86,14 @@ def test_default_starts_every_daemon(tmp_path, monkeypatch):
 
 def test_config_disables_only_listed(tmp_path, monkeypatch):
     monkeypatch.delenv('VIBE_DISABLE_DAEMONS', raising=False)
-    cfg = _write_cfg(tmp_path, {'daemons': {'codex_watcher': False, 'telegram': False}})
+    cfg = _write_cfg(tmp_path, {'daemons': {'codex_watcher': False, 'heartbeat': False}})
     started = _capture(monkeypatch)
     daemons.start_all_daemons(_FakeEnv(cfg), {}, threading.Lock())
 
     assert 'CodexPGWatcher' not in started
     assert len(started) == len(daemons.DAEMON_TOGGLES) - 2
     # 끄지 않은 것은 그대로 떠야 한다 — 하나 껐다고 다른 게 죽으면 안 됨
-    assert 'ZettelSync' in started and 'Heartbeat' in started
+    assert 'ZettelSync' in started and 'OrchestratorDaemon' in started
 
 
 def test_true_value_keeps_daemon_on(tmp_path, monkeypatch):
@@ -101,11 +128,11 @@ def test_broken_config_starts_everything(tmp_path, monkeypatch):
 def test_unknown_key_is_ignored_not_fatal(tmp_path, monkeypatch, capsys):
     """오타 키가 다른 데몬을 죽이거나 예외를 내면 안 된다 — 무시하고 경고만."""
     monkeypatch.delenv('VIBE_DISABLE_DAEMONS', raising=False)
-    cfg = _write_cfg(tmp_path, {'daemons': {'telegramm': False}})   # 오타
+    cfg = _write_cfg(tmp_path, {'daemons': {'discordd': False}})   # 오타
     started = _capture(monkeypatch)
     daemons.start_all_daemons(_FakeEnv(cfg), {}, threading.Lock())
     assert len(started) == len(daemons.DAEMON_TOGGLES)
-    assert 'telegramm' in capsys.readouterr().out
+    assert 'discordd' in capsys.readouterr().out
 
 
 def test_status_reflects_config_and_env(tmp_path, monkeypatch):
@@ -115,10 +142,10 @@ def test_status_reflects_config_and_env(tmp_path, monkeypatch):
     사용자는 토글을 켜고 재시작한 뒤 "왜 안 뜨지"를 무한 반복하게 된다.
     """
     monkeypatch.setenv('VIBE_DISABLE_DAEMONS', 'heartbeat')
-    cfg = _write_cfg(tmp_path, {'daemons': {'telegram': False}})
+    cfg = _write_cfg(tmp_path, {'daemons': {'orchestrator': False}})
     st = {d['key']: d for d in daemons.daemon_status(cfg)}
 
-    assert st['telegram']['enabled'] is False and st['telegram']['source'] == 'config'
+    assert st['orchestrator']['enabled'] is False and st['orchestrator']['source'] == 'config'
     assert st['heartbeat']['enabled'] is False and st['heartbeat']['source'] == 'env'
     assert st['zettel_sync']['enabled'] is True
     assert st['zettel_sync']['label']            # 라벨 없는 항목은 UI에서 빈 줄로 보인다

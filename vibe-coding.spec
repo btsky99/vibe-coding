@@ -148,7 +148,7 @@ a = Analysis(
     #   PySide6/textual은 의도적 제외(dashboard/TUI는 별도 python 서브프로세스 전용).
     hiddenimports=['websockets', 'winpty', 'urllib.request', 'runpy',
                    'fastembed', 'onnxruntime', 'tokenizers', 'updater', 'soft_updater',
-                   'webview', 'clr', 'psycopg2', 'watchdog', 'dotenv', 'rich', 'telegram',
+                   'webview', 'clr', 'psycopg2', 'watchdog', 'dotenv', 'rich',
                    'win32com', 'win32api', 'win32con', 'pythoncom', 'numpy', 'filelock', 'PIL'],
     hookspath=[],
     hooksconfig={},

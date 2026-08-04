@@ -11,7 +11,7 @@ REVISION HISTORY:
 - 2026-07-05 Claude: server.py SSEHandler do_GET/do_POST의 update/soft-update 6블록 분리
   (do_GET: check-update-ready·trigger-update-check·soft-update/check,
    do_POST: apply-update·soft-update/apply·trigger-update-check).
-  클래스 메서드 → handler 인자 모듈 함수로 변환(telegram_api 패턴). server.py 4732→감량.
+  클래스 메서드 → handler 인자 모듈 함수로 변환. server.py 4732→감량.
 """
 from __future__ import annotations
 

@@ -17,6 +17,7 @@ DESCRIPTION: 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태
   src/server_locator.py가 단독 소유하므로 여기서 재구현하지 않는다.
 
 REVISION HISTORY:
+- 2026-08-03 Codex: provider별 작업 크기 권고와 판단 이유 표시
 - 2026-08-02 Claude: 원격 노드(tailnet 온오프라인) + 떠 있는 콘솔 창 섹션 추가.
   섹션 헤더/전각 폭 계산을 도입해 한글 줄이 구분선과 어긋나던 것을 정리.
   두 섹션은 /api/nodes/* 의존 — 구버전 서버에 붙으면 조용히 생략된다.
@@ -248,6 +249,11 @@ def render(port: int, width: int = 76, expect_slug: str = '') -> str:
                 out.append(' ' * len(f'   {cli:<7}{_clip(plan, 10):<11}') + extra)
         else:
             out.append(head + f'{GRAY}(창 정보 없음){R}')
+        advice = q.get('advice') or {}
+        if advice.get('action'):
+            out.append(f"{YEL}     ↳ {_clip(str(advice['action']), width - 8)}{R}")
+            if advice.get('reason'):
+                out.append(f"{GRAY}       {_clip(str(advice['reason']), width - 10)}{R}")
     if not shown:
         out.append(f'{GRAY}   (사용 가능한 쿼터 정보 없음){R}')
     out.append('')

@@ -26,12 +26,10 @@ const CHECK_LABELS: Record<string, string> = {
   pg_database: '프로젝트 DB',
   hooks: 'Claude Code 훅',
   cli_agents: 'CLI 에이전트',
-  telegram: '텔레그램 봇',
 };
 
 /* 진단 항목별 조치 설명 */
 const ACTION_LABELS: Record<string, string> = {
-  open_telegram_panel: '텔레그램 설정으로 이동',
   install_claude: 'Claude Code를 설치하세요',
   install_cli: 'AI CLI 설치',
 };
@@ -120,11 +118,6 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   };
 
   const handleAction = async (action: string) => {
-    if (action === 'open_telegram_panel' && onNavigate) {
-      onNavigate('telegram');
-      return;
-    }
-
     if (action === 'install_claude' || action === 'install_cli') {
       setInstallingAction(action);
       setToolchainInstalling(true);

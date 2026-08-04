@@ -272,7 +272,7 @@ export default function OfficeChatPanel({
                   <div className={`mb-0.5 flex items-center gap-2 text-[8px] ${isFromUser ? 'justify-end' : ''}`}>
                     <span className="font-bold" style={{ color: `${senderColor}bb` }}>
                       {senderName}
-                      {msg.source === 'telegram' && msg.tgUser && ` (${msg.tgUser})`}
+                      {msg.source === 'connector' && msg.actorName && ` (${msg.actorName})`}
                     </span>
                     <span className="text-white/15">
                       {new Date(msg.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}

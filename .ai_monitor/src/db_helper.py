@@ -85,7 +85,6 @@ def get_messages(limit=50):
                 is_read::text AS is_read,
                 ts::text AS timestamp
             FROM pg_messages
-            WHERE channel <> 'telegram_response'
             ORDER BY ts DESC
             LIMIT {int(limit)};
             """

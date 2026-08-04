@@ -11,6 +11,7 @@ import {
   Activity,
   BookOpen,
   Brain,
+  Bot,
   ClipboardList,
   Files,
   Gauge,
@@ -19,7 +20,6 @@ import {
   Package,
   Search,
   Settings,
-  Smartphone,
   Wifi,
   Zap,
 } from 'lucide-react';
@@ -160,8 +160,8 @@ const ActivityBar = memo(function ActivityBar({
         <HeartPulse className="w-5 h-5" />
       </button>
 
-      <button onClick={() => onTabChange('telegram')} className={tabCls('telegram')} title="Telegram Bridge">
-        <Smartphone className="w-5 h-5" />
+      <button onClick={() => onTabChange('discord')} className={tabCls('discord')} title="Discord 봇 설정">
+        <Bot className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('lan')} className={tabCls('lan')} title="LAN 공유">
