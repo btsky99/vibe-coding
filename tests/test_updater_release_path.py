@@ -227,3 +227,84 @@ def test_find_asset_returns_setup_dict_with_name():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# _download_asset — 절단/손상 다운로드 차단
+# [과거사고 2026-08-05] 완결성 검사가 `total < 1MB` 하나뿐이라 401MB 중 58MB만 받아도
+#   '완료'로 통과했다. 손상 인스톨러가 ready로 올라가 업데이트 버튼이 무반응이 됐다.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _FakeResponse:
+    def __init__(self, payload: bytes, content_length):
+        self._payload = payload
+        self._offset = 0
+        self.headers = {} if content_length is None else {'Content-Length': str(content_length)}
+
+    def read(self, size):
+        chunk = self._payload[self._offset:self._offset + size]
+        self._offset += len(chunk)
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _run_download(monkeypatch, tmp_path, payload, content_length, **kwargs):
+    monkeypatch.setattr(updater, 'urlopen',
+                        lambda *_a, **_k: _FakeResponse(payload, content_length))
+    dest = tmp_path / 'setup.exe.new'
+    ok = updater._download_asset('https://example/asset', dest, None, **kwargs)
+    return ok, dest
+
+
+def test_download_rejects_truncated_by_asset_size(monkeypatch, tmp_path):
+    """릴리즈가 알려준 크기보다 적게 받으면 실패여야 한다 — 이게 실제 사고의 형태다."""
+    payload = b'x' * 2_000_000
+    ok, _dest = _run_download(monkeypatch, tmp_path, payload, None,
+                              expected_size=10_000_000)
+    assert ok is False
+
+
+def test_download_rejects_truncated_by_content_length(monkeypatch, tmp_path):
+    """릴리즈 메타가 없어도 응답 Content-Length와 어긋나면 잡아야 한다."""
+    ok, _dest = _run_download(monkeypatch, tmp_path, b'x' * 2_000_000, 9_000_000)
+    assert ok is False
+
+
+def test_download_accepts_exact_size(monkeypatch, tmp_path):
+    payload = b'x' * 2_000_000
+    ok, dest = _run_download(monkeypatch, tmp_path, payload, len(payload),
+                             expected_size=len(payload))
+    assert ok is True
+    assert dest.stat().st_size == len(payload)
+
+
+def test_download_rejects_digest_mismatch(monkeypatch, tmp_path):
+    """크기가 맞아도 내용이 깨졌으면 설치하면 안 된다."""
+    payload = b'x' * 2_000_000
+    ok, _dest = _run_download(monkeypatch, tmp_path, payload, len(payload),
+                              expected_size=len(payload),
+                              expected_digest='sha256:' + '0' * 64)
+    assert ok is False
+
+
+def test_download_accepts_matching_digest(monkeypatch, tmp_path):
+    import hashlib
+    payload = b'y' * 2_000_000
+    want = hashlib.sha256(payload).hexdigest()
+    ok, _dest = _run_download(monkeypatch, tmp_path, payload, len(payload),
+                              expected_size=len(payload),
+                              expected_digest='sha256:' + want)
+    assert ok is True
+
+
+def test_download_skips_digest_when_release_has_none(monkeypatch, tmp_path):
+    """[제약] digest 없는 예전 릴리즈로의 복귀 경로를 막으면 안 된다."""
+    payload = b'z' * 2_000_000
+    ok, _dest = _run_download(monkeypatch, tmp_path, payload, len(payload),
+                              expected_size=len(payload), expected_digest='')
+    assert ok is True

@@ -25,6 +25,7 @@ REVISION HISTORY:
 - 2026-03-25 Claude: EXE → pip upgrade 전용으로 전환 (실패 — 되돌림)
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
+import hashlib
 import json
 import os
 import sys
@@ -210,11 +211,19 @@ def _find_asset_url(release):
     return asset.get("browser_download_url") or asset.get("url")
 
 
-def _download_asset(url, dest, token, progress_cb=None):
+def _download_asset(url, dest, token, progress_cb=None, expected_size=0, expected_digest=""):
     """릴리스 에셋을 dest 경로에 다운로드합니다.
 
     progress_cb(downloaded_bytes, total_bytes)가 주어지면 청크마다 호출한다.
     total_bytes는 Content-Length가 없으면 0(진행률 미상) — caller가 방어한다.
+
+    [과거사고 2026-08-05] 완결성 검사가 `total < 1MB` 하나뿐이라, 연결이 중간에 끊겨
+      401MB 중 58MB만 받아도 '완료'로 통과했다. 그 잘린 파일이 update_ready.json에
+      ready=True로 기록되고, 사용자가 업데이트를 눌러도 손상된 인스톨러라 아무 일도
+      일어나지 않았다(실측: %APPDATA%\\VibeCoding\\vibe-coding-setup.exe.new 58MB 잔존).
+      이 PC는 ECONNRESET이 반복되는 회선이라 대용량 에셋에서 중간 절단이 특히 잘 난다.
+    [불변식] 크기·해시 중 하나라도 어긋나면 실패로 처리한다 — 손상 파일을 ready로
+      올리는 것보다 업데이트가 안 뜨는 쪽이 훨씬 안전하다(설치 EXE 교체는 되돌리기 어렵다).
     """
     logger.info("다운로드 시작: %s → %s", url, dest)
     req = Request(url)
@@ -246,11 +255,43 @@ def _download_asset(url, dest, token, progress_cb=None):
         if total < 1_000_000:
             logger.error("다운로드 파일 너무 작음 (%d bytes) — 손상 가능성", total)
             return False
+        # 절단 검출 — 릴리즈 API가 알려준 크기가 1순위, 응답 Content-Length가 2순위.
+        # 둘 다 없으면 크기 검증을 못 하므로 해시 검증에 의존한다.
+        for label, want in (("릴리즈 asset.size", expected_size),
+                            ("Content-Length", total_size)):
+            if want and total != want:
+                logger.error("다운로드 절단: %s=%d, 실제=%d bytes", label, want, total)
+                return False
+        if not _verify_digest(dest, expected_digest):
+            return False
         logger.info("다운로드 완료: %d bytes", total)
         return True
     except Exception as e:
         logger.error("Download failed: %s", e)
         return False
+
+
+def _verify_digest(dest, expected_digest):
+    """릴리즈 API의 `digest`("sha256:...")와 실제 파일 해시를 대조한다.
+
+    [WHY 크기 검사만으로 부족] 프록시가 오류 페이지를 정확히 같은 길이로 흘려보내는 일은
+      드물지만, 재시도로 이어 붙은 파일은 크기가 맞아도 내용이 깨질 수 있다.
+    [제약] digest가 없는 예전 릴리즈는 검증을 건너뛴다 — 없다고 실패시키면 구 릴리즈로의
+      복귀 경로가 막힌다. 400MB 해싱은 수 초라 다운로드 시간에 비해 무시할 수준.
+    """
+    prefix = "sha256:"
+    if not expected_digest or not str(expected_digest).startswith(prefix):
+        return True
+    want = str(expected_digest)[len(prefix):].strip().lower()
+    digest = hashlib.sha256()
+    with open(dest, "rb") as f:
+        for block in iter(lambda: f.read(1_048_576), b""):
+            digest.update(block)
+    got = digest.hexdigest()
+    if got != want:
+        logger.error("다운로드 해시 불일치: 기대=%s 실제=%s", want, got)
+        return False
+    return True
 
 
 def build_update_bat(exe_path, old_path, pid, runtime_dir) -> str:
@@ -547,7 +588,9 @@ def check_and_update(data_dir):
         except Exception:
             pass
 
-    if not _download_asset(asset_url, tmp_path, token, progress_cb=_write_progress):
+    if not _download_asset(asset_url, tmp_path, token, progress_cb=_write_progress,
+                           expected_size=int(asset.get("size") or 0),
+                           expected_digest=str(asset.get("digest") or "")):
         if tmp_path.exists():
             tmp_path.unlink()
         try:
