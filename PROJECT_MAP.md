@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-05 22:25
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-05 22:52
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 4개 · 미푸시 0커밋
+- **브랜치**: `main` · 미커밋 9개 · 미푸시 1커밋
 - **최근 커밋**
+  - `7858fbc` 2026-08-05 — feat(recycle): 컨텍스트 리사이클 자동화 + 프롬프트 글자 상한 — Phase 6
   - `6a6b391` 2026-08-05 — chore(release): v3.7.319 — Discord 릴레이·업데이트 검증·404 진단성 수정
   - `b7558ef` 2026-08-05 — fix(updater): 절단된 다운로드를 '완료'로 통과시키던 검증 구멍 수정
   - `94fd2f8` 2026-08-05 — fix(server): 미등록 POST가 'Failed to fetch'로 보이던 원인 수정
   - `90da217` 2026-08-04 — fix(connectors): Discord 응답을 TUI 화면 스크레이프에서 stream-json으로 교체
-  - `c053e38` 2026-08-04 — feat(discord): 멀티에이전트 사용량 상태판 추가 — v3.7.318
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-05 22:22** 의도: list
@@ -26,15 +26,15 @@
   - 다음: Vibe View Discord 설정 UI와 fan-out 승인 저장/API/UI를 구현한 뒤 실제 Discord 자격증명으로 E2E 검증하고 문서를 마무리한다.
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **CLI 자동 설치 후에도 claude/codex/agy가 '미설치'로 표시되어 설치가 무한 재시도됨**
+  - 원인: 서버 프로세스의 os.environ['PATH']가 기동 시점 스냅샷이라, 설치기가 레지스트리에만 추가한 bin 디렉토리(%APPDATA%/npm, %LOCALAPPDATA%/agy/bin, ~/.local/bin)를 영원히 못 봄. 추가로 tool_install의 a
+  - 수정: infra/env_path.py 신규(레지스트리+알려진 CLI bin 재병합, TTL 5s)를 감지 3경로(setup_doctor.check_cli_agents / tools_api._check_tool_installed / tool_install.tool_status
+- **자동 리사이클이 항상 drain_timeout으로 실패**
+  - 원인: seal()이 부르는 set_session_checkpoint가 updated_at=NOW()를 갱신 → user_active의 '나이' 판정이 항상 0초 → 항상 True
+  - 수정: SEAL 성공 시각을 기준선(_seal_ts)으로 잡고 '기준선 이후 새 쓰기'로 판정 변경 + 회귀 테스트 4건 추가
 - **설치본에서 Discord 토큰 저장 시 Failed to fetch**
   - 원인: do_POST 404 폴백이 요청 본문을 안 읽고 닫아 Windows가 RST 전송 → 브라우저 fetch가 네트워크 오류로 실패. 실제 원인(구버전 백엔드에 /api/config/discord 라우트 없음)이 완전히 은폐됨
   - 수정: 폴백에서 본문 배수 후 route_not_found JSON + Content-Length 반환 (94fd2f8). 진단법: curl은 404로 보이고 브라우저만 실패하면 본문 미배수 RST를 의심
-- **Discord 응답이 부팅 배너/스피너 잔상으로 나옴 + 데몬 상태판 전부 꺼짐**
-  - 원인: connector 응답 캡처가 대화형 TUI 화면을 정규식으로 긁는 구조 / daemon_status running 판정이 스레드명 단독이라 popen 후 return하는 데몬을 오탐
-  - 수정: 헤드리스 claude -p --output-format stream-json 캡처(api/connector_relay.py)로 교체, 자식 프로세스 레지스트리로 running 판정 보강(90da217)
-- **EnumWindows 결과 0건 / 콘솔 목록에 서비스·트레이 앱 노이즈 16건**
-  - 원인: ctypes argtypes 미지정으로 HWND가 32비트로 잘려 조용히 실패. 또 conhost 존재만으로 필터해 숨김 콘솔(서비스)까지 포함, conhost '부모'만 추적해 부모가 죽은 콘솔(pg_ctl이 남긴 형제 cmd)을 놓침
-  - 수정: argtypes/restype 명시 + user32.EnumWindows로 보이는 창에서 출발해 혈통이 conhost 부모와 겹치는지 판정. infra/console_scan.py + 회귀 테스트 12건
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -77,7 +77,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2082 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2098 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` 🔨 | 336 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` 🔨 | 303 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
@@ -105,7 +105,7 @@
 | `heal_api.py` | 30 | 자가치유 계측 API — GET /api/heal/metrics. src.heal_metrics.compute_heal_metrics를 |
 | `hive_api.py` 🔨 | 1312 | /api/hive/*, /api/orchestrator/*, /api/install-skills, |
 | `hive_ingest_api.py` | 142 | 하이브 수집(ingest) POST 핸들러 3종 — pg_logs 기록 / thought PG 기록 / |
-| `install_api.py` | 421 | 다른 프로젝트에 Vibe Coding 스킬셋(.gemini/scripts/*.md)을 복사 설치하는 라우트 핸들러. |
+| `install_api.py` | 442 | 다른 프로젝트에 Vibe Coding 스킬셋(.gemini/scripts/*.md)을 복사 설치하는 라우트 핸들러. |
 | `lan_api.py` 🔨 | 554 | /api/lan/* 핸들러 — 프론트(127.0.0.1 로컬서버)가 LAN 브리지를 제어하는 통로. |
 | `launch_api.py` | 102 | CLI 에이전트(claude/antigravity/codex) 실행 API — 새 cmd 창에서 에이전트를 띄운다. |
 | `locks_api.py` | 67 | 파일 락 API — 에이전트 간 동시 편집 충돌 방지. locks.json에 {파일: 소유에이전트}를 |
@@ -118,11 +118,12 @@
 | `office_proxy_api.py` | 230 | 오피스 서버(office_server.py) 프로세스 관리 + HTTP 프록시. |
 | `projects_api.py` | 69 | 최근 프로젝트 목록 API — projects.json에 최근 연 프로젝트 경로를 MRU(최대 20개)로 |
 | `pty_api.py` 🔨 | 246 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
+| `recycle_api.py` 🔨 | 384 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
 | `setup_api.py` | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
-| `tools_api.py` | 1152 | AI 도구 CLI 설치 관리 API. |
+| `tools_api.py` | 1167 | AI 도구 CLI 설치 관리 API. |
 | `update_api.py` 🔨 | 213 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
@@ -131,11 +132,11 @@
 ### 데이터 계층 (.ai_monitor/src/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `brief_limits.py` | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
+| `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
 | `claude_quota.py` 🔨 | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
 | `code_search.py` | 200 | 설명: 코드 인텔리전스 검색 — PostgreSQL FTS 기반 BM25 검색 엔진 |
-| `codex_context.py` | 105 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
+| `codex_context.py` 🔨 | 105 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
 | `codex_quota.py` | 216 | Codex CLI(OpenAI)의 플랜 쿼터 사용률(5h/7d %) 공급자. |
 | `connector_core.py` 🔨 | 112 | Discord 등 외부 connector가 공통으로 사용하는 ACL, 터미널 주소, |
 | `db.py` | 42 | 설명: 레거시 DB 진입점 (SQLite 런타임 저장소 폐기 잔재). get_connection()은 |
@@ -153,7 +154,7 @@
 | `pg_lan.py` 🔨 | 107 | LAN 브리지 채팅 이력(lan_messages) + 원격실행 감사로그(lan_exec_log) CRUD. |
 | `pg_memory.py` | 639 | 설명: 하이브 메모리(hive_memory) CRUD + zettel 승격 + 세션 로그 + 채팅 + 지식 회상 |
 | `pg_office.py` | 320 | 설명: 오피스 프로필 CRUD(PostgreSQL SSOT) + 활성 세션 컨텍스트(크래시 복구) |
-| `pg_schema.py` | 817 | 설명: PostgreSQL 스키마 DDL(ensure_schema) + 레거시 JSONL/JSON 마이그레이션 |
+| `pg_schema.py` 🔨 | 828 | 설명: PostgreSQL 스키마 DDL(ensure_schema) + 레거시 JSONL/JSON 마이그레이션 |
 | `pg_store.py` | 127 | 설명: PostgreSQL 저장소 파사드 — 분할된 pg_* 도메인 모듈을 단일 경로로 재노출 |
 | `pg_tasks.py` | 388 | 설명: 하이브 태스크(hive_tasks) CRUD + 원자적 체크아웃 + 코멘트 + 하트비트 + 상태 저장 |
 | `pg_vector_search.py` | 224 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
@@ -162,6 +163,7 @@
 | `secure.py` | 59 | 설명: 보안 유틸 — 로그 민감정보 마스킹(API키/Bearer/패스워드 정규식), |
 | `server_locator.py` | 76 | 설명: 9000번대 바이브 서버 포트 공용 탐색기 — /api/project-info 슬러그 대조로 |
 | `server_utils.py` | 59 | 서버 공통 유틸리티 — 포트 탐색, CORS, JSON 응답 헬퍼. |
+| `session_recycle.py` 🔨 | 235 | 컨텍스트 리사이클 상태머신 — 세션을 마감 기록으로 봉인하고 새 컨텍스트로 |
 | `wiki_generator.py` | 381 | 설명: LLM 위키 자동생성 엔진 — code_nodes → 프롬프트 조립 → hive_tasks 등록 |
 | `zettelkasten.py` | 459 | Hive Zettelkasten — 카파시 Append-Review-Rescue + 루만 제텔카스텐 융합 메모 시스템. |
 
@@ -171,8 +173,9 @@
 | `app_boot.py` 🔨 | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` 🔨 | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 925 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
+| `daemons.py` 🔨 | 990 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
 | `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
+| `env_path.py` | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `fs_watcher.py` | 117 | 파일 시스템 실시간 감시(watchdog) + cli_agent 출력 브로드캐스트 워커. |
 | `heartbeat_daemon.py` 🔨 | 725 | 설명: 자율 클로드 심장 박동 데몬 — 사람이 부르지 않아도 주기적으로 깨어나 |
 | `instance_lock.py` | 179 | 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로직. |
@@ -186,7 +189,7 @@
 | `runtime.py` | 134 | 시스템 런타임 보조 유틸 — Python 인터프리터 후보 탐색, |
 | `session_parse.py` | 136 | CLI 세션 파일(JSONL/JSON) 토큰 usage 파서 모음. |
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
-| `tool_install.py` | 291 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
+| `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
 | `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
 
 ## ⚙️ 스크립트 (scripts/)
@@ -281,12 +284,12 @@
 | `checkpoint.py` | 62 | 의도 단위 세션 체크포인트 CLI — "왜/어디까지 결정/다음 뭐" 3요소를 |
 | `codex_pg_watcher.py` | 286 | Mirror Codex CLI history entries into PostgreSQL pg_logs. |
 | `discord_dashboard.py` 🔨 | 257 | Vibe Coding 상태를 Discord Components V2 웹훅 메시지 하나로 갱신한다. |
-| `discord_gateway.py` 🔨 | 299 | 단일 Discord 봇 연결로 허가된 채널 메시지를 백그라운드 대화 버스에 |
+| `discord_gateway.py` 🔨 | 340 | 단일 Discord 봇 연결로 허가된 채널 메시지를 백그라운드 대화 버스에 |
 | `harness_verify.py` | 437 | Vibe Coding 하네스 V2 검증 스크립트. |
 | `heal_report.py` | 100 | 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics를 호출해 4장치 지표를 |
 | `incident.py` | 132 | 사고 장부 CLI — 고친 에러 기록(record) / 재발 검색(search) / |
-| `install_ai_toolchain.py` | 137 | Vibe Coding first-run Node.js and AI CLI automatic installer chain. |
-| `install_antigravity.py` | 48 | Install Google's official Antigravity CLI (`agy`). |
+| `install_ai_toolchain.py` | 142 | Vibe Coding first-run Node.js and AI CLI automatic installer chain. |
+| `install_antigravity.py` | 88 | Install Google's official Antigravity CLI (`agy`). |
 | `install_dev_tools.py` | 159 | 프로젝트 개발 도구 통합 설치 스크립트. |
 | `install_frontend_deps.py` | 195 | 프론트엔드(React/Vite) 의존성 설치 스크립트. |
 | `install_gh_cli.py` | 154 | GitHub CLI(gh) 자동 설치 스크립트. |
@@ -363,6 +366,7 @@
 | `test_agent_api.py` 🔨 | 333 | agent_api.py 단위 테스트. |
 | `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
 | `test_claude_quota.py` 🔨 | 53 | Claude 사용량 응답에서 신규 모델별 주간 한도를 보존하는 회귀 테스트. |
+| `test_cli_install_recovery.py` | 173 | CLI 자동 설치가 "성공했는데도 미설치로 보이던" 결함(2026-08-05)의 회귀 방지. |
 | `test_codex_harness_v2.py` | 86 | Focused tests for Codex Harness V2 bootstrap and entrypoints. |
 | `test_codex_orchestration.py` | 114 | Codex 라우팅과 오케스트레이터 연동 회귀 테스트. |
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
@@ -389,6 +393,7 @@
 | `test_quota_policy.py` 🔨 | 69 | 사용량 snapshot의 다섯 권고 상태와 guard 동작 회귀 테스트. |
 | `test_route_table.py` 🔨 | 135 | server.py 라우트 완전성 가드 — do_GET/do_POST를 if/elif에서 디스패치 테이블로 |
 | `test_self_heal_2.py` | 231 | 자가 치유 2.0 회귀 방지 테스트 — 회상 v2(pgvector) 그레이스풀 |
+| `test_session_recycle.py` 🔨 | 280 | 컨텍스트 리사이클 GUARD/상태머신 회귀 테스트. 핵심 방어선은 |
 | `test_setup_auto_install.py` | 153 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` 🔨 | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
@@ -437,4 +442,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-05 22:25
+> 자동 생성 완료: 2026-08-05 22:52

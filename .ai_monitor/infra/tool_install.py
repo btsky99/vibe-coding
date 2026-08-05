@@ -25,15 +25,23 @@ import threading
 import time
 from pathlib import Path
 
+from infra import env_path  # 설치 직후 PATH 재병합 — 재시작 없이 감지하기 위해 필수
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 
 # ── 지원 도구 메타 ──────────────────────────────────────────────────────────
 TOOL_INSTALL_TARGETS: dict[str, dict] = {
+    # [과거사고 2026-08-05] 여기가 `package=@google/gemini-cli` + `command=antigravity`였다.
+    #   그 패키지의 bin은 `gemini` 하나뿐이라(npm view로 실측) `antigravity` 실행 파일은
+    #   **절대 생기지 않는다**. _watch_install이 exit_code==0 and installed 를 요구하므로
+    #   npm이 성공해도 installed=False → 영구 'failed'. "설치가 정상으로 안 된다"의 정체.
+    # [불변식] Antigravity CLI는 npm 배포가 없다. 공식 인스톨러(install_antigravity.py)만이
+    #   유일한 설치 경로이고 명령 이름은 `agy`다. package를 다시 채우지 말 것.
     'antigravity': {
-        'package': '@google/gemini-cli',
+        'package': '',
         'display': 'Antigravity CLI',
-        'command': 'antigravity',
+        'command': 'agy',
+        'install_script': 'install_antigravity.py',
     },
     'claude': {
         'package': '@anthropic-ai/claude-code',
@@ -58,6 +66,10 @@ def tool_status(name: str) -> dict:
     """Return local CLI installation status for a supported tool."""
     if not name:
         return {"installed": False, "path": "", "version": ""}
+
+    # [WHY] 설치기는 별도 프로세스에서 돌며 레지스트리 PATH만 갱신한다. 이 서버 프로세스의
+    #   os.environ['PATH']는 기동 시점 스냅샷이라, 갱신 없이는 설치 성공을 영원히 못 본다.
+    env_path.refresh_path()
 
     candidates = [name]
     if os.name == 'nt':
@@ -213,6 +225,20 @@ def start_tool_install(name: str) -> dict:
     tool_meta = TOOL_INSTALL_TARGETS.get(name)
     if not tool_meta:
         return {'status': 'error', 'message': f'Unsupported tool: {name}'}
+
+    # [불변식] 이 상태 머신은 `npm install -g` 전용이다. npm 배포가 없는 도구(Antigravity)를
+    #   여기로 흘리면 아무 패키지나 깔고 실패 판정만 남는다 — 전용 인스톨러로 되돌려 보낸다.
+    #   호출부(tools_api.launch_tool_installer)가 install_script를 실행하는 정식 경로다.
+    if not tool_meta.get('package'):
+        script = tool_meta.get('install_script') or ''
+        return {
+            'status': 'error',
+            'message': (
+                f'{tool_meta["display"]}은(는) npm으로 설치할 수 없습니다. '
+                f'전용 설치 스크립트({script})를 사용하세요.'
+            ),
+            'install_script': script,
+        }
 
     current = get_tool_install_state(name)
     if current.get('status') == 'running':

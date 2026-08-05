@@ -1017,6 +1017,8 @@ def _g_fs_dialog(h, pp):
 #   호출 시점 해석(late-binding). install-*-cli 복합조건은 legacy elif 잔류(R9 예정).
 def _g_tool_status(h, pp):         install_api.tool_status(h, pp, _tool_status)
 def _g_install_tool_status(h, pp): install_api.install_tool_status(h, pp, _get_tool_install_state)
+# [WHY 별도] Antigravity는 npm 배포가 없어 install-cli(npm 전용) 튜플에 넣으면 안 된다.
+def _g_install_antigravity(h, pp): install_api.install_antigravity(h)
 def _g_register_codex(h, pp):      install_api.register_codex_to_ai(h, _python_runner_cmds, BASE_DIR, PROJECT_ROOT)
 
 # GET exact 라우트 (Phase 2 R3: 로그/스트림 3종) — api/logs_api.py로 본문 이전, 전역은 주입.
@@ -1152,6 +1154,7 @@ GET_ROUTES = {
     '/api/dirs': _g_fs_dialog,
     '/api/tool-status': _g_tool_status,
     '/api/install-tool-status': _g_install_tool_status,
+    '/api/install-antigravity': _g_install_antigravity,
     '/api/register-codex-to-ai': _g_register_codex,
     '/stream': _g_stream,
     '/api/server-logs': _g_server_logs,

@@ -228,6 +228,9 @@ def handle_install_cli(handler, path, get_npm_executable_fn) -> None:
     (R9에서 복합조건 wrapper 테이블화 예정). [주입] get_npm_executable_fn = server._get_npm_executable.
     [제약] Windows 전용 — `start cmd.exe /k`로 사용자가 진행 상황을 눈으로 확인."""
     # 터미널 창을 띄워서 npm install -g 실행 — 사용자가 진행 상황을 직접 확인
+    # 🔴 [불변식] 여기는 **npm 배포가 있는 도구만** 등록한다. Antigravity(`agy`)는 npm
+    #   배포가 없어 공식 인스톨러 전용이며 /api/install-antigravity(=install_antigravity)로
+    #   따로 처리한다. 과거 @google/gemini-cli를 Antigravity로 오등록해 영구 실패했다.
     _install_map = {
         '/api/install-gemini-cli': ('gemini', '@google/gemini-cli', 'Gemini CLI'),
         '/api/install-claude-code': ('claude', '@anthropic-ai/claude-code', 'Claude Code'),
@@ -254,6 +257,24 @@ def handle_install_cli(handler, path, get_npm_executable_fn) -> None:
         result = {'status': 'success', 'message': f'{_display} 설치 터미널이 열렸습니다.'}
     except Exception as exc:
         result = {'status': 'error', 'message': str(exc)}
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    handler.wfile.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+
+
+def install_antigravity(handler) -> None:
+    """GET /api/install-antigravity — Antigravity CLI(`agy`)를 공식 인스톨러로 설치.
+
+    [WHY 별도 라우트] handle_install_cli는 `npm install -g` 전용이다. Antigravity는 npm
+      배포가 없어(2026-08-05 npm view 실측: @google/gemini-cli의 bin은 `gemini` 하나뿐)
+      그 경로로 흘리면 엉뚱한 패키지를 깔고 `agy`가 없어 영구 실패한다.
+    [불변식] 설치 실행은 tools_api.launch_tool_installer가 유일 경로 — frozen 경로 탐색과
+      Python 선택 규칙이 한 곳에만 있어야 개발/EXE 모드가 어긋나지 않는다.
+    """
+    from api import tools_api
+    result = tools_api.launch_tool_installer('antigravity')
     handler.send_response(200)
     handler.send_header('Content-Type', 'application/json;charset=utf-8')
     handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())

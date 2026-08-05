@@ -49,6 +49,20 @@ STATUS_MISSING = "missing" # 사용자 조치 필요
 STATUS_ERROR = "error"     # 수리 실패
 
 
+def _refresh_env_path() -> None:
+    """CLI 감지 직전에 PATH를 레지스트리 기준으로 재병합한다(실패해도 진단은 계속).
+
+    [WHY 지연 import] setup_doctor는 `python .ai_monitor/setup_doctor.py`로 단독 실행되기도
+      하고 frozen 번들에서 import되기도 한다. 모듈 최상단에서 infra를 당기면 경로 구성이
+      다른 한쪽에서 ImportError로 진단 전체가 죽는다 — 진단기는 어떤 경우에도 살아야 한다.
+    """
+    try:
+        from infra import env_path
+        env_path.refresh_path()
+    except Exception:
+        pass
+
+
 def _make_result(status: str, message: str, auto_fixed: bool = False, action: str = "") -> dict:
     """진단 결과 딕셔너리 생성"""
     r = {"status": status, "message": message, "auto_fixed": auto_fixed}
@@ -311,6 +325,12 @@ def check_hooks() -> dict:
 
 def check_cli_agents() -> dict:
     """claude, antigravity, codex CLI가 시스템에 설치되어 있는지 확인한다."""
+    # [과거사고 2026-08-05] 설치기가 새 PATH 항목(%APPDATA%/npm, %LOCALAPPDATA%/agy/bin,
+    #   ~/.local/bin)을 레지스트리에만 쓰는데, 이미 떠 있는 이 프로세스는 기동 시점 PATH
+    #   스냅샷만 본다 → 설치 성공에도 계속 '미설치'로 보고, 배너 폴링이 auto-install을
+    #   무한 재시도했다. 감지 직전에 PATH를 재병합해서 재시작 없이 잡히게 한다.
+    _refresh_env_path()
+
     agents = {
         "claude": ["claude", "--version"],
         "antigravity": ["agy", "--version"],

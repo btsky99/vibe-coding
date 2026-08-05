@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from infra import env_path  # 설치 직후 PATH 재병합 — 재시작 없이 감지하기 위해 필수
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────
@@ -403,6 +404,11 @@ def _check_tool_installed(tool: dict) -> dict:
 
     Why: 명령 실행과 경로 확인을 모두 시도하여 다양한 설치 방식을 지원.
     """
+    # [과거사고 2026-08-05] 설치 성공에도 '설치 필요'로 고착되던 원인 — 서버 프로세스 PATH가
+    #   기동 시점 스냅샷이라 설치기가 새로 추가한 bin 디렉토리를 못 봤다. TTL 캐시가 있어
+    #   도구 수만큼 불려도 레지스트리 읽기는 폴링당 1회로 수렴한다.
+    env_path.refresh_path()
+
     version = None
     real_python = _resolve_python()
 
@@ -603,6 +609,8 @@ def launch_tool_installer(tool_id: str) -> dict[str, Any]:
         }
 
     try:
+        # [불변식] 자식 콘솔은 이 프로세스 PATH를 상속 — spawn 전에 최신화(위 주석 참조).
+        env_path.refresh_path(force=True)
         python_cmd = _get_python_cmd()
         cmd_parts = [python_cmd, str(script_path), *tool_def.get("install_args", [])]
         install_cmd = subprocess.list2cmdline(cmd_parts)
@@ -638,6 +646,10 @@ def launch_ai_toolchain_installer() -> dict[str, Any]:
     if not script_path:
         return {"status": "error", "message": "AI 도구 자동 설치 스크립트를 찾을 수 없습니다."}
     try:
+        # [불변식] spawn 직전에 force refresh — 자식 콘솔은 이 프로세스의 PATH를 **상속**한다.
+        #   서버가 낡은 PATH를 들고 있으면 자식도 낡은 PATH로 시작해 이미 깔린 도구를
+        #   '미설치'로 오판하고 재설치를 돈다.
+        env_path.refresh_path(force=True)
         runner = sys.executable if getattr(sys, "frozen", False) else _get_python_cmd()
         install_cmd = subprocess.list2cmdline([runner, str(script_path)])
         cmdline = (
@@ -867,9 +879,12 @@ RULE_SETUP_PROMPTS: list[dict[str, str]] = [
             "       검증: claude --version / 인증: claude  (최초 실행 시 OAuth 로그인)\n"
             "  2) Codex CLI    — npm install -g @openai/codex\n"
             "       검증: codex --version / 인증: OpenAI API 키 또는 codex 로그인 절차\n"
-            "  3) Antigravity  — npm install -g @google/gemini-cli   (※ 구 Gemini CLI 전환)\n"
-            "       검증: antigravity --version (없으면 gemini --version) / 인증: agy OAuth\n"
-            "       주의: 패키지명은 @google/gemini-cli지만 하이브에선 'Antigravity'로 라벨링한다.\n\n"
+            "  3) Antigravity  — irm https://antigravity.google/cli/install.ps1 | iex   (Windows)\n"
+            "                     curl -fsSL https://antigravity.google/cli/install.sh | bash  (macOS/Linux)\n"
+            "       검증: agy --version / 인증: agy  (최초 실행 시 OAuth 로그인)\n"
+            "       🔴 주의: Antigravity는 npm 배포가 **없다**. `npm i -g @google/gemini-cli`는\n"
+            "          `gemini` 명령만 만들고 `agy`는 안 생긴다(2026-08-05 npm view 실측).\n"
+            "          구 Gemini CLI와 다른 별개 도구다 — 공식 인스톨러만 쓸 것.\n\n"
             "【설치 후】\n"
             "  - 각 CLI를 `--version`으로 ✅/❌ 요약\n"
             "  - 인증이 필요한 CLI는 사용자에게 로그인 명령을 안내 (자동 로그인 시도 금지)\n\n"

@@ -29,33 +29,38 @@ def _command_exists(names: tuple[str, ...]) -> bool:
     return any(shutil.which(name) or shutil.which(f"{name}.cmd") for name in names)
 
 
-def _refresh_windows_path() -> None:
-    """Refresh PATH after winget/MSI so the same installer process can continue."""
-    if os.name != "nt":
-        return
-    paths = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+def _load_env_path():
+    """공용 PATH 재병합 모듈(infra/env_path)을 불러온다. 못 찾으면 None.
+
+    [WHY 여기서 sys.path를 건드리나] 이 스크립트는 세 가지 방식으로 실행된다 —
+      ①개발: `python scripts/install_ai_toolchain.py` ②frozen: boot._run_daemon_script가
+      `.ai_monitor`를 미리 주입 ③설치 EXE가 띄운 새 콘솔. ①에서만 경로 주입이 없으므로
+      리포 루트 기준으로 한 번 보강한다.
+    [WHY 실패를 허용하나] 이 스크립트는 '아무것도 없는 PC'의 복구 경로다. 부수적인 PATH
+      최적화 때문에 설치 자체가 죽으면 안 된다. 부모(tools_api)가 spawn 직전에 이미
+      force refresh 하므로, 여기서 실패해도 상속받은 PATH는 최신이다.
+    """
+    ai_monitor = SCRIPT_DIR.parent / ".ai_monitor"
+    if ai_monitor.is_dir() and str(ai_monitor) not in sys.path:
+        sys.path.insert(0, str(ai_monitor))
     try:
-        import winreg
+        from infra import env_path
+        return env_path
+    except Exception:
+        return None
 
-        registry_paths = (
-            (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
-            (winreg.HKEY_CURRENT_USER, r"Environment"),
-        )
-        for hive, key_name in registry_paths:
-            try:
-                with winreg.OpenKey(hive, key_name) as key:
-                    value, _ = winreg.QueryValueEx(key, "Path")
-                    paths.extend(os.path.expandvars(value).split(os.pathsep))
-            except OSError:
-                continue
-    except ImportError:
-        pass
 
-    paths.extend([
-        str(Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs"),
-        str(Path(os.environ.get("APPDATA", "")) / "npm"),
-    ])
-    os.environ["PATH"] = os.pathsep.join(dict.fromkeys(path for path in paths if path))
+_ENV_PATH = _load_env_path()
+
+
+def _refresh_windows_path() -> None:
+    """설치 단계 사이마다 PATH를 다시 읽는다 — 직전 단계가 추가한 bin을 다음 단계가 보게.
+
+    [불변식] Node 설치 → npm 탐색, npm -g 설치 → claude/codex 탐색 사이에 반드시 호출.
+      빼먹으면 방금 설치한 도구를 '미설치'로 오판해 무한 재설치한다.
+    """
+    if _ENV_PATH is not None:
+        _ENV_PATH.refresh_path(force=True)
 
 
 def _find_npm() -> str | None:
