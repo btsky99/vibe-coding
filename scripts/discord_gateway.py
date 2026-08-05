@@ -4,6 +4,7 @@ DESCRIPTION: 단일 Discord 봇 연결로 허가된 채널 메시지를 백그�
              게시하고, 같은 버스의 상관 응답을 Discord 채널로 반환한다.
 
 REVISION HISTORY:
+- 2026-08-06 Claude: 응답 대기 180초 하드코딩 제거(서버 600초와 어긋나 답변 유실) + 경과 표시
 - 2026-08-04 Codex: relay error를 completed로 오기록하지 않고 connector event를 failed로 마감
 - 2026-08-03 Codex: Discord의 PTY 직접 접근을 제거하고 대화 버스 전용 client로 전환
 - 2026-08-03 Codex: Discord REST 요청에 명시적 User-Agent를 추가해 Cloudflare 1010 차단 수정
@@ -26,6 +27,12 @@ from pathlib import Path
 from typing import Any
 
 import websockets
+
+# [제약] .ai_monitor는 설치된 패키지가 아니라 프로젝트 내부 디렉터리다. 데몬은 cwd를
+#   프로젝트 루트로 바꿔 띄우므로 cwd가 아닌 __file__ 기준으로 넣어야 한다.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".ai_monitor"))
+
+from src.connector_core import GATEWAY_WAIT_SEC   # noqa: E402 — 위 sys.path 주입 이후여야 한다
 
 
 API = "https://discord.com/api/v10"
@@ -106,8 +113,6 @@ class DiscordGateway:
                              if binding["terminal_id"] == self.terminal_id}
         self.groups = load_groups(os.environ.get("DISCORD_GROUP_BINDINGS", "{}"))
         self.project_root = Path(__file__).resolve().parents[1]
-        monitor = self.project_root / ".ai_monitor"
-        sys.path.insert(0, str(monitor))
         from src.pg_connectors import claim_event, mark_event
         self.claim_event = claim_event
         self.mark_event = mark_event
@@ -159,11 +164,19 @@ class DiscordGateway:
             raw = response.read()
         return json.loads(raw.decode()) if raw else {}
 
-    async def send(self, channel_id: str, content: str, reply_id: str = "") -> None:
+    async def send(self, channel_id: str, content: str, reply_id: str = "") -> str:
+        """보낸 메시지 id를 돌려준다 — 진행 표시를 나중에 편집으로 갱신하기 위해 필요하다."""
         payload: dict[str, Any] = {"content": content, "allowed_mentions": {"parse": []}}
         if reply_id:
             payload["message_reference"] = {"message_id": reply_id, "fail_if_not_exists": False}
-        await asyncio.to_thread(self._request, "POST", f"/channels/{channel_id}/messages", payload)
+        result = await asyncio.to_thread(
+            self._request, "POST", f"/channels/{channel_id}/messages", payload)
+        return str(result.get("id") or "")
+
+    async def _edit(self, channel_id: str, message_id: str, content: str) -> None:
+        await asyncio.to_thread(
+            self._request, "PATCH", f"/channels/{channel_id}/messages/{message_id}",
+            {"content": content, "allowed_mentions": {"parse": []}})
 
     def _allowed(self, event: dict) -> bool:
         author = event.get("author") or {}
@@ -172,11 +185,52 @@ class DiscordGateway:
                 and str(author.get("id")) in self.actors
                 and not author.get("bot") and not event.get("webhook_id"))
 
+    async def _progress(self, channel: str, reply_to: str, progress_id: str,
+                        elapsed: float) -> str:
+        """경과 표시를 한 건만 만들고 그 뒤로는 편집한다 — 채널을 알림으로 도배하지 않는다.
+
+        [WHY 예외를 삼키나] 진행 표시는 편의 기능이다. 여기서 예외가 위로 올라가면
+          본 응답 수거 루프가 통째로 죽어 답변이 유실된다 — 원래 고치려던 사고와 같은
+          결과가 되므로, 표시에 실패해도 대기는 계속한다.
+        """
+        text = f"⏳ 작업 중… {int(elapsed)}초 경과"
+        try:
+            if progress_id:
+                await self._edit(channel, progress_id, text)
+                return progress_id
+            return await self.send(channel, text, reply_to)
+        except Exception:                                # noqa: BLE001 — 위 [WHY] 참조
+            return progress_id
+
+    async def _deliver(self, channel: str, reply_to: str, progress_id: str,
+                       output: str) -> None:
+        """진행 표시가 있으면 그 자리를 첫 청크로 덮어 메시지 수를 늘리지 않는다."""
+        for index, part in enumerate(chunks(output)):
+            body = f"```text\n{part}\n```"
+            if index == 0 and progress_id:
+                try:
+                    await self._edit(channel, progress_id, body)
+                    continue
+                except Exception:                        # noqa: BLE001
+                    pass                                 # 편집 실패는 새 메시지로 흘린다 — 중복이 유실보다 낫다
+            await self.send(channel, body, reply_to if index == 0 else "")
+
     async def _capture_output(self, channel: str, message_id: str, binding: dict,
                               request_seq: int) -> str:
+        """버스에 상관 응답이 실릴 때까지 폴링하고 Discord로 되돌린다.
+
+        [불변식] GATEWAY_WAIT_SEC > 서버 RELAY_TIMEOUT_SEC — connector_core가 보장한다.
+          역전되면 서버가 답을 남기기 전에 여기서 포기해 답변이 DB에만 남고 유실된다.
+        [WHY 진행 표시] 헤드리스 claude는 턴이 끝나야 답을 남기므로 도구를 여러 번 쓰는
+          요청은 수 분간 완전 무음이다. 무음은 '연결이 끊겼다'로 읽혀 같은 요청을 다시
+          보내게 만들고, 그러면 터미널 직렬 락에 걸려 실제로 더 느려진다.
+        """
         terminal = binding["terminal_id"]
         since = request_seq
-        deadline = time.monotonic() + 180
+        started = time.monotonic()
+        deadline = started + GATEWAY_WAIT_SEC
+        progress_id = ""
+        next_ping = 20.0
         while time.monotonic() < deadline:
             await asyncio.sleep(1.5)
             path = f"/api/agent/chat/feed?terminal_id={terminal}&since={since}"
@@ -191,13 +245,16 @@ class DiscordGateway:
                 output = clean_output(replies)
                 relay_error = str(replies[-1].get("error") or "")
                 break
+            elapsed = time.monotonic() - started
+            if elapsed >= next_ping:
+                next_ping = elapsed + 30
+                progress_id = await self._progress(channel, message_id, progress_id, elapsed)
         else:
-            output = "요청은 전달됐지만 제한 시간 안에 응답이 오지 않았습니다."
+            output = f"요청은 전달됐지만 {int(GATEWAY_WAIT_SEC // 60)}분 안에 응답이 오지 않았습니다."
             relay_error = "response_timeout"
         if not output:
             output = "요청은 전달됐지만 아직 응답이 없습니다."
-        for index, part in enumerate(chunks(output)):
-            await self.send(channel, f"```text\n{part}\n```", message_id if index == 0 else "")
+        await self._deliver(channel, message_id, progress_id, output)
         return relay_error
 
     async def _handle_recycle(self, channel: str, event_id: str, terminal: str,

@@ -4,6 +4,7 @@ DESCRIPTION: Discord 등 외부 connector가 공통으로 사용하는 ACL, 터�
              개인/그룹 메시지 라우팅 계약. 네트워크와 저장소에 의존하지 않는다.
 
 REVISION HISTORY:
+- 2026-08-06 Claude: 릴레이/게이트웨이 대기 상한을 한 곳으로 통합 (응답 유실 사고 수정)
 - 2026-08-03 Codex: 기본 3터미널과 다중 PC room 라우팅 최초 구현
 """
 
@@ -15,6 +16,17 @@ from dataclasses import dataclass
 
 DEFAULT_TERMINAL_COUNT = 3
 MAX_TERMINAL_COUNT = 9
+
+# [불변식] GATEWAY_WAIT_SEC > RELAY_TIMEOUT_SEC — 절대 역전 금지.
+#   커넥터 응답은 "서버가 버스에 남기고, 게이트웨이가 폴링해 수거한다" 2단 구조다.
+#   게이트웨이가 먼저 포기하면 서버가 그 뒤에 남긴 답변을 수거할 주체가 사라져
+#   답변이 DB에만 남고 사용자에겐 영원히 안 간다.
+# [과거사고] ~v3.7.319: 게이트웨이 180초 하드코딩 vs 릴레이 600초로 어긋나 있었다.
+#   3분 넘는 요청은 claude가 정상 응답해도 전부 response_timeout으로 버려졌다
+#   (2026-08-04 connector_events 3건 실측). 두 값이 서로를 모르던 것이 근본 원인이라
+#   상수를 각자 두지 말고 반드시 여기서 import 한다.
+RELAY_TIMEOUT_SEC = 600
+GATEWAY_WAIT_SEC = RELAY_TIMEOUT_SEC + 60
 _TERMINAL_RE = re.compile(r"^T([1-9])$", re.IGNORECASE)
 _TARGET_RE = re.compile(r"@(?P<target>all|[a-z0-9_-]+(?::T[1-9])?|T[1-9])\b", re.IGNORECASE)
 

@@ -4,6 +4,7 @@ DESCRIPTION: Discord 등 외부 connector의 한 턴을 헤드리스 claude로 �
              답변만 메시지 버스에 돌려주는 소비자. TUI 화면 스크레이프를 대체한다.
 
 REVISION HISTORY:
+- 2026-08-06 Claude: 실행 상한을 connector_core로 이관 — 게이트웨이 대기와 어긋나 응답이 유실됐다.
 - 2026-08-04 Claude: 신규 — PTY 화면 긁기(_clean_connector_output)를 stream-json 캡처로 교체.
 """
 from __future__ import annotations
@@ -12,6 +13,8 @@ import json
 import subprocess
 import threading
 from pathlib import Path
+
+from src.connector_core import RELAY_TIMEOUT_SEC
 
 # [WHY 화면 스크레이프를 버렸나 — 2026-08-04 실측]
 #   기존 경로는 Discord 메시지를 PTY(대화형 claude TUI)에 타이핑하고 화면 로그를 정규식으로
@@ -28,7 +31,6 @@ from pathlib import Path
 #   같은 세션을 공유하려면 TUI를 다시 긁어야 하므로 의도적으로 분리했다. 대화 연속성은
 #   아래 _SESSIONS의 --resume 으로 유지한다.
 
-_RELAY_TIMEOUT_SEC = 600
 _MAX_REPLY_CHARS = 6000
 
 # [불변식] 같은 터미널의 연속 요청은 직렬 처리 — claude --resume은 같은 세션에 동시
@@ -120,7 +122,7 @@ def _run_headless(cmd: list[str], cwd: str) -> tuple[str, str, int]:
     session_id = ''
     process = _proc.popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL, cwd=cwd, shell=True, encoding=None)
-    killer = threading.Timer(_RELAY_TIMEOUT_SEC,
+    killer = threading.Timer(RELAY_TIMEOUT_SEC,
                              lambda: process.poll() is None and process.kill())
     killer.daemon = True
     killer.start()

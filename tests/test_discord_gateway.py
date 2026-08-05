@@ -3,6 +3,7 @@ FILE: tests/test_discord_gateway.py
 DESCRIPTION: Discord Gateway binding 정규화, 출력 보안 필터, ACL 메시지 처리 테스트.
 
 REVISION HISTORY:
+- 2026-08-06 Claude: 대기 상한 역전(응답 유실)과 무음 구간 회귀 테스트 추가
 - 2026-08-03 Codex: PTY 직접 접근 금지와 버스 상관 응답 회귀 테스트 추가
 - 2026-08-03 Codex: Discord REST User-Agent 회귀 테스트 추가
 - 2026-08-03 Codex: 최초 작성
@@ -201,3 +202,90 @@ def test_terminal_specific_gateway_filters_other_bindings(monkeypatch):
     monkeypatch.setenv("DISCORD_CHANNEL_BINDINGS", '{"11":"T1","22":"T2"}')
     gateway = gateway_module.DiscordGateway()
     assert set(gateway.bindings) == {"22"}
+
+
+def test_gateway_waits_longer_than_server_relay():
+    """[재발방지 2026-08-06] 게이트웨이가 서버보다 먼저 포기하면, 서버가 그 뒤에 버스로
+    돌려주는 답변을 수거할 주체가 사라져 답이 DB에만 남고 사용자에겐 영원히 안 간다.
+    이전에는 게이트웨이 180초 하드코딩 vs 릴레이 600초로 어긋나 3분 넘는 요청이
+    정상 응답에도 전부 response_timeout으로 버려졌다.
+    """
+    from src.connector_core import GATEWAY_WAIT_SEC, RELAY_TIMEOUT_SEC
+
+    assert GATEWAY_WAIT_SEC > RELAY_TIMEOUT_SEC
+    assert gateway_module.GATEWAY_WAIT_SEC == GATEWAY_WAIT_SEC
+
+
+def test_slow_reply_shows_one_progress_message_then_overwrites_it(monkeypatch):
+    """무음 구간에 경과 표시가 나오되 채널을 도배하지 않고, 결과가 그 자리를 덮는다."""
+    gateway = object.__new__(gateway_module.DiscordGateway)
+    clock = {"now": 0.0}
+    polls = {"count": 0}
+    monkeypatch.setattr(gateway_module.time, "monotonic", lambda: clock["now"])
+
+    def local_request(*_args):
+        polls["count"] += 1
+        clock["now"] += 15.0                     # 폴링 1회를 15초로 가속
+        if polls["count"] < 5:
+            return {"latest_seq": 1, "messages": []}
+        return {"latest_seq": 8, "messages": [{
+            "seq": 8, "source": "connector", "role": "assistant",
+            "content": "done", "reply_to_seq": 7,
+        }]}
+
+    sent, edited = [], []
+
+    async def send(_channel, content, _reply_id=""):
+        sent.append(content)
+        return "progress-1"
+
+    async def edit(_channel, message_id, content):
+        edited.append((message_id, content))
+
+    async def no_sleep(_seconds):
+        return None
+
+    gateway._local_request = local_request
+    gateway.send = send
+    gateway._edit = edit
+    monkeypatch.setattr(gateway_module.asyncio, "sleep", no_sleep)
+    asyncio.run(gateway._capture_output("c", "m", {"terminal_id": "T1"}, 7))
+
+    assert len(sent) == 1 and sent[0].startswith("⏳")
+    assert edited[-1] == ("progress-1", "```text\ndone\n```")
+
+
+def test_progress_failure_does_not_lose_the_reply(monkeypatch):
+    """[불변식] 진행 표시 실패가 응답 수거를 죽이면 원래 고치려던 유실 사고와 같아진다."""
+    gateway = object.__new__(gateway_module.DiscordGateway)
+    clock = {"now": 0.0}
+    polls = {"count": 0}
+    monkeypatch.setattr(gateway_module.time, "monotonic", lambda: clock["now"])
+
+    def local_request(*_args):
+        polls["count"] += 1
+        clock["now"] += 25.0
+        if polls["count"] < 3:
+            return {"latest_seq": 1, "messages": []}
+        return {"latest_seq": 8, "messages": [{
+            "seq": 8, "source": "connector", "role": "assistant",
+            "content": "done", "reply_to_seq": 7,
+        }]}
+
+    delivered = []
+
+    async def send(_channel, content, _reply_id=""):
+        if content.startswith("⏳"):
+            raise RuntimeError("discord 5xx")
+        delivered.append(content)
+        return "msg-1"
+
+    async def no_sleep(_seconds):
+        return None
+
+    gateway._local_request = local_request
+    gateway.send = send
+    monkeypatch.setattr(gateway_module.asyncio, "sleep", no_sleep)
+    asyncio.run(gateway._capture_output("c", "m", {"terminal_id": "T1"}, 7))
+
+    assert delivered == ["```text\ndone\n```"]
