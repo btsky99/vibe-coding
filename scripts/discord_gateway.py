@@ -200,6 +200,40 @@ class DiscordGateway:
             await self.send(channel, f"```text\n{part}\n```", message_id if index == 0 else "")
         return relay_error
 
+    async def _handle_recycle(self, channel: str, event_id: str, terminal: str,
+                              project: str, content: str) -> None:
+        """세션 리사이클 명령 처리. 판정·실행은 전부 서버 API가 한다.
+
+        [제약] '--force'는 승인 대기·플래핑 가드만 뚫는다. 동시 실행(already_running)은
+          force로도 안 뚫리며, 그건 서버 쪽 plan_recycle의 불변식이다.
+        """
+        args = content.split()[1:]
+        force = "--force" in args or "강제" in args
+        try:
+            res = await asyncio.to_thread(
+                self._local_request, "POST", "/api/session/recycle",
+                {"terminal_id": terminal, "project_id": project,
+                 "trigger": "manual", "force": force})
+        except Exception as exc:
+            await asyncio.to_thread(self.mark_event, f"discord:{self.node_id}",
+                                    event_id, "failed", {"error": str(exc)})
+            await self.send(channel, f"리사이클 호출 실패: `{exc}`", event_id)
+            return
+
+        if res.get("ok"):
+            note = " (재정박 축약됨)" if res.get("truncated") else ""
+            msg = (f"✅ `{terminal}` 세션을 교체했습니다{note}.\n"
+                   f"재정박 {res.get('reanchor_chars')}자 주입 완료 — 이어서 진행하면 됩니다.")
+        else:
+            reason = res.get("reason") or "unknown"
+            msg = f"⏸ 리사이클하지 않았습니다 — `{reason}`"
+            if res.get("fallback_path"):
+                # 세션은 잃었지만 재정박 프롬프트는 건졌다 — 수동 복구 경로를 알려준다.
+                msg += f"\n재정박 내용은 `{res['fallback_path']}`에 보존했습니다."
+        await asyncio.to_thread(self.mark_event, f"discord:{self.node_id}", event_id,
+                                "completed" if res.get("ok") else "ignored", res)
+        await self.send(channel, msg, event_id)
+
     async def handle_message(self, event: dict) -> None:
         if not self._allowed(event):
             return
@@ -229,6 +263,13 @@ class DiscordGateway:
             return
         terminal = binding["terminal_id"]
         project = binding["project_id"]
+
+        # [WHY 명시 명령] "세션 마감해" 같은 자연어 매칭은 쓰지 않는다 — 오탐 한 번이
+        #   곧 세션 파괴다. 되돌릴 수 없는 동작은 오직 명시 토큰으로만 연다.
+        if content.split()[0].lower() in ("!recycle", "!리사이클"):
+            await self._handle_recycle(channel, event_id, terminal, project, content)
+            return
+
         result = await asyncio.to_thread(self._local_request, "POST", "/api/agent/chat/bus", {
             "terminal_id": terminal, "source": "connector", "role": "user",
             "content": content, "actor_name": author.get("global_name") or author.get("username") or "Discord",

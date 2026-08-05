@@ -985,10 +985,17 @@ def _g_lan(h, pp):
     from api import lan_api
     lan_api.handle_get(h, pp.path, parse_qs(pp.query), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 
+def _g_recycle(h, pp):
+    from api import recycle_api
+    if not recycle_api.handle_get(h, pp.path, parse_qs(pp.query),
+                                  PROJECT_ID=_current_project_id()):
+        h.send_error(404)
+
 GET_PREFIX_ROUTES = [
     ('/api/git/', _g_git),
     ('/api/agent/', _g_agent),
     ('/api/pty/', _g_pty),
+    ('/api/session/recycle', _g_recycle),
     ('/api/experience', _g_experience),
     ('/api/zettel/', _g_zettel),
     ('/api/codegraph/', _g_codegraph),
@@ -1455,10 +1462,16 @@ def _p_lan(h, pp):
     from api import lan_api
     lan_api.handle_post(h, pp.path, _p_body(h), DATA_DIR=DATA_DIR, PROJECT_ID=_current_project_id())
 
+def _p_recycle(h, pp):
+    from api import recycle_api
+    if not recycle_api.handle_post(h, pp.path, PROJECT_ID=_current_project_id()):
+        h.send_error(404)
+
 POST_PREFIX_ROUTES = [
     ('/api/tools/', _p_tools),
     ('/api/agent/', _p_agent),
     ('/api/pty/', _p_pty),
+    ('/api/session/recycle', _p_recycle),
     ('/api/zettel/', _p_zettel),
     ('/api/codegraph/', _p_codegraph),
     ('/api/memory/', _p_memory),

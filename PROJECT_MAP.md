@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-05 01:05
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-05 22:25
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,22 +8,22 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 2개 · 미푸시 3커밋
+- **브랜치**: `main` · 미커밋 4개 · 미푸시 0커밋
 - **최근 커밋**
+  - `6a6b391` 2026-08-05 — chore(release): v3.7.319 — Discord 릴레이·업데이트 검증·404 진단성 수정
   - `b7558ef` 2026-08-05 — fix(updater): 절단된 다운로드를 '완료'로 통과시키던 검증 구멍 수정
   - `94fd2f8` 2026-08-05 — fix(server): 미등록 POST가 'Failed to fetch'로 보이던 원인 수정
   - `90da217` 2026-08-04 — fix(connectors): Discord 응답을 TUI 화면 스크레이프에서 stream-json으로 교체
   - `c053e38` 2026-08-04 — feat(discord): 멀티에이전트 사용량 상태판 추가 — v3.7.318
-  - `537fdef` 2026-08-04 — docs(discord): 설정값 발급 안내 추가 — v3.7.317
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-05 22:22** 의도: list
+  - 결정: []
+- **08-05 22:04** 의도: list
+  - 결정: []
 - **08-03 22:22** 의도: Telegram 제거 및 Discord Harness 전환 구현
   - 결정: Telegram은 즉시 제거하고 Discord 단일 커넥터, 기본 터미널 3개, PostgreSQL 버스, 다중 PC node:terminal 라우팅을 사용한다. Discord 자격증명 미설정 시 daemon은 자동 비활성화한다.
   - 다음: Vibe View Discord 설정 UI와 fan-out 승인 저장/API/UI를 구현한 뒤 실제 Discord 자격증명으로 E2E 검증하고 문서를 마무리한다.
-- **08-01 22:18** 의도: list
-  - 결정: []
-- **08-01 15:26** 의도: list
-  - 결정: []
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
 - **설치본에서 Discord 토큰 저장 시 Failed to fetch**
@@ -119,10 +119,10 @@
 | `projects_api.py` | 69 | 최근 프로젝트 목록 API — projects.json에 최근 연 프로젝트 경로를 MRU(최대 20개)로 |
 | `pty_api.py` 🔨 | 246 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
-| `setup_api.py` 🔨 | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
+| `setup_api.py` | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
-| `tools_api.py` 🔨 | 1152 | AI 도구 CLI 설치 관리 API. |
+| `tools_api.py` | 1152 | AI 도구 CLI 설치 관리 API. |
 | `update_api.py` 🔨 | 213 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
@@ -131,9 +131,11 @@
 ### 데이터 계층 (.ai_monitor/src/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
+| `brief_limits.py` | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
 | `claude_quota.py` 🔨 | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
 | `code_search.py` | 200 | 설명: 코드 인텔리전스 검색 — PostgreSQL FTS 기반 BM25 검색 엔진 |
+| `codex_context.py` | 105 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
 | `codex_quota.py` | 216 | Codex CLI(OpenAI)의 플랜 쿼터 사용률(5h/7d %) 공급자. |
 | `connector_core.py` 🔨 | 112 | Discord 등 외부 connector가 공통으로 사용하는 ACL, 터미널 주소, |
 | `db.py` | 42 | 설명: 레거시 DB 진입점 (SQLite 런타임 저장소 폐기 잔재). get_connection()은 |
@@ -283,14 +285,14 @@
 | `harness_verify.py` | 437 | Vibe Coding 하네스 V2 검증 스크립트. |
 | `heal_report.py` | 100 | 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics를 호출해 4장치 지표를 |
 | `incident.py` | 132 | 사고 장부 CLI — 고친 에러 기록(record) / 재발 검색(search) / |
-| `install_ai_toolchain.py` 🔨 | 137 | Vibe Coding first-run Node.js and AI CLI automatic installer chain. |
-| `install_antigravity.py` 🔨 | 48 | Install Google's official Antigravity CLI (`agy`). |
+| `install_ai_toolchain.py` | 137 | Vibe Coding first-run Node.js and AI CLI automatic installer chain. |
+| `install_antigravity.py` | 48 | Install Google's official Antigravity CLI (`agy`). |
 | `install_dev_tools.py` | 159 | 프로젝트 개발 도구 통합 설치 스크립트. |
 | `install_frontend_deps.py` | 195 | 프론트엔드(React/Vite) 의존성 설치 스크립트. |
 | `install_gh_cli.py` | 154 | GitHub CLI(gh) 자동 설치 스크립트. |
 | `install_harness.py` | 331 | 하네스 V2 경량판 설치 스크립트. |
 | `install_hive_hooks.py` | 307 | 외부(또는 자기) 프로젝트의 .claude/settings.local.json에 비이브 코딩 하이브 훅을 |
-| `install_nodejs.py` 🔨 | 143 | Node.js LTS 자동 설치 스크립트 (Windows). |
+| `install_nodejs.py` | 143 | Node.js LTS 자동 설치 스크립트 (Windows). |
 | `install_npm_tool.py` | 92 | npm 글로벌 패키지 설치 스크립트. |
 | `install_playwright_cli.py` 🔨 | 71 | Playwright CLI 설치 + 브라우저 다운로드 — UI 검증(스크린샷 대신 Playwright 직접 확인)용. |
 | `install_psql.py` | 189 | PostgreSQL CLI(psql) PATH 등록 스크립트. |
@@ -359,7 +361,7 @@
 | 파일 | 줄 수 | 테스트 대상 |
 |------|------|------------|
 | `test_agent_api.py` 🔨 | 333 | agent_api.py 단위 테스트. |
-| `test_ai_toolchain_installer.py` 🔨 | 54 | Sequential AI toolchain installer regression tests. |
+| `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
 | `test_claude_quota.py` 🔨 | 53 | Claude 사용량 응답에서 신규 모델별 주간 한도를 보존하는 회귀 테스트. |
 | `test_codex_harness_v2.py` | 86 | Focused tests for Codex Harness V2 bootstrap and entrypoints. |
 | `test_codex_orchestration.py` | 114 | Codex 라우팅과 오케스트레이터 연동 회귀 테스트. |
@@ -387,8 +389,8 @@
 | `test_quota_policy.py` 🔨 | 69 | 사용량 snapshot의 다섯 권고 상태와 guard 동작 회귀 테스트. |
 | `test_route_table.py` 🔨 | 135 | server.py 라우트 완전성 가드 — do_GET/do_POST를 if/elif에서 디스패치 테이블로 |
 | `test_self_heal_2.py` | 231 | 자가 치유 2.0 회귀 방지 테스트 — 회상 v2(pgvector) 그레이스풀 |
-| `test_setup_auto_install.py` 🔨 | 153 | First-run sequential automatic dependency installation API regression tests. |
-| `test_setup_banner_install_actions.py` 🔨 | 33 | Setup banner installer action wiring regression tests. |
+| `test_setup_auto_install.py` | 153 | First-run sequential automatic dependency installation API regression tests. |
+| `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` 🔨 | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
 | `test_smoke_isolation.py` 🔨 | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_updater_bundle_version.py` 🔨 | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
@@ -435,4 +437,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-05 01:05
+> 자동 생성 완료: 2026-08-05 22:25

@@ -62,3 +62,6 @@ tests/office/test_office_report.md
 
 # soft 업데이트 런타임 산출물 (apply 직전 SHA 백업 — 관리 체크아웃 전용)
 .soft_rollback
+
+# 로컬 전용 산출물 — 리사이클 실패 시 재정박 폴백(_local/reanchor-*.md), 프로젝트 특화 교훈
+_local/

@@ -338,16 +338,55 @@ Discord에서 안전하게 worker 호출과 위험 작업을 승인한다.
 
 Discord 명령으로 현재 세션을 정리하고 새 컨텍스트에서 안전하게 이어간다.
 
+### Phase 6-0 — 컨텍스트 계측 실태 (2026-08-05 실측)
+
+자동 트리거를 얹기 전에 계측 원천을 실측했다. **결과가 설계를 바꿨다.**
+
+| CLI | 원천 | 상태 | 자동 트리거 |
+|-----|------|------|-------------|
+| claude | `~/.claude/projects/*/*.jsonl` (639개) | 정상 — `/api/context-usage` | 가능 |
+| codex | `~/.codex/sessions/**/rollout-*.jsonl` (34개) | API 부재 → `src/codex_context.py` 신설 | 가능 |
+| antigravity | `/api/antigravity-context-usage` | **죽은 계측** | **불가 — 제외** |
+
+- codex는 `last_token_usage.input_tokens / model_context_window`가 정답이다.
+  `total_token_usage`는 세션 누적이라 실측에서 11164%가 나온다(오용 금지).
+- antigravity API는 폐기 경로 `~/.gemini/tmp/<folder>/chats/`를 읽는다. 실측 시
+  그 경로엔 파일 1개(mtime 5/26)뿐이고, 실제 대화는
+  `~/.gemini/antigravity-cli/conversations/*.db`(SQLite, 39개, mtime 8/4)에 있다.
+  → `AUTO_TRIGGER_CLIS`에서 제외하고 수동 `!recycle`만 허용한다.
+  agy용 파서를 만들면 이 표와 `session_recycle.AUTO_TRIGGER_CLIS`를 함께 갱신할 것.
+
 ### 작업
 
-- [ ] 재시작 가능 상태와 금지 상태 정의
-- [ ] checkpoint에 목표, 완료 항목, 미완료 항목, 변경 파일, 다음 명령 저장
-- [ ] 진행 중 tool/process 정리와 timeout 처리
-- [ ] PTY 세션 정상 종료 후 새 세션 생성
-- [ ] 새 세션에서 규칙, 프로젝트, task, checkpoint 로드
-- [ ] 성공·실패·부분 복구 상태를 Discord와 Vibe View에 표시
-- [ ] 재시작 요청 중복과 재진입 경쟁 방지
-- [ ] 실패 시 기존 checkpoint로 수동 복구 가능하게 유지
+- [x] 재시작 가능 상태와 금지 상태 정의 (`plan_recycle` 순수 함수 — 금지 7종)
+- [x] checkpoint에 목표·결정·다음 단계·변경 파일 저장 (`active_session_context` 재사용)
+- [x] 진행 중 tool/process 정리와 timeout 처리 (DRAIN 20초, 자동은 타임아웃 시 후퇴)
+- [x] PTY 세션 정상 종료 후 새 세션 생성 (`/api/pty/terminate` → `spawn`)
+- [x] 새 세션에서 규칙·checkpoint 로드 (재정박 프롬프트, 규칙은 경로만·본문 금지)
+- [x] 성공·실패 상태를 Discord에 표시 (`!recycle` 응답)
+- [ ] Vibe View 패널 표시 — **미착수** (API `/api/session/recycle/status`는 준비됨)
+- [x] 재시작 요청 중복과 재진입 경쟁 방지 (`recycle_state` + 멱등 토큰)
+- [x] 실패 시 기존 checkpoint로 수동 복구 가능하게 유지 (`_local/reanchor-<T>.md` 폴백)
+
+### 구현 산출물
+
+| 파일 | 역할 |
+|------|------|
+| `src/session_recycle.py` | 상태머신(GUARD→SEAL→DRAIN→SWAP→REANCHOR) — 순수 로직 |
+| `src/brief_limits.py` | 재정박·브리프 글자 상한 + 중간 절단 (규칙 9의 유일 강제 지점) |
+| `src/codex_context.py` | codex 컨텍스트 파서 (Phase 6-0에서 신설) |
+| `api/recycle_api.py` | HTTP 계층 + 실제 deps 주입 |
+| `infra/daemons.py` | `run_recycle_watcher` — 60초 폴링 자동 발동 |
+| `scripts/discord_gateway.py` | `!recycle` 명시 명령 |
+| `tests/test_session_recycle.py` | GUARD 10종 + 불변식 회귀 31건 |
+
+### 구현 중 발견한 결함 (재발 방지)
+
+`seal()`이 부르는 `set_session_checkpoint`가 `updated_at = NOW()`를 찍는다.
+그래서 SEAL 직후 `user_active()`의 "나이" 판정이 항상 0초 → 항상 True →
+**DRAIN이 매번 20초를 꽉 채우고 실패, 자동 리사이클이 구조적으로 100% 불발**이었다.
+가짜 deps를 쓰는 단위 테스트로는 잡히지 않는 통합 결함.
+→ SEAL 성공 시각을 기준선으로 잡고 "기준선 이후의 새 쓰기"만 활동으로 판정하도록 수정.
 
 ### 완료 기준
 

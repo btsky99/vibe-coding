@@ -806,6 +806,8 @@ def run_heartbeat(env: DaemonEnv) -> None:
 #   daemon_status는 _daemon_child_alive()로 자식 프로세스도 함께 본다(위 과거사고 참조).
 DAEMON_TOGGLES: dict = {
     'watchdog':      {'label': '하이브 워치독 (프로세스 감시)', 'thread': 'Watchdog'},
+    'recycle_watcher': {'label': '컨텍스트 리사이클 자동 발동 (85% 초과 시)',
+                        'thread': 'RecycleWatcher'},
     'discord_dashboard': {'label': 'Discord 읽기 전용 대시보드', 'thread': 'DiscordDashboard'},
     'discord_gateway': {'label': 'Discord 양방향 Gateway', 'thread': 'DiscordGateway'},
     'codex_watcher': {'label': 'Codex PG 워처 (온디맨드 — Codex 쓸 때만 자동 기동)',
@@ -875,6 +877,68 @@ def daemon_status(config_file: Path) -> list:
     ]
 
 
+def run_recycle_watcher(env: DaemonEnv) -> None:
+    """컨텍스트 임계치 초과 시 세션 리사이클을 자동 발동한다(Phase 6).
+
+    [WHY 서버 API 경유] 판정(GUARD)을 여기 복제하지 않는다 — 사용자 입력 중 여부,
+      리사이클 진행 중 여부, 플래핑 가드가 전부 서버 쪽 plan_recycle에 있고,
+      데몬이 자체 판단하면 두 벌이 어긋나 '사람이 타이핑 중인데 죽이는' 최악의
+      실패 모드가 열린다. 데몬은 계측과 호출만 담당한다.
+    [P0 계측] antigravity는 계측 원천이 폐기 경로라 자동 대상에서 제외됨 —
+      AUTO_TRIGGER_CLIS가 유일 원천이므로 여기서 별도 분기하지 않는다.
+    """
+    import urllib.error
+    import urllib.request
+
+    base = f'http://127.0.0.1:{env.http_port}'
+    interval = 60.0
+
+    def _post(path: str, payload: dict) -> dict | None:
+        try:
+            req = urllib.request.Request(
+                base + path, method='POST',
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                return json.loads(resp.read().decode('utf-8'))
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+
+    time.sleep(45)  # 서버 라우트와 PG 스키마가 준비될 여유
+    while True:
+        try:
+            status = None
+            try:
+                with urllib.request.urlopen(
+                        f'{base}/api/session/recycle/status', timeout=10) as resp:
+                    status = json.loads(resp.read().decode('utf-8'))
+            except (urllib.error.URLError, OSError, ValueError):
+                status = None
+
+            if status:
+                threshold = float(status.get('threshold') or 85.0)
+                for cli in status.get('auto_trigger_clis') or []:
+                    m = (status.get('measurement') or {}).get(cli) or {}
+                    if not m.get('available'):
+                        continue
+                    if float(m.get('percentage') or 0) < threshold:
+                        continue
+                    res = _post('/api/session/recycle',
+                                {'trigger': 'auto', 'cli': cli,
+                                 'project_id': env.current_project_id()})
+                    if res and res.get('ok'):
+                        print(f"[리사이클] {cli} {m.get('percentage')}% → 세션 교체 완료 "
+                              f"(재정박 {res.get('reanchor_chars')}자)")
+                    elif res and res.get('reason') not in (
+                            'below_threshold', 'user_active', 'flap_guard',
+                            'already_running', 'no_measurement'):
+                        # 정상적인 '지금은 아님' 사유는 로그를 더럽히지 않는다.
+                        print(f"[리사이클] {cli} 보류 — {res.get('reason')}")
+        except Exception as exc:
+            print(f'[리사이클 워처] 순회 오류: {exc}')
+        time.sleep(interval)
+
+
 def start_all_daemons(env: DaemonEnv, agent_status: dict,
                       agent_status_lock: threading.Lock) -> None:
     """부팅 4단계 — 백그라운드 데몬 스레드 10종을 일괄 기동.
@@ -912,6 +976,7 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     _t('embed_backfill', run_embedding_backfill, (env,))
     _t('heartbeat', run_heartbeat, (env,))
     _t('lan_bridge', run_lan_bridge, (env,))
+    _t('recycle_watcher', run_recycle_watcher, (env,))
 
     # [WHY 로그] 데몬이 안 뜬 이유가 로그에 없으면 비활성 원인을 추적할 방법이 없다.
     #   설정으로 끈 것과 버그로 안 뜬 것을 구분하는 유일한 단서다.

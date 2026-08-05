@@ -535,6 +535,17 @@ def ensure_schema(data_dir: Path | None = None) -> bool:
         execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS intent TEXT NOT NULL DEFAULT '';")
         execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS decisions JSONB NOT NULL DEFAULT '[]'::jsonb;")
         execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS next_step TEXT NOT NULL DEFAULT '';")
+        # [2026-08-05 Phase 6 리사이클] 컨텍스트 교체 진행 상태.
+        # [WHY] 계획 초안의 별도 session_checkpoints 테이블을 만들지 않았다 —
+        #   active_session_context가 이미 intent/decisions/next_step으로 체크포인트
+        #   정본이고 checkpoint.py가 여기에 쓴다. 새 테이블은 이중 정본이 된다.
+        # [불변식] recycle_state가 비어 있지 않으면 리사이클 진행 중 —
+        #   plan_recycle이 이 값 하나로 동시 실행을 막으므로 실패 경로에서도
+        #   반드시 ''로 되돌려야 한다(안 그러면 해당 터미널이 영구 잠긴다).
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS recycle_state TEXT NOT NULL DEFAULT '';")
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS recycle_token TEXT NOT NULL DEFAULT '';")
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS recycled_at TIMESTAMPTZ;")
+        execute_raw("ALTER TABLE active_session_context ADD COLUMN IF NOT EXISTS predecessor_id BIGINT;")
 
         execute_raw("""
             CREATE TABLE IF NOT EXISTS agent_stats (

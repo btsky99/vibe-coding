@@ -18,7 +18,7 @@ AI 멀티 에이전트 하이브 마인드 대시보드. PostgreSQL 18 기반, W
 
 ## 🚨 절대 규칙 — 위반 시 즉시 중단
 
-아래 8개는 **세부 규칙 파일을 읽지 않아도** 항상 적용된다. 위반이 감지되면 진행 전에 반드시 수정한다.
+아래 9개는 **세부 규칙 파일을 읽지 않아도** 항상 적용된다. 위반이 감지되면 진행 전에 반드시 수정한다.
 
 ### 1. 한글 필수
 대화 출력, 코드 주석, 커밋 메시지 본문, 문서 — **전부 한글**. 영어 식별자/외부 인용은 허용.
@@ -77,6 +77,21 @@ REVISION HISTORY:
 - **원인 (Why):** (1줄)
 - **수정 내용 (How):** (1~2줄)
 
+### 9. 프롬프트 컨텍스트 상한 (글자 수)
+규칙 2(1500**줄**)는 코드 파일용이다. **프롬프트 계열은 글자 수로 따로 제한**한다.
+
+| 종류 | 상한 | 대상 |
+|------|------|------|
+| 재정박 프롬프트 | 1500자 | 리사이클 후 새 세션 첫 주입 |
+| 워커 브리프 | 1200자 | 에이전트 간 위임 지시 |
+| checkpoint intent / next_step | 각 200자 | 복구 브리핑 |
+
+- 강제 지점은 `.ai_monitor/src/brief_limits.py` 하나뿐 — 직접 슬라이싱 금지.
+- 초과 시 **차단이 아니라 중간 절단 축약**. 차단하면 세션 복구가 실패해 더 나쁘다.
+- 상세: [`.claude/rules/context-limits.md`](.claude/rules/context-limits.md)
+
+---
+
 긴 작업의 단계 전환 시 `python scripts/checkpoint.py "의도" --decided "결정" --next "다음"` 기록 — 세션이 튕겨도 다음 세션이 재설명 없이 이어받는다. 에러를 고친 직후에는 `python scripts/incident.py record`로 사고 장부 기록 (자가 치유 2.0).
 
 ---
@@ -88,6 +103,7 @@ REVISION HISTORY:
 - [`.claude/rules/commit-rules.md`](.claude/rules/commit-rules.md) — 커밋 메시지 상세
 - [`.claude/rules/hive-sync.md`](.claude/rules/hive-sync.md) — 하이브 동기화 프로토콜
 - [`.claude/rules/file-limits.md`](.claude/rules/file-limits.md) — 1500줄 제한 + LLM 주석 가이드
+- [`.claude/rules/context-limits.md`](.claude/rules/context-limits.md) — 프롬프트 글자 수 상한 + 중간 절단
 - [`.claude/agents/README.md`](./.claude/agents/README.md) — Subagent 위임 라우팅 정책 (vibe-code-review/security/debug)
 - [`RULES.md`](./RULES.md) — 신규 멤버용 종합 안내 (위 규칙들의 풀 버전)
 - [`docs/HARNESS_V2.md`](./docs/HARNESS_V2.md) — 하네스 계약
