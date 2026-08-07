@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>vibe-seoul 상태</title>
+<!--
+  FILE: web/status/index.html
+  DESCRIPTION: 서울 VPS 읽기 전용 상태판. /api/status 의 JSON을 그려준다.
+  [WHY 단일 파일인가] 빌드 도구 없이 nginx가 그대로 서빙한다 — 상태판이 죽어서
+    상태를 못 보는 상황을 만들지 않으려면 의존성이 적을수록 좋다.
+  REVISION HISTORY:
+  - 2026-08-08 Claude: 최초 작성.
+-->
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --tx:#1a1d21; --dim:#6b7280;
+    --ok:#0f9d58; --bad:#d93025; --warn:#f4a300; --accent:#4f46e5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1115; --card:#171a21; --line:#272b33; --tx:#e6e8eb; --dim:#9aa1ab;
+      --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#818cf8;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1115; --card:#171a21; --line:#272b33; --tx:#e6e8eb; --dim:#9aa1ab;
+    --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#818cf8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font:15px/1.55 -apple-system,'Segoe UI','Noto Sans KR',sans-serif;
+    padding:20px 16px 48px}
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  .region{color:var(--dim);font-size:13px}
+  .stamp{color:var(--dim);font-size:12px;margin-bottom:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:16px;margin-bottom:14px}
+  .card h2{font-size:13px;margin:0 0 12px;color:var(--dim);font-weight:600;
+    letter-spacing:.04em;text-transform:uppercase}
+  .row{display:flex;align-items:center;gap:10px;padding:9px 0;
+    border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
+  .dot.off{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 22%,transparent)}
+  .nm{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .meta{color:var(--dim);font-size:12px;white-space:nowrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .stat .k{color:var(--dim);font-size:12px;margin-bottom:5px}
+  .stat .v{font-size:21px;font-weight:700;letter-spacing:-.02em}
+  .bar{height:5px;background:var(--line);border-radius:3px;margin-top:9px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);border-radius:3px;
+    transition:width .4s ease}
+  .bar>i.hot{background:var(--warn)}
+  .bar>i.crit{background:var(--bad)}
+  .empty{color:var(--dim);font-size:13px;padding:6px 0}
+  footer{color:var(--dim);font-size:12px;text-align:center;margin-top:22px}
+  .err{background:color-mix(in srgb,var(--bad) 12%,transparent);
+    border:1px solid var(--bad);color:var(--bad);
+    border-radius:10px;padding:12px;margin-bottom:14px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>vibe-seoul</h1>
+    <span class="region" id="region"></span>
+  </header>
+  <div class="stamp" id="stamp">불러오는 중…</div>
+
+  <div id="err"></div>
+
+  <div class="grid" id="stats"></div>
+
+  <div class="card">
+    <h2>서비스</h2>
+    <div id="svc"><div class="empty">불러오는 중…</div></div>
+  </div>
+
+  <div class="card">
+    <h2>연결된 원격 노드</h2>
+    <div id="tun"><div class="empty">불러오는 중…</div></div>
+  </div>
+
+  <footer>10초마다 자동 갱신 · 읽기 전용</footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function bar(pct){
+  const cls = pct >= 90 ? 'crit' : pct >= 75 ? 'hot' : '';
+  return `<div class="bar"><i class="${cls}" style="width:${Math.min(100,pct)}%"></i></div>`;
+}
+
+function render(d){
+  $('err').innerHTML = '';
+  $('region').textContent = d.region || '';
+  $('stamp').textContent = `기준 ${d.checked_at}`;
+
+  const m = d.resources?.mem || {}, k = d.resources?.disk || {};
+  const memPct = m.total_mb ? Math.round(m.used_mb / m.total_mb * 100) : 0;
+  $('stats').innerHTML = `
+    <div class="stat"><div class="k">메모리</div>
+      <div class="v">${m.used_mb ?? '–'} <span style="font-size:13px;font-weight:400;color:var(--dim)">/ ${m.total_mb ?? '–'} MB</span></div>
+      ${bar(memPct)}</div>
+    <div class="stat"><div class="k">디스크</div>
+      <div class="v">${k.used_gb ?? '–'} <span style="font-size:13px;font-weight:400;color:var(--dim)">/ ${k.total_gb ?? '–'} GB</span></div>
+      ${bar(k.pct ?? 0)}</div>
+    <div class="stat"><div class="k">가동 시간</div>
+      <div class="v" style="font-size:17px">${d.resources?.uptime || '–'}</div></div>
+    <div class="stat"><div class="k">부하</div>
+      <div class="v">${d.resources?.load || '–'}</div></div>`;
+
+  const svc = d.services || [];
+  $('svc').innerHTML = svc.length ? svc.map(s => `
+    <div class="row">
+      <span class="dot ${s.active ? 'on' : 'off'}"></span>
+      <span class="nm">${s.name}</span>
+      <span class="meta">${s.active ? '정상' : '중지'}${s.restarts ? ` · 재시작 ${s.restarts}회` : ''}</span>
+    </div>`).join('') : '<div class="empty">정보 없음</div>';
+
+  const t = d.tunnels || [];
+  $('tun').innerHTML = t.length ? t.map(x => `
+    <div class="row"><span class="dot on"></span>
+      <span class="nm">터널 포트 ${x.tunnel_port}</span>
+      <span class="meta">연결됨</span></div>`).join('')
+    : '<div class="empty">아직 연결된 원격 노드가 없습니다.</div>';
+}
+
+async function tick(){
+  try{
+    const r = await fetch('/api/status', {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    render(await r.json());
+  }catch(e){
+    $('err').innerHTML = `<div class="err">상태를 불러오지 못했습니다 — ${e.message}<br>
+      서버나 status-api가 내려갔을 수 있습니다.</div>`;
+    $('stamp').textContent = '연결 실패';
+  }
+}
+tick();
+setInterval(tick, 10000);
+</script>
+</body>
+</html>
