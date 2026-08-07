@@ -95,19 +95,61 @@ def resources() -> dict:
     return {'mem': mem, 'disk': disk, 'load': load, 'uptime': up}
 
 
-def remote_nodes() -> list[dict]:
-    """RustDesk에 등록된 기기 수와 열린 역터널 포트.
+# 터널 포트 ↔ 노드 이름. Register-RemoteNode.ps1이 배정하는 번호와 일치해야 한다.
+# [WHY 하드코딩인가] authorized_keys에는 포트가 아니라 permitlisten 제약만 있고,
+#   노드 이름(주석)과 포트를 잇는 단일 원천이 없다. 목록이 짧고 사람이 배정하므로
+#   여기서 명시하는 편이 추측 파싱보다 정확하다. 노드를 늘리면 이 표를 함께 갱신할 것.
+TUNNEL_NAMES = {
+    22001: 'cipher (크립토 PC)',
+    22002: 'macmini (맥미니)',
+    22003: 'qeuhlak',
+    22004: 'na2js',
+    22005: '예비',
+}
 
-    [제약] hbbs의 sqlite를 직접 읽지 않는다 — 잠금 충돌 위험이 있고 스키마가 버전에
-      묶인다. 대신 '지금 열려 있는 터널 포트'라는 관측 가능한 사실만 본다.
+
+def _tunnel_alive(port: int) -> bool:
+    """터널 끝단이 실제로 응답하는지 확인한다.
+
+    [🔴 왜 포트 존재만으로는 안 되나 — 2026-08-08 실측]
+      역터널은 상대 PC가 죽어도 VPS 쪽 리슨 포트가 남는다. 포트만 보고 '연결됨'이라
+      표시했더니 22001·22004 둘 다 초록불이었는데 실제로는 **양쪽 다 응답이 없었다**.
+      상대 PC의 sshd가 안 떠 있었던 것이다. 거짓 정상은 장애보다 나쁘다 —
+      "연결돼 있다"고 믿고 다른 원인을 찾게 만들기 때문이다.
+      그래서 실제로 TCP를 열어 SSH 배너가 오는지까지 본다.
+    [제약] 타임아웃을 짧게(1.5초) 둔다. 상태판은 10초마다 호출되므로 느리면 안 된다.
     """
-    tunnels = []
-    ss = _sh(['ss', '-tlnH'])
-    for line in ss.splitlines():
+    import socket
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=1.5) as s:
+            s.settimeout(1.5)
+            return s.recv(16).startswith(b'SSH-')
+    except Exception:
+        return False
+
+
+def remote_nodes() -> list[dict]:
+    """역터널 포트별 상태. 포트 존재가 아니라 **실응답**으로 판정한다.
+
+    [제약] hbbs의 sqlite는 읽지 않는다 — 잠금 충돌 위험이 있고 스키마가 버전에 묶인다.
+    """
+    ports = set()
+    for line in _sh(['ss', '-tlnH']).splitlines():
         parts = line.split()
-        if len(parts) >= 4 and ':2200' in parts[3]:
-            tunnels.append(parts[3].rsplit(':', 1)[-1])
-    return [{'tunnel_port': p} for p in sorted(set(tunnels))]
+        if len(parts) >= 4:
+            addr = parts[3]
+            tail = addr.rsplit(':', 1)[-1]
+            if tail.isdigit() and 22001 <= int(tail) <= 22099:
+                ports.add(int(tail))
+
+    out = []
+    for p in sorted(ports):
+        out.append({
+            'tunnel_port': p,
+            'name': TUNNEL_NAMES.get(p, f'미등록 ({p})'),
+            'alive': _tunnel_alive(p),
+        })
+    return out
 
 
 def payload() -> dict:
