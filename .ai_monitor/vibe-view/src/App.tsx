@@ -89,8 +89,11 @@ function App() {
 
   // ─── 경량 소스 업데이트 채널(boot.py A안) ──────────────────────────────
   // EXE 풀빌드(updateReady)와 독립된 빠른 .py 갱신 채널. 둘이 동시에 뜨면 풀빌드 우선.
-  const [softUpdate, setSoftUpdate] = useState<{ ready: boolean; remote_sha?: string; reason?: string } | null>(null);
+  const [softUpdate, setSoftUpdate] = useState<{ ready: boolean; remote_sha?: string; reason?: string; staged?: boolean; staged_sha?: string } | null>(null);
   const [softApplying, setSoftApplying] = useState(false);
+  // 진행률 — 서버가 git fetch를 흘리며 파일에 기록한 값을 폴링해 읽는다.
+  // phase: idle | fetching | staged | applying | restarting | error
+  const [softProgress, setSoftProgress] = useState<{ phase: string; percent: number; detail?: string } | null>(null);
 
   // ─── 슬롯별 프로젝트 (터미널마다 다른 프로젝트 실행) ───────────────────────
   // [WHY] currentPath 전역 하나로는 모든 슬롯이 같은 프로젝트로 뜬다. 슬롯별 오버라이드를 둬서
@@ -338,7 +341,26 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  // 경량 소스 업데이트 적용 — git reset --hard origin/main + EXE 재시작(boot.py 재진입)
+  // 진행률 폴링 — 업데이트가 걸려 있을 때만 1초 주기로 돈다.
+  // [WHY 조건부인가] 평상시에도 1초마다 때리면 아무 일 없는 대부분의 시간에 순수 낭비다.
+  //   배너가 떠 있거나 적용 중일 때만 켠다.
+  const softActive = Boolean(softUpdate?.ready) || softApplying;
+  useEffect(() => {
+    if (!softActive) return;
+    const tick = () => {
+      fetch(`${API_BASE}/api/soft-update/progress`)
+        .then(res => res.json())
+        .then(data => setSoftProgress(data))
+        .catch(() => {});
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [softActive]);
+
+  // 경량 소스 업데이트 즉시 적용 — reset --hard + EXE 재시작(boot.py 재진입).
+  // 자동 경로는 이걸 안 쓴다: 서버가 미리 받아두고 다음 부팅에 boot.py가 적용한다.
+  // 이 버튼은 "재시작까지 기다리기 싫다"는 경우의 즉시 경로.
   const applySoftUpdate = () => {
     setSoftApplying(true);
     fetch(`${API_BASE}/api/soft-update/apply`, { method: 'POST' })
@@ -349,6 +371,13 @@ function App() {
       })
       .catch((err) => alert(`소스 업데이트 요청 실패: ${err}`))
       .finally(() => setSoftApplying(false));
+  };
+
+  // 지금 받아만 두기 — 워킹트리를 안 건드리므로 재시작이 없다.
+  const stageSoftUpdate = () => {
+    fetch(`${API_BASE}/api/soft-update/stage`, { method: 'POST' })
+      .then(res => res.json())
+      .catch(() => {});
   };
 
   // 프로젝트 라이브 전환 — 선택한 폴더로 서버 프로젝트(DB/컨텍스트/배너)를 재시작 없이 전환.
@@ -605,28 +634,66 @@ function App() {
 
       {/* ── 소스 업데이트(빠름) 배너 — boot.py 경량 채널. 초록으로 풀빌드(파랑)와 구분 ── */}
       {/* 풀빌드 업데이트가 동시에 떠 있으면 그쪽을 우선 표시(중복 배너 방지) */}
-      {softUpdate?.ready && !updateReady && (
-        <div className="flex items-center justify-between px-3 py-1 bg-emerald-500/20 border-b border-emerald-500/40 shrink-0 z-50">
-          <span className="text-[10px] text-emerald-400 font-bold">
-            소스 업데이트(빠름) 준비됨 <span className="font-mono">{softUpdate.remote_sha?.slice(0, 7)}</span> — 풀빌드 없이 즉시 반영
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={applySoftUpdate}
-              disabled={softApplying}
-              className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500 text-white hover:bg-emerald-500/80 disabled:opacity-50 transition-colors"
-            >
-              {softApplying ? '적용 중...' : '소스 업데이트'}
-            </button>
-            <button
-              onClick={() => setSoftUpdate(null)}
-              className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
-            >
-              ✕
-            </button>
+      {softUpdate?.ready && !updateReady && (() => {
+        // 3단계 상태 — 받는 중(%) → 예약됨(재시작하면 적용) → 적용 중.
+        // [WHY 예약 상태를 따로 보여주나] 자동 경로는 여기서 멈춘 채 재시작을 기다린다.
+        //   이걸 안 알리면 사용자는 "업데이트가 있다는데 아무 일도 안 일어난다"로 읽는다.
+        const ph = softProgress?.phase ?? 'idle';
+        const pct = softProgress?.percent ?? 0;
+        const fetching = ph === 'fetching';
+        const staged = ph === 'staged' || Boolean(softUpdate.staged);
+        const busy = fetching || ph === 'applying' || ph === 'restarting' || softApplying;
+        const label = fetching ? `받는 중 ${pct}%`
+          : ph === 'applying' ? '적용 중'
+          : ph === 'restarting' ? '재시작 중'
+          : staged ? '재시작하면 적용됩니다'
+          : '풀빌드 없이 즉시 반영';
+        return (
+          <div className="px-3 py-1 bg-emerald-500/20 border-b border-emerald-500/40 shrink-0 z-50">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-emerald-400 font-bold">
+                소스 업데이트(빠름) <span className="font-mono">{softUpdate.remote_sha?.slice(0, 7)}</span>
+                {' — '}{label}
+                {softProgress?.detail && fetching && (
+                  <span className="ml-1 font-normal text-emerald-400/60">{softProgress.detail}</span>
+                )}
+              </span>
+              <div className="flex items-center gap-2">
+                {!staged && !busy && (
+                  <button
+                    onClick={stageSoftUpdate}
+                    className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/40 transition-colors"
+                  >
+                    받아두기
+                  </button>
+                )}
+                <button
+                  onClick={applySoftUpdate}
+                  disabled={busy}
+                  className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-500 text-white hover:bg-emerald-500/80 disabled:opacity-50 transition-colors"
+                >
+                  {busy ? '진행 중...' : '지금 적용(재시작)'}
+                </button>
+                <button
+                  onClick={() => setSoftUpdate(null)}
+                  className="text-[9px] text-white/40 hover:text-white/70 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            {/* 진행률 바 — 받는 중일 때만. 예약/유휴 상태에서 빈 바가 남으면 '멈춘 것'처럼 보인다. */}
+            {busy && (
+              <div className="mt-1 h-0.5 w-full bg-emerald-500/20 rounded overflow-hidden">
+                <div
+                  className="h-full bg-emerald-400 transition-all duration-300"
+                  style={{ width: `${fetching ? pct : 100}%` }}
+                />
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── 상단 메뉴바 컴포넌트 ── */}
       <TopMenuBar

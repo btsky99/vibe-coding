@@ -197,7 +197,8 @@ def soft_update_apply(handler, data_dir: Path, src_dir: Path) -> None:
         def _do_soft_apply():
             time.sleep(0.3)  # 응답이 클라이언트에 도달할 시간 확보 후 reset/재시작
             try:
-                result = apply_soft_update(_src)
+                # data_dir를 넘겨야 fetch 진행률이 soft_update_progress.json에 기록된다.
+                result = apply_soft_update(_src, data_dir)
                 if not result.get("ok"):
                     with open(data_dir / "soft_update_ready.json", "w", encoding="utf-8") as ef:
                         json.dump({"ready": False, "error": result.get("error", "적용 실패")},
@@ -210,4 +211,51 @@ def soft_update_apply(handler, data_dir: Path, src_dir: Path) -> None:
         threading.Thread(target=_do_soft_apply, daemon=False).start()
     except Exception as e:
         handler.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
+        handler.wfile.flush()
+
+
+def soft_update_progress(handler, data_dir: Path) -> None:
+    """GET /api/soft-update/progress — 받는 중/예약됨/적용 중 상태와 %를 반환.
+
+    [제약] 폴링 주기가 짧으므로(1초) 어떤 계산도 하지 않고 파일만 읽어 돌려준다.
+      여기서 git을 부르면 진행률을 보는 행위 자체가 업데이트를 느리게 만든다.
+    """
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    try:
+        from soft_updater import read_progress
+        payload = read_progress(data_dir)
+    except Exception as e:
+        payload = {"phase": "idle", "percent": 0, "detail": "", "error": str(e)}
+    handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+
+
+def soft_update_stage(handler, data_dir: Path, src_dir: Path) -> None:
+    """POST /api/soft-update/stage — 지금 받아만 둔다(적용은 다음 재시작).
+
+    자동 폴링(5분)을 기다리지 않고 사용자가 바로 받게 하는 수동 트리거.
+    [불변식] 워킹트리를 건드리지 않으므로 실행 중인 앱에 영향이 없다 — 그래서 재시작 없이
+      응답을 정상 반환한다(apply와 달리 os._exit 하지 않는다).
+    """
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    try:
+        from soft_updater import stage_soft_update
+        _src = src_dir
+
+        def _do_stage():
+            try:
+                stage_soft_update(data_dir, _src)
+            except Exception as ex:
+                print(f"[soft-update] stage 실패: {ex}")
+
+        handler.wfile.write(json.dumps({"started": True}).encode('utf-8'))
+        handler.wfile.flush()
+        threading.Thread(target=_do_stage, daemon=True).start()
+    except Exception as e:
+        handler.wfile.write(json.dumps({"started": False, "error": str(e)}).encode('utf-8'))
         handler.wfile.flush()

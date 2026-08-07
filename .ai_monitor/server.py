@@ -1073,6 +1073,7 @@ def _g_install_skills(h, pp):      install_api.install_skills(h, BASE_DIR, SCRIP
 def _g_check_update_ready(h, pp):  update_api.check_update_ready(h, DATA_DIR, __version__)
 def _g_trigger_update_chk(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
 def _g_soft_update_check(h, pp):   update_api.soft_update_check(h, DATA_DIR, _soft_src_dir())
+def _g_soft_update_progress(h, pp): update_api.soft_update_progress(h, DATA_DIR)
 # [불변식] heal은 전체(global) 집계 — project_id 슬러그 불일치로 0 오도 방지(설치/dev 분기).
 def _g_heal_metrics(h, pp):        heal_api.handle_get(h, '')
 def _g_setup_status(h, pp):        setup_api.handle_get(h, pp.path, parse_qs(pp.query))
@@ -1176,6 +1177,7 @@ GET_ROUTES = {
     '/api/check-update-ready': _g_check_update_ready,
     '/api/trigger-update-check': _g_trigger_update_chk,
     '/api/soft-update/check': _g_soft_update_check,
+    '/api/soft-update/progress': _g_soft_update_progress,
     '/api/heal/metrics': _g_heal_metrics,
     '/api/setup/status': _g_setup_status,
     '/api/events/thoughts': _g_events_thoughts,
@@ -1297,6 +1299,7 @@ def _p_body(h):
 # exact 위임
 def _p_apply_update(h, pp):    update_api.apply_update(h, DATA_DIR)
 def _p_soft_update(h, pp):     update_api.soft_update_apply(h, DATA_DIR, _soft_src_dir())
+def _p_soft_stage(h, pp):      update_api.soft_update_stage(h, DATA_DIR, _soft_src_dir())
 def _p_trigger_update(h, pp):  update_api.trigger_update_check(h, DATA_DIR)
 def _p_projects(h, pp):        projects_api.handle_post(h, PROJECTS_FILE)
 def _p_experience(h, pp):      experience_api.handle_post(h, pp.path)
@@ -1417,6 +1420,7 @@ POST_ROUTES = {
     '/api/setup/auto-install': _p_setup_auto_install,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,
+    '/api/soft-update/stage': _p_soft_stage,
     '/api/trigger-update-check': _p_trigger_update,
     '/api/projects': _p_projects,
     '/api/experience': _p_experience,
@@ -1989,13 +1993,25 @@ def main():
     #   [과거사고 2026-07-03] "dev는 체크아웃 아니라 무해" 가정이 틀렸음 — dev 트리도 체크아웃이라
     #   ready=true 배너→apply가 dev 트리를 reset --hard(미푸시 커밋 4개 고아화). 지금은
     #   soft_updater._channel_block_reason이 비frozen 실행을 채널에서 차단(VIBE_SRC_DIR opt-in 제외).
+    #   [자동 적용 2026-08-07] 감지에서 멈추지 않고 **받아두기(stage)** 까지 여기서 끝낸다.
+    #   느린 fetch를 앱이 떠 있는 동안 처리해야 다음 부팅에서 boot.py가 로컬 reset만으로
+    #   즉시 최신이 된다(= 재시작 1번, 부팅 지연 0). 트리 이동은 안 하므로 실행 중 코드는 불변.
     try:
         from soft_updater import check_soft_update as _check_soft
+        from soft_updater import stage_soft_update as _stage_soft
+        from soft_updater import auto_update_enabled as _soft_auto
 
         def _soft_update_loop():
             while True:
                 try:
-                    _check_soft(DATA_DIR, _soft_src_dir())
+                    res = _check_soft(DATA_DIR, _soft_src_dir()) or {}
+                    # 이미 같은 SHA를 받아뒀으면 재fetch 하지 않는다(매 5분 네트워크 낭비 방지).
+                    if res.get("ready") and not res.get("staged") and _soft_auto(DATA_DIR):
+                        st = _stage_soft(DATA_DIR, _soft_src_dir())
+                        if st.get("staged"):
+                            print(f"[soft-update] 예약됨 {str(st.get('sha'))[:7]} — 재시작 시 적용")
+                        elif not st.get("ok"):
+                            print(f"[soft-update] 예약 실패: {st.get('error')}")
                 except Exception as e:
                     print(f"[soft-update] poll error: {e}")
                 time.sleep(300)

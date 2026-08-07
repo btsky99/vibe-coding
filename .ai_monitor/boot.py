@@ -55,6 +55,7 @@ def _inject_bundled_node_path() -> None:
 REPO_URL = "https://github.com/btsky99/vibe-coding.git"
 APP_REL = os.path.join(".ai_monitor", "server.py")  # 체크아웃 기준 메인 엔트리 상대경로
 ROLLBACK_FILE = ".soft_rollback"  # soft_updater가 apply 직전 직전 SHA를 여기에 기록
+STAGED_FILE = ".soft_staged"  # soft_updater가 미리 받아둔(fetch만 끝난) 대상 SHA
 
 
 # [PyInstaller 의존성 노출] boot.py가 진입점이 되면 앱 코드를 정적 import 하지 않으므로
@@ -182,9 +183,14 @@ def _git(args: list, cwd=None, timeout=300) -> bool:
     # 비윈도우는 반드시 0. (proc.py:18과 동일 관용구 — 새 subprocess 호출 시 재사용할 것)
     no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     try:
+        # [버그수정 2026-08-07] encoding 미지정이면 text=True가 **로케일 인코딩**(한국어 Windows는
+        #   cp949)으로 디코드한다. git이 한글 메시지나 UTF-8 파일명을 뱉는 순간 리더 스레드가
+        #   UnicodeDecodeError로 죽고, 그 예외를 아래 except가 삼켜 False를 반환한다.
+        #   → 정상 실행된 git이 '실패'로 보여 예약 업데이트가 조용히 건너뛰어진다.
+        #   실제로 E2E 검증 중 재현됐다. soft_updater._git과 같은 규약(utf-8/replace)으로 맞춘다.
         r = subprocess.run(["git"] + args, cwd=cwd and str(cwd),
-                           capture_output=True, text=True, timeout=timeout,
-                           creationflags=no_win)
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout, creationflags=no_win)
         return r.returncode == 0
     except Exception:
         return False
@@ -221,6 +227,72 @@ def _ensure_src(src: Path) -> Path:
     return seed if _is_checkout(seed) else src
 
 
+def _apply_staged_update(src: Path) -> str:
+    """앱을 띄우기 **전에** 미리 받아둔 업데이트를 적용한다. 적용한 SHA 또는 "".
+
+    [WHY 여기인가] 사용자가 원한 건 "재시작하면 알아서 최신". 앱이 뜬 뒤에 적용하면
+      또 한 번 껐다 켜야 해서 반쪽짜리다. 그래서 server.py를 runpy 하기 전에 트리를 옮긴다.
+    [WHY 네트워크를 안 타나] 무거운 fetch는 앱이 떠 있는 동안 soft_updater.stage_soft_update가
+      이미 끝내 뒀다. 여기 남은 건 로컬 reset뿐이라 수십 ms — 부팅 체감이 없다.
+      부팅 경로에 네트워크를 넣으면 오프라인/느린 회선에서 매번 앱 실행이 지연된다.
+    [WHY 토글을 안 읽나] 자동 적용 on/off는 **예약 시점**(서버, config 접근 가능)에서 이미
+      걸린다. 꺼져 있으면 예약 파일 자체가 생기지 않는다 → 부팅 경로는 설정을 몰라도 된다.
+      boot.py가 앱 모듈을 import 못 하는 A안 불변식과도 맞는다.
+    [불변식] 여기서 실패해도 절대 예외를 밖으로 던지지 않는다 — 업데이트 실패가 앱 실행
+      자체를 막으면 사용자는 복구 수단을 잃는다. 실패 시 조용히 현재 트리로 진행한다.
+    """
+    marker = src / STAGED_FILE
+    if not marker.exists():
+        return ""
+    # dev 트리 보호 — soft_updater._channel_block_reason과 같은 기준.
+    # (dev 리포에 예약 파일이 잘못 생겨도 D:\vibe-coding을 reset 하지 않는다)
+    if not _is_frozen() and not os.environ.get("VIBE_SRC_DIR", "").strip():
+        return ""
+    try:
+        import json
+        sha = (json.loads(marker.read_text(encoding="utf-8")) or {}).get("sha") or ""
+    except Exception:
+        sha = ""
+    if not sha:
+        try:
+            marker.unlink()
+        except Exception:
+            pass
+        return ""
+
+    # [유실 방지] 예약 시점에도 검사했지만 그 사이 트리가 바뀌었을 수 있어 직전에 한 번 더 본다.
+    #   HEAD가 대상의 조상이 아니면 = 원격에 없는 로컬 커밋이 있다 → reset 시 고아화(2026-07-03 사고).
+    if not _git(["merge-base", "--is-ancestor", "HEAD", sha], cwd=src):
+        print("[boot] 예약 업데이트에 로컬 전용 커밋 충돌 — 적용 건너뜀")
+        try:
+            marker.unlink()
+        except Exception:
+            pass
+        return ""
+
+    # 롤백 지점 기록 — 새 코드로 부팅하다 죽으면 _run_main_app이 이 SHA로 되돌린다.
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(src), capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30,
+                           creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                                          if sys.platform == "win32" else 0))
+        prev = (r.stdout or "").strip()
+        if prev:
+            (src / ROLLBACK_FILE).write_text(prev, encoding="utf-8")
+    except Exception:
+        pass
+
+    if not _git(["reset", "--hard", sha], cwd=src):
+        print("[boot] 예약 업데이트 reset 실패 — 현재 코드로 계속 진행")
+        return ""
+    try:
+        marker.unlink()
+    except Exception:
+        pass
+    print(f"[boot] 소스 업데이트 적용됨 → {sha[:7]}")
+    return sha
+
+
 def _inject_paths(src: Path) -> None:
     """체크아웃이 frozen 번들보다 먼저 잡히도록 sys.path 최우선 삽입.
     [불변식] .ai_monitor 가 index 0 — server.py가 `from api/src/infra`를 여기서 해결.
@@ -240,6 +312,10 @@ def _runpy_entry(entry: Path, argv: list) -> None:
 def _run_main_app(passthrough: list) -> None:
     """메인 앱(인자 없음 또는 --install 등 서브커맨드) 실행 경로."""
     src = _ensure_src(_managed_src_root())
+    # [순서 불변식] 게이트 검사보다 **먼저** 적용해야 한다. 적용 후의 트리가 곧 실행 대상이고,
+    #   게이트는 "이 EXE가 그 트리를 실행해도 되는가"를 묻기 때문. 반대로 하면 새 소스의
+    #   min_exe가 아니라 옛 소스의 min_exe로 판정해 위반 소스를 그대로 실행하게 된다.
+    _apply_staged_update(src)
     if not _gate_ok(src):
         # SRC가 이 EXE보다 너무 최신 → 번들 seed(이 EXE의 동봉 소스)로 폴백 실행.
         print("[boot] soft_manifest.min_exe > 현재 EXE 버전 — 풀빌드 업데이트 필요. 번들 소스로 실행.")
