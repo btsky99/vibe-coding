@@ -1,11 +1,13 @@
-# 원격제어 (RustDesk + Tailscale) — 운영 가이드
+<!--
+FILE: docs/REMOTE_CONTROL.md
+DESCRIPTION: 무료 원격제어(RustDesk + Tailscale 셀프호스트) 구축 구조와 기기별 운영 절차.
+             상용 원격제어(팀뷰어/애니데스크) 대체. 스크립트 실체는 scripts/remote/.
 
-**FILE**: docs/REMOTE_CONTROL.md
-**DESCRIPTION**: 무료 원격제어 구축의 전체 구조와 기기별 절차. 상용 원격제어(팀뷰어/애니데스크) 대체.
-스크립트 실체는 `scripts/remote/`.
-
-**REVISION HISTORY**
+REVISION HISTORY:
 - 2026-08-07 Claude: 최초 작성 — yjscom 실구축 결과 및 실측으로 확인된 함정 3건 반영.
+-->
+
+# 원격제어 (RustDesk + Tailscale) — 운영 가이드
 
 ---
 

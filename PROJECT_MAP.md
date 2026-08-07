@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-07 16:44
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-07 20:23
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 2개 · 미푸시 3커밋
+- **브랜치**: `main` · 미커밋 4개 · 미푸시 1커밋
 - **최근 커밋**
-  - `bb73c84` 2026-08-06 — fix(discord): 3분 넘는 요청의 답변이 통째로 유실되던 결함 수정
-  - `d57d430` 2026-08-05 — fix(setup): CLI 설치 성공에도 "미설치"로 고착되던 결함 수정
-  - `7858fbc` 2026-08-05 — feat(recycle): 컨텍스트 리사이클 자동화 + 프롬프트 글자 상한 — Phase 6
-  - `6a6b391` 2026-08-05 — chore(release): v3.7.319 — Discord 릴레이·업데이트 검증·404 진단성 수정
-  - `b7558ef` 2026-08-05 — fix(updater): 절단된 다운로드를 '완료'로 통과시키던 검증 구멍 수정
+  - `d3533f5` 2026-08-07 — feat(remote): 무료 원격제어 구축 — Tailscale 위 RustDesk 셀프호스트
+  - `c5fd230` 2026-08-07 — chore(release): v3.7.321 — 볼트 동기화 핑퐁 차단
+  - `c7a42f2` 2026-08-07 — fix(zettel): 볼트 동기화 3단 핑퐁 차단 — 서버 CPU 47% 점유의 발원지 수정
+  - `9383fbd` 2026-08-07 — chore(release): auto-bump version to v3.7.320 [skip ci]
+  - `9e2a1c7` 2026-08-07 — chore(docs): 하이브 상태판·프로젝트 맵 자동 갱신 반영
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-06 08:28** 의도: CipherTrader v4.2 캠페인 무인 완주 체계 구축 (사용자 부재)
@@ -26,15 +26,15 @@
   - 결정: []
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
-- **개발 PC의 'tpsl 손실 가중 상향' 지시를 TPSL_PEN으로 잘못 잡을 뻔함 (이름이 유사)**
-  - 원인: train_v3_full.py에 비슷한 이름의 두 상수가 다른 축에 있음. TPSL_PEN(200.0)은 저장 점수 페널티 score=acc-TPSL_PEN*tpsl_val-... 이라 학습 손실에 영향 0. 실제 손실 가중은 TP_SL_W(0.3, L146 하드코딩)
-  - 수정: TP_SL_W를 env화(기본 0.3 유지)하고 R4는 0.6 주입. 두 상수의 차이를 코드 주석에 명시. ckpt 메타에 tp_sl_w/save_by 기록해 산출물만 보고 사양 대조 가능하게
-- **워치독이 정상 완주한 5m RL을 'policy 후보 없음'으로 오판하고, 그 실패를 재시도 없이 rl_done=True로 완료 처리**
-  - 원인: 결함 2개. ① 경로: policy는 models/rl_position에 저장되는데 워치독이 R.CKPT(.cache/mamba2, 백본 자리)를 조회 — 같은 버그가 캠페인 upload()에도 있어 policy가 드라이브에 영영 안 올라감 ② 실패 처리: 산출물 없음
-  - 수정: RLDIR=models/rl_position로 경로 정정, _fresh()로 존재+최소크기+라운드시작 이후 mtime 3중 검수(07-28 v3.x 잔재 혼입 차단), 산출물 없으면 rl_started 되돌려 재시도(상한 3회), sync_drive()로 전 TF 드라
-- **build_unified_v31.py --gen v42 에피소드 빌드가 ValueError: all the input array dimensions except **
-  - 원인: _source_mask 의 _GLOBAL_MEMO 캐시 키가 (table, sym, tf, idx 양끝) 뿐이고 len(idx) 가 없다. 이 함수만 예외적으로 idx 정렬 배열을 캐시하는데(다른 사용처는 원시 DataFrame) mask_macro 는 sym=None
-  - 수정: 캐시 키에 len(idx) 추가 + 히트해도 길이 불일치면 재계산하는 방어선. 재현 검증: 양끝 동일 2951/2950 idx 두 개로 수정 전 키 충돌 True, 수정 후 False
+- **hbbs가 os error 10013으로 즉사 (Listening on websocket :21118 직후)**
+  - 원인: hbbs의 웹소켓 포트 21118과 RustDesk 클라이언트 직접 IP 접속 기본 포트 21118이 동일. 한 PC에 서버+클라이언트를 올리면 충돌
+  - 수정: hbbs 포트는 기준 포트에서 파생돼 개별 변경 불가하므로 클라이언트 직접접속 포트를 21128로 자동 회피
+- **RustDesk 커스텀 ID 서버 설정이 반영 안 됨 (설정 화면엔 보이는데 실제 접속은 공용 rs-ny.rustdesk.com으로 나감)**
+  - 원인: RustDesk 설정이 두 곳에 존재. 사용자 프로필(%APPDATA%)은 GUI용이고 실제 접속을 받는 서비스는 C:\Windows\ServiceProfiles\LocalService\... 를 읽음. 서비스 계정이 LocalSystem이 아니라 LocalServic
+  - 수정: 양쪽 프로필에 동시 주입 + 서비스 정지 후 기록(살아있는 서비스가 종료 시 되쓰기함) + 재기동 후 되읽어 검증
+- **hbbs 기동 실패 (예약 작업 LastResult=0x80070005 액세스 거부)**
+  - 원인: icacls로 설치 디렉터리에 /inheritance:r + (OI)(CI) 권한을 /T로 걸었더니, 상속 플래그는 컨테이너용이라 파일에는 적용되지 않는데 상속만 먼저 끊겨 hbbs.exe의 ACE가 0개가 됨. SYSTEM조차 실행 불가. icacls는 이 조합을 오
+  - 수정: 디렉터리 전체 잠금을 폐기하고 개인키 파일 하나만 상속 플래그 없이 SID로 잠금(*S-1-5-18, *S-1-5-32-544)
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -69,6 +69,7 @@
 | `docs/METAVERSE_OFFICE_DESIGN.md` | Vibe Coding용 가상 메타버스 오피스 시스템 상세 설계 문서. |
 | `docs/MIIX520_SERVER_MIGRATION_PLAN.md` | Lenovo Miix 520을 Vibe Coding 중앙 버스 서버로 전환하기 위한 설치·이전·운영 계획 |
 | `docs/PLATFORM_LAYERS.md` | Vibe Coding 플랫폼의 레이어 경계 정의. |
+| `docs/REMOTE_CONTROL.md` | 무료 원격제어(RustDesk + Tailscale 셀프호스트) 구축 구조와 기기별 운영 절차. |
 | `docs/TERMINAL3_SCROLL_ISSUE.md` |  |
 | `docs/VIBE_CONVENTIONS.md` | .vibe/ 디렉토리 규약 — Layer 2 확장(프로젝트별 스킬/에이전트/규칙)을 |
 | `docs/VIBE_PROJECT_GUIDE.md` | Vibe-Coding (AI Monitor) 프로젝트의 전체 구조, 철학 및 운영 가이드 (v5.0 최신화) |
@@ -316,7 +317,7 @@
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
 | `tui.py` 🔨 | 349 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `zettel_capture.py` | 701 | 제텔카스텐 자동 캡처 엔진. |
-| `zettel_sync.py` | 876 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
+| `zettel_sync.py` 🔨 | 929 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
 ### 코어
@@ -442,4 +443,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-07 16:44
+> 자동 생성 완료: 2026-08-07 20:23
