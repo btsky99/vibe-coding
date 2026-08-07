@@ -26,8 +26,14 @@ param(
     #   22001=cipher / 22002=macmini / 22003~ 예비
     [Parameter(Mandatory)][int]$TunnelPort,
 
-    [string]$VpsHost = '158.247.205.192',
-    [string]$RustDeskKey = 'Bw3wsELixaTPKsT8jgkJE+C3PlDcadouqzuwdPb5lRQ=',
+    # [🔴 하드코딩 금지 — 2026-08-07 사고] 이 저장소는 **공개(PUBLIC)** 다.
+    #   초판에서 VpsHost/RustDeskKey를 기본값으로 박아 푸시했다가 회수했다.
+    #   hbbs 공개키 자체로 화면을 볼 수는 없지만, `-k _` 게이트가 "이 키를 아는 클라이언트만
+    #   받는다"는 구조라 키가 공개되면 게이트가 무력해진다(제3자가 내 ID 서버에 무단 등록).
+    #   → 서버 주소와 키는 **호출 시점에 주입**한다. 저장소에는 남기지 않는다.
+    #   값은 %LOCALAPPDATA%\vibe-remote\rustdesk-server.txt 또는 관리자에게서 받는다.
+    [Parameter(Mandatory)][string]$VpsHost,
+    [Parameter(Mandatory)][string]$RustDeskKey,
 
     # 비우면 16자 자동 생성.
     [string]$RustDeskPassword = '',
