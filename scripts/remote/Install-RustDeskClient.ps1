@@ -160,11 +160,32 @@ Start-Sleep -Seconds 2
 $secretPath = Save-Secret -Name 'rustdesk-password.txt' -Value $Password
 Write-Step "고정 비밀번호 설정 완료 → $secretPath" 'OK'
 
-# ── 6. 방화벽 축소 ──────────────────────────────────────────────────────────
-# 설치 프로그램이 만든 "모든 주소 허용" 규칙을 tailnet으로 좁힌다.
-# (좁은 규칙을 더하는 것만으로는 넓은 규칙이 남아 노출이 그대로다 — 공통 모듈 주석 참조)
-Restrict-FirewallToTailnet -DisplayNamePattern '*RustDesk*' | Out-Null
-New-TailnetOnlyRule -DisplayName 'vibe-remote RustDesk 직접접속' -TcpPorts @($DirectPort) | Out-Null
+# ── 6. 방화벽 ───────────────────────────────────────────────────────────────
+# [🔴 2026-08-07] 노출 정책은 **ID 서버가 어디냐**로 갈린다. 한쪽 규칙을 양쪽에 쓰면 조용히 깨진다.
+#   - tailnet ID 서버(또는 ID 서버 없음): 접속이 tailnet 안에서만 오므로 100.64.0.0/10로 좁힌다.
+#   - 공인 VPS ID 서버: 상대가 **임의의 공인 IP**에서 홀펀칭으로 들어온다. tailnet으로 좁히면
+#     P2P 직결이 막혀 매번 중계로 떨어지거나 아예 실패한다. 좁히면 안 된다.
+#   실제로 VPS 전환 직후 이 축소가 그대로 걸려 직결 경로를 막았다 — 그래서 자동 판별로 바꿨다.
+$isTailnetServer = ($IdServer -eq '') -or ($IdServer -match '^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\.')
+
+if ($isTailnetServer) {
+    Restrict-FirewallToTailnet -DisplayNamePattern '*RustDesk*' | Out-Null
+    New-TailnetOnlyRule -DisplayName 'vibe-remote RustDesk 직접접속' -TcpPorts @($DirectPort) | Out-Null
+} else {
+    # 공인 서버 모드 — 설치 프로그램이 만든 RustDesk 규칙을 원래대로(모든 주소) 되돌린다.
+    # [주의] 이건 노출을 넓히는 동작이다. 이 구조에서는 불가피하다(상대 IP를 미리 알 수 없음).
+    #   대신 인증은 고정 비밀번호 16자 + hbbs 공개키 대조 2중으로 막는다.
+    $rules = @(Get-NetFirewallRule -DisplayName '*RustDesk*' -ErrorAction SilentlyContinue |
+               Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' })
+    foreach ($r in $rules) { Set-NetFirewallRule -InputObject $r -RemoteAddress Any -Enabled True }
+    Write-Step "공인 ID 서버 모드 — RustDesk 방화벽 $($rules.Count)건을 모든 주소 허용으로 복원(홀펀칭 필요)" 'WARN'
+
+    # tailnet 전용으로 만들어 둔 직접접속 규칙은 이 모드에서 의미가 없다. 남기면 오해를 부른다.
+    # [WHY 대신 열지 않나] 직접 IP 접속은 같은 LAN에서나 쓸모 있고, 공인망에 21118을 여는 것은
+    #   ID 서버를 두는 이유(홀펀칭)를 무색하게 하면서 공격면만 넓힌다.
+    Get-NetFirewallRule -DisplayName 'vibe-remote RustDesk 직접접속' -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+}
 
 # ── 7. 서비스 재기동 후 ID 확보 ─────────────────────────────────────────────
 if ($null -ne (Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue)) {
@@ -180,15 +201,22 @@ for ($i = 0; $i -lt 10; $i++) {
 }
 
 # ── 결과 ────────────────────────────────────────────────────────────────────
+# [WHY 모드별로 다르게 찍나] 안내문이 실제 구성과 어긋나면 사용자가 엉뚱한 주소로 접속을 시도한다.
+#   실제로 VPS로 전환한 뒤에도 "Tailscale 주소를 입력하라"고 찍혀 혼란을 유발했다.
+#   관측 도구가 거짓이면 판단도 거짓이 된다 — 출력은 항상 실제 구성을 따라간다.
 Write-Host ''
 Write-Host '=== 구축 완료 ===' -ForegroundColor Cyan
 Write-Host ("  이 PC          : {0}" -f $env:COMPUTERNAME)
-if ($null -ne $tsIp) { Write-Host ("  Tailscale 주소 : {0}   <- 접속할 때 ID 칸에 이걸 입력" -f $tsIp) -ForegroundColor Green }
-if (-not [string]::IsNullOrWhiteSpace($rid)) { Write-Host ("  RustDesk ID    : {0}" -f $rid) }
+if (-not [string]::IsNullOrWhiteSpace($rid)) { Write-Host ("  RustDesk ID    : {0}   <- 접속할 때 ID 칸에 이걸 입력" -f $rid) -ForegroundColor Green }
 Write-Host ("  비밀번호       : {0}" -f $Password) -ForegroundColor Yellow
 Write-Host ("  비밀번호 파일  : {0}" -f $secretPath)
-Write-Host ("  직접접속 포트  : {0} (tailnet 전용)" -f $DirectPort)
 Write-Host ''
-Write-Host '  다른 기기(탭/폰/PC)에서 RustDesk를 열고 ID 칸에 위 Tailscale 주소를 넣으면 된다.' -ForegroundColor Gray
-Write-Host '  단, 그 기기도 같은 Tailscale 계정에 로그인돼 있어야 한다.' -ForegroundColor Gray
+if ($isTailnetServer) {
+    if ($null -ne $tsIp) { Write-Host ("  Tailscale 주소 : {0}:{1}   (직접 IP 접속용)" -f $tsIp, $DirectPort) -ForegroundColor Green }
+    Write-Host '  붙는 쪽 기기도 같은 Tailscale 계정에 로그인돼 있어야 한다.' -ForegroundColor Gray
+} else {
+    Write-Host ("  ID 서버        : {0}" -f $IdServer) -ForegroundColor Green
+    Write-Host '  붙는 쪽 기기의 RustDesk 설정 > 네트워크에 같은 ID 서버/Key를 넣으면 된다.' -ForegroundColor Gray
+    Write-Host '  그 기기는 계정도 VPN도 필요 없다 — 인터넷만 되면 붙는다.' -ForegroundColor Gray
+}
 Write-Host ''
