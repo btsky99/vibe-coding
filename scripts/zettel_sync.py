@@ -4,6 +4,9 @@ DESCRIPTION: Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트.
              PostgreSQL의 zettel_notes를 마크다운 파일로 export하여
              Obsidian에서 그래프 뷰 + 편집이 가능하도록 한다.
 REVISION HISTORY:
+    2026-08-07 Claude: 무변경 파일 쓰기 스킵(_write_if_changed) — 매 사이클 전량
+                       재작성이 mtime을 밀어 GDrive 미러 전량 재복사를 유발하던
+                       3단 핑퐁 차단 (server.py CPU 47% 점유의 발원지)
     2026-04-06 — Obsidian → PG 역동기화 (import_from_vault) 추가
     2026-04-05 — 초기 구현 (PG → Obsidian 단방향 동기화)
 """
@@ -271,6 +274,42 @@ def _cleanup_stale_note_files(vault_dir: Path, notes: list[dict],
     return removed
 
 
+def _strip_volatile(text: str, prefixes: tuple) -> str:
+    """비교 전용 정규화 — prefixes로 시작하는 줄을 제거한다. 파일에는 원본을 쓴다."""
+    if not prefixes:
+        return text
+    return '\n'.join(
+        line for line in text.split('\n') if not line.lstrip().startswith(prefixes)
+    )
+
+
+def _write_if_changed(path: Path, content: str, *, volatile_prefixes: tuple = ()) -> bool:
+    """내용이 실질적으로 같으면 쓰지 않는다. 실제로 기록한 경우에만 True.
+
+    [과거사고 2026-08-07] 무조건 write_text 호출이 60초 주기 sync에서 vault 943개 중
+      928개의 mtime을 매 사이클 갱신 → mirror_vault(mtime 비교)가 전량 GDrive 재복사 →
+      import_from_vault가 되읽는 3단 핑퐁. server.py CPU의 47%를 두 스레드가
+      점유했고(ZettelSync 21.5% + ZettelGDrive 25.4%, 41시간 중 각 ~1.2시간),
+      사이클마다의 대량 할당이 파이썬 힙을 932MB 고수위로 고착시켰다.
+      쓰기를 건너뛰면 mtime이 보존되어 GDrive 미러가 자동으로 멎는다 —
+      그래서 mirror_vault 쪽은 손대지 않는다(고칠 곳은 발원지 하나뿐).
+    [불변식] 고아 정리(_cleanup_stale_note_files)는 mtime이 아니라 zettel_id 프론트매터로
+      삭제를 판정한다 — 쓰기를 건너뛰어도 살아있는 노트가 오삭제되지 않는다.
+    [제약] volatile_prefixes는 '실질 내용이 그대로여도 매번 달라지는' 프론트매터 키용
+      (예: 'updated:'는 datetime.now로 생성). 비교에서만 빼고 파일에는 기록한다 —
+      빼지 않으면 project-doc/INDEX.md가 영원히 '변경됨'으로 판정돼 핑퐁이 남는다.
+    """
+    try:
+        old = path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        old = None
+    if old is not None and (_strip_volatile(old, volatile_prefixes)
+                            == _strip_volatile(content, volatile_prefixes)):
+        return False
+    path.write_text(content, encoding='utf-8')
+    return True
+
+
 def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: bool = False):
     """PostgreSQL → Obsidian Vault 전체 동기화."""
     ensure_schema(DATA_DIR)
@@ -302,6 +341,7 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
     all_links = _load_all_links([n['id'] for n in notes])
 
     exported = 0
+    written = 0            # 실제 디스크에 기록한 수 — 스킵이 도는지 로그로 관측
     for note in notes:
         # 마크다운 생성
         frontmatter = _format_frontmatter(note)
@@ -319,16 +359,20 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
         if not filepath.resolve().is_relative_to(vault_dir.resolve()):
             print(f'[zettel_sync] 경로 인젝션 탐지, 건너뜀: {note["id"]}')
             continue
-        filepath.write_text(md_content, encoding='utf-8')
+        if _write_if_changed(filepath, md_content):
+            written += 1
         exported += 1
 
     # 프로젝트 문서 동기화
-    doc_count = _sync_project_docs(vault_dir)
+    doc_count, doc_written = _sync_project_docs(vault_dir)
 
     # 인덱스 파일 생성 (MOC — Map of Content)
     _generate_moc(vault_dir, notes)
 
-    print(f'[zettel_sync] {exported}개 노트 + {doc_count}개 문서를 {vault_dir}에 동기화 완료')
+    # [관측] 기록 수를 노출하지 않으면 핑퐁 재발을 화면에서 알아챌 수 없다.
+    # 정상 정착 시 written/doc_written은 0에 수렴한다.
+    print(f'[zettel_sync] {exported}개 노트({written}개 기록) + '
+          f'{doc_count}개 문서({doc_written}개 기록)를 {vault_dir}에 동기화 완료')
     return exported
 
 
@@ -472,14 +516,17 @@ _DOC_TITLE_KO = {
 }
 
 
-def _sync_project_docs(vault_dir: Path) -> int:
+def _sync_project_docs(vault_dir: Path) -> tuple:
     """프로젝트 핵심 문서를 vault의 _project/{프로젝트명}/ 폴더에 자동 동기화한다.
 
     프로젝트별 하위 폴더로 분리하여 멀티 프로젝트 vault에서 충돌을 방지한다.
+
+    [반환] (대상 문서 수, 실제 기록한 수) — 후자는 핑퐁 감시용 관측값.
     """
     # 프로젝트 이름 추출 (폴더명에서)
     proj_name = _PROJECT_ROOT.name  # 'vibe-coding'
     synced = 0
+    written = 0
 
     for glob_pattern, dest_subdir_tmpl in _DOC_SCAN_PATTERNS:
         dest_subdir = dest_subdir_tmpl.replace('{proj}', proj_name)
@@ -540,10 +587,14 @@ def _sync_project_docs(vault_dir: Path) -> int:
             if not dest.resolve().is_relative_to(vault_dir.resolve()):
                 continue
 
-            dest.write_text((fm + content) if fm else content, encoding='utf-8')
+            # [WHY volatile] 이 프론트매터의 updated는 datetime.now로 매번 새로 찍히므로
+            #   원문 비교로는 100% '변경됨'이 된다 — 비교에서만 제외해야 스킵이 성립한다.
+            if _write_if_changed(dest, (fm + content) if fm else content,
+                                 volatile_prefixes=('updated:',)):
+                written += 1
             synced += 1
 
-    return synced
+    return synced, written
 
 
 def _generate_moc(vault_dir: Path, notes: list):
@@ -616,7 +667,9 @@ def _generate_moc(vault_dir: Path, notes: list):
                     lines.append(f'- [[{doc.stem}]]')
                 lines.append('')
 
-    (vault_dir / 'INDEX.md').write_text('\n'.join(lines), encoding='utf-8')
+    # INDEX.md도 updated가 매 사이클 갱신되므로 비교에서 제외해야 스킵이 성립한다.
+    _write_if_changed(vault_dir / 'INDEX.md', '\n'.join(lines),
+                      volatile_prefixes=('updated:',))
 
 
 # ── Obsidian → PostgreSQL 역동기화 ────────────────────────────────────────
