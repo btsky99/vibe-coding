@@ -95,16 +95,17 @@ def resources() -> dict:
     return {'mem': mem, 'disk': disk, 'load': load, 'uptime': up}
 
 
-# 터널 포트 ↔ 노드 이름. Register-RemoteNode.ps1이 배정하는 번호와 일치해야 한다.
-# [WHY 하드코딩인가] authorized_keys에는 포트가 아니라 permitlisten 제약만 있고,
-#   노드 이름(주석)과 포트를 잇는 단일 원천이 없다. 목록이 짧고 사람이 배정하므로
-#   여기서 명시하는 편이 추측 파싱보다 정확하다. 노드를 늘리면 이 표를 함께 갱신할 것.
+# 터널 포트 ↔ 노드 이름.
+# [WHY 하드코딩인가] authorized_keys에는 permitlisten 제약만 있고 노드 이름과 포트를
+#   잇는 단일 원천이 없다. 목록이 짧고 사람이 배정하므로 여기서 명시한다.
+# [🔴 2026-08-08] 처음엔 번호 순서로 추측해 22004를 na2js로 적었으나 **틀렸다**.
+#   SSH 배너로 검증하니 22004는 OpenSSH_10.2(유닉스)에 출발지가 1.242.15.27(맥미니 회선)
+#   이었다. 22001은 OpenSSH_for_Windows_9.5 + 집 회선이라 윈도우가 맞았다.
+#   → 노드를 추가하면 추측하지 말고 배너·출발지로 확인할 것:
+#      python3 -c "import socket;s=socket.create_connection(('127.0.0.1',PORT));print(s.recv(100))"
 TUNNEL_NAMES = {
-    22001: 'cipher (크립토 PC)',
-    22002: 'macmini (맥미니)',
-    22003: 'qeuhlak',
-    22004: 'na2js',
-    22005: '예비',
+    22001: '크립토 PC (Windows)',
+    22004: '맥미니 (macOS)',
 }
 
 
