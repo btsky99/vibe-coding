@@ -57,6 +57,16 @@ _TABLES = {
         'time': "created_at",
         'select': "id, agent_id, task_type, domain, outcome, LEFT(description, 200) AS description",
         'quality': "length(coalesce(description,'')) >= 20",
+        # [🔴 2026-08-08 실측] 이 테이블만 임계를 높인다. 내용이 **커밋 메시지**라
+        #   "feat(zettel): 파일명 전체 한글화 — 노트 + 프로젝트 문서 그래프 뷰" 처럼
+        #   일반 명사 나열이 많고, 그런 문장은 임베딩 공간의 중심 근처에 놓여
+        #   아무 질의와도 0.6 안팎으로 매칭된다. 실제로 무관 질의 4건 중 3건의
+        #   최고점이 전부 이 테이블에서 나왔다("영화 추천해줘" 0.632).
+        #   0.66 = 그 노이즈 상한(0.632)과 진짜 관련 결과(0.688) 사이.
+        # [대안을 버린 이유] 전역 임계를 0.65로 올리면 노이즈는 0이 되지만 관련 질의도
+        #   5건 중 1건만 통과했다. 노이즈의 출처가 한 테이블에 몰려 있으므로
+        #   그 테이블만 조이는 것이 손실이 훨씬 적다.
+        'min_sim': 0.66,
     },
     # 사고 장부 — ref에 recurrence_count 사용: 재발 잦은 사고일수록 회상 우선순위 ↑
     # [주의] bump_reference를 이 테이블에 쓰면 재발 카운트가 오염됨 — 호출 금지
@@ -163,18 +173,32 @@ def upsert_embedding(table: str, pk_value, vec: list[float]) -> bool:
 
 
 def vector_search(table: str, query_vec: list[float], project_id: str = '',
-                  limit: int = 5, min_similarity: float = 0.45) -> list[dict]:
+                  limit: int = 5, min_similarity: float = 0.55) -> list[dict]:
     """코사인 유사도 검색 + 랭킹.
 
     랭킹 = 유사도 + 0.1×ln(1+참조횟수) − 시간감쇠
     - 시간감쇠 = 0.1 × (1 − 0.5^(경과일/30)) : 30일에 −0.05, 포화 −0.1
       [WHY] 오래된 지식을 죽이지 않되(상한 0.1) 최신 지식에 가산점.
     - min_similarity 미만은 제외 — 무관 회상 주입(소음)의 직접 차단선.
-      임계 0.45는 brainstorm 승인값 (memory.md §3.5).
+
+    [🔴 임계 0.45 → 0.55(+테이블별) — 2026-08-08 실측 근거]
+      0.45는 이 모델(paraphrase-multilingual-MiniLM)에서 사실상 무필터였다. 실측:
+        관련 질의 최고 0.688 / 무관 질의("영화 추천해줘") 최고 0.632
+      즉 아무 질문에나 커밋 메시지가 딸려 나와 매 프롬프트의 회상 블록을 채웠다.
+      노이즈가 특정 테이블(agent_experience=커밋 메시지)에 몰려 있어 전역을 0.55로 두고
+      그 테이블만 _TABLES['min_sim']=0.66으로 조인다. 전역 0.65 단일안은 노이즈를
+      없애는 대신 관련 질의도 5건 중 1건만 남겨 손실이 너무 컸다.
+    [의도적 트레이드오프] '놓침'은 생긴다. 그래도 노이즈보다 낫다 — 놓치면 아무것도
+      안 뜨지만, 노이즈는 회상 자체의 신뢰를 무너뜨려 블록 전체를 무시하게 만든다.
+    [재조정 방법] `python scripts/recall_quality.py --sweep` 로 관련/무관 간격을 다시
+      재고 조정할 것. 데이터가 쌓이면 무관 상한이 달라진다 — 고정 상수가 아니라 관측 대상이다.
     """
     if not vector_available() or table not in _TABLES or not query_vec:
         return []
     cfg = _TABLES[table]
+    # 테이블별 임계가 있으면 그쪽을 쓴다. 호출자가 명시적으로 더 높게 준 경우는 존중한다
+    # (더 낮추는 것은 허용하지 않는다 — 노이즈 차단선을 우회로 뚫으면 안 된다).
+    min_similarity = max(float(min_similarity), float(cfg.get('min_sim', 0.0)))
     proj_filter = f"AND project_id = {_sql_text(project_id)}" if project_id else ""
     # 저정보 행 차단(_TABLES.quality) — 회상 노이즈 컷 (2026-07-16)
     quality_filter = f"AND {cfg['quality']}" if cfg.get('quality') else ""

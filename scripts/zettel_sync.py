@@ -172,8 +172,26 @@ def _render_links_section(links: list, backlinks: list) -> str:
 
 
 def _escape_yaml(s: str) -> str:
-    """YAML 문자열 이스케이프."""
-    return s.replace('"', '\\"').replace('\n', ' ')
+    """YAML 이중따옴표 문자열 이스케이프.
+
+    [🔴 과거사고 2026-08-08] 백슬래시를 먼저 이스케이프하지 않아 export↔import 왕복마다
+      따옴표 앞 백슬래시가 누적됐다. `"밖에서` → `\\"밖에서` → `\\\\"밖에서` … 로 자라
+      제목이 백슬래시 수십 개로 뭉개졌고(최악 1건은 참조 309회), 그 노트의 임베딩이
+      의미를 잃어 **아무 질의에나 0.6대로 매칭되는 회상 노이즈**가 됐다.
+      "오늘 점심 뭐 먹지"가 관련 질의와 같은 점수를 받은 원인이 이것이다.
+    [불변식] 백슬래시를 **가장 먼저** 치환한다. 순서를 바꾸면 방금 넣은 백슬래시를
+      다시 이스케이프해 같은 사고가 재발한다. _unescape_yaml과 정확히 역순이어야 한다.
+    """
+    return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+
+
+def _unescape_yaml(s: str) -> str:
+    """_escape_yaml의 역변환 — import 시 반드시 거쳐야 왕복이 안정적이다.
+
+    [불변식] escape의 **역순**으로 푼다: 따옴표 먼저, 백슬래시 나중.
+      순서를 바꾸면 `\\\\"`(이스케이프된 백슬래시 + 따옴표)를 잘못 해석한다.
+    """
+    return s.replace('\\"', '"').replace('\\\\', '\\')
 
 
 def _format_ts(ts) -> str:
@@ -686,7 +704,10 @@ def _parse_frontmatter(text: str) -> dict:
             continue
         key, _, val = line.partition(':')
         key = key.strip()
-        val = val.strip().strip('"')
+        # [불변식] 따옴표를 벗긴 뒤 반드시 unescape 한다. 이 한 줄이 빠져서
+        #   export가 넣은 \" 가 그대로 DB에 저장되고, 다음 export에서 다시
+        #   이스케이프돼 백슬래시가 왕복마다 누적됐다(2026-08-08 사고).
+        val = _unescape_yaml(val.strip().strip('"'))
         if key == 'tags':
             # tags: ["a", "b"] 파싱
             try:
