@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-07 20:23
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-07 22:07
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,33 +8,34 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 4개 · 미푸시 1커밋
+- **브랜치**: `main` · 미커밋 369개 · 미푸시 0커밋
 - **최근 커밋**
+  - `9f1d881` 2026-08-07 — feat(soft-update): 화면(UI) 변경도 경량 업데이트로 전달되게 수정 [skip ci]
+  - `4666efc` 2026-08-07 — feat(soft-update): 재시작 시 자동 적용 + % 진행률 — v3.7.322
+  - `7ef981e` 2026-08-07 — build(ci): 문서·독립 스크립트 변경은 설치본 풀빌드를 건너뛰도록 paths-ignore 추가 [skip ci]
   - `d3533f5` 2026-08-07 — feat(remote): 무료 원격제어 구축 — Tailscale 위 RustDesk 셀프호스트
   - `c5fd230` 2026-08-07 — chore(release): v3.7.321 — 볼트 동기화 핑퐁 차단
-  - `c7a42f2` 2026-08-07 — fix(zettel): 볼트 동기화 3단 핑퐁 차단 — 서버 CPU 47% 점유의 발원지 수정
-  - `9383fbd` 2026-08-07 — chore(release): auto-bump version to v3.7.320 [skip ci]
-  - `9e2a1c7` 2026-08-07 — chore(docs): 하이브 상태판·프로젝트 맵 자동 갱신 반영
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-07 20:45** 의도: CipherTrader 300ch 에피소드 빌드 + 15m RL 2R 병행 (앱 재시작 대기)
+  - 결정: R5(pinball τ=0.80) 백본은 게이트 통과·교체완료. RL은 DEEP_W 실패 후 --sl-max 0.03로 2R. 300ch는 v42x 재빌드(292 재사용 불가). 모니터 표 축을 TF→세대로 교정
+  - 다음: 300ch 빌드 완주(~3h) 후 폭 300 검증. 15m RL 2R 결과는 백본단독 대비로 판정. 1h·4h는 진입까지 중단 유지
 - **08-06 08:28** 의도: CipherTrader v4.2 캠페인 무인 완주 체계 구축 (사용자 부재)
   - 결정: v35_features 캐시키 len(idx) 결함 수정 + 캠페인 backbone 재기동 가드 + watchdog_v42 신설(캠페인/빌드/모니터 부활, 잔여 5m RL 담당). RL은 GPU 직렬화로 캠페인 완주 후 실행
   - 다음: 15m→1h→4h 백본 자동 진행. 5m 에피소드 재빌드 완료되면 워치독이 5m RL+업로드 수행. 사용자 복귀 시 watchdog_v42.log 확인
 - **08-05 22:22** 의도: list
   - 결정: []
-- **08-05 22:04** 의도: list
-  - 결정: []
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
-- **hbbs가 os error 10013으로 즉사 (Listening on websocket :21118 직후)**
-  - 원인: hbbs의 웹소켓 포트 21118과 RustDesk 클라이언트 직접 IP 접속 기본 포트 21118이 동일. 한 PC에 서버+클라이언트를 올리면 충돌
-  - 수정: hbbs 포트는 기준 포트에서 파생돼 개별 변경 불가하므로 클라이언트 직접접속 포트를 21128로 자동 회피
-- **RustDesk 커스텀 ID 서버 설정이 반영 안 됨 (설정 화면엔 보이는데 실제 접속은 공용 rs-ny.rustdesk.com으로 나감)**
-  - 원인: RustDesk 설정이 두 곳에 존재. 사용자 프로필(%APPDATA%)은 GUI용이고 실제 접속을 받는 서비스는 C:\Windows\ServiceProfiles\LocalService\... 를 읽음. 서비스 계정이 LocalSystem이 아니라 LocalServic
-  - 수정: 양쪽 프로필에 동시 주입 + 서비스 정지 후 기록(살아있는 서비스가 종료 시 되쓰기함) + 재기동 후 되읽어 검증
-- **hbbs 기동 실패 (예약 작업 LastResult=0x80070005 액세스 거부)**
-  - 원인: icacls로 설치 디렉터리에 /inheritance:r + (OI)(CI) 권한을 /T로 걸었더니, 상속 플래그는 컨테이너용이라 파일에는 적용되지 않는데 상속만 먼저 끊겨 hbbs.exe의 ACE가 0개가 됨. SYSTEM조차 실행 불가. icacls는 이 조합을 오
-  - 수정: 디렉터리 전체 잠금을 폐기하고 개인키 파일 하나만 상속 플래그 없이 SID로 잠금(*S-1-5-18, *S-1-5-32-544)
+- **진행률 바가 뒤로 감 (8% -> 4%)**
+  - 원인: git --progress는 단계마다 0->100%를 반복한다. Enumerating objects와 Counting objects에 같은 구간(0-8)을 배분했더니 Enumerating 100% 다음 Counting 50%에서 역행
+  - 수정: 구간을 겹치지 않게 분리(Enumerating 0-4 / Counting 4-8) + 최댓값 단조 클램프. 진행바 역행은 사용자가 실패로 읽으므로 정확도보다 단조성이 우선
+- **경량 소스 업데이트가 화면(UI) 변경을 전혀 전달하지 못함 — .py만 새것이고 UI는 옛것**
+  - 원인: 2겹. (1) server.py STATIC_DIR이 frozen에서 BASE_DIR=sys._MEIPASS(EXE에 구워진 사본)만 봄 — 경량 채널은 체크아웃 .py만 갈아끼우므로 UI는 영원히 옛 번들. (2) .ai_monitor/vibe-view/.gitign
+  - 수정: 중첩 .gitignore에서 dist 제거 + STATIC_DIR이 체크아웃 dist 우선(깨졌으면 번들 폴백). _dist_is_usable은 index.html 존재만이 아니라 참조 번들 실재까지 확인 — 반쪽 dist를 서빙하면 화면이 빈 채로 뜬다
+- **경량 소스 업데이트 apply가 유실방지 가드에 막힘 (관리 체크아웃에 로컬 전용 커밋 1개)**
+  - 원인: %LOCALAPPDATA%\VibeCoding\app 체크아웃에 upstream c7a42f2와 내용이 완전히 동일한 중복 커밋 e28b108이 생성돼 있었음(2026-08-07 18:47). ancestor 가드가 '로컬 전용 커밋 있음'으로 보고 apply 차단. 
+  - 수정: patch-id 및 git diff origin/main HEAD -- <파일> 로 내용 동일함을 먼저 확인 → 백업 브랜치(backup/pre-align-2026-08-07) 생성 후 reset --hard origin/main. 확인 없이 reset 금지(2026-
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -78,9 +79,9 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2098 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
-| `boot.py` 🔨 | 336 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
-| `soft_updater.py` 🔨 | 303 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
+| `server.py` 🔨 | 2146 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `boot.py` 🔨 | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
+| `soft_updater.py` 🔨 | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
 | `mission_control.py` | 414 | AI 에이전트 전용 네이티브 윈도우 관제 센터 (Mission Control) — 시스템 트레이 및 사이드바 HUD 관리. |
 | `mission_control_ui.py` | 496 | 미션 컨트롤 사이드바 HUD UI 컴포넌트 — 에이전트 상태 링 및 실시간 로그 시각화. |
@@ -125,7 +126,7 @@
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
 | `tools_api.py` 🔨 | 1167 | AI 도구 CLI 설치 관리 API. |
-| `update_api.py` 🔨 | 213 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
+| `update_api.py` 🔨 | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
 | `zettel_api.py` | 203 | Hive Zettelkasten REST API 핸들러. |
@@ -323,7 +324,7 @@
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` 🔨 | 1016 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
+| `App.tsx` 🔨 | 1083 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
 | `main.tsx` | 75 | 설명: React 앱 진입점. ErrorBoundary로 전체 트리를 감싸 |
 | `types.ts` | 206 | 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답 |
 | `constants.tsx` | 93 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
@@ -443,4 +444,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-07 20:23
+> 자동 생성 완료: 2026-08-07 22:07
