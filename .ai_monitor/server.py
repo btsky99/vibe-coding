@@ -909,7 +909,39 @@ _parse_antigravity_session = _session_parse.parse_antigravity_session
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 정적 파일 경로
-STATIC_DIR = (BASE_DIR / "vibe-view" / "dist").resolve()
+# [WHY 체크아웃을 먼저 보나 — 2026-08-07] frozen에서 BASE_DIR은 _MEIPASS(=EXE에 구워진 사본)다.
+#   그것만 쓰면 **화면 변경이 경량 소스 업데이트로 절대 전달되지 않는다** — .py는 체크아웃에서
+#   새것을 읽는데 UI만 EXE 안의 옛것이라, UI를 고칠 때마다 설치본 풀빌드가 강제됐다.
+#   server.py는 boot.py가 체크아웃에서 runpy 하므로 __file__이 곧 체크아웃 경로다. 이를 이용해
+#   체크아웃 dist를 우선하고, 없거나 깨졌으면 번들 사본으로 물러난다.
+# [불변식] 체크아웃의 .py와 dist는 같은 커밋에서 함께 갱신되므로 항상 서로 정합적이다.
+#   (그래서 체크아웃이 EXE보다 옛것이어도 '옛 .py + 옛 dist' 조합이라 깨지지 않는다.)
+def _dist_is_usable(d: Path) -> bool:
+    """index.html이 있고 그것이 참조하는 번들이 실제로 존재하는지까지 확인한다.
+
+    [WHY 참조까지 보나] 존재 검사만으로는 부족하다 — dist가 커밋 규칙 문제로 반쪽만 들어간
+    상태(index.html은 새것, 번들은 없음)가 실제로 있었다. 그대로 서빙하면 화면이 **빈 채로**
+    뜨고, 정적 파일 404라 원인 추적이 오래 걸린다. 참조 검증 실패 시 번들 사본으로 물러나면
+    최소한 옛 화면이라도 정상 동작한다.
+    """
+    index = d / "index.html"
+    if not index.is_file():
+        return False
+    try:
+        html = index.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    refs = re.findall(r'(?:src|href)="\.?/?(assets/[^"]+)"', html)
+    return all((d / r).is_file() for r in refs)
+
+
+_bundled_dist = (BASE_DIR / "vibe-view" / "dist").resolve()
+_checkout_dist = (Path(__file__).resolve().parent / "vibe-view" / "dist").resolve()
+
+STATIC_DIR = _bundled_dist
+if _checkout_dist != _bundled_dist and _dist_is_usable(_checkout_dist):
+    STATIC_DIR = _checkout_dist
+    print(f"[*] 체크아웃 dist 사용(경량 업데이트로 UI 갱신 가능): {STATIC_DIR}")
 
 print(f"[*] Static files directory: {STATIC_DIR}")
 if not STATIC_DIR.exists():

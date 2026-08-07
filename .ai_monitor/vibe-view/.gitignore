@@ -8,7 +8,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# [🔴 dist는 의도적으로 추적한다 — 2026-08-07] Vite 템플릿 기본값(`dist`)을 그대로 두면
+#   경량 소스 업데이트 채널이 화면 변경을 절대 전달하지 못한다. 설치본은 프론트엔드를
+#   git 체크아웃의 dist에서 읽으므로(server.py STATIC_DIR), 빌드 산출물이 커밋되지 않으면
+#   .py만 새것이고 화면은 옛것인 상태가 된다.
+#   [과거 상태] 루트 .gitignore에 `!.ai_monitor/vibe-view/dist/**` 예외가 있었지만
+#   **더 깊은 .gitignore가 이긴다**는 git 규칙 때문에 여기 `dist` 한 줄이 그걸 무력화했고,
+#   그 결과 추적된 dist 자산 20개가 전부 화석이 돼 있었다(신규 해시 파일은 무시됨).
+#   [의무] UI를 고쳤으면 `npm run build` 후 dist를 함께 커밋한다. 한쪽만 커밋하면
+#   index.html이 존재하지 않는 번들을 가리켜 화면이 빈 채로 뜬다.
 dist-ssr
 *.local
 
