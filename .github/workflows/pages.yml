@@ -1,9 +1,17 @@
 # FILE: .github/workflows/pages.yml
-# DESCRIPTION: btsky.pe.kr 다운로드 랜딩 페이지(web/)를 GitHub Pages로 배포.
+# FILE: .github/workflows/pages.yml
+# DESCRIPTION: 공개 제품 허브(web/)를 GitHub Pages로 배포. 정본 주소는 www.btsky.pe.kr.
 #   web/ 하위만 바뀌면 트리거 → build-release.yml(윈도우 EXE 빌드)와 독립.
-#   web/CNAME(btsky.pe.kr)이 아티팩트에 포함돼 커스텀 도메인이 자동 설정된다.
+#   web/CNAME 이 아티팩트에 포함돼 커스텀 도메인이 자동 설정된다 — **CNAME 파일이
+#   도메인의 유일한 정본**이다. 웹 UI 에서 바꿔도 다음 배포 때 이 파일로 되돌아간다.
+#
+# [🔴 2026-08-08] apex(btsky.pe.kr)는 더 이상 Pages 가 아니다 — 아픽스 서버의
+#   개인 관제 콘솔이 그 자리를 쓴다. 여기 CNAME 을 apex 로 되돌리면 콘솔과
+#   도메인이 충돌하고, DNS 가 VPS 를 가리키는 동안 GitHub 도메인 검증이 실패해
+#   **Pages 인증서가 폐기되어 www 까지 함께 죽는다**.
 # REVISION HISTORY:
 #   - 2026-07-22 Claude: 최초 생성 — 정적 페이지 무료 호스팅(웹호스팅 결제 회피).
+#   - 2026-08-08 Claude: 정본 도메인을 www 로 이전(아픽스 콘솔이 apex 를 가져감).
 name: Deploy Pages
 
 on:

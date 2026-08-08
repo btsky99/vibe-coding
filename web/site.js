@@ -164,7 +164,7 @@ window.Site = (function () {
     if (productKey && window.App) {
       const hasAccess = window.App.hasProductAccess(sess.id, productKey);
       if (!hasAccess) {
-        alert(`🔒 해당 프로젝트(${productKey}) 이용 권한이 부여되지 않았습니다.\n파란이빨 포털(btsky.pe.kr/portal/)에서 관리자(btsky99)에게 권한 신청을 확인해 주세요.`);
+        alert(`🔒 해당 프로젝트(${productKey}) 이용 권한이 부여되지 않았습니다.\n파란이빨 포털(www.btsky.pe.kr/portal/)에서 관리자(btsky99)에게 권한 신청을 확인해 주세요.`);
         location.href = (window.SITE_BASE || './') + 'portal/';
         return;
       }

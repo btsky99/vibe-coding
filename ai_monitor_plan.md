@@ -54,7 +54,12 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 |---|---|---|
 | M1 | hosting.kr DNS: `btsky.pe.kr` A레코드를 GitHub 4개 → `158.247.205.192` 로 교체 | Phase 2, **www 확인 후** |
 | M2 | GitHub OAuth App 생성 (Client ID/Secret 발급) | Phase 3 |
-| M3 | Google Cloud Console: 기존 OAuth 클라이언트에 리디렉션 URI 추가 | Phase 3 |
+| M3 | Google Cloud Console: 리디렉션 URI 추가 + **client secret 확보** | Phase 3 |
+| M4 | Google Cloud Console: 승인된 JavaScript 원본에 `https://www.btsky.pe.kr` 추가 | Phase 1 직후 |
+
+> M4 배경: 공개 허브의 구글 로그인(`web/auth.js`, GIS)은 **승인된 원본**에 등록된
+> 도메인에서만 뜬다. apex 만 등록돼 있어 www 이전 직후 로그인 버튼이 동작하지 않는다.
+> 이 로그인은 실인증이 아닌 프로토타입이라 사이트 자체는 멀쩡하다 — 급한 항목은 아니다.
 
 ---
 
