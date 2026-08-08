@@ -65,3 +65,6 @@ tests/office/test_office_report.md
 
 # 로컬 전용 산출물 — 리사이클 실패 시 재정박 폴백(_local/reanchor-*.md), 프로젝트 특화 교훈
 _local/
+
+# �ҽ� ���޿� zip ���⹰ (make_source_package.py)
+dist_pkg/
