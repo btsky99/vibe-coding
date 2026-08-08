@@ -548,6 +548,29 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                         return _candidate
             return None
 
+        def _bidirectional_enabled() -> bool:
+            """볼트 → DB 되읽기를 켤지. 기본 **꺼짐**(단방향 PG→Vault).
+
+            [WHY 기본을 껐나] 되읽기 경로에서만 사고가 3건 났다 —
+              핑퐁(c7a42f2, CPU 47%) / 이스케이프 누적(f500109, 제목 115MB) /
+              그 잔해로 인한 폭주(c93061f, CPU 93%). 그런데 실측하면 얻은 게 없다:
+              author='obsidian' 노트가 **0건**이고(사람이 볼트에서 만든 노트가 없다),
+              회상 경로는 전부 PG(pg_vector_search)라 볼트 .md를 읽어 쓰는 코드가 없다.
+              얻는 것 0, 사고 3건 — 그래서 기본값을 뒤집었다.
+            [불변식] 단방향이면 볼트는 순수 파생물이 된다. 깨지면 지우고 재생성하면 되고,
+              폭주가 DB로 돌아올 경로 자체가 사라진다.
+            [되켜기] 크로스-PC 지식 흡수가 필요하면 config.json에
+              "zettel_bidirectional": true. 다만 중앙 PG(아픽스 서버)로 가면 이 경로는
+              통째로 불필요해진다 — 파일 병합 대신 INSERT 하나가 곧 공유다.
+            """
+            try:
+                if env.config_file.exists():
+                    _cfg = json.loads(env.config_file.read_text(encoding='utf-8'))
+                    return bool(_cfg.get('zettel_bidirectional', False))
+            except Exception:
+                pass
+            return False
+
         def _get_gdrive_vault():
             # 1순위: config.json 명시 설정 (사용자 오버라이드)
             try:
@@ -578,7 +601,8 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                         #   [핑퐁 안전] import_from_vault의 mtime + _same_note_payload 가드가 동일내용
                         #      재쓰기/재흡수를 막아 수렴. 로컬 60초 루프와 include_archived=True로 일치시켜
                         #      _보관 파일을 두고 두 루프가 다투지 않게 한다(watch_and_sync 호출부 참조).
-                        _mod.import_from_vault(_gdrive_vault, project_id=_proj_id)
+                        if _bidirectional_enabled():
+                            _mod.import_from_vault(_gdrive_vault, project_id=_proj_id)
                         _mod.export_to_vault(_vault, project_id=_proj_id,
                                              include_archived=True)
                         _mod.mirror_vault(
@@ -596,7 +620,8 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                          name='ZettelGDrive').start()
         # include_archived=True — GDrive 루프와 아카이브 표현을 일치시켜 _보관 파일 핑퐁 제거.
         _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60,
-                            bidirectional=True, include_archived=True,
+                            bidirectional=_bidirectional_enabled(),
+                            include_archived=True,
                             resolve=_resolve_current)
     except Exception as e:
         print(f"[!] 제텔카스텐 동기화 데몬 오류: {e}")
