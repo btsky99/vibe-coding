@@ -21,11 +21,14 @@ set -euo pipefail
 SRC=/opt/vibe/vibe-coding
 VENV=/opt/vibe/venv
 WWW=/var/www/vibe
-# [2026-08-08] 실제로 발급·연결된 이름은 admin.btsky.pe.kr 이다.
-#   status 는 DNS 레코드가 없어 한때 이름만 적혀 있었다 — 둘 다 적어 두되 기본은 admin.
-#   certbot 이 인증서를 붙이는 대상도 이 이름이므로 여기와 DNS A레코드가 어긋나면
-#   갱신이 조용히 실패한다.
-DOMAIN="${STATUS_DOMAIN:-admin.btsky.pe.kr status.btsky.pe.kr}"
+# [2026-08-08] 발급·연결된 이름은 admin.btsky.pe.kr 이고, 같은 인증서에 apex
+#   (btsky.pe.kr)가 SAN 으로 들어가 있다. status 는 DNS 레코드가 없다(이름만 유지).
+#
+# [🔴 apex 를 목록에서 빼지 말 것] 2026-08-08 개편으로 apex 의 A레코드가 GitHub
+#   Pages 에서 이 서버로 넘어왔다. 여기서 apex 를 지우면 server_name 이 어긋나
+#   certbot 갱신이 **조용히 실패**하고, 90일 뒤 아무 경고 없이 사이트가 죽는다.
+#   DNS A레코드 ↔ 이 변수 ↔ 인증서 SAN 세 곳은 항상 함께 움직인다.
+DOMAIN="${STATUS_DOMAIN:-btsky.pe.kr admin.btsky.pe.kr status.btsky.pe.kr}"
 
 log(){ printf '\033[0;36m[*]\033[0m %s\n' "$*"; }
 ok(){  printf '\033[0;32m[OK]\033[0m %s\n' "$*"; }
