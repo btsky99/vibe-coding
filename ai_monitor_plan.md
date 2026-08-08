@@ -1,136 +1,234 @@
 <!--
 FILE: ai_monitor_plan.md
-DESCRIPTION: 아픽스 서버(서울 VPS) 중앙 대화 PG 1차 구현 계획 — 노드 ID + append-only 대화.
+DESCRIPTION: 아픽스 콘솔 구축 계획 — btsky.pe.kr 을 개인 전용 총괄 관제판으로 전환하고
+             공개 제품 허브를 www 로 분리한다. 모든 프로젝트·노드를 한 화면에서 관제.
 
 REVISION HISTORY:
 - 2026-08-08 Claude: 신규. vibe-brainstorm 승인 설계 반영.
-                     이전 계획(슬롯별 프로젝트 전환)은 완료(2026-07-24) → 교체.
+                     이전 계획(중앙 대화 PG)은 미착수 → Phase 10으로 흡수 보존.
 -->
 
-# 아픽스 서버 중앙 대화 PG — 1차
+# 아픽스 콘솔 — btsky.pe.kr 전면 개편
 
-**상태: 계획 승인 대기**
-승인: 2026-08-08 (vibe-brainstorm). 설계 메모리: `project_apix_central_db`.
+**상태: 승인 완료 (2026-08-08) · Phase 0 완료**
+설계 메모리: `project_apix_console`, `project_apix_central_db`, `project_seoul_vps`
 
 ## 목표
 
-여러 PC의 클로드가 한 DB로 **대화를 주고받는다**. 지식 공유는 2차.
-완료 판정: 다른 PC의 `T1`과 `T3`가 메시지를 왕복하고, **서버가 꺼져 있어도 앱은 멀쩡하다**.
+`btsky.pe.kr` 을 **나만 들어가는 총괄 관제판**으로 만든다. 개발 중인 모든 프로젝트
+(vibe-coding · CipherTrader · OnS · finbee · APIS)와 모든 노드(PC 3대 · 레노버 · 탭 ·
+VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮겨 계속 공개한다.
 
-## 설계 고정 사항 (변경 금지 — 이유는 설계 메모리 참조)
+**완료 판정**: 밖에서 폰으로 `btsky.pe.kr` 에 들어가 구글 로그인 한 번 하면,
+각 노드가 살아 있는지 · 무슨 작업이 돌고 있는지 · 어디서 터졌는지가 **수집 시각과 함께**
+보인다. 다른 사람이 같은 주소에 들어오면 공개 허브로 튕긴다.
 
-- **연결은 SSH 터널.** Tailscale을 쓰지 않는다 — 제3자 의존 회피가 이 서버를 만든 목적이다.
-- 서버의 `listen_addresses`(127.0.0.1)·방화벽(22/tcp)·기존 서비스를 **건드리지 않는다**.
-- 로컬 `pg_base.py`를 건드리지 않는다. 원격은 **별도 모듈**로 격리한다.
-- 노드 ID는 로컬 식별자를 바꾸지 않는다. 중앙으로 나갈 때만 `{node}/claude:T1`로 감싼다.
-- 대화 테이블은 **append-only**(UPDATE 없음). 읽음 표시는 커서 테이블로 한다.
+## 최종 도메인 배치
 
-## 재사용할 기존 자산 (새로 만들지 말 것)
+| 주소 | 무엇 | 어디 | 접근 |
+|---|---|---|---|
+| `btsky.pe.kr` | 아픽스 콘솔 | 아픽스 서버 | 🔒 구글/깃허브 로그인 (btsky99만) |
+| `www.btsky.pe.kr` | 공개 제품 허브 | GitHub Pages | 공개 |
+| `ons.btsky.pe.kr` | OnS | Vercel — **손대지 않음** | 공개 |
+| `admin.btsky.pe.kr` | 레거시 | → `btsky.pe.kr` 301 | — |
 
-| 기존 | 용도 |
-|---|---|
-| `src/server_utils.py: find_free_port` | 터널 로컬 포트 자동 탐색 |
-| `infra/pty_process.py: kill_orphan_pty_servers` | '자기 것만 죽이는' 좀비 정리 패턴 |
-| `infra/daemons.py: start_all_daemons` / `DaemonEnv` | 터널 데몬 등록 지점, config 경로 |
-| `infra/proc.py` | 콘솔 숨김 subprocess 래퍼 (인라인 CREATE_NO_WINDOW 금지) |
+## 설계 고정 사항 (변경 금지 — 이유는 아래 근거 참조)
+
+- **관제 데이터 전송은 HTTPS 인제스트**(노드 → 서버 POST). SSH 터널을 쓰지 않는다.
+  근거: 관제는 작고 단방향이고 주기적이다. 터널은 노드마다 상주 데몬 + 좀비 정리가
+  필요해(`project_apix_central_db` Critic 블로커) 탭 같은 약한 노드에서 먼저 무너진다.
+  Tailscale 배제 이유였던 "제3자 의존 회피"는 **내 서버로 직접 붙는 HTTPS 에는 해당 없음**.
+  실시간 양방향이 필요한 **대화**만 Phase 10에서 SSH 터널로 간다.
+- **콘솔 코드는 `apix-console` private 리포**. `vibe-coding` 은 public 이라
+  노드 목록·엔드포인트 구조가 그대로 공개된다.
+- **`/api/*` 는 무인증으로 열지 않는다.** 여는 길은 로그인 게이트 뒤뿐 (Phase 0 사고).
+- **인제스트 토큰은 노드별로 따로 발급.** 한 대 유출 시 그 한 대만 폐기한다.
+- **모든 값에 수집 시각을 함께 표시**하고, 낡으면 회색+⚠️ 로 강등한다.
+  근거: `feedback_observability_first` — 노드가 죽어도 마지막 값이 남아 "정상"으로
+  보이는 관제판은 장애보다 나쁘다. 값 없음과 값 낡음을 같은 색으로 그리지 않는다.
+- **`vibe-coding` 리포에 시크릿을 절대 넣지 않는다.** 전부 `/opt/apix/apix.env` (600, root).
+
+## 🙋 사용자 수동 작업 (내가 대신 못 하는 것)
+
+| # | 무엇 | 언제 |
+|---|---|---|
+| M1 | hosting.kr DNS: `btsky.pe.kr` A레코드를 GitHub 4개 → `158.247.205.192` 로 교체 | Phase 2, **www 확인 후** |
+| M2 | GitHub OAuth App 생성 (Client ID/Secret 발급) | Phase 3 |
+| M3 | Google Cloud Console: 기존 OAuth 클라이언트에 리디렉션 URI 추가 | Phase 3 |
 
 ---
 
-## Phase 1 — 서버 셋업
+## Phase 0 — 뚫린 상태 API 차단 ✅ 완료
 
 ```
-[ ] Task 1: 서버 셋업 스크립트 작성
-    파일: scripts/remote/vps-knowledge-db.sh (신규)
-    방법: hive_knowledge DB + 전용 계정(최소 권한, 슈퍼유저 금지) 생성.
-          터널 전용 SSH 키를 authorized_keys에 등록하되
-          permitopen="127.0.0.1:5433",no-pty,no-agent-forwarding,no-X11-forwarding 부착.
-          전부 멱등(이미 있으면 건너뜀). listen_addresses/방화벽 변경 코드는 넣지 않는다.
-    검증: 두 번 실행해도 결과가 같고 에러가 없다.
+[x] Task 0: /api/status 외부 차단
+    파일: scripts/remote/vps-web-deploy.sh
+    내용: nginx snippet 에 allow 127.0.0.1 / deny all. 서버 즉시 적용 완료.
+    검증: 외부 403 · 루프백 200 실측 확인 (PHASE0_OK).
+    부수: 검증부가 평문 http 로 재서 정상인데도 404를 뱉던 결함 동시 수정.
+          certbot 이후 80 블록은 return 404 뿐 — 콘텐츠는 전부 443 에 있다.
+```
 
-[ ] Task 2: 서버에 적용 + 수동 접속 확인   (의존: Task 1)
+## Phase 1 — 공개 허브를 www 로 이전
+
+```
+[ ] Task 1: CNAME 교체 + Pages 커스텀 도메인 변경
+    파일: web/CNAME
+    방법: btsky.pe.kr → www.btsky.pe.kr. 커밋·푸시로 Pages 워크플로 재배포 후
+          gh api PUT repos/btsky99/vibe-coding/pages 로 cname 갱신.
+    🔴 순서 불변식: 이 작업이 apex A레코드 변경보다 **반드시 먼저**다. 반대로 하면
+       GitHub 이 도메인 검증 실패로 Pages 인증서를 폐기해 www 까지 같이 죽는다.
+    검증: gh api ...pages 의 https_certificate.state = approved (수분 대기).
+
+[ ] Task 2: 내부 절대경로·메타태그 정리   (의존: Task 1)
+    파일: web/index.html, web/site.js, web/*/index.html
+    방법: og:url·canonical·하드코딩된 https://btsky.pe.kr 를 www 로 교체.
+          상대경로(./)는 그대로 둔다.
+    검증: grep 으로 'btsky.pe.kr' 중 www 아닌 잔재 0건.
+```
+
+## Phase 2 — apex 를 아픽스 서버로
+
+```
+[ ] Task 3: apex A레코드 전환   (의존: Task 1 검증 통과 · 🙋 M1)
     파일: 없음 (운영 작업)
-    방법: ssh로 스크립트 전달 실행 → 개발 PC에서 터널을 손으로 띄우고 psql 접속.
-    검증: psql로 hive_knowledge 접속 성공 + 전용 계정이 다른 DB엔 접근 불가.
-          기존 서비스(nginx/RustDesk/vibe-bridge) 정상 확인.
+    검증: dig btsky.pe.kr 이 158.247.205.192 단독. www 는 계속 Pages 정상.
+
+[ ] Task 4: 인증서 발급 + 리다이렉트 규칙   (의존: Task 3)
+    파일: apix-console/deploy/nginx-apix.conf (신규)
+    방법: certbot -d btsky.pe.kr -d admin.btsky.pe.kr (기존 인증서에 SAN 추가).
+          admin/* → https://btsky.pe.kr 301.
+          apex 의 알려진 제품 경로(/vibe-coding /crypto /crypto-coin /finbee /ons
+          /resources /portal)만 화이트리스트로 www 301 → 루프 방지.
+    🔴 /.well-known/acme-challenge 는 로그인 게이트 예외로 고정. 빠뜨리면 갱신이
+       조용히 실패해 90일 뒤 사이트가 통째로 죽는다.
+    검증: 옛 링크 3개가 www 로 301. certbot renew --dry-run 통과.
 ```
 
-## Phase 2 — 노드 정체성
+## Phase 3 — 로그인 게이트
 
 ```
-[ ] Task 3: 노드 ID 도입
-    파일: .ai_monitor/src/node_identity.py (신규)
-    방법: config.json에 node_id(uuid4, 최초 1회 생성) + node_label 저장.
-          node_ref('claude:T1') -> '{node_id}/claude:T1' 헬퍼 제공.
-          🔴 로컬 agent_id를 바꾸지 않는다 — 중앙 전송 시에만 감싼다.
-    검증: tests/test_node_identity.py — 재호출/재시작해도 같은 ID, 라벨 변경이 ID를 안 바꿈.
+[ ] Task 5: apix-console private 리포 생성
+    파일: (신규 리포) apix-console/
+    방법: gh repo create --private. 구조 = console/(프론트) collector/(수집)
+          deploy/(nginx·systemd·설치 스크립트).
+    검증: 리포가 private 이고 vibe-coding 에 콘솔 코드가 없다.
+
+[ ] Task 6: oauth2-proxy 설치   (의존: Task 5 · 🙋 M2 · 🙋 M3)
+    파일: apix-console/deploy/oauth2-proxy.service, deploy/apix.env.example
+    방법: 바이너리 설치 + 127.0.0.1:4180 상주. 구글·깃허브 두 provider 등록.
+          🔴 이메일 화이트리스트에 내 계정만. 기본 정책은 deny.
+          시크릿은 /opt/apix/apix.env (600, root) — 리포에는 example 만.
+    검증: 로그아웃 상태에서 콘솔 접근 시 로그인으로, 타 계정 로그인 시 거부.
+
+[ ] Task 7: nginx auth_request 연결   (의존: Task 6)
+    파일: apix-console/deploy/nginx-apix.conf
+    방법: 콘솔 화면과 /api/* 전부 게이트 뒤로. 미인증 GET / 은 www 로 302.
+          /ingest/* 와 /.well-known/* 는 게이트 예외(각각 토큰 인증 / 인증서 갱신).
+    🔴 검증은 반드시 --resolve 로 실제 소스 IP를 바꿔가며 HTTPS 로 한다 (Phase 0 교훈).
+    검증: 미인증 /api/status → 302 또는 401 (200 절대 금지). 인증 후 200.
 ```
 
-## Phase 3 — 중앙 연결 (가장 중요한 검증 지점)
+## Phase 4 — 콘솔 뼈대 + 서버 자체 헬스
 
 ```
-[ ] Task 4: 중앙 PG 커넥션 모듈
-    파일: .ai_monitor/src/pg_central.py (신규)
-    방법: config.json central_db{host,port,user,password,dbname} 로드.
-          설정이 없으면 get_central_conn()이 None을 반환하고 끝난다(예외 금지).
-          🔴 중앙 스키마(agent_messages, message_cursors) 생성은 **연결이 성립한 뒤에만**.
-             pg_schema.py에 넣지 않는다 — 설정 없는 사용자의 로컬 DB가 오염된다.
-    검증: tests/test_pg_central.py — 설정 없음 -> None, 잘못된 설정 -> None(예외 없음).
+[ ] Task 8: 콘솔 셸 UI
+    파일: apix-console/console/index.html, console/app.js, console/style.css
+    방법: 정적 HTML+JS (1코어 서버라 빌드 도구·프레임워크 없음).
+          공통 카드 컴포넌트에 **수집 시각 뱃지**를 내장 — 개별 패널이 빼먹을 수 없게.
+    검증: 데이터 없음/낡음/정상 3가지 상태가 눈으로 구분된다.
 
-[ ] Task 5: 무동작 회귀 검증   (의존: Task 4)
-    파일: tests/test_central_optional.py (신규)
-    방법: central_db 설정이 없는 상태에서 서버 부팅 경로가 평소와 동일한지 확인.
-          로컬 DB에 중앙 테이블이 생기지 않았는지 명시적으로 단언.
-    검증: 🔴 설정 없는 사용자에게 아무 변화가 없다. 이게 통과해야 Phase 4로 간다.
+[ ] Task 9: 서버 헬스 패널   (의존: Task 8)
+    파일: apix-console/collector/server_health.py (vps_status_api.py 승계)
+    방법: 기존 항목 + 인증서 만료일 + 서비스 재시작 급증 감지.
+    검증: 서비스를 하나 멈추면 화면이 30초 내 빨갛게 바뀐다.
 ```
 
-## Phase 4 — SSH 터널
+## Phase 5 — 중앙 PG + 인제스트
 
 ```
-[ ] Task 6: 터널 데몬
-    파일: .ai_monitor/infra/tunnel_daemon.py (신규)
-    방법: ssh -N -L <로컬>:127.0.0.1:5433 을 infra.proc로 기동.
-          로컬 포트는 find_free_port로 탐색(5434 고정 금지 — 멀티 인스턴스 충돌).
-          죽으면 지수 백오프 재연결. PID+포트를 런타임 파일에 기록.
-          🔴 PC당 1개 공유 — 이미 살아있는 터널이 있으면 그 포트를 재사용한다.
-    검증: 터널 프로세스를 강제 종료 -> 자동 재연결. 서버가 꺼져 있어도 앱은 정상.
+[ ] Task 10: 스키마
+    파일: apix-console/collector/schema.sql
+    방법: apix_nodes(노드·토큰해시·라벨) / apix_heartbeats / apix_projects /
+          apix_tasks / apix_events(릴리즈·사고·커밋 공용). 전부 append-only 지향.
+          🔴 노드 식별은 node_id 별도 컬럼 — agent_id('claude:T1')에 PC 구분자가 없다.
+          전용 계정 최소 권한. 기존 DB·listen_addresses·방화벽 건드리지 않는다.
+    검증: 두 번 실행해도 같은 결과(멱등). 다른 DB 접근 불가.
 
-[ ] Task 7: 좀비 터널 정리 + 데몬 등록   (의존: Task 6)
-    파일: .ai_monitor/infra/tunnel_daemon.py, .ai_monitor/infra/daemons.py
-    방법: 부팅 시 PID 파일 기준으로 고아 ssh 프로세스 정리
-          (kill_orphan_pty_servers의 '자기 것만 죽인다' 패턴을 따른다 — 다른 인스턴스/
-           사용자의 ssh를 죽이면 안 된다). start_all_daemons에 등록.
-    검증: 🔴 앱 비정상 종료 후 재시작 시 ssh 좀비 0개.
-          전례: v3.7.244 좀비 node PTY가 _MEI를 잠가 앱이 안 켜진 사고.
+[ ] Task 11: 인제스트 API   (의존: Task 10)
+    파일: apix-console/collector/ingest.py (127.0.0.1:9101)
+    방법: POST /ingest/heartbeat|tasks|events. Bearer 토큰 → 노드 해석.
+          토큰은 해시로만 저장. 노드별 rate limit + 페이로드 크기 상한.
+          PG 커넥션 풀 상한 고정 (브릿지와 동시 폭주 방지 — 1코어 1.9GB).
+    검증: 잘못된 토큰 401, 큰 페이로드 413, 정상 202. 서버 재시작 후에도 동작.
 ```
 
-## Phase 5 — 대화
+## Phase 6 — 노드 푸시 (이 PC 1대부터)
 
 ```
-[ ] Task 8: 메시지 송수신 + 커서
-    파일: .ai_monitor/src/pg_central.py   (의존: Task 3, 4)
-    방법: send_message(to_node,to_agent,content) / fetch_new(node_id) 구현.
-          created_at은 서버 now() 사용(PC 시계를 믿지 않는다).
-          읽음은 message_cursors(node_id,last_seen_id) UPSERT — 메시지 행은 불변 유지.
-          노드별 rate limit + 보존 30일 정리.
-    검증: 같은 DB에 두 노드 ID로 왕복. 커서가 중복 수신을 막는지 확인.
+[ ] Task 12: 푸시 클라이언트
+    파일: scripts/apix_push.py (vibe-coding — 시크릿은 env 로 분리)
+    방법: 5분 주기. 하트비트(호스트·CPU·메모리·앱 버전·활성 슬롯) 전송.
+          🔴 서버가 죽어도 조용히 실패하고 로컬에 영향 0 (예외 삼키되 로컬 로그 1줄).
+    검증: 서버를 끄고 돌려도 앱 정상. 켜면 콘솔에 이 PC가 뜬다.
 
-[ ] Task 9: API 라우트   (의존: Task 8)
-    파일: .ai_monitor/api/central_api.py (신규), .ai_monitor/server.py (라우팅 1줄)
-    방법: GET /api/central/messages (커서 이후), POST /api/central/messages.
-          중앙 미설정이면 503이 아니라 빈 목록 + disabled 플래그(프론트가 조용히 숨김).
-          🔴 대화만 — 원격 '실행'은 이 경로에 절대 넣지 않는다(LAN 브리지 3중 게이트 우회 금지).
-    검증: 설정 유/무 양쪽에서 200 응답.
+[ ] Task 13: 스케줄 등록   (의존: Task 12)
+    파일: infra/daemons.py 등록 또는 작업 스케줄러
+    검증: 앱 재시작 후에도 하트비트가 계속 올라온다.
+```
 
-[ ] Task 10: 실시간 수신 (NOTIFY)   (의존: Task 8)
-    파일: .ai_monitor/infra/tunnel_daemon.py 또는 신규 리스너 스레드
-    방법: LISTEN agent_msg. office_api.py의 기존 LISTEN 스레드 패턴을 그대로 따른다
-          (autocommit 필수). 연결 끊기면 폴링으로 자동 강등.
-    검증: 다른 노드가 INSERT하면 수 초 내 수신.
+## Phase 7 — 작업 진행상황 · 프로젝트 보드
 
-[ ] Task 11: E2E 검증   (의존: Task 9, 10)
-    파일: tests/test_central_e2e.py (신규)
-    방법: 노드 A의 claude:T1 -> 노드 B의 claude:T3 왕복. 서버 다운 시 로컬 정상 동작.
-    검증: 왕복 성공 + 서버 없이도 앱 부팅 정상.
+```
+[ ] Task 14: 작업 데이터 push   (의존: Task 11, 12)
+    파일: scripts/apix_push.py
+    방법: hive_tasks · 체크포인트 · 최근 커밋의 **변경분만** 전송(마지막 전송 커서).
+    검증: 태스크 상태를 바꾸면 콘솔에 5분 내 반영.
+
+[ ] Task 15: 프로젝트별 보드   (의존: Task 14)
+    파일: apix-console/console/panels/projects.js
+    방법: 프로젝트별 카드 — 마지막 활동·진행 태스크·마지막 커밋·담당 노드.
+          CipherTrader 처럼 git 이 없는 노드는 이벤트만으로 표시.
+    검증: 5개 프로젝트가 전부 뜨고, 조용한 프로젝트는 조용하다고 표시된다.
+```
+
+## Phase 8 — 릴리즈/CI + 사고 장부
+
+```
+[ ] Task 16: GitHub 폴러
+    파일: apix-console/collector/github_poller.py (cron 5분)
+    방법: 최신 릴리즈·워크플로 실패를 apix_events 로. 토큰 사용(rate limit 회피).
+    검증: 일부러 실패한 워크플로가 콘솔에 뜬다.
+
+[ ] Task 17: 사고·교훈 패널   (의존: Task 14)
+    파일: apix-console/console/panels/incidents.js
+    검증: incident.py record 직후 콘솔에 나타난다.
+```
+
+## Phase 9 — 노드 확산
+
+```
+[ ] Task 18: na2js · qeuhlak · lenovo · 탭 · CipherTrader 노드에 푸시 배포
+    방법: 노드별 개별 토큰 발급. 노드마다 검증 후 다음으로.
+    검증: 콘솔 노드 목록에 전부 살아 있고, 한 대를 끄면 그 한 대만 회색이 된다.
+```
+
+## Phase 10 — 중앙 대화 PG (별건 · 콘솔 이후)
+
+관제와 목적이 다르다(실시간 양방향). 승인된 설계는 `project_apix_central_db` 에 있고
+아래 태스크 목록은 그 계획을 **그대로 보존**한 것이다. 콘솔이 안정된 뒤 착수한다.
+
+```
+[ ] Task 19: vps-knowledge-db.sh — hive_knowledge DB + 최소권한 계정 + permitopen 키
+[ ] Task 20: node_identity.py — node_id(uuid4) + node_ref('{node}/claude:T1')
+[ ] Task 21: pg_central.py — 미설정 시 None 반환(예외 금지), 스키마는 연결 후에만 생성
+[ ] Task 22: 무동작 회귀 — 설정 없는 사용자에게 변화 0 (이게 통과해야 다음)
+[ ] Task 23: tunnel_daemon.py — find_free_port + 지수 백오프, PC당 1개 공유
+[ ] Task 24: 좀비 터널 정리 — '자기 것만 죽인다' 패턴 (v3.7.244 전례)
+[ ] Task 25: 메시지 송수신 + 커서 — append-only, created_at 은 서버 now()
+[ ] Task 26: central_api.py — 대화만. 원격 실행은 절대 넣지 않는다
+[ ] Task 27: LISTEN 실시간 수신 — office_api 패턴(autocommit), 끊기면 폴링 강등
+[ ] Task 28: E2E — 노드 A T1 ↔ 노드 B T3 왕복 + 서버 없이 앱 부팅 정상
 ```
 
 ---
@@ -138,15 +236,24 @@ REVISION HISTORY:
 ## 의존성 요약
 
 ```
-Task 1 → Task 2 ─┐
-Task 3 ──────────┼→ Task 8 → Task 9 ─┐
-Task 4 → Task 5 ─┘         ↘ Task 10 ┴→ Task 11
-Task 6 → Task 7
+Task 0 ✅
+Task 1 → Task 2
+       ↘ Task 3(🙋M1) → Task 4
+Task 5 → Task 6(🙋M2,M3) → Task 7 → Task 8 → Task 9
+                                  ↘ Task 10 → Task 11 → Task 12 → Task 13
+                                                              ↘ Task 14 → Task 15
+                                                                        ↘ Task 17
+                                              Task 16
+Task 18 (Task 13 검증 후)
+Task 19~28 (콘솔 안정 후)
 ```
 
-Phase 3(Task 5)이 통과하기 전에는 Phase 4 이후로 진행하지 않는다.
+🔴 **Task 1 검증이 통과하기 전에는 Task 3(apex A레코드)로 넘어가지 않는다.**
+순서를 뒤집으면 www 까지 죽는다.
 
 ## 완료 후 기록할 지식
 
-- `project_apix_central_db` 갱신 — 실제 구현 결과, 터널 재연결 실측, 지연 측정치
-- 사고가 나면 `incident.py record` — 특히 좀비/포트 충돌 계열
+- `project_apix_console` 신규 — 도메인 배치·게이트 구조·인제스트 계약·실측 함정
+- `project_seoul_vps` 갱신 — 도메인 배치 변경, 메모리 예산 실측
+- `project_btsky_web_deploy` 갱신 — apex 가 더 이상 Pages 가 아님
+- 사고 발생 시 `incident.py record` — 특히 인증서·리다이렉트 루프 계열

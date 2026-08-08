@@ -92,7 +92,19 @@ systemctl is-active --quiet vibe-status && ok "상태 API 상주" || warn "상�
 mkdir -p /etc/nginx/snippets
 cat > /etc/nginx/snippets/vibe-status.conf <<'EOF'
 # 상태 API 프록시 — vps-web-deploy.sh 가 관리. 직접 수정하지 말 것.
+#
+# [🔴 2026-08-08 보안사고] 이 엔드포인트는 발견 시점까지 **무인증 공개**였다.
+#   노출된 것: 상주 서비스 목록·재시작 횟수·메모리/디스크·역터널 포트(22001~4)와
+#   각 터널에 붙은 노드의 실명("크립토 PC", "맥미니"). 공격자에게는 그대로
+#   정찰 지도다. 아픽스 콘솔 개편의 Phase 0 으로 즉시 닫았다.
+#
+# [불변식] 이 API는 **절대 무인증으로 열지 않는다**. 여는 방법은 하나뿐 —
+#   아픽스 콘솔의 로그인 게이트(oauth2-proxy) 뒤에 두는 것.
+#   "잠깐 확인하려고" allow 를 늘리는 순간 같은 사고가 반복된다.
 location = /api/status {
+    allow 127.0.0.1;
+    deny all;
+
     proxy_pass http://127.0.0.1:9100/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -140,11 +152,39 @@ fi
 # ── 5. 검증 — '설정했다'가 아니라 '응답한다'를 본다 ─────────────────────────
 echo
 echo "=== 검증 ==="
-h=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/status/ || echo 000)
-a=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/api/status || echo 000)
-m=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ || echo 000)
+# [🔴 함정 — 평문 http 로 재면 전부 404다] certbot 이 붙고 난 뒤로 80 포트 블록은
+#   `return 404` 뿐이고 실제 콘텐츠·snippet 은 전부 443 블록에 있다. 예전처럼
+#   `http://127.0.0.1/...` 로 재면 정상인데도 404가 찍혀 배포가 실패로 보인다.
+#   그래서 검증은 전부 HTTPS + --resolve 로 통일한다.
+PUBIP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
+D1=$(echo "$DOMAIN" | awk '{print $1}')
+HAS_TLS=0; [ -d "/etc/letsencrypt/live/${D1}" ] && HAS_TLS=1
+
+if [ "$HAS_TLS" = "1" ]; then
+  probe(){ curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "${D1}:443:${2:-127.0.0.1}" "https://${D1}$1" || echo 000; }
+else
+  probe(){ curl -s  -o /dev/null -w '%{http_code}' --max-time 8 -H "Host: ${D1}" "http://${2:-127.0.0.1}$1" || echo 000; }
+fi
+
+m=$(probe /)
+h=$(probe /status/)
 printf '  메인 페이지  HTTP %s\n' "$m"
 printf '  상태판       HTTP %s\n' "$h"
-printf '  상태 API     HTTP %s\n' "$a"
-[ "$a" = "200" ] && curl -s --max-time 5 http://127.0.0.1/api/status | head -c 200 && echo
-[ "$m" = "200" ] && [ "$h" = "200" ] && [ "$a" = "200" ] && ok "전부 정상" || warn "일부 실패 — 위 코드 확인"
+
+# [WHY 공인 IP로 자기 자신을 치는가] allow/deny 는 **실제 소스 IP**로 판정하므로
+#   127.0.0.1 로 부르면 영원히 200이 나온다. 차단이 실제로 걸렸는지 보려면
+#   루프백이 아닌 소스 주소로 한 번 나갔다 들어와야 한다. 이 확인을 빼먹으면
+#   "닫았다고 생각했는데 열려 있는" 2026-08-08 사고가 그대로 재발한다.
+#
+# [🔴 함정 — 이렇게 재면 거짓말한다] `http://127.0.0.1/api/status` 로 재면 404가 나온다.
+#   snippet 은 certbot 이 만든 **443 블록에만** include 되어 있고, 80 포트의
+#   default_server 블록은 `return 404` 이기 때문이다. 반드시 HTTPS + 올바른 Host 로,
+#   --resolve 로 소스 IP만 바꿔 가며 같은 이름을 쳐야 allow/deny 판정을 볼 수 있다.
+x=$(probe /api/status "$PUBIP")
+y=$(probe /api/status 127.0.0.1)
+printf '  상태 API(외부) HTTP %s  ← 403 이어야 정상\n' "$x"
+printf '  상태 API(로컬) HTTP %s  ← 200 이어야 정상\n' "$y"
+
+[ "$m" = "200" ] && [ "$h" = "200" ] && [ "$x" = "403" ] && [ "$y" = "200" ] \
+  && ok "전부 정상 (상태 API 외부 차단 확인)" \
+  || warn "일부 실패 — 위 코드 확인"
