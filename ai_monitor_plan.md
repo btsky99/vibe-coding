@@ -124,11 +124,12 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 ## Phase 3 — 로그인 게이트
 
 ```
-[ ] Task 5: apix-console private 리포 생성
-    파일: (신규 리포) apix-console/
+[x] Task 5: apix-console private 리포 생성
+    파일: (신규 리포) apix-console/  — 로컬 클론 D:/apix-console
     방법: gh repo create --private. 구조 = console/(프론트) collector/(수집)
           deploy/(nginx·systemd·설치 스크립트).
-    검증: 리포가 private 이고 vibe-coding 에 콘솔 코드가 없다.
+    ✅ 2026-08-08 실측: visibility=PRIVATE, 3커밋(5df0320→bb880c8), 1094줄.
+       vibe-coding 리포에 콘솔 코드 없음.
 
 [ ] Task 6: oauth2-proxy 설치   (의존: Task 5 · 🙋 M2 · 🙋 M3)
     파일: apix-console/deploy/oauth2-proxy.service, deploy/apix.env.example
@@ -148,16 +149,20 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 ## Phase 4 — 콘솔 뼈대 + 서버 자체 헬스
 
 ```
-[ ] Task 8: 콘솔 셸 UI
+[~] Task 8: 콘솔 셸 UI   — 코드 완료(75ccd06) · 화면 검증 대기
     파일: apix-console/console/index.html, console/app.js, console/style.css
     방법: 정적 HTML+JS (1코어 서버라 빌드 도구·프레임워크 없음).
           공통 카드 컴포넌트에 **수집 시각 뱃지**를 내장 — 개별 패널이 빼먹을 수 없게.
     검증: 데이터 없음/낡음/정상 3가지 상태가 눈으로 구분된다.
+    🔴 아직 눈으로 못 봤다 — nginx 가 아직 콘솔을 서빙하지 않는다(Task 7 대기).
+       "코드가 있다"를 "화면이 맞다"로 세지 말 것.
 
-[ ] Task 9: 서버 헬스 패널   (의존: Task 8)
+[~] Task 9: 서버 헬스 패널   (의존: Task 8) — 백엔드 완료 · 화면 검증 대기
     파일: apix-console/collector/server_health.py (vps_status_api.py 승계)
     방법: 기존 항목 + 인증서 만료일 + 서비스 재시작 급증 감지.
-    검증: 서비스를 하나 멈추면 화면이 30초 내 빨갛게 바뀐다.
+    ✅ 백엔드 실측(2026-08-08 22:15): apix-collector active, 127.0.0.1:9101 응답
+       200 — collected_at·age_sec·services[].restarts 정상 포함.
+    검증: 서비스를 하나 멈추면 화면이 30초 내 빨갛게 바뀐다. (미실시)
 ```
 
 ## Phase 5 — 중앙 PG + 인제스트
