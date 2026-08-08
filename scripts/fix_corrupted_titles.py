@@ -129,6 +129,50 @@ def vault_roots() -> list[Path]:
     return uniq
 
 
+def repair_db(plans) -> int:
+    """복구 + 임베딩 무효화(NULL). plans = [(row, 새제목|None), ...]
+
+    [WHY NULL로 두나] 제목이 바뀌었는데 옛 임베딩이 남아 있으면 검색은 여전히
+      깨진 제목 기준으로 매칭된다. 값이 바뀌면 벡터도 반드시 함께 무효화해야 한다.
+      백필 데몬이 새 제목으로 다시 만든다.
+    """
+    done = 0
+    for r, new in plans:
+        if not new:
+            continue
+        ok = execute_raw(
+            f"UPDATE zettel_notes SET title = {_sql_text(new)}, embedding = NULL "
+            f"WHERE id = {_sql_text(str(r['id']))}"
+        )
+        done += 1 if ok else 0
+    return done
+
+
+def auto_repair() -> dict:
+    """부팅 시 자동 복구 — 오염이 없으면 아무 일도 하지 않는다.
+
+    [WHY 자동화가 필요한가] 새 버전을 설치해도 **이미 부푼 볼트는 그대로 남는다**.
+      크기 가드는 '더 나빠지지 않게' 할 뿐 쌓인 3.2GB를 되돌리지 못하고,
+      다른 PC 사용자가 복구 스크립트를 손으로 돌릴 것이라 기대할 수 없다.
+      그 PC는 원인을 짐작할 방법조차 없이(옵시디언을 안 깔았으면 볼트를 열어볼 일도 없다)
+      계속 느려진다 — 그래서 부팅 경로에서 스스로 걷어낸다.
+    [비용] 정상 환경에서는 SQL 1회 + 파일 stat() 몇 번이다. 오염이 없으면 즉시 끝난다.
+    [제약] 데몬 스레드에서 호출된다 — 예외가 새어 나가면 동기화 데몬이 죽으므로
+      호출부에서 반드시 감싼다.
+    """
+    rows = find_corrupted()
+    plans = [(r, _restore_title(r['title'], r['content'])) for r in rows]
+    db_fixed = repair_db(plans) if plans else 0
+    # huge_only — 부팅 경로라 비용이 곧 체감 지연이다. 위 docstring의 [비용] 참조.
+    files_fixed, files_deleted, freed = fix_vault_files(apply=True, huge_only=True)
+    return {
+        'db_fixed': db_fixed,
+        'files_fixed': files_fixed,
+        'files_deleted': files_deleted,
+        'freed_mb': round(freed / 1048576, 1),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--run', action='store_true', help='실제 복구 수행')
@@ -155,18 +199,7 @@ def main() -> int:
         print('\n--run 을 붙이면 실제로 복구한다.')
         return 0
 
-    # 복구 + 임베딩 무효화(NULL) — 백필/재임베딩이 새 제목으로 다시 만들게 한다.
-    # [WHY NULL로 두나] 제목이 바뀌었는데 옛 임베딩이 남아 있으면 검색은 여전히
-    #   깨진 제목 기준으로 매칭된다. 값이 바뀌면 벡터도 반드시 함께 무효화해야 한다.
-    done = 0
-    for r, new in plans:
-        if not new:
-            continue
-        ok = execute_raw(
-            f"UPDATE zettel_notes SET title = {_sql_text(new)}, embedding = NULL "
-            f"WHERE id = {_sql_text(str(r['id']))}"
-        )
-        done += 1 if ok else 0
+    done = repair_db(plans)
     print(f'DB 복구 {done}건 — 임베딩은 NULL로 비웠다.')
 
     # [🔴 필수] 볼트 파일도 함께 고친다 — 로컬과 GDrive **양쪽 다**.
@@ -179,8 +212,14 @@ def main() -> int:
     return 0
 
 
-def fix_vault_files(*, apply: bool = True) -> tuple[int, int, int]:
+def fix_vault_files(*, apply: bool = True, huge_only: bool = False) -> tuple[int, int, int]:
     """모든 볼트(로컬 + GDrive)의 깨진 .md를 정리한다. (고침, 지움, 회수바이트)
+
+    huge_only=True면 **stat()만** 보고 거대 파일만 지운다 — 내용을 한 건도 읽지 않는다.
+    [WHY 이 모드가 필요한가] 부팅 경로(auto_repair)에서 전량 read_text를 하면 정상
+      환경에서도 파일 2000개를 읽어 8.2초가 걸렸다(실측). 자동 복구의 목적은 '폭주 잔해
+      제거'이고 폭주는 크기로 판정되므로 읽을 이유가 없다. 작은 파일의 제목 백슬래시는
+      DB를 고친 뒤 export가 어차피 덮어쓴다(제목이 달라져 _write_if_changed가 기록한다).
 
     [복원 근거] 파일 **이름**에는 원문 제목이 살아 있다(파일명 생성은 이스케이프 경로를
       타지 않기 때문). 그래서 파일명을 원본으로 삼아 title을 되살린다.
@@ -213,6 +252,9 @@ def fix_vault_files(*, apply: bool = True) -> tuple[int, int, int]:
                         continue
                 deleted += 1
                 freed += size
+                continue
+
+            if huge_only:
                 continue
 
             try:

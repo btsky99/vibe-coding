@@ -520,7 +520,28 @@ def run_zettel_sync(env: DaemonEnv) -> None:
         # 경로 slug(D--vibe-coding)를 표준으로 사용한다. 폴더명을 쓰면 Obsidian export가
         # 구형 project_id(vibe-coding) 49건만 내보내고 최신 지식 대부분을 누락한다.
         _proj_id = env.current_project_id()
-        print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project_id={_proj_id}, 60초 양방향')
+
+        # [자가 복구] 이스케이프 폭주의 잔해를 부팅 시 1회 걷어낸다.
+        #   [WHY] 새 버전의 크기 가드는 '더 나빠지지 않게' 할 뿐, 구버전에서 이미 부푼
+        #     볼트(실측 3.2GB)를 되돌리지 못한다. 사용자가 복구 스크립트를 손으로 돌릴 것을
+        #     기대할 수 없고, 방치하면 동기화가 매 사이클 그 데이터를 읽어 CPU를 태운다.
+        #   [비용] 정상 환경에서는 SQL 1회 + stat() 몇 번 — 오염이 없으면 즉시 끝난다.
+        #   [제약] 여기서 예외가 새면 동기화 데몬 전체가 죽는다. 복구는 부가 기능이므로
+        #     실패해도 동기화는 계속되어야 한다 → 반드시 감싼다.
+        try:
+            _fix_spec = _ilu.spec_from_file_location(
+                'fix_corrupted_titles', str(_sync_script.parent / 'fix_corrupted_titles.py'))
+            _fix_mod = _ilu.module_from_spec(_fix_spec)
+            _fix_spec.loader.exec_module(_fix_mod)
+            _rep = _fix_mod.auto_repair()
+            if _rep['db_fixed'] or _rep['files_deleted'] or _rep['files_fixed']:
+                print(f'[zettel_sync] 🔧 폭주 잔해 자동 정리 — DB {_rep["db_fixed"]}건, '
+                      f'파일 수정 {_rep["files_fixed"]}건, 삭제 {_rep["files_deleted"]}건 '
+                      f'({_rep["freed_mb"]}MB 회수)')
+        except Exception as _re:
+            print(f'[zettel_sync] 자동 정리 건너뜀 (무시): {_re}')
+
+        print(f'[*] 제텔카스텐 Vault 동기화 데몬 시작됨 — vault={_vault}, project_id={_proj_id}, 60초 단방향')
 
         # [라이브 전환 추종] 매 사이클 현재 vault/project_id를 재해석 — 무재시작 프로젝트 전환 시
         #   서버 DB 커넥션이 새 프로젝트로 바뀌므로 이 루프의 스코프도 함께 따라가야 한다
