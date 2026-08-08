@@ -77,7 +77,7 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 ## Phase 1 — 공개 허브를 www 로 이전
 
 ```
-[ ] Task 1: CNAME 교체 + Pages 커스텀 도메인 변경
+[~] Task 1: CNAME 교체 + Pages 커스텀 도메인 변경   — 코드 완료(f37fd39) · 검증 대기
     파일: web/CNAME
     방법: btsky.pe.kr → www.btsky.pe.kr. 커밋·푸시로 Pages 워크플로 재배포 후
           gh api PUT repos/btsky99/vibe-coding/pages 로 cname 갱신.
@@ -85,11 +85,22 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
        GitHub 이 도메인 검증 실패로 Pages 인증서를 폐기해 www 까지 같이 죽는다.
     검증: gh api ...pages 의 https_certificate.state = approved (수분 대기).
 
-[ ] Task 2: 내부 절대경로·메타태그 정리   (의존: Task 1)
+    🔴 발급 창 = 실제 공개 다운타임 (2026-08-08 21:43~ 실측):
+       cname 을 www 로 바꾼 직후 state=dns_changed 이고, 이때 www:443 은
+       기본 `*.github.io` 인증서를 제시한다 → 브라우저 신뢰 실패.
+       apex 는 이미 www 로 301 하므로 **사이트 전체가 그 창 동안 안 열린다**.
+       이 구간에는 gh api PUT 도 404("certificate has not finished being issued")
+       로 거부되므로 재촉할 수단이 없다 — 기다리는 것 외에 할 일 없음.
+       다음에 도메인을 또 옮긴다면 이 다운타임을 미리 계산에 넣을 것.
+    후속: approved 되면 https_enforced=true 로 올린다(현재 false).
+
+[x] Task 2: 내부 절대경로·메타태그 정리   (의존: Task 1)
     파일: web/index.html, web/site.js, web/*/index.html
     방법: og:url·canonical·하드코딩된 https://btsky.pe.kr 를 www 로 교체.
           상대경로(./)는 그대로 둔다.
     검증: grep 으로 'btsky.pe.kr' 중 www 아닌 잔재 0건.
+    ✅ 2026-08-08 실측: 리포 전체에서 `//btsky.pe.kr` 코드 참조 0건
+       (남은 언급은 이 계획서·HIVEMIND.md 의 서술문뿐).
 ```
 
 ## Phase 2 — apex 를 아픽스 서버로

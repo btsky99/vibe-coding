@@ -41,6 +41,11 @@ def get_central_config(config_file=None) -> dict | None:
     """중앙 DB 설정을 반환한다. 미설정/불완전하면 None.
 
     [불변식] 예외를 던지지 않는다. 호출부는 None 하나만 처리하면 된다.
+    [🔴 tunnel 하위 dict는 그대로 통과시킨다] tunnel_daemon.get_tunnel_config가 이 반환값에서
+      cfg['tunnel']을 읽어 ssh 파라미터를 얻는다. 여기서 필수 키만 추려 버리면 터널 데몬이
+      항상 '미설정'으로 판단해 조용히 잠든다 — 설정을 다 채운 사용자가 원인을 알 수 없는
+      가장 나쁜 실패 모드다. 이 키는 psycopg2.connect에 넘기지 않으므로(아래 명시 인자)
+      섞여 있어도 무해하다.
     """
     path = config_file or CONFIG_FILE
     raw = _read_config(path).get('central_db')
@@ -57,6 +62,8 @@ def get_central_config(config_file=None) -> dict | None:
         cfg['port'] = int(cfg['port'])
     except (TypeError, ValueError):
         return None
+    if isinstance(raw.get('tunnel'), dict):
+        cfg['tunnel'] = raw['tunnel']
     return cfg
 
 
