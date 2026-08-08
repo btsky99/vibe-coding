@@ -67,6 +67,12 @@ def _format_frontmatter(note: dict) -> str:
 
     note_type = note.get('note_type', 'fleeting')
     title = note.get('title', '')
+    # [방어선] 제목이 상한을 넘으면 이미 비정상이다 — 자르지 않으면 export가 그 길이를
+    #   그대로 파일에 쓰고, 다음 import가 되읽어 폭주가 유지된다. 여기서 끊어야 수렴한다.
+    if len(title) > MAX_TITLE_CHARS:
+        print(f'[zettel_sync] ⚠ 제목이 비정상적으로 김({len(title):,}자) — {MAX_TITLE_CHARS}자로 절단: '
+              f'{note.get("id", "?")}')
+        title = title[:MAX_TITLE_CHARS]
     emoji = _NOTE_TYPE_EMOJI.get(note_type, '')
     # aliases: 그래프에서 노드 이름으로 이모지+짧은 제목 표시
     short_title = title[:30] + ('...' if len(title) > 30 else '')
@@ -171,6 +177,19 @@ def _render_links_section(links: list, backlinks: list) -> str:
     return '\n'.join(sections)
 
 
+# [WHY 크기 가드가 따로 필요한가] 이스케이프 왕복은 2026-08-08에 대칭으로 고쳤지만,
+#   그 버그가 **살아 있던 동안 아무도 폭주를 멈추지 못했다** — 제목 하나가 115MB,
+#   볼트가 3.2GB까지 자라 동기화 데몬이 server.py CPU의 93%를 태웠다.
+#   왕복 로직의 정확성과 별개로, 비정상 크기를 조기에 잘라내는 방어선이 있어야
+#   같은 종류의 결함이 다시 생겨도 '느려짐'까지 번지지 않는다.
+MAX_TITLE_CHARS = 500
+
+# 실측 근거: 정상 노트 1054개의 합계가 5.8MB(개당 평균 5.6KB)였다. 1MB를 넘는 .md는
+#   이스케이프 폭주 말고 원인이 없다. read_text 전에 stat()으로 걸러야 의미가 있다 —
+#   228MB 파일은 '읽는 행위' 자체가 9.2초짜리 비용이다.
+MAX_NOTE_FILE_BYTES = 1_000_000
+
+
 def _escape_yaml(s: str) -> str:
     """YAML 이중따옴표 문자열 이스케이프.
 
@@ -269,6 +288,13 @@ def _cleanup_stale_note_files(vault_dir: Path, notes: list[dict],
         except Exception:
             continue
         if rel.parts and rel.parts[0] in protected_top:
+            continue
+        # [방어선] import_from_vault와 같은 이유 — 폭주 파일을 읽지 않는다. 여기서 스킵하면
+        #   고아 판정이 미뤄질 뿐이고(파일은 남음), 읽으면 사이클마다 수 초를 잃는다.
+        try:
+            if md_file.stat().st_size > MAX_NOTE_FILE_BYTES:
+                continue
+        except OSError:
             continue
         try:
             fm = _parse_frontmatter(md_file.read_text(encoding='utf-8'))
@@ -810,6 +836,18 @@ def import_from_vault(vault_dir: Path, project_id: str = ''):
             continue
         # 경로 트래버설 방어
         if not md_file.resolve().is_relative_to(vault_dir.resolve()):
+            continue
+
+        # [방어선] 읽기 **전에** 크기로 거른다. 이 순서가 핵심 — read_text를 먼저 하면
+        #   폭주 파일 하나가 사이클마다 수 초를 먹는다(228MB=9.2초 실측). 볼트는 PG의
+        #   파생물이므로 스킵해도 손실이 없고, 다음 export가 정상 크기로 다시 쓴다.
+        try:
+            if md_file.stat().st_size > MAX_NOTE_FILE_BYTES:
+                print(f'[zettel_sync] ⚠ 비정상 크기 노트 건너뜀 '
+                      f'({md_file.stat().st_size / 1048576:.1f}MB): {md_file.name[:60]}')
+                skipped += 1
+                continue
+        except OSError:
             continue
 
         try:
