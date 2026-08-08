@@ -21,7 +21,11 @@ set -euo pipefail
 SRC=/opt/vibe/vibe-coding
 VENV=/opt/vibe/venv
 WWW=/var/www/vibe
-DOMAIN="${STATUS_DOMAIN:-status.btsky.pe.kr}"
+# [2026-08-08] 실제로 발급·연결된 이름은 admin.btsky.pe.kr 이다.
+#   status 는 DNS 레코드가 없어 한때 이름만 적혀 있었다 — 둘 다 적어 두되 기본은 admin.
+#   certbot 이 인증서를 붙이는 대상도 이 이름이므로 여기와 DNS A레코드가 어긋나면
+#   갱신이 조용히 실패한다.
+DOMAIN="${STATUS_DOMAIN:-admin.btsky.pe.kr status.btsky.pe.kr}"
 
 log(){ printf '\033[0;36m[*]\033[0m %s\n' "$*"; }
 ok(){  printf '\033[0;32m[OK]\033[0m %s\n' "$*"; }
