@@ -103,8 +103,13 @@ def resources() -> dict:
 #   이었다. 22001은 OpenSSH_for_Windows_9.5 + 집 회선이라 윈도우가 맞았다.
 #   → 노드를 추가하면 추측하지 말고 배너·출발지로 확인할 것:
 #      python3 -c "import socket;s=socket.create_connection(('127.0.0.1',PORT));print(s.recv(100))"
+# [2026-08-08] 이제 이 표는 '표시용'이 아니라 **서버 설정과 짝을 이루는 배정표**다.
+#   authorized_keys 의 permitlisten 이 키마다 포트 하나로 고정돼 있어, 여기 적힌 포트와
+#   노드의 -R 포트가 어긋나면 그 노드는 접속 자체가 거부된다. 노드를 추가·변경할 때
+#   authorized_keys 와 이 표를 **함께** 고칠 것.
 TUNNEL_NAMES = {
     22001: '크립토 PC (Windows)',
+    22002: 'na2js (미접속)',   # 키만 등록됨 — 아직 한 번도 붙은 적 없음(auth.log 무기록)
     22004: '맥미니 (macOS)',
 }
 

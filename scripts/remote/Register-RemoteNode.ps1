@@ -57,12 +57,35 @@ Write-Host "=== 노드 등록: $NodeName (포트 $TunnelPort) ===" -ForegroundCo
 Write-Host ''
 
 # ── 1. VPS authorized_keys 등록 ─────────────────────────────────────────────
-# [보안 불변식] restrict 로 전부 끄고 permitlisten 으로 **이 노드의 포트 하나만** 연다.
-#   restrict 는 셸/포트포워딩/에이전트/X11/PTY를 모두 막는 기본값이며, permitlisten 이
-#   그중 역방향 리스닝만 예외로 되살린다. 이렇게 하면 키가 유출돼도 그 포트를 여는 것
-#   외에는 아무것도 못 한다.
+# [보안 불변식] restrict 로 전부 끄고, 되살릴 것만 골라 되살린다.
+#
+# [🔴 2026-08-08 실측으로 밝혀진 두 가지 — 추측으로 되돌리지 말 것]
+#
+#  (1) `restrict,permitlisten="PORT"` 만으로는 **터널이 아예 안 열린다.**
+#      restrict 가 포트포워딩을 끄고, permitlisten 은 '허용 범위를 좁히는' 옵션일 뿐
+#      꺼진 기능을 켜지 못한다. 그래서 `port-forwarding` 을 함께 줘야 한다.
+#      실측: ssh 가 "remote port forwarding failed for listen port 22009" 로 거절.
+#      이 형태로 등록된 노드는 등록은 성공한 것처럼 보이고 접속만 조용히 실패한다.
+#
+#  (2) `port-forwarding` 은 역방향(-R)뿐 아니라 **정방향(-L)까지 함께** 켠다.
+#      그러면 이 키로 VPS 내부에 닿을 수 있다 — PostgreSQL(5433, 루프백 trust 인증)과
+#      상태 API(9100)가 그대로 열린다. 실측에서 터널 키로 9100 JSON 응답을 받아냈다.
+#      permitopen 을 존재하지 않는 대상 하나로 고정해 -L 을 봉쇄한다.
+#      (permitopen 을 아예 안 쓰면 '전부 허용'이 기본값이라 구멍이 남는다.)
+#
+# permitlisten 을 3가지 표기로 적는 이유 — 클라이언트가 `-R PORT:`, `-R localhost:PORT:`,
+#   `-R 127.0.0.1:PORT:` 중 무엇을 보내는지에 따라 매칭 대상이 달라진다. 셋 다 열어두면
+#   노드 쪽 명령 형태가 무엇이든 걸리지 않는다(3형태 모두 실측 통과).
 # [멱등] 같은 노드를 다시 등록하면 옛 줄을 지우고 새로 넣는다 — 중복 누적을 막는다.
-$authLine = "restrict,permitlisten=`"$TunnelPort`" $PublicKey"
+$authOpts = @(
+    'restrict'
+    'port-forwarding'
+    "permitlisten=`"$TunnelPort`""
+    "permitlisten=`"localhost:$TunnelPort`""
+    "permitlisten=`"127.0.0.1:$TunnelPort`""
+    'permitopen="127.0.0.1:1"'
+) -join ','
+$authLine = "$authOpts $PublicKey"
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($authLine))
 
 # [함정] 여러 줄 bash를 PowerShell 문자열로 넘기면 따옴표/BOM에서 깨진다.
