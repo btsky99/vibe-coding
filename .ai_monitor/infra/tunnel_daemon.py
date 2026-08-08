@@ -247,21 +247,41 @@ def _build_ssh_cmd(cfg: dict) -> list:
     return cmd
 
 
-def ensure_tunnel(data_dir: Path, cfg: dict):
-    """터널이 필요하면 띄우고, 이미 통하면 그대로 둔다. Popen 또는 None.
+def _our_tunnel_is_alive(data_dir: Path, cfg: dict) -> bool:
+    """상태 파일에 적힌 터널이 지금도 우리 것으로 살아 있는가.
 
-    [🔴 PC당 1개 공유] 로컬 포트에서 PostgreSQL이 응답하면 **누가 띄웠든** 목적은 달성된
-      것이므로 새로 띄우지 않는다. 개발본과 설치본이 동시에 도는 환경(멀티 인스턴스)에서
-      각자 터널을 띄우면 뒤에 온 쪽이 포트 충돌로 조용히 실패한다 — 그 상태가 제일 나쁘다
-      ('설정은 했는데 왜 안 되지'). 포트를 공유 자원으로 보는 편이 단순하고 안전하다.
+    [🔴 왜 포트 응답만으로 판단하면 안 되나 — 2026-08-09에 실제로 당했다]
+      초판은 `_port_speaks_postgres()`가 True면 '누군가 이미 터널을 띄웠다'고 보고
+      새로 띄우지 않았다. 그런데 그 포트에 있던 것은 **다른 프로젝트의 로컬 PostgreSQL**
+      (D:/KQuantPG, 5434)이었다. 'PG처럼 응답한다'와 '우리 중앙 서버다'는 완전히 다르다.
+      그 결과: 터널을 안 띄우고 → 남의 PG에 hive 계정으로 붙어 인증 실패 → 커넥션 None →
+      사용자에게는 "중앙 기능이 그냥 안 켜짐"으로만 보인다. 원인 추적이 거의 불가능하다.
+      그래서 재사용 판정은 **우리가 띄웠다는 기록(PID+명령줄)** 으로만 한다.
     """
-    if _port_speaks_postgres(cfg['local_port']):
+    state = _read_state(data_dir)
+    pid = int(state.get('pid') or 0)
+    if not pid or int(state.get('local_port') or 0) != int(cfg['local_port']):
+        return False
+    if not _is_our_tunnel(pid, cfg['local_port'], cfg['remote_port'], cfg['ssh_host']):
+        return False
+    return _port_speaks_postgres(cfg['local_port'])
+
+
+def ensure_tunnel(data_dir: Path, cfg: dict):
+    """터널이 필요하면 띄우고, 우리 터널이 이미 살아 있으면 그대로 둔다. Popen 또는 None.
+
+    [PC당 1개 공유] 멀티 인스턴스(개발본+설치본)가 각자 터널을 띄우면 뒤에 온 쪽이
+      포트 충돌로 조용히 실패한다. 상태 파일을 공유하므로 먼저 띄운 터널을 함께 쓴다.
+    """
+    if _our_tunnel_is_alive(data_dir, cfg):
         return None
 
     if _port_is_open(cfg['local_port']):
-        # 포트는 열려 있는데 PG가 아니다 — 남의 프로그램이다. 절대 죽이지 않는다.
-        print(f"[tunnel] 로컬 포트 {cfg['local_port']}를 다른 프로그램이 쓰고 있다 — "
-              f"central_db.port를 비어 있는 값으로 바꿔야 한다")
+        # 포트는 열려 있는데 우리 터널이 아니다 — PG든 아니든 남의 것이다. 절대 죽이지 않는다.
+        who = 'PostgreSQL' if _port_speaks_postgres(cfg['local_port']) else '다른 프로그램'
+        print(f"[tunnel] 🔴 로컬 포트 {cfg['local_port']}를 {who}이(가) 이미 쓰고 있다 "
+              f"(우리 터널 아님) — config.json의 central_db.port를 비어 있는 값으로 바꿀 것. "
+              f"이대로 두면 중앙 기능이 원인 없이 꺼진 것처럼 보인다")
         return None
 
     cmd = _build_ssh_cmd(cfg)
@@ -347,9 +367,12 @@ def run_tunnel_daemon(env) -> None:
                     print('[tunnel] ssh 종료 감지 — 재연결')
                     child = None
 
-                if not _port_speaks_postgres(cfg['local_port']):
+                # [불변식] 생존 판정도 _our_tunnel_is_alive로 한다. 포트 응답만 보면
+                #   같은 포트를 쓰는 남의 PostgreSQL을 우리 터널로 오인해 영원히
+                #   재연결을 시도하지 않는다(2026-08-09 실측 결함).
+                if not _our_tunnel_is_alive(data_dir, cfg):
                     child = ensure_tunnel(data_dir, cfg)
-                    if child is None and not _port_speaks_postgres(cfg['local_port']):
+                    if child is None and not _our_tunnel_is_alive(data_dir, cfg):
                         # 실패 — 백오프. 서버가 꺼져 있는 것은 정상 상태이므로 조용히 기다린다.
                         _stop_event.wait(backoff)
                         backoff = min(backoff * 2, _BACKOFF_MAX)

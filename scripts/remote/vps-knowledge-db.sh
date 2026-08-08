@@ -122,7 +122,14 @@ if [ -n "$PUB" ]; then
 #   permitopen 없음 → 이 키로 서버의 아무 포트나 포워딩 가능(PG·상태API가 뚫린다).
 #   no-pty 없음     → 셸 접속이 가능해진다.
 #   과거 사고: authorized_keys 옵션 누락으로 터널 키가 VPS 내부에 닿던 구멍(cff33fb).
-    OPTS='restrict,permitopen="127.0.0.1:'"$PG_PORT"'",no-agent-forwarding,no-X11-forwarding,no-pty'
+    # [🔴 조각을 하나도 빼지 말 것 — 둘 다 실제로 당한 사고다]
+    #   port-forwarding 없음 → restrict가 포워딩까지 끄므로 터널이 열리지 않는다.
+    #     permitopen은 '허용 목록'일 뿐 포워딩을 켜지 않는다. 증상은
+    #     `channel N: open failed: administratively prohibited`이고, ssh 프로세스는
+    #     멀쩡히 살아 있어 겉보기엔 연결된 것처럼 보인다(2026-08-09 실측).
+    #   permitopen 없음 → 이 키로 서버의 아무 포트나 포워딩할 수 있다(PG·상태 API가 뚫림).
+    #   no-pty 없음 → 셸 접속이 가능해진다.
+    OPTS='restrict,port-forwarding,permitopen="127.0.0.1:'"$PG_PORT"'",no-agent-forwarding,no-X11-forwarding,no-pty'
     LINE="$OPTS $PUB"
 
     touch "$AUTH_KEYS"; chmod 600 "$AUTH_KEYS"
