@@ -141,6 +141,10 @@
       </div>
       <div class="top-right">
         <span id="whoami"></span>
+        <!-- [WHY 기본 숨김인가] 관리자에게만 노출한다. 링크가 보인다고 뚫리는 건
+             아니지만(콘솔은 서버의 로그인 게이트가 막는다), 일반 회원에게 관리
+             경로를 광고할 이유가 없다. renderApp() 이 isAdmin 일 때만 켠다. -->
+        <a class="nlink" id="apixLink" href="/console/" style="display:none">🎛️ 아픽스 콘솔</a>
         <a class="nlink" href="../">← 파란이빨 허브</a>
         <button class="nlink solid" onclick="logout()">로그아웃</button>
       </div>
@@ -148,6 +152,9 @@
     <div class="wrap-container">
       <div class="greet-title" id="greet"></div>
       <div class="greet-sub" id="greetSub"></div>
+      <!-- 관리자 전용 진입 배너. content 바깥에 두는 이유 — renderAdminUsers()가
+           content 를 통째로 덮어쓰므로 안에 두면 사라진다. -->
+      <div id="apixBanner"></div>
       <div id="content"></div>
     </div>
   </div>
@@ -194,6 +201,25 @@ function renderApp(sess){
   document.getElementById('greetSub').textContent = isAdmin ? '가입 신청한 사용자별로 허용할 5대 프로젝트 권한을 개별 선택하여 승인하세요.' : '승인 완료된 회원입니다. 부여된 파란이빨 프로젝트 이용 권한을 확인하세요.';
 
   if (isAdmin) {
+    // 아픽스 서버 관제 진입. 여기서만 노출한다.
+    document.getElementById('apixLink').style.display = '';
+    document.getElementById('apixBanner').innerHTML = `
+      <a href="/console/" style="display:block; text-decoration:none; margin:0 0 22px;
+         padding:18px 22px; border-radius:14px; border:1px solid rgba(56,189,248,.35);
+         background:linear-gradient(135deg, rgba(2,132,199,.18), rgba(37,99,235,.10));">
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <div style="font-size:30px; line-height:1;">🎛️</div>
+          <div style="flex:1; min-width:200px;">
+            <div style="font-size:1.05rem; font-weight:700; color:#e6edf3;">아픽스 서버 관제 콘솔</div>
+            <div style="font-size:.86rem; color:#94a3b8; margin-top:3px;">
+              서버 자원 · 서비스 상태 · 노드 생존 · 인증서 만료일을 한 화면에서
+            </div>
+          </div>
+          <div style="font-size:.82rem; color:#38bdf8; font-weight:600; white-space:nowrap;">
+            구글 로그인 필요 →
+          </div>
+        </div>
+      </a>`;
     renderAdminUsers();
   } else {
     const approvedMap = A.getApprovedMap();

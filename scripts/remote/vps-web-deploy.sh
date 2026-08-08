@@ -55,139 +55,40 @@ else
   warn "$SRC/web 없음"
 fi
 
-# ── 3. 상태 API ─────────────────────────────────────────────────────────────
-# [🔴 DynamicUser를 쓰지 않는 이유 — 미래의 함정]
-#   격리를 위해 DynamicUser=yes + RestrictAddressFamilies 를 붙이고 싶어지는데,
-#   vps_status_api.remote_nodes()가 호출하는 `ss`는 **NETLINK_SOCK_DIAG** 소켓을 쓴다.
-#   RestrictAddressFamilies에 AF_NETLINK를 빠뜨리면 ss가 실패하고, _sh()가 예외를
-#   삼키기 때문에 화면에는 "터널 0개"가 **정상처럼** 표시된다. 거짓 정상은 장애보다 나쁘다.
-#   지금은 단순함을 택했다. 강화한다면 AF_NETLINK를 반드시 함께 허용할 것.
-cat > /etc/systemd/system/vibe-status.service <<EOF
-[Unit]
-Description=Vibe VPS Status API (read-only)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=${SRC}
-ExecStart=${VENV}/bin/python ${SRC}/scripts/vps_status_api.py
-Environment=PYTHONUNBUFFERED=1
-Restart=always
-RestartSec=5
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now vibe-status >/dev/null 2>&1 || true
-systemctl restart vibe-status
-sleep 3
-systemctl is-active --quiet vibe-status && ok "상태 API 상주" || warn "상태 API 기동 실패"
-
-# ── 4. nginx ────────────────────────────────────────────────────────────────
-# [WHY snippet + include 인가] 사이트 파일을 통째로 덮어쓰면 certbot이 나중에 써넣는
-#   443 블록이 날아간다. 프록시 규칙만 별도 파일로 두고 include 한 줄만 주입하면
-#   HTTPS 발급 이후에도 이 스크립트를 안전하게 재실행할 수 있다.
-mkdir -p /etc/nginx/snippets
-cat > /etc/nginx/snippets/vibe-status.conf <<'EOF'
-# 상태 API 프록시 — vps-web-deploy.sh 가 관리. 직접 수정하지 말 것.
+# ── 3. (은퇴) 상태 API · nginx ──────────────────────────────────────────────
+# [🔴 2026-08-09 이후 이 스크립트는 정적 파일만 배포한다]
+#   상태 API(vibe-status)는 아픽스 콘솔의 collector 가 승계했고, nginx 설정은
+#   apix-console 리포(deploy/nginx-apix.conf)가 소유한다.
 #
-# [🔴 2026-08-08 보안사고] 이 엔드포인트는 발견 시점까지 **무인증 공개**였다.
-#   노출된 것: 상주 서비스 목록·재시작 횟수·메모리/디스크·역터널 포트(22001~4)와
-#   각 터널에 붙은 노드의 실명("크립토 PC", "맥미니"). 공격자에게는 그대로
-#   정찰 지도다. 아픽스 콘솔 개편의 Phase 0 으로 즉시 닫았다.
+#   여기서 nginx 를 다시 쓰면 sites-enabled/vibe 가 되살아나 콘솔 사이트와
+#   **같은 server_name 이 둘**이 된다. nginx 는 그때 뒤쪽을 경고 없이 무시하므로
+#   "배포했는데 콘솔이 사라졌다"는 증상이 원인 불명으로 나타난다.
+#   상태 API 도 마찬가지로 되살리면 9100 포트와 옛 /api/status 경로가 함께 부활해
+#   무인증 공개 사고(2026-08-08)의 무대가 다시 열린다.
 #
-# [불변식] 이 API는 **절대 무인증으로 열지 않는다**. 여는 방법은 하나뿐 —
-#   아픽스 콘솔의 로그인 게이트(oauth2-proxy) 뒤에 두는 것.
-#   "잠깐 확인하려고" allow 를 늘리는 순간 같은 사고가 반복된다.
-location = /api/status {
-    allow 127.0.0.1;
-    deny all;
+#   되돌릴 일이 생기면 git 이력에서 이 블록을 꺼내되, 반드시
+#   apix-console 쪽 설정과의 충돌을 먼저 정리할 것.
 
-    proxy_pass http://127.0.0.1:9100/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_read_timeout 10s;
-}
-EOF
-
-SITE=/etc/nginx/sites-available/vibe
-if [ ! -f "$SITE" ] || ! grep -q 'vibe-status.conf' "$SITE"; then
-  cp -f "$SITE" "${SITE}.bak.$(date +%s)" 2>/dev/null || true
-  cat > "$SITE" <<EOF
-server {
-    listen 80 default_server;
-    server_name ${DOMAIN} _;
-
-    root ${WWW};
-    index index.html;
-
-    # 개인 상태판 — 검색 노출 방지 및 기본 방어 헤더
-    add_header X-Robots-Tag "noindex, nofollow" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "no-referrer" always;
-
-    include /etc/nginx/snippets/vibe-status.conf;
-
-    location / { try_files \$uri \$uri/ \$uri/index.html =404; }
-}
-EOF
-fi
-ln -sf "$SITE" /etc/nginx/sites-enabled/vibe
-rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/status
-
-if nginx -t >/dev/null 2>&1; then
-  systemctl reload nginx
-  ok "nginx 재설정"
-else
-  warn "nginx 설정 오류 — 되돌린다"
-  nginx -t
-  LAST_BAK=$(ls -t "${SITE}".bak.* 2>/dev/null | head -1 || true)
-  [ -n "$LAST_BAK" ] && cp -f "$LAST_BAK" "$SITE" && systemctl reload nginx
-  exit 1
-fi
-
-# ── 5. 검증 — '설정했다'가 아니라 '응답한다'를 본다 ─────────────────────────
+# ── 4. 검증 — '설정했다'가 아니라 '응답한다'를 본다 ─────────────────────────
 echo
 echo "=== 검증 ==="
-# [🔴 함정 — 평문 http 로 재면 전부 404다] certbot 이 붙고 난 뒤로 80 포트 블록은
-#   `return 404` 뿐이고 실제 콘텐츠·snippet 은 전부 443 블록에 있다. 예전처럼
-#   `http://127.0.0.1/...` 로 재면 정상인데도 404가 찍혀 배포가 실패로 보인다.
-#   그래서 검증은 전부 HTTPS + --resolve 로 통일한다.
 PUBIP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
-D1=$(echo "$DOMAIN" | awk '{print $1}')
-HAS_TLS=0; [ -d "/etc/letsencrypt/live/${D1}" ] && HAS_TLS=1
+D1=btsky.pe.kr
 
-if [ "$HAS_TLS" = "1" ]; then
-  probe(){ curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "${D1}:443:${2:-127.0.0.1}" "https://${D1}$1" || echo 000; }
-else
-  probe(){ curl -s  -o /dev/null -w '%{http_code}' --max-time 8 -H "Host: ${D1}" "http://${2:-127.0.0.1}$1" || echo 000; }
-fi
+# [🔴 함정] 서버가 자기 도메인을 확인할 때는 --resolve 로 IP 를 못박는다.
+#   systemd-resolved 가 옛 레코드를 캐시해 자기 검사가 남의 서버 응답을 받아온다
+#   (2026-08-08~09 에 두 번 오판했다). 평문 http 로 재는 것도 금물 — 80 블록은
+#   리다이렉트뿐이라 콘텐츠 판정에 쓸 수 없다.
+probe(){ curl -s -o /dev/null -w '%{http_code}' --max-time 10          --resolve "${D1}:443:${PUBIP}" "https://${D1}$1" || echo 000; }
 
 m=$(probe /)
-h=$(probe /status/)
-printf '  메인 페이지  HTTP %s\n' "$m"
-printf '  상태판       HTTP %s\n' "$h"
+v=$(probe /vibe-coding/)
+c=$(probe /console/)
+printf '  메인            HTTP %s  ← 200
+' "$m"
+printf '  /vibe-coding/   HTTP %s  ← 200
+' "$v"
+printf '  /console/       HTTP %s  ← 302(로그인) — 200 이면 게이트가 풀린 것
+' "$c"
 
-# [WHY 공인 IP로 자기 자신을 치는가] allow/deny 는 **실제 소스 IP**로 판정하므로
-#   127.0.0.1 로 부르면 영원히 200이 나온다. 차단이 실제로 걸렸는지 보려면
-#   루프백이 아닌 소스 주소로 한 번 나갔다 들어와야 한다. 이 확인을 빼먹으면
-#   "닫았다고 생각했는데 열려 있는" 2026-08-08 사고가 그대로 재발한다.
-#
-# [🔴 함정 — 이렇게 재면 거짓말한다] `http://127.0.0.1/api/status` 로 재면 404가 나온다.
-#   snippet 은 certbot 이 만든 **443 블록에만** include 되어 있고, 80 포트의
-#   default_server 블록은 `return 404` 이기 때문이다. 반드시 HTTPS + 올바른 Host 로,
-#   --resolve 로 소스 IP만 바꿔 가며 같은 이름을 쳐야 allow/deny 판정을 볼 수 있다.
-x=$(probe /api/status "$PUBIP")
-y=$(probe /api/status 127.0.0.1)
-printf '  상태 API(외부) HTTP %s  ← 403 이어야 정상\n' "$x"
-printf '  상태 API(로컬) HTTP %s  ← 200 이어야 정상\n' "$y"
-
-[ "$m" = "200" ] && [ "$h" = "200" ] && [ "$x" = "403" ] && [ "$y" = "200" ] \
-  && ok "전부 정상 (상태 API 외부 차단 확인)" \
-  || warn "일부 실패 — 위 코드 확인"
+[ "$m" = "200" ] && [ "$v" = "200" ] && [ "$c" = "302" ]   && ok "정적 배포 완료 (콘솔 게이트 정상)"   || warn "예상과 다름 — 위 코드 확인"

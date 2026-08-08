@@ -18,6 +18,12 @@ window.Site = (function () {
     if (sess) {
       const isAdmin = sess.role === 'admin' || (sess.id && (sess.id.includes('btsky99') || sess.id.includes('paranibal') || sess.id.includes('admin')));
       const label = isAdmin ? '👑 파란이빨 관리자' : (sess.name || '회원');
+      // [WHY 절대경로 /console/ 인가] 콘솔은 아픽스 서버가 서빙하며 제품 페이지처럼
+      //   하위 디렉터리에 있지 않다. SITE_BASE 를 붙이면 /vibe-coding/console/ 같은
+      //   존재하지 않는 경로가 만들어진다.
+      // [노출 범위] 관리자에게만 보인다. 실제 차단은 서버의 로그인 게이트가 한다 —
+      //   이 조건은 편의이자 광고 억제일 뿐 보안 장치가 아니다.
+      if (isAdmin) html += `<a class="nlink" href="/console/" style="margin-right:8px;">🎛️ 아픽스 콘솔</a>`;
       html += `<a class="nlink" href="${window.SITE_BASE || './'}portal/">💈 ${label} 포털</a>`;
       html += `<button class="nlink solid" type="button" onclick="Site.logout()">로그아웃</button>`;
     } else {
