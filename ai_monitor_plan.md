@@ -10,27 +10,35 @@ REVISION HISTORY:
 
 # 아픽스 콘솔 — btsky.pe.kr 전면 개편
 
-**상태: 승인 완료 (2026-08-08) · Phase 0 완료**
+**상태: Phase 0~6 완료 (2026-08-09 새벽) · 콘솔 라이브**
 설계 메모리: `project_apix_console`, `project_apix_central_db`, `project_seoul_vps`
 
 ## 목표
 
-`btsky.pe.kr` 을 **나만 들어가는 총괄 관제판**으로 만든다. 개발 중인 모든 프로젝트
+**메인은 공개 허브, 관리 정보는 그 안의 관리자 전용 페이지.** 개발 중인 모든 프로젝트
 (vibe-coding · CipherTrader · OnS · finbee · APIS)와 모든 노드(PC 3대 · 레노버 · 탭 ·
-VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮겨 계속 공개한다.
+VPS)의 상태를 한 화면에서 본다.
 
-**완료 판정**: 밖에서 폰으로 `btsky.pe.kr` 에 들어가 구글 로그인 한 번 하면,
+**완료 판정**: 밖에서 폰으로 `btsky.pe.kr/console/` 에 들어가 구글 로그인 한 번 하면,
 각 노드가 살아 있는지 · 무슨 작업이 돌고 있는지 · 어디서 터졌는지가 **수집 시각과 함께**
-보인다. 다른 사람이 같은 주소에 들어오면 공개 허브로 튕긴다.
+보인다. 로그인 없는 사람에게는 공개 메인만 보인다.
 
-## 최종 도메인 배치
+## 최종 도메인 배치 (2026-08-09 확정 — **초기안에서 반전됨**)
 
 | 주소 | 무엇 | 어디 | 접근 |
 |---|---|---|---|
-| `btsky.pe.kr` | 아픽스 콘솔 | 아픽스 서버 | 🔒 구글/깃허브 로그인 (btsky99만) |
-| `www.btsky.pe.kr` | 공개 제품 허브 | GitHub Pages | 공개 |
+| `btsky.pe.kr/` | **공개 메인 허브** | 아픽스 서버가 직접 서빙 | 공개 |
+| `btsky.pe.kr/console/` | 🎛️ 아픽스 콘솔 | 아픽스 서버 | 🔒 구글 로그인 (btsky99만) |
+| `www.btsky.pe.kr` | → apex 301 | 아픽스 서버 | — (전파 대기 중) |
 | `ons.btsky.pe.kr` | OnS | Vercel — **손대지 않음** | 공개 |
-| `admin.btsky.pe.kr` | 레거시 | → `btsky.pe.kr` 301 | — |
+| `admin`·`status` | 레거시 | → apex 301 | — |
+
+> 🔴 **초기에 "apex 전체 = 콘솔"로 만들었다가 되돌렸다.** 요구는 "메인은 공개(지금 화면
+> 그대로), 관리 정보만 그 안에 관리자 전용 페이지"였다. apex 를 통째로 잠그지 말 것.
+>
+> 🔴 **메인을 GitHub Pages 에 얹지 않는다.** 도메인을 옮길 때마다 GitHub 인증서 재발급을
+> 기다려야 하고 그동안 사이트가 통째로 죽는다(2026-08-08 실측 약 2시간). 서버가 직접
+> 서빙하면 certbot 1분. 가용성을 남의 큐에 맡기지 않는다.
 
 ## 설계 고정 사항 (변경 금지 — 이유는 아래 근거 참조)
 
@@ -74,10 +82,15 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
           certbot 이후 80 블록은 return 404 뿐 — 콘텐츠는 전부 443 에 있다.
 ```
 
-## Phase 1 — 공개 허브를 www 로 이전
+## Phase 1 — 공개 허브를 www 로 이전 ❌ **폐기 (2026-08-09 방향 전환)**
+
+> 이 Phase 의 전제("메인은 콘솔, 공개 허브는 www")가 뒤집혔다. 메인은 공개 허브로
+> 남고 **아픽스 서버가 직접 서빙**한다. www 는 apex 로 301 하는 별칭일 뿐이다.
+> 아래 기록은 **다운타임 실측치를 남기기 위해** 보존한다 — 다음에 도메인을 옮길 때
+> 같은 값을 예산으로 잡을 것.
 
 ```
-[~] Task 1: CNAME 교체 + Pages 커스텀 도메인 변경   — 코드 완료(f37fd39) · 검증 대기
+[-] Task 1: (폐기) CNAME 교체 + Pages 커스텀 도메인 변경 — f37fd39
     파일: web/CNAME
     방법: btsky.pe.kr → www.btsky.pe.kr. 커밋·푸시로 Pages 워크플로 재배포 후
           gh api PUT repos/btsky99/vibe-coding/pages 로 cname 갱신.
@@ -106,11 +119,11 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 ## Phase 2 — apex 를 아픽스 서버로
 
 ```
-[ ] Task 3: apex A레코드 전환   (의존: Task 1 검증 통과 · 🙋 M1)
+[x] Task 3: apex A레코드 전환   (의존: Task 1 검증 통과 · 🙋 M1)
     파일: 없음 (운영 작업)
     검증: dig btsky.pe.kr 이 158.247.205.192 단독. www 는 계속 Pages 정상.
 
-[ ] Task 4: 인증서 발급 + 리다이렉트 규칙   (의존: Task 3)
+[x] Task 4: 인증서 발급 + 리다이렉트 규칙   (의존: Task 3)
     파일: apix-console/deploy/nginx-apix.conf (신규)
     방법: certbot -d btsky.pe.kr -d admin.btsky.pe.kr (기존 인증서에 SAN 추가).
           admin/* → https://btsky.pe.kr 301.
@@ -131,14 +144,14 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
     ✅ 2026-08-08 실측: visibility=PRIVATE, 3커밋(5df0320→bb880c8), 1094줄.
        vibe-coding 리포에 콘솔 코드 없음.
 
-[ ] Task 6: oauth2-proxy 설치   (의존: Task 5 · 🙋 M2 · 🙋 M3)
+[x] Task 6: oauth2-proxy 설치   (의존: Task 5 · 🙋 M2 · 🙋 M3)
     파일: apix-console/deploy/oauth2-proxy.service, deploy/apix.env.example
     방법: 바이너리 설치 + 127.0.0.1:4180 상주. 구글·깃허브 두 provider 등록.
           🔴 이메일 화이트리스트에 내 계정만. 기본 정책은 deny.
           시크릿은 /opt/apix/apix.env (600, root) — 리포에는 example 만.
     검증: 로그아웃 상태에서 콘솔 접근 시 로그인으로, 타 계정 로그인 시 거부.
 
-[ ] Task 7: nginx auth_request 연결   (의존: Task 6)
+[x] Task 7: nginx auth_request 연결   (의존: Task 6)
     파일: apix-console/deploy/nginx-apix.conf
     방법: 콘솔 화면과 /api/* 전부 게이트 뒤로. 미인증 GET / 은 www 로 302.
           /ingest/* 와 /.well-known/* 는 게이트 예외(각각 토큰 인증 / 인증서 갱신).
@@ -149,26 +162,27 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 ## Phase 4 — 콘솔 뼈대 + 서버 자체 헬스
 
 ```
-[~] Task 8: 콘솔 셸 UI   — 코드 완료(75ccd06) · 화면 검증 대기
+[x] Task 8: 콘솔 셸 UI   — 화면 검증 완료(2026-08-09)
     파일: apix-console/console/index.html, console/app.js, console/style.css
     방법: 정적 HTML+JS (1코어 서버라 빌드 도구·프레임워크 없음).
           공통 카드 컴포넌트에 **수집 시각 뱃지**를 내장 — 개별 패널이 빼먹을 수 없게.
     검증: 데이터 없음/낡음/정상 3가지 상태가 눈으로 구분된다.
-    🔴 아직 눈으로 못 봤다 — nginx 가 아직 콘솔을 서빙하지 않는다(Task 7 대기).
-       "코드가 있다"를 "화면이 맞다"로 세지 말 것.
+    ✅ 2026-08-09 브라우저 실접속: /console/ 에서 4패널 렌더, CSS·JS 상대경로 정상.
+       (앞선 세션의 경고 "코드가 있다를 화면이 맞다로 세지 말 것" — 이제 실제로 봤다.)
 
-[~] Task 9: 서버 헬스 패널   (의존: Task 8) — 백엔드 완료 · 화면 검증 대기
+[x] Task 9: 서버 헬스 패널   (의존: Task 8) — 완료
     파일: apix-console/collector/server_health.py (vps_status_api.py 승계)
     방법: 기존 항목 + 인증서 만료일 + 서비스 재시작 급증 감지.
     ✅ 백엔드 실측(2026-08-08 22:15): apix-collector active, 127.0.0.1:9101 응답
        200 — collected_at·age_sec·services[].restarts 정상 포함.
-    검증: 서비스를 하나 멈추면 화면이 30초 내 빨갛게 바뀐다. (미실시)
+    ✅ 화면 실측: vibe-seoul 메모리/디스크 막대, 서비스 7종 상태, 역터널 4개,
+       인증서 89일 남음까지 표시. 서비스 강제 중단 테스트는 미실시(운영 중이라 보류).
 ```
 
 ## Phase 5 — 중앙 PG + 인제스트
 
 ```
-[ ] Task 10: 스키마
+[x] Task 10: 스키마
     파일: apix-console/collector/schema.sql
     방법: apix_nodes(노드·토큰해시·라벨) / apix_heartbeats / apix_projects /
           apix_tasks / apix_events(릴리즈·사고·커밋 공용). 전부 append-only 지향.
@@ -176,7 +190,7 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
           전용 계정 최소 권한. 기존 DB·listen_addresses·방화벽 건드리지 않는다.
     검증: 두 번 실행해도 같은 결과(멱등). 다른 DB 접근 불가.
 
-[ ] Task 11: 인제스트 API   (의존: Task 10)
+[x] Task 11: 인제스트 API   (의존: Task 10)
     파일: apix-console/collector/ingest.py (127.0.0.1:9101)
     방법: POST /ingest/heartbeat|tasks|events. Bearer 토큰 → 노드 해석.
           토큰은 해시로만 저장. 노드별 rate limit + 페이로드 크기 상한.
@@ -187,13 +201,13 @@ VPS)의 상태를 한 화면에서 본다. 공개 제품 허브는 `www` 로 옮
 ## Phase 6 — 노드 푸시 (이 PC 1대부터)
 
 ```
-[ ] Task 12: 푸시 클라이언트
+[x] Task 12: 푸시 클라이언트
     파일: scripts/apix_push.py (vibe-coding — 시크릿은 env 로 분리)
     방법: 5분 주기. 하트비트(호스트·CPU·메모리·앱 버전·활성 슬롯) 전송.
           🔴 서버가 죽어도 조용히 실패하고 로컬에 영향 0 (예외 삼키되 로컬 로그 1줄).
     검증: 서버를 끄고 돌려도 앱 정상. 켜면 콘솔에 이 PC가 뜬다.
 
-[ ] Task 13: 스케줄 등록   (의존: Task 12)
+[x] Task 13: 스케줄 등록   (의존: Task 12)
     파일: infra/daemons.py 등록 또는 작업 스케줄러
     검증: 앱 재시작 후에도 하트비트가 계속 올라온다.
 ```
