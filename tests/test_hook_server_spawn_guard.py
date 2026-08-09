@@ -35,6 +35,23 @@ class _SpawnSpy:
         raise AssertionError("스폰 가드가 뚫렸다 — server.py가 실제로 실행될 뻔했다")
 
 
+@pytest.fixture(autouse=True)
+def _clean_hook_env(monkeypatch):
+    """훅의 조기 종료 환경변수를 걷어낸다.
+
+    [🔴 왜 필요한가] main()은 OFFICE_MODE / VIBE_CHILD_AGENT 가 세팅돼 있으면 아무것도
+      출력하지 않고 sys.exit(0) 한다(캐스케이드 루프 방지). 그런데 이 테스트를 돌리는
+      개발자의 셸이 cli_agent 가 띄운 자식 세션이면 VIBE_CHILD_AGENT=1 이 상속돼 있어,
+      가드 분기를 한 줄도 타지 않은 채 "exit 0 · 폴백 0회"가 되어 **테스트가 통과처럼
+      보인다**. 실제로 2026-08-09 이 환경에서 마지막 문구 단언만 깨져 발각됐다 —
+      단언 하나가 없었으면 환경 의존 거짓 통과였다.
+    [불변식] main()을 부르는 테스트는 환경변수를 상속하지 않는다. autouse 인 이유는
+      새 테스트가 이 격리를 잊고 추가되는 것을 막기 위해서다.
+    """
+    monkeypatch.delenv("OFFICE_MODE", raising=False)
+    monkeypatch.delenv("VIBE_CHILD_AGENT", raising=False)
+
+
 @pytest.fixture
 def spy(monkeypatch):
     s = _SpawnSpy()
