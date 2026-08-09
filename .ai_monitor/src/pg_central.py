@@ -6,6 +6,9 @@ DESCRIPTION: 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의
              아픽스 서버(중앙 대화 PG) 1차 — Task 4.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: 슬롯 멘션('@1-2') 수신 소실 수정 — 프론트는 agent 없이 폴링하는데
+                     to_agent를 ''과 비교해 슬롯 지정 메시지가 수신 노드에서 통째로
+                     걸러졌다. 조건을 _to_agent_clause 하나로 통합.
 - 2026-08-09 Claude: node_registry(uuid→번호/이름 명부) + list_recent(before_id).
                      화면이 발신자를 uuid로 그리던 문제와 과거 조회 부재 해소
                      (Phase 11 Task 33·34).
@@ -334,6 +337,23 @@ def send_message(content: str, to_node: str = '', to_agent: str = '',
         return None
 
 
+def _to_agent_clause(agent_id: str) -> tuple[str, tuple]:
+    """'이 수신자 앞으로 온 것인가' 조건절. fetch_new/pending_count가 공유한다.
+
+    [🔴 agent_id가 비면 조건을 아예 걸지 않는다] 화면의 중앙 버스는 노드당 하나만
+      폴링한다(App에서 1회 — 슬롯마다 폴링하면 커서가 밀려 메시지가 유실된다).
+      그래서 프론트는 agent를 붙이지 않고 부르는데, 이때 to_agent를 ''과 비교하면
+      '@1-2'처럼 슬롯을 지정한 메시지가 세 조건에 모두 어긋나 **수신 노드 화면에서
+      조용히 사라진다**(Phase 11 슬롯 멘션이 발신만 되고 수신이 막혀 있던 원인).
+      노드는 자기 앞으로 온 것을 전부 받고, 어느 슬롯에 보여줄지는 화면이 정한다.
+    [불변식] 두 함수가 같은 조건을 써야 한다 — 어긋나면 '안 읽음 3'인데 조회는 0건인
+      상태가 된다. 조건을 한 곳에 둔 이유가 이것이므로 호출부에 다시 쓰지 말 것.
+    """
+    if not agent_id:
+        return '', ()
+    return "   AND (to_agent IS NULL OR to_agent = '' OR to_agent = %s)", (agent_id,)
+
+
 def fetch_new(agent_id: str = '', limit: int = 50, advance: bool = True,
               config_file=None) -> list[dict]:
     """이 노드 앞으로 온 새 메시지를 가져온다. 중앙 미설정/실패면 빈 목록.
@@ -361,14 +381,15 @@ def fetch_new(agent_id: str = '', limit: int = 50, advance: bool = True,
             row = cur.fetchone()
             cursor = int(row[0]) if row else 0
 
+            agent_sql, agent_params = _to_agent_clause(agent_id)
             cur.execute(
                 "SELECT id, from_node, from_agent, to_node, to_agent, content, created_at"
                 "  FROM agent_messages"
                 " WHERE id > %s AND from_node <> %s"
                 "   AND (to_node IS NULL OR to_node = %s)"
-                "   AND (to_agent IS NULL OR to_agent = '' OR to_agent = %s)"
+                + agent_sql +
                 " ORDER BY id LIMIT %s",
-                (cursor, node, node, agent_id, int(limit)),
+                (cursor, node, node, *agent_params, int(limit)),
             )
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -445,7 +466,7 @@ def pending_count(agent_id: str = '', config_file=None) -> int:
     """커서 뒤에 남은 미수신 개수. 실패/미설정이면 0.
 
     [제약] fetch_new와 조건식이 같아야 한다 — 어긋나면 '안 읽음 3'인데 조회하면 0건인
-      상태가 된다. 조건을 고칠 때 양쪽을 함께 고친다.
+      상태가 된다. 그래서 수신자 조건은 _to_agent_clause 하나에서만 만든다.
     """
     conn = get_central_conn(config_file)
     if conn is None:
@@ -453,6 +474,7 @@ def pending_count(agent_id: str = '', config_file=None) -> int:
     try:
         from src.node_identity import get_node_id
         node = get_node_id(config_file)
+        agent_sql, agent_params = _to_agent_clause(agent_id)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM agent_messages"
@@ -460,8 +482,8 @@ def pending_count(agent_id: str = '', config_file=None) -> int:
                 "                       WHERE node_id=%s AND agent_id=%s), 0)"
                 "   AND from_node <> %s"
                 "   AND (to_node IS NULL OR to_node = %s)"
-                "   AND (to_agent IS NULL OR to_agent = '' OR to_agent = %s)",
-                (node, agent_id, node, node, agent_id),
+                + agent_sql,
+                (node, agent_id, node, node, *agent_params),
             )
             return int(cur.fetchone()[0])
     except Exception as exc:
