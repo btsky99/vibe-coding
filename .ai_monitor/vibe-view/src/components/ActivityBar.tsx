@@ -4,6 +4,7 @@
  * 📝 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수,
  *          하이브 헬스, 사고/실행 중 상태). memo로 리렌더 최소화.
  * REVISION HISTORY:
+ * - 2026-08-09 Claude: 중앙 대화 탭 추가 (Phase 10 Task 29)
  * - 2026-07-18 Claude: 헤더 누락 보강 (코드 품질 점검 규칙 5 준수)
  */
 import { memo } from 'react';
@@ -18,6 +19,7 @@ import {
   GitBranch,
   HeartPulse,
   Package,
+  Radio,
   Search,
   Settings,
   Wifi,
@@ -166,6 +168,9 @@ const ActivityBar = memo(function ActivityBar({
 
       <button onClick={() => onTabChange('lan')} className={tabCls('lan')} title="LAN 공유">
         <Wifi className="w-5 h-5" />
+      </button>
+      <button onClick={() => onTabChange('central')} className={tabCls('central')} title="중앙 대화 (아픽스 서버)">
+        <Radio className="w-5 h-5" />
       </button>
       <button onClick={() => onTabChange('tools')} className={tabCls('tools')} title="개발 도구">
         <Package className="w-5 h-5" />

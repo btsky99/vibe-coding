@@ -55,6 +55,7 @@ const StatusBoard = lazy(() => import('./components/StatusBoard'));
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import TasksPanel from './components/panels/TasksPanel';
 import LanPanel from './components/panels/LanPanel';
+import CentralPanel from './components/panels/CentralPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
@@ -573,6 +574,7 @@ function App() {
     git: 'Git 감시',
     heal: '자가치유 계측',
     lan: 'LAN 공유',
+    central: '중앙 대화',
     daemons: '백그라운드 데몬',
   }[activeTab] ?? activeTab;
 
@@ -810,6 +812,9 @@ function App() {
             ) : activeTab === 'lan' ? (
               /* LAN 브리지 패널 — 자동발견·페어링·파일전송 (Phase 1) */
               <LanPanel />
+            ) : activeTab === 'central' ? (
+              /* 중앙 대화 패널 — 아픽스 서버 PG를 여러 PC가 공유 (Phase 10 Task 29) */
+              <CentralPanel />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.

@@ -7,6 +7,8 @@ DESCRIPTION: 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 2
              LISTEN을 못 세우면 주기 폴링으로 강등해 기능을 잃지 않는다.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: Task 31 — purge_old 주기 배선. 보존 정책이 코드에만 있고 아무도
+                     부르지 않아 사실상 무기한 보관이던 구멍을 이 루프에 얹어 막음.
 - 2026-08-09 Claude: 신규. Task 27 — 폴링 지연/부하 문제를 NOTIFY로 해소하되,
                      '신호만 받고 조회는 소비자가' 구조로 메시지 유실 경로를 차단.
 """
@@ -29,6 +31,11 @@ _DEGRADED_POLL_SEC = 60.0
 
 # 커넥션 재수립 백오프 상한. 서버가 꺼져 있는 것은 정상 상태이므로 조용히 물러난다.
 _BACKOFF_MAX_SEC = 120.0
+
+# 보존 정리 주기(Task 31). [WHY 24시간인가] 삭제 대상은 30일 경과분이라 하루 늦어도
+#   무해하고, 1코어 서버에 DELETE를 자주 물릴 이유가 없다.
+_PURGE_INTERVAL_SEC = 24 * 3600.0
+_last_purge_at = 0.0
 
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
@@ -116,6 +123,35 @@ def _relevant(payload: str, node: str) -> bool:
     return payload == '' or payload == node
 
 
+def _maybe_purge() -> None:
+    """하루 한 번 보존 기간 지난 중앙 메시지를 지운다 — Task 31.
+
+    [🔴 왜 여기인가] purge_old는 Task 25에 구현돼 있었지만 호출자가 없어 '30일 보존'이
+      문서상의 약속일 뿐이었다. 별도 데몬을 세우지 않은 이유는 이 루프가 이미 최소
+      _SELECT_CAP_SEC 주기로 깨어나고, **LISTEN이 살아 있는 경로에서만** 호출되므로
+      '연결 확인'을 공짜로 얻기 때문이다. 스레드 하나를 아끼는 것보다, 터널이 죽은 동안
+      원격 DELETE를 시도하지 않는다는 보장이 크다.
+    [제약] 호출 지점은 커넥션이 성립한 뒤여야 한다. 강등(degraded) 경로에서 부르면
+      매 폴링 틱마다 연결 재시도 비용을 문다.
+    [불변식] 여러 노드가 같은 중앙 DB에 붙어 각자 이 정리를 돈다 — DELETE는 멱등이라
+      중복 실행은 무해하다. '누가 청소 담당인가'를 정하는 조율 장치를 두지 않는 이유다.
+    [제약] 실패해도 다음 주기까지 재시도하지 않는다(시각을 미리 찍는다). 보존 정리는
+      늦어도 되는 작업이고, 실패를 즉시 되풀이하면 죽은 서버에 매 틱 DELETE를 던진다.
+    """
+    global _last_purge_at
+    now = time.time()
+    if now - _last_purge_at < _PURGE_INTERVAL_SEC:
+        return
+    _last_purge_at = now
+    try:
+        from src.pg_central import purge_old
+        removed = purge_old()
+        if removed:
+            print(f'[central] 보존 정리 — 오래된 메시지 {removed}건 삭제')
+    except Exception as exc:
+        _mark(error=f'purge: {str(exc)[:180]}')
+
+
 def _loop(node: str, stop: threading.Event) -> None:
     import select
 
@@ -138,6 +174,7 @@ def _loop(node: str, stop: threading.Event) -> None:
             _mark(pending=True)
 
         try:
+            _maybe_purge()          # 연결이 성립한 경로에서만 (Task 31)
             select.select([conn], [], [], _SELECT_CAP_SEC)
             conn.poll()
             hit = False

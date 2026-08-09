@@ -275,10 +275,10 @@ VPS)의 상태를 한 화면에서 본다.
 ### 남은 것 (백엔드 완료 후)
 
 ```
-[ ] Task 29: 프론트 대화 UI — /api/central/{status,messages,poll,send} 소비
+[x] Task 29: 프론트 대화 UI — /api/central/{status,messages,poll,send} 소비
               status의 enabled/connected 를 분리 표시(회색 하나로 합치지 말 것)
 [x] Task 30: 2대 실왕복 — 이 PC(노드 A) ↔ VPS(노드 B) 완료. 아래 검증 범위 참조
-[ ] Task 31: purge_old 주기 실행 배선 — 30일 보존이 코드에만 있고 아무도 부르지 않는다
+[x] Task 31: purge_old 주기 실행 배선 — 30일 보존이 코드에만 있고 아무도 부르지 않는다
 [ ] Task 32: 신규 노드 온보딩 절차 — 키 발급→permitopen 등록→config 주입을 스크립트 1개로
               (지금은 수작업. 다른 PC를 붙이려면 이게 먼저다)
 ```
