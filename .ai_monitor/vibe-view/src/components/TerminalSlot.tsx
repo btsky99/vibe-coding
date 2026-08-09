@@ -1074,7 +1074,7 @@ export default function TerminalSlot({
       </div>
       {/* [WHY 슬롯마다 두는가] 지시하는 창(왼쪽)과 애들끼리 오가는 흐름(오른쪽)을 동시에
           봐야 감시가 된다. 상태는 App의 단일 버스라 슬롯이 늘어도 폴링은 그대로 1개다. */}
-      {centralBus && <SideBus bus={centralBus} />}
+      {centralBus && <SideBus bus={centralBus} fromAgent={`claude:${terminalId}`} />}
       </div>
 
       {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}

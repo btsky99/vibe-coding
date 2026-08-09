@@ -162,7 +162,64 @@ def send(handler, parsed_path=None) -> None:
         _json_response(handler, {'ok': False, 'id': None,
                                  'error': '중앙 미설정 또는 발신 실패'})
         return
-    _json_response(handler, {'ok': True, 'id': mid})
+
+    # 같은 노드의 슬롯을 지정한 말은 그 슬롯 CLI에 직접 꽂는다 — 화면에만 뜨면 상대가
+    # 읽지 못해 대화가 한쪽 방향으로 끝난다. 원격 발신은 여기에 오지 않는다(아래 참조).
+    delivered = _deliver_if_local(str(body.get('to_node') or ''),
+                                  str(body.get('to_agent') or ''),
+                                  str(body.get('from_agent') or 'claude'), content)
+    _json_response(handler, {'ok': True, 'id': mid, 'delivered': delivered})
+
+
+def _deliver_if_local(to_node: str, to_agent: str, from_agent: str, content: str) -> str:
+    """수신 대상이 이 노드의 슬롯이면 PTY에 주입하고 결과 사유를 돌려준다.
+
+    [🔴 이 함수가 로컬만 다루는 것이 보안 경계다] 주입은 bypass 권한 CLI에 대한 사실상의
+      명령 실행이다. 원격 노드가 보낸 메시지는 poll 경로로 들어오고 그 경로는 주입을
+      부르지 않는다 — 이 모듈 헤더의 '원격 실행 금지'가 지켜지는 지점이 여기 하나뿐이므로
+      여기에 원격 분기를 추가하지 말 것.
+    [제약] 주입 실패는 발신 실패가 아니다. 사유만 실어 보내고 200을 유지한다.
+    """
+    from src import central_inject
+    from src.node_identity import get_node_id
+    from api import pty_api
+
+    if not to_agent:
+        return 'broadcast'
+    try:
+        me = get_node_id()
+    except Exception:
+        return 'no_node_id'
+    if to_node and to_node != me:
+        return 'remote'          # 원격 대상 — 주입 없음(설계 고정)
+
+    seq = _self_seq()
+    ok, why = central_inject.deliver_local(
+        to_agent, from_agent, content, pty_api.get_pty_rest_url(),
+        from_addr=_addr(seq, from_agent), to_addr=_addr(seq, to_agent))
+    return 'ok' if ok else why
+
+
+def _self_seq() -> int:
+    """이 노드의 명부 번호. 실패하면 0 — 주소 표기만 흐려지고 주입은 진행한다."""
+    from src import pg_central
+    try:
+        me = __import__('src.node_identity', fromlist=['get_node_id']).get_node_id()
+        for ref in pg_central.list_node_refs():
+            if ref.get('node_id') == me:
+                return int(ref.get('node_seq') or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _addr(seq: int, agent_id: str) -> str:
+    """'claude:T2' + 노드번호 1 → '1-2'. 슬롯을 못 읽으면 에이전트 문자열 그대로."""
+    from src.central_inject import _slot_no
+    slot = _slot_no(agent_id)
+    if not slot:
+        return str(agent_id or '?')
+    return f'{seq}-{slot}' if seq else f'T{slot}'
 
 
 def ack(handler, parsed_path=None) -> None:

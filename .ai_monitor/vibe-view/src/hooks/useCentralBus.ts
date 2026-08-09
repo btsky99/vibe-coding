@@ -114,7 +114,8 @@ export interface CentralBus {
   unread: number;
   hasMore: boolean;
   loadingOlder: boolean;
-  send: (content: string, to?: { to_node?: string; to_agent?: string }) => Promise<{ ok: boolean; error?: string }>;
+  send: (content: string, to?: { to_node?: string; to_agent?: string },
+         fromAgent?: string) => Promise<{ ok: boolean; error?: string }>;
   loadOlder: () => Promise<number>;
   markRead: () => void;
   /** 'a3f9…/claude:T1' 같은 원본 → '아픽스 3-1' (라벨은 호출부가 붙인다) */
@@ -239,7 +240,8 @@ export function useCentralBus(): CentralBus {
     return {};
   }, [nodes]);
 
-  const send = useCallback(async (content: string, to?: { to_node?: string; to_agent?: string }) => {
+  const send = useCallback(async (content: string, to?: { to_node?: string; to_agent?: string },
+                                  fromAgent?: string) => {
     const body = content.trim();
     if (!body) return { ok: false, error: '빈 메시지' };
     // 호출부가 대상을 명시하지 않았을 때만 멘션을 해석한다.
@@ -247,7 +249,11 @@ export function useCentralBus(): CentralBus {
     const r = await fetch(`${API_BASE}/api/central/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: body, ...(to || {}) }),   // to 생략 = 브로드캐스트
+      // [🔴 from_agent를 빼면 답장 주소가 만들어지지 않는다] 서버 기본값은 슬롯 없는
+      //   'claude'라, 받는 쪽에 '1-?'로 찍혀 누구에게 답해야 할지가 사라진다. 발신 슬롯을
+      //   아는 곳은 호출부(SideBus)뿐이므로 여기서 그대로 실어 보낸다.
+      body: JSON.stringify({ content: body, ...(to || {}),
+                             ...(fromAgent ? { from_agent: fromAgent } : {}) }),
     }).then(res => res.json()).catch(() => ({ ok: false, error: '요청 실패' }));
     // 내 발신분은 poll이 걸러내므로(자기 노드 제외) 직접 다시 읽어야 화면에 남는다.
     if (r.ok) loadHistory();

@@ -29,7 +29,13 @@ const DEFAULT_W = 300;
 /** 이 픽셀 이내로 바닥에 붙어 있을 때만 새 메시지를 따라간다. */
 const STICK_PX = 40;
 
-export default function SideBus({ bus }: { bus: CentralBus }) {
+/**
+ * fromAgent: 이 창이 붙어 있는 슬롯의 에이전트 주소('claude:T2').
+ * [🔴 없으면 서버가 슬롯 없는 'claude'로 기록한다] 그러면 받는 쪽에 발신자가 '1-?'로
+ *   찍혀 답장 주소를 만들 수 없다 — 양방향 대화가 한쪽 방향으로 끝난다. 버스는 App에
+ *   하나뿐이라 발신 슬롯을 아는 곳은 이 컴포넌트뿐이다.
+ */
+export default function SideBus({ bus, fromAgent }: { bus: CentralBus; fromAgent?: string }) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) === '1');
   const [width, setWidth] = useState(() => {
     const raw = Number(localStorage.getItem(WIDTH_KEY));
@@ -86,7 +92,7 @@ export default function SideBus({ bus }: { bus: CentralBus }) {
     const content = input.trim();
     if (!content || sending) return;
     setSending(true);
-    const r = await bus.send(content);
+    const r = await bus.send(content, undefined, fromAgent);
     setSending(false);
     if (!r.ok) { setErr(r.error || '발신 실패'); return; }
     setInput('');

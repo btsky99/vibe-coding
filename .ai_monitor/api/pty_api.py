@@ -27,6 +27,15 @@ def set_pty_rest_url(url: str) -> None:
     _node_pty_url = url
 
 
+def get_pty_rest_url() -> str:
+    """현재 Node PTY REST URL. 아직 주입 전이면 빈 문자열.
+
+    [WHY 게터인가] 슬롯 포트는 런타임에 정해져 import 시점 상수가 될 수 없다. 소비자가
+      모듈 전역을 직접 읽으면 import 시점 값(None)이 박히므로 반드시 호출 시점에 읽는다.
+    """
+    return _node_pty_url or ''
+
+
 # ── 하위 호환: 기존 getter 방식 유지 (사용하지 않지만 import 에러 방지) ──────
 def set_pty_sessions_getter(getter) -> None:
     pass
