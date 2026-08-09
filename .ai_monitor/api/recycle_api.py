@@ -155,11 +155,15 @@ class RecycleDeps:
             return (None, None)
 
     def _modified_files(self) -> list[str]:
-        """[제약] git 없는 프로젝트에서도 실패하면 안 된다 — 빈 목록으로 계속 간다."""
-        import subprocess
+        """[제약] git 없는 프로젝트에서도 실패하면 안 된다 — 빈 목록으로 계속 간다.
+
+        [🔴 2026-08-09] proc.run 필수 — 리사이클은 자동 발동(데몬)이라 subprocess.run
+          직호출이면 사용자가 아무것도 안 했는데 검은 cmd 창이 뜬다.
+        """
+        from infra import proc
         try:
-            out = subprocess.run(['git', 'status', '--porcelain'], capture_output=True,
-                                 text=True, timeout=5, cwd=self.project_root())
+            out = proc.run(['git', 'status', '--porcelain'], capture_output=True,
+                           text=True, timeout=5, cwd=self.project_root())
             if out.returncode != 0:
                 return []
             return [ln[3:].strip() for ln in out.stdout.splitlines() if ln.strip()][:40]

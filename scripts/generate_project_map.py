@@ -26,6 +26,23 @@ except Exception:
     pass
 
 
+# ── 콘솔 숨김 subprocess (규칙: 인라인 CREATE_NO_WINDOW 금지, infra/proc 이 단일 소스) ──
+# [WHY try/except] 이 스크립트는 다른 프로젝트에 복사돼 단독 실행될 수 있다(_resolve_root ②).
+#   그 환경엔 infra 패키지가 없으므로, import 실패를 기능 중단으로 만들면 맵 생성 자체가
+#   죽는다. 이식 환경에서는 같은 규약(creationflags 기본 주입)의 최소 대체를 쓴다.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / '.ai_monitor'))
+    from infra.proc import run as _proc_run
+except ImportError:
+    import subprocess as _sp
+
+    _NO_WINDOW = getattr(_sp, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
+
+    def _proc_run(cmd, **kwargs):
+        kwargs.setdefault('creationflags', _NO_WINDOW)
+        return _sp.run(cmd, **kwargs)
+
+
 # ── 프로젝트 루트 ─────────────────────────────────────────────────────────
 def _resolve_root() -> Path:
     """맵을 생성할 대상 프로젝트 루트를 결정한다.
@@ -136,11 +153,16 @@ def _header_description(path: Path) -> str:
 
 
 def _git(*args, timeout=20) -> str:
-    """git 호출 — 실패/미설치/비저장소는 빈 문자열. 맵 생성을 절대 막지 않는다."""
-    import subprocess
+    """git 호출 — 실패/미설치/비저장소는 빈 문자열. 맵 생성을 절대 막지 않는다.
+
+    [🔴 과거사고 2026-08-09] subprocess.run 을 직접 부르면 호출마다 검은 cmd 창이 뜬다.
+      CREATE_NO_WINDOW 는 부모에서 자식으로 상속되지 않으므로, 콘솔 없는 데몬이 띄워도
+      자식 git.exe 는 새 콘솔을 받는다. 이 함수는 한 번의 맵 생성에서 5회 불리고
+      데몬이 30분마다 돌리므로, 그대로 두면 창이 연달아 깜빡인다.
+    """
     try:
-        r = subprocess.run(['git', '-C', str(PROJECT_ROOT), *args], capture_output=True,
-                           text=True, encoding='utf-8', errors='replace', timeout=timeout)
+        r = _proc_run(['git', '-C', str(PROJECT_ROOT), *args], capture_output=True,
+                      text=True, encoding='utf-8', errors='replace', timeout=timeout)
         return r.stdout.strip() if r.returncode == 0 else ''
     except Exception:
         return ''

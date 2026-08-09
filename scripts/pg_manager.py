@@ -11,7 +11,6 @@ REVISION HISTORY:
 
 import os
 import sys
-import subprocess
 import time
 from pathlib import Path
 
@@ -22,6 +21,13 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 PROJECT_ROOT = Path(__file__).parent.parent
+
+# [🔴 2026-08-09] pg_ctl/psql 은 콘솔 앱이라 subprocess.run 직호출 시 검은 cmd 창이 뜬다.
+#   이 스크립트는 사람만 부르는 게 아니다 — hook_bridge/itcp/pg_base 가 PG가 죽어 있으면
+#   자동으로 `pg_manager start` 를 띄운다(훅 경로 포함). CREATE_NO_WINDOW 는 상속되지
+#   않으므로 부모가 콘솔 숨김으로 띄워도 여기서 다시 주입해야 한다.
+sys.path.insert(0, str(PROJECT_ROOT / '.ai_monitor'))
+from infra import proc  # noqa: E402 — [표준] 콘솔 숨김 래퍼, 경로 삽입 후라야 import 가능
 
 # frozen(배포) 모드: installer가 {app}\pgsql\ 에 설치한 바이너리 사용
 # 개발 모드: 소스 트리 내 .ai_monitor/bin/pgsql/ 사용
@@ -45,7 +51,7 @@ def run_pg_ctl(cmd_args):
             cmd += ["-l", str(log_file)]
         
         # encoding 명시: 윈도우 cp949 환경에서 PostgreSQL UTF-8 출력 디코딩 오류 방지
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        result = proc.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         return result.stdout.strip()
     except Exception as e:
         return f"Error: {str(e)}"
@@ -114,14 +120,14 @@ def setup_extensions():
     
     print("🧩 확장 기능 활성화 시도 중...")
     try:
-        subprocess.run([
+        proc.run([
             str(psql), "-p", str(PORT), "-U", "postgres", "-d", "postgres", "-c", sql
         ], capture_output=True, text=True, encoding="utf-8", errors="replace")
-        
+
         # PGMQ SQL 파일 실행
         mq_sql_path = PG_DIR / "share" / "extension" / "pgmq.sql"
         if mq_sql_path.exists():
-            subprocess.run([
+            proc.run([
                 str(psql), "-p", str(PORT), "-U", "postgres", "-d", "postgres", "-f", str(mq_sql_path)
             ], capture_output=True, text=True, encoding="utf-8", errors="replace")
             print("✅ PGMQ (SQL) 설치 완료")
@@ -247,7 +253,7 @@ def init_log_schema():
     
     print("📝 로그 스키마 및 실시간 트리거 초기화 중...")
     try:
-        subprocess.run([
+        proc.run([
             str(psql), "-p", str(PORT), "-U", "postgres", "-d", "postgres", "-c", schema_sql
         ], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
         print("✅ 로그 스키마 세팅 성공.")

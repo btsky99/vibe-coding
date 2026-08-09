@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +35,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / '.ai_monitor'))
 sys.path.insert(0, str(_ROOT / 'scripts'))
+
+from infra import proc  # [표준] 콘솔 숨김 래퍼 — 경로 삽입 후라야 import 가능
 
 MAX_PROJECTS = 20
 MAX_TASKS = 100          # 1회 전송 상한. 콘솔 서버가 1코어라 한 번에 밀어붙이지 않는다.
@@ -72,11 +73,18 @@ def _bootstrap_since() -> str:
 
 def _git(path: Path, *args: str, timeout: int = 8) -> str:
     """[제약] 실패를 예외가 아니라 빈 문자열로 돌려준다. git 이 없는 노드
-    (CipherTrader 학습 PC 처럼)에서도 나머지 수집은 계속돼야 한다."""
+    (CipherTrader 학습 PC 처럼)에서도 나머지 수집은 계속돼야 한다.
+
+    [🔴 과거사고 2026-08-09] 여기서 subprocess.run 을 직접 부르면 **검은 cmd 창이
+      5분마다 십수 번 깜빡인다**. 이 모듈은 작업 스케줄러('APIX Node Push')가
+      pythonw 로 5분마다 돌리는데, pythonw 자신은 콘솔이 없어도 자식 git.exe 는
+      콘솔 앱이라 Windows 가 새 콘솔을 할당한다 — CREATE_NO_WINDOW 는 상속되지 않는다.
+      게다가 프로젝트 수만큼 호출되므로 한 주기에 창이 10개 넘게 뜬다.
+      proc.run 이 그 플래그를 주입하는 유일한 지점이다."""
     try:
-        r = subprocess.run(['git', '-C', str(path), *args],
-                           capture_output=True, text=True, encoding='utf-8',
-                           errors='replace', timeout=timeout)
+        r = proc.run(['git', '-C', str(path), *args],
+                     capture_output=True, text=True, encoding='utf-8',
+                     errors='replace', timeout=timeout)
         return r.stdout if r.returncode == 0 else ''
     except Exception:                                   # noqa: BLE001
         return ''
@@ -90,8 +98,8 @@ def _git_ok(path: Path, *args: str) -> bool:
       반드시 종료 코드로 판정해야 한다 — 아래 commit_events 의 사고가 그 예다.
     """
     try:
-        r = subprocess.run(['git', '-C', str(path), *args],
-                           capture_output=True, timeout=8)
+        r = proc.run(['git', '-C', str(path), *args],
+                     capture_output=True, timeout=8)   # 콘솔 숨김 이유는 _git 참조
         return r.returncode == 0
     except Exception:                                   # noqa: BLE001
         return False

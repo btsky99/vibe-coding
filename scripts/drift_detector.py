@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(PROJECT_ROOT / '.ai_monitor'))
+from infra import proc  # noqa: E402 — [표준] 콘솔 숨김 래퍼, 경로 삽입 후라야 import 가능
 PLAN_FILE = PROJECT_ROOT / "ai_monitor_plan.md"
 
 TASK_RE = re.compile(r"^\[(?P<done>[ xX])\]\s*Task\s*(?P<number>\d+):\s*(?P<title>.+?)\s*$")
@@ -106,8 +108,12 @@ def get_open_tasks() -> list[PlanTask]:
 
 
 def get_changed_files() -> list[str]:
+    # [🔴 과거사고 2026-08-09] subprocess.run 직호출 시 검은 cmd 창이 뜬다.
+    #   이 함수는 generate_hivemind_doc 이 import 해 쓰고, 그 스크립트를 문서 생성
+    #   데몬이 30분마다 돌린다 — 창 깜빡임이 주기적으로 재발하는 경로였다.
+    #   CREATE_NO_WINDOW 는 자식에게 상속되지 않으므로 호출 지점마다 필요하다.
     try:
-        result = subprocess.run(
+        result = proc.run(
             ["git", "status", "--porcelain=v1"],
             cwd=str(PROJECT_ROOT),
             capture_output=True,

@@ -430,8 +430,10 @@ def _list_project_files(base: Path) -> list[str]:
     [폴백] git 미설치/비-git 디렉토리 → rglob + _is_noise_file(벤더/빌드 배제).
     """
     try:
-        import subprocess
-        out = subprocess.run(
+        # [🔴 과거사고 2026-08-09] subprocess.run 직호출은 검은 cmd 창을 띄운다.
+        #   이 함수는 커밋 감시 데몬(60초 폴링)이 커밋마다 부르는 경로다.
+        from infra import proc
+        out = proc.run(
             ['git', 'ls-files'], cwd=str(base), capture_output=True,
             text=True, encoding='utf-8', errors='replace', timeout=15,
         )

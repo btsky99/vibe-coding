@@ -18,6 +18,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
 # ── 샌드박스 권한 프로파일 ───────────────────────────────────────────────────
 # [WHY] 파일로 배포하지 않고 상수→런타임 materialize — .ai_monitor/config/ 신규 디렉토리를
 # 만들면 spec datas + CI --add-data 양쪽 갱신이 필요(v3.7.215~218 사고). data_dir은 이미
@@ -207,10 +209,14 @@ class Workspace:
 
 
 def _git(cwd: Path, *args: str) -> tuple[bool, str]:
-    """git 호출 — heartbeat의 _git과 동일 계약(성공여부, 출력). 60초 상한."""
+    """git 호출 — heartbeat의 _git과 동일 계약(성공여부, 출력). 60초 상한.
+
+    [🔴 2026-08-09] proc.run 필수 — subprocess.run 직호출은 호출마다 검은 cmd 창을 띄운다
+      (CREATE_NO_WINDOW 는 자식에게 상속되지 않는다). 원격 실행은 한 번에 여러 번 부른다.
+    """
     try:
-        r = subprocess.run(['git', '-C', str(cwd), *args], capture_output=True,
-                           text=True, encoding='utf-8', errors='replace', timeout=60)
+        r = proc.run(['git', '-C', str(cwd), *args], capture_output=True,
+                     text=True, encoding='utf-8', errors='replace', timeout=60)
         return r.returncode == 0, (r.stdout or '') + (r.stderr or '')
     except (OSError, subprocess.SubprocessError) as e:
         return False, str(e)

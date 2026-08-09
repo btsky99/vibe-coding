@@ -31,7 +31,9 @@ def _auto_cli_version() -> str:
     global _AUTO_CLI_VER
     if _AUTO_CLI_VER is None:
         try:
-            r = subprocess.run(['claude', '--version'], capture_output=True, text=True, timeout=5)
+            # [2026-08-09] proc.run — 직호출이면 이 1회 조회에도 검은 cmd 창이 번쩍인다.
+            #   (모듈 하단 import 지만 함수 실행 시점엔 이미 바인딩돼 있다)
+            r = proc.run(['claude', '--version'], capture_output=True, text=True, timeout=5)
             _AUTO_CLI_VER = (r.stdout or '').strip() or 'claude CLI'
         except Exception:
             _AUTO_CLI_VER = 'claude CLI'
