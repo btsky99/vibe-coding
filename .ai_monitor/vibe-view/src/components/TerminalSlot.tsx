@@ -123,10 +123,12 @@ interface TerminalSlotProps {
   // [🔴 App이 소유한 단일 중앙 대화 버스] 슬롯이 직접 useCentralBus를 부르면 커서가 갈라져
   //   한 슬롯이 가져간 메시지를 나머지가 못 본다. 반드시 props로만 받는다.
   centralBus?: CentralBus;
+  // 헤더에서 이름을 바꿨을 때. 미전달이면 편집 UI가 뜨지 않는다(오피스 등 재사용처 보호).
+  onRenameSlot?: (name: string) => void;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, centralBus
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, centralBus, onRenameSlot
 }: TerminalSlotProps) {
   // [슬롯별 프로젝트] cwd/project_id 산출의 단일 기준. 미지정이면 전역 currentPath로 폴백.
   const effectivePath = slotProject || currentPath;
@@ -200,8 +202,12 @@ export default function TerminalSlot({
 
   // 이 슬롯의 터미널 ID — cli_agent.py의 _terminals 키와 일치 (T1, T2, ...)
   const terminalId = `T${slotId + 1}`;
-  // 오피스 프로필 사용자 이름 (없으면 T1 등 기본값)
-  const displayName = slotName || terminalId;
+  // [주소] 중앙 명부에 이 PC 번호가 있으면 '아픽스 1-1' 형식, 없으면 기존처럼 T1.
+  //   번호는 표시용이라 미설정(0)이어도 화면이 깨지지 않고 그냥 옛 표기로 남는다.
+  const nodeSeq = centralBus?.selfSeq || 0;
+  const slotAddress = nodeSeq ? `아픽스 ${nodeSeq}-${slotId + 1}` : terminalId;
+  // 사용자가 정한 이름(config slot_names) — 있으면 주소와 함께 보인다.
+  const displayName = slotName ? `${slotAddress} · ${slotName}` : slotAddress;
 
   // 이 슬롯의 에이전트 타입 (claude / antigravity / codex)
   // [버그수정 2026-03-08] Codex가 'claude'로 분류되어 T1 데이터를 T3에 표시하는 문제 수정
@@ -762,6 +768,8 @@ export default function TerminalSlot({
       {/* 터미널 헤더 — terminal/TerminalSlotHeader.tsx로 분리 (2026-08-09, Phase 11 Task 38) */}
       <TerminalSlotHeader
         displayName={displayName}
+        slotName={slotName}
+        onRenameSlot={onRenameSlot}
         isTerminalMode={isTerminalMode}
         activeAgent={activeAgent}
         agentType={agentType}

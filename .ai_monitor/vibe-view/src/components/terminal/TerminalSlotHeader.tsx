@@ -14,10 +14,15 @@
  * - 2026-08-09 Claude: TerminalSlot.tsx에서 순수 이동(Phase 11 Task 38). 동작 무변경.
  * ------------------------------------------------------------------------
  */
+import { useEffect, useRef, useState } from 'react';
 import { Terminal, Zap, ClipboardList, MessageSquare, X } from 'lucide-react';
 
 interface Props {
   displayName: string;
+  /** 현재 저장된 이름(주소 제외). 편집 입력의 초기값. */
+  slotName?: string;
+  /** 미전달이면 편집 UI를 띄우지 않는다 — 오피스 등 이름을 소유하지 않는 재사용처 보호. */
+  onRenameSlot?: (name: string) => void;
   isTerminalMode: boolean;
   activeAgent: string;
   agentType: string;
@@ -35,17 +40,55 @@ interface Props {
 }
 
 export default function TerminalSlotHeader({
-  displayName, isTerminalMode, activeAgent, agentType, gitBranch, lockedFileByAgent,
-  myPendingTasks, recentAgentMsgs, termData, effectivePath, isActiveProject,
+  displayName, slotName, onRenameSlot, isTerminalMode, activeAgent, agentType, gitBranch,
+  lockedFileByAgent, myPendingTasks, recentAgentMsgs, termData, effectivePath, isActiveProject,
   onActivateProject, onPickProject, onClose,
 }: Props) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  const beginEdit = () => {
+    if (!onRenameSlot) return;
+    setDraft(slotName || '');
+    setEditing(true);
+  };
+  const commit = () => {
+    setEditing(false);
+    // [WHY 빈 값도 넘기나] 이름을 지우는 것도 의도된 조작이다 — 호출부가 빈 값을 받으면
+    //   키를 삭제해 주소만 남는다. 여기서 막으면 한 번 붙인 이름을 못 뗀다.
+    onRenameSlot?.(draft);
+  };
+
   return (
     <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
       <div className="flex items-center gap-2 max-w-[60%] overflow-hidden">
         <Terminal className="w-3 h-3 text-accent shrink-0" />
-        <span className="text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider truncate">
-          {isTerminalMode ? `${displayName} - ${activeAgent}` : displayName}
-        </span>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }   // 되돌리기
+            }}
+            placeholder="이름 (예: 프론트)"
+            maxLength={20}
+            className="w-28 bg-black/40 border border-primary/40 rounded px-1 py-0.5 text-[10px] text-white outline-none"
+          />
+        ) : (
+          <span
+            onDoubleClick={beginEdit}
+            title={onRenameSlot ? '더블클릭해서 이름 변경' : undefined}
+            className={`text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider truncate ${onRenameSlot ? 'cursor-text hover:text-white' : ''}`}
+          >
+            {isTerminalMode ? `${displayName} - ${activeAgent}` : displayName}
+          </span>
+        )}
         {/* Git 브랜치 배지 — cmux 스타일 수직 탭 컨텍스트 정보 */}
         {gitBranch && (
           <span className="text-[8px] font-mono text-accent/70 bg-accent/10 border border-accent/20 px-1.5 py-0.5 rounded shrink-0">

@@ -128,6 +128,28 @@ function App() {
       return _parseSlotMap(saved ? JSON.parse(saved) : {});
     } catch { return {}; }
   });
+
+  // [🔴 두 가지가 동시에 어긋나기 쉬운 지점 — 변환은 여기서만 한다]
+  //   ① 키 형식: api/message_api.py가 PTY 세션 id('T1@프로젝트')의 앞부분으로
+  //      config.slot_names를 조회한다. 숫자 키로 저장하면 이름 라우팅이 조용히 실패한다
+  //      (@프론트로 보낸 메시지가 아무에게도 안 감 — 에러도 안 난다).
+  //   ② 오프셋: 화면의 slotId는 0-based인데 터미널 id는 `T${slotId+1}`이다(TerminalSlot).
+  //      +1을 빠뜨리면 T1 이름이 T2로 저장돼 엉뚱한 슬롯이 불린다.
+  const _namesToConfig = (m: Record<number, string>): Record<string, string> =>
+    Object.fromEntries(
+      Object.entries(m).filter(([, v]) => v).map(([k, v]) => [`T${Number(k) + 1}`, v]),
+    );
+  const _namesFromConfig = (raw: unknown): Record<number, string> => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const clean: Record<number, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      const n = Number(String(k).replace(/^T/i, '')) - 1;
+      if (typeof v === 'string' && v && Number.isFinite(n) && n >= 0) clean[n] = v;
+    }
+    return clean;
+  };
+  const [slotNames, setSlotNames] = useState<Record<number, string>>({});
+  const slotNamesLoaded = useRef(false);
   const [activeProjectSlot, setActiveProjectSlot] = useState<number | null>(null);
   // [권위 소스 로드] 마운트 시 config.json.slot_projects를 읽어 localStorage 캐시를 덮어쓴다.
   //   loaded 가드로 로드 전 초기 빈 값이 백엔드에 역기록돼 유실되는 것을 막는다(save 이펙트에서 참조).
@@ -147,7 +169,9 @@ function App() {
         .then(cfg => {
           if (cancelled) return;
           if (cfg && cfg.slot_projects) setSlotProjects(_parseSlotMap(cfg.slot_projects));
+          if (cfg && cfg.slot_names) setSlotNames(_namesFromConfig(cfg.slot_names));
           slotProjectsLoaded.current = true; // 서버 도달 성공 — 이후 변경만 영속 허용
+          slotNamesLoaded.current = true;
         })
         .catch(() => {
           if (cancelled) return;
@@ -173,6 +197,27 @@ function App() {
   }, [slotProjects]);
   const setSlotProject = (slotId: number, path: string) => {
     setSlotProjects(prev => ({ ...prev, [slotId]: path }));
+  };
+
+  // [불변식] slot_projects와 같은 이유로 로드 완료 전에는 쓰지 않는다 — 마운트 초기 빈 값이
+  //   저장된 이름을 지우는 사고 방지.
+  useEffect(() => {
+    if (!slotNamesLoaded.current) return;
+    fetch(`${API_BASE}/api/config/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot_names: _namesToConfig(slotNames) }),
+    }).catch(() => { /* 영속 실패는 다음 변경에서 재시도 */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotNames]);
+
+  const setSlotName = (slotId: number, name: string) => {
+    setSlotNames(prev => {
+      const next = { ...prev };
+      const clean = name.trim().slice(0, 20);   // 헤더 폭을 밀어내지 않는 선
+      if (clean) next[slotId] = clean; else delete next[slotId];
+      return next;
+    });
   };
   // [불변식] 활성화 = 그 슬롯 프로젝트를 currentPath로 승격 → 기존 패널들이 currentPath를 읽어
   //   자동 재조회. 미지정 슬롯이면 currentPath 유지(전역 프로젝트 그대로).
@@ -995,6 +1040,8 @@ function App() {
                   orchestratorData={skillChain}
                   hiveActivity={hiveActivity}
                   centralBus={centralBus}
+                  slotName={slotNames[slotId]}
+                  onRenameSlot={(name: string) => setSlotName(slotId, name)}
                 />
               ))}
             </div>

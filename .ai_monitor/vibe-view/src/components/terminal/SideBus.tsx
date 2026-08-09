@@ -137,6 +137,19 @@ export default function SideBus({ bus }: { bus: CentralBus }) {
           </button>
         </div>
 
+        {/* [🔴 지정된 3대에서는 절대 뜨지 않는다] 번호는 호스트명 매핑으로 자동 배정된다
+            (src/node_identity.py _DEFAULT_SEQ). 이 안내는 매핑에 없는 **네 번째 PC**가
+            붙었을 때만 보이는 폴백이다. 중앙을 안 쓰면(enabled=false) 아예 안 보인다. */}
+        {enabled && bus.selfSeq === 0 && (
+          <div className="px-2 py-1.5 border-b border-yellow-500/20 bg-yellow-500/5 text-[10px] text-yellow-200/80 leading-relaxed shrink-0">
+            이 PC의 번호가 정해지지 않았습니다 — 발신자가 uuid로 표시됩니다.<br />
+            <span className="text-yellow-200/50">
+              config.json 의 <code>node_seq</code> 에 번호를 넣거나, 알려진 PC라면
+              호스트명을 <code>_DEFAULT_SEQ</code> 에 추가하세요.
+            </span>
+          </div>
+        )}
+
         {!enabled ? (
           <div className="flex-1 flex items-center justify-center p-4 text-center text-[10px] text-white/35 leading-relaxed">
             중앙 대화가 설정되지 않았습니다.<br />

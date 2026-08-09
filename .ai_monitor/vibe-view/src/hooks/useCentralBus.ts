@@ -197,9 +197,42 @@ export function useCentralBus(): CentralBus {
     return () => clearInterval(t);
   }, []);
 
+  /**
+   * 본문 맨 앞의 @토큰을 수신 대상으로 바꾼다. '@1-1'(주소)과 '@프론트'(이름) 둘 다 받는다.
+   *
+   * [🔴 못 찾으면 브로드캐스트로 보낸다 — 막지 않는다] 오타 하나로 메시지가 사라지는 편이
+   *   엉뚱한 데로 가는 것보다 나쁘다. central_api.send가 to_node를 비우면 브로드캐스트로
+   *   두는 것과 같은 판단이다(그 함수 주석 참조).
+   * [제약] @토큰은 본문에서 지우지 않는다 — 받는 쪽 화면에 '누구에게 한 말인지'가 남아야
+   *   여러 노드가 섞인 버스에서 맥락을 잃지 않는다.
+   */
+  const resolveMention = useCallback((text: string): { to_node?: string; to_agent?: string } => {
+    const m = /^@(\S+)/.exec(text.trim());
+    if (!m) return {};
+    const token = m[1].replace(/[,:]$/, '');
+
+    // ① 주소 형식 '1-1' / '아픽스 1-1'의 숫자쌍
+    const addr = /^(?:아픽스)?(\d+)-(\d+)$/.exec(token);
+    if (addr) {
+      const seq = Number(addr[1]);
+      const slot = Number(addr[2]);
+      const ref = nodes.find(n => n.node_seq === seq);
+      if (ref) return { to_node: ref.node_id, to_agent: `claude:T${slot}` };
+      return {};
+    }
+
+    // ② 이름 — config의 slot_names는 이 PC 것만 알 수 있으므로, 노드 라벨과만 대조한다.
+    //    (다른 PC의 터미널 이름까지 풀려면 명부에 이름을 실어야 한다 — 지금 범위 밖)
+    const byLabel = nodes.find(n => n.node_label && n.node_label.toLowerCase() === token.toLowerCase());
+    if (byLabel) return { to_node: byLabel.node_id };
+    return {};
+  }, [nodes]);
+
   const send = useCallback(async (content: string, to?: { to_node?: string; to_agent?: string }) => {
     const body = content.trim();
     if (!body) return { ok: false, error: '빈 메시지' };
+    // 호출부가 대상을 명시하지 않았을 때만 멘션을 해석한다.
+    if (!to || (!to.to_node && !to.to_agent)) to = resolveMention(body);
     const r = await fetch(`${API_BASE}/api/central/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -208,7 +241,7 @@ export function useCentralBus(): CentralBus {
     // 내 발신분은 poll이 걸러내므로(자기 노드 제외) 직접 다시 읽어야 화면에 남는다.
     if (r.ok) loadHistory();
     return r;
-  }, [loadHistory]);
+  }, [loadHistory, resolveMention]);
 
   const loadOlder = useCallback(async () => {
     if (loadingOlder || !hasMore) return 0;
