@@ -251,20 +251,39 @@ VPS)의 상태를 한 화면에서 본다.
 ## Phase 10 — 중앙 대화 PG (별건 · 콘솔 이후)
 
 관제와 목적이 다르다(실시간 양방향). 승인된 설계는 `project_apix_central_db` 에 있고
-아래 태스크 목록은 그 계획을 **그대로 보존**한 것이다. 콘솔이 안정된 뒤 착수한다.
+아래 태스크 목록은 그 계획을 **그대로 보존**한 것이다.
+
+**상태: Task 19~28 백엔드 전부 완료 (2026-08-09) — 커밋 `cfb062f` · `19bb67f`**
 
 ```
-[ ] Task 19: vps-knowledge-db.sh — hive_knowledge DB + 최소권한 계정 + permitopen 키
-[ ] Task 20: node_identity.py — node_id(uuid4) + node_ref('{node}/claude:T1')
-[ ] Task 21: pg_central.py — 미설정 시 None 반환(예외 금지), 스키마는 연결 후에만 생성
-[ ] Task 22: 무동작 회귀 — 설정 없는 사용자에게 변화 0 (이게 통과해야 다음)
-[ ] Task 23: tunnel_daemon.py — find_free_port + 지수 백오프, PC당 1개 공유
-[ ] Task 24: 좀비 터널 정리 — '자기 것만 죽인다' 패턴 (v3.7.244 전례)
-[ ] Task 25: 메시지 송수신 + 커서 — append-only, created_at 은 서버 now()
-[ ] Task 26: central_api.py — 대화만. 원격 실행은 절대 넣지 않는다
-[ ] Task 27: LISTEN 실시간 수신 — office_api 패턴(autocommit), 끊기면 폴링 강등
-[ ] Task 28: E2E — 노드 A T1 ↔ 노드 B T3 왕복 + 서버 없이 앱 부팅 정상
+[x] Task 19: vps-knowledge-db.sh — hive_knowledge DB + 최소권한 계정 + permitopen 키
+[x] Task 20: node_identity.py — node_id(uuid4) + node_ref('{node}/claude:T1')
+[x] Task 21: pg_central.py — 미설정 시 None 반환(예외 금지), 스키마는 연결 후에만 생성
+[x] Task 22: 무동작 회귀 — 설정 없는 사용자에게 변화 0 (이게 통과해야 다음)
+[x] Task 23: tunnel_daemon.py — find_free_port + 지수 백오프, PC당 1개 공유
+[x] Task 24: 좀비 터널 정리 — '자기 것만 죽인다' 패턴 (v3.7.244 전례)
+[x] Task 25: 메시지 송수신 + 커서 — append-only, created_at 은 서버 now()
+[x] Task 26: central_api.py — 대화만. 원격 실행은 절대 넣지 않는다
+[x] Task 27: LISTEN 실시간 수신 — office_api 패턴(autocommit), 끊기면 폴링 강등
+[x] Task 28: E2E — 노드 A T1 ↔ 노드 B T3 왕복 + 서버 없이 앱 부팅 정상
 ```
+
+**실측 검증(2026-08-09)**: 터널 127.0.0.1:5436 → VPS 5433 연결 성공 · 에코 차단과
+커서 전진 왕복 통과 · INSERT 후 NOTIFY 도달 **0.25초** · HTTP 5종 실호출 정상 ·
+전체 테스트 407 통과.
+
+### 남은 것 (백엔드 완료 후)
+
+```
+[ ] Task 29: 프론트 대화 UI — /api/central/{status,messages,poll,send} 소비
+              status의 enabled/connected 를 분리 표시(회색 하나로 합치지 말 것)
+[ ] Task 30: 2대 실왕복 — 이 PC ↔ 다른 노드. 지금까지는 한 PC에서 상대를 흉내낸 것뿐
+[ ] Task 31: purge_old 주기 실행 배선 — 30일 보존이 코드에만 있고 아무도 부르지 않는다
+```
+
+🔴 **부채**: `tests/test_tunnel_daemon.py`(미추적)는 08-08에 쓰인 옛 API 대상이라
+`_ssh_command` · `live_tunnel_port` 등이 지금 모듈에 없다(9 fail / 5 error).
+터널 재작성 때 같이 안 고쳤다. 현행 API로 다시 쓰거나 버릴 것.
 
 ---
 
