@@ -48,7 +48,14 @@ function sshConfigPath() {
  *   Include를 재귀 파싱하면 경로 탈출 검증까지 필요해져 이득 대비 복잡도가 크다.
  *   Include를 쓰기 시작하면 여기서 목록이 비어 보이는 것으로 드러난다.
  *
- * @returns {Array<{alias:string, aliases:string[], hostName:string, user:string}>}
+ * [WHY port/proxyJump까지 뽑는가] 아픽스 서버 경유 노드는 `HostName localhost` +
+ *   `Port 2200x` + `ProxyJump vibe-vps` 형태다. 이 세 값이 있어야 파이썬 쪽에서
+ *   "이 별칭의 역터널 포트가 서버에 살아 있는가"로 온오프라인을 판정할 수 있다.
+ *   ssh config 파싱은 이 파일이 단독 소유하므로(모듈 헤더 참조) 파이썬에서 다시
+ *   읽지 않고 여기서 함께 내보낸다.
+ *
+ * @returns {Array<{alias:string, aliases:string[], hostName:string, user:string,
+ *                  port:number, proxyJump:string}>}
  */
 function listHosts() {
   const cfg = sshConfigPath();
@@ -84,12 +91,19 @@ function listHosts() {
       const concrete = aliases.filter((a) => !a.includes('*') && !a.includes('?'));
       if (concrete.length === 0) { current = null; continue; }
       // 대표 별칭 = 첫 번째. 나머지는 같은 기기의 다른 이름이므로 카드를 늘리지 않는다.
-      current = { alias: concrete[0], aliases: concrete, hostName: '', user: '' };
+      current = { alias: concrete[0], aliases: concrete, hostName: '', user: '',
+                  port: 0, proxyJump: '' };
       hosts.push(current);
     } else if (current && key === 'hostname') {
       current.hostName = value;
     } else if (current && key === 'user') {
       current.user = value;
+    } else if (current && key === 'port') {
+      // [제약] 숫자가 아니면 0으로 둔다 — 역터널 판정에서 '포트 모름'과 구분해야 한다.
+      const n = parseInt(value, 10);
+      current.port = Number.isFinite(n) ? n : 0;
+    } else if (current && key === 'proxyjump') {
+      current.proxyJump = value;
     }
   }
 

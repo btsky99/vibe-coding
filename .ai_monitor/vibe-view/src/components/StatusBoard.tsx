@@ -33,15 +33,17 @@ const NODE_POLL_MS = 15000;
 const CONSOLE_POLL_MS = 5000;
 const CLI_CACHE_KEY = 'vibe.statusboard.cliCheck';
 
+// [🔴 alive와 reachable을 한 값으로 합치지 말 것] 둘은 조치가 정반대인 별개 사실이다.
+//   alive=하트비트(살아 있나) / reachable=역터널(조종 가능한가).
+//   null은 '판정 불가'로, false(=아님)와 다르게 그려야 한다 — 이유는 nodes_api 헤더 참조.
 interface RemoteHost {
   alias: string;
   aliases: string[];
   hostName: string;
   user: string;
-  online: boolean;
-  peerKnown: boolean;
-  lastSeen: string;
-  os: string;
+  alive: boolean | null;
+  reachable: boolean | null;
+  heartbeatAge: number | null;
 }
 
 interface ConsoleItem {
@@ -83,11 +85,10 @@ const OWNER_STYLE: Record<string, { dot: string; chip: string; note: string }> =
   },
 };
 
-function relTime(iso: string): string {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '';
-  const sec = (Date.now() - t) / 1000;
+// [WHY 서버가 준 '나이(초)'를 쓰는가] 브라우저 시계가 어긋나면 절대시각 비교는 몇 시간씩
+//   틀린다. 관제 쪽도 같은 이유로 age_sec 을 서버에서 계산해 내려준다.
+function ageText(sec: number | null): string {
+  if (sec === null || sec === undefined) return '';
   if (sec < 60) return '방금';
   if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
@@ -96,9 +97,10 @@ function relTime(iso: string): string {
 
 export default function StatusBoard() {
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
-  const [tailscaleOk, setTailscaleOk] = useState(true);
-  const [tailscaleErr, setTailscaleErr] = useState('');
-  const [local, setLocal] = useState<{ hostname?: string; ips?: string[] }>({});
+  const [serverOk, setServerOk] = useState(true);
+  const [serverErr, setServerErr] = useState('');
+  const [heartbeatOk, setHeartbeatOk] = useState(true);
+  const [local, setLocal] = useState<{ hostname?: string; platform?: string }>({});
   const [sshAvailable, setSshAvailable] = useState(true);
 
   const [consoles, setConsoles] = useState<ConsoleItem[]>([]);
@@ -137,8 +139,9 @@ export default function StatusBoard() {
       if (!alive.current) return;
       setHosts(Array.isArray(d.hosts) ? d.hosts : []);
       setSshAvailable(d.sshAvailable !== false);
-      setTailscaleOk(d.tailscale?.available !== false);
-      setTailscaleErr(d.tailscale?.error || '');
+      setServerOk(d.server?.available !== false);
+      setServerErr(d.server?.error || '');
+      setHeartbeatOk(d.server?.heartbeatAvailable !== false);
       setLocal(d.local || {});
     } catch { /* 폴링 실패는 다음 회차에 복구 — 화면을 비우지 않는다 */ }
   }, []);
@@ -225,9 +228,7 @@ export default function StatusBoard() {
           <div className="text-[13px] font-black tracking-tight truncate">
             {local.hostname || '이 PC'}
           </div>
-          <div className="text-[10px] text-[#777] truncate">
-            {(local.ips || []).filter((ip) => !ip.includes(':')).join(', ') || 'Tailscale 주소 없음'}
-          </div>
+          <div className="text-[10px] text-[#777] truncate">{local.platform || ''}</div>
         </div>
         <div className="flex-1" />
         <button
@@ -255,15 +256,23 @@ export default function StatusBoard() {
           <span className="text-[10px] font-black uppercase tracking-widest text-[#888]">원격 노드</span>
           <div className="flex-1 h-px bg-white/10" />
           <span className="text-[10px] text-[#666]">
-            {hosts.filter((h) => h.online).length}/{hosts.length} 온라인
+            {hosts.filter((h) => h.alive === true).length}/{hosts.length} 살아있음
           </span>
         </div>
 
-        {!tailscaleOk && (
+        {!serverOk && (
           <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-warning/10 border border-warning/30">
             <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
             <span className="text-[10px] text-warning">
-              Tailscale 상태를 못 읽어 온오프라인 판정이 빠졌어. {tailscaleErr}
+              아픽스 서버에 못 물어봐서 판정이 빠졌어 — 노드가 죽은 게 아니야. {serverErr}
+            </span>
+          </div>
+        )}
+        {serverOk && !heartbeatOk && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-warning/10 border border-warning/30">
+            <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
+            <span className="text-[10px] text-warning">
+              서버는 붙었는데 관제 DB를 못 읽어 '살아있음' 판정만 빠졌어. 터널 표시는 유효해.
             </span>
           </div>
         )}
@@ -289,20 +298,31 @@ export default function StatusBoard() {
                 <div
                   key={h.alias}
                   className={`rounded-xl border p-3 flex flex-col gap-2 transition-colors ${
-                    h.online ? 'bg-[#252526] border-white/10' : 'bg-[#222] border-white/5 opacity-70'
+                    h.alive === false ? 'bg-[#222] border-white/5 opacity-70' : 'bg-[#252526] border-white/10'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${
-                      h.online ? 'bg-green-500' : 'bg-[#555]'
+                      h.alive === true ? 'bg-green-500' : h.alive === false ? 'bg-[#555]' : 'bg-yellow-500/50'
                     }`} />
                     <span className="text-[13px] font-black tracking-tight truncate">{h.alias}</span>
                     <span className="text-[9px] text-[#777] truncate">
                       {h.user ? `${h.user}@` : ''}{h.hostName || '—'}
                     </span>
                     <div className="flex-1" />
-                    <span className="text-[9px] text-[#666] shrink-0">
-                      {h.online ? '온라인' : (h.peerKnown ? `오프라인 ${relTime(h.lastSeen)}` : '미확인')}
+                    {/* 두 사실을 나란히 — 합치면 "터널만 죽음"과 "앱이 죽음"을 구분 못 한다 */}
+                    <span className="text-[9px] shrink-0 flex items-center gap-1.5">
+                      <span className={h.alive === true ? 'text-green-400'
+                        : h.alive === false ? 'text-[#777]' : 'text-yellow-500/70'}>
+                        {h.alive === true ? `살아있음 ${ageText(h.heartbeatAge)}`
+                          : h.alive === false ? `끊김 ${ageText(h.heartbeatAge)}` : '생존 미확인'}
+                      </span>
+                      <span className="text-[#444]">·</span>
+                      <span className={h.reachable === true ? 'text-primary'
+                        : h.reachable === false ? 'text-[#777]' : 'text-[#555]'}>
+                        {h.reachable === true ? '조종가능'
+                          : h.reachable === false ? '터널끊김' : '터널없음'}
+                      </span>
                     </span>
                   </div>
 
@@ -314,8 +334,10 @@ export default function StatusBoard() {
                     <div className="flex-1" />
                     <button
                       onClick={() => checkCli(h.alias)}
-                      disabled={busy || !h.online || !sshAvailable}
-                      title={h.online ? 'SSH로 CLI 설치 여부 확인' : '오프라인 노드는 점검할 수 없어'}
+                      // [WHY reachable 기준인가] 점검은 SSH다. 노드가 살아 있어도(하트비트 O)
+                      //   터널이 죽었으면 들어갈 수 없다 — 여기서 봐야 할 것은 생존이 아니라 통로다.
+                      disabled={busy || h.reachable === false || !sshAvailable}
+                      title={h.reachable === false ? '터널이 끊겨 들어갈 수 없어' : 'SSH로 CLI 설치 여부 확인'}
                       className="px-2 py-1 rounded-lg text-[10px] font-bold bg-[#3c3c3c] hover:bg-primary/20 hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed border border-white/5 flex items-center gap-1 transition-colors"
                     >
                       {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}

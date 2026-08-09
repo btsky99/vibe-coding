@@ -1,7 +1,7 @@
 """
 FILE: api/nodes_api.py
 DESCRIPTION: 상태판(독립 창 + tui.py)의 데이터 공급 라우트 4종.
-  GET  /api/nodes/remote        — ssh config 별칭 + tailnet 온오프라인 병합
+  GET  /api/nodes/remote        — ssh config 별칭 + 아픽스 서버 조회(생존/접속) 병합
   GET  /api/nodes/consoles      — 화면에 떠 있는 콘솔 창 목록 + 소속 판정
   POST /api/nodes/console/kill  — 콘솔 창 안전 종료(3중 재검증)
   POST /api/nodes/check-cli     — 원격 노드의 claude/codex 설치 점검(온디맨드)
@@ -10,7 +10,12 @@ DESCRIPTION: 상태판(독립 창 + tui.py)의 데이터 공급 라우트 4종.
   ~/.ssh/config 파싱은 pty-server의 remote_hosts.js가 단독 소유한다(별칭 화이트리스트가
   원격 spawn의 보안 경계이기도 하다). 파이썬에서 재구현하면 두 목록이 갈리는 순간
   "UI엔 보이는데 실행은 거부되는" 상태가 된다. → pty_api 프록시로 그 목록을 그대로 받아
-  tailscale 상태만 덧붙인다.
+  서버 조회 결과만 덧붙인다.
+
+[🔴 alive와 reachable을 합치지 말 것]
+  alive(하트비트=살아 있나)와 reachable(역터널=조종 가능한가)은 조치가 정반대인 별개
+  사실이다. 프론트 편의를 위해 여기서 하나로 뭉개면 원인 진단이 불가능해진다 —
+  이유는 infra/node_status.py 헤더 참조. 세 값(true/false/null)을 그대로 내려보낸다.
 
 [제약] check-cli는 SSH 왕복(수 초)이라 폴링 대상이 아니다. 프론트는 사용자가 버튼을
   눌렀을 때만 호출하고 결과를 자기 상태에 캐시한다(node_status 모듈 헤더 참조).
@@ -64,28 +69,26 @@ def remote(handler) -> None:
         modes = hosts_res.get('modes') or []
         ssh_available = hosts_res.get('sshAvailable', False)
 
-        ts = node_status.tailscale_status()
+        probe = node_status.server_probe()
         merged = []
         for h in hosts:
-            alias = h.get('alias') or ''
-            peer = node_status.match_peer(ts, alias, h.get('hostName') or '')
             merged.append({
                 **h,
-                'online': bool(peer and peer.get('online')),
-                'peerKnown': peer is not None,
-                'lastSeen': (peer or {}).get('last_seen') or '',
-                'os': (peer or {}).get('os') or '',
-                'tailscaleIps': (peer or {}).get('ips') or [],
+                # 세 값 그대로: True=확인됨 / False=아님 / None=판정 불가
+                'alive': node_status.is_alive(probe, h),
+                'reachable': node_status.is_reachable(probe, h),
+                'heartbeatAge': node_status.heartbeat_age(probe, h),
             })
 
         _write(handler, {
             'hosts': merged,
             'modes': modes,
             'sshAvailable': ssh_available,
-            'tailscale': {
-                'available': ts.get('available', False),
-                'error': ts.get('error', ''),
-                'self': ts.get('self') or {},
+            'server': {
+                'available': probe.get('available', False),
+                'heartbeatAvailable': probe.get('heartbeat_available', False),
+                'error': probe.get('error', ''),
+                'staleAfterSec': node_status.STALE_AFTER_SEC,
             },
             'local': node_status.local_summary(),
         })
