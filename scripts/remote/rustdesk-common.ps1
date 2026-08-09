@@ -1,22 +1,19 @@
 ﻿<#
 FILE: scripts/remote/rustdesk-common.ps1
 DESCRIPTION: RustDesk 원격제어 구축 스크립트들이 공유하는 공통 함수 모음.
-             경로 탐지 / TOML [options] 병합 기록 / tailnet 방화벽 축소 / 다운로드 헬퍼.
+             경로 탐지 / TOML [options] 병합 기록 / 인바운드 노출 제거 / 다운로드 헬퍼.
              단독 실행용이 아니라 Install-RustDeskClient.ps1, Install-RustDeskServer.ps1이 점으로 불러 쓴다.
 
 REVISION HISTORY:
-- 2026-08-07 Claude: 최초 작성 — tailnet 직결(계층1) + 셀프호스트 hbbs(계층2) 공통 기반.
+- 2026-08-07 Claude: 최초 작성 — 직결(계층1) + 셀프호스트 hbbs(계층2) 공통 기반.
+- 2026-08-09 Claude: 외부 메시 VPN 전면 폐기 — 계층1(사설망 직결) 삭제. 아픽스 서버
+                     hbbs 경유만 남기고, 인바운드 허용 규칙은 축소가 아니라 제거한다.
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# [불변식] Tailscale CGNAT 대역. 방화벽 축소의 유일한 신뢰 경계 —
-# 이 값이 틀리면 원격제어 포트가 공인망에 열린 채로 남는다. 임의 확장 금지.
-$script:TailnetV4 = '100.64.0.0/10'
-$script:TailnetV6 = 'fd7a:115c:a1e0::/48'
-
-# [WHY 저장소 밖인가] 비밀번호·개인키가 git에 들어가면 tailnet 안이라도 화면 조작 권한이 통째로 샌다.
+# [WHY 저장소 밖인가] 비밀번호·개인키가 git에 들어가면 화면 조작 권한이 통째로 샌다.
 # .gitignore에 의존하면 규칙이 빠지는 순간 커밋되므로, 아예 **저장소 바깥** 경로로 못 박는다.
 $script:SecretDir = Join-Path $env:LOCALAPPDATA 'vibe-remote'
 
@@ -65,32 +62,6 @@ function Assert-Admin {
     }
 }
 
-
-function Get-TailscaleIPv4 {
-    <#
-      [WHY] `tailscale ip -4`를 쓰지 않고 status --json을 파싱한다 —
-      exit node나 다중 계정 상황에서 `ip -4`가 의도와 다른 주소를 뱉은 전례가 있어
-      "이 기기 자신(Self)"임을 JSON에서 명시적으로 확인한다.
-      [반환] 미설치/미로그인 시 $null. 호출부가 판단한다(치명 아님 — 직결은 못 쓰지만 설치는 진행 가능).
-    #>
-    $exe = 'C:\Program Files\Tailscale\tailscale.exe'
-    if (-not (Test-Path $exe)) {
-        $cmd = Get-Command tailscale -ErrorAction SilentlyContinue
-        if ($null -eq $cmd) { return $null }
-        $exe = $cmd.Source
-    }
-    try {
-        $raw = & $exe status --json 2>$null | Out-String
-        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-        $json = $raw | ConvertFrom-Json
-        foreach ($ip in $json.Self.TailscaleIPs) {
-            if ($ip -notmatch ':') { return $ip }
-        }
-    } catch {
-        return $null
-    }
-    return $null
-}
 
 
 function Get-RustDeskExe {
@@ -330,56 +301,74 @@ function Get-RustDeskId {
 }
 
 
-function Restrict-FirewallToTailnet {
+function Remove-InboundExposure {
     <#
-      이미 존재하는 허용 규칙의 원격 주소를 tailnet 대역으로 **축소**한다.
+      RustDesk 인바운드 허용 규칙을 **삭제**한다(축소가 아니라 제거).
 
-      [핵심 함정] 새 규칙을 추가하는 방식은 통하지 않는다. Windows 방화벽에서 허용 규칙은
-      OR로 합쳐지므로, 설치 프로그램이 만든 "모든 주소 허용" 규칙이 남아 있는 한
-      좁은 규칙을 아무리 더해도 공인망 노출은 그대로다. 반드시 기존 규칙을 Set-으로 고쳐야 한다.
-      [불변식] 규칙이 0개면 축소 실패로 간주하고 경고한다 — 조용히 넘어가면
-      "잠갔다고 착각한 열린 포트"가 남는다.
+      [WHY 축소가 아니라 제거인가] 예전에는 사설망 대역으로 좁히는 방식이었다. 그 사설망을
+      폐기한 지금, 남은 접속 경로는 아픽스 서버 hbbs 경유 하나뿐이고 그건 **아웃바운드**다
+      — 이 PC가 서버로 나가서 붙으므로 인바운드 허용 규칙이 아예 필요 없다.
+      규칙을 남겨두면 목적 없는 열린 포트만 남는다. 가장 좁은 노출은 노출 없음이다.
+
+      [핵심 함정 — 남겨둠] Windows 방화벽에서 허용 규칙은 OR로 합쳐진다. 설치 프로그램이
+      만든 "모든 주소 허용" 규칙이 하나라도 남아 있으면 좁은 규칙을 아무리 더해도 공인망
+      노출은 그대로다. 그래서 '좁은 규칙 추가'가 아니라 '기존 규칙 제거'여야 한다.
+
+      [불변식] 지운 개수를 반환한다. 0이면 원래 없었다는 뜻이라 정상이다 — 여기서 경고를
+      띄우면 깨끗한 PC에서 매번 겁주는 문구가 뜬다.
     #>
     param([Parameter(Mandatory)][string]$DisplayNamePattern)
 
     $rules = @(Get-NetFirewallRule -DisplayName $DisplayNamePattern -ErrorAction SilentlyContinue |
                Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' })
     if ($rules.Count -eq 0) {
-        Write-Step "방화벽 규칙 '$DisplayNamePattern' 없음 — 축소할 대상이 없다." 'WARN'
+        Write-Step "인바운드 허용 규칙 '$DisplayNamePattern' 없음 — 노출 0 (정상)" 'OK'
         return 0
     }
     foreach ($r in $rules) {
-        Set-NetFirewallRule -InputObject $r -RemoteAddress @($script:TailnetV4, $script:TailnetV6) -Enabled True
+        Remove-NetFirewallRule -InputObject $r -ErrorAction SilentlyContinue
     }
-    Write-Step "방화벽 $($rules.Count)건을 tailnet 전용으로 축소 ($script:TailnetV4)" 'OK'
+    Write-Step "인바운드 허용 규칙 $($rules.Count)건 삭제 — 접속은 아픽스 서버 경유(아웃바운드)만" 'OK'
     return $rules.Count
 }
 
 
-function New-TailnetOnlyRule {
+function New-AllowedInboundRule {
     <#
-      tailnet에서만 들어오는 인바운드 허용 규칙을 만든다(같은 이름이면 갱신).
-      [제약] 이 함수만으로는 노출이 좁아지지 않는다 — 더 넓은 기존 허용 규칙이 있으면
-      Restrict-FirewallToTailnet을 함께 불러야 실효가 있다.
+      지정한 원격 대역에서만 들어오는 인바운드 허용 규칙을 만든다(같은 이름이면 갱신).
+
+      [WHY AllowFrom 이 필수 인자인가] 예전에는 대역이 상수(사설망)로 박혀 있어 호출부가
+      노출 범위를 생각할 필요가 없었다. 그 사설망을 폐기한 지금 대역은 상황마다 다르고,
+      기본값을 Any 로 두면 실수 한 번에 전 세계로 열린다. 호출부가 매번 명시하게 만든다.
+
+      [핵심 함정] 이 함수만으로는 노출이 좁아지지 않는다. Windows 방화벽에서 허용 규칙은
+      OR 로 합쳐지므로, 설치 프로그램이 만든 "모든 주소 허용" 규칙이 남아 있으면 좁은 규칙을
+      더해도 소용없다. 넓은 규칙은 Remove-InboundExposure 로 먼저 지워야 한다.
     #>
     param(
         [Parameter(Mandatory)][string]$DisplayName,
         [Parameter(Mandatory)][int[]]$TcpPorts,
+        [Parameter(Mandatory)][string[]]$AllowFrom,
         [int[]]$UdpPorts = @()
     )
-    Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+    if ($AllowFrom.Count -eq 0) {
+        throw "AllowFrom 이 비었다. 열 대역을 명시하라 — 빈 값을 '전체 허용'으로 해석하지 않는다."
+    }
+    Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
+    $desc = "vibe-remote: $($AllowFrom -join ',') 에서만 허용"
     if ($TcpPorts.Count -gt 0) {
         New-NetFirewallRule -DisplayName $DisplayName -Direction Inbound -Action Allow `
-            -Protocol TCP -LocalPort $TcpPorts -RemoteAddress @($script:TailnetV4, $script:TailnetV6) `
-            -Profile Any -Description 'vibe-remote: tailnet 전용 RustDesk' | Out-Null
+            -Protocol TCP -LocalPort $TcpPorts -RemoteAddress $AllowFrom `
+            -Profile Any -Description $desc | Out-Null
     }
     if ($UdpPorts.Count -gt 0) {
         New-NetFirewallRule -DisplayName "$DisplayName (UDP)" -Direction Inbound -Action Allow `
-            -Protocol UDP -LocalPort $UdpPorts -RemoteAddress @($script:TailnetV4, $script:TailnetV6) `
-            -Profile Any -Description 'vibe-remote: tailnet 전용 RustDesk' | Out-Null
+            -Protocol UDP -LocalPort $UdpPorts -RemoteAddress $AllowFrom `
+            -Profile Any -Description $desc | Out-Null
     }
-    Write-Step "방화벽 규칙 생성: $DisplayName (TCP $($TcpPorts -join ',') / UDP $($UdpPorts -join ','))" 'OK'
+    Write-Step "방화벽 규칙 생성: $DisplayName (TCP $($TcpPorts -join ',') / UDP $($UdpPorts -join ',')) ← $($AllowFrom -join ',')" 'OK'
 }
 
 
@@ -387,7 +376,7 @@ function Save-Secret {
     <#
       비밀값을 %LOCALAPPDATA%\vibe-remote 아래에 저장한다.
       [WHY 저장소 밖인가] 이 값(고정 비밀번호, hbbs 개인키)이 git에 들어가면
-      tailnet 안이라도 화면 조작 권한이 통째로 유출된다. 저장소 경로는 쓰지 않는다.
+      화면 조작 권한이 통째로 유출된다. 저장소 경로는 쓰지 않는다.
     #>
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Value)
     if (-not (Test-Path $script:SecretDir)) { New-Item -ItemType Directory -Path $script:SecretDir -Force | Out-Null }

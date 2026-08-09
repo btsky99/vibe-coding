@@ -2,7 +2,7 @@
 #
 # FILE: scripts/remote/vps-setup.sh
 # DESCRIPTION: Vultr(Ubuntu 24.04) VPS를 RustDesk ID/중계 서버 + 웹(PWA) 호스트로 만든다.
-#              Tailscale 없이 인터넷 너머에서 원격제어가 되게 하는 공개 진입점 서버 구성.
+#              외부 메시 VPN 없이 인터넷 너머에서 원격제어가 되게 하는 공개 진입점 서버 구성.
 #              root로 1회 실행. 재실행해도 안전(멱등)하게 작성했다.
 #
 # 사용:
@@ -10,7 +10,7 @@
 #   또는 서버에 올려서: bash vps-setup.sh
 #
 # REVISION HISTORY:
-# - 2026-08-07 Claude: 최초 작성 — Tailscale 폐기 후 VPS 중심 구조로 전환.
+# - 2026-08-07 Claude: 최초 작성 — 외부 메시 VPN 폐기 후 VPS 중심 구조로 전환.
 #
 
 set -euo pipefail

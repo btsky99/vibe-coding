@@ -2,7 +2,7 @@
  * ------------------------------------------------------------------------
  * 📄 파일명: StatusBoard.tsx
  * 📝 설명: 상태판 독립 창(?page=status) 본체. 두 가지를 한 화면에 보여준다.
- *          ① 원격 노드 — ssh config 별칭 + tailnet 온오프라인 + claude/codex 설치 점검
+ *          ① 원격 노드 — ssh config 별칭 + 생존/접속 + claude/codex 설치 점검
  *          ② 이 PC의 콘솔 창 — 화면에 떠 있는 검은 창의 정체와 "닫아도 되는지"
  *
  * [WHY 독립 창인가 — 좌측 패널이 아니라]
@@ -27,7 +27,7 @@ import {
   Server, ShieldAlert, Terminal, X,
 } from 'lucide-react';
 
-// 노드 목록은 tailscale 왕복이 있어 자주 볼 이유가 없다. 콘솔은 창이 뜨고 지는 게
+// 노드 목록은 아픽스 서버 왕복이 있어 자주 볼 이유가 없다. 콘솔은 창이 뜨고 지는 게
 // 사용자가 지켜보는 대상이라 더 촘촘히 본다(백엔드에 3초 TTL 캐시가 있어 안전).
 const NODE_POLL_MS = 15000;
 const CONSOLE_POLL_MS = 5000;

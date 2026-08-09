@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import socket
 import sys
 import urllib.error
@@ -164,6 +165,34 @@ def _projects() -> list[str]:
         return []
 
 
+def _tunnel_identity() -> dict:
+    """이 PC 의 역터널 이름·포트. 역터널 노드가 아니면 빈 dict.
+
+    [WHY 이 값을 하트비트에 싣는가] 관제(하트비트)와 접속(역터널)은 별개 계통이라
+      상태판이 "이 하트비트가 어느 ssh 별칭의 것인가"를 맞출 키가 없었다. 라벨은
+      사람이 자유롭게 적는 값이라(`개발 PC (Windows)`) ssh 별칭(`cipher`)과 안 맞는다.
+      역터널 포트는 **양쪽이 같은 값을 아는 유일한 식별자**다 — 관리하는 쪽 ssh config 의
+      `Port` 와 노드 쪽 `-R <포트>:localhost:22` 가 같은 숫자다.
+    [제약] Setup-RemoteNode.ps1 이 만든 래퍼(`tunnel-<이름>.cmd`)에서 읽는다. 그 스크립트가
+      래퍼 형식을 바꾸면 여기도 같이 고쳐야 한다 — 어긋나면 조용히 빈 값이 되고,
+      증상은 상태판의 '생존 미확인'뿐이라 원인이 드러나지 않는다.
+    """
+    base = os.environ.get('LOCALAPPDATA') or ''
+    roots = [Path(base) / 'vibe-remote'] if base else []
+    roots.append(Path.home() / '.vibe-remote')      # 맥/리눅스 노드
+    for root in roots:
+        try:
+            for f in sorted(root.glob('tunnel-*.cmd')):
+                text = f.read_text(encoding='utf-8', errors='replace')
+                m = re.search(r'-R\s+(\d+):', text)
+                if m:
+                    return {'node_name': f.stem[len('tunnel-'):],
+                            'tunnel_port': int(m.group(1))}
+        except OSError:
+            continue
+    return {}
+
+
 def payload() -> dict:
     d = {
         'host': socket.gethostname(),
@@ -171,6 +200,7 @@ def payload() -> dict:
         'app_version': _app_version(),
         'projects': _projects(),
     }
+    d.update(_tunnel_identity())
     d.update(_resources())
     return d
 

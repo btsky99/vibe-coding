@@ -1,32 +1,34 @@
 ﻿<#
 FILE: scripts/remote/Install-RustDeskForFamily.ps1
 DESCRIPTION: 원격지 PC(부모님/지인)를 "고정 ID로 언제든 붙을 수 있는" 상태로 한 번에 만든다.
-             RustDesk 무인 접속 + 고정 비밀번호 + 절전 해제 + (선택) Tailscale 자동 합류.
+             RustDesk 무인 접속 + 고정 비밀번호 + 절전 해제 + 아픽스 서버 hbbs 지정.
              Install-RustDeskClient.ps1이 '내 기기'용이라면 이 스크립트는 '남의 기기'용이다 —
              다시 방문하지 않아도 되도록 재접속에 필요한 모든 조건을 한 번에 건다.
 
              사용 (그 PC에서 관리자 PowerShell):
-               # 부모님 — 내 tailnet에 합류시켜 인터넷 노출 0으로
-               .\Install-RustDeskForFamily.ps1 -TailscaleAuthKey 'tskey-auth-xxxxx'
+               # 기본 — 내 아픽스 서버 경유 (제3자 서버를 거치지 않는다)
+               .\Install-RustDeskForFamily.ps1 -IdServer 158.247.205.192 -Key '<hbbs 공개키>'
 
-               # 지인 — Tailscale 없이 RustDesk 공용 서버로 (고정 ID는 동일하게 유지됨)
+               # 서버를 안 쓸 때 — RustDesk 공용 서버 경유 (고정 ID는 동일하게 유지됨)
                .\Install-RustDeskForFamily.ps1 -Mode public
 
 REVISION HISTORY:
 - 2026-08-07 Claude: 최초 작성 — 일회용 지원을 고정 ID 재접속으로 전환.
                      절전 해제를 포함한 이유는 아래 Disable-SleepForRemote 주석 참조.
+- 2026-08-09 Claude: 외부 메시 VPN 전면 폐기 — 사설망 합류 모드 삭제, 아픽스 서버 hbbs 모드로 대체.
 #>
 
 [CmdletBinding()]
 param(
-    # tailscale: 내 tailnet에 합류(권장, 노출 0) / public: RustDesk 공용 서버 경유
-    [ValidateSet('tailscale', 'public')]
-    [string]$Mode = 'tailscale',
+    # apix: 내 아픽스 서버 hbbs 경유(권장, 제3자 없음) / public: RustDesk 공용 서버 경유
+    [ValidateSet('apix', 'public')]
+    [string]$Mode = 'apix',
 
-    # Tailscale 관리 콘솔(https://login.tailscale.com/admin/settings/keys)에서 발급.
-    # [WHY 필요한가] 이게 없으면 그 PC에서 브라우저 로그인을 시켜야 한다 —
-    #   부모님께 전화로 안내하기 가장 어려운 단계다. 사전 발급 키 하나면 무인으로 끝난다.
-    [string]$TailscaleAuthKey = '',
+    # 아픽스 서버(hbbs) 주소와 공개키. apix 모드에서 **둘 다 필수**다.
+    # [🔴 키가 없으면 조용히 실패한다] 클라이언트가 서버를 신뢰하지 못해 접속이 안 되는데
+    #   화면에는 아무 에러도 안 뜬다 — 그래서 아래에서 명시적으로 막는다.
+    [string]$IdServer = '',
+    [string]$Key = '',
 
     # 비우면 16자 자동 생성. 이 값을 형이 보관하면 언제든 재접속 가능.
     [string]$Password = '',
@@ -42,7 +44,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'rustdesk-common.ps1')
 
-$TailscaleMsi = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
 
 Write-Host ''
 Write-Host '=== 원격지 PC 세팅 (고정 ID 무인 접속) ===' -ForegroundColor Cyan
@@ -57,7 +58,7 @@ function Disable-SleepForRemote {
 
       [WHY 이게 핵심인가] 원격제어가 안 되는 사고의 대부분은 소프트웨어 문제가 아니라
         "그 PC가 자고 있어서"다. Windows 기본값은 유휴 30분 뒤 절전이고, 절전에 들어가면
-        tailnet에서도 사라진다. **인터넷 너머에서는 깨울 방법이 없다** —
+        네트워크에서도 사라진다. **인터넷 너머에서는 깨울 방법이 없다** —
         Wake-on-LAN은 같은 브로드캐스트 도메인(=같은 랜)에서만 동작하기 때문.
         원격지 PC는 애초에 안 자게 만드는 것 말고 답이 없다.
       [WHY 화면은 끄나] 모니터 절전은 원격 접속을 막지 않는다. 전기와 번인만 아끼면 되므로 유지.
@@ -90,59 +91,16 @@ function Disable-SleepForRemote {
 }
 
 
-function Install-TailscaleAndJoin {
-    <#
-      Tailscale 설치 후 사전 발급 키로 무인 합류시킨다.
-      [불변식] --unattended 필수 — 없으면 사용자가 로그아웃한 뒤 tailnet 연결이 끊긴다.
-        원격지 PC는 아무도 로그인해 있지 않은 시간이 대부분이라 이 플래그가 곧 가용성이다.
-    #>
-    param([string]$AuthKey)
 
-    $exe = 'C:\Program Files\Tailscale\tailscale.exe'
-    if (-not (Test-Path $exe)) {
-        Write-Step 'Tailscale 설치 중...'
-        $msi = Join-Path $env:TEMP 'tailscale-setup.msi'
-        Invoke-Download -Uri $TailscaleMsi -OutFile $msi
-        Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait
-        for ($i = 0; $i -lt 30; $i++) {
-            if (Test-Path $exe) { break }
-            Start-Sleep -Seconds 2
-        }
-    }
-    if (-not (Test-Path $exe)) { throw 'Tailscale 설치 실패 — https://tailscale.com/download 에서 수동 설치 후 다시 실행하라.' }
-    Write-Step "Tailscale 설치 확인: $exe" 'OK'
-
-    $already = Get-TailscaleIPv4
-    if ($null -ne $already) {
-        Write-Step "이미 tailnet에 합류돼 있다: $already" 'OK'
-        return $already
-    }
-
-    if ([string]::IsNullOrWhiteSpace($AuthKey)) {
-        throw @'
-Tailscale 로그인이 안 돼 있고 -TailscaleAuthKey 도 없다.
-  해결: https://login.tailscale.com/admin/settings/keys 에서 auth key를 발급해
-        -TailscaleAuthKey 'tskey-auth-...' 로 다시 실행하라.
-        (Reusable 체크, 만료 기간은 짧게 잡아도 된다 — 합류는 1회면 끝난다)
-'@
-    }
-
-    Write-Step 'tailnet 합류 중...'
-    & $exe up --authkey=$AuthKey --unattended 2>&1 | Out-Null
-    Start-Sleep -Seconds 5
-    $ip = Get-TailscaleIPv4
-    if ($null -eq $ip) { throw 'tailnet 합류 실패 — auth key 만료/오타 또는 네트워크 확인.' }
-    Write-Step "tailnet 합류 완료: $ip" 'OK'
-    return $ip
-}
-
-
-# ── 1. Tailscale (모드에 따라) ──────────────────────────────────────────────
+# ── 1. 접속 경로 확인 (모드에 따라) ─────────────────────────────────────────
 $tsIp = $null
-if ($Mode -eq 'tailscale') {
-    $tsIp = Install-TailscaleAndJoin -AuthKey $TailscaleAuthKey
+if ($Mode -eq 'apix') {
+    if ([string]::IsNullOrWhiteSpace($IdServer) -or [string]::IsNullOrWhiteSpace($Key)) {
+        throw 'apix 모드에는 -IdServer 와 -Key 가 모두 필요하다. 키 없이는 접속이 조용히 실패한다.'
+    }
+    Write-Step "아픽스 서버 경유: $IdServer" 'OK'
 } else {
-    Write-Step 'public 모드 — Tailscale 없이 RustDesk 공용 서버를 쓴다.' 'INFO'
+    Write-Step 'public 모드 — RustDesk 공용 서버(제3자)를 거친다.' 'WARN'
 }
 
 # ── 2. RustDesk 설치 ────────────────────────────────────────────────────────
@@ -196,10 +154,11 @@ if ($ShowConnectionNotice) {
     $opts['show-remote-cursor'] = 'Y'
     $opts['enable-tray']        = 'Y'
 }
-if ($Mode -eq 'tailscale') {
-    # tailnet 직결 — 공용 서버를 거치지 않는다.
-    $opts['direct-server']      = 'Y'
-    $opts['direct-access-port'] = "$($script:DirectPortDefault)"
+if ($Mode -eq 'apix') {
+    # 내 서버가 ID/중계를 맡는다 — 공용 서버를 거치지 않는다.
+    $opts['custom-rendezvous-server'] = $IdServer
+    $opts['relay-server']             = $IdServer
+    $opts['key']                      = $Key
 }
 Set-RustDeskOptionsEverywhere -Options $opts | Out-Null
 
@@ -213,15 +172,12 @@ Write-Step '고정 비밀번호 설정 완료' 'OK'
 Disable-SleepForRemote -IncludeBattery ([bool]$DisableSleepOnBattery)
 
 # ── 7. 방화벽 ───────────────────────────────────────────────────────────────
-if ($Mode -eq 'tailscale') {
-    # tailnet에서만 들어오게 축소 — 공인망 노출 0.
-    Restrict-FirewallToTailnet -DisplayNamePattern '*RustDesk*' | Out-Null
-    New-TailnetOnlyRule -DisplayName 'vibe-remote RustDesk 직접접속' -TcpPorts @($script:DirectPortDefault) | Out-Null
-} else {
-    # [주의] public 모드에서는 방화벽을 좁히면 안 된다. 공용 서버로 홀펀칭할 때 상대가
-    #   임의의 공인 IP에서 들어오므로, tailnet 대역으로 제한하면 연결 자체가 성립하지 않는다.
-    Write-Step 'public 모드 — 방화벽은 RustDesk 기본값 유지(홀펀칭 상대 IP를 미리 알 수 없음).' 'INFO'
-}
+# [주의] 두 모드 모두 방화벽을 좁히면 안 된다. ID 서버가 어디든 홀펀칭 상대는 임의의
+#   공인 IP에서 들어오므로, 대역을 제한하면 연결 자체가 성립하지 않는다.
+#   방어선은 방화벽이 아니라 고정 비밀번호 16자 + (apix 모드) hbbs 공개키 대조다.
+Write-Step '방화벽은 RustDesk 기본값 유지 — 홀펀칭 상대 IP를 미리 알 수 없다.' 'INFO'
+# 과거 사설망 전용으로 만들어 둔 직접접속 규칙이 남아 있으면 지운다(이제 의미 없는 대역).
+Remove-InboundExposure -DisplayNamePattern 'vibe-remote RustDesk 직접접속' | Out-Null
 
 # ── 8. 재기동 후 ID 확보 ────────────────────────────────────────────────────
 if ($null -ne (Get-Service -Name 'RustDesk' -ErrorAction SilentlyContinue)) {
@@ -241,8 +197,8 @@ $card += '━━━━━━━━━━━━━━━━━━━━━━━�
 $card += '  이 PC에 원격으로 접속할 때 쓸 정보'
 $card += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
 $card += ("  컴퓨터 이름 : {0}" -f $env:COMPUTERNAME)
-if ($Mode -eq 'tailscale') {
-    $card += ("  접속 주소   : {0}:{1}" -f $tsIp, $script:DirectPortDefault)
+if ($Mode -eq 'apix') {
+    $card += ("  ID 서버     : {0}" -f $IdServer)
 }
 if (-not [string]::IsNullOrWhiteSpace($rid)) {
     $card += ("  RustDesk ID : {0}" -f $rid)
@@ -267,7 +223,7 @@ try {
 }
 
 Write-Host '  이 화면을 사진으로 찍어 보내주시면 됩니다.' -ForegroundColor Gray
-if ($Mode -eq 'tailscale') {
-    Write-Host '  ※ 관리 콘솔에서 이 기기에 ACL을 걸어 역방향 접근을 막을 것 (docs/REMOTE_CONTROL.md).' -ForegroundColor Yellow
+if ($Mode -eq 'apix') {
+    Write-Host '  ※ 붙는 쪽 기기에도 같은 ID 서버/Key 를 넣어야 한다 (docs/REMOTE_CONTROL.md).' -ForegroundColor Yellow
 }
 Write-Host ''

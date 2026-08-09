@@ -18,7 +18,7 @@ DESCRIPTION: 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태
 
 REVISION HISTORY:
 - 2026-08-03 Codex: provider별 작업 크기 권고와 판단 이유 표시
-- 2026-08-02 Claude: 원격 노드(tailnet 온오프라인) + 떠 있는 콘솔 창 섹션 추가.
+- 2026-08-02 Claude: 원격 노드(생존/접속) + 떠 있는 콘솔 창 섹션 추가.
   섹션 헤더/전각 폭 계산을 도입해 한글 줄이 구분선과 어긋나던 것을 정리.
   두 섹션은 /api/nodes/* 의존 — 구버전 서버에 붙으면 조용히 생략된다.
 - 2026-07-29 Claude: 최초 작성 — 레노버(APIS) 상주 노드를 터미널에서 보기 위한 TUI.
@@ -120,6 +120,25 @@ def _ago(iso: str) -> str:
         return iso[:16]
 
 
+def _ago_sec(sec) -> str:
+    """서버가 계산해준 '나이(초)' → '3분 전'.
+
+    [WHY 서버 계산값을 쓰는가] 이 PC 시계가 어긋나면 절대시각 비교(_ago)는 몇 시간씩
+      틀린다. 관제·상태판 모두 나이를 서버에서 계산해 내려주므로 그대로 표시만 한다.
+    """
+    try:
+        sec = int(sec)
+    except (TypeError, ValueError):
+        return ''
+    if sec < 60:
+        return f'{sec}초 전'
+    if sec < 3600:
+        return f'{sec // 60}분 전'
+    if sec < 86400:
+        return f'{sec // 3600}시간 전'
+    return f'{sec // 86400}일 전'
+
+
 def _width(s: str) -> int:
     """한글 등 전각 문자를 2칸으로 세는 표시 폭.
 
@@ -160,26 +179,36 @@ def _section(title: str, width: int, note: str = '') -> str:
 # [제약] 아래 두 섹션은 /api/nodes/* 를 쓴다. 구버전 서버(라우트 없음)에 붙으면 _get이
 #   None을 주므로 섹션을 통째로 생략한다 — 원격 노드의 서버가 항상 최신이라는 보장이 없다.
 def _render_nodes(port: int, width: int) -> list[str]:
-    """원격 노드 — tailnet 온오프라인. 상태판 창과 같은 데이터."""
+    """원격 노드 — 생존(하트비트)/접속(역터널). 상태판 창과 같은 데이터."""
     data = _get(port, '/api/nodes/remote')
     if not data:
         return []
     hosts = data.get('hosts') or []
     if not hosts:
         return []
-    online = sum(1 for h in hosts if h.get('online'))
-    out = [_section('원격 노드', width, f'{online}/{len(hosts)} 온라인')]
+    # [🔴 생존과 접속을 합치지 말 것] alive=하트비트 / reachable=역터널. 조치가 정반대라
+    #   한 값으로 뭉개면 "터널만 죽음"과 "앱이 죽음"을 구분할 수 없다(nodes_api 헤더 참조).
+    #   세 값이다 — True/False/None(판정 불가). None을 False로 세지 않는다.
+    alive_n = sum(1 for h in hosts if h.get('alive') is True)
+    out = [_section('원격 노드', width, f'{alive_n}/{len(hosts)} 살아있음')]
     for h in hosts[:8]:
-        up = bool(h.get('online'))
-        dot = f'{GREEN}●{R}' if up else f'{GRAY}○{R}'
+        alive, reach = h.get('alive'), h.get('reachable')
+        dot = (f'{GREEN}●{R}' if alive is True
+               else f'{GRAY}○{R}' if alive is False else f'{DIM}◌{R}')
         who = f"{h.get('user') or ''}@{h.get('hostName') or ''}".strip('@')
-        state = '온라인' if up else (f"{_ago(h.get('lastSeen') or '')} 이후 오프라인"
-                                   if h.get('lastSeen') else '오프라인')
-        color = '' if up else GRAY
+        age = h.get('heartbeatAge')
+        life = ('살아있음' if alive is True else '끊김' if alive is False else '생존?')
+        if age is not None:
+            life += f' {_ago_sec(age)}'
+        link = ('조종가능' if reach is True else '터널끊김' if reach is False else '터널없음')
+        color = '' if alive is True else GRAY
         out.append(f'   {dot} {color}{_clip(h.get("alias") or "?", 14):<14}{R} '
-                   f'{DIM}{_clip(who, 26):<26}{R} {color}{state}{R}')
-    if not (data.get('tailscale') or {}).get('available', True):
-        out.append(f'{GRAY}   (tailscale 상태를 못 읽어 온오프라인 판정 생략){R}')
+                   f'{DIM}{_clip(who, 22):<22}{R} {color}{life:<14}{R}{DIM}{link}{R}')
+    srv = data.get('server') or {}
+    if not srv.get('available', True):
+        out.append(f'{GRAY}   (아픽스 서버에 못 물어봐 판정 생략 — 노드가 죽은 게 아님){R}')
+    elif not srv.get('heartbeatAvailable', True):
+        out.append(f'{GRAY}   (관제 DB를 못 읽어 생존 판정만 생략 — 터널 표시는 유효){R}')
     out.append('')
     return out
 

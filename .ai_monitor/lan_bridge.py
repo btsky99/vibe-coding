@@ -6,7 +6,7 @@ DESCRIPTION: LAN 브리지 — 별도 프로세스로 실행되어 0.0.0.0:9020�
 
 REVISION HISTORY:
 - 2026-07-19 Claude: 신규 — LAN 브리지 Phase 1 Task 3~5. office_server 구조 복제.
-- 2026-07-22 Claude: Tailscale/VPN 지원 — 통신 대상 IP 해석을 _resolve_target으로 통합
+- 2026-07-22 Claude: 원격 VPN 지원 — 통신 대상 IP 해석을 _resolve_target으로 통합
   (발견 우선 → 페어링 저장주소 폴백). 페어링 때 양측이 http_port를 교환해 상대 주소를 저장.
 """
 # [보안 불변식] 라우트는 2계층:
@@ -167,7 +167,7 @@ def _resolve_target(peer_id: str) -> dict | None:
     """peer_id → {ip, http_port, name, ...}. 발견(같은 LAN, UDP 브로드캐스트) 우선, 없으면
     페어링 때 저장한 고정 주소로 폴백.
 
-    [WHY] 발견은 255.255.255.255 브로드캐스트라 서브넷/VPN(Tailscale)을 못 넘는다
+    [WHY] 발견은 255.255.255.255 브로드캐스트라 서브넷/VPN을 못 넘는다
     (lan_discovery 의도된 경계). 다른 네트워크 통신은 페어링 저장주소가 유일 경로. 같은 LAN이면
     발견이 우선이라 DHCP로 IP가 바뀌어도 흡수(저장주소는 페어링 시점 고정이라 stale 가능).
     [불변식] 반환 dict는 최소 ip·http_port 키 보유 — 5개 send_* 함수가 이 계약에 의존.
@@ -588,7 +588,7 @@ class Handler(BaseHTTPRequestHandler):
         key = derive_key(code)
         proof = make_pair_proof(code, 'init', peers.self_id)
         url = f'http://{ip}:{port}/lan/pair-request'
-        # [Tailscale] 내 http_port를 함께 보냄 — 개시자(코드 표시측)는 client_address로 내 IP는
+        # [원격 VPN] 내 http_port를 함께 보냄 — 개시자(코드 표시측)는 client_address로 내 IP는
         #   알아도 포트는 모른다. 이 값으로 상대가 내 고정 주소를 저장해 역방향 통신을 연다.
         req = Request(url, data=json.dumps({
             'peer_id': peers.self_id, 'name': STATE['name'], 'proof': proof,
@@ -604,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
         # [보안] 상대의 ack-proof를 코드로 검증 — 코드를 모르는 가짜 응답자(MITM)를 배제.
         if not verify_pair_proof(code, 'ack', res.get('self_id', ''), res.get('proof', '')):
             return {'ok': False, 'error': '상대 응답 검증 실패(코드 불일치 또는 위조)'}
-        # [Tailscale] 내가 입력한 상대 ip/port를 고정 주소로 저장 — 발견 없이도 통신 가능.
+        # [원격 VPN] 내가 입력한 상대 ip/port를 고정 주소로 저장 — 발견 없이도 통신 가능.
         peers.add_peer(res['self_id'], res.get('name', ''), key, ip=ip, http_port=int(port))
         return {'ok': True, 'peer_id': res['self_id'], 'name': res.get('name', '')}
 
@@ -633,7 +633,7 @@ class Handler(BaseHTTPRequestHandler):
                 _seclog(f'페어링 시도 한도 초과 — 창 폐기 (from {src})')
             return {'ok': False, 'error': '코드 불일치'}
         # 성공: 같은 코드로 파생한 키로 상대 신뢰 등록 + ack-proof 응답. 창은 일회성 소진.
-        # [Tailscale] 상대 IP는 소켓 client_address, 포트는 요청 본문의 http_port로 저장 —
+        # [원격 VPN] 상대 IP는 소켓 client_address, 포트는 요청 본문의 http_port로 저장 —
         #   양측이 서로의 고정 주소를 가져야 다른 네트워크(VPN)에서 양방향 통신이 성립한다.
         key = derive_key(code)
         peers.add_peer(peer_id, name, key,

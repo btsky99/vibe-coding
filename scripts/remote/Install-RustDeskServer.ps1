@@ -1,8 +1,11 @@
 ﻿<#
 FILE: scripts/remote/Install-RustDeskServer.ps1
-DESCRIPTION: RustDesk ID/중계 서버(hbbs + hbbr)를 이 PC에 셀프호스트한다 (계층 2).
-             tailnet 안에서만 열리며, 클라이언트가 100.x.x.x 대신 짧은 ID로 붙게 해준다.
-             공인망 노출은 하지 않는다 — 부모님/지인 확장은 docs/REMOTE_CONTROL.md 참조.
+DESCRIPTION: RustDesk ID/중계 서버(hbbs + hbbr)를 이 PC에 셀프호스트한다.
+             [🔴 보통은 이 스크립트가 아니라 아픽스 서버(VPS)의 hbbs 를 쓴다]
+             집 PC 는 공인 IP 가 없어 밖에서 붙을 수 없다. 예전에는 메시 VPN 안에서만
+             열어 해결했는데 그 방식을 폐기했으므로, 이 스크립트는 LAN 전용이거나
+             공인 IP 를 직접 가진 호스트에서만 의미가 있다.
+             일반적인 구성은 docs/REMOTE_CONTROL.md 참조.
 
              사용:
                관리자 PowerShell> .\Install-RustDeskServer.ps1
@@ -10,15 +13,22 @@ DESCRIPTION: RustDesk ID/중계 서버(hbbs + hbbr)를 이 PC에 셀프호스트
 
 REVISION HISTORY:
 - 2026-08-07 Claude: 최초 작성 — Windows에는 공식 서비스 래퍼가 없어 예약 작업(SYSTEM)으로 상주시킴.
+- 2026-08-09 Claude: 외부 메시 VPN 폐기 — 중계 주소 자동탐지 제거(명시 필수), 방화벽은
+                     사설망 축소가 아니라 지정 대역 허용으로 전환.
 #>
 
 [CmdletBinding()]
 param(
     [string]$InstallDir = 'C:\ProgramData\rustdesk-server',
 
-    # 중계 서버 주소. 비우면 이 PC의 Tailscale IP를 쓴다.
-    # [제약] 여기에 LAN IP(192.168.x)를 넣으면 외부망에 나갔을 때 중계가 끊긴다 — tailnet IP여야 한다.
+    # 중계 서버 주소 — **필수**. 클라이언트가 실제로 도달할 수 있는 주소여야 한다.
+    # [제약] LAN IP(192.168.x)를 넣으면 같은 공유기 안에서만 동작한다. 밖에서도 쓰려면
+    #   공인 IP 여야 한다 — 자동 탐지는 하지 않는다(틀린 주소를 조용히 쓰는 것보다 낫다).
     [string]$RelayAddress = '',
+
+    # 인바운드를 허용할 원격 대역. 기본은 사설 LAN. 공인망에 열려면 명시적으로 넘겨야 한다
+    # — 기본값이 Any 면 실수로 전 세계에 여는 사고가 난다.
+    [string[]]$AllowFrom = @('192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12'),
 
     [switch]$Uninstall
 )
@@ -53,10 +63,7 @@ if ($Uninstall) {
 
 # ── 1. 중계 주소 결정 ───────────────────────────────────────────────────────
 if ([string]::IsNullOrWhiteSpace($RelayAddress)) {
-    $RelayAddress = Get-TailscaleIPv4
-    if ($null -eq $RelayAddress) {
-        throw 'Tailscale IP를 찾지 못했다. Tailscale 로그인 후 다시 실행하거나 -RelayAddress를 직접 지정하라.'
-    }
+    throw '-RelayAddress 를 지정해야 한다. 클라이언트가 도달 가능한 주소여야 하며, 자동 탐지는 하지 않는다.'
 }
 Write-Step "중계 주소: $RelayAddress" 'OK'
 
@@ -99,7 +106,7 @@ if ($null -ne $holder) {
     if ($null -ne $holderProc -and $holderProc.ProcessName -eq 'rustdesk') {
         Write-Step "포트 21118을 RustDesk 클라이언트가 선점 중 → 직접접속 포트를 $($script:DirectPortWhenHbbs)로 옮긴다." 'WARN'
         Set-RustDeskOptionsEverywhere -Options @{ 'direct-access-port' = "$($script:DirectPortWhenHbbs)" } | Out-Null
-        New-TailnetOnlyRule -DisplayName 'vibe-remote RustDesk 직접접속' -TcpPorts @($script:DirectPortWhenHbbs) | Out-Null
+        New-AllowedInboundRule -DisplayName 'vibe-remote RustDesk 직접접속' -TcpPorts @($script:DirectPortWhenHbbs) -AllowFrom $AllowFrom | Out-Null
         Start-Sleep -Seconds 3
     } else {
         throw "포트 21118을 다른 프로그램이 쓰고 있다(PID $($holder.OwningProcess) / $($holderProc.ProcessName)). 먼저 정리하라."
@@ -219,10 +226,13 @@ Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName $TaskHbbs
 Start-Sleep -Seconds 4
 
-# ── 5. 방화벽 (tailnet 전용) ────────────────────────────────────────────────
+# ── 5. 방화벽 (지정 대역만) ─────────────────────────────────────────────────
 # 21115 NAT 판정 / 21116 ID 등록·홀펀칭(TCP+UDP) / 21117 중계 / 21118·21119 웹클라이언트
-New-TailnetOnlyRule -DisplayName 'vibe-remote hbbs/hbbr' `
-                    -TcpPorts @(21115, 21116, 21117, 21118, 21119) -UdpPorts @(21116)
+# [🔴 Any 로 열지 말 것] -AllowFrom 기본값은 사설 LAN 이다. 공인망에 여는 것은 호출자가
+#   명시적으로 선택해야 하는 결정이며, 그때는 hbbs 공개키 대조가 유일한 방어선이 된다.
+New-AllowedInboundRule -DisplayName 'vibe-remote hbbs/hbbr' `
+                       -TcpPorts @(21115, 21116, 21117, 21118, 21119) -UdpPorts @(21116) `
+                       -AllowFrom $AllowFrom
 
 # ── 6. 검증 ─────────────────────────────────────────────────────────────────
 $running = @(Get-Process -Name 'hbbs', 'hbbr' -ErrorAction SilentlyContinue)

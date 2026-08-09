@@ -5,7 +5,7 @@
  * 🕒 변경 이력:
  * - 2026-07-19 Claude: 신규 — LAN 브리지 Phase 1 Task 9 (파일 전송 UI). 채팅은 Phase 2.
  * - 2026-07-22 Claude: Phase 3 — 원격 Claude 에이전트 실행 UI(전송/승인팝업/출력뷰/마스터토글).
- * - 2026-07-22 Claude: Tailscale/VPN 지원 — 수동 IP 페어링 입력 + 페어링된 기기(발견 안 돼도)를
+ * - 2026-07-22 Claude: 원격 VPN 지원 — 수동 IP 페어링 입력 + 페어링된 기기(발견 안 돼도)를
  *   전송 대상으로 노출. 발견 목록은 미페어링 후보만 표시.
  */
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -35,7 +35,7 @@ export default function LanPanel() {
   const [myCode, setMyCode] = useState<string>('');
   const [target, setTarget] = useState<Peer | null>(null);
   const [inputCode, setInputCode] = useState('');
-  // [Tailscale] 수동 IP 페어링 — 발견 안 되는 다른 네트워크/VPN 상대를 IP로 직접 연결.
+  // [원격 VPN] 수동 IP 페어링 — 발견 안 되는 다른 네트워크/VPN 상대를 IP로 직접 연결.
   const [manualIp, setManualIp] = useState('');
   const [manualPort, setManualPort] = useState('');
   const [manualCode, setManualCode] = useState('');
@@ -102,7 +102,7 @@ export default function LanPanel() {
     setTarget(null); setInputCode(''); refresh();
   };
 
-  // [Tailscale] IP 직접 입력 페어링 — 발견(UDP)이 못 넘는 다른 네트워크/VPN 상대 연결.
+  // [원격 VPN] IP 직접 입력 페어링 — 발견(UDP)이 못 넘는 다른 네트워크/VPN 상대 연결.
   //   포트 기본 9020(브리지 시작 포트). 성공 시 상대는 st.trusted에 뜨고 오프라인이어도 전송 가능.
   const doManualConnect = async () => {
     const ip = manualIp.trim();
@@ -415,10 +415,10 @@ export default function LanPanel() {
               <div className="text-2xl font-mono tracking-widest text-green-300">{myCode || st.pending_code}</div>
             </div>
           )}
-          {/* [Tailscale] 수동 IP 연결 — 발견 안 되는 다른 네트워크/VPN 상대. 상대의 IP·포트·코드 입력 */}
+          {/* [원격 VPN] 수동 IP 연결 — 발견 안 되는 다른 네트워크/VPN 상대. 상대의 IP·포트·코드 입력 */}
           <div className="border-t border-white/10 pt-2 space-y-1.5">
             <div className="text-[11px] text-[#888]">
-              다른 네트워크 / VPN(Tailscale) — 상대 IP 직접 입력
+              다른 네트워크 / VPN — 상대 IP 직접 입력
             </div>
             <div className="flex gap-1.5">
               <input value={manualIp} onChange={e => setManualIp(e.target.value)} placeholder="예: 100.101.102.103"

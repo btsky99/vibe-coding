@@ -10,7 +10,7 @@
 #                - 기존 DB(postgres/vibe/root)와 서비스(nginx/hbbs/hbbr/vibe-bridge/vibe-status)
 #                  는 건드리지 않는다. 이 서버는 이미 5개 서비스가 운영 중이다.
 #
-#              [WHY Tailscale이 아닌 SSH 터널인가] 이 서버를 세운 목적 자체가 제3자 서비스
+#              [WHY 외부 메시 VPN이 아닌 SSH 터널인가] 이 서버를 세운 목적 자체가 제3자 서비스
 #                의존을 줄이는 것이다. SSH는 이미 쓰고 있는 수단이라 새 의존이 0이다.
 #
 #              [🔴 알려진 한계 — 이 서버의 pg_hba는 `host all all 127.0.0.1/32 trust`다]

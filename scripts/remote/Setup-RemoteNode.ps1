@@ -14,7 +14,7 @@ DESCRIPTION: 원격지 PC(CipherTrader 학습 노드 등)를 "밖에서 화면�
                .\Setup-RemoteNode.ps1 -NodeName cipher -TunnelPort 22001
 
 REVISION HISTORY:
-- 2026-08-07 Claude: 최초 작성 — Tailscale 폐기 후 VPS 경유 구조로 전환하며 신설.
+- 2026-08-07 Claude: 최초 작성 — 외부 메시 VPN 폐기 후 VPS 경유 구조로 전환하며 신설.
 #>
 
 [CmdletBinding()]

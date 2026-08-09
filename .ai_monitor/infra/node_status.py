@@ -37,6 +37,7 @@ REVISION HISTORY:
 """
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shutil
@@ -70,9 +71,24 @@ _LISTEN_RE = re.compile(r'(?:127\.0\.0\.1|\[::1\]):(\d+)')
 # 관제 PG는 서버 루프백에만 열려 있다. 이 조회는 **서버 안에서** 실행된다(ssh 원격 명령).
 # [WHY -tA 인가 — -F 를 안 쓴다] 비정렬 모드(-A)의 기본 구분자가 이미 '|' 다. -F'|' 를 쓰면
 #   따옴표가 ssh→sh→su→psql 4겹을 통과하며 깨진다. 기본값에 기대면 그 문제가 사라진다.
-_HB_SQL = ("SELECT lower(label), "
-           "EXTRACT(EPOCH FROM (now() - last_seen_at))::int "
-           "FROM apix_nodes WHERE NOT revoked AND last_seen_at IS NOT NULL")
+#
+# [WHY 식별자를 4개나 끌어오는가] 하트비트와 ssh config 를 이어붙일 공용 키가 원래 없었다.
+#   label 은 사람이 자유롭게 적고('개발 PC (Windows)'), node_id 는 관제가 붙이고,
+#   ssh 별칭은 관리하는 쪽이 정한다. 그래서 맞을 수 있는 후보를 전부 가져와 순서대로 댄다.
+#   tunnel_port 가 유일하게 **양쪽이 같은 값을 아는** 정확한 키다(apix_push._tunnel_identity).
+# [제약] 마지막 컬럼(나이)의 위치가 고정이다 — 파서가 뒤에서부터 읽는다. 컬럼을 추가하려면
+#   나이 앞에 넣을 것.
+_HB_SQL = ("SELECT coalesce(payload->>'tunnel_port',''), "
+           "coalesce(payload->>'node_name',''), "
+           "coalesce(payload->>'host',''), "
+           "node_id, lower(label), "
+           "EXTRACT(EPOCH FROM (now() - n.last_seen_at))::int "
+           "FROM apix_nodes n LEFT JOIN LATERAL ("
+           "  SELECT payload FROM apix_heartbeats h WHERE h.node_id = n.node_id"
+           "   ORDER BY h.received_at DESC LIMIT 1) p ON true "
+           "WHERE NOT n.revoked AND n.last_seen_at IS NOT NULL")
+
+_HB_SQL_B64 = base64.b64encode(_HB_SQL.encode('utf-8')).decode('ascii')
 
 # [WHY 구분자를 출력에 심는가] ss와 psql 출력을 한 SSH 왕복에 합쳐 받는다. 왕복을 둘로
 #   나누면 상태판 열 때마다 접속이 2회라 체감이 두 배로 느려진다.
@@ -89,8 +105,13 @@ _REMOTE_CMD = (
     #   올려야 하는데, 그러면 서버 프로세스 목록에 비밀번호가 잠시 뜬다. 대신 유닉스 소켓
     #   peer 인증으로 postgres 로 붙는다 — 비밀번호가 어디에도 등장하지 않는다.
     #   (자격증명을 흘린 전례: project_apix_central_db 사고 ①)
+    # [🔴 SQL 을 base64 로 넘기는 이유] 이 문자열은 ssh→sh→su→psql 4겹을 통과한다.
+    #   SQL 안의 작은따옴표(payload->>'host')가 su -c '...' 를 그대로 끊어버린다
+    #   (2026-08-09 실측: 관제 DB 조회가 통째로 실패했는데 증상은 '읽음 False' 뿐이었다).
+    #   base64 는 따옴표를 만들지 않으므로 인용 계층이 몇 겹이든 안전하다.
     # 실패해도 조용히 넘어가 '하트비트 알 수 없음'이 되게 둔다 — 터널 정보까지 잃으면 안 된다.
-    f"su postgres -c 'psql -p 5433 -d apix -tA -c \"{_HB_SQL}\"' 2>/dev/null; "
+    f"echo {_HB_SQL_B64} | base64 -d | "
+    "su postgres -c 'psql -p 5433 -d apix -tA -f -' 2>/dev/null; "
     # [🔴 반드시 0으로 끝낼 것] 마지막 psql이 실패하면 그 종료코드가 ssh의 반환값이 되어
     #   '서버 접속 실패'로 오판된다(2026-08-09 실측). 접속 성공 여부는 종료코드가 아니라
     #   아래 마커가 출력에 있는지로 판정한다 — 그래야 관제 DB만 죽은 상황과 구분된다.
@@ -174,18 +195,31 @@ def server_probe(vps_alias: str = '', timeout: int = 15) -> dict:
             if _TUNNEL_PORT_MIN <= p <= _TUNNEL_PORT_MAX:
                 ports.add(p)
 
+    # 이름 계열 키 → 나이, 터널포트 → 나이. 두 사전을 따로 둔다(포트가 우선순위 최상).
     beats: dict[str, int] = {}
+    beats_by_port: dict[int, int] = {}
     for line in hb_txt.splitlines():
-        label, sep, age = line.strip().partition('|')
-        if not sep:
+        cols = [c.strip() for c in line.strip().split('|')]
+        if len(cols) < 6:
             continue
         try:
-            beats[label.strip().lower()] = int(age.strip())
+            age = int(cols[-1])
         except ValueError:
             continue
+        tunnel_port, node_name, host, node_id, label = cols[0], cols[1], cols[2], cols[3], cols[4]
+        if tunnel_port.isdigit():
+            beats_by_port[int(tunnel_port)] = age
+        for key in (node_name, host, node_id, label):
+            k = key.strip().lower()
+            if k:
+                beats.setdefault(k, age)
+                # node_id 는 'pc-yjscom' 형태라 접두사를 벗긴 값도 후보로 둔다.
+                if '-' in k:
+                    beats.setdefault(k.split('-', 1)[1], age)
 
     return {'available': True, 'error': '', 'tunnel_ports': ports,
-            'heartbeats': beats, 'heartbeat_available': bool(hb_txt.strip()),
+            'heartbeats': beats, 'heartbeats_by_port': beats_by_port,
+            'heartbeat_available': bool(hb_txt.strip()),
             'alias': _resolved_alias or ''}
 
 
@@ -202,9 +236,19 @@ def _labels_of(host: dict) -> list[str]:
 
 
 def heartbeat_age(probe: dict, host: dict) -> int | None:
-    """이 노드의 마지막 하트비트 나이(초). 판정 불가면 None."""
+    """이 노드의 마지막 하트비트 나이(초). 판정 불가면 None.
+
+    [불변식] 역터널 포트 매칭이 최우선이다 — 유일하게 양쪽이 같은 값을 아는 키라
+      오탐이 없다. 이름 계열은 사람이 붙인 값이라 두 노드가 같은 이름을 가질 수 있고,
+      그러면 남의 하트비트를 자기 것으로 읽는다. 포트가 있으면 이름은 보지 않는다.
+    """
     if not probe.get('heartbeat_available'):
         return None
+    port = int(host.get('port') or 0)
+    by_port = probe.get('heartbeats_by_port') or {}
+    if port and port in by_port:
+        return by_port[port]
+
     beats = probe.get('heartbeats') or {}
     for key in _labels_of(host):
         if key in beats:
