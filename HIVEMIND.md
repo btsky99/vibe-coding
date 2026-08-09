@@ -1,6 +1,6 @@
 # HiveMind Status
 
-Updated: `2026-08-09 11:16:29`
+Updated: `2026-08-09 12:18:17`
 
 ## Current Focus
 Open plan tasks:
@@ -20,9 +20,11 @@ Open plan tasks:
   방법: 노드별 개별 토큰 발급. 노드마다 검증 후 다음으로.
   검증: 콘솔 노드 목록에 전부 살아 있고, 한 대를 끄면 그 한 대만 회색이 된다.
 
-Alignment: Current work aligns best with Task 14: 작업 데이터 push   (의존: Task 11, 12). Matched files: scripts/apix_sources.py. Unmatched changes still present: project_map.md.
+Alignment: Current work aligns best with Task 14: 작업 데이터 push   (의존: Task 11, 12). Matched files: scripts/apix_push.py, scripts/apix_sources.py. Unmatched changes still present: hivemind.md, project_map.md.
 Changed files:
+- hivemind.md
 - project_map.md
+- scripts/apix_push.py
 - scripts/apix_sources.py
 
 ## Agent Flow

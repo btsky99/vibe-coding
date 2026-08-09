@@ -15,8 +15,10 @@ DESCRIPTION: 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주
              설정:
                ~/.apix/token   또는 환경변수 APIX_TOKEN   (노드별 개별 토큰)
                ~/.apix/url     또는 환경변수 APIX_URL     (기본: 아래 DEFAULT_URL)
+               ~/.apix/cursor.json — 마지막으로 **서버가 받아준** 지점 (자동 생성)
 
 REVISION HISTORY:
+- 2026-08-09 Claude: Task 14 — 태스크·커밋·체크포인트·사고 증분 전송 + 커서 배선.
 - 2026-08-08 Claude: 최초 작성 — 하트비트부터.
 """
 from __future__ import annotations
@@ -31,9 +33,18 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-DEFAULT_URL = 'https://admin.btsky.pe.kr'
+# [WHY apex 인가] `admin` 은 계획상 은퇴 대상(→ apex 301)이다. 301 을 만나면 urllib 은
+#   기본적으로 POST 를 GET 으로 바꿔 따라가므로, 인제스트가 **본문 없이** 재요청되어
+#   조용히 사라진다. 영구 주소로 직접 쏘고, 그래도 3xx 가 오면 아래 _NoRedirect 가
+#   에러로 바꿔 로그에 드러나게 한다.
+DEFAULT_URL = 'https://btsky.pe.kr'
 TIMEOUT = 8
 CONF_DIR = Path.home() / '.apix'
+CURSOR_PATH = CONF_DIR / 'cursor.json'
+
+# 서버(collector/app.py)의 MAX_BODY 는 256KB, nginx client_max_body_size 도 256k.
+# 그 아래로 잘라 보낸다 — 넘으면 413 이고, 413 은 재시도해도 영원히 413 이다.
+CHUNK_BYTES = 200 * 1024
 
 
 def _read(name: str, env: str, default: str = '') -> str:
@@ -205,6 +216,19 @@ def payload() -> dict:
     return d
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """[🔴 왜 리다이렉트를 막나] 기본 동작은 301/302 를 만나면 POST 를 GET 으로 바꿔
+    따라간다. 그러면 본문(태스크·이벤트)이 통째로 버려진 채 요청이 '성공'할 수도 있고,
+    실패해도 원인이 'http_404'로만 보여 도메인 이전 때문이라는 걸 알 수 없다.
+    따라가지 않으면 urllib 이 HTTPError 를 올려 `http_301` 로 정확히 남는다."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def post(kind: str, body: dict) -> tuple[bool, str]:
     token = _read('token', 'APIX_TOKEN')
     if not token:
@@ -217,7 +241,7 @@ def post(kind: str, body: dict) -> tuple[bool, str]:
         'Content-Type': 'application/json; charset=utf-8',
     })
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with _OPENER.open(req, timeout=TIMEOUT) as r:
             return (200 <= r.status < 300), f'http_{r.status}'
     except urllib.error.HTTPError as e:
         return False, f'http_{e.code}'
@@ -225,11 +249,133 @@ def post(kind: str, body: dict) -> tuple[bool, str]:
         return False, type(e).__name__
 
 
+# ── 커서 (Task 14) ──────────────────────────────────────────────────────────
+# [🔴 불변식] 커서는 **서버가 202 로 받아준 지점**만 기록한다. 조회 직후에 전진시키면,
+#   전송이 실패한 구간이 영영 다시 조회되지 않아 그 사이의 태스크·사고가 사라진다.
+#   반대로 실패 시 다시 보내는 중복은 서버가 흡수한다 —
+#   태스크는 (node_id, external_id) UPSERT, 이벤트는 dedup_key ON CONFLICT DO NOTHING.
+#   즉 이 방향의 오차는 '중복'(무해)이고, 반대 방향은 '유실'(복구 불가)이다.
+
+def _load_cursor() -> dict:
+    try:
+        d = json.loads(CURSOR_PATH.read_text(encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except Exception:                                  # noqa: BLE001
+        return {}
+
+
+def _save_cursor(data: dict) -> None:
+    """[제약] 5분마다 덮어쓴다 — 쓰다가 죽으면 커서가 깨져 전량 재전송이 된다.
+    임시 파일 + os.replace 로 원자 교체한다(같은 볼륨이라 replace 가 원자적)."""
+    try:
+        CONF_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CURSOR_PATH.with_suffix('.tmp')
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+        os.replace(tmp, CURSOR_PATH)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+
+def _batches(items: list) -> list[list]:
+    """직렬화 크기 기준으로 나눈다 — 건수 기준으로 자르면 사고 본문(최대 4000자)이
+    섞였을 때 같은 건수라도 크기가 10배씩 차이 나 413 을 못 막는다."""
+    out: list[list] = []
+    cur: list = []
+    size = 0
+    for it in items:
+        n = len(json.dumps(it, ensure_ascii=False).encode('utf-8')) + 1
+        if cur and size + n > CHUNK_BYTES:
+            out.append(cur)
+            cur, size = [], 0
+        cur.append(it)
+        size += n
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _post_all(kind: str, key: str, items: list) -> bool:
+    """전부 성공해야 True. 일부만 들어간 채 True 를 주면 커서가 전진해 나머지가 유실된다."""
+    for chunk in _batches(items):
+        ok, why = post(kind, {key: chunk})
+        if not ok:
+            print(f'[apix] {kind} 전송 실패 ({why}) — 커서 유지, 다음 주기 재시도')
+            return False
+    return True
+
+
+def push_work() -> str:
+    """프로젝트별 증분(태스크·커밋·체크포인트·사고)을 콘솔로 올린다.
+
+    [WHY 프로젝트마다 따로 쏘나] 한 요청에 몰면 (a) 20개 프로젝트 부트스트랩이 256KB
+      상한을 넘고, (b) 한 프로젝트의 실패가 전체 커서를 묶어 멀쩡한 프로젝트까지
+      같은 데이터를 계속 재전송한다. 프로젝트는 서로 독립이므로 실패도 독립이어야 한다.
+    [WHY 세 이벤트를 한 요청에 합치나] 커밋·체크포인트·사고는 커서가 각각이지만
+      전송 실패의 원인(서버 다운·토큰 만료)은 공통이다. 나눠 쏘면 요청만 3배가 된다.
+      한 요청이 성공하면 세 커서를 함께 전진시킨다.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import apix_sources as src
+        projects = src.discover()
+    except Exception as e:                             # noqa: BLE001
+        return f'수집 불가({type(e).__name__})'
+
+    cursor = _load_cursor()
+    n_task = n_event = n_fail = 0
+    dirty = False
+
+    for proj in projects:
+        c = dict(cursor.get(proj['key']) or {})
+
+        try:
+            tasks, t_next = src.tasks(proj, c.get('tasks', ''))
+        except Exception:                              # noqa: BLE001
+            tasks, t_next = [], ''
+        if tasks:
+            if _post_all('tasks', 'tasks', tasks):
+                c['tasks'] = t_next
+                n_task += len(tasks)
+                dirty = True
+            else:
+                n_fail += 1
+
+        try:
+            commits, sha = src.commit_events(proj, c.get('commit', ''))
+            ckpts, ck = src.checkpoint_events(proj, c.get('ckpt', ''))
+            incidents, iid = src.incident_events(proj, c.get('incident', 0))
+        except Exception:                              # noqa: BLE001
+            commits = ckpts = incidents = []
+            sha, ck, iid = c.get('commit', ''), c.get('ckpt', ''), c.get('incident', 0)
+
+        events = commits + ckpts + incidents
+        if events:
+            if _post_all('events', 'events', events):
+                c.update({'commit': sha, 'ckpt': ck, 'incident': iid})
+                n_event += len(events)
+                dirty = True
+            else:
+                n_fail += 1
+
+        if c:
+            cursor[proj['key']] = c
+
+    if dirty:
+        _save_cursor(cursor)
+    return f'프로젝트 {len(projects)} · 태스크 {n_task} · 이벤트 {n_event} · 실패 {n_fail}'
+
+
 def main() -> int:
     ok, why = post('heartbeat', payload())
     # [WHY 실패해도 0 을 반환하나] 스케줄러가 실패를 재시도·경보로 확대하면
     #   서버가 잠깐 꺼진 것만으로 로컬에 소음이 쌓인다. 결과는 한 줄로만 남긴다.
     print(f'[apix] heartbeat {"ok" if ok else "skip"} ({why})')
+
+    # [WHY 하트비트 성공을 전제로 하나] 작업 수집은 로컬 PG 접속 4회 + git 호출 수십 회다.
+    #   토큰이 없거나 서버가 죽은 노드에서 그 비용을 5분마다 태우는 건 순손실이고,
+    #   하트비트가 그 판정을 이미 끝냈다. 서버가 돌아오면 커서 덕에 밀린 만큼 따라잡는다.
+    if ok:
+        print(f'[apix] work {push_work()}')
     return 0
 
 

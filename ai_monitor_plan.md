@@ -215,10 +215,14 @@ VPS)의 상태를 한 화면에서 본다.
 ## Phase 7 — 작업 진행상황 · 프로젝트 보드
 
 ```
-[ ] Task 14: 작업 데이터 push   (의존: Task 11, 12)
-    파일: scripts/apix_push.py
-    방법: hive_tasks · 체크포인트 · 최근 커밋의 **변경분만** 전송(마지막 전송 커서).
-    검증: 태스크 상태를 바꾸면 콘솔에 5분 내 반영.
+[x] Task 14: 작업 데이터 push   (의존: Task 11, 12)   ✅ 2026-08-09 검증
+    파일: scripts/apix_sources.py(수집·신규) + scripts/apix_push.py(전송·커서)
+    방법: hive_tasks · 체크포인트 · 커밋 · 사고의 **변경분만** 전송.
+          커서 ~/.apix/cursor.json — 서버가 202 로 받아준 지점만 기록.
+    검증 실측: 태스크 상태 변경 → 콘솔 /api/projects 에 반영(open 3→2, age 10초).
+          프로젝트 4(pc-yjscom) · 이벤트 40건(commit 8 · ckpt 13 · incident 13).
+    🔴 이 PC 에서 잡히는 프로젝트는 4개(vibe-coding·apix-console·k-quant·ons).
+       crypto-bot·finbee 는 노드가 달라 Task 18 에서 붙는다 — 누락이 아니다.
 
 [ ] Task 15: 프로젝트별 보드   (의존: Task 14)
     파일: apix-console/console/panels/projects.js

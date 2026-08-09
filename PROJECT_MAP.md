@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 11:16
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 12:18
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,24 +8,23 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 1개 · 미푸시 11커밋
+- **브랜치**: `main` · 미커밋 4개 · 미푸시 0커밋
 - **최근 커밋**
-  - `162d276` 2026-08-09 — build(web): 프론트 재빌드 — 상태판 생존/접속 분리 + 중앙 대화 UI 반영
-  - `b7275d5` 2026-08-09 — refactor(remote): 외부 메시 VPN 전면 폐기 + 하트비트↔역터널 매칭 키 확립
-  - `acfa577` 2026-08-09 — refactor(nodes): 노드 상태를 생존(하트비트)과 접속(역터널)으로 분리 — 외부 메시 VPN 폐기
-  - `60258e4` 2026-08-09 — fix(test): 훅 가드 테스트의 환경 의존 거짓 통과 차단
-  - `e936f94` 2026-08-09 — feat(central): 중앙 대화 프론트 UI + 보존 정리 배선 — Task 29·31
+  - `1204120` 2026-08-09 — refactor(web): 옛 상태판(/status/) 제거 — 아픽스 콘솔로 통합
+  - `a78dd71` 2026-08-09 — chore(release): v3.7.329 — 외부 메시 VPN 폐기 + 중앙 대화 PG 완성
+  - `c95d957` 2026-08-09 — build(web): 프론트 재빌드 — 상태판 생존/접속 분리 + 중앙 대화 UI 반영
+  - `620e62d` 2026-08-09 — refactor(remote): 외부 메시 VPN 전면 폐기 + 하트비트↔역터널 매칭 키 확립
+  - `d4fb143` 2026-08-09 — refactor(nodes): 노드 상태를 생존(하트비트)과 접속(역터널)으로 분리 — 외부 메시 VPN 폐기
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-09 11:43** 의도: show
+  - 결정: []
 - **08-09 10:11** 의도: 아픽스 콘솔 Task 14 — 노드가 태스크/커밋/사고를 콘솔로 증분 푸시
   - 결정: 수집은 scripts/apix_sources.py로 분리, 전송/커서는 apix_push.py. 커서는 ~/.apix/cursor.json, 전송 성공 후에만 전진
   - 다음: apix_sources 작성 → apix_push 배선 → 실전송 검증
 - **08-09 09:37** 의도: Task 30 2대 실왕복 완료
   - 결정: 노드B=VPS 샌드박스로 검증, NOTIFY 0.46초 왕복 통과. B는 터널 미경유가 한계
   - 다음: Task 32 노드 온보딩 스크립트 또는 Task 29 프론트 UI
-- **08-09 09:24** 의도: Phase 10 중앙 대화 PG 백엔드 완성
-  - 결정: Task 26 POST 미배선 발견·수정, 실서버 E2E+NOTIFY 0.25초 검증 통과
-  - 다음: Task 29 프론트 대화 UI 또는 Task 30 2대 실왕복
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
 - **test_app_alive_skips_offline_fallback 실패 — capsys.out이 빈 문자열**
@@ -286,8 +285,8 @@
 | `antigravity_adapter.py` | 138 | Antigravity CLI(agy) 호출 격리 레이어 — closed-source 인터페이스 변경 대비 |
 | `antigravity_output_filter.py` | 78 | Antigravity CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터. |
 | `antigravity_session_repair.py` | 216 | Antigravity CLI 세션 히스토리 자동 수리 스크립트. |
-| `apix_push.py` 🔨 | 237 | 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주기 실행을 전제한다. |
-| `apix_sources.py` | 328 | 아픽스 콘솔로 올릴 **로컬 데이터 수집기**. 이 PC 안의 프로젝트를 찾아 |
+| `apix_push.py` 🔨 | 383 | 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주기 실행을 전제한다. |
+| `apix_sources.py` | 345 | 아픽스 콘솔로 올릴 **로컬 데이터 수집기**. 이 PC 안의 프로젝트를 찾아 |
 | `auto.py` 🔨 | 76 | 자율 클로드 heartbeat 터미널 스위치 — on/off/status. |
 | `auto_metrics.py` | 201 | 자율 heartbeat 데몬(claude-auto) 실효 계측 리포트 — 채택률/blocked율/게이트 차단/자가발굴 비율을 |
 | `build_verify.py` | 645 | 빌드 전 필수 조건 검증 스크립트. |
@@ -472,4 +471,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-09 11:16
+> 자동 생성 완료: 2026-08-09 12:18
