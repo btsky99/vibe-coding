@@ -1,6 +1,6 @@
 # HiveMind Status
 
-Updated: `2026-08-09 22:33:41`
+Updated: `2026-08-09 23:46:13`
 
 ## Current Focus
 Open plan tasks:
@@ -19,10 +19,10 @@ Open plan tasks:
 - Task 32: 신규 노드 온보딩 절차 — 키 발급→permitopen 등록→config 주입을 스크립트 1개로
   (지금은 수작업. 다른 PC를 붙이려면 이게 먼저다)
 
-Alignment: Changed files do not map to any open plan task. Current changes: project_map.md, tests/test_central_api.py.
+Alignment: Changed files do not map to any open plan task. Current changes: hivemind.md, project_map.md.
 Changed files:
+- hivemind.md
 - project_map.md
-- tests/test_central_api.py
 
 ## Agent Flow
 ```mermaid

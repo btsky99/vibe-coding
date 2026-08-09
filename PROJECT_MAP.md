@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 22:33
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 23:46
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 1개 · 미푸시 6커밋
+- **브랜치**: `main` · 미커밋 2개 · 미푸시 8커밋
 - **최근 커밋**
+  - `d8a71a7` 2026-08-09 — feat(central): 슬롯 멘션 양방향화 — '@1-2'가 상대 CLI에 실제로 꽂히고 답이 버스로 돌아온다
+  - `95b98ab` 2026-08-09 — test(central): 수신 조건 일치 검사를 리터럴 대조 → 헬퍼 경유 검사로 교체
   - `3920cdf` 2026-08-09 — fix(central): 슬롯 멘션 '@1-2' 수신 소실 — to_agent 필터가 화면 폴링을 걸러냄
   - `d5f724f` 2026-08-09 — fix(central): 안읽음 뱃지가 재시작마다 과거 대화를 새 것으로 셈
   - `b041343` 2026-08-09 — docs(plan): Phase 11 Task 32~46 완료 표시 — 배포만 남음
-  - `7b367f1` 2026-08-09 — feat(ui): 터미널 이름 편집 + 멘션 라우팅 (Phase 11-C/D)
-  - `24a7419` 2026-08-09 — feat(ui): 터미널 좌우 2분할 + 중앙 대화 단일 버스 (Phase 11-B/C)
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-09 22:17** 의도: 아픽스 Phase 11 통합 대화 화면 구현 — Task 32~46 완료, 앱 재시작 후 화면 확인 대기
@@ -91,7 +91,7 @@
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
 | `agent_api.py` 🔨 | 1467 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
-| `central_api.py` 🔨 | 179 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
+| `central_api.py` 🔨 | 236 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
 | `config_api.py` | 96 | 앱 설정 갱신 API — config.json에 부분 업데이트(merge)하고, last_path 변경 시 |
@@ -119,7 +119,7 @@
 | `office_launch_api.py` | 84 | 오피스 독립 서버 실행 라우트 3종 — POST /api/office/launch(office_server 프로세스 |
 | `office_proxy_api.py` | 230 | 오피스 서버(office_server.py) 프로세스 관리 + HTTP 프록시. |
 | `projects_api.py` | 69 | 최근 프로젝트 목록 API — projects.json에 최근 연 프로젝트 경로를 MRU(최대 20개)로 |
-| `pty_api.py` 🔨 | 246 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
+| `pty_api.py` 🔨 | 255 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
 | `recycle_api.py` 🔨 | 409 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
 | `setup_api.py` | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
@@ -135,6 +135,7 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
+| `central_inject.py` 🔨 | 138 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
 | `central_listener.py` 🔨 | 276 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
@@ -289,6 +290,7 @@
 | `auto.py` 🔨 | 76 | 자율 클로드 heartbeat 터미널 스위치 — on/off/status. |
 | `auto_metrics.py` | 201 | 자율 heartbeat 데몬(claude-auto) 실효 계측 리포트 — 채택률/blocked율/게이트 차단/자가발굴 비율을 |
 | `build_verify.py` | 645 | 빌드 전 필수 조건 검증 스크립트. |
+| `central_say.py` 🔨 | 105 | 슬롯 CLI가 아픽스 중앙 대화(서로 대화)에 답하는 수단. |
 | `checkpoint.py` | 62 | 의도 단위 세션 체크포인트 CLI — "왜/어디까지 결정/다음 뭐" 3요소를 |
 | `codex_pg_watcher.py` | 286 | Mirror Codex CLI history entries into PostgreSQL pg_logs. |
 | `discord_claude_bridge.py` 🔨 | 191 | Discord 채널 ↔ 로컬 Claude Code(claude -p) 직결 브리지. |
@@ -470,4 +472,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-09 22:33
+> 자동 생성 완료: 2026-08-09 23:46
