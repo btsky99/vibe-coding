@@ -64,6 +64,14 @@ const KEEP_BASE = 150;
 const PAGE = 50;
 /** 명부는 거의 안 바뀐다 — 폴링에 얹지 않고 이 주기로만 새로 읽는다. */
 const NODES_REFRESH_MS = 60000;
+/**
+ * 읽은 지점(id)을 앱 재시작 너머로 남기는 키.
+ * [WHY 영속인가] 이게 없으면 lastReadId가 매 실행마다 0에서 시작해, 부팅 직후 불러온
+ *   히스토리 전부가 '새 메시지'로 집계된다. SideBus는 접힘이 기본이라 뱃지가 유일한
+ *   알림 수단인데, 켤 때마다 '50'이 떠 있으면 사용자는 뱃지를 무시하게 된다 —
+ *   알림 장치가 조용히 무력화되는 쪽이 안 뜨는 것보다 나쁘다.
+ */
+const READ_KEY = 'vibe_central_read_id';
 
 /** 노드 UUID는 화면에 다 못 넣는다 — 앞 8자만. 명부에 없는 노드의 폴백 표시. */
 export const shortNode = (id: string) => (id || '').slice(0, 8) || '?';
@@ -123,7 +131,10 @@ export function useCentralBus(): CentralBus {
   const [selfSeq, setSelfSeq] = useState(0);
   const [syncedAt, setSyncedAt] = useState(0);
   const [now, setNow] = useState(() => Date.now());
-  const [lastReadId, setLastReadId] = useState(0);
+  const [lastReadId, setLastReadId] = useState(() => {
+    const raw = Number(localStorage.getItem(READ_KEY));
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  });
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
@@ -301,7 +312,11 @@ export function useCentralBus(): CentralBus {
   const markRead = useCallback(() => {
     setLastReadId(prev => {
       const last = messages.length ? messages[messages.length - 1].id : prev;
-      return Math.max(prev, last);
+      const next = Math.max(prev, last);
+      // [제약] 저장 실패(할당량 초과·프라이빗 모드)를 삼킨다 — 읽음 표시가 안 남는 것보다
+      //   대화창이 예외로 죽는 쪽이 훨씬 나쁘다. 최악이라도 이번 실행 안에서는 정상 동작한다.
+      if (next !== prev) { try { localStorage.setItem(READ_KEY, String(next)); } catch { /* 무시 */ } }
+      return next;
     });
   }, [messages]);
 

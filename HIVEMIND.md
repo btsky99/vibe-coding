@@ -1,12 +1,9 @@
 # HiveMind Status
 
-Updated: `2026-08-09 12:18:17`
+Updated: `2026-08-09 22:19:00`
 
 ## Current Focus
 Open plan tasks:
-- Task 14: 작업 데이터 push   (의존: Task 11, 12)
-  파일: scripts/apix_push.py
-  방법: hive_tasks · 체크포인트 · 최근 커밋의 **변경분만** 전송(마지막 전송 커서).
 - Task 15: 프로젝트별 보드   (의존: Task 14)
   파일: apix-console/console/panels/projects.js
   방법: 프로젝트별 카드 — 마지막 활동·진행 태스크·마지막 커밋·담당 노드.
@@ -19,13 +16,13 @@ Open plan tasks:
 - Task 18: na2js · qeuhlak · lenovo · 탭 · CipherTrader 노드에 푸시 배포
   방법: 노드별 개별 토큰 발급. 노드마다 검증 후 다음으로.
   검증: 콘솔 노드 목록에 전부 살아 있고, 한 대를 끄면 그 한 대만 회색이 된다.
+- Task 32: 신규 노드 온보딩 절차 — 키 발급→permitopen 등록→config 주입을 스크립트 1개로
+  (지금은 수작업. 다른 PC를 붙이려면 이게 먼저다)
 
-Alignment: Current work aligns best with Task 14: 작업 데이터 push   (의존: Task 11, 12). Matched files: scripts/apix_push.py, scripts/apix_sources.py. Unmatched changes still present: hivemind.md, project_map.md.
+Alignment: Changed files do not map to any open plan task. Current changes: hivemind.md, project_map.md.
 Changed files:
 - hivemind.md
 - project_map.md
-- scripts/apix_push.py
-- scripts/apix_sources.py
 
 ## Agent Flow
 ```mermaid

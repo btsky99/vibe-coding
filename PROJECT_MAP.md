@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 12:18
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 22:18
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,34 +8,33 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 4개 · 미푸시 0커밋
+- **브랜치**: `main` · 미커밋 2개 · 미푸시 4커밋
 - **최근 커밋**
-  - `1204120` 2026-08-09 — refactor(web): 옛 상태판(/status/) 제거 — 아픽스 콘솔로 통합
-  - `a78dd71` 2026-08-09 — chore(release): v3.7.329 — 외부 메시 VPN 폐기 + 중앙 대화 PG 완성
-  - `c95d957` 2026-08-09 — build(web): 프론트 재빌드 — 상태판 생존/접속 분리 + 중앙 대화 UI 반영
-  - `620e62d` 2026-08-09 — refactor(remote): 외부 메시 VPN 전면 폐기 + 하트비트↔역터널 매칭 키 확립
-  - `d4fb143` 2026-08-09 — refactor(nodes): 노드 상태를 생존(하트비트)과 접속(역터널)으로 분리 — 외부 메시 VPN 폐기
+  - `b041343` 2026-08-09 — docs(plan): Phase 11 Task 32~46 완료 표시 — 배포만 남음
+  - `7b367f1` 2026-08-09 — feat(ui): 터미널 이름 편집 + 멘션 라우팅 (Phase 11-C/D)
+  - `24a7419` 2026-08-09 — feat(ui): 터미널 좌우 2분할 + 중앙 대화 단일 버스 (Phase 11-B/C)
+  - `cbec4bd` 2026-08-09 — feat(central): 노드 주소 체계 + 명부 — 대화에서 발신자를 사람 말로 (Phase 11-A)
+  - `0b590e6` 2026-08-09 — fix(win): 주기적 검은 cmd 창 깜빡임 — 콘솔 숨김 누락 8곳
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-09 22:17** 의도: 아픽스 Phase 11 통합 대화 화면 구현 — Task 32~46 완료, 앱 재시작 후 화면 확인 대기
+  - 결정: 3층 이름(uuid불변/node_seq 호스트명자동/slot_name자유) + useCentralBus는 App 1회 마운트 + 터미널 좌우2분할(오른쪽 기본접힘)
+  - 다음: 앱 재시작 후 2분할 화면·이름편집 육안 확인 → 이상 없으면 Task 47 /vibe-release 배포
+- **08-09 16:07** 의도: show
+  - 결정: []
 - **08-09 11:43** 의도: show
   - 결정: []
-- **08-09 10:11** 의도: 아픽스 콘솔 Task 14 — 노드가 태스크/커밋/사고를 콘솔로 증분 푸시
-  - 결정: 수집은 scripts/apix_sources.py로 분리, 전송/커서는 apix_push.py. 커서는 ~/.apix/cursor.json, 전송 성공 후에만 전진
-  - 다음: apix_sources 작성 → apix_push 배선 → 실전송 검증
-- **08-09 09:37** 의도: Task 30 2대 실왕복 완료
-  - 결정: 노드B=VPS 샌드박스로 검증, NOTIFY 0.46초 왕복 통과. B는 터널 미경유가 한계
-  - 다음: Task 32 노드 온보딩 스크립트 또는 Task 29 프론트 UI
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **5분마다 검은 cmd 창이 십수 번 연달아 깜빡임**
+  - 원인: 작업 스케줄러 'APIX Node Push'(5분 주기)가 돌리는 apix_sources._git()이 subprocess.run 직호출 — CREATE_NO_WINDOW는 자식에게 상속되지 않아 pythonw가 띄워도 자식 git.exe가 새 콘솔을 받음. 프로젝트 
+  - 수정: apix_sources/generate_project_map/drift_detector/zettel_capture/pg_manager/lan_sandbox/recycle_api/hive_api 8곳을 infra.proc 래퍼 경유로 전환 (d423a7d). 진단은 co
+- **T1 PTY 세션이 반복 terminate — 콘솔창 깜빡임 후 사라짐 (api_terminate, exit code -1073741510/0xC000013A)**
+  - 원인: 자동 리사이클 워처(infra/daemons.run_recycle_watcher)가 terminal_id를 전송하지 않고, 수신부(api/recycle_api.handle_post)가 'T1'로 하드코딩 폴백. 계측은 CLI 단위(claude/codex)인데 처형은 터
+  - 수정: daemons에 _targets() 추가 — /api/pty/sessions에서 agent==cli && running인 슬롯만 골라 terminal_id 명시 전달. recycle_api는 terminal_id 없으면 400 거부(폴백 제거). codex_contex
 - **test_app_alive_skips_offline_fallback 실패 — capsys.out이 빈 문자열**
   - 원인: hook_bridge.main()이 VIBE_CHILD_AGENT=1(캐스케이드 가드) 상속으로 출력 없이 exit 0. 테스트가 환경변수를 격리하지 않아 실행 셸에 따라 결과가 달라짐
   - 수정: tests/test_hook_server_spawn_guard.py에 autouse 픽스처로 OFFICE_MODE/VIBE_CHILD_AGENT delenv
-- **syntax error at or near "%" — recycle_api의 active_session_context 쿼리 전량 실패**
-  - 원인: pg_base.query_rows/execute에 params 인자가 없어 호출부가 넘긴 튜플이 timeout에 바인딩됨. psycopg2는 파라미터가 없으면 보간을 건너뛰어 %s가 그대로 서버로 나갔고, except가 예외를 삼켜 호출부는 빈 결과를 정상으로 오인
-  - 수정: pg_base.query_rows/execute에 params를 2번째 위치 인자로 추가하고 cur.execute(sql, params)로 전달. psql 폴백은 파라미터 쿼리를 명시적으로 거부. 회귀 테스트 tests/test_pg_base_params.py 추가
-- **SSH 터널이 열리지 않음 — channel open failed: administratively prohibited**
-  - 원인: authorized_keys 옵션에 port-forwarding 누락. OpenSSH의 restrict는 포트 포워딩까지 끄고, permitopen은 허용목록일 뿐 포워딩을 켜지 않는다. ssh 프로세스는 살아있어 겉보기엔 정상이라 진단이 어렵다. 부수 결함: ensu
-  - 수정: OPTS를 restrict,port-forwarding,permitopen=...로 수정. 재사용 판정을 _our_tunnel_is_alive(상태파일 PID+명령줄 검증)로 교체. 🔴 이 함정은 project_seoul_vps 메모리에 이미 적혀 있었다 — 서버 스크
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -79,7 +78,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2173 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2177 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` 🔨 | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` 🔨 | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
@@ -92,7 +91,7 @@
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
 | `agent_api.py` 🔨 | 1467 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
-| `central_api.py` 🔨 | 151 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
+| `central_api.py` 🔨 | 179 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
 | `config_api.py` | 96 | 앱 설정 갱신 API — config.json에 부분 업데이트(merge)하고, last_path 변경 시 |
@@ -106,7 +105,7 @@
 | `fs_dialog_api.py` | 147 | 파일시스템 다이얼로그 / 탐색 라우트 모음 — server.py do_GET/do_POST에서 추출(Phase 2 R1). |
 | `git_api.py` | 235 | /api/git/* 엔드포인트 핸들러 모듈. |
 | `heal_api.py` | 30 | 자가치유 계측 API — GET /api/heal/metrics. src.heal_metrics.compute_heal_metrics를 |
-| `hive_api.py` 🔨 | 1312 | /api/hive/*, /api/orchestrator/*, /api/install-skills, |
+| `hive_api.py` 🔨 | 1314 | /api/hive/*, /api/orchestrator/*, /api/install-skills, |
 | `hive_ingest_api.py` | 142 | 하이브 수집(ingest) POST 핸들러 3종 — pg_logs 기록 / thought PG 기록 / |
 | `install_api.py` 🔨 | 442 | 다른 프로젝트에 Vibe Coding 스킬셋(.gemini/scripts/*.md)을 복사 설치하는 라우트 핸들러. |
 | `lan_api.py` 🔨 | 554 | /api/lan/* 핸들러 — 프론트(127.0.0.1 로컬서버)가 LAN 브리지를 제어하는 통로. |
@@ -114,14 +113,14 @@
 | `locks_api.py` | 67 | 파일 락 API — 에이전트 간 동시 편집 충돌 방지. locks.json에 {파일: 소유에이전트}를 |
 | `logs_api.py` | 168 | 로그/메시지/실시간 로그 스트림 라우트 4종 — GET /stream(SSE), GET /api/server-logs, |
 | `memory_api.py` | 412 | Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함. |
-| `message_api.py` | 92 | 에이전트 간 메시지 전송 API — 메시지를 DB(send_message)에 저장하고, 수신 대상 |
+| `message_api.py` 🔨 | 116 | 에이전트 간 메시지 전송 API — 메시지를 DB(send_message)에 저장하고, 수신 대상 |
 | `nodes_api.py` 🔨 | 167 | 상태판(독립 창 + tui.py)의 데이터 공급 라우트 4종. |
 | `office_api.py` | 370 | 오피스 모드 전용 API — 프로필 중앙화(PostgreSQL SSOT) + 클래식과 네임스페이스 분리. |
 | `office_launch_api.py` | 84 | 오피스 독립 서버 실행 라우트 3종 — POST /api/office/launch(office_server 프로세스 |
 | `office_proxy_api.py` | 230 | 오피스 서버(office_server.py) 프로세스 관리 + HTTP 프록시. |
 | `projects_api.py` | 69 | 최근 프로젝트 목록 API — projects.json에 최근 연 프로젝트 경로를 MRU(최대 20개)로 |
 | `pty_api.py` 🔨 | 246 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
-| `recycle_api.py` 🔨 | 384 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
+| `recycle_api.py` 🔨 | 409 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
 | `setup_api.py` | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
@@ -136,11 +135,11 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
-| `central_listener.py` 🔨 | 252 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
+| `central_listener.py` 🔨 | 276 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
 | `code_search.py` | 200 | 설명: 코드 인텔리전스 검색 — PostgreSQL FTS 기반 BM25 검색 엔진 |
-| `codex_context.py` 🔨 | 105 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
+| `codex_context.py` 🔨 | 122 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
 | `codex_quota.py` | 216 | Codex CLI(OpenAI)의 플랜 쿼터 사용률(5h/7d %) 공급자. |
 | `connector_core.py` 🔨 | 124 | Discord 등 외부 connector가 공통으로 사용하는 ACL, 터미널 주소, |
 | `db.py` | 42 | 설명: 레거시 DB 진입점 (SQLite 런타임 저장소 폐기 잔재). get_connection()은 |
@@ -149,11 +148,11 @@
 | `heal_metrics.py` | 273 | 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부/체크포인트/교훈)가 실제로 삽질을 |
 | `lan_discovery.py` | 120 | LAN 자동발견 — UDP 브로드캐스트로 같은 네트워크의 다른 바이브코딩 브리지를 |
 | `lan_peers.py` 🔨 | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
-| `lan_sandbox.py` | 304 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
+| `lan_sandbox.py` 🔨 | 310 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
 | `logger.py` | 130 | 설명: 작업 세션 로깅 진입점. log_start()가 session_id 발급 + 민감정보 마스킹 |
-| `node_identity.py` 🔨 | 161 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
+| `node_identity.py` 🔨 | 219 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
 | `pg_base.py` 🔨 | 558 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
-| `pg_central.py` 🔨 | 424 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
+| `pg_central.py` 🔨 | 515 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
 | `pg_connectors.py` 🔨 | 65 | 외부 connector 이벤트의 PostgreSQL 중복 방지와 감사 기록 저장소. |
 | `pg_experience.py` | 226 | 설명: 에이전트 경험/성장(XP·레벨·스탯) + 유사 경험 회상 + pg_logs 활동 기록 |
 | `pg_incidents.py` | 182 | 설명: 사고 장부(incident_ledger) — 고친 에러의 시그니처/근본원인/수정법 기록 + |
@@ -179,7 +178,7 @@
 | `app_boot.py` 🔨 | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` 🔨 | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 1077 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
+| `daemons.py` 🔨 | 1115 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
 | `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` 🔨 | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `fs_watcher.py` | 117 | 파일 시스템 실시간 감시(watchdog) + cli_agent 출력 브로드캐스트 워커. |
@@ -240,7 +239,7 @@
 |------|------|------|
 | `safety_guard.py` | 378 | Bounded Autonomy 및 위험 명령 탐지 엔진 — 시스템 파괴 명령 사전 차단. |
 | `completion_guard.py` | 273 | 서브에이전트 완료 신호 자동 감지기 — Harness continue:false 패턴. |
-| `drift_detector.py` | 270 | 계획 이탈 감지기 — 현재 작업이 ai_monitor_plan.md와 일치하는지 검증. |
+| `drift_detector.py` 🔨 | 276 | 계획 이탈 감지기 — 현재 작업이 ai_monitor_plan.md와 일치하는지 검증. |
 | `plan_validator.py` | 232 | Harness 패턴 계획 검증 엔진 (V1-V5). |
 | `rules_validator.py` | 150 | 프로젝트의 행동 원칙(RULES.md) 준수 여부를 자동으로 검증하는 스크립트. |
 
@@ -270,12 +269,12 @@
 | `osc_parser.py` | 257 | 설명: 터미널 출력 스트림에서 OSC(Operating System Command) 시퀀스를 감지하여 |
 | `git_visualizer.py` | 65 | 에이전트가 현재 Git 워크트리, 브랜치 상태 및 최근 이력을 한눈에 파악하게 돕는 시각화 도구. |
 | `screenshot_analyzer.py` | 154 | 멀티모달 버그 감지 — 스크린샷을 Antigravity Vision API로 분석하여 |
-| `generate_project_map.py` 🔨 | 706 | PROJECT_MAP.md 자동 생성 스크립트. |
+| `generate_project_map.py` 🔨 | 728 | PROJECT_MAP.md 자동 생성 스크립트. |
 
 ### 인프라
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `pg_manager.py` | 269 | 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저. |
+| `pg_manager.py` 🔨 | 275 | 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저. |
 | `setup_hive_pg.py` | 133 | 하이브 마인드 전용 포터블 PostgreSQL 18 + pgvector 설치 및 초기화 스크립트. |
 | `install_codex.py` | 85 | Codex CLI 설치 및 초기 설정 스크립트. |
 
@@ -286,7 +285,7 @@
 | `antigravity_output_filter.py` | 78 | Antigravity CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터. |
 | `antigravity_session_repair.py` | 216 | Antigravity CLI 세션 히스토리 자동 수리 스크립트. |
 | `apix_push.py` 🔨 | 383 | 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주기 실행을 전제한다. |
-| `apix_sources.py` | 345 | 아픽스 콘솔로 올릴 **로컬 데이터 수집기**. 이 PC 안의 프로젝트를 찾아 |
+| `apix_sources.py` 🔨 | 377 | 아픽스 콘솔로 올릴 **로컬 데이터 수집기**. 이 PC 안의 프로젝트를 찾아 |
 | `auto.py` 🔨 | 76 | 자율 클로드 heartbeat 터미널 스위치 — on/off/status. |
 | `auto_metrics.py` | 201 | 자율 heartbeat 데몬(claude-auto) 실효 계측 리포트 — 채택률/blocked율/게이트 차단/자가발굴 비율을 |
 | `build_verify.py` | 645 | 빌드 전 필수 조건 검증 스크립트. |
@@ -330,14 +329,14 @@
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
 | `tui.py` 🔨 | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
-| `zettel_capture.py` | 701 | 제텔카스텐 자동 캡처 엔진. |
+| `zettel_capture.py` 🔨 | 703 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` 🔨 | 988 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` 🔨 | 1088 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
+| `App.tsx` 🔨 | 1142 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
 | `main.tsx` | 75 | 설명: React 앱 진입점. ErrorBoundary로 전체 트리를 감싸 |
 | `types.ts` | 206 | 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답 |
 | `constants.tsx` | 93 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
@@ -353,7 +352,7 @@
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
 | `SetupBanner.tsx` 🔨 | 227 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 494 | 설명: 상태판 독립 창(?page=status) 본체. 두 가지를 한 화면에 보여준다. |
-| `TerminalSlot.tsx` 🔨 | 1171 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
+| `TerminalSlot.tsx` 🔨 | 1101 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
 | `TopMenuBar.tsx` | 574 | 설명: VS Code 스타일 상단 메뉴바 컴포넌트. |
 | `VibeEditor.tsx` | 141 | 설명: Monaco Editor 기반 코드 편집기 — VS Code 스타일 하이라이팅/주석 색상 강화, |
@@ -362,7 +361,7 @@
 | 패널 | 줄 수 | 설명 |
 |------|------|------|
 | `AgentTerminalCard.tsx` | 256 | 설명: 자율 에이전트 터미널 카드 컴포넌트. |
-| `CentralPanel.tsx` 🔨 | 270 | 설명: 중앙 대화(아픽스 서버) 패널 — 여러 PC의 클로드가 한 PG를 공유해 주고받는 대화창. |
+| `CentralPanel.tsx` 🔨 | 166 | 설명: 중앙 대화(아픽스 서버) 패널 — 여러 PC의 클로드가 한 PG를 공유해 주고받는 대화창. |
 | `DaemonsPanel.tsx` | 143 | 백그라운드 데몬 on/off 패널. GET/POST /api/daemons만 사용하며 판정 로직은 |
 | `DiscordPanel.tsx` 🔨 | 191 | Discord 공용 봇 토큰과 현재 PC의 터미널별 채널 binding을 저장한다. |
 | `GitPanel.tsx` | 250 | Git 저장소 실시간 감시 패널 — 브랜치 상태, 파일 변경, 커밋 로그를 5초 폴링으로 표시 |
@@ -381,7 +380,7 @@
 |------|------|------------|
 | `test_agent_api.py` 🔨 | 333 | agent_api.py 단위 테스트. |
 | `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
-| `test_central_api.py` 🔨 | 263 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
+| `test_central_api.py` 🔨 | 266 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
 | `test_central_api_routes.py` 🔨 | 64 | 중앙 대화 HTTP 라우트 배선 회귀 테스트 — 구현만 되고 안 붙는 사고 방지 + 원격 실행 금지선 고정. |
 | `test_central_e2e.py` 🔨 | 161 | 중앙 대화 실왕복 E2E (Task 28) — 중앙 서버가 실제로 붙을 때만 돈다. |
 | `test_central_messaging.py` 🔨 | 176 | 중앙 대화(agent_messages) 송수신 규약의 회귀 테스트 — 중앙 서버 없이 검증한다. |
@@ -407,7 +406,7 @@
 | `test_lan_room_chat.py` | 129 | LAN 그룹방 회귀 테스트 — scope가 토큰 서명에 묶이는지, 1:1 하위호환이 보존되는지, |
 | `test_lan_sandbox.py` | 193 | LAN 원격실행 폴더 격리 회귀 테스트 — 화이트리스트 검증(우회 차단) + 모드별 |
 | `test_new_api_modules.py` | 341 | tasks_api, files_api 단위 테스트. |
-| `test_node_identity.py` 🔨 | 85 | 노드 정체성 회귀 테스트 — ID 영속성, 라벨 독립성, node_ref 왕복, 손상 복구. |
+| `test_node_identity.py` 🔨 | 127 | 노드 정체성 회귀 테스트 — ID 영속성, 라벨 독립성, node_ref 왕복, 손상 복구. |
 | `test_node_status.py` 🔨 | 124 | 노드 상태 판정(생존/접속 분리) + 원격 명령 조립 규약의 회귀 테스트. |
 | `test_orchestrator_monitor.py` | 64 | Regression tests for orchestration monitor data adapters. |
 | `test_pg_base_params.py` 🔨 | 100 | query_rows/execute의 파라미터 바인딩 계약 회귀 테스트 — %s가 서버로 새어나가지 않는지 고정. |
@@ -471,4 +470,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-09 12:18
+> 자동 생성 완료: 2026-08-09 22:18
