@@ -156,7 +156,34 @@ CREATE TABLE IF NOT EXISTS message_cursors (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (node_id, agent_id)
 );
+
+-- [WHY 트리거인가] 수신 측이 폴링만 하면 지연이 주기만큼 생기고, 주기를 줄이면
+--   1코어 서버에 빈 쿼리가 쏟아진다. NOTIFY는 INSERT한 쪽이 비용을 내고 수신 측은
+--   대기만 하므로, 노드가 늘어도 서버 부하가 늘지 않는다.
+-- [제약] payload는 대상 노드 하나뿐이다. 메시지 본문을 실으면 8000바이트 상한에 걸리고
+--   (초과 시 NOTIFY 자체가 실패해 조용히 알림이 끊긴다), 무엇보다 대기 중인 모든
+--   커넥션에 내용이 흘러간다. 수신자는 신호만 받고 본인 몫을 직접 조회한다.
+CREATE OR REPLACE FUNCTION notify_agent_message() RETURNS trigger AS $fn$
+BEGIN
+    PERFORM pg_notify('agent_msg', coalesce(NEW.to_node, ''));
+    RETURN NEW;
+END $fn$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_agent_message ON agent_messages;
+CREATE TRIGGER trg_agent_message AFTER INSERT ON agent_messages
+    FOR EACH ROW EXECUTE FUNCTION notify_agent_message();
 """
+
+NOTIFY_CHANNEL = 'agent_msg'
+
+# 노드당 분당 발신 상한. [WHY] 에이전트가 루프에 빠져 INSERT를 쏟으면 1코어 서버가
+#   그대로 무너지고, 그 사이 다른 노드의 대화까지 막힌다. 사람이 치는 대화는 분당 수 건이라
+#   이 값에 걸리지 않는다 — 걸린다면 그건 사고다.
+_SEND_LIMIT_PER_MIN = 60
+
+# 보존 기간. [불변식 예외] agent_messages는 append-only지만 무한 증가는 1코어/1.9GB
+#   서버에서 감당할 수 없다. 오래된 행 삭제만 유일한 DELETE 경로로 허용한다.
+_RETENTION_DAYS = 30
 
 
 def _ensure_schema_locked(conn) -> bool:
@@ -171,6 +198,143 @@ def _ensure_schema_locked(conn) -> bool:
         return True
     except Exception:
         return False
+
+
+# ── 대화 ─────────────────────────────────────────────────────────────────────
+_send_times: list = []
+
+
+def _rate_limited() -> bool:
+    """최근 1분 발신량이 상한을 넘었는가. [제약] 프로세스 단위 — 서버 강제가 아니다."""
+    now = time.monotonic()
+    _send_times[:] = [t for t in _send_times if now - t < 60]
+    if len(_send_times) >= _SEND_LIMIT_PER_MIN:
+        return True
+    _send_times.append(now)
+    return False
+
+
+def send_message(content: str, to_node: str = '', to_agent: str = '',
+                 from_agent: str = '', config_file=None) -> int | None:
+    """중앙에 메시지를 남긴다. 메시지 id 또는 None(중앙 미설정/실패/과속).
+
+    to_node가 비면 브로드캐스트다(모든 노드가 받는다).
+    [불변식] created_at은 서버 now()를 쓴다 — 인자로 받지 않는다. 시계가 어긋난 PC
+      하나가 전체 대화 순서를 뒤섞는 것을 막는다.
+    [제약] 예외를 던지지 않는다. 대화 실패가 호출부를 죽이면 안 된다.
+    """
+    if not content or not str(content).strip():
+        return None
+    if _rate_limited():
+        print(f'[central] 발신 상한({_SEND_LIMIT_PER_MIN}/분) 초과 — 건너뜀')
+        return None
+
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return None
+
+    try:
+        from src.node_identity import get_node_id
+        node = get_node_id(config_file)
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO agent_messages (from_node, from_agent, to_node, to_agent, content)"
+                " VALUES (%s, %s, NULLIF(%s,''), NULLIF(%s,''), %s) RETURNING id",
+                (node, from_agent or 'claude', to_node, to_agent, str(content)),
+            )
+            return int(cur.fetchone()[0])
+    except Exception as exc:
+        print(f'[central] 발신 실패: {exc}')
+        return None
+
+
+def fetch_new(agent_id: str = '', limit: int = 50, advance: bool = True,
+              config_file=None) -> list[dict]:
+    """이 노드 앞으로 온 새 메시지를 가져온다. 중앙 미설정/실패면 빈 목록.
+
+    [불변식] 자기 노드가 보낸 것은 제외한다 — 브로드캐스트는 자신에게도 매칭되므로
+      거르지 않으면 보낸 메시지를 즉시 되받아 무한 루프가 된다.
+    [WHY 커서인가] 읽음 표시를 메시지 행에 쓰면 여러 노드가 같은 행을 두고 경합하고,
+      '누가 어디까지 읽었나'는 노드 수만큼 필요한데 행 하나에는 담기지 않는다.
+    [제약] advance=True는 조회와 동시에 커서를 민다 — 호출부가 처리에 실패하면 그
+      메시지는 다시 오지 않는다. 처리 실패를 되돌려야 하는 호출부는 advance=False로
+      받고 성공 후 ack_upto()를 부른다.
+    """
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return []
+
+    try:
+        from src.node_identity import get_node_id
+        node = get_node_id(config_file)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT last_seen_id FROM message_cursors WHERE node_id=%s AND agent_id=%s",
+                (node, agent_id),
+            )
+            row = cur.fetchone()
+            cursor = int(row[0]) if row else 0
+
+            cur.execute(
+                "SELECT id, from_node, from_agent, to_node, to_agent, content, created_at"
+                "  FROM agent_messages"
+                " WHERE id > %s AND from_node <> %s"
+                "   AND (to_node IS NULL OR to_node = %s)"
+                "   AND (to_agent IS NULL OR to_agent = '' OR to_agent = %s)"
+                " ORDER BY id LIMIT %s",
+                (cursor, node, node, agent_id, int(limit)),
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        if rows and advance:
+            ack_upto(rows[-1]['id'], agent_id, config_file=config_file)
+        return rows
+    except Exception as exc:
+        print(f'[central] 수신 실패: {exc}')
+        return []
+
+
+def ack_upto(message_id: int, agent_id: str = '', config_file=None) -> bool:
+    """커서를 message_id까지 민다. 되돌아가지 않는다(GREATEST)."""
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return False
+    try:
+        from src.node_identity import get_node_id
+        node = get_node_id(config_file)
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO message_cursors (node_id, agent_id, last_seen_id)"
+                " VALUES (%s, %s, %s)"
+                " ON CONFLICT (node_id, agent_id) DO UPDATE"
+                "   SET last_seen_id = GREATEST(message_cursors.last_seen_id, EXCLUDED.last_seen_id),"
+                "       updated_at = now()",
+                (node, agent_id, int(message_id)),
+            )
+        return True
+    except Exception as exc:
+        print(f'[central] 커서 갱신 실패: {exc}')
+        return False
+
+
+def purge_old(days: int = _RETENTION_DAYS, config_file=None) -> int:
+    """보존 기간이 지난 메시지를 지운다. 삭제 건수(실패 시 0).
+
+    [제약] append-only 원칙의 유일한 예외다. 1코어/1.9GB 서버에서 무한 증가는
+      감당되지 않는다. 커서는 id 기준이라 오래된 행이 사라져도 어긋나지 않는다.
+    """
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM agent_messages"
+                        " WHERE created_at < now() - make_interval(days => %s)", (int(days),))
+            return cur.rowcount or 0
+    except Exception as exc:
+        print(f'[central] 보존 정리 실패: {exc}')
+        return 0
 
 
 def _close_locked() -> None:
