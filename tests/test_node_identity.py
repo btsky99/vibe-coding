@@ -3,6 +3,8 @@ FILE: tests/test_node_identity.py
 DESCRIPTION: 노드 정체성 회귀 테스트 — ID 영속성, 라벨 독립성, node_ref 왕복, 손상 복구.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: node_seq 회귀 4건 추가 — 호스트명 자동 배정이 조용히 0을 반환하면
+                     대화 화면에서 발신자가 전부 '미지'가 된다 (Phase 11 Task 32).
 - 2026-08-08 Claude: 신규 (아픽스 중앙 대화 PG Task 3).
 """
 import json
@@ -83,3 +85,43 @@ def test_foreign_node_ref_is_not_local(cfg):
     ni.get_node_id(cfg)
     other = "0" * 32
     assert ni.is_local_ref(f"{other}/claude:T3", cfg) is False
+
+
+# ── node_seq (Phase 11 Task 32) ─────────────────────────────────────────────
+
+
+def test_seq_from_hostname_without_config(cfg, monkeypatch):
+    """지정된 3대는 아무 설정 없이도 자기 번호를 알아야 한다 — 사람에게 묻지 않는 게 요구사항."""
+    monkeypatch.setattr(ni, "_default_label", lambda: "NA2JS")   # 대소문자 무관
+    assert ni.get_node_seq(cfg) == 3
+    # 매핑으로 결정되면 config에 굳는다 — 이후 호스트명이 바뀌어도 번호가 안 흔들려야 한다.
+    assert json.loads(cfg.read_text(encoding="utf-8"))["node_seq"] == 3
+
+
+def test_saved_seq_wins_over_hostname(cfg, monkeypatch):
+    """config가 정본 — 호스트명을 바꿔도 이미 정해진 번호를 덮지 않는다."""
+    ni.set_node_seq(7, cfg)
+    monkeypatch.setattr(ni, "_default_label", lambda: "yjscom")   # 매핑상 1
+    assert ni.get_node_seq(cfg) == 7
+
+
+def test_unknown_host_returns_zero(cfg, monkeypatch):
+    """네 번째 PC는 0(미지)이어야 한다. 1을 기본값으로 주면 새 PC가 메인 PC를 사칭한다."""
+    monkeypatch.setattr(ni, "_default_label", lambda: "some-new-pc")
+    assert ni.get_node_seq(cfg) == 0
+    assert not cfg.exists() or "node_seq" not in json.loads(cfg.read_text(encoding="utf-8"))
+
+
+def test_seq_out_of_range_is_rejected(cfg):
+    assert ni.set_node_seq(0, cfg) is False
+    assert ni.set_node_seq(100, cfg) is False
+    assert ni.set_node_seq("abc", cfg) is False
+    assert ni.set_node_seq(42, cfg) is True
+
+
+def test_seq_does_not_touch_node_id(cfg, monkeypatch):
+    """[불변식] 번호는 표시용 별명이다 — 외래키인 node_id를 흔들면 중앙 참조가 깨진다."""
+    monkeypatch.setattr(ni, "_default_label", lambda: "yjscom")
+    node_id = ni.get_node_id(cfg)
+    ni.set_node_seq(9, cfg)
+    assert ni.get_node_id(cfg) == node_id

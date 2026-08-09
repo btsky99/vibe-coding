@@ -5,6 +5,9 @@ DESCRIPTION: 에이전트 간 메시지 전송 API — 메시지를 DB(send_mess
              server.py do_POST '/api/message'에서 위임.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: 터미널 이름 라우팅의 정본을 config.json(slot_names)으로 이전
+                     (Phase 11 Task 37). pty-server 값은 연결 시점 스냅샷이라 이름을 바꾼
+                     뒤 재연결 전까지 옛 이름으로 배달되던 문제.
 - 2026-07-05 Claude: server.py do_POST '/api/message' 89줄 분리(long-tail 라운드). 로직 원본 동일
   (verbatim). WS_PORT는 런타임 재설정 전역, send_message는 db_helper 경로 2갈래라 파라미터 주입.
 """
@@ -14,6 +17,21 @@ import sys
 import json
 import time
 from pathlib import Path
+
+
+def _load_slot_names() -> dict:
+    """config.json의 slot_names{터미널ID: 이름}. 실패하면 빈 dict.
+
+    [제약] 예외를 삼킨다 — 이름 조회 실패로 메시지 배달 자체가 죽으면 안 된다.
+      빈 dict면 호출부가 pty 값으로 폴백하므로 동작은 이전과 같아진다.
+    """
+    try:
+        from src.pg_base import DATA_DIR
+        cfg = json.loads((DATA_DIR / 'config.json').read_text(encoding='utf-8'))
+        names = cfg.get('slot_names')
+        return names if isinstance(names, dict) else {}
+    except Exception:
+        return {}
 
 
 def handle_send(handler, ws_port: int, base_dir: Path, send_message) -> None:
@@ -54,12 +72,18 @@ def handle_send(handler, ws_port: int, base_dir: Path, send_message) -> None:
                 _sessions_url = f'http://127.0.0.1:{ws_port}/api/pty/sessions'
                 with _ureq.urlopen(_sessions_url, timeout=2) as _r:
                     _sessions = json.loads(_r.read().decode())
+                _cfg_names = _load_slot_names()
                 for _slot_id, _sess in (_sessions.items() if isinstance(_sessions, dict) else []):
                     _agent = str(_sess.get('agent', '')).lower()
-                    _slot_name = str(_sess.get('slot_name', '')).lower()
+                    # [🔴 이름의 정본은 config.json 하나다] pty-server가 들고 있는 slot_name은
+                    #   연결 시점에 전달된 값이라, 사용자가 이름을 바꾼 뒤 재연결하기 전까지
+                    #   옛 이름으로 라우팅된다. config를 먼저 보고 없을 때만 폴백한다.
+                    _term = str(_slot_id).split('@')[0]
+                    _slot_name = (str(_cfg_names.get(_term, '')).lower()
+                                  or str(_sess.get('slot_name', '')).lower())
                     if not _sess.get('running', False):
                         continue
-                    if _to in _agent or _agent.startswith(_to) or _to in _slot_name:
+                    if _to in _agent or _agent.startswith(_to) or (_slot_name and _to in _slot_name):
                         _write_url = f'http://127.0.0.1:{ws_port}/api/pty/write/{_slot_id}'
                         _payload = json.dumps({'text': content_to_send}).encode()
                         _req = _ureq.Request(

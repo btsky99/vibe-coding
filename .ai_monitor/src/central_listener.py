@@ -7,6 +7,8 @@ DESCRIPTION: 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 2
              LISTEN을 못 세우면 주기 폴링으로 강등해 기능을 잃지 않는다.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: Phase 11 Task 36 — LISTEN 성립 직후 노드 명부 등록. 부팅 시점에
+                     하면 터널이 아직 안 열려 실패한다.
 - 2026-08-09 Claude: Task 31 — purge_old 주기 배선. 보존 정책이 코드에만 있고 아무도
                      부르지 않아 사실상 무기한 보관이던 구멍을 이 루프에 얹어 막음.
 - 2026-08-09 Claude: 신규. Task 27 — 폴링 지연/부하 문제를 NOTIFY로 해소하되,
@@ -152,6 +154,23 @@ def _maybe_purge() -> None:
         _mark(error=f'purge: {str(exc)[:180]}')
 
 
+def _register_self() -> None:
+    """이 PC를 중앙 명부에 올린다 — 화면이 uuid 대신 '아픽스 3-1 (na2js)'을 그리는 근거.
+
+    [제약] 실패(번호 미설정·번호 충돌·연결 끊김)를 예외로 올리지 않는다. 명부는 표시
+      편의이지 대화의 전제조건이 아니다 — 여기서 터지면 LISTEN 루프가 통째로 죽는다.
+    [WHY 충돌을 error로 남기나] 두 PC가 같은 번호를 들면 화면에서 한 대가 다른 대를
+      사칭하게 된다. 조용히 넘기면 원인을 못 찾으므로 상태 스냅샷에 드러낸다.
+    """
+    try:
+        from src.pg_central import register_node_ref
+        ok, why = register_node_ref()
+        if not ok and why and why != 'node_seq 미설정':
+            _mark(error=f'명부: {why[:180]}')
+    except Exception as exc:
+        _mark(error=f'명부: {str(exc)[:180]}')
+
+
 def _loop(node: str, stop: threading.Event) -> None:
     import select
 
@@ -172,6 +191,11 @@ def _loop(node: str, stop: threading.Event) -> None:
             # [WHY 재연결 직후 한 번 세우는가] 끊겨 있던 동안 도착한 메시지는 NOTIFY를
             #   놓쳤다. NOTIFY는 저장되지 않으므로 재구독만으로는 영원히 못 받는다.
             _mark(pending=True)
+            # [WHY 여기서 명부를 올리나] 연결이 성립한 직후가 유일하게 확실한 시점이다.
+            #   부팅 시점에 하면 터널이 아직 안 열려 실패하고, 주기 작업으로 만들면 안 바뀌는
+            #   값을 계속 쓰게 된다. 라벨/번호를 바꾼 뒤 재연결하면 자연히 갱신된다.
+            #   실패해도 대화는 정상 동작한다 — 화면이 uuid 앞자리로 폴백할 뿐이다.
+            _register_self()
 
         try:
             _maybe_purge()          # 연결이 성립한 경로에서만 (Task 31)

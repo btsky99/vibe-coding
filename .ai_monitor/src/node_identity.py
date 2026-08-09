@@ -5,6 +5,8 @@ DESCRIPTION: 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, �
              아픽스 서버(중앙 대화 PG) 1차 — Task 3.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: node_seq 추가 — uuid는 사람이 못 읽어 대화 화면의 발신자를 식별할 수
+                     없었다. 호스트명 매핑으로 자동 배정(Phase 11 Task 32).
 - 2026-08-08 Claude: 신규. 여러 PC의 claude:T1이 중앙에서 서로 구분되지 않던 선행 결함 해소.
 """
 import json
@@ -119,6 +121,62 @@ def set_node_label(label: str, config_file: Path | None = None) -> bool:
     with _lock:
         cfg = _read_config(path)
         cfg['node_label'] = str(label or '').strip() or _default_label()
+        return _write_config(path, cfg)
+
+
+# ── 노드 번호(node_seq) ──────────────────────────────────────────────────────
+# [WHY uuid가 있는데 번호를 또 두나] node_id는 32자 16진수라 사람이 못 읽는다. 대화 화면에
+#   발신자를 'a3f9…' 로 그리면 누가 말했는지 알 수 없다. 번호는 **표시 전용 별명**이고
+#   데이터의 외래키는 끝까지 node_id다 — 번호를 외래키로 쓰면 번호를 바꾸는 순간 과거
+#   기록이 미아가 된다.
+# [WHY 사람에게 묻지 않고 호스트명으로 배정하나] 번호는 이미 확정된 값이다(사용자 지정:
+#   1=메인 2=크립토개발 3=na2js). 매번 물으면 PC 3대에 같은 질문을 3번 하게 되고, 오답이
+#   들어오면 두 PC가 같은 번호를 갖는다. 호스트명은 그 PC가 스스로 아는 유일한 고정값이다.
+# [제약] 여기 없는 호스트명(네 번째 PC)은 0을 받는다 — 0은 '아직 모름'이고, 그때만 UI가
+#   1회 묻는다. 임의로 1을 기본값으로 주면 새 PC가 전부 메인 PC를 사칭한다.
+# 🔴 크립토 개발 PC의 호스트명은 아직 확인되지 않았다. 그 PC를 붙일 때 한 줄 추가한다
+#   (소문자로 적을 것 — 조회가 .lower()로 정규화된다).
+_DEFAULT_SEQ: dict[str, int] = {
+    'yjscom': 1,
+    'na2js': 3,
+}
+
+_SEQ_MIN, _SEQ_MAX = 1, 99
+
+
+def get_node_seq(config_file: Path | None = None) -> int:
+    """이 PC의 표시 번호. config → 호스트명 매핑 → 0(미지) 순으로 본다.
+
+    [부수효과 의도됨] 매핑으로 처음 결정되면 config에 1회 기록한다. 호스트명은 사용자가
+      언제든 바꿀 수 있는 값이라, 한 번 정해진 뒤에는 config가 정본이어야 번호가 안 흔들린다.
+    """
+    path = Path(config_file) if config_file else CONFIG_FILE
+    cfg = _read_config(path)
+    try:
+        saved = int(cfg.get('node_seq') or 0)
+    except (TypeError, ValueError):
+        saved = 0
+    if _SEQ_MIN <= saved <= _SEQ_MAX:
+        return saved
+
+    guess = _DEFAULT_SEQ.get(_default_label().strip().lower(), 0)
+    if guess:
+        set_node_seq(guess, config_file)
+    return guess
+
+
+def set_node_seq(seq: int, config_file: Path | None = None) -> bool:
+    """번호를 저장한다. 범위 밖이면 저장하지 않는다(node_id는 건드리지 않음)."""
+    try:
+        value = int(seq)
+    except (TypeError, ValueError):
+        return False
+    if not (_SEQ_MIN <= value <= _SEQ_MAX):
+        return False
+    path = Path(config_file) if config_file else CONFIG_FILE
+    with _lock:
+        cfg = _read_config(path)
+        cfg['node_seq'] = value
         return _write_config(path, cfg)
 
 

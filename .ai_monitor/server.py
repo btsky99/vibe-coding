@@ -1189,11 +1189,15 @@ def _g_central_messages(h, pp):
 def _g_central_poll(h, pp):
     from api import central_api
     central_api.poll(h, pp)
+def _g_central_nodes(h, pp):
+    from api import central_api
+    central_api.nodes(h, pp)
 
 GET_ROUTES = {
     '/api/central/status': _g_central_status,
     '/api/central/messages': _g_central_messages,
     '/api/central/poll': _g_central_poll,
+    '/api/central/nodes': _g_central_nodes,
     '/api/nodes/remote': _g_nodes_remote,
     '/api/nodes/consoles': _g_nodes_consoles,
     '/api/browse-folder': _g_fs_dialog,

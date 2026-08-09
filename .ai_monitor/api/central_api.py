@@ -2,7 +2,8 @@
 FILE: api/central_api.py
 DESCRIPTION: 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26.
   GET  /api/central/status    — 설정/연결/리스너 상태 + 미수신 개수
-  GET  /api/central/messages  — 최근 대화 조회(커서 불변 — 화면용)
+  GET  /api/central/messages  — 최근 대화 조회(커서 불변 — 화면용, before_id로 과거 조회)
+  GET  /api/central/nodes     — uuid→번호/이름 명부 (표시용)
   GET  /api/central/poll      — 대기 신호가 있을 때만 수신(커서 전진)
   POST /api/central/send      — 메시지 발신
   POST /api/central/ack       — 커서 수동 확정(advance=false 로 받은 경우)
@@ -18,6 +19,9 @@ DESCRIPTION: 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26.
   다른 상태다.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: /nodes 명부 라우트 + messages before_id (Phase 11 Task 35).
+                     🔴 server.py GET_ROUTES 등록을 같이 해야 한다 — 구현만 하고 등록을
+                     빠뜨려 라우트가 죽어 있던 전례가 있다.
 - 2026-08-09 Claude: 신규. Task 26 — 대화 전용 라우트.
 """
 from __future__ import annotations
@@ -74,10 +78,34 @@ def status(handler, parsed_path=None) -> None:
 
 
 def messages(handler, parsed_path=None) -> None:
-    """GET /api/central/messages?limit=50 — 화면용 최근 대화. 커서를 밀지 않는다."""
+    """GET /api/central/messages?limit=50&before_id=0 — 화면용 최근 대화. 커서를 밀지 않는다.
+
+    before_id>0이면 그보다 오래된 구간을 준다('이전 50개 더 보기').
+    """
     from src import pg_central
-    rows = pg_central.list_recent(limit=_limit(parsed_path))
-    _json_response(handler, {'messages': rows, 'count': len(rows)})
+    try:
+        before = int(_q(parsed_path, 'before_id', '0') if parsed_path else '0')
+    except (TypeError, ValueError):
+        before = 0
+    rows = pg_central.list_recent(limit=_limit(parsed_path), before_id=before)
+    _json_response(handler, {'messages': rows, 'count': len(rows), 'before_id': before})
+
+
+def nodes(handler, parsed_path=None) -> None:
+    """GET /api/central/nodes — uuid→번호/이름 명부. 화면이 발신자를 사람 말로 그리는 근거.
+
+    [제약] 이 파일의 기존 계약대로 중앙 미설정/서버 다운에서도 200 + 빈 배열이다.
+      500을 내면 중앙을 안 쓰는 사용자에게도 에러 배지가 뜬다.
+    """
+    from src import pg_central
+    from src.node_identity import get_node_id, get_node_seq
+
+    _json_response(handler, {
+        'nodes': pg_central.list_node_refs(),
+        # 프론트가 '나'를 구분해 말풍선 방향을 정하는 데 쓴다. 명부가 비어도 이건 항상 있다.
+        'self_node_id': get_node_id(),
+        'self_seq': get_node_seq(),
+    })
 
 
 def poll(handler, parsed_path=None) -> None:

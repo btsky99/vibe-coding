@@ -335,3 +335,201 @@ Task 19~28 (콘솔 안정 후)
 - `project_seoul_vps` 갱신 — 도메인 배치 변경, 메모리 예산 실측
 - `project_btsky_web_deploy` 갱신 — apex 가 더 이상 Pages 가 아님
 - 사고 발생 시 `incident.py record` — 특히 인증서·리다이렉트 루프 계열
+
+---
+
+# Phase 11 — 아픽스 통합 대화 화면 (Task 32~47)
+
+**상태: 설계 승인 완료 (2026-08-09) · 미착수**
+설계 근거: 대화 UI 가 `ChatSlot` / `LanPanel 채팅` / `CentralPanel` 3곳에 흩어져 있고
+패널은 한 번에 하나만 보여서, LAN·중앙 대화가 **사실상 못 쓰는 상태**였다.
+
+## 이 Phase 의 불변식 (어기면 기능이 조용히 깨진다)
+
+1. **`node_id`(uuid32)를 바꾸지 않는다.** `node_identity.py` 주석의 불변식 —
+   형식을 바꾸면 중앙 DB 에 쌓인 참조가 전부 파싱 불가가 된다. `1-1` 은 표시 층일 뿐이다.
+2. **중앙 대화 폴러는 앱 전체에 하나뿐이다.** `fetch_new(advance=True)` 가 커서를 밀기
+   때문에, 슬롯마다 폴링하면 한 슬롯이 읽은 메시지를 나머지가 **영영 못 본다**.
+3. **`slot_name` 의 정본은 config.json 하나다.** pty-server 메모리에도 두면 재연결
+   전까지 라우팅이 옛 이름을 본다.
+4. **중앙에 원격 실행 UI 를 만들지 않는다.** `central_api.py` 헤더의 설계 고정 사항 —
+   공용 지점에 실행 통로가 생기면 DB 계정 하나가 전 노드 RCE 권한이 된다.
+5. **오른쪽 창에 LAN 채팅을 섞지 않는다.** 중앙 대화는 같은 망에서도 0.46 초로 동작한다
+   (실측). 두 소스를 합치면 중복·순서 꼬임만 남는다.
+
+## 제외 (이미 되어 있거나 의도적으로 안 함)
+
+- `purge_old` 주기 배선 — Task 31 에서 완료, 보존 **30일 유지**
+- LAN 채팅/파일 전송 통합 — LAN 브리지는 파일·원격 실행 전용으로 존치
+- `node_seq` 를 사람에게 묻는 것 — 번호는 이미 확정됐다(1=메인 2=크립토 3=na2js).
+  호스트명 매핑으로 **자동 배정**하고, 질문은 네 번째 PC 가 붙을 때만 뜨는 폴백으로 둔다
+
+---
+
+## Phase 11-A — 백엔드 (Task 32~37)
+
+### Task 32: node_seq 읽기/쓰기 + **호스트명 기본 배정** — PC 주소의 저장소
+    파일: .ai_monitor/src/node_identity.py
+    방법: get_node_seq()/set_node_seq() 를 get/set_node_label 과 같은 패턴으로 추가.
+          config.json 키는 node_seq(int), 범위 1~99.
+          🔴 **번호는 이미 확정돼 있다(사용자 지정) — 묻지 말고 호스트명으로 배정한다.**
+              _DEFAULT_SEQ = {'yjscom': 1, <크립토 개발 PC 호스트명>: 2, 'na2js': 3}
+          get_node_seq() 는 ① config 값 ② 호스트명 매핑 ③ 0(미지의 새 PC) 순으로 본다.
+          매핑에 걸리면 그 값을 config 에 1회 기록해 이후 호스트명이 바뀌어도 안 흔들린다.
+    완료 조건: pytest 4건 — 매핑된 호스트명은 config 없이도 번호가 나옴, config 값이
+          매핑보다 우선, 미지 호스트명은 0, 범위 밖 저장 거부.
+
+### Task 33: node_registry 테이블 + upsert — uuid→번호 명부
+    파일: .ai_monitor/src/pg_central.py
+    방법: _SCHEMA_SQL 에 node_registry(node_id PK, node_seq INT, node_label TEXT,
+          updated_at) 추가. register_node_ref() 는 자기 행을 upsert 하되, **같은
+          node_seq 에 다른 node_id 가 이미 있으면 저장하지 않고 (False, 사유) 반환**.
+          list_node_refs() 는 전체 명부 반환.
+    완료 조건: 같은 seq 를 두 uuid 로 등록 시도 → 두 번째가 거부되고 경고 로그.
+    의존: Task 32
+
+### Task 34: list_recent 에 before_id — '이전 50개' 의 서버측
+    파일: .ai_monitor/src/pg_central.py
+    방법: list_recent(limit, before_id=0). before_id>0 이면 WHERE id < %s 를 덧붙인다.
+          커서(message_cursors)는 **건드리지 않는다** — 과거 조회는 수신이 아니다.
+    완료 조건: before_id 로 두 번 호출해 겹치지 않는 두 구간이 나오는지 확인.
+    의존: Task 33 (같은 파일 — 순차 수정)
+
+### Task 35: 명부·과거조회 라우트 노출
+    파일: .ai_monitor/api/central_api.py
+    방법: GET /api/central/nodes → {nodes:[{node_id,node_seq,node_label}]}.
+          GET /api/central/messages 에 before_id 쿼리 추가.
+          중앙 미설정/서버 다운에서도 200 + 빈 배열(이 파일의 기존 계약 유지).
+          server.py 의 GET_ROUTES 에 등록 — 🔴 구현하고 라우트 등록을 빠뜨려
+          죽어 있던 전례가 있다.
+    완료 조건: curl 로 두 라우트 200 확인 + 중앙 끈 상태에서도 200.
+    의존: Task 33, 34
+
+### Task 36: 부팅 시 자기 노드 명부 등록
+    파일: .ai_monitor/src/central_listener.py
+    방법: 리스너 기동 경로에서 register_node_ref() 1회 호출. node_seq 가 0(미설정)이면
+          호출하지 않는다 — 0번으로 명부를 오염시키지 않는다.
+    완료 조건: 앱 재시작 후 /api/central/nodes 에 이 PC 가 보임.
+    의존: Task 33
+
+### Task 37: 이름 라우팅 정본을 config 로 이전
+    파일: .ai_monitor/api/message_api.py
+    방법: 현재 pty 세션의 slot_name 으로 매칭하는 부분을, config.json 의
+          slot_names{터미널ID: 이름} 를 **먼저** 보고 없을 때만 pty 값으로 폴백.
+    완료 조건: config 에만 이름이 있고 pty 는 빈 상태에서 그 이름으로 메시지 도달.
+
+---
+
+## Phase 11-B — 프론트 준비 (Task 38~41)
+
+### Task 38: TerminalSlot 헤더 분리 — 규칙 2 대비 선행 분할
+    파일: .ai_monitor/vibe-view/src/components/TerminalSlot.tsx →
+          .../components/terminal/TerminalSlotHeader.tsx (신규)
+    방법: 현재 1171줄이라 2분할·이름편집을 그대로 얹으면 **1500줄 규칙을 넘긴다**.
+          헤더(h-7 영역, 배지·모델·프로젝트 표시)를 통째로 새 파일로 옮기고 props 로
+          받는다. 이 태스크에서는 **동작을 1도 바꾸지 않는다**(순수 이동).
+    완료 조건: 두 파일 모두 1500줄 이하, tsc 오류 0, 화면 변화 없음.
+
+### Task 39: useCentralBus 훅 — 앱 전체 단일 폴러
+    파일: .ai_monitor/vibe-view/src/hooks/useCentralBus.ts (신규)
+    방법: status/poll/messages 폴링과 메시지 배열(상한 150), 명부(uuid→'아픽스 3-1
+          (na2js)') 변환, send(), loadOlder(before_id), 안읽음 카운트를 한곳에 소유.
+          🔴 불변식 2 — 이 훅은 App 에서 **한 번만** 마운트한다.
+    완료 조건: 훅 단독 렌더 시 3초 폴링 1회만 발생(네트워크 탭/로그로 확인).
+    의존: Task 35
+
+### Task 40: CentralPanel 을 표시 전용으로 분리
+    파일: .ai_monitor/vibe-view/src/components/panels/CentralPanel.tsx
+    방법: 내부 useState/fetch 8곳을 제거하고 props(messages, status, onSend,
+          onLoadOlder)로 받는다. 패널 자체는 기존 위치에서 계속 동작해야 한다
+          (훅을 App 에서 주입).
+    완료 조건: 중앙 패널이 이전과 동일하게 동작하며 자체 폴링이 0.
+    의존: Task 39
+
+### Task 41: SideBus 컴포넌트 — 오른쪽 '서로 대화' 창
+    파일: .ai_monitor/vibe-view/src/components/terminal/SideBus.tsx (신규)
+    방법: 접기/펼치기, 접힘 시 안읽음 뱃지, 폭 드래그 + localStorage 저장,
+          **스크롤이 맨 아래일 때만** 자동 추적, 상단 '이전 50개 더 보기'.
+          발신 입력도 포함(나도 버스 참여). 표시명은 훅이 준 변환 결과를 그대로 쓴다.
+    완료 조건: 접었다 펴도 폭 유지, 과거 읽는 중 새 메시지가 와도 화면이 안 밀림.
+    의존: Task 39, 40
+
+---
+
+## Phase 11-C — 통합 (Task 42~45)
+
+### Task 42: App 에 버스 마운트 + 슬롯 전달
+    파일: .ai_monitor/vibe-view/src/App.tsx
+    방법: useCentralBus() 를 최상위에서 1회 호출하고 결과를 TerminalSlot·CentralPanel
+          양쪽에 내려보낸다.
+    완료 조건: 터미널 3개를 켜도 /api/central/poll 호출이 3초당 1회.
+    의존: Task 39, 40
+
+### Task 43: TerminalSlot 본문 좌우 2분할
+    파일: .ai_monitor/vibe-view/src/components/TerminalSlot.tsx
+    방법: 본문 flex 영역을 좌(기존 ChatSlot, 상한 300 현행 유지) / 우(SideBus) 로 나눈다.
+          접힘이 기본값 — 처음 켰을 때 화면이 좁아지는 인상을 주지 않는다.
+    완료 조건: 접힘/펼침 모두에서 xterm 높이 계산이 깨지지 않음(h-full 유지).
+    의존: Task 38, 41, 42
+
+### Task 44: 헤더 이름 인라인 편집
+    파일: .../terminal/TerminalSlotHeader.tsx, .ai_monitor/vibe-view/src/App.tsx
+    방법: displayName 클릭 → 인라인 input → 저장 시 /api/config/update 로
+          slot_names 갱신. 표시는 '아픽스 1-1 · 프론트' 형식, 이름 없으면 주소만.
+    완료 조건: 이름 저장 후 앱 재시작해도 유지되고, 그 이름으로 메시지가 도달.
+    의존: Task 37, 38
+
+### Task 45: 미지 PC 폴백 안내 — 3대에서는 뜨지 않는다
+    파일: .ai_monitor/vibe-view/src/components/terminal/TerminalSlotHeader.tsx
+    방법: 🔴 지정된 3대(1·2·3)는 Task 32 의 호스트명 매핑으로 자동 배정되므로 **아무것도
+          묻지 않는다**. 이 안내는 매핑에 없는 **네 번째 PC**가 붙었을 때만 뜨는 폴백이다.
+          node_seq 가 0 일 때만 '이 PC 번호를 정하세요' 1회 노출, 저장 후 재노출 없음.
+          중앙을 안 쓰는 사용자에게는 아예 뜨지 않는다.
+    완료 조건: 기존 3대에서는 한 번도 안 뜸 + 호스트명을 바꾼 테스트 환경에서만 1회 노출.
+    의존: Task 32, 35
+
+---
+
+## Phase 11-D — 마무리 (Task 46~47)
+
+### Task 46: 멘션 파싱 — @1-1 과 @프론트 둘 다
+    파일: .ai_monitor/vibe-view/src/hooks/useCentralBus.ts
+    방법: 발신 직전 본문 앞의 @토큰을 명부(주소)와 slot_names(이름) 양쪽에서 찾아
+          to_node/to_agent 로 변환. 못 찾으면 **그냥 브로드캐스트로 보낸다** —
+          오타 하나로 메시지가 사라지는 편이 더 나쁘다(central_api send 의 기존 판단).
+    완료 조건: @1-1 / @프론트 / @없는이름 세 경우 모두 의도대로.
+    의존: Task 39
+
+### Task 47: 통합 검증 + 배포
+    파일: (검증 전용)
+    방법: pytest 전체 · tsc · vite build · 로컬 EXE smoke.
+          3대 중 2대(메인 ↔ na2js)로 실왕복 확인 — 한쪽에서 보낸 게 다른 쪽
+          오른쪽 창에 뜨고 발신자가 '아픽스 3-1' 로 보이는지.
+          이후 /vibe-release 로 배포 — 나머지 PC 는 자동 업데이트로 반영된다.
+    완료 조건: 전체 테스트 통과 + 2대 실왕복 성공 + 릴리즈 발행.
+    의존: Task 32~46 전부
+
+---
+
+## Phase 11 의존성 요약
+
+```
+Task 32 → 33 → 34 → 35 → 39 → 40 → 41 → 43
+            ↘ 36        ↘ 42 ↗        ↗
+Task 37 ─────────────→ 44 ←── 38 ──→ 43
+Task 32,35 ─────────→ 45
+Task 39 ────────────→ 46
+전부 → Task 47
+```
+
+🔴 **Task 38(헤더 분리)을 Task 43 보다 먼저 한다.** 순서를 뒤집으면 TerminalSlot 이
+1500줄을 넘긴 상태로 커밋되어 규칙 2 위반이 누적된다.
+
+## Phase 11 완료 후 기록할 지식
+
+- `project_apix_addressing` 신규 — 3층 이름(uuid 불변 / seq 수동 / slot_name 자유),
+  단일 폴러 불변식(커서를 여러 곳에서 밀면 메시지 유실), seq 충돌 거부 규칙
+- `project_apix_node_onboarding` 갱신 — 표시명이 pc-na2js/cipher/na2js 로 제각각이던
+  문제가 주소 체계로 해소됨
+- `feedback_office_classic_separation` 폐기 — "오피스/클래식 혼용 금지"는 사용자가
+  2026-08-09 에 해제했다(대화 UI 일원화가 새 방침)

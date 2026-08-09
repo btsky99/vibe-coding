@@ -243,9 +243,12 @@ def test_중앙_라우트에_원격_실행이_없다():
     source = (BASE / '.ai_monitor' / 'server.py').read_text(encoding='utf-8')
     routes = {ln.split("'")[1] for ln in source.splitlines()
               if "'/api/central/" in ln and ':' in ln}
+    # [허용 목록] 라우트를 늘릴 때는 반드시 여기에 명시적으로 추가한다 — 이 테스트의 목적은
+    #   '실행 통로가 몰래 생기는 것'을 막는 것이지 라우트 추가 자체를 막는 것이 아니다.
+    #   nodes: uuid→번호/이름 명부 조회(읽기 전용, Phase 11 Task 35).
     assert routes == {'/api/central/status', '/api/central/messages',
                       '/api/central/poll', '/api/central/send',
-                      '/api/central/ack'}, f'중앙 라우트가 늘었다: {routes}'
+                      '/api/central/ack', '/api/central/nodes'}, f'중앙 라우트가 늘었다: {routes}'
 
 
 def test_미수신_집계는_수신_조건과_같아야_한다():

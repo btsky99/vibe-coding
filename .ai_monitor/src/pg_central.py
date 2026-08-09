@@ -6,6 +6,9 @@ DESCRIPTION: 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의
              아픽스 서버(중앙 대화 PG) 1차 — Task 4.
 
 REVISION HISTORY:
+- 2026-08-09 Claude: node_registry(uuid→번호/이름 명부) + list_recent(before_id).
+                     화면이 발신자를 uuid로 그리던 문제와 과거 조회 부재 해소
+                     (Phase 11 Task 33·34).
 - 2026-08-08 Claude: 신규. 로컬 pg_base와 완전 분리 — 중앙 스키마가 로컬 DB를 오염시키던
                      경로 자체를 없애기 위해 pg_schema.py에 넣지 않았다.
 """
@@ -157,6 +160,20 @@ CREATE TABLE IF NOT EXISTS message_cursors (
     PRIMARY KEY (node_id, agent_id)
 );
 
+-- [WHY 명부가 따로 필요한가] agent_messages에는 from_node(uuid)만 남는다. 화면에
+--   'a3f9…' 로 그리면 누가 말했는지 알 수 없어서, uuid를 사람이 읽는 번호/이름으로
+--   바꿀 표가 있어야 한다. 메시지 행에 번호를 같이 저장하지 않는 이유는 — 이름을 바꾸면
+--   과거 메시지 전부를 UPDATE 해야 하고, 그건 append-only 불변식을 깨기 때문이다.
+-- [불변식] node_id가 PK다. node_seq는 사람이 정하는 표시용이라 유일성을 DB로 강제하지
+--   않는다(UNIQUE를 걸면 번호를 서로 바꾸는 중간 상태에서 저장 자체가 막힌다).
+--   대신 register_node_ref()가 쓰기 전에 충돌을 검사해 거부한다.
+CREATE TABLE IF NOT EXISTS node_registry (
+    node_id    TEXT PRIMARY KEY,
+    node_seq   INT         NOT NULL,
+    node_label TEXT        NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- [WHY 트리거인가] 수신 측이 폴링만 하면 지연이 주기만큼 생기고, 주기를 줄이면
 --   1코어 서버에 빈 쿼리가 쏟아진다. NOTIFY는 INSERT한 쪽이 비용을 내고 수신 측은
 --   대기만 하므로, 노드가 늘어도 서버 부하가 늘지 않는다.
@@ -198,6 +215,75 @@ def _ensure_schema_locked(conn) -> bool:
         return True
     except Exception:
         return False
+
+
+# ── 노드 명부 ────────────────────────────────────────────────────────────────
+
+
+def register_node_ref(config_file=None) -> tuple[bool, str]:
+    """이 PC를 명부에 등록/갱신한다. (성공, 사유).
+
+    [🔴 왜 충돌을 거부하나] node_seq는 사람이 정하는 값이라 두 PC가 같은 번호를 들 수 있다.
+      그대로 두면 화면에서 '3-1'이 두 대를 가리키고 멘션이 엉뚱한 곳으로 간다. 뒤에 온
+      쪽을 조용히 덮으면 먼저 있던 PC가 이름을 잃으므로, **쓰지 않고 알린다**.
+    [제약] node_seq가 0(미지의 새 PC)이면 등록하지 않는다 — 0번으로 명부를 오염시키면
+      그 PC들이 서로 같은 번호가 되어 위 충돌 검사가 무의미해진다.
+    [제약] 예외를 던지지 않는다. 명부는 표시 편의이지 대화의 전제조건이 아니다.
+    """
+    from src.node_identity import get_node_id, get_node_label, get_node_seq
+
+    seq = get_node_seq(config_file)
+    if not seq:
+        return False, 'node_seq 미설정'
+
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return False, '중앙 미연결'
+
+    node = get_node_id(config_file)
+    label = get_node_label(config_file)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT node_id FROM node_registry WHERE node_seq=%s AND node_id<>%s LIMIT 1",
+                (seq, node),
+            )
+            row = cur.fetchone()
+            if row:
+                msg = f'번호 {seq}는 이미 다른 노드({str(row[0])[:8]}…)가 쓰는 중'
+                print(f'[central] 명부 등록 거부 — {msg}')
+                return False, msg
+
+            cur.execute(
+                "INSERT INTO node_registry (node_id, node_seq, node_label, updated_at)"
+                " VALUES (%s, %s, %s, now())"
+                " ON CONFLICT (node_id) DO UPDATE"
+                " SET node_seq=EXCLUDED.node_seq, node_label=EXCLUDED.node_label,"
+                "     updated_at=now()",
+                (node, seq, label),
+            )
+        return True, ''
+    except Exception as exc:
+        print(f'[central] 명부 등록 실패: {exc}')
+        return False, str(exc)[:200]
+
+
+def list_node_refs(config_file=None) -> list[dict]:
+    """전체 명부. 중앙 미설정/실패면 빈 목록 — 화면은 uuid 앞자리로 폴백하면 된다."""
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT node_id, node_seq, node_label FROM node_registry"
+                " ORDER BY node_seq, node_id"
+            )
+            return [{'node_id': r[0], 'node_seq': int(r[1]), 'node_label': r[2] or ''}
+                    for r in cur.fetchall()]
+    except Exception as exc:
+        print(f'[central] 명부 조회 실패: {exc}')
+        return []
 
 
 # ── 대화 ─────────────────────────────────────────────────────────────────────
@@ -318,7 +404,7 @@ def ack_upto(message_id: int, agent_id: str = '', config_file=None) -> bool:
         return False
 
 
-def list_recent(limit: int = 50, config_file=None) -> list[dict]:
+def list_recent(limit: int = 50, before_id: int = 0, config_file=None) -> list[dict]:
     """이 노드가 관련된 최근 대화를 시간순으로 반환한다. 커서를 건드리지 않는다.
 
     [WHY fetch_new와 분리하는가] 화면에 대화를 그리는 것과 '처리했다'고 표시하는 것은
@@ -326,6 +412,9 @@ def list_recent(limit: int = 50, config_file=None) -> list[dict]:
       않은 메시지가 영구히 사라진다.
     [불변식] 자기 발신분도 포함한다 — 대화창에는 내가 보낸 말도 보여야 한다.
       (fetch_new가 자기 것을 거르는 것은 '수신 처리' 맥락이라 목적이 다르다.)
+    [before_id] '이전 50개 더 보기'용. id 기준이라 created_at이 같은 초에 몰려도
+      경계가 겹치거나 빠지지 않는다(시각 기준으로 페이징하면 같은 초의 행이 유실된다).
+      과거 조회는 수신이 아니므로 여기서도 커서는 밀지 않는다.
     """
     conn = get_central_conn(config_file)
     if conn is None:
@@ -333,13 +422,15 @@ def list_recent(limit: int = 50, config_file=None) -> list[dict]:
     try:
         from src.node_identity import get_node_id
         node = get_node_id(config_file)
+        before = int(before_id or 0)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, from_node, from_agent, to_node, to_agent, content, created_at"
                 "  FROM agent_messages"
-                " WHERE to_node IS NULL OR to_node = %s OR from_node = %s"
+                " WHERE (to_node IS NULL OR to_node = %s OR from_node = %s)"
+                "   AND (%s <= 0 OR id < %s)"
                 " ORDER BY id DESC LIMIT %s",
-                (node, node, int(limit)),
+                (node, node, before, before, int(limit)),
             )
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
