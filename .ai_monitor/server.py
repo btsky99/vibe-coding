@@ -1178,7 +1178,22 @@ def _g_nodes_consoles(h, pp):
     from api import nodes_api
     nodes_api.consoles(h)
 
+# 중앙 대화 3종 — api/central_api.py 위임 (Task 26).
+# [🔴 원격 실행 라우트를 여기에 추가하지 말 것] central_api 헤더의 설계 고정 사항 참조.
+def _g_central_status(h, pp):
+    from api import central_api
+    central_api.status(h, pp)
+def _g_central_messages(h, pp):
+    from api import central_api
+    central_api.messages(h, pp)
+def _g_central_poll(h, pp):
+    from api import central_api
+    central_api.poll(h, pp)
+
 GET_ROUTES = {
+    '/api/central/status': _g_central_status,
+    '/api/central/messages': _g_central_messages,
+    '/api/central/poll': _g_central_poll,
     '/api/nodes/remote': _g_nodes_remote,
     '/api/nodes/consoles': _g_nodes_consoles,
     '/api/browse-folder': _g_fs_dialog,
@@ -1448,7 +1463,19 @@ def _p_git_rollback(h, pp):    git_api.rollback(h, BASE_DIR)
 def _p_git_diff(h, pp):        git_api.diff(h, parse_qs(pp.query), BASE_DIR)
 def _p_screenshot_analyze(h, pp): screenshot_api.analyze(h, SCRIPTS_DIR, PROJECT_ID)
 
+# 중앙 대화 발신 2종 — api/central_api.py 위임 (Task 26).
+# [🔴 원격 실행 라우트를 여기에 추가하지 말 것] central_api 헤더의 설계 고정 사항 참조.
+#   중앙 DB는 여러 PC의 공용 접점이라 실행 엔드포인트 하나가 전 노드 RCE가 된다.
+def _p_central_send(h, pp):
+    from api import central_api
+    central_api.send(h, pp)
+def _p_central_ack(h, pp):
+    from api import central_api
+    central_api.ack(h, pp)
+
 POST_ROUTES = {
+    '/api/central/send': _p_central_send,
+    '/api/central/ack': _p_central_ack,
     '/api/setup/auto-install': _p_setup_auto_install,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,

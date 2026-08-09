@@ -318,6 +318,66 @@ def ack_upto(message_id: int, agent_id: str = '', config_file=None) -> bool:
         return False
 
 
+def list_recent(limit: int = 50, config_file=None) -> list[dict]:
+    """이 노드가 관련된 최근 대화를 시간순으로 반환한다. 커서를 건드리지 않는다.
+
+    [WHY fetch_new와 분리하는가] 화면에 대화를 그리는 것과 '처리했다'고 표시하는 것은
+      다른 행위다. 하나로 합치면 패널을 열어보기만 해도 커서가 밀려, 아직 아무도 처리하지
+      않은 메시지가 영구히 사라진다.
+    [불변식] 자기 발신분도 포함한다 — 대화창에는 내가 보낸 말도 보여야 한다.
+      (fetch_new가 자기 것을 거르는 것은 '수신 처리' 맥락이라 목적이 다르다.)
+    """
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return []
+    try:
+        from src.node_identity import get_node_id
+        node = get_node_id(config_file)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, from_node, from_agent, to_node, to_agent, content, created_at"
+                "  FROM agent_messages"
+                " WHERE to_node IS NULL OR to_node = %s OR from_node = %s"
+                " ORDER BY id DESC LIMIT %s",
+                (node, node, int(limit)),
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows.reverse()                       # 화면은 오래된 것부터 아래로 쌓는다
+        return rows
+    except Exception as exc:
+        print(f'[central] 목록 조회 실패: {exc}')
+        return []
+
+
+def pending_count(agent_id: str = '', config_file=None) -> int:
+    """커서 뒤에 남은 미수신 개수. 실패/미설정이면 0.
+
+    [제약] fetch_new와 조건식이 같아야 한다 — 어긋나면 '안 읽음 3'인데 조회하면 0건인
+      상태가 된다. 조건을 고칠 때 양쪽을 함께 고친다.
+    """
+    conn = get_central_conn(config_file)
+    if conn is None:
+        return 0
+    try:
+        from src.node_identity import get_node_id
+        node = get_node_id(config_file)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM agent_messages"
+                " WHERE id > coalesce((SELECT last_seen_id FROM message_cursors"
+                "                       WHERE node_id=%s AND agent_id=%s), 0)"
+                "   AND from_node <> %s"
+                "   AND (to_node IS NULL OR to_node = %s)"
+                "   AND (to_agent IS NULL OR to_agent = '' OR to_agent = %s)",
+                (node, agent_id, node, node, agent_id),
+            )
+            return int(cur.fetchone()[0])
+    except Exception as exc:
+        print(f'[central] 미수신 집계 실패: {exc}')
+        return 0
+
+
 def purge_old(days: int = _RETENTION_DAYS, config_file=None) -> int:
     """보존 기간이 지난 메시지를 지운다. 삭제 건수(실패 시 0).
 

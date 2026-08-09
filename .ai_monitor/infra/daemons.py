@@ -836,6 +836,22 @@ def run_central_tunnel(env: DaemonEnv) -> None:
         print(f"[!] 중앙 터널 데몬 시작 실패: {e}")
 
 
+def run_central_listener(env: DaemonEnv) -> None:
+    """중앙 대화 NOTIFY 리스너 — 본체는 src/central_listener.py.
+
+    [WHY 터널과 별도 데몬인가] 터널은 프로세스(ssh) 수명을 관리하고 리스너는 세션(LISTEN)
+      수명을 관리한다. 한 스레드에 합치면 터널 재기동이 구독을 조용히 날려도 알 수 없다.
+    [기본 꺼짐] 본체가 central_db 미설정 시 즉시 return한다(터널 데몬과 동일한 이중 게이트).
+    [제약] 본체는 호출 스레드에서 도는 run_forever다 — 여기서 Thread를 만들면 안 된다
+      (daemon_status가 스레드명으로 생존을 판정하므로 등록 이름의 스레드가 살아 있어야 한다).
+    """
+    try:
+        from src.central_listener import run_forever
+        run_forever()
+    except Exception as e:
+        print(f"[!] 중앙 리스너 데몬 시작 실패: {e}")
+
+
 def run_heartbeat(env: DaemonEnv) -> None:
     """자율 클로드 심장 박동 데몬 — 본체는 infra/heartbeat_daemon.py.
 
@@ -888,6 +904,8 @@ DAEMON_TOGGLES: dict = {
     'lan_bridge':    {'label': 'LAN 브리지 (별도 토글 lan_bridge_enabled도 필요)', 'thread': 'LanBridge'},
     'central_tunnel': {'label': '중앙 PG SSH 터널 (별도 설정 central_tunnel.enabled도 필요)',
                        'thread': 'CentralTunnel'},
+    'central_listen': {'label': '중앙 대화 실시간 수신 (central_db 설정 시에만 동작)',
+                       'thread': 'CentralListen'},
 }
 
 
@@ -1045,6 +1063,7 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     _t('lan_bridge', run_lan_bridge, (env,))
     _t('recycle_watcher', run_recycle_watcher, (env,))
     _t('central_tunnel', run_central_tunnel, (env,))
+    _t('central_listen', run_central_listener, (env,))
 
     # [WHY 로그] 데몬이 안 뜬 이유가 로그에 없으면 비활성 원인을 추적할 방법이 없다.
     #   설정으로 끈 것과 버그로 안 뜬 것을 구분하는 유일한 단서다.

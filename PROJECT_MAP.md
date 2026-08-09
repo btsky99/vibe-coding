@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-08 21:47
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 09:18
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,34 +8,33 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 370개 · 미푸시 1커밋
+- **브랜치**: `main` · 미커밋 372개 · 미푸시 3커밋
 - **최근 커밋**
-  - `db220e5` 2026-08-08 — feat(central): SSH 터널 데몬 — Phase 10 대비 보존 (아직 미연결)
-  - `f37fd39` 2026-08-08 — feat(web): 공개 제품 허브를 www.btsky.pe.kr 로 이전
-  - `e601043` 2026-08-08 — fix(vps): 무인증 공개였던 상태 API 차단 + 아픽스 콘솔 계획 수립
-  - `d0e6dbb` 2026-08-08 — feat(central): 노드 정체성 + 중앙 PG 커넥션 모듈 (Task 3~5)
-  - `c996eb1` 2026-08-08 — feat(central): 아픽스 서버 중앙 대화 DB 셋업 스크립트 + 1차 구현 계획
+  - `f590173` 2026-08-09 — fix(db): 파라미터 쿼리가 통째로 실패하던 원인 — 리사이클 GUARD 무력화
+  - `cfb062f` 2026-08-09 — feat(central): 중앙 대화 송수신 + 노드별 커서 — Task 25
+  - `94bc9bf` 2026-08-09 — fix(central): 터널이 열리지 않던 원인 2건 수정 — 실동작 검증 통과
+  - `c81ed7e` 2026-08-09 — fix(web): 포털 콘솔 배너 글씨가 안 보이던 문제 — 라이트 테마 색으로 교정
+  - `73beaba` 2026-08-08 — chore(release): auto-bump version to v3.7.327 [skip ci]
 
 ### 📍 최근 체크포인트 (중단 지점)
-- **08-08 21:45** 의도: 중앙 대화 PG 임시 중단 — 아픽스 콘솔 우선
-  - 결정: 터널 데몬은 Phase 10 대비 커밋만 하고 미연결 상태로 보존. 콘솔 작업은 다른 세션이 담당
-  - 다음: 재개 시 Phase 10부터. 터널 데몬을 start_all_daemons에 등록하고 좀비/재연결 실측 검증
-- **08-08 20:42** 의도: show
+- **08-08 23:58** 의도: show
   - 결정: []
-- **08-08 17:53** 의도: 볼트 폭주 수정 v3.7.323 배포 중
-  - 결정: 볼트를 단방향(PG->Vault)으로 강등 + 부팅 자가복구 도입. 지향점은 아픽스 서버(VPS) 중앙 지식 PG
-  - 다음: CI 빌드 완료 확인 후 릴리즈 검증. 이후 아픽스 서버 중앙 PG 설계 브레인스토밍
+- **08-08 23:19** 의도: show
+  - 결정: []
+- **08-08 22:04** 의도: 아픽스 서버 정비 완료 — 도메인 연결 대기
+  - 결정: 서버 CLI 자동갱신(systemd timer)+모델 Sonnet 고정. 중앙 대화 PG는 Phase 10으로 보류, 터널 데몬만 미연결 상태로 보존
+  - 다음: btsky.pe.kr 도메인 연결 완료 후 재개. 아픽스 콘솔은 다른 세션 담당
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
-- **admin.btsky.pe.kr/api/status 무인증 공개 — 서비스 목록·역터널 포트·노드 실명 노출**
-  - 원인: vibe-status 상태 API 를 nginx snippet 으로 프록시하면서 접근 제어를 아예 넣지 않았다. '개인 상태판이라 아무도 모른다'는 전제로 noindex 헤더만 붙였다 — 주소를 아는 순간 무너지는 방어선
-  - 수정: snippet 에 allow 127.0.0.1 / deny all. 검증은 반드시 HTTPS + --resolve 로 소스 IP 를 바꿔가며 잰다(루프백으로 재면 영원히 200, 평문 http 로 재면 443 블록을 못 봐서 404). 상시 노출은 로그인 게이트 뒤에서
-- **PG 터널 경로만 격리하려 했으나 pg_hba 규칙이 매치되지 않아 LEAK**
-  - 원인: pg_hba는 목적지가 아니라 소스 주소로 매칭한다. 리눅스 루프백에서 127.0.0.2:5433로 접속해도 커널이 소스를 127.0.0.1로 잡아 client_addr=127.0.0.1이 된다 -> host ... 127.0.0.2/32 규칙은 영원히 매치되지 않는다
-  - 수정: 격리 시도 전부 롤백(백업본 복원+드롭인 제거, 서비스 3종 생존 확인). 작동하지 않는 보안 설정은 보호받고 있다는 착각을 유발하므로 남기지 않는다. 근본 해결은 trust 제거+전 클라이언트 비번화이나 서버의 vibe-bridge/vibe-status가 pg_bas
-- **앱 상시 느림 — 시스템 CPU 40% 고착**
-  - 원인: YAML 이스케이프 왕복 버그의 잔존 데이터. 제목이 왕복마다 2배씩 자라 최대 115MB(vibe-2781), 볼트가 로컬1631MB+GDrive1627MB로 부품. ZettelGDrive 데몬이 120초마다 전량 read_text+정규식 파싱 -> server.py
-  - 수정: fix_corrupted_titles.py 복구범위를 GDrive볼트까지 확장(로컬만 고쳐 되살아나던 구멍) + 1MB초과는 삭제해 export가 재생성 + zettel_sync에 MAX_TITLE_CHARS/MAX_NOTE_FILE_BYTES 방어선(read_text
+- **syntax error at or near "%" — recycle_api의 active_session_context 쿼리 전량 실패**
+  - 원인: pg_base.query_rows/execute에 params 인자가 없어 호출부가 넘긴 튜플이 timeout에 바인딩됨. psycopg2는 파라미터가 없으면 보간을 건너뛰어 %s가 그대로 서버로 나갔고, except가 예외를 삼켜 호출부는 빈 결과를 정상으로 오인
+  - 수정: pg_base.query_rows/execute에 params를 2번째 위치 인자로 추가하고 cur.execute(sql, params)로 전달. psql 폴백은 파라미터 쿼리를 명시적으로 거부. 회귀 테스트 tests/test_pg_base_params.py 추가
+- **SSH 터널이 열리지 않음 — channel open failed: administratively prohibited**
+  - 원인: authorized_keys 옵션에 port-forwarding 누락. OpenSSH의 restrict는 포트 포워딩까지 끄고, permitopen은 허용목록일 뿐 포워딩을 켜지 않는다. ssh 프로세스는 살아있어 겉보기엔 정상이라 진단이 어렵다. 부수 결함: ensu
+  - 수정: OPTS를 restrict,port-forwarding,permitopen=...로 수정. 재사용 판정을 _our_tunnel_is_alive(상태파일 PID+명령줄 검증)로 교체. 🔴 이 함정은 project_seoul_vps 메모리에 이미 적혀 있었다 — 서버 스크
+- **PostgreSQL 루프백 접속이 아무 비밀번호로나 성공 (틀린 비밀번호로도 붙음)**
+  - 원인: pg_hba.conf 의 host all all 127.0.0.1/32 trust. 최소 권한 계정을 만들어도 무의미하고, 서버에서 코드를 실행하게 된 공격자가 postgres 슈퍼유저로 직행할 수 있다
+  - 수정: 관제 계정만 scram-sha-256 을 강제하는 규칙을 trust 라인 **앞에** 삽입(pg_hba 는 첫 매칭이 이긴다). trust 자체를 지우면 어떤 서비스가 비밀번호 없는 연결에 의존하는지 모른 채 운영 중인 것을 멈추게 되므로, 근본 정리는 영향 조사 후 
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -79,7 +78,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2146 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2161 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` 🔨 | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` 🔨 | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
@@ -92,6 +91,7 @@
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
 | `agent_api.py` 🔨 | 1467 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
+| `central_api.py` | 151 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
 | `config_api.py` | 96 | 앱 설정 갱신 API — config.json에 부분 업데이트(merge)하고, last_path 변경 시 |
@@ -135,6 +135,7 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
+| `central_listener.py` | 215 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
 | `code_search.py` | 200 | 설명: 코드 인텔리전스 검색 — PostgreSQL FTS 기반 BM25 검색 엔진 |
@@ -150,8 +151,8 @@
 | `lan_sandbox.py` | 304 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
 | `logger.py` | 130 | 설명: 작업 세션 로깅 진입점. log_start()가 session_id 발급 + 민감정보 마스킹 |
 | `node_identity.py` 🔨 | 161 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
-| `pg_base.py` | 538 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
-| `pg_central.py` 🔨 | 200 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
+| `pg_base.py` 🔨 | 558 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
+| `pg_central.py` 🔨 | 424 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
 | `pg_connectors.py` 🔨 | 65 | 외부 connector 이벤트의 PostgreSQL 중복 방지와 감사 기록 저장소. |
 | `pg_experience.py` | 226 | 설명: 에이전트 경험/성장(XP·레벨·스탯) + 유사 경험 회상 + pg_logs 활동 기록 |
 | `pg_incidents.py` | 182 | 설명: 사고 장부(incident_ledger) — 고친 에러의 시그니처/근본원인/수정법 기록 + |
@@ -177,7 +178,7 @@
 | `app_boot.py` 🔨 | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` 🔨 | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 1054 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
+| `daemons.py` 🔨 | 1077 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
 | `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` 🔨 | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `fs_watcher.py` | 117 | 파일 시스템 실시간 감시(watchdog) + cli_agent 출력 브로드캐스트 워커. |
@@ -194,7 +195,7 @@
 | `session_parse.py` | 136 | CLI 세션 파일(JSONL/JSON) 토큰 usage 파서 모음. |
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
 | `tool_install.py` 🔨 | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
-| `tunnel_daemon.py` 🔨 | 365 | 중앙 PG(아픽스 서버)로 가는 SSH 터널을 띄우고 살려두는 데몬. |
+| `tunnel_daemon.py` 🔨 | 388 | 중앙 PG(아픽스 서버)로 가는 SSH 터널을 띄우고 살려두는 데몬. |
 | `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
 
 ## ⚙️ 스크립트 (scripts/)
@@ -223,7 +224,7 @@
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `hive_hook.py` | 1009 | Claude Code 자동 액션 트레이스 훅 핸들러. |
-| `hook_bridge.py` 🔨 | 634 | Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입. |
+| `hook_bridge.py` | 634 | Claude Code UserPromptSubmit 훅 브릿지 — 자율 에이전트 디스패치 및 하이브 컨텍스트 자동 주입. |
 | `claude_hook.py` | 297 | Claude Code 전용 자동 훅 핸들러. |
 | `antigravity_hook.py` | 595 | Antigravity CLI hook integration. |
 
@@ -283,6 +284,7 @@
 | `antigravity_adapter.py` | 138 | Antigravity CLI(agy) 호출 격리 레이어 — closed-source 인터페이스 변경 대비 |
 | `antigravity_output_filter.py` | 78 | Antigravity CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터. |
 | `antigravity_session_repair.py` | 216 | Antigravity CLI 세션 히스토리 자동 수리 스크립트. |
+| `apix_push.py` 🔨 | 207 | 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주기 실행을 전제한다. |
 | `auto.py` 🔨 | 76 | 자율 클로드 heartbeat 터미널 스위치 — on/off/status. |
 | `auto_metrics.py` | 201 | 자율 heartbeat 데몬(claude-auto) 실효 계측 리포트 — 채택률/blocked율/게이트 차단/자가발굴 비율을 |
 | `build_verify.py` | 645 | 빌드 전 필수 조건 검증 스크립트. |
@@ -311,6 +313,7 @@
 | `install_system_tool.py` | 208 | Windows 시스템 도구 설치 스크립트. |
 | `intent_map.py` | 175 | 하이브 훅 자동 의도 감지 워크플로 맵. |
 | `lesson.py` | 170 | 세션 교훈 증류 CLI — propose(후보 적재) / list / approve(승인 시 |
+| `make_source_package.py` 🔨 | 188 | 개인 인프라 정보를 걷어낸 소스 배포 zip을 만든다. 남에게 코드를 건네되 |
 | `migrate_antigravity_db.py` | 83 | DB 식별자 gemini→antigravity 일회성 마이그레이션 (plan Task 9). |
 | `migrate_archive_session_summaries.py` | 70 | 일회성 마이그레이션 — 이미 permanent로 오승격된 세션요약 노트를 archived=true로 내린다. |
 | `migrate_vault_consolidate.py` | 240 | 지식 창고 재점검 일회성 정리 마이그레이션 (2026-07-14). |
@@ -324,7 +327,7 @@
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
 | `tui.py` 🔨 | 349 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
-| `vps_status_api.py` 🔨 | 195 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
+| `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
 | `zettel_capture.py` | 701 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` 🔨 | 988 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
@@ -375,6 +378,7 @@
 |------|------|------------|
 | `test_agent_api.py` 🔨 | 333 | agent_api.py 단위 테스트. |
 | `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
+| `test_central_messaging.py` | 176 | 중앙 대화(agent_messages) 송수신 규약의 회귀 테스트 — 중앙 서버 없이 검증한다. |
 | `test_central_optional.py` 🔨 | 104 | 🔴 중앙 서버를 쓰지 않는 사용자에게 아무 변화가 없음을 고정하는 회귀 테스트. |
 | `test_claude_quota.py` | 53 | Claude 사용량 응답에서 신규 모델별 주간 한도를 보존하는 회귀 테스트. |
 | `test_cli_install_recovery.py` 🔨 | 173 | CLI 자동 설치가 "성공했는데도 미설치로 보이던" 결함(2026-08-05)의 회귀 방지. |
@@ -389,7 +393,7 @@
 | `test_discord_dashboard.py` 🔨 | 101 | Discord Components V2 dashboard 렌더링과 webhook upsert 회귀 테스트. |
 | `test_discord_gateway.py` 🔨 | 291 | Discord Gateway binding 정규화, 출력 보안 필터, ACL 메시지 처리 테스트. |
 | `test_harness_verify.py` | 218 | harness_verify.py V2 검증 스크립트의 단위 테스트. |
-| `test_hook_server_spawn_guard.py` 🔨 | 158 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
+| `test_hook_server_spawn_guard.py` | 158 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | ITCP 폴백 로직 단위 테스트. |
 | `test_knowledge_pipeline.py` | 133 | 지식 노트 파이프라인 재설계 회귀 테스트 — 세션요약 노이즈 차단 + 파일지식 1급화 + |
@@ -399,6 +403,7 @@
 | `test_new_api_modules.py` | 341 | tasks_api, files_api 단위 테스트. |
 | `test_node_identity.py` 🔨 | 85 | 노드 정체성 회귀 테스트 — ID 영속성, 라벨 독립성, node_ref 왕복, 손상 복구. |
 | `test_orchestrator_monitor.py` | 64 | Regression tests for orchestration monitor data adapters. |
+| `test_pg_base_params.py` 🔨 | 100 | query_rows/execute의 파라미터 바인딩 계약 회귀 테스트 — %s가 서버로 새어나가지 않는지 고정. |
 | `test_pg_central.py` 🔨 | 104 | 중앙 PG 커넥션 모듈 회귀 테스트 — 미설정/오설정에서 예외 없이 None인지, |
 | `test_pg_connectors.py` 🔨 | 29 | connector event PostgreSQL 중복 claim과 상태 갱신 테스트. |
 | `test_pg_store_split.py` | 124 | pg_store.py 분할(2026-06-10) 회귀 방지 테스트. |
@@ -410,9 +415,9 @@
 | `test_setup_auto_install.py` | 153 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
-| `test_smoke_isolation.py` 🔨 | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
+| `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_tunnel_daemon.py` | 216 | 중앙 PG SSH 터널 데몬 회귀 테스트 — 게이트/좌표 교환/좀비 정리 판정/기동 락. |
-| `test_updater_bundle_version.py` 🔨 | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
+| `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
 | `test_updater_release_path.py` 🔨 | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
@@ -459,4 +464,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-08 21:47
+> 자동 생성 완료: 2026-08-09 09:18
