@@ -277,9 +277,30 @@ VPS)의 상태를 한 화면에서 본다.
 ```
 [ ] Task 29: 프론트 대화 UI — /api/central/{status,messages,poll,send} 소비
               status의 enabled/connected 를 분리 표시(회색 하나로 합치지 말 것)
-[ ] Task 30: 2대 실왕복 — 이 PC ↔ 다른 노드. 지금까지는 한 PC에서 상대를 흉내낸 것뿐
+[x] Task 30: 2대 실왕복 — 이 PC(노드 A) ↔ VPS(노드 B) 완료. 아래 검증 범위 참조
 [ ] Task 31: purge_old 주기 실행 배선 — 30일 보존이 코드에만 있고 아무도 부르지 않는다
+[ ] Task 32: 신규 노드 온보딩 절차 — 키 발급→permitopen 등록→config 주입을 스크립트 1개로
+              (지금은 수작업. 다른 PC를 붙이려면 이게 먼저다)
 ```
+
+### Task 30 실왕복 결과 (2026-08-09)
+
+노드 A = 이 PC(`e818a01f…`) / 노드 B = 서울 VPS(`a68e0ef3…`, `/tmp/nodeB` 샌드박스에
+현행 `pg_central`·`node_identity`·`pg_base` 를 올려 **실제 클라이언트 코드로** 기동).
+
+- B → A 발신 → A의 리스너에 **NOTIFY 0.46초** 도달 → `fetch_new` 수신(발신자·본문 일치)
+- A → B 답신 → B의 커서가 해당 id까지 전진(수신 확정)
+- 검증 후 `agent_messages`·`message_cursors` 전량 삭제, VPS 샌드박스 제거
+  (config.json에 DB 비밀번호가 들어가므로 남기지 않는다)
+
+🔴 **검증 범위의 한계**: 노드 B는 VPS 자신이라 PG에 **로컬로 직접** 붙었다. 즉 B쪽은
+`tunnel_daemon`을 타지 않았다 — 터널 경로는 A(이 PC)에서만 검증됐다. **다른 PC에서
+터널을 뚫는 경로는 여전히 미검증**이며, 그건 Task 32(온보딩)를 해야 확인할 수 있다.
+
+🔴 **이 PC의 Tailscale이 죽어 있다**(BackendState=NoState, 서비스 재시작해도 동일).
+그래서 tailnet 피어(lenovo·na2js·qeuhlak·apis)에 전부 접근 불가였고, VPS 역터널
+(22001/22002/22004)은 살아 있으나 이 PC 키로는 로그인 거부됐다. 중앙 대화 기능과는
+무관한 별개 문제지만, 다른 PC를 붙이려면 먼저 풀어야 한다.
 
 🔴 **부채**: `tests/test_tunnel_daemon.py`(미추적)는 08-08에 쓰인 옛 API 대상이라
 `_ssh_command` · `live_tunnel_port` 등이 지금 모듈에 없다(9 fail / 5 error).
