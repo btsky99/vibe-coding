@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 22:18
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 22:33
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 2개 · 미푸시 4커밋
+- **브랜치**: `main` · 미커밋 1개 · 미푸시 6커밋
 - **최근 커밋**
+  - `3920cdf` 2026-08-09 — fix(central): 슬롯 멘션 '@1-2' 수신 소실 — to_agent 필터가 화면 폴링을 걸러냄
+  - `d5f724f` 2026-08-09 — fix(central): 안읽음 뱃지가 재시작마다 과거 대화를 새 것으로 셈
   - `b041343` 2026-08-09 — docs(plan): Phase 11 Task 32~46 완료 표시 — 배포만 남음
   - `7b367f1` 2026-08-09 — feat(ui): 터미널 이름 편집 + 멘션 라우팅 (Phase 11-C/D)
   - `24a7419` 2026-08-09 — feat(ui): 터미널 좌우 2분할 + 중앙 대화 단일 버스 (Phase 11-B/C)
-  - `cbec4bd` 2026-08-09 — feat(central): 노드 주소 체계 + 명부 — 대화에서 발신자를 사람 말로 (Phase 11-A)
-  - `0b590e6` 2026-08-09 — fix(win): 주기적 검은 cmd 창 깜빡임 — 콘솔 숨김 누락 8곳
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-09 22:17** 의도: 아픽스 Phase 11 통합 대화 화면 구현 — Task 32~46 완료, 앱 재시작 후 화면 확인 대기
@@ -26,15 +26,15 @@
   - 결정: []
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **중앙 대화 슬롯 멘션 '@1-2'가 수신 노드 화면에 안 뜸 (에러 없이 조용히 유실)**
+  - 원인: 프론트 중앙 버스는 단일 폴링이라 agent 파라미터 없이 호출(agent_id=''). pg_central.fetch_new/pending_count의 조건 to_agent IS NULL OR to_agent='' OR to_agent=%s 가 ''과 비교돼, to_
+  - 수정: _to_agent_clause() 신설 — agent_id가 비면 수신자 조건을 생략. fetch_new/pending_count가 이 함수 하나만 공유(조건 중복 제거). 커밋 3920cdf. 검증: 가짜 원격 uuid로 to_agent='claude:T2' INSE
 - **5분마다 검은 cmd 창이 십수 번 연달아 깜빡임**
   - 원인: 작업 스케줄러 'APIX Node Push'(5분 주기)가 돌리는 apix_sources._git()이 subprocess.run 직호출 — CREATE_NO_WINDOW는 자식에게 상속되지 않아 pythonw가 띄워도 자식 git.exe가 새 콘솔을 받음. 프로젝트 
   - 수정: apix_sources/generate_project_map/drift_detector/zettel_capture/pg_manager/lan_sandbox/recycle_api/hive_api 8곳을 infra.proc 래퍼 경유로 전환 (d423a7d). 진단은 co
 - **T1 PTY 세션이 반복 terminate — 콘솔창 깜빡임 후 사라짐 (api_terminate, exit code -1073741510/0xC000013A)**
   - 원인: 자동 리사이클 워처(infra/daemons.run_recycle_watcher)가 terminal_id를 전송하지 않고, 수신부(api/recycle_api.handle_post)가 'T1'로 하드코딩 폴백. 계측은 CLI 단위(claude/codex)인데 처형은 터
   - 수정: daemons에 _targets() 추가 — /api/pty/sessions에서 agent==cli && running인 슬롯만 골라 terminal_id 명시 전달. recycle_api는 terminal_id 없으면 400 거부(폴백 제거). codex_contex
-- **test_app_alive_skips_offline_fallback 실패 — capsys.out이 빈 문자열**
-  - 원인: hook_bridge.main()이 VIBE_CHILD_AGENT=1(캐스케이드 가드) 상속으로 출력 없이 exit 0. 테스트가 환경변수를 격리하지 않아 실행 셸에 따라 결과가 달라짐
-  - 수정: tests/test_hook_server_spawn_guard.py에 autouse 픽스처로 OFFICE_MODE/VIBE_CHILD_AGENT delenv
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -152,7 +152,7 @@
 | `logger.py` | 130 | 설명: 작업 세션 로깅 진입점. log_start()가 session_id 발급 + 민감정보 마스킹 |
 | `node_identity.py` 🔨 | 219 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
 | `pg_base.py` 🔨 | 558 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
-| `pg_central.py` 🔨 | 515 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
+| `pg_central.py` 🔨 | 537 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
 | `pg_connectors.py` 🔨 | 65 | 외부 connector 이벤트의 PostgreSQL 중복 방지와 감사 기록 저장소. |
 | `pg_experience.py` | 226 | 설명: 에이전트 경험/성장(XP·레벨·스탯) + 유사 경험 회상 + pg_logs 활동 기록 |
 | `pg_incidents.py` | 182 | 설명: 사고 장부(incident_ledger) — 고친 에러의 시그니처/근본원인/수정법 기록 + |
@@ -380,7 +380,7 @@
 |------|------|------------|
 | `test_agent_api.py` 🔨 | 333 | agent_api.py 단위 테스트. |
 | `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
-| `test_central_api.py` 🔨 | 266 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
+| `test_central_api.py` 🔨 | 279 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
 | `test_central_api_routes.py` 🔨 | 64 | 중앙 대화 HTTP 라우트 배선 회귀 테스트 — 구현만 되고 안 붙는 사고 방지 + 원격 실행 금지선 고정. |
 | `test_central_e2e.py` 🔨 | 161 | 중앙 대화 실왕복 E2E (Task 28) — 중앙 서버가 실제로 붙을 때만 돈다. |
 | `test_central_messaging.py` 🔨 | 176 | 중앙 대화(agent_messages) 송수신 규약의 회귀 테스트 — 중앙 서버 없이 검증한다. |
@@ -470,4 +470,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-09 22:18
+> 자동 생성 완료: 2026-08-09 22:33

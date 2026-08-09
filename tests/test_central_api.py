@@ -252,14 +252,27 @@ def test_중앙_라우트에_원격_실행이_없다():
 
 
 def test_미수신_집계는_수신_조건과_같아야_한다():
-    """[제약] 어긋나면 '안 읽음 3'인데 조회하면 0건인 상태가 된다."""
+    """[제약] 어긋나면 '안 읽음 3'인데 조회하면 0건인 상태가 된다.
+
+    [WHY 리터럴 대조를 그만뒀나] 수신자 조건이 _to_agent_clause 로 빠지면서(Phase 11)
+      두 함수 본문에서 리터럴이 사라졌다. 리터럴을 찾는 검사는 **불변식이 더 튼튼해진
+      리팩터링을 실패로 신고**한다. 지금 검사해야 할 것은 '같은 문자열을 두 번 썼는가'가
+      아니라 '조건을 만드는 곳이 하나인가'다 — 그래서 헬퍼 경유를 본다.
+    """
     import inspect
-    조건 = ('from_node <> %s', 'to_node IS NULL OR to_node = %s',
-            "to_agent IS NULL OR to_agent = '' OR to_agent = %s")
-    fetch = ' '.join(inspect.getsource(pg_central.fetch_new).split())
-    count = ' '.join(inspect.getsource(pg_central.pending_count).split())
-    for c in 조건:
-        assert c in fetch and c in count, f'조건 불일치: {c}'
+    # 조건 생성이 한 곳(_to_agent_clause)에 있고, 그 안에 실제 조건이 들어 있어야 한다.
+    helper = ' '.join(inspect.getsource(pg_central._to_agent_clause).split())
+    assert "to_agent IS NULL OR to_agent = '' OR to_agent = %s" in helper
+
+    # 두 함수는 자기 손으로 조건을 쓰지 않고 헬퍼를 부른다(복붙 재발 방지).
+    공통 = ('from_node <> %s', 'to_node IS NULL OR to_node = %s')
+    for 이름 in ('fetch_new', 'pending_count'):
+        src = ' '.join(inspect.getsource(getattr(pg_central, 이름)).split())
+        assert '_to_agent_clause(agent_id)' in src, f'{이름}이 헬퍼를 안 쓴다'
+        assert 'agent_sql' in src and 'agent_params' in src, f'{이름}이 헬퍼 결과를 안 붙인다'
+        assert "to_agent = '' OR" not in src, f'{이름}에 조건이 복붙돼 있다'
+        for c in 공통:
+            assert c in src, f'조건 불일치: {이름} — {c}'
 
 
 if __name__ == '__main__':
