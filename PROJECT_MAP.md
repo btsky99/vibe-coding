@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 10:18
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-09 10:48
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 382개 · 미푸시 9커밋
+- **브랜치**: `main` · 미커밋 367개 · 미푸시 10커밋
 - **최근 커밋**
+  - `b7275d5` 2026-08-09 — refactor(remote): 외부 메시 VPN 전면 폐기 + 하트비트↔역터널 매칭 키 확립
   - `acfa577` 2026-08-09 — refactor(nodes): 노드 상태를 생존(하트비트)과 접속(역터널)으로 분리 — 외부 메시 VPN 폐기
   - `60258e4` 2026-08-09 — fix(test): 훅 가드 테스트의 환경 의존 거짓 통과 차단
   - `e936f94` 2026-08-09 — feat(central): 중앙 대화 프론트 UI + 보존 정리 배선 — Task 29·31
   - `b89c757` 2026-08-09 — docs(plan): Task 30 실왕복 완료 기록 + 검증 한계 명시
-  - `fcdab5e` 2026-08-09 — docs(plan): Phase 10 완료 표시 + 남은 3건 명시
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-09 10:11** 의도: 아픽스 콘솔 Task 14 — 노드가 태스크/커밋/사고를 콘솔로 증분 푸시
@@ -149,7 +149,7 @@
 | `file_store.py` | 229 | 설명: 레거시 파일 기반 저장소 폴백 (PostgreSQL 미가용 시). shared_memory.json / |
 | `heal_metrics.py` | 273 | 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부/체크포인트/교훈)가 실제로 삽질을 |
 | `lan_discovery.py` | 120 | LAN 자동발견 — UDP 브로드캐스트로 같은 네트워크의 다른 바이브코딩 브리지를 |
-| `lan_peers.py` | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
+| `lan_peers.py` 🔨 | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
 | `lan_sandbox.py` | 304 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
 | `logger.py` | 130 | 설명: 작업 세션 로깅 진입점. log_start()가 session_id 발급 + 민감정보 마스킹 |
 | `node_identity.py` 🔨 | 161 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
@@ -329,7 +329,7 @@
 | `smoke_test.py` 🔨 | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
-| `tui.py` 🔨 | 349 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
+| `tui.py` 🔨 | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
 | `zettel_capture.py` | 701 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` 🔨 | 988 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
@@ -370,7 +370,7 @@
 | `HealPanel.tsx` | 129 | 자가치유 계측 패널 (읽기 전용). GET /api/heal/metrics를 불러 4장치 |
 | `HivePanel.tsx` | 464 | 하이브 진단 패널 — 에이전트 상태 모니터링 + 시스템 헬스 체크 + 자가 치유 UI. |
 | `LanExecDirs.tsx` | 167 | 원격 실행 허용 폴더 관리 — 이 PC가 다른 PC의 Claude에게 열어줄 폴더 목록 + 모드 지정. |
-| `LanPanel.tsx` | 657 | 설명: LAN 브리지 패널 — 같은 네트워크의 다른 바이브코딩을 자동발견하고 페어링(6자리 코드)한 뒤 |
+| `LanPanel.tsx` 🔨 | 657 | 설명: LAN 브리지 패널 — 같은 네트워크의 다른 바이브코딩을 자동발견하고 페어링(6자리 코드)한 뒤 |
 | `LanRoomChat.tsx` | 125 | LAN 그룹 채팅방 — 페어링된 모든 PC가 함께 보는 방. 1:1 채팅과 저장/표시가 완전 분리된다. |
 | `MemoryPanel.tsx` | 469 | 에이전트 간 공유 메모리(SQLite) 패널 — 검색, CRUD, 폴링 로직을 포함한 독립 컴포넌트 |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 보드 패널 컴포넌트. |
@@ -409,7 +409,7 @@
 | `test_lan_sandbox.py` | 193 | LAN 원격실행 폴더 격리 회귀 테스트 — 화이트리스트 검증(우회 차단) + 모드별 |
 | `test_new_api_modules.py` | 341 | tasks_api, files_api 단위 테스트. |
 | `test_node_identity.py` 🔨 | 85 | 노드 정체성 회귀 테스트 — ID 영속성, 라벨 독립성, node_ref 왕복, 손상 복구. |
-| `test_node_status.py` | 124 | 노드 상태 판정(생존/접속 분리) + 원격 명령 조립 규약의 회귀 테스트. |
+| `test_node_status.py` 🔨 | 124 | 노드 상태 판정(생존/접속 분리) + 원격 명령 조립 규약의 회귀 테스트. |
 | `test_orchestrator_monitor.py` | 64 | Regression tests for orchestration monitor data adapters. |
 | `test_pg_base_params.py` 🔨 | 100 | query_rows/execute의 파라미터 바인딩 계약 회귀 테스트 — %s가 서버로 새어나가지 않는지 고정. |
 | `test_pg_central.py` 🔨 | 104 | 중앙 PG 커넥션 모듈 회귀 테스트 — 미설정/오설정에서 예외 없이 None인지, |
@@ -472,4 +472,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-09 10:18
+> 자동 생성 완료: 2026-08-09 10:48
