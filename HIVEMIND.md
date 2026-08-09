@@ -1,6 +1,6 @@
 # HiveMind Status
 
-Updated: `2026-08-09 10:48:09`
+Updated: `2026-08-09 11:16:29`
 
 ## Current Focus
 Open plan tasks:
@@ -20,17 +20,10 @@ Open plan tasks:
   방법: 노드별 개별 토큰 발급. 노드마다 검증 후 다음으로.
   검증: 콘솔 노드 목록에 전부 살아 있고, 한 대를 끄면 그 한 대만 회색이 된다.
 
-Alignment: Current work aligns best with Task 14: 작업 데이터 push   (의존: Task 11, 12). Matched files: scripts/apix_sources.py. Unmatched changes still present: .ai_monitor/vibe-view/dist/assets/floatingwindow--ho84gjj.js, .ai_monitor/vibe-view/dist/assets/floatingwindow-0s1b6f_d.js, .ai_monitor/vibe-view/dist/assets/floatingwindow-9xjfhv3b.js, .ai_monitor/vibe-view/dist/assets/floatingwindow-b1l-pjxp.js, .ai_monitor/vibe-view/dist/assets/floatingwindow-b3fcsmgf.js (+362 more).
+Alignment: Current work aligns best with Task 14: 작업 데이터 push   (의존: Task 11, 12). Matched files: scripts/apix_sources.py. Unmatched changes still present: project_map.md.
 Changed files:
-- .ai_monitor/vibe-view/dist/assets/floatingwindow--ho84gjj.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-0s1b6f_d.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-9xjfhv3b.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-b1l-pjxp.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-b3fcsmgf.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-b9tvuepc.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-bde4oduz.js
-- .ai_monitor/vibe-view/dist/assets/floatingwindow-be0wm_qz.js
-- ... and 360 more
+- project_map.md
+- scripts/apix_sources.py
 
 ## Agent Flow
 ```mermaid
