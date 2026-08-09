@@ -971,12 +971,38 @@ def run_recycle_watcher(env: DaemonEnv) -> None:
       실패 모드가 열린다. 데몬은 계측과 호출만 담당한다.
     [P0 계측] antigravity는 계측 원천이 폐기 경로라 자동 대상에서 제외됨 —
       AUTO_TRIGGER_CLIS가 유일 원천이므로 여기서 별도 분기하지 않는다.
+    [🔴 과거사고 2026-08-09] terminal_id를 안 실어 보냈다. 서버가 'T1'로 폴백해
+      codex가 임계를 넘어도 죽는 건 claude가 돌던 T1이었다("T1만 계속 크래시").
+      계측은 CLI 단위인데 처형은 터미널 단위 — 그 사이를 잇는 매핑이 통째로
+      빠져 있었다. 이제 PTY 세션 목록에서 agent==cli인 슬롯만 골라 지목한다.
     """
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     base = f'http://127.0.0.1:{env.http_port}'
     interval = 60.0
+
+    def _targets(cli: str, project_id: str) -> list[str]:
+        """해당 CLI가 지금 '실제로 돌고 있는' 터미널 ID들.
+
+        [제약] running=True만 고른다 — 죽어 있는 슬롯에 리사이클을 걸면
+          terminate가 무의미하게 실패하고 spawn만 남아 유령 세션이 생긴다.
+        [WHY 서버 경유] PTY 서버(9001) 직통 대신 server.py 프록시를 쓴다.
+          데몬은 env.http_port만 알고 PTY 포트는 모른다(멀티 인스턴스에서 가변).
+        """
+        try:
+            qs = urllib.parse.urlencode({'project_id': project_id})
+            with urllib.request.urlopen(f'{base}/api/pty/sessions?{qs}',
+                                        timeout=10) as resp:
+                sessions = json.loads(resp.read().decode('utf-8'))
+        except (urllib.error.URLError, OSError, ValueError):
+            return []
+        if not isinstance(sessions, dict):
+            return []
+        return [tid for tid, s in sessions.items()
+                if isinstance(s, dict) and s.get('running')
+                and str(s.get('agent') or '') == cli]
 
     def _post(path: str, payload: dict) -> dict | None:
         try:
@@ -1002,23 +1028,35 @@ def run_recycle_watcher(env: DaemonEnv) -> None:
 
             if status:
                 threshold = float(status.get('threshold') or 85.0)
+                project_id = env.current_project_id()
                 for cli in status.get('auto_trigger_clis') or []:
                     m = (status.get('measurement') or {}).get(cli) or {}
                     if not m.get('available'):
                         continue
                     if float(m.get('percentage') or 0) < threshold:
                         continue
-                    res = _post('/api/session/recycle',
-                                {'trigger': 'auto', 'cli': cli,
-                                 'project_id': env.current_project_id()})
-                    if res and res.get('ok'):
-                        print(f"[리사이클] {cli} {m.get('percentage')}% → 세션 교체 완료 "
-                              f"(재정박 {res.get('reanchor_chars')}자)")
-                    elif res and res.get('reason') not in (
-                            'below_threshold', 'user_active', 'flap_guard',
-                            'already_running', 'no_measurement'):
-                        # 정상적인 '지금은 아님' 사유는 로그를 더럽히지 않는다.
-                        print(f"[리사이클] {cli} 보류 — {res.get('reason')}")
+                    targets = _targets(cli, project_id)
+                    if not targets:
+                        # [WHY 로그] 임계는 넘었는데 대상이 없다 = 계측 원천이
+                        #   이미 끝난 세션의 화석일 가능성이 크다. 조용히 넘기면
+                        #   그 화석이 영구히 남아도 아무도 모른다.
+                        print(f"[리사이클] {cli} {m.get('percentage')}% 임계 초과 — "
+                              f"실행 중인 {cli} 터미널 없음, 건너뜀")
+                        continue
+                    for terminal_id in targets:
+                        res = _post('/api/session/recycle',
+                                    {'trigger': 'auto', 'cli': cli,
+                                     'terminal_id': terminal_id,
+                                     'project_id': project_id})
+                        if res and res.get('ok'):
+                            print(f"[리사이클] {terminal_id} {cli} {m.get('percentage')}% "
+                                  f"→ 세션 교체 완료 (재정박 {res.get('reanchor_chars')}자)")
+                        elif res and res.get('reason') not in (
+                                'below_threshold', 'user_active', 'flap_guard',
+                                'already_running', 'no_measurement'):
+                            # 정상적인 '지금은 아님' 사유는 로그를 더럽히지 않는다.
+                            print(f"[리사이클] {terminal_id} {cli} 보류 — "
+                                  f"{res.get('reason')}")
         except Exception as exc:
             print(f'[리사이클 워처] 순회 오류: {exc}')
         time.sleep(interval)

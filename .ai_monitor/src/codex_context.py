@@ -8,11 +8,21 @@ DESCRIPTION: Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout j
 
 REVISION HISTORY:
 - 2026-08-05 Claude: 최초 구현 — 리사이클 P0 계측에서 codex 계측 부재 확인 후 신설
+- 2026-08-09 Claude: session_age_sec/stale 노출 — 끝난 세션의 화석 사용률이
+  현재값처럼 보이던 문제(실측: 5일 전 rollout이 79.2%로 표시)
 """
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+
+# [WHY 6시간] rollout jsonl은 턴마다 갱신되므로, 이보다 오래 멈춘 파일은
+#   'codex를 안 쓰는 중'일 가능성이 높다. 다만 유휴 상태로 살아 있는 세션도
+#   같은 모습이라 available=False로 죽이지 않는다 — 자동 리사이클의 실제
+#   차단은 '그 CLI가 실제 돌고 있는 터미널이 있는가'(infra/daemons._targets)가
+#   맡고, 여기서는 화석임을 드러내기만 한다(관측이 거짓이면 판단도 거짓).
+STALE_AFTER_SEC = 6 * 3600
 
 # [원천] ~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<uuid>.jsonl
 #   claude(~/.claude/projects/<slug>/*.jsonl)와 달리 날짜 3중 디렉터리라
@@ -95,11 +105,18 @@ def context_usage(codex_home: Path | None = None) -> dict:
         return {'available': False, 'percentage': 0.0, 'context_used': used,
                 'context_window': 0, 'session': path.name, 'reason': 'no_context_window'}
 
+    try:
+        age = max(0.0, time.time() - path.stat().st_mtime)
+    except OSError:
+        age = 0.0
+
     return {
         'available': True,
         'percentage': round(used / window * 100, 1),
         'context_used': used,
         'context_window': window,
         'session': path.name,
+        'session_age_sec': round(age),
+        'stale': age > STALE_AFTER_SEC,
         'reason': '',
     }

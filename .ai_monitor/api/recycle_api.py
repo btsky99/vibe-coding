@@ -8,6 +8,8 @@ DESCRIPTION: 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_
 
 REVISION HISTORY:
 - 2026-08-05 Claude: 최초 구현 — Phase 6(컨텍스트 리사이클)
+- 2026-08-09 Claude: terminal_id 'T1' 하드코딩 폴백 제거 — 대상 터미널을
+  호출부가 반드시 지정하게 강제(엉뚱한 슬롯 처형 사고)
 """
 from __future__ import annotations
 
@@ -306,7 +308,16 @@ class RecycleDeps:
 
 # ────────────────────────── 핸들러 ──────────────────────────
 
-def _guard_input(body: dict, cli: str, trigger: str, project_id: str) -> GuardInput:
+def _guard_input(body: dict, cli: str, trigger: str, project_id: str,
+                 terminal_id: str) -> GuardInput:
+    """[제약] terminal_id는 호출부(handle_post)가 검증해 넘긴 값만 받는다.
+
+    [🔴 과거사고 2026-08-09] 여기서 `body.get('terminal_id') or 'T1'`로 자체
+      폴백을 두었고 handle_post에도 같은 폴백이 중복돼 있었다. 리사이클 워처가
+      terminal_id를 아예 안 보내므로 codex가 임계를 넘어도 GUARD는 T1 행을 읽고
+      SWAP은 T1을 죽였다 — codex가 어느 슬롯에 있든 처형은 항상 T1이었다.
+      폴백을 지운 이유: 대상을 못 정하면 '아무나 죽이기'보다 거부가 안전하다.
+    """
     measurement = measure_context(cli, project_id)
     try:
         from src.db_helper import query_rows
@@ -315,7 +326,7 @@ def _guard_input(body: dict, cli: str, trigger: str, project_id: str) -> GuardIn
             "EXTRACT(EPOCH FROM (NOW() - updated_at)) AS age "
             "FROM active_session_context WHERE terminal_id = %s AND status = 'active' "
             "AND project_id = %s LIMIT 1;",
-            (body.get('terminal_id') or 'T1', project_id)) or []
+            (terminal_id, project_id)) or []
     except Exception:
         rows = []
     row = rows[0] if rows else {}
@@ -360,14 +371,24 @@ def handle_post(handler, path: str, PROJECT_ID: str = '') -> bool:
     if path != '/api/session/recycle':
         return False
     body = _body(handler)
-    terminal_id = str(body.get('terminal_id') or 'T1')
+    terminal_id = str(body.get('terminal_id') or '').strip()
     # [불변식] project_id가 비면 UPDATE/SELECT가 어떤 행에도 안 걸려 상태 기록이
     #   조용히 사라진다(0건을 '정상'으로 오독). 본문 → 서버 주입 순으로 채운다.
     project_id = str(body.get('project_id') or '') or PROJECT_ID
     cli = str(body.get('cli') or 'claude')
     trigger = 'auto' if body.get('trigger') == 'auto' else 'manual'
 
-    gi = _guard_input(body, cli, trigger, project_id)
+    # [불변식] 대상 터미널은 호출부가 명시한다 — 폴백 금지.
+    #   이 엔드포인트의 부작용은 '특정 PTY를 죽이고 새로 띄우는 것'이라
+    #   대상을 추측하면 살아 있는 남의 세션이 소리 없이 증발한다(위 과거사고).
+    #   프론트에는 호출부가 없어(유일 호출자 = infra/daemons.py 리사이클 워처)
+    #   필수화로 깨지는 UI 경로가 없음을 확인하고 거부로 바꿨다.
+    if not terminal_id:
+        _json(handler, {'ok': False, 'stage': 'guard', 'reason': 'no_terminal_id',
+                        'detail': 'terminal_id는 필수 — 대상 터미널을 명시할 것'}, 400)
+        return True
+
+    gi = _guard_input(body, cli, trigger, project_id, terminal_id)
     if body.get('dry_run'):
         d = plan_recycle(gi)
         _json(handler, {'allowed': d.allowed, 'reason': d.reason, 'detail': d.detail})
