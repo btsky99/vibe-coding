@@ -447,7 +447,17 @@ def _ensure_pg_running() -> bool:
     return False
 
 
-def query_rows(sql: str, timeout: int = 15) -> list[dict]:
+def query_rows(sql: str, params: tuple | None = None, timeout: int = 15) -> list[dict]:
+    """[제약] params는 반드시 2번째 위치 인자다 — 순서를 바꾸지 말 것.
+
+    [🔴 과거사고 2026-08-09] 이 함수에 params가 없던 시절 recycle_api가
+      `query_rows(sql, (a, b))`로 불렀고, 튜플이 timeout에 바인딩돼 %s가 그대로
+      서버로 나갔다. psycopg2는 파라미터가 없으면 보간을 아예 건너뛰므로
+      "syntax error at or near %"만 남고 호출부는 빈 리스트를 정상 응답으로 받았다.
+      결과: 리사이클의 GUARD 3종(flap_guard/user_active/already_running)이
+      전부 판정 불가 → 사용자가 타이핑 중이어도 세션이 교체됐다.
+      params를 뒤로 옮기면 그 사고가 그대로 재현된다.
+    """
     # [WHY] global 선언 — 분할 전 코드는 선언 없이 except에서 _pg_conn = None을
     # 대입해 로컬 변수만 만들었고(리셋 무효), 죽은 커넥션이 _get_pg_conn의
     # SELECT 1 프로브로만 회복되고 있었다. 분할하며 근본 수정.
@@ -468,7 +478,7 @@ def query_rows(sql: str, timeout: int = 15) -> list[dict]:
             if conn is None:
                 return []
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, params)
                 return [dict(row) for row in cur.fetchall()]
         except Exception as e:
             print(f"[pg_store] query_rows 오류 (psycopg2): {e}")
@@ -477,13 +487,20 @@ def query_rows(sql: str, timeout: int = 15) -> list[dict]:
                 _pg_conn = None
             return []
     # psycopg2 미설치 시 psql.exe 폴백
+    # [제약] psql은 %s 바인딩을 모른다. 여기서 문자열로 끼워 넣으면 인젝션 경로가
+    #   열리므로 대신 명시적으로 포기한다 — 조용히 %s를 흘려보낸 것이 바로 위
+    #   과거사고의 발단이었다. 파라미터 쿼리는 psycopg2 경로 전용이다.
+    if params is not None:
+        print('[pg_store] query_rows: psql 폴백은 파라미터 쿼리를 지원하지 않음 — 건너뜀')
+        return []
     ok, output = _run_psql(sql, csv_output=True, timeout=timeout)
     if not ok or not output.strip():
         return []
     return list(csv.DictReader(io.StringIO(output)))
 
 
-def execute(sql: str, timeout: int = 15) -> bool:
+def execute(sql: str, params: tuple | None = None, timeout: int = 15) -> bool:
+    """[제약] params는 2번째 위치 인자 — query_rows와 순서를 맞춘다(같은 사고 방지)."""
     global _pg_conn  # query_rows와 동일한 리셋 무효 버그 수정
     from src.pg_schema import ensure_schema  # 순환 import 방지 지연 import
     if not ensure_schema():
@@ -498,7 +515,7 @@ def execute(sql: str, timeout: int = 15) -> bool:
                 if conn is None:
                     return False
                 with conn.cursor() as cur:
-                    cur.execute(sql)
+                    cur.execute(sql, params)
                 return True
             except Exception as e:
                 err_msg = str(e)
@@ -510,6 +527,9 @@ def execute(sql: str, timeout: int = 15) -> bool:
                 with _pg_conn_lock:
                     _pg_conn = None
                 return False
+    if params is not None:
+        print('[pg_store] execute: psql 폴백은 파라미터 쿼리를 지원하지 않음 — 건너뜀')
+        return False
     ok, _ = _run_psql(sql, csv_output=False, timeout=timeout)
     return ok
 
