@@ -57,9 +57,9 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import {
-  Terminal, X, Zap, ClipboardList, MessageSquare, CheckCircle2, Clock
-} from 'lucide-react';
+// [2026-08-09] Terminal·X·Zap·ClipboardList·MessageSquare는 헤더와 함께
+//   terminal/TerminalSlotHeader.tsx로 이동했다(Phase 11 Task 38).
+import { CheckCircle2, Clock } from 'lucide-react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -69,6 +69,9 @@ import { LogRecord, AgentMessage, Task } from '../types';
 import { slugifyProjectPath } from '../lib/projectContext';
 import { pickFolderDialog } from '../lib/folderPicker';
 import ChatSlot from './ChatSlot';
+import TerminalSlotHeader from './terminal/TerminalSlotHeader';
+import SideBus from './terminal/SideBus';
+import type { CentralBus } from '../hooks/useCentralBus';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
 import { copyTextToClipboard, captureSelectRestore, installClipboardShortcuts } from './terminal/xtermSelection';
@@ -117,10 +120,13 @@ interface TerminalSlotProps {
   onActivateProject?: () => void;
   // "📁 프로젝트" — 이 슬롯의 프로젝트 경로 지정
   onPickProject?: (path: string) => void;
+  // [🔴 App이 소유한 단일 중앙 대화 버스] 슬롯이 직접 useCentralBus를 부르면 커서가 갈라져
+  //   한 슬롯이 가져간 메시지를 나머지가 못 본다. 반드시 props로만 받는다.
+  centralBus?: CentralBus;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, centralBus
 }: TerminalSlotProps) {
   // [슬롯별 프로젝트] cwd/project_id 산출의 단일 기준. 미지정이면 전역 currentPath로 폴백.
   const effectivePath = slotProject || currentPath;
@@ -753,120 +759,30 @@ export default function TerminalSlot({
   return (
     // h-full: 그리드 셀 높이를 명시적으로 채워야 flex 자식들이 올바른 높이를 전달받음
     <div className={`h-full min-w-0 min-h-0 bg-[#252526] ${ringClass} rounded-md flex flex-col overflow-hidden shadow-inner relative transition-all duration-700`}>
-      {/* 터미널 헤더 — 슬롯 번호, 에이전트명, 락/작업/메시지 배지 */}
-      <div className="h-7 bg-[#2d2d2d] border-b border-black/40 flex items-center justify-between px-3 shrink-0">
-        <div className="flex items-center gap-2 max-w-[60%] overflow-hidden">
-          <Terminal className="w-3 h-3 text-accent shrink-0" />
-          <span className="text-[10px] font-bold text-[#bbbbbb] uppercase tracking-wider truncate">
-            {isTerminalMode ? `${displayName} - ${activeAgent}` : displayName}
-          </span>
-          {/* Git 브랜치 배지 — cmux 스타일 수직 탭 컨텍스트 정보 */}
-          {gitBranch && (
-            <span className="text-[8px] font-mono text-accent/70 bg-accent/10 border border-accent/20 px-1.5 py-0.5 rounded shrink-0">
-              {gitBranch}
-            </span>
-          )}
-          {lockedFileByAgent && (
-            <div className="flex items-center gap-1.5 ml-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] text-yellow-500 animate-pulse shrink-0">
-              <Zap className="w-2.5 h-2.5" />
-              <span className="font-mono">LOCK: {lockedFileByAgent.split(/[\\\/]/).pop()}</span>
-            </div>
-          )}
-          {/* 이 에이전트에게 할당된 작업 수 배지 */}
-          {myPendingTasks.length > 0 && (
-            <div
-              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] text-yellow-400 shrink-0"
-              title={myPendingTasks.map(t => t.title).join(', ')}
-            >
-              <ClipboardList className="w-2.5 h-2.5" />
-              <span>{myPendingTasks.length}개 작업</span>
-            </div>
-          )}
-          {/* 이 에이전트에게 온 최근 메시지 알림 배지 */}
-          {recentAgentMsgs.length > 0 && (
-            <div
-              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-primary/10 border border-primary/30 rounded text-[9px] text-primary shrink-0 animate-pulse"
-              title={recentAgentMsgs[recentAgentMsgs.length - 1].content}
-            >
-              <MessageSquare className="w-2.5 h-2.5" />
-              <span>{recentAgentMsgs.length}개 메시지</span>
-            </div>
-          )}
-        </div>
-        {!isTerminalMode ? (
-          <div className="flex gap-2 items-center">
-            {/* [유휴 헤더 — 폴더 먼저, 실행은 나중] 사용자 최종 의도(2026-07-24): "상단에서 폴더
-                선택 후 카드를 누르면 그 폴더로 실행"돼야 한다. 카드 클릭마다 폴더창을 띄우는 흐름
-                (구 handleLaunchWithPick)은 반대로 매번 물어봐 반려됨. 그래서:
-                  · 📁 뱃지 = 현재 슬롯 프로젝트 표시 + 클릭 시 사이드 패널 activate
-                  · '폴더 선택' 버튼 = handlePickProject로 slotProject 갱신(유휴라 팝업만·재시작 없음)
-                아래 AgentSelectCards의 카드 클릭은 launchAgent 직결 → 팝업 없이 effectivePath로 spawn.
-                (effectivePath는 폴더 선택 후 리렌더로 최신값 반영되므로 next 주입 불필요.) */}
-            <button
-              onClick={onActivateProject}
-              title="이 프로젝트를 사이드 패널(파일·Git·태스크)에 표시"
-              className={`px-2 py-0.5 rounded text-[9px] border font-bold truncate max-w-[120px] transition-all ${isActiveProject ? 'bg-accent/25 border-accent/60 text-accent' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-            >
-              📁 {effectivePath.split(/[/\\]/).filter(Boolean).pop() || '프로젝트'}
-            </button>
-            <button
-              onClick={handlePickProject}
-              title="실행할 프로젝트 폴더를 먼저 선택 — 이후 아래 카드를 누르면 이 폴더로 실행됩니다"
-              className="px-1.5 py-0.5 rounded text-[9px] border border-white/5 bg-[#3c3c3c] text-[#cccccc] hover:bg-white/10 transition-all"
-            >
-              폴더 선택
-            </button>
-            <span className="text-[9px] text-[#858585] font-bold ml-1">→ 아래 카드로 실행</span>
-          </div>
-        ) : (
-          <div className="flex gap-2 items-center">
-            {/* Claude Code 모델 배지 — main_model / bg_model 표시 (Claude 에이전트 실행 중일 때만) */}
-            {agentType === 'claude' && termData.main_model && (
-              <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[#1a1a2e]/80 border border-blue-500/20 rounded text-[8px] text-blue-300/80 font-mono">
-                <span className="opacity-60">M:</span>
-                <span className="font-bold">{String(termData.main_model).replace('claude-', '').replace(/-\d{8}$/, '')}</span>
-                {termData.bg_model && (
-                  <>
-                    <span className="opacity-40 mx-0.5">|</span>
-                    <span className="opacity-60">BG:</span>
-                    <span className="font-bold text-green-300/70">{String(termData.bg_model).replace('claude-', '').replace(/-\d{8}$/, '')}</span>
-                  </>
-                )}
-              </div>
-            )}
+      {/* 터미널 헤더 — terminal/TerminalSlotHeader.tsx로 분리 (2026-08-09, Phase 11 Task 38) */}
+      <TerminalSlotHeader
+        displayName={displayName}
+        isTerminalMode={isTerminalMode}
+        activeAgent={activeAgent}
+        agentType={agentType}
+        gitBranch={gitBranch}
+        lockedFileByAgent={lockedFileByAgent}
+        myPendingTasks={myPendingTasks}
+        recentAgentMsgs={recentAgentMsgs}
+        termData={termData}
+        effectivePath={effectivePath}
+        isActiveProject={isActiveProject}
+        onActivateProject={onActivateProject}
+        onPickProject={handlePickProject}
+        onClose={closeTerminal}
+      />
 
-            {/* [2026-07-24] Antigravity 컨텍스트 게이지 제거 — 헤더 폭을 잡아먹어 폴더 배지/변경 버튼을
-                밀어내던 문제(사용자 요청). 토큰 사용량은 하단 모니터링/DB로 확인 가능해 헤더에선 불필요. */}
-
-            {/* [2026-07-24] Claude/Codex 플랜 쿼터 배지(구 QuotaBadge) 제거 — 헤더 폭을 잡아먹어
-                폴더 배지/변경 버튼을 밀어내던 문제(사용자 요청, "컨덱스 빼줘"). 사용률은 하단
-                컨텍스트 바(Claude)·DB로 확인 가능해 헤더 상시 표시는 불필요. agentQuota prop은
-                호환성 위해 시그니처만 유지(미소비). */}
-
-            {/* [슬롯별 프로젝트] 프로젝트 뱃지(클릭=이 프로젝트로 패널 전환) + 변경 버튼.
-                isActiveProject면 하이라이트 — 지금 사이드 패널이 이 슬롯 프로젝트를 보고 있다는 표시. */}
-            <button
-              onClick={onActivateProject}
-              title="이 프로젝트를 사이드 패널(파일·Git·태스크)에 표시"
-              className={`px-2 py-0.5 rounded text-[9px] border font-bold truncate max-w-[120px] transition-all ${isActiveProject ? 'bg-accent/25 border-accent/60 text-accent' : 'bg-[#3c3c3c] border-white/5 text-[#cccccc] hover:bg-white/10'}`}
-            >
-              📁 {effectivePath.split(/[/\\]/).filter(Boolean).pop() || '프로젝트'}
-            </button>
-            <button
-              onClick={handlePickProject}
-              title="이 슬롯의 프로젝트 폴더 변경 (실행 중이면 재시작)"
-              className="px-1.5 py-0.5 rounded text-[9px] border border-white/5 bg-[#3c3c3c] text-[#cccccc] hover:bg-white/10 transition-all"
-            >
-              변경
-            </button>
-
-            {/* [2026-07-24] 모니터링 토글 버튼 제거(사용자 요청) — 헤더 혼잡 완화. 미부착 슬롯에선
-                여전히 자동 표시(handleTerminalData setShowMonitor(true) + 1088행 근본수정)되므로 기능 손실 없음. */}
-            <button onClick={closeTerminal} className="p-0.5 hover:bg-red-500/20 rounded text-red-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
-          </div>
-        )}
-      </div>
-
+      {/* ── 좌우 2분할 (Phase 11 Task 43) ──────────────────────────────────
+          왼쪽 = 기존 본문 전부(터미널/채팅), 오른쪽 = 서로 대화(SideBus, 기본 접힘).
+          [제약] 이 래퍼가 flex-1 min-h-0을 들고, 왼쪽 열도 min-h-0/min-w-0을 유지해야
+            xterm의 높이 계산이 예전과 같아진다 — 하나라도 빠지면 터미널이 무한히 늘어난다. */}
+      <div className="flex-1 min-h-0 min-w-0 flex flex-row">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
         <div className="flex-1 min-w-0 flex flex-col min-h-0 bg-[#1e1e1e]">
@@ -1146,6 +1062,12 @@ export default function TerminalSlot({
           <AgentSelectCards logs={slotLogs} onLaunch={launchAgent} />
         </div>
       )}
+
+      </div>
+      {/* [WHY 슬롯마다 두는가] 지시하는 창(왼쪽)과 애들끼리 오가는 흐름(오른쪽)을 동시에
+          봐야 감시가 된다. 상태는 App의 단일 버스라 슬롯이 늘어도 폴링은 그대로 1개다. */}
+      {centralBus && <SideBus bus={centralBus} />}
+      </div>
 
       {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}
       {isTerminalMode && (

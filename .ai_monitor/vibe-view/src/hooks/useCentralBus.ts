@@ -1,0 +1,297 @@
+/**
+ * ------------------------------------------------------------------------
+ * 📄 파일명: hooks/useCentralBus.ts
+ * 📝 설명: 중앙 대화(아픽스 서버) 버스 — 앱 전체가 공유하는 단 하나의 상태 소유자.
+ *          상태·폴링·발신·과거조회·표시명 변환·안읽음 집계를 여기서만 한다.
+ *
+ * [🔴 불변식 — 이 훅은 앱에서 딱 한 번만 마운트한다]
+ *   /api/central/poll 은 이 노드의 커서(agent_id='')를 **전진시킨다**. 터미널 슬롯마다
+ *   이 훅을 부르면 한 슬롯이 가져간 메시지를 나머지 슬롯이 영영 못 본다. 게다가
+ *   consume_pending()은 프로세스 단위 test-and-clear라 신호도 한 쪽만 먹는다.
+ *   → App.tsx에서 1회 호출하고 결과를 props로 내려보낸다. 소비 컴포넌트는 표시만 한다.
+ *
+ * [WHY 폴링인가 — 서버는 NOTIFY를 쓰는데] 서버는 LISTEN으로 0.25초 내 신호를 받지만 그
+ *   신호는 서버 프로세스 안에 있다. 브라우저까지 밀려면 SSE를 새로 파야 하는데,
+ *   /api/central/poll 은 신호가 없으면 원격을 조회하지 않고 즉시 반환하도록 설계돼 있어
+ *   (central_api.poll 주석) 3초 폴링의 실비용이 로컬 왕복뿐이다. SSE 값어치가 없다.
+ *
+ * 🕒 변경 이력:
+ * - 2026-08-09 Claude: 신규 — Phase 11 Task 39. CentralPanel이 홀로 갖던 상태를 앱 공용
+ *                      버스로 승격(슬롯마다 폴링하면 커서가 갈라지는 문제).
+ * ------------------------------------------------------------------------
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { API_BASE } from '../constants';
+
+export interface CentralMsg {
+  id: number;
+  from_node: string;
+  from_agent: string;
+  to_node: string | null;
+  to_agent: string | null;
+  content: string;
+  created_at: string;
+}
+
+export interface ListenerState {
+  running?: boolean;
+  mode?: 'off' | 'listen' | 'degraded';
+  pending?: boolean;
+  last_signal_at?: number;
+  last_error?: string;
+}
+
+export interface CentralStatus {
+  enabled: boolean;
+  connected: boolean;
+  node_id: string;
+  pending: number;
+  listener: ListenerState;
+}
+
+export interface NodeRef {
+  node_id: string;
+  node_seq: number;
+  node_label: string;
+}
+
+const POLL_MS = 3000;
+/** 이 시간을 넘게 상태 갱신이 없으면 값을 낡은 것으로 강등한다(⚠️ + 회색). */
+const STALE_MS = 15000;
+/** 오른쪽 '서로 대화' 창의 기본 보관량. 왼쪽(300)보다 짧은 이유 — 노드 수만큼 유입이 곱해진다. */
+const KEEP_BASE = 150;
+/** '이전 N개 더 보기' 한 번에 가져오는 양. 상한도 같은 폭으로 늘린다. */
+const PAGE = 50;
+/** 명부는 거의 안 바뀐다 — 폴링에 얹지 않고 이 주기로만 새로 읽는다. */
+const NODES_REFRESH_MS = 60000;
+
+/** 노드 UUID는 화면에 다 못 넣는다 — 앞 8자만. 명부에 없는 노드의 폴백 표시. */
+export const shortNode = (id: string) => (id || '').slice(0, 8) || '?';
+
+/**
+ * created_at은 json_response의 default=str을 통과한 파이썬 datetime 문자열이다
+ * ("2026-08-09 09:30:06.1+00:00"). JS Date는 공백 구분자를 표준으로 안 받으므로
+ * 'T'로 바꿔 넘긴다. 그래도 실패하면 원문을 그대로 보여준다 — 시각을 못 읽었다고
+ * 메시지를 숨기면 안 된다.
+ */
+export const fmtTime = (raw: string) => {
+  const d = new Date(String(raw || '').replace(' ', 'T'));
+  if (isNaN(d.getTime())) return String(raw || '');
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
+/**
+ * from_agent('claude:T1' | 'claude')에서 슬롯 번호만 뽑는다.
+ * [제약] 외부 connector(디스코드·텔레그램)가 보낸 값은 슬롯이 없다 — 0을 돌려주고
+ *   호출부가 번호 없이 그린다. 여기서 1로 폴백하면 남의 슬롯을 사칭하게 된다.
+ */
+export const slotOfAgent = (agent: string): number => {
+  const m = /[:@]?T(\d+)\b/i.exec(String(agent || ''));
+  return m ? Number(m[1]) : 0;
+};
+
+export interface CentralBus {
+  status: CentralStatus | null;
+  messages: CentralMsg[];
+  stale: boolean;
+  /** 마지막 status 응답 시각(epoch ms). 0이면 아직 한 번도 못 받음. */
+  syncedAt: number;
+  /** 매초 갱신되는 현재 시각 — '몇 초 전' 표시가 응답이 끊긴 동안에도 흘러야 한다. */
+  nowMs: number;
+  /** 수동 새로고침(버튼). 폴링과 같은 경로를 탄다. */
+  refresh: () => void;
+  selfNodeId: string;
+  selfSeq: number;
+  nodes: NodeRef[];
+  unread: number;
+  hasMore: boolean;
+  loadingOlder: boolean;
+  send: (content: string, to?: { to_node?: string; to_agent?: string }) => Promise<{ ok: boolean; error?: string }>;
+  loadOlder: () => Promise<number>;
+  markRead: () => void;
+  /** 'a3f9…/claude:T1' 같은 원본 → '아픽스 3-1' (라벨은 호출부가 붙인다) */
+  addressOf: (msg: CentralMsg) => string;
+  labelOf: (nodeId: string) => string;
+  isSelf: (msg: CentralMsg) => boolean;
+}
+
+export function useCentralBus(): CentralBus {
+  const [status, setStatus] = useState<CentralStatus | null>(null);
+  const [messages, setMessages] = useState<CentralMsg[]>([]);
+  const [nodes, setNodes] = useState<NodeRef[]>([]);
+  const [selfNodeId, setSelfNodeId] = useState('');
+  const [selfSeq, setSelfSeq] = useState(0);
+  const [syncedAt, setSyncedAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const [lastReadId, setLastReadId] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
+  /** 보관 상한. '이전 더 보기'를 누르면 그만큼 늘린다 — 방금 불러온 과거를 즉시 잘라내면 모순이다. */
+  const keepRef = useRef(KEEP_BASE);
+  const oldestRef = useRef(0);
+
+  /**
+   * [불변식] 병합은 항상 id 기준 중복 제거 + 오름차순이다. messages(히스토리)와
+   * poll(증분)이 같은 행을 줄 수 있고(내가 보낸 직후 refresh + 폴링), id 순서가
+   * 어긋나면 대화가 뒤집힌다.
+   */
+  const merge = useCallback((incoming: CentralMsg[]) => {
+    if (!incoming?.length) return;
+    setMessages(prev => {
+      const byId = new Map<number, CentralMsg>();
+      for (const m of prev) byId.set(m.id, m);
+      for (const m of incoming) byId.set(m.id, m);
+      const merged = [...byId.values()].sort((a, b) => a.id - b.id).slice(-keepRef.current);
+      oldestRef.current = merged.length ? merged[0].id : 0;
+      return merged;
+    });
+  }, []);
+
+  /** 화면용 히스토리. [제약] 이 경로는 커서를 밀지 않는다 — 열어보는 것과 '처리함'은 다르다. */
+  const loadHistory = useCallback(() => {
+    fetch(`${API_BASE}/api/central/messages?limit=${PAGE}`)
+      .then(r => r.json())
+      .then((d: { messages?: CentralMsg[] }) => merge(d.messages || []))
+      .catch(() => {});
+  }, [merge]);
+
+  const loadNodes = useCallback(() => {
+    fetch(`${API_BASE}/api/central/nodes`)
+      .then(r => r.json())
+      .then((d: { nodes?: NodeRef[]; self_node_id?: string; self_seq?: number }) => {
+        setNodes(d.nodes || []);
+        if (d.self_node_id) setSelfNodeId(d.self_node_id);
+        if (typeof d.self_seq === 'number') setSelfSeq(d.self_seq);
+      })
+      .catch(() => {});
+  }, []);
+
+  const tick = useCallback(() => {
+    fetch(`${API_BASE}/api/central/status`)
+      .then(r => r.json())
+      .then((s: CentralStatus) => {
+        setStatus(s);
+        setSyncedAt(Date.now());
+        if (s.node_id) setSelfNodeId(s.node_id);
+        if (!s.enabled) return;
+        return fetch(`${API_BASE}/api/central/poll?limit=${PAGE}`)
+          .then(r => r.json())
+          .then((d: { messages?: CentralMsg[] }) => merge(d.messages || []));
+      })
+      .catch(() => {});
+  }, [merge]);
+
+  useEffect(() => {
+    loadHistory();
+    loadNodes();
+    tick();
+    const t = setInterval(tick, POLL_MS);
+    const tn = setInterval(loadNodes, NODES_REFRESH_MS);
+    return () => { clearInterval(t); clearInterval(tn); };
+  }, [loadHistory, loadNodes, tick]);
+
+  // 낡음 판정은 '경과 시간'이라 응답이 끊긴 동안에도 흘러야 한다 — 별도 타이머로 now를 민다.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const send = useCallback(async (content: string, to?: { to_node?: string; to_agent?: string }) => {
+    const body = content.trim();
+    if (!body) return { ok: false, error: '빈 메시지' };
+    const r = await fetch(`${API_BASE}/api/central/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: body, ...(to || {}) }),   // to 생략 = 브로드캐스트
+    }).then(res => res.json()).catch(() => ({ ok: false, error: '요청 실패' }));
+    // 내 발신분은 poll이 걸러내므로(자기 노드 제외) 직접 다시 읽어야 화면에 남는다.
+    if (r.ok) loadHistory();
+    return r;
+  }, [loadHistory]);
+
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMore) return 0;
+    const before = oldestRef.current;
+    if (!before) return 0;
+    setLoadingOlder(true);
+    try {
+      const d = await fetch(`${API_BASE}/api/central/messages?limit=${PAGE}&before_id=${before}`)
+        .then(r => r.json())
+        .catch(() => ({ messages: [] as CentralMsg[] }));
+      const rows: CentralMsg[] = d.messages || [];
+      // 상한을 먼저 늘린다 — merge가 slice(-keep)로 자르므로 순서가 뒤바뀌면 방금 받은 게 사라진다.
+      keepRef.current += PAGE;
+      merge(rows);
+      if (rows.length < PAGE) setHasMore(false);
+      return rows.length;
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasMore, loadingOlder, merge]);
+
+  const nodeById = useMemo(() => {
+    const m = new Map<string, NodeRef>();
+    for (const n of nodes) m.set(n.node_id, n);
+    return m;
+  }, [nodes]);
+
+  /** 같은 번호를 두 노드가 쓰면 화면에서 한 대가 다른 대를 사칭한다 — ⚠로 드러낸다. */
+  const dupSeq = useMemo(() => {
+    const seen = new Map<number, string>();
+    const dup = new Set<number>();
+    for (const n of nodes) {
+      const prev = seen.get(n.node_seq);
+      if (prev && prev !== n.node_id) dup.add(n.node_seq);
+      else seen.set(n.node_seq, n.node_id);
+    }
+    return dup;
+  }, [nodes]);
+
+  const addressOf = useCallback((msg: CentralMsg) => {
+    const ref = nodeById.get(msg.from_node);
+    const slot = slotOfAgent(msg.from_agent);
+    if (!ref) return `${shortNode(msg.from_node)}${slot ? `-${slot}` : ''}`;
+    const warn = dupSeq.has(ref.node_seq) ? '⚠' : '';
+    return `아픽스 ${ref.node_seq}${slot ? `-${slot}` : ''}${warn}`;
+  }, [dupSeq, nodeById]);
+
+  const labelOf = useCallback((nodeId: string) => nodeById.get(nodeId)?.node_label || '', [nodeById]);
+
+  const isSelf = useCallback((msg: CentralMsg) => !!selfNodeId && msg.from_node === selfNodeId, [selfNodeId]);
+
+  const unread = useMemo(
+    () => messages.filter(m => m.id > lastReadId && m.from_node !== selfNodeId).length,
+    [messages, lastReadId, selfNodeId],
+  );
+
+  const markRead = useCallback(() => {
+    setLastReadId(prev => {
+      const last = messages.length ? messages[messages.length - 1].id : prev;
+      return Math.max(prev, last);
+    });
+  }, [messages]);
+
+  const refresh = useCallback(() => { loadHistory(); loadNodes(); tick(); }, [loadHistory, loadNodes, tick]);
+
+  return {
+    status,
+    messages,
+    stale: syncedAt > 0 && now - syncedAt > STALE_MS,
+    syncedAt,
+    nowMs: now,
+    refresh,
+    selfNodeId,
+    selfSeq,
+    nodes,
+    unread,
+    hasMore,
+    loadingOlder,
+    send,
+    loadOlder,
+    markRead,
+    addressOf,
+    labelOf,
+    isSelf,
+  };
+}
