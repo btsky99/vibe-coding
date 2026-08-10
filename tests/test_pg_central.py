@@ -94,6 +94,25 @@ def test_port_is_normalized_to_int(cfg):
     assert pc.get_central_config(cfg)["port"] == 5433
 
 
+def test_str_path_is_accepted(cfg):
+    """[🔴 회귀] str 경로가 '설정 없음'으로 둔갑하지 않는다.
+
+    _read_config가 모든 예외를 {}로 삼키므로, str을 넘겼을 때 나던
+    AttributeError가 그대로 미설정으로 보였다. 노드 온보딩 진단이 이 함정에
+    걸려 "config를 썼는데 앱이 못 읽는다"로 오진했다(Task 32).
+    """
+    payload = {"central_db": {
+        "host": "127.0.0.1", "port": 5433,
+        "user": "hive", "password": "pw", "dbname": "hive_knowledge",
+    }}
+    _write(cfg, payload)
+
+    assert pc.get_central_config(str(cfg)) is not None
+    assert pc.get_central_config(cfg) is not None
+    # 진짜 없는 파일은 여전히 None이어야 한다 — 관대해진 것이 아니라 타입만 정규화했다.
+    assert pc.get_central_config(str(cfg.parent / "nope.json")) is None
+
+
 def test_schema_ddl_is_not_run_without_connection(cfg):
     """[🔴 핵심] 연결이 성립하기 전에는 DDL이 절대 실행되지 않는다."""
     _write(cfg, {"central_db": {

@@ -41,8 +41,12 @@ _cached_path: Path | None = None
 
 
 def _read_config(config_file: Path) -> dict:
+    # [🔴 str 경로를 Path로 정규화한다] 아래 except가 모든 예외를 {}로 삼키므로, str을
+    #   넘기면 AttributeError('str' has no read_text)가 그대로 '설정 없음'으로 둔갑한다.
+    #   증상이 "central_db를 분명히 썼는데 앱이 미설정이라고 한다"로만 보여 원인이
+    #   드러나지 않는다 — 노드 온보딩 진단이 실제로 이 함정에 걸렸다(Task 32).
     try:
-        return json.loads(config_file.read_text(encoding='utf-8'))
+        return json.loads(Path(config_file).read_text(encoding='utf-8'))
     except FileNotFoundError:
         return {}
     except Exception:
