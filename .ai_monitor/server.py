@@ -535,8 +535,10 @@ def _resolve_playwright_install_script() -> Path | None:
 
 
 def _open_folder_dialog_subprocess() -> str:
-    # EXE 빌드에서 sys.executable은 vibe-coding.exe → 실제 Python을 인자로 전달
-    return _runtime.open_folder_dialog_subprocess(_python_runner_cmds()[0])
+    # [WHY 이름은 그대로 두는가] fs_dialog_api 가 이 callable 을 주입받아 쓴다. 내부 구현만
+    #   네이티브 우선으로 바뀌었고(runtime.open_folder_dialog), 서브프로세스는 폴백이다.
+    # EXE 빌드에서 sys.executable은 vibe-coding.exe → 폴백용 실제 Python을 인자로 전달
+    return _runtime.open_folder_dialog(_python_runner_cmds()[0])
 
 
 def _open_file_dialog_subprocess() -> str:
