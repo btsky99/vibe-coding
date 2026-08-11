@@ -107,6 +107,9 @@ REVISION HISTORY:
 - [`.claude/agents/README.md`](./.claude/agents/README.md) — Subagent 위임 라우팅 정책 (vibe-code-review/security/debug)
 - [`RULES.md`](./RULES.md) — 신규 멤버용 종합 안내 (위 규칙들의 풀 버전)
 - [`docs/HARNESS_V2.md`](./docs/HARNESS_V2.md) — 하네스 계약
+- [`docs/AGENT_GRAPH.md`](./docs/AGENT_GRAPH.md) — **실행 그래프 선언** (노드/엣지/스테이트/컨디션).
+  새 배선을 놓기 전에 여기에 "실패하면 어디로"를 먼저 적는다. 2026-08-11 사고 3건이
+  전부 '엣지 미선언'이었다. ※지식그래프(회상)와 다름 — 이쪽은 실행 모델링
 
 세부 규칙과 본 파일이 충돌하면 **본 파일이 우선**한다.
 
