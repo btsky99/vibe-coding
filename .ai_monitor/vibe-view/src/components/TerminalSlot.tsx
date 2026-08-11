@@ -777,7 +777,6 @@ export default function TerminalSlot({
         lockedFileByAgent={lockedFileByAgent}
         myPendingTasks={myPendingTasks}
         recentAgentMsgs={recentAgentMsgs}
-        termData={termData}
         effectivePath={effectivePath}
         isActiveProject={isActiveProject}
         onActivateProject={onActivateProject}

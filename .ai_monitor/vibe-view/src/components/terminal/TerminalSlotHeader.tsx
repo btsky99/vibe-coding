@@ -31,7 +31,6 @@ interface Props {
   /** 구조적 타입 — 원본(Task)의 전체 필드를 요구하지 않는다. 헤더는 제목만 쓴다. */
   myPendingTasks: Array<{ title: string }>;
   recentAgentMsgs: Array<{ content: string }>;
-  termData: { main_model?: string; bg_model?: string };
   effectivePath: string;
   isActiveProject?: boolean;
   onActivateProject?: () => void;
@@ -41,7 +40,7 @@ interface Props {
 
 export default function TerminalSlotHeader({
   displayName, slotName, onRenameSlot, isTerminalMode, activeAgent, agentType, gitBranch,
-  lockedFileByAgent, myPendingTasks, recentAgentMsgs, termData, effectivePath, isActiveProject,
+  lockedFileByAgent, myPendingTasks, recentAgentMsgs, effectivePath, isActiveProject,
   onActivateProject, onPickProject, onClose,
 }: Props) {
   const [editing, setEditing] = useState(false);
@@ -149,20 +148,12 @@ export default function TerminalSlotHeader({
         </div>
       ) : (
         <div className="flex gap-2 items-center">
-          {/* Claude Code 모델 배지 — main_model / bg_model 표시 (Claude 에이전트 실행 중일 때만) */}
-          {agentType === 'claude' && termData.main_model && (
-            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[#1a1a2e]/80 border border-blue-500/20 rounded text-[8px] text-blue-300/80 font-mono">
-              <span className="opacity-60">M:</span>
-              <span className="font-bold">{String(termData.main_model).replace('claude-', '').replace(/-\d{8}$/, '')}</span>
-              {termData.bg_model && (
-                <>
-                  <span className="opacity-40 mx-0.5">|</span>
-                  <span className="opacity-60">BG:</span>
-                  <span className="font-bold text-green-300/70">{String(termData.bg_model).replace('claude-', '').replace(/-\d{8}$/, '')}</span>
-                </>
-              )}
-            </div>
-          )}
+          {/* [2026-08-11] 모델 배지(M:/BG:) 제거 — 하단 컨텍스트 바와 **다른 모델명을 보여줬다**.
+              사용자 판정: 하단이 맞고 헤더가 틀렸다. 헤더는 PTY 스냅샷의 main_model 을 그리는데
+              그 값이 실제 세션 모델과 어긋나 있었다(하단 'Opus 5' vs 헤더 'sonnet-4-6').
+              🔴 같은 사실을 두 곳에서 각자 계산하면 반드시 갈라진다 — 표시 지점을 하나로 줄인다.
+              되살릴 일이 생기면 값을 하단 바와 같은 출처에서 받아 오는 것이 선행 조건이다.
+              (termData prop 도 이 배지 전용이라 함께 제거 — 죽은 prop 을 남기지 않는다.) */}
 
           {/* [2026-07-24] Antigravity 컨텍스트 게이지 / Claude·Codex 쿼터 배지 제거 — 헤더 폭을
               잡아먹어 폴더 배지·변경 버튼을 밀어내던 문제(사용자 요청). 사용률은 하단 컨텍스트
