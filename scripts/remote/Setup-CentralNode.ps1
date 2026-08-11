@@ -1,8 +1,8 @@
 ﻿<#
 FILE: scripts/remote/Setup-CentralNode.ps1
 DESCRIPTION: 바이브 코딩이 깔린 PC 를 '중앙 대화' 노드로 붙인다. 대상 PC 에서 1회 실행한다.
-             하는 일 — ① 터널 전용 SSH 키 발급 ② config.json 의 central_db 주입
-             ③ 터널을 실제로 열어 실증 ④ 안 되면 원인을 갈라 보여준다.
+             하는 일 — ① 터널 전용 SSH 키 발급 ② config.json 의 central_db + 원격 주입
+             게이트 주입 ③ 터널을 실제로 열어 실증 ④ 안 되면 원인을 갈라 보여준다.
 
              사용 (대상 PC 의 PowerShell — 관리자 권한 불필요):
                .\Setup-CentralNode.ps1 -Password '<hive DB 비밀번호>'
@@ -27,6 +27,8 @@ DESCRIPTION: 바이브 코딩이 깔린 PC 를 '중앙 대화' 노드로 붙인�
              겉보기로는 구분되지 않는다 — 실제로 TCP 를 한 번 열어봐야 안다.
 
 REVISION HISTORY:
+- 2026-08-11 Claude: central_remote_inject 도 같이 세운다 — 연결만 세운 노드(na2js)가
+                     메시지를 받고도 CLI 에 못 꽂아 '답 없는 노드'가 됐다.
 - 2026-08-11 Claude: 최초 작성 — Phase 10 Task 32. 지금까지 신규 노드 연결이 수작업이라
                      다른 PC 를 붙이는 것 자체가 막혀 있었다.
 #>
@@ -53,6 +55,15 @@ param(
 
     # config.json 이 있는 폴더. 비우면 설치본 → 개발본 순서로 찾는다.
     [string]$DataDir = '',
+
+    # 이 노드의 슬롯 CLI 에 '말을 꽂을 수 있는' 발신 노드 번호들. 빈 배열이면 게이트를 끈다.
+    # [🔴 왜 기본이 1 인가 — 이 스크립트는 '내 노드를 내가 붙이는' 도구다]
+    #   central_inject 의 원격 게이트는 앱 기본값이 꺼짐이다(모르는 노드의 RCE 차단).
+    #   그런데 온보딩이 이 값을 안 쓰고 넘어가면, 붙인 노드는 중앙 메시지를 받아 화면에
+    #   띄우기만 하고 CLI 에는 안 꽂는다 — 사람 눈에는 '연결됐는데 답이 없다'로만 보인다.
+    #   2026-08-11 na2js(3번)가 정확히 이 상태였다: 커서는 140까지 올라갔는데 답이 0건.
+    #   관리 PC(1번)만 기본 허용하고, 필요 없으면 -AllowInjectFrom @() 로 끈다.
+    [int[]]$AllowInjectFrom = @(1),
 
     [string]$KeyName = 'hive_tunnel_ed25519'
 )
@@ -158,12 +169,26 @@ if ($NodeSeq -gt 0) {
     $conf | Add-Member -NotePropertyName 'node_seq' -NotePropertyValue $NodeSeq -Force
 }
 
+# [🔴 연결(central_db)과 주입 게이트(central_remote_inject)는 별개다]
+#   전자는 '중앙 대화를 받는가', 후자는 '받은 말을 이 PC 의 CLI 에 꽂는가'다. 전자만 넣으면
+#   노드는 듣기만 하고 말을 못 해 대화가 단방향으로 퇴화한다. 온보딩은 둘을 같이 세운다.
+# [불변식] allow_nodes 가 비면 enabled 가 true 여도 꺼진 것과 같다(src/central_inject.remote_gate).
+#   그래서 빈 배열일 때는 enabled 를 false 로 적는다 — 설정 파일만 봐도 상태가 읽히게.
+$injectOn = ($AllowInjectFrom -ne $null) -and ($AllowInjectFrom.Count -gt 0)
+$inject = [ordered]@{
+    enabled     = $injectOn
+    allow_nodes = @($AllowInjectFrom)
+}
+$conf | Add-Member -NotePropertyName 'central_remote_inject' -NotePropertyValue $inject -Force
+
 # [🔴 PS 5.1 ConvertTo-Json 기본 -Depth 는 2] tunnel 은 3단계라 기본값으로는 중첩이
 #   "System.Collections.Specialized.OrderedDictionary" 문자열로 뭉개진다. 에러는 나지 않고
 #   앱만 조용히 '터널 미설정'이 된다 — 반드시 -Depth 를 넉넉히 준다.
 $json = $conf | ConvertTo-Json -Depth 12
 [IO.File]::WriteAllText($confPath, $json, $utf8NoBom)
 Say 'central_db 주입 완료' 'OK'
+Say $(if ($injectOn) { "원격 주입 게이트 ON — 허용 노드: $($AllowInjectFrom -join ', ')" }
+      else { '원격 주입 게이트 OFF — 이 노드는 중앙 메시지를 화면에만 띄운다' }) 'OK'
 
 # ── 6. 공개키 등록 안내 ─────────────────────────────────────────────────────
 Write-Host ''
