@@ -55,6 +55,27 @@ export interface NodeRef {
   node_label: string;
 }
 
+/** poll 응답의 주입 결과 1건. ok=false면 그 메시지는 화면까지만 오고 CLI엔 안 꽂혔다. */
+export interface InjectResult {
+  id: number;
+  ok: boolean;
+  why: string;
+  from_seq?: number;
+}
+
+/**
+ * 상대가 답할 수 없는 상태를 화면이 알아야 하는 이유 —
+ * 게이트가 막으면 메시지는 화면에 뜨지만 그 PC의 CLI는 말이 온 사실 자체를 모른다.
+ * 사용자에게는 '상대가 답이 없다'로만 보여, 이 값이 없으면 원인을 알 길이 전혀 없다.
+ * 열 수 있는 것(허용 안 된 노드)만 배너로 올린다 — 슬롯 미기동 등은 사용자가 손쓸 수 없다.
+ */
+export interface BlockedNotice {
+  fromSeq: number;
+  why: string;
+}
+
+const OPENABLE = new Set(['remote_disabled', 'node_not_allowed']);
+
 const POLL_MS = 3000;
 /** 이 시간을 넘게 상태 갱신이 없으면 값을 낡은 것으로 강등한다(⚠️ + 회색). */
 const STALE_MS = 15000;
@@ -122,6 +143,11 @@ export interface CentralBus {
   addressOf: (msg: CentralMsg) => string;
   labelOf: (nodeId: string) => string;
   isSelf: (msg: CentralMsg) => boolean;
+  /** 사용자가 열 수 있는 '주입 막힘'. null이면 배너를 그리지 않는다. */
+  blocked: BlockedNotice | null;
+  /** 그 노드를 허용 목록에 넣는다(설정 쓰기는 서버가 한다). */
+  allowNode: (seq: number) => Promise<{ ok: boolean; error?: string }>;
+  dismissBlocked: () => void;
 }
 
 export function useCentralBus(): CentralBus {
@@ -138,6 +164,44 @@ export function useCentralBus(): CentralBus {
   });
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [blocked, setBlocked] = useState<BlockedNotice | null>(null);
+
+  /**
+   * 주입 결과에서 '사용자가 열 수 있는 막힘'만 골라 배너 대상으로 세운다.
+   *
+   * [WHY 마지막 1건만 들고 있나] 같은 노드가 여러 줄을 보내면 전부 같은 이유로 막힌다.
+   *   목록으로 쌓으면 배너가 도배되고 사용자가 할 일은 여전히 버튼 하나뿐이다.
+   * [제약] why는 'node_not_allowed(seq=3)'처럼 값이 붙어 오므로 접두사로 판정한다.
+   *   완전일치로 비교하면 그 경우가 조용히 누락된다.
+   */
+  const noteBlocked = useCallback((results: InjectResult[]) => {
+    for (const r of results) {
+      if (r.ok) continue;
+      const openable = [...OPENABLE].some(k => r.why?.startsWith(k));
+      if (openable && (r.from_seq || 0) > 0) {
+        setBlocked({ fromSeq: r.from_seq as number, why: r.why });
+        return;
+      }
+    }
+  }, []);
+
+  /** 배너의 [허용] — 설정 쓰기는 서버가 한다(사용자가 파일을 손대면 안 된다). */
+  const allowNode = useCallback(async (seq: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/central/allow-node`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seq }),
+      });
+      const data = await res.json();
+      if (data?.ok) { setBlocked(null); return { ok: true }; }
+      return { ok: false, error: String(data?.error || '실패') };
+    } catch {
+      return { ok: false, error: '서버 응답 없음' };
+    }
+  }, []);
+
+  const dismissBlocked = useCallback(() => setBlocked(null), []);
 
   /** 보관 상한. '이전 더 보기'를 누르면 그만큼 늘린다 — 방금 불러온 과거를 즉시 잘라내면 모순이다. */
   const keepRef = useRef(KEEP_BASE);
@@ -189,10 +253,13 @@ export function useCentralBus(): CentralBus {
         if (!s.enabled) return;
         return fetch(`${API_BASE}/api/central/poll?limit=${PAGE}`)
           .then(r => r.json())
-          .then((d: { messages?: CentralMsg[] }) => merge(d.messages || []));
+          .then((d: { messages?: CentralMsg[]; injected?: InjectResult[] }) => {
+            merge(d.messages || []);
+            noteBlocked(d.injected || []);
+          });
       })
       .catch(() => {});
-  }, [merge]);
+  }, [merge, noteBlocked]);
 
   useEffect(() => {
     loadHistory();
@@ -347,5 +414,8 @@ export function useCentralBus(): CentralBus {
     addressOf,
     labelOf,
     isSelf,
+    blocked,
+    allowNode,
+    dismissBlocked,
   };
 }

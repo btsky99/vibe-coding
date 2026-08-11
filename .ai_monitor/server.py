@@ -1478,10 +1478,17 @@ def _p_central_send(h, pp):
 def _p_central_ack(h, pp):
     from api import central_api
     central_api.ack(h, pp)
+# [WHY 이건 실행 라우트가 아닌가] 위 금지는 '중앙 DB를 통해 남의 PC를 움직이는' 것을 막는다.
+#   allow-node는 그 반대다 — **이 PC 안에서** 이 PC의 허용 설정을 바꾼다. 중앙에서 부를 수
+#   없는(로컬 127.0.0.1 전용) 라우트이고, 하는 일은 config 한 줄 쓰기다.
+def _p_central_allow(h, pp):
+    from api import central_api
+    central_api.allow_node(h, pp)
 
 POST_ROUTES = {
     '/api/central/send': _p_central_send,
     '/api/central/ack': _p_central_ack,
+    '/api/central/allow-node': _p_central_allow,
     '/api/setup/auto-install': _p_setup_auto_install,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,

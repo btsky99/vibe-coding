@@ -86,7 +86,7 @@ def test_broadcast_is_never_injected(cfg):
 def test_unlisted_node_is_blocked(cfg, monkeypatch):
     """허용 목록에 없는 노드는 슬롯이 살아 있어도 막힌다."""
     _write(cfg, {"central_remote_inject": {"enabled": True, "allow_nodes": [3]}})
-    monkeypatch.setattr(ci, "_seq_of", lambda node_id, config_file=None: 7)
+    monkeypatch.setattr(ci, "seq_of", lambda node_id, config_file=None: 7)
     monkeypatch.setattr(ci, "_find_slot_session", lambda url, slot: "proj")
 
     ok, why = ci.deliver_remote({"from_node": "n7", "to_agent": "claude:T2",
@@ -100,7 +100,7 @@ def test_seq_lookup_failure_blocks(cfg, monkeypatch):
     조회 실패를 '일단 허용'으로 처리하면 게이트가 네트워크 상태에 따라 열린다.
     """
     _write(cfg, {"central_remote_inject": {"enabled": True, "allow_nodes": [3]}})
-    monkeypatch.setattr(ci, "_seq_of", lambda node_id, config_file=None: 0)
+    monkeypatch.setattr(ci, "seq_of", lambda node_id, config_file=None: 0)
     monkeypatch.setattr(ci, "_find_slot_session", lambda url, slot: "proj")
 
     ok, why = ci.deliver_remote({"from_node": "n?", "to_agent": "claude:T2",
@@ -117,7 +117,7 @@ def test_sender_without_slot_is_not_injected(cfg, monkeypatch):
     축내고 대화는 안 된다.
     """
     _write(cfg, {"central_remote_inject": {"enabled": True, "allow_nodes": [3]}})
-    monkeypatch.setattr(ci, "_seq_of", lambda node_id, config_file=None: 3)
+    monkeypatch.setattr(ci, "seq_of", lambda node_id, config_file=None: 3)
     monkeypatch.setattr(ci, "_find_slot_session", lambda url, slot: "proj")
 
     ok, why = ci.deliver_remote({"from_node": "n3", "from_agent": "claude",
@@ -132,7 +132,7 @@ def test_reply_address_points_back_to_sender(cfg, monkeypatch):
     이 주소가 틀리면 상대는 받기만 하고 답을 못 보낸다(단방향으로 퇴화).
     """
     _write(cfg, {"central_remote_inject": {"enabled": True, "allow_nodes": [3]}})
-    monkeypatch.setattr(ci, "_seq_of", lambda node_id, config_file=None: 3)
+    monkeypatch.setattr(ci, "seq_of", lambda node_id, config_file=None: 3)
     monkeypatch.setattr(ci, "_find_slot_session", lambda url, slot: "proj")
     ci._recent.clear()
 

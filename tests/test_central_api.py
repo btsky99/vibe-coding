@@ -246,9 +246,14 @@ def test_중앙_라우트에_원격_실행이_없다():
     # [허용 목록] 라우트를 늘릴 때는 반드시 여기에 명시적으로 추가한다 — 이 테스트의 목적은
     #   '실행 통로가 몰래 생기는 것'을 막는 것이지 라우트 추가 자체를 막는 것이 아니다.
     #   nodes: uuid→번호/이름 명부 조회(읽기 전용, Phase 11 Task 35).
+    #   allow-node: **이 PC의** 주입 허용 설정에 번호 하나를 더한다(2026-08-12).
+    #     실행 통로가 아니다 — 중앙에서 부를 수 없고(로컬 전용), 하는 일은 config 쓰기다.
+    #     오히려 이것이 없으면 사용자가 config.json 을 손으로 고쳐야 하고, 실제로 그러다
+    #     BOM 하나로 노드를 통째로 잃었다(na2js). 게이트를 여는 판단은 여전히 사람이 한다.
     assert routes == {'/api/central/status', '/api/central/messages',
                       '/api/central/poll', '/api/central/send',
-                      '/api/central/ack', '/api/central/nodes'}, f'중앙 라우트가 늘었다: {routes}'
+                      '/api/central/ack', '/api/central/nodes',
+                      '/api/central/allow-node'}, f'중앙 라우트가 늘었다: {routes}'
 
 
 def test_미수신_집계는_수신_조건과_같아야_한다():

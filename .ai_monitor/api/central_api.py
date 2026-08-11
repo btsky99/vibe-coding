@@ -159,8 +159,26 @@ def _inject_remote(rows: list) -> list:
         from api import pty_api
     except Exception:
         return []
-    if not central_inject.remote_gate()[0]:
-        return []                     # 꺼져 있으면 PTY 조회조차 하지 않는다
+
+    enabled = central_inject.remote_gate()[0]
+
+    # [🔴 꺼져 있을 때도 '막혔다'는 사실은 돌려준다 — 2026-08-11 변경]
+    #   옛 구현은 게이트가 꺼져 있으면 빈 배열을 돌려주고 끝냈다(PTY 조회 절약). 그 결과
+    #   **가장 흔한 실패가 화면에 아무 흔적도 남기지 않았다.** 사용자에게는 '상대가 답이
+    #   없다'로만 보이고, 원인을 알려면 그 PC에서 설정 파일을 열어봐야 했다.
+    #   비개발자에게 스크립트를 시키는 구조 자체가 결함이다 — 막혔다는 사실과 발신자
+    #   번호를 실어 보내면 UI가 [허용] 버튼 한 개로 해결할 수 있다.
+    #   PTY 조회는 여전히 하지 않는다(막힌 게 확정이라 물어볼 이유가 없다).
+    if not enabled:
+        blocked = []
+        for msg in rows:
+            if not str(msg.get('to_agent') or ''):
+                continue          # 브로드캐스트는 원래 주입 대상이 아니다 — 소음
+            blocked.append({
+                'id': msg.get('id'), 'ok': False, 'why': 'remote_disabled',
+                'from_seq': central_inject.seq_of(msg.get('from_node') or ''),
+            })
+        return blocked
 
     pty_url = pty_api.get_pty_rest_url()
     out = []
@@ -168,7 +186,8 @@ def _inject_remote(rows: list) -> list:
         ok, why = central_inject.deliver_remote(msg, pty_url)
         if ok or why not in ('broadcast_not_injected', 'no_slot'):
             # 브로드캐스트/슬롯 없음은 정상적인 '주입 대상 아님'이라 소음이다.
-            out.append({'id': msg.get('id'), 'ok': ok, 'why': why})
+            out.append({'id': msg.get('id'), 'ok': ok, 'why': why,
+                        'from_seq': central_inject.seq_of(msg.get('from_node') or '')})
     return out
 
 
@@ -272,3 +291,22 @@ def ack(handler, parsed_path=None) -> None:
         return
     ok = pg_central.ack_upto(mid, agent_id=str(body.get('agent') or ''))
     _json_response(handler, {'ok': ok})
+
+
+def allow_node(handler, parsed_path=None) -> None:
+    """POST /api/central/allow-node — {seq} 그 번호 노드가 이 PC의 CLI에 말을 꽂도록 허용.
+
+    [WHY 이 라우트가 필요한가] 게이트를 여는 유일한 방법이 'config.json을 손으로 고치기'
+      였다. 비개발자에게 그것을 시켰다가 BOM 한 개로 노드 하나를 통째로 잃었다
+      (2026-08-11). 판단(허용할 것인가)은 사람이 하되 쓰기는 앱이 한다.
+    [불변식] 더하기만 한다 — 기존 허용은 유지된다(central_inject.allow_node).
+    """
+    from src import central_inject
+
+    body = _read_body(handler)
+    ok, why = central_inject.allow_node(body.get('seq'))
+    if not ok:
+        _json_response(handler, {'ok': False, 'error': why}, 400)
+        return
+    enabled, allowed = central_inject.remote_gate()
+    _json_response(handler, {'ok': True, 'enabled': enabled, 'allow_nodes': sorted(allowed)})

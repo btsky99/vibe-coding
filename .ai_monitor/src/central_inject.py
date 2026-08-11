@@ -151,7 +151,51 @@ def remote_gate(config_file=None) -> tuple[bool, set[int]]:
     return bool(allowed), allowed
 
 
-def _seq_of(node_id: str, config_file=None) -> int:
+def allow_node(seq: int, config_file=None) -> tuple[bool, str]:
+    """발신 노드 번호를 허용 목록에 넣고 게이트를 켠다. (성공여부, 사유).
+
+    [🔴 왜 API로 여는가 — 사용자가 설정 파일을 손대게 하면 안 된다]
+      이 값을 넣으려고 사람에게 PowerShell 한 줄을 시켰다가 노드 하나가 통째로 죽었다
+      (BOM 한 개로 config.json 파싱 실패 → 설정 전체 소멸, 2026-08-11). 비개발자가
+      쓰는 제품에서 '설정 파일을 열어 JSON을 고치세요'는 해법이 아니라 사고 유발기다.
+      여는 판단은 여전히 사람이 하되, **쓰는 일은 앱이** 한다.
+    [불변식] 이 함수는 allow_nodes에 **더하기만** 한다. 목록을 통째로 교체하면 다른
+      노드의 허용이 조용히 취소돼, 왜 갑자기 안 되는지 알 수 없게 된다.
+    [제약] 0은 거절한다 — 명부에 없는 노드(seq=0)를 허용하면 '알 수 없는 발신자 전부'를
+      허용하는 것과 같다. 게이트의 목적이 정확히 그것을 막는 것이다.
+    """
+    try:
+        value = int(seq)
+    except (TypeError, ValueError):
+        return False, 'invalid_seq'
+    if value <= 0:
+        return False, 'unknown_node'
+
+    from src.node_identity import CONFIG_FILE, _load_config, _write_config
+    path = config_file or CONFIG_FILE
+    cfg, status = _load_config(path)
+    if status == 'corrupt':
+        # 읽지 못한 설정에 쓰면 나머지 키가 사라진다. 쓰기를 거절하는 편이 낫다.
+        return False, 'config_unreadable'
+
+    raw = cfg.get('central_remote_inject')
+    raw = raw if isinstance(raw, dict) else {}
+    nodes = []
+    for v in (raw.get('allow_nodes') or []):
+        try:
+            nodes.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    if value not in nodes:
+        nodes.append(value)
+
+    cfg['central_remote_inject'] = {'enabled': True, 'allow_nodes': sorted(nodes)}
+    if not _write_config(path, cfg):
+        return False, 'write_failed'
+    return True, ''
+
+
+def seq_of(node_id: str, config_file=None) -> int:
     """발신 노드의 uuid → 명부 번호. 못 찾으면 0(=허용 안 됨).
 
     [제약] 명부 조회가 실패하면 0을 돌려 **주입을 막는 쪽**으로 넘어진다.
@@ -193,7 +237,7 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
     if not pty_url:
         return False, 'no_pty_url'
 
-    seq = _seq_of(msg.get('from_node') or '', config_file)
+    seq = seq_of(msg.get('from_node') or '', config_file)
     if seq not in allowed:
         return False, f'node_not_allowed(seq={seq})'
 

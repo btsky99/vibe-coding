@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-11 23:17
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 08:07
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 5개 · 미푸시 4커밋
+- **브랜치**: `main` · 미커밋 11개 · 미푸시 0커밋
 - **최근 커밋**
+  - `c825396` 2026-08-11 — docs(graph): G2-a 주입 게이트 엣지 선언 + 규율 5 — 만든 당일 스스로 어긴 규율
+  - `57a11cb` 2026-08-11 — build(release): 폴더 다이얼로그 근본 수정 + 노드 진단 도구 — v3.7.336
   - `bdad300` 2026-08-11 — fix(dialog): 폴더 선택 창이 앱 뒤에 열리던 문제 — 네이티브 in-process 호출로 전환
   - `fc8f3d9` 2026-08-11 — fix(node): 노드 진단 스크립트 신설 + 하트비트 app_version 설치본 미검출 수정
   - `6305979` 2026-08-11 — fix(onboarding): 노드 온보딩이 원격 주입 게이트도 세운다 — 답 없는 노드 차단
-  - `f865c94` 2026-08-11 — fix(central): 답장 주소를 만들 수 없는 메시지는 주입하지 않는다 — 단방향 퇴화 차단
-  - `c6ca995` 2026-08-11 — build(release): 노드 간 대화 성립 — v3.7.335
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-11 09:12** 의도: na2js 중앙 대화 온보딩 대기
@@ -81,7 +81,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2179 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2186 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` 🔨 | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` 🔨 | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
@@ -94,7 +94,7 @@
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
 | `agent_api.py` | 1467 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
-| `central_api.py` 🔨 | 274 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
+| `central_api.py` 🔨 | 312 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
 | `config_api.py` | 96 | 앱 설정 갱신 API — config.json에 부분 업데이트(merge)하고, last_path 변경 시 |
@@ -138,7 +138,7 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
-| `central_inject.py` 🔨 | 262 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
+| `central_inject.py` 🔨 | 306 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
 | `central_listener.py` 🔨 | 311 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
@@ -154,7 +154,7 @@
 | `lan_peers.py` 🔨 | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
 | `lan_sandbox.py` 🔨 | 310 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
 | `logger.py` | 130 | 설명: 작업 세션 로깅 진입점. log_start()가 session_id 발급 + 민감정보 마스킹 |
-| `node_identity.py` 🔨 | 226 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
+| `node_identity.py` 🔨 | 311 | 이 PC(노드)의 영구 정체성. config.json에 node_id(uuid4, 최초 1회) + node_label을 |
 | `pg_base.py` 🔨 | 558 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
 | `pg_central.py` 🔨 | 537 | 중앙 PG(아픽스 서버) 커넥션 격리 모듈. config.json의 central_db 설정을 읽어 |
 | `pg_connectors.py` | 65 | 외부 connector 이벤트의 PostgreSQL 중복 방지와 감사 기록 저장소. |
@@ -386,7 +386,7 @@
 |------|------|------------|
 | `test_agent_api.py` | 333 | agent_api.py 단위 테스트. |
 | `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
-| `test_central_api.py` 🔨 | 279 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
+| `test_central_api.py` 🔨 | 284 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
 | `test_central_api_routes.py` 🔨 | 64 | 중앙 대화 HTTP 라우트 배선 회귀 테스트 — 구현만 되고 안 붙는 사고 방지 + 원격 실행 금지선 고정. |
 | `test_central_e2e.py` 🔨 | 161 | 중앙 대화 실왕복 E2E (Task 28) — 중앙 서버가 실제로 붙을 때만 돈다. |
 | `test_central_inject_remote.py` 🔨 | 175 | 🔴 원격 주입 4중 게이트 회귀 테스트. 주입은 bypass 권한 CLI에 대한 사실상의 |
@@ -398,6 +398,7 @@
 | `test_codex_harness_v2.py` | 86 | Focused tests for Codex Harness V2 bootstrap and entrypoints. |
 | `test_codex_orchestration.py` | 114 | Codex 라우팅과 오케스트레이터 연동 회귀 테스트. |
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
+| `test_config_self_heal.py` | 163 | config.json 자가복구 회귀 테스트 — 읽기 실패가 '설정 없음'으로 둔갑해 |
 | `test_connector_core.py` | 67 | connector ACL과 기본 3터미널·그룹 라우팅 계약 테스트. |
 | `test_connector_relay.py` | 201 | Discord 등 connector 턴을 헤드리스 claude로 돌리는 릴레이 회귀 테스트. |
 | `test_console_scan.py` | 206 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
@@ -423,7 +424,7 @@
 | `test_pg_store_split.py` | 124 | pg_store.py 분할(2026-06-10) 회귀 방지 테스트. |
 | `test_pty_idle_reclaim.py` | 86 | 유휴 claude 세션 회수(방법 A) 계약 검증 — pty-server.js 소스 정적 검사. |
 | `test_quota_policy.py` | 69 | 사용량 snapshot의 다섯 권고 상태와 guard 동작 회귀 테스트. |
-| `test_route_table.py` 🔨 | 135 | server.py 라우트 완전성 가드 — do_GET/do_POST를 if/elif에서 디스패치 테이블로 |
+| `test_route_table.py` | 135 | server.py 라우트 완전성 가드 — do_GET/do_POST를 if/elif에서 디스패치 테이블로 |
 | `test_self_heal_2.py` | 231 | 자가 치유 2.0 회귀 방지 테스트 — 회상 v2(pgvector) 그레이스풀 |
 | `test_session_recycle.py` 🔨 | 280 | 컨텍스트 리사이클 GUARD/상태머신 회귀 테스트. 핵심 방어선은 |
 | `test_setup_auto_install.py` | 153 | First-run sequential automatic dependency installation API regression tests. |
@@ -432,7 +433,7 @@
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_tunnel_daemon.py` 🔨 | 226 | 중앙 PG SSH 터널 데몬 회귀 테스트 — 게이트/ssh 옵션/우리터널 판정/고아 회수. |
 | `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
-| `test_updater_release_path.py` 🔨 | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
+| `test_updater_release_path.py` | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
@@ -479,4 +480,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-11 23:17
+> 자동 생성 완료: 2026-08-12 08:07

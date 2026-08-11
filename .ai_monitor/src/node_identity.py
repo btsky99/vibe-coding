@@ -12,8 +12,10 @@ REVISION HISTORY:
 import json
 import os
 import re
+import shutil
 import socket
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -40,33 +42,103 @@ _cached_id: str | None = None
 _cached_path: Path | None = None
 
 
-def _read_config(config_file: Path) -> dict:
-    # [🔴 str 경로를 Path로 정규화한다] 아래 except가 모든 예외를 {}로 삼키므로, str을
-    #   넘기면 AttributeError('str' has no read_text)가 그대로 '설정 없음'으로 둔갑한다.
-    #   증상이 "central_db를 분명히 썼는데 앱이 미설정이라고 한다"로만 보여 원인이
-    #   드러나지 않는다 — 노드 온보딩 진단이 실제로 이 함정에 걸렸다(Task 32).
+def _load_config(config_file) -> tuple[dict, str]:
+    """(설정, 상태) — 상태는 'ok' | 'missing' | 'corrupt' | 'restored'.
+
+    [🔴 왜 '없음'과 '깨짐'을 갈라야 하는가 — 이 둘을 뭉개서 노드 하나를 통째로 잃었다]
+      옛 구현은 모든 실패를 {}로 삼켰다. 그러면 호출부(get_node_id)가 '설정이 아직
+      없구나'로 읽고 새 uuid를 발급해 **파일을 통째로 덮어쓴다**. 실제로는 파일이
+      멀쩡히 있었고 BOM 한 개 때문에 못 읽었을 뿐인데, 그 한 번의 덮어쓰기로
+      central_db·node_seq·슬롯 이름이 전부 사라지고 노드 정체성까지 갈렸다
+      (2026-08-11 na2js). 읽기 실패는 '빈 설정'이 아니다 — 쓰기를 막아야 하는 신호다.
+
+    [🔴 BOM 관용] PowerShell 5.1의 `Set-Content -Encoding utf8`, 메모장, 다수 편집기가
+      BOM을 붙인다. 사용자가 손으로 한 줄 고치면 그것만으로 앱이 설정을 잃는 구조였다.
+      utf-8-sig는 BOM이 없어도 정상 동작하므로 관용 쪽이 순손실 없이 안전하다.
+
+    [자가복구] 깨졌으면 마지막 정상본(.bak)으로 되살린다. 사람이 스크립트를 돌려야만
+      복구되는 구조는 제품이 아니다 — 앱이 스스로 이전 상태로 돌아와야 한다.
+    """
+    path = Path(config_file)          # [제약] str이 들어와도 죽지 않게 정규화(과거 함정)
     try:
-        return json.loads(Path(config_file).read_text(encoding='utf-8'))
+        raw = path.read_text(encoding='utf-8-sig')
     except FileNotFoundError:
-        return {}
+        return {}, 'missing'
     except Exception:
-        # [WHY 예외를 삼키는가] config.json이 깨져 있어도 앱은 떠야 한다. 여기서 터지면
-        #   부팅 경로 전체가 죽는다 — 정체성은 앱 기동의 전제조건이 아니다.
-        return {}
+        return {}, 'corrupt'
+
+    if not raw.strip():
+        # 빈 파일은 '없음'과 같다 — 덮어써도 잃을 것이 없다.
+        return {}, 'missing'
+
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data, 'ok'
+    except Exception:
+        pass
+
+    # 여기부터는 '파일은 있는데 못 읽는' 상태. 원본을 보존하고 백업에서 되살린다.
+    _quarantine(path)
+    backup, status = _load_backup(path)
+    if status == 'ok':
+        _write_config(path, backup, backup_after=False)   # 되살린 내용을 정본 자리에
+        return backup, 'restored'
+    return {}, 'corrupt'
 
 
-def _write_config(config_file: Path, cfg: dict) -> bool:
+def _quarantine(path: Path) -> None:
+    """읽지 못한 원본을 남긴다. [WHY] 덮어쓰기 전에 바이트를 보존하지 않으면 사용자가
+    손으로 적은 값(비밀번호·터널 포트)이 영구 소멸한다. 실패해도 무시한다 — 보존은
+    복구의 보조 수단이지 전제조건이 아니다."""
+    try:
+        stamp = time.strftime('%Y%m%dT%H%M%S')
+        path.replace(path.with_name(f'{path.name}.corrupt-{stamp}'))
+    except Exception:
+        pass
+
+
+def _load_backup(path: Path) -> tuple[dict, str]:
+    try:
+        raw = path.with_name(path.name + '.bak').read_text(encoding='utf-8-sig')
+        data = json.loads(raw)
+        if isinstance(data, dict) and data:
+            return data, 'ok'
+    except Exception:
+        pass
+    return {}, 'missing'
+
+
+def _read_config(config_file: Path) -> dict:
+    """[호환] 상태가 필요 없는 호출부용 얇은 래퍼. 새 코드는 _load_config를 쓴다."""
+    return _load_config(config_file)[0]
+
+
+def _write_config(config_file: Path, cfg: dict, backup_after: bool = True) -> bool:
     """다른 키를 보존한 채 원자적으로 저장. 실패해도 예외를 던지지 않는다.
 
     [제약] config.json은 서버·훅·CLI가 각자 read-modify-write 한다. os.replace로
       '반쯤 쓰인 파일'은 막지만 프로세스 간 lost update까지는 막지 못한다.
       node_id는 최초 1회만 쓰이므로 실무상 충돌 창이 없다 — 고빈도 키를 여기에 얹지 말 것.
+
+    [WHY 성공한 내용을 .bak으로 한 벌 더 두는가] 이것이 _load_config 자가복구의 유일한
+      재료다. 백업이 없으면 파일이 깨진 순간 되돌릴 곳이 없어, 사람이 비밀번호를 다시
+      받아 온보딩을 처음부터 돌리는 수밖에 없다.
+    [제약] backup_after=False는 **복구가 스스로를 덮어쓰는 것을 막기 위해서다** — 복구
+      직후 .bak을 다시 쓰면 방금 되살린 내용으로 백업이 갱신돼, 다음 사고 때 되돌릴
+      '이전 정상본'이 사라진다.
     """
+    config_file = Path(config_file)
     tmp = config_file.with_suffix('.json.tmp')
     try:
         config_file.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
         os.replace(tmp, config_file)
+        if backup_after:
+            try:
+                shutil.copyfile(config_file, config_file.with_name(config_file.name + '.bak'))
+            except Exception:
+                pass          # 백업 실패가 저장 실패로 번지면 안 된다
         return True
     except Exception:
         try:
@@ -83,6 +155,11 @@ def get_node_id(config_file: Path | None = None) -> str:
       바뀌지 않는다 — 라벨은 사람이 읽는 표시용이고 ID는 데이터의 외래키다.
     [폴백] 저장에 실패해도(권한/디스크) 발급한 값을 그대로 반환한다. 이 프로세스 안에서는
       일관되며, 다음 부팅에 새 ID를 받는다. 대화가 조금 갈라지는 편이 앱이 죽는 것보다 낫다.
+
+    [🔴 읽지 못한 설정 위에 새 ID를 쓰지 않는다] 과거에는 읽기 실패를 '설정 없음'으로 보고
+      새 uuid를 담아 파일을 덮어썼다. 그 한 번의 쓰기가 central_db·node_seq·슬롯 이름을
+      전부 지우고 노드를 중앙에서 미아로 만들었다(2026-08-11 na2js). 복구 불가는 '못 읽음'이
+      아니라 '덮어씀'에서 왔다. 이제 상태가 corrupt면 **메모리에만** 발급하고 파일은 둔다.
     """
     global _cached_id, _cached_path
     path = Path(config_file) if config_file else CONFIG_FILE
@@ -90,13 +167,21 @@ def get_node_id(config_file: Path | None = None) -> str:
         if _cached_id is not None and _cached_path == path:
             return _cached_id
 
-        cfg = _read_config(path)
+        cfg, status = _load_config(path)
         current = str(cfg.get('node_id') or '').strip().lower()
         if _NODE_ID_RE.fullmatch(current):
             _cached_id, _cached_path = current, path
             return current
 
         new_id = uuid.uuid4().hex
+        if status == 'corrupt':
+            # 되살릴 백업조차 없는 상태. 쓰기를 포기하는 편이 낫다 — 사람이 원본
+            # (.corrupt-* 로 보존됨)에서 값을 되찾을 여지를 남긴다.
+            print('[node_identity] 설정을 읽지 못해 임시 ID로 기동한다 — 파일은 건드리지 '
+                  f'않았다. 보존본: {path.name}.corrupt-*', flush=True)
+            _cached_id, _cached_path = new_id, path
+            return new_id
+
         cfg['node_id'] = new_id
         if 'node_label' not in cfg:
             cfg['node_label'] = _default_label()

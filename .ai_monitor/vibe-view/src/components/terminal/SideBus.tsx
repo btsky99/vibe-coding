@@ -43,6 +43,8 @@ export default function SideBus({ bus, fromAgent }: { bus: CentralBus; fromAgent
   });
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [allowing, setAllowing] = useState(false);
+  const [allowErr, setAllowErr] = useState('');
   const [err, setErr] = useState('');
 
   const boxRef = useRef<HTMLDivElement>(null);
@@ -153,6 +155,43 @@ export default function SideBus({ bus, fromAgent }: { bus: CentralBus; fromAgent
               config.json 의 <code>node_seq</code> 에 번호를 넣거나, 알려진 PC라면
               호스트명을 <code>_DEFAULT_SEQ</code> 에 추가하세요.
             </span>
+          </div>
+        )}
+
+        {/* [🔴 이 배너가 없으면 사용자는 원인을 알 방법이 전혀 없다]
+            게이트가 막으면 상대 메시지는 여기 화면에 뜨지만 이 PC의 CLI에는 안 꽂힌다.
+            즉 "말은 보이는데 여기 있는 클로드는 답을 안 한다"로 보인다. 예전에는 이걸
+            알아내려고 그 PC에서 설정 파일을 열어야 했고, 그러다 BOM 하나로 노드를 통째로
+            잃었다(2026-08-11). 판단은 사람이 하되 쓰기는 앱이 한다 — 버튼 하나로 끝낸다. */}
+        {enabled && bus.blocked && (
+          <div className="px-2 py-1.5 border-b border-amber-500/25 bg-amber-500/5 shrink-0">
+            <div className="text-[10px] text-amber-200/85 leading-relaxed">
+              아픽스 <b>{bus.blocked.fromSeq}번</b>이 보낸 말이 이 PC의 CLI에 전달되지
+              않았습니다 — 화면에만 표시됩니다.
+            </div>
+            <div className="mt-1 flex items-center gap-1.5">
+              <button
+                onClick={async () => {
+                  const seq = bus.blocked?.fromSeq;
+                  if (!seq) return;
+                  setAllowing(true);
+                  const r = await bus.allowNode(seq);
+                  setAllowing(false);
+                  if (!r.ok) setAllowErr(r.error || '실패');
+                }}
+                disabled={allowing}
+                className="px-2 py-0.5 text-[10px] rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-400/30 disabled:opacity-40"
+              >
+                {allowing ? '허용하는 중…' : `${bus.blocked.fromSeq}번 노드 허용`}
+              </button>
+              <button
+                onClick={bus.dismissBlocked}
+                className="px-1.5 py-0.5 text-[10px] text-white/40 hover:text-white/70"
+              >
+                나중에
+              </button>
+              {allowErr && <span className="text-[9px] text-red-300/80">{allowErr}</span>}
+            </div>
           </div>
         )}
 
