@@ -108,6 +108,56 @@ def test_seq_lookup_failure_blocks(cfg, monkeypatch):
     assert ok is False and "node_not_allowed" in why
 
 
+# ── 왕복 성립 조건 ──────────────────────────────────────────────────────────
+def test_sender_without_slot_is_not_injected(cfg, monkeypatch):
+    """[🔴 핵심] 답장 주소를 만들 수 없는 메시지는 꽂지 않는다.
+
+    주입문은 "답장: central_say.py {발신자주소}"를 함께 싣는다. 발신자 슬롯을 모르면
+    그 주소가 깨져 상대가 답하려다 실패한다 — 답할 수 없는 말은 상대 슬롯의 컨텍스트만
+    축내고 대화는 안 된다.
+    """
+    _write(cfg, {"central_remote_inject": {"enabled": True, "allow_nodes": [3]}})
+    monkeypatch.setattr(ci, "_seq_of", lambda node_id, config_file=None: 3)
+    monkeypatch.setattr(ci, "_find_slot_session", lambda url, slot: "proj")
+
+    ok, why = ci.deliver_remote({"from_node": "n3", "from_agent": "claude",
+                                 "to_agent": "claude:T2", "content": "hi"},
+                                "http://127.0.0.1:1", cfg)
+    assert (ok, why) == (False, "sender_slot_unknown")
+
+
+def test_reply_address_points_back_to_sender(cfg, monkeypatch):
+    """주입문의 답장 주소가 '발신노드-발신슬롯'이어야 왕복이 닫힌다.
+
+    이 주소가 틀리면 상대는 받기만 하고 답을 못 보낸다(단방향으로 퇴화).
+    """
+    _write(cfg, {"central_remote_inject": {"enabled": True, "allow_nodes": [3]}})
+    monkeypatch.setattr(ci, "_seq_of", lambda node_id, config_file=None: 3)
+    monkeypatch.setattr(ci, "_find_slot_session", lambda url, slot: "proj")
+    ci._recent.clear()
+
+    sent = {}
+
+    def _fake_urlopen(req, timeout=None):
+        sent['body'] = req.data.decode('utf-8')
+
+        class _R:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        return _R()
+
+    monkeypatch.setattr(ci.urllib.request, "urlopen", _fake_urlopen)
+
+    ok, _ = ci.deliver_remote({"from_node": "n3", "from_agent": "claude:T1",
+                               "to_agent": "claude:T2", "content": "안녕"},
+                              "http://127.0.0.1:1", cfg)
+    assert ok is True
+    body = json.loads(sent['body'])['text']
+    assert "아픽스 3-1" in body, "발신자 주소가 주입문에 없다"
+    assert "central_say.py 3-1" in body, "답장 주소가 발신자를 가리키지 않는다"
+    ci._recent.clear()
+
+
 # ── 게이트 ④ 상한 ───────────────────────────────────────────────────────────
 def test_remote_rate_limit_is_separate_from_local():
     """원격 폭주가 로컬 대화 몫을 굶기지 않는다 — 창 키가 분리돼 있다."""

@@ -197,6 +197,16 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
     if seq not in allowed:
         return False, f'node_not_allowed(seq={seq})'
 
+    # [🔴 답장 주소를 만들 수 없으면 주입하지 않는다 — 왕복이 성립해야 대화다]
+    #   주입문은 "답장: central_say.py {발신자주소}"를 함께 싣는데, 발신자 슬롯을
+    #   모르면 그 주소가 '1-?'가 되어 상대가 답하려다 실패한다. 답할 수 없는 말을
+    #   CLI 에 꽂는 것은 상대 슬롯의 컨텍스트만 축내고 대화는 안 된다 —
+    #   그런 메시지는 화면 표시로 끝내는 편이 낫다.
+    #   (외부 커넥터·스크립트가 from_agent 를 'claude'처럼 슬롯 없이 보내는 경우다.)
+    from_slot = _slot_no(msg.get('from_agent') or '')
+    if not from_slot:
+        return False, 'sender_slot_unknown'
+
     project_id = _find_slot_session(pty_url, slot)
     if not project_id:
         return False, 'slot_not_running'
@@ -206,8 +216,7 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
     if not _rate_ok(f'remote:{target}', limit=_MAX_REMOTE_PER_WINDOW):
         return False, 'rate_limited'
 
-    from_addr = f"{seq}-{_slot_no(msg.get('from_agent') or '') or '?'}"
-    text = _format(from_addr, f'T{slot}', str(msg.get('content') or ''))
+    text = _format(f'{seq}-{from_slot}', f'T{slot}', str(msg.get('content') or ''))
     url = f'{pty_url}/api/pty/write/T{slot}?project_id={quote(project_id)}'
     try:
         req = urllib.request.Request(
