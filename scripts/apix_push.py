@@ -201,21 +201,42 @@ def _tunnel_identity() -> dict:
     [제약] Setup-RemoteNode.ps1 이 만든 래퍼(`tunnel-<이름>.cmd`)에서 읽는다. 그 스크립트가
       래퍼 형식을 바꾸면 여기도 같이 고쳐야 한다 — 어긋나면 조용히 빈 값이 되고,
       증상은 상태판의 '생존 미확인'뿐이라 원인이 드러나지 않는다.
+
+    [🔴 래퍼가 둘 이상이면 이름을 고르지 않는다 — 진단이 두 번 오염된 지점]
+      옛 구현은 `sorted(glob(...))` 의 **첫 파일**을 말없이 채택했다. 알파벳 순이라
+      다른 PC 것을 복사해 온 래퍼가 남아 있으면 그쪽이 이긴다(`cipher` < `na2js`).
+      그 결과 na2js 가 자기를 'cipher/22001' 이라고 보고했고, 상태판·진단이 두 번
+      엉뚱한 PC 를 가리켰다(2026-08-11). **틀린 식별자는 없는 것보다 나쁘다** —
+      없으면 '모른다'로 보이지만, 틀리면 '안다'고 믿고 엉뚱한 곳을 파게 된다.
+      그래서 모호하면 이름·포트를 비우고 후보 목록만 실어 보낸다. 화면이 충돌을
+      볼 수 있어야 사람이 지울 래퍼를 고를 수 있다.
     """
     base = os.environ.get('LOCALAPPDATA') or ''
     roots = [Path(base) / 'vibe-remote'] if base else []
     roots.append(Path.home() / '.vibe-remote')      # 맥/리눅스 노드
+
+    found: list[dict] = []
+    seen: set[str] = set()
     for root in roots:
         try:
             for f in sorted(root.glob('tunnel-*.cmd')):
                 text = f.read_text(encoding='utf-8', errors='replace')
                 m = re.search(r'-R\s+(\d+):', text)
-                if m:
-                    return {'node_name': f.stem[len('tunnel-'):],
-                            'tunnel_port': int(m.group(1))}
+                if not m:
+                    continue
+                name = f.stem[len('tunnel-'):]
+                if name in seen:
+                    continue    # 두 루트에 같은 이름 — 같은 노드의 중복이지 충돌이 아니다
+                seen.add(name)
+                found.append({'node_name': name, 'tunnel_port': int(m.group(1))})
         except OSError:
             continue
-    return {}
+
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        return {}
+    return {'tunnel_conflict': found}
 
 
 def payload() -> dict:

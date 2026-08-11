@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 08:07
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 08:49
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 11개 · 미푸시 0커밋
+- **브랜치**: `main` · 미커밋 6개 · 미푸시 1커밋
 - **최근 커밋**
+  - `ac75e5d` 2026-08-12 — fix(central): BOM 한 개로 config.json이 통째로 소멸하던 파괴 경로 차단 + 게이트를 버튼으로
   - `c825396` 2026-08-11 — docs(graph): G2-a 주입 게이트 엣지 선언 + 규율 5 — 만든 당일 스스로 어긴 규율
   - `57a11cb` 2026-08-11 — build(release): 폴더 다이얼로그 근본 수정 + 노드 진단 도구 — v3.7.336
   - `bdad300` 2026-08-11 — fix(dialog): 폴더 선택 창이 앱 뒤에 열리던 문제 — 네이티브 in-process 호출로 전환
   - `fc8f3d9` 2026-08-11 — fix(node): 노드 진단 스크립트 신설 + 하트비트 app_version 설치본 미검출 수정
-  - `6305979` 2026-08-11 — fix(onboarding): 노드 온보딩이 원격 주입 게이트도 세운다 — 답 없는 노드 차단
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-11 09:12** 의도: na2js 중앙 대화 온보딩 대기
@@ -289,7 +289,7 @@
 | `antigravity_adapter.py` | 138 | Antigravity CLI(agy) 호출 격리 레이어 — closed-source 인터페이스 변경 대비 |
 | `antigravity_output_filter.py` | 78 | Antigravity CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터. |
 | `antigravity_session_repair.py` | 216 | Antigravity CLI 세션 히스토리 자동 수리 스크립트. |
-| `apix_push.py` 🔨 | 397 | 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주기 실행을 전제한다. |
+| `apix_push.py` 🔨 | 418 | 이 PC 의 상태를 아픽스 콘솔로 밀어 올린다. 5분 주기 실행을 전제한다. |
 | `apix_sources.py` 🔨 | 377 | 아픽스 콘솔로 올릴 **로컬 데이터 수집기**. 이 PC 안의 프로젝트를 찾아 |
 | `auto.py` | 76 | 자율 클로드 heartbeat 터미널 스위치 — on/off/status. |
 | `auto_metrics.py` | 201 | 자율 heartbeat 데몬(claude-auto) 실효 계측 리포트 — 채택률/blocked율/게이트 차단/자가발굴 비율을 |
@@ -398,7 +398,7 @@
 | `test_codex_harness_v2.py` | 86 | Focused tests for Codex Harness V2 bootstrap and entrypoints. |
 | `test_codex_orchestration.py` | 114 | Codex 라우팅과 오케스트레이터 연동 회귀 테스트. |
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
-| `test_config_self_heal.py` | 163 | config.json 자가복구 회귀 테스트 — 읽기 실패가 '설정 없음'으로 둔갑해 |
+| `test_config_self_heal.py` 🔨 | 163 | config.json 자가복구 회귀 테스트 — 읽기 실패가 '설정 없음'으로 둔갑해 |
 | `test_connector_core.py` | 67 | connector ACL과 기본 3터미널·그룹 라우팅 계약 테스트. |
 | `test_connector_relay.py` | 201 | Discord 등 connector 턴을 헤드리스 claude로 돌리는 릴레이 회귀 테스트. |
 | `test_console_scan.py` | 206 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
@@ -432,6 +432,7 @@
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_tunnel_daemon.py` 🔨 | 226 | 중앙 PG SSH 터널 데몬 회귀 테스트 — 게이트/ssh 옵션/우리터널 판정/고아 회수. |
+| `test_tunnel_identity.py` | 85 | 하트비트의 역터널 식별자(_tunnel_identity) 회귀 테스트 — 래퍼가 둘 이상일 때 |
 | `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
 | `test_updater_release_path.py` | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
@@ -480,4 +481,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-12 08:07
+> 자동 생성 완료: 2026-08-12 08:49

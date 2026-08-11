@@ -26,7 +26,10 @@ param(
     [Parameter(Mandatory)][string]$PublicKey,
 
     [string]$VpsHost = '',
-    [string]$VpsKey = ''
+    [string]$VpsKey = '',
+
+    # 이미 다른 기계가 물고 있는 포트에도 강행한다. 정말 그 자리를 뺏겠다는 뜻이다.
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
@@ -55,6 +58,48 @@ $PublicKey = $PublicKey.Trim()
 Write-Host ''
 Write-Host "=== 노드 등록: $NodeName (포트 $TunnelPort) ===" -ForegroundColor Cyan
 Write-Host ''
+
+# ── 0. 포트 충돌 사전 확인 ──────────────────────────────────────────────────
+# [🔴 왜 이 검사가 생겼나 — 포트 배정을 사람 기억에 맡겼다가 진단이 두 번 오염됐다]
+#   -TunnelPort 는 지금까지 손으로 넣는 값이었고, 어디에도 '이 포트는 누구 것'이라는
+#   검증 가능한 기록이 없었다. 다른 PC 설정을 복사해 온 노드가 남의 포트를 차지한 채
+#   조용히 살아 있으면, 관리하는 쪽은 `ssh cipher` 가 붙으니 맞다고 믿는다.
+#   실제로 2026-08-11 na2js 진단이 이 방식으로 두 번 엉뚱한 기계를 가리켰다.
+#
+#   더 나쁜 것은 등록 자체는 성공한다는 점이다. 노드 쪽 ExitOnForwardFailure=yes 때문에
+#   **먼저 붙은 쪽이 이기고 나중 노드는 조용히 재시도만 반복**한다 — 증상이 '연결 안 됨'
+#   뿐이라 포트가 겹쳤다는 사실이 끝까지 드러나지 않는다.
+#
+# [제약] 판정은 sshd 호스트키 지문으로 한다. 라벨은 복사되지만 호스트키는 복사되지 않는다.
+#   상세 감사는 scripts/remote/tunnel_audit.py.
+$probe = @"
+fp=`$(ssh-keyscan -T 6 -p $TunnelPort -t ed25519 127.0.0.1 2>/dev/null | ssh-keygen -lf - 2>/dev/null | head -1 | awk '{print `$2}')
+peer=`$(ss -ltnp "sport = :$TunnelPort" 2>/dev/null | grep -c LISTEN)
+echo "FP=`${fp:-none} LISTEN=`${peer:-0}"
+"@
+# [함정] 위 Base64 블록과 같은 이유 — CRLF 가 원격 bash 에 들어가면 `$'\r'` 로 죽는다.
+$probe = $probe -replace "`r`n", "`n"
+$probeOut = ($probe | & ssh -i $VpsKey -o BatchMode=yes -o ConnectTimeout=10 "root@$VpsHost" "bash -s" 2>&1) -join ' '
+
+if ($probeOut -match 'FP=(\S+)\s+LISTEN=(\d+)') {
+    $liveFp = $Matches[1]; $listening = [int]$Matches[2]
+    if ($listening -gt 0 -and $liveFp -ne 'none') {
+        Say "$TunnelPort 번에 이미 기계가 붙어 있다 — 지문 $liveFp" 'WARN'
+        if (-not $Force) {
+            Say "다른 노드의 자리일 수 있어 등록을 멈춘다." 'FAIL'
+            Say "확인:  python scripts\remote\tunnel_audit.py" 'INFO'
+            Say "빈 포트를 쓰거나, 정말 뺏을 거면 -Force 를 붙여라." 'INFO'
+            throw "포트 $TunnelPort 충돌 — 등록 중단"
+        }
+        Say '-Force 지정됨 — 기존 사용자를 밀어내고 진행한다.' 'WARN'
+    } else {
+        Say "$TunnelPort 번 비어 있음 — 계속" 'OK'
+    }
+} else {
+    # [WHY 막지 않나] 조사 실패는 '충돌 없음'도 '충돌'도 아니다. 여기서 차단하면 VPS 가
+    #   잠깐 느린 것만으로 온보딩이 통째로 막힌다 — 사고보다 흔한 실패에 더 비싼 값을 매기는 꼴.
+    Say "포트 사용 여부를 확인하지 못했다(조사 실패). 그대로 진행한다." 'WARN'
+}
 
 # ── 1. VPS authorized_keys 등록 ─────────────────────────────────────────────
 # [보안 불변식] restrict 로 전부 끄고, 되살릴 것만 골라 되살린다.
