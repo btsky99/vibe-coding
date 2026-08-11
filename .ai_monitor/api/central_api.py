@@ -134,7 +134,42 @@ def poll(handler, parsed_path=None) -> None:
     rows = pg_central.fetch_new(agent_id=agent, limit=_limit(parsed_path))
     if not rows and signalled and pg_central.get_central_conn() is None:
         central_listener.raise_pending()     # 조회 자체가 불가능했다 — 신호 보존
-    _json_response(handler, {'messages': rows, 'count': len(rows), 'signalled': signalled})
+
+    injected = _inject_remote(rows)
+    _json_response(handler, {'messages': rows, 'count': len(rows),
+                             'signalled': signalled, 'injected': injected})
+
+
+def _inject_remote(rows: list) -> list:
+    """원격 노드가 보낸 메시지를 이 PC 슬롯 CLI에 꽂는다(게이트 통과 시에만).
+
+    [🔴 왜 리스너가 아니라 여기인가] 리스너에서 주입하려면 리스너가 메시지를 조회해야
+      하고, 그러면 커서를 리스너가 밀게 된다. 그 순간 화면(poll)은 같은 메시지를 영영
+      못 본다 — 커서는 하나뿐이다. 조회하는 곳이 곧 소비자여야 한다는 불변식은
+      pg_central.fetch_new 의 설계 전제이기도 하다.
+    [불변식] 게이트가 막으면 조용히 넘어간다. 화면 표시는 이 함수와 무관하게 이뤄지므로,
+      주입이 안 돼도 대화는 보인다 — 기능이 사라지는 것이 아니라 '읽기 전용'이 된다.
+    [제약] 반환값은 관측용이다. 실패 사유를 응답에 실어야 '왜 답이 안 오지'를 화면에서
+      알 수 있다 — 조용히 버리면 게이트가 막은 것인지 슬롯이 죽은 것인지 구분 불가다.
+    """
+    if not rows:
+        return []
+    try:
+        from src import central_inject
+        from api import pty_api
+    except Exception:
+        return []
+    if not central_inject.remote_gate()[0]:
+        return []                     # 꺼져 있으면 PTY 조회조차 하지 않는다
+
+    pty_url = pty_api.get_pty_rest_url()
+    out = []
+    for msg in rows:
+        ok, why = central_inject.deliver_remote(msg, pty_url)
+        if ok or why not in ('broadcast_not_injected', 'no_slot'):
+            # 브로드캐스트/슬롯 없음은 정상적인 '주입 대상 아님'이라 소음이다.
+            out.append({'id': msg.get('id'), 'ok': ok, 'why': why})
+    return out
 
 
 def send(handler, parsed_path=None) -> None:
@@ -174,10 +209,13 @@ def send(handler, parsed_path=None) -> None:
 def _deliver_if_local(to_node: str, to_agent: str, from_agent: str, content: str) -> str:
     """수신 대상이 이 노드의 슬롯이면 PTY에 주입하고 결과 사유를 돌려준다.
 
-    [🔴 이 함수가 로컬만 다루는 것이 보안 경계다] 주입은 bypass 권한 CLI에 대한 사실상의
-      명령 실행이다. 원격 노드가 보낸 메시지는 poll 경로로 들어오고 그 경로는 주입을
-      부르지 않는다 — 이 모듈 헤더의 '원격 실행 금지'가 지켜지는 지점이 여기 하나뿐이므로
-      여기에 원격 분기를 추가하지 말 것.
+    [🔴 이 함수는 로컬만 다룬다 — 여기에 원격 분기를 추가하지 말 것]
+      주입은 bypass 권한 CLI에 대한 사실상의 명령 실행이다. 로컬 발신은 그 PC 사용자가
+      스스로 친 말이라 게이트가 필요 없지만, 원격 발신은 다르다.
+      [2026-08-11 변경] 원격 발신 주입은 **금지에서 게이트로** 바뀌었다. 다만 경로는
+      여전히 분리돼 있다 — 원격은 poll 경로의 _inject_remote 가 4중 게이트
+      (토글·허용노드·수신슬롯 명시·상한)를 통과시킨 뒤에만 꽂는다.
+      두 경로를 합치지 말 것: 발신 시점 주입은 게이트가 없고, 있어서도 안 된다.
     [제약] 주입 실패는 발신 실패가 아니다. 사유만 실어 보내고 200을 유지한다.
     """
     from src import central_inject
