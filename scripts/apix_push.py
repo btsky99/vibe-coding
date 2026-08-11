@@ -60,14 +60,28 @@ def _read(name: str, env: str, default: str = '') -> str:
 
 def _app_version() -> str:
     """[제약] 개발 모드와 설치본 모두에서 동작해야 한다. import 대신 파일을 읽는
-    이유 — 이 스크립트는 vibe-coding 패키지 밖에서도 단독 실행된다."""
-    try:
-        p = Path(__file__).resolve().parent.parent / '.ai_monitor' / '_version.py'
-        for line in p.read_text(encoding='utf-8').splitlines():
-            if line.strip().startswith('__version__'):
-                return line.split('=', 1)[1].strip().strip('\'"')
-    except Exception:                                  # noqa: BLE001
-        pass
+    이유 — 이 스크립트는 vibe-coding 패키지 밖에서도 단독 실행된다.
+
+    [🔴 후보를 여러 개 보는 이유 — 두 레이아웃의 상대 경로가 다르다]
+      개발:   <repo>/scripts/apix_push.py       → <repo>/.ai_monitor/_version.py
+      설치본: _internal/scripts/apix_push.py    → _internal/_version.py
+      (.ai_monitor 패키지가 _internal 루트로 펼쳐지므로 중간 폴더가 사라진다)
+      개발 경로만 보던 초판은 설치본에서 조용히 ''를 돌려줬고, 그 값이 관제 하트비트의
+      app_version 으로 올라갔다. 2026-08-11 na2js 진단 때 '이 노드가 새 코드를 쓰는가'를
+      원격에서 판정할 수 없어 막힌 지점이 정확히 여기다 — 버전이 안 보이면 노드가
+      침묵할 때 '설정 문제'와 '구버전 문제'를 가를 수 없다.
+    [제약] 실패해도 ''를 돌려준다 — 버전을 못 읽는 것이 하트비트 전체를 막으면 안 된다.
+    """
+    here = Path(__file__).resolve().parent
+    for p in (here.parent / '.ai_monitor' / '_version.py',   # 개발 레이아웃
+              here.parent / '_version.py',                   # 설치본(_internal) 레이아웃
+              here / '_version.py'):
+        try:
+            for line in p.read_text(encoding='utf-8').splitlines():
+                if line.strip().startswith('__version__'):
+                    return line.split('=', 1)[1].strip().strip('\'"')
+        except Exception:                              # noqa: BLE001
+            continue
     return ''
 
 
