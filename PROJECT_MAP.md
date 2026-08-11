@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-11 09:08
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-11 19:09
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,35 +8,35 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 0개 · 미푸시 2커밋
+- **브랜치**: `main` · 미커밋 7개 · 미푸시 3커밋
 - **최근 커밋**
-  - `8de0188` 2026-08-11 — docs(plan): 콘솔 Phase 7~9 상태를 실측으로 정정 — 계획이 현실보다 뒤처져 있었다
-  - `8c4457f` 2026-08-11 — feat(central): 신규 노드 온보딩 스크립트 — 다른 PC 붙이기가 수작업이던 마지막 관문
-  - `eff9217` 2026-08-11 — build(release): 아픽스 통합 대화 화면 배포 — v3.7.332
-  - `bc84b09` 2026-08-10 — docs(central): 노드 번호 2번은 결번 — '크립토 PC'는 개발 PC 자신이었다
-  - `0caa696` 2026-08-09 — docs(map): 자동 생성 지도 갱신 — central_inject·central_say 신규 파일 반영
+  - `ce03f54` 2026-08-11 — feat(central): 원격 발신 CLI 주입 — 금지에서 4중 게이트로 (노드 간 대화 성립)
+  - `9f62c8a` 2026-08-11 — feat(graph): 실행 그래프 선언 + 세팅 프롬프트 ⑫ — 오늘 사고 3건이 전부 '엣지 미선언'이었다
+  - `f0d2f7c` 2026-08-11 — feat(tools): 세팅 프롬프트 ⑪ 지식 그래프 — 다른 프로젝트엔 그래프가 아예 안 생기고 있었다
+  - `21ff921` 2026-08-11 — fix(central): 리스너가 '조용한 단절'에서 못 빠져나오던 결함 — 메시지 영구 유실
+  - `4d3bc9d` 2026-08-11 — fix(ui): 터미널 헤더 모델 배지 제거 — 하단 바와 다른 모델명을 보여줬다
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-11 09:12** 의도: na2js 중앙 대화 온보딩 대기
+  - 결정: 웹루트 짧은URL 사본(c9x.ps1)에 비밀번호 주입해 배포 — 서버 내부에서만 처리해 화면 노출 0
+  - 다음: na2js에서 iwr 실행 → 공개키 받아 vps-knowledge-db.sh로 등록 → 재실행 실증 → c9x.ps1 즉시 삭제
 - **08-11 08:48** 의도: v3.7.332 배포 후 남은 계획 태스크 순차 진행
   - 결정: 331은 CI가 이미 발행 → 332로 재채번 후 푸시 완료
   - 다음: Task 15(프로젝트별 보드) → 16 → 17 → 32 → 18 순서
 - **08-10 00:34** 의도: Phase 11 Task 47 — 배포 전 남은 것: na2js 정리 + 2대 왕복
   - 결정: 검증3종 통과 / 사라졌던 central_db 복원해 송수신 실증 / 노드지도 확정: PC는 2대(1=yjscom=개발=크립토, 2=결번, 3=na2js) 둘 다 같은 집 LAN
   - 다음: na2js PC에서 앱 켜기 → 9020으로 진입 → cipher와 섞인 node_name·tunnel_port 22001을 전용 포트로 재발급 → 2대 왕복 → 배포
-- **08-10 00:19** 의도: Phase 11 Task 47 — 중앙 접속 설정 복원 후 왕복 검증
-  - 결정: config에서 사라졌던 central_db 복원(로컬 5436↔VPS 5433 터널), 중앙 DB 연결·송신 실증 / 역터널은 na2js 통로가 아님(크립토 전용)을 메모리에 정정
-  - 다음: 앱 재시작으로 리스너 기동 후 화면 확인 → 배포 → na2js는 그 PC에서 앱 켠 뒤 왕복
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **중앙 대화 메시지가 수신 노드 화면에 전혀 뜨지 않음 (명부 등록은 성공)**
+  - 원인: SSH 터널 너머가 끊겨도 로컬 소켓은 established로 남아 conn.closed가 0. select는 타임아웃만 하고 리스너는 재연결하지 않아 조용한 귀머거리가 됨. NOTIFY는 저장되지 않아 그 사이 메시지는 영구 유실. _SELECT_CAP_SEC 주석은
+  - 수정: central_listener._alive(SELECT 1 왕복) 신설 + 알림 없이 깨어났을 때만 확인해 죽었으면 재연결. 재연결이 pending을 세워 놓친 메시지 복구. tests/test_central_listener_health.py로 역검증까지 고정
+- **get_central_config가 설정을 썼는데도 None을 반환**
+  - 원인: node_identity._read_config가 Path 전용인데 str을 받으면 AttributeError가 나고, 아래 except가 모든 예외를 {}로 삼켜 '설정 없음'으로 둔갑
+  - 수정: Path(config_file)로 정규화 + tests/test_pg_central.py에 회귀 테스트(없는 파일은 여전히 None)
 - **중앙 대화 슬롯 멘션 '@1-2'가 수신 노드 화면에 안 뜸 (에러 없이 조용히 유실)**
   - 원인: 프론트 중앙 버스는 단일 폴링이라 agent 파라미터 없이 호출(agent_id=''). pg_central.fetch_new/pending_count의 조건 to_agent IS NULL OR to_agent='' OR to_agent=%s 가 ''과 비교돼, to_
   - 수정: _to_agent_clause() 신설 — agent_id가 비면 수신자 조건을 생략. fetch_new/pending_count가 이 함수 하나만 공유(조건 중복 제거). 커밋 3920cdf. 검증: 가짜 원격 uuid로 to_agent='claude:T2' INSE
-- **5분마다 검은 cmd 창이 십수 번 연달아 깜빡임**
-  - 원인: 작업 스케줄러 'APIX Node Push'(5분 주기)가 돌리는 apix_sources._git()이 subprocess.run 직호출 — CREATE_NO_WINDOW는 자식에게 상속되지 않아 pythonw가 띄워도 자식 git.exe가 새 콘솔을 받음. 프로젝트 
-  - 수정: apix_sources/generate_project_map/drift_detector/zettel_capture/pg_manager/lan_sandbox/recycle_api/hive_api 8곳을 infra.proc 래퍼 경유로 전환 (d423a7d). 진단은 co
-- **T1 PTY 세션이 반복 terminate — 콘솔창 깜빡임 후 사라짐 (api_terminate, exit code -1073741510/0xC000013A)**
-  - 원인: 자동 리사이클 워처(infra/daemons.run_recycle_watcher)가 terminal_id를 전송하지 않고, 수신부(api/recycle_api.handle_post)가 'T1'로 하드코딩 폴백. 계측은 CLI 단위(claude/codex)인데 처형은 터
-  - 수정: daemons에 _targets() 추가 — /api/pty/sessions에서 agent==cli && running인 슬롯만 골라 terminal_id 명시 전달. recycle_api는 terminal_id 없으면 400 거부(폴백 제거). codex_contex
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -58,6 +58,7 @@
 | `RULES.md` | 프로젝트 내 모든 에이전트가 준수해야 할 핵심 행동 수칙 및 코드 스타일 가이드 |
 | `ai_monitor_plan.md` | 아픽스 콘솔 구축 계획 — btsky.pe.kr 을 개인 전용 총괄 관제판으로 전환하고 |
 | `memory.md` | 프로젝트의 핵심 기술적 결정, 사용자 선호도, 아키텍처 원칙 및 과거의 실수/해결책 기록소. |
+| `docs/AGENT_GRAPH.md` | 이 프로젝트의 **실행 그래프 선언** — 노드(일하는 단위) / 엣지(다음으로 가는 길) / |
 | `docs/API_SPEC.md` | Vibe-Coding (AI Monitor) REST API 상세 명세서 |
 | `docs/CIPHERTRADER_LLM_MULTI_AGENT_DESIGN.md` | CipherTrader Crypto를 LLM 주도 다중 에이전트 자동매매 시스템으로 전환하기 위한 누적 설계 문서 |
 | `docs/CLAUDE_CODE_AGENT_TEAMS_ANALYSIS.md` |  |
@@ -93,7 +94,7 @@
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
 | `agent_api.py` 🔨 | 1467 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
-| `central_api.py` 🔨 | 236 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
+| `central_api.py` 🔨 | 274 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
 | `config_api.py` | 96 | 앱 설정 갱신 API — config.json에 부분 업데이트(merge)하고, last_path 변경 시 |
@@ -127,7 +128,7 @@
 | `setup_api.py` | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
-| `tools_api.py` 🔨 | 1167 | AI 도구 CLI 설치 관리 API. |
+| `tools_api.py` 🔨 | 1311 | AI 도구 CLI 설치 관리 API. |
 | `update_api.py` 🔨 | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
@@ -137,8 +138,8 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
-| `central_inject.py` 🔨 | 138 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
-| `central_listener.py` 🔨 | 276 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
+| `central_inject.py` 🔨 | 253 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
+| `central_listener.py` 🔨 | 311 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
 | `code_search.py` | 200 | 설명: 코드 인텔리전스 검색 — PostgreSQL FTS 기반 BM25 검색 엔진 |
@@ -180,7 +181,7 @@
 |------|------|------|
 | `app_boot.py` 🔨 | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
-| `console_scan.py` 🔨 | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
+| `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
 | `daemons.py` 🔨 | 1115 | 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/ |
 | `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` 🔨 | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
@@ -356,7 +357,7 @@
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
 | `SetupBanner.tsx` 🔨 | 227 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 494 | 설명: 상태판 독립 창(?page=status) 본체. 두 가지를 한 화면에 보여준다. |
-| `TerminalSlot.tsx` 🔨 | 1101 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
+| `TerminalSlot.tsx` 🔨 | 1100 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
 | `TopMenuBar.tsx` | 574 | 설명: VS Code 스타일 상단 메뉴바 컴포넌트. |
 | `VibeEditor.tsx` | 141 | 설명: Monaco Editor 기반 코드 편집기 — VS Code 스타일 하이라이팅/주석 색상 강화, |
@@ -387,6 +388,8 @@
 | `test_central_api.py` 🔨 | 279 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
 | `test_central_api_routes.py` 🔨 | 64 | 중앙 대화 HTTP 라우트 배선 회귀 테스트 — 구현만 되고 안 붙는 사고 방지 + 원격 실행 금지선 고정. |
 | `test_central_e2e.py` 🔨 | 161 | 중앙 대화 실왕복 E2E (Task 28) — 중앙 서버가 실제로 붙을 때만 돈다. |
+| `test_central_inject_remote.py` 🔨 | 125 | 🔴 원격 주입 4중 게이트 회귀 테스트. 주입은 bypass 권한 CLI에 대한 사실상의 |
+| `test_central_listener_health.py` 🔨 | 109 | 🔴 리스너가 '조용한 단절'을 빠져나오는지 고정하는 회귀 테스트. |
 | `test_central_messaging.py` 🔨 | 176 | 중앙 대화(agent_messages) 송수신 규약의 회귀 테스트 — 중앙 서버 없이 검증한다. |
 | `test_central_optional.py` 🔨 | 104 | 🔴 중앙 서버를 쓰지 않는 사용자에게 아무 변화가 없음을 고정하는 회귀 테스트. |
 | `test_claude_quota.py` | 53 | Claude 사용량 응답에서 신규 모델별 주간 한도를 보존하는 회귀 테스트. |
@@ -396,7 +399,7 @@
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
 | `test_connector_core.py` 🔨 | 67 | connector ACL과 기본 3터미널·그룹 라우팅 계약 테스트. |
 | `test_connector_relay.py` 🔨 | 201 | Discord 등 connector 턴을 헤드리스 claude로 돌리는 릴레이 회귀 테스트. |
-| `test_console_scan.py` 🔨 | 206 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
+| `test_console_scan.py` | 206 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
 | `test_daemon_toggles.py` 🔨 | 355 | 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증. |
 | `test_discord_config_api.py` 🔨 | 49 | Discord 공용 토큰·Node ID·터미널 채널 binding 저장 계약 회귀 테스트. |
 | `test_discord_dashboard.py` 🔨 | 101 | Discord Components V2 dashboard 렌더링과 webhook upsert 회귀 테스트. |
@@ -474,4 +477,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-11 09:08
+> 자동 생성 완료: 2026-08-11 19:09
