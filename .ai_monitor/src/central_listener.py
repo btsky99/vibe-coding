@@ -171,6 +171,27 @@ def _register_self() -> None:
         _mark(error=f'명부: {str(exc)[:180]}')
 
 
+def _alive(conn) -> bool:
+    """실제 왕복으로 커넥션 생존을 확인한다. LISTEN 커넥션에 써도 안전하다(autocommit).
+
+    [🔴 왜 closed 플래그로는 부족한가] SSH 터널 너머가 끊겨도 **로컬 소켓은 established로
+      남는다** — ssh 프로세스가 이쪽 끝을 붙잡고 있어 TCP keepalive 조차 응답한다.
+      그래서 conn.closed 는 0 이고 select 는 얌전히 타임아웃만 하며, 리스너는 살아 있는
+      것처럼 보이는 채로 **아무 알림도 못 받는 귀머거리**가 된다.
+    [과거사고 2026-08-11] na2js 가 연결 13분 뒤 이 상태가 됐다. 명부 등록까지 성공해
+      화면에는 'listen'(정상)으로 떴지만 그 뒤 도착한 메시지 3건을 전부 놓쳤다.
+      NOTIFY 는 저장되지 않으므로 놓친 신호는 재연결 없이는 영영 오지 않는다.
+    [WHY 이 패턴인가] pg_base._get_pg_conn 이 로컬 커넥션에 이미 쓰는 방식이다
+      (매 사용 전 SELECT 1). 원격은 half-open 위험이 더 큰데 리스너만 빠져 있었다.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT 1')
+        return True
+    except Exception:
+        return False
+
+
 def _loop(node: str, stop: threading.Event) -> None:
     import select
 
@@ -208,6 +229,20 @@ def _loop(node: str, stop: threading.Event) -> None:
                     hit = True
             if hit:
                 _mark(pending=True)
+            elif not _alive(conn):
+                # [🔴 여기가 _SELECT_CAP_SEC 주석이 약속한 '재평가'다] 상한을 걸어 루프로
+                #   돌아오기만 하고 아무것도 확인하지 않으면 재평가가 아니다 — 조용한
+                #   단절을 영원히 못 벗어난다(위 _alive 의 과거사고 참조).
+                #   알림을 받고 깨어난 경우(hit)에는 방금 서버와 통했으므로 확인하지 않는다:
+                #   확인 비용은 60초에 한 번, 그것도 조용한 주기에만 든다.
+                _mark(error='LISTEN 커넥션 무응답 — 재연결한다')
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                conn = None
+                # 재연결 경로(위)가 pending 을 세운다 → 끊겨 있는 동안 놓친 NOTIFY 를
+                # 조회 한 번으로 만회한다. 이 복구가 없으면 메시지가 영구 유실된다.
         except Exception as exc:
             _mark(error=str(exc)[:200])
             try:
