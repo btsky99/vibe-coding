@@ -166,29 +166,32 @@ export default function SideBus({ bus, fromAgent }: { bus: CentralBus; fromAgent
         {enabled && bus.blocked && (
           <div className="px-2 py-1.5 border-b border-amber-500/25 bg-amber-500/5 shrink-0">
             <div className="text-[10px] text-amber-200/85 leading-relaxed">
-              아픽스 <b>{bus.blocked.fromSeq}번</b>이 보낸 말이 이 PC의 CLI에 전달되지
-              않았습니다 — 화면에만 표시됩니다.
+              {bus.blocked.message}
             </div>
             <div className="mt-1 flex items-center gap-1.5">
-              <button
-                onClick={async () => {
-                  const seq = bus.blocked?.fromSeq;
-                  if (!seq) return;
-                  setAllowing(true);
-                  const r = await bus.allowNode(seq);
-                  setAllowing(false);
-                  if (!r.ok) setAllowErr(r.error || '실패');
-                }}
-                disabled={allowing}
-                className="px-2 py-0.5 text-[10px] rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-400/30 disabled:opacity-40"
-              >
-                {allowing ? '허용하는 중…' : `${bus.blocked.fromSeq}번 노드 허용`}
-              </button>
+              {/* 버튼은 이 자리에서 풀 수 있는 사유일 때만. 손쓸 수 없는 사유에 버튼을
+                  달면 눌러도 아무 일이 없어 '고장난 앱'으로 읽힌다. */}
+              {bus.blocked.openable && (
+                <button
+                  onClick={async () => {
+                    const seq = bus.blocked?.fromSeq;
+                    if (!seq) return;
+                    setAllowing(true);
+                    const r = await bus.allowNode(seq);
+                    setAllowing(false);
+                    if (!r.ok) setAllowErr(r.error || '실패');
+                  }}
+                  disabled={allowing}
+                  className="px-2 py-0.5 text-[10px] rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-400/30 disabled:opacity-40"
+                >
+                  {allowing ? '허용하는 중…' : `${bus.blocked.fromSeq}번 노드 허용`}
+                </button>
+              )}
               <button
                 onClick={bus.dismissBlocked}
                 className="px-1.5 py-0.5 text-[10px] text-white/40 hover:text-white/70"
               >
-                나중에
+                {bus.blocked.openable ? '나중에' : '닫기'}
               </button>
               {allowErr && <span className="text-[9px] text-red-300/80">{allowErr}</span>}
             </div>

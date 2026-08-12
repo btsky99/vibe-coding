@@ -13,7 +13,7 @@ DESCRIPTION: 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주
   · 로컬 발신 → deliver_local. 그 PC 사용자가 스스로 친 말이라 게이트 없음
   · 원격 발신 → deliver_remote. 4중 게이트를 전부 통과해야만 꽂힌다
       ① 토글(기본 꺼짐) ② 허용 노드 목록에 발신자가 있음
-      ③ 수신 슬롯이 명시됨(브로드캐스트는 주입 안 함) ④ 창당 상한
+      ③ 꽂을 슬롯이 정해짐(미지정이면 대표 슬롯 1개 — broadcast_slot) ④ 창당 상한
   두 경로를 합치지 말 것 — 발신 시점 주입에는 게이트가 없고, 있어서도 안 된다.
   대화는 되돌릴 수 있어도 실행은 되돌릴 수 없다는 원칙은 그대로다.
 
@@ -151,6 +151,37 @@ def remote_gate(config_file=None) -> tuple[bool, set[int]]:
     return bool(allowed), allowed
 
 
+def broadcast_slot(config_file=None) -> int:
+    """받는 슬롯을 안 정한 말을 꽂을 **대표 슬롯 하나**. 0이면 주입 안 함(옛 동작).
+
+    [🔴 왜 생겼나 — '전달은 되는데 클로드가 인식을 못 한다'의 절반이 여기였다]
+      초판은 브로드캐스트를 통째로 주입 대상에서 뺐다. 근거는 타당했다 —
+      받는 사람을 안 정한 말을 **모든 슬롯**에 꽂으면 노드 하나가 전 슬롯을 조종한다.
+      그런데 결과는 사람이 창에 그냥 한 줄 쓰면 **어느 CLI도 그 말을 못 보는** 것이었다.
+      화면엔 뜨는데 상대 클로드는 침묵하니, 사용자에게는 '읽고 무시한다'로 보인다.
+
+      금지의 진짜 대상은 '슬롯을 안 정했다'가 아니라 '전 슬롯 동시 도달'이었다.
+      그래서 범위만 좁힌다 — **노드당 딱 한 슬롯**. 원래 불변식은 그대로 지켜지고,
+      '@를 안 붙이면 아무도 못 듣는' 함정만 사라진다.
+    [제약] 여전히 remote_gate(토글+허용 목록)를 먼저 통과해야 한다. 이 값은 '어디에
+      꽂을지'만 정하지 '꽂아도 되는지'를 정하지 않는다.
+    [제약] 0으로 두면 옛 동작(브로드캐스트 미주입)으로 되돌아간다 — 이 판단을 바꾸고
+      싶은 사용자를 위해 설정으로 남긴다.
+    """
+    try:
+        from src.node_identity import CONFIG_FILE, _read_config
+        raw = _read_config(config_file or CONFIG_FILE).get('central_remote_inject')
+    except Exception:
+        return 1
+    if not isinstance(raw, dict) or 'broadcast_slot' not in raw:
+        return 1                      # 미설정 기본값 — 대표 슬롯 T1
+    try:
+        v = int(raw.get('broadcast_slot'))
+    except (TypeError, ValueError):
+        return 1                      # 오타 하나로 조용히 '아무도 못 들음'이 되지 않게
+    return v if v >= 0 else 1
+
+
 def allow_node(seq: int, config_file=None) -> tuple[bool, str]:
     """발신 노드 번호를 허용 목록에 넣고 게이트를 켠다. (성공여부, 사유).
 
@@ -217,8 +248,8 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
     [🔴 게이트 4중 — 하나라도 막히면 화면 표시까지가 끝이다]
       ① 토글이 켜져 있고 허용 목록이 비어 있지 않은가
       ② 발신 노드가 그 허용 목록에 있는가
-      ③ 수신 슬롯이 **명시**돼 있는가 — 브로드캐스트는 주입하지 않는다.
-         받는 사람을 안 정한 말을 모든 슬롯에 꽂으면 노드 하나가 전 슬롯을 조종한다.
+      ③ 꽂을 슬롯이 정해지는가 — 명시됐으면 그 슬롯, 없으면 **대표 슬롯 하나**
+         (broadcast_slot). 금지 대상은 '슬롯 미지정'이 아니라 '전 슬롯 동시 도달'이다.
       ④ 상한(창당 _MAX_REMOTE_PER_WINDOW)을 넘지 않았는가
     [불변식] 실패해도 예외를 던지지 않는다 — 주입 실패가 수신 자체를 깨면 안 된다.
       화면 표시는 이 함수와 무관하게 이미 이뤄진다.
@@ -228,12 +259,15 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
         return False, 'remote_disabled'
 
     to_agent = str(msg.get('to_agent') or '')
-    if not to_agent:
-        return False, 'broadcast_not_injected'
-
-    slot = _slot_no(to_agent)
-    if not slot:
-        return False, 'no_slot'
+    if to_agent:
+        slot = _slot_no(to_agent)
+        if not slot:
+            return False, 'no_slot'       # 슬롯을 적었는데 못 읽는다 — 추측하지 않는다
+    else:
+        # 받는 슬롯 미지정 → 대표 슬롯 하나로. 상세는 broadcast_slot() 참조.
+        slot = broadcast_slot(config_file)
+        if not slot:
+            return False, 'broadcast_not_injected'
     if not pty_url:
         return False, 'no_pty_url'
 
@@ -241,15 +275,16 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
     if seq not in allowed:
         return False, f'node_not_allowed(seq={seq})'
 
-    # [🔴 답장 주소를 만들 수 없으면 주입하지 않는다 — 왕복이 성립해야 대화다]
-    #   주입문은 "답장: central_say.py {발신자주소}"를 함께 싣는데, 발신자 슬롯을
-    #   모르면 그 주소가 '1-?'가 되어 상대가 답하려다 실패한다. 답할 수 없는 말을
-    #   CLI 에 꽂는 것은 상대 슬롯의 컨텍스트만 축내고 대화는 안 된다 —
-    #   그런 메시지는 화면 표시로 끝내는 편이 낫다.
-    #   (외부 커넥터·스크립트가 from_agent 를 'claude'처럼 슬롯 없이 보내는 경우다.)
+    # [🔴 발신 슬롯을 몰라도 주입한다 — 옛 하드 거부는 오판이었다]
+    #   주입문은 "답장: central_say.py {발신자주소}"를 싣는다. 옛 구현은 발신 슬롯을
+    #   모르면 주소가 '1-?'가 되어 답장이 실패한다고 보고 주입 자체를 거부했다.
+    #   그런데 central_say.py `_resolve` 는 **슬롯 없는 노드 주소('1')를 이미 받는다** —
+    #   답장은 처음부터 가능했고, 거부할 이유가 없었다.
+    #   이 오판의 대가가 컸다: `from_agent` 를 안 실은 발신(스크립트·외부 커넥터·서버
+    #   기본값 'claude')은 **전부 조용히 버려졌다.** 화면에는 멀쩡히 뜨므로 사용자에게는
+    #   '상대 클로드가 읽고 무시한다'로 보인다(2026-08-11 na2js 왕복 실패의 절반).
     from_slot = _slot_no(msg.get('from_agent') or '')
-    if not from_slot:
-        return False, 'sender_slot_unknown'
+    reply_addr = f'{seq}-{from_slot}' if from_slot else f'{seq}'
 
     project_id = _find_slot_session(pty_url, slot)
     if not project_id:
@@ -260,7 +295,7 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
     if not _rate_ok(f'remote:{target}', limit=_MAX_REMOTE_PER_WINDOW):
         return False, 'rate_limited'
 
-    text = _format(f'{seq}-{from_slot}', f'T{slot}', str(msg.get('content') or ''))
+    text = _format(reply_addr, f'T{slot}', str(msg.get('content') or ''))
     url = f'{pty_url}/api/pty/write/T{slot}?project_id={quote(project_id)}'
     try:
         req = urllib.request.Request(

@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 08:49
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 19:23
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 6개 · 미푸시 1커밋
+- **브랜치**: `main` · 미커밋 7개 · 미푸시 2커밋
 - **최근 커밋**
+  - `edd3f8b` 2026-08-12 — fix(remote): 역터널 포트 배정이 조용히 어긋나던 구조 — 라벨 대신 호스트키로 판정
   - `ac75e5d` 2026-08-12 — fix(central): BOM 한 개로 config.json이 통째로 소멸하던 파괴 경로 차단 + 게이트를 버튼으로
   - `c825396` 2026-08-11 — docs(graph): G2-a 주입 게이트 엣지 선언 + 규율 5 — 만든 당일 스스로 어긴 규율
   - `57a11cb` 2026-08-11 — build(release): 폴더 다이얼로그 근본 수정 + 노드 진단 도구 — v3.7.336
   - `bdad300` 2026-08-11 — fix(dialog): 폴더 선택 창이 앱 뒤에 열리던 문제 — 네이티브 in-process 호출로 전환
-  - `fc8f3d9` 2026-08-11 — fix(node): 노드 진단 스크립트 신설 + 하트비트 app_version 설치본 미검출 수정
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-11 09:12** 의도: na2js 중앙 대화 온보딩 대기
@@ -28,15 +28,15 @@
   - 다음: na2js PC에서 앱 켜기 → 9020으로 진입 → cipher와 섞인 node_name·tunnel_port 22001을 전용 포트로 재발급 → 2대 왕복 → 배포
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **na2js 진단이 두 번 엉뚱한 기계를 가리킴 (node_name=cipher, tunnel_port=22001 오보고)**
+  - 원인: apix_push._tunnel_identity가 sorted(glob('tunnel-*.cmd')) 첫 파일을 무검증 채택 — 복사된 래퍼가 알파벳 순으로 이김. 포트 배정에 검증 가능한 기록 부재
+  - 수정: 모호하면 이름을 고르지 않고 tunnel_conflict로 후보만 보고 + tunnel_audit.py로 호스트키 지문 판정 + Register-RemoteNode 충돌 검사
 - **설치본에서 폴더 변경(탐색기/터미널 변경 버튼)이 눌러도 무반응**
   - 원인: 다이얼로그는 정상 생성되나 서버가 띄운 별도 프로세스(tkinter)라 포그라운드 잠금으로 앱 창 뒤에 깔림. 오진 3건(파이썬없음/tkinter없음/다른인터프리터) 전부 실측 반증됨
   - 수정: infra/folder_dialog.py 네이티브 SHBrowseForFolderW를 앱 프로세스 안에서 호출(bdad300). 🔴OleInitialize 필수 - CoInitializeEx는 메인스레드에서만 우연히 뜨고 워커스레드에선 조용히 정지. 검증절차는 /vib
 - **아픽스 3-1(na2js)에 메시지를 보내도 답이 0건**
   - 원인: central_remote_inject 게이트가 na2js에 미설정(앱 기본 꺼짐) — 온보딩 스크립트가 central_db만 넣고 주입 게이트를 안 세움. 중앙 DB 수신은 정상(커서 140, 1초)
   - 수정: Setup-CentralNode.ps1에 -AllowInjectFrom(기본 1) 추가해 central_remote_inject를 함께 기록 (6305979). 진단 순서: 커서 전진 확인 → 하트비트 생존 확인 → 수신측 게이트
-- **중앙 대화 메시지가 수신 노드 화면에 전혀 뜨지 않음 (명부 등록은 성공)**
-  - 원인: SSH 터널 너머가 끊겨도 로컬 소켓은 established로 남아 conn.closed가 0. select는 타임아웃만 하고 리스너는 재연결하지 않아 조용한 귀머거리가 됨. NOTIFY는 저장되지 않아 그 사이 메시지는 영구 유실. _SELECT_CAP_SEC 주석은
-  - 수정: central_listener._alive(SELECT 1 왕복) 신설 + 알림 없이 깨어났을 때만 확인해 죽었으면 재연결. 재연결이 pending을 세워 놓친 메시지 복구. tests/test_central_listener_health.py로 역검증까지 고정
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -94,7 +94,7 @@
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
 | `agent_api.py` | 1467 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
-| `central_api.py` 🔨 | 312 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
+| `central_api.py` 🔨 | 315 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
 | `config_api.py` | 96 | 앱 설정 갱신 API — config.json에 부분 업데이트(merge)하고, last_path 변경 시 |
@@ -138,7 +138,7 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `brief_limits.py` 🔨 | 89 | 프롬프트 계열 텍스트(재정박·워커 브리프·체크포인트)의 글자 수 상한과 |
-| `central_inject.py` 🔨 | 306 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
+| `central_inject.py` 🔨 | 341 | 중앙 대화(아픽스 버스) → 로컬 터미널 슬롯 PTY 주입. '@1-2'로 온 말이 화면에만 |
 | `central_listener.py` 🔨 | 311 | 중앙 대화(agent_messages) 실시간 수신 신호기 — Task 27. |
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
@@ -389,7 +389,7 @@
 | `test_central_api.py` 🔨 | 284 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
 | `test_central_api_routes.py` 🔨 | 64 | 중앙 대화 HTTP 라우트 배선 회귀 테스트 — 구현만 되고 안 붙는 사고 방지 + 원격 실행 금지선 고정. |
 | `test_central_e2e.py` 🔨 | 161 | 중앙 대화 실왕복 E2E (Task 28) — 중앙 서버가 실제로 붙을 때만 돈다. |
-| `test_central_inject_remote.py` 🔨 | 175 | 🔴 원격 주입 4중 게이트 회귀 테스트. 주입은 bypass 권한 CLI에 대한 사실상의 |
+| `test_central_inject_remote.py` 🔨 | 245 | 🔴 원격 주입 4중 게이트 회귀 테스트. 주입은 bypass 권한 CLI에 대한 사실상의 |
 | `test_central_listener_health.py` 🔨 | 109 | 🔴 리스너가 '조용한 단절'을 빠져나오는지 고정하는 회귀 테스트. |
 | `test_central_messaging.py` 🔨 | 176 | 중앙 대화(agent_messages) 송수신 규약의 회귀 테스트 — 중앙 서버 없이 검증한다. |
 | `test_central_optional.py` 🔨 | 104 | 🔴 중앙 서버를 쓰지 않는 사용자에게 아무 변화가 없음을 고정하는 회귀 테스트. |
@@ -432,7 +432,7 @@
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_tunnel_daemon.py` 🔨 | 226 | 중앙 PG SSH 터널 데몬 회귀 테스트 — 게이트/ssh 옵션/우리터널 판정/고아 회수. |
-| `test_tunnel_identity.py` | 85 | 하트비트의 역터널 식별자(_tunnel_identity) 회귀 테스트 — 래퍼가 둘 이상일 때 |
+| `test_tunnel_identity.py` 🔨 | 85 | 하트비트의 역터널 식별자(_tunnel_identity) 회귀 테스트 — 래퍼가 둘 이상일 때 |
 | `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
 | `test_updater_release_path.py` | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
@@ -481,4 +481,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-12 08:49
+> 자동 생성 완료: 2026-08-12 19:23

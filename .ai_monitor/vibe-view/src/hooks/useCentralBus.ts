@@ -72,9 +72,34 @@ export interface InjectResult {
 export interface BlockedNotice {
   fromSeq: number;
   why: string;
+  /** [허용] 버튼으로 이 자리에서 풀 수 있는가. false면 안내만 한다. */
+  openable: boolean;
+  /** 사람이 읽을 한 줄. 사유 코드를 그대로 보여주면 아무도 못 고친다. */
+  message: string;
 }
 
 const OPENABLE = new Set(['remote_disabled', 'node_not_allowed']);
+
+/**
+ * 사유 코드 → 사람이 읽고 **행동할 수 있는** 문장.
+ *
+ * [WHY 코드를 그대로 안 쓰나] 'slot_not_running' 을 화면에 찍으면 사용자는 그것이
+ * 자기 PC 얘기인지 상대 PC 얘기인지조차 모른다. 이 창의 목적은 '왜 답이 없지'에
+ * 답하는 것이고, 답이 되려면 다음 행동이 보여야 한다.
+ * [제약] 여기 없는 사유는 배너를 띄우지 않는다 — 손쓸 수 없는 실패까지 알리면
+ *   배너가 상시 표시돼 정작 고칠 수 있는 것이 묻힌다.
+ */
+function describeBlock(why: string, seq: number): { openable: boolean; message: string } | null {
+  if (why.startsWith('remote_disabled'))
+    return { openable: true, message: `아픽스 ${seq}번의 말이 이 PC의 CLI에 전달되지 않았습니다 — 원격 주입이 꺼져 있습니다.` };
+  if (why.startsWith('node_not_allowed'))
+    return { openable: true, message: `아픽스 ${seq}번이 이 PC의 허용 목록에 없어 CLI에 전달되지 않았습니다.` };
+  if (why.startsWith('slot_not_running'))
+    return { openable: false, message: '받을 터미널이 떠 있지 않아 CLI에 전달되지 않았습니다 — 터미널 슬롯을 하나 켜 주세요.' };
+  if (why.startsWith('rate_limited'))
+    return { openable: false, message: '짧은 시간에 너무 많이 와서 잠시 주입을 멈췄습니다(5분 뒤 자동 해제).' };
+  return null;
+}
 
 const POLL_MS = 3000;
 /** 이 시간을 넘게 상태 갱신이 없으면 값을 낡은 것으로 강등한다(⚠️ + 회색). */
@@ -177,11 +202,15 @@ export function useCentralBus(): CentralBus {
   const noteBlocked = useCallback((results: InjectResult[]) => {
     for (const r of results) {
       if (r.ok) continue;
-      const openable = [...OPENABLE].some(k => r.why?.startsWith(k));
-      if (openable && (r.from_seq || 0) > 0) {
-        setBlocked({ fromSeq: r.from_seq as number, why: r.why });
-        return;
-      }
+      const seq = r.from_seq || 0;
+      const desc = describeBlock(r.why || '', seq);
+      if (!desc) continue;
+      // [제약] 열 수 있는 막힘은 발신 번호를 알아야 버튼이 성립한다. 번호가 0이면
+      //   허용할 대상을 특정할 수 없으므로 배너를 띄우지 않는다(누구를 허용하라는
+      //   말인지 알 수 없는 버튼은 없느니만 못하다).
+      if (desc.openable && seq <= 0) continue;
+      setBlocked({ fromSeq: seq, why: r.why, ...desc });
+      return;
     }
   }, []);
 

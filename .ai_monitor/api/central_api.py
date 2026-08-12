@@ -171,9 +171,12 @@ def _inject_remote(rows: list) -> list:
     #   PTY 조회는 여전히 하지 않는다(막힌 게 확정이라 물어볼 이유가 없다).
     if not enabled:
         blocked = []
+        # [🔴 브로드캐스트도 막힌 것으로 센다 — 2026-08-12 정정]
+        #   이 줄은 원래 "브로드캐스트는 주입 대상이 아니니 소음"이라며 건너뛰었다.
+        #   그 전제가 깨졌다(central_inject.broadcast_slot — 이제 대표 슬롯에 꽂힌다).
+        #   전제가 바뀐 곳을 같이 안 고치면, 가장 흔한 경우인 '@ 없이 쓴 한 줄'만
+        #   화면에 아무 흔적 없이 사라져 원인 추적이 다시 불가능해진다.
         for msg in rows:
-            if not str(msg.get('to_agent') or ''):
-                continue          # 브로드캐스트는 원래 주입 대상이 아니다 — 소음
             blocked.append({
                 'id': msg.get('id'), 'ok': False, 'why': 'remote_disabled',
                 'from_seq': central_inject.seq_of(msg.get('from_node') or ''),
