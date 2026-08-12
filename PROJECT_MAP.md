@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 20:04
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-12 20:56
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 15개 · 미푸시 3커밋
+- **브랜치**: `main` · 미커밋 13개 · 미푸시 4커밋
 - **최근 커밋**
+  - `6d3cdf6` 2026-08-12 — fix(central): 노드 간 대화 왕복 성립 — 배달을 화면에서 떼고, 엔터·답장경로 근본 수정
   - `cde8567` 2026-08-12 — fix(central): 상대 클로드가 메시지를 못 보던 진짜 원인 — 주입 게이트 2곳이 조용히 버림
   - `edd3f8b` 2026-08-12 — fix(remote): 역터널 포트 배정이 조용히 어긋나던 구조 — 라벨 대신 호스트키로 판정
   - `ac75e5d` 2026-08-12 — fix(central): BOM 한 개로 config.json이 통째로 소멸하던 파괴 경로 차단 + 게이트를 버튼으로
   - `c825396` 2026-08-11 — docs(graph): G2-a 주입 게이트 엣지 선언 + 규율 5 — 만든 당일 스스로 어긴 규율
-  - `57a11cb` 2026-08-11 — build(release): 폴더 다이얼로그 근본 수정 + 노드 진단 도구 — v3.7.336
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-11 09:12** 의도: na2js 중앙 대화 온보딩 대기
@@ -28,15 +28,15 @@
   - 다음: na2js PC에서 앱 켜기 → 9020으로 진입 → cipher와 섞인 node_name·tunnel_port 22001을 전용 포트로 재발급 → 2대 왕복 → 배포
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **노드 간 대화: 글씨는 주입되는데 엔터가 안 눌려 상대 클로드가 못 읽음 + 읽어도 답장 불가**
+  - 원인: 3중 원인 — ①배달이 프론트 poll에 얹혀 있어 UI가 안 돌면 배달 0건(근거였던 '커서는 하나뿐'이 틀림: message_cursors 키는 node_id+agent_id) ②Enter를 본문과 한 덩어리로 보내 Ink TUI가 붙여넣기로 판정해 CR을 줄바꿈으
+  - 수정: fetch_new에 cursor_key 추가해 배달 전용 커서 분리 + 리스너가 deliver_pending 호출 + pty-server가 본문/Enter를 150ms 띄워 별도 전송하고 본문 개행 제거 + _reply_script()로 절대경로 안내
 - **thread panic: reached unreachable code / std.Build.Step.Run.convertPathArg assert(!std.fs.**
   - 원인: zig 전역 캐시(C:\Users\com\AppData\Local\zig)와 빌드 리포(D:\vibe-coding\herdr)의 드라이브가 달라 std.fs.path.relative 가 상대경로를 만들지 못하고 절대경로를 반환 -> assert 실패. 증상이 'unre
   - 수정: ZIG_GLOBAL_CACHE_DIR 을 리포와 같은 드라이브로 지정 (D:\vibe-coding\herdr\.zig-global-cache). 빌드 스크립트에 고정
 - **중앙 대화 메시지가 화면엔 뜨는데 상대 PC 클로드 CLI가 인식 못함 (na2js 왕복 실패)**
   - 원인: 주입 게이트 2곳이 조용히 버림 — ①브로드캐스트(받는 슬롯 미지정)는 통째로 미주입 ②from_agent에 슬롯 없으면 sender_slot_unknown로 거부(그러나 central_say는 노드 주소를 원래 지원해 거부 근거 자체가 오판)
   - 수정: broadcast_slot 신설(노드당 대표 슬롯 1개만 주입, 기본 T1) + sender_slot_unknown 거부 제거하고 답장주소를 노드번호로 폴백 + 막힌 사유를 UI 배너에 한국어 안내로 노출
-- **na2js 진단이 두 번 엉뚱한 기계를 가리킴 (node_name=cipher, tunnel_port=22001 오보고)**
-  - 원인: apix_push._tunnel_identity가 sorted(glob('tunnel-*.cmd')) 첫 파일을 무검증 채택 — 복사된 래퍼가 알파벳 순으로 이김. 포트 배정에 검증 가능한 기록 부재
-  - 수정: 모호하면 이름을 고르지 않고 tunnel_conflict로 후보만 보고 + tunnel_audit.py로 호스트키 지문 판정 + Register-RemoteNode 충돌 검사
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -481,4 +481,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-12 20:04
+> 자동 생성 완료: 2026-08-12 20:56

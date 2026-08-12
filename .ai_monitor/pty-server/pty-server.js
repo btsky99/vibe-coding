@@ -515,6 +515,28 @@ function attachSocketToSession(ws, sessionId, agent) {
 
       if (processed.includes('\r')) {
         const segments = processed.split('\r');
+
+        // [🔴 본문과 Enter 가 한 덩어리로 나가면 제출이 '가끔' 안 된다 — 2026-08-12]
+        //   증상: 아래 챗창에서 엔터를 치면 어떤 때는 바로 전송되고, 어떤 때는 엔터를
+        //   한 번 더 눌러야 했다. '가끔'인 것이 핵심 단서였다.
+        //   원인: 챗창은 한 줄을 **통째로** 보내므로 write(본문) 직후 write('\r') 가 붙는다.
+        //   Ink 계열 TUI(Claude Code 등)는 짧은 간격에 몰려 든 입력을 붙여넣기로 판정해
+        //   끝의 CR 을 '제출'이 아니라 '입력칸 줄바꿈'으로 소비한다 — 타이밍에 따라
+        //   판정이 갈리니 성공/실패가 무작위로 보인다.
+        //   터미널에 직접 타이핑할 때는 엔터가 **별도 키 이벤트**로 오므로 이 문제가 없다.
+        // [제약] 지연은 '방금 본문을 쓴 경우'에만 준다. 단독 엔터(segment 가 빈 문자열)는
+        //   대화형 타이핑이므로 즉시 보낸다 — 여기에 지연을 걸면 타이핑이 굼떠진다.
+        let delayMs = 0;
+        const at = (ms, fn) => {
+          if (ms <= 0) { fn(); return; }
+          setTimeout(() => {
+            // 지연 사이에 세션이 죽었을 수 있다 — 죽은 pty 에 쓰면 예외가 샌다.
+            try { if (ptySessions.has(sessionId)) fn(); } catch (e) {
+              console.error('[pty/ws] 지연 입력 실패:', e.message);
+            }
+          }, ms);
+        };
+
         for (let idx = 0; idx < segments.length; idx++) {
           const segment = segments[idx];
           if (segment) {
@@ -525,7 +547,7 @@ function attachSocketToSession(ws, sessionId, agent) {
                 wsInputBuf.push(segment);
               }
             }
-            ptyProcess.write(segment);
+            at(delayMs, () => ptyProcess.write(segment));
           }
 
           if (idx < segments.length - 1) {
@@ -544,7 +566,9 @@ function attachSocketToSession(ws, sessionId, agent) {
             }
 
             const enterStr = getSubmitEnterSequence(agent);
-            ptyProcess.write(enterStr);
+            // 본문을 방금 쓴 경우에만 간격을 벌린다(위 [🔴] 참조). 단독 엔터는 즉시.
+            if (segment) delayMs += SUBMIT_ENTER_DELAY_MS;
+            at(delayMs, () => ptyProcess.write(enterStr));
           }
         }
       } else {
