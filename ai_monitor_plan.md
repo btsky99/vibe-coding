@@ -642,96 +642,112 @@ Task 39 ────────────→ 46
 
 ---
 
-## Phase 12-B — 2단계: 기계 검수 + 카드
+## 🔀 2026-08-12 재편 — 순서를 바꾼다 (사용자 판단)
 
-### Task 54: git 실측 수집
-    파일: `.ai_monitor/src/job_verify.py` (신규)
-    방법: `collect_diff(job)` — `git_before..HEAD` 의 파일수/+줄/-줄/커밋 목록.
-      **에이전트에게 묻지 않고 저장소에서 직접 읽는다**(불변식 1).
-    완료 조건: 커밋 2개 만든 뒤 호출 → 실제 수치와 일치
+1단계(48~54)를 끝낸 뒤 사용자가 정확한 지적을 했다: **"바이브 코딩은 안 건드리고
+진행 가능한 거 아닌가"**, **"btsky.pe.kr 을 활용하면 되는 거 아닌가"**, **"각 PC 마다
+연결 UI 만 만들어두면 되는 거 아닌가"**. 셋 다 맞다.
 
-### Task 55: 기계 검증 — 거짓 불가한 것만
-    파일: `.ai_monitor/src/job_verify.py`
-    방법: `verify(job)` — 테스트 실행(pytest), 규칙 2 줄수 검사, 프론트 변경 시 tsc.
-      결과를 `verify_json` 에 저장하고 이벤트를 남긴다. **판정만 하고 고치지 않는다.**
-    완료 조건: `tests/test_job_verify.py` — 실패 테스트가 있는 job 이 `decide` 로 가되 실패로 표시
+일감 저장소가 **중앙 DB** 에 있으므로 화면·비서·발주는 서버에서 완결된다. 앱이 필요한
+지점은 **윈도우 PC 에 일을 시킬 때**뿐이고, 그 코드는 이미 만들어 커밋해 뒀다(배포만 남음).
 
-### Task 56: 반려를 사고 장부로 — 재발 방지 고리
-    파일: `.ai_monitor/src/pg_jobs.py`
-    방법: `decide_job(reject)` 시 `pg_incidents.record_incident()` 호출
-      (error=반려 사유, cause=verify_json 요약, fix=지시문).
-      [WHY] 엔터 사고가 장부에 없어서 재발했다 — 반려를 자동으로 남겨 그 구멍을 막는다.
-    완료 조건: 반려 1건 후 `python scripts/incident.py search "<사유>"` 에서 조회됨
+바뀐 것:
+- 화면은 **한 곳에만** 산다 — `btsky.pe.kr/board/`. 각 PC 는 그 주소를 여는 것으로 끝.
+  → 옛 계획의 "앱 안 카드 패널(Task 57·58)"과 "React 멀티 엔트리" 구상은 **폐기**한다.
+    화면을 두 벌 만들 이유가 사라졌다(오늘 내내 지킨 원칙과 같은 결).
+- 콘솔 프론트는 **바닐라 HTML/JS**(빌드 없음) → 같은 방식으로 만든다. 빌드 파이프라인 증가 없음.
+- 인증은 **GitHub 로그인**이 이미 서 있다(oauth2-proxy). 구글 아님 — 되돌리지 말 것.
+- PWA 자산(manifest·아이콘)도 이미 있다 → 폰은 홈 화면 추가로 끝.
 
-### Task 57: 일감 조회 훅
-    파일: `.ai_monitor/vibe-view/src/hooks/useJobs.ts` (신규)
-    방법: `useCentralBus` 패턴 — **App 에서 1회만** 마운트(슬롯마다 폴링하면 안 됨).
-      `decide` 목록과 `최근 이력` 을 분리해 반환.
-    완료 조건: 타입체크 통과 + job 생성 시 3초 내 목록 반영
+## Phase 12-B — 서버에서 완결 (앱 무관, 위험 0)
 
-### Task 58: 카드 패널 — 서로대화 자리를 이어받는다
-    파일: `.ai_monitor/vibe-view/src/components/terminal/JobCards.tsx` (신규),
-      `TerminalSlot.tsx`
-    방법: 2층 구조 — 상단 [결정 대기](보통 빈칸), 하단 [최근 일감](접힘, 항상 남음).
-      카드에 프로젝트/노드/diff_stat/검수요약/[승인][반려][자세히].
-      기존 `SideBus` 는 남기되 기본 접힘으로 강등.
-    완료 조건: Playwright 로 카드 렌더 + 승인 버튼이 `decide` 를 호출하는지
+### Task 55: 콘솔에 일감 API — 화면이 볼 곳
+    파일: /opt/apix/src/collector/app.py (서버), .ai_monitor/src/pg_jobs.py (로직 공유)
+    방법: GET /api/jobs, /api/jobs/detail, POST /api/jobs, /api/jobs/decide.
+      응답 스키마는 로컬 jobs_api 와 **동일하게** 맞춘다 — 화면이 API_BASE 만 바꿔
+      끼울 수 있어야 한다. pg_jobs 는 서버에도 두어 로직을 한 벌로 유지.
+    완료 조건: 브라우저에서 /api/jobs 가 오늘 만든 일감(#36·37)을 돌려준다
 
----
+### Task 56: board 화면 — 여러 프로젝트를 한 눈에
+    파일: /var/www/vibe/board/ (index.html, board.js, board.css)
+    방법: 시안(2026-08-12 승인) 구조 — 위 비서 조종석, 가운데 프로젝트별 열,
+      오른쪽 상세(무엇이 바뀌었나 = git 실측 / 어디까지 갔나 = 전이 이력).
+      콘솔 스타일 계승, 바닐라. 기존 manifest·아이콘 재사용.
+    완료 조건: 폰과 PC 브라우저에서 같은 화면이 뜨고 카드 클릭 시 상세가 바뀐다
 
-## Phase 12-C — 3단계: 검수 에이전트 + 레이아웃
+### Task 57: 반려를 사고 장부로 — 재발 방지 고리
+    파일: .ai_monitor/src/pg_jobs.py
+    방법: decide_job(reject) 시 pg_incidents.record_incident() 호출.
+      엔터 사고가 장부에 없어서 재발했다 — 반려를 자동으로 남겨 그 구멍을 막는다.
+    완료 조건: 반려 1건 후 incident.py search 로 조회됨
 
-### Task 59: 독립 검수 에이전트
-    파일: `.ai_monitor/src/job_verify.py`
-    방법: 기계 검증 통과분에 한해 별도 CLI 세션에 "이 diff 를 반증해보라" 지시.
-      **검수 job 은 job 을 만들 수 없다**(불변식 4) — runner 진입부에서 차단.
-    완료 조건: 검수 세션이 job 생성 시도 시 거부되는지 테스트
+### Task 58: 기계 검증 — 거짓 불가한 것만
+    파일: .ai_monitor/src/job_verify.py
+    방법: verify(job) — 테스트 실행, 규칙 2 줄 수 검사, 프론트 변경 시 tsc.
+      결과를 verify_json 에 저장하고 이벤트를 남긴다. **판정만 하고 고치지 않는다.**
+    완료 조건: 실패 테스트가 있는 job 이 decide 로 가되 실패로 표시된다
 
-### Task 60: 안전장치 — 무한 왕복·좀비 job 차단
-    파일: `.ai_monitor/src/pg_jobs.py`, `job_runner.py`
-    방법: `retry_count` 상한(기본 3) 초과 시 `rejected` 고정. `running` 상태가 TTL(기본 2시간)
-      초과하면 이벤트를 남기고 `decide` 로 회수(비서가 죽어도 job 이 고이지 않게).
-    완료 조건: 상한 초과 job 이 더 안 돌아가는지, TTL 경과 job 이 회수되는지
+### Task 59: 서버 tmux 비서
+    파일: scripts/remote/setup-assistant.sh (신규)
+    방법: tmux 세션 하나에 claude 상주. **연결 유지가 목적**이다 — 실측상 SSH 새 연결이
+      840ms 인데 상주하면 그 비용이 0 이 된다(DB 왕복은 114ms 로 무시 가능).
+    완료 조건: SSH 를 끊었다 다시 붙어도 같은 세션이 이어진다
 
-### Task 61: 레이아웃 모드 — 터미널 1개 + 카드
-    파일: `.ai_monitor/vibe-view/src/App.tsx`
-    방법: config `layout_mode: 'grid'|'assistant'`. **기본값 grid(지금 그대로)**.
-      assistant 모드는 터미널 1개 + 오른쪽 카드 패널 340px.
-    완료 조건: 토글 왕복 시 기존 그리드가 그대로 복원되는지
+### Task 60: 서버를 노드로 등록 + 비서 지정 장치
+    파일: .ai_monitor/src/pg_jobs.py, 서버 config
+    방법: 서버에 node_seq 배정(아픽스 4). config 에 assistant: {node_seq, slot} 신설 —
+      비서가 누구인지 하드코딩하지 않는다(나중에 옮길 수 있어야 한다).
+    완료 조건: 명부에 4번이 뜨고, 비서 지정을 바꾸면 발주 대상이 따라 바뀐다
 
-### Task 62: 파일탐색기 팝업화 — 260px 회수
-    파일: `.ai_monitor/vibe-view/src/App.tsx`, `ActivityBar.tsx`
-    방법: 사이드바 기본 닫힘 + ActivityBar 버튼으로 `FloatingWindow` 에 띄움
-      (lazy 로딩 이미 되어 있음). 열림 상태는 localStorage 유지.
-    완료 조건: 앱 재시작 후에도 마지막 상태 유지, 파일 열기 동작 회귀 없음
+### Task 61: 서버 노드 러너 — 리눅스에서 되는 일만
+    파일: scripts/remote/server_runner.py (신규)
+    방법: 앱 없이 도는 경량 러너. PTY 대신 tmux send-keys 로 비서/작업 세션에 지시.
+      **윈도우 전용 작업(빌드·EXE)은 받지 않는다** — 받아서 실패하느니 거절이 낫다.
+    완료 조건: 서버 앞으로 발주한 일감이 서버에서 실행되고 결과가 job 에 남는다
 
-### Task 63: 3단계 통합 검증 + 배포
-    파일: —
-    방법: 두 PC 실왕복 — 발주 → 기동 → 검수 → 카드 → 승인까지 한 바퀴.
-    완료 조건: `apix_job_events` 에 전이가 빠짐없이 남았는지 확인 후 `/vibe-release`
+### 🔴 Task 62: pg_hba trust 정리 — Task 55 **이전**에 끝낼 것
+    파일: 서버 /etc/postgresql/18/main/pg_hba.conf
+    방법: 로컬 trust 를 scram-sha-256 으로. 웹에서 발주가 가능해지는 순간
+      "서버 안에 들어온 누구든 중앙 DB 를 연다"가 실제 위험이 된다.
+    완료 조건: trust 항목이 없고 기존 서비스(collector·앱 터널)가 계속 붙는다
 
----
+## Phase 12-C — 나중: 윈도우 PC 까지 확장
 
-## Phase 12 의존성
+### Task 63: 앱 배포로 다른 PC 확장
+    파일: — (코드는 이미 커밋됨: job_runner·리스너 배선·게이트)
+    방법: /vibe-release 로 배포하면 na2js·yjscom 이 일감을 집는다.
+    완료 조건: 서버에서 발주한 일감을 3-1 이 실행하고 카드에 결과가 뜬다
+
+### Task 64: (선택) 앱에 '결재함 열기'
+    파일: .ai_monitor/vibe-view/src/components/TopMenuBar.tsx
+    방법: btsky.pe.kr/board/ 를 여는 버튼 하나. 그전에는 즐겨찾기로 충분하다.
+    완료 조건: 버튼으로 board 가 열린다
+
+
+## Phase 12 의존성 (재편 후)
 
 ```
-Task 48 → 49 → 51 → 52 → 53   (50은 51 전에 완료)
-Task 53 → 54 → 55 → 56
-Task 55 → 57 → 58
-Task 58 → 59, 60, 61 → 62 → 63
+12-A ✅ Task 48 → 49 → 51 → 52 → 53 → 54   (50은 51 전에 완료)
+                          ↓
+12-B  🔴Task 62(보안 선결) → 55 → 56
+                            55 → 57, 58
+                            59 → 60 → 61
+                          ↓ 써보고 좋으면
+12-C  Task 63 → 64(선택)
 ```
 
-**1단계(48~53)만으로도 쓸모가 있다** — 화면 없이도 다른 PC 에 일을 시키고 결과가 남는다.
-2·3단계는 각각 그 위에 얹힌다. 중간에 멈춰도 반쪽이 남지 않는 것이 이 분해의 목적이다.
+**Task 62 를 55 보다 먼저 한다.** 웹에서 발주가 되는 순간 pg_hba trust 는
+"서버 안에 들어온 누구든 중앙 DB 를 연다"가 되고, 그때는 이미 늦다.
 
-### V3 경고(같은 파일 중복 등장)에 대한 판단 — 무시해도 되는 이유
-`pg_jobs.py`(48·49·56·60), `job_verify.py`(54·55·59), `App.tsx`(61·62)가 여러 태스크에
-걸친다. V3 는 **병렬 작업 시 충돌**을 경고하는 규칙인데, 위 의존 그래프가 이들을
-**직렬로 고정**한다(48→49, 54→55, 61→62). 한 파일을 한 번에 완성하려고 태스크를 합치면
-30분 단위가 깨지고 '스키마만 되고 CRUD 는 안 된' 중간 커밋을 못 만든다 — 쪼갠 편이 낫다.
-**단, 이 세 파일은 두 에이전트에게 동시에 배분하지 말 것.**
+## 이 재편이 지키는 것
+
+- **클래식은 손대지 않는다** — 12-B 전체가 앱 무관이다. 사용자가 반복해 걱정한 지점이다.
+- **화면은 한 곳** — btsky.pe.kr/board/. 두 벌 만들지 않는다.
+- **멈춰도 반쪽이 안 남는다** — 12-B 만으로 폰에서 지시하고 서버가 일하고 카드로 결재하는
+  고리가 완성된다. 12-C 는 윈도우가 필요한 일이 생길 때 붙인다.
 
 ## Phase 12 완료 후 기록할 지식
 
-- `project_apix_jobs_cards` 갱신 — 실제 구현에서 드러난 함정
+- `project_apix_jobs_cards` 갱신 — 실제 구현에서 드러난 함정, 특히 tmux 비서의 수명 관리
 - 기동 게이트가 실제로 막은 사례(있다면) — 게이트 설계 근거 보강
+- 서버 노드가 받을 수 있는 일/없는 일의 경계 — 리눅스·1코어 제약의 실측치
