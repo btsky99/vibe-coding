@@ -1194,12 +1194,20 @@ def _g_central_poll(h, pp):
 def _g_central_nodes(h, pp):
     from api import central_api
     central_api.nodes(h, pp)
+def _g_jobs_list(h, pp):
+    from api import jobs_api
+    jobs_api.list_jobs(h, pp)
+def _g_jobs_detail(h, pp):
+    from api import jobs_api
+    jobs_api.job_detail(h, pp)
 
 GET_ROUTES = {
     '/api/central/status': _g_central_status,
     '/api/central/messages': _g_central_messages,
     '/api/central/poll': _g_central_poll,
     '/api/central/nodes': _g_central_nodes,
+    '/api/jobs': _g_jobs_list,
+    '/api/jobs/detail': _g_jobs_detail,
     '/api/nodes/remote': _g_nodes_remote,
     '/api/nodes/consoles': _g_nodes_consoles,
     '/api/browse-folder': _g_fs_dialog,
@@ -1484,11 +1492,26 @@ def _p_central_ack(h, pp):
 def _p_central_allow(h, pp):
     from api import central_api
     central_api.allow_node(h, pp)
+# [WHY 여기도 실행 라우트가 아닌가] 발주는 중앙 DB 에 줄 하나를 쓰는 것이고, 실제 실행
+#   여부는 **받는 노드의 게이트**가 정한다. allow-dir 는 이 PC 안의 설정을 바꾼다.
+#   권한 판단을 항상 실행하는 쪽에 두는 것이 이 배치의 요점이다.
+def _p_jobs_create(h, pp):
+    from api import jobs_api
+    jobs_api.create(h, pp)
+def _p_jobs_decide(h, pp):
+    from api import jobs_api
+    jobs_api.decide(h, pp)
+def _p_jobs_allow_dir(h, pp):
+    from api import jobs_api
+    jobs_api.allow_dir(h, pp)
 
 POST_ROUTES = {
     '/api/central/send': _p_central_send,
     '/api/central/ack': _p_central_ack,
     '/api/central/allow-node': _p_central_allow,
+    '/api/jobs': _p_jobs_create,
+    '/api/jobs/decide': _p_jobs_decide,
+    '/api/jobs/allow-dir': _p_jobs_allow_dir,
     '/api/setup/auto-install': _p_setup_auto_install,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,

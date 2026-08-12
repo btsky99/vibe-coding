@@ -20,6 +20,7 @@ import threading
 import time
 
 from src.pg_central import NOTIFY_CHANNEL, get_central_config, is_central_enabled
+from src.pg_jobs import NOTIFY_CHANNEL as JOB_CHANNEL
 from src.pg_base import _CONN_RESILIENCE_KW
 
 # LISTEN이 살아 있어도 select에 거는 상한. [WHY] 절전/터널 단절 후의 half-open 소켓은
@@ -109,6 +110,11 @@ def _open_listen_conn(node: str):
         conn.autocommit = True   # [제약] autocommit이 아니면 NOTIFY가 도착하지 않는다
         with conn.cursor() as cur:
             cur.execute(f'LISTEN {NOTIFY_CHANNEL};')
+            # [WHY 같은 커넥션에서 두 채널을 듣나] LISTEN 은 세션에 붙는다. 채널마다
+            #   커넥션을 따로 열면 터널 하나가 끊길 때 한쪽만 조용히 죽어, '대화는 오는데
+            #   일감은 안 온다' 같은 반쪽 상태가 된다 — 진단이 가장 어려운 모양이다.
+            #   하나로 묶으면 살거나 죽거나 둘 중 하나라 _alive() 한 번으로 판정된다.
+            cur.execute(f'LISTEN {JOB_CHANNEL};')
         return conn
     except Exception as exc:
         _mark(error=str(exc)[:200])
@@ -172,6 +178,20 @@ def _deliver() -> None:
         central_inject.deliver_pending()
     except Exception as exc:            # 배달 실패가 수신 신호 자체를 죽이면 안 된다
         _mark(error=f'배달: {str(exc)[:180]}')
+
+
+def _run_jobs() -> None:
+    """이 노드 앞으로 온 일감을 처리한다 — Phase 12 Task 52.
+
+    [불변식] 배달(_deliver)과 같은 자리에 둔다. 둘 다 '화면이 안 돌아도 동작해야 하는'
+      일이다 — 프론트 폴링에 얹었다가 23시간 무배달을 겪은 것이 이 배치의 이유다.
+    [제약] 예외를 삼킨다. 일감 처리 실패가 리스너를 죽이면 그 PC 는 대화 알림까지 잃는다.
+    """
+    try:
+        from src import job_runner
+        job_runner.run_pending()
+    except Exception as exc:                    # noqa: BLE001
+        _mark(error=f'일감: {str(exc)[:180]}')
 
 
 def _register_self() -> None:
@@ -240,20 +260,32 @@ def _loop(node: str, stop: threading.Event) -> None:
             # 끊겨 있던 동안 도착한 것들도 지금 배달한다 — NOTIFY 는 저장되지 않으므로
             # 재구독만으로는 영영 안 온다(위 pending 재설정과 같은 이유).
             _deliver()
+            _run_jobs()         # 같은 이유 — 끊긴 동안 쌓인 일감을 여기서 만회한다
 
         try:
             _maybe_purge()          # 연결이 성립한 경로에서만 (Task 31)
             select.select([conn], [], [], _SELECT_CAP_SEC)
             conn.poll()
-            hit = False
+            hit = job_hit = False
             while conn.notifies:
                 note = conn.notifies.pop(0)
-                if _relevant(getattr(note, 'payload', '') or '', node):
+                payload = getattr(note, 'payload', '') or ''
+                # [🔴 채널로 갈라야 한다] 두 채널이 한 커넥션에 오므로 payload 만 보면
+                #   일감 알림을 대화 신호로 착각한다. 그러면 화면은 '새 메시지 있음'인데
+                #   조회는 0건인 상태가 되고, 정작 일감은 아무도 안 집는다.
+                if getattr(note, 'channel', '') == JOB_CHANNEL:
+                    # 일감은 브로드캐스트가 없다 — 내 노드 앞으로 온 것만 의미가 있다.
+                    if payload == node:
+                        job_hit = True
+                elif _relevant(payload, node):
                     hit = True
+
             if hit:
                 _mark(pending=True)
                 _deliver()          # 화면을 기다리지 않고 서버가 직접 배달한다
-            elif not _alive(conn):
+            if job_hit:
+                _run_jobs()
+            if not (hit or job_hit) and not _alive(conn):
                 # [🔴 여기가 _SELECT_CAP_SEC 주석이 약속한 '재평가'다] 상한을 걸어 루프로
                 #   돌아오기만 하고 아무것도 확인하지 않으면 재평가가 아니다 — 조용한
                 #   단절을 영원히 못 벗어난다(위 _alive 의 과거사고 참조).
