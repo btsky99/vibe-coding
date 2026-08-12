@@ -245,6 +245,123 @@ def broadcast_slot(config_file=None) -> int:
     return v if v >= 0 else 1
 
 
+def _norm_dir(path: str) -> str:
+    """비교용 정규화 경로. 실패하면 빈 문자열(= 어떤 화이트리스트와도 안 맞음).
+
+    [🔴 왜 문자열 비교로 끝내면 안 되는가] `D:\\proj\\..\\other` 같은 경로가 문자열로는
+      화이트리스트와 달라 보이지만 실제로는 다른 폴더를 가리킨다. 정규화 없이 비교하면
+      게이트가 **막았다고 믿으면서 뚫린다** — 가장 나쁜 실패 모드다.
+    [제약] 윈도우는 대소문자를 구분하지 않으므로 casefold 한다. 리눅스에서는 서로 다른
+      두 경로가 같게 보일 수 있으나, 노드는 전부 윈도우라 실무상 문제가 없다.
+
+    [🔴 빈 문자열을 먼저 걸러낸다] `Path('').resolve()` 는 예외가 아니라 **현재 작업
+      폴더**를 돌려준다. 그대로 두면 work_dir 이 비었을 때 조용히 cwd 로 바뀌고,
+      cwd 가 허용 폴더 안이면 게이트를 통과한다 — 막았다고 믿으면서 뚫리는 경우다.
+      (Task 50 테스트가 실제로 이 구멍을 잡아냈다.)
+    """
+    from pathlib import Path
+    raw = str(path or '').strip()
+    if not raw:
+        return ''
+    try:
+        return str(Path(raw).resolve()).casefold()
+    except OSError:
+        return ''
+
+
+def launch_gate(config_file=None) -> tuple[bool, list[str]]:
+    """기동 게이트 상태 — (켜졌는가, 허용 폴더 목록).
+
+    [🔴 왜 remote_gate 와 별도인가 — 대화 허용이 실행 허용을 뜻하면 안 된다]
+      원격 주입(remote_gate)은 '떠 있는 CLI 에 말 걸기'다. 기동은 **없던 프로세스를
+      만들고 작업 폴더를 지정**하는 것이라 한 단계 더 세다. 두 개를 한 토글로 묶으면
+      대화를 열어준 순간 임의 폴더에서의 실행까지 열린다 — 사용자가 동의한 적 없는 권한이다.
+      `central_api.py` 헤더가 경고한 "중앙 DB 계정 하나가 모든 노드에 대한 RCE" 가
+      정확히 그 상태다.
+    [불변식] 기본은 꺼짐. allow_dirs 가 비면 꺼진 것과 같다 — 명시적 허용만 인정한다.
+    """
+    try:
+        from src.node_identity import CONFIG_FILE, _read_config
+        raw = _read_config(config_file or CONFIG_FILE).get('central_remote_launch')
+    except Exception:
+        return False, []
+    if not isinstance(raw, dict) or not raw.get('enabled'):
+        return False, []
+    dirs = [str(d) for d in (raw.get('allow_dirs') or []) if str(d).strip()]
+    return bool(dirs), dirs
+
+
+def launch_allowed(work_dir: str, config_file=None) -> tuple[bool, str]:
+    """이 폴더에서 CLI 를 띄워도 되는가. (허용여부, 사유).
+
+    [제약] 하위 폴더는 허용한다 — 저장소 루트를 허용했는데 하위 패키지에서 못 돌면
+      쓸모가 없다. 상위로 거슬러 올라가는 것은 당연히 막힌다.
+    [WHY 사유를 문자열로 돌려주나] 'needs_approval' 은 사용자가 버튼 하나로 풀 수 있는
+      상태이고 'launch_disabled' 는 아니다. 둘을 같은 실패로 뭉개면 화면이 무엇을
+      제안해야 할지 모른다 — 오늘 주입 게이트에서 겪은 문제와 같다.
+    """
+    enabled, dirs = launch_gate(config_file)
+    if not enabled:
+        return False, 'launch_disabled'
+
+    target = _norm_dir(work_dir)
+    if not target:
+        return False, 'bad_work_dir'
+
+    from pathlib import Path
+    for d in dirs:
+        base = _norm_dir(d)
+        if not base:
+            continue
+        if target == base:
+            return True, ''
+        try:
+            if Path(target).is_relative_to(Path(base)):
+                return True, ''
+        except (ValueError, OSError):
+            continue
+    return False, 'needs_approval'
+
+
+def allow_launch_dir(work_dir: str, config_file=None) -> tuple[bool, str]:
+    """그 폴더에서의 기동을 허용 목록에 넣고 게이트를 켠다. (성공여부, 사유).
+
+    [불변식] **더하기만** 한다(allow_node 와 같은 이유). 목록을 교체하면 다른 프로젝트의
+      허용이 조용히 취소돼, 왜 갑자기 안 되는지 알 수 없게 된다.
+    [제약] 존재하지 않는 폴더는 거절한다 — 오타로 적은 경로를 허용해두면 나중에 그 이름의
+      폴더가 생기는 순간 의도치 않게 열린다.
+    """
+    from pathlib import Path
+
+    from src.node_identity import CONFIG_FILE, _load_config, _write_config
+
+    raw_path = str(work_dir or '').strip()
+    if not raw_path:
+        return False, 'empty_path'
+    try:
+        resolved = Path(raw_path).resolve()
+        if not resolved.is_dir():
+            return False, 'not_a_directory'
+    except OSError:
+        return False, 'bad_work_dir'
+
+    path = config_file or CONFIG_FILE
+    cfg, status = _load_config(path)
+    if status == 'corrupt':
+        return False, 'config_unreadable'    # 읽지 못한 설정에 쓰면 나머지 키가 사라진다
+
+    raw = cfg.get('central_remote_launch')
+    raw = raw if isinstance(raw, dict) else {}
+    dirs = [str(d) for d in (raw.get('allow_dirs') or []) if str(d).strip()]
+    if not any(_norm_dir(d) == _norm_dir(str(resolved)) for d in dirs):
+        dirs.append(str(resolved))
+
+    cfg['central_remote_launch'] = {'enabled': True, 'allow_dirs': dirs}
+    if not _write_config(path, cfg):
+        return False, 'write_failed'
+    return True, ''
+
+
 def allow_node(seq: int, config_file=None) -> tuple[bool, str]:
     """발신 노드 번호를 허용 목록에 넣고 게이트를 켠다. (성공여부, 사유).
 
