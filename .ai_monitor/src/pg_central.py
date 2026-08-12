@@ -355,7 +355,7 @@ def _to_agent_clause(agent_id: str) -> tuple[str, tuple]:
 
 
 def fetch_new(agent_id: str = '', limit: int = 50, advance: bool = True,
-              config_file=None) -> list[dict]:
+              config_file=None, cursor_key: str | None = None) -> list[dict]:
     """이 노드 앞으로 온 새 메시지를 가져온다. 중앙 미설정/실패면 빈 목록.
 
     [불변식] 자기 노드가 보낸 것은 제외한다 — 브로드캐스트는 자신에게도 매칭되므로
@@ -365,18 +365,29 @@ def fetch_new(agent_id: str = '', limit: int = 50, advance: bool = True,
     [제약] advance=True는 조회와 동시에 커서를 민다 — 호출부가 처리에 실패하면 그
       메시지는 다시 오지 않는다. 처리 실패를 되돌려야 하는 호출부는 advance=False로
       받고 성공 후 ack_upto()를 부른다.
+
+    [🔴 cursor_key — '어느 커서를 쓰나'와 '무엇을 거르나'를 분리한다]
+      message_cursors 의 기본키는 (node_id, agent_id)라 커서는 원래부터 여러 개 둘 수
+      있었다. 그런데 옛 코드는 agent_id 하나로 **커서 선택과 수신자 필터를 동시에**
+      정해, 소비자를 하나 더 두려면 필터까지 바뀌는 구조였다. 그래서 "커서는 하나뿐"
+      이라는 잘못된 전제가 굳었고, CLI 주입을 화면 폴링에 얹을 수밖에 없었다 —
+      화면이 안 돌면 배달도 안 되는 구조의 뿌리다(2026-08-12 na2js: 앱·터널·게이트가
+      전부 정상인데 UI 가 poll 을 안 불러 23시간 무배달).
+      cursor_key 를 따로 주면 배달기(서버)가 화면과 **독립된 커서**로 같은 메시지를
+      소비할 수 있다. 필터는 agent_id 가 그대로 담당한다.
     """
     conn = get_central_conn(config_file)
     if conn is None:
         return []
 
+    key = agent_id if cursor_key is None else cursor_key
     try:
         from src.node_identity import get_node_id
         node = get_node_id(config_file)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT last_seen_id FROM message_cursors WHERE node_id=%s AND agent_id=%s",
-                (node, agent_id),
+                (node, key),
             )
             row = cur.fetchone()
             cursor = int(row[0]) if row else 0
@@ -395,7 +406,7 @@ def fetch_new(agent_id: str = '', limit: int = 50, advance: bool = True,
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
         if rows and advance:
-            ack_upto(rows[-1]['id'], agent_id, config_file=config_file)
+            ack_upto(rows[-1]['id'], key, config_file=config_file)
         return rows
     except Exception as exc:
         print(f'[central] 수신 실패: {exc}')

@@ -53,6 +53,21 @@ _MAX_REMOTE_PER_WINDOW = 4
 _lock = threading.RLock()
 _recent: dict[str, list[float]] = {}     # slot_id → 주입 시각들
 
+# [🔴 배달 전용 커서] 화면 폴링의 커서(agent_id='')와 **분리**한다.
+#   message_cursors 기본키가 (node_id, agent_id)라 원래부터 가능했는데, 옛 코드가
+#   커서 선택과 수신자 필터를 agent_id 하나로 겸했던 탓에 "커서는 하나뿐"이라는
+#   잘못된 전제가 굳어 있었다. 그 전제 때문에 주입을 화면 폴링에 얹었고, 결과적으로
+#   **화면이 안 돌면 배달도 멈추는** 구조가 됐다(2026-08-12 na2js: 앱·터널·게이트가
+#   전부 정상인데 UI 가 poll 을 안 불러 23시간 무배달, 미수신 1건 대기).
+#   이름을 사람이 쓸 수 없는 형태로 둔다 — 슬롯 주소와 절대 충돌하면 안 된다.
+_INJECT_CURSOR = '__inject__'
+
+# 최근 배달 결과(화면 배너용). [WHY 큐인가] 배달은 이제 서버가 하므로 화면은 결과를
+#   '나중에' 읽는다. 화면이 오래 안 열려도 메모리가 새지 않게 상한을 둔다 —
+#   배너는 최신 몇 건만 보여주면 되고, 정확한 이력은 어차피 대화 목록에 남는다.
+_results: list[dict] = []
+_RESULTS_MAX = 20
+
 
 def _slot_no(agent_id: str) -> int:
     """'claude:T2' → 2. 슬롯을 못 읽으면 0.
@@ -108,15 +123,63 @@ def _find_slot_session(pty_url: str, slot: int) -> str | None:
     return None
 
 
+def _reply_script() -> str:
+    """이 PC 에서 central_say.py 의 **절대 경로**. 못 찾으면 빈 문자열.
+
+    [🔴 왜 절대 경로여야 하는가 — 상대 CLI 의 작업 폴더를 가정하면 안 된다]
+      주입문은 원래 `python scripts/central_say.py ...` 라는 **상대 경로**를 안내했다.
+      그건 받는 CLI 가 바이브코딩 저장소 안에서 돌고 있을 때만 맞는 말이다.
+      실측(2026-08-12): na2js 의 3-1 은 `D:\\CipherTrader` 에서 돌고 있었다. 메시지는
+      정상 도착해 클로드가 읽었는데, 그 경로에 파일이 없어 **"답장 불가"** 로 끝났다.
+      배달·게이트·엔터를 다 고쳐 놓고 마지막 한 줄에서 왕복이 끊긴 것이다.
+      슬롯 CLI 는 어느 프로젝트에서든 열릴 수 있다 — cwd 를 가정하지 말 것.
+
+    [제약] 설치본은 소스가 `_appseed` 아래에 있고, 개발본은 리포 루트에 있다. 둘 다
+      확인하고 **실제로 존재하는** 것만 돌려준다 — 없는 경로를 안내하면 상대는
+      "파일이 없다"는 오류만 보고 원인을 모른다.
+    """
+    import sys
+    from pathlib import Path
+
+    cands = []
+    mei = getattr(sys, '_MEIPASS', '')
+    if mei:
+        cands.append(Path(mei) / '_appseed' / 'scripts' / 'central_say.py')
+    if getattr(sys, 'frozen', False):
+        # onedir 설치본: <설치폴더>\_internal\_appseed\scripts\
+        cands.append(Path(sys.executable).parent / '_internal' / '_appseed'
+                     / 'scripts' / 'central_say.py')
+    # 개발/관리 체크아웃: src/central_inject.py → .ai_monitor → 리포 루트
+    cands.append(Path(__file__).resolve().parents[2] / 'scripts' / 'central_say.py')
+
+    for c in cands:
+        try:
+            if c.is_file():
+                return str(c)
+        except OSError:
+            continue
+    return ''
+
+
 def _format(from_addr: str, to_addr: str, content: str) -> str:
     """주입될 한 줄. 발신자 주소와 답장 방법을 같이 실어야 왕복이 성립한다.
 
     [WHY 답장 방법을 매번 붙이는가] 수신 슬롯의 CLI는 이 버스의 존재를 모른다. 답하는 법을
       본문에 넣지 않으면 사람에게 답해버리고 대화가 버스에 안 남는다 — 양방향이 깨진다.
+
+    [🔴 반드시 한 줄이어야 한다 — 개행 하나가 말을 두 동강 낸다]
+      TUI 입력칸에 개행이 들어가면 거기서 먼저 제출돼, 뒷부분(답장 방법)이 다음
+      프롬프트에 남는다. 수신 CLI 는 '답하는 법'을 못 본 채 반쪽짜리 말만 받는다.
+      본문에 든 개행도 공백으로 접는다 — 사람이 여러 줄로 쓴 채팅도 한 마디로 다룬다.
+      (pty-server 도 같은 정규화를 한다. 양쪽에 둔 이유: 이 함수를 안 거치는 주입
+       경로가 생겨도 마지막 방어선이 남아야 한다.)
     """
-    return (f'[아픽스 {from_addr} → {to_addr}] {content}\n'
-            f'(이건 아픽스 중앙 대화로 온 말이야. 답장: '
-            f'python scripts/central_say.py {from_addr} "답할 내용")')
+    flat = ' '.join(str(content).split())
+    script = _reply_script()
+    how = (f'python "{script}" {from_addr} "답할 내용"' if script
+           else '이 PC 바이브코딩 앱의 "서로 대화" 창에 직접 입력')
+    return (f'[아픽스 {from_addr} → {to_addr}] {flat} '
+            f'(이건 아픽스 중앙 대화로 온 말이야. 답장: {how})')
 
 
 def remote_gate(config_file=None) -> tuple[bool, set[int]]:
@@ -305,6 +368,87 @@ def deliver_remote(msg: dict, pty_url: str, config_file=None) -> tuple[bool, str
         return True, target
     except Exception as e:
         return False, f'write_failed: {e}'
+
+
+def deliver_pending(config_file=None) -> int:
+    """중앙에서 이 노드 앞으로 온 새 메시지를 **서버가 직접** 슬롯 CLI에 배달한다.
+    배달한(또는 막힌) 건수를 돌려준다. 리스너가 NOTIFY를 받을 때마다 부른다.
+
+    [🔴 왜 화면(poll)이 아니라 서버가 배달하는가 — 2026-08-12 구조 변경]
+      옛 구조는 '조회하는 곳이 곧 소비자'라는 불변식 때문에 주입을 화면 폴링에 얹었다.
+      그래서 **React 훅이 안 돌면 그 PC 는 아무 말도 못 받는다.** 실측: na2js 는 앱·터널·
+      리스너·게이트가 전부 정상인데 UI 가 poll 을 부르지 않아 23시간 동안 한 건도 배달되지
+      않았고, 미수신 1건이 그대로 대기 중이었다. 사람에게는 '상대 클로드가 무시한다'로만
+      보인다 — 에이전트 간 배달이 화면 렌더링에 인질로 잡혀 있으면 안 된다.
+      이제 커서를 분리(_INJECT_CURSOR)해 배달과 표시가 서로를 기다리지 않는다.
+
+    [🔴 실패해도 커서를 되돌리지 않는다 — 재시도가 더 나쁘다]
+      슬롯이 안 떠 있어 못 꽂은 메시지를 몇 시간 뒤 터미널을 열자마자 쏟아 넣으면,
+      그 CLI 는 이미 지나간 맥락으로 움직인다. 대화는 화면에 그대로 남아 있으므로
+      '한 번만 시도'가 안전하다. 실패 사유는 _results 에 남아 화면이 이유를 말해준다.
+    [불변식] 예외를 밖으로 내지 않는다 — 배달 실패가 리스너 루프를 죽이면 그 PC 는
+      알림 자체를 잃는다. 배달은 부가 기능이고 수신 신호는 기반이다.
+    """
+    try:
+        from src import pg_central
+        from api import pty_api
+    except Exception:
+        return 0
+
+    try:
+        rows = pg_central.fetch_new(agent_id='', limit=20, advance=True,
+                                    config_file=config_file,
+                                    cursor_key=_INJECT_CURSOR)
+    except Exception as exc:
+        print(f'[central] 배달 조회 실패: {exc}')
+        return 0
+    if not rows:
+        return 0
+
+    out = process_rows(rows, pty_api.get_pty_rest_url(), config_file)
+    if out:
+        with _lock:
+            _results.extend(out)
+            del _results[:-_RESULTS_MAX]
+    return len(out)
+
+
+def process_rows(rows: list, pty_url: str, config_file=None) -> list[dict]:
+    """메시지 목록을 슬롯 CLI에 꽂고 건별 결과를 돌려준다.
+
+    [제약] 반환값은 관측용이다. 실패 사유를 남겨야 '왜 답이 안 오지'를 화면에서 가릴 수
+      있다 — 조용히 버리면 게이트가 막은 것인지 슬롯이 죽은 것인지 구분 불가다.
+    [WHY 게이트가 꺼져 있어도 목록을 만드나] 가장 흔한 실패(꺼짐)가 화면에 아무 흔적도
+      남기지 않으면, 원인을 알려면 그 PC 에서 설정 파일을 열어야 한다. 막혔다는 사실과
+      발신 번호를 실어 보내면 UI 가 [허용] 버튼 하나로 끝낼 수 있다.
+    """
+    if not rows:
+        return []
+    enabled = remote_gate(config_file)[0]
+    out = []
+    for msg in rows:
+        if not enabled:
+            # PTY 조회는 하지 않는다 — 막힌 게 확정이라 물어볼 이유가 없다.
+            ok, why = False, 'remote_disabled'
+        else:
+            ok, why = deliver_remote(msg, pty_url, config_file)
+        if not ok and why in ('broadcast_not_injected', 'no_slot'):
+            continue          # 설정상 '주입 대상 아님' — 사유로 알릴 것이 없다
+        out.append({'id': msg.get('id'), 'ok': ok, 'why': why,
+                    'from_seq': seq_of(msg.get('from_node') or '', config_file)})
+    return out
+
+
+def take_results() -> list[dict]:
+    """쌓인 배달 결과를 꺼내 비운다(화면이 배너를 그리는 재료).
+
+    [WHY 꺼내면 비우나] 같은 막힘을 매 폴링마다 다시 올리면 [나중에]로 닫은 배너가
+      3초 뒤 되살아난다 — 사용자가 끌 수 없는 알림은 알림이 아니라 소음이다.
+    """
+    with _lock:
+        out = list(_results)
+        _results.clear()
+    return out
 
 
 def deliver_local(to_agent: str, from_agent: str, content: str,

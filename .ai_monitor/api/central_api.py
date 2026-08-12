@@ -117,7 +117,7 @@ def poll(handler, parsed_path=None) -> None:
     [제약] fetch가 실패하면 신호를 되돌린다 — 신호를 소비만 하고 못 받아오면 그 메시지는
       다음 NOTIFY까지 잠든다(NOTIFY는 저장되지 않는다).
     """
-    from src import pg_central, central_listener
+    from src import central_inject, central_listener, pg_central
 
     agent = _q(parsed_path, 'agent') if parsed_path else ''
     force = (_q(parsed_path, 'force') if parsed_path else '') in ('1', 'true')
@@ -135,63 +135,18 @@ def poll(handler, parsed_path=None) -> None:
     if not rows and signalled and pg_central.get_central_conn() is None:
         central_listener.raise_pending()     # 조회 자체가 불가능했다 — 신호 보존
 
-    injected = _inject_remote(rows)
+    # [🔴 주입은 더 이상 여기서 하지 않는다 — 2026-08-12 구조 변경]
+    #   배달은 리스너(central_listener._deliver)가 전용 커서로 한다. 화면이 안 돌아도
+    #   상대 CLI 는 말을 받는다. 여기서는 그 결과만 꺼내 배너 재료로 넘긴다.
+    #   둘 다 주입하면 같은 메시지가 CLI 에 두 번 꽂힌다 — 소비자는 하나여야 한다.
+    injected = central_inject.take_results()
     _json_response(handler, {'messages': rows, 'count': len(rows),
                              'signalled': signalled, 'injected': injected})
 
 
-def _inject_remote(rows: list) -> list:
-    """원격 노드가 보낸 메시지를 이 PC 슬롯 CLI에 꽂는다(게이트 통과 시에만).
-
-    [🔴 왜 리스너가 아니라 여기인가] 리스너에서 주입하려면 리스너가 메시지를 조회해야
-      하고, 그러면 커서를 리스너가 밀게 된다. 그 순간 화면(poll)은 같은 메시지를 영영
-      못 본다 — 커서는 하나뿐이다. 조회하는 곳이 곧 소비자여야 한다는 불변식은
-      pg_central.fetch_new 의 설계 전제이기도 하다.
-    [불변식] 게이트가 막으면 조용히 넘어간다. 화면 표시는 이 함수와 무관하게 이뤄지므로,
-      주입이 안 돼도 대화는 보인다 — 기능이 사라지는 것이 아니라 '읽기 전용'이 된다.
-    [제약] 반환값은 관측용이다. 실패 사유를 응답에 실어야 '왜 답이 안 오지'를 화면에서
-      알 수 있다 — 조용히 버리면 게이트가 막은 것인지 슬롯이 죽은 것인지 구분 불가다.
-    """
-    if not rows:
-        return []
-    try:
-        from src import central_inject
-        from api import pty_api
-    except Exception:
-        return []
-
-    enabled = central_inject.remote_gate()[0]
-
-    # [🔴 꺼져 있을 때도 '막혔다'는 사실은 돌려준다 — 2026-08-11 변경]
-    #   옛 구현은 게이트가 꺼져 있으면 빈 배열을 돌려주고 끝냈다(PTY 조회 절약). 그 결과
-    #   **가장 흔한 실패가 화면에 아무 흔적도 남기지 않았다.** 사용자에게는 '상대가 답이
-    #   없다'로만 보이고, 원인을 알려면 그 PC에서 설정 파일을 열어봐야 했다.
-    #   비개발자에게 스크립트를 시키는 구조 자체가 결함이다 — 막혔다는 사실과 발신자
-    #   번호를 실어 보내면 UI가 [허용] 버튼 한 개로 해결할 수 있다.
-    #   PTY 조회는 여전히 하지 않는다(막힌 게 확정이라 물어볼 이유가 없다).
-    if not enabled:
-        blocked = []
-        # [🔴 브로드캐스트도 막힌 것으로 센다 — 2026-08-12 정정]
-        #   이 줄은 원래 "브로드캐스트는 주입 대상이 아니니 소음"이라며 건너뛰었다.
-        #   그 전제가 깨졌다(central_inject.broadcast_slot — 이제 대표 슬롯에 꽂힌다).
-        #   전제가 바뀐 곳을 같이 안 고치면, 가장 흔한 경우인 '@ 없이 쓴 한 줄'만
-        #   화면에 아무 흔적 없이 사라져 원인 추적이 다시 불가능해진다.
-        for msg in rows:
-            blocked.append({
-                'id': msg.get('id'), 'ok': False, 'why': 'remote_disabled',
-                'from_seq': central_inject.seq_of(msg.get('from_node') or ''),
-            })
-        return blocked
-
-    pty_url = pty_api.get_pty_rest_url()
-    out = []
-    for msg in rows:
-        ok, why = central_inject.deliver_remote(msg, pty_url)
-        if ok or why not in ('broadcast_not_injected', 'no_slot'):
-            # 브로드캐스트/슬롯 없음은 정상적인 '주입 대상 아님'이라 소음이다.
-            out.append({'id': msg.get('id'), 'ok': ok, 'why': why,
-                        'from_seq': central_inject.seq_of(msg.get('from_node') or '')})
-    return out
+# [🔴 _inject_remote 는 제거됐다 — 2026-08-12] 주입 로직은 central_inject.process_rows 로
+#   옮겼고, 부르는 주체는 리스너다. 여기(poll)에 다시 만들지 말 것 — 화면과 리스너가
+#   둘 다 주입하면 같은 말이 CLI 에 두 번 꽂힌다. 배달자는 하나여야 한다.
 
 
 def send(handler, parsed_path=None) -> None:

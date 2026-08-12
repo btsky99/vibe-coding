@@ -154,6 +154,26 @@ def _maybe_purge() -> None:
         _mark(error=f'purge: {str(exc)[:180]}')
 
 
+def _deliver() -> None:
+    """새 메시지를 슬롯 CLI에 배달한다(서버가 직접).
+
+    [🔴 왜 리스너가 부르는가 — 배달이 화면에 인질로 잡혀 있었다]
+      옛 구조는 주입을 프론트의 poll 에 얹었다. 그래서 React 훅이 안 돌면 그 PC 는
+      아무 말도 못 받는다. 실측(2026-08-12 na2js): 앱·터널·리스너·게이트가 전부 정상인데
+      UI 가 poll 을 부르지 않아 23시간 동안 배달 0건, 미수신 1건이 그대로 대기했다.
+      사람에게는 '상대 클로드가 무시한다'로만 보인다.
+    [불변식] 화면의 커서를 건드리지 않는다 — 배달기는 _INJECT_CURSOR 를 쓴다.
+      그래서 서버가 먼저 배달해도 화면은 같은 메시지를 그대로 받아 그린다.
+    [제약] pending 플래그는 여기서 소비하지 않는다. 그건 화면 몫이고, 하나를 둘이
+      나눠 가지면 둘 중 하나가 신호를 잃는다.
+    """
+    try:
+        from src import central_inject
+        central_inject.deliver_pending()
+    except Exception as exc:            # 배달 실패가 수신 신호 자체를 죽이면 안 된다
+        _mark(error=f'배달: {str(exc)[:180]}')
+
+
 def _register_self() -> None:
     """이 PC를 중앙 명부에 올린다 — 화면이 uuid 대신 '아픽스 3-1 (na2js)'을 그리는 근거.
 
@@ -217,6 +237,9 @@ def _loop(node: str, stop: threading.Event) -> None:
             #   값을 계속 쓰게 된다. 라벨/번호를 바꾼 뒤 재연결하면 자연히 갱신된다.
             #   실패해도 대화는 정상 동작한다 — 화면이 uuid 앞자리로 폴백할 뿐이다.
             _register_self()
+            # 끊겨 있던 동안 도착한 것들도 지금 배달한다 — NOTIFY 는 저장되지 않으므로
+            # 재구독만으로는 영영 안 온다(위 pending 재설정과 같은 이유).
+            _deliver()
 
         try:
             _maybe_purge()          # 연결이 성립한 경로에서만 (Task 31)
@@ -229,6 +252,7 @@ def _loop(node: str, stop: threading.Event) -> None:
                     hit = True
             if hit:
                 _mark(pending=True)
+                _deliver()          # 화면을 기다리지 않고 서버가 직접 배달한다
             elif not _alive(conn):
                 # [🔴 여기가 _SELECT_CAP_SEC 주석이 약속한 '재평가'다] 상한을 걸어 루프로
                 #   돌아오기만 하고 아무것도 확인하지 않으면 재평가가 아니다 — 조용한

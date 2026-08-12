@@ -342,6 +342,12 @@ function normalizeCodexStream(data) {
   return data.replace(/\r\r\n/g, '\r\n');
 }
 
+// 본문을 쓴 뒤 Enter 를 따로 보내기까지의 간격(ms).
+// [WHY 이 값인가] Ink 계열 TUI 의 붙여넣기 판정 창을 넘겨야 하는데, 사용자가 체감할
+//   만큼 길면 안 된다. 너무 짧으면 다시 한 덩어리로 묶여 엔터가 먹히지 않는다.
+//   호출부(central_inject) 의 HTTP timeout 3초보다 충분히 작아야 한다.
+const SUBMIT_ENTER_DELAY_MS = 150;
+
 function getSubmitEnterSequence(_agent) {
   // Connector/REST injection should mirror the frontend terminal path:
   // a single Enter submits once. The old double-CR path could leave Codex/Antigravity
@@ -1242,11 +1248,34 @@ app.post('/api/pty/write/:id', (req, res) => {
   }
 
   try {
-    // 텍스트 + Enter 키 전송
+    // [🔴 개행을 본문에서 없앤다 — TUI 는 중간 개행에서 먼저 제출해 말을 두 동강 낸다]
+    //   주입문이 여러 줄이면 첫 줄만 전송되고 나머지가 다음 프롬프트에 남는다.
+    //   대화 한 마디는 한 줄이어야 한다.
+    const oneLine = String(text).replace(/\r?\n/g, ' ');
+
+    // [🔴 Enter 를 본문과 **같은 덩어리로 보내면 안 된다** — 2026-08-12 사고]
+    //   증상: "글씨는 들어가는데 엔터가 안 눌려서 클로드가 못 읽는다."
+    //   원인: Claude Code 같은 Ink 계열 TUI 는 짧은 시간에 몰려 들어온 입력을
+    //   **붙여넣기 한 덩어리**로 판정한다. 그러면 끝의 CR 이 '제출'이 아니라
+    //   '입력칸 안의 줄바꿈'으로 소비돼, 텍스트만 남고 영원히 전송되지 않는다.
+    //   사람이 칠 때는 엔터가 별도 키 이벤트로 오기 때문에 이 문제가 안 보인다 —
+    //   그래서 "터미널에선 되는데 주입만 안 된다"로 나타난다.
+    //   본문을 먼저 쓰고 한 박자 쉰 뒤 CR 을 따로 보내면 별개 키 입력으로 인식된다.
+    // [제약] 응답은 기다리지 않고 바로 돌려준다. 이 지연은 호출부(주입 경로)의
+    //   3초 타임아웃 안에 있어야 하며, 늘릴 거면 그쪽 timeout 도 같이 봐야 한다.
     const enterStr = getSubmitEnterSequence(info.agent);
-    info.pty.write(text);
-    info.pty.write(enterStr);
-    res.json({ status: 'written', terminal_id: `T${target}`, length: text.length });
+    info.pty.write(oneLine);
+    setTimeout(() => {
+      try {
+        const cur = ptySessions.get(key);
+        // 지연 사이에 세션이 죽었을 수 있다 — 죽은 pty 에 쓰면 예외가 루프로 샌다.
+        if (cur && cur.pty) cur.pty.write(enterStr);
+      } catch (e) {
+        console.error('[pty/write] Enter 전송 실패:', e.message);
+      }
+    }, SUBMIT_ENTER_DELAY_MS);
+
+    res.json({ status: 'written', terminal_id: `T${target}`, length: oneLine.length });
   } catch (err) {
     res.status(500).json({ error: 'write_failed', detail: err.message });
   }

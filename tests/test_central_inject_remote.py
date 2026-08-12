@@ -192,7 +192,7 @@ def test_sender_without_slot_still_gets_injected(cfg, monkeypatch):
                                 "http://127.0.0.1:1", cfg)
     assert ok is True, why
     body = json.loads(sent['body'])['text']
-    assert "central_say.py 3 " in body, '노드 단위 답장 주소가 실려야 왕복이 닫힌다'
+    assert 'central_say.py" 3 ' in body, '노드 단위 답장 주소가 실려야 왕복이 닫힌다'
     ci._recent.clear()
 
 
@@ -224,7 +224,11 @@ def test_reply_address_points_back_to_sender(cfg, monkeypatch):
     assert ok is True
     body = json.loads(sent['body'])['text']
     assert "아픽스 3-1" in body, "발신자 주소가 주입문에 없다"
-    assert "central_say.py 3-1" in body, "답장 주소가 발신자를 가리키지 않는다"
+    assert 'central_say.py" 3-1' in body, "답장 주소가 발신자를 가리키지 않는다"
+    # [🔴 절대 경로여야 한다] 상대 경로를 안내하면 받는 CLI 가 바이브코딩 저장소가 아닌
+    #   폴더에서 돌 때 "파일이 없다"로 끝난다 — 실제로 3-1(D:\CipherTrader)이 그랬다.
+    assert '"' + ci._reply_script() + '"' in body, "답장 스크립트가 절대 경로가 아니다"
+    assert "\n" not in body, "주입문에 개행이 있으면 TUI 가 말을 두 동강 낸다"
     ci._recent.clear()
 
 
