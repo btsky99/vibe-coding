@@ -568,3 +568,170 @@ Task 39 ────────────→ 46
   문제가 주소 체계로 해소됨
 - `feedback_office_classic_separation` 폐기 — "오피스/클래식 혼용 금지"는 사용자가
   2026-08-09 에 해제했다(대화 UI 일원화가 새 방침)
+
+---
+
+# Phase 12 — 아픽스 일감 카드 (비서 구조) · Task 48~63
+
+**설계 승인 2026-08-12.** 상세 근거는 메모리 `project_apix_jobs_cards`.
+목표: 사용자는 **결정만** 한다. 비서 하나가 앞에 있고 나머지는 백그라운드.
+
+## 이 Phase 의 불변식 (어기면 옛 보드/오피스를 반복한다)
+
+1. **카드 뼈대는 실측, 자기신고는 라벨로만.** git diff·테스트 결과는 꾸밀 수 없다.
+   `self_report` 는 참고 표시일 뿐 상태 판정 근거로 쓰지 않는다.
+   근거: 2026-08-12 na2js 가 `listener: running` 으로 정상 보고하며 23시간 배달 0건.
+2. **평소 카드 0장이 정상.** 카드는 구경거리가 아니라 결정 대기열이다.
+3. **🔴 카드가 치워져도 기록은 지우지 않는다.** `apix_job_events` append-only,
+   반려는 사고 장부 자동 기록, **purge 하지 않는다**(중앙 대화와 정책이 다름).
+4. **검수 job 은 job 을 만들 수 없다** — 검수의 검수 무한 재귀 차단.
+5. 제품을 가르지 않는다. 레이아웃 모드 토글이며 **기본값은 지금 그대로**.
+
+## 제외 (이미 있음)
+
+주입/엔터/답장경로(v3.7.337 완료), 중앙 대화 왕복, 노드 명부, 하트비트, FloatingWindow.
+
+---
+
+## Phase 12-A — 1단계: 일감 뼈대 (화면 없음)
+
+### Task 48: 일감 스키마 신설 — 기록이 먼저다
+    파일: `.ai_monitor/src/pg_jobs.py` (신규)
+    방법: `pg_central._SCHEMA_SQL` 패턴을 따라 `apix_jobs`(id/project/target_node/
+      target_slot/instruction/status/git_before/git_after/diff_stat/self_report/
+      verify_json/retry_count/created_at/updated_at) + `apix_job_events`(job_id/at/kind/
+      detail, append-only) 정의. NOTIFY 트리거 `apix_job` 채널(payload=target_node).
+      purge 함수는 **만들지 않는다**(불변식 3).
+    완료 조건: `python -c "from src import pg_jobs; pg_jobs.ensure()"` 후 중앙 DB 에 두 테이블 존재
+
+### Task 49: 일감 CRUD + 이벤트 기록
+    파일: `.ai_monitor/src/pg_jobs.py`
+    방법: `create_job()/claim_job()/report_job()/decide_job()/list_jobs()`.
+      **모든 상태 전이는 `apix_job_events` 에 한 줄을 남긴다**(전이 없이 UPDATE 금지).
+      `claim_job` 은 `UPDATE ... WHERE status='queued' RETURNING` 원자적 체크아웃
+      (`hive_tasks` 패턴 재사용) — 두 노드가 같은 job 을 집으면 중복 실행된다.
+    완료 조건: `tests/test_pg_jobs.py` — 전이마다 이벤트가 쌓이는지, 동시 claim 시 1건만 성공하는지
+
+### Task 50: 기동 게이트 A — 주입보다 강한 권한이라 따로 잠근다
+    파일: `.ai_monitor/src/central_inject.py`
+    방법: `launch_gate(config_file)` 신설 — `central_remote_launch: {enabled, allow_dirs[]}`.
+      허용 폴더 화이트리스트 밖이면 거부. 첫 기동은 승인 대기 상태로 두고 사용자가 허용하면
+      그 폴더를 `allow_dirs` 에 **추가만** 한다(LAN `exec_trust=ask` 패턴).
+      기존 `remote_gate` 와 **별도** — 대화 주입 허용이 기동 허용을 뜻하면 안 된다.
+    완료 조건: `tests/test_launch_gate.py` — 기본 꺼짐, 화이트리스트 밖 거부, 추가만 하고 교체 안 함
+
+### Task 51: 노드 쪽 일감 실행기
+    파일: `.ai_monitor/src/job_runner.py` (신규)
+    방법: `claim_job()` → 게이트 검사 → 대상 슬롯이 없으면 CLI 기동, 있으면 기존 슬롯에 주입
+      (`central_inject.deliver_remote` 재사용) → 시작 시 `git rev-parse HEAD` 를 `git_before`
+      에 기록. 실패는 예외를 올리지 않고 job 을 `rejected` + 이벤트로 남긴다.
+    완료 조건: 로컬에서 job 하나 만들고 runner 호출 → 슬롯에 지시가 꽂히고 `git_before` 채워짐
+
+### Task 52: 리스너에 일감 채널 배선
+    파일: `.ai_monitor/src/central_listener.py`
+    방법: `apix_job` 채널을 함께 LISTEN. 신호 오면 `job_runner.run_pending()` 호출.
+      기존 `_deliver()` 와 같은 자리에 둔다(화면을 기다리지 않는다는 원칙 동일).
+    완료 조건: 다른 PC 에서 job 생성 → 이쪽 리스너가 3초 내 집어가는지 실측
+
+### Task 53: 발주·조회 라우트 + 1단계 E2E
+    파일: `.ai_monitor/api/jobs_api.py` (신규), `.ai_monitor/server.py`
+    방법: `GET /api/jobs`, `POST /api/jobs`(발주), `POST /api/jobs/decide`.
+      server.py 는 라우트 등록만(POST_ROUTES 누락으로 죽어 있던 전례 주의).
+    완료 조건: **1단계 완료 판정** — 이 PC 에서 3-1 앞으로 job 발주 → na2js 가 실행 →
+      `git_after`/`diff_stat` 이 job 에 기록됨. 화면은 아직 없음.
+
+---
+
+## Phase 12-B — 2단계: 기계 검수 + 카드
+
+### Task 54: git 실측 수집
+    파일: `.ai_monitor/src/job_verify.py` (신규)
+    방법: `collect_diff(job)` — `git_before..HEAD` 의 파일수/+줄/-줄/커밋 목록.
+      **에이전트에게 묻지 않고 저장소에서 직접 읽는다**(불변식 1).
+    완료 조건: 커밋 2개 만든 뒤 호출 → 실제 수치와 일치
+
+### Task 55: 기계 검증 — 거짓 불가한 것만
+    파일: `.ai_monitor/src/job_verify.py`
+    방법: `verify(job)` — 테스트 실행(pytest), 규칙 2 줄수 검사, 프론트 변경 시 tsc.
+      결과를 `verify_json` 에 저장하고 이벤트를 남긴다. **판정만 하고 고치지 않는다.**
+    완료 조건: `tests/test_job_verify.py` — 실패 테스트가 있는 job 이 `decide` 로 가되 실패로 표시
+
+### Task 56: 반려를 사고 장부로 — 재발 방지 고리
+    파일: `.ai_monitor/src/pg_jobs.py`
+    방법: `decide_job(reject)` 시 `pg_incidents.record_incident()` 호출
+      (error=반려 사유, cause=verify_json 요약, fix=지시문).
+      [WHY] 엔터 사고가 장부에 없어서 재발했다 — 반려를 자동으로 남겨 그 구멍을 막는다.
+    완료 조건: 반려 1건 후 `python scripts/incident.py search "<사유>"` 에서 조회됨
+
+### Task 57: 일감 조회 훅
+    파일: `.ai_monitor/vibe-view/src/hooks/useJobs.ts` (신규)
+    방법: `useCentralBus` 패턴 — **App 에서 1회만** 마운트(슬롯마다 폴링하면 안 됨).
+      `decide` 목록과 `최근 이력` 을 분리해 반환.
+    완료 조건: 타입체크 통과 + job 생성 시 3초 내 목록 반영
+
+### Task 58: 카드 패널 — 서로대화 자리를 이어받는다
+    파일: `.ai_monitor/vibe-view/src/components/terminal/JobCards.tsx` (신규),
+      `TerminalSlot.tsx`
+    방법: 2층 구조 — 상단 [결정 대기](보통 빈칸), 하단 [최근 일감](접힘, 항상 남음).
+      카드에 프로젝트/노드/diff_stat/검수요약/[승인][반려][자세히].
+      기존 `SideBus` 는 남기되 기본 접힘으로 강등.
+    완료 조건: Playwright 로 카드 렌더 + 승인 버튼이 `decide` 를 호출하는지
+
+---
+
+## Phase 12-C — 3단계: 검수 에이전트 + 레이아웃
+
+### Task 59: 독립 검수 에이전트
+    파일: `.ai_monitor/src/job_verify.py`
+    방법: 기계 검증 통과분에 한해 별도 CLI 세션에 "이 diff 를 반증해보라" 지시.
+      **검수 job 은 job 을 만들 수 없다**(불변식 4) — runner 진입부에서 차단.
+    완료 조건: 검수 세션이 job 생성 시도 시 거부되는지 테스트
+
+### Task 60: 안전장치 — 무한 왕복·좀비 job 차단
+    파일: `.ai_monitor/src/pg_jobs.py`, `job_runner.py`
+    방법: `retry_count` 상한(기본 3) 초과 시 `rejected` 고정. `running` 상태가 TTL(기본 2시간)
+      초과하면 이벤트를 남기고 `decide` 로 회수(비서가 죽어도 job 이 고이지 않게).
+    완료 조건: 상한 초과 job 이 더 안 돌아가는지, TTL 경과 job 이 회수되는지
+
+### Task 61: 레이아웃 모드 — 터미널 1개 + 카드
+    파일: `.ai_monitor/vibe-view/src/App.tsx`
+    방법: config `layout_mode: 'grid'|'assistant'`. **기본값 grid(지금 그대로)**.
+      assistant 모드는 터미널 1개 + 오른쪽 카드 패널 340px.
+    완료 조건: 토글 왕복 시 기존 그리드가 그대로 복원되는지
+
+### Task 62: 파일탐색기 팝업화 — 260px 회수
+    파일: `.ai_monitor/vibe-view/src/App.tsx`, `ActivityBar.tsx`
+    방법: 사이드바 기본 닫힘 + ActivityBar 버튼으로 `FloatingWindow` 에 띄움
+      (lazy 로딩 이미 되어 있음). 열림 상태는 localStorage 유지.
+    완료 조건: 앱 재시작 후에도 마지막 상태 유지, 파일 열기 동작 회귀 없음
+
+### Task 63: 3단계 통합 검증 + 배포
+    파일: —
+    방법: 두 PC 실왕복 — 발주 → 기동 → 검수 → 카드 → 승인까지 한 바퀴.
+    완료 조건: `apix_job_events` 에 전이가 빠짐없이 남았는지 확인 후 `/vibe-release`
+
+---
+
+## Phase 12 의존성
+
+```
+Task 48 → 49 → 51 → 52 → 53   (50은 51 전에 완료)
+Task 53 → 54 → 55 → 56
+Task 55 → 57 → 58
+Task 58 → 59, 60, 61 → 62 → 63
+```
+
+**1단계(48~53)만으로도 쓸모가 있다** — 화면 없이도 다른 PC 에 일을 시키고 결과가 남는다.
+2·3단계는 각각 그 위에 얹힌다. 중간에 멈춰도 반쪽이 남지 않는 것이 이 분해의 목적이다.
+
+### V3 경고(같은 파일 중복 등장)에 대한 판단 — 무시해도 되는 이유
+`pg_jobs.py`(48·49·56·60), `job_verify.py`(54·55·59), `App.tsx`(61·62)가 여러 태스크에
+걸친다. V3 는 **병렬 작업 시 충돌**을 경고하는 규칙인데, 위 의존 그래프가 이들을
+**직렬로 고정**한다(48→49, 54→55, 61→62). 한 파일을 한 번에 완성하려고 태스크를 합치면
+30분 단위가 깨지고 '스키마만 되고 CRUD 는 안 된' 중간 커밋을 못 만든다 — 쪼갠 편이 낫다.
+**단, 이 세 파일은 두 에이전트에게 동시에 배분하지 말 것.**
+
+## Phase 12 완료 후 기록할 지식
+
+- `project_apix_jobs_cards` 갱신 — 실제 구현에서 드러난 함정
+- 기동 게이트가 실제로 막은 사례(있다면) — 게이트 설계 근거 보강
