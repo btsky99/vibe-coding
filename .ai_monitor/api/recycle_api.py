@@ -10,6 +10,8 @@ REVISION HISTORY:
 - 2026-08-05 Claude: 최초 구현 — Phase 6(컨텍스트 리사이클)
 - 2026-08-09 Claude: terminal_id 'T1' 하드코딩 폴백 제거 — 대상 터미널을
   호출부가 반드시 지정하게 강제(엉뚱한 슬롯 처형 사고)
+- 2026-08-14 Claude: claude 계측에 stale 노출 + status에 terminals(터미널별 계측)
+  추가 — 끝난 세션의 화석 85.3%로 T1·T2가 반복 처형된 사고
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import session_binding as sb
 import session_recycle as sr
 from session_recycle import GuardInput, execute_recycle, make_token, plan_recycle
 
@@ -71,6 +74,10 @@ def measure_context(cli: str, project_id: str = '') -> dict:
       /api/antigravity-context-usage가 폐기 경로(~/.gemini/tmp/*/chats)를 읽어
       70일 된 화석만 본다. 여기서 0%를 반환하면 '여유 있음'으로 오독되어
       자동 트리거가 영원히 안 도는 걸 아무도 모르게 된다. reason으로 드러낸다.
+
+    [🔴 과거사고 2026-08-14] 이 값은 'CLI 전역 1개'다 — 어느 터미널의 것인지
+      모른다. 자동 처형의 대상 선정에 이 값을 쓰면 안 된다(terminals를 쓸 것).
+      여기 남은 용도는 UI 표시와 GUARD의 context_pct 하나뿐이다.
     """
     if cli == 'codex':
         from codex_context import context_usage
@@ -90,11 +97,81 @@ def measure_context(cli: str, project_id: str = '') -> dict:
         used = int(snap.get('context_used') or 0)
         if window <= 0 or used <= 0:
             return {'available': False, 'percentage': 0.0, 'reason': 'no_active_session'}
+        # [🔴 과거사고 2026-08-14] 나이를 안 실어 보냈다. 어제 끝난 8MB 세션이
+        #   853,206/1,000,000 = 85.3%로 16시간째 고정 보고됐고, 워처는 그것을
+        #   현재값으로 읽어 60초마다 살아 있는 터미널을 죽였다. codex 경로에는
+        #   이미 있던 장치(codex_context.stale)가 claude에만 빠져 있었다.
+        last = sb.parse_iso(snap.get('last_ts') or '')
+        age = (time.time() - last) if last is not None else None
         return {'available': True, 'percentage': round(used / window * 100, 1),
-                'context_used': used, 'context_window': window, 'reason': ''}
+                'context_used': used, 'context_window': window,
+                'last_ts': str(snap.get('last_ts') or ''),
+                'session_age_sec': round(age) if age is not None else None,
+                'stale': bool(age is not None and age > sb.STALE_AFTER_SEC),
+                'reason': ''}
 
     return {'available': False, 'percentage': 0.0,
             'reason': f'{cli}_measurement_unavailable'}
+
+
+def _pty_slots(project_id: str) -> list[dict]:
+    """PTY 슬롯 목록(terminal_id 주입). 실패는 빈 목록 — '대상 없음'으로 흡수한다.
+
+    [제약] project_id를 반드시 실어 보낸다 — 빼면 응답 키가 `T3@D--CipherTrader`
+      같은 네임스페이스 형태로 섞여 나와 terminal_id로 그대로 쓸 수 없다.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    try:
+        from api import pty_api
+        base = getattr(pty_api, '_node_pty_url', '') or ''
+    except Exception:
+        base = ''
+    if not base:
+        return []
+    qs = urllib.parse.urlencode({'project_id': project_id})
+    try:
+        with urllib.request.urlopen(f'{base}/api/pty/sessions?{qs}', timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.URLError, OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    out = []
+    for tid, slot in data.items():
+        if isinstance(slot, dict):
+            out.append({**slot, 'terminal_id': tid})
+    return out
+
+
+def measure_terminals(project_id: str) -> dict:
+    """터미널별 계측 — 자동 리사이클의 대상 선정에 쓰는 유일한 정본.
+
+    [WHY] CLI 전역 계측(measure_context)은 '세션 1개'의 수치인데 처형은 '터미널
+      N개'였다. 2026-08-09 수정이 T1 고정 폴백을 팬아웃으로 바꿔놓아, 세션 하나가
+      임계를 넘으면 같은 CLI를 쓰는 슬롯이 전부 죽었다(2026-08-14 T1·T2 동시 처형).
+    [codex 규칙] rollout 파일에는 cwd가 없어 슬롯 결속이 불가능하다. 러닝 codex
+      터미널이 정확히 1개일 때만 전역 계측을 그 터미널의 것으로 인정한다 —
+      2개 이상이면 어느 세션이 누구 것인지 알 수 없으므로 계측 없음으로 낸다.
+      '모르면 안 죽인다'가 이 모듈 전체의 실패 방향이다.
+    """
+    slots = _pty_slots(project_id)
+    out = sb.measure_terminals(slots)
+
+    codex_slots = [s for s in slots
+                   if s.get('running') and str(s.get('agent') or '') == 'codex'
+                   and s.get('terminal_id')]
+    if len(codex_slots) == 1:
+        m = dict(measure_context('codex', project_id))
+        m['cli'] = 'codex'
+        out[str(codex_slots[0]['terminal_id'])] = m
+    else:
+        for slot in codex_slots:
+            out[str(slot['terminal_id'])] = {
+                'cli': 'codex', 'available': False, 'percentage': 0.0,
+                'reason': 'ambiguous_codex_sessions'}
+    return out
 
 
 # ────────────────────────── deps ──────────────────────────
@@ -363,6 +440,9 @@ def handle_get(handler, path: str, params: dict | None = None,
     _json(handler, {
         'measurement': {c: measure_context(c, project_id)
                         for c in ('claude', 'codex', 'antigravity')},
+        # [불변식] 자동 리사이클 워처는 measurement가 아니라 terminals만 본다 —
+        #   measurement에는 '어느 터미널의 값인가'가 없다(2026-08-14 사고).
+        'terminals': measure_terminals(project_id),
         'auto_trigger_clis': list(sr.AUTO_TRIGGER_CLIS),
         'threshold': sr.DEFAULT_THRESHOLD,
         'cli': cli,

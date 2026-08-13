@@ -962,6 +962,48 @@ def daemon_status(config_file: Path) -> list:
     ]
 
 
+def plan_terminal_recycles(terminals: dict, autos: set,
+                           threshold: float) -> tuple[list, list]:
+    """터미널별 계측 → (처형 대상, 남길 기록). 부작용 없는 순수 판정.
+
+    반환: ([(terminal_id, cli, pct), ...], [(note_key, message), ...])
+
+    [WHY 순수 함수로 분리] 바로 이 판정이 2026-08-09·08-14 두 번 사고를 냈다
+      (T1 고정 폴백 → 전 슬롯 팬아웃). 무한 루프 안에 있으면 테스트가 불가능해
+      회귀를 못 막는다. 루프는 이 함수의 결과를 집행하기만 한다.
+    [불변식] 대상은 자기 세션이 결속된 터미널뿐 — CLI 전역 계측은 쓰지 않는다.
+    """
+    targets, notes = [], []
+    for terminal_id in sorted(terminals):
+        m = terminals[terminal_id] or {}
+        cli = str(m.get('cli') or '')
+        if cli not in autos:
+            continue
+        if not m.get('available'):
+            if m.get('reason') in ('unbound_session', 'ambiguous_codex_sessions'):
+                # [WHY 로그] 이 슬롯은 자동 리사이클이 영영 안 걸린다. 조용히
+                #   넘기면 '자동이 도는 줄 알았는데 0회'가 된다.
+                notes.append((f'unbound:{terminal_id}',
+                              f"[리사이클] {terminal_id} {cli} 계측 불가"
+                              f"({m.get('reason')}) — 자동 대상 제외, 수동만 가능"))
+            continue
+        pct = float(m.get('percentage') or 0)
+        if pct < threshold:
+            continue
+        if m.get('stale'):
+            # [WHY 차단] 마지막 쓰기가 STALE_AFTER_SEC보다 오래됐다 = 그 슬롯의
+            #   '진행 중 대화'가 아니다. 화석을 근거로 죽이면 새 세션은 첫 응답
+            #   전에 또 죽고, 그래서 usage가 영영 0이라 계측은 계속 화석을
+            #   가리킨다 — 자기영속 루프가 된다(2026-08-14 실측).
+            age_h = (m.get('session_age_sec') or 0) / 3600
+            notes.append((f'stale:{terminal_id}',
+                          f"[리사이클] {terminal_id} {cli} {pct}% 임계 초과 — "
+                          f"세션이 {age_h:.1f}시간째 정지(화석), 건너뜀"))
+            continue
+        targets.append((terminal_id, cli, pct))
+    return targets, notes
+
+
 def run_recycle_watcher(env: DaemonEnv) -> None:
     """컨텍스트 임계치 초과 시 세션 리사이클을 자동 발동한다(Phase 6).
 
@@ -974,35 +1016,32 @@ def run_recycle_watcher(env: DaemonEnv) -> None:
     [🔴 과거사고 2026-08-09] terminal_id를 안 실어 보냈다. 서버가 'T1'로 폴백해
       codex가 임계를 넘어도 죽는 건 claude가 돌던 T1이었다("T1만 계속 크래시").
       계측은 CLI 단위인데 처형은 터미널 단위 — 그 사이를 잇는 매핑이 통째로
-      빠져 있었다. 이제 PTY 세션 목록에서 agent==cli인 슬롯만 골라 지목한다.
+      빠져 있었다.
+    [🔴 과거사고 2026-08-14] 위 수정이 'T1 고정'을 '전부 처형'으로 바꿨다.
+      agent==cli인 running 슬롯을 모두 대상으로 삼아, 세션 하나가 임계를 넘으면
+      무관한 옆 슬롯까지 같이 죽었다(T1·T2 동시 처형). 게다가 계측 원천이 어제
+      끝난 세션의 화석(85.3%, 16시간 정지)이라 60초마다 영구 반복됐다.
+      → 이제 CLI 전역 계측을 아예 안 본다. 서버가 세션 파일을 슬롯에 결속해
+      내려주는 status['terminals']만 쓰고, 화석(stale)은 건너뛴다.
     """
     import urllib.error
-    import urllib.parse
     import urllib.request
 
     base = f'http://127.0.0.1:{env.http_port}'
     interval = 60.0
+    # [WHY 재출력 억제] 옛 코드는 같은 사유를 60초마다 찍어 로그를 덮었다(실측:
+    #   하룻밤 수백 줄). 그렇다고 침묵시키면 화석이 영구히 남아도 아무도 모른다
+    #   — 사유가 바뀌거나 30분이 지날 때만 다시 찍는다.
+    notes: dict[str, tuple[str, float]] = {}
+    NOTE_REPEAT_SEC = 1800.0
 
-    def _targets(cli: str, project_id: str) -> list[str]:
-        """해당 CLI가 지금 '실제로 돌고 있는' 터미널 ID들.
-
-        [제약] running=True만 고른다 — 죽어 있는 슬롯에 리사이클을 걸면
-          terminate가 무의미하게 실패하고 spawn만 남아 유령 세션이 생긴다.
-        [WHY 서버 경유] PTY 서버(9001) 직통 대신 server.py 프록시를 쓴다.
-          데몬은 env.http_port만 알고 PTY 포트는 모른다(멀티 인스턴스에서 가변).
-        """
-        try:
-            qs = urllib.parse.urlencode({'project_id': project_id})
-            with urllib.request.urlopen(f'{base}/api/pty/sessions?{qs}',
-                                        timeout=10) as resp:
-                sessions = json.loads(resp.read().decode('utf-8'))
-        except (urllib.error.URLError, OSError, ValueError):
-            return []
-        if not isinstance(sessions, dict):
-            return []
-        return [tid for tid, s in sessions.items()
-                if isinstance(s, dict) and s.get('running')
-                and str(s.get('agent') or '') == cli]
+    def _note(key: str, msg: str) -> None:
+        prev = notes.get(key)
+        now = time.time()
+        if prev and prev[0] == msg and (now - prev[1]) < NOTE_REPEAT_SEC:
+            return
+        notes[key] = (msg, now)
+        print(msg)
 
     def _post(path: str, payload: dict) -> dict | None:
         try:
@@ -1029,34 +1068,26 @@ def run_recycle_watcher(env: DaemonEnv) -> None:
             if status:
                 threshold = float(status.get('threshold') or 85.0)
                 project_id = env.current_project_id()
-                for cli in status.get('auto_trigger_clis') or []:
-                    m = (status.get('measurement') or {}).get(cli) or {}
-                    if not m.get('available'):
-                        continue
-                    if float(m.get('percentage') or 0) < threshold:
-                        continue
-                    targets = _targets(cli, project_id)
-                    if not targets:
-                        # [WHY 로그] 임계는 넘었는데 대상이 없다 = 계측 원천이
-                        #   이미 끝난 세션의 화석일 가능성이 크다. 조용히 넘기면
-                        #   그 화석이 영구히 남아도 아무도 모른다.
-                        print(f"[리사이클] {cli} {m.get('percentage')}% 임계 초과 — "
-                              f"실행 중인 {cli} 터미널 없음, 건너뜀")
-                        continue
-                    for terminal_id in targets:
-                        res = _post('/api/session/recycle',
-                                    {'trigger': 'auto', 'cli': cli,
-                                     'terminal_id': terminal_id,
-                                     'project_id': project_id})
-                        if res and res.get('ok'):
-                            print(f"[리사이클] {terminal_id} {cli} {m.get('percentage')}% "
-                                  f"→ 세션 교체 완료 (재정박 {res.get('reanchor_chars')}자)")
-                        elif res and res.get('reason') not in (
-                                'below_threshold', 'user_active', 'flap_guard',
-                                'already_running', 'no_measurement'):
-                            # 정상적인 '지금은 아님' 사유는 로그를 더럽히지 않는다.
-                            print(f"[리사이클] {terminal_id} {cli} 보류 — "
-                                  f"{res.get('reason')}")
+                targets, notes_out = plan_terminal_recycles(
+                    status.get('terminals') or {},
+                    set(status.get('auto_trigger_clis') or []), threshold)
+                for key, msg in notes_out:
+                    _note(key, msg)
+                for terminal_id, cli, pct in targets:
+                    res = _post('/api/session/recycle',
+                                {'trigger': 'auto', 'cli': cli,
+                                 'terminal_id': terminal_id,
+                                 'project_id': project_id})
+                    if res and res.get('ok'):
+                        print(f"[리사이클] {terminal_id} {cli} {pct}% "
+                              f"→ 세션 교체 완료 (재정박 {res.get('reanchor_chars')}자)")
+                    elif res and res.get('reason') not in (
+                            'below_threshold', 'user_active', 'flap_guard',
+                            'already_running', 'no_measurement'):
+                        # 정상적인 '지금은 아님' 사유는 로그를 더럽히지 않는다.
+                        _note(f'hold:{terminal_id}',
+                              f"[리사이클] {terminal_id} {cli} 보류 — "
+                              f"{res.get('reason')}")
         except Exception as exc:
             print(f'[리사이클 워처] 순회 오류: {exc}')
         time.sleep(interval)

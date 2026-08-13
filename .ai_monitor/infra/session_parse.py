@@ -10,6 +10,9 @@ REVISION HISTORY:
 - 2026-07-06 Claude: server.py 세션 파서 2개(_parse_session_tail/_parse_antigravity_session)
                      분리 (Phase 2 Task 12 / R13). 클로저가 아닌 순수 함수라 시그니처·
                      로직·주석 verbatim 유지, 호출부(hive_api.handle_get 주입)만 경로 변경.
+- 2026-08-14 Claude: claude_ctx_window를 hive_api에서 이관 — src/session_binding이
+                     같은 매핑을 필요로 해 두 벌이 될 뻔했다(모델 추가 시 한쪽만
+                     갱신되면 점유율이 5배 틀어진다: 1M 모델을 200k로 계산).
 """
 from __future__ import annotations
 
@@ -17,15 +20,39 @@ import json
 from pathlib import Path
 
 
-def parse_session_tail(path: Path):
+# ── Claude 모델별 컨텍스트 창 매핑 ─────────────────────────────────────────
+# Session JSONL의 `model` 필드는 base ID만 기록한다(`[1m]` 접미사 없음).
+# Opus 4.7은 Claude Code CLI가 1M 컨텍스트로 구동하므로 1M으로 취급한다.
+def claude_ctx_window(model: str) -> int:
+    """모델명 → 컨텍스트 창 토큰 수. 알 수 없는 모델은 200k 기본.
+
+    [불변식] 이 함수가 유일 원천 — 사용률(%)의 분모라 여기가 틀리면 리사이클이
+      멀쩡한 세션을 죽이거나(과소 추정) 임계를 영영 못 넘는다(과대 추정).
+    """
+    if not model:
+        return 200_000
+    m = model.lower()
+    # Opus 4.7 이상은 1M 컨텍스트 (Claude Code CLI 기본 운용)
+    if 'opus-4-7' in m or 'opus-4-8' in m or 'opus-5' in m:
+        return 1_000_000
+    # 향후 확장: Sonnet 1M 변종 추가 시 여기에 조건 추가
+    return 200_000
+
+
+def parse_session_tail(path: Path, tail_bytes: int = 8192):
     """Claude Code 세션 JSONL 파일 꼬리에서 마지막 토큰 usage 정보 추출.
 
-    대형 파일(수천 줄)의 불필요한 전체 읽기를 피하기 위해 파일 끝 8KB만 읽어
+    대형 파일(수천 줄)의 불필요한 전체 읽기를 피하기 위해 파일 끝 일부만 읽어
     마지막 assistant 메시지의 usage 필드를 파싱합니다.
     발견 못하면 None 반환.
+
+    [2026-08-14] tail_bytes를 인자로 뺐다 — 기본 8KB는 거대한 tool_result 한 줄에
+      통째로 먹혀 usage를 놓친다(실측: 활발히 도는 세션이 model='unknown'/0토큰).
+      기본값은 그대로라 기존 호출부 동작은 불변. 넓혀 읽는 판단은 호출부 몫이다
+      (src/session_binding.parse_usage_deep).
     """
     try:
-        TAIL_BYTES = 8192  # 끝 8KB면 최근 메시지 수십 개 충분히 커버
+        TAIL_BYTES = max(1024, int(tail_bytes))
         with open(path, 'rb') as f:
             f.seek(0, 2)                      # 파일 끝으로 이동
             size = f.tell()

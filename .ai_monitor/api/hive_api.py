@@ -51,19 +51,9 @@ from src.pg_store import (
 )
 
 
-# ── Claude 모델별 컨텍스트 창 매핑 ─────────────────────────────────────────
-# Session JSONL의 `model` 필드는 base ID만 기록한다(`[1m]` 접미사 없음).
-# Opus 4.7은 Claude Code CLI가 1M 컨텍스트로 구동하므로 1M으로 취급한다.
-def _claude_ctx_window(model: str) -> int:
-    """모델명 → 컨텍스트 창 토큰 수. 알 수 없는 모델은 200k 기본."""
-    if not model:
-        return 200_000
-    m = model.lower()
-    # Opus 4.7 이상은 1M 컨텍스트 (Claude Code CLI 기본 운용)
-    if 'opus-4-7' in m or 'opus-4-8' in m or 'opus-5' in m:
-        return 1_000_000
-    # 향후 확장: Sonnet 1M 변종 추가 시 여기에 조건 추가
-    return 200_000
+# [2026-08-14] 정본은 infra/session_parse — src/session_binding(터미널별 계측)이
+#   같은 매핑을 쓰므로 여기 두면 두 벌이 된다. 별칭만 남겨 호출부는 그대로 둔다.
+from infra.session_parse import claude_ctx_window as _claude_ctx_window
 
 
 def _sum_usage_since(jsonl_files: list, since_epoch: float) -> dict:
