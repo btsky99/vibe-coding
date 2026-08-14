@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-14 18:03
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-14 18:31
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 49개 · 미푸시 6커밋
+- **브랜치**: `main` · 미커밋 8개 · 미푸시 0커밋
 - **최근 커밋**
+  - `c6f3cda` 2026-08-14 — refactor(discord): 디스코드 연동 전면 제거 — 커넥터 계층까지 철거
   - `f6e02a4` 2026-08-14 — fix(recycle): 화석 계측과 팬아웃 처형 제거 — T1·T2 반복 종료 근본 수정
   - `0c63d18` 2026-08-12 — docs(plan): 요구 6개 재정의 + herdr 방향 반영 — Phase 12 재작성
   - `f4a1778` 2026-08-12 — docs(plan): Phase 12 재편 — 서버에서 완결, 앱은 나중 (사용자 판단)
   - `05b5cc4` 2026-08-12 — feat(jobs): 일감 실행기 + 라우트 + git 실측 — Phase 12 Task 51~54 (1단계 완료)
-  - `e010815` 2026-08-12 — feat(jobs): 일감 저장소 + 기동 게이트 — Phase 12 Task 48~50
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-13 21:40** 의도: herdr-kr 포크: 한글화 1차 + 전역 메뉴 확장(에이전트 실행/프로젝트 열기/폴더 열기) 구현
@@ -92,7 +92,7 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `_common.py` | 60 | 설명: API 핸들러 공용 헬퍼. 8개 도메인 모듈에 복붙돼 있던 _json_response(8중복)와 |
-| `agent_api.py` | 1441 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
+| `agent_api.py` 🔨 | 1441 | 설명: CLI 오케스트레이터 자율 에이전트 REST API 핸들러. |
 | `central_api.py` 🔨 | 270 | 중앙 대화(아픽스 서버) HTTP 라우트 5종 — Task 26. |
 | `codegraph_api.py` | 220 | 코드 인텔리전스 REST API 핸들러. |
 | `commands_api.py` | 54 | 터미널 명령 전송 API — 대상 슬롯의 Node PTY 세션에 명령을 큐잉한다(REST 프록시). |
@@ -109,7 +109,7 @@
 | `hive_ingest_api.py` | 142 | 하이브 수집(ingest) POST 핸들러 3종 — pg_logs 기록 / thought PG 기록 / |
 | `install_api.py` | 442 | 다른 프로젝트에 Vibe Coding 스킬셋(.gemini/scripts/*.md)을 복사 설치하는 라우트 핸들러. |
 | `jobs_api.py` 🔨 | 166 | 일감(job) HTTP 라우트 — Phase 12 Task 53. |
-| `lan_api.py` | 583 | /api/lan/* 핸들러 — 프론트(127.0.0.1 로컬서버)가 LAN 브리지를 제어하는 통로. |
+| `lan_api.py` 🔨 | 583 | /api/lan/* 핸들러 — 프론트(127.0.0.1 로컬서버)가 LAN 브리지를 제어하는 통로. |
 | `launch_api.py` | 102 | CLI 에이전트(claude/antigravity/codex) 실행 API — 새 cmd 창에서 에이전트를 띄운다. |
 | `locks_api.py` | 67 | 파일 락 API — 에이전트 간 동시 편집 충돌 방지. locks.json에 {파일: 소유에이전트}를 |
 | `logs_api.py` | 168 | 로그/메시지/실시간 로그 스트림 라우트 4종 — GET /stream(SSE), GET /api/server-logs, |
@@ -172,7 +172,7 @@
 | `server_locator.py` | 76 | 설명: 9000번대 바이브 서버 포트 공용 탐색기 — /api/project-info 슬러그 대조로 |
 | `server_utils.py` | 59 | 서버 공통 유틸리티 — 포트 탐색, CORS, JSON 응답 헬퍼. |
 | `session_binding.py` 🔨 | 299 | claude 세션 jsonl ↔ PTY 슬롯 결속 + 터미널별 컨텍스트 점유율 계측. |
-| `session_recycle.py` | 236 | 컨텍스트 리사이클 상태머신 — 세션을 마감 기록으로 봉인하고 새 컨텍스트로 |
+| `session_recycle.py` 🔨 | 236 | 컨텍스트 리사이클 상태머신 — 세션을 마감 기록으로 봉인하고 새 컨텍스트로 |
 | `wiki_generator.py` | 381 | 설명: LLM 위키 자동생성 엔진 — code_nodes → 프롬프트 조립 → hive_tasks 등록 |
 | `zettelkasten.py` | 459 | Hive Zettelkasten — 카파시 Append-Review-Rescue + 루만 제텔카스텐 융합 메모 시스템. |
 
@@ -191,7 +191,7 @@
 | `instance_lock.py` | 179 | 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로직. |
 | `lifecycle.py` | 329 | 프로세스 라이프사이클 정리 함수 모음. |
 | `memory_watcher.py` | 388 | 에이전트 메모리(Claude Code / Antigravity CLI) 파일 감시 + PostgreSQL |
-| `node_status.py` 🔨 | 330 | 원격 노드의 두 가지 사실을 아픽스 서버에서 한 번에 조회 + CLI(claude/codex) 설치 점검. |
+| `node_status.py` 🔨 | 333 | 원격 노드의 두 가지 사실을 아픽스 서버에서 한 번에 조회 + CLI(claude/codex) 설치 점검. |
 | `postgres_runtime.py` | 300 | 내장 PostgreSQL 18 기동/초기화 런타임. 배포(frozen) 모드에서 |
 | `proc.py` | 35 | Windows 콘솔 숨김 subprocess 공용 래퍼. 앱의 모든 subprocess 호출이 |
 | `project_context.py` | 204 | Platform Phase 2-3 — 활성 프로젝트 컨텍스트 Resolver. |
@@ -207,7 +207,7 @@
 ### 에이전트/터미널
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `cli_agent.py` | 1150 | 설명: CLI 오케스트레이터 자율 에이전트 핵심 엔진. |
+| `cli_agent.py` 🔨 | 1150 | 설명: CLI 오케스트레이터 자율 에이전트 핵심 엔진. |
 | `agent_shell.py` | 431 | 터미널 전용 자율 에이전트 인터랙티브 쉘. |
 | `terminal_agent.py` | 411 | 멀티터미널 자율 에이전트 디스패처 (REPL 모드). |
 | `agent_launcher.py` | 242 | 통합 에이전트 런처. |
@@ -379,7 +379,7 @@
 ## 🧪 테스트 (tests/)
 | 파일 | 줄 수 | 테스트 대상 |
 |------|------|------------|
-| `test_agent_api.py` | 326 | agent_api.py 단위 테스트. |
+| `test_agent_api.py` 🔨 | 326 | agent_api.py 단위 테스트. |
 | `test_ai_toolchain_installer.py` | 54 | Sequential AI toolchain installer regression tests. |
 | `test_central_api.py` 🔨 | 284 | 중앙 대화 HTTP 라우트(Task 26)와 실시간 수신 신호기(Task 27)의 규약 회귀 — |
 | `test_central_api_routes.py` 🔨 | 64 | 중앙 대화 HTTP 라우트 배선 회귀 테스트 — 구현만 되고 안 붙는 사고 방지 + 원격 실행 금지선 고정. |
@@ -395,13 +395,13 @@
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
 | `test_config_self_heal.py` 🔨 | 163 | config.json 자가복구 회귀 테스트 — 읽기 실패가 '설정 없음'으로 둔갑해 |
 | `test_console_scan.py` | 206 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
-| `test_daemon_toggles.py` | 329 | 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증. |
+| `test_daemon_toggles.py` 🔨 | 329 | 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증. |
 | `test_harness_verify.py` | 218 | harness_verify.py V2 검증 스크립트의 단위 테스트. |
 | `test_hook_server_spawn_guard.py` 🔨 | 175 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | ITCP 폴백 로직 단위 테스트. |
 | `test_knowledge_pipeline.py` | 133 | 지식 노트 파이프라인 재설계 회귀 테스트 — 세션요약 노이즈 차단 + 파일지식 1급화 + |
-| `test_lan_exec_gate.py` | 154 | LAN 원격실행 게이트 E2E — 미등록 폴더 요청이 claude를 띄우지 못하는지, 허용 요청이 |
+| `test_lan_exec_gate.py` 🔨 | 154 | LAN 원격실행 게이트 E2E — 미등록 폴더 요청이 claude를 띄우지 못하는지, 허용 요청이 |
 | `test_lan_room_chat.py` | 129 | LAN 그룹방 회귀 테스트 — scope가 토큰 서명에 묶이는지, 1:1 하위호환이 보존되는지, |
 | `test_lan_sandbox.py` | 193 | LAN 원격실행 폴더 격리 회귀 테스트 — 화이트리스트 검증(우회 차단) + 모드별 |
 | `test_launch_gate.py` 🔨 | 130 | 기동 게이트 회귀 테스트 — Phase 12 Task 50. |
@@ -472,4 +472,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-14 18:03
+> 자동 생성 완료: 2026-08-14 18:31

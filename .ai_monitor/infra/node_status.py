@@ -75,7 +75,10 @@ _LISTEN_RE = re.compile(r'(?:127\.0\.0\.1|\[::1\]):(\d+)')
 # [WHY 식별자를 4개나 끌어오는가] 하트비트와 ssh config 를 이어붙일 공용 키가 원래 없었다.
 #   label 은 사람이 자유롭게 적고('개발 PC (Windows)'), node_id 는 관제가 붙이고,
 #   ssh 별칭은 관리하는 쪽이 정한다. 그래서 맞을 수 있는 후보를 전부 가져와 순서대로 댄다.
-#   tunnel_port 가 유일하게 **양쪽이 같은 값을 아는** 정확한 키다(apix_push._tunnel_identity).
+#   tunnel_port 가 유일하게 **양쪽이 같은 값을 아는** 정확한 키다.
+#   [이관 2026-08-14] 그 값을 만드는 쪽(apix_push._tunnel_identity)은 이 리포에 없다 —
+#   노드 푸시 일체가 APIX 노드 런타임(로컬 D:\apix\node, 리포 btsky99/apix)으로 넘어갔다.
+#   여기 필드명을 바꾸려면 그쪽 _tunnel_identity 도 같이 고쳐야 짝이 맞는다.
 # [제약] 마지막 컬럼(나이)의 위치가 고정이다 — 파서가 뒤에서부터 읽는다. 컬럼을 추가하려면
 #   나이 앞에 넣을 것.
 _HB_SQL = ("SELECT coalesce(payload->>'tunnel_port',''), "
