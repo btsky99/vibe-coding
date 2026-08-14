@@ -47,7 +47,7 @@ EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.db', '.sqlite', '.sqlite3', '.dat'
 #   **저장소에 없는 것**(실행 중 생기는 비밀과 상태)만 제외한다.
 #   저장소를 private로 돌리게 되면 이 목록을 다시 좁힐 것.
 EXCLUDE_NAMES = {
-    '.env', 'config.json', 'discord_secrets.dat', 'soft_manifest.json',
+    '.env', 'config.json', 'soft_manifest.json',
 }
 
 # 결과물 재검사 패턴 — 넣지 말았어야 할 것이 남았는지 본다.

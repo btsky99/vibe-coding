@@ -703,9 +703,6 @@ init_db()
 #   철거로 미참조. 로깅은 pg_logs 단일 경로.
 LOCKS_FILE = DATA_DIR / "locks.json"
 CONFIG_FILE = DATA_DIR / "config.json"
-# connector 릴레이(Discord 등)가 슬롯→프로젝트 폴더를 해석할 때 쓰는 유일한 경로 원천.
-# frozen 모드에서 DATA_DIR이 %APPDATA%로 바뀌므로 모듈이 스스로 유추하면 안 된다.
-agent_api.set_config_file(CONFIG_FILE)
 # 에이전트 간 메시지 채널 파일
 MESSAGES_FILE = DATA_DIR / "messages.jsonl"
 # 에이전트 간 공유 작업 큐 파일 (JSON 배열 — 업데이트/삭제 지원)
@@ -1087,9 +1084,6 @@ def _g_config(h, pp):
                           PROJECT_CONTEXT_UNRESOLVED, _current_project_id(),
                           _current_project_root())
 def _g_daemons(h, pp):             daemons_api.handle_get(h, CONFIG_FILE)
-def _g_discord_config(h, pp):
-    from api import discord_config_api
-    discord_config_api.handle_get(h, DATA_DIR / 'discord_secrets.dat')
 def _g_vibe_sidebar(h, pp):        vibe_api.handle_sidebar_state(h)
 def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
 def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)
@@ -1227,7 +1221,6 @@ GET_ROUTES = {
     # Phase 2 R8 — 설정/vibe/칸반/메모리 exact. 순수위임(vibe 3종) + 인라인 모듈 이전.
     '/api/config': _g_config,
     '/api/daemons': _g_daemons,
-    '/api/config/discord': _g_discord_config,
     '/api/vibe/sidebar': _g_vibe_sidebar,
     '/api/vibe/notifications': _g_vibe_notifications,
     '/api/vibe/skills': _g_vibe_skills,
@@ -1366,9 +1359,6 @@ def _p_projects(h, pp):        projects_api.handle_post(h, PROJECTS_FILE)
 def _p_experience(h, pp):      experience_api.handle_post(h, pp.path)
 def _p_config_update(h, pp):   config_api.handle_update(h, CONFIG_FILE, PROJECTS_FILE)
 def _p_daemons(h, pp):         daemons_api.handle_update(h, CONFIG_FILE)
-def _p_discord_config(h, pp):
-    from api import discord_config_api
-    discord_config_api.handle_post(h, DATA_DIR / 'discord_secrets.dat')
 def _p_launch(h, pp):          launch_api.handle_launch(h, _codex_main_model)
 def _p_send_command(h, pp):    commands_api.handle_send_command(h, _NODE_PTY_REST_URL, _get_node_pty_sessions)
 def _p_locks(h, pp):           locks_api.handle_lock(h, LOCKS_FILE)
@@ -1521,7 +1511,6 @@ POST_ROUTES = {
     '/api/experience': _p_experience,
     '/api/config/update': _p_config_update,
     '/api/daemons': _p_daemons,
-    '/api/config/discord': _p_discord_config,
     '/api/launch': _p_launch,
     '/api/send-command': _p_send_command,
     '/api/locks': _p_locks,
@@ -1807,8 +1796,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         #   수신 버퍼에 안 읽은 요청 본문이 남아 있으면 Windows가 RST를 보낸다. curl은 이미
         #   응답을 파싱해서 404로 보이지만, 브라우저 fetch는 응답을 버리고 TypeError로 실패한다
         #   → UI에 원인 불명의 'Failed to fetch'만 뜬다. 실제로 설치본에서 구버전 백엔드가
-        #   신규 라우트(/api/config/discord)를 모르는 상황이 정확히 이렇게 보여서, 라우트
-        #   부재라는 진짜 원인이 네트워크 장애로 오인됐다.
+        #   신규 라우트(당시 /api/config/discord — 지금은 제거됨)를 모르는 상황이 정확히
+        #   이렇게 보여서, 라우트 부재라는 진짜 원인이 네트워크 장애로 오인됐다.
         # [불변식] 응답 전에 본문을 반드시 비운다. 본문 있는 POST에만 해당되므로 GET 폴백엔 불필요.
         try:
             _unread = int(self.headers.get('Content-Length', 0) or 0)

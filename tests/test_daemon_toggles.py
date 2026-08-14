@@ -4,7 +4,7 @@ DESCRIPTION: 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 �
 
 REVISION HISTORY:
 - 2026-08-04 Claude: popen 데몬이 상태판에서 항상 '꺼짐'으로 보이던 오탐 회귀 테스트 추가.
-- 2026-08-04 Codex: Discord 채널이 각 slot_projects의 project_id를 따르는 회귀 테스트 추가.
+- 2026-08-14 Claude: Discord 채널 바인딩 테스트 제거 — 커넥터 계층 전면 철거.
 - 2026-08-01 Claude: 신규 — 토글이 lan_bridge 하나뿐이라 안 쓰는 데몬도 무조건 뜨던 문제
                      (Codex 미사용 PC에서 codex_pg_watcher가 CPU 4.2시간 소비) 해소분 고정.
 - 2026-08-01 Claude: daemon_status(UI 상태 조회) + 레지스트리 스레드명 일치 검증 추가.
@@ -23,32 +23,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / ".ai_monitor"))
 
 from infra import daemons
-
-
-def test_discord_bindings_follow_each_slot_project():
-    config = {
-        'node_id': 'pc1',
-        'channels': {'T1': 'c1', 'T2': 'c2', 'T3': 'c3'},
-        'slot_projects': {
-            '0': 'D:/vibe-coding',
-            '1': 'D:/ons',
-            '2': 'D:/CipherTrader',
-        },
-    }
-
-    bindings = daemons._discord_channel_bindings(config, 'D--ons')
-
-    assert bindings['c1']['project_id'] == 'D--vibe-coding'
-    assert bindings['c2']['project_id'] == 'D--ons'
-    assert bindings['c3']['project_id'] == 'D--CipherTrader'
-
-
-def test_discord_bindings_fall_back_when_slot_project_is_missing():
-    config = {'node_id': 'pc1', 'channels': {'T2': 'c2'}, 'slot_projects': {}}
-
-    bindings = daemons._discord_channel_bindings(config, 'D--ons')
-
-    assert bindings['c2']['project_id'] == 'D--ons'
 
 
 class _FakeEnv:
@@ -184,16 +158,16 @@ def test_status_running_detects_popen_child_without_thread(tmp_path, monkeypatch
     env = _FakeEnv(tmp_path / 'nope.json')
     env.child_procs = []
     child = _FakeChild()
-    daemons._track_child('discord_gateway', env, child)
+    daemons._track_child('lan_bridge', env, child)
 
     st = {d['key']: d for d in daemons.daemon_status(env.config_file)}
-    assert st['discord_gateway']['running'] is True
+    assert st['lan_bridge']['running'] is True
     # [불변식] 표시용 레지스트리가 종료 책임을 가져가면 안 된다 — cleanup 대상에도 남아야 함
     assert env.child_procs == [child]
 
     child.terminate()          # 자식이 죽으면 즉시 '꺼짐'으로 돌아와야 한다
     st = {d['key']: d for d in daemons.daemon_status(env.config_file)}
-    assert st['discord_gateway']['running'] is False
+    assert st['lan_bridge']['running'] is False
 
 
 def test_status_running_ignores_other_daemons_children(tmp_path, monkeypatch):
@@ -207,7 +181,7 @@ def test_status_running_ignores_other_daemons_children(tmp_path, monkeypatch):
 
     st = {d['key']: d for d in daemons.daemon_status(env.config_file)}
     assert st['watchdog']['running'] is True
-    assert st['discord_dashboard']['running'] is False
+    assert st['orchestrator']['running'] is False
 
 
 def test_track_child_keys_are_registry_keys():

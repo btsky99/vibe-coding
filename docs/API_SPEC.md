@@ -2,8 +2,7 @@
 FILE: docs/API_SPEC.md
 DESCRIPTION: Vibe-Coding (AI Monitor) REST API 상세 명세서
 REVISION HISTORY:
-- 2026-08-03 Codex: Discord 터미널별 토큰 설정 GET/POST API 추가
-- 2026-08-03 Codex: Discord API를 공용 토큰·Node ID·터미널별 채널 binding 계약으로 교정
+- 2026-08-14 Claude: Discord 설정 API 2종 삭제 — 커넥터 계층 전면 철거
 - 2026-08-03 Codex: 사용량 권고를 포함하는 `/api/agent-quota` 계약 추가
 - 2026-03-19 Gemini: 최초 작성. v5.0 기준 모든 엔드포인트 정리.
 """
@@ -72,8 +71,6 @@ Mission Control UI와 cmux 호환 CLI 시스템을 위한 실시간 피드백 AP
 | **POST** | `/api/save-file` | 파일 내용 저장 |
 | **GET** | `/api/config` | 시스템 전역 설정 조회 |
 | **POST** | `/api/config/update` | 시스템 전역 설정 업데이트 |
-| **GET** | `/api/config/discord` | Discord 공용 토큰 설정 여부와 Node/ACL/터미널 채널 binding 조회(토큰 원문 비노출) |
-| **POST** | `/api/config/discord` | Discord 공용 토큰·Node ID·서버/사용자 ACL·T1~T9 채널 binding 저장 |
 | **POST** | `/api/launch` | 특정 에이전트(Claude/Gemini/Codex) 터미널 실행 |
 | **POST** | `/api/shutdown` | 서버 및 관련 프로세스 안전 종료 |
 

@@ -4,10 +4,11 @@
 FILE: src/session_recycle.py
 DESCRIPTION: 컨텍스트 리사이클 상태머신 — 세션을 마감 기록으로 봉인하고 새 컨텍스트로
              교체한 뒤 재정박한다. GUARD 판정은 순수 함수, 실행은 주입된 deps 경유.
-             DISCORD_HARNESS_INTEGRATION_PLAN.md Phase 6의 구현체.
+             설계 근거는 docs/HARNESS_DESIGN.md §2.
 
 REVISION HISTORY:
 - 2026-08-05 Claude: 최초 구현 — 하네스 v2.1 분석에서 도출(① 컨텍스트 리사이클)
+- 2026-08-14 Claude: 근거 문서 경로 갱신 — Discord 계획서 폐기(커넥터 전면 제거)
 """
 from __future__ import annotations
 

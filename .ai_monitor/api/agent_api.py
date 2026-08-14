@@ -179,21 +179,6 @@ def set_pty_rest_url(url: str) -> None:
     _node_pty_url = url
 
 
-_connector_config_file = None   # connector 릴레이가 슬롯→프로젝트 폴더를 읽을 config.json
-
-
-def set_config_file(path) -> None:
-    """server.py가 확정한 config.json 경로를 주입한다.
-
-    [WHY 계산하지 말고 주입] DATA_DIR은 frozen 모드에서 %APPDATA%\\VibeCoding로 바뀐다.
-      모듈이 스스로 `_BASE_DIR/'data'`로 유추하면 설치본에서 존재하지 않는 파일을 읽어
-      slot_projects가 항상 비고, Discord 요청이 조용히 엉뚱한 폴더에서 실행된다
-      (설치본 빈 패널 사고와 같은 계열). 경로의 유일한 원천은 server.py다.
-    """
-    global _connector_config_file
-    _connector_config_file = path
-
-
 def set_pty_sessions_getter(getter) -> None:
     """[Deprecated] 하위 호환용 — Node PTY 전환으로 사용하지 않음."""
     pass
@@ -1395,21 +1380,10 @@ def handle_chat_bus_post(handler) -> None:
         _json_response(handler, {'error': 'empty_content'}, 400)
         return
 
+    # [2026-08-14] source='connector'(Discord) 자동 릴레이 분기 제거 — 커넥터 계층
+    #   전체를 걷어냈다. 버스는 dashboard/hook 기록용으로 계속 쓴다.
     seq = _bus_append(terminal_id, source, role, content, actor_name=actor_name)
-    if source == 'connector' and role == 'user':
-        # [WHY 별도 모듈] connector 턴은 헤드리스 claude를 따로 띄워 stream-json을 읽는다.
-        #   PTY 화면 스크레이프를 걷어낸 이유는 api/connector_relay.py 상단 주석 참조.
-        from api import connector_relay
-        threading.Thread(
-            target=connector_relay.relay_turn,
-            args=(terminal_id, project_id, content, seq, _bus_append,
-                  _connector_config_file, _project_root),
-            daemon=True,
-            name=f'connector-bus-{terminal_id}',
-        ).start()
-    _json_response(handler, {
-        'status': 'ok', 'seq': seq, 'queued': source == 'connector',
-    })
+    _json_response(handler, {'status': 'ok', 'seq': seq, 'queued': False})
 
 
 def handle_get(handler, path: str) -> bool:

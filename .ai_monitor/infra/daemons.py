@@ -1,12 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # 📄 파일명: infra/daemons.py
-# 📝 설명: 백그라운드 데몬 러너 — 워치독/Discord 대시보드/오케스트레이터/문서 생성/
+# 📝 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/
 #          에이전트 동기화/MUX/제텔 동기화·정제/커밋 감시 (server.py 분할 단계 9)
 # 🕒 변경 이력:
+# [2026-08-14] Claude — Discord 대시보드/게이트웨이 러너 2종 삭제(커넥터 전면 철거).
 # [2026-08-04] Claude — popen 계열 데몬이 상태판에서 항상 '꺼짐'으로 보이던 오탐 수정
 #   (스레드명 단독 판정 → 자식 프로세스 레지스트리 병행).
-# [2026-08-04] Codex — 저장된 Bot Token과 T1 채널만으로 사용량 대시보드 자동 기동.
-# [2026-08-04] Codex — Discord T1~Tn을 활성 프로젝트 하나가 아닌 slot_projects에 바인딩.
 # [2026-06-10] Claude — server.py main() 내부 중첩 함수 11개 이관 (~500줄)
 #   - [제약] 모든 함수는 daemon=True 스레드에서 호출됨 — 블로킹 루프 허용.
 #   - [WHY] env(DaemonEnv)는 호출 시점에 server.py 래퍼가 생성 — HTTP_PORT 등이
@@ -69,9 +68,9 @@ class DaemonEnv:
 
 # ── 자식 프로세스 레지스트리 (상태판 running 판정용) ─────────────────────────
 # [과거사고 2026-08-04] daemon_status가 running을 threading.enumerate()의 스레드명으로만
-#   판정했다. 그런데 popen 계열 데몬(watchdog/lan_bridge/discord_*/orchestrator)은 자식을
+#   판정했다. 그런데 popen 계열 데몬(watchdog/lan_bridge/orchestrator)은 자식을
 #   띄우고 즉시 return하므로 스레드가 사라진다 → 실측에서 4종이 프로세스는 살아있는데
-#   상태판은 전부 "꺼짐"이었다. Discord 게이트웨이가 안 뜬 줄 알고 엉뚱한 곳을 팠다.
+#   상태판은 전부 "꺼짐"이었다. 안 뜬 줄 알고 엉뚱한 곳을 팠다.
 # [불변식] 자식은 여전히 env.child_procs 에도 반드시 들어가야 한다 —
 #   lifecycle.cleanup_child_procs 가 그 리스트만 종료 대상으로 삼는다. 레지스트리는
 #   '표시용 별도 인덱스'이지 종료 책임을 가져가지 않는다.
@@ -149,120 +148,6 @@ def run_lan_bridge(env: DaemonEnv) -> None:
         encoding='utf-8', errors='replace',
     )
     _track_child('lan_bridge', env, child)
-
-
-def run_discord_dashboard(env: DaemonEnv) -> None:
-    """Webhook 또는 UI에 저장된 공용 Bot으로 Discord 사용량 대시보드를 기동한다."""
-    webhook = os.environ.get('DISCORD_WEBHOOK_URL', '').strip()
-    child_env = os.environ.copy()
-    try:
-        from api.discord_config_api import load_config
-        config = load_config(env.data_dir / 'discord_secrets.dat')
-        channels = config.get('channels') or {}
-        # T1을 기본 상태 채널로 사용하고, T1이 비었으면 첫 등록 채널을 사용한다.
-        dashboard_channel = channels.get('T1') or next(iter(channels.values()), '')
-        if config.get('token') and dashboard_channel:
-            child_env['DISCORD_BOT_TOKEN'] = config['token']
-            child_env['DISCORD_DASHBOARD_CHANNEL_ID'] = dashboard_channel
-    except Exception as error:
-        print(f'[!] Discord dashboard 설정 로드 실패: {type(error).__name__}')
-    has_bot_target = (child_env.get('DISCORD_BOT_TOKEN', '').strip()
-                      and child_env.get('DISCORD_DASHBOARD_CHANNEL_ID', '').strip())
-    if (not webhook and not has_bot_target) or not env.scripts_dir:
-        return
-    script = env.scripts_dir / 'discord_dashboard.py'
-    runners = runtime.python_runner_cmds(env.base_dir, env.project_root)
-    if not script.exists() or not runners:
-        return
-    log_path = env.data_dir / 'discord_dashboard.log'
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = open(log_path, 'a', encoding='utf-8')
-    child = proc.popen(
-        [runners[0], str(script), '--server', f'http://127.0.0.1:{env.http_port}',
-         '--project-root', str(env.project_root), '--project-id', env.current_project_id()],
-        cwd=str(env.project_root), stdout=log_handle, stderr=log_handle,
-        env=child_env,
-        encoding='utf-8', errors='replace',
-    )
-    child._vibe_log_handle = log_handle
-    _track_child('discord_dashboard', env, child)
-
-
-def run_discord_gateway(env: DaemonEnv) -> None:
-    """공용 봇 토큰 하나로 현재 PC의 모든 터미널 binding을 처리한다.
-
-    UI v2 설정이 있으면 그 값이 정본이며 Gateway를 한 개만 띄운다. 환경변수 계약은
-    UI 설정이 없는 기존 사용자의 하위 호환을 위해 유지한다.
-    """
-    if not env.scripts_dir:
-        return
-    config = {}
-    try:
-        from api.discord_config_api import load_config
-        config = load_config(env.data_dir / 'discord_secrets.dat')
-        if env.config_file.exists():
-            app_config = json.loads(env.config_file.read_text(encoding='utf-8'))
-            config['slot_projects'] = app_config.get('slot_projects') or {}
-    except Exception as error:
-        print(f'[!] Discord UI 설정 로드 실패: {type(error).__name__}')
-    child_env = os.environ.copy()
-    if config.get('token'):
-        channels = config.get('channels') or {}
-        child_env['DISCORD_BOT_TOKEN'] = config['token']
-        child_env['VIBE_NODE_ID'] = config['node_id']
-        child_env['DISCORD_GUILD_IDS'] = ','.join(config['guild_ids'])
-        child_env['DISCORD_USER_IDS'] = ','.join(config['user_ids'])
-        child_env['DISCORD_CHANNEL_IDS'] = ','.join(channels.values())
-        child_env['DISCORD_CHANNEL_BINDINGS'] = json.dumps(
-            _discord_channel_bindings(config, env.current_project_id())
-        )
-    required = ('DISCORD_BOT_TOKEN', 'DISCORD_GUILD_IDS', 'DISCORD_CHANNEL_IDS', 'DISCORD_USER_IDS')
-    has_bindings = (child_env.get('DISCORD_CHANNEL_BINDINGS', '').strip()
-                    or child_env.get('DISCORD_GROUP_BINDINGS', '').strip())
-    if not all(child_env.get(key, '').strip() for key in required) or not has_bindings:
-        return
-    script = env.scripts_dir / 'discord_gateway.py'
-    runners = runtime.python_runner_cmds(env.base_dir, env.project_root)
-    if not script.exists() or not runners:
-        return
-    log_path = env.data_dir / 'discord_gateway.log'
-    log_handle = open(log_path, 'a', encoding='utf-8')
-    child_env.pop('DISCORD_TERMINAL_ID', None)
-    child_env['VIBE_SERVER_URL'] = f'http://127.0.0.1:{env.http_port}'
-    child_env['VIBE_PROJECT_ID'] = env.current_project_id()
-    child = proc.popen(
-        [runners[0], str(script)], cwd=str(env.project_root),
-        stdout=log_handle, stderr=log_handle, env=child_env,
-        encoding='utf-8', errors='replace',
-    )
-    child._vibe_log_handle = log_handle
-    _track_child('discord_gateway', env, child)
-
-
-def _discord_channel_bindings(config: dict, fallback_project_id: str) -> dict:
-    """Bind Discord terminal IDs to the persisted per-slot projects.
-
-    ``slot_projects`` is zero-based while external terminal IDs are one-based.
-    Falling back is intentional for old configurations that predate per-slot
-    project persistence.
-    """
-    channels = config.get('channels') or {}
-    slot_projects = config.get('slot_projects') or {}
-    bindings = {}
-    for terminal, channel in channels.items():
-        terminal_id = str(terminal).upper()
-        project_id = fallback_project_id
-        if terminal_id.startswith('T') and terminal_id[1:].isdigit():
-            slot_index = int(terminal_id[1:]) - 1
-            path = slot_projects.get(str(slot_index), slot_projects.get(slot_index, ''))
-            if isinstance(path, str) and path.strip():
-                project_id = slugify(Path(path.strip()))
-        bindings[str(channel)] = {
-            'node_id': config['node_id'],
-            'terminal_id': terminal_id,
-            'project_id': project_id,
-        }
-    return bindings
 
 
 # Codex를 '사용 중'으로 볼 시간 창 — 이 시간 안에 히스토리가 갱신됐으면 워처를 띄운다.
@@ -889,8 +774,6 @@ DAEMON_TOGGLES: dict = {
     'watchdog':      {'label': '하이브 워치독 (프로세스 감시)', 'thread': 'Watchdog'},
     'recycle_watcher': {'label': '컨텍스트 리사이클 자동 발동 (85% 초과 시)',
                         'thread': 'RecycleWatcher'},
-    'discord_dashboard': {'label': 'Discord 읽기 전용 대시보드', 'thread': 'DiscordDashboard'},
-    'discord_gateway': {'label': 'Discord 양방향 Gateway', 'thread': 'DiscordGateway'},
     'codex_watcher': {'label': 'Codex PG 워처 (온디맨드 — Codex 쓸 때만 자동 기동)',
                       'thread': 'CodexPGWatcher'},
     'orchestrator':  {'label': '오케스트레이터 데몬', 'thread': 'OrchestratorDaemon'},
@@ -1118,8 +1001,6 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
                          name=DAEMON_TOGGLES[key]['thread'], daemon=True).start()
 
     _t('watchdog', run_watchdog, (env,))
-    _t('discord_dashboard', run_discord_dashboard, (env,))
-    _t('discord_gateway', run_discord_gateway, (env,))
     _t('codex_watcher', run_codex_pg_watcher, (env,))
     _t('orchestrator', run_orchestrator_daemon, (env,))
     _t('doc_generators', run_doc_generators_daemon, (env,))

@@ -181,10 +181,39 @@ def _pick_online_peer(dd: Path, req_peer: str):
 #   handle_chat은 SSE로 브라우저에 보내지만, 여기선 브리지 exec-emit로 요청자에게 역방향 릴레이.
 # [제약] handle_run(싱글턴+SSE)은 caller가 출력을 폴링할 수 없어 부적합 → 전용 캡처 스레드.
 
-# [중복 금지] stream-json 파서는 api/connector_relay.py가 유일 정의 —
-#   connector 릴레이와 LAN 원격 실행이 같은 claude 출력 형식을 읽는다. 사본을 두면
-#   한쪽만 고쳐져 두 경로의 파싱이 갈린다([[feedback-no-duplicates]]).
-from api.connector_relay import extract_stream_text as _extract_stream_text
+def _extract_stream_text(line: str) -> str:
+    """claude stream-json 1줄 → 표시용 텍스트.
+
+    [2026-08-14] api/connector_relay.py에서 이관 — Discord 커넥터 계층을 걷어내며
+      유일하게 남은 소비자가 여기가 됐다. 원래 '중복 금지'로 relay에 두고 빌려
+      썼는데, 빌려주던 쪽이 사라졌으니 소비자가 소유한다.
+    [제약] agent_api.handle_chat의 파싱과 형식이 같아야 한다 — 같은 claude
+      stream-json을 읽는다. 한쪽 출력 형식이 바뀌면 양쪽을 같이 고칠 것.
+    """
+    line = line.strip()
+    if not line:
+        return ''
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        return line + '\n'   # stream-json 아닌 일반 텍스트(폴백)
+    mtype = msg.get('type', '')
+    if mtype == 'assistant':
+        content = msg.get('message', {}).get('content', '')
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            out = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get('type') == 'text':
+                        out.append(block.get('text', ''))
+                    elif block.get('type') == 'tool_use':
+                        out.append(f"\n[도구: {block.get('name', '')}]\n")
+            return ''.join(out)
+    elif mtype == 'result':
+        return ''   # result는 전체 재전송이라 중복 방지(assistant로 이미 스트리밍됨)
+    return ''
 
 
 def _run_remote_exec(dd: Path, peer_id: str, exec_id: str, task: str, project_id: str,

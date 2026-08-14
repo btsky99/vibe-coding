@@ -64,7 +64,6 @@ import GitPanel from './components/panels/GitPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
 import HealPanel from './components/panels/HealPanel';
 import DaemonsPanel from './components/panels/DaemonsPanel';
-import DiscordPanel from './components/panels/DiscordPanel';
 import SetupBanner from './components/SetupBanner';
 
 // 레이아웃 모드 타입 정의 — TopMenuBar와 공유 (9분할 추가)
@@ -857,9 +856,6 @@ function App() {
             ) : activeTab === 'daemons' ? (
               /* 백그라운드 데몬 on/off — 저사양 PC에서 상시 데몬 CPU/메모리 회수 */
               <DaemonsPanel />
-            ) : activeTab === 'discord' ? (
-              /* Discord T1~T3 기본 토큰 + T4 이후 동적 추가 설정 */
-              <DiscordPanel />
             ) : activeTab === 'lan' ? (
               /* LAN 브리지 패널 — 자동발견·페어링·파일전송 (Phase 1) */
               <LanPanel />

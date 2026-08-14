@@ -43,7 +43,6 @@ cp -a /home/tunnel/.ssh/authorized_keys "$STAGE/ssh/tunnel_authorized_keys" 2>/d
 
 # ── 3. 비밀 환경 ────────────────────────────────────────────────────────────
 mkdir -p "$STAGE/env"
-cp -a /opt/vibe/discord.env "$STAGE/env/" 2>/dev/null || true
 
 # ── 4. Claude 인증 ──────────────────────────────────────────────────────────
 # [WHY 담나] 재인증은 브라우저 왕복이 필요해 원격만으로는 복구가 번거롭다.
@@ -98,8 +97,6 @@ cat > "$STAGE/RESTORE.md" <<'EOF'
     chown -R tunnel:tunnel /home/tunnel/.ssh
     chmod 700 /home/tunnel/.ssh && chmod 600 /home/tunnel/.ssh/authorized_keys
 
-## 4. 디스코드
-    mkdir -p /opt/vibe && cp env/discord.env /opt/vibe/ && chmod 600 /opt/vibe/discord.env
 
 ## 5. PostgreSQL
     sudo -u postgres psql -p 5433 -f postgres_all.sql

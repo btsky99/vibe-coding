@@ -125,3 +125,30 @@ def test_target_dir_is_covered_by_token_signature():
     assert mod._exec_body_hash('a', 'b') != mod._exec_body_hash('ab', '')
     # 구버전 규약(sha256(task)만)과 달라야 한다 = 와이어 변경이 실제로 적용됨
     assert base != hashlib.sha256('작업'.encode()).hexdigest()
+
+
+# ── stream-json 파서 (2026-08-14 connector_relay에서 이관) ──────────────────
+# 원래 tests/test_connector_relay.py 소유였다. Discord 커넥터 계층을 걷어내며
+# 유일한 소비자가 LAN 원격 실행이 되어 파서와 함께 여기로 옮겼다.
+
+def test_스트림_파서가_한글_간격을_보존한다():
+    line = json.dumps({'type': 'assistant',
+                       'message': {'content': [{'type': 'text',
+                                                'text': '안녕하세요! 무엇을 도와드릴까요?'}]}})
+    assert lan_api._extract_stream_text(line) == '안녕하세요! 무엇을 도와드릴까요?'
+
+
+def test_스트림_파서가_result_중복을_버린다():
+    """result는 전체 재전송이라 그대로 이으면 응답이 두 번 나간다."""
+    assert lan_api._extract_stream_text('{"type":"result","result":"전체 재전송"}') == ''
+
+
+def test_스트림_파서가_비JSON을_폴백으로_흘린다():
+    assert lan_api._extract_stream_text('그냥 텍스트') == '그냥 텍스트\n'
+    assert lan_api._extract_stream_text('   ') == ''
+
+
+def test_스트림_파서가_도구_호출을_표시한다():
+    line = json.dumps({'type': 'assistant',
+                       'message': {'content': [{'type': 'tool_use', 'name': 'Read'}]}})
+    assert '[도구: Read]' in lan_api._extract_stream_text(line)

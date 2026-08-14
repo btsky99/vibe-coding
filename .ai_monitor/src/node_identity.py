@@ -32,10 +32,9 @@ CONFIG_FILE = DATA_DIR / 'config.json'
 #   형식을 바꾸면 이미 중앙 DB에 쌓인 참조가 전부 파싱 불가가 된다.
 _NODE_ID_RE = re.compile(r'^[0-9a-f]{32}$')
 
-# [주의: 이름 충돌] api/discord_config_api.py에도 'node_id'가 있지만 그것은
-#   DPAPI로 암호화된 별도 secret 파일의 사용자 지정 슬러그(디스코드 채널 구분용)다.
-#   여기의 node_id는 data/config.json의 자동 생성 UUID로, 저장소도 수명도 다르다.
-#   둘을 합치지 말 것 — 사용자가 디스코드 라벨을 바꾸면 중앙 대화 정체성이 갈아엎힌다.
+# [이력 2026-08-14] 예전엔 discord_config_api에도 동명의 'node_id'(사용자 지정
+#   슬러그)가 있어 혼동 주의가 필요했다. 커넥터 철거로 이제 여기가 유일 원천이다 —
+#   data/config.json의 자동 생성 UUID.
 
 _lock = threading.Lock()
 _cached_id: str | None = None

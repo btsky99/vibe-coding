@@ -596,7 +596,7 @@ def _stream_output(process: subprocess.Popen, run_id: str, cli: str = '',
         except Exception:
             pass  # 라이브 파일 기록 실패는 무시 (메인 흐름 영향 없음)
 
-    # subprocess 모드 감지: discord_bridge.py 등 외부 프로세스가 stdout을 파싱할 때
+    # subprocess 모드 감지: 외부 프로세스가 stdout을 파싱할 때
     # CLI_AGENT_JSON_STDOUT=1 환경변수로 이벤트를 stdout에도 출력 (SSE 큐와 병행)
     _json_stdout = os.environ.get('CLI_AGENT_JSON_STDOUT', '') == '1'
 

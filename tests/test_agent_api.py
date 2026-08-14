@@ -12,8 +12,6 @@ DESCRIPTION: agent_api.py 단위 테스트.
              - HTTP 핸들러는 간단한 Mock 객체로 대체
 
 REVISION HISTORY:
-- 2026-08-04 Claude: connector 릴레이 테스트를 test_connector_relay.py로 이관(스크레이프 폐기).
-- 2026-08-03 Codex: Discord connector의 버스 전용 양방향 relay 회귀 테스트 추가.
 - 2026-07-26 Codex: 프로젝트 스코프 PTY 선택 회귀 테스트 추가.
 - 2026-06-11 Claude: gemini→antigravity 식별자 스윕 (agy 마이그레이션 Task 8)
 - 2026-06-11 Claude: TestGetGeminiLastTask 삭제 — agy 전환으로 대상 함수 제거 (비공개 포맷)
@@ -45,11 +43,6 @@ _mock_cli_agent._current_run = None
 sys.modules.setdefault("cli_agent", _mock_cli_agent)
 
 import agent_api
-
-
-# [이관 2026-08-04] connector 릴레이 테스트는 tests/test_connector_relay.py로 이동.
-#   PTY 화면 스크레이프(_clean_connector_output/_node_json 경로)를 stream-json 캡처로
-#   교체하면서 대상 함수가 agent_api에서 사라졌다.
 
 
 class TestProjectScopedPtyIdentity:

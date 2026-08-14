@@ -12,7 +12,6 @@ import {
   Activity,
   BookOpen,
   Brain,
-  Bot,
   ClipboardList,
   Files,
   Gauge,
@@ -160,10 +159,6 @@ const ActivityBar = memo(function ActivityBar({
 
       <button onClick={() => onTabChange('heal')} className={tabCls('heal')} title="자가치유 계측">
         <HeartPulse className="w-5 h-5" />
-      </button>
-
-      <button onClick={() => onTabChange('discord')} className={tabCls('discord')} title="Discord 봇 설정">
-        <Bot className="w-5 h-5" />
       </button>
 
       <button onClick={() => onTabChange('lan')} className={tabCls('lan')} title="LAN 공유">

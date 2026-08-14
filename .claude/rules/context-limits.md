@@ -57,7 +57,7 @@ if info['truncated']:
 ```
 
 **차단하면 안 되는 이유**: REANCHOR가 실패하면 세션을 되살리지 못한다. 이는
-`docs/DISCORD_HARNESS_INTEGRATION_PLAN.md`의 보안 불변식 10
+`docs/HARNESS_DESIGN.md`의 안전 불변식 5
 ("체크포인트 저장 실패 시 현재 세션을 파괴하지 않는다")과 정면 충돌한다.
 상한은 품질 장치이지 안전 장치가 아니다 — 안전이 우선한다.
 
