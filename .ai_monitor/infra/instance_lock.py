@@ -7,6 +7,11 @@ DESCRIPTION: 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로�
              os._exit(0)으로 새 인스턴스를 즉시 종료한다.
 
 REVISION HISTORY:
+- 2026-08-14 Claude: 좀비 락 회수 구현 — 락 bind 실패를 곧바로 '실행 중'으로 단정하던
+                     경로가, 커널 대기(wait=Executive)에 갇혀 kill조차 안 먹는 좀비가
+                     락 포트를 영구 점유하면 **개발 서버 영구 기동 불가**로 이어졌다.
+                     2026-07-16에 smoke 경로만 PID 시드로 우회했고 dev/frozen은 미수정,
+                     L97의 "좀비 회수" 주석은 구현이 없는 채였다 — 그 빈칸을 메운다.
 - 2026-07-22 Claude: 멀티 인스턴스 포트 슬롯화 — (프로젝트×환경) 해시로 9000-9008 짝수
                      베이스를 결정적 배정. dev+설치본 + '서로 다른 프로젝트 설치본 2개'
                      동시 실행 시 둘 다 9000을 선호해 TOCTOU 경쟁→나중 인스턴스 PTY가
@@ -28,11 +33,129 @@ REVISION HISTORY:
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import socket
 import sys
+import threading
 from pathlib import Path
+
+# [불변식] 락 소켓 핸드셰이크 배너. 살아있는 인스턴스만 이걸 보낸다 —
+#   '포트가 잡혀 있다'와 '주인이 살아있다'를 가르는 유일한 신호다.
+_LOCK_HELLO = b'VIBE-INSTANCE-ALIVE\n'
+
+# 좀비 확정 시 다음 락 포트로 몇 칸까지 비켜갈지. 19001+479가 대역 끝이라
+# 20칸은 항상 대역 안에 머문다(_LOCK_PORT 최대 19480 → 19500은 초과하나
+# 락 대역은 우리만 쓰는 사설 구간이라 실害 없음 — 충돌 시 계속 +1 할 뿐).
+_MAX_LOCK_HOP = 20
+
+
+def _probe_lock_holder(port: int, timeout: float = 0.8) -> bool:
+    """락 포트 점유자가 '살아있는 인스턴스'인지 핸드셰이크로 판정.
+
+    [WHY 핸드셰이크] bind 실패만으로는 주인의 생사를 알 수 없다. 커널 대기에 갇힌
+      좀비(wait=Executive — 관리자 kill도 안 먹는다)는 소켓을 계속 붙들지만 accept를
+      못 한다. 연결이 거부/무응답이면 좀비, 배너가 오면 진짜 실행 중이다.
+    [WHY HTTP가 아니라 여기부터] HTTP는 부팅 완료 후에야 뜬다 — 부팅 중인 정상
+      인스턴스를 좀비로 오판해 중복 실행할 위험이 있다. 락 핸드셰이크는 부팅 최초
+      단계에서 켜지므로 '부팅 중'도 살아있음으로 정확히 잡는다.
+    """
+    try:
+        with contextlib.closing(socket.create_connection(('127.0.0.1', port),
+                                                         timeout=timeout)) as s:
+            s.settimeout(timeout)
+            return s.recv(len(_LOCK_HELLO)).startswith(b'VIBE-INSTANCE')
+    except OSError:
+        return False
+
+
+def _probe_http_holder(project_root: Path) -> bool:
+    """[구버전 호환 보조] 이 프로젝트의 서버가 HTTP로 응답 중인가.
+
+    [WHY] 핸드셰이크를 모르는 구버전 인스턴스가 락을 쥐고 있으면 위 판정이 좀비로
+      오판한다. 그쪽은 HTTP가 이미 떠 있으므로 여기서 걸러진다. 이 보조선은 구버전이
+      모두 교체되면 자연히 무용해진다(제거해도 안전).
+    [제약] project_id 대조 필수 — 첫 응답 채택은 타 프로젝트 서버를 '내 인스턴스'로
+      오인해 멀쩡한 기동을 막는다(server_locator 2026-07-16 사고와 같은 함정).
+      슬러그 산출이 실패하면 보수적으로 '살아있음'(=기존 동작 유지) 쪽에 선다.
+    [제약] 지연 import — infra가 src를 모듈 로드 시점에 참조하면 사이클 위험.
+    """
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from infra.project_context import slugify
+        from src.server_locator import probe_port
+    except Exception:
+        return False
+    try:
+        want = slugify(project_root)
+    except Exception:
+        want = ''
+    try:
+        with ThreadPoolExecutor(max_workers=20) as ex:
+            for r in ex.map(probe_port, range(9000, 9020)):
+                if not r:
+                    continue
+                if not want or r[1] == want or r[1] == '':
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def _serve_lock_hello(sock: socket.socket) -> None:
+    """락 소켓을 listen 상태로 올리고 생존 배너를 응답하는 데몬 스레드를 붙인다.
+
+    [제약] 이 스레드는 caller가 락 소켓을 close()하면 accept가 OSError로 깨져
+      스스로 끝난다 — 별도 종료 신호가 없는 건 그 때문이다(daemon=True라 프로세스
+      종료도 막지 않는다).
+    """
+    try:
+        sock.listen(8)
+    except OSError:
+        return  # listen 실패해도 락(bind) 자체는 유효 — 기동을 막지 않는다
+
+    def _loop() -> None:
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            with contextlib.closing(conn):
+                with contextlib.suppress(OSError):
+                    conn.sendall(_LOCK_HELLO)
+
+    threading.Thread(target=_loop, daemon=True, name='instance-lock-hello').start()
+
+
+def _focus_existing_and_exit(project_root: Path, lock_port: int) -> None:
+    """살아있는 기존 인스턴스를 확인한 경우 — 그 창을 포커스하고 즉시 종료(반환 없음)."""
+    print(f"[*] 이미 실행 중인 인스턴스 감지 (락 포트 {lock_port})")
+    if os.name == 'nt':
+        try:
+            import ctypes
+            _win_title = f"바이브 코딩 [{project_root.name}]"
+            _hwnd = ctypes.windll.user32.FindWindowW(None, _win_title)
+            if _hwnd:
+                # [과거사고 2026-07-25] 여기서 SW_RESTORE(9)를 무조건 걸어, 사용자가
+                # 최대화해 둔 창이 메시지를 보낼 때마다 이전 크기로 줄어들었다.
+                # SW_RESTORE는 '최소화 해제'가 아니라 '최대화/최소화 이전 크기로 복원'
+                # 이라 최대화 창에 걸면 최대화가 풀린다. 유발 경로: hook_bridge가 살아있는
+                # 서버를 오프라인으로 오판(.server.pid만 조회) → 매 메시지 server.py 재스폰
+                # → 새 인스턴스가 락에 걸려 이 분기 진입 → 창 축소 → os._exit. 사용자 눈엔
+                # "채팅 엔터 칠 때마다 창이 작아짐"으로만 보여 원인 추적이 오래 걸렸다.
+                # [불변식] 창 크기/최대화 상태는 사용자 소유다 — 포커스 목적으로 건드리지
+                # 않는다. 최소화(IsIconic)된 창만 화면에 되살리면 목적이 충족된다.
+                if ctypes.windll.user32.IsIconic(_hwnd):
+                    ctypes.windll.user32.ShowWindow(_hwnd, 9)    # SW_RESTORE — 최소화 해제용
+                ctypes.windll.user32.SetForegroundWindow(_hwnd)
+                print(f"[*] 기존 창 포커스 완료: {_win_title}")
+            else:
+                print(f"[*] 기존 창을 찾을 수 없습니다 (아직 로딩 중일 수 있음)")
+        except Exception as e:
+            print(f"[!] 창 포커스 실패: {e}")
+    os._exit(0)
 
 
 def acquire_single_instance_lock(project_root: Path) -> socket.socket:
@@ -60,44 +183,50 @@ def acquire_single_instance_lock(project_root: Path) -> socket.socket:
     _LOCK_PORT    = 19001 + (_proj_hash % 480)
     _proj_id      = f"{_proj_hash:04x}"
 
+    # ── 락 획득 (+ 좀비 점유 시 회수) ────────────────────────────────────────
+    # [🔴 과거사고 2026-08-14] 이 자리에서 bind 실패를 곧바로 '이미 실행 중'으로 단정하고
+    #   os._exit(0)을 했다. 그런데 커널 대기(wait=Executive)에 갇혀 관리자 권한
+    #   Stop-Process조차 튕겨내는 좀비가 락 포트를 붙들자, 새 서버가 매 시도마다 조용히
+    #   즉사해 **재부팅 전까지 개발 서버 기동 불가**가 됐다. 증상이 "로그에 Server Started만
+    #   찍히고 본문 0줄"이라 원인이 코드 수정 쪽으로 오인되기 쉽다.
+    # [불변식] '포트가 잡혀 있다' ≠ '주인이 살아있다'. 생사는 반드시 핸드셰이크(+HTTP
+    #   보조)로 확인하고, 좀비로 확인된 경우에만 옆 포트로 비켜간다. 확인 없이 비켜가면
+    #   단일 인스턴스 보장이 깨져 v3.7.179 이전의 '창 2개' 버그로 되돌아간다.
     _lock_sock = None
-    try:
+    _port = _LOCK_PORT
+    for _attempt in range(_MAX_LOCK_HOP):
         _sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        _sock.bind(('127.0.0.1', _LOCK_PORT))
-        _lock_sock = _sock
-    except OSError:
-        # 이미 실행 중 — 기존 창을 포커스하고 종료
-        print(f"[*] 이미 실행 중인 인스턴스 감지 (락 포트 {_LOCK_PORT})")
-        if os.name == 'nt':
-            try:
-                import ctypes
-                _win_title = f"바이브 코딩 [{project_root.name}]"
-                _hwnd = ctypes.windll.user32.FindWindowW(None, _win_title)
-                if _hwnd:
-                    # [과거사고 2026-07-25] 여기서 SW_RESTORE(9)를 무조건 걸어, 사용자가
-                    # 최대화해 둔 창이 메시지를 보낼 때마다 이전 크기로 줄어들었다.
-                    # SW_RESTORE는 '최소화 해제'가 아니라 '최대화/최소화 이전 크기로 복원'
-                    # 이라 최대화 창에 걸면 최대화가 풀린다. 유발 경로: hook_bridge가 살아있는
-                    # 서버를 오프라인으로 오판(.server.pid만 조회) → 매 메시지 server.py 재스폰
-                    # → 새 인스턴스가 락에 걸려 이 분기 진입 → 창 축소 → os._exit. 사용자 눈엔
-                    # "채팅 엔터 칠 때마다 창이 작아짐"으로만 보여 원인 추적이 오래 걸렸다.
-                    # [불변식] 창 크기/최대화 상태는 사용자 소유다 — 포커스 목적으로 건드리지
-                    # 않는다. 최소화(IsIconic)된 창만 화면에 되살리면 목적이 충족된다.
-                    if ctypes.windll.user32.IsIconic(_hwnd):
-                        ctypes.windll.user32.ShowWindow(_hwnd, 9)    # SW_RESTORE — 최소화 해제용
-                    ctypes.windll.user32.SetForegroundWindow(_hwnd)
-                    print(f"[*] 기존 창 포커스 완료: {_win_title}")
-                else:
-                    print(f"[*] 기존 창을 찾을 수 없습니다 (아직 로딩 중일 수 있음)")
-            except Exception as e:
-                print(f"[!] 창 포커스 실패: {e}")
-        os._exit(0)
+        try:
+            _sock.bind(('127.0.0.1', _port))
+            _lock_sock = _sock
+            break
+        except OSError:
+            _sock.close()   # [제약] 실패 소켓을 닫지 않으면 hop마다 fd가 샌다
+            if _probe_lock_holder(_port):
+                _focus_existing_and_exit(project_root, _port)      # 살아있는 주인 확정
+            # 핸드셰이크 무응답 — 좀비이거나, 핸드셰이크를 모르는 구버전이다.
+            # HTTP 보조 판정은 20포트 스캔이라 비싸므로 첫 충돌에서 한 번만 쓴다.
+            if _attempt == 0 and _probe_http_holder(project_root):
+                _focus_existing_and_exit(project_root, _port)      # 구버전 주인 확정
+            print(f"[!] 락 포트 {_port} 좀비 점유 감지 (응답 없음) → 다음 포트로 회수 시도")
+            _port += 1
 
-    # 좀비 소켓 대비: 락 획득 실패 후 프로세스가 실제로 없으면 강제 회수
-    # (위에서 이미 성공했으므로 여기는 도달하지 않음 — 안전장치)
+    if _lock_sock is None:
+        # [WHY 종료] 20칸 연속 좀비는 정상 상황이 아니다 — 여기서 락 없이 진행하면
+        #   단일 인스턴스 보장이 통째로 사라진다. 재부팅 안내가 정직한 실패다.
+        print(f"[!] 락 포트 {_LOCK_PORT}~{_port - 1} 전부 점유 — 좀비 프로세스가 남아 있습니다.")
+        print(f"[!] 재부팅하거나 남은 pythonw/python 프로세스를 정리한 뒤 다시 실행하세요.")
+        os._exit(1)
 
-    print(f"[*] 인스턴스 락 확보 (포트 {_LOCK_PORT})")
+    # [WHY] 락을 쥔 쪽이 배너를 응답해야 다음 인스턴스가 나를 '좀비 아님'으로 판정한다.
+    #   bind만 하고 끝내면 위 _probe_lock_holder가 나를 좀비로 오인해 중복 실행된다.
+    _serve_lock_hello(_lock_sock)
+
+    if _port != _LOCK_PORT:
+        print(f"[*] 인스턴스 락 확보 (포트 {_port} — 원래 슬롯 {_LOCK_PORT}는 좀비 점유)")
+    else:
+        print(f"[*] 인스턴스 락 확보 (포트 {_port})")
     return _lock_sock
 
 
