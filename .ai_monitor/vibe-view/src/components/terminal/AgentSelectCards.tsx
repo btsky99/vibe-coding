@@ -4,6 +4,9 @@
  * 📝 설명: 터미널 미실행 슬롯의 에이전트 선택 카드 3장(Claude/Antigravity/Codex)
  *          + 배경 로그 표시(블러). 카드 버튼이 onLaunch(agent, yolo)를 호출.
  * REVISION HISTORY:
+ * - 2026-08-15 Claude: 하단 '상태판 · 원격 노드' 섹션(RemoteHostCards) 제거 — 사용자가 안 쓰는
+ *                      진입점이었다. 상태판 창 자체는 dashboard_window.py(?page=status)로 살아 있고
+ *                      원격 SSH 슬롯 배선(TerminalSlot remote 분기 + /api/pty/remote/*)도 그대로다.
  * - 2026-07-15 Claude: TerminalSlot.tsx 1500줄 상한 도달로 분리 (로직 무변경 이동,
  *                      배경 로그 자동 스크롤 effect는 이 뷰 전용이라 함께 이동)
  * - 2026-03-08 Claude: (TerminalSlot 내) Codex CLI 카드 추가
@@ -14,18 +17,13 @@ import { motion } from 'framer-motion';
 import { Cpu, Zap, Code2, Orbit } from 'lucide-react';
 import { API_BASE } from '../../constants';
 import { LogRecord } from '../../types';
-import RemoteHostCards from './RemoteHostCards';
 
 export default function AgentSelectCards({ logs, onLaunch }: {
   logs: LogRecord[];
-  // [2026-07-29] 원격 슬롯용으로 3·4번째 인자를 옵셔널 추가 — 기존 호출부는 그대로 동작한다.
-  //   remote가 주어지면 슬롯은 로컬 CLI 대신 ssh 세션으로 붙는다.
-  onLaunch: (
-    agent: string,
-    yolo: boolean,
-    cwdOverride?: string,
-    remote?: { host: string; mode: string },
-  ) => void;
+  // [2026-08-15] 원격 노드/상태판 카드(RemoteHostCards) 제거 — 이 뷰는 로컬 CLI 3종만 띄운다.
+  //   TerminalSlot.launchAgent는 cwdOverride/remote 옵셔널 인자를 여전히 갖지만
+  //   (옵셔널이라 이 좁은 타입에 그대로 할당된다) 여기서 넘길 일은 없다.
+  onLaunch: (agent: string, yolo: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -159,12 +157,6 @@ export default function AgentSelectCards({ logs, onLaunch }: {
           </motion.div>
 
         </div>
-
-        {/* 원격 노드 카드 — ssh config에 Host가 있을 때만 나타난다 (2026-07-29) */}
-        <RemoteHostCards
-          onLaunchRemote={(host, mode) => onLaunch('remote', false, undefined, { host, mode })}
-          onLaunchLocal={(mode) => onLaunch(mode, false)}
-        />
         </div>
       </div>
 
