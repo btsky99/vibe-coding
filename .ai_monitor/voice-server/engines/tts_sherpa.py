@@ -108,10 +108,11 @@ class SherpaKoEngine:
         )
         self.tts = sherpa_onnx.OfflineTts(cfg)
 
-    def synth(self, text: str) -> bytes:
+    def synth(self, text: str, speed: float = 0.0) -> bytes:
         if self.tts is None:
             self.load()
-        audio = self.tts.generate(text, sid=0, speed=SPEED)
+        # speed<=0 은 '지정 안 함' — 환경변수 기본값을 쓴다. 화면에서 속도를 만지면 그 값이 온다.
+        audio = self.tts.generate(text, sid=0, speed=(speed if speed > 0 else SPEED))
         pcm = np.clip(np.asarray(audio.samples, dtype=np.float32), -1.0, 1.0)
         pcm = (pcm * 32767).astype('<i2')
 

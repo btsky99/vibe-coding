@@ -840,14 +840,6 @@ export default function TerminalSlot({
 
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
-            {/* [음성] onWakeWordChange 를 넘긴 화면에서만 그린다 — 오피스 등 재사용처를 건드리지 않는다. */}
-            {onWakeWordChange && (
-              <VoiceBar
-                terminalId={terminalId}
-                wakeWord={wakeWord || ''}
-                onWakeWordChange={onWakeWordChange}
-              />
-            )}
             <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 opacity-80 hover:opacity-100 transition-opacity items-center">
               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
               {shortcuts.map((sc, i) => (
@@ -1081,6 +1073,22 @@ export default function TerminalSlot({
       )}
 
       </div>
+
+      {/* [음성] 슬롯 최하단에 **항상** 그린다.
+          [🔴 과거사고 2026-08-15] 처음에는 터미널 입력줄 안쪽에 뒀는데, 그 입력줄은
+            isTerminalMode 일 때만 존재한다. 그래서 에이전트 선택 카드 화면(터미널을 아직
+            안 띄운 슬롯)에서는 마이크가 통째로 사라져 "마이크 모양도 없다"는 지적을 받았다.
+            목소리 고르기·답 듣기는 터미널이 없어도 만질 수 있어야 하는 설정이다.
+          [제약] onWakeWordChange 를 넘긴 화면에서만 — 오피스 등 재사용처는 건드리지 않는다. */}
+      {onWakeWordChange && (
+        <div className="px-2 py-1.5 border-t border-black/40 bg-[#252526] shrink-0">
+          <VoiceBar
+            terminalId={terminalId}
+            wakeWord={wakeWord || ''}
+            onWakeWordChange={onWakeWordChange}
+          />
+        </div>
+      )}
 
       {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}
       {isTerminalMode && (

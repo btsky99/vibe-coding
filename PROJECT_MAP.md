@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 02:34
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 08:52
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 19개 · 미푸시 7커밋
+- **브랜치**: `main` · 미커밋 35개 · 미푸시 9커밋
 - **최근 커밋**
+  - `01b58f0` 2026-08-15 — refactor(ui): 터미널 선택 화면 하단 '상태판 · 원격 노드' 섹션 제거
+  - `e2e1c50` 2026-08-15 — feat(voice): 로컬 음성 입출력 — 슬롯별 호출어로 말해서 지시하고 답을 듣는다
   - `c8e254c` 2026-08-14 — feat(recall): 회상 v2 e5 전환 — 임베딩 모델 교체 + 임계 실측 재설정
   - `24006ac` 2026-08-14 — fix(instance): 좀비가 락 포트를 물면 개발 서버가 영구 기동 불가
   - `93148a6` 2026-08-14 — refactor(apix): 중앙 대화 서버 잔재 제거 — VPS 구축 스크립트 + 실행 그래프 선언
-  - `95bc9a8` 2026-08-14 — fix(setup): 기본 설치팩이 다 깔린 뒤에도 매 실행 다시 뜨던 문제
-  - `f082143` 2026-08-14 — fix(lan): 설치본에서 LAN 브리지가 안 뜨던 결함 + 바로가기 관리자 권한 자동 체크
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 00:54** 의도: 아픽스 음성(STT+TTS) 기능을 vibe-coding 터미널 슬롯에 이식
@@ -28,15 +28,15 @@
   - 다음: 아픽스 전용 파일 삭제 + server.py/App.tsx 배선 제거, 딸린 것 선별 후
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **마이크 모양이 화면에 아예 없다 (음성 기능 커밋 후)**
+  - 원인: 원인 2개. (1) 프론트 dist 를 빌드하지 않아 앱이 옛 번들을 서빙 — dist 에 '호출어' 문자열 0건. (2) VoiceBar 를 터미널 입력줄 안쪽에 뒀는데 그 입력줄은 isTerminalMode 일 때만 존재 — 에이전트 선택 카드 화면에서는 음성 UI
+  - 수정: npm run build 로 dist 갱신 + VoiceBar 를 슬롯 최하단(isTerminalMode 밖)으로 이동해 항상 렌더
+- **음성 사이드카 /status 가 404 를 돌려주고 목소리/마이크가 동작 안 함**
+  - 원인: VOICE_PORT 9021 이 LAN 브리지와 충돌. 포트 지도의 '다음 빈 자리'를 잡았는데 LAN 브리지는 한 자리가 아니라 인스턴스마다 9020,9021,.. 로 번진다. status 요청이 LAN 브리지로 가 404
+  - 수정: VOICE_PORT 9021 -> 9030 (voice_api.py + voice_server.py 양쪽). 포트 지도의 다음 자리는 안전하지 않다는 주석 추가
 - **개발 서버가 실행 즉시 조용히 종료 (server.log에 'Server Started'만 반복, 본문 0줄)**
   - 원인: 커널 대기(wait=Executive)에 갇혀 관리자 권한 Stop-Process도 안 먹는 좀비 pythonw가 인스턴스 락 포트 19276을 영구 점유. instance_lock.acquire_single_instance_lock이 bind 실패를 곧바로 '이미 실
   - 수정: 락 소켓에 생존 핸드셰이크(listen+accept 배너) 도입. bind 실패 시 핸드셰이크(+구버전용 HTTP project_id 대조 보조)로 주인의 생사를 판정하고, 좀비로 확인된 경우에만 다음 락 포트로 회수(최대 20칸). 전부 점유면 재부팅 안내 후 exi
-- **기본 설치팩 배너가 설치 완료 후에도 매 실행 표시 + 자동 설치 cmd 창 반복**
-  - 원인: SetupBanner가 toolchain 배열 존재만으로 렌더링(서버는 항상 4개 반환) / 자동설치 억제가 프로세스 메모리 쿨다운뿐이라 재시작마다 리셋 → CREATE_NEW_CONSOLE 재실행
-  - 수정: 미설치 도구만 렌더+표시할 것 없으면 배너 미렌더, launch_ai_toolchain_installer(visible) 도입해 자동은 무창, 자동 시도 3회 상한을 디스크에 기록 (95bc9a8)
-- **설치본에서 LAN 브리지 '켜기'가 동작하지 않음 (토글 후 재시작해도 브리지 미기동, 오류도 없음)**
-  - 원인: run_lan_bridge가 실행기를 runtime.python_runner_cmds()[0]로 골랐는데 이 함수는 frozen에서 앱 EXE를 후보에서 일부러 제외한다. Python 미설치 PC는 마지막 폴백 'python'이 나가 proc.popen이 FileNot
-  - 수정: runtime.script_runner_cmd() 신설 — frozen이면 sys.executable(앱 EXE, boot.py가 .py 인자를 runpy로 받음). run_lan_bridge/run_watchdog/run_codex_pg_watcher가 이걸 사용. 
 
 🔨 = 최근 7일 내 변경된 파일
 
@@ -125,7 +125,7 @@
 | `update_api.py` | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
-| `voice_api.py` | 177 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
+| `voice_api.py` 🔨 | 182 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
 | `zettel_api.py` | 203 | Hive Zettelkasten REST API 핸들러. |
 
 ### 데이터 계층 (.ai_monitor/src/)
@@ -169,7 +169,7 @@
 ### 인프라 계층 (.ai_monitor/infra/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `app_boot.py` | 448 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
+| `app_boot.py` 🔨 | 448 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
 | `daemons.py` 🔨 | 1007 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
@@ -189,16 +189,17 @@
 | `session_parse.py` 🔨 | 163 | CLI 세션 파일(JSONL/JSON) 토큰 usage 파서 모음. |
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
 | `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
-| `voice_turn.py` | 113 | 음성 낭독용 '턴 채널' 저장소 — Stop 훅이 쓰고 /api/voice/turn 이 읽는다. |
-| `webview_permissions.py` | 104 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
+| `voice_turn.py` 🔨 | 113 | 음성 낭독용 '턴 채널' 저장소 — Stop 훅이 쓰고 /api/voice/turn 이 읽는다. |
+| `webview_permissions.py` 🔨 | 104 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
 | `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
 
 ### 음성 사이드카 (.ai_monitor/voice-server/) — 별도 프로세스·별도 venv
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `engines/tts_cosyvoice.py` | 85 | CosyVoice2 낭독 어댑터. 텍스트를 받아 WAV 바이트를 돌려준다. |
-| `engines/tts_sherpa.py` | 124 | sherpa-onnx VITS 한국어 낭독 어댑터. 텍스트 → WAV 바이트. |
-| `voice_server.py` | 247 | 음성 사이드카 — 로컬 STT(faster-whisper) / TTS(CosyVoice2·IndexTTS2) 서버. |
+| `engines/tts_cosyvoice.py` | 88 | CosyVoice2 낭독 어댑터. 텍스트를 받아 WAV 바이트를 돌려준다. |
+| `engines/tts_sapi.py` | 123 | Windows 내장 음성(SAPI5) 낭독 어댑터. 텍스트 → WAV 바이트. |
+| `engines/tts_sherpa.py` | 125 | sherpa-onnx VITS 한국어 낭독 어댑터. 텍스트 → WAV 바이트. |
+| `voice_server.py` | 335 | 음성 사이드카 — 로컬 STT(faster-whisper) / TTS(CosyVoice2·IndexTTS2) 서버. |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -322,11 +323,12 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
+| `setup_voice.py` | 97 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
 | `smoke_test.py` | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
 | `tui.py` 🔨 | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
-| `voice_turn_hook.py` | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
+| `voice_turn_hook.py` 🔨 | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
 | `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
 | `zettel_capture.py` 🔨 | 703 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` 🔨 | 988 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
@@ -351,7 +353,7 @@
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
 | `SetupBanner.tsx` 🔨 | 239 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 264 | 설명: 상태판 독립 창(?page=status) 본체. 이 PC의 콘솔 창 — |
-| `TerminalSlot.tsx` 🔨 | 1106 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
+| `TerminalSlot.tsx` 🔨 | 1114 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
 | `TopMenuBar.tsx` | 574 | 설명: VS Code 스타일 상단 메뉴바 컴포넌트. |
 | `VibeEditor.tsx` | 141 | 설명: Monaco Editor 기반 코드 편집기 — VS Code 스타일 하이라이팅/주석 색상 강화, |
@@ -375,27 +377,27 @@
 ### 터미널 하위 컴포넌트 (components/terminal/)
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `AgentSelectCards.tsx` | 182 | 설명: 터미널 미실행 슬롯의 에이전트 선택 카드 3장(Claude/Antigravity/Codex) |
+| `AgentSelectCards.tsx` 🔨 | 174 | 설명: 터미널 미실행 슬롯의 에이전트 선택 카드 3장(Claude/Antigravity/Codex) |
 | `AgentUsageBar.tsx` | 191 | 터미널 하단의 에이전트별 플랜·컨텍스트 사용량 바와 상세 팝업. |
 | `ClaudeContextBar.tsx` | 277 | 설명: Claude 컨텍스트 컬러 블록 바 + 클릭 상세 팝업(/context 스타일 블록 그리드, |
 | `MonitorView.tsx` | 169 | 설명: 자율 에이전트 모니터링 뷰 — 상태 뱃지, 오케스트레이터 스킬 체인 배지, |
 | `QuotaBadge.tsx` | 87 | 설명: 터미널 헤더 플랜 쿼터 배지 — Claude/Codex 5h 게이지+% · 7d %. |
-| `RemoteHostCards.tsx` | 151 | 설명: ~/.ssh/config의 Host 별칭을 카드로 띄우고, 원격 셸/클로드/코덱스를 |
 | `ShortcutEditModal.tsx` | 47 | 터미널 단축어(사용자 커스텀 명령) 편집 모달. |
 | `SlashCommandMenu.tsx` | 66 | 터미널 입력 영역의 슬래시 커맨드(`/`) 드롭다운 — 카테고리별 |
 | `TerminalSlotHeader.tsx` 🔨 | 189 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
-| `VoiceBar.tsx` | 150 | 설명: 터미널 슬롯 입력줄 옆의 음성 조작부 — 마이크 버튼, 상시 대기 토글, |
+| `VoiceBar.tsx` 🔨 | 187 | 설명: 터미널 슬롯 입력줄 옆의 음성 조작부 — 마이크 버튼, 상시 대기 토글, |
+| `VoiceSettings.tsx` | 136 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
 | `xtermSelection.ts` | 107 | 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸. |
 
 ### 공용 로직 (lib/)
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `audioCapture.ts` | 242 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
+| `audioCapture.ts` 🔨 | 242 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
 | `clipboard.ts` | 63 | 설명: 클립보드 읽기/쓰기 공용 헬퍼 — pywebview 네이티브 브리지 우선, navigator.clipboard 폴백. |
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
-| `speech.ts` | 236 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` | 364 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `speech.ts` 🔨 | 236 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
+| `voiceBus.ts` 🔨 | 438 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -405,7 +407,7 @@
 | `useOfficePty.ts` | 285 | 오피스 채팅 ↔ PTY 직접 통신 훅. |
 | `useOfficeState.ts` | 269 | 메타버스 오피스 전용 파생 상태 계산 훅. |
 | `useVibeData.ts` | 387 | 설명: 바이브 코딩 데이터 폴링 커스텀 훅. |
-| `useVoice.ts` | 50 | 설명: lib/voiceBus.ts(전역 싱글턴)를 React 에 잇는 얇은 층. 상태 구독과 |
+| `useVoice.ts` 🔨 | 50 | 설명: lib/voiceBus.ts(전역 싱글턴)를 React 에 잇는 얇은 층. 상태 구독과 |
 | `useWorkspaceProfiles.ts` | 428 | 오피스 모드 회사 조직 관리 훅. |
 
 ## 🧪 테스트 (tests/)
@@ -491,4 +493,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 02:34
+> 자동 생성 완료: 2026-08-15 08:52

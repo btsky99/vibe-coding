@@ -1,0 +1,26 @@
+# 음성 사이드카 전용 의존성.
+#
+# [🔴 앱 venv 에 섞지 말 것] 이 목록은 .ai_monitor/voice-server/.venv 에만 깔린다.
+#   앱 venv 와 합치면 onnxruntime/ctranslate2 가 앱 의존성과 버전을 다투고, 음성을 안 쓰는
+#   사용자까지 200MB 넘는 설치를 떠안는다. 프로세스를 가른 이유가 그것이다(voice_server.py 헤더).
+#
+# 설치:
+#   python scripts/setup_voice.py    (venv 생성 + 아래 설치 + 임포트 검증까지)
+#   또는 수동:
+#   uv venv .ai_monitor/voice-server/.venv --python 3.11
+#   VIRTUAL_ENV=.ai_monitor/voice-server/.venv uv pip install -r .ai_monitor/voice-server/requirements.txt
+#
+# [제약 — 파이썬 3.11] ctranslate2 휠이 3.13 에 아직 없다(2026-08 기준). 3.12 는 되지만
+#   실측한 조합은 3.11 이다.
+
+# 받아쓰기(STT)
+faster-whisper==1.2.1
+
+# 낭독(TTS) — sherpa-onnx VITS 한국어. 모델 자체는 첫 사용 때 내려받는다(62MB).
+sherpa-onnx==1.13.5
+numpy>=2.0
+
+# 낭독(TTS) — Windows 내장 음성(SAPI5, 한국어 Heami).
+# [WHY 조건부인가] 윈도우 전용 패키지라 다른 OS 에서는 설치 자체가 실패한다.
+#   없어도 sherpa 로 동작하므로 목소리 선택지만 줄어든다.
+pywin32==312; sys_platform == 'win32'

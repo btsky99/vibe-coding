@@ -14,13 +14,16 @@
  *
  * REVISION HISTORY:
  * - 2026-08-15 Claude: 최초 작성 — 로컬 음성(STT/TTS) UI
+ * - 2026-08-15 Claude: 아이콘만으로는 무슨 기능인지 안 보인다는 지적 — 글자 라벨과
+ *   낭독 체크박스를 붙이고, 목소리 선택(⚙ VoiceSettings)을 연다
  * ------------------------------------------------------------------------
  */
 
 import { useState } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Loader2, Square } from 'lucide-react';
+import { Mic, MicOff, Loader2, Square, Settings2, Check } from 'lucide-react';
 import { voiceBus } from '../../lib/voiceBus';
 import { useVoiceState } from '../../hooks/useVoice';
+import VoiceSettings from './VoiceSettings';
 
 interface Props {
   /** 'T1' 형식 */
@@ -34,6 +37,7 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
   const v = useVoiceState();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(wakeWord);
+  const [showSettings, setShowSettings] = useState(false);
 
   const isTarget = v.target === terminalId;
   const busy = v.busy;
@@ -44,9 +48,13 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
     if (clean !== wakeWord) onWakeWordChange(clean);
   };
 
+  const voiceLabel = v.voices.find((o) => o.id === (v.voice || v.voices[0]?.id))?.label || '기본';
+
   return (
-    <div className="flex items-center gap-1.5 text-[10px]">
-      {/* 누르고 말하기 — 호출어 없이 이 슬롯에 바로 말한다 */}
+    <div className="flex items-center gap-1.5 text-[10px] relative">
+      {/* 누르고 말하기 — 호출어 없이 이 슬롯에 바로 말한다.
+          [WHY 글자를 같이 두나] 마이크 아이콘 두 개(누르고 말하기 / 상시 대기)가 나란히
+          있으면 아이콘만으로는 구분되지 않는다 — 실제로 "마이크 모양이 없다"는 지적을 받았다. */}
       <button
         onPointerDown={(e) => {
           e.preventDefault();
@@ -55,40 +63,69 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
         onPointerUp={() => voiceBus.releaseToTalk()}
         onPointerCancel={() => voiceBus.releaseToTalk()}
         title="누르고 있는 동안 이 슬롯에 말합니다"
-        className={`px-2 py-1 rounded border transition-colors ${
+        className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors ${
           isTarget && v.speaking
             ? 'bg-red-500/30 border-red-400/60 text-red-200'
             : 'bg-[#3c3c3c] border-white/10 hover:bg-white/10 text-white/70'
         }`}
       >
         {busy ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />}
+        <span>말하기</span>
       </button>
 
       {/* 상시 대기 — 호출어로 부르면 깨어난다 */}
       <button
         onClick={() => (v.enabled ? voiceBus.disable() : void voiceBus.enable())}
         title={v.enabled ? '상시 대기 끄기' : '상시 대기 켜기 (호출어로 부르면 반응)'}
-        className={`px-2 py-1 rounded border transition-colors ${
+        className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors ${
           v.enabled
             ? 'bg-primary/25 border-primary/40 text-primary'
             : 'bg-[#3c3c3c] border-white/10 hover:bg-white/10 text-white/50'
         }`}
       >
         {v.enabled ? <Mic size={12} /> : <MicOff size={12} />}
+        <span>{v.enabled ? '듣는 중' : '상시 대기'}</span>
       </button>
 
-      {/* 낭독 */}
+      {/* 답을 소리로 들을 것인가 — 체크 표시로 상태가 한눈에 보이게 한다 */}
       <button
-        onClick={() => voiceBus.setTts(!v.ttsOn)}
+        onClick={() => voiceBus.setTts(!v.ttsOn, terminalId)}
         title={v.ttsOn ? '답 낭독 끄기' : '답 낭독 켜기'}
-        className={`px-2 py-1 rounded border transition-colors ${
+        className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors ${
           v.ttsOn
             ? 'bg-primary/25 border-primary/40 text-primary'
             : 'bg-[#3c3c3c] border-white/10 hover:bg-white/10 text-white/50'
         }`}
       >
-        {v.ttsOn ? <Volume2 size={12} /> : <VolumeX size={12} />}
+        <span
+          className={`w-3 h-3 rounded-[3px] border flex items-center justify-center ${
+            v.ttsOn ? 'bg-primary border-primary text-white' : 'border-white/30'
+          }`}
+        >
+          {v.ttsOn && <Check size={9} strokeWidth={3} />}
+        </span>
+        <span>답 듣기</span>
       </button>
+
+      {/* 목소리 고르기 */}
+      <button
+        onClick={() => {
+          // [🔴 여기서 checkReady 를 부르는 이유] 사이드카는 첫 status 요청 때 뜬다.
+          //   패널을 열었는데 목록이 비어 있으면 사용자는 '목소리가 없다'고 읽는다.
+          if (!showSettings) void voiceBus.checkReady();
+          setShowSettings((s) => !s);
+        }}
+        title="어떤 목소리로 읽을지 고릅니다"
+        className={`flex items-center gap-1 px-2 py-1 rounded border transition-colors max-w-[9rem] ${
+          showSettings
+            ? 'bg-primary/25 border-primary/40 text-primary'
+            : 'bg-[#3c3c3c] border-white/10 hover:bg-white/10 text-white/60'
+        }`}
+      >
+        <Settings2 size={12} className="shrink-0" />
+        <span className="truncate">{voiceLabel}</span>
+      </button>
+      {showSettings && <VoiceSettings onClose={() => setShowSettings(false)} />}
 
       {v.playing && (
         <button

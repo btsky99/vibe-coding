@@ -64,7 +64,10 @@ class CosyVoiceEngine:
         self.prompt = load_wav(str(PROMPT_WAV), 16000)
         self.sample_rate = getattr(self.model, 'sample_rate', 24000)
 
-    def synth(self, text: str) -> bytes:
+    def synth(self, text: str, speed: float = 0.0) -> bytes:
+        # [제약] speed 는 받기만 하고 쓰지 않는다 — 어댑터 시그니처를 sherpa/sapi 와 맞추기
+        #   위한 것이다. CosyVoice2 의 inference 에도 speed 인자가 있지만 이 PC 에 모델이
+        #   없어 실측을 못 했다. 검증 없이 넘겨서 합성이 깨지는 쪽이 더 나쁘다.
         if self.model is None:
             self.load()
 

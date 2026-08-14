@@ -58,10 +58,26 @@ export interface VoiceState {
   ready: boolean;
   /** 마지막 오류 — 조용히 죽지 않게 사람에게 보인다. */
   error: string;
+  /** 고를 수 있는 목소리 — 서버가 실제로 합성 가능한 것만 준다. */
+  voices: VoiceOption[];
+  /** 지금 고른 목소리 id. 빈 값이면 서버 기본값. */
+  voice: string;
+  /** 낭독 속도 배율(0.5~1.5). */
+  speed: number;
+}
+
+export interface VoiceOption {
+  id: string;
+  label: string;
+  engine: string;
+  lang: string;
+  note?: string;
 }
 
 const TTS_KEY = 'vibe.voice.tts';
 const WAKE_ENABLED_KEY = 'vibe.voice.enabled';
+const VOICE_KEY = 'vibe.voice.id';
+const SPEED_KEY = 'vibe.voice.speed';
 
 /** 답을 다 읽은 뒤 이 시간 동안은 호출어 없이 바로 이어 말할 수 있다. */
 const FOLLOW_MS = 12000;
@@ -78,6 +94,13 @@ class VoiceBus {
     message: '',
     ready: false,
     error: '',
+    voices: [],
+    // [WHY localStorage 인가] 목소리는 이 PC 에 뭐가 깔려 있느냐에 달린 기기별 취향이다.
+    //   프로젝트 config(=다른 PC 와도 공유되는 값)에 넣으면 그 PC 에 없는 목소리를 가리킨다.
+    voice: (() => { try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; } })(),
+    speed: (() => {
+      try { return Number(localStorage.getItem(SPEED_KEY)) || 1.0; } catch { return 1.0; }
+    })(),
   };
 
   private listeners = new Set<() => void>();
@@ -161,10 +184,26 @@ class VoiceBus {
     this.set({ enabled: false, speaking: false, level: 0, message: '' });
   }
 
-  setTts(on: boolean): void {
+  /**
+   * 답을 소리로 들을지.
+   *
+   * [🔴 마이크와 독립이다] 예전에는 낭독 폴링이 enabled(마이크 켜짐)에 묶여 있어, 마이크를
+   *   켜지 않으면 체크를 해도 아무 소리가 나지 않았다 — 사용자에게는 고장으로 보인다.
+   *   '손으로 치고 답은 귀로 듣는다'는 정상적인 사용 방식이라 조건에서 뺐다.
+   * [WHY slotId 를 받나] 마이크가 없으면 호출어로 대상이 정해질 일이 없다. 체크를 누른
+   *   슬롯이 곧 '읽어 줄 대상'이다 — 안 그러면 target 이 null 이라 영영 아무것도 안 읽는다.
+   */
+  setTts(on: boolean, slotId?: string): void {
     try { localStorage.setItem(TTS_KEY, on ? '1' : '0'); } catch { /* 저장 실패는 무시 */ }
     if (!on) this.stopSpeaking();
-    this.set({ ttsOn: on });
+    this.set({ ttsOn: on, target: on ? (slotId ?? this.state.target) : this.state.target });
+    if (on) {
+      void this.checkReady();                 // 사이드카가 아직 없으면 여기서 기동이 시작된다
+      this.scheduleTurnPoll(1500);
+    } else if (this.turnTimer) {
+      clearTimeout(this.turnTimer);
+      this.turnTimer = null;
+    }
   }
 
   /* ── 누르고 말하기 ───────────────────────────────────────────────────── */
@@ -264,7 +303,7 @@ class VoiceBus {
 
   private scheduleTurnPoll(ms: number): void {
     if (this.turnTimer) clearTimeout(this.turnTimer);
-    if (!this.state.enabled || !this.state.ttsOn) return;
+    if (!this.state.ttsOn) return;              // 마이크 상태와 무관 — setTts 주석 참조
     this.turnTimer = setTimeout(() => { void this.pollTurn(); }, ms);
   }
 
@@ -278,7 +317,7 @@ class VoiceBus {
    */
   private async pollTurn(): Promise<void> {
     const slot = this.state.target;
-    if (!slot || !this.state.ttsOn || !this.state.enabled) { this.scheduleTurnPoll(8000); return; }
+    if (!slot || !this.state.ttsOn) { this.scheduleTurnPoll(8000); return; }
     try {
       const res = await fetch(`${API_BASE}/api/voice/turn?terminal=${encodeURIComponent(slot)}`,
         { cache: 'no-store' });
@@ -297,8 +336,29 @@ class VoiceBus {
     this.scheduleTurnPoll(this.state.playing ? 8000 : 3000);
   }
 
+  setVoice(id: string): void {
+    try { localStorage.setItem(VOICE_KEY, id); } catch { /* 저장 실패는 무시 */ }
+    this.set({ voice: id });
+  }
+
+  setSpeed(v: number): void {
+    const speed = Math.max(0.5, Math.min(1.5, Number(v) || 1.0));
+    try { localStorage.setItem(SPEED_KEY, String(speed)); } catch { /* 저장 실패는 무시 */ }
+    this.set({ speed });
+  }
+
+  /**
+   * 고른 목소리를 짧은 문장으로 들려준다.
+   *
+   * [WHY 미리듣기가 필요한가] 목소리는 이름만 봐서는 고를 수 없다. 실제로 들어 보지 않으면
+   *   사용자는 답이 올 때까지 기다렸다가 마음에 안 들면 다시 고르는 짓을 반복한다.
+   */
+  async preview(id?: string): Promise<void> {
+    await this.speak('안녕하세요. 이 목소리로 답을 읽어 드릴게요.', id ?? this.state.voice);
+  }
+
   /** 마크다운 답을 귀로 들을 문장으로 바꿔 서버에 합성을 맡기고 재생한다. */
-  async speak(markdown: string): Promise<void> {
+  async speak(markdown: string, voiceOverride?: string): Promise<void> {
     const text = toSpeech(markdown);
     if (!text) return;
     this.stopSpeaking();
@@ -309,7 +369,11 @@ class VoiceBus {
       const res = await fetch(`${API_BASE}/api/voice/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          voice: voiceOverride ?? this.state.voice,
+          speed: this.state.speed,
+        }),
       });
       if (!res.ok) throw new Error(`tts ${res.status}`);
       const blob = await res.blob();
@@ -353,7 +417,17 @@ class VoiceBus {
     try {
       const res = await fetch(`${API_BASE}/api/voice/status`, { cache: 'no-store' });
       const d = await res.json();
-      this.set({ ready: !!d?.ready, error: d?.ready ? '' : String(d?.detail || '') });
+      const voices: VoiceOption[] = Array.isArray(d?.voices) ? d.voices : [];
+      // [🔴 저장된 목소리가 이 PC 에 없을 수 있다] 다른 PC 에서 쓰던 값이 남아 있거나
+      //   음성이 제거된 경우다. 그대로 두면 낭독이 매번 실패한다 — 서버 기본값으로 되돌린다.
+      const stale = this.state.voice && voices.length > 0
+        && !voices.some((v) => v.id === this.state.voice);
+      this.set({
+        ready: !!d?.ready,
+        error: d?.ready ? '' : String(d?.detail || ''),
+        voices,
+        voice: stale ? String(d?.voice || '') : this.state.voice,
+      });
     } catch {
       this.set({ ready: false });
     }

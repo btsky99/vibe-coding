@@ -37,9 +37,14 @@ from pathlib import Path
 
 from api._common import json_response as _json_response
 
-# 사이드카 포트. [제약] 멀티 인스턴스 포트 지도(9000-9009 서버 / 9010+ 오피스 /
-# 9019 heartbeat / 9020 LAN)의 다음 자리다. 바꾸면 그 문서도 같이 고칠 것.
-VOICE_PORT = int(os.environ.get('VOICE_PORT', '9021'))
+# 사이드카 포트.
+# [🔴 과거사고 2026-08-15 — 9021 은 쓸 수 없다] 포트 지도(9000-9009 서버 / 9010+ 오피스 /
+#   9019 heartbeat / 9020 LAN)를 보고 '다음 자리'인 9021 을 잡았는데, LAN 브리지는 한 자리가
+#   아니라 인스턴스마다 9020,9021,… 로 번진다(실측: 두 인스턴스가 9020·9021 점유).
+#   결과가 나쁜 쪽으로 조용했다 — 사이드카는 뜨지도 못하고, /status 요청은 LAN 브리지가
+#   받아 404 를 돌려줘 '음성 엔진 준비 안 됨'으로만 보였다. 포트 지도의 '다음 자리'는
+#   안전하지 않다. 대역을 띄워 잡는다.
+VOICE_PORT = int(os.environ.get('VOICE_PORT', '9030'))
 BASE_URL = f'http://127.0.0.1:{VOICE_PORT}'
 
 _spawn_lock = threading.Lock()
