@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-14 19:17
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-14 20:57
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,35 +8,35 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 47개 · 미푸시 0커밋
+- **브랜치**: `main` · 미커밋 13개 · 미푸시 3커밋
 - **최근 커밋**
+  - `f082143` 2026-08-14 — fix(lan): 설치본에서 LAN 브리지가 안 뜨던 결함 + 바로가기 관리자 권한 자동 체크
+  - `c7e95fb` 2026-08-14 — docs(rules): 절대 규칙 10 신설 — 사람이 안 시킨 실행은 콘솔 창을 띄우지 않는다
+  - `346a33d` 2026-08-14 — refactor(apix): 아픽스 계층 전면 철거 — 중앙 대화·일감·노드 상태 -7946줄
   - `0f11b12` 2026-08-14 — refactor(apix): 노드 푸시 잔재 4파일 제거 — APIX 노드 런타임으로 이관 완료
   - `f5123a6` 2026-08-14 — chore(release): auto-bump version to v3.7.338 [skip ci]
-  - `c6f3cda` 2026-08-14 — refactor(discord): 디스코드 연동 전면 제거 — 커넥터 계층까지 철거
-  - `f6e02a4` 2026-08-14 — fix(recycle): 화석 계측과 팬아웃 처형 제거 — T1·T2 반복 종료 근본 수정
-  - `0c63d18` 2026-08-12 — docs(plan): 요구 6개 재정의 + herdr 방향 반영 — Phase 12 재작성
 
 ### 📍 최근 체크포인트 (중단 지점)
-- **08-14 19:13** 의도: vibe-coding에서 아픽스 계층 전면 제거 (사용자 지시)
+- **08-14 19:48** 의도: 설치본 LAN 브리지 미기동 수정 + 바로가기 관리자 권한 자동 체크
+  - 결정: 데몬 .py 실행기를 runtime.script_runner_cmd(frozen이면 앱 EXE)로 통일, .lnk LinkFlags 바이트 패치로 관리자 권한
+  - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
+- **08-14 19:24** 의도: vibe-coding에서 아픽스 계층 전면 제거 (사용자 지시)
   - 결정: 깜빡임 진범=apix_runner watch 1초 폴링 콘솔숨김 누락. 러너 종료+스케줄러 삭제 완료
   - 다음: 아픽스 전용 파일 삭제 + server.py/App.tsx 배선 제거, 딸린 것 선별 후
 - **08-13 21:40** 의도: herdr-kr 포크: 한글화 1차 + 전역 메뉴 확장(에이전트 실행/프로젝트 열기/폴더 열기) 구현
   - 결정: 메뉴 항목은 [kr] 설정 섹션으로 정의(재빌드 없이 추가 가능). 라벨/액션은 global_menu_entries() 단일 원천으로 통합
   - 다음: 폴더 열기 다이얼로그에 목록 렌더링 추가 — ui/dialogs.rs render_kr_path_overlay + overlays.rs inner rect + mouse.rs 분기. 로직/상태는 이미 완료
-- **08-12 23:14** 의도: APIX 제품 구성 확정 — 중앙(btsky.pe.kr)+노드(herdr포크)+바이브코딩 별개
-  - 결정: 각 PC 상주는 herdr(PTY소유·상태자동판정·소켓API), 바이브코딩은 상주에서 뺌 / herdr 본체 안 뜯고 얇은 러너로 소켓만 / herdr-kr → APIX 리네임(upstream 유지, T5 조율 후) / 자율대화보다 비서경유+일감방(사회자=비서)
-  - 다음: 12-B 착수: Task 62 pg_hba 정리(선결) → 55 콘솔 일감API → 56 board화면. 실행백엔드 추상화 한 겹 넣어 herdr 이음매 확보
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **설치본에서 LAN 브리지 '켜기'가 동작하지 않음 (토글 후 재시작해도 브리지 미기동, 오류도 없음)**
+  - 원인: run_lan_bridge가 실행기를 runtime.python_runner_cmds()[0]로 골랐는데 이 함수는 frozen에서 앱 EXE를 후보에서 일부러 제외한다. Python 미설치 PC는 마지막 폴백 'python'이 나가 proc.popen이 FileNot
+  - 수정: runtime.script_runner_cmd() 신설 — frozen이면 sys.executable(앱 EXE, boot.py가 .py 인자를 runpy로 받음). run_lan_bridge/run_watchdog/run_codex_pg_watcher가 이걸 사용. 
+- **주기적 검은 콘솔 창 깜빡임 재발 — 타이핑 중 포커스 상실**
+  - 원인: D:\apix\node\apix_runner.py --watch 가 WATCH_POLL_S=1.0 으로 1초마다 build_inventory() -> subprocess.run([apix.exe,...]) 를 creationflags 없이 호출. d423a7d 에서 고
+  - 수정: 러너 프로세스 종료 + 작업 스케줄러 APIX Node Push 삭제 + vibe-coding 에서 아픽스 계층 전면 철거(346a33d) + CLAUDE.md 절대 규칙 10 신설(c7e95fb)
 - **T1/T2 터미널이 60초마다 반복 종료(api_terminate) — 크래시로 오인**
   - 원인: 자동 리사이클 워처가 (1) 종료된 세션의 화석 사용률(853206/1000000=85.3%, 마지막 쓰기 7시간 전)을 현재값으로 읽고 (2) agent==claude인 running 슬롯을 전부 처형(팬아웃)했다. 새로 태어난 세션은 첫 assistant 응답 전에
   - 수정: 세션↔슬롯 결속(src/session_binding.py: first_ts>=slot.started + mtime vs last_output_at 대조)으로 터미널별 계측 도입, 워처는 status['terminals']만 보고 결속된 터미널 하나씩만 처형. claud
-- **herdr: 액세스가 거부되었습니다. (os error 5) [코드 1로 프로세스 종료됨] — 바탕화면 바로가기 실행 시 반복**
-  - 원인: 권한 상승(관리자) 컨텍스트에서 herdr 서버를 띄우면 named pipe 소유자가 BUILTIN\Administrators 로 잡힌다. src/ipc.rs 의 SDDL 이 D:P(A;;GA;;;SY)(A;;GA;;;OW) — SYSTEM 과 '소유자'에게만 전권이라
-  - 수정: 관리자 셸에서 herdr 서버를 띄우지 않는다. 이미 떴으면 herdr 전부 종료 + 소켓 마커 파일 삭제 후 일반 권한(explorer 경유 또는 더블클릭)으로 재실행. 파이프 소유자가 YJSCOM\com 으로 바뀌면 정상. 포크에는 main.rs 에 Permissi
-- **노드 간 대화: 글씨는 주입되는데 엔터가 안 눌려 상대 클로드가 못 읽음 + 읽어도 답장 불가**
-  - 원인: 3중 원인 — ①배달이 프론트 poll에 얹혀 있어 UI가 안 돌면 배달 0건(근거였던 '커서는 하나뿐'이 틀림: message_cursors 키는 node_id+agent_id) ②Enter를 본문과 한 덩어리로 보내 Ink TUI가 붙여넣기로 판정해 CR을 줄바꿈으
-  - 수정: fetch_new에 cursor_key 추가해 배달 전용 커서 분리 + 리스너가 deliver_pending 호출 + pty-server가 본문/Enter를 150ms 띄워 별도 전송하고 본문 개행 제거 + _reply_script()로 절대경로 안내
 
 ### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
 - `scripts/hive_hook.py` — 30일 내 3건
@@ -121,10 +121,10 @@
 | `pty_api.py` 🔨 | 255 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
 | `recycle_api.py` 🔨 | 489 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
-| `setup_api.py` | 137 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
+| `setup_api.py` | 193 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
-| `tools_api.py` 🔨 | 1311 | AI 도구 CLI 설치 관리 API. |
+| `tools_api.py` 🔨 | 1359 | AI 도구 CLI 설치 관리 API. |
 | `update_api.py` 🔨 | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
@@ -174,7 +174,7 @@
 | `app_boot.py` | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 986 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
+| `daemons.py` 🔨 | 1000 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
 | `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `folder_dialog.py` 🔨 | 139 | 윈도우 네이티브 폴더 선택 다이얼로그(SHBrowseForFolderW, ctypes). |
@@ -187,7 +187,7 @@
 | `proc.py` | 35 | Windows 콘솔 숨김 subprocess 공용 래퍼. 앱의 모든 subprocess 호출이 |
 | `project_context.py` | 204 | Platform Phase 2-3 — 활성 프로젝트 컨텍스트 Resolver. |
 | `pty_process.py` | 483 | Node.js PTY 서버 프로세스 관리 함수 모음. |
-| `runtime.py` 🔨 | 158 | 시스템 런타임 보조 유틸 — Python 인터프리터 후보 탐색, |
+| `runtime.py` 🔨 | 204 | 시스템 런타임 보조 유틸 — Python 인터프리터 후보 탐색, |
 | `session_parse.py` 🔨 | 163 | CLI 세션 파일(JSONL/JSON) 토큰 usage 파서 모음. |
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
 | `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
@@ -340,7 +340,7 @@
 | `FilePathText.tsx` | 110 | 설명: 텍스트 내 파일 경로를 정규식으로 감지해 클릭 가능한 링크 세그먼트로 분리 렌더. |
 | `FileTreeNode.tsx` | 165 | 설명: 파일 탐색기의 단일 트리 노드 컴포넌트. |
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
-| `SetupBanner.tsx` | 227 | Setup Doctor 진단 결과를 상단 배너로 표시. |
+| `SetupBanner.tsx` | 239 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 264 | 설명: 상태판 독립 창(?page=status) 본체. 이 PC의 콘솔 창 — |
 | `TerminalSlot.tsx` 🔨 | 1084 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
@@ -373,10 +373,11 @@
 | `test_codex_harness_v2.py` | 86 | Focused tests for Codex Harness V2 bootstrap and entrypoints. |
 | `test_codex_orchestration.py` | 114 | Codex 라우팅과 오케스트레이터 연동 회귀 테스트. |
 | `test_codex_pg_watcher.py` | 108 | Tests for mirroring Codex CLI history into pg_logs. |
-| `test_console_scan.py` | 192 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
+| `test_console_scan.py` 🔨 | 192 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
 | `test_daemon_toggles.py` 🔨 | 329 | 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증. |
 | `test_harness_verify.py` | 218 | harness_verify.py V2 검증 스크립트의 단위 테스트. |
 | `test_hook_server_spawn_guard.py` 🔨 | 175 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
+| `test_installed_script_runner.py` 🔨 | 119 | 설치본(frozen EXE)에서 데몬 .py를 띄울 실행기 선택 회귀 테스트. |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | ITCP 폴백 로직 단위 테스트. |
 | `test_knowledge_pipeline.py` | 133 | 지식 노트 파이프라인 재설계 회귀 테스트 — 세션요약 노이즈 차단 + 파일지식 1급화 + |
@@ -393,7 +394,7 @@
 | `test_self_heal_2.py` | 231 | 자가 치유 2.0 회귀 방지 테스트 — 회상 v2(pgvector) 그레이스풀 |
 | `test_session_binding.py` 🔨 | 269 | 세션↔슬롯 결속 + 화석(stale) 판정 회귀 테스트. 방어 대상은 |
 | `test_session_recycle.py` | 280 | 컨텍스트 리사이클 GUARD/상태머신 회귀 테스트. 핵심 방어선은 |
-| `test_setup_auto_install.py` | 153 | First-run sequential automatic dependency installation API regression tests. |
+| `test_setup_auto_install.py` | 261 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
@@ -402,7 +403,7 @@
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
-| `test_windows_installer_toolchain.py` | 105 | Regression checks for prerequisite-first Windows installer packaging. |
+| `test_windows_installer_toolchain.py` | 111 | Regression checks for prerequisite-first Windows installer packaging. |
 | `test_zettel_oneway_default.py` 🔨 | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
 | `test_zettel_size_guard.py` 🔨 | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
@@ -445,4 +446,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-14 19:17
+> 자동 생성 완료: 2026-08-14 20:57

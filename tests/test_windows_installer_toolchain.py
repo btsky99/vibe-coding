@@ -56,7 +56,13 @@ def test_installer_stops_processes_that_can_respawn_bundled_node():
     assert r"\pty-server\pty-server.js" in installer
 
 
-def test_first_run_ui_reports_each_core_tool():
+def test_first_run_ui_reports_only_missing_core_tools():
+    """서버는 네 도구를 항상 내려주고, UI는 **안 깔린 것만** 보여준다.
+
+    [변경 2026-08-14] 예전엔 설치 완료 도구까지 나열해 배너가 영구히 남았다
+    ("설치됨" / "설치 완료 · 최초 1회 실행/로그인 필요" 칩). 설치가 끝난 뒤에도
+    계속 뜨는 게 문제였으므로 그 라벨들을 일부러 없앴다 — 되살리지 말 것.
+    """
     api = (ROOT / ".ai_monitor" / "api" / "setup_api.py").read_text(encoding="utf-8")
     ui = (
         ROOT / ".ai_monitor" / "vibe-view" / "src" / "components" / "SetupBanner.tsx"
@@ -65,8 +71,8 @@ def test_first_run_ui_reports_each_core_tool():
     assert 'core_ids = ("nodejs", "claude", "codex", "antigravity")' in api
     assert "기본 설치팩" in ui
     assert "확인·설치 중" in ui
-    assert "설치됨" in ui
-    assert "설치 완료 · 최초 1회 실행/로그인 필요" in ui
+    assert "pendingTools.length > 0" in ui          # 미설치가 있을 때만 그린다
+    assert "pendingTools.length === 0" in ui        # 없으면 배너 자체를 안 그린다
     assert "window.setInterval" in ui
 
 

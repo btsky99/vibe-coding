@@ -3,9 +3,12 @@
  * DESCRIPTION: Setup Doctor 진단 결과를 상단 배너로 표시.
  *              자동 수리된 항목은 잠시 표시 후 사라지고,
  *              사용자 조치가 필요한 항목만 지속적으로 배너에 남는다.
- *              "닫기" 시 localStorage에 기록하여 재표시 방지.
+ *              보여줄 게 하나도 없으면 배너 자체를 렌더링하지 않는다.
  *
  * REVISION HISTORY:
+ * - 2026-08-14 Claude: "기본 설치팩"이 전부 설치된 뒤에도 계속 떠 있던 문제 —
+ *                      미설치 도구가 있을 때만 표시하고, 표시할 게 없으면 배너를 안 그린다.
+ *                      자동 설치 폴링에 상한(5분)을 둬 영원히 도는 것도 차단.
  * - 2026-07-29 Codex: Explain that installed AI CLIs require a first launch and login.
  * - 2026-07-29 Codex: Show and poll per-tool first-run installation progress.
  * - 2026-07-29 Codex: Stop treating missing project hooks as a missing Claude installation.
@@ -67,23 +70,26 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   const [installingAction, setInstallingAction] = useState<string | null>(null);
   const [toolchainInstalling, setToolchainInstalling] = useState(false);
 
-  /* localStorage 키 — 사용자가 닫으면 다시 안 보임 */
   useEffect(() => {
-    /* 이전에 닫았으면 표시 안 함 */
-    localStorage.removeItem('setup_banner_dismissed');
-
     /* 서버에서 진단 결과 가져오기 */
     fetch(`${API_BASE}/api/setup/status`)
       .then(r => r.json())
       .then((data: SetupStatus) => {
         setStatus(data);
-        if (data.checks?.cli_agents?.status === 'missing') {
-          setToolchainInstalling(true);
+        /* [WHY toolchain 기준] cli_agents 진단은 nodejs를 안 보고, 반대로 toolchain은
+           네 도구의 실제 설치 상태다. 실제로 빠진 게 있을 때만 자동 설치를 부른다.
+           서버가 자동 경로를 무창 + 총 3회로 제한하므로 여기서 또 막지 않는다. */
+        const missing = (data.toolchain ?? []).filter(tool => !tool.installed);
+        if (missing.length > 0) {
           fetch(`${API_BASE}/api/setup/auto-install`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: '{}',
-          }).catch(() => { /* 설치 실패는 다음 실행의 진단 배너에서 다시 안내 */ });
+          })
+            .then(r => r.json())
+            /* 실제로 설치가 시작됐을 때만 폴링 — exhausted/idle에 켜면 영원히 돈다 */
+            .then(res => { if (res?.status === 'started' || res?.status === 'running') setToolchainInstalling(true); })
+            .catch(() => { /* 설치 실패는 다음 실행의 진단 배너에서 다시 안내 */ });
         }
         /* 자동 수리 항목은 5초 후 숨김 */
         if ((data.auto_fixed?.length ?? 0) > 0 && (data.needs_action?.length ?? 0) === 0) {
@@ -95,7 +101,15 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
 
   useEffect(() => {
     if (!toolchainInstalling) return;
+    /* [상한] 설치가 끝내 완료되지 않아도 폴링은 5분에서 멈춘다. 무한 폴링은 앱이 켜져
+       있는 내내 3초마다 setup_doctor 전체 진단(PATH 재병합 + which 호출)을 돌린다. */
+    let ticks = 0;
     const poll = window.setInterval(() => {
+      if (++ticks > 100) {
+        setToolchainInstalling(false);
+        setInstallingAction(null);
+        return;
+      }
       fetch(`${API_BASE}/api/setup/status`)
         .then(r => r.json())
         .then((data: SetupStatus) => {
@@ -113,6 +127,15 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   /* 렌더링 조건 */
   if (dismissed || !status) return null;
 
+  /* [WHY] 예전엔 toolchain 배열이 오기만 하면 "기본 설치팩" 줄을 그렸다. 서버는 네 도구를
+     설치 여부와 무관하게 **항상** 내려주므로, 설치가 다 끝난 PC에서도 배너가 영구히 남았다.
+     남길 이유가 있는 건 '아직 안 깔린 도구'뿐이다. */
+  const pendingTools = (status.toolchain ?? []).filter(tool => !tool.installed);
+  const hasFixedToShow = showFixed && (status.auto_fixed?.length ?? 0) > 0;
+  if (!hasFixedToShow && pendingTools.length === 0 && (status.needs_action?.length ?? 0) === 0) {
+    return null;
+  }
+
   const handleDismiss = () => {
     setDismissed(true);
   };
@@ -122,10 +145,11 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
       setInstallingAction(action);
       setToolchainInstalling(true);
       try {
+        /* [manual] 사람이 누른 설치 — 서버는 이때만 콘솔 창을 열고, 자동 3회 상한도 안 건다. */
         const response = await fetch(`${API_BASE}/api/setup/auto-install`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: '{}',
+          body: JSON.stringify({ manual: true }),
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const result = await response.json();
@@ -139,7 +163,7 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
   };
 
   /* 배너 색상 결정 */
-  const hasIssues = (status.needs_action?.length ?? 0) > 0;
+  const hasIssues = (status.needs_action?.length ?? 0) > 0 || pendingTools.length > 0;
   const bgColor = hasIssues
     ? 'bg-amber-900/80 border-amber-600/50'
     : 'bg-emerald-900/60 border-emerald-600/40';
@@ -163,30 +187,18 @@ export default function SetupBanner({ onNavigate }: SetupBannerProps) {
           </span>
         ))}
 
-        {/* 조치 필요 항목 */}
-        {status.toolchain && (
+        {/* 기본 설치팩 — 아직 안 깔린 도구만. 전부 설치되면 이 줄은 사라진다. */}
+        {pendingTools.length > 0 && (
           <span className="inline-flex items-center gap-2 flex-wrap">
             <strong className="text-gray-100">기본 설치팩</strong>
-            {status.toolchain.map(tool => (
+            {pendingTools.map(tool => (
               <span
                 key={tool.id}
                 title={tool.version || undefined}
-                className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${
-                  tool.installed
-                    ? 'bg-emerald-950/70 text-emerald-300'
-                    : 'bg-amber-950/70 text-amber-200'
-                }`}
+                className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs bg-amber-950/70 text-amber-200"
               >
-                {tool.installed ? (
-                  <CheckCircle className="w-3 h-3" />
-                ) : (
-                  <Wrench className="w-3 h-3 animate-pulse" />
-                )}
-                {tool.name}: {tool.installed
-                  ? (tool.id === 'nodejs'
-                    ? '설치됨'
-                    : '설치 완료 · 최초 1회 실행/로그인 필요')
-                  : (toolchainInstalling ? '확인·설치 중' : '설치 필요')}
+                <Wrench className="w-3 h-3 animate-pulse" />
+                {tool.name}: {toolchainInstalling ? '확인·설치 중' : '설치 필요'}
               </span>
             ))}
           </span>

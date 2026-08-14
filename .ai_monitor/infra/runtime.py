@@ -7,6 +7,8 @@ DESCRIPTION: 시스템 런타임 보조 유틸 — Python 인터프리터 후보
              모았습니다. server.py와 데몬/API 모듈이 공유합니다.
 
 REVISION HISTORY:
+- 2026-08-14 Claude: app_data_dir 추가 — 설치본에서 쓰기 가능한 상태 파일 위치를
+                     server.py/pg_base.py 복사본이 아닌 한 곳으로 통일
 - 2026-08-14 Claude: script_runner_cmd 추가 — 설치본(EXE)에서 Python 미설치 PC면
                      데몬용 .py 실행기가 없어 LAN 브리지가 조용히 안 뜨던 결함
 - 2026-08-11 Claude: open_folder_dialog 추가 — 서브프로세스 다이얼로그가 앱 창 뒤에
@@ -16,12 +18,33 @@ REVISION HISTORY:
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
 
 from infra import folder_dialog  # 윈도우 네이티브 폴더 다이얼로그(프로세스 내 호출)
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+
+
+def app_data_dir() -> Path:
+    """앱이 **쓸 수 있는** 데이터 디렉토리를 반환한다(마커·로그 등 상태 파일용).
+
+    [WHY 함수화] 같은 분기가 server.py(DATA_DIR)와 src/pg_base.py에 이미 복사돼 있었다.
+      설치본에서는 MEIPASS가 매 실행 새로 추출되는 임시 폴더고 설치 경로(Program Files)는
+      비관리자 쓰기 불가라, "다음 실행에도 남아야 하는" 파일을 둘 곳은 여기뿐이다.
+    [불변식] VIBE_DATA_DIR가 최우선 — smoke_test(frozen EXE)가 설치본 상태 파일을
+      덮어쓰던 2026-08-01 사고 이후의 격리 스위치다. 새 상태 파일도 이 함수를 경유해야
+      테스트에서 자동 격리된다. 직접 %APPDATA%를 조합하면 그 격리를 뚫는다.
+    """
+    override = os.environ.get('VIBE_DATA_DIR', '').strip()
+    if override:
+        return Path(override)
+    if getattr(sys, 'frozen', False):
+        if os.name == 'nt':
+            return Path(os.getenv('APPDATA', '')) / 'VibeCoding'
+        return Path.home() / '.vibe-coding'
+    return Path(__file__).resolve().parent.parent / 'data'
 
 
 def python_runner_cmds(base_dir: Path, project_root: Path) -> list[str]:

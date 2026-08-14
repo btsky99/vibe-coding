@@ -8,6 +8,8 @@ DESCRIPTION: AI 도구 CLI 설치 관리 API.
              POST /api/tools/install  — 특정 도구 설치 실행 (새 콘솔 창)
 
 REVISION HISTORY:
+- 2026-08-14 Claude: launch_ai_toolchain_installer에 visible 인자 — 자동(사람이 안 누른)
+                     경로는 콘솔 창 없이 로그 파일로만(절대 규칙 10).
 - 2026-07-29 Codex: Replace Gemini compatibility with official Antigravity CLI.
 - 2026-07-29 Codex: Add one sequential first-run installer for Node.js and all AI CLIs.
 - 2026-07-28 Codex: Expose an installer launcher for first-run automatic dependency repair.
@@ -24,11 +26,13 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from infra import env_path  # 설치 직후 PATH 재병합 — 재시작 없이 감지하기 위해 필수
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 — 인라인 CREATE_NO_WINDOW 금지
+from infra import runtime  # 쓰기 가능한 데이터 디렉토리(설치 로그·마커) 단일 출처
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────
 # [2026-04-13] Claude: frozen(EXE) 모드에서 _PROJECT_ROOT가 EXE 설치 경로를 가리키던 버그 수정
@@ -640,8 +644,20 @@ def launch_tool_installer(tool_id: str) -> dict[str, Any]:
         return {"status": "error", "message": f"설치 실행 실패: {exc}"}
 
 
-def launch_ai_toolchain_installer() -> dict[str, Any]:
-    """Node.js와 세 AI CLI의 누락분을 한 콘솔에서 순차 자동 설치한다."""
+def toolchain_install_log_path() -> Path:
+    """무창(silent) 자동 설치의 출력이 쌓이는 로그 경로."""
+    return runtime.app_data_dir() / "logs" / "ai_toolchain_install.log"
+
+
+def launch_ai_toolchain_installer(visible: bool = True) -> dict[str, Any]:
+    """Node.js와 세 AI CLI의 누락분을 순차 자동 설치한다.
+
+    [규칙 10] visible=False는 **사용자가 안 누른** 자동 실행 경로다 — 콘솔 창을 만들지
+      않고 로그 파일로만 남긴다. 자동 설치가 cmd 창을 띄우면 앱을 켤 때마다 포커스를
+      빼앗겨 타이핑이 끊긴다(콘솔 깜빡임 사고 계열). 진행 상황은 배너가
+      /api/setup/status를 3초 폴링해 보여주므로 창 없이도 사용자에게 보인다.
+    [주의] visible=True(배너 버튼 클릭)는 사람이 결과를 보려고 누른 것이라 창을 그대로 연다.
+    """
     script_path = _find_install_script("install_ai_toolchain.py")
     if not script_path:
         return {"status": "error", "message": "AI 도구 자동 설치 스크립트를 찾을 수 없습니다."}
@@ -651,6 +667,37 @@ def launch_ai_toolchain_installer() -> dict[str, Any]:
         #   '미설치'로 오판하고 재설치를 돈다.
         env_path.refresh_path(force=True)
         runner = sys.executable if getattr(sys, "frozen", False) else _get_python_cmd()
+
+        if not visible:
+            log_path = toolchain_install_log_path()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file = open(log_path, "a", encoding="utf-8", errors="replace")
+            try:
+                log_file.write(
+                    f"\n===== 자동(무창) AI 도구 설치 시작 "
+                    f"{datetime.now():%Y-%m-%d %H:%M:%S} — runner={runner} =====\n"
+                )
+                log_file.flush()
+                # [제약] proc.popen이 CREATE_NO_WINDOW를 넣는다 — 여기서 인라인 플래그 금지.
+                #   자식이 다시 npm.cmd 등을 부르면 그 손자에는 상속되지 않으므로,
+                #   install_ai_toolchain.py 쪽도 infra.proc를 써야 완전히 무창이다.
+                proc.popen(
+                    [runner, str(script_path)],
+                    cwd=str(_PROJECT_ROOT),
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    close_fds=True,
+                )
+            finally:
+                # 자식이 핸들을 dup했으므로 부모 사본은 닫는다(핸들 누수 방지).
+                log_file.close()
+            return {
+                "status": "success",
+                "mode": "silent",
+                "log": str(log_path),
+                "message": "필수 AI 도구를 백그라운드에서 설치 중입니다.",
+            }
+
         install_cmd = subprocess.list2cmdline([runner, str(script_path)])
         cmdline = (
             "title Vibe Coding - AI Toolchain Auto Installer && "
@@ -664,7 +711,8 @@ def launch_ai_toolchain_installer() -> dict[str, Any]:
             close_fds=True,
             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
         )
-        return {"status": "success", "message": "필수 AI 도구 자동 설치를 시작했습니다."}
+        return {"status": "success", "mode": "console",
+                "message": "필수 AI 도구 자동 설치를 시작했습니다."}
     except Exception as exc:
         return {"status": "error", "message": f"AI 도구 자동 설치 실행 실패: {exc}"}
 
