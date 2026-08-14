@@ -49,7 +49,9 @@ UNRELATED = [
 
 
 def best_sim(query: str, min_sim: float = 0.0) -> tuple[float, str]:
-    vec = embed_floats(query)
+    # [🔴 e5 비대칭] 검색어는 'query:' 쪽으로 임베딩해야 저장분(passage:)과 짝이 맞는다.
+    #   섞으면 숫자는 그럴듯한데 순위만 조용히 나빠져 이 도구가 거짓 판정을 낸다.
+    vec = embed_floats(query, kind='query')
     if not vec:
         return 0.0, '(임베딩 실패)'
     best, label = 0.0, ''

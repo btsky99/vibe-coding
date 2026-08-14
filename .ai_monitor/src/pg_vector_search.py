@@ -21,7 +21,7 @@ import math
 from src.pg_base import execute_raw, query_rows, _sql_text, _now_iso
 
 # [WHY] 차원/모델은 embed_service와 단일 진실 — 직접 상수 복제 금지
-from infra.embed_service import EMBED_DIM, EMBED_MODEL_NAME
+from infra.embed_service import EMBED_DIM, EMBED_MODEL_NAME, EMBED_SIGNATURE
 
 # None=미확인, True/False=ensure_vector_schema 결과 캐시
 _VECTOR_READY: bool | None = None
@@ -39,7 +39,19 @@ _TABLES = {
         'ref': 'access_count',
         'time': "updated_at",
         'select': "id, title, LEFT(content, 200) AS content, note_type, author, project_id",
-        'quality': "length(coalesce(title,'') || coalesce(content,'')) >= 30",
+        # [🔴 2026-08-14] 세션요약을 회상 대상에서 제외한다. 실측: 활성 노트 2583건 중
+        #   1578건(61%)이 세션요약이었고, 내용이 "하 이제 설치되내 쩝" 같은 발화 로그라
+        #   어떤 질문에도 0.45~0.50으로 걸려 회상 블록을 통째로 채웠다. 지식이 아니라
+        #   대화 기록이다 — pg_logs에 이미 있고 회상으로 다시 볼 이유가 없다.
+        # [WHY 삭제가 아니라 조회 차단] 오판이면 되돌려야 한다. 필터 한 줄을 빼면
+        #   즉시 복구되지만 DELETE는 되돌릴 수 없다.
+        'quality': ("length(coalesce(title,'') || coalesce(content,'')) >= 30 "
+                    "AND coalesce(source_ref, '') <> 'session-summary'"),
+        # [WHY min_sim 없음] 예전엔 여기에 0.58을 박아 호출자가 넘긴 0.45를 막았다.
+        #   그 우회는 vector_search의 `max()`가 _FLOOR를 비교 대상에서 빠뜨린 버그
+        #   때문이었고, 그 버그를 고친 지금은 _FLOOR가 모든 테이블에 강제된다.
+        #   숫자를 두 곳에 두면 모델 교체 때 한쪽만 갱신돼 다시 어긋난다 — 단일 출처는
+        #   _FLOOR다. 특정 테이블만 **더 엄하게** 걸 근거가 실측으로 생기면 그때 추가한다.
     },
     'hive_memory': {
         'pk': 'key',
@@ -49,6 +61,7 @@ _TABLES = {
         'time': "CASE WHEN updated_at <> '' THEN updated_at::timestamptz ELSE NOW() END",
         'select': "key, title, LEFT(content, 200) AS content, author, project_id",
         'quality': "length(coalesce(title,'') || coalesce(content,'')) >= 30",
+        # min_sim 없음 — zettel_notes와 같은 이유(_FLOOR 단일 출처).
     },
     'agent_experience': {
         'pk': 'id',
@@ -93,13 +106,20 @@ def reset_vector_cache() -> None:
     _VECTOR_READY = None
 
 
-def ensure_vector_schema() -> bool:
+def ensure_vector_schema(skip_signature_guard: bool = False) -> bool:
     """vector 확장 + embedding 컬럼 + 참조 컬럼을 보장한다. 실패 시 False(무음).
 
     [WHY] CREATE EXTENSION은 superuser 권한/확장 파일 필요 — 외부 프로젝트 PC의
     PG에는 없을 수 있다. 실패해도 회상 v1(ILIKE)이 100% 동작하므로 경고만 남긴다.
     """
+    # [🔴 부트스트랩 데드락 방지] 서명 가드는 '무효 벡터로 검색하는 것'을 막으려는 장치다.
+    #   그런데 그 무효 상태를 **해소하는 도구**(scripts/reembed_all.py)까지 막아버리면
+    #   복구 경로가 사라진다. 재임베딩 도구만 이 가드를 건너뛴다 — 그 도구는 검색을
+    #   하지 않고 쓰기만 하므로 오답이 나올 위험이 없다.
     global _VECTOR_READY
+    if skip_signature_guard:
+        execute_raw("CREATE EXTENSION IF NOT EXISTS vector;")
+        return bool(query_rows("SELECT 1 AS ok FROM pg_extension WHERE extname = 'vector';"))
     if _VECTOR_READY is not None:
         return _VECTOR_READY
 
@@ -110,12 +130,29 @@ def ensure_vector_schema() -> bool:
         _VECTOR_READY = False
         return False
 
-    # 모델 차원 불일치 감지 — 모델 교체 시 컬럼 재생성이 필요하므로 메타로 고정
+    # 벡터 출처 불일치 감지 — 저장된 벡터가 '어느 공간에서 온 것'인지 대조한다.
+    # [🔴🔴 과거사고 2026-08-14] 예전엔 **모델 이름만** 비교했다. 그런데 fastembed 0.8이
+    #   같은 이름 모델의 풀링을 CLS→MEAN으로 바꿔버려, 이름은 그대로인 채 벡터 공간만
+    #   통째로 갈아엎혔다. 이 가드는 통과했고 계측도 "커버리지 100% 🟢"를 찍었으며,
+    #   실제로는 정답 노트가 452건 중 364위로 밀려 회상이 쓰레기만 반환하고 있었다.
+    #   → 이름이 아니라 **서명(모델·차원·풀링·접두어 규약·라이브러리 버전)** 을 비교한다.
+    # [불변식] 서명이 다르면 회상을 **끄는 게 맞다.** 무효 벡터로 검색하면 결과가 없는 게
+    #   아니라 '그럴듯한 오답'이 나온다 — 침묵보다 나쁘다.
     meta = query_rows(
-        "SELECT payload->>'model' AS model, payload->>'dim' AS dim "
+        "SELECT payload->>'signature' AS signature, payload->>'model' AS model, "
+        "payload->>'dim' AS dim "
         "FROM hive_state WHERE state_key = 'embed_model' LIMIT 1;"
     )
-    if meta and meta[0].get('model') and meta[0]['model'] != EMBED_MODEL_NAME:
+    _db_sig = (meta[0].get('signature') if meta else None) or ''
+    if _db_sig and _db_sig != EMBED_SIGNATURE:
+        print(f"[pg_vector] 🔴 임베딩 서명 불일치 — 저장된 벡터가 다른 공간에서 왔습니다.\n"
+              f"            DB  = {_db_sig}\n"
+              f"            코드 = {EMBED_SIGNATURE}\n"
+              f"            회상 v2 비활성. 복구: python scripts/reembed_all.py --run")
+        _VECTOR_READY = False
+        return False
+    if not _db_sig and meta and meta[0].get('model') and meta[0]['model'] != EMBED_MODEL_NAME:
+        # 서명 도입 이전(구버전 메타)과의 호환 — 이름만이라도 다르면 막는다.
         print(f"[pg_vector] 임베딩 모델 불일치: DB={meta[0]['model']} ≠ 코드={EMBED_MODEL_NAME} "
               "— 재임베딩 필요. 회상 v2 비활성.")
         _VECTOR_READY = False
@@ -135,9 +172,18 @@ def ensure_vector_schema() -> bool:
         _VECTOR_READY = False
         return False
 
+    # [WHY DO NOTHING 유지] 여기서 자동 갱신하면 서명이 바뀔 때마다 조용히 덮어써서
+    #   위의 불일치 가드가 영영 안 걸린다. 서명 갱신은 **재임베딩을 마친 쪽**만 한다
+    #   (scripts/reembed_all.py) — "벡터가 새 공간으로 옮겨졌다"는 사실의 유일한 증거이므로
+    #   벡터를 실제로 다시 만든 주체가 기록해야 한다.
+    # [🔴 복구 안내는 실재해야 한다] 위 print의 명령줄은 **실행 가능한 정본**이어야 한다.
+    #   2026-08-14 도입 시 없는 파일(`reembed.py --yes`)을 안내해, 가드에 걸린 사람이
+    #   그대로 붙여넣으면 "그런 파일 없음"만 보게 돼 있었다. 스크립트명/플래그를 바꾸면
+    #   이 문자열도 같이 바꾼다.
     execute_raw(
         "INSERT INTO hive_state (state_key, payload, updated_at) VALUES ('embed_model', "
-        + _sql_text(f'{{"model": "{EMBED_MODEL_NAME}", "dim": {EMBED_DIM}}}') + "::jsonb, "
+        + _sql_text(f'{{"model": "{EMBED_MODEL_NAME}", "dim": {EMBED_DIM}, '
+                    f'"signature": "{EMBED_SIGNATURE}"}}') + "::jsonb, "
         + _sql_text(_now_iso()) + ") ON CONFLICT (state_key) DO NOTHING;"
     )
     _VECTOR_READY = True
@@ -151,13 +197,24 @@ def _vec_literal(vec: list[float]) -> str:
 
 
 def pending_embedding_rows(table: str, limit: int = 50) -> list[dict]:
-    """백필 데몬용 — embedding IS NULL인 행의 (pk, text)를 반환."""
+    """백필 데몬용 — embedding IS NULL이고 **본문이 있는** 행의 (pk, text)를 반환.
+
+    [🔴 과거사고 2026-08-14] 빈 본문 조건이 없어 백필과 재임베딩이 서로를 되돌렸다.
+      scripts/reembed_all.py는 빈 행을 NULL로 비우고(placeholder 벡터가 아무 질의와도
+      중간 매칭돼 회상 노이즈가 되므로), 백필은 NULL인 그 행을 골라 '(빈 내용)'으로
+      다시 채웠다(NULL로 두면 매 주기 재선택되는 무한 루프를 피하려고). 두 정책이
+      정면 충돌해 60초마다 왕복했고, 결국 노이즈 쪽이 이겼다.
+    [불변식] 빈 본문은 **영구히 NULL**이다 — 검색에서 빠지는 게 옳다. 무한 루프는
+      placeholder로 채워서가 아니라 여기서 **선택 자체를 막아** 끊는다. 그래야 두 목적
+      (노이즈 차단 · 재선택 방지)이 동시에 성립한다.
+    """
     if not vector_available() or table not in _TABLES:
         return []
     cfg = _TABLES[table]
     return query_rows(
         f"SELECT {cfg['pk']} AS pk, ({cfg['text']}) AS text FROM {table} "
-        f"WHERE embedding IS NULL LIMIT {int(limit)};"
+        f"WHERE embedding IS NULL AND length(btrim(coalesce(({cfg['text']}), ''))) > 0 "
+        f"LIMIT {int(limit)};"
     )
 
 
@@ -172,8 +229,34 @@ def upsert_embedding(table: str, pk_value, vec: list[float]) -> bool:
     )
 
 
+# [불변식] 어떤 호출자도 이 아래로는 못 내린다. 기본 인자는 호출자가 덮어쓸 수 있지만
+#   이 상수는 vector_search 안에서 강제되므로 우회 경로가 없다 — 위 과거사고의 재발 방지선.
+#
+# [🔴🔴 이 숫자는 모델에 종속된다 — 모델을 바꾸면 반드시 다시 잰다]
+#   임계값은 '의미의 경계'가 아니라 **그 모델의 코사인 분포 위 좌표**다. 모델이 바뀌면
+#   분포가 통째로 이동하므로 옛 숫자는 의미를 잃는다.
+#     MiniLM 시절 : 관련/무관이 0.4~0.6에 퍼져 0.55가 실제로 경계 역할을 했다.
+#     e5-small-ml : 0.8 근처 좁은 띠에 몰린다 — 0.55는 **아무것도 못 거른다.**
+#   2026-08-14 실측(scripts/recall_quality.py, 지식 5169건):
+#     관련 최저 0.860 / 무관 최고 0.847 → 간격 +0.013. 0.55로는 무관 질의 4건이
+#     전부 회상됐다("오늘 점심 뭐 먹지"가 0.829로 통과).
+#   0.85는 그 사이를 가르는 값이다.
+#
+# [🔴 이 값의 한계를 알고 쓸 것 — 표본 9건에 맞춘 숫자다]
+#   관련 5·무관 4건으로 정한 값이라 **과적합이다.** 여유가 관련 +0.010 / 무관 -0.003
+#   밖에 없어, 표본 밖 질의 하나로 뒤집힐 수 있다. 게다가 남은 오분류 1건은 임계로
+#   풀 수 없는 종류였다 — "오늘 점심 뭐 먹지"가 'recipe'가 든 노트와 0.847로 붙었다.
+#   어휘가 실제로 겹치므로 모델 판단이 틀린 게 아니다.
+#   → 진짜 해법은 절대 임계가 아니라 **순위 기반 판정**이다(embed_service의 e5 주석과
+#     같은 결론). 상위 후보 간 점수 차가 작으면 '변별 실패'로 보고 통째로 버리는 식.
+#     그 구조 전환 전까지 이 상수는 **임시 방편**이다.
+# [불변식] 오분류가 보여도 숫자를 감으로 흔들지 말 것. recall_quality.py로 **다시 재고**
+#   위 실측 줄을 갱신한 뒤에만 바꾼다 — 근거 없는 조정이 0.45→0.55→0.66 6일 삽질의 형태였다.
+_FLOOR = 0.85
+
+
 def vector_search(table: str, query_vec: list[float], project_id: str = '',
-                  limit: int = 5, min_similarity: float = 0.55) -> list[dict]:
+                  limit: int = 5, min_similarity: float = _FLOOR) -> list[dict]:
     """코사인 유사도 검색 + 랭킹.
 
     랭킹 = 유사도 + 0.1×ln(1+참조횟수) − 시간감쇠
@@ -198,7 +281,13 @@ def vector_search(table: str, query_vec: list[float], project_id: str = '',
     cfg = _TABLES[table]
     # 테이블별 임계가 있으면 그쪽을 쓴다. 호출자가 명시적으로 더 높게 준 경우는 존중한다
     # (더 낮추는 것은 허용하지 않는다 — 노이즈 차단선을 우회로 뚫으면 안 된다).
-    min_similarity = max(float(min_similarity), float(cfg.get('min_sim', 0.0)))
+    # [🔴 과거사고 2026-08-08~08-14] 이 가드에 구멍이 있었다. `max(호출자값, cfg)`만
+    #   비교해서 **함수 기본값(_FLOOR)은 비교 대상이 아니었다.** api/memory_api가
+    #   min_similarity=0.45를 명시로 넘기면 cfg에 min_sim이 없는 테이블
+    #   (zettel_notes·hive_memory = 지식의 88%)은 0.45가 그대로 통과했다. 즉 2026-08-08의
+    #   0.55 상향이 6일 동안 **가장 큰 두 테이블에서만 무효**였고, 아무도 몰랐다.
+    #   바닥선을 셋 다 비교하도록 고친다 — 이제 어떤 호출자도 _FLOOR 아래로 못 내린다.
+    min_similarity = max(float(min_similarity), float(cfg.get('min_sim', 0.0)), _FLOOR)
     proj_filter = f"AND project_id = {_sql_text(project_id)}" if project_id else ""
     # 저정보 행 차단(_TABLES.quality) — 회상 노이즈 컷 (2026-07-16)
     quality_filter = f"AND {cfg['quality']}" if cfg.get('quality') else ""

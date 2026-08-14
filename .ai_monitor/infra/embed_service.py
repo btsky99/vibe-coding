@@ -5,6 +5,8 @@ DESCRIPTION: fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvect
              embed(레거시 bytes)/cosine_sim을 제공한다.
 
 REVISION HISTORY:
+- 2026-08-14 Claude: 모델을 multilingual-e5-small로 교체 — 기존 모델이 fastembed 0.8의
+                     풀링 변경으로 **순위가 뒤집혀** 있었다(아래 과거사고). + EMBED_SIGNATURE 도입
 - 2026-07-15 Claude: load_error() 신설 — 로드 실패 사유를 계측에 노출. pythonw(콘솔 없음)에서
                      print가 유실돼 'fastembed 미설치'가 not_warm으로 위장했던 사각지대 해소
 - 2026-06-10 Claude: memory_watcher.py의 고아 임베딩 헬퍼 이관 + embed_floats 신설
@@ -15,10 +17,47 @@ from __future__ import annotations
 import os
 import threading
 
-# [WHY] 모델 고정 — vector(384) 컬럼 차원과 1:1 결합. 모델 교체 시 컬럼 재생성 필요하므로
-# pg_vector_search.ensure_vector_schema가 이 상수를 메타에 기록해 불일치를 감지한다.
-EMBED_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# ═══════════════════════════════════════════════════════════════════════════
+# [🔴🔴 과거사고 2026-08-14 — 회상이 "아무 질문에나 쓰레기를 반환"하던 진짜 원인]
+#
+#   fastembed 0.8이 paraphrase-multilingual-MiniLM-L12-v2의 풀링을 **CLS → MEAN으로
+#   바꿨다**(라이브러리가 로드할 때마다 UserWarning으로 경고하고 있었다). 모델 **이름은
+#   그대로**여서 아래 불일치 가드도, 계측(커버리지 100% 🟢)도 전부 통과했다.
+#
+#   실측 결과(지식노트 452건, 질의 5건):
+#     현행 모델 : top3 적중 2/5 · 관련 최저 0.470 / 무관 최고 0.563 → 간격 **-0.093**
+#     e5-small : top3 적중 4/5 · 관련 최저 0.879 / 무관 최고 0.840 → 간격 **+0.039**
+#   "설치본에서 데몬 파이썬 실행기를 어떻게 고르지"의 정답 노트가 **452건 중 364위**였다.
+#
+#   🔴 교훈: 간격이 음수면 **어떤 임계값으로도 못 가른다.** 2026-08-08부터 6일간
+#     0.45→0.55→0.66으로 임계를 만진 것은 전부 헛수고였다 — 순위 자체가 뒤집혀 있었다.
+#     임계값을 의심하기 전에 **랭킹(정답 순위)을 먼저 재라**. scripts/recall_quality.py.
+#
+#   🔴 재발 방지: EMBED_SIGNATURE에 라이브러리 버전과 풀링을 함께 넣는다. 모델 이름만
+#     비교하면 같은 이름으로 벡터 공간이 통째로 바뀌는 이 사고를 또 못 잡는다.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# [WHY e5] 다국어 검색 전용으로 학습돼 한국어 기술문서에서 순위가 안정적이고, 384차원이라
+#   기존 vector(384) 컬럼을 **그대로 쓴다**(스키마 마이그레이션 불필요).
+# [제약] e5 계열은 비대칭 검색 모델이다 — 질의는 'query: ', 문서는 'passage: ' 접두어가
+#   **필수**다. 빼면 성능이 눈에 띄게 떨어진다. embed_floats(kind=)가 이걸 강제한다.
+# [제약] e5는 코사인이 0.7~0.9의 좁은 띠에 몰린다. 절대 임계값보다 **순위**가 정보다 —
+#   pg_vector_search의 임계는 이 특성에 맞춰 잡는다.
+EMBED_MODEL_NAME = "e5-small-ml"
+_HF_REPO = "intfloat/multilingual-e5-small"
 EMBED_DIM = 384
+
+# [불변식] 벡터 공간을 바꾸는 **모든 요소**를 여기에 적는다. 이 문자열이 달라지면
+#   저장된 벡터는 전부 무효다 — pg_vector_search가 이 값을 메타와 대조해 차단한다.
+def _lib_version() -> str:
+    try:
+        import importlib.metadata as _md
+        return _md.version('fastembed')
+    except Exception:
+        return '?'
+
+
+EMBED_SIGNATURE = f"{_HF_REPO}|dim{EMBED_DIM}|mean|e5-prefix|fastembed{_lib_version()}"
 
 _embedder = None
 _embedder_lock = threading.Lock()
@@ -41,6 +80,23 @@ def _get_embedder():
             if _embedder is None:
                 try:
                     from fastembed import TextEmbedding
+                    from fastembed.common.model_description import (
+                        PoolingType, ModelSource,
+                    )
+                    # [WHY 커스텀 등록] multilingual-e5-small은 fastembed 기본 목록에
+                    #   없다(목록의 384차원 다국어 모델은 위 사고를 낸 그것 하나뿐).
+                    #   add_custom_model로 풀링·정규화를 **코드가 명시**해 두면
+                    #   라이브러리가 기본값을 바꿔도 우리 벡터 공간은 안 흔들린다 —
+                    #   이번 사고의 직접적 재발 방지선이다.
+                    try:
+                        TextEmbedding.add_custom_model(
+                            model=EMBED_MODEL_NAME, pooling=PoolingType.MEAN,
+                            normalization=True, sources=ModelSource(hf=_HF_REPO),
+                            dim=EMBED_DIM, model_file='onnx/model.onnx',
+                            description='multilingual-e5-small (회상 v2)',
+                        )
+                    except ValueError:
+                        pass  # 이미 등록됨(같은 프로세스에서 재호출) — 정상
                     # [EXE 함정] 홈 디렉토리 오염 방지 — VIBE_EMBED_CACHE 지정 시
                     # 모델 캐시를 DATA_DIR 하위로 고정 (Task 7에서 server.py가 설정)
                     cache_dir = os.environ.get('VIBE_EMBED_CACHE') or None
@@ -111,16 +167,22 @@ def warm_async() -> None:
     threading.Thread(target=_run, daemon=True, name='embed-warm').start()
 
 
-def embed_floats(text: str) -> list[float] | None:
+def embed_floats(text: str, kind: str = 'passage') -> list[float] | None:
     """텍스트 → float 리스트 (pgvector vector(384) INSERT용). 실패 시 None.
 
-    [제약] 512자 절단 — MiniLM 토큰 한도 + 회상 대상은 제목/요약이라 충분.
+    [🔴 제약 — e5 접두어] kind='query'(검색어) / 'passage'(저장 대상)를 **반드시 구분**한다.
+      e5는 비대칭 검색 모델이라 접두어가 곧 역할 지정이다. 둘을 뒤섞으면(둘 다 passage로
+      넣는 등) 순위가 흐트러진다 — 겉으로는 여전히 숫자가 나오므로 조용히 나빠진다.
+      기본값을 'passage'로 둔 이유: 호출부 대다수(백필/저장 경로)가 문서 쪽이고,
+      검색 경로는 memory_api 한 곳뿐이라 그쪽만 명시하면 된다.
+    [제약] 512자 절단 — 토큰 한도 + 회상 대상은 제목/요약이라 충분.
     """
     try:
         embedder = _get_embedder()
         if embedder is None:
             return None
-        vec = list(embedder.embed([text[:512]]))[0]
+        prefix = 'query: ' if kind == 'query' else 'passage: '
+        vec = list(embedder.embed([prefix + text[:512]]))[0]
         return [float(x) for x in vec]
     except Exception as e:
         print(f"[Embedding] 변환 실패: {e}")

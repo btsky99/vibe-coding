@@ -702,8 +702,15 @@ def run_embedding_backfill(env: DaemonEnv) -> None:
                 done = 0
                 for table in tables:
                     for row in pending_embedding_rows(table, limit=50):
-                        # 빈 텍스트도 placeholder로 임베딩 — 스킵하면 매 주기 재선택(무한 루프)
-                        text = (row.get('text') or '').strip() or '(빈 내용)'
+                        # [🔴 2026-08-14] 예전엔 빈 텍스트를 '(빈 내용)'으로 채웠다(재선택
+                        #   무한 루프 회피). 그런데 그 placeholder 벡터가 아무 질의와도
+                        #   중간 매칭돼 회상 노이즈가 됐고, 빈 행을 NULL로 비우는
+                        #   scripts/reembed_all.py와 60초마다 왕복했다. 이제 빈 행은
+                        #   pending_embedding_rows가 아예 안 골라준다 — 여기 continue는
+                        #   그 계약이 깨졌을 때를 위한 이중 안전망이다(placeholder 부활 금지).
+                        text = (row.get('text') or '').strip()
+                        if not text:
+                            continue
                         vec = embed_floats(text)
                         if vec and upsert_embedding(table, row['pk'], vec):
                             done += 1

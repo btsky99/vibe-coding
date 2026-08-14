@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-14 20:57
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-14 23:10
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 13개 · 미푸시 3커밋
+- **브랜치**: `main` · 미커밋 10개 · 미푸시 6커밋
 - **최근 커밋**
+  - `24006ac` 2026-08-14 — fix(instance): 좀비가 락 포트를 물면 개발 서버가 영구 기동 불가
+  - `93148a6` 2026-08-14 — refactor(apix): 중앙 대화 서버 잔재 제거 — VPS 구축 스크립트 + 실행 그래프 선언
+  - `95bc9a8` 2026-08-14 — fix(setup): 기본 설치팩이 다 깔린 뒤에도 매 실행 다시 뜨던 문제
   - `f082143` 2026-08-14 — fix(lan): 설치본에서 LAN 브리지가 안 뜨던 결함 + 바로가기 관리자 권한 자동 체크
   - `c7e95fb` 2026-08-14 — docs(rules): 절대 규칙 10 신설 — 사람이 안 시킨 실행은 콘솔 창을 띄우지 않는다
-  - `346a33d` 2026-08-14 — refactor(apix): 아픽스 계층 전면 철거 — 중앙 대화·일감·노드 상태 -7946줄
-  - `0f11b12` 2026-08-14 — refactor(apix): 노드 푸시 잔재 4파일 제거 — APIX 노드 런타임으로 이관 완료
-  - `f5123a6` 2026-08-14 — chore(release): auto-bump version to v3.7.338 [skip ci]
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-14 19:48** 의도: 설치본 LAN 브리지 미기동 수정 + 바로가기 관리자 권한 자동 체크
@@ -28,18 +28,15 @@
   - 다음: 폴더 열기 다이얼로그에 목록 렌더링 추가 — ui/dialogs.rs render_kr_path_overlay + overlays.rs inner rect + mouse.rs 분기. 로직/상태는 이미 완료
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **개발 서버가 실행 즉시 조용히 종료 (server.log에 'Server Started'만 반복, 본문 0줄)**
+  - 원인: 커널 대기(wait=Executive)에 갇혀 관리자 권한 Stop-Process도 안 먹는 좀비 pythonw가 인스턴스 락 포트 19276을 영구 점유. instance_lock.acquire_single_instance_lock이 bind 실패를 곧바로 '이미 실
+  - 수정: 락 소켓에 생존 핸드셰이크(listen+accept 배너) 도입. bind 실패 시 핸드셰이크(+구버전용 HTTP project_id 대조 보조)로 주인의 생사를 판정하고, 좀비로 확인된 경우에만 다음 락 포트로 회수(최대 20칸). 전부 점유면 재부팅 안내 후 exi
+- **기본 설치팩 배너가 설치 완료 후에도 매 실행 표시 + 자동 설치 cmd 창 반복**
+  - 원인: SetupBanner가 toolchain 배열 존재만으로 렌더링(서버는 항상 4개 반환) / 자동설치 억제가 프로세스 메모리 쿨다운뿐이라 재시작마다 리셋 → CREATE_NEW_CONSOLE 재실행
+  - 수정: 미설치 도구만 렌더+표시할 것 없으면 배너 미렌더, launch_ai_toolchain_installer(visible) 도입해 자동은 무창, 자동 시도 3회 상한을 디스크에 기록 (95bc9a8)
 - **설치본에서 LAN 브리지 '켜기'가 동작하지 않음 (토글 후 재시작해도 브리지 미기동, 오류도 없음)**
   - 원인: run_lan_bridge가 실행기를 runtime.python_runner_cmds()[0]로 골랐는데 이 함수는 frozen에서 앱 EXE를 후보에서 일부러 제외한다. Python 미설치 PC는 마지막 폴백 'python'이 나가 proc.popen이 FileNot
   - 수정: runtime.script_runner_cmd() 신설 — frozen이면 sys.executable(앱 EXE, boot.py가 .py 인자를 runpy로 받음). run_lan_bridge/run_watchdog/run_codex_pg_watcher가 이걸 사용. 
-- **주기적 검은 콘솔 창 깜빡임 재발 — 타이핑 중 포커스 상실**
-  - 원인: D:\apix\node\apix_runner.py --watch 가 WATCH_POLL_S=1.0 으로 1초마다 build_inventory() -> subprocess.run([apix.exe,...]) 를 creationflags 없이 호출. d423a7d 에서 고
-  - 수정: 러너 프로세스 종료 + 작업 스케줄러 APIX Node Push 삭제 + vibe-coding 에서 아픽스 계층 전면 철거(346a33d) + CLAUDE.md 절대 규칙 10 신설(c7e95fb)
-- **T1/T2 터미널이 60초마다 반복 종료(api_terminate) — 크래시로 오인**
-  - 원인: 자동 리사이클 워처가 (1) 종료된 세션의 화석 사용률(853206/1000000=85.3%, 마지막 쓰기 7시간 전)을 현재값으로 읽고 (2) agent==claude인 running 슬롯을 전부 처형(팬아웃)했다. 새로 태어난 세션은 첫 assistant 응답 전에
-  - 수정: 세션↔슬롯 결속(src/session_binding.py: first_ts>=slot.started + mtime vs last_output_at 대조)으로 터미널별 계측 도입, 워처는 status['terminals']만 보고 결속된 터미널 하나씩만 처형. claud
-
-### 🔥 사고다발 파일 — 수정 전 `incident.py search` 필독
-- `scripts/hive_hook.py` — 30일 내 3건
 
 🔨 = 최근 7일 내 변경된 파일
 
@@ -81,8 +78,8 @@
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `server.py` 🔨 | 2128 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
-| `boot.py` 🔨 | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
-| `soft_updater.py` 🔨 | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
+| `boot.py` | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
+| `soft_updater.py` | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
 | `mission_control.py` | 414 | AI 에이전트 전용 네이티브 윈도우 관제 센터 (Mission Control) — 시스템 트레이 및 사이드바 HUD 관리. |
 | `mission_control_ui.py` | 496 | 미션 컨트롤 사이드바 HUD UI 컴포넌트 — 에이전트 상태 링 및 실시간 로그 시각화. |
@@ -111,7 +108,7 @@
 | `launch_api.py` | 102 | CLI 에이전트(claude/antigravity/codex) 실행 API — 새 cmd 창에서 에이전트를 띄운다. |
 | `locks_api.py` | 67 | 파일 락 API — 에이전트 간 동시 편집 충돌 방지. locks.json에 {파일: 소유에이전트}를 |
 | `logs_api.py` | 168 | 로그/메시지/실시간 로그 스트림 라우트 4종 — GET /stream(SSE), GET /api/server-logs, |
-| `memory_api.py` | 412 | Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함. |
+| `memory_api.py` | 429 | Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함. |
 | `message_api.py` 🔨 | 116 | 에이전트 간 메시지 전송 API — 메시지를 DB(send_message)에 저장하고, 수신 대상 |
 | `nodes_api.py` 🔨 | 91 | 상태판(독립 창 + tui.py)의 콘솔 창 라우트 2종 — 전부 **이 PC 안**의 사실만 다룬다. |
 | `office_api.py` | 370 | 오피스 모드 전용 API — 프로필 중앙화(PostgreSQL SSOT) + 클래식과 네임스페이스 분리. |
@@ -121,11 +118,11 @@
 | `pty_api.py` 🔨 | 255 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
 | `recycle_api.py` 🔨 | 489 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
-| `setup_api.py` | 193 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
+| `setup_api.py` 🔨 | 193 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
 | `tools_api.py` 🔨 | 1359 | AI 도구 CLI 설치 관리 API. |
-| `update_api.py` 🔨 | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
+| `update_api.py` | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
 | `zettel_api.py` | 203 | Hive Zettelkasten REST API 핸들러. |
@@ -142,7 +139,7 @@
 | `db.py` | 42 | 설명: 레거시 DB 진입점 (SQLite 런타임 저장소 폐기 잔재). get_connection()은 |
 | `db_helper.py` | 113 | 설명: 세션 로그 기록 헬퍼 — pg_store(upsert_session_log/list_session_logs)로 |
 | `file_store.py` | 229 | 설명: 레거시 파일 기반 저장소 폴백 (PostgreSQL 미가용 시). shared_memory.json / |
-| `heal_metrics.py` | 273 | 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부/체크포인트/교훈)가 실제로 삽질을 |
+| `heal_metrics.py` | 296 | 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부/체크포인트/교훈)가 실제로 삽질을 |
 | `job_verify.py` 🔨 | 92 | 일감 검수 — Phase 12 Task 54(git 실측 수집). |
 | `lan_discovery.py` | 120 | LAN 자동발견 — UDP 브로드캐스트로 같은 네트워크의 다른 바이브코딩 브리지를 |
 | `lan_peers.py` 🔨 | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
@@ -157,7 +154,7 @@
 | `pg_schema.py` | 828 | 설명: PostgreSQL 스키마 DDL(ensure_schema) + 레거시 JSONL/JSON 마이그레이션 |
 | `pg_store.py` | 127 | 설명: PostgreSQL 저장소 파사드 — 분할된 pg_* 도메인 모듈을 단일 경로로 재노출 |
 | `pg_tasks.py` | 388 | 설명: 하이브 태스크(hive_tasks) CRUD + 원자적 체크아웃 + 코멘트 + 하트비트 + 상태 저장 |
-| `pg_vector_search.py` 🔨 | 248 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
+| `pg_vector_search.py` 🔨 | 337 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
 | `quota_policy.py` | 117 | provider 쿼터 snapshot을 작업 크기 권고로 변환하는 순수 정책 계층. |
 | `recall_client.py` | 83 | 설명: 훅(단명 프로세스)용 회상 클라이언트 — 서버 recall-smart API 우선, |
 | `secure.py` | 59 | 설명: 보안 유틸 — 로그 민감정보 마스킹(API키/Bearer/패스워드 정규식), |
@@ -174,13 +171,13 @@
 | `app_boot.py` | 441 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 1000 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
-| `embed_service.py` | 152 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
+| `daemons.py` 🔨 | 1007 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
+| `embed_service.py` | 214 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `folder_dialog.py` 🔨 | 139 | 윈도우 네이티브 폴더 선택 다이얼로그(SHBrowseForFolderW, ctypes). |
 | `fs_watcher.py` | 117 | 파일 시스템 실시간 감시(watchdog) + cli_agent 출력 브로드캐스트 워커. |
 | `heartbeat_daemon.py` | 725 | 설명: 자율 클로드 심장 박동 데몬 — 사람이 부르지 않아도 주기적으로 깨어나 |
-| `instance_lock.py` | 179 | 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로직. |
+| `instance_lock.py` 🔨 | 308 | 단일 인스턴스 락 획득 + HTTP/WS 서버 포트 확정 로직. |
 | `lifecycle.py` | 329 | 프로세스 라이프사이클 정리 함수 모음. |
 | `memory_watcher.py` | 388 | 에이전트 메모리(Claude Code / Antigravity CLI) 파일 감시 + PostgreSQL |
 | `postgres_runtime.py` | 300 | 내장 PostgreSQL 18 기동/초기화 런타임. 배포(frozen) 모드에서 |
@@ -303,6 +300,7 @@
 | `install_statusline.py` | 112 | Claude Code 커스텀 상태줄을 현재 PC의 사용자 전역 설정에 멱등 설치한다. |
 | `install_system_tool.py` | 208 | Windows 시스템 도구 설치 스크립트. |
 | `intent_map.py` | 175 | 하이브 훅 자동 의도 감지 워크플로 맵. |
+| `knowledge_extract.py` | 369 | 코드 안에 이미 적혀 있는 '진짜 지식'을 제텔카스텐으로 옮기는 추출기. |
 | `lesson.py` | 170 | 세션 교훈 증류 CLI — propose(후보 적재) / list / approve(승인 시 |
 | `make_source_package.py` 🔨 | 188 | 개인 인프라 정보를 걷어낸 소스 배포 zip을 만든다. 남에게 코드를 건네되 |
 | `migrate_antigravity_db.py` | 83 | DB 식별자 gemini→antigravity 일회성 마이그레이션 (plan Task 9). |
@@ -310,8 +308,8 @@
 | `migrate_vault_consolidate.py` | 240 | 지식 창고 재점검 일회성 정리 마이그레이션 (2026-07-14). |
 | `pg_project.py` | 39 | PostgreSQL project DB resolver shared by script-side logging and messaging utilities. |
 | `recall.py` | 51 | 경험 회상 스크립트 — 현재 작업과 유사한 과거 경험을 검색하여 출력. |
-| `recall_quality.py` 🔨 | 126 | 회상 v2의 **품질**을 측정한다. 커버리지·건수가 아니라 "관련된 걸 찾고 |
-| `reembed_all.py` 🔨 | 181 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
+| `recall_quality.py` 🔨 | 128 | 회상 v2의 **품질**을 측정한다. 커버리지·건수가 아니라 "관련된 걸 찾고 |
+| `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
 | `smoke_test.py` | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
@@ -340,7 +338,7 @@
 | `FilePathText.tsx` | 110 | 설명: 텍스트 내 파일 경로를 정규식으로 감지해 클릭 가능한 링크 세그먼트로 분리 렌더. |
 | `FileTreeNode.tsx` | 165 | 설명: 파일 탐색기의 단일 트리 노드 컴포넌트. |
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
-| `SetupBanner.tsx` | 239 | Setup Doctor 진단 결과를 상단 배너로 표시. |
+| `SetupBanner.tsx` 🔨 | 239 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 264 | 설명: 상태판 독립 창(?page=status) 본체. 이 PC의 콘솔 창 — |
 | `TerminalSlot.tsx` 🔨 | 1084 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
@@ -394,7 +392,7 @@
 | `test_self_heal_2.py` | 231 | 자가 치유 2.0 회귀 방지 테스트 — 회상 v2(pgvector) 그레이스풀 |
 | `test_session_binding.py` 🔨 | 269 | 세션↔슬롯 결속 + 화석(stale) 판정 회귀 테스트. 방어 대상은 |
 | `test_session_recycle.py` | 280 | 컨텍스트 리사이클 GUARD/상태머신 회귀 테스트. 핵심 방어선은 |
-| `test_setup_auto_install.py` | 261 | First-run sequential automatic dependency installation API regression tests. |
+| `test_setup_auto_install.py` 🔨 | 261 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
@@ -403,7 +401,7 @@
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
-| `test_windows_installer_toolchain.py` | 111 | Regression checks for prerequisite-first Windows installer packaging. |
+| `test_windows_installer_toolchain.py` 🔨 | 111 | Regression checks for prerequisite-first Windows installer packaging. |
 | `test_zettel_oneway_default.py` 🔨 | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
 | `test_zettel_size_guard.py` 🔨 | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
@@ -446,4 +444,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-14 20:57
+> 자동 생성 완료: 2026-08-14 23:10

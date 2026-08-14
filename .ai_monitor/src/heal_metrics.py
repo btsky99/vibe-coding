@@ -212,22 +212,45 @@ def _incident_metrics(project_id: str) -> dict:
 
 
 def _checkpoint_metrics(project_id: str) -> dict:
-    """체크포인트: 세션 연속성 인프라 활성도(기록 성실도 위주)."""
+    """체크포인트: 세션 연속성 인프라 활성도.
+
+    [🔴 과거사고 2026-08-14] 이 함수는 **행 수만 셌다**. 그래서 2999건 / 최근 7일 461건으로
+      🟢가 떴는데, 실제로 intent가 채워진 행은 137건(4.6%)뿐이었다. 나머지는
+      `pg_office.upsert_active_session()`이 매 프롬프트마다 만드는 자동 행으로
+      task_summary/modified_files만 있고 intent·next_step은 비어 있다(그 둘은
+      scripts/checkpoint.py 수동 호출로만 채워진다). 이어받을 내용이 없는 껍데기를
+      성과로 셌던 것 — 계측이 거짓이면 판단도 거짓이 된다.
+    [불변식] 성과 판정은 **내용 있는 행(filled)** 기준. total은 참고값으로만 남긴다.
+      generate_project_map.py도 `WHERE intent <> ''`로 읽는다 — 판정 기준을 그쪽에 맞춘다.
+    """
     pid = _pid_and(project_id)
     r = _one(
         "SELECT count(*) AS total, "
+        "count(*) FILTER (WHERE coalesce(intent, '') <> '') AS filled, "
         "count(*) FILTER (WHERE updated_at >= now() - interval '7 days') AS recent7, "
+        "count(*) FILTER (WHERE updated_at >= now() - interval '7 days' "
+        "                   AND coalesce(intent, '') <> '') AS filled7, "
         "count(DISTINCT agent_id) AS agents "
         f"FROM active_session_context WHERE 1=1{pid}"
     )
     total = int(r.get("total", 0) or 0)
+    filled = int(r.get("filled", 0) or 0)
     recent7 = int(r.get("recent7", 0) or 0)
+    filled7 = int(r.get("filled7", 0) or 0)
     agents = int(r.get("agents", 0) or 0)
-    verdict = "🟢" if recent7 > 0 else ("🟡" if total > 0 else "🔴")
+    fill_pct = round(100 * filled / total, 1) if total else 0.0
+    if filled7 == 0:
+        verdict = "🔴"          # 최근 7일 이어받을 내용 0 = 복구 브리핑이 빈다
+    elif fill_pct < 30:
+        verdict = "🟡"          # 돌긴 하나 대부분이 껍데기
+    else:
+        verdict = "🟢"
     return {
-        "total": total, "recent_7d": recent7, "distinct_agents": agents,
+        "total": total, "filled": filled, "fill_pct": fill_pct,
+        "recent_7d": recent7, "filled_7d": filled7, "distinct_agents": agents,
         "verdict": verdict,
-        "note": "체크포인트=intent/decisions/next_step 저장. 최근 7일 0건이면 이어받기 인프라 유휴.",
+        "note": ("성과 기준은 intent가 채워진 행이다. 자동 생성 행(task_summary만)은 "
+                 "복구 브리핑에 쓸 수 없다 — 낮은 fill_pct는 checkpoint.py 호출 부재를 뜻한다."),
     }
 
 

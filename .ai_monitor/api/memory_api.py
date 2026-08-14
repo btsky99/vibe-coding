@@ -97,13 +97,18 @@ def db_info(handler, DATA_DIR: Path, PG_PORT, PG_PROJECT_DB, query_rows) -> None
 def _format_recall_summary(query: str, items: list[dict]) -> str:
     """회상 결과 → 에이전트 컨텍스트 주입용 텍스트. 빈 결과면 빈 문자열(주입 생략).
 
-    [WHY] 0.45 임계를 넘은 것만 도착하므로 '관련 없음' 표시가 따로 없다 —
+    [WHY] 임계를 넘은 것만 도착하므로 '관련 없음' 표시가 따로 없다 —
     빈 문자열이 곧 '주입할 가치 없음' 신호 (기존 노이즈 주입 문제의 해결점).
+    [🔴 표기] 임계 숫자를 여기에 **하드코딩하지 말 것**. 실제 컷은 pg_vector_search가
+      테이블별로 다르게 걸고, 문자열만 남으면 코드가 바뀌어도 화면이 옛 숫자를 계속
+      말한다 — 2026-08-14까지 "유사도 0.45+"가 그렇게 6일간 거짓을 표시했다.
+      실제 최저 유사도를 items에서 계산해 보여준다.
     """
     if not items:
         return ''
     icons = {'zettel': '🧠', 'memory': '💾', 'experience': '🏃'}
-    lines = [f"[회상 v2] '{query[:50]}' 관련 지식 {len(items)}건 (유사도 0.45+):"]
+    _lo = min((float(it.get('sim') or 0) for it in items), default=0.0)
+    lines = [f"[회상 v2] '{query[:50]}' 관련 지식 {len(items)}건 (최저 유사도 {_lo:.2f}):"]
     for it in items:
         icon = icons.get(it.get('kind', ''), '•')
         sim = float(it.get('sim') or 0)
@@ -313,6 +318,7 @@ def handle_post(handler, path: str, data: dict,
             )
             from src.pg_vector_search import (
                 vector_available, vector_search, bump_reference,
+                _FLOOR as _VS_FLOOR,
             )
 
             # [제약] is_loaded 가드 — 모델 미로드 상태에서 embed_floats를 부르면
@@ -339,7 +345,10 @@ def handle_post(handler, path: str, data: dict,
                 _log_recall_event('fallback', 0, PROJECT_ID, reason, caller)
                 return True
 
-            vec = embed_floats(query)
+            # [🔴 e5 비대칭] 검색어는 'query:' 접두어로 임베딩해야 한다. 저장 쪽(passage:)과
+            #   섞으면 숫자는 정상으로 나오면서 순위만 조용히 나빠진다 — 진단이 가장 어려운
+            #   형태의 고장이다(2026-08-14 풀링 사고와 같은 계열).
+            vec = embed_floats(query, kind='query')
             if not vec:
                 handler.wfile.write(json.dumps(
                     {'status': 'success', 'fallback': True, 'items': [],
@@ -349,10 +358,18 @@ def handle_post(handler, path: str, data: dict,
                 _log_recall_event('fallback', 0, PROJECT_ID, 'embed_fail', caller)
                 return True
 
-            # 3개 지식원 통합 검색 → 점수순 병합. 임계 0.45는 vector_search 기본값.
-            # [2026-07-16] 짧은 쿼리(저정보)는 임계 0.60 상향 — "그럼 진행해" 같은 일반
-            # 지시가 임베딩 변별력 부족으로 무관 지식과 0.5+ 매칭되던 노이즈 컷.
-            min_sim = 0.45 if len(query) >= 20 else 0.60
+            # 3개 지식원 통합 검색 → 점수순 병합.
+            # [🔴 2026-08-14] 여기 있던 `min_sim = 0.45`가 vector_search의 0.55 바닥선을
+            #   뚫고 있었다(테이블별 min_sim이 없는 zettel_notes·hive_memory에 한해).
+            #   임계의 단일 출처는 pg_vector_search다 — 여기서 숫자를 다시 정하지 않는다.
+            #   짧은 쿼리("그럼 진행해")만 변별력 부족을 이유로 위로 올린다.
+            # [🔴 상대값으로 적는다] 예전엔 0.60/0.65 같은 절대값을 박았다. 그런데 임계는
+            #   모델의 코사인 분포 위 좌표라(pg_vector_search._FLOOR 주석 참조) 모델을
+            #   바꾸면 여기만 옛 좌표로 남아 조용히 무력해진다 — 실제로 e5 전환 후 0.65는
+            #   무관 질의를 하나도 못 걸렀다(무관 최고 0.829). 바닥선에 **가산**하면
+            #   모델이 바뀌어도 '짧은 쿼리는 더 엄하게'라는 의도가 살아남는다.
+            _SHORT_QUERY_MARGIN = 0.02
+            min_sim = _VS_FLOOR if len(query) >= 20 else _VS_FLOOR + _SHORT_QUERY_MARGIN
             kind_tables = [
                 ('zettel', 'zettel_notes'),
                 ('memory', 'hive_memory'),

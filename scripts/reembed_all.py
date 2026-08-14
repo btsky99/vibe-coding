@@ -28,7 +28,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / '.ai_monitor'))
 
-from infra.embed_service import EMBED_MODEL_NAME, embed_floats  # noqa: E402
+from infra.embed_service import (  # noqa: E402
+    EMBED_DIM, EMBED_MODEL_NAME, EMBED_SIGNATURE, embed_floats,
+)
 from src.pg_base import execute_raw, query_rows, _sql_text, _now_iso  # noqa: E402
 from src.pg_vector_search import _TABLES, _vec_literal, ensure_vector_schema  # noqa: E402
 
@@ -148,6 +150,13 @@ def reembed(only_table: str = '', batch: int = 200) -> None:
         total_fail += fail
 
     # 좌표계 지문 기록 — 다음 실행에서 변경을 감지할 수 있게.
+    # [🔴🔴 과거사고 2026-08-14 — 이 지문은 6일간 아무도 안 읽었다]
+    #   2026-08-07에 여기서 'embed_fingerprint' 키에 지문을 남겼지만, 정작 가드인
+    #   ensure_vector_schema는 **'embed_model' 키**를 읽는다. 키가 서로 달라 방어선이
+    #   연결된 적이 없었고, 그래서 같은 사고(모델 이름은 같은데 벡터 공간이 바뀜)를
+    #   또 못 잡았다. 지문을 남기는 것과 **누가 그걸 읽는가**는 다른 문제다.
+    #   → 가드가 실제로 읽는 키(embed_model.signature)에 쓴다. 옛 키도 함께 남긴다
+    #     (구버전 코드가 참조할 수 있으므로 제거는 별건).
     stamp = f'{{"model": "{EMBED_MODEL_NAME}", "lib": "{_lib_version()}"}}'
     execute_raw(
         "INSERT INTO hive_state (state_key, payload, updated_at) VALUES ('embed_fingerprint', "
@@ -155,8 +164,17 @@ def reembed(only_table: str = '', batch: int = 200) -> None:
         "ON CONFLICT (state_key) DO UPDATE SET payload = EXCLUDED.payload, "
         "updated_at = EXCLUDED.updated_at;"
     )
+    execute_raw(
+        "INSERT INTO hive_state (state_key, payload, updated_at) VALUES ('embed_model', "
+        + _sql_text(f'{{"model": "{EMBED_MODEL_NAME}", "dim": {EMBED_DIM}, '
+                    f'"signature": "{EMBED_SIGNATURE}"}}')
+        + "::jsonb, " + _sql_text(_now_iso()) + ") "
+        "ON CONFLICT (state_key) DO UPDATE SET payload = EXCLUDED.payload, "
+        "updated_at = EXCLUDED.updated_at;"
+    )
     print(f'\n총 {total_done}건 갱신 / {total_fail}건 실패')
     print(f'좌표계 지문 기록: {stamp}')
+    print(f'가드용 서명 기록: {EMBED_SIGNATURE}')
 
 
 def main() -> int:
@@ -166,7 +184,10 @@ def main() -> int:
     ap.add_argument('--table', default='', help='특정 테이블만')
     args = ap.parse_args()
 
-    if not ensure_vector_schema():
+    # [불변식] 이 도구는 서명 가드를 건너뛴다 — 가드가 막는 바로 그 상태를 해소하는 게
+    #   이 도구의 일이다. 가드를 그대로 받으면 "재임베딩이 필요한데 재임베딩을 못 하는"
+    #   부트스트랩 데드락이 된다.
+    if not ensure_vector_schema(skip_signature_guard=True):
         print('[!] vector 확장이 없다. 회상 v2 비활성 상태.')
         return 1
 
