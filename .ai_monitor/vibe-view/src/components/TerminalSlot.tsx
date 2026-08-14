@@ -70,8 +70,6 @@ import { slugifyProjectPath } from '../lib/projectContext';
 import { pickFolderDialog } from '../lib/folderPicker';
 import ChatSlot from './ChatSlot';
 import TerminalSlotHeader from './terminal/TerminalSlotHeader';
-import SideBus from './terminal/SideBus';
-import type { CentralBus } from '../hooks/useCentralBus';
 import ShortcutEditModal from './terminal/ShortcutEditModal';
 import SlashCommandMenu from './terminal/SlashCommandMenu';
 import { copyTextToClipboard, captureSelectRestore, installClipboardShortcuts } from './terminal/xtermSelection';
@@ -120,15 +118,12 @@ interface TerminalSlotProps {
   onActivateProject?: () => void;
   // "📁 프로젝트" — 이 슬롯의 프로젝트 경로 지정
   onPickProject?: (path: string) => void;
-  // [🔴 App이 소유한 단일 중앙 대화 버스] 슬롯이 직접 useCentralBus를 부르면 커서가 갈라져
-  //   한 슬롯이 가져간 메시지를 나머지가 못 본다. 반드시 props로만 받는다.
-  centralBus?: CentralBus;
   // 헤더에서 이름을 바꿨을 때. 미전달이면 편집 UI가 뜨지 않는다(오피스 등 재사용처 보호).
   onRenameSlot?: (name: string) => void;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, centralBus, onRenameSlot
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, onRenameSlot
 }: TerminalSlotProps) {
   // [슬롯별 프로젝트] cwd/project_id 산출의 단일 기준. 미지정이면 전역 currentPath로 폴백.
   const effectivePath = slotProject || currentPath;
@@ -202,12 +197,8 @@ export default function TerminalSlot({
 
   // 이 슬롯의 터미널 ID — cli_agent.py의 _terminals 키와 일치 (T1, T2, ...)
   const terminalId = `T${slotId + 1}`;
-  // [주소] 중앙 명부에 이 PC 번호가 있으면 '아픽스 1-1' 형식, 없으면 기존처럼 T1.
-  //   번호는 표시용이라 미설정(0)이어도 화면이 깨지지 않고 그냥 옛 표기로 남는다.
-  const nodeSeq = centralBus?.selfSeq || 0;
-  const slotAddress = nodeSeq ? `아픽스 ${nodeSeq}-${slotId + 1}` : terminalId;
-  // 사용자가 정한 이름(config slot_names) — 있으면 주소와 함께 보인다.
-  const displayName = slotName ? `${slotAddress} · ${slotName}` : slotAddress;
+  // 사용자가 정한 이름(config slot_names) — 있으면 T1 과 함께 보인다.
+  const displayName = slotName ? `${terminalId} · ${slotName}` : terminalId;
 
   // 이 슬롯의 에이전트 타입 (claude / antigravity / codex)
   // [버그수정 2026-03-08] Codex가 'claude'로 분류되어 T1 데이터를 T3에 표시하는 문제 수정
@@ -784,11 +775,8 @@ export default function TerminalSlot({
         onClose={closeTerminal}
       />
 
-      {/* ── 좌우 2분할 (Phase 11 Task 43) ──────────────────────────────────
-          왼쪽 = 기존 본문 전부(터미널/채팅), 오른쪽 = 서로 대화(SideBus, 기본 접힘).
-          [제약] 이 래퍼가 flex-1 min-h-0을 들고, 왼쪽 열도 min-h-0/min-w-0을 유지해야
-            xterm의 높이 계산이 예전과 같아진다 — 하나라도 빠지면 터미널이 무한히 늘어난다. */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-row">
+      {/* [제약] 이 열이 flex-1 min-h-0/min-w-0을 유지해야 xterm의 높이 계산이 맞는다 —
+          하나라도 빠지면 터미널이 무한히 늘어난다. */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col">
       {/* ── 터미널 뷰: isTerminalMode일 때 표시, 채팅 전환 시 hidden으로 유지 (unmount 안 함) ── */}
       {isTerminalMode && (
@@ -1070,10 +1058,6 @@ export default function TerminalSlot({
         </div>
       )}
 
-      </div>
-      {/* [WHY 슬롯마다 두는가] 지시하는 창(왼쪽)과 애들끼리 오가는 흐름(오른쪽)을 동시에
-          봐야 감시가 된다. 상태는 App의 단일 버스라 슬롯이 늘어도 폴링은 그대로 1개다. */}
-      {centralBus && <SideBus bus={centralBus} fromAgent={`claude:${terminalId}`} />}
       </div>
 
       {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}

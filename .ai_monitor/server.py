@@ -1164,45 +1164,13 @@ def _g_copy_path(h, pp):
     except Exception as e:
         h.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
 
-# 상태판(독립 창 + tui.py) 데이터 2종 — api/nodes_api.py 위임.
-# [WHY GET 분리] consoles는 CIM 스냅샷(~700ms)이라 무거우므로 remote와 한 응답에 묶지 않는다.
-#   상태판이 두 섹션을 각자 다른 주기로 갱신할 수 있어야 한다(노드 15초 / 콘솔 5초).
-def _g_nodes_remote(h, pp):
-    from api import nodes_api
-    nodes_api.remote(h)
+# 상태판(독립 창 + tui.py) 콘솔 목록 — api/nodes_api.py 위임.
+# [제약] consoles는 CIM 스냅샷(~700ms)이라 무겁다. 상태판은 5초 주기로만 부른다.
 def _g_nodes_consoles(h, pp):
     from api import nodes_api
     nodes_api.consoles(h)
 
-# 중앙 대화 3종 — api/central_api.py 위임 (Task 26).
-# [🔴 원격 실행 라우트를 여기에 추가하지 말 것] central_api 헤더의 설계 고정 사항 참조.
-def _g_central_status(h, pp):
-    from api import central_api
-    central_api.status(h, pp)
-def _g_central_messages(h, pp):
-    from api import central_api
-    central_api.messages(h, pp)
-def _g_central_poll(h, pp):
-    from api import central_api
-    central_api.poll(h, pp)
-def _g_central_nodes(h, pp):
-    from api import central_api
-    central_api.nodes(h, pp)
-def _g_jobs_list(h, pp):
-    from api import jobs_api
-    jobs_api.list_jobs(h, pp)
-def _g_jobs_detail(h, pp):
-    from api import jobs_api
-    jobs_api.job_detail(h, pp)
-
 GET_ROUTES = {
-    '/api/central/status': _g_central_status,
-    '/api/central/messages': _g_central_messages,
-    '/api/central/poll': _g_central_poll,
-    '/api/central/nodes': _g_central_nodes,
-    '/api/jobs': _g_jobs_list,
-    '/api/jobs/detail': _g_jobs_detail,
-    '/api/nodes/remote': _g_nodes_remote,
     '/api/nodes/consoles': _g_nodes_consoles,
     '/api/browse-folder': _g_fs_dialog,
     '/api/browse-file': _g_fs_dialog,
@@ -1413,14 +1381,11 @@ def _p_agents_heartbeat(h, pp):
 #   동일한 OfficeServerState 객체를 공유해야 생존/포트 판정이 갈리지 않는다.
 # [주의] exact 3종을 POST_ROUTES에 등록하면 exact-first 디스패치로 프록시 복합조건(not in 제외)보다
 #   먼저 걸린다 → 프록시의 launch/restart/status 제외 조건은 그대로 둬도 무해(방어적).
-# 상태판 POST 2종 — api/nodes_api.py 위임. 둘 다 본문을 핸들러가 직접 소비한다
+# 상태판 POST — api/nodes_api.py 위임. 본문을 핸들러가 직접 소비한다
 # (위임 규칙: body 선읽기 금지 대상 아님 — nodes_api._read_body가 Content-Length만큼 읽음).
 def _p_nodes_console_kill(h, pp):
     from api import nodes_api
     nodes_api.console_kill(h)
-def _p_nodes_check_cli(h, pp):
-    from api import nodes_api
-    nodes_api.check_cli(h)
 
 def _p_office_launch(h, pp):
     office_launch_api.launch(h, _office_state, _launch_office_server, BASE_DIR, _python_runner_cmds)
@@ -1467,41 +1432,7 @@ def _p_git_rollback(h, pp):    git_api.rollback(h, BASE_DIR)
 def _p_git_diff(h, pp):        git_api.diff(h, parse_qs(pp.query), BASE_DIR)
 def _p_screenshot_analyze(h, pp): screenshot_api.analyze(h, SCRIPTS_DIR, PROJECT_ID)
 
-# 중앙 대화 발신 2종 — api/central_api.py 위임 (Task 26).
-# [🔴 원격 실행 라우트를 여기에 추가하지 말 것] central_api 헤더의 설계 고정 사항 참조.
-#   중앙 DB는 여러 PC의 공용 접점이라 실행 엔드포인트 하나가 전 노드 RCE가 된다.
-def _p_central_send(h, pp):
-    from api import central_api
-    central_api.send(h, pp)
-def _p_central_ack(h, pp):
-    from api import central_api
-    central_api.ack(h, pp)
-# [WHY 이건 실행 라우트가 아닌가] 위 금지는 '중앙 DB를 통해 남의 PC를 움직이는' 것을 막는다.
-#   allow-node는 그 반대다 — **이 PC 안에서** 이 PC의 허용 설정을 바꾼다. 중앙에서 부를 수
-#   없는(로컬 127.0.0.1 전용) 라우트이고, 하는 일은 config 한 줄 쓰기다.
-def _p_central_allow(h, pp):
-    from api import central_api
-    central_api.allow_node(h, pp)
-# [WHY 여기도 실행 라우트가 아닌가] 발주는 중앙 DB 에 줄 하나를 쓰는 것이고, 실제 실행
-#   여부는 **받는 노드의 게이트**가 정한다. allow-dir 는 이 PC 안의 설정을 바꾼다.
-#   권한 판단을 항상 실행하는 쪽에 두는 것이 이 배치의 요점이다.
-def _p_jobs_create(h, pp):
-    from api import jobs_api
-    jobs_api.create(h, pp)
-def _p_jobs_decide(h, pp):
-    from api import jobs_api
-    jobs_api.decide(h, pp)
-def _p_jobs_allow_dir(h, pp):
-    from api import jobs_api
-    jobs_api.allow_dir(h, pp)
-
 POST_ROUTES = {
-    '/api/central/send': _p_central_send,
-    '/api/central/ack': _p_central_ack,
-    '/api/central/allow-node': _p_central_allow,
-    '/api/jobs': _p_jobs_create,
-    '/api/jobs/decide': _p_jobs_decide,
-    '/api/jobs/allow-dir': _p_jobs_allow_dir,
     '/api/setup/auto-install': _p_setup_auto_install,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,
@@ -1535,7 +1466,6 @@ POST_ROUTES = {
     '/api/dashboard/launch': _p_dashboard_launch,
     '/api/agents/heartbeat': _p_agents_heartbeat,
     '/api/nodes/console/kill': _p_nodes_console_kill,
-    '/api/nodes/check-cli': _p_nodes_check_cli,
     '/api/office/launch': _p_office_launch,
     '/api/office/restart': _p_office_restart,
     '/api/office/status': _p_office_status,

@@ -1,34 +1,23 @@
 """
 FILE: api/nodes_api.py
-DESCRIPTION: 상태판(독립 창 + tui.py)의 데이터 공급 라우트 4종.
-  GET  /api/nodes/remote        — ssh config 별칭 + 아픽스 서버 조회(생존/접속) 병합
+DESCRIPTION: 상태판(독립 창 + tui.py)의 콘솔 창 라우트 2종 — 전부 **이 PC 안**의 사실만 다룬다.
   GET  /api/nodes/consoles      — 화면에 떠 있는 콘솔 창 목록 + 소속 판정
   POST /api/nodes/console/kill  — 콘솔 창 안전 종료(3중 재검증)
-  POST /api/nodes/check-cli     — 원격 노드의 claude/codex 설치 점검(온디맨드)
 
-[WHY ssh 목록을 여기서 다시 파싱하지 않는가 — 중복 금지]
-  ~/.ssh/config 파싱은 pty-server의 remote_hosts.js가 단독 소유한다(별칭 화이트리스트가
-  원격 spawn의 보안 경계이기도 하다). 파이썬에서 재구현하면 두 목록이 갈리는 순간
-  "UI엔 보이는데 실행은 거부되는" 상태가 된다. → pty_api 프록시로 그 목록을 그대로 받아
-  서버 조회 결과만 덧붙인다.
-
-[🔴 alive와 reachable을 합치지 말 것]
-  alive(하트비트=살아 있나)와 reachable(역터널=조종 가능한가)은 조치가 정반대인 별개
-  사실이다. 프론트 편의를 위해 여기서 하나로 뭉개면 원인 진단이 불가능해진다 —
-  이유는 infra/node_status.py 헤더 참조. 세 값(true/false/null)을 그대로 내려보낸다.
-
-[제약] check-cli는 SSH 왕복(수 초)이라 폴링 대상이 아니다. 프론트는 사용자가 버튼을
-  눌렀을 때만 호출하고 결과를 자기 상태에 캐시한다(node_status 모듈 헤더 참조).
+[제약] consoles는 CIM 스냅샷(~700ms)이라 무겁다 — 상태판은 5초 주기로만 부른다.
+  더 잦게 부르면 스캔이 겹쳐 서버 응답 전체가 늘어진다.
 
 REVISION HISTORY:
 - 2026-08-02 Claude: 최초 작성 — 정체불명 콘솔 창 식별 + 원격 노드 상태판.
+- 2026-08-14 Claude: 아픽스 계층 철거 — remote/check-cli 제거. 원격 노드 조회(node_status)가
+  사라져 이 파일은 로컬 콘솔 창 전용이 됐다. 원격 상태가 다시 필요하면 아픽스 리포에 둘 것.
 """
 from __future__ import annotations
 
 import json
 import os
 
-from infra import console_scan, node_status
+from infra import console_scan
 
 
 def _json_headers(handler) -> None:
@@ -53,47 +42,6 @@ def _read_body(handler) -> dict:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
-
-
-def remote(handler) -> None:
-    """GET /api/nodes/remote — 원격 노드 카드용 통합 목록.
-
-    [불변식] alias는 remote_hosts.js가 실제로 파싱해낸 값만 내려간다 — 프론트가 이 alias로
-      원격 실행을 요청하고, Node 쪽이 같은 화이트리스트로 2차 검증한다.
-    """
-    _json_headers(handler)
-    try:
-        from api import pty_api
-        hosts_res = pty_api._node_get('/api/pty/remote/hosts') or {}
-        hosts = hosts_res.get('hosts') or []
-        modes = hosts_res.get('modes') or []
-        ssh_available = hosts_res.get('sshAvailable', False)
-
-        probe = node_status.server_probe()
-        merged = []
-        for h in hosts:
-            merged.append({
-                **h,
-                # 세 값 그대로: True=확인됨 / False=아님 / None=판정 불가
-                'alive': node_status.is_alive(probe, h),
-                'reachable': node_status.is_reachable(probe, h),
-                'heartbeatAge': node_status.heartbeat_age(probe, h),
-            })
-
-        _write(handler, {
-            'hosts': merged,
-            'modes': modes,
-            'sshAvailable': ssh_available,
-            'server': {
-                'available': probe.get('available', False),
-                'heartbeatAvailable': probe.get('heartbeat_available', False),
-                'error': probe.get('error', ''),
-                'staleAfterSec': node_status.STALE_AFTER_SEC,
-            },
-            'local': node_status.local_summary(),
-        })
-    except Exception as e:
-        _write(handler, {'hosts': [], 'modes': [], 'sshAvailable': False, 'error': str(e)})
 
 
 def consoles(handler) -> None:
@@ -141,27 +89,3 @@ def console_kill(handler) -> None:
         exe=str(body.get('exe') or ''),
     )
     _write(handler, result)
-
-
-def check_cli(handler) -> None:
-    """POST /api/nodes/check-cli — {alias} 노드에 claude/codex가 있는지 SSH로 1회 확인."""
-    body = _read_body(handler)
-    _json_headers(handler)
-    alias = str(body.get('alias') or '').strip()
-    if not alias:
-        _write(handler, {'ok': False, 'error': 'alias가 필요해.'})
-        return
-    # [보안] 임의 문자열로 ssh를 부르지 않는다 — remote_hosts.js가 파싱한 별칭만 허용.
-    known: set[str] = set()
-    try:
-        from api import pty_api
-        for h in ((pty_api._node_get('/api/pty/remote/hosts') or {}).get('hosts') or []):
-            if h.get('alias'):
-                known.add(h['alias'])
-            known.update(h.get('aliases') or [])
-    except Exception:
-        pass
-    if alias not in known:
-        _write(handler, {'ok': False, 'error': 'ssh config에 없는 별칭이야.'})
-        return
-    _write(handler, {'alias': alias, **node_status.check_remote_clis(alias)})

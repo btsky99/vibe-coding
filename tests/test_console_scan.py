@@ -190,17 +190,3 @@ def test_kill_route_requires_pid():
     nodes_api.console_kill(h)
     assert h.payload['ok'] is False
     assert h.payload['reason'] == 'bad_request'
-
-
-def test_check_cli_rejects_unknown_alias(monkeypatch):
-    """[보안] ssh config에 없는 별칭으로는 ssh를 부르지 않는다."""
-    from api import nodes_api, pty_api
-    monkeypatch.setattr(pty_api, '_node_get', lambda path, timeout=3.0: {'hosts': [{'alias': 'lenovo', 'aliases': ['lenovo']}]})
-    called = []
-    from infra import node_status
-    monkeypatch.setattr(node_status, 'check_remote_clis', lambda alias, timeout=12: called.append(alias) or {})
-
-    h = _FakeHandler({'alias': 'evil; rm -rf /'})
-    nodes_api.check_cli(h)
-    assert h.payload['ok'] is False
-    assert not called, '화이트리스트에 없는 별칭으로 ssh가 실행됐다'

@@ -1,9 +1,8 @@
 /**
  * ------------------------------------------------------------------------
  * 📄 파일명: StatusBoard.tsx
- * 📝 설명: 상태판 독립 창(?page=status) 본체. 두 가지를 한 화면에 보여준다.
- *          ① 원격 노드 — ssh config 별칭 + 생존/접속 + claude/codex 설치 점검
- *          ② 이 PC의 콘솔 창 — 화면에 떠 있는 검은 창의 정체와 "닫아도 되는지"
+ * 📝 설명: 상태판 독립 창(?page=status) 본체. 이 PC의 콘솔 창 —
+ *          화면에 떠 있는 검은 창의 정체와 "닫아도 되는지"를 보여준다.
  *
  * [WHY 독립 창인가 — 좌측 패널이 아니라]
  *   상태판은 옆에 띄워 두고 곁눈질하는 물건이다. 좌측 액티비티 바 패널로 만들면
@@ -23,28 +22,11 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Check, Cpu, Loader2, Monitor, RefreshCw, Search,
-  Server, ShieldAlert, Terminal, X,
+  AlertTriangle, Loader2, Monitor, RefreshCw, ShieldAlert, Terminal, X,
 } from 'lucide-react';
 
-// 노드 목록은 아픽스 서버 왕복이 있어 자주 볼 이유가 없다. 콘솔은 창이 뜨고 지는 게
-// 사용자가 지켜보는 대상이라 더 촘촘히 본다(백엔드에 3초 TTL 캐시가 있어 안전).
-const NODE_POLL_MS = 15000;
+// 창이 뜨고 지는 것을 지켜보는 화면이라 촘촘히 본다(백엔드에 3초 TTL 캐시가 있어 안전).
 const CONSOLE_POLL_MS = 5000;
-const CLI_CACHE_KEY = 'vibe.statusboard.cliCheck';
-
-// [🔴 alive와 reachable을 한 값으로 합치지 말 것] 둘은 조치가 정반대인 별개 사실이다.
-//   alive=하트비트(살아 있나) / reachable=역터널(조종 가능한가).
-//   null은 '판정 불가'로, false(=아님)와 다르게 그려야 한다 — 이유는 nodes_api 헤더 참조.
-interface RemoteHost {
-  alias: string;
-  aliases: string[];
-  hostName: string;
-  user: string;
-  alive: boolean | null;
-  reachable: boolean | null;
-  heartbeatAge: number | null;
-}
 
 interface ConsoleItem {
   pid: number;
@@ -57,14 +39,6 @@ interface ConsoleItem {
   owner: 'owned' | 'slot' | 'foreign';
   label: string;
   ancestry: string[];
-}
-
-interface CliResult {
-  ok: boolean;
-  claude: boolean | null;
-  codex: boolean | null;
-  error?: string;
-  at: number;
 }
 
 const OWNER_STYLE: Record<string, { dot: string; chip: string; note: string }> = {
@@ -85,30 +59,11 @@ const OWNER_STYLE: Record<string, { dot: string; chip: string; note: string }> =
   },
 };
 
-// [WHY 서버가 준 '나이(초)'를 쓰는가] 브라우저 시계가 어긋나면 절대시각 비교는 몇 시간씩
-//   틀린다. 관제 쪽도 같은 이유로 age_sec 을 서버에서 계산해 내려준다.
-function ageText(sec: number | null): string {
-  if (sec === null || sec === undefined) return '';
-  if (sec < 60) return '방금';
-  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
-  return `${Math.floor(sec / 86400)}일 전`;
-}
-
 export default function StatusBoard() {
-  const [hosts, setHosts] = useState<RemoteHost[]>([]);
-  const [serverOk, setServerOk] = useState(true);
-  const [serverErr, setServerErr] = useState('');
-  const [heartbeatOk, setHeartbeatOk] = useState(true);
-  const [local, setLocal] = useState<{ hostname?: string; platform?: string }>({});
-  const [sshAvailable, setSshAvailable] = useState(true);
-
   const [consoles, setConsoles] = useState<ConsoleItem[]>([]);
   const [consoleSupported, setConsoleSupported] = useState(true);
   const [consoleLoading, setConsoleLoading] = useState(true);
 
-  const [cliResults, setCliResults] = useState<Record<string, CliResult>>({});
-  const [checking, setChecking] = useState<Record<string, boolean>>({});
   const [killing, setKilling] = useState<Record<number, boolean>>({});
   const [confirmKill, setConfirmKill] = useState<ConsoleItem | null>(null);
   const [notice, setNotice] = useState('');
@@ -116,35 +71,6 @@ export default function StatusBoard() {
   // 창이 닫히고 나서 setState가 불리면 React 경고가 난다 — 언마운트 후 반영 차단.
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
-
-  // CLI 점검은 SSH 왕복이라 비싸다 → 창을 다시 열어도 결과가 남도록 localStorage에 캐시.
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CLI_CACHE_KEY);
-      if (raw) setCliResults(JSON.parse(raw));
-    } catch { /* 캐시 파손은 무시 — 점검을 다시 하면 된다 */ }
-  }, []);
-
-  const persistCli = useCallback((next: Record<string, CliResult>) => {
-    setCliResults(next);
-    try {
-      localStorage.setItem(CLI_CACHE_KEY, JSON.stringify(next));
-    } catch { /* 용량 초과 등은 무시 */ }
-  }, []);
-
-  const loadNodes = useCallback(async () => {
-    try {
-      const r = await fetch('/api/nodes/remote');
-      const d = await r.json();
-      if (!alive.current) return;
-      setHosts(Array.isArray(d.hosts) ? d.hosts : []);
-      setSshAvailable(d.sshAvailable !== false);
-      setServerOk(d.server?.available !== false);
-      setServerErr(d.server?.error || '');
-      setHeartbeatOk(d.server?.heartbeatAvailable !== false);
-      setLocal(d.local || {});
-    } catch { /* 폴링 실패는 다음 회차에 복구 — 화면을 비우지 않는다 */ }
-  }, []);
 
   const loadConsoles = useCallback(async () => {
     try {
@@ -159,37 +85,10 @@ export default function StatusBoard() {
   }, []);
 
   useEffect(() => {
-    loadNodes();
-    const t = setInterval(loadNodes, NODE_POLL_MS);
-    return () => clearInterval(t);
-  }, [loadNodes]);
-
-  useEffect(() => {
     loadConsoles();
     const t = setInterval(loadConsoles, CONSOLE_POLL_MS);
     return () => clearInterval(t);
   }, [loadConsoles]);
-
-  const checkCli = useCallback(async (alias: string) => {
-    setChecking((s) => ({ ...s, [alias]: true }));
-    try {
-      const r = await fetch('/api/nodes/check-cli', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alias }),
-      });
-      const d = await r.json();
-      if (!alive.current) return;
-      persistCli({
-        ...cliResults,
-        [alias]: { ok: !!d.ok, claude: d.claude, codex: d.codex, error: d.error || '', at: Date.now() },
-      });
-    } catch (e) {
-      if (alive.current) setNotice(`점검 실패: ${e}`);
-    } finally {
-      if (alive.current) setChecking((s) => ({ ...s, [alias]: false }));
-    }
-  }, [cliResults, persistCli]);
 
   // [🔴 불변식] created/exe를 조회 시점 값 그대로 되돌려줘야 서버가 PID 재사용을 걸러낸다.
   //   pid만 보내면 서버가 mismatch로 거부한다(의도된 동작 — 오폭 방지).
@@ -226,13 +125,12 @@ export default function StatusBoard() {
         <Monitor className="w-4 h-4 text-primary" />
         <div className="min-w-0">
           <div className="text-[13px] font-black tracking-tight truncate">
-            {local.hostname || '이 PC'}
+            이 PC
           </div>
-          <div className="text-[10px] text-[#777] truncate">{local.platform || ''}</div>
         </div>
         <div className="flex-1" />
         <button
-          onClick={() => { loadNodes(); loadConsoles(); }}
+          onClick={() => loadConsoles()}
           className="p-1.5 rounded-lg hover:bg-white/10 text-[#aaa] hover:text-white transition-colors"
           title="새로고침"
         >
@@ -248,114 +146,6 @@ export default function StatusBoard() {
           </button>
         </div>
       )}
-
-      {/* ── 원격 노드 ────────────────────────────────────────────────── */}
-      <section className="px-5 pt-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Server className="w-3.5 h-3.5 text-primary/70" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-[#888]">원격 노드</span>
-          <div className="flex-1 h-px bg-white/10" />
-          <span className="text-[10px] text-[#666]">
-            {hosts.filter((h) => h.alive === true).length}/{hosts.length} 살아있음
-          </span>
-        </div>
-
-        {!serverOk && (
-          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-warning/10 border border-warning/30">
-            <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
-            <span className="text-[10px] text-warning">
-              아픽스 서버에 못 물어봐서 판정이 빠졌어 — 노드가 죽은 게 아니야. {serverErr}
-            </span>
-          </div>
-        )}
-        {serverOk && !heartbeatOk && (
-          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-warning/10 border border-warning/30">
-            <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
-            <span className="text-[10px] text-warning">
-              서버는 붙었는데 관제 DB를 못 읽어 '살아있음' 판정만 빠졌어. 터널 표시는 유효해.
-            </span>
-          </div>
-        )}
-        {!sshAvailable && (
-          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-warning/10 border border-warning/30">
-            <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
-            <span className="text-[10px] text-warning">
-              ssh 실행파일이 없어 원격 접속이 불가능해. (윈도우: OpenSSH 클라이언트 설치 필요)
-            </span>
-          </div>
-        )}
-
-        {hosts.length === 0 ? (
-          <div className="text-[11px] text-[#666] py-3">
-            ~/.ssh/config에 Host 별칭이 없어. 별칭을 등록하면 여기에 노드가 뜬다.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {hosts.map((h) => {
-              const cli = cliResults[h.alias];
-              const busy = !!checking[h.alias];
-              return (
-                <div
-                  key={h.alias}
-                  className={`rounded-xl border p-3 flex flex-col gap-2 transition-colors ${
-                    h.alive === false ? 'bg-[#222] border-white/5 opacity-70' : 'bg-[#252526] border-white/10'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${
-                      h.alive === true ? 'bg-green-500' : h.alive === false ? 'bg-[#555]' : 'bg-yellow-500/50'
-                    }`} />
-                    <span className="text-[13px] font-black tracking-tight truncate">{h.alias}</span>
-                    <span className="text-[9px] text-[#777] truncate">
-                      {h.user ? `${h.user}@` : ''}{h.hostName || '—'}
-                    </span>
-                    <div className="flex-1" />
-                    {/* 두 사실을 나란히 — 합치면 "터널만 죽음"과 "앱이 죽음"을 구분 못 한다 */}
-                    <span className="text-[9px] shrink-0 flex items-center gap-1.5">
-                      <span className={h.alive === true ? 'text-green-400'
-                        : h.alive === false ? 'text-[#777]' : 'text-yellow-500/70'}>
-                        {h.alive === true ? `살아있음 ${ageText(h.heartbeatAge)}`
-                          : h.alive === false ? `끊김 ${ageText(h.heartbeatAge)}` : '생존 미확인'}
-                      </span>
-                      <span className="text-[#444]">·</span>
-                      <span className={h.reachable === true ? 'text-primary'
-                        : h.reachable === false ? 'text-[#777]' : 'text-[#555]'}>
-                        {h.reachable === true ? '조종가능'
-                          : h.reachable === false ? '터널끊김' : '터널없음'}
-                      </span>
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {/* CLI 설치 여부 — 점검 전에는 '?' 로 두고 사용자가 누를 때만 SSH를 쓴다.
-                        (자동 점검하면 노드마다 주기적으로 SSH 세션이 열린다) */}
-                    <CliChip label="claude" state={cli?.ok ? cli.claude : null} />
-                    <CliChip label="codex" state={cli?.ok ? cli.codex : null} />
-                    <div className="flex-1" />
-                    <button
-                      onClick={() => checkCli(h.alias)}
-                      // [WHY reachable 기준인가] 점검은 SSH다. 노드가 살아 있어도(하트비트 O)
-                      //   터널이 죽었으면 들어갈 수 없다 — 여기서 봐야 할 것은 생존이 아니라 통로다.
-                      disabled={busy || h.reachable === false || !sshAvailable}
-                      title={h.reachable === false ? '터널이 끊겨 들어갈 수 없어' : 'SSH로 CLI 설치 여부 확인'}
-                      className="px-2 py-1 rounded-lg text-[10px] font-bold bg-[#3c3c3c] hover:bg-primary/20 hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed border border-white/5 flex items-center gap-1 transition-colors"
-                    >
-                      {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
-                      점검
-                    </button>
-                  </div>
-
-                  {cli && !cli.ok && cli.error && (
-                    <div className="text-[9px] text-warning/80 truncate" title={cli.error}>
-                      점검 실패: {cli.error}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
 
       {/* ── 콘솔 창 ──────────────────────────────────────────────────── */}
       <section className="px-5 py-4">
@@ -470,25 +260,5 @@ export default function StatusBoard() {
         </div>
       )}
     </div>
-  );
-}
-
-/** CLI 설치 여부 칩 — null은 '아직 점검 안 함'(모름)이지 '없음'이 아니다. */
-function CliChip({ label, state }: { label: string; state: boolean | null | undefined }) {
-  const known = state === true || state === false;
-  return (
-    <span
-      className={`px-1.5 py-0.5 rounded border text-[9px] font-bold flex items-center gap-1 ${
-        state === true
-          ? 'bg-green-500/15 text-green-400 border-green-500/30'
-          : state === false
-            ? 'bg-red-500/10 text-red-400/80 border-red-500/25'
-            : 'bg-white/5 text-[#777] border-white/10'
-      }`}
-      title={known ? (state ? `${label} 설치됨` : `${label} 없음`) : '아직 점검하지 않음'}
-    >
-      {state === true ? <Check className="w-2.5 h-2.5" /> : state === false ? <X className="w-2.5 h-2.5" /> : <Cpu className="w-2.5 h-2.5" />}
-      {label}
-    </span>
   );
 }

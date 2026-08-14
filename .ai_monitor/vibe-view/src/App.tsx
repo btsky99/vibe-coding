@@ -55,8 +55,6 @@ const StatusBoard = lazy(() => import('./components/StatusBoard'));
 /* ── 패널 컴포넌트 (사이드바 직접 렌더링용) ── */
 import TasksPanel from './components/panels/TasksPanel';
 import LanPanel from './components/panels/LanPanel';
-import CentralPanel from './components/panels/CentralPanel';
-import { useCentralBus } from './hooks/useCentralBus';
 import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
 import HivePanel from './components/panels/HivePanel';
@@ -74,10 +72,6 @@ function App() {
   // ─── 공유 데이터 훅 — 모든 폴링/SSE/상태를 useVibeData로 통합 ──────
   const vibe = useVibeData();
 
-  // [🔴 단 하나의 중앙 대화 버스] 여기서만 마운트한다. /api/central/poll이 이 노드의 커서를
-  //   전진시키므로, 소비처(중앙 패널·터미널 우측 창)마다 훅을 부르면 한 쪽이 가져간 메시지를
-  //   다른 쪽이 영영 못 본다. 아래로는 props로만 내려보낸다.
-  const centralBus = useCentralBus();
   const {
     logs, setLogs, messages, memory, locks,
     agentTerminals, globalPipelineStage, skillChain,
@@ -624,7 +618,6 @@ function App() {
     git: 'Git 감시',
     heal: '자가치유 계측',
     lan: 'LAN 공유',
-    central: '중앙 대화',
     daemons: '백그라운드 데몬',
   }[activeTab] ?? activeTab;
 
@@ -859,9 +852,6 @@ function App() {
             ) : activeTab === 'lan' ? (
               /* LAN 브리지 패널 — 자동발견·페어링·파일전송 (Phase 1) */
               <LanPanel />
-            ) : activeTab === 'central' ? (
-              /* 중앙 대화 패널 — 아픽스 서버 PG를 여러 PC가 공유 (Phase 10 Task 29) */
-              <CentralPanel bus={centralBus} />
             ) : null}
             {/* [성능 최적화] 파일 탐색기는 항상 마운트 유지 — 탭 전환 시 재마운트로 인한
                 API 재호출(drives, projects, config, files) 지연을 방지.
@@ -1035,7 +1025,6 @@ function App() {
                   agentTerminals={agentTerminals}
                   orchestratorData={skillChain}
                   hiveActivity={hiveActivity}
-                  centralBus={centralBus}
                   slotName={slotNames[slotId]}
                   onRenameSlot={(name: string) => setSlotName(slotId, name)}
                 />
