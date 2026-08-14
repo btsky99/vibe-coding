@@ -6,6 +6,8 @@ DESCRIPTION: Windows 바탕화면 바로가기 생성 유틸리티.
   EXE 모드: 현재 실행 파일 사용.
 
 REVISION HISTORY:
+- 2026-08-14 Claude: 바탕화면 바로가기에 '관리자 권한으로 실행' 자동 체크 —
+  LAN 브리지 방화벽 규칙(netsh)이 비관리자에선 조용히 실패해 "됐다는데 연결 안 됨"이 됨
 - 2026-03-26 Claude: pythonw → vibe-coding.exe 직접 실행으로 변경 (pythonw는 에러 무시)
 - 2026-03-26 Claude: remove_shortcut() 추가 — 언인스톨 시 바탕화면 바로가기 삭제
 - 2026-03-25 Claude: pip install 모드 대응 — entry point 자동 탐색 + winshell 의존성 제거
@@ -15,6 +17,34 @@ import os
 import sys
 import shutil
 from pathlib import Path
+
+
+def set_run_as_admin(lnk_path) -> bool:
+    """.lnk에 '관리자 권한으로 실행' 체크를 켠다(바이트 패치). 성공 여부 반환.
+
+    [WHY 바이트 패치] WScript.Shell의 IShellLink COM에는 이 플래그를 켜는 속성이 아예
+      없다(IShellLinkDataList::SetFlags를 파이썬에서 잡으려면 별도 인터페이스 캐스팅 필요).
+      .lnk 포맷은 고정 헤더라 LinkFlags 한 바이트를 켜는 쪽이 의존성 0에 확실하다.
+    [포맷 근거] MS-SHLLINK: ShellLinkHeader.LinkFlags는 오프셋 0x14의 4바이트 LE.
+      RunAsUser = bit 13 = 0x2000 → 상위쪽 바이트인 0x15 자리에 0x20을 OR한다.
+    [불변식] 반드시 shortcut.save() **뒤에** 호출한다 — COM save가 파일을 통째로 다시
+      쓰므로 먼저 패치하면 그대로 날아간다.
+    """
+    if os.name != 'nt':
+        return False
+    try:
+        path = Path(lnk_path)
+        raw = bytearray(path.read_bytes())
+        if len(raw) < 0x16:
+            return False
+        if raw[0x15] & 0x20:
+            return True                      # 이미 켜짐 — 재기록 안 함(멱등)
+        raw[0x15] |= 0x20
+        path.write_bytes(bytes(raw))
+        return True
+    except OSError as e:
+        print(f"관리자 권한 플래그 설정 실패: {e}")
+        return False
 
 
 def create_shortcut():
@@ -105,6 +135,11 @@ def create_shortcut():
                 break
 
         shortcut.save()
+        # [WHY 관리자] LAN 브리지가 부팅 때 netsh로 방화벽 인바운드 규칙을 등록하는데,
+        #   비관리자면 조용히 실패(firewall_ok=False)해 상대 PC에서 연결이 안 된다.
+        #   save() 이후에 패치해야 한다 — COM save가 파일을 다시 쓴다.
+        if set_run_as_admin(shortcut_path):
+            print("바로가기에 '관리자 권한으로 실행'을 체크했습니다.")
         print(f"바탕화면 바로가기가 생성되었습니다: {shortcut_path}")
     except Exception as e:
         print(f"바로가기 생성 중 오류 발생: {e}")

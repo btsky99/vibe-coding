@@ -11,6 +11,9 @@
 ;      또는 Inno Setup Compiler에서 이 파일 열고 Build > Compile
 ;
 ; 변경 이력:
+; [2026-08-14] Claude — 바탕화면/시작메뉴 바로가기에 '관리자 권한으로 실행' 자동 체크.
+;              LAN 브리지의 netsh 방화벽 등록이 비관리자에서 조용히 실패해
+;              "브리지는 켜졌는데 상대 PC에서 연결 안 됨"이 되던 문제. [Run] 바이트 패치.
 ; [2026-07-28] Claude — [재설치 DLL 잠금 재발] "DeleteFile 실패; 코드 5: {app}\_internal\msvcp140.dll"
 ;              (v3.7.302, 특정 PC에서 반복 / 재부팅 후에는 설치 성공). 근본원인 2가지:
 ;              ① CloseApplicationsFilter=*vibe-coding* — 이 옵션은 '닫을 앱' 필터가 아니라
@@ -204,6 +207,20 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Com
 ;     새 {app}\exe로 repoint. 정상 타깃(Test-Path True)은 건드리지 않음(멱등).
 ;   [불변식] skipifsilent 금지 — 이 복구는 무음 업데이트에서 반드시 실행돼야 함(그게 주 사고 경로).
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$new='{app}\{#MyAppExeName}'; $ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if(($sc.TargetPath -like '*VibeCoding*vibe-coding.exe') -and -not (Test-Path $sc.TargetPath)){{ $sc.TargetPath=$new; $sc.WorkingDirectory=Split-Path $new; if(Test-Path ('{app}\vibe_final.ico')){{ $sc.IconLocation='{app}\vibe_final.ico' }}; $sc.Save() }} }} catch {{}} }}"""; Flags: runhidden; StatusMsg: "구 바로가기 경로 복구 중..."
+; ── 바로가기에 '관리자 권한으로 실행' 자동 체크 ──────────────────────────
+; [WHY] LAN 브리지가 기동 때 netsh로 방화벽 인바운드 규칙(9020/9021)을 등록한다.
+;   비관리자면 netsh가 실패하는데 크래시는 안 나므로(firewall_ok=False) 사용자에겐
+;   "켰는데 상대 PC에서 연결이 안 됨"으로만 보인다. 매번 우클릭→관리자 실행을
+;   기억할 수 없으니 바로가기 속성에 박아둔다.
+; [포맷 근거] MS-SHLLINK — ShellLinkHeader.LinkFlags는 오프셋 0x14의 4바이트 LE이고
+;   RunAsUser는 bit 13(0x2000) → 바이트 0x15에 0x20을 OR한다. IShellLink COM에는
+;   이 플래그 속성이 없어(SetFlags는 IShellLinkDataList) 바이트 패치가 유일한 무의존 방법.
+; [불변식] 이 줄은 위 '구 바로가기 경로 복구'보다 **뒤에** 와야 한다 — repoint가
+;   $sc.Save()로 파일을 다시 쓰므로 먼저 패치하면 플래그가 지워진다.
+; [주의] Desktop/Programs만 대상. 시작프로그램(Startup)에는 걸지 않는다 —
+;   Startup의 관리자 바로가기는 로그온 때 UAC에 막혀 그냥 안 뜬다(자동 실행 파괴).
+; [불변식] skipifsilent 금지 — 무음 업데이트에서도 플래그가 유지돼야 한다.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if($sc.TargetPath -like '*VibeCoding*vibe-coding.exe'){{ $b=[IO.File]::ReadAllBytes($_.FullName); if($b.Length -gt 21 -and -not ($b[21] -band 0x20)){{ $b[21]=$b[21] -bor 0x20; [IO.File]::WriteAllBytes($_.FullName,$b) }} }} }} catch {{}} }}"""; Flags: runhidden; StatusMsg: "바로가기 관리자 권한 설정 중..."
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppDisplayName} 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

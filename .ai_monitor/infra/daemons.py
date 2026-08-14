@@ -3,6 +3,8 @@
 # 📝 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/
 #          에이전트 동기화/MUX/제텔 동기화·정제/커밋 감시 (server.py 분할 단계 9)
 # 🕒 변경 이력:
+# [2026-08-14] Claude — 데몬 .py 실행기를 runtime.script_runner_cmd로 통일(설치본에서
+#   Python 미설치 PC면 LAN 브리지/워치독이 조용히 안 뜨던 결함) + _spawn_script 실패 로그.
 # [2026-08-14] Claude — Discord 대시보드/게이트웨이 러너 2종 삭제(커넥터 전면 철거).
 # [2026-08-04] Claude — popen 계열 데몬이 상태판에서 항상 '꺼짐'으로 보이던 오탐 수정
 #   (스레드명 단독 판정 → 자식 프로세스 레지스트리 병행).
@@ -87,6 +89,28 @@ def _track_child(key: str, env: DaemonEnv, child) -> None:
         _DAEMON_CHILDREN[key] = child
 
 
+def _spawn_script(key: str, env: 'DaemonEnv', argv: list):
+    """데몬 스크립트 자식을 띄우고 레지스트리에 등록. 실패하면 None + 이유 로그.
+
+    [WHY try] 데몬은 이름 없는 daemon 스레드에서 돌고 호출부에 try가 없다.
+      실행기 경로가 틀리면 Popen이 FileNotFoundError로 스레드째 사라지는데,
+      frozen(GUI) 모드는 stderr가 어디에도 안 붙어 **아무 흔적도 안 남는다** —
+      사용자에겐 "토글을 켰는데 아무 일도 안 일어남"으로만 보인다(2026-08-14 LAN 브리지).
+    [불변식] stdout/stderr=PIPE 유지 — 읽는 쪽이 없어도 기존 동작이며, 파이프를
+      없애면 자식 출력이 부모 콘솔로 새어 규칙 10(창 노출)과 충돌할 수 있다.
+    """
+    try:
+        child = proc.popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace',
+        )
+    except OSError as e:
+        print(f"[!] 데몬 '{key}' 기동 실패 — 실행기={argv[0]!r} ({e})")
+        return None
+    _track_child(key, env, child)
+    return child
+
+
 def _daemon_child_alive(key: str) -> bool:
     with _DAEMON_CHILDREN_LOCK:
         child = _DAEMON_CHILDREN.get(key)
@@ -103,29 +127,27 @@ def run_watchdog(env: DaemonEnv) -> None:
         return
     watchdog_script = env.scripts_dir / "hive_watchdog.py"
     if watchdog_script.exists():
-        _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-        if not _python_cmds:
-            print("[!] run_watchdog: Python 인터프리터를 찾을 수 없어 워치독 스킵")
-            return
-        python_exe = _python_cmds[0]
+        # [실행기] script_runner_cmd — frozen이면 앱 EXE 자신. 시스템 Python은 번들
+        #   의존성(psycopg 등)이 없어 설치본 PC에서 import 실패로 즉사한다.
+        python_exe = runtime.script_runner_cmd(env.base_dir, env.project_root)
         # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
-        child = proc.popen(
+        child = _spawn_script(
+            'watchdog', env,
             [python_exe, str(watchdog_script), "--data-dir", str(env.data_dir)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
         )
-        _track_child('watchdog', env, child)
+        if child is None:
+            return
 
 
 def run_lan_bridge(env: DaemonEnv) -> None:
     """LAN 브리지(lan_bridge.py) 별도 프로세스 기동 — config lan_bridge_enabled=True일 때만.
 
     [WHY 기본 꺼짐] 브리지는 0.0.0.0을 노출하므로 사용자가 명시적으로 켤 때만 뜬다.
-    [frozen 함정] sys.executable은 frozen 모드에서 앱EXE라 스크립트 실행 불가 →
-      python_runner_cmds가 개발/EXE 모드별 실제 인터프리터를 해석(watchdog과 동일 패턴).
+    [과거사고 2026-08-14] 설치본에서 "브리지 켜기 → 재시작"을 해도 안 뜨던 결함.
+      옛 코드가 python_runner_cmds()[0]을 실행기로 썼는데, 그 함수는 frozen에서
+      앱 EXE를 후보에서 **제외**하므로 Python 미설치 PC는 폴백 'python'이 나가
+      Popen이 죽었다. 그런데 Python이 깔린 PC(개발 PC)에서는 우연히 떠서
+      "개발에선 되는데 설치본에선 안 됨"으로 보였다 → script_runner_cmd로 교체.
     [불변식] Popen 자식은 child_procs.append — cleanup_child_procs가 이 리스트만 종료.
     """
     try:
@@ -136,18 +158,13 @@ def run_lan_bridge(env: DaemonEnv) -> None:
         return
     bridge_script = env.base_dir / 'lan_bridge.py'
     if not bridge_script.exists():
+        print(f"[!] run_lan_bridge: 브리지 스크립트 없음 — {bridge_script}")
         return
-    _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-    if not _python_cmds:
-        print("[!] run_lan_bridge: Python 인터프리터를 찾을 수 없어 LAN 브리지 스킵")
-        return
-    # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
-    child = proc.popen(
-        [_python_cmds[0], str(bridge_script), "--data-dir", str(env.data_dir)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        encoding='utf-8', errors='replace',
+    runner = runtime.script_runner_cmd(env.base_dir, env.project_root)
+    _spawn_script(
+        'lan_bridge', env,
+        [runner, str(bridge_script), "--data-dir", str(env.data_dir)],
     )
-    _track_child('lan_bridge', env, child)
 
 
 # Codex를 '사용 중'으로 볼 시간 창 — 이 시간 안에 히스토리가 갱신됐으면 워처를 띄운다.
@@ -189,11 +206,8 @@ def run_codex_pg_watcher(env: DaemonEnv) -> None:
     watcher_script = env.scripts_dir / "codex_pg_watcher.py"
     if not watcher_script.exists():
         return
-    _python_cmds = runtime.python_runner_cmds(env.base_dir, env.project_root)
-    if not _python_cmds:
-        print("[!] run_codex_pg_watcher: Python interpreter not found")
-        return
-    python_exe = _python_cmds[0]
+    # [실행기] frozen이면 앱 EXE 자신 — 이 워처는 psycopg(번들 전용)를 import한다.
+    python_exe = runtime.script_runner_cmd(env.base_dir, env.project_root)
     codex_home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
     child = None
 

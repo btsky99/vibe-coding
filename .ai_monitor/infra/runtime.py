@@ -7,6 +7,8 @@ DESCRIPTION: 시스템 런타임 보조 유틸 — Python 인터프리터 후보
              모았습니다. server.py와 데몬/API 모듈이 공유합니다.
 
 REVISION HISTORY:
+- 2026-08-14 Claude: script_runner_cmd 추가 — 설치본(EXE)에서 Python 미설치 PC면
+                     데몬용 .py 실행기가 없어 LAN 브리지가 조용히 안 뜨던 결함
 - 2026-08-11 Claude: open_folder_dialog 추가 — 서브프로세스 다이얼로그가 앱 창 뒤에
                      열려 '눌러도 아무 일 없음'으로 보이던 문제(포그라운드 잠금) 수정
 - 2026-04-20 Claude: server.py L770~862 분리 (Task 2.1)
@@ -49,6 +51,27 @@ def python_runner_cmds(base_dir: Path, project_root: Path) -> list[str]:
             seen.add(resolved)
 
     return candidates or ['python']
+
+
+def script_runner_cmd(base_dir: Path, project_root: Path) -> str:
+    """번들 .py(데몬/도구)를 띄울 실행기 **1개**를 고른다.
+
+    [WHY 별도 함수] python_runner_cmds는 '진짜 Python 인터프리터'만 후보로 내놓고
+      frozen에서는 sys.executable(앱 EXE)을 일부러 뺀다. 그래서 EXE 설치본에서는
+      PC에 Python이 없으면 마지막 폴백 'python'(PATH 미존재)이 나가 Popen이
+      FileNotFoundError로 죽는다. 데몬 스레드엔 try가 없어 조용히 사라진다.
+    [과거사고 2026-08-14] 설치본에서 LAN 브리지 토글을 켜고 재시작해도 브리지가
+      안 뜨던 원인이 이것. Python이 깔린 PC에서는 우연히 동작해 재현이 갈렸다.
+    [불변식] frozen이면 앱 EXE 자신이 실행기다 — boot.main()이 첫 인자가 '.py'면
+      _run_daemon_script()로 받아 runpy 실행한다(부팅 시퀀스 재진입 없음).
+      이 계약이 깨지면 EXE가 창을 무한 생성한다(v3.7.47 유형) — boot.py와 한 쌍.
+    [주의] 번들 의존성(psycopg 등)을 쓰는 스크립트는 EXE 실행기여야만 import가 된다.
+      외부 시스템 Python에는 그 패키지가 없다.
+    """
+    if getattr(sys, 'frozen', False):
+        return sys.executable
+    cmds = python_runner_cmds(base_dir, project_root)
+    return cmds[0] if cmds else 'python'
 
 
 def project_python_runner_cmds(
