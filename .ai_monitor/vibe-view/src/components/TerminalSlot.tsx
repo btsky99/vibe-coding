@@ -79,6 +79,8 @@ import AgentUsageBar from './terminal/AgentUsageBar';
 import AgentSelectCards from './terminal/AgentSelectCards';
 // [2026-07-24] QuotaBadge 컴포넌트 헤더에서 제거 — 타입(AgentQuotaInfo)만 인터페이스용으로 유지.
 import { type AgentQuotaInfo } from './terminal/QuotaBadge';
+import VoiceBar from './terminal/VoiceBar';
+import { useVoiceSlot } from '../hooks/useVoice';
 import MonitorView from './terminal/MonitorView';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
@@ -120,10 +122,15 @@ interface TerminalSlotProps {
   onPickProject?: (path: string) => void;
   // 헤더에서 이름을 바꿨을 때. 미전달이면 편집 UI가 뜨지 않는다(오피스 등 재사용처 보호).
   onRenameSlot?: (name: string) => void;
+  // [음성] 이 슬롯을 부르는 말(예: '클로드'). 상시 대기 중 이 말이 들리면 이 슬롯이 대상이 된다.
+  //   [🔴 slotName과 별개다] 이름은 화면 표시용이라 길거나 공백이 섞이는데, 호출어는 짧고
+  //   부르기 좋아야 인식이 덜 흘린다. 미전달이면 음성 UI 자체를 그리지 않는다.
+  wakeWord?: string;
+  onWakeWordChange?: (w: string) => void;
 }
 
 export default function TerminalSlot({
-  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, onRenameSlot
+  slotId, logs, currentPath, terminalCount, locks, messages, tasks, antigravityUsage, claudeUsage, agentQuota, agentTerminals, orchestratorData, hiveActivity, slotName, slotModel, slotCli, slotProject, isActiveProject, onActivateProject, onPickProject, onRenameSlot, wakeWord, onWakeWordChange
 }: TerminalSlotProps) {
   // [슬롯별 프로젝트] cwd/project_id 산출의 단일 기준. 미지정이면 전역 currentPath로 폴백.
   const effectivePath = slotProject || currentPath;
@@ -654,6 +661,13 @@ export default function TerminalSlot({
     return true;
   };
 
+  // [음성] 이 슬롯을 음성 대상 후보로 등록한다.
+  // [🔴 등록만 하고 마이크를 열지 않는다] 마이크는 앱 전체에 하나뿐이고(lib/voiceBus),
+  //   여는 시점은 사용자가 VoiceBar 를 누를 때다. 슬롯마다 열면 장치 경합으로 전부 죽는다.
+  // [제약] 받아쓴 문장은 입력창을 거쳐 handleSend 로 간다 — 손으로 친 것과 같은 경로다.
+  //   별도 전송 경로를 만들면 오류 처리·IME 보정 같은 기존 방어가 음성에만 빠진다.
+  useVoiceSlot(terminalId, wakeWord || '', setInputValue, handleSend);
+
   // 터미널 실행 중이면 활성 에이전트 이름으로 로그 필터링 (정확한 귀속)
   // 유휴 상태이면 해시 기반 분배 (배경 로그 표시용)
   const slotLogs = isTerminalMode
@@ -826,6 +840,14 @@ export default function TerminalSlot({
 
           {/* 터미널 한글 입력 및 단축어 바 */}
           <div className="p-2 border-t border-black/40 bg-[#252526] shrink-0 flex flex-col gap-2 z-10">
+            {/* [음성] onWakeWordChange 를 넘긴 화면에서만 그린다 — 오피스 등 재사용처를 건드리지 않는다. */}
+            {onWakeWordChange && (
+              <VoiceBar
+                terminalId={terminalId}
+                wakeWord={wakeWord || ''}
+                onWakeWordChange={onWakeWordChange}
+              />
+            )}
             <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 opacity-80 hover:opacity-100 transition-opacity items-center">
               <button onClick={() => setShowShortcutEditor(true)} className="px-2 py-0.5 bg-primary/20 hover:bg-primary/40 text-primary rounded text-[10px] whitespace-nowrap border border-primary/30 font-bold transition-colors">✏️ 편집</button>
               {shortcuts.map((sc, i) => (

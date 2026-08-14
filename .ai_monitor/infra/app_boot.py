@@ -388,6 +388,13 @@ def run_gui_app(cfg: BootConfig) -> None:
                          args=(cfg.official_icon, cfg.window_title),
                          daemon=True).start()
 
+        # [음성] WebView2 마이크 권한 배선.
+        # [🔴 없으면 음성 입력이 '조용히' 죽는다 — 2026-08-15 실측] pywebview 6.1 은
+        #   PermissionRequested 를 처리하지 않아, 페이지의 getUserMedia 가 허용도 거부도
+        #   안 된 채 응답 없이 매달린다(에러조차 안 온다). 화면에는 '듣는 중…'만 남는다.
+        from infra.webview_permissions import enable_microphone
+        enable_microphone(window)
+
         # ── WebView2 영구 저장소 경로 ──
         # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
         # %APPDATA%/vibe-coding/<dev|exe>/<프로젝트명>/webview_data 에 영구 저장

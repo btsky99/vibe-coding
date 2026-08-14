@@ -1170,7 +1170,30 @@ def _g_nodes_consoles(h, pp):
     from api import nodes_api
     nodes_api.consoles(h)
 
+# 음성(로컬 STT/TTS) — api/voice_api.py 위임.
+# [제약] turn은 프론트가 슬롯마다 폴링한다. 파일 한 개만 읽는 최단 경로를 유지할 것.
+# [제약] stt/tts는 사이드카(별도 프로세스)로 바이트만 나른다 — 여기서 모델을 올리지 말 것.
+def _g_voice_turn(h, pp):
+    from api import voice_api
+    voice_api.handle_turn(h, pp, _current_project_id())
+
+def _g_voice_status(h, pp):
+    from api import voice_api
+    voice_api.handle_status(h, PROJECT_ROOT)
+
+def _p_voice_stt(h, pp):
+    from api import voice_api
+    _cl = int(h.headers.get('Content-Length') or 0)
+    voice_api.handle_stt(h, h.rfile.read(_cl) if _cl else b'')
+
+def _p_voice_tts(h, pp):
+    from api import voice_api
+    _cl = int(h.headers.get('Content-Length') or 0)
+    voice_api.handle_tts(h, h.rfile.read(_cl) if _cl else b'')
+
 GET_ROUTES = {
+    '/api/voice/turn': _g_voice_turn,
+    '/api/voice/status': _g_voice_status,
     '/api/nodes/consoles': _g_nodes_consoles,
     '/api/browse-folder': _g_fs_dialog,
     '/api/browse-file': _g_fs_dialog,
@@ -1433,6 +1456,8 @@ def _p_git_diff(h, pp):        git_api.diff(h, parse_qs(pp.query), BASE_DIR)
 def _p_screenshot_analyze(h, pp): screenshot_api.analyze(h, SCRIPTS_DIR, PROJECT_ID)
 
 POST_ROUTES = {
+    '/api/voice/stt': _p_voice_stt,
+    '/api/voice/tts': _p_voice_tts,
     '/api/setup/auto-install': _p_setup_auto_install,
     '/api/apply-update': _p_apply_update,
     '/api/soft-update/apply': _p_soft_update,

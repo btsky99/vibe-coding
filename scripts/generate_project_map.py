@@ -506,6 +506,26 @@ def generate():
                 lines.append(f"| `{f.name}`{_badge(f.name)} | {lc} | {desc} |")
     lines.append("")
 
+    # ── 2-b. 음성 사이드카 ──
+    # [WHY 별도 섹션인가] voice-server는 앱 venv가 아닌 **별도 파이썬 환경**에서 도는
+    #   독립 프로세스다. api/infra와 같은 표에 섞으면 "앱 서버가 import하는 모듈"로
+    #   오해되어, 다음 세션이 앱 venv에 torch를 깔려 드는 사고가 난다.
+    voice_dir = ai_dir / "voice-server"
+    if voice_dir.exists():
+        lines.append("### 음성 사이드카 (.ai_monitor/voice-server/) — 별도 프로세스·별도 venv")
+        lines.append("| 모듈 | 줄 수 | 설명 |")
+        lines.append("|------|------|------|")
+        for f in sorted(voice_dir.rglob('*.py')):
+            # [🔴 .venv를 반드시 걸러라] 사이드카는 자기 venv를 이 폴더 안에 둔다.
+            #   빼먹으면 site-packages의 파이썬 파일 수천 개가 지도에 쏟아진다
+            #   (실측: PROJECT_MAP이 451줄 → 2020줄로 부풀었다).
+            if f.name == '__init__.py' or '.venv' in f.parts or 'models' in f.parts:
+                continue
+            rel = f"voice-server/{f.relative_to(voice_dir).as_posix()}"
+            lines.append(f"| `{rel.split('voice-server/')[-1]}` | {count_lines(f)} | "
+                         f"{get_description(rel, f.name, f)} |")
+        lines.append("")
+
     # ── 3. Scripts ──
     lines.append("## ⚙️ 스크립트 (scripts/)")
     scripts_dir = PROJECT_ROOT / "scripts"
@@ -598,6 +618,24 @@ def generate():
                 desc = get_description(f.name, f.name, f)
                 lines.append(f"| `{f.name}`{_badge(f.name)} | {lc} | {desc} |")
     lines.append("")
+
+    # 터미널 하위 컴포넌트 + 공용 로직(lib/hooks).
+    # [WHY 추가했나] 여기가 비어 있으면 지도에 없는 파일이 생긴다. 음성처럼 lib/hooks에만
+    #   사는 기능은 통째로 안 보여, 다음 세션이 같은 것을 다시 만들게 된다.
+    for sub, title in (('components/terminal', '터미널 하위 컴포넌트 (components/terminal/)'),
+                       ('lib', '공용 로직 (lib/)'),
+                       ('hooks', '훅 (hooks/)')):
+        d = vv_src / sub
+        if not d.exists():
+            continue
+        lines.append(f"### {title}")
+        lines.append("| 파일 | 줄 수 | 설명 |")
+        lines.append("|------|------|------|")
+        for f in sorted(d.iterdir()):
+            if f.is_file() and f.suffix in ('.tsx', '.ts') and not f.name.endswith('.test.tsx'):
+                lines.append(f"| `{f.name}`{_badge(f.name)} | {count_lines(f)} | "
+                             f"{get_description(f.name, f.name, f)} |")
+        lines.append("")
 
     # ── 5. 테스트 ──
     lines.append("## 🧪 테스트 (tests/)")

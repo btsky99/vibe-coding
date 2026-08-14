@@ -69,3 +69,9 @@ _local/
 # 소스 전달용 zip 산출물 (make_source_package.py)
 dist_pkg/
 
+
+# 음성 스택 — 모델(78MB+)과 전용 venv는 리포에 넣지 않는다.
+# [WHY] 설치본에는 릴리즈 빌드가 동봉하고, 개발 체크아웃에서는 첫 사용 때 자동으로 받는다
+#   (voice-server/engines/tts_sherpa.py의 _download_model).
+.ai_monitor/voice-server/models/
+.ai_monitor/voice-server/.venv/

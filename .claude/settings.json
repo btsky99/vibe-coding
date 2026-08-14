@@ -58,6 +58,17 @@
             "command": "python \"D:\\vibe-coding\\scripts\\claude_hook.py\" stop"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/vibe-coding/scripts/voice_turn_hook.py",
+            "async": true,
+            "timeout": 15
+          }
+        ]
       }
     ]
   }

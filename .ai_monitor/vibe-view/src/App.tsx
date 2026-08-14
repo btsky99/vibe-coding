@@ -163,6 +163,7 @@ function App() {
           if (cancelled) return;
           if (cfg && cfg.slot_projects) setSlotProjects(_parseSlotMap(cfg.slot_projects));
           if (cfg && cfg.slot_names) setSlotNames(_namesFromConfig(cfg.slot_names));
+          if (cfg && cfg.slot_wake_words) setSlotWakeWords(_namesFromConfig(cfg.slot_wake_words));
           slotProjectsLoaded.current = true; // 서버 도달 성공 — 이후 변경만 영속 허용
           slotNamesLoaded.current = true;
         })
@@ -203,6 +204,32 @@ function App() {
     }).catch(() => { /* 영속 실패는 다음 변경에서 재시도 */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotNames]);
+
+  // ── [음성] 슬롯별 호출어 ────────────────────────────────────────────────
+  // [🔴 slot_names 와 같은 두 함정을 그대로 갖는다] 키는 'T1' 형식, slotId 는 0-based.
+  //   변환은 위 _namesToConfig/_namesFromConfig 를 재사용한다 — 별도 변환을 만들면
+  //   한쪽만 고쳐져 호출해도 반응 없는(에러도 안 나는) 상태가 된다.
+  const [slotWakeWords, setSlotWakeWords] = useState<Record<number, string>>({});
+  const wakeWordsLoaded = useRef(false);
+  useEffect(() => {
+    if (!slotNamesLoaded.current) return;   // config 도달 전에는 쓰지 않는다(빈 값 역기록 방지)
+    if (!wakeWordsLoaded.current) { wakeWordsLoaded.current = true; return; }
+    fetch(`${API_BASE}/api/config/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot_wake_words: _namesToConfig(slotWakeWords) }),
+    }).catch(() => { /* 영속 실패는 다음 변경에서 재시도 */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotWakeWords]);
+
+  const setSlotWakeWord = (slotId: number, word: string) => {
+    setSlotWakeWords(prev => {
+      const next = { ...prev };
+      const clean = word.trim().slice(0, 12);
+      if (clean) next[slotId] = clean; else delete next[slotId];
+      return next;
+    });
+  };
 
   const setSlotName = (slotId: number, name: string) => {
     setSlotNames(prev => {
@@ -1027,6 +1054,8 @@ function App() {
                   hiveActivity={hiveActivity}
                   slotName={slotNames[slotId]}
                   onRenameSlot={(name: string) => setSlotName(slotId, name)}
+                  wakeWord={slotWakeWords[slotId] || ''}
+                  onWakeWordChange={(w: string) => setSlotWakeWord(slotId, w)}
                 />
               ))}
             </div>

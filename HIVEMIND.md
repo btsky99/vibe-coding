@@ -1,21 +1,21 @@
 # HiveMind Status
 
-Updated: `2026-08-14 23:10:09`
+Updated: `2026-08-15 02:10:25`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/api/memory_api.py, .ai_monitor/infra/daemons.py, .ai_monitor/infra/embed_service.py, .ai_monitor/src/heal_metrics.py, .ai_monitor/src/pg_vector_search.py (+5 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/api/voice_api.py, .ai_monitor/infra/app_boot.py, .ai_monitor/infra/voice_turn.py, .ai_monitor/infra/webview_permissions.py, .ai_monitor/server.py (+13 more). Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- .ai_monitor/api/memory_api.py
-- .ai_monitor/infra/daemons.py
-- .ai_monitor/infra/embed_service.py
-- .ai_monitor/src/heal_metrics.py
-- .ai_monitor/src/pg_vector_search.py
-- hivemind.md
-- project_map.md
-- scripts/knowledge_extract.py
-- ... and 2 more
+- .ai_monitor/api/voice_api.py
+- .ai_monitor/infra/app_boot.py
+- .ai_monitor/infra/voice_turn.py
+- .ai_monitor/infra/webview_permissions.py
+- .ai_monitor/server.py
+- .ai_monitor/vibe-view/src/app.tsx
+- .ai_monitor/vibe-view/src/components/terminal/voicebar.tsx
+- .ai_monitor/vibe-view/src/components/terminalslot.tsx
+- ... and 10 more
 
 ## Agent Flow
 ```mermaid
