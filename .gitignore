@@ -75,3 +75,5 @@ dist_pkg/
 #   (voice-server/engines/tts_sherpa.py의 _download_model).
 .ai_monitor/voice-server/models/
 .ai_monitor/voice-server/.venv/
+# 사이드카 로그 — 콘솔 없이 도는 자식의 유일한 실패 단서(api/voice_api.py:_sidecar_log).
+.ai_monitor/voice-server/voice-server.log

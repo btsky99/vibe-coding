@@ -23,6 +23,8 @@ DESCRIPTION: 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프
 
 REVISION HISTORY:
 - 2026-08-15 Claude: 최초 작성 — 턴 채널 + 로컬 음성 사이드카 프록시
+- 2026-08-15 Claude: '음성 엔진 준비 중'에서 안 넘어가던 사고 — stdout=PIPE 를 아무도
+  읽지 않아 자식이 멈췄다. 로그 파일로 돌리고, 죽은 자식을 다시 띄우게 판정을 실물화
 """
 
 from __future__ import annotations
@@ -48,7 +50,36 @@ VOICE_PORT = int(os.environ.get('VOICE_PORT', '9030'))
 BASE_URL = f'http://127.0.0.1:{VOICE_PORT}'
 
 _spawn_lock = threading.Lock()
-_spawned = False
+# [🔴 bool 이 아니라 Popen 을 들고 있는 이유] 예전엔 `_spawned = True` 한 장으로 판정했는데,
+#   자식이 죽어도 플래그가 남아 두 번 다시 안 띄웠다 — 화면은 영구히 '준비 중'이 된다.
+#   poll() 로 실물을 보면 죽은 뒤 첫 /status 요청이 곧 재기동이 된다.
+_proc = None                                                # subprocess.Popen | None
+_log_fp = None                                              # 자식 수명 동안 열려 있어야 한다
+
+
+def _sidecar_log(project_root: Path):
+    """사이드카 stdout/stderr 를 받을 파일을 연다(매 기동 덮어쓰기).
+
+    [🔴 과거사고 2026-08-15 — PIPE 로 받으면 자식이 죽는다] stdout=PIPE 로 띄우고 부모가
+      읽지 않으면 파이프 버퍼가 차서 자식이 write 에서 멈춘다. 실측 증상은 조용했다 —
+      프로세스는 살아 있고(CPU 0.03초·리슨 0개) /status 는 영원히 '준비 중'이었으며,
+      TTS 예열은 `[Errno 22] Invalid argument` 로 떨어졌다. 같은 결함을 이 리포가 이미
+      두 번 고쳤다(postgres_runtime.py:212 PIPE 상속 버그, agent_api.py:18 stderr 데드락).
+    [WHY DEVNULL 이 아니라 파일인가] 콘솔 없이 도는 자식이라(규칙 10) 버리면 실패 원인을
+      볼 방법이 아예 없다. 위 진단도 로그를 파일로 돌린 뒤에야 5분 만에 끝났다.
+    [WHY 덮어쓰기인가] 기동은 드물다. append 면 아무도 안 지워 무한히 자란다.
+    """
+    global _log_fp
+    path = project_root / '.ai_monitor' / 'voice-server' / 'voice-server.log'
+    try:
+        if _log_fp and not _log_fp.closed:
+            _log_fp.close()
+        _log_fp = path.open('wb')
+        return _log_fp
+    except OSError:
+        # 로그를 못 열었다고 음성을 포기하지는 않는다 — 조용히 버리는 쪽이 낫다.
+        import subprocess
+        return subprocess.DEVNULL
 
 
 def _sidecar_python(project_root: Path) -> str | None:
@@ -69,10 +100,10 @@ def _sidecar_python(project_root: Path) -> str | None:
 
 
 def _spawn_sidecar(project_root: Path) -> str:
-    """사이드카를 띄운다. 이미 떠 있으면 아무것도 하지 않는다."""
-    global _spawned
+    """사이드카를 띄운다. 이미 살아 있으면 아무것도 하지 않는다."""
+    global _proc
     with _spawn_lock:
-        if _spawned:
+        if _proc is not None and _proc.poll() is None:
             return ''
         py = _sidecar_python(project_root)
         if not py:
@@ -81,14 +112,21 @@ def _spawn_sidecar(project_root: Path) -> str:
         if not script.exists():
             return f'사이드카 스크립트가 없습니다: {script}'
         try:
+            import subprocess
+
             from infra import proc
             # [🔴 규칙 10] 사람이 누르지 않은 실행이다 — infra.proc 이 CREATE_NO_WINDOW 를
             #   붙여 준다. subprocess 를 직접 부르면 매 기동마다 콘솔이 번쩍인다.
-            proc.popen([py, str(script)],
-                       cwd=str(script.parent),
-                       stdout=-1, stderr=-2,
-                       env={**os.environ, 'VOICE_PORT': str(VOICE_PORT)})
-            _spawned = True
+            # [🔴 stdout 은 파일 — PIPE 금지] _sidecar_log 주석 참조. 부모(server.py)는
+            #   이 자식을 읽어 주는 스레드가 없다.
+            # [🔴 stdin=DEVNULL] 부모가 pythonw 라 stdin 핸들이 무효다. 그대로 상속시키면
+            #   자식이 표준입력을 만지는 순간(일부 네이티브 라이브러리가 그런다) 터진다.
+            _proc = proc.popen([py, str(script)],
+                               cwd=str(script.parent),
+                               stdin=subprocess.DEVNULL,
+                               stdout=_sidecar_log(project_root),
+                               stderr=subprocess.STDOUT,
+                               env={**os.environ, 'VOICE_PORT': str(VOICE_PORT)})
             return ''
         except Exception as e:                              # noqa: BLE001
             return f'사이드카 기동 실패: {type(e).__name__}: {e}'
@@ -174,9 +212,15 @@ def shutdown_sidecar() -> None:
     [🔴 왜 필요한가] 이 프로세스는 콘솔이 없어 사람 눈에 안 보인다. 안 내리면 모델을
       물고 남아 다음 기동에서 포트 충돌이 나고, 사용자는 원인을 찾을 방법이 없다.
     """
-    global _spawned
+    global _proc, _log_fp
     try:
         urllib.request.urlopen(f'{BASE_URL}/shutdown', data=b'{}', timeout=2).read()
     except Exception:                                       # noqa: BLE001
         pass
-    _spawned = False
+    _proc = None
+    try:
+        if _log_fp and not _log_fp.closed:
+            _log_fp.close()
+    except OSError:
+        pass
+    _log_fp = None
