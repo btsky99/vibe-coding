@@ -1,21 +1,21 @@
 # HiveMind Status
 
-Updated: `2026-08-15 15:03:12`
+Updated: `2026-08-16 00:13:52`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: .local/, ai_monitor_plan.md, hivemind.md, project_map.md, scripts/wiki_build.py (+44 more). Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .ai_monitor/vibe-view/dist/assets/floatingwindow-biisa3d2.js, .ai_monitor/vibe-view/dist/assets/index-d-a_6_g_.css, .ai_monitor/vibe-view/dist/assets/index-yi4kgzk7.js, .ai_monitor/vibe-view/dist/assets/officeapp-ccs-_uwo.js, .ai_monitor/vibe-view/dist/index.html (+55 more). Update ai_monitor_plan.md if this work is intentional.
 Changed files:
-- .local/
-- ai_monitor_plan.md
-- hivemind.md
-- project_map.md
-- scripts/wiki_build.py
-- scripts/wiki_lint.py
-- wiki//354/213/234/354/212/244/355/205/234//353/213/244/353/245/270 /355/224/204/353/241/234/354/240/235/355/212/270.md
-- wiki//354/213/234/354/212/244/355/205/234//353/215/260/353/252/254/352/263/274 /354/275/230/354/206/224 /354/260/275.md
-- ... and 41 more
+- .ai_monitor/vibe-view/dist/assets/floatingwindow-biisa3d2.js
+- .ai_monitor/vibe-view/dist/assets/index-d-a_6_g_.css
+- .ai_monitor/vibe-view/dist/assets/index-yi4kgzk7.js
+- .ai_monitor/vibe-view/dist/assets/officeapp-ccs-_uwo.js
+- .ai_monitor/vibe-view/dist/index.html
+- .ai_monitor/vibe-view/src/lib/browservoice.ts
+- .ai_monitor/vibe-view/src/lib/voicebus.ts
+- .ai_monitor/voice-server/engines/tts_cosyvoice.py
+- ... and 52 more
 
 ## Agent Flow
 ```mermaid

@@ -21,8 +21,8 @@ sources:
   - .ai_monitor/infra/pty_process.py:277
   - .ai_monitor/infra/pty_process.py:411
   - .ai_monitor/infra/pty_process.py:434
-  - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:166
-  # …외 19건 (본문 각 항목에 경로 표기)
+  - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:156
+  # …외 26건 (본문 각 항목에 경로 표기)
   - session_memory  # ~/.claude/projects/<슬러그>/memory/ · 1장
 related: []
 confidence: high
@@ -35,7 +35,7 @@ updated: 2026-08-15
 
 슬롯 포트는 런타임에 정해져 import 시점 상수가 될 수 없다. 소비자가
 
-> 자동 합성 (코드 주석 39건 · 파일 5개 · 세션 메모리 1장 · 추출 7ca29da).
+> 자동 합성 (코드 주석 46건 · 파일 5개 · 세션 메모리 1장 · 추출 55d5cf1).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
 
 ## 🧠 세션에서 굳은 것 (세션 메모리)
@@ -289,13 +289,39 @@ server.py main() 내부 nested 래퍼(_pty_health_check/_kill_pty_proc/_pty_watc
 
 ### 모듈 상단 `[WHY]`
 
+── 출력이 흐르는가 (헤더 '도는 중' 판정의 근거) ──
+[WHY 이게 따로 필요한가] agentStatus(아래 722행)는 pg_logs·태스크·pipeline_stage 를 폴링해
+만든다. 그런데 CLI 가 10분짜리 한 건을 붙들고 있으면 그동안 DB 에 아무 줄도 안 남아
+화면은 IDLE 로 보인다 — 사용자가 "멈춘 것 같은데" 라고 말하는 상태의 정체가 이것이다.
+PTY 바이트가 실제로 도착하는지는 유일하게 거짓말하지 않는 신호라 ws.onmessage 에서 직접 찍는다.
+[🔴 제약] 여기서 setState 를 하면 안 된다. TUI 스피너는 초당 수십 청크를 뿜어 렌더가 폭발한다.
+ref 에만 시각을 찍고, 1초 타이머가 그것을 읽어 굵은 단위(초)의 상태로 바꾼다.
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:156`
+
+### 모듈 상단 `[WHY]`
+
+[WHY 마지막 실행 인자를 들고 있나] '재시작'이 launchAgent(activeAgent, false) 로 호출되면
+원격 슬롯이 조용히 로컬 셸로 바뀐다(514행 재연결 경로에 같은 함정이 이미 주석으로 박혀 있다).
+yolo·cwd 도 같은 이유로 잃는다. 실행 시점 인자를 그대로 재생하는 것이 유일하게 안전하다.
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:166`
+
+### 모듈 상단 `[WHY]`
+
+/** '지우기'로 날린 직전 입력. [WHY] 되돌릴 수 없는 삭제 단추는 오누름 한 번에 긴 지시를 잃는다. */
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:177`
+
+### 모듈 상단 `[WHY]`
+
 터미널 우클릭 컨텍스트 메뉴 위치 + 복사 대상 텍스트 스냅샷
 [WHY] hasSelection 불리언 대신 텍스트 자체를 담는다 — 메뉴가 뜬 뒤 클릭 시점에
 getSelection()을 다시 읽으면 TUI의 DSR 응답으로 선택이 이미 지워져 빈 문자열이 복사되는 사고 방지.
 mouseTracking: TUI가 마우스 리포팅(DECSET 1000/1006)을 켜면 드래그가 로컬 선택을 못 만듦 —
 이때 복사 비활성 사유를 메뉴에 안내하기 위한 플래그 (2026-07-04 사고: 복사 버튼 미표시 재발)
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:166`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:189`
 
 ### 모듈 상단 `[WHY]`
 
@@ -303,14 +329,14 @@ mouseTracking: TUI가 마우스 리포팅(DECSET 1000/1006)을 켜면 드래그�
 기본 우클릭 복사/붙여넣기 메뉴를 제공하지 않아(자동완성 항목만 뜸) — textarea 전용 커스텀 메뉴로 보완.
 윈도우 WebView2에선 기본 메뉴가 떠서 안 보이던 차이가 맥 대응 후 드러난 문제.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:172`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:195`
 
 ### 모듈 상단 `[WHY]`
 
 [WHY] xterm은 onUserInput마다 선택을 지운다(TUI 자동 응답 포함) — 우클릭 시점에 선택이
 사라져 있어도 복사가 가능하도록 마지막 비어있지 않은 선택 텍스트를 캐시.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:177`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:200`
 
 ### 모듈 상단 `[WHY]`
 
@@ -318,35 +344,35 @@ mouseTracking: TUI가 마우스 리포팅(DECSET 1000/1006)을 켜면 드래그�
 지운다(복사는 캐시로 되지만 파란 영역이 순식간에 사라짐). getSelectionPosition의 버퍼 절대 좌표를
 저장해 두었다가 spurious clear가 오면 select()로 즉시 재적용해 시각적 선택을 유지한다.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:184`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:207`
 
 ### 모듈 상단 `[불변식]`
 
 [불변식] 사용자가 새 좌클릭/복사로 의도적으로 선택을 지운 경우에만 true — 이때는 복원하지 않는다.
 TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 유일한 신호.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:188`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:211`
 
 ### connectPath `[제약]`
 
 키보드 복붙 단축키 — 맥 ⌘C/⌘V, 윈도우 Ctrl+Shift+C/V (플랫폼 분기는 헬퍼 내부).
 [제약] term.textarea는 open() 이후에만 존재 → 반드시 이 위치에서 호출.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:336`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:361`
 
 ### connectPath `[제약]`
 
 텍스트 드래그(선택) 시 자동 클립보드 복사 + 마지막 선택 캐시 + 하이라이트 유지 복원.
 [제약] 선택 해제 이벤트에서도 발화하므로 hasSelection 가드 필수 — 캐시를 빈 값으로 덮지 않는다.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:342`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:367`
 
 ### dragSelectHandler `[불변식]`
 
 [불변식] 합성 이벤트는 shiftKey=true라 각 핸들러 첫 가드에서 return → 무한 재귀 없음.
 드래그가 터미널 밖으로 나가도 추적되도록 document capture에 세션 리스너를 건다.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:404`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:429`
 
 ### connectPath `[WHY]`
 
@@ -354,14 +380,38 @@ TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 
 [WHY] 라이브 선택이 TUI DSR 응답으로 이미 지워졌으면 캐시(lastSelectionRef)로 폴백 —
 "드래그 → 우클릭했는데 복사 버튼이 없다" 사고(2026-07-03) 방지.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:433`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:458`
 
 ### ctxHandler `[WHY]`
 
 [WHY] enable-mouse-events 클래스 = TUI가 마우스 리포팅 중 — 일반 드래그로는 선택이
 아예 생성되지 않는다(onSelectionChange 미발화). Shift+드래그만 로컬 선택 허용.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:439`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:464`
+
+### 모듈 상단 `[제약]`
+
+출력 경과 초를 1초마다 굵게 갱신 — 헤더의 '도는 중 / 조용함' 판정 입력.
+[제약] 터미널 모드일 때만 돈다. 슬롯 수만큼 곱해지는 타이머라 유휴 슬롯에서 돌리면 낭비다.
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:651`
+
+### 모듈 상단 `[WHY]`
+
+중단 — 지금 하던 답만 멈춘다.
+[WHY ESC 이고 Ctrl+C 가 아닌가] claude/codex TUI 에서 ESC 는 '진행 중인 응답 취소',
+Ctrl+C 는 CLI 자체 종료다. 종료는 이미 '끄기'(closeTerminal)가 맡고 있으므로 중단이
+세션까지 날리면 두 단추가 같은 일을 하게 되고, 되돌릴 방법이 없는 쪽이 더 위험하다.
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:664`
+
+### 모듈 상단 `[불변식]`
+
+재시작 — 마지막 실행 인자를 그대로 재생한다(원격/yolo/cwd 유실 방지, lastLaunchRef 주석).
+[불변식] 재시작은 xterm dispose + 새 PTY spawn = 스크롤백 전량 소실 → 확인을 받는다
+(handlePickProject 와 같은 문구·같은 이유).
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:675`
 
 ### 모듈 상단 `[불변식]`
 
@@ -369,13 +419,13 @@ TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 
 [불변식] PTY cwd는 spawn 시 고정 → 살아있는 터미널의 프로젝트는 재시작 없이 못 바꾼다.
 재연결 시 launchAgent에 next를 명시 주입 — onPickProject 직후 effectivePath는 아직 옛 값(stale).
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:623`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:684`
 
 ### next `[불변식]`
 
 [불변식] 재시작은 xterm dispose + 새 PTY spawn = 스크롤백 전량 소실. 사용자에게 명시.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:635`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:696`
 
 ### 모듈 상단 `[제약]`
 
@@ -385,7 +435,20 @@ TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 
 [제약] 받아쓴 문장은 입력창을 거쳐 handleSend 로 간다 — 손으로 친 것과 같은 경로다.
 별도 전송 경로를 만들면 오류 처리·IME 보정 같은 기존 방어가 음성에만 빠진다.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:664`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:737`
+
+### ringClass `[WHY]`
+
+h-full: 그리드 셀 높이를 명시적으로 채워야 flex 자식들이 올바른 높이를 전달받음
+[음성 소유권] 이 슬롯 안 어디든 만지면(터미널 클릭·입력창 포커스) 이 슬롯이
+마이크·스피커의 임자가 된다. 장치는 하나뿐이라 임자를 한 곳에서 정해야 한다
+(lib/voiceBus.ts claim 주석). 클릭이 아니라 **포커스**를 보는 이유: xterm 은
+숨은 textarea 로 포커스를 받으므로 터미널 본문 클릭도 여기로 올라온다.
+[WHY 캡처 단계인가] 포커스 이벤트는 버블링하지 않는다(focusin 만 한다). React 의
+onFocus 는 합성 이벤트라 버블처럼 보이지만, 캡처로 잡아야 자식이 먼저 멈추는
+경우까지 확실히 받는다.
+
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:850`
 
 ### ringClass `[WHY]`
 
@@ -393,14 +456,14 @@ TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 
 선택 여부를 이 시점에 스냅샷 — 메뉴 클릭 시 selectionStart/End는 유지되지만
 포커스가 흔들려 빈 선택으로 읽히는 경우를 대비해 hasSel을 미리 저장.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:857`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:956`
 
 ### ringClass `[WHY]`
 
 [WHY] 클릭 시점 getSelection() 재조회 금지 — 메뉴가 떠 있는 사이 TUI 응답으로
 선택이 지워지면 빈 문자열이 복사됨. 메뉴 오픈 시점 스냅샷(selText)을 사용.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:931`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:1054`
 
 ### ringClass `[WHY]`
 
@@ -408,14 +471,14 @@ TUI의 자동 clear(userClearedSelRef=false)와 사용자 clear를 구분하는 
 멀티라인 붙여넣기가 줄 단위로 즉시 실행됨. term.paste()는 onData 경유로
 \x1b[200~ 래핑을 적용한 뒤 같은 ws로 흘러간다.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:955`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:1078`
 
 ### ringClass `[WHY]`
 
 [WHY] 무음 실패 금지 — WebView2 클립보드 읽기 권한 거부 시 사용자가 원인을
 알 수 없던 사고(2026-07-04). 로컬 표시 전용 write라 pty로는 전송되지 않는다.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:961`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:1084`
 
 ## `.ai_monitor/vibe-view/src/components/terminal/xtermSelection.ts`
 

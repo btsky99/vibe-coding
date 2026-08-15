@@ -3,7 +3,7 @@ title: 터미널과 PTY 함정
 type: 함정
 sources:
   - .ai_monitor/infra/app_boot.py:198
-  - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:377
+  - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:402
   - incident_ledger  # 사고 9건
 related: []
 confidence: high
@@ -16,7 +16,7 @@ updated: 2026-08-15
 
 pywebview 6.x _add_edit_menu는 NSMenuItem엔 title을 안 주고
 
-> 자동 합성 (코드 주석 2건 · 파일 2개 · 사고 장부 9건 · 추출 7ca29da).
+> 자동 합성 (코드 주석 2건 · 파일 2개 · 사고 장부 9건 · 추출 55d5cf1).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
 
 ## 🔴 밟았던 것 (사고 장부)
@@ -105,7 +105,7 @@ capture 단계에서 일반 좌클릭 mousedown을 shiftKey=true 합성 이벤�
 해결: 드래그 세션 전체(mousedown→mousemove→mouseup)를 shift 이벤트로 재디스패치해
 xterm 로컬 선택 확장을 유지하고 원본 이벤트는 stopImmediatePropagation으로 리포팅 경로 차단.
 
-출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:377`
+출처: `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx:402`
 
 ## 확인법
 
