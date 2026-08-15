@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 08:52
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 09:46
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 35개 · 미푸시 9커밋
+- **브랜치**: `main` · 미커밋 16개 · 미푸시 11커밋
 - **최근 커밋**
+  - `da8e0b9` 2026-08-15 — fix(memory): 공유 메모리 패널이 한 페이지를 '총 개수'로 표기하던 오해 제거
+  - `88a617c` 2026-08-15 — feat(voice): 목소리 선택 UI + 마이크가 화면에서 사라지던 문제 수정
   - `01b58f0` 2026-08-15 — refactor(ui): 터미널 선택 화면 하단 '상태판 · 원격 노드' 섹션 제거
   - `e2e1c50` 2026-08-15 — feat(voice): 로컬 음성 입출력 — 슬롯별 호출어로 말해서 지시하고 답을 듣는다
   - `c8e254c` 2026-08-14 — feat(recall): 회상 v2 e5 전환 — 임베딩 모델 교체 + 임계 실측 재설정
-  - `24006ac` 2026-08-14 — fix(instance): 좀비가 락 포트를 물면 개발 서버가 영구 기동 불가
-  - `93148a6` 2026-08-14 — refactor(apix): 중앙 대화 서버 잔재 제거 — VPS 구축 스크립트 + 실행 그래프 선언
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 00:54** 의도: 아픽스 음성(STT+TTS) 기능을 vibe-coding 터미널 슬롯에 이식
@@ -53,7 +53,7 @@
 | `PROJECT_MAP.md` | ` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**. |
 | `README.md` |  |
 | `RULES.md` | 프로젝트 내 모든 에이전트가 준수해야 할 핵심 행동 수칙 및 코드 스타일 가이드 |
-| `ai_monitor_plan.md` | 아픽스 콘솔 구축 계획 — btsky.pe.kr 을 개인 전용 총괄 관제판으로 전환하고 |
+| `ai_monitor_plan.md` | 바이브 코딩의 **현재 계획**. CLAUDE.md 가 작업 시작 전에 읽으라고 지정한 문서다. |
 | `memory.md` | 프로젝트의 핵심 기술적 결정, 사용자 선호도, 아키텍처 원칙 및 과거의 실수/해결책 기록소. |
 | `docs/AGENT_GRAPH.md` | 이 프로젝트의 **실행 그래프 선언** — 노드(일하는 단위) / 엣지(다음으로 가는 길) / |
 | `docs/API_SPEC.md` | Vibe-Coding (AI Monitor) REST API 상세 명세서 |
@@ -108,7 +108,7 @@
 | `launch_api.py` | 102 | CLI 에이전트(claude/antigravity/codex) 실행 API — 새 cmd 창에서 에이전트를 띄운다. |
 | `locks_api.py` | 67 | 파일 락 API — 에이전트 간 동시 편집 충돌 방지. locks.json에 {파일: 소유에이전트}를 |
 | `logs_api.py` | 168 | 로그/메시지/실시간 로그 스트림 라우트 4종 — GET /stream(SSE), GET /api/server-logs, |
-| `memory_api.py` 🔨 | 429 | Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함. |
+| `memory_api.py` 🔨 | 454 | Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함. |
 | `message_api.py` 🔨 | 116 | 에이전트 간 메시지 전송 API — 메시지를 DB(send_message)에 저장하고, 수신 대상 |
 | `nodes_api.py` 🔨 | 91 | 상태판(독립 창 + tui.py)의 콘솔 창 라우트 2종 — 전부 **이 PC 안**의 사실만 다룬다. |
 | `office_api.py` | 370 | 오피스 모드 전용 API — 프로필 중앙화(PostgreSQL SSOT) + 클래식과 네임스페이스 분리. |
@@ -323,7 +323,7 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `setup_voice.py` | 97 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
+| `setup_voice.py` 🔨 | 97 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
 | `smoke_test.py` | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
@@ -345,7 +345,7 @@
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
-| `ActivityBar.tsx` 🔨 | 191 | 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수, |
+| `ActivityBar.tsx` 🔨 | 189 | 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수, |
 | `ChatSlot.tsx` | 610 | 설명: cokacdir 패턴 채팅 UI 컴포넌트. |
 | `FileExplorer.tsx` | 557 | 설명: 파일 탐색기 사이드바 패널 컴포넌트. |
 | `FilePathText.tsx` | 110 | 설명: 텍스트 내 파일 경로를 정규식으로 감지해 클릭 가능한 링크 세그먼트로 분리 렌더. |
@@ -369,7 +369,7 @@
 | `LanExecDirs.tsx` | 167 | 원격 실행 허용 폴더 관리 — 이 PC가 다른 PC의 Claude에게 열어줄 폴더 목록 + 모드 지정. |
 | `LanPanel.tsx` 🔨 | 657 | 설명: LAN 브리지 패널 — 같은 네트워크의 다른 바이브코딩을 자동발견하고 페어링(6자리 코드)한 뒤 |
 | `LanRoomChat.tsx` | 125 | LAN 그룹 채팅방 — 페어링된 모든 PC가 함께 보는 방. 1:1 채팅과 저장/표시가 완전 분리된다. |
-| `MemoryPanel.tsx` | 469 | 에이전트 간 공유 메모리(SQLite) 패널 — 검색, CRUD, 폴링 로직을 포함한 독립 컴포넌트 |
+| `MemoryPanel.tsx` 🔨 | 517 | 에이전트 간 공유 메모리(PostgreSQL hive_memory + zettel_notes) 패널 — |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 보드 패널 컴포넌트. |
 | `ToolsPanel.tsx` | 407 | AI 개발 도구 설치 관리 패널. |
 | `ZettelkastenPanel.tsx` | 537 | Hive Zettelkasten 패널 — 카파시 + 루만 융합 메모 시스템 UI. |
@@ -386,7 +386,7 @@
 | `SlashCommandMenu.tsx` | 66 | 터미널 입력 영역의 슬래시 커맨드(`/`) 드롭다운 — 카테고리별 |
 | `TerminalSlotHeader.tsx` 🔨 | 189 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
 | `VoiceBar.tsx` 🔨 | 187 | 설명: 터미널 슬롯 입력줄 옆의 음성 조작부 — 마이크 버튼, 상시 대기 토글, |
-| `VoiceSettings.tsx` | 136 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
+| `VoiceSettings.tsx` 🔨 | 136 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
 | `xtermSelection.ts` | 107 | 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸. |
 
 ### 공용 로직 (lib/)
@@ -493,4 +493,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 08:52
+> 자동 생성 완료: 2026-08-15 09:46

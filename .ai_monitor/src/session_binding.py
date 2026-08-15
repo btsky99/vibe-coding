@@ -141,7 +141,7 @@ def parse_usage_deep(path: Path) -> dict | None:
 def collect_claude_sessions(cwds: set[str], now: float | None = None) -> list[dict]:
     """주어진 cwd들에 속한 claude 세션 파일 목록(결속 후보).
 
-    [WHY 전체 스캔] 디렉터리 슬러그(`D--apix`)는 claude 본체의 인코딩 규칙이라
+    [WHY 전체 스캔] 디렉터리 슬러그(`D--vibe-coding`)는 claude 본체의 인코딩 규칙이라
       우리가 재현하면 어긋난다(과거사고: 설치본에서 디렉터리 미발견). 파일 안의
       cwd를 진실로 삼고 디렉터리 이름은 믿지 않는다.
     """

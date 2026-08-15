@@ -78,22 +78,22 @@ def slot(tid: str, cwd: str, started_min: float, output_min: float | None = None
 def projects(tmp_path, monkeypatch):
     """~/.claude/projects 를 tmp로 갈아끼운다."""
     home = tmp_path / 'home'
-    (home / '.claude' / 'projects' / 'D--apix').mkdir(parents=True)
+    (home / '.claude' / 'projects' / 'D--sample-proj').mkdir(parents=True)
     monkeypatch.setattr(Path, 'home', staticmethod(lambda: home))
-    return home / '.claude' / 'projects' / 'D--apix'
+    return home / '.claude' / 'projects' / 'D--sample-proj'
 
 
 # ── 사고 재현 ────────────────────────────────────────────────────────────
 
 def test_화석은_결속되지_않는다(projects):
     """2026-08-14 사고 그대로: 어제 끝난 85.3% 세션 + 방금 뜬 슬롯 2개."""
-    write_session(projects, 'fossil', 'D:/apix', first_min=1200, last_min=420,
+    write_session(projects, 'fossil', 'D:/sample-proj', first_min=1200, last_min=420,
                   tokens=853_206)                       # 7시간 전 마지막 쓰기
-    write_session(projects, 'fresh1', 'D:/apix', first_min=5, last_min=1, tokens=1000)
-    write_session(projects, 'fresh2', 'D:/apix', first_min=3, last_min=1, tokens=1000)
+    write_session(projects, 'fresh1', 'D:/sample-proj', first_min=5, last_min=1, tokens=1000)
+    write_session(projects, 'fresh2', 'D:/sample-proj', first_min=3, last_min=1, tokens=1000)
 
-    slots = [slot('T1', 'D:/apix', started_min=6), slot('T2', 'D:/apix', started_min=4)]
-    bound = sb.bind_slots(slots, sb.collect_claude_sessions({'d:/apix'}, NOW_EPOCH))
+    slots = [slot('T1', 'D:/sample-proj', started_min=6), slot('T2', 'D:/sample-proj', started_min=4)]
+    bound = sb.bind_slots(slots, sb.collect_claude_sessions({'d:/sample-proj'}, NOW_EPOCH))
 
     assert set(bound) == {'T1', 'T2'}
     assert 'fossil' not in bound['T1']['path']
@@ -105,9 +105,9 @@ def test_화석은_결속되지_않는다(projects):
 
 def test_화석만_있으면_계측_불가_처형_대상_아님(projects):
     """옛 로직이 T1·T2를 죽인 조건 — 이제는 available=False라 아무도 안 죽는다."""
-    write_session(projects, 'fossil', 'D:/apix', first_min=1200, last_min=420,
+    write_session(projects, 'fossil', 'D:/sample-proj', first_min=1200, last_min=420,
                   tokens=853_206)
-    slots = [slot('T1', 'D:/apix', started_min=6), slot('T2', 'D:/apix', started_min=4)]
+    slots = [slot('T1', 'D:/sample-proj', started_min=6), slot('T2', 'D:/sample-proj', started_min=4)]
 
     got = sb.measure_terminals(slots, NOW_EPOCH)
 
@@ -119,9 +119,9 @@ def test_화석만_있으면_계측_불가_처형_대상_아님(projects):
 
 def test_장수_슬롯이_화석을_물면_stale로_드러난다(projects):
     """슬롯이 오래 살아 화석이 결속 조건을 통과하는 경우의 2차 방어선."""
-    write_session(projects, 'fossil', 'D:/apix', first_min=1200, last_min=420,
+    write_session(projects, 'fossil', 'D:/sample-proj', first_min=1200, last_min=420,
                   tokens=853_206)
-    slots = [slot('T1', 'D:/apix', started_min=1300)]   # 슬롯이 세션보다 먼저 떴다
+    slots = [slot('T1', 'D:/sample-proj', started_min=1300)]   # 슬롯이 세션보다 먼저 떴다
 
     m = sb.measure_terminals(slots, NOW_EPOCH)['T1']
 
@@ -132,8 +132,8 @@ def test_장수_슬롯이_화석을_물면_stale로_드러난다(projects):
 
 
 def test_살아있는_세션은_stale이_아니다(projects):
-    write_session(projects, 'live', 'D:/apix', first_min=60, last_min=2, tokens=900_000)
-    m = sb.measure_terminals([slot('T1', 'D:/apix', started_min=61)], NOW_EPOCH)['T1']
+    write_session(projects, 'live', 'D:/sample-proj', first_min=60, last_min=2, tokens=900_000)
+    m = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=61)], NOW_EPOCH)['T1']
 
     assert m['available'] is True and m['stale'] is False
     assert m['percentage'] == 90.0         # opus-5 → 1M 창
@@ -144,16 +144,16 @@ def test_살아있는_세션은_stale이_아니다(projects):
 def test_다른_프로젝트_세션은_결속되지_않는다(projects):
     write_session(projects, 'other', 'D:/CipherTrader', first_min=5, last_min=1,
                   tokens=900_000)
-    got = sb.measure_terminals([slot('T1', 'D:/apix', started_min=6)], NOW_EPOCH)
+    got = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=6)], NOW_EPOCH)
 
     assert got['T1']['reason'] == 'unbound_session'
 
 
 def test_슬롯보다_먼저_시작된_대화는_결속되지_않는다(projects):
     """--continue/--resume 케이스 — 안 죽는 쪽으로 실패해야 한다."""
-    write_session(projects, 'resumed', 'D:/apix', first_min=600, last_min=1,
+    write_session(projects, 'resumed', 'D:/sample-proj', first_min=600, last_min=1,
                   tokens=900_000)
-    got = sb.measure_terminals([slot('T1', 'D:/apix', started_min=5)], NOW_EPOCH)
+    got = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=5)], NOW_EPOCH)
 
     assert got['T1']['available'] is False
     assert got['T1']['reason'] == 'unbound_session'
@@ -161,27 +161,27 @@ def test_슬롯보다_먼저_시작된_대화는_결속되지_않는다(projects
 
 def test_시계_스큐는_관용_마진이_흡수한다(projects):
     """대화가 슬롯보다 1분 '먼저' 기록돼도 결속은 유지된다(마진 3분)."""
-    write_session(projects, 'skewed', 'D:/apix', first_min=6, last_min=1, tokens=900_000)
-    got = sb.measure_terminals([slot('T1', 'D:/apix', started_min=5)], NOW_EPOCH)
+    write_session(projects, 'skewed', 'D:/sample-proj', first_min=6, last_min=1, tokens=900_000)
+    got = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=5)], NOW_EPOCH)
 
     assert got['T1']['available'] is True and got['T1']['percentage'] == 90.0
 
 
 def test_남의_슬롯에서_진행중인_대화는_거부된다(projects):
     """last_output_at 판별자 — 내가 출력한 적 없는 시각의 대화는 내 것이 아니다."""
-    write_session(projects, 'busy', 'D:/apix', first_min=10, last_min=1, tokens=900_000)
+    write_session(projects, 'busy', 'D:/sample-proj', first_min=10, last_min=1, tokens=900_000)
     # 슬롯은 9분째 아무것도 출력하지 않았는데 대화는 1분 전까지 진행됐다
-    got = sb.measure_terminals([slot('T1', 'D:/apix', started_min=11, output_min=9)],
+    got = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=11, output_min=9)],
                                NOW_EPOCH)
 
     assert got['T1']['reason'] == 'unbound_session'
 
 
 def test_한_세션은_한_슬롯에만_배정된다(projects):
-    write_session(projects, 'only', 'D:/apix', first_min=5, last_min=1, tokens=900_000)
-    slots = [slot('T1', 'D:/apix', started_min=6), slot('T2', 'D:/apix', started_min=6)]
+    write_session(projects, 'only', 'D:/sample-proj', first_min=5, last_min=1, tokens=900_000)
+    slots = [slot('T1', 'D:/sample-proj', started_min=6), slot('T2', 'D:/sample-proj', started_min=6)]
 
-    bound = sb.bind_slots(slots, sb.collect_claude_sessions({'d:/apix'}, NOW_EPOCH))
+    bound = sb.bind_slots(slots, sb.collect_claude_sessions({'d:/sample-proj'}, NOW_EPOCH))
 
     assert len(bound) == 1
 
@@ -190,38 +190,38 @@ def test_한_세션은_한_슬롯에만_배정된다(projects):
 
 def test_빈_세션_파일은_후보가_아니다(projects):
     (projects / 'empty.jsonl').write_text('', encoding='utf-8')
-    assert sb.collect_claude_sessions({'d:/apix'}, NOW_EPOCH) == []
+    assert sb.collect_claude_sessions({'d:/sample-proj'}, NOW_EPOCH) == []
 
 
 def test_응답_전_세션은_임계_판정에서_빠진다(projects):
     """태어나자마자 죽던 세션 — 0%로 보고하면 '여유 있음'과 구분이 안 된다."""
-    write_session(projects, 'newborn', 'D:/apix', first_min=1, last_min=1, tokens=0)
-    m = sb.measure_terminals([slot('T1', 'D:/apix', started_min=2)], NOW_EPOCH)['T1']
+    write_session(projects, 'newborn', 'D:/sample-proj', first_min=1, last_min=1, tokens=0)
+    m = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=2)], NOW_EPOCH)['T1']
 
     assert m['available'] is False and m['reason'] == 'no_usage_yet'
 
 
 def test_죽은_슬롯은_계측하지_않는다(projects):
-    write_session(projects, 'live', 'D:/apix', first_min=5, last_min=1, tokens=900_000)
-    dead = {**slot('T1', 'D:/apix', started_min=6), 'running': False}
+    write_session(projects, 'live', 'D:/sample-proj', first_min=5, last_min=1, tokens=900_000)
+    dead = {**slot('T1', 'D:/sample-proj', started_min=6), 'running': False}
 
     assert sb.measure_terminals([dead], NOW_EPOCH) == {}
 
 
 def test_거대한_tool_result가_꼬리를_먹어도_usage를_찾는다(projects):
     """8KB 꼬리에 usage가 안 걸리는 실제 상황 — 못 찾으면 자동이 조용히 0회가 된다."""
-    path = write_session(projects, 'huge', 'D:/apix', first_min=10, last_min=2,
+    path = write_session(projects, 'huge', 'D:/sample-proj', first_min=10, last_min=2,
                          tokens=900_000)
     # assistant usage 뒤에 32KB짜리 tool_result 한 줄을 붙인다
     with path.open('a', encoding='utf-8') as f:
-        f.write(json.dumps({'type': 'user', 'sessionId': 'huge', 'cwd': 'D:/apix',
+        f.write(json.dumps({'type': 'user', 'sessionId': 'huge', 'cwd': 'D:/sample-proj',
                             'timestamp': iso(1), 'blob': 'x' * 32_000}) + '\n')
     touch(path, 1)
 
     assert (parse_session_tail(path) or {}).get('input_tokens', 0) == 0  # 기본 8KB는 놓친다
     assert sb.parse_usage_deep(path)['input_tokens'] == 900_000
 
-    m = sb.measure_terminals([slot('T1', 'D:/apix', started_min=11)], NOW_EPOCH)['T1']
+    m = sb.measure_terminals([slot('T1', 'D:/sample-proj', started_min=11)], NOW_EPOCH)['T1']
     assert m['available'] is True and m['percentage'] == 90.0
 
 
