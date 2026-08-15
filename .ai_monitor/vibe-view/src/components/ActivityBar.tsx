@@ -138,6 +138,12 @@ const ActivityBar = memo(function ActivityBar({
         {memoryCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-cyan-500 rounded-full" />}
       </button>
 
+      {/* [2026-08-15] 지식 백과사전(wiki/). 제텔카스텐 탭 바로 옆에 둔다 — 후자는
+          W12 에서 은퇴 예정이라 자리를 이어받는 순서를 눈에 보이게 한다. */}
+      <button onClick={() => onTabChange('wiki')} className={tabCls('wiki')} title="지식 백과사전">
+        <BookOpen className="w-5 h-5 text-emerald-400" />
+      </button>
+
       <button onClick={() => onTabChange('zettel')} className={tabCls('zettel')} title="Zettelkasten">
         <BookOpen className="w-5 h-5" />
       </button>

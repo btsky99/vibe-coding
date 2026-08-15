@@ -82,6 +82,29 @@ def handle_get(handler, path: str, project_root: Path, project_id: str) -> bool:
 
 def handle_post(handler, path: str, data: dict | None,
                 project_root: Path, project_id: str, scripts_dir: Path) -> bool:
+    # 증분 갱신 — 데몬이 10분마다 하는 일을 사람이 지금 시키는 것.
+    # [WHY reset 과 따로 두나] reset 은 페이지를 지우고 다시 만든다(손으로 덧붙인 내용이
+    #   날아간다). 대부분의 경우 필요한 건 '방금 고친 주석을 지금 반영'뿐이다 —
+    #   그걸 하려고 파괴적 버튼을 누르게 만들면 언젠가 사고가 난다.
+    if path == '/api/wiki/sync':
+        try:
+            from src import wiki_index
+            wiki_root = project_root / 'wiki'
+            mod = _load_build(scripts_dir)
+            build_stat = mod.build() if mod else {'pages': 0}
+            sync_stat = wiki_index.sync(wiki_root, project_id)
+            mirror = wiki_index.mirror_to_hub(wiki_root, project_root.name)
+            _json(handler, {
+                'status': 'success',
+                'message': (f"{build_stat['pages']}장 · 새 항목 {sync_stat['created']} · "
+                            f"변경 {sync_stat['updated']} · 정리 {sync_stat['archived']}"),
+                'build': build_stat, 'sync': sync_stat, 'mirror': mirror,
+                **_counts(wiki_root, project_id),
+            })
+        except Exception as exc:
+            _json(handler, {'status': 'error', 'message': str(exc)}, 500)
+        return True
+
     if path != '/api/wiki/reset':
         return False
 

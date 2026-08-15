@@ -1473,6 +1473,7 @@ POST_ROUTES = {
     '/api/config/update': _p_config_update,
     '/api/daemons': _p_daemons,
     '/api/wiki/reset': _p_wiki_reset,
+    '/api/wiki/sync': _p_wiki_reset,   # 같은 핸들러가 path 로 분기(증분 갱신)
     '/api/launch': _p_launch,
     '/api/send-command': _p_send_command,
     '/api/locks': _p_locks,

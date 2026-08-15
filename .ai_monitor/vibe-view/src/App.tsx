@@ -57,6 +57,7 @@ import TasksPanel from './components/panels/TasksPanel';
 import LanPanel from './components/panels/LanPanel';
 import MemoryPanel from './components/panels/MemoryPanel';
 import ZettelkastenPanel from './components/panels/ZettelkastenPanel';
+import WikiPanel from './components/panels/WikiPanel';
 import HivePanel from './components/panels/HivePanel';
 import GitPanel from './components/panels/GitPanel';
 import ToolsPanel from './components/panels/ToolsPanel';
@@ -641,6 +642,7 @@ function App() {
     messages: '메시지 채널',
     tasks: '태스크보드',
     memory: '공유 메모리',
+    wiki: '지식 백과사전',
     hive: '하이브 진단 / 스킬',
     git: 'Git 감시',
     heal: '자가치유 계측',
@@ -855,6 +857,9 @@ function App() {
             ) : activeTab === 'memory' ? (
               /* 공유 메모리 패널 */
               <MemoryPanel currentProjectName={currentPath.split(/[/\\]/).filter(Boolean).pop()} />
+            ) : activeTab === 'wiki' ? (
+              /* 지식 백과사전 — 코드 주석에서 자동 합성되는 wiki/ 상태·갱신·초기화 */
+              <WikiPanel />
             ) : activeTab === 'zettel' ? (
               /* 제텔카스텐 패널 — 카파시+루만 융합 메모 시스템 */
               <ZettelkastenPanel />
