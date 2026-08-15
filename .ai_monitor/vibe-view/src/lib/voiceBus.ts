@@ -14,16 +14,27 @@
  *          보낸다. 로컬 오픈소스 전환(2026-08-15 사용자 결정)의 요지가 그 전송을
  *          없애는 것이라, 캡처(audioCapture)→서버(/api/voice/stt) 경로를 쓴다.
  *
+ *          [🔴 낭독은 브라우저가 먼저 한다 — 인식과 반대다] 합성은 오디오를 밖으로
+ *          보내지 않는다(WebView2 가 잡는 것은 OS 내장 Heami 하나뿐 — browserVoice.ts
+ *          실측 주석). 그래서 프라이버시 이유가 없고, 사이드카 예열 ~2분을 기다릴
+ *          이유는 더더욱 없다. 사이드카는 되돌아갈 길로 남긴다.
+ *
  *          [불변식] 낭독 중에는 마이크를 뮤트한다. 안 하면 스피커로 나간 제 목소리를
  *          다시 받아적어 스스로에게 명령한다. 브라우저 에코 제거가 1차, 이게 2차다.
  *
  * REVISION HISTORY:
  * - 2026-08-15 Claude: 최초 작성 — 로컬 STT/TTS + 슬롯별 호출어
+ * - 2026-08-15 Claude: 낭독을 브라우저 합성기 우선으로 — '준비 중' 대기 제거.
+ *   준비 상태 폴링을 팝오버에서 이 버스로 이관(팝오버를 닫으면 고착되던 사고)
  * ------------------------------------------------------------------------
  */
 
 import { API_BASE } from '../constants';
 import { MicCapture } from './audioCapture';
+import {
+  browserTtsAvailable, browserVoiceOptions, cancelBrowserSpeech,
+  isWebVoiceId, speakBrowser, watchBrowserVoices,
+} from './browserVoice';
 import { matchWakeWord, toSpeech } from './speech';
 
 export interface SlotBinding {
@@ -54,8 +65,17 @@ export interface VoiceState {
   target: string | null;
   /** 화면에 보여 줄 짧은 상태 문구. */
   message: string;
-  /** 서버 음성 엔진이 준비됐는가(사이드카 기동 여부). */
+  /**
+   * **읽어 줄 수 있는가**(사이드카 기동 여부가 아니다).
+   *
+   * [🔴 의미가 바뀌었다 — 2026-08-15] 예전엔 '사이드카가 떴는가'였다. 그래서 사이드카가
+   *   모델을 올리는 ~2분 동안 화면이 '준비 중'에 묶였고, 팝오버를 닫으면 그 값이 영영
+   *   갱신되지 않아 고착됐다. 지금은 브라우저 합성기가 있으면 즉시 true — 사람이
+   *   기다릴 이유가 없다. 사이드카 상태는 sttReady 로 따로 본다.
+   */
   ready: boolean;
+  /** 받아쓰기(사이드카 STT)가 준비됐는가. 낭독과 무관 — 낭독은 브라우저가 먼저 한다. */
+  sttReady: boolean;
   /** 마지막 오류 — 조용히 죽지 않게 사람에게 보인다. */
   error: string;
   /** 고를 수 있는 목소리 — 서버가 실제로 합성 가능한 것만 준다. */
@@ -92,7 +112,9 @@ class VoiceBus {
     ttsOn: (() => { try { return localStorage.getItem(TTS_KEY) !== '0'; } catch { return true; } })(),
     target: null,
     message: '',
-    ready: false,
+    // 브라우저 합성기가 있으면 처음부터 말할 수 있다 — 물어보고 정할 것이 없다.
+    ready: browserTtsAvailable(),
+    sttReady: false,
     error: '',
     voices: [],
     // [WHY localStorage 인가] 목소리는 이 PC 에 뭐가 깔려 있느냐에 달린 기기별 취향이다.
@@ -112,6 +134,44 @@ class VoiceBus {
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   /** 누르고 말하기로 강제 지정된 슬롯 — 놓을 때까지 호출어를 무시한다. */
   private pressSlot: string | null = null;
+  /** 사이드카가 준 목소리. 브라우저 목소리와 합쳐 state.voices 가 된다. */
+  private serverVoices: VoiceOption[] = [];
+  /** 사이드카가 /status 로 한 번이라도 답했는가. 저장된 목소리 판정의 전제. */
+  private serverAnswered = false;
+  private statusTimer: ReturnType<typeof setTimeout> | null = null;
+  private statusTries = 0;
+
+  constructor() {
+    // [🔴 여기서 사이드카를 부르지 않는다] 앱을 켜기만 해도 whisper 모델이 올라가면
+    //   음성을 안 쓰는 사람이 CPU 를 낸다. 브라우저 목소리는 공짜라 미리 채워 두고,
+    //   사이드카는 사용자가 음성을 만진 뒤에 ensureSidecar() 로 부른다.
+    this.refreshVoices();
+    watchBrowserVoices(() => this.refreshVoices());
+  }
+
+  /**
+   * 고를 수 있는 목소리 목록을 다시 만든다.
+   *
+   * [🔴 브라우저 것을 앞에 둔다] 목록의 첫 줄이 곧 기본값이다. 사이드카 목소리를 앞에
+   *   두면 앱을 켜자마자 고른 사람이 '기다려야 하는 쪽'을 집게 된다.
+   */
+  private refreshVoices(): void {
+    const web = browserVoiceOptions();
+    const voices = [...web, ...this.serverVoices];
+    // [🔴 저장된 목소리가 이 PC 에 없을 수 있다] 다른 PC 에서 쓰던 값이 남아 있거나
+    //   음성이 제거된 경우다. 그대로 두면 낭독이 매번 실패한다 — 빈 값으로 되돌린다.
+    // [🔴 사이드카 목소리는 사이드카가 답한 뒤에만 판정한다] 아직 안 뜬 상태에서
+    //   판정하면 '목록에 없다'가 되어 사용자가 고른 값을 부팅 때마다 날린다.
+    const cur = this.state.voice;
+    const stale = !!cur && (isWebVoiceId(cur)
+      ? web.length > 0 && !web.some((v) => v.id === cur)
+      : this.serverAnswered && !this.serverVoices.some((v) => v.id === cur));
+    this.set({
+      voices,
+      voice: stale ? '' : this.state.voice,
+      ready: browserTtsAvailable() || this.state.sttReady,
+    });
+  }
 
   /* ── 구독(useSyncExternalStore) ──────────────────────────────────────── */
 
@@ -170,7 +230,7 @@ class VoiceBus {
     this.mic = mic;
     try { localStorage.setItem(WAKE_ENABLED_KEY, '1'); } catch { /* 저장 실패는 무시 */ }
     this.set({ enabled: true, message: '듣는 중…', error: '' });
-    void this.checkReady();
+    this.ensureSidecar();                       // 받아쓰기는 사이드카 몫 — 여기서 깨운다
     this.scheduleTurnPoll(1500);
   }
 
@@ -198,7 +258,9 @@ class VoiceBus {
     if (!on) this.stopSpeaking();
     this.set({ ttsOn: on, target: on ? (slotId ?? this.state.target) : this.state.target });
     if (on) {
-      void this.checkReady();                 // 사이드카가 아직 없으면 여기서 기동이 시작된다
+      // [🔴 낭독은 이걸 기다리지 않는다] 브라우저 합성기가 이미 읽는다. 사이드카는
+      //   '더 나은 목소리'와 받아쓰기를 위해 뒤에서 데워 둘 뿐이다.
+      this.ensureSidecar();
       this.scheduleTurnPoll(1500);
     } else if (this.turnTimer) {
       clearTimeout(this.turnTimer);
@@ -212,6 +274,7 @@ class VoiceBus {
   async pressToTalk(slotId: string): Promise<void> {
     this.pressSlot = slotId;
     this.set({ target: slotId, message: '듣는 중…' });
+    this.ensureSidecar();                       // 누른 말은 사이드카가 받아쓴다
     if (!this.mic) await this.enable();
   }
 
@@ -354,14 +417,45 @@ class VoiceBus {
    *   사용자는 답이 올 때까지 기다렸다가 마음에 안 들면 다시 고르는 짓을 반복한다.
    */
   async preview(id?: string): Promise<void> {
-    await this.speak('안녕하세요. 이 목소리로 답을 읽어 드릴게요.', id ?? this.state.voice);
+    // [🔴 미리듣기 뒤에 귀를 열지 않는다 — 아픽스 실측] 일반 낭독은 끝나면 '이어 말하기'
+    //   창을 연다. 목소리를 고르는 동안 그러면 고르는 소리·주변 말이 지시로 들어간다.
+    await this.speak('안녕하세요. 이 목소리로 답을 읽어 드릴게요.',
+                     { voice: id ?? this.state.voice, preview: true });
   }
 
-  /** 마크다운 답을 귀로 들을 문장으로 바꿔 서버에 합성을 맡기고 재생한다. */
-  async speak(markdown: string, voiceOverride?: string): Promise<void> {
+  /**
+   * 답을 소리로 읽는다.
+   *
+   * [🔴 브라우저 합성기를 먼저 시도한다 — 2026-08-15] 사이드카는 첫 기동에 ~2분이 걸린다.
+   *   그동안 사람이 기다리게 두지 않는다(아픽스 보드에는 아예 '준비 중'이 없다).
+   *   브라우저가 한 조각도 못 읽었을 때만 사이드카로 넘어간다 — 되돌아갈 길은 남긴다.
+   * [🔴 사용자가 사이드카 목소리를 골랐어도, 아직 안 떴으면 브라우저로 읽는다] 고른 값을
+   *   지키는 것보다 지금 들리는 것이 중요하다. 뜨고 나면 자연히 고른 목소리로 돌아간다.
+   */
+  async speak(markdown: string, opts: { voice?: string; preview?: boolean } = {}): Promise<void> {
     const text = toSpeech(markdown);
     if (!text) return;
+    // [🔴 창이 숨어 있으면 읽지 않는다 — 아픽스 실측] 최소화해 둔 창이 혼자 떠드는 것은
+    //   사고로 읽힌다. 사람이 직접 누른 미리듣기는 예외다.
+    if (!opts.preview && typeof document !== 'undefined' && document.hidden) return;
+
     this.stopSpeaking();
+    const wanted = opts.voice ?? this.state.voice;
+
+    if (browserTtsAvailable() && (isWebVoiceId(wanted) || !wanted || !this.state.sttReady)) {
+      this.set({ busy: false, playing: true, message: '읽는 중…' });
+      this.mic?.setMuted(true);                   // [불변식] 소리보다 먼저 귀를 닫는다
+      const ok = await speakBrowser(text, { voiceId: wanted, speed: this.state.speed });
+      if (ok) { this.onSpeechEnd(opts.preview); return; }
+      // 브라우저가 한 마디도 못 했다 — 아래 사이드카 경로로 이어서 시도한다.
+      this.set({ playing: false });
+    }
+
+    await this.speakViaSidecar(text, wanted, opts.preview);
+  }
+
+  /** 되돌아갈 길 — 로컬 사이드카(sherpa/SAPI)로 합성해 재생한다. */
+  private async speakViaSidecar(text: string, voice: string, preview?: boolean): Promise<void> {
     this.set({ busy: true, message: '읽는 중…' });
     // [불변식] 재생 전에 뮤트한다 — 순서를 바꾸면 첫 문장을 자기가 받아적는다.
     this.mic?.setMuted(true);
@@ -370,8 +464,10 @@ class VoiceBus {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // 사이드카에는 브라우저용 'web:' 이 아닌 것만 넘긴다 — 모르는 id 를 주면
+          // 그쪽이 기본값으로 떨어져 사용자가 고른 것과 다른 목소리가 난다.
           text,
-          voice: voiceOverride ?? this.state.voice,
+          voice: isWebVoiceId(voice) ? '' : voice,
           speed: this.state.speed,
         }),
       });
@@ -381,12 +477,12 @@ class VoiceBus {
       const el = new Audio(url);
       this.audio = el;
       this.set({ busy: false, playing: true });
-      el.onended = () => { URL.revokeObjectURL(url); this.onSpeechEnd(); };
-      el.onerror = () => { URL.revokeObjectURL(url); this.onSpeechEnd(); };
+      el.onended = () => { URL.revokeObjectURL(url); this.onSpeechEnd(preview); };
+      el.onerror = () => { URL.revokeObjectURL(url); this.onSpeechEnd(preview); };
       await el.play();
     } catch (e) {
       this.set({ busy: false, error: String(e), message: '낭독 실패' });
-      this.onSpeechEnd();
+      this.onSpeechEnd(preview);
     }
   }
 
@@ -394,6 +490,7 @@ class VoiceBus {
     const el = this.audio;
     this.audio = null;
     if (el) { try { el.pause(); } catch { /* 이미 멈춤 */ } }
+    cancelBrowserSpeech();                        // 두 경로가 겹쳐 울지 않게 둘 다 끊는다
     if (this.state.playing) this.set({ playing: false });
     this.mic?.setMuted(false);
   }
@@ -404,33 +501,61 @@ class VoiceBus {
    * [WHY 여기서 이어 말하기 창을 여나] 답을 듣고 되묻는 것은 한 대화의 연속이다.
    *   매번 이름을 다시 부르게 하면 대화가 아니라 명령이 된다.
    */
-  private onSpeechEnd(): void {
+  private onSpeechEnd(preview?: boolean): void {
     this.audio = null;
     this.mic?.setMuted(false);
+    if (preview) {
+      // [🔴 미리듣기는 대화가 아니다] 여기서 이어 말하기 창을 열면, 목소리를 여러 개
+      //   들어 보는 동안 나온 주변 말이 곧바로 지시로 들어간다(아픽스에서 실제로 났다).
+      this.set({ playing: false, busy: false });
+      return;
+    }
     this.followUntil = Date.now() + FOLLOW_MS;
-    this.set({ playing: false, message: this.state.enabled ? '이어서 말씀하세요' : '' });
+    this.set({ playing: false, busy: false, message: this.state.enabled ? '이어서 말씀하세요' : '' });
   }
 
   /* ── 서버 준비 상태 ──────────────────────────────────────────────────── */
+
+  /**
+   * 사이드카(받아쓰기·고급 목소리)를 깨우고, 준비될 때까지 **혼자** 다시 묻는다.
+   *
+   * [🔴 폴링을 화면에서 버스로 옮긴 이유 — 2026-08-15 고착 사고] 예전엔 '목소리' 팝오버가
+   *   열려 있는 동안에만 3초마다 물었다. 예열(~2분)이 끝나기 전에 팝오버를 닫으면
+   *   ready=true 를 받을 기회가 영영 사라져 화면이 '준비 중'에 굳었다. 상태를 소유한
+   *   쪽이 갱신도 소유해야 한다 — 화면이 열려 있고 없고와 무관해야 한다.
+   * [WHY 상한을 두나] 사이드카가 설치조차 안 된 PC 에서 무한히 두드리면 서버 로그만
+   *   더럽힌다. 3분(45회)이면 예열은 끝난다 — 그 뒤엔 사용자가 다시 만질 때 재개된다.
+   */
+  ensureSidecar(): void {
+    if (this.state.sttReady) return;
+    this.statusTries = 0;
+    if (this.statusTimer) { clearTimeout(this.statusTimer); this.statusTimer = null; }
+    void this.checkReady();
+  }
+
+  private scheduleStatusPoll(): void {
+    if (this.state.sttReady || this.statusTries++ > 45) return;
+    if (this.statusTimer) clearTimeout(this.statusTimer);
+    this.statusTimer = setTimeout(() => { void this.checkReady(); }, 4000);
+  }
 
   async checkReady(): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/api/voice/status`, { cache: 'no-store' });
       const d = await res.json();
-      const voices: VoiceOption[] = Array.isArray(d?.voices) ? d.voices : [];
-      // [🔴 저장된 목소리가 이 PC 에 없을 수 있다] 다른 PC 에서 쓰던 값이 남아 있거나
-      //   음성이 제거된 경우다. 그대로 두면 낭독이 매번 실패한다 — 서버 기본값으로 되돌린다.
-      const stale = this.state.voice && voices.length > 0
-        && !voices.some((v) => v.id === this.state.voice);
+      this.serverAnswered = true;
+      this.serverVoices = Array.isArray(d?.voices) ? d.voices : [];
       this.set({
-        ready: !!d?.ready,
-        error: d?.ready ? '' : String(d?.detail || ''),
-        voices,
-        voice: stale ? String(d?.voice || '') : this.state.voice,
+        sttReady: !!d?.ready,
+        // [🔴 여기서 error 를 채우지 않는다] 사이드카가 예열 중이라는 사실은 오류가
+        //   아니다. 낭독은 브라우저가 이미 하고 있다 — 화면을 노랗게 만들 이유가 없다.
+        error: '',
       });
+      this.refreshVoices();
     } catch {
-      this.set({ ready: false });
+      this.set({ sttReady: false });
     }
+    this.scheduleStatusPoll();
   }
 }
 

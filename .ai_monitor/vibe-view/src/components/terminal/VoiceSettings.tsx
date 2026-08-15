@@ -16,6 +16,7 @@
  *
  * REVISION HISTORY:
  * - 2026-08-15 Claude: 최초 작성 — 목소리 선택·속도·미리듣기
+ * - 2026-08-15 Claude: 준비 폴링을 voiceBus 로 이관 + '준비 중' 표시 제거(읽기는 즉시 됨)
  * ------------------------------------------------------------------------
  */
 
@@ -42,20 +43,11 @@ export default function VoiceSettings({ onClose }: Props) {
     return () => document.removeEventListener('mousedown', onDown);
   }, [onClose]);
 
-  // 엔진이 준비될 때까지 다시 묻는다.
-  // [WHY 필요한가] 사이드카 첫 기동은 수십 초다. 한 번만 묻고 말면 패널은 준비 안 된
-  //   상태로 굳고, 사용자는 닫았다 여는 것 말고는 할 수 있는 게 없다.
-  // [🔴 종료 조건이 voices 면 안 된다 — 사고 2026-08-15] 서버의 /status 는 목소리 목록을
-  //   **엔진 로딩과 무관하게 즉시** 준다(voice_server.py: list_voices() 는 상태를 안 봄).
-  //   반면 ready 는 STT/TTS 예열이 끝나야 true 다. 종료 조건을 voices.length 로 두면
-  //   첫 응답에서 목록이 차는 순간 폴링이 멈추고, 뒤늦게 온 ready=true 를 영영 못 받아
-  //   화면이 '음성 엔진 준비 중…' 에 **영구 고착**됐다(백엔드는 정상인데 화면만 거짓말).
-  //   표시가 보는 값(ready)과 폴링이 멈추는 값이 같아야 한다.
-  useEffect(() => {
-    if (v.ready) return;
-    const t = setInterval(() => { void voiceBus.checkReady(); }, 3000);
-    return () => clearInterval(t);
-  }, [v.ready]);
+  // [🔴 여기서 폴링하지 않는다 — 2026-08-15 고착 사고] 예전엔 이 팝오버가 3초마다
+  //   /status 를 물었다. 그래서 팝오버를 닫으면 갱신이 멈췄고, 예열이 끝난 뒤에도
+  //   화면은 '준비 중'을 영영 붙들고 있었다. 지금은 상태를 소유한 voiceBus 가 스스로
+  //   다시 묻는다(ensureSidecar). 화면은 열려 있든 아니든 결과만 받는다.
+  useEffect(() => { voiceBus.ensureSidecar(); }, []);
 
   const current = v.voice || (v.voices[0]?.id ?? '');
 
@@ -75,7 +67,7 @@ export default function VoiceSettings({ onClose }: Props) {
       <div className="text-white/45 mb-1.5">목소리</div>
       {v.voices.length === 0 ? (
         <div className="rounded border border-dashed border-white/15 px-2 py-3 text-center text-white/35">
-          {v.ready ? '고를 수 있는 목소리가 없습니다' : '음성 엔진을 준비하는 중…'}
+          이 PC 에서 쓸 수 있는 목소리가 없습니다
         </div>
       ) : (
         <div className="flex flex-col gap-1 max-h-44 overflow-y-auto custom-scrollbar">
@@ -129,12 +121,17 @@ export default function VoiceSettings({ onClose }: Props) {
         <span className="w-8 text-right tabular-nums text-white/60">{v.speed.toFixed(2)}</span>
       </div>
 
-      {/* 엔진 상태 — 낭독이 안 될 때 사용자가 자기 스피커를 의심하지 않게 한다. */}
+      {/* 상태 한 줄.
+          [🔴 '준비 중'을 기본으로 띄우지 않는다] 읽기는 이 PC 내장 목소리로 이미 되므로
+            기다리라고 말할 이유가 없다. 여기서 알릴 것은 '받아쓰기가 아직인가' 하나뿐이고,
+            그것도 사람이 말을 걸어야 의미가 생긴다. */}
       <div className="mt-2 border-t border-white/10 pt-2 text-[10px]">
-        {v.ready ? (
-          <span className="text-emerald-300/70">● 음성 엔진 준비됨</span>
+        {v.error ? (
+          <span className="text-amber-300/70">● {v.error}</span>
+        ) : v.sttReady ? (
+          <span className="text-emerald-300/70">● 듣기·읽기 모두 준비됨</span>
         ) : (
-          <span className="text-amber-300/70">● {v.error || '음성 엔진 준비 중…'}</span>
+          <span className="text-white/40">● 읽기는 바로 됩니다 · 받아쓰기 준비 중</span>
         )}
       </div>
     </div>

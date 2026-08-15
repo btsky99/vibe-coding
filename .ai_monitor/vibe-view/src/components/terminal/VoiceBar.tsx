@@ -161,9 +161,9 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
               읽어 주는 목소리 하나를 고르는 것이라, 소리 아이콘이 짝을 정확히 가리킨다. */}
         <button
           onClick={() => {
-            // [🔴 여기서 checkReady 를 부르는 이유] 사이드카는 첫 status 요청 때 뜬다.
-            //   패널을 열었는데 목록이 비어 있으면 사용자는 '목소리가 없다'고 읽는다.
-            if (!showSettings) void voiceBus.checkReady();
+            // [🔴 여기서 사이드카를 깨우는 이유] 목록의 '더 나은 목소리'는 사이드카가
+            //   떠야 나온다. 브라우저 목소리는 이미 채워져 있으므로 패널이 비지는 않는다.
+            if (!showSettings) voiceBus.ensureSidecar();
             setShowSettings((s) => !s);
           }}
           title={rawLabel ? `읽어 주는 목소리: ${rawLabel}` : '어떤 목소리로 읽을지 고릅니다'}
