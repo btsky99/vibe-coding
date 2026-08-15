@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 10:47
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 12:03
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 3개 · 미푸시 17커밋
+- **브랜치**: `main` · 미커밋 62개 · 미푸시 23커밋
 - **최근 커밋**
-  - `6c3755c` 2026-08-15 — feat(setup): 옵시디언을 기본 설치팩에 편입 — 설치·업데이트 때 CLI·DB 처럼 자동 설치
-  - `5df7c62` 2026-08-15 — docs(rules): 규칙 1 확장 — 비전문가 눈높이 설명 의무화
-  - `ef209bd` 2026-08-15 — feat(wiki): 코드 주석 702건을 주제별 백과사전 36장으로 합성 (W2)
-  - `7cbf195` 2026-08-15 — feat(wiki): LLM 위키 뼈대 + 작성 규약 — 지식 창고를 로그 덤프에서 백과사전으로 (W1)
-  - `e8fec8d` 2026-08-15 — fix(recall): 랭킹 보정항이 유사도를 삼켜 정답이 탈락하던 문제 — 계수 0.1→0.004
+  - `bb07263` 2026-08-15 — fix(voice): '음성 엔진 준비 중'에서 안 넘어가던 사고 — stdout 파이프 데드락
+  - `7532e70` 2026-08-15 — feat(wiki): 지식 백과사전 패널 — 상태·즉시 갱신·2단계 초기화 (W11)
+  - `3adcebe` 2026-08-15 — feat(wiki): 위키 상태 조회 + 초기화 API — 설치본에서도 '싹 지우고 새로' (W10)
+  - `909e7e6` 2026-08-15 — feat(wiki): 사고 장부 120건을 주제별 함정 페이지에 병합 (W3)
+  - `a940379` 2026-08-15 — feat(wiki): 위키 자동 갱신 데몬 + 구글 드라이브 허브 미러 (W6·W9)
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -28,15 +28,15 @@
   - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **음성 설정이 '음성 엔진 준비 중…'에서 안 넘어감 (TTS 로딩 실패: [Errno 22] Invalid argument)**
+  - 원인: voice_api._spawn_sidecar가 stdout=PIPE로 사이드카를 띄우는데 부모(server.py)가 읽어주는 스레드가 없어 파이프 버퍼가 차 자식이 멈춤. 지문=CPU 0.03초·리슨 포트 0개·프로세스는 살아있음. 게다가 _spawned=True 플래
+  - 수정: stdout을 voice-server/voice-server.log 파일로 리다이렉트(DEVNULL 아님 — 콘솔 없는 자식이라 버리면 진단 불가), stdin=DEVNULL(부모 pythonw는 stdin 핸들 무효), _spawned bool → _proc Pope
 - **마이크 모양이 화면에 아예 없다 (음성 기능 커밋 후)**
   - 원인: 원인 2개. (1) 프론트 dist 를 빌드하지 않아 앱이 옛 번들을 서빙 — dist 에 '호출어' 문자열 0건. (2) VoiceBar 를 터미널 입력줄 안쪽에 뒀는데 그 입력줄은 isTerminalMode 일 때만 존재 — 에이전트 선택 카드 화면에서는 음성 UI
   - 수정: npm run build 로 dist 갱신 + VoiceBar 를 슬롯 최하단(isTerminalMode 밖)으로 이동해 항상 렌더
 - **음성 사이드카 /status 가 404 를 돌려주고 목소리/마이크가 동작 안 함**
   - 원인: VOICE_PORT 9021 이 LAN 브리지와 충돌. 포트 지도의 '다음 빈 자리'를 잡았는데 LAN 브리지는 한 자리가 아니라 인스턴스마다 9020,9021,.. 로 번진다. status 요청이 LAN 브리지로 가 404
   - 수정: VOICE_PORT 9021 -> 9030 (voice_api.py + voice_server.py 양쪽). 포트 지도의 다음 자리는 안전하지 않다는 주석 추가
-- **개발 서버가 실행 즉시 조용히 종료 (server.log에 'Server Started'만 반복, 본문 0줄)**
-  - 원인: 커널 대기(wait=Executive)에 갇혀 관리자 권한 Stop-Process도 안 먹는 좀비 pythonw가 인스턴스 락 포트 19276을 영구 점유. instance_lock.acquire_single_instance_lock이 bind 실패를 곧바로 '이미 실
-  - 수정: 락 소켓에 생존 핸드셰이크(listen+accept 배너) 도입. bind 실패 시 핸드셰이크(+구버전용 HTTP project_id 대조 보조)로 주인의 생사를 판정하고, 좀비로 확인된 경우에만 다음 락 포트로 회수(최대 20칸). 전부 점유면 재부팅 안내 후 exi
 
 🔨 = 최근 7일 내 변경된 파일
 
@@ -77,7 +77,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2153 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2160 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
@@ -125,7 +125,8 @@
 | `update_api.py` | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
-| `voice_api.py` 🔨 | 182 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
+| `voice_api.py` 🔨 | 226 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
+| `wiki_api.py` 🔨 | 166 | LLM 위키 상태 조회 + 초기화 API. |
 | `zettel_api.py` | 203 | Hive Zettelkasten REST API 핸들러. |
 
 ### 데이터 계층 (.ai_monitor/src/)
@@ -155,7 +156,7 @@
 | `pg_schema.py` | 828 | 설명: PostgreSQL 스키마 DDL(ensure_schema) + 레거시 JSONL/JSON 마이그레이션 |
 | `pg_store.py` | 127 | 설명: PostgreSQL 저장소 파사드 — 분할된 pg_* 도메인 모듈을 단일 경로로 재노출 |
 | `pg_tasks.py` | 388 | 설명: 하이브 태스크(hive_tasks) CRUD + 원자적 체크아웃 + 코멘트 + 하트비트 + 상태 저장 |
-| `pg_vector_search.py` 🔨 | 356 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
+| `pg_vector_search.py` 🔨 | 362 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
 | `quota_policy.py` | 117 | provider 쿼터 snapshot을 작업 크기 권고로 변환하는 순수 정책 계층. |
 | `recall_client.py` | 83 | 설명: 훅(단명 프로세스)용 회상 클라이언트 — 서버 recall-smart API 우선, |
 | `secure.py` | 59 | 설명: 보안 유틸 — 로그 민감정보 마스킹(API키/Bearer/패스워드 정규식), |
@@ -164,6 +165,7 @@
 | `session_binding.py` 🔨 | 299 | claude 세션 jsonl ↔ PTY 슬롯 결속 + 터미널별 컨텍스트 점유율 계측. |
 | `session_recycle.py` 🔨 | 236 | 컨텍스트 리사이클 상태머신 — 세션을 마감 기록으로 봉인하고 새 컨텍스트로 |
 | `wiki_generator.py` | 381 | 설명: LLM 위키 자동생성 엔진 — code_nodes → 프롬프트 조립 → hive_tasks 등록 |
+| `wiki_index.py` 🔨 | 276 | wiki/ 마크다운(정본)을 zettel_notes(검색 인덱스)로 밀어 넣는다. |
 | `zettelkasten.py` | 459 | Hive Zettelkasten — 카파시 Append-Review-Rescue + 루만 제텔카스텐 융합 메모 시스템. |
 
 ### 인프라 계층 (.ai_monitor/infra/)
@@ -172,7 +174,7 @@
 | `app_boot.py` 🔨 | 448 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 1007 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
+| `daemons.py` 🔨 | 1065 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
 | `embed_service.py` 🔨 | 214 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `folder_dialog.py` 🔨 | 139 | 윈도우 네이티브 폴더 선택 다이얼로그(SHBrowseForFolderW, ctypes). |
@@ -292,6 +294,7 @@
 | `build_verify.py` | 645 | 빌드 전 필수 조건 검증 스크립트. |
 | `checkpoint.py` | 62 | 의도 단위 세션 체크포인트 CLI — "왜/어디까지 결정/다음 뭐" 3요소를 |
 | `codex_pg_watcher.py` | 286 | Mirror Codex CLI history entries into PostgreSQL pg_logs. |
+| `console_flicker_watch.py` | 214 | 순간적으로 떴다 사라지는 콘솔 창의 '범인'을 잡는 감시기. |
 | `fix_corrupted_titles.py` 🔨 | 282 | YAML 이스케이프 누적으로 백슬래시가 뭉개진 제텔 노트 제목을 복구한다. |
 | `harness_verify.py` | 437 | Vibe Coding 하네스 V2 검증 스크립트. |
 | `heal_report.py` | 100 | 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics를 호출해 4장치 지표를 |
@@ -317,6 +320,7 @@
 | `migrate_antigravity_db.py` | 83 | DB 식별자 gemini→antigravity 일회성 마이그레이션 (plan Task 9). |
 | `migrate_archive_session_summaries.py` | 70 | 일회성 마이그레이션 — 이미 permanent로 오승격된 세션요약 노트를 archived=true로 내린다. |
 | `migrate_vault_consolidate.py` | 240 | 지식 창고 재점검 일회성 정리 마이그레이션 (2026-07-14). |
+| `migrate_vault_pretty_names.py` | 156 | 볼트 노트 파일명을 옛 규칙(`{note_id} {제목}`)에서 새 규칙(제목만)으로 1회 개명한다. |
 | `pg_project.py` | 39 | PostgreSQL project DB resolver shared by script-side logging and messaging utilities. |
 | `recall.py` | 51 | 경험 회상 스크립트 — 현재 작업과 유사한 과거 경험을 검색하여 출력. |
 | `recall_quality.py` 🔨 | 128 | 회상 v2의 **품질**을 측정한다. 커버리지·건수가 아니라 "관련된 걸 찾고 |
@@ -331,14 +335,15 @@
 | `voice_turn_hook.py` 🔨 | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
 | `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
 | `wiki_build.py` 🔨 | 522 | 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/ 백과사전 페이지로 합성한다. |
+| `wiki_lint.py` | 396 | wiki/ 백과사전이 '늙었는지'를 기계적으로 검출한다 — 죽은 출처(사라진 파일· |
 | `zettel_capture.py` 🔨 | 703 | 제텔카스텐 자동 캡처 엔진. |
-| `zettel_sync.py` 🔨 | 988 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
+| `zettel_sync.py` 🔨 | 1106 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
 ### 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `App.tsx` 🔨 | 1156 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
+| `App.tsx` 🔨 | 1161 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
 | `main.tsx` | 75 | 설명: React 앱 진입점. ErrorBoundary로 전체 트리를 감싸 |
 | `types.ts` | 206 | 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답 |
 | `constants.tsx` | 93 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
@@ -346,7 +351,7 @@
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
 |----------|------|------|
-| `ActivityBar.tsx` 🔨 | 189 | 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수, |
+| `ActivityBar.tsx` 🔨 | 195 | 설명: 좌측 액티비티 바 — 패널 탭 전환 아이콘 + 배지(태스크/메모리/충돌/Git 변경 수, |
 | `ChatSlot.tsx` | 610 | 설명: cokacdir 패턴 채팅 UI 컴포넌트. |
 | `FileExplorer.tsx` | 557 | 설명: 파일 탐색기 사이드바 패널 컴포넌트. |
 | `FilePathText.tsx` | 110 | 설명: 텍스트 내 파일 경로를 정규식으로 감지해 클릭 가능한 링크 세그먼트로 분리 렌더. |
@@ -373,6 +378,7 @@
 | `MemoryPanel.tsx` 🔨 | 517 | 에이전트 간 공유 메모리(PostgreSQL hive_memory + zettel_notes) 패널 — |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 보드 패널 컴포넌트. |
 | `ToolsPanel.tsx` | 407 | AI 개발 도구 설치 관리 패널. |
+| `WikiPanel.tsx` 🔨 | 167 | LLM 위키(지식 백과사전) 상태판. 페이지·검색항목 수를 보여주고 |
 | `ZettelkastenPanel.tsx` | 537 | Hive Zettelkasten 패널 — 카파시 + 루만 융합 메모 시스템 UI. |
 
 ### 터미널 하위 컴포넌트 (components/terminal/)
@@ -386,7 +392,7 @@
 | `ShortcutEditModal.tsx` | 47 | 터미널 단축어(사용자 커스텀 명령) 편집 모달. |
 | `SlashCommandMenu.tsx` | 66 | 터미널 입력 영역의 슬래시 커맨드(`/`) 드롭다운 — 카테고리별 |
 | `TerminalSlotHeader.tsx` 🔨 | 189 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
-| `VoiceBar.tsx` 🔨 | 187 | 설명: 터미널 슬롯 입력줄 옆의 음성 조작부 — 마이크 버튼, 상시 대기 토글, |
+| `VoiceBar.tsx` 🔨 | 239 | 설명: 터미널 슬롯 입력줄 옆의 음성 조작부 — 마이크 버튼, 상시 대기 토글, |
 | `VoiceSettings.tsx` 🔨 | 136 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
 | `xtermSelection.ts` | 107 | 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸. |
 
@@ -453,6 +459,7 @@
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
 | `test_windows_installer_toolchain.py` 🔨 | 114 | Regression checks for prerequisite-first Windows installer packaging. |
 | `test_zettel_oneway_default.py` 🔨 | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
+| `test_zettel_pretty_names.py` | 102 | 볼트 파일명 규칙 회귀 테스트 — note_id 접두 제거 이후의 이름 짓기가 |
 | `test_zettel_size_guard.py` 🔨 | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
 | `FileExplorer.test.tsx` | 136 | FileExplorer 컴포넌트 |
@@ -494,4 +501,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 10:47
+> 자동 생성 완료: 2026-08-15 12:03

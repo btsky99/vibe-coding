@@ -222,23 +222,135 @@ def _format_ts(ts) -> str:
     return str(ts)[:16]
 
 
+# ── 파일명 예쁘게 짓기 ─────────────────────────────────────────────────────
+#
+# [WHY / 2026-08-15] 옛 규칙은 `{note_id} {제목}` 이었다. 그 결과 옵시디언 파일 목록이
+#   `w-ff6eb8de6f7b 📖 …` 처럼 **의미 없는 12자리 해시로 시작**해 이름순 정렬이 사실상
+#   무작위가 됐다(사람도 LLM도 목록을 훑어 고를 수 없음). note_id 는 프론트매터
+#   `zettel_id` 에 그대로 남으므로 파일명에서 빼도 정보 손실이 없다.
+#
+# [불변식] 링크·백링크·MOC 도 모두 이 함수를 거친다(165·173·674행) — 여기만 바꾸면
+#   본문 `[[링크]]` 가 자동으로 따라온다. 다른 곳에서 파일명을 직접 조립하지 말 것.
+
+MAX_FILENAME_CHARS = 80
+
+# 제목 조각 중 정보가 0인 것들 — 위키/파일카드 생성기가 분류 미상일 때 채워 넣는 자리표시자
+_NOISE_SEGMENTS = {'그 밖', '기타', '미분류', ''}
+
+# Windows/Obsidian 파일명 금지 문자 → **삭제가 아니라 치환**.
+#   [과거사고] 삭제로 처리하던 시절 `React 컴포넌트/모듈` 이 `React 컴포넌트모듈` 로
+#   뭉개져 단어가 붙어버렸다. 구분자는 구분자로 바꿔야 읽힌다.
+_CHAR_SUBSTITUTES = {
+    '/': ' · ', '\\': ' · ', '*': '', '?': '',
+    '"': '', '<': '(', '>': ')', '|': ' · ',
+}
+
+# note_id → 최종 파일명(확장자 없음). export 사이클마다 재구성된다.
+#   [제약] 충돌 판정에 전체 노트 집합이 필요해 순수 함수로 만들 수 없다.
+#     레지스트리가 비어 있으면 충돌 정보 없이 개별 계산으로 폴백한다(외부 프로젝트 링크 등).
+_NAME_REGISTRY: dict[str, str] = {}
+
+
+def _pretty_title(title: str) -> str:
+    """제목을 사람이 읽는 형태로 다듬는다 — 잡음 조각·꼬리 중복 제거, 단어 경계 절단."""
+    text = title.replace('\x00', '')
+    for bad, good in _CHAR_SUBSTITUTES.items():
+        text = text.replace(bad, good)
+    # 콜론은 두 얼굴이다 — `제목: 설명` 은 구분자지만 `20:14` 는 시각이다.
+    #   [과거사고 2026-08-15] 둘 다 구분자로 바꿨더니 `세션 요약: 2026-06-11 20:14` 가
+    #   `… 20 · 14` 로 쪼개져 시각이 사라졌다. 숫자 사이 콜론은 하이픈으로만 바꾼다.
+    text = re.sub(r':\s+', ' · ', text)
+    text = text.replace(':', '-')
+    text = text.replace('..', '').strip().strip('"\'' + ' ')
+
+    # `·` 와 `—` 를 같은 층의 구분자로 보고 조각낸다. 두 문자가 섞여 쓰이는 데다
+    # 어느 쪽이든 "상위 · 하위" 관계를 뜻해 구분해 다룰 실익이 없다.
+    parts = [p.strip().strip('"\'') for p in re.split(r'\s*[·—]\s*', text)]
+    parts = [p for p in parts if p not in _NOISE_SEGMENTS]
+
+    # 꼬리 중복 제거: `useVoice.ts · React 컴포넌트 · useVoice` 의 마지막 조각처럼
+    #   앞 조각과 사실상 같은 말은 버린다(확장자 차이는 무시).
+    #   [과거사고 2026-08-15] 처음엔 부분 문자열 포함으로 판정했다. 그러자
+    #     `2026-07-29 20 · 26` 에서 꼬리 `26` 이 앞의 `2026` 안에 있다는 이유로 지워져
+    #     분(分)이 증발했다. 낱말 중간이 아니라 **조각 단위**로만 비교해야 한다.
+    def _stem(s: str) -> str:
+        # 첫 조각에만 붙는 이모지(📄/📖/🧠)를 떼고 비교한다 — 안 떼면
+        #   `📄 CodeWikiPanel.tsx` 와 꼬리 `CodeWikiPanel` 이 다른 말로 판정돼 중복이 남는다.
+        s = re.sub(r'^[^\w]+', '', s)
+        return (s.rsplit('.', 1)[0] if '.' in s else s).casefold()
+
+    while len(parts) >= 2:
+        tail = parts[-1]
+        if tail and any(_stem(tail) == _stem(p) for p in parts[:-1]):
+            parts.pop()
+        else:
+            break
+
+    pretty = ' · '.join(parts)
+    pretty = re.sub(r'\s{2,}', ' ', pretty).strip(' ·-—')
+
+    if len(pretty) > MAX_FILENAME_CHARS:
+        # [WHY] 고정 길이 절단은 `_header_descriptio` 처럼 낱말을 반토막 내 검색이 안 걸린다.
+        #   마지막 공백까지 물러서고, 물러설 곳이 없으면(긴 식별자 한 덩어리) 그냥 자른다.
+        cut = pretty[:MAX_FILENAME_CHARS]
+        space = cut.rfind(' ')
+        pretty = (cut[:space] if space > MAX_FILENAME_CHARS // 2 else cut).rstrip() + '…'
+
+    return pretty
+
+
 def _safe_filename(note_id: str, title: str) -> str:
-    """Obsidian에서 사용 가능한 안전한 파일명 생성. 제목 포함 + 경로 트래버설 방어.
+    """Obsidian에서 사용 가능한 안전한 파일명 생성 (확장자 제외).
 
-    예: vibe-3, "결정: 방식 C 선택" → "vibe-3 결정 — 방식 C 선택"
+    예: w-ff6eb8de, "📖 테스트 · 그 밖 · test_x.py · 모듈 상단"
+        → "📖 테스트 · test_x.py · 모듈 상단"
     """
-    # 위험 문자 제거
+    return _NAME_REGISTRY.get(note_id) or _base_filename(note_id, title)
+
+
+def _base_filename(note_id: str, title: str) -> str:
+    """꼬리표를 붙이기 전의 이름. 충돌 판정의 기준값이자 레지스트리 미등록 시 폴백."""
     safe_id = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', note_id).replace('..', '')
-    if not safe_id:
-        safe_id = 'unnamed'
+    pretty = _pretty_title(title) if title else ''
+    # 제목이 통째로 잡음이었거나 빈 노트 → id 라도 남겨야 파일이 겹치지 않는다
+    return pretty or safe_id or 'unnamed'
 
-    if title:
-        # 제목에서 파일명 불가 문자 제거, 콜론→대시
-        safe_title = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', title)
-        safe_title = safe_title.replace('..', '').strip()[:60]  # 최대 60자
-        return f'{safe_id} {safe_title}' if safe_title else safe_id
 
-    return safe_id
+def _short_id(note_id: str) -> str:
+    """충돌 시 붙이는 꼬리표. 해시형(w-ff6eb8de6f7b)은 뒤 4자, 순번형(vibe-3539)은 숫자 전체."""
+    tail = note_id.rsplit('-', 1)[-1]
+    return tail[-4:] if len(tail) > 4 else (tail or note_id)
+
+
+def build_name_registry(notes: list[dict]) -> dict[str, str]:
+    """export 대상 전체를 보고 파일명을 확정한다 — 동명이인에게 꼬리표를 붙인다.
+
+    [WHY] id 접두를 뺀 대가로 이름 충돌이 생긴다(실측: 위키 노트 849장 중 같은
+      `주제 · 파일 · 심볼` 조합이 다수 — 같은 심볼을 다른 줄에서 두 번 인덱싱한 경우).
+      덮어쓰면 한쪽이 조용히 사라지므로 반드시 갈라야 한다.
+
+    [불변식] 충돌 그룹은 **전원에게** 꼬리표를 준다. 선착순으로 한 명만 깨끗한 이름을
+      가지면, 나중에 더 작은 id 가 들어왔을 때 승자가 바뀌어 두 파일이 동시에 개명된다
+      (= 볼트 전체 재복사). 전원 부여는 그 흔들림이 없다.
+    """
+    global _NAME_REGISTRY
+    groups: dict[str, list[str]] = {}
+    base_of: dict[str, str] = {}
+    for n in notes:
+        nid = str(n.get('id', ''))
+        if not nid:
+            continue
+        base = _base_filename(nid, n.get('title', '') or '')
+        base_of[nid] = base
+        groups.setdefault(base.casefold(), []).append(nid)
+
+    registry: dict[str, str] = {}
+    for _key, ids in groups.items():
+        for nid in ids:
+            base = base_of[nid]
+            registry[nid] = base if len(ids) == 1 else f'{base} ({_short_id(nid)})'
+    _NAME_REGISTRY = registry
+    return registry
 
 
 def _note_output_path(vault_dir: Path, note: dict) -> Path:
@@ -377,6 +489,12 @@ def export_to_vault(vault_dir: Path, project_id: str = '', include_archived: boo
         return (n.get('source_ref') == 'session-summary'
                 or t.startswith('세션 요약') or t.startswith('Merge '))
     notes = [n for n in notes if not _is_ephemeral(n)]
+
+    # [불변식] 레지스트리는 _cleanup_stale_note_files **보다 먼저** 세운다. 정리 단계가
+    #   `note_id → 있어야 할 경로` 를 이 함수로 계산하기 때문 — 순서가 뒤집히면 옛 이름을
+    #   기준으로 판정해 살아있는 노트를 전부 고아로 오인하고 지운다.
+    build_name_registry(notes)
+
     removed = _cleanup_stale_note_files(vault_dir, notes, project_id=project_id)
     if removed:
         print(f'[zettel_sync] 오래된/고아 노트 {removed}개 삭제')
