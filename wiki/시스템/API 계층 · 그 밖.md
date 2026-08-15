@@ -22,7 +22,7 @@ sources:
   - .ai_monitor/api/logs_api.py:1
   - .ai_monitor/api/logs_api.py:25
   - .ai_monitor/api/message_api.py:23
-  # …외 10건 (본문 각 항목에 경로 표기)
+  # …외 12건 (본문 각 항목에 경로 표기)
 related: []
 confidence: high
 updated: 2026-08-15
@@ -34,7 +34,7 @@ updated: 2026-08-15
 
 사본이 미묘하게 달라(experience/vibe/zettel/codegraph만 default=str,
 
-> 자동 합성 (코드 주석 30건 · 파일 17개 · 추출 b28ef16).
+> 자동 합성 (코드 주석 32건 · 파일 18개 · 추출 909e7e6).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
 
 ## 코드에 박힌 지식
@@ -365,6 +365,24 @@ server 모듈의 전역 함수를 간접 호출합니다.
 server.py에서 run_pg_sql을 모듈 레벨에서 임포트
 
 출처: `.ai_monitor/api/vibe_api.py:40`
+
+## `.ai_monitor/api/wiki_api.py`
+
+### 모듈 상단 `[제약]`
+
+wiki_build 는 scripts/ 에 있어 패키지 import 가 안 된다 — 경로로 로드한다.
+[제약] frozen(EXE) 에서는 프로젝트 체크아웃의 scripts/ 를 봐야 한다. tools_api 가
+같은 문제를 _find_install_script 로 풀고 있으니 규칙이 바뀌면 양쪽을 같이 고칠 것.
+
+출처: `.ai_monitor/api/wiki_api.py:18`
+
+### handle_post `[WHY]`
+
+[WHY 명시 확인을 요구하나] 위키 페이지를 통째로 지운다. 사람이 옵시디언에서 손으로
+덧붙인 문단도 함께 사라진다(원료에 없는 내용은 복원되지 않는다). 실수로 눌린
+요청 하나에 그게 날아가면 안 된다.
+
+출처: `.ai_monitor/api/wiki_api.py:88`
 
 ## 확인법
 

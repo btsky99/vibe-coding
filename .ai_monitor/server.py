@@ -210,6 +210,7 @@ import api.launch_api as launch_api
 import api.commands_api as commands_api
 import api.config_api as config_api
 import api.daemons_api as daemons_api
+import api.wiki_api as wiki_api
 import api.fs_dialog_api as fs_dialog_api
 import api.dashboard_api as dashboard_api
 import api.setup_api as setup_api
@@ -1084,6 +1085,7 @@ def _g_config(h, pp):
                           PROJECT_CONTEXT_UNRESOLVED, _current_project_id(),
                           _current_project_root())
 def _g_daemons(h, pp):             daemons_api.handle_get(h, CONFIG_FILE)
+def _g_wiki_status(h, pp):         wiki_api.handle_get(h, pp.path, _current_project_root(), PROJECT_ID)
 def _g_vibe_sidebar(h, pp):        vibe_api.handle_sidebar_state(h)
 def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
 def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)
@@ -1212,6 +1214,7 @@ GET_ROUTES = {
     # Phase 2 R8 — 설정/vibe/칸반/메모리 exact. 순수위임(vibe 3종) + 인라인 모듈 이전.
     '/api/config': _g_config,
     '/api/daemons': _g_daemons,
+    '/api/wiki/status': _g_wiki_status,
     '/api/vibe/sidebar': _g_vibe_sidebar,
     '/api/vibe/notifications': _g_vibe_notifications,
     '/api/vibe/skills': _g_vibe_skills,
@@ -1350,6 +1353,8 @@ def _p_projects(h, pp):        projects_api.handle_post(h, PROJECTS_FILE)
 def _p_experience(h, pp):      experience_api.handle_post(h, pp.path)
 def _p_config_update(h, pp):   config_api.handle_update(h, CONFIG_FILE, PROJECTS_FILE)
 def _p_daemons(h, pp):         daemons_api.handle_update(h, CONFIG_FILE)
+def _p_wiki_reset(h, pp):
+    wiki_api.handle_post(h, pp.path, _p_body(h), _current_project_root(), PROJECT_ID, SCRIPTS_DIR)
 def _p_launch(h, pp):          launch_api.handle_launch(h, _codex_main_model)
 def _p_send_command(h, pp):    commands_api.handle_send_command(h, _NODE_PTY_REST_URL, _get_node_pty_sessions)
 def _p_locks(h, pp):           locks_api.handle_lock(h, LOCKS_FILE)
@@ -1467,6 +1472,7 @@ POST_ROUTES = {
     '/api/experience': _p_experience,
     '/api/config/update': _p_config_update,
     '/api/daemons': _p_daemons,
+    '/api/wiki/reset': _p_wiki_reset,
     '/api/launch': _p_launch,
     '/api/send-command': _p_send_command,
     '/api/locks': _p_locks,
