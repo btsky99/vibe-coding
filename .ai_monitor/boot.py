@@ -6,6 +6,8 @@ DESCRIPTION: 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스�
   의존성(pywebview/psycopg/...)만 frozen 유지되고, 앱 .py는 항상 체크아웃에서 로드된다.
 
 REVISION HISTORY:
+- 2026-08-16 Claude: 표준 출력 인코딩 방어 — cp949 가 줄표를 못 담아 print 가 예외를 내고
+  설치본이 보이지 않는 모달 대화상자에서 영구 정지하던 사고(_make_stdio_encoding_safe).
 - 2026-07-29 Codex: Acquire an early Windows mutex before slow first-run boot work.
 - 2026-07-29 Codex: Expose installer-bundled Node/npm and global AI CLI shims on PATH.
 - 2026-06-24 Claude: 최초 작성 — 경량 소스 업데이트 채널(A안) Task 2~3.
@@ -40,6 +42,33 @@ def _acquire_early_windows_instance_mutex() -> None:
         ctypes.windll.kernel32.CloseHandle(mutex)
         os._exit(0)
     _EARLY_INSTANCE_MUTEX = mutex
+
+
+def _make_stdio_encoding_safe() -> None:
+    """표준 출력이 한글·줄표를 못 담는 인코딩이어도 print 가 앱을 죽이지 않게 한다.
+
+    [🔴 과거사고 2026-08-16 — 이것 때문에 설치본이 통째로 안 떴다] boot.py 의 안내 문구에
+      줄표(—)가 들어 있는데, 부모가 stdout 을 파이프·파일로 넘기면 그 스트림이 시스템
+      기본 인코딩(한국어 윈도우 = cp949)으로 잡힌다. cp949 는 U+2014 를 못 담아
+      **print 한 줄이 UnicodeEncodeError 를 던지고, GUI 모드라 그 예외가 화면 없는
+      모달 대화상자('Unhandled exception in script')로 떠서 프로세스가 영원히 멈춘다.**
+      로그도 안 남는다 — 실패 지점이 로깅 초기화보다 앞이기 때문이다.
+    [🔴 왜 '문구에서 — 를 빼기'가 답이 아닌가] 그건 이번 한 줄만 막는다. 이 파일은
+      앱 전체의 진입점이고 앞으로도 한글 안내를 계속 찍는다. 스트림 자체를 안전하게
+      만들어야 다음 문장이 같은 함정을 밟지 않는다.
+    [제약] GUI(windowed) 프로즌 실행에서는 sys.stdout 이 None 이거나 reconfigure 가
+      없을 수 있다 — 그때는 조용히 넘어간다. 여기서 예외가 나면 본말전도다.
+    [불변식] 어떤 print 보다도 먼저 불려야 한다. main() 첫 줄인 이유다.
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError, AttributeError):
+            pass                                   # 못 바꿔도 부팅은 계속한다
 
 
 def _inject_bundled_node_path() -> None:
@@ -394,6 +423,7 @@ def _selftest() -> int:
 
 
 def main() -> None:
+    _make_stdio_encoding_safe()                    # [불변식] 첫 print 보다 먼저
     _inject_bundled_node_path()
     args = sys.argv[1:]
     if args and args[0] == "--boot-selftest":
