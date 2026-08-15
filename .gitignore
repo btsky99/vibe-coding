@@ -77,3 +77,6 @@ dist_pkg/
 .ai_monitor/voice-server/.venv/
 # 사이드카 로그 — 콘솔 없이 도는 자식의 유일한 실패 단서(api/voice_api.py:_sidecar_log).
 .ai_monitor/voice-server/voice-server.log
+# 낭독 캐시(mp3). 이 PC 에서 실제로 들은 문장들이라 다른 사람에게 의미가 없고,
+# 상한 안에서 알아서 정리된다(engines/tts_cache.py).
+.ai_monitor/voice-server/cache/

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 FILE: .ai_monitor/voice-server/voice_server.py
-DESCRIPTION: 음성 사이드카 — 로컬 STT(faster-whisper) / TTS(CosyVoice2·IndexTTS2) 서버.
+DESCRIPTION: 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 기본, sapi·sherpa 폴백) 서버.
              앱 서버(server.py)가 /api/voice/* 를 이쪽으로 프록시한다.
 
              [🔴 왜 앱과 같은 프로세스가 아닌가 — 이 구조의 존재 이유]
@@ -19,15 +19,19 @@ DESCRIPTION: 음성 사이드카 — 로컬 STT(faster-whisper) / TTS(CosyVoice2
                말 것 — 그 순간 두 환경이 다시 묶인다. 표준 라이브러리와 음성 라이브러리만.
 
              [엔드포인트]
-               GET  /status            → {ready, loading, stt, tts, engine, device, detail, voices}
+               GET  /status            → {ready, ttsReady, loading, stt, tts, engine, device,
+                                          detail, voices, cache}
                GET  /voices            → {voices: [{id, label, engine, lang}]}
                POST /stt   (audio/wav) → {text, ms}
-               POST /tts   (json)      → audio/wav   body: {text, voice?, speed?}
+               POST /tts   (json)      → audio/mpeg 또는 audio/wav (엔진에 따라 다름 —
+                                         synthesize 주석)  body: {text, voice?, speed?}
                POST /shutdown          → 종료(앱이 내릴 때)
 
 REVISION HISTORY:
 - 2026-08-15 Claude: 최초 작성 — 로컬 음성 스택 사이드카
 - 2026-08-15 Claude: 목소리 선택 — 엔진을 voice_id 별로 캐시하고 /voices 로 목록을 연다
+- 2026-08-15 Claude: 기본 낭독을 edge-tts 로 교체(로컬 6종 전부 탈락 — tts_edge.py 헤더).
+  응답 형식이 엔진마다 달라져 MIME 을 같이 반환하고, ttsReady 를 ready 에서 분리했다
 """
 
 from __future__ import annotations
@@ -51,10 +55,11 @@ HOST = '127.0.0.1'
 PORT = int(os.environ.get('VOICE_PORT', '9030'))
 
 # 어떤 TTS 엔진을 쓸지.
-# [WHY 기본이 sherpa 인가 — 2026-08-15 실측] 한국어·경량·GPU 0 을 동시에 만족한 유일한
-#   후보다(engines/tts_sherpa.py 헤더에 비교 근거). cosyvoice 는 품질이 위지만 VRAM 을
-#   2GB 상주하므로, 이 PC 처럼 학습을 병행하는 기계에서는 기본값이 될 수 없다.
-TTS_ENGINE = os.environ.get('VOICE_TTS_ENGINE', 'sherpa').strip().lower()
+# [WHY 기본이 edge 인가 — 2026-08-15 실측] 로컬 후보 6종(MeloTTS·XTTS-v2·OmniVoice·
+#   VoxCPM2·Qwen3-TTS·Kokoro)이 전부 떨어졌다(Kokoro 는 한국어가 0개). edge-tts 는
+#   모델 0개·GPU 0·문장당 0.5~1.1초로 통과했다 — engines/tts_edge.py 헤더에 근거.
+#   sherpa 와 sapi 는 **네트워크가 끊겼을 때 되돌아갈 길**로 남는다.
+TTS_ENGINE = os.environ.get('VOICE_TTS_ENGINE', 'edge').strip().lower()
 STT_MODEL = os.environ.get('VOICE_STT_MODEL', 'small').strip()
 
 # 목소리 식별자는 '<엔진>:<그 엔진 안의 이름>' 한 문자열이다.
@@ -123,6 +128,9 @@ def _new_engine(voice_id: str):
     """voice_id 로 어댑터 인스턴스를 만든다(로딩은 아직 안 한다)."""
     _engines_dir_on_path()
     kind = voice_id.split(':', 1)[0].lower()
+    if kind == 'edge':
+        from engines.tts_edge import EdgeEngine
+        return EdgeEngine(voice_id)
     if kind == 'sapi':
         from engines.tts_sapi import SapiEngine
         return SapiEngine(voice_id)
@@ -134,21 +142,26 @@ def _new_engine(voice_id: str):
 
 
 def _pick_default_voice() -> str:
-    """처음 켰을 때 쓸 목소리.
+    """처음 켰을 때 쓸 목소리. 순서 = edge → SAPI(Heami) → sherpa.
 
     [🔴 왜 sherpa 가 기본이 아닌가 — 2026-08-15 명료도 실측] 같은 문장을 합성해 그 소리를
       다시 faster-whisper 로 받아쓰게 했더니
         · sherpa VITS : "테스트를 모두 통과했습니다. 코미딸까요?"   (원문 = 커밋할까요)
         · SAPI Heami  : "테스트를 모두 통과했습니다. 커밋할까요?"   (원문 일치)
-      Heami 가 더 정확했고, 내려받을 모델도 없어 첫 기동까지 빨라진다. 다만 윈도우 전용이라
-      다른 OS 에서는 목록에 없고 그때만 sherpa 로 내려간다.
+      Heami 가 더 정확했고, 내려받을 모델도 없어 첫 기동까지 빨라진다.
+    [🔴 그 위에 edge 가 앉는다] edge 는 신경망 합성이라 Heami 보다 확연히 자연스럽고
+      역시 모델을 안 내려받는다. 다만 **네트워크가 필요하다** — 그래서 순서가 중요하다.
+      edge 를 못 쓰는 상황(오프라인·VOICE_EDGE=0)에서는 available() 이 false 라
+      목록에 아예 없고, 자연히 그 아래 후보가 기본값이 된다.
     """
     if ENV_VOICE:
         return ENV_VOICE
-    for v in list_voices():
-        if v.get('engine') == 'sapi' and v.get('lang') == 'ko':
-            return v['id']
-    return f'{TTS_ENGINE}:default'
+    voices = list_voices()
+    for engine in ('edge', 'sapi'):
+        for v in voices:
+            if v.get('engine') == engine and v.get('lang') == 'ko':
+                return v['id']
+    return f'{TTS_ENGINE}:default' if TTS_ENGINE != 'edge' else 'sherpa:default'
 
 
 def load_tts(voice_id: str = ''):
@@ -182,13 +195,21 @@ def list_voices() -> list:
     if _voices_cache is not None:
         return _voices_cache
     _engines_dir_on_path()
-    out = [{
+    out: list = []
+    # [🔴 edge 를 맨 앞에 둔다] 목록 순서가 곧 '무엇을 권하는가'다. 화면도 이 순서를
+    #   그대로 그리므로, 뒤에 두면 사용자가 되돌아갈 길(폴백)을 기본으로 고르게 된다.
+    try:
+        from engines.tts_edge import list_voices as _edge
+        out += _edge()
+    except Exception as e:                                 # noqa: BLE001
+        _log(f'edge 목록 실패(무시): {e}')
+    out.append({
         'id': 'sherpa:default',
         'label': '로컬 VITS (한국어)',
         'engine': 'sherpa',
         'lang': 'ko',
         'note': '모델 62MB · GPU 0 · 또렷하지만 기계적',
-    }]
+    })
     try:
         from engines.tts_sapi import list_voices as _sapi
         out += _sapi()
@@ -196,6 +217,17 @@ def list_voices() -> list:
         _log(f'SAPI 목록 실패(무시): {e}')
     _voices_cache = out
     return out
+
+
+def _cache_stats() -> dict:
+    """캐시 현황. [WHY /status 에 싣나] 캐시는 눈에 안 보이는 장치라, 안 도는 채로
+    몇 달이 가도 아무도 모른다. 파일 수가 안 늘면 그 자체가 고장 신호다."""
+    try:
+        _engines_dir_on_path()
+        from engines import tts_cache
+        return tts_cache.stats()
+    except Exception:                                  # noqa: BLE001
+        return {}
 
 
 def warmup() -> None:
@@ -207,16 +239,20 @@ def warmup() -> None:
     _state['loading'] = True
     if not _state['voice']:
         _state['voice'] = _pick_default_voice()
-    try:
-        load_stt()
-    except Exception as e:                             # noqa: BLE001
-        _state['detail'] = f'STT 로딩 실패: {e}'
-        _log(_state['detail'])
-        _log(traceback.format_exc())
+    # [🔴 TTS 를 먼저 올린다 — 순서가 체감을 가른다] STT(whisper small)는 수십 초가
+    #   걸리는데 edge TTS 는 올릴 모델이 없어 즉시 끝난다. STT 를 먼저 두면 '읽기'가
+    #   '듣기'를 기다리느라 그 수십 초 동안 브라우저 폴백으로만 읽힌다 — 사용자는 자기가
+    #   고른 목소리가 아닌 소리를 듣고 설정이 안 먹었다고 판단한다.
     try:
         load_tts()
     except Exception as e:                             # noqa: BLE001
         _state['detail'] = f'TTS 로딩 실패: {e}'
+        _log(_state['detail'])
+        _log(traceback.format_exc())
+    try:
+        load_stt()
+    except Exception as e:                             # noqa: BLE001
+        _state['detail'] = f'STT 로딩 실패: {e}'
         _log(_state['detail'])
         _log(traceback.format_exc())
     _state['loading'] = False
@@ -239,8 +275,15 @@ def transcribe(wav: bytes) -> dict:
     return {'text': text, 'ms': int((time.time() - t0) * 1000)}
 
 
-def synthesize(text: str, voice: str = '', speed: float = 0.0) -> bytes:
-    return load_tts(voice).synth(text, speed)
+def synthesize(text: str, voice: str = '', speed: float = 0.0) -> tuple[bytes, str]:
+    """합성 결과와 그 형식(MIME).
+
+    [🔴 형식이 엔진마다 다르다] edge 는 mp3, sherpa/sapi 는 wav 다. 예전처럼 wav 로
+      못 박아 내보내면 브라우저가 mp3 를 wav 로 알고 재생에 실패한다 — 소리만 안 나고
+      오류는 안 뜨는, 가장 찾기 나쁜 형태의 고장이 된다.
+    """
+    eng = load_tts(voice)
+    return eng.synth(text, speed), getattr(eng, 'mime', 'audio/wav')
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -260,7 +303,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):                                  # noqa: N802
         if self.path.startswith('/status'):
             ready = _state['stt'] and _state['tts']
-            self._json({**_state, 'ready': ready, 'voices': list_voices()})
+            # [🔴 ttsReady 를 따로 낸다] ready 는 '받아쓰기까지 다 됐는가'다. 낭독은
+            #   그것을 기다릴 이유가 없는데(TTS 는 이미 떴다), 화면이 ready 하나만 보면
+            #   whisper 가 올라오는 수십 초 동안 고른 목소리를 안 쓴다. 두 준비 상태는
+            #   수명이 달라졌으므로 값도 갈라야 한다.
+            self._json({
+                **_state,
+                'ready': ready,
+                'ttsReady': bool(_state['tts']),
+                'voices': list_voices(),
+                'cache': _cache_stats(),
+            })
             return
         if self.path.startswith('/voices'):
             self._json({'voices': list_voices()})
@@ -300,16 +353,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({'error': 'no text'}, 400)
                 return
             try:
-                wav = synthesize(text, voice, speed)
+                audio, mime = synthesize(text, voice, speed)
             except Exception as e:                     # noqa: BLE001
+                # [🔴 여기서 다른 엔진으로 갈아타지 않는다] 폴백은 프론트(voiceBus.speak)가
+                #   한다 — 그쪽은 브라우저 내장 합성기라는, 서버가 닿을 수 없는 마지막
+                #   수단을 갖고 있다. 여기서 절반쯤 폴백하면 폴백이 두 군데가 되어
+                #   '왜 이 목소리가 났는지' 를 아무도 설명 못 하게 된다.
                 _log(traceback.format_exc())
                 self._json({'error': f'{type(e).__name__}: {e}'}, 500)
                 return
             self.send_response(200)
-            self.send_header('Content-Type', 'audio/wav')
-            self.send_header('Content-Length', str(len(wav)))
+            self.send_header('Content-Type', mime)
+            self.send_header('Content-Length', str(len(audio)))
             self.end_headers()
-            self.wfile.write(wav)
+            self.wfile.write(audio)
             return
 
         if self.path.startswith('/shutdown'):

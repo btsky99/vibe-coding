@@ -14,10 +14,11 @@
  *          보낸다. 로컬 오픈소스 전환(2026-08-15 사용자 결정)의 요지가 그 전송을
  *          없애는 것이라, 캡처(audioCapture)→서버(/api/voice/stt) 경로를 쓴다.
  *
- *          [🔴 낭독은 브라우저가 먼저 한다 — 인식과 반대다] 합성은 오디오를 밖으로
- *          보내지 않는다(WebView2 가 잡는 것은 OS 내장 Heami 하나뿐 — browserVoice.ts
- *          실측 주석). 그래서 프라이버시 이유가 없고, 사이드카 예열 ~2분을 기다릴
- *          이유는 더더욱 없다. 사이드카는 되돌아갈 길로 남긴다.
+ *          [🔴 낭독은 사이드카(edge-tts)가 먼저 한다 — 2026-08-15 실측으로 뒤집힘]
+ *          로컬 합성 6종이 전부 떨어져 edge-tts 를 기본으로 삼았다(engines/tts_edge.py).
+ *          인식과 달리 낭독은 '읽을 문장'만 나가고 마이크 오디오는 나가지 않는다 —
+ *          위험의 크기가 다르므로 판단도 다르다. 그래도 싫은 사람이 있으므로 끄는
+ *          스위치를 뒀다(state.edgeOn). 끄면 브라우저 내장 합성기로만 읽는다.
  *
  *          [불변식] 낭독 중에는 마이크를 뮤트한다. 안 하면 스피커로 나간 제 목소리를
  *          다시 받아적어 스스로에게 명령한다. 브라우저 에코 제거가 1차, 이게 2차다.
@@ -26,6 +27,8 @@
  * - 2026-08-15 Claude: 최초 작성 — 로컬 STT/TTS + 슬롯별 호출어
  * - 2026-08-15 Claude: 낭독을 브라우저 합성기 우선으로 — '준비 중' 대기 제거.
  *   준비 상태 폴링을 팝오버에서 이 버스로 이관(팝오버를 닫으면 고착되던 사고)
+ * - 2026-08-15 Claude: 기본 낭독을 edge-tts(사이드카 mp3)로 — 순서를 다시 뒤집었다.
+ *   브라우저 합성기는 네트워크가 죽었을 때 되돌아갈 길로 남는다(speak 주석)
  * ------------------------------------------------------------------------
  */
 
@@ -82,8 +85,25 @@ export interface VoiceState {
    *   기다릴 이유가 없다. 사이드카 상태는 sttReady 로 따로 본다.
    */
   ready: boolean;
-  /** 받아쓰기(사이드카 STT)가 준비됐는가. 낭독과 무관 — 낭독은 브라우저가 먼저 한다. */
+  /** 받아쓰기(사이드카 STT)가 준비됐는가. 낭독과 무관 — 둘은 수명이 다르다. */
   sttReady: boolean;
+  /**
+   * 사이드카가 **지금 합성할 수 있는가**(/status 의 ttsReady).
+   *
+   * [🔴 sttReady 와 갈라 둔 이유 — 2026-08-15] 예전엔 준비 상태가 하나뿐이라, 낭독이
+   *   받아쓰기(whisper 로딩 수십 초)를 기다렸다. edge-tts 는 올릴 모델이 없어 즉시
+   *   준비되는데도 그 수십 초 동안 브라우저 목소리로 읽혀, 사용자는 자기가 고른
+   *   목소리가 안 먹는다고 판단했다.
+   */
+  ttsReady: boolean;
+  /**
+   * 인터넷 목소리(edge-tts)를 쓸 것인가 — **끄는 스위치**.
+   *
+   * [WHY 필요한가] edge 는 문장을 마이크로소프트 서버로 보낸다. 그 자체가 싫거나,
+   *   회선이 느리거나, 오프라인으로 쓰는 사람이 있다. 끄면 목록에서 사라지고 낭독은
+   *   이 PC 안(브라우저 Heami / SAPI / sherpa)에서만 일어난다.
+   */
+  edgeOn: boolean;
   /** 마지막 오류 — 조용히 죽지 않게 사람에게 보인다. */
   error: string;
   /** 고를 수 있는 목소리 — 서버가 실제로 합성 가능한 것만 준다. */
@@ -106,6 +126,9 @@ const TTS_KEY = 'vibe.voice.tts';
 const WAKE_ENABLED_KEY = 'vibe.voice.enabled';
 const VOICE_KEY = 'vibe.voice.id';
 const SPEED_KEY = 'vibe.voice.speed';
+// [WHY localStorage 인가] 목소리(VOICE_KEY)와 같은 이유다 — 회선·취향은 기기별이라
+//   프로젝트 config 에 넣으면 다른 PC 의 설정까지 같이 바뀐다.
+const EDGE_KEY = 'vibe.voice.edge';
 
 /** 답을 다 읽은 뒤 이 시간 동안은 호출어 없이 바로 이어 말할 수 있다. */
 const FOLLOW_MS = 12000;
@@ -132,6 +155,9 @@ class VoiceBus {
     // 브라우저 합성기가 있으면 처음부터 말할 수 있다 — 물어보고 정할 것이 없다.
     ready: browserTtsAvailable(),
     sttReady: false,
+    ttsReady: false,
+    // 기본은 켜짐. [WHY] 오늘 실측에서 통과한 유일한 낭독이라 이게 곧 '보통 상태'다.
+    edgeOn: (() => { try { return localStorage.getItem(EDGE_KEY) !== '0'; } catch { return true; } })(),
     error: '',
     voices: [],
     // [WHY localStorage 인가] 목소리는 이 PC 에 뭐가 깔려 있느냐에 달린 기기별 취향이다.
@@ -179,6 +205,8 @@ class VoiceBus {
   private serverVoices: VoiceOption[] = [];
   /** 사이드카가 /status 로 한 번이라도 답했는가. 저장된 목소리 판정의 전제. */
   private serverAnswered = false;
+  /** 사이드카가 스스로 고른 기본 목소리(/status 의 voice). 아직 아무것도 안 고른 사람 몫. */
+  private serverDefault = '';
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private statusTries = 0;
 
@@ -232,25 +260,58 @@ class VoiceBus {
   /**
    * 고를 수 있는 목소리 목록을 다시 만든다.
    *
-   * [🔴 브라우저 것을 앞에 둔다] 목록의 첫 줄이 곧 기본값이다. 사이드카 목소리를 앞에
-   *   두면 앱을 켜자마자 고른 사람이 '기다려야 하는 쪽'을 집게 된다.
+   * [🔴 순서가 바뀌었다 — 2026-08-15] 예전엔 브라우저 목소리를 앞에 뒀다. 사이드카가
+   *   모델을 올리는 ~2분 동안 고른 사람이 '기다려야 하는 쪽'을 집지 않게 하려는 것이었다.
+   *   edge-tts 는 올릴 모델이 없어 그 기다림 자체가 사라졌고, 품질은 확연히 위다.
+   *   그래서 edge → 브라우저(항상 되는 길) → 로컬 엔진 순으로 놓는다.
+   * [🔴 스위치가 꺼져 있으면 edge 를 목록에서 통째로 뺀다] 목록에 두고 고르면 실패하는
+   *   구조는 사용자가 '고장'으로 읽는다. 못 쓰는 것은 보여 주지 않는다.
    */
   private refreshVoices(): void {
     const web = browserVoiceOptions();
-    const voices = [...web, ...this.serverVoices];
+    const server = this.state.edgeOn
+      ? this.serverVoices
+      : this.serverVoices.filter((v) => v.engine !== 'edge');
+    const edge = server.filter((v) => v.engine === 'edge');
+    const local = server.filter((v) => v.engine !== 'edge');
+    const voices = [...edge, ...web, ...local];
+
     // [🔴 저장된 목소리가 이 PC 에 없을 수 있다] 다른 PC 에서 쓰던 값이 남아 있거나
     //   음성이 제거된 경우다. 그대로 두면 낭독이 매번 실패한다 — 빈 값으로 되돌린다.
     // [🔴 사이드카 목소리는 사이드카가 답한 뒤에만 판정한다] 아직 안 뜬 상태에서
     //   판정하면 '목록에 없다'가 되어 사용자가 고른 값을 부팅 때마다 날린다.
+    // [WHY 스위치를 끈 것도 여기서 걸리나] 위 server 에서 edge 를 뺐으므로, 고른 값이
+    //   edge 였으면 자동으로 '없는 목소리'가 되어 풀린다 — 스위치 처리가 한 곳에 모인다.
     const cur = this.state.voice;
     const stale = !!cur && (isWebVoiceId(cur)
       ? web.length > 0 && !web.some((v) => v.id === cur)
-      : this.serverAnswered && !this.serverVoices.some((v) => v.id === cur));
-    this.set({
-      voices,
-      voice: stale ? '' : this.state.voice,
-      ready: browserTtsAvailable() || this.state.sttReady,
-    });
+      : this.serverAnswered && !server.some((v) => v.id === cur));
+    let voice = stale ? '' : cur;
+
+    // [🔴 화면에 칠한 것과 실제로 나는 소리가 같아야 한다] 아무것도 안 골랐을 때 화면은
+    //   목록 첫 줄을 칠하는데, 낭독은 사이드카가 정한 기본값으로 나간다. 둘이 어긋나면
+    //   사용자는 설정이 안 먹었다고 읽는다. 사이드카가 알려 준 기본값을 여기서 채운다.
+    // [WHY localStorage 에 안 쓰나] 사람이 고른 적 없는 값이다. 저장하면 나중에 기본값이
+    //   바뀌어도 옛 값에 묶인다.
+    if (!voice && this.serverDefault && voices.some((v) => v.id === this.serverDefault)) {
+      voice = this.serverDefault;
+    }
+
+    this.set({ voices, voice, ready: browserTtsAvailable() || this.state.ttsReady });
+  }
+
+  /**
+   * 인터넷 목소리(edge-tts) 스위치.
+   *
+   * [🔴 끄면 즉시 되돌아간다] 다음 답부터가 아니라 지금 읽던 것도 멈춘다. 스위치를 끈
+   *   사람은 '지금 이 소리를 그만'이라는 뜻으로 누른다.
+   */
+  setEdge(on: boolean): void {
+    try { localStorage.setItem(EDGE_KEY, on ? '1' : '0'); } catch { /* 저장 실패는 무시 */ }
+    if (!on) this.stopSpeaking();
+    this.set({ edgeOn: on });
+    this.refreshVoices();
+    if (on) this.ensureSidecar();
   }
 
   /* ── 구독(useSyncExternalStore) ──────────────────────────────────────── */
@@ -642,13 +703,31 @@ class VoiceBus {
   }
 
   /**
+   * 이 목소리를 사이드카(edge-tts / 로컬 엔진)로 읽을 것인가.
+   *
+   * [🔴 아무것도 안 골랐을 때만 '떴는가'를 따진다] 사용자가 사이드카 목소리를 직접
+   *   골랐으면 그 값이 곧 의사표시다 — 아직 안 떴어도 한 번은 두드려 본다(실패하면
+   *   호출부가 브라우저로 내려간다). 반대로 안 고른 사람에게 기본 경로를 태울 때는
+   *   뜬 것이 확인된 뒤에만 간다. 안 그러면 매 낭독마다 502 를 한 번씩 맞고 시작한다.
+   */
+  private useSidecarFor(voiceId: string): boolean {
+    if (isWebVoiceId(voiceId)) return false;
+    if (!this.state.edgeOn && voiceId.startsWith('edge:')) return false;
+    if (voiceId) return true;
+    return this.state.edgeOn && this.state.ttsReady;
+  }
+
+  /**
    * 답을 소리로 읽는다.
    *
-   * [🔴 브라우저 합성기를 먼저 시도한다 — 2026-08-15] 사이드카는 첫 기동에 ~2분이 걸린다.
-   *   그동안 사람이 기다리게 두지 않는다(아픽스 보드에는 아예 '준비 중'이 없다).
-   *   브라우저가 한 조각도 못 읽었을 때만 사이드카로 넘어간다 — 되돌아갈 길은 남긴다.
-   * [🔴 사용자가 사이드카 목소리를 골랐어도, 아직 안 떴으면 브라우저로 읽는다] 고른 값을
-   *   지키는 것보다 지금 들리는 것이 중요하다. 뜨고 나면 자연히 고른 목소리로 돌아간다.
+   * [🔴 순서가 뒤집혔다 — 2026-08-15 edge-tts 도입] 예전엔 브라우저 합성기가 먼저였다.
+   *   사이드카가 첫 기동에 ~2분(whisper 모델)이 걸려 사람을 기다리게 했기 때문이다.
+   *   edge-tts 는 올릴 모델이 없어 그 기다림이 사라졌고, 품질은 확연히 위다.
+   *   그래서 지금은 사이드카가 먼저이고 브라우저가 되돌아갈 길이다.
+   * [🔴 무음이 되면 안 된다 — 이 함수의 가장 중요한 계약] edge 는 네트워크에 기댄다.
+   *   회선이 끊기거나 MS 가 막으면 실패한다. 그때 **조용히** 다음 길로 내려간다.
+   *   사용자에게 실패를 알리는 것보다 소리가 나는 것이 먼저다 — 오류 문구는 error 에만
+   *   남기고 화면 문구는 '읽는 중'을 유지한다.
    */
   async speak(markdown: string, opts: { voice?: string; preview?: boolean } = {}): Promise<void> {
     const text = toSpeech(markdown);
@@ -659,24 +738,45 @@ class VoiceBus {
 
     this.stopSpeaking();
     const wanted = opts.voice ?? this.state.voice;
+    const sidecarFirst = this.useSidecarFor(wanted);
 
-    if (browserTtsAvailable() && (isWebVoiceId(wanted) || !wanted || !this.state.sttReady)) {
+    // ① 사이드카(기본 = edge-tts mp3).
+    if (sidecarFirst && await this.speakViaSidecar(text, wanted, opts.preview)) return;
+
+    // ② 브라우저 내장 합성기 — 프로세스도 네트워크도 없어 이 길은 거의 안 죽는다.
+    if (browserTtsAvailable()) {
       this.set({ busy: false, playing: true, message: '읽는 중…' });
       this.mic?.setMuted(true);                   // [불변식] 소리보다 먼저 귀를 닫는다
       const ok = await speakBrowser(text, { voiceId: wanted, speed: this.state.speed });
       if (ok) { this.onSpeechEnd(opts.preview); return; }
-      // 브라우저가 한 마디도 못 했다 — 아래 사이드카 경로로 이어서 시도한다.
       this.set({ playing: false });
     }
 
-    await this.speakViaSidecar(text, wanted, opts.preview);
+    // ③ 브라우저까지 못 읽었다. 아직 사이드카를 안 써 봤다면 마지막으로 두드린다.
+    if (!sidecarFirst && await this.speakViaSidecar(text, wanted, opts.preview)) return;
+
+    // 모든 길이 막혔다 — 이때만 사람에게 알린다.
+    this.set({ busy: false, playing: false, message: '낭독 실패' });
+    this.onSpeechEnd(opts.preview);
   }
 
-  /** 되돌아갈 길 — 로컬 사이드카(sherpa/SAPI)로 합성해 재생한다. */
-  private async speakViaSidecar(text: string, voice: string, preview?: boolean): Promise<void> {
+  /**
+   * 사이드카로 합성해 재생한다. edge 면 mp3, 로컬 엔진이면 wav 가 온다.
+   *
+   * [🔴 형식을 우리가 정하지 않는다] Content-Type 을 그대로 담은 blob 을 Audio 에 준다.
+   *   프론트가 wav 로 못 박으면 mp3 가 디코드에 실패하고, 그 실패는 소리만 안 나고
+   *   오류도 안 뜨는 가장 찾기 나쁜 형태가 된다(voice_server.synthesize 주석과 짝).
+   * [🔴 실패하면 onSpeechEnd 를 부르지 않고 false 만 돌려준다] 여기서 종료 처리를 하면
+   *   호출부가 다음 길로 내려가는 것과 동시에 '이어 말하기' 창이 열려, 아직 답을 읽지도
+   *   않았는데 마이크가 열린다.
+   *
+   * @returns 재생이 실제로 시작됐으면 true
+   */
+  private async speakViaSidecar(text: string, voice: string, preview?: boolean): Promise<boolean> {
     this.set({ busy: true, message: '읽는 중…' });
     // [불변식] 재생 전에 뮤트한다 — 순서를 바꾸면 첫 문장을 자기가 받아적는다.
     this.mic?.setMuted(true);
+    let url = '';
     try {
       const res = await fetch(`${API_BASE}/api/voice/tts`, {
         method: 'POST',
@@ -691,16 +791,26 @@ class VoiceBus {
       });
       if (!res.ok) throw new Error(`tts ${res.status}`);
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      // [🔴 빈 응답을 성공으로 보면 무음이 된다] 길이 0 은 재생기가 조용히 삼킨다.
+      if (!blob.size) throw new Error('tts empty');
+      url = URL.createObjectURL(blob);
       const el = new Audio(url);
-      this.audio = el;
-      this.set({ busy: false, playing: true });
-      el.onended = () => { URL.revokeObjectURL(url); this.onSpeechEnd(preview); };
-      el.onerror = () => { URL.revokeObjectURL(url); this.onSpeechEnd(preview); };
+      // [🔴 종료 처리는 재생이 시작된 뒤에 건다] 먼저 걸면 디코드 실패(onerror)가
+      //   '다 읽었다'로 처리돼, 폴백과 이어 말하기 창이 동시에 열린다.
       await el.play();
+      this.audio = el;
+      this.set({ busy: false, playing: true, error: '' });
+      const done = () => { URL.revokeObjectURL(url); this.onSpeechEnd(preview); };
+      el.onended = done;
+      el.onerror = done;
+      return true;
     } catch (e) {
-      this.set({ busy: false, error: String(e), message: '낭독 실패' });
-      this.onSpeechEnd(preview);
+      if (url) URL.revokeObjectURL(url);
+      // [WHY message 를 안 건드리나] 아래 브라우저 경로가 이어서 읽는다. 여기서
+      //   '낭독 실패'를 띄우면 소리는 정상으로 나는데 화면만 빨개진다.
+      this.set({ busy: false, playing: false, error: String(e) });
+      this.mic?.setMuted(false);
+      return false;
     }
   }
 
@@ -789,15 +899,20 @@ class VoiceBus {
       const d = await res.json();
       this.serverAnswered = true;
       this.serverVoices = Array.isArray(d?.voices) ? d.voices : [];
+      this.serverDefault = String(d?.voice || '');
       this.set({
         sttReady: !!d?.ready,
+        // [🔴 낭독 준비는 받아쓰기와 따로 본다] edge 는 올릴 모델이 없어 기동 직후
+        //   바로 true 가 된다. ready(=받아쓰기까지)를 기다리면 whisper 로딩 수십 초
+        //   동안 고른 목소리 대신 브라우저 목소리가 난다.
+        ttsReady: !!d?.ttsReady,
         // [🔴 여기서 error 를 채우지 않는다] 사이드카가 예열 중이라는 사실은 오류가
         //   아니다. 낭독은 브라우저가 이미 하고 있다 — 화면을 노랗게 만들 이유가 없다.
         error: '',
       });
       this.refreshVoices();
     } catch {
-      this.set({ sttReady: false });
+      this.set({ sttReady: false, ttsReady: false });
     }
     this.scheduleStatusPoll();
   }

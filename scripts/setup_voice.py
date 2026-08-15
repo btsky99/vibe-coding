@@ -80,6 +80,13 @@ def main() -> int:
     check = (
         'import faster_whisper, sherpa_onnx\n'
         'print("STT/TTS 임포트 OK")\n'
+        # [🔴 edge 는 기본 낭독 엔진이라 여기서 확인한다] 없으면 조용히 폴백으로만 돌아
+        #   사용자는 '왜 목소리가 이 모양이지'만 느끼고 원인을 못 찾는다.
+        'try:\n'
+        '    import edge_tts\n'
+        '    print("edge-tts 사용 가능 - 기본 낭독")\n'
+        'except Exception as e:\n'
+        '    print(f"edge-tts 없음 - 이 PC 안 목소리로만 읽는다: {e}")\n'
         'try:\n'
         '    import win32com.client\n'
         '    print("Windows 내장 음성 사용 가능")\n'

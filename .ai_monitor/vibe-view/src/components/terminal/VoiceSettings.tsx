@@ -17,6 +17,8 @@
  * REVISION HISTORY:
  * - 2026-08-15 Claude: 최초 작성 — 목소리 선택·속도·미리듣기
  * - 2026-08-15 Claude: 준비 폴링을 voiceBus 로 이관 + '준비 중' 표시 제거(읽기는 즉시 됨)
+ * - 2026-08-15 Claude: 인터넷 목소리(edge-tts) 끄는 스위치 — 문장이 밖으로 나가는 것을
+ *   사용자가 직접 정할 수 있어야 한다. 끄면 목록에서도 빠진다(voiceBus.refreshVoices)
  * ------------------------------------------------------------------------
  */
 
@@ -119,6 +121,35 @@ export default function VoiceSettings({ onClose }: Props) {
           className="flex-1 accent-primary"
         />
         <span className="w-8 text-right tabular-nums text-white/60">{v.speed.toFixed(2)}</span>
+      </div>
+
+      {/* 인터넷 목소리 스위치.
+          [🔴 목소리 목록 '아래'에 둔다] 이 스위치를 끄면 목록에서 edge 항목이 사라진다.
+            위에 두면 사라지는 원인이 눈에 안 들어와 목록이 고장 난 것처럼 보인다.
+          [WHY 이런 문구인가] '문장을 밖으로 보낸다'가 사용자가 실제로 결정하는 내용이다.
+            'edge-tts'는 그 사실을 말해 주지 않는다 — 이름은 괄호로 뒤에 붙인다. */}
+      <div className="mt-3 flex items-start gap-2 border-t border-white/10 pt-2">
+        <button
+          onClick={() => voiceBus.setEdge(!v.edgeOn)}
+          className={`mt-0.5 h-3.5 w-6 shrink-0 rounded-full transition-colors ${
+            v.edgeOn ? 'bg-primary/70' : 'bg-white/15'
+          }`}
+          title={v.edgeOn ? '끄면 이 PC 안에서만 읽습니다' : '켜면 더 자연스러운 목소리를 씁니다'}
+        >
+          <span
+            className={`block h-2.5 w-2.5 rounded-full bg-white transition-transform ${
+              v.edgeOn ? 'translate-x-3' : 'translate-x-0.5'
+            }`}
+          />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="text-white/70">인터넷 목소리 쓰기 <span className="text-white/30">(edge-tts)</span></div>
+          <div className="text-[9px] leading-tight text-white/35">
+            {v.edgeOn
+              ? '읽을 문장만 마이크로소프트로 보내 자연스럽게 읽습니다. 끄면 이 PC 안에서만 읽어요'
+              : '이 PC 에 깔린 목소리로만 읽습니다. 밖으로 나가는 것이 없어요'}
+          </div>
+        </div>
       </div>
 
       {/* 상태 한 줄.

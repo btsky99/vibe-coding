@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 15:43
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 23:25
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 55개 · 미푸시 35커밋
+- **브랜치**: `main` · 미커밋 60개 · 미푸시 37커밋
 - **최근 커밋**
+  - `ce2cd78` 2026-08-15 — feat(ui): 채팅 화면을 아픽스 보드처럼 — 머리말에 상태·하는 일·중단/재시작/끄기
+  - `2149826` 2026-08-15 — fix(voice): 누르고 있는 동안만 듣기 — 열리는 중에 떼면 마이크가 남던 사고 + 슬롯 소유권
   - `be9c5ac` 2026-08-15 — fix(recall): 무관 회상 차단선이 이미 뚫려 있었다 — 표본 확장 후 0.85→0.86 (W8)
   - `d30e758` 2026-08-15 — feat(ui): 전송창·음성 막대를 아픽스 보드와 같은 배치로 — [🎤][입력][지우기][보내기] 한 줄
   - `38053dd` 2026-08-15 — feat(wiki): 세션 메모리 98장을 백과사전에 편입 + 링크 정합 (W4·W7)
-  - `7ca29da` 2026-08-15 — feat(voice): 음성 조작을 아픽스 보드와 같은 모양으로 — 누르고 말하기·체크 두 개·호출어 직접 지정
-  - `aad6c8c` 2026-08-15 — chore(map): PROJECT_MAP 갱신 — browserVoice.ts 등재 + 줄 수 재계산
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -199,10 +199,12 @@
 ### 음성 사이드카 (.ai_monitor/voice-server/) — 별도 프로세스·별도 venv
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
+| `engines/tts_cache.py` | 156 | 합성 결과 디스크 캐시 — 같은 문장을 두 번 만들지 않는다. |
 | `engines/tts_cosyvoice.py` | 88 | CosyVoice2 낭독 어댑터. 텍스트를 받아 WAV 바이트를 돌려준다. |
+| `engines/tts_edge.py` | 153 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
 | `engines/tts_sapi.py` | 123 | Windows 내장 음성(SAPI5) 낭독 어댑터. 텍스트 → WAV 바이트. |
 | `engines/tts_sherpa.py` | 125 | sherpa-onnx VITS 한국어 낭독 어댑터. 텍스트 → WAV 바이트. |
-| `voice_server.py` | 335 | 음성 사이드카 — 로컬 STT(faster-whisper) / TTS(CosyVoice2·IndexTTS2) 서버. |
+| `voice_server.py` | 392 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 기본, sapi·sherpa 폴백) 서버. |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -297,7 +299,7 @@
 | `checkpoint.py` | 62 | 의도 단위 세션 체크포인트 CLI — "왜/어디까지 결정/다음 뭐" 3요소를 |
 | `codex_pg_watcher.py` | 286 | Mirror Codex CLI history entries into PostgreSQL pg_logs. |
 | `console_flicker_watch.py` 🔨 | 214 | 순간적으로 떴다 사라지는 콘솔 창의 '범인'을 잡는 감시기. |
-| `fix_corrupted_titles.py` 🔨 | 282 | YAML 이스케이프 누적으로 백슬래시가 뭉개진 제텔 노트 제목을 복구한다. |
+| `fix_corrupted_titles.py` | 282 | YAML 이스케이프 누적으로 백슬래시가 뭉개진 제텔 노트 제목을 복구한다. |
 | `harness_verify.py` | 437 | Vibe Coding 하네스 V2 검증 스크립트. |
 | `heal_report.py` | 100 | 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics를 호출해 4장치 지표를 |
 | `incident.py` | 132 | 사고 장부 CLI — 고친 에러 기록(record) / 재발 검색(search) / |
@@ -329,13 +331,13 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `setup_voice.py` 🔨 | 97 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
+| `setup_voice.py` 🔨 | 104 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
 | `smoke_test.py` | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
 | `tui.py` 🔨 | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `voice_turn_hook.py` 🔨 | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
-| `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
+| `vps_status_api.py` | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
 | `wiki_build.py` 🔨 | 759 | 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/ 백과사전 페이지로 합성한다. |
 | `wiki_lint.py` 🔨 | 415 | wiki/ 백과사전이 '늙었는지'를 기계적으로 검출한다 — 죽은 출처(사라진 파일· |
 | `zettel_capture.py` 🔨 | 703 | 제텔카스텐 자동 캡처 엔진. |
@@ -348,7 +350,7 @@
 | `App.tsx` 🔨 | 1161 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
 | `main.tsx` | 75 | 설명: React 앱 진입점. ErrorBoundary로 전체 트리를 감싸 |
 | `types.ts` | 206 | 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답 |
-| `constants.tsx` | 94 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
+| `constants.tsx` 🔨 | 94 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
 
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
@@ -361,7 +363,7 @@
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
 | `SetupBanner.tsx` 🔨 | 239 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 264 | 설명: 상태판 독립 창(?page=status) 본체. 이 PC의 콘솔 창 — |
-| `TerminalSlot.tsx` 🔨 | 1172 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
+| `TerminalSlot.tsx` 🔨 | 1244 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
 | `TopMenuBar.tsx` | 574 | 설명: VS Code 스타일 상단 메뉴바 컴포넌트. |
 | `VibeEditor.tsx` | 141 | 설명: Monaco Editor 기반 코드 편집기 — VS Code 스타일 하이라이팅/주석 색상 강화, |
@@ -394,22 +396,22 @@
 | `QuotaBadge.tsx` | 87 | 설명: 터미널 헤더 플랜 쿼터 배지 — Claude/Codex 5h 게이지+% · 7d %. |
 | `ShortcutEditModal.tsx` | 47 | 터미널 단축어(사용자 커스텀 명령) 편집 모달. |
 | `SlashCommandMenu.tsx` | 66 | 터미널 입력 영역의 슬래시 커맨드(`/`) 드롭다운 — 카테고리별 |
-| `TerminalSlotHeader.tsx` 🔨 | 189 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
+| `TerminalSlotHeader.tsx` 🔨 | 257 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
 | `VoiceBar.tsx` 🔨 | 275 | 설명: 전송창 바로 아래 한 줄짜리 음성 막대 — 답 소리 듣기, 호출어 부르기, |
-| `VoiceSettings.tsx` 🔨 | 139 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
+| `VoiceSettings.tsx` 🔨 | 170 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
 | `xtermSelection.ts` | 107 | 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸. |
 
 ### 공용 로직 (lib/)
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `apiBase.ts` | 22 | 설명: 서버 주소 한 줄. 지금 열려 있는 포트가 곧 그 인스턴스의 API 다. |
+| `apiBase.ts` 🔨 | 22 | 설명: 서버 주소 한 줄. 지금 열려 있는 포트가 곧 그 인스턴스의 API 다. |
 | `audioCapture.ts` 🔨 | 295 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
 | `browserVoice.ts` 🔨 | 168 | 설명: 브라우저(WebView2) 내장 합성기로 읽는 길. 서버 사이드카 없이 즉시 말한다. |
 | `clipboard.ts` | 63 | 설명: 클립보드 읽기/쓰기 공용 헬퍼 — pywebview 네이티브 브리지 우선, navigator.clipboard 폴백. |
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
 | `speech.ts` 🔨 | 283 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` 🔨 | 807 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `voiceBus.ts` 🔨 | 922 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -459,13 +461,13 @@
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
 | `test_updater_release_path.py` | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
-| `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
+| `test_vault_auto_repair.py` | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
 | `test_windows_installer_toolchain.py` 🔨 | 114 | Regression checks for prerequisite-first Windows installer packaging. |
-| `test_zettel_oneway_default.py` 🔨 | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
+| `test_zettel_oneway_default.py` | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
 | `test_zettel_pretty_names.py` 🔨 | 102 | 볼트 파일명 규칙 회귀 테스트 — note_id 접두 제거 이후의 이름 짓기가 |
-| `test_zettel_size_guard.py` 🔨 | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
+| `test_zettel_size_guard.py` | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
 | `FileExplorer.test.tsx` | 136 | FileExplorer 컴포넌트 |
 
@@ -506,4 +508,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 15:43
+> 자동 생성 완료: 2026-08-15 23:25
