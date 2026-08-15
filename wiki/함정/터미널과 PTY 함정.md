@@ -2,7 +2,7 @@
 title: 터미널과 PTY 함정
 type: 함정
 sources:
-  - .ai_monitor/infra/app_boot.py:193
+  - .ai_monitor/infra/app_boot.py:198
   - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:377
   - incident_ledger  # 사고 9건
 related: []
@@ -16,7 +16,7 @@ updated: 2026-08-15
 
 pywebview 6.x _add_edit_menu는 NSMenuItem엔 title을 안 주고
 
-> 자동 합성 (코드 주석 2건 · 파일 2개 · 사고 장부 9건 · 추출 909e7e6).
+> 자동 합성 (코드 주석 2건 · 파일 2개 · 사고 장부 9건 · 추출 7ca29da).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
 
 ## 🔴 밟았던 것 (사고 장부)
@@ -86,7 +86,7 @@ pywebview 6.x _add_edit_menu는 NSMenuItem엔 title을 안 주고
 메뉴를 만들고, 정작 keyEquivalent(⌘C/⌘V)를 소비하는 진짜 Edit 메뉴는 autoenables
 그대로 남아 회색 항목이 키를 삼켰다(전 플랫폼 무반응). 서브메뉴 title도 함께 검사.
 
-출처: `.ai_monitor/infra/app_boot.py:193`
+출처: `.ai_monitor/infra/app_boot.py:198`
 
 ## `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx`
 

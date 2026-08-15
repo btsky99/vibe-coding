@@ -19,6 +19,7 @@ sources:
   - .ai_monitor/src/pg_schema.py:531
   - .ai_monitor/src/pg_schema.py:721
   - .ai_monitor/src/pg_store.py:1
+  - session_memory  # ~/.claude/projects/<슬러그>/memory/ · 1장
 related: []
 confidence: high
 updated: 2026-08-15
@@ -30,8 +31,37 @@ updated: 2026-08-15
 
 itcp는 scripts/ 에 있어 pip 설치 환경엔 없음 → ImportError 시 no-op 폴백.
 
-> 자동 합성 (코드 주석 17건 · 파일 5개 · 추출 909e7e6).
+> 자동 합성 (코드 주석 17건 · 파일 5개 · 세션 메모리 1장 · 추출 7ca29da).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
+
+## 🧠 세션에서 굳은 것 (세션 메모리)
+
+> 원본은 `~/.claude/projects/<슬러그>/memory/` 다. **여기가 아니라 원본을 고칠 것** — 다음 빌드에 덮어써진다.
+
+### 🧠 project_code_intelligence
+
+**MindVault 영감 — tree-sitter + PostgreSQL FTS + 코드 그래프 + LLM 위키. 3 Phase 단계적 구현.**
+
+MindVault 영상 분석 후 코드 인텔리전스 시스템 구현 결정 (2026-04-14)
+
+**Why:** 바이브 코딩 도구로서, 사용자 프로젝트가 커질 때 AI의 토큰 낭비(61,800개→0) 해결 필수
+**How to apply:** 접근법 C (tree-sitter + PostgreSQL FTS + LLM 위키 하이브리드)
+
+#### 3 Phase 구현 계획 (전체 완료)
+- Phase 1: ✅ tree-sitter AST 파싱 + PostgreSQL FTS BM25 검색 + 코드 그래프 저장
+- Phase 2: ✅ react-force-graph-2d 그래프 시각화 + 검색 UI
+- Phase 3: ✅ LLM 위키 자동생성 (v3.7.204, 2026-04-15 완료)
+
+#### 핵심 파일
+- code_indexer.py, code_search.py, codegraph_api.py
+- CodeGraphPanel.tsx, CodeSearchPanel.tsx, CodeWikiPanel.tsx
+- pg_store.py에 4개 테이블 추가 (code_projects, code_nodes, code_edges, code_wiki)
+
+#### 의존성
+- tree-sitter + 개별 언어 파서 (Python, TS, Go, Rust, Java 등)
+- react-force-graph-2d
+
+출처: 세션 메모리 `project_code_intelligence.md` · type=project
 
 ## 코드에 박힌 지식
 

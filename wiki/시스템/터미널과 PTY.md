@@ -4,16 +4,17 @@ type: 시스템
 sources:
   - .ai_monitor/api/pty_api.py:31
   - .ai_monitor/infra/app_boot.py:1
-  - .ai_monitor/infra/app_boot.py:71
-  - .ai_monitor/infra/app_boot.py:79
-  - .ai_monitor/infra/app_boot.py:93
-  - .ai_monitor/infra/app_boot.py:165
-  - .ai_monitor/infra/app_boot.py:183
-  - .ai_monitor/infra/app_boot.py:236
-  - .ai_monitor/infra/app_boot.py:272
-  - .ai_monitor/infra/app_boot.py:295
-  - .ai_monitor/infra/app_boot.py:352
-  - .ai_monitor/infra/app_boot.py:381
+  - .ai_monitor/infra/app_boot.py:76
+  - .ai_monitor/infra/app_boot.py:84
+  - .ai_monitor/infra/app_boot.py:98
+  - .ai_monitor/infra/app_boot.py:170
+  - .ai_monitor/infra/app_boot.py:188
+  - .ai_monitor/infra/app_boot.py:241
+  - .ai_monitor/infra/app_boot.py:277
+  - .ai_monitor/infra/app_boot.py:300
+  - .ai_monitor/infra/app_boot.py:357
+  - .ai_monitor/infra/app_boot.py:386
+  - .ai_monitor/infra/app_boot.py:413
   - .ai_monitor/infra/pty_process.py:27
   - .ai_monitor/infra/pty_process.py:32
   - .ai_monitor/infra/pty_process.py:132
@@ -21,8 +22,8 @@ sources:
   - .ai_monitor/infra/pty_process.py:411
   - .ai_monitor/infra/pty_process.py:434
   - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:166
-  - .ai_monitor/vibe-view/src/components/TerminalSlot.tsx:172
-  # …외 18건 (본문 각 항목에 경로 표기)
+  # …외 19건 (본문 각 항목에 경로 표기)
+  - session_memory  # ~/.claude/projects/<슬러그>/memory/ · 1장
 related: []
 confidence: high
 updated: 2026-08-15
@@ -34,8 +35,37 @@ updated: 2026-08-15
 
 슬롯 포트는 런타임에 정해져 import 시점 상수가 될 수 없다. 소비자가
 
-> 자동 합성 (코드 주석 38건 · 파일 5개 · 추출 909e7e6).
+> 자동 합성 (코드 주석 39건 · 파일 5개 · 세션 메모리 1장 · 추출 7ca29da).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
+
+## 🧠 세션에서 굳은 것 (세션 메모리)
+
+> 원본은 `~/.claude/projects/<슬러그>/memory/` 다. **여기가 아니라 원본을 고칠 것** — 다음 빌드에 덮어써진다.
+
+### 🧠 project_office_api_migration
+
+**오피스 메타버스에서 PTY 터미널 대신 채팅→태스크API 기반으로 에이전트 연결 전환 작업 진행 중**
+
+#### 오피스 에이전트 연결 방식 전환
+
+**현재 상태 (2026-04-13):**
+- vite.config.ts `emptyOutDir: false` 적용 완료 — 빌드 시 기존 번들 보존
+- server.py office_api 직접 호출 4곳 → `_proxy_to_office_server()` 프록시로 전환 완료
+- office_api import 및 init_office 호출 server.py에서 제거 완료
+- 오피스 서버(9010) 정상 가동 확인
+
+**다음 할 일:**
+1. 오피스 채팅 → agent_api 연결 브릿지 구현
+   - 사용자 채팅 메시지 → auto_dispatcher로 에이전트 매칭
+   - agent_api.run()으로 CLI 실행 (claude/gemini/codex)
+   - 실행 결과를 office_chat으로 반환
+2. 오피스에서 PTY 터미널 의존성 완전 제거 (useOfficePty.ts 등)
+3. 채팅 기반 에이전트 실행 결과 표시 UI
+
+**Why:** PTY 터미널 방식은 클래식 대시보드와 중복 + dist/ 공유 문제 + 메타버스 UX에 안 맞음
+**How to apply:** 오피스는 채팅+태스크API, 클래식은 PTY 터미널로 완전 분리
+
+출처: 세션 메모리 `project_office_api_migration.md` · type=project
 
 ## 코드에 박힌 지식
 
@@ -57,6 +87,11 @@ updated: 2026-08-15
 뒤 앱을 로드한다. 창 종료 시 자식 프로세스/PG/HTTP/락을 정리한다.
 server.py main()의 GUI try 블록 전체를 이관 — 부팅에 필요한 server.py 고유
 함수/객체/값은 BootConfig로 명시 주입받는다(R20).
+- 2026-08-15 Claude: WebView2 초기화 실패 감시(webview_health) 배선 — 런타임 자동 업데이트로
+엔진이 안 붙으면 '하얀 창' 이 단일 인스턴스 락을 쥔 채 살아남아 재실행
+자체가 막혔다. 실패 시 락을 놓고 죽어야 사용자가 빠져나온다.
+[불변식] 감시자에 window 를 넘기되 events.loaded 외에는 만지지 않는다 —
+WebView2 를 크로스스레드로 건드려 부팅을 교착시킨 자책 사고 1건.
 - 2026-07-26 Codex: macOS 네이티브 폴더 선택 브리지를 추가해 상단 메뉴 무반응 수정.
 - 2026-07-22 Claude: _ClipboardBridge(js_api) 신설 — 맥 WKWebView가 navigator.clipboard를 조용히
 거부해 우클릭 복붙 전멸 → NSPasteboard 브리지로 우회. Edit 메뉴 탐색을
@@ -79,7 +114,7 @@ server.py main()의 GUI try 블록 전체를 이관 — 부팅에 필요한 serv
 실측: 원격 상주 노드에서 앱을 띄우면 PostgreSQL·데몬까지는 뜨는데 창 단계에서 죽어
 HTTP 서버(9000번대)가 끝내 안 올라온다 → 원격에서 상태를 볼 수단이 사라진다.
 
-출처: `.ai_monitor/infra/app_boot.py:71`
+출처: `.ai_monitor/infra/app_boot.py:76`
 
 ### _HeadlessWindow `[제약]`
 
@@ -87,7 +122,7 @@ pywebview 창 대역 — _init_and_load_app이 쓰는 두 메서드만 흉내 �
 [제약] 창 객체에서 실제로 쓰이는 것은 evaluate_js(스플래시 문구)와 load_url뿐이다.
 더 붙이면 진짜 창과의 계약이 벌어져 유지보수가 어려워지므로 의도적으로 최소만 구현한다.
 
-출처: `.ai_monitor/infra/app_boot.py:79`
+출처: `.ai_monitor/infra/app_boot.py:84`
 
 ### _ClipboardBridge `[WHY]` `[제약]`
 
@@ -99,7 +134,7 @@ navigator.clipboard.readText가 NotAllowedError로 조용히 거부됨(윈도우
 오프메인 호출이 실무상 안전. 비-맥 플랫폼은 None/False 반환 → 프론트(lib/clipboard.ts)가
 navigator.clipboard로 폴백(윈도우는 그걸로 충분).
 
-출처: `.ai_monitor/infra/app_boot.py:93`
+출처: `.ai_monitor/infra/app_boot.py:98`
 
 ### _install_mac_edit_menu `[WHY]` `[제약]`
 
@@ -113,7 +148,7 @@ selector — cocoa.py _add_edit_menu)를 만든다. 그런데 이 앱의 스플�
 추가하지 않아 'Edit' 중복을 피한다. [제약] NSMenu 조작은 메인스레드 전용 — caller가 메인
 런루프(AppHelper.callAfter)로 디스패치한다.
 
-출처: `.ai_monitor/infra/app_boot.py:165`
+출처: `.ai_monitor/infra/app_boot.py:170`
 
 ### _install_mac_edit_menu `[WHY]`
 
@@ -124,7 +159,7 @@ pywebview의 Edit 서브메뉴를 찾아 항상-활성화로 전환.
 autoenablesItems=NO로 두면 항목이 항상 활성 → Cmd+C/V/X가 responder chain(WKWebView)의
 copy:/paste:/cut:로 라우팅돼 복붙이 동작한다.
 
-출처: `.ai_monitor/infra/app_boot.py:183`
+출처: `.ai_monitor/infra/app_boot.py:188`
 
 ### _setup_edit_menu `[WHY]`
 
@@ -133,14 +168,14 @@ callAfter로 메인 런루프에 태워 안전하게 실행. 메뉴바 렌더 �
 시점(스플래시→load_url) 일회성 문제라, 초기 ~20초 동안만 몇 차례 갱신해
 load_url 이후 포커스 시점을 확실히 커버한 뒤 종료한다(무한 갱신 불필요).
 
-출처: `.ai_monitor/infra/app_boot.py:236`
+출처: `.ai_monitor/infra/app_boot.py:241`
 
 ### _update_splash `[WHY]`
 
 [WHY] pg_store 분할(2026-06-10) 후 _SCHEMA_READY는 pg_schema 내부
 상태 — 모듈 속성 직접 대입은 무효라 reset_schema_cache()로 캡슐화
 
-출처: `.ai_monitor/infra/app_boot.py:272`
+출처: `.ai_monitor/infra/app_boot.py:277`
 
 ### _init_and_load_app `[WHY]`
 
@@ -150,7 +185,7 @@ load_url 이후 포커스 시점을 확실히 커버한 뒤 종료한다(무한 
 닭-달걀. 데몬만으론 90초 창(+데몬 사망 시 영구) 비활성 → 여기서 선제 워밍.
 [R18] 데몬 일괄 기동 직전으로 이동 — backfill 데몬은 내부 90초 대기라 순서 무관.
 
-출처: `.ai_monitor/infra/app_boot.py:295`
+출처: `.ai_monitor/infra/app_boot.py:300`
 
 ### run_gui_app `[WHY]`
 
@@ -159,14 +194,26 @@ load_url 이후 포커스 시점을 확실히 커버한 뒤 종료한다(무한 
 데스크톱이 없는 세션에서는 여기서 예외가 나거나 멈춘다. 초기화 본체
 (_init_and_load_app)는 창과 무관하므로 직접 호출하고 프로세스만 살려둔다.
 
-출처: `.ai_monitor/infra/app_boot.py:352`
+출처: `.ai_monitor/infra/app_boot.py:357`
 
 ### run_gui_app `[WHY]`
 
 [WHY] js_api=클립보드 브리지 — 맥 WKWebView의 navigator.clipboard 거부 우회
 (lib/clipboard.ts가 window.pywebview.api.clip_read/clip_write로 호출).
 
-출처: `.ai_monitor/infra/app_boot.py:381`
+출처: `.ai_monitor/infra/app_boot.py:386`
+
+### run_gui_app `[불변식]`
+
+[🔴 하얀 창 탈출 — 사고 2026-08-15] WebView2 초기화가 실패해도 pywebview 는
+예외를 안 올린다. 창은 뜨는데 엔진이 없어 하얀 화면이 되고, 그 프로세스가
+단일 인스턴스 락을 계속 쥐어 **재실행조차 막힌다**(아이콘을 눌러도 하얀 창만
+포커스됨). 감시해서 실패면 락을 놓고 죽어야 사용자가 빠져나올 수 있다.
+[불변식] 감시자는 window.events.loaded(순수 threading.Event)만 본다. WebView2
+객체를 다른 스레드에서 건드리면 STA 스레드와 교착해 부팅이 멈춘다 —
+자책 사고 1건. 상세는 infra/webview_health.py 헤더.
+
+출처: `.ai_monitor/infra/app_boot.py:413`
 
 ## `.ai_monitor/infra/pty_process.py`
 

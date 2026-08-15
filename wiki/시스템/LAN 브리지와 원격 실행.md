@@ -23,6 +23,7 @@ sources:
   - .ai_monitor/lan_bridge.py:76
   - .ai_monitor/lan_bridge.py:104
   # …외 24건 (본문 각 항목에 경로 표기)
+  - session_memory  # ~/.claude/projects/<슬러그>/memory/ · 2장
 related: []
 confidence: high
 updated: 2026-08-15
@@ -34,8 +35,155 @@ updated: 2026-08-15
 
 LAN 원격실행이 yolo(권한 전면 스킵) 대신 deny 프로파일로 격리하기 위한 통로.
 
-> 자동 합성 (코드 주석 44건 · 파일 5개 · 추출 909e7e6).
+> 자동 합성 (코드 주석 44건 · 파일 5개 · 세션 메모리 2장 · 추출 7ca29da).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
+
+## 🧠 세션에서 굳은 것 (세션 메모리)
+
+> 원본은 `~/.claude/projects/<슬러그>/memory/` 다. **여기가 아니라 원본을 고칠 것** — 다음 빌드에 덮어써진다.
+
+### 🧠 feedback_metaverse_quality
+
+**오피스 메타버스 시각 품질은 Gather Town 레벨이 기준. 프리미티브 + 픽셀아트 혼합 금지**
+
+오피스/메타버스 화면을 만들 때 품질 기준은 **Gather Town 수준**이다. 사용자가
+레퍼런스로 보여준 스크린샷(pokemon/stardew valley 풍 탑다운 픽셀 오피스)이 기준선.
+
+**Why:** 2026-04-09 세션에서 OfficeWorld(DOM 동그라미) → OfficeCanvas(Phaser +
+부분 LimeZu) 전환을 시도했는데, 사용자가 최종 결과물에 "이건 어니아 영 아니야 ㅠㅠ
+내일 다시 만들자"로 반응. 마지막 커밋 `9091da5`는 체크포인트로 유지되지만 품질
+만족 못 함. 원인:
+1. 프리미티브(내가 그린 사각형)와 LimeZu 픽셀아트를 혼합 → 시각적 부조화
+2. 대표실/회의실/탕비실은 여전히 프리미티브 유지, 코딩 부서만 LimeZu
+3. LimeZu Room_Builder의 진짜 벽/벽지 미활용 — "방"이 아니라 "바닥에 그린 구역"
+4. Interiors 에셋 수백 개 중 4~5개만 사용 (desk_plain, chair_side, plant_large)
+5. 조급한 단계별 진행 — "빨리 보여주기"에 매달려 기반 설계 스킵
+6. 코딩 부서 3x3 레이아웃이 답답. 통로/공간감 부재
+
+**How to apply:**
+- **금지**: 프리미티브(Phaser Graphics 사각형/원)와 픽셀아트 스프라이트를 한 화면에
+  섞지 마라. 한 개라도 남으면 전체가 어색해짐. 전부 스프라이트 아니면 전부 프리미티브.
+- **필수**: LimeZu 등 타일셋을 쓸 때는 **Room_Builder의 진짜 벽 타일**로 방을 만들어야
+  한다. 바닥 tint만으로는 "방"이 아님. 벽 + 문 + 창문 = 방.
+- **필수**: 에셋 통합 전 **전체 시트 스캔**부터. Interiors_free_16x16.png 같은 큰
+  시트는 어떤 스프라이트가 있는지 먼저 목록화. 그 다음에 "이 오브젝트에 이 스프라이트"
+  매핑. 몇 개 크롭해서 붙이고 끝내지 말 것.
+- **필수**: 탑다운 RPG 오피스는 **통로/빈 공간/러그**로 공간감을 만들어야 한다. 책상을
+  3x3 그리드에 억지로 끼워넣지 말 것.
+- **Playwright로 계속 검증**: 각 변경마다 캡처해서 직접 확인 (이건 이번에 잘 했음)
+- **레퍼런스 기준선 유지**: Gather Town 스크린샷을 계속 비교하면서 "이 정도 안 나오면
+  멈추지 않음" 원칙. 어중간한 타협 금지.
+
+**Next session starting point:**
+- LimeZu 에셋은 `D:\vibe-coding\Modern_Interiors_Free_v2.2` + 프로젝트 내
+  `.ai_monitor/vibe-view/public/assets/limezu/` 에 이미 로드됨
+- Phaser + React 통합 파이프라인 완성됨 (OfficeCanvas.tsx 패턴)
+- 캐릭터 idle 애니메이션 + depth 레이어링 공식 확립 ("앉아있는 느낌")
+- 내일은 `OfficeCanvas.tsx`를 처음부터 다시 쓰거나 신규 파일로 시작. 방 레이아웃 설계
+  → 벽/바닥 타일맵 → 방별 가구 큐레이션 → 캐릭터 순서로.
+
+출처: 세션 메모리 `feedback_metaverse_quality.md` · type=feedback
+
+### 🧠 project_pty_pool_isolation
+
+**2-5.3a + 2-5.3b TTL 워커 + 2-5.3c 탭 배지 모두 완료. Platform Phase 2 마무리.**
+
+#### 2-5.3c 완료 (2026-05-03)
+- ✅ C.1 GET /api/pty/sessions/summary — { project_id: { agent_count, total } } 집계 응답
+- ✅ C.2 pty_api.py handle_get L156-166 자동 패스스루로 추가 매핑 불필요
+- ✅ C.3 useVibeData ptySessionsSummary state + 10s 폴링
+- ✅ C.4 TopMenuBar 탭 우상단 absolute 배지 (agent_count > 0만 노출, slugifyProjectPath로 path → project_id 매핑)
+- ✅ C.5 App.tsx props 1줄 배선
+- ✅ C.6 tsc 0 errors + vite build 38s
+
+→ Phase 2-5.3 (탭별 PTY 세션 풀 분리) 3개 PR 모두 완료. Platform Phase 2 마무리 + Phase 3-3(UI 병합) 진입 가능.
+
+#### 2-5.3b 완료 (2026-05-03)
+- ✅ B.1 lastInputAt/lastOutputAt 필드 + 갱신 지점 4곳 (legacy/persistent onData + 두 ws.on('message'))
+- ✅ B.2 isSessionIdleForCleanup() — attached/yolo/O*/legacy(detachedAt 없음) 면제
+- ✅ B.3 setInterval 스윕 워커 (PTY_TTL_SWEEP_MS) + .unref()로 이벤트 루프 비차단
+- ✅ B.4 GET /api/pty/sessions 응답 last_input_at, last_output_at, idle_seconds 필드
+- ✅ B.5 SIGTERM/SIGINT/exit + cleanupAllSessions에서 stopTtlSweepWorker
+- ✅ B.6 단위 8/8 + 부팅 검증 (TTL=8s/idle=4s/sweep=2s 환경변수에서 워커 시작 로그 확인)
+- ✅ B.7 ai_monitor_plan.md + 본 메모리 갱신
+
+##### 환경변수 기본값
+- `PTY_TTL_MS` = 60분 (3,600,000ms)
+- `PTY_IDLE_THRESHOLD_MS` = 10분 (600,000ms)
+- `PTY_TTL_SWEEP_MS` = 5분 (300,000ms)
+
+##### 면제 정책 (코드 = 명세)
+1. attached=true → 면제 (사용자가 보고 있음)
+2. yolo=true → 면제 (장기 실행 의도)
+3. slotId.startsWith('O') → 면제 (오피스 풀 별도)
+4. detachedAt 없음 → 면제 (legacy 핸들러 / spawn만 되고 detach 안 한 세션)
+
+#### 2-5.3a 완료 (2026-05-03 커밋 14982ab)
+- ✅ Node 키 헬퍼 (sessionKey/parseSessionKey/_resolvePidFromQuery/displayId)
+- ✅ WebSocket 핸들러 #1/#2 sessionId 복합 키 변경
+- ✅ GET /api/pty/sessions — ?project_id= 필터 + 통합 응답 분기
+- ✅ /api/pty/output|interrupt|terminate|write — _resolveSessionKey 도입
+- ✅ /api/pty/office/spawn + office/sessions — sessionKey 적용
+- ✅ DELETE /api/pty/sessions 신설 — ?project_id= 필수, O* 제외
+- ✅ pty_api.py — _extract_project_id, _node_delete, handle_delete
+- ✅ server.py do_DELETE — /api/pty/ 라우팅
+- ✅ TerminalSlot.tsx — wsParams project_id
+- ✅ useVibeData.ts — withProjectId 적용
+- ✅ 빌드 OK (47s, 2185 modules)
+- ✅ A.12 백엔드 격리 curl 검증: project_id 필터로 누설 없음 확인
+  - D--vibe-coding 필터 → T1(claude)+T2(codex) 2건 정상
+  - fake-project 필터 → 빈 응답 (다른 프로젝트 세션 누설 X)
+- ✅ A.14 커밋 14982ab (1차) + 73d8ead (Codex PTY heartbeat 2차)
+
+#### 후속 PR 진입점 (ai_monitor_plan.md 참조)
+- **2-5.3b TTL 정리 워커**: B.1~B.8 (lastInputAt/Output 필드 + 60분 TTL + 5분 스윕)
+- **2-5.3c 탭별 활성 에이전트 수 배지**: C.1~C.8 (/api/pty/sessions/summary + TopMenuBar 배지)
+
+Phase 2-5.3 — 탭별 PTY 세션 풀 분리. 멀티 프로젝트 탭 환경에서 각 탭이 독립적인 T1~T8 PTY 세션을 갖게 한다.
+
+**Why:** Phase 2-5.1/2-5.2에서 탭 바 + ?project_id= 쿼리 인프라가 깔렸지만, PTY 풀은 여전히 평탄(slot0~31). 프로젝트별 격리 없이는 탭 전환 시 컨텍스트가 섞임.
+
+**How to apply:** PTY 관련 신규/수정 작업은 반드시 `sessionKey(pid, slot)` 헬퍼를 거쳐 풀 접근. `ptySessions.get('slot3')` 같은 직접 키 접근 금지.
+
+#### 확정 설계
+
+##### 풀 키 구조 (Q1=A)
+- 복합 키: `{project_id}:slot{0-7}`
+- 헬퍼: `sessionKey(pid, slot)`, `parseSessionKey(key)` (Node)
+- `?project_id=` 누락 시 `_default` 폴백 (후방 호환)
+
+##### 탭 전환 정책 (Q2=C)
+- 기본: detach 유지 (프로세스/출력 버퍼 살림, socket만 분리)
+- TTL 정리: **60분** + 5분마다 스윕
+- idle 판정: `agent_status == 'idle'` AND `마지막 출력 후 10분 무변화` AND `마지막 키 입력 후 10분 무변화`
+- **yolo=true 면제** — 사용자가 명시적으로 켠 장기 실행 의도 존중
+
+##### 변경 범위 (Q3=C)
+3개 PR 분리:
+- **2-5.3a**: Node 풀 키 + WebSocket URL + 프론트 + 프로젝트 제거 핸들러 (회귀 핵심)
+- **2-5.3b**: TTL 정리 워커 (lastInputAt/lastOutputAt 필드 + setInterval)
+- **2-5.3c**: UI 탭별 활성 에이전트 수 배지 (plan A-2/A-3)
+
+##### 변경 파일
+- `.ai_monitor/pty-server/pty-server.js` (~120줄)
+- `.ai_monitor/api/pty_api.py` (~10줄, 패스스루라 거의 무변경)
+- `.ai_monitor/vibe-view/src/components/TerminalSlot.tsx` (~20줄)
+- `.ai_monitor/vibe-view/src/hooks/useVibeData.ts` (~10줄)
+
+##### 비범위 / 명시 제약
+- **오피스 세션**(`/api/pty/office/spawn`, UUID 키)은 별도 풀 — 본 정책 미적용
+- **프로젝트 rename 비지원** — config.json 편집 후 앱 재시작 필요. 슬러그 바뀌면 기존 풀 고립.
+- 프로젝트 제거 시: `DELETE /api/pty/sessions?project_id={pid}` 일괄 종료 핸들러 신설
+
+##### 위험도
+🟡 중간 — PTY 동작 변경은 회귀 위험. 단독 PR 권장. 시작 첫 단계로 `Grep "slot[0-9]" .ai_monitor/vibe-view/src` 전수조사.
+
+#### 의존성
+- Phase 2-5.1 (탭 바 UI) ✅ 커밋 eb238ac
+- Phase 2-5.2 (?project_id= 쿼리 인프라) ✅ 커밋 eb238ac
+- 본 작업 완료 후 → Platform Phase 2 마무리, Phase 3-3(UI 병합) 진행 가능
+
+출처: 세션 메모리 `project_pty_pool_isolation.md` · type=project
 
 ## 코드에 박힌 지식
 
@@ -141,7 +289,7 @@ _proc.run(콘솔 숨김 주입)으로 콘솔 없이 조용히 트리 킬.
 
 ── 원격 실행 러너 (Phase 3 Task 6) ──────────────────────────────────
 [WHY 재사용] agent_api의 명령 빌더(_build_chat_cmd)와 콘솔숨김 popen(_proc.popen)을
-그대로 재사용 — claude 실행법 중복 금지([[feedback-no-duplicates]]). 다른 점은 출력 목적지:
+그대로 재사용 — claude 실행법 중복 금지([[서버와 라우팅]]). 다른 점은 출력 목적지:
 handle_chat은 SSE로 브라우저에 보내지만, 여기선 브리지 exec-emit로 요청자에게 역방향 릴레이.
 [제약] handle_run(싱글턴+SSE)은 caller가 출력을 폴링할 수 없어 부적합 → 전용 캡처 스레드.
 
@@ -358,7 +506,7 @@ LAN 원격실행(api/lan_api.py)과 자율 데몬(infra/heartbeat_daemon.py)이 
 무제한이었음)을 막기 위한 격리 계층. heartbeat의 deny 프로파일을 정본으로 흡수.
 [WHY 별도 모듈] lan_api(원격실행)와 heartbeat_daemon(자율실행)이 같은 문제를 각자 풀면
 프로파일이 갈라져 한쪽만 강화되는 사고가 난다. 여기가 정본이고 양쪽이 import 한다.
-[제약] project_id 비의존 — LAN 계층 전체가 이식성 전제([[feedback-vibe-essence]]).
+[제약] project_id 비의존 — LAN 계층 전체가 이식성 전제([[회상과 지식 창고]]).
 
 출처: `.ai_monitor/src/lan_sandbox.py:1`
 

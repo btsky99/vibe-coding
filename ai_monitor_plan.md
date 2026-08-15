@@ -90,11 +90,13 @@ AI 멀티 에이전트 하이브 마인드 대시보드. **라이트하게** 간
     방법: incident_ledger 를 증상/원인/수정 3단으로 페이지화. 동일 파일 사고는 한 장에 병합.
     검증: 재발 이력 있는 사고가 한 페이지에 모이는가
 
-[ ] W4: memory/ 98장 편입 (W1 후)
+[x] W4: memory/ 98장 편입 (W1 후) — 원본은 남기고 '원료'로 편입(페이지 아니라 섹션)
     파일: scripts/wiki_build.py
-    방법: ~/.claude/projects/<slug>/memory/*.md 를 wiki/ 로 이관. 이미 위키 형식이라
-          프론트매터만 정규화. [[링크]]는 그대로 살린다.
-    검증: MEMORY.md 인덱스가 wiki/INDEX.md 로 대체되고 링크가 안 끊기는가
+    방법: ~/.claude/projects/<slug>/memory/*.md 를 **원료로 읽어** 주제 페이지의 섹션으로
+          합성. 🔴 원안('이관' + MEMORY.md 대체)은 폐기 — memory/ 는 세션마다 무조건
+          주입되는 유일한 100% 활용 층이라, 검증 안 된 위키로 갈아타는 건 W12 원칙
+          ("품질을 재고 나서 지운다")을 W4 에서 어기는 꼴이다. 원본은 남는다.
+    검증: 링크가 안 끊기는가 → wiki_lint dangling 52건 → **3건**(placeholder 제외)
 
 [x] W5: 위키 → DB 인덱서 (W2·W3·W4 후) — b28ef16
     파일: .ai_monitor/src/wiki_index.py (신설, ~200줄)
@@ -102,12 +104,12 @@ AI 멀티 에이전트 하이브 마인드 대시보드. **라이트하게** 간
           knowledge_extract.upsert_notes 패턴 재사용. 파일이 사라지면 인덱스도 제거.
     검증: 위키 1장 수정 → 재인덱싱 → 회상에 즉시 반영
 
-[ ] W6: 인덱서 데몬 등록 (W5 후)
+[x] W6: 인덱서 데몬 등록 (W5 후) — a940379
     파일: .ai_monitor/infra/daemons.py (DAEMON_TOGGLES)
     방법: 기존 zettel_sync 데몬 자리를 wiki_index 로 교체. 규칙 10 준수(무창).
     검증: 데몬 패널에 표시 + 토글 동작 + 콘솔 창 안 뜸
 
-[ ] W7: wiki lint (W5 후)
+[x] W7: wiki lint (W5 후) — 오류 0 · 경고 2(미분류) · 참고 3(dangling)
     파일: scripts/wiki_lint.py (신설)
     방법: 페이지가 인용한 파일:줄번호/심볼이 아직 존재하는지 검사. 고아 페이지,
           출처 없는 주장, 150장 상한 초과 경고.
@@ -118,20 +120,20 @@ AI 멀티 에이전트 하이브 마인드 대시보드. **라이트하게** 간
     방법: 관련/무관 질의로 간격 재측정. _FLOOR·_REF_WEIGHT 가 여전히 타당한지 확인.
     검증: 관련 질의 상위 3건이 전부 위키 페이지인가
 
-[ ] W9: GDrive 허브 미러 (W5 후)
+[x] W9: GDrive 허브 미러 (W5 후) — a940379
     파일: .ai_monitor/infra/wiki_hub.py (신설), config.json(wiki_hub_path)
     방법: zettel_sync 의 _write_if_changed / mirror_vault 재사용. 프로젝트별 하위폴더로
           분리. 🔴 무조건 write 금지 — 내용 해시 비교 후 변경분만(c7a42f2 핑퐁 사고).
           업로드 API 호출 없음 — 구글 드라이브 앱이 동기화를 담당한다.
     검증: 두 번 연속 실행 시 두 번째는 쓰기 0건
 
-[ ] W10: 리셋 API (W5 후)
+[x] W10: 리셋 API (W5 후) — 3adcebe
     파일: .ai_monitor/api/wiki_api.py (신설), server.py 라우트
     방법: POST /api/wiki/reset — 인덱스 비우기 + wiki/ 비우기 + 원료 재생성.
           설치본에서도 동작해야 하므로 스크립트가 아니라 API.
     검증: 설치본에서 호출 → 위키 재생성 완료
 
-[ ] W11: 리셋 UI 버튼 (W10 후)
+[x] W11: 리셋 UI 버튼 (W10 후) — 7532e70
     파일: .ai_monitor/vibe-view/src/components/panels/ (지식 패널)
     방법: 확인 다이얼로그 + 진행 표시. 파괴적 작업이므로 2단계 확인.
     검증: 버튼 → 재생성 → 패널에 새 위키 표시

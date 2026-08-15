@@ -1,15 +1,21 @@
 # HiveMind Status
 
-Updated: `2026-08-15 10:47:56`
+Updated: `2026-08-15 15:03:12`
 
 ## Current Focus
 No open plan tasks remain.
 
-Alignment: Plan has no open tasks, but the workspace still has changes: hivemind.md, project_map.md, scripts/wiki_build.py. Update ai_monitor_plan.md if this work is intentional.
+Alignment: Plan has no open tasks, but the workspace still has changes: .local/, ai_monitor_plan.md, hivemind.md, project_map.md, scripts/wiki_build.py (+44 more). Update ai_monitor_plan.md if this work is intentional.
 Changed files:
+- .local/
+- ai_monitor_plan.md
 - hivemind.md
 - project_map.md
 - scripts/wiki_build.py
+- scripts/wiki_lint.py
+- wiki//354/213/234/354/212/244/355/205/234//353/213/244/353/245/270 /355/224/204/353/241/234/354/240/235/355/212/270.md
+- wiki//354/213/234/354/212/244/355/205/234//353/215/260/353/252/254/352/263/274 /354/275/230/354/206/224 /354/260/275.md
+- ... and 41 more
 
 ## Agent Flow
 ```mermaid

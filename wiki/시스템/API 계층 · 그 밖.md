@@ -22,7 +22,7 @@ sources:
   - .ai_monitor/api/logs_api.py:1
   - .ai_monitor/api/logs_api.py:25
   - .ai_monitor/api/message_api.py:23
-  # …외 12건 (본문 각 항목에 경로 표기)
+  # …외 13건 (본문 각 항목에 경로 표기)
 related: []
 confidence: high
 updated: 2026-08-15
@@ -34,7 +34,7 @@ updated: 2026-08-15
 
 사본이 미묘하게 달라(experience/vibe/zettel/codegraph만 default=str,
 
-> 자동 합성 (코드 주석 32건 · 파일 18개 · 추출 909e7e6).
+> 자동 합성 (코드 주석 33건 · 파일 18개 · 추출 7ca29da).
 > 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
 
 ## 코드에 박힌 지식
@@ -378,11 +378,20 @@ wiki_build 는 scripts/ 에 있어 패키지 import 가 안 된다 — 경로로
 
 ### handle_post `[WHY]`
 
+증분 갱신 — 데몬이 10분마다 하는 일을 사람이 지금 시키는 것.
+[WHY reset 과 따로 두나] reset 은 페이지를 지우고 다시 만든다(손으로 덧붙인 내용이
+날아간다). 대부분의 경우 필요한 건 '방금 고친 주석을 지금 반영'뿐이다 —
+그걸 하려고 파괴적 버튼을 누르게 만들면 언젠가 사고가 난다.
+
+출처: `.ai_monitor/api/wiki_api.py:85`
+
+### handle_post `[WHY]`
+
 [WHY 명시 확인을 요구하나] 위키 페이지를 통째로 지운다. 사람이 옵시디언에서 손으로
 덧붙인 문단도 함께 사라진다(원료에 없는 내용은 복원되지 않는다). 실수로 눌린
 요청 하나에 그게 날아가면 안 된다.
 
-출처: `.ai_monitor/api/wiki_api.py:88`
+출처: `.ai_monitor/api/wiki_api.py:111`
 
 ## 확인법
 
