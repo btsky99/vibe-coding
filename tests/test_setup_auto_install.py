@@ -27,7 +27,9 @@ sys.path.insert(0, str(_PROJECT_ROOT / ".ai_monitor"))
 from api import setup_api, tools_api  # noqa: E402
 from infra import runtime  # noqa: E402
 
-_CORE = ("nodejs", "claude", "codex", "antigravity")
+# [2026-08-15] obsidian 편입 — 기본 설치팩은 setup_api 와 **같은 순서**여야 한다.
+#   launched 목록을 순서까지 비교하는 단언이 있어, 순서가 어긋나면 실패한다.
+_CORE = ("nodejs", "claude", "codex", "antigravity", "obsidian")
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +73,7 @@ def test_auto_install_starts_one_chain_for_node_and_all_missing_clis():
             _tool("claude", False),
             _tool("codex", False),
             _tool("antigravity", False),
+            _tool("obsidian", False),
         ]
     }
     with (
@@ -89,6 +92,7 @@ def test_auto_install_starts_one_chain_for_node_and_all_missing_clis():
         "claude",
         "codex",
         "antigravity",
+        "obsidian",
     ]
 
 
@@ -100,6 +104,7 @@ def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
             _tool("claude", True),
             _tool("codex", False),
             _tool("antigravity", False),
+            _tool("obsidian", False),
         ]
     }
     with (
@@ -112,7 +117,7 @@ def test_auto_install_starts_only_missing_ai_clis_when_node_is_ready():
         assert setup_api.handle_post(handler, "/api/setup/auto-install", {})
 
     launch.assert_called_once_with(visible=False)
-    assert handler.json()["launched"] == ["codex", "antigravity"]
+    assert handler.json()["launched"] == ["codex", "antigravity", "obsidian"]
 
 
 def test_auto_install_failure_can_be_retried():
@@ -122,6 +127,7 @@ def test_auto_install_failure_can_be_retried():
             _tool("claude", False),
             _tool("codex", False),
             _tool("antigravity", False),
+            _tool("obsidian", False),
         ]
     }
     with (
@@ -151,6 +157,7 @@ def test_auto_install_does_not_open_duplicate_windows():
             _tool("claude", False),
             _tool("codex", False),
             _tool("antigravity", False),
+            _tool("obsidian", False),
         ]
     }
     with (

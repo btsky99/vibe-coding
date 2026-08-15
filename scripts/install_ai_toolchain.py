@@ -132,6 +132,23 @@ def main() -> None:
         if result.returncode != 0:
             failures.append("Antigravity CLI")
 
+    # 옵시디언 — 지식 창고(wiki/)를 사람이 읽는 창.
+    # [WHY npm 이 아니라 별도 스크립트인가] GUI 앱이라 winget/인스톨러 경로가 필요하다.
+    # [WHY 실패해도 전체를 중단하지 않나] 위키는 파일과 DB 만으로 완전히 동작한다 —
+    #   옵시디언은 3층 구조의 ③(선택적 뷰어)이라 없다고 기능이 죽지 않는다.
+    #   여기서 SystemExit 를 내면 AI CLI 는 다 깔렸는데 설치팩 전체가 실패로 보인다.
+    obsidian_script = SCRIPT_DIR / "install_system_tool.py"
+    if obsidian_script.exists():
+        print("[자동 설치] Obsidian (지식 창고 뷰어)")
+        try:
+            result = subprocess.run(
+                [sys.executable, str(obsidian_script), "--tool", "obsidian"], timeout=900,
+            )
+            if result.returncode != 0:
+                print("[알림] Obsidian 자동 설치 실패 — 위키는 옵시디언 없이도 동작합니다.")
+        except Exception as exc:
+            print(f"[알림] Obsidian 설치 건너뜀: {exc}")
+
     if failures:
         print(f"[일부 실패] {', '.join(failures)}")
         raise SystemExit(1)

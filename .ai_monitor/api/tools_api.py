@@ -305,10 +305,18 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     # ── Zettelkasten 도구 ─────────────────────────────────────────────
     {
+        # [2026-08-15] 기본 설치팩(core_ids)에 편입 — wiki/ 백과사전을 **사람이 읽는 창**.
+        #   지식은 마크다운 파일이라 옵시디언 없이도 LLM 회상은 완전히 동작하지만
+        #   (3층 구조의 ③은 선택), 사람 쪽 입구가 없으면 위키를 고칠 일이 없어져
+        #   창고가 다시 로그 덤프로 썩는다.
         "id": "obsidian",
         "name": "Obsidian",
-        "description": "마크다운 지식 관리 앱 — Zettelkasten 그래프 뷰어 + 편집기",
-        "check_commands": [["obsidian", "--version"]],
+        "description": "지식 창고(wiki/)를 사람이 읽고 고치는 뷰어 — 마크다운 로컬 저장",
+        # [🔴 규칙 10] check_commands 를 비운다. GUI(Electron) 앱은 --version 인자를
+        #   무시하고 **창을 띄운다**. 도구 상태는 폴링으로 반복 조회되므로 그대로 두면
+        #   사용자가 안 눌러도 창이 계속 뜬다. 경로 존재만으로 판정한다.
+        "check_commands": [],
+        "skip_version_probe": True,
         "check_paths": [
             os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Obsidian", "Obsidian.exe"),
             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Obsidian", "Obsidian.exe"),
@@ -459,6 +467,13 @@ def _check_tool_installed(tool: dict) -> dict:
     if not version:
         for path in tool.get("check_paths", []):
             if os.path.exists(path):
+                # [🔴 규칙 10] GUI 앱은 --version 을 줘도 인자를 무시하고 **창을 띄운다**
+                #   (Electron 계열이 특히). 상태 조회는 5초 폴링이라 그대로 두면 창이
+                #   반복해서 뜬다 — 사용자가 안 누른 실행은 창을 만들지 않는다.
+                #   존재 = 설치됨으로 판정하고 프로브를 건너뛴다.
+                if tool.get("skip_version_probe"):
+                    version = f"설치됨 ({Path(path).name})"
+                    break
                 try:
                     result = proc.run(
                         [path, "--version"], capture_output=True, text=True, timeout=10,

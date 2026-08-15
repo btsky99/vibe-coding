@@ -75,7 +75,9 @@ def handle_get(handler, path: str, params: dict = None, **kwargs):
             from api import tools_api
 
             result = run_all()
-            core_ids = ("nodejs", "claude", "codex", "antigravity")
+            # [2026-08-15] obsidian 편입 — 지식 창고(wiki/)를 사람이 읽는 창이라
+            #   CLI·DB 와 같은 기본 설치팩으로 취급한다(사용자 결정).
+            core_ids = ("nodejs", "claude", "codex", "antigravity", "obsidian")
             tool_status = {
                 item["id"]: {
                     "id": item["id"],
@@ -137,11 +139,11 @@ def handle_post(handler, path: str, data: dict | None = None, **kwargs) -> bool:
     statuses = {
         item["id"]: item
         for item in tools_api._get_all_status()["tools"]
-        if item["id"] in {"nodejs", "claude", "codex", "antigravity"}
+        if item["id"] in {"nodejs", "claude", "codex", "antigravity", "obsidian"}
     }
     targets = [
         tool_id
-        for tool_id in ("nodejs", "claude", "codex", "antigravity")
+        for tool_id in ("nodejs", "claude", "codex", "antigravity", "obsidian")
         if not statuses.get(tool_id, {}).get("installed", False)
     ]
 

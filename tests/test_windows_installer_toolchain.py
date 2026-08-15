@@ -57,18 +57,21 @@ def test_installer_stops_processes_that_can_respawn_bundled_node():
 
 
 def test_first_run_ui_reports_only_missing_core_tools():
-    """서버는 네 도구를 항상 내려주고, UI는 **안 깔린 것만** 보여준다.
+    """서버는 기본 설치팩을 항상 내려주고, UI는 **안 깔린 것만** 보여준다.
 
     [변경 2026-08-14] 예전엔 설치 완료 도구까지 나열해 배너가 영구히 남았다
     ("설치됨" / "설치 완료 · 최초 1회 실행/로그인 필요" 칩). 설치가 끝난 뒤에도
     계속 뜨는 게 문제였으므로 그 라벨들을 일부러 없앴다 — 되살리지 말 것.
+    [변경 2026-08-15] obsidian 편입 — wiki/ 백과사전을 사람이 읽는 창이라 CLI·DB 와
+    같은 기본 설치팩으로 다룬다. 문자열을 그대로 단언하므로 core_ids 를 바꾸면
+    이 테스트도 함께 고쳐야 한다(중복이지만 의도적 — 설치팩 구성은 조용히 바뀌면 안 된다).
     """
     api = (ROOT / ".ai_monitor" / "api" / "setup_api.py").read_text(encoding="utf-8")
     ui = (
         ROOT / ".ai_monitor" / "vibe-view" / "src" / "components" / "SetupBanner.tsx"
     ).read_text(encoding="utf-8")
 
-    assert 'core_ids = ("nodejs", "claude", "codex", "antigravity")' in api
+    assert 'core_ids = ("nodejs", "claude", "codex", "antigravity", "obsidian")' in api
     assert "기본 설치팩" in ui
     assert "확인·설치 중" in ui
     assert "pendingTools.length > 0" in ui          # 미설치가 있을 때만 그린다
