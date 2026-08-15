@@ -1,7 +1,12 @@
 /**
  * FILE: MemoryPanel.tsx
- * DESCRIPTION: 에이전트 간 공유 메모리(SQLite) 패널 — 검색, CRUD, 폴링 로직을 포함한 독립 컴포넌트
+ * DESCRIPTION: 에이전트 간 공유 메모리(PostgreSQL hive_memory + zettel_notes) 패널 —
+ *   검색, CRUD, 폴링 로직을 포함한 독립 컴포넌트
  * REVISION HISTORY:
+ * - 2026-08-15 Claude: "총 N개"가 DB 전체 개수로 오해되던 표기 수정 + 작성자 필터 가시화.
+ *   [과거사고] 작성자 필터가 'user'로 걸린 채 4건만 뜨자 "공유 메모리가 죽었다"로 읽혔다.
+ *   실제로는 hive 666·zettel 3956건이 있고 회상도 7일 266회 hit. 원인은 두 가지였다 —
+ *   ① 한 페이지(top 20)를 총계처럼 표기 ② 활성 필터가 9px 회색이라 안 보임.
  * - 2026-03-01 Claude: DB 정보 표시 + APPDATA→로컬 동기화 버튼 추가
  *                      배포 버전에서 어떤 DB를 사용 중인지 표시하고 수동 동기화 지원
  * - 2026-03-01 Claude: App.tsx에서 분리 — 독립 컴포넌트화
@@ -47,34 +52,41 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
   const [memTags, setMemTags] = useState('');
   const [memAuthor, setMemAuthor] = useState('claude');
 
+  // 한 번에 받아올 건수. 서버 기본값과 같은 20에서 시작해 '더 보기'로 늘린다.
+  // [WHY 무한 스크롤 대신 버튼] 5초 폴링이 매번 top건을 다시 받아오므로, 스크롤로 자동
+  //   증가시키면 폴링 트래픽이 사용자 모르게 계속 커진다. 늘리는 순간을 명시적으로 둔다.
+  const [limit, setLimit] = useState(20);
+
   // ─── 데이터 페칭 ────────────────────────────────────────────────────────
-  // 검색어/작성자/지식포함 파라미터를 쿼리스트링으로 전달.
-  const fetchMemory = (q = '', author = '', withZettel = false) => {
+  // 검색어/작성자/지식포함/건수 파라미터를 쿼리스트링으로 전달.
+  const fetchMemory = (q = '', author = '', withZettel = false, top = 20) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (author) params.set('author', author);
     if (withZettel) params.set('include_zettel', 'true');
-    const url = params.toString()
-      ? `${API_BASE}/api/memory?${params.toString()}`
-      : `${API_BASE}/api/memory`;
-    fetch(url)
+    params.set('top', String(top));
+    fetch(`${API_BASE}/api/memory?${params.toString()}`)
       .then(res => res.json())
       .then(data => setMemory(Array.isArray(data) ? data : []))
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
 
-  // 검색어/작성자/지식포함 변경 시 즉시 재조회 + 5초 폴링 유지
+  // 검색어/작성자/지식포함/건수 변경 시 즉시 재조회 + 5초 폴링 유지
   useEffect(() => {
-    fetchMemory(memSearch, memAuthorFilter, includeZettel);
+    fetchMemory(memSearch, memAuthorFilter, includeZettel, limit);
     const interval = setInterval(
-      () => fetchMemory(memSearch, memAuthorFilter, includeZettel),
+      () => fetchMemory(memSearch, memAuthorFilter, includeZettel, limit),
       5000,
     );
     return () => clearInterval(interval);
-  }, [memSearch, memAuthorFilter, includeZettel]);
+  }, [memSearch, memAuthorFilter, includeZettel, limit]);
 
   // ─── DB 정보 상태 ────────────────────────────────────────────────────────
-  const [dbInfo, setDbInfo] = useState<{ db_path?: string; is_local?: boolean; count?: number } | null>(null);
+  // project_count/zettel_count는 구버전 서버·구스키마에서 null로 온다 — 있을 때만 표시.
+  const [dbInfo, setDbInfo] = useState<{
+    db_path?: string; is_local?: boolean; count?: number;
+    project_count?: number | null; zettel_count?: number | null;
+  } | null>(null);
   const [syncMsg, setSyncMsg] = useState('');
   const [syncing, setSyncing] = useState(false);
 
@@ -94,7 +106,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .then(res => res.json())
       .then(data => {
         setSyncMsg(data.message || '완료');
-        fetchMemory(memSearch, memAuthorFilter, includeZettel); // 목록 즉시 갱신
+        fetchMemory(memSearch, memAuthorFilter, includeZettel, limit); // 목록 즉시 갱신
       })
       .catch(() => setSyncMsg('동기화 실패'))
       .finally(() => setSyncing(false));
@@ -126,7 +138,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
         // 저장 후 폼 초기화 및 목록 갱신
         setMemKey(''); setMemTitle(''); setMemContent('');
         setMemTags(''); setShowMemForm(false); setEditingMemKey(null);
-        fetchMemory(memSearch, memAuthorFilter, includeZettel);
+        fetchMemory(memSearch, memAuthorFilter, includeZettel, limit);
       })
       .catch((err) => console.error('[MemoryPanel] fetch error:', err));
   };
@@ -152,7 +164,7 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       .then(res => res.json())
       .then(data => {
         if (data.status !== 'success') alert(data.message || '승격 실패');
-        fetchMemory(memSearch, memAuthorFilter, includeZettel);
+        fetchMemory(memSearch, memAuthorFilter, includeZettel, limit);
       })
       .catch((err) => console.error('[MemoryPanel] promote error:', err));
   };
@@ -194,10 +206,18 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
       </div>
 
       {/* 항목 수 요약 + 지식 포함 + 작성자 필터 + 전체/현재 프로젝트 토글 */}
+      {/* [WHY '표시 N / 창고 M'인가] 목록은 top건만 받아온 한 페이지다. 예전 표기("총 N개")는
+          이 페이지 길이를 DB 총량으로 읽히게 해, 창고에 666건이 있어도 "20개뿐"으로 오해됐다. */}
       <div className="flex items-center justify-between shrink-0 px-0.5 gap-1">
         <span className="text-[9px] text-[#858585] shrink-0">
-          총 {displayedMemory.length}개{memSearch && ` (검색)`}
-          {memAuthorFilter && ` (by ${memAuthorFilter})`}
+          표시 {displayedMemory.length}
+          {typeof dbInfo?.project_count === 'number' && (
+            <span className="text-[#5f5f5f]">
+              {' / 창고 '}💾{dbInfo.project_count}
+              {typeof dbInfo?.zettel_count === 'number' && ` 🧠${dbInfo.zettel_count}`}
+            </span>
+          )}
+          {memSearch && ` (검색)`}
         </span>
         <div className="flex items-center gap-1">
           {/* C.1 — 제텔카스텐 지식 포함 토글 */}
@@ -213,10 +233,17 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
             {includeZettel ? '🧠 지식 on' : '🧠 지식 off'}
           </button>
           {/* B.2 — 작성자 필터 드롭다운 (prefix 매칭: 'claude' → claude-*) */}
+          {/* [과거사고 2026-08-15] 필터가 걸려도 회색 9px 텍스트뿐이라 눈에 안 띄었다.
+              'user'(4건)로 걸린 화면을 보고 창고 전체가 4건이라고 판단하는 오해가 났다.
+              활성 시 색을 반전시키고 옆에 해제 버튼을 붙여 '지금 걸려 있음'을 못 지나치게 한다. */}
           <select
             value={memAuthorFilter}
             onChange={e => setMemAuthorFilter(e.target.value)}
-            className="text-[8px] bg-[#3c3c3c] border border-white/5 rounded px-1 py-0.5 focus:outline-none cursor-pointer text-white"
+            className={`text-[8px] border rounded px-1 py-0.5 focus:outline-none cursor-pointer ${
+              memAuthorFilter
+                ? 'bg-amber-500/25 border-amber-400/50 text-amber-200 font-bold'
+                : 'bg-[#3c3c3c] border-white/5 text-white'
+            }`}
             title="작성자 필터"
           >
             <option value="">작성자: 전체</option>
@@ -227,6 +254,15 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
             <option value="unknown">unknown</option>
             <option value="legacy">legacy</option>
           </select>
+          {memAuthorFilter && (
+            <button
+              onClick={() => setMemAuthorFilter('')}
+              className="text-[8px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/40 transition-colors"
+              title="작성자 필터 해제 — 전체 보기"
+            >
+              ✕
+            </button>
+          )}
           {/* 프로젝트 필터 토글 — currentProjectName이 있을 때만 표시 */}
           {currentProjectName && (
             <button
@@ -354,6 +390,18 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
             </div>
           ))
         )}
+
+        {/* 더 보기 — 받아온 건수가 요청 상한에 닿았다면 서버에 더 남아 있다는 뜻.
+            [제약] displayedMemory가 아니라 memory 길이로 판정한다 — 프로젝트 필터는
+            클라이언트에서 걸리므로 걸러진 뒤 길이로 보면 항상 상한 미만이 되어 버튼이 사라진다. */}
+        {memory.length >= limit && (
+          <button
+            onClick={() => setLimit(prev => prev + 50)}
+            className="w-full py-1.5 rounded border border-dashed border-white/15 hover:border-cyan-500/40 hover:bg-cyan-500/5 text-[9px] text-[#858585] hover:text-cyan-400 transition-colors"
+          >
+            ↓ 더 보기 (+50)
+          </button>
+        )}
       </div>
 
       {/* 저장 폼 또는 추가 버튼 */}
@@ -446,8 +494,8 @@ export default function MemoryPanel({ currentProjectName }: MemoryPanelProps) {
           <div className="flex items-center gap-1.5">
             <Database className="w-3 h-3 text-[#666] shrink-0" />
             <span className={`text-[8px] font-mono truncate flex-1 ${dbInfo.is_local ? 'text-green-400/70' : 'text-yellow-400/70'}`}
-                  title={dbInfo.db_path}>
-              {dbInfo.is_local ? '📂 로컬 DB' : '🌐 APPDATA DB'} ({dbInfo.count ?? 0}개)
+                  title={`${dbInfo.db_path} — 전 프로젝트 hive_memory 합계`}>
+              {dbInfo.is_local ? '📂 로컬 DB' : '🌐 APPDATA DB'} (전체 {dbInfo.count ?? 0}개)
             </span>
             <button
               onClick={syncMemory}

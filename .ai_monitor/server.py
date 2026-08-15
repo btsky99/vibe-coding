@@ -1089,7 +1089,7 @@ def _g_vibe_notifications(h, pp):  vibe_api.handle_notifications(h)
 def _g_vibe_skills(h, pp):         vibe_skills_api.handle_get(h, pp.path, parse_qs(pp.query), PROJECT_ROOT)
 # [9차 정리 2026-07-16] _g_kanban_activity(/api/kanban/pg-activity) 은퇴 — 소비자였던
 #   오케스트레이션 보드(TaskBoardPanel)가 은퇴되어 프론트 호출자 0.
-def _g_memory_db_info(h, pp):      memory_api.db_info(h, DATA_DIR, PG_PORT, PG_PROJECT_DB, query_rows)
+def _g_memory_db_info(h, pp):      memory_api.db_info(h, DATA_DIR, PG_PORT, PG_PROJECT_DB, query_rows, PROJECT_ID)
 
 # GET exact 라우트 (Phase 2 R16: do_GET 잔여 legacy elif 완전 흡수 → 테이블 완성).
 # [WHY] do_POST는 이미 exact→prefix→cond 뒤 404 폴백뿐(legacy 없음). do_GET만 elif 11종 잔류라

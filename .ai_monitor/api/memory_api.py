@@ -3,6 +3,9 @@ FILE: api/memory_api.py
 DESCRIPTION: Postgres-first memory API handlers. recall-smart(임베딩 통합 회상) 포함.
 
 REVISION HISTORY:
+- 2026-08-15 Claude: db-info에 project_count/zettel_count 추가 — 패널이 "총 20개"만 보여
+  DB에 20건뿐인 것으로 오해하게 만들었다(실제 hive 666·zettel 3956). 페이지 크기와 창고
+  크기를 화면에서 갈라 보여주기 위한 분모 공급.
 - 2026-07-16 Claude: 짧은 쿼리(<20자) 임계 0.60 상향 — 일반 지시에 무관 지식이
   0.5+ 유사도로 주입되던 회상 노이즈 컷 (A2)
 - 2026-07-15 Claude: [로드맵 ②] recall-smart caller 필드 계측 — 에이전트별(claude/antigravity)
@@ -70,9 +73,13 @@ def handle_get(handler, path: str, params: dict,
     return False
 
 
-def db_info(handler, DATA_DIR: Path, PG_PORT, PG_PROJECT_DB, query_rows) -> None:
-    """GET /api/memory/db-info — 공유 메모리 DB 경로 + hive_memory 항목 수 반환.
+def db_info(handler, DATA_DIR: Path, PG_PORT, PG_PROJECT_DB, query_rows,
+            PROJECT_ID: str = '') -> None:
+    """GET /api/memory/db-info — 공유 메모리 DB 경로 + 창고 규모(전체/이 프로젝트/지식) 반환.
     [WHY] 배포/개발 버전이 어떤 DB를 바라보는지 UI에서 확인(슬러그 불일치 빈 패널 진단용).
+    [WHY project/zettel count 추가 2026-08-15] /api/memory는 top_k(기본 20)로 잘린 한 페이지를
+      돌려주는데 패널이 그 길이를 "총 N개"로 표기해, DB에 20건뿐인 것처럼 보였다. 화면이
+      분모를 가지려면 서버가 줘야 한다 — 프론트에서 셀 방법이 없다.
     [불변식] query_rows/PG_PORT/PG_PROJECT_DB는 server.py 전역 — 동적 포트/DB 폴백 후 최신값을
       봐야 하므로 wrapper가 호출 시점에 주입한다(디폴트 인자 바인딩 금지).
     """
@@ -84,11 +91,29 @@ def db_info(handler, DATA_DIR: Path, PG_PORT, PG_PROJECT_DB, query_rows) -> None
         ensure_schema(DATA_DIR)
         rows = query_rows("SELECT COUNT(*) AS count FROM hive_memory;")
         count = int(rows[0].get('count', 0)) if rows else 0
+        # [제약] 두 카운트는 실패해도 전체 응답을 깨면 안 된다 — db_path/count가 본래 책임이고
+        #   zettel_notes는 스키마가 없는 설치본(구버전 DB)이 있을 수 있다. 실패 시 None → UI 미표시.
+        project_count = zettel_count = None
+        try:
+            r = query_rows("SELECT COUNT(*) AS count FROM hive_memory WHERE project_id=%s;",
+                           (PROJECT_ID,))
+            project_count = int(r[0].get('count', 0)) if r else 0
+        except Exception:
+            pass
+        try:
+            r = query_rows("SELECT COUNT(*) AS count FROM zettel_notes WHERE project_id=%s;",
+                           (PROJECT_ID,))
+            zettel_count = int(r[0].get('count', 0)) if r else 0
+        except Exception:
+            pass
         handler.wfile.write(json.dumps({
             'db_path': f'postgres://localhost:{PG_PORT}/{PG_PROJECT_DB}',
             'is_local': False,
             'backend': 'postgres',
             'count': count,
+            'project_id': PROJECT_ID,
+            'project_count': project_count,
+            'zettel_count': zettel_count,
         }, ensure_ascii=False).encode('utf-8'))
     except Exception as e:
         handler.wfile.write(json.dumps({'error': str(e), 'count': 0}).encode('utf-8'))
