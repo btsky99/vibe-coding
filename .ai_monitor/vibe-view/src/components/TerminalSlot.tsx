@@ -5,6 +5,8 @@
  *          에이전트 선택 카드(Claude/Antigravity), XTerm.js 터미널 실행, 자율 에이전트
  *          모니터링 뷰(상태/태스크/로그), 단축어 바, 슬래시 커맨드 팝업, 단축어 편집 모달을 담당합니다.
  * REVISION HISTORY:
+ * - 2026-08-15 Claude: 머리말에 '도는가·무엇을 하는가·중단/재시작/끄기'를 올리고, 판정 근거를
+ *                      DB 폴링이 아닌 PTY 바이트 도착 시각으로 둠. 음성 막대를 최하단 고정.
  * - 2026-08-04 Codex: PTY 출력 청크를 수신 순서대로 직렬화하고 resize를 합쳐 TUI 화면 깨짐 방지.
  * - 2026-08-04 Codex: 한글 IME 확정값을 다음 이벤트 루프에서 읽고 실제 WS 전송 성공 때만 입력 삭제.
  * - 2026-07-26 Codex: 전 에이전트 공통 사용량 바를 터미널 하단에 배치.
@@ -151,6 +153,23 @@ export default function TerminalSlot({
   const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsReconnectAttemptRef = useRef(0);
 
+  // ── 출력이 흐르는가 (헤더 '도는 중' 판정의 근거) ──
+  // [WHY 이게 따로 필요한가] agentStatus(아래 722행)는 pg_logs·태스크·pipeline_stage 를 폴링해
+  //   만든다. 그런데 CLI 가 10분짜리 한 건을 붙들고 있으면 그동안 DB 에 아무 줄도 안 남아
+  //   화면은 IDLE 로 보인다 — 사용자가 "멈춘 것 같은데" 라고 말하는 상태의 정체가 이것이다.
+  //   PTY 바이트가 실제로 도착하는지는 유일하게 거짓말하지 않는 신호라 ws.onmessage 에서 직접 찍는다.
+  // [🔴 제약] 여기서 setState 를 하면 안 된다. TUI 스피너는 초당 수십 청크를 뿜어 렌더가 폭발한다.
+  //   ref 에만 시각을 찍고, 1초 타이머가 그것을 읽어 굵은 단위(초)의 상태로 바꾼다.
+  const lastOutputAtRef = useRef(0);
+  /** 마지막 PTY 출력 이후 경과 초. null = 아직 한 글자도 못 받음(또는 터미널 미부착). */
+  const [outputAgeSec, setOutputAgeSec] = useState<number | null>(null);
+  // [WHY 마지막 실행 인자를 들고 있나] '재시작'이 launchAgent(activeAgent, false) 로 호출되면
+  //   원격 슬롯이 조용히 로컬 셸로 바뀐다(514행 재연결 경로에 같은 함정이 이미 주석으로 박혀 있다).
+  //   yolo·cwd 도 같은 이유로 잃는다. 실행 시점 인자를 그대로 재생하는 것이 유일하게 안전하다.
+  const lastLaunchRef = useRef<{
+    agent: string; yolo: boolean; cwd?: string; remote?: { host: string; mode: string };
+  } | null>(null);
+
   const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [hasAttachedTerminal, setHasAttachedTerminal] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
@@ -275,6 +294,8 @@ export default function TerminalSlot({
     remote?: { host: string; mode: string },
   ) => {
     const connectPath = cwdOverride || effectivePath;
+    // 재시작 단추가 그대로 재생할 수 있게 이번 실행 인자를 통째로 기록한다(위 lastLaunchRef 주석).
+    lastLaunchRef.current = { agent, yolo, cwd: connectPath, remote };
     // 기존 터미널이 살아있으면 먼저 정리 — dispose 없이 덮어쓰면
     // 이전 xterm 캔버스가 DOM에 남아 잔상(이중 삼중 출력) 현상 발생
     // [버그수정 2026-03-20] 재연결 타이머 정리 (새 연결 시작 전)
@@ -543,6 +564,9 @@ export default function TerminalSlot({
         }
       };
       ws.onmessage = e => {
+        // [흐름 표시] 청크가 도착한 시각만 찍는다 — setState 금지(위 lastOutputAtRef 주석).
+        //   await 앞에서 찍는 이유: 직렬화 큐가 밀려도 '방금 왔다'는 사실 자체는 즉시 참이다.
+        lastOutputAtRef.current = Date.now();
         outputQueue = outputQueue.then(async () => {
           const data = e.data instanceof Blob ? await e.data.text() : String(e.data);
           if (termRef.current === term && wsRef.current === ws) term.write(data);
@@ -622,6 +646,39 @@ export default function TerminalSlot({
     resizeObserverRef.current = null;
     if (wsRef.current) wsRef.current.close(1000);  // 1000=정상종료 → onclose에서 재연결 안 함
     if (termRef.current) termRef.current.dispose();
+  };
+
+  // 출력 경과 초를 1초마다 굵게 갱신 — 헤더의 '도는 중 / 조용함' 판정 입력.
+  // [제약] 터미널 모드일 때만 돈다. 슬롯 수만큼 곱해지는 타이머라 유휴 슬롯에서 돌리면 낭비다.
+  useEffect(() => {
+    if (!isTerminalMode) { setOutputAgeSec(null); return; }
+    const tick = () => {
+      const at = lastOutputAtRef.current;
+      setOutputAgeSec(at ? Math.floor((Date.now() - at) / 1000) : null);
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
+  }, [isTerminalMode]);
+
+  // 중단 — 지금 하던 답만 멈춘다.
+  // [WHY ESC 이고 Ctrl+C 가 아닌가] claude/codex TUI 에서 ESC 는 '진행 중인 응답 취소',
+  //   Ctrl+C 는 CLI 자체 종료다. 종료는 이미 '끄기'(closeTerminal)가 맡고 있으므로 중단이
+  //   세션까지 날리면 두 단추가 같은 일을 하게 되고, 되돌릴 방법이 없는 쪽이 더 위험하다.
+  const interruptAgent = () => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send('\x1b');
+    termRef.current?.focus();
+  };
+
+  // 재시작 — 마지막 실행 인자를 그대로 재생한다(원격/yolo/cwd 유실 방지, lastLaunchRef 주석).
+  // [불변식] 재시작은 xterm dispose + 새 PTY spawn = 스크롤백 전량 소실 → 확인을 받는다
+  //   (handlePickProject 와 같은 문구·같은 이유).
+  const restartAgent = () => {
+    if (!window.confirm('이 터미널을 재시작합니다 (현재 스크롤백은 사라집니다). 진행할까요?')) return;
+    const last = lastLaunchRef.current;
+    launchAgent(last?.agent || activeAgent || 'claude', last?.yolo ?? false, last?.cwd, last?.remote);
   };
 
   // [슬롯별 프로젝트] 이 슬롯의 프로젝트 폴더 지정. 실행 중이면 재시작 확인 후 새 cwd로 재연결.
@@ -722,6 +779,12 @@ export default function TerminalSlot({
   const agentStatus = isActiveStage ? 'WORKING' : inProgressTask ? 'WORKING' : recentLog ? 'RUNNING' : isServerRunning ? 'RUNNING' : 'IDLE';
   const statusColor = agentStatus === 'WORKING' ? 'text-yellow-400' : agentStatus === 'RUNNING' ? 'text-green-400' : 'text-[#858585]';
   const statusDot = agentStatus === 'IDLE' ? 'bg-[#555]' : agentStatus === 'RUNNING' ? 'bg-green-400 animate-pulse' : 'bg-yellow-400 animate-pulse';
+  // [흐름] 최근 3초 안에 PTY 바이트가 있었으면 '도는 중'이다. TUI 스피너·커서 점멸만으로도
+  //   바이트는 계속 온다. 3초인 이유: TUI 프레임 간격(대개 0.1~0.5초)보다 넉넉히 크고,
+  //   사람이 "멈췄나?" 하고 의심을 시작하는 시간보다는 작다. 조정은 실측으로만.
+  // [🔴 agentStatus 와 합치지 말 것] 저건 DB 폴링(30초 창)이고 이건 실시간 바이트다. 근거가
+  //   다른 두 신호를 하나로 뭉개면 어느 쪽이 틀렸는지 화면만 보고는 못 가른다.
+  const isOutputFlowing = isTerminalMode && hasAttachedTerminal && outputAgeSec !== null && outputAgeSec < 3;
 
   // 에이전트 완료 알림 — WORKING/RUNNING → IDLE 전환 시 브라우저 알림 발송 (cmux 알림 시스템)
   useEffect(() => {
@@ -813,6 +876,11 @@ export default function TerminalSlot({
         onActivateProject={onActivateProject}
         onPickProject={handlePickProject}
         onClose={closeTerminal}
+        isOutputFlowing={isOutputFlowing}
+        outputAgeSec={outputAgeSec}
+        liveTask={liveTask}
+        onRestart={restartAgent}
+        onInterrupt={interruptAgent}
       />
 
       {/* [제약] 이 열이 flex-1 min-h-0/min-w-0을 유지해야 xterm의 높이 계산이 맞는다 —
@@ -1129,11 +1197,26 @@ export default function TerminalSlot({
 
       </div>
 
-      {/* [음성] 슬롯 최하단에 **항상** 그린다.
+      {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}
+      {isTerminalMode && (
+        <AgentUsageBar
+          agentType={agentType}
+          quota={agentQuota?.[agentType]}
+          claudeUsage={claudeUsage}
+          antigravityUsage={antigravityUsage}
+          onRefresh={() => window.dispatchEvent(new Event('vibe:refresh-usage'))}
+        />
+      )}
+
+      {/* [음성] 슬롯의 **맨 마지막**에 항상 그린다.
           [🔴 과거사고 2026-08-15] 처음에는 터미널 입력줄 안쪽에 뒀는데, 그 입력줄은
             isTerminalMode 일 때만 존재한다. 그래서 에이전트 선택 카드 화면(터미널을 아직
             안 띄운 슬롯)에서는 마이크가 통째로 사라져 "마이크 모양도 없다"는 지적을 받았다.
             목소리 고르기·답 듣기는 터미널이 없어도 만질 수 있어야 하는 설정이다.
+          [🔴 사용량 바보다 아래인 이유 — 2026-08-15 2차] 조건부 렌더에서 꺼낸 것만으로는
+            부족했다. AgentUsageBar 가 터미널 모드에서만 뒤에 붙어 음성 막대가 화면 종류마다
+            한 칸씩 위아래로 움직였다. **늘 같은 자리**여야 손이 기억한다 — 그래서 항상 그리는
+            이 막대를 최하단에 고정하고, 조건부인 사용량 바를 그 위로 올렸다.
           [제약] onWakeWordChange 를 넘긴 화면에서만 — 오피스 등 재사용처는 건드리지 않는다. */}
       {onWakeWordChange && (
         <div className="px-2 py-1.5 border-t border-black/40 bg-[#252526] shrink-0">
@@ -1146,17 +1229,6 @@ export default function TerminalSlot({
             showMic={!isTerminalMode}
           />
         </div>
-      )}
-
-      {/* 에이전트별 사용량은 헤더를 밀지 않도록 터미널 최하단에 공통 표시한다. */}
-      {isTerminalMode && (
-        <AgentUsageBar
-          agentType={agentType}
-          quota={agentQuota?.[agentType]}
-          claudeUsage={claudeUsage}
-          antigravityUsage={antigravityUsage}
-          onRefresh={() => window.dispatchEvent(new Event('vibe:refresh-usage'))}
-        />
       )}
 
       {/* 단축어 편집 모달 팝업 — 별도 컴포넌트로 분리 */}
