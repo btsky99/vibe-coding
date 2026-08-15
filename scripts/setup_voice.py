@@ -77,21 +77,20 @@ def main() -> int:
         return rc
 
     # 설치가 됐는지는 import 로 확인한다 — pip 성공 코드만으로는 실제 로드 가능 여부를 모른다.
+    # [🔴 둘을 갈라서 확인한다 — 2026-08-15 정리] 낭독(edge)과 듣기(whisper)는 이제
+    #   부품을 공유하지 않는다. 한 줄로 묶어 확인하면 어느 쪽이 죽었는지 모른 채
+    #   "음성이 안 된다"만 남는다. 마이크가 죽은 것과 목소리가 죽은 것은 대처가 다르다.
     check = (
-        'import faster_whisper, sherpa_onnx\n'
-        'print("STT/TTS 임포트 OK")\n'
-        # [🔴 edge 는 기본 낭독 엔진이라 여기서 확인한다] 없으면 조용히 폴백으로만 돌아
-        #   사용자는 '왜 목소리가 이 모양이지'만 느끼고 원인을 못 찾는다.
+        'import faster_whisper\n'
+        'print("듣기(STT) 임포트 OK - faster-whisper")\n'
+        # [🔴 edge 는 유일한 낭독 엔진이다] 없으면 사이드카가 아무것도 못 읽고 프론트의
+        #   브라우저 합성기만 남는다. 소리는 나므로 사용자는 '왜 목소리가 이 모양이지'만
+        #   느끼고 원인을 못 찾는다 — 그래서 설치 시점에 크게 알린다.
         'try:\n'
         '    import edge_tts\n'
-        '    print("edge-tts 사용 가능 - 기본 낭독")\n'
+        '    print("낭독(TTS) 임포트 OK - edge-tts")\n'
         'except Exception as e:\n'
-        '    print(f"edge-tts 없음 - 이 PC 안 목소리로만 읽는다: {e}")\n'
-        'try:\n'
-        '    import win32com.client\n'
-        '    print("Windows 내장 음성 사용 가능")\n'
-        'except Exception:\n'
-        '    print("Windows 내장 음성 없음 - sherpa 만 쓸 수 있다")\n'
+        '    print(f"[!] edge-tts 없음 - 낭독은 브라우저 목소리로만 난다: {e}")\n'
     )
     print('$ (설치 검증)', flush=True)
     rc = subprocess.run([str(py), '-c', check], cwd=str(ROOT)).returncode

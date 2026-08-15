@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 FILE: .ai_monitor/voice-server/voice_server.py
-DESCRIPTION: 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 기본, sapi·sherpa 폴백) 서버.
+DESCRIPTION: 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버.
              앱 서버(server.py)가 /api/voice/* 를 이쪽으로 프록시한다.
+
+             [🔴 낭독 엔진은 edge 하나뿐이다 — 2026-08-15 정리] sherpa VITS·SAPI·CosyVoice
+               어댑터를 걷어냈다. 되돌아갈 길은 **프론트의 브라우저 내장 합성기**
+               (browserVoice.ts)가 맡는다 — 그쪽은 서버도 네트워크도 안 타서 이 프로세스가
+               통째로 죽어도 살아 있는, 더 나은 마지막 수단이다. 폴백을 서버 안에도 두면
+               '왜 이 목소리가 났는지'를 설명할 수 없게 된다(do_POST /tts 주석과 짝).
 
              [🔴 왜 앱과 같은 프로세스가 아닌가 — 이 구조의 존재 이유]
                음성 스택은 python 3.10 + torch(CUDA) 를 요구한다. 앱 venv 는 3.12/3.13 에
@@ -32,6 +38,8 @@ REVISION HISTORY:
 - 2026-08-15 Claude: 목소리 선택 — 엔진을 voice_id 별로 캐시하고 /voices 로 목록을 연다
 - 2026-08-15 Claude: 기본 낭독을 edge-tts 로 교체(로컬 6종 전부 탈락 — tts_edge.py 헤더).
   응답 형식이 엔진마다 달라져 MIME 을 같이 반환하고, ttsReady 를 ready 에서 분리했다
+- 2026-08-15 Claude: 낭독 엔진을 edge 하나로 정리 — sherpa·SAPI·CosyVoice 제거(사용자 지시).
+  폴백은 프론트 브라우저 합성기 단일 경로가 됐다
 """
 
 from __future__ import annotations
@@ -55,16 +63,18 @@ HOST = '127.0.0.1'
 PORT = int(os.environ.get('VOICE_PORT', '9030'))
 
 # 어떤 TTS 엔진을 쓸지.
-# [WHY 기본이 edge 인가 — 2026-08-15 실측] 로컬 후보 6종(MeloTTS·XTTS-v2·OmniVoice·
+# [WHY edge 하나만 남았나 — 2026-08-15 실측] 로컬 후보 6종(MeloTTS·XTTS-v2·OmniVoice·
 #   VoxCPM2·Qwen3-TTS·Kokoro)이 전부 떨어졌다(Kokoro 는 한국어가 0개). edge-tts 는
 #   모델 0개·GPU 0·문장당 0.5~1.1초로 통과했다 — engines/tts_edge.py 헤더에 근거.
-#   sherpa 와 sapi 는 **네트워크가 끊겼을 때 되돌아갈 길**로 남는다.
+# [🔴 이 값은 이제 사실상 상수다] 다른 값을 넣어도 어댑터가 없어 edge 로 돈다. 환경변수를
+#   남겨 둔 것은 다음에 엔진을 하나 더 붙일 때 배선 자리를 알아보게 하려는 것뿐이다.
 TTS_ENGINE = os.environ.get('VOICE_TTS_ENGINE', 'edge').strip().lower()
 STT_MODEL = os.environ.get('VOICE_STT_MODEL', 'small').strip()
 
 # 목소리 식별자는 '<엔진>:<그 엔진 안의 이름>' 한 문자열이다.
-# [WHY 엔진과 목소리를 한 문자열로 묶나] 화면은 '목소리 하나를 고른다'만 알면 된다.
-#   엔진을 따로 고르게 하면 sherpa 를 고른 뒤 sapi 목소리를 고르는 잘못된 조합이 생긴다.
+# [WHY 엔진이 하나인데도 접두사를 유지하나] 프론트가 이 접두사로 '사이드카가 읽을 것'과
+#   '브라우저가 읽을 것'(web:)을 가른다 — browserVoice.ts 의 WEB_PREFIX 와 짝이다.
+#   떼면 두 경로가 같은 id 공간을 쓰게 되어 폴백이 자기 자신을 다시 부른다.
 ENV_VOICE = os.environ.get('VOICE_TTS_VOICE', '').strip()
 
 _state = {
@@ -125,51 +135,47 @@ def _engines_dir_on_path() -> None:
 
 
 def _new_engine(voice_id: str):
-    """voice_id 로 어댑터 인스턴스를 만든다(로딩은 아직 안 한다)."""
+    """voice_id 로 어댑터 인스턴스를 만든다(로딩은 아직 안 한다).
+
+    [🔴 모르는 접두사도 edge 로 보낸다 — 무음 방지] 예전 설정이 localStorage 에 남아
+      'sherpa:default' 같은 죽은 id 가 올라올 수 있다. 여기서 예외를 던지면 그 사용자는
+      목소리를 다시 고르기 전까지 사이드카가 매번 500 을 내고, 프론트는 그때마다 브라우저
+      폴백으로 내려간다 — 소리는 나지만 아무도 이유를 모른다. 그냥 edge 로 읽는다.
+    """
     _engines_dir_on_path()
+    from engines.tts_edge import EdgeEngine
     kind = voice_id.split(':', 1)[0].lower()
-    if kind == 'edge':
-        from engines.tts_edge import EdgeEngine
-        return EdgeEngine(voice_id)
-    if kind == 'sapi':
-        from engines.tts_sapi import SapiEngine
-        return SapiEngine(voice_id)
-    if kind == 'cosyvoice':
-        from engines.tts_cosyvoice import CosyVoiceEngine
-        return CosyVoiceEngine()
-    from engines.tts_sherpa import SherpaKoEngine
-    return SherpaKoEngine()
+    return EdgeEngine(voice_id if kind == 'edge' else '')
 
 
 def _pick_default_voice() -> str:
-    """처음 켰을 때 쓸 목소리. 순서 = edge → SAPI(Heami) → sherpa.
+    """처음 켰을 때 쓸 목소리 = edge 한국어 첫 번째(선희).
 
-    [🔴 왜 sherpa 가 기본이 아닌가 — 2026-08-15 명료도 실측] 같은 문장을 합성해 그 소리를
+    [🔴 왜 로컬 엔진이 기본이 아닌가 — 2026-08-15 명료도 실측] 같은 문장을 합성해 그 소리를
       다시 faster-whisper 로 받아쓰게 했더니
         · sherpa VITS : "테스트를 모두 통과했습니다. 코미딸까요?"   (원문 = 커밋할까요)
         · SAPI Heami  : "테스트를 모두 통과했습니다. 커밋할까요?"   (원문 일치)
-      Heami 가 더 정확했고, 내려받을 모델도 없어 첫 기동까지 빨라진다.
-    [🔴 그 위에 edge 가 앉는다] edge 는 신경망 합성이라 Heami 보다 확연히 자연스럽고
-      역시 모델을 안 내려받는다. 다만 **네트워크가 필요하다** — 그래서 순서가 중요하다.
-      edge 를 못 쓰는 상황(오프라인·VOICE_EDGE=0)에서는 available() 이 false 라
-      목록에 아예 없고, 자연히 그 아래 후보가 기본값이 된다.
+      로컬 후보는 그렇게 갈렸고, edge 는 신경망 합성이라 둘 다보다 확연히 자연스러웠다.
+      그 실측이 두 어댑터를 걷어낸 근거다 — 되돌리려면 이 수치부터 다시 잴 것.
+    [🔴 빈 문자열을 돌려주지 않는다] 빈 값이면 load_tts 가 매번 이 함수를 다시 불러
+      edge 목록 조회(네트워크)를 낭독 경로에 얹는다.
     """
     if ENV_VOICE:
         return ENV_VOICE
-    voices = list_voices()
-    for engine in ('edge', 'sapi'):
-        for v in voices:
-            if v.get('engine') == engine and v.get('lang') == 'ko':
-                return v['id']
-    return f'{TTS_ENGINE}:default' if TTS_ENGINE != 'edge' else 'sherpa:default'
+    for v in list_voices():
+        if v.get('lang') == 'ko':
+            return v['id']
+    # 목록 조회가 실패한 경우(오프라인 등). 이 id 로 합성해 보고, 그것도 실패하면
+    # 프론트가 브라우저 합성기로 내려간다.
+    return 'edge:ko-KR-SunHiNeural'
 
 
 def load_tts(voice_id: str = ''):
     """목소리별 TTS 엔진 로딩(캐시).
 
-    [🔴 목소리마다 인스턴스를 따로 둔다] sherpa 는 62MB 를 상주시키고 sapi 는 아무것도
-      안 올린다. 목소리를 바꿀 때마다 앞의 것을 버리면, 두 목소리를 번갈아 쓰는 사용자가
-      매번 모델 로딩(수 초)을 기다린다. 개수가 한 자릿수라 캐시가 커질 위험이 없다.
+    [WHY 목소리마다 인스턴스를 따로 두나] edge 어댑터는 올릴 모델이 없어 지금은 캐시의
+      값이 크지 않다. 그래도 유지하는 이유는 목소리별 상태(선택된 화자)를 인스턴스가
+      들고 있기 때문이다 — 하나를 공유하면 두 슬롯이 다른 목소리를 쓸 때 서로 덮어쓴다.
     """
     vid = voice_id or _state['voice'] or _pick_default_voice()
     hit = _engines.get(vid)
@@ -188,33 +194,23 @@ def load_tts(voice_id: str = ''):
 
 
 def list_voices() -> list:
-    """고를 수 있는 목소리 전부. [WHY 캐시하나] /status 가 주기적으로 불리는데 SAPI 열거는
-      매번 COM 아파트를 열고 닫는다. 목소리는 앱이 도는 동안 늘거나 줄지 않는다.
+    """고를 수 있는 목소리 전부 = edge 한국어 3종.
+
+    [WHY 캐시하나] /status 가 주기적으로 불린다. edge 목록은 상수라 계산이 싸지만,
+      실패했을 때 매 /status 마다 같은 실패를 반복 기록하는 것을 막는 값이 더 크다.
+    [🔴 빈 목록도 캐시한다] 실패를 캐시하지 않으면 오프라인 상태에서 /status 폴링이
+      그대로 재시도 루프가 된다. 화면은 목록이 비면 브라우저 목소리만 그린다.
     """
     global _voices_cache
     if _voices_cache is not None:
         return _voices_cache
     _engines_dir_on_path()
     out: list = []
-    # [🔴 edge 를 맨 앞에 둔다] 목록 순서가 곧 '무엇을 권하는가'다. 화면도 이 순서를
-    #   그대로 그리므로, 뒤에 두면 사용자가 되돌아갈 길(폴백)을 기본으로 고르게 된다.
     try:
         from engines.tts_edge import list_voices as _edge
         out += _edge()
     except Exception as e:                                 # noqa: BLE001
         _log(f'edge 목록 실패(무시): {e}')
-    out.append({
-        'id': 'sherpa:default',
-        'label': '로컬 VITS (한국어)',
-        'engine': 'sherpa',
-        'lang': 'ko',
-        'note': '모델 62MB · GPU 0 · 또렷하지만 기계적',
-    })
-    try:
-        from engines.tts_sapi import list_voices as _sapi
-        out += _sapi()
-    except Exception as e:                                 # noqa: BLE001
-        _log(f'SAPI 목록 실패(무시): {e}')
     _voices_cache = out
     return out
 
@@ -278,9 +274,9 @@ def transcribe(wav: bytes) -> dict:
 def synthesize(text: str, voice: str = '', speed: float = 0.0) -> tuple[bytes, str]:
     """합성 결과와 그 형식(MIME).
 
-    [🔴 형식이 엔진마다 다르다] edge 는 mp3, sherpa/sapi 는 wav 다. 예전처럼 wav 로
-      못 박아 내보내면 브라우저가 mp3 를 wav 로 알고 재생에 실패한다 — 소리만 안 나고
-      오류는 안 뜨는, 가장 찾기 나쁜 형태의 고장이 된다.
+    [🔴 mime 을 여기서 못 박지 않는다] 지금은 edge 하나뿐이라 늘 audio/mpeg 이지만,
+      wav 로 고정해 내보내면 브라우저가 mp3 를 wav 로 알고 재생에 실패한다 — 소리만
+      안 나고 오류는 안 뜨는, 가장 찾기 나쁜 형태의 고장이 된다(engines/__init__ 규약).
     """
     eng = load_tts(voice)
     return eng.synth(text, speed), getattr(eng, 'mime', 'audio/wav')

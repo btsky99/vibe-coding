@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 23:25
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-16 00:13
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 60개 · 미푸시 37커밋
+- **브랜치**: `main` · 미커밋 60개 · 미푸시 38커밋
 - **최근 커밋**
+  - `55d5cf1` 2026-08-15 — feat(voice): 낭독을 edge-tts 로 — 모델 0개·GPU 0, 실패하면 조용히 기존 목소리로
   - `ce2cd78` 2026-08-15 — feat(ui): 채팅 화면을 아픽스 보드처럼 — 머리말에 상태·하는 일·중단/재시작/끄기
   - `2149826` 2026-08-15 — fix(voice): 누르고 있는 동안만 듣기 — 열리는 중에 떼면 마이크가 남던 사고 + 슬롯 소유권
   - `be9c5ac` 2026-08-15 — fix(recall): 무관 회상 차단선이 이미 뚫려 있었다 — 표본 확장 후 0.85→0.86 (W8)
   - `d30e758` 2026-08-15 — feat(ui): 전송창·음성 막대를 아픽스 보드와 같은 배치로 — [🎤][입력][지우기][보내기] 한 줄
-  - `38053dd` 2026-08-15 — feat(wiki): 세션 메모리 98장을 백과사전에 편입 + 링크 정합 (W4·W7)
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -200,11 +200,8 @@
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
 | `engines/tts_cache.py` | 156 | 합성 결과 디스크 캐시 — 같은 문장을 두 번 만들지 않는다. |
-| `engines/tts_cosyvoice.py` | 88 | CosyVoice2 낭독 어댑터. 텍스트를 받아 WAV 바이트를 돌려준다. |
-| `engines/tts_edge.py` | 153 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
-| `engines/tts_sapi.py` | 123 | Windows 내장 음성(SAPI5) 낭독 어댑터. 텍스트 → WAV 바이트. |
-| `engines/tts_sherpa.py` | 125 | sherpa-onnx VITS 한국어 낭독 어댑터. 텍스트 → WAV 바이트. |
-| `voice_server.py` | 392 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 기본, sapi·sherpa 폴백) 서버. |
+| `engines/tts_edge.py` | 158 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
+| `voice_server.py` | 388 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -331,7 +328,7 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `setup_voice.py` 🔨 | 104 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
+| `setup_voice.py` 🔨 | 103 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
 | `smoke_test.py` | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
@@ -406,12 +403,12 @@
 |------|------|------|
 | `apiBase.ts` 🔨 | 22 | 설명: 서버 주소 한 줄. 지금 열려 있는 포트가 곧 그 인스턴스의 API 다. |
 | `audioCapture.ts` 🔨 | 295 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
-| `browserVoice.ts` 🔨 | 168 | 설명: 브라우저(WebView2) 내장 합성기로 읽는 길. 서버 사이드카 없이 즉시 말한다. |
+| `browserVoice.ts` 🔨 | 173 | 설명: 브라우저(WebView2) 내장 합성기로 읽는 길. 서버 사이드카 없이 즉시 말한다. |
 | `clipboard.ts` | 63 | 설명: 클립보드 읽기/쓰기 공용 헬퍼 — pywebview 네이티브 브리지 우선, navigator.clipboard 폴백. |
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
 | `speech.ts` 🔨 | 283 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` 🔨 | 922 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `voiceBus.ts` 🔨 | 926 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -508,4 +505,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 23:25
+> 자동 생성 완료: 2026-08-16 00:13
