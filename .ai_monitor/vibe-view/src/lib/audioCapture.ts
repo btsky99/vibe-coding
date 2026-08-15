@@ -17,6 +17,8 @@
  *
  * REVISION HISTORY:
  * - 2026-08-15 Claude: 최초 작성 — 로컬 STT 전환에 따른 자체 캡처
+ * - 2026-08-15 Claude: '누르고 말하기' 모드 추가(beginHold/releaseHold) — 누르는 동안은
+ *   VAD 문턱·무음 판정을 우회하고, 손을 떼는 순간 그 자리에서 발화를 확정한다
  * ------------------------------------------------------------------------
  */
 
@@ -120,6 +122,7 @@ export class MicCapture {
     try { this.stream?.getTracks().forEach((t) => t.stop()); } catch { /* 이미 끝남 */ }
     try { void this.ctx?.close(); } catch { /* 이미 닫힘 */ }
     this.node = null; this.source = null; this.stream = null; this.ctx = null;
+    this.hold = false;
     this.reset();
   }
 
@@ -128,6 +131,38 @@ export class MicCapture {
   setMuted(v: boolean): void {
     this.muted = v;
     if (v) this.reset();
+  }
+
+  /**
+   * '누르고 말하기' 모드.
+   *
+   * [🔴 왜 VAD 를 통째로 우회하나] 버튼을 누르고 있는 동안은 사람이 이미 '지금부터
+   *   말한다'고 선언한 것이다. 그런데 VAD 문턱(threshold)은 조용히 말하는 첫 음절을
+   *   자주 흘리고, 말 도중 잠깐 뜸을 들이면 silenceMs 로 발화를 끊어 문장을 두 동강
+   *   낸다. 누르고 있는 동안은 전부 담고, 손을 떼는 순간이 곧 '끝'이다.
+   * [제약] maxSpeechMs 는 그대로 산다 — 버튼이 눌린 채 잊히면 마이크가 영영 열린다.
+   */
+  private hold = false;
+  beginHold(): void {
+    this.hold = true;
+    this.reset();
+  }
+
+  /**
+   * 손을 뗐다 — 담고 있던 것을 **그 자리에서** 발화로 확정한다.
+   *
+   * [🔴 무음을 기다리지 않는다] 기다리면 손을 뗀 뒤 900ms 동안 들어온 주변 소리가
+   *   같은 발화에 붙는다. 그리고 사용자는 그 사이를 '먹통'으로 읽는다.
+   */
+  releaseHold(): void {
+    this.hold = false;
+    if (!this.speaking) { this.reset(); return; }
+    // 누르고 말한 것은 짧아도 버리지 않는다("네", "응"). 대신 헛클릭(120ms 미만)은 버린다.
+    this.flush(this.currentMs(), 120);
+  }
+
+  private currentMs(): number {
+    return (this.speechSamples / TARGET_RATE) * 1000;
   }
 
   private reset(): void {
@@ -151,6 +186,23 @@ export class MicCapture {
     const rate = input.sampleRate;
     const loud = rms >= this.opts.threshold;
 
+    if (this.hold) {
+      // 누르고 있는 동안은 문턱·무음 판정을 보지 않는다(beginHold 주석 참조).
+      if (!this.speaking) {
+        this.speaking = true;
+        this.speechSamples = 0;
+        this.buf = [];
+        this.handlers.onSpeechState?.(true);
+      }
+      this.buf.push(downsample(src, rate, TARGET_RATE));
+      this.speechSamples += Math.round((src.length / rate) * TARGET_RATE);
+      if (this.currentMs() >= this.opts.maxSpeechMs) {
+        this.hold = false;                       // 눌린 채 잊힌 버튼에서 마이크를 되찾는다
+        this.flush(this.currentMs(), 120);
+      }
+      return;
+    }
+
     if (!this.speaking) {
       if (!loud) return;
       this.speaking = true;
@@ -170,7 +222,7 @@ export class MicCapture {
     }
   }
 
-  private flush(ms: number): void {
+  private flush(ms: number, minMs = this.opts.minSpeechMs): void {
     const chunks = this.buf;
     const peak = this.peak;
     this.speaking = false;
@@ -182,7 +234,8 @@ export class MicCapture {
 
     // 너무 짧으면 버린다. [WHY] 문 닫는 소리·마우스 클릭이 매번 서버로 나가면
     //   인식기가 헛돌고, 그 결과 "말한 적 없는 문장"이 입력창에 꽂힌다.
-    if (ms < this.opts.minSpeechMs) return;
+    // [제약] 기준은 호출부가 낮출 수 있다 — 누르고 말하기는 사람이 이미 의도를 밝혔다.
+    if (ms < minMs) return;
 
     const total = chunks.reduce((n, c) => n + c.length, 0);
     const pcm = new Float32Array(total);

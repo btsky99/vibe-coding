@@ -10,10 +10,51 @@
  *
  * REVISION HISTORY:
  * - 2026-08-15 Claude: 최초 작성 — 아픽스 음성 기능 이식(순수 로직 분리)
+ * - 2026-08-15 Claude: 호출어를 쉼표로 여러 개 받는다(parseWakeWords) + 짧은 호출어 경고
+ *   (wakeWordWarning). 사용자가 정한 낱말은 발음 변형을 우리가 만들어 줄 수 없다
  * ------------------------------------------------------------------------
  */
 
 /* ── 호출어 ───────────────────────────────────────────────────────────────── */
+
+/** 호출어 한 개의 최소 길이. 이보다 짧으면 아무 말에나 걸린다. */
+export const WAKE_MIN_LEN = 2;
+
+/**
+ * 사용자가 적은 호출어 칸을 낱말 목록으로 만든다.
+ *
+ * [🔴 쉼표로 여러 개를 받는 이유 — 아픽스와 갈리는 지점] 아픽스는 호출어가 '아픽스'
+ *   하나여서 발음 변형(아팩스·아펙스·아픽쓰·어픽스·apix)을 코드에 손으로 박아 둘 수
+ *   있었다. 여기는 사용자가 아무 낱말이나 넣으므로 그 변형을 아무도 만들어 주지 못한다.
+ *   대신 사람이 직접 "클로드, 클로드야" 처럼 적을 수 있게 한다 — 자기 발음을 아는 것은
+ *   본인뿐이다.
+ * [제약] 공백·대소문자는 무시한다(normalizeForWake). 인식기가 띄어쓰기를 자주 흘린다.
+ */
+export function parseWakeWords(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of String(raw || '').split(',')) {
+    const w = normalizeForWake(part);
+    if (!w || seen.has(w)) continue;
+    seen.add(w);
+    out.push(w);
+  }
+  return out;
+}
+
+/**
+ * 호출어 칸에 대해 화면에 띄울 경고. 없으면 빈 문자열.
+ *
+ * [WHY 막지 않고 알리기만 하나] 짧은 호출어가 항상 틀린 것은 아니다("코덱"). 다만
+ *   대가(아무 말에나 깨어남)를 모르고 고르면 사용자는 인식기를 탓하게 된다.
+ */
+export function wakeWordWarning(raw: string): string {
+  const words = parseWakeWords(raw);
+  if (!words.length) return '';
+  const short = words.filter((w) => w.length <= WAKE_MIN_LEN);
+  if (short.length) return `‘${short.join('’, ‘')}’ 는 너무 짧아 다른 말에도 깨어날 수 있어요`;
+  return '';
+}
 
 /**
  * 인식된 문장에서 어느 슬롯을 부른 것인지 가려낸다.
@@ -30,7 +71,7 @@
  *   ("클로드한테 코덱스 얘기 전해줘") 뒤엣것을 고르면 엉뚱한 슬롯이 받는다.
  *
  * @param text  인식 결과 문장
- * @param words 슬롯ID → 호출어 (예: {T1: '클로드', T2: '코덱스'})
+ * @param words 슬롯ID → 호출어 칸 원문. **쉼표로 여러 개**(예: {T1: '클로드, 클로드야'})
  * @returns 매칭된 슬롯과, 호출어를 걷어낸 나머지 지시문. 없으면 null.
  */
 export function matchWakeWord(
@@ -40,22 +81,28 @@ export function matchWakeWord(
   const norm = normalizeForWake(text);
   if (!norm) return null;
 
-  let best: { slot: string; at: number; end: number } | null = null;
+  let best: { slot: string; at: number; word: string } | null = null;
   for (const [slot, raw] of Object.entries(words)) {
-    const w = normalizeForWake(raw);
-    if (w.length < 2) continue;          // 한 글자 호출어는 오인식이 너무 많다
-    const at = norm.indexOf(w);
-    if (at < 0) continue;
-    // [🔴 문장 앞쪽만 호출로 인정한다] 말 중간에 우연히 나온 단어까지 받으면
-    //   대화하다가 아무 때나 슬롯이 깨어난다. 부르는 말은 앞에 온다.
-    if (at > 6) continue;
-    if (!best || at < best.at) best = { slot, at, end: at + w.length };
+    for (const w of parseWakeWords(raw)) {
+      if (w.length < WAKE_MIN_LEN) continue;   // 한 글자 호출어는 오인식이 너무 많다
+      const at = norm.indexOf(w);
+      if (at < 0) continue;
+      // [🔴 문장 앞쪽만 호출로 인정한다] 말 중간에 우연히 나온 단어까지 받으면
+      //   대화하다가 아무 때나 슬롯이 깨어난다. 부르는 말은 앞에 온다.
+      if (at > 6) continue;
+      // [🔴 같은 자리면 긴 쪽이 이긴다] '클로드, 클로드야' 처럼 한쪽이 다른 쪽의
+      //   앞부분인 변형을 같이 적는 경우, 짧은 것을 고르면 남은 '야'가 지시문 앞에
+      //   붙는다. 조사 제거 규칙이 있긴 하지만 그것에 기대지 않는 편이 안전하다.
+      if (!best || at < best.at || (at === best.at && w.length > best.word.length)) {
+        best = { slot, at, word: w };
+      }
+    }
   }
   if (!best) return null;
 
   // 원문에서 잘라야 띄어쓰기·문장부호가 살아 있는 지시문이 남는다. 정규화 문자열의
   // 인덱스는 원문과 어긋나므로, 원문에서 다시 찾아 자른다.
-  const rest = cutAfterWake(text, words[best.slot]);
+  const rest = cutAfterWake(text, best.word);
   return { slot: best.slot, rest };
 }
 

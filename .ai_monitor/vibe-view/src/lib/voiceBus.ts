@@ -102,6 +102,14 @@ const SPEED_KEY = 'vibe.voice.speed';
 /** 답을 다 읽은 뒤 이 시간 동안은 호출어 없이 바로 이어 말할 수 있다. */
 const FOLLOW_MS = 12000;
 
+/**
+ * 손을 뗀 뒤 이 시간 안에 도착한 받아쓰기만 '누른 말'로 본다.
+ *
+ * [WHY 15초인가] 사이드카가 차가우면 첫 인식이 10초 넘게 걸린다(모델 로딩). 그보다
+ *   짧게 잡으면 첫 발화가 배달되지 않고, 길게 잡으면 시효의 의미가 없어진다.
+ */
+const PRESS_GRACE_MS = 15000;
+
 class VoiceBus {
   private state: VoiceState = {
     enabled: false,
@@ -134,6 +142,25 @@ class VoiceBus {
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   /** 누르고 말하기로 강제 지정된 슬롯 — 놓을 때까지 호출어를 무시한다. */
   private pressSlot: string | null = null;
+  /** 손을 뗀 뒤 받아쓰기 결과가 돌아올 때까지 대상을 붙들어 두는 자리(releaseToTalk 주석). */
+  private pendingPress: string | null = null;
+  /**
+   * pendingPress 를 만든 시각.
+   *
+   * [🔴 시효가 없으면 엉뚱한 말이 옛 슬롯으로 간다] 누른 말이 너무 짧아 버려지면
+   *   pendingPress 가 남는다. 그 뒤 상시 대기 상태에서 호출어 없이 들린 말이
+   *   '누른 말'로 오인돼 배달된다 — 사용자는 부른 적도 누른 적도 없다.
+   */
+  private pendingPressAt = 0;
+  /**
+   * 직전 지시가 **음성으로** 들어왔는가.
+   *
+   * [🔴 이어 듣기의 유일한 근거 — 아픽스 실측] 답을 읽은 뒤 마이크를 여는 것은 되묻기
+   *   편의다. 그런데 키보드로 친 지시의 답 뒤에도 열면, 사용자는 마이크가 열린 줄
+   *   모르는 채 옆사람과 말하고 그게 지시가 된다. 음성으로 시작한 대화만 음성으로 잇는다.
+   */
+  private lastInputWasVoice = false;
+  private followTimer: ReturnType<typeof setTimeout> | null = null;
   /** 사이드카가 준 목소리. 브라우저 목소리와 합쳐 state.voices 가 된다. */
   private serverVoices: VoiceOption[] = [];
   /** 사이드카가 /status 로 한 번이라도 답했는가. 저장된 목소리 판정의 전제. */
@@ -203,13 +230,26 @@ class VoiceBus {
 
   /* ── 켜고 끄기 ───────────────────────────────────────────────────────── */
 
-  /** 저장된 설정을 복원한다. [제약] 마이크는 사용자 제스처 뒤에만 열리므로 여기서 켜지 않는다. */
+  /**
+   * 지난번에 호출어 대기를 켜 뒀었는지.
+   *
+   * [🔴 이 값으로 자동으로 켜지 않는다 — 의도된 것] 앱을 켜자마자 마이크가 열리면
+   *   오디오가 계속 들어오고(노트북은 배터리도) 사용자는 그 사실을 모른다. 상시 대기는
+   *   **매번 사람이 켜는 것**이 기본이다. 이 값은 화면에 '지난번엔 켜 뒀었다'를
+   *   알려 주는 용도로만 쓴다.
+   */
   restore(): boolean {
     try { return localStorage.getItem(WAKE_ENABLED_KEY) === '1'; } catch { return false; }
   }
 
-  async enable(): Promise<void> {
-    if (this.mic) return;
+  /**
+   * 마이크 장치를 실제로 연다. 이미 열려 있으면 아무것도 하지 않는다.
+   *
+   * [🔴 앱에 하나뿐이다] 누르고 말하기·상시 대기·이어 듣기 셋이 같은 장치를 쓴다.
+   *   각자 열면 인식기 여럿이 같은 마이크를 잡고 전부 죽는다(audioCapture.ts 헤더).
+   */
+  private async openMic(): Promise<boolean> {
+    if (this.mic) return true;
     const mic = new MicCapture({
       onUtterance: (wav) => { void this.onUtterance(wav); },
       onSpeechState: (speaking) => this.set({ speaking }),
@@ -224,24 +264,46 @@ class VoiceBus {
     try {
       await mic.start();
     } catch {
-      this.set({ enabled: false, message: '마이크 권한이 필요합니다' });
-      return;
+      this.set({ message: '마이크 권한이 필요합니다' });
+      return false;
     }
     this.mic = mic;
+    this.ensureSidecar();                       // 받아쓰기는 사이드카 몫 — 여기서 깨운다
+    return true;
+  }
+
+  /**
+   * 마이크를 닫는다. 단, **아직 쓸 사람이 있으면 닫지 않는다.**
+   *
+   * [🔴 세 주인이 한 장치를 공유한다] 상시 대기(enabled)·누르고 있는 손(pressSlot)·
+   *   이어 듣기 창(followUntil). 하나가 끝났다고 닫으면 나머지가 조용히 먹통이 된다.
+   */
+  private closeMicIfIdle(): void {
+    if (this.state.enabled || this.pressSlot) return;
+    if (Date.now() < this.followUntil) return;
+    this.mic?.stop();
+    this.mic = null;
+    this.set({ speaking: false, level: 0 });
+  }
+
+  /** 호출어 상시 대기를 켠다. [제약] 사용자 제스처 안에서 불러야 권한창이 뜬다. */
+  async enable(): Promise<void> {
+    const ok = await this.openMic();
+    if (!ok) { this.set({ enabled: false }); return; }
     try { localStorage.setItem(WAKE_ENABLED_KEY, '1'); } catch { /* 저장 실패는 무시 */ }
     this.set({ enabled: true, message: '듣는 중…', error: '' });
-    this.ensureSidecar();                       // 받아쓰기는 사이드카 몫 — 여기서 깨운다
     this.scheduleTurnPoll(1500);
   }
 
   disable(): void {
-    this.mic?.stop();
-    this.mic = null;
     this.pressSlot = null;
     this.followUntil = 0;
-    if (this.turnTimer) { clearTimeout(this.turnTimer); this.turnTimer = null; }
     try { localStorage.setItem(WAKE_ENABLED_KEY, '0'); } catch { /* 저장 실패는 무시 */ }
+    // [🔴 enabled 를 먼저 내린다] closeMicIfIdle 이 이 값을 보고 닫을지 정한다.
     this.set({ enabled: false, speaking: false, level: 0, message: '' });
+    this.closeMicIfIdle();
+    // [WHY 낭독 폴링은 안 끈다] 답 듣기는 마이크와 독립이다(setTts 주석). 여기서 같이
+    //   끄면 '손으로 치고 답은 귀로 듣는다'가 상시 대기를 끄는 순간 죽는다.
   }
 
   /**
@@ -270,19 +332,43 @@ class VoiceBus {
 
   /* ── 누르고 말하기 ───────────────────────────────────────────────────── */
 
-  /** 마이크 버튼을 누르는 동안 그 슬롯이 무조건 대상이 된다(호출어 불필요). */
+  /**
+   * 버튼을 누르는 동안만 듣는다. 그 슬롯이 무조건 대상이다(호출어 불필요).
+   *
+   * [🔴 여기서 상시 대기를 켜지 않는다] 예전에는 enable() 을 불러 마이크를 계속 열어
+   *   뒀다. 한 번 눌렀다는 이유로 마이크가 영영 열려 있으면 사용자가 동의한 적 없는
+   *   상시 청취가 된다. 누르는 동안만 열고, 떼면 닫는다(상시 대기가 켜져 있으면 유지).
+   */
   async pressToTalk(slotId: string): Promise<void> {
     this.pressSlot = slotId;
+    this.pendingPress = slotId;
+    this.pendingPressAt = Date.now();
     this.set({ target: slotId, message: '듣는 중…' });
-    this.ensureSidecar();                       // 누른 말은 사이드카가 받아쓴다
-    if (!this.mic) await this.enable();
+    const ok = await this.openMic();
+    if (!ok) { this.pressSlot = null; this.pendingPress = null; return; }
+    // [제약] 낭독 중이면 뮤트 상태다 — 사람이 버튼을 눌렀다는 것은 지금 말을 자르고
+    //   자기가 말하겠다는 뜻이다. 읽던 것을 멈추고 귀를 연다.
+    if (this.state.playing) this.stopSpeaking();
+    this.mic?.setMuted(false);
+    this.mic?.beginHold();
   }
 
+  /**
+   * 손을 뗐다 — **그대로 보낸다.**
+   *
+   * [🔴 확인 단추를 두지 않는다 — 아픽스 실측] 누르고 말한 사람은 이미 보낼 생각이었다.
+   *   여기서 한 번 더 확인을 받으면 핸즈프리가 성립하지 않는다. 잘못 들었으면 입력창에
+   *   남은 것을 고치면 된다.
+   * [🔴 pressSlot 을 바로 비우되 대상은 pendingPress 로 넘긴다] releaseHold 가 발화를
+   *   확정해도 받아쓰기는 서버 왕복이라 route() 는 한참 뒤에 돈다. pressSlot 만 보고
+   *   판단하면 그 사이에 null 이 되어 '아무에게도 안 간 말'이 된다.
+   */
   releaseToTalk(): void {
-    // [🔴 즉시 끄지 않는다] 손을 떼는 순간 말이 아직 캡처 버퍼에 있다. 여기서 마이크를
-    //   닫으면 마지막 한 마디가 통째로 사라진다. VAD 가 무음을 보고 스스로 끊게 둔다.
+    if (!this.pressSlot) return;                // 누른 적 없는 뗌(권한 실패 등)은 무시
+    this.pendingPressAt = Date.now();           // 시효는 '뗀 순간'부터 센다
+    this.mic?.releaseHold();                    // 여기서 발화가 확정돼 onUtterance 로 간다
     this.pressSlot = null;
-    this.followUntil = Date.now() + 3000;
+    this.closeMicIfIdle();
   }
 
   /* ── 인식 ────────────────────────────────────────────────────────────── */
@@ -319,8 +405,12 @@ class VoiceBus {
    *   ④ 아무것도 아니면 버린다 (옆사람 대화·TV 소리가 명령이 되면 안 된다)
    */
   private route(text: string): void {
-    if (this.pressSlot) {
-      this.deliver(this.pressSlot, text);
+    // 누르는 중이거나, 방금 손을 뗀 그 말이다(pendingPress). 사람이 직접 지목한 것이 가장 세다.
+    const fresh = Date.now() - this.pendingPressAt < PRESS_GRACE_MS;
+    const forced = this.pressSlot ?? (fresh ? this.pendingPress : null);
+    this.pendingPress = null;
+    if (forced) {
+      this.deliver(forced, text);
       return;
     }
 
@@ -354,6 +444,7 @@ class VoiceBus {
     const b = this.slots.get(slotId);
     if (!b) { this.set({ message: `${slotId} 슬롯이 화면에 없습니다` }); return; }
     this.set({ target: slotId, message: `${slotId} 전송: ${text.slice(0, 20)}` });
+    this.lastInputWasVoice = true;              // 이 대화는 음성으로 시작됐다(onSpeechEnd 참조)
     this.followUntil = Date.now() + FOLLOW_MS;
     b.onText(text);
     // [🔴 말을 마친 것이 곧 확인이다] 여기서 또 확인을 요구하면 핸즈프리가 성립하지
@@ -508,10 +599,36 @@ class VoiceBus {
       // [🔴 미리듣기는 대화가 아니다] 여기서 이어 말하기 창을 열면, 목소리를 여러 개
       //   들어 보는 동안 나온 주변 말이 곧바로 지시로 들어간다(아픽스에서 실제로 났다).
       this.set({ playing: false, busy: false });
+      this.closeMicIfIdle();
       return;
     }
+    if (!this.lastInputWasVoice) {
+      // 키보드로 친 지시의 답이었다 — 읽어 주기만 하고 귀는 열지 않는다.
+      this.set({ playing: false, busy: false, message: this.state.enabled ? '듣는 중…' : '' });
+      this.closeMicIfIdle();
+      return;
+    }
+    this.lastInputWasVoice = false;             // 한 번의 답에 한 번만 열린다
+    this.openFollowWindow();
+    this.set({ playing: false, busy: false, message: '이어서 말씀하세요' });
+  }
+
+  /**
+   * 답을 다 읽은 뒤 잠깐 귀를 열어 둔다(되묻기).
+   *
+   * [🔴 상시 대기와 다른 스위치다] 호출어 대기가 꺼져 있어도 이 창은 열린다 — 방금
+   *   음성으로 물어본 사람에게 "다시 눌러서 되물으세요"는 대화가 아니다. 대신 창이
+   *   닫히면 마이크도 같이 닫는다. 열어 둔 채로 잊히는 것이 가장 나쁜 상태다.
+   */
+  private openFollowWindow(): void {
     this.followUntil = Date.now() + FOLLOW_MS;
-    this.set({ playing: false, busy: false, message: this.state.enabled ? '이어서 말씀하세요' : '' });
+    void this.openMic();
+    if (this.followTimer) clearTimeout(this.followTimer);
+    this.followTimer = setTimeout(() => {
+      this.followTimer = null;
+      if (!this.state.enabled) this.set({ message: '' });
+      this.closeMicIfIdle();
+    }, FOLLOW_MS + 200);
   }
 
   /* ── 서버 준비 상태 ──────────────────────────────────────────────────── */

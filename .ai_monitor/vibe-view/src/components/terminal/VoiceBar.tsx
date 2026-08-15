@@ -16,6 +16,9 @@
  * - 2026-08-15 Claude: 최초 작성 — 로컬 음성(STT/TTS) UI
  * - 2026-08-15 Claude: 아이콘만으로는 무슨 기능인지 안 보인다는 지적 — 글자 라벨과
  *   낭독 체크박스를 붙이고, 목소리 선택(⚙ VoiceSettings)을 연다
+ * - 2026-08-15 Claude: 아픽스 보드와 같은 조작 모양으로 — ①누르고 말하기(떼면 바로 전송)
+ *   ②답 소리 듣기 체크 ③호출어 부르기 체크(기본 꺼짐·마이크가 열려 있음을 체크로 보임)
+ *   ④호출어를 쉼표로 여러 개. 두 글자 이하는 경고를 화면에 띄운다
  * - 2026-08-15 Claude: 줄이 어긋나 보인다는 지적 — 실측하니 호출어 버튼만 높이 21px·
  *   top +2px 였다(나머지는 25px·0). 높이를 BTN 한 곳으로 묶고, 평평하게 늘어서 있던
  *   다섯 개를 '입력 | 출력 | 이름' 세 묶음으로 가른다
@@ -25,6 +28,7 @@
 import { useState } from 'react';
 import { Mic, MicOff, Loader2, Square, Volume2, Check } from 'lucide-react';
 import { voiceBus } from '../../lib/voiceBus';
+import { wakeWordWarning } from '../../lib/speech';
 import { useVoiceState } from '../../hooks/useVoice';
 import VoiceSettings from './VoiceSettings';
 
@@ -71,12 +75,16 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
 
   const commit = () => {
     setEditing(false);
-    const clean = draft.trim().slice(0, 12);   // 부르는 말이 길면 인식이 더 자주 흘린다
+    // [🔴 상한을 12→60 으로 올렸다] 쉼표로 변형을 여러 개 적게 했으므로 한 낱말 기준의
+    //   상한은 더 이상 맞지 않는다("클로드, 클로드야, 크로드"만 해도 15자다).
+    const clean = draft.trim().slice(0, 60);
     if (clean !== wakeWord) onWakeWordChange(clean);
   };
 
   const rawLabel = v.voices.find((o) => o.id === (v.voice || v.voices[0]?.id))?.label || '';
   const voiceLabel = rawLabel ? shortVoice(rawLabel) : '목소리';
+  // 편집 중에는 지금 치고 있는 값에 대해, 아닐 때는 저장된 값에 대해 경고한다.
+  const wakeWarning = wakeWordWarning(editing ? draft : wakeWord);
 
   return (
     <div className="flex items-center gap-1.5 text-[10px] relative">
@@ -90,28 +98,36 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
         <button
           onPointerDown={(e) => {
             e.preventDefault();
+            // [🔴 포인터를 이 버튼에 붙들어 둔다] 누른 채로 손가락·커서가 버튼 밖으로
+            //   나가면 pointerup 이 다른 요소에서 발생해 여기로 안 온다. 그러면 버튼은
+            //   눌린 상태로 굳고 마이크가 열린 채 남는다 — 가장 나쁜 상태다.
+            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
             void voiceBus.pressToTalk(terminalId);
           }}
           onPointerUp={() => voiceBus.releaseToTalk()}
           onPointerCancel={() => voiceBus.releaseToTalk()}
-          title="누르고 있는 동안 이 슬롯에 말합니다"
-          className={`${BTN} ${
+          title="누르고 있는 동안만 듣습니다. 손을 떼면 그대로 보냅니다"
+          className={`${BTN} select-none touch-none ${
             isTarget && v.speaking
               ? 'bg-red-500/30 border-red-400/60 text-red-200'
               : 'bg-[#3c3c3c] border-white/10 hover:bg-white/10 text-white/70'
           }`}
         >
           {busy ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />}
-          <span>말하기</span>
+          <span>누르고 말하기</span>
         </button>
 
-        {/* 상시 대기 — 호출어로 부르면 깨어난다.
+        {/* 호출어 부르기(상시 대기) — 체크로 그린다.
+            [🔴 기본은 꺼짐이고, 켜는 것은 사람이다] 켜져 있는 동안 마이크가 계속 열려
+              있다. 앱이 알아서 켜면 사용자는 자기가 언제부터 청취당했는지 모른다.
             [🔴 입력 레벨을 버튼 '안'에 깐 이유] 예전엔 옆에 따로 둔 막대라, 켤 때마다
               그 폭만큼 뒤쪽 버튼이 통째로 밀렸다. 레벨은 이 버튼의 상태이므로 배경으로
               깔면 폭이 변하지 않고, 소리에 반응해 차오르는 게 그대로 보인다. */}
         <button
           onClick={() => (v.enabled ? voiceBus.disable() : void voiceBus.enable())}
-          title={v.enabled ? '상시 대기 끄기' : '상시 대기 켜기 (호출어로 부르면 반응)'}
+          title={v.enabled
+            ? '호출어 대기 끄기 (마이크를 닫습니다)'
+            : '호출어 대기 켜기 — 켜 두는 동안 마이크가 계속 열려 있습니다'}
           className={`${BTN} relative overflow-hidden ${
             v.enabled
               ? 'bg-primary/20 border-primary/40 text-primary'
@@ -126,8 +142,15 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
             />
           )}
           <span className="relative flex items-center gap-1">
+            <span
+              className={`w-3 h-3 rounded-[3px] border flex items-center justify-center ${
+                v.enabled ? 'bg-primary border-primary text-white' : 'border-white/30'
+              }`}
+            >
+              {v.enabled && <Check size={9} strokeWidth={3} />}
+            </span>
             {v.enabled ? <Mic size={12} /> : <MicOff size={12} />}
-            <span>{v.enabled ? '듣는 중' : '상시 대기'}</span>
+            <span>호출어 부르기</span>
           </span>
         </button>
       </div>
@@ -153,7 +176,7 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
           >
             {v.ttsOn && <Check size={9} strokeWidth={3} />}
           </span>
-          <span>답 듣기</span>
+          <span>답 소리 듣기</span>
         </button>
 
         {/* 목소리 고르기.
@@ -182,7 +205,9 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
       <Divider />
 
       {/* ── ③ 이 슬롯을 부르는 말 ────────────────────────────────────────────
-          슬롯마다 다른 유일한 값이다. 그래서 앞의 두 묶음(전역 설정)과 떼어 둔다. */}
+          슬롯마다 다른 유일한 값이다. 그래서 앞의 두 묶음(전역 설정)과 떼어 둔다.
+          [🔴 쉼표로 여러 개] 사용자가 아무 낱말이나 정하므로 발음 변형을 우리가 만들어
+            줄 수 없다(speech.ts parseWakeWords 주석). 본인이 직접 적게 한다. */}
       {editing ? (
         <input
           autoFocus
@@ -193,22 +218,37 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange }: Pro
             if (e.key === 'Enter') commit();
             if (e.key === 'Escape') { setDraft(wakeWord); setEditing(false); }
           }}
-          placeholder="호출어"
-          className="h-[25px] w-24 shrink-0 bg-[#1e1e1e] border border-primary/40 rounded px-2
-                     text-[10px] text-white focus:outline-none"
+          placeholder="예: 클로드, 클로드야"
+          title="쉼표로 여러 개를 넣을 수 있습니다. 띄어쓰기·대소문자는 무시합니다"
+          className={`h-[25px] w-40 shrink-0 bg-[#1e1e1e] border rounded px-2
+                     text-[10px] text-white focus:outline-none ${
+                       wakeWordWarning(draft) ? 'border-amber-400/60' : 'border-primary/40'
+                     }`}
         />
       ) : (
         <button
           onClick={() => { setDraft(wakeWord); setEditing(true); }}
-          title="이 슬롯을 부르는 말을 정합니다 (예: 클로드)"
-          className={`${BTN} ${
+          title="이 슬롯을 부르는 말 (쉼표로 여러 개 — 예: 클로드, 클로드야)"
+          className={`${BTN} max-w-[10rem] ${
             wakeWord
               ? 'border-white/10 bg-[#3c3c3c] text-white/70 hover:bg-white/10'
               : 'border-dashed border-white/20 text-white/35 hover:text-white/60'
           }`}
         >
-          {wakeWord ? `“${wakeWord}”` : '호출어 설정'}
+          <span className="truncate">{wakeWord ? `“${wakeWord}”` : '호출어 설정'}</span>
         </button>
+      )}
+
+      {/* 호출어에 대한 경고.
+          [🔴 막지 않고 알린다] 짧은 호출어가 늘 틀린 것은 아니다. 다만 대가(아무 말에나
+            깨어남)를 모른 채 고르면 사용자는 인식기를 탓하게 된다. */}
+      {wakeWarning && (
+        <span className="text-amber-300/80 truncate max-w-[13rem]" title={wakeWarning}>
+          ⚠ {wakeWarning}
+        </span>
+      )}
+      {v.enabled && !wakeWord && (
+        <span className="text-amber-300/80">⚠ 호출어를 먼저 정하세요</span>
       )}
 
       {/* ── 오른쪽: 지금 벌어지는 일 ─────────────────────────────────────────
