@@ -10,8 +10,8 @@ REVISION HISTORY:
 - 2026-08-15 Claude: WebView2 초기화 실패 감시(webview_health) 배선 — 런타임 자동 업데이트로
                      엔진이 안 붙으면 '하얀 창' 이 단일 인스턴스 락을 쥔 채 살아남아 재실행
                      자체가 막혔다. 실패 시 락을 놓고 죽어야 사용자가 빠져나온다.
-                     [불변식] _webview_storage 확정을 create_window 앞으로 이동 — 감시자가
-                     실패 진단(UDF 가 어느 런타임 버전에 묶였나)에 이 경로를 쓴다.
+                     [불변식] 감시자에 window 를 넘기되 events.loaded 외에는 만지지 않는다 —
+                     WebView2 를 크로스스레드로 건드려 부팅을 교착시킨 자책 사고 1건.
 - 2026-07-26 Codex: macOS 네이티브 폴더 선택 브리지를 추가해 상단 메뉴 무반응 수정.
 - 2026-07-22 Claude: _ClipboardBridge(js_api) 신설 — 맥 WKWebView가 navigator.clipboard를 조용히
                      거부해 우클릭 복붙 전멸 → NSPasteboard 브리지로 우회. Edit 메뉴 탐색을
@@ -382,18 +382,6 @@ def run_gui_app(cfg: BootConfig) -> None:
                 pass
             os._exit(0)
 
-        # ── WebView2 영구 저장소 경로 ──
-        # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
-        # %APPDATA%/vibe-coding/<dev|exe>/<프로젝트명>/webview_data 에 영구 저장
-        # 개발/EXE 분리: 스키마 차이로 인한 데이터 손상 방지
-        # [불변식] 이 경로는 create_window 보다 먼저 확정돼야 한다 — 아래 watch_init 이
-        #   실패 진단에 쓴다(어느 UDF 가 구버전에 묶였는지가 원인 판정의 핵심).
-        _appdata = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')
-        _mode = 'exe' if getattr(sys, 'frozen', False) else 'dev'
-        _webview_storage = Path(_appdata) / 'vibe-coding' / _mode / cfg.project_root.name / 'webview_data'
-        _webview_storage.mkdir(parents=True, exist_ok=True)
-        print(f"[*] WebView2 storage: {_webview_storage}")
-
         print(f"[*] Launching Desktop Window with Splash...")
         # [WHY] js_api=클립보드 브리지 — 맥 WKWebView의 navigator.clipboard 거부 우회
         #   (lib/clipboard.ts가 window.pywebview.api.clip_read/clip_write로 호출).
@@ -401,11 +389,34 @@ def run_gui_app(cfg: BootConfig) -> None:
                               html=cfg.splash_html, width=1400, height=900,
                               js_api=_ClipboardBridge())
 
+        threading.Thread(target=force_win32_icon,
+                         args=(cfg.official_icon, cfg.window_title),
+                         daemon=True).start()
+
+        # [음성] WebView2 마이크 권한 배선.
+        # [🔴 없으면 음성 입력이 '조용히' 죽는다 — 2026-08-15 실측] pywebview 6.1 은
+        #   PermissionRequested 를 처리하지 않아, 페이지의 getUserMedia 가 허용도 거부도
+        #   안 된 채 응답 없이 매달린다(에러조차 안 온다). 화면에는 '듣는 중…'만 남는다.
+        from infra.webview_permissions import enable_microphone
+        enable_microphone(window)
+
+        # ── WebView2 영구 저장소 경로 ──
+        # 기본 private_mode=True 는 종료 시 localStorage 전체 삭제 → 프로필/설정 유실
+        # %APPDATA%/vibe-coding/<dev|exe>/<프로젝트명>/webview_data 에 영구 저장
+        # 개발/EXE 분리: 스키마 차이로 인한 데이터 손상 방지
+        _appdata = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')
+        _mode = 'exe' if getattr(sys, 'frozen', False) else 'dev'
+        _webview_storage = Path(_appdata) / 'vibe-coding' / _mode / cfg.project_root.name / 'webview_data'
+        _webview_storage.mkdir(parents=True, exist_ok=True)
+        print(f"[*] WebView2 storage: {_webview_storage}")
+
         # [🔴 하얀 창 탈출 — 사고 2026-08-15] WebView2 초기화가 실패해도 pywebview 는
         #   예외를 안 올린다. 창은 뜨는데 엔진이 없어 하얀 화면이 되고, 그 프로세스가
         #   단일 인스턴스 락을 계속 쥐어 **재실행조차 막힌다**(아이콘을 눌러도 하얀 창만
         #   포커스됨). 감시해서 실패면 락을 놓고 죽어야 사용자가 빠져나올 수 있다.
-        #   상세 원인·왜 자동 정리를 안 하는지는 infra/webview_health.py 헤더 참조.
+        # [불변식] 감시자는 window.events.loaded(순수 threading.Event)만 본다. WebView2
+        #   객체를 다른 스레드에서 건드리면 STA 스레드와 교착해 부팅이 멈춘다 —
+        #   자책 사고 1건. 상세는 infra/webview_health.py 헤더.
         from infra.webview_health import watch_init as _watch_webview_init
 
         def _release_lock_on_dead() -> None:
@@ -418,17 +429,6 @@ def run_gui_app(cfg: BootConfig) -> None:
             cfg.cleanup_postgres()
 
         _watch_webview_init(window, _webview_storage, _release_lock_on_dead)
-
-        threading.Thread(target=force_win32_icon,
-                         args=(cfg.official_icon, cfg.window_title),
-                         daemon=True).start()
-
-        # [음성] WebView2 마이크 권한 배선.
-        # [🔴 없으면 음성 입력이 '조용히' 죽는다 — 2026-08-15 실측] pywebview 6.1 은
-        #   PermissionRequested 를 처리하지 않아, 페이지의 getUserMedia 가 허용도 거부도
-        #   안 된 채 응답 없이 매달린다(에러조차 안 온다). 화면에는 '듣는 중…'만 남는다.
-        from infra.webview_permissions import enable_microphone
-        enable_microphone(window)
 
         # webview.start() 블로킹 — _init_and_load_app이 별도 스레드에서 전체 초기화 수행
         webview.start(
