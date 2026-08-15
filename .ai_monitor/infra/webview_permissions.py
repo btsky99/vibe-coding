@@ -25,6 +25,9 @@ DESCRIPTION: WebView2(Windows)에서 마이크 권한 요청을 허용하는 배
                아직 None 이라 붙일 수 없다 — 그래서 폴링으로 기다린다.
 
 REVISION HISTORY:
+- 2026-08-15 Claude: 배선 시점을 loaded 이후로 미룸 — create_window 직후에는 WebView2
+                     어셈블리가 아직 로드 전이라 import 가 항상 실패해 마이크가 조용히
+                     죽어 있었다(실측: 로그에 '바인딩 없음' 만 반복).
 - 2026-08-15 Claude: 최초 작성 — 아픽스 음성 기능 이식(마이크 권한 전제)
 """
 
@@ -38,28 +41,63 @@ import time
 _ALLOWED_KINDS = ('Microphone',)
 
 
+def _run_on_ui(window, fn):
+    """fn 을 창의 UI 스레드에서 실행하고 결과를 돌려준다. 못 하면 (None, 예외).
+
+    [🔴🔴 이 우회가 없으면 마이크가 조용히 죽는다 — 실측 2026-08-15]
+      `webview.CoreWebView2` 게터를 다른 스레드에서 읽으면 .NET 이 그대로 거절한다:
+        System.InvalidOperationException: CoreWebView2 can only be accessed from the UI thread.
+      (내부적으로 ICoreWebView2Controller QueryInterface 가 E_NOINTERFACE 로 실패한다.)
+      예외는 배선 스레드만 죽이고 로그 한 줄로 끝나 **화면에는 아무 표시도 안 난다** —
+      사용자는 마이크가 고장 났다고 생각하게 된다.
+
+      게다가 그냥 읽으면 위험하기까지 하다. 다른 스레드에서의 접근은 UI 스레드와 동기화를
+      요구하는데, 그 스레드가 스플래시를 그리는 중(NavigateToString)이면 서로를 기다려
+      **부팅 전체가 멈춘다**(자책 사고 1건 — infra/webview_health.py 헤더).
+
+    [WHY Invoke 인가] pywebview 자신이 같은 문제를 이렇게 푼다
+      (winforms.py 의 `i.Invoke(Func[Type](create))`, `set_title`). 우리도 같은 관문을 쓴다.
+    [제약] Invoke 는 동기다 — UI 스레드가 막혀 있으면 반환하지 않는다. 그래서 호출부는
+      반드시 events.loaded **이후**에만 이 함수를 부른다(그 시점의 UI 스레드는 유휴).
+    """
+    from System import Func, Type                              # type: ignore[import-not-found]
+    from webview.platforms.winforms import BrowserView
+
+    inst = BrowserView.instances.get(getattr(window, 'uid', 'master'))
+    if inst is None:
+        return None, RuntimeError('BrowserView 인스턴스 없음')
+
+    box: dict = {}
+
+    def _do():
+        try:
+            box['value'] = fn(inst)
+        except Exception as e:                                 # noqa: BLE001
+            box['error'] = e
+        return None
+
+    try:
+        if getattr(inst, 'InvokeRequired', False):
+            inst.Invoke(Func[Type](_do))
+        else:
+            _do()
+    except Exception as e:                                     # noqa: BLE001
+        return None, e
+    return box.get('value'), box.get('error')
+
+
 def _find_core(window, timeout: float) -> object | None:
     """창의 CoreWebView2 객체를 기다렸다 반환. 없으면 None.
 
-    [🔴 이 폴링은 위험하다 — 사고 2026-08-15] `webview.CoreWebView2` 게터는 WinForms
-      컨트롤이라 **창을 만든 STA 스레드 전용**이다. 다른 스레드에서 읽으면 UI 스레드와
-      동기화가 필요한데, 그 스레드가 스플래시를 그리는 중(NavigateToString)이면 서로를
-      기다려 **부팅이 통째로 멈춘다**(증상: 창 '응답 없음'). 같은 폴링을 부팅 감시에
-      썼다가 그 사고를 냈고, 감시 쪽은 window.events.loaded 대기로 교체했다
-      (infra/webview_health.py).
-      여기 남아 있는 이유: 이 함수는 Microsoft.Web.WebView2 바인딩이 있을 때만 도달하며
-      (없으면 호출부가 먼저 return), 마이크 권한은 CoreWebView2 객체 없이는 붙일 방법이
-      없다. **호출 시점을 부팅 임계 구간 밖으로 미루는 것 외에 안전한 방법이 없다** —
-      이 파일을 고칠 때 폴링을 더 이른 시점으로 당기지 말 것.
+    접근은 전부 _run_on_ui 를 통한다 — 직접 읽으면 UI 스레드 예외로 죽는다(위 참조).
+    대기(sleep)는 UI 스레드가 아니라 **여기(백그라운드)** 에서 한다. UI 스레드 안에서
+    기다리면 그 창의 메시지 루프가 그동안 멈춰 화면이 굳는다.
     """
-    from webview.platforms.winforms import BrowserView
-
     deadline = time.time() + timeout
     while time.time() < deadline:
-        inst = BrowserView.instances.get(getattr(window, 'uid', 'master'))
-        browser = getattr(inst, 'browser', None) if inst else None
-        wv = getattr(browser, 'webview', None) if browser else None
-        core = getattr(wv, 'CoreWebView2', None) if wv else None
+        core, _err = _run_on_ui(
+            window, lambda i: getattr(getattr(i, 'browser', None), 'webview', None)
+            and i.browser.webview.CoreWebView2)
         if core is not None:
             return core
         time.sleep(0.2)
@@ -67,6 +105,24 @@ def _find_core(window, timeout: float) -> object | None:
 
 
 def _attach(window, timeout: float) -> None:
+    # [🔴 순서가 전부다 — 실측 2026-08-15] pywebview 는 `webview.start()` 안에서
+    #   platforms.edgechromium 을 import 하고, **그 모듈이** clr.AddReference 로 WebView2
+    #   어셈블리를 로드한다(edgechromium.py:36-37). 이 스레드는 create_window 직후에
+    #   시작되므로 그 시점엔 어셈블리가 아직 없다 → `from Microsoft...` 가 **항상**
+    #   ImportError 를 내고 배선을 통째로 건너뛴다. 로그에는 '바인딩 없음' 한 줄만 남고
+    #   마이크는 조용히 죽는다(getUserMedia 가 허용도 거부도 못 받아 매달림 — 이 파일
+    #   헤더 참조). 창이 실제로 뜬 뒤라면 어셈블리는 확실히 로드돼 있다.
+    # [WHY events.loaded 인가] 순수 threading.Event 라 크로스스레드 대기가 안전하다.
+    #   WebView2 객체를 미리 건드려 확인하려 들면 STA 스레드와 교착한다(webview_health 헤더).
+    deadline = time.time() + timeout
+    try:
+        if not window.events.loaded.wait(timeout):
+            print('[voice] 마이크 권한 배선 생략 — 창이 끝내 뜨지 않음')
+            return
+    except Exception as e:                                    # noqa: BLE001
+        print(f'[voice] 마이크 권한 배선 생략 (loaded 이벤트 없음: {e})')
+        return
+
     try:
         from Microsoft.Web.WebView2.Core import (            # type: ignore[import-not-found]
             CoreWebView2PermissionKind,
@@ -78,7 +134,7 @@ def _attach(window, timeout: float) -> None:
         print(f'[voice] 마이크 권한 배선 생략 (WebView2 바인딩 없음: {e})')
         return
 
-    core = _find_core(window, timeout)
+    core = _find_core(window, max(5.0, deadline - time.time()))
     if core is None:
         print('[voice] 마이크 권한 배선 실패 — CoreWebView2 를 못 찾음 (음성 입력 불가)')
         return
@@ -96,12 +152,18 @@ def _attach(window, timeout: float) -> None:
             # 앱이 꺼지는 것은 비교 대상이 아니다.
             pass
 
-    try:
+    # [🔴] 이벤트 구독도 CoreWebView2 를 만지는 일이라 UI 스레드에서 해야 한다.
+    #   읽기만 UI 스레드로 옮기고 등록을 백그라운드에서 하면 같은 예외로 되돌아간다.
+    def _subscribe(_inst):
         core.PermissionRequested += EventHandler[CoreWebView2PermissionRequestedEventArgs](
             on_permission)
+        return True
+
+    ok, err = _run_on_ui(window, _subscribe)
+    if ok:
         print('[voice] 마이크 권한 배선 완료 (WebView2 PermissionRequested)')
-    except Exception as e:                                    # noqa: BLE001
-        print(f'[voice] 마이크 권한 배선 실패: {e} (음성 입력 불가)')
+    else:
+        print(f'[voice] 마이크 권한 배선 실패: {err} (음성 입력 불가)')
 
 
 def enable_microphone(window, timeout: float = 30.0) -> None:

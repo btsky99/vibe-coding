@@ -42,14 +42,20 @@ export default function VoiceSettings({ onClose }: Props) {
     return () => document.removeEventListener('mousedown', onDown);
   }, [onClose]);
 
-  // 목록이 아직 비었으면 채워질 때까지 다시 묻는다.
-  // [WHY 필요한가] 사이드카 첫 기동은 수십 초다. 한 번만 묻고 말면 패널은 '목소리 없음'인
-  //   채로 굳고, 사용자는 닫았다 여는 것 말고는 할 수 있는 게 없다.
+  // 엔진이 준비될 때까지 다시 묻는다.
+  // [WHY 필요한가] 사이드카 첫 기동은 수십 초다. 한 번만 묻고 말면 패널은 준비 안 된
+  //   상태로 굳고, 사용자는 닫았다 여는 것 말고는 할 수 있는 게 없다.
+  // [🔴 종료 조건이 voices 면 안 된다 — 사고 2026-08-15] 서버의 /status 는 목소리 목록을
+  //   **엔진 로딩과 무관하게 즉시** 준다(voice_server.py: list_voices() 는 상태를 안 봄).
+  //   반면 ready 는 STT/TTS 예열이 끝나야 true 다. 종료 조건을 voices.length 로 두면
+  //   첫 응답에서 목록이 차는 순간 폴링이 멈추고, 뒤늦게 온 ready=true 를 영영 못 받아
+  //   화면이 '음성 엔진 준비 중…' 에 **영구 고착**됐다(백엔드는 정상인데 화면만 거짓말).
+  //   표시가 보는 값(ready)과 폴링이 멈추는 값이 같아야 한다.
   useEffect(() => {
-    if (v.voices.length > 0) return;
+    if (v.ready) return;
     const t = setInterval(() => { void voiceBus.checkReady(); }, 3000);
     return () => clearInterval(t);
-  }, [v.voices.length]);
+  }, [v.ready]);
 
   const current = v.voice || (v.voices[0]?.id ?? '');
 
