@@ -80,6 +80,7 @@ import AgentSelectCards from './terminal/AgentSelectCards';
 // [2026-07-24] QuotaBadge 컴포넌트 헤더에서 제거 — 타입(AgentQuotaInfo)만 인터페이스용으로 유지.
 import { type AgentQuotaInfo } from './terminal/QuotaBadge';
 import VoiceBar from './terminal/VoiceBar';
+import MicPressButton from './terminal/MicPressButton';
 import { useVoiceSlot } from '../hooks/useVoice';
 import MonitorView from './terminal/MonitorView';
 
@@ -153,6 +154,8 @@ export default function TerminalSlot({
   const [hasAttachedTerminal, setHasAttachedTerminal] = useState(false);
   const [activeAgent, setActiveAgent] = useState('');
   const [inputValue, setInputValue] = useState('');
+  /** '지우기'로 날린 직전 입력. [WHY] 되돌릴 수 없는 삭제 단추는 오누름 한 번에 긴 지시를 잃는다. */
+  const [clearedText, setClearedText] = useState('');
   const [shortcuts, setShortcuts] = useState<Shortcut[]>(() => {
     try {
       const saved = localStorage.getItem('hive_shortcuts');
@@ -661,6 +664,18 @@ export default function TerminalSlot({
     return true;
   };
 
+  // 전송창은 한 줄로 시작해 내용만큼만 자란다.
+  // [🔴 rows 를 2로 고정하지 않는 이유] 보드처럼 한 줄짜리 전송창이 기본이지만, 붙여넣기로
+  //   들어온 여러 줄을 한 줄 창에 가두면 무엇을 보내는지 안 보인다. 상한(max-h-28)까지만
+  //   자라고 그 뒤로는 스크롤한다. 값이 어디서 들어오든(음성·슬래시·단축어) 같이 동작해야
+  //   하므로 onChange 가 아니라 inputValue 를 보고 맞춘다.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
+  }, [inputValue]);
+
   // [음성] 이 슬롯을 음성 대상 후보로 등록한다.
   // [🔴 등록만 하고 마이크를 열지 않는다] 마이크는 앱 전체에 하나뿐이고(lib/voiceBus),
   //   여는 시점은 사용자가 VoiceBar 를 누를 때다. 슬롯마다 열면 장치 경합으로 전부 죽는다.
@@ -848,10 +863,15 @@ export default function TerminalSlot({
                 </button>
               ))}
             </div>
-            <div className="flex gap-2 items-end relative">
+            {/* 전송창 — 아픽스 보드와 같은 한 줄 배치: [🎤][입력][지우기][보내기]
+                [🔴 🎤 가 입력줄에 붙어야 하는 이유] 말하는 것과 치는 것은 같은 일(지시
+                  넣기)의 두 방법이다. 멀리 떼어 두면 다른 기능으로 읽힌다. */}
+            <div className="flex gap-1.5 items-end relative">
+              <MicPressButton terminalId={terminalId} iconOnly />
               <textarea
                 ref={inputRef}
                 value={inputValue}
+                enterKeyHint="send"
                 onChange={e => setInputValue(e.target.value)}
                 onContextMenu={e => {
                   // [WHY] 기본 메뉴(맥 WKWebView는 자동완성만 노출) 차단 후 커스텀 메뉴 오픈.
@@ -892,9 +912,9 @@ export default function TerminalSlot({
                     }
                   }
                 }}
-                placeholder="터미널 명령어 전송 (한글 완벽 지원, 엔터:전송, 쉬프트+엔터:줄바꿈)..."
-                rows={2}
-                className="flex-1 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-2 text-xs focus:outline-none focus:border-primary text-white resize-none custom-scrollbar leading-relaxed"
+                placeholder="시킬 일을 적으세요…  (엔터: 보내기, 시프트+엔터: 줄바꿈)"
+                rows={1}
+                className="peer flex-1 min-h-[34px] max-h-28 bg-[#1e1e1e] border border-white/10 hover:border-white/30 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-primary text-white resize-none custom-scrollbar leading-relaxed"
               />
               <SlashCommandMenu
                 activeAgent={activeAgent}
@@ -902,11 +922,35 @@ export default function TerminalSlot({
                 setShowSlashMenu={setShowSlashMenu}
                 onSelect={(cmd) => setInputValue(cmd + ' ')}
               />
+              {/* 지우기.
+                  [🔴 비었을 때 감추는 일은 CSS 가 한다 — JS 금지] peer-placeholder-shown.
+                    JS 로 판단하면 값을 넣는 모든 경로(음성 받아쓰기·슬래시 메뉴·단축어·
+                    붙여넣기)에서 갱신을 불러야 하고, 한 곳만 빠뜨리면 단추가 남는다.
+                  [🔴 되돌리기를 붙인다] 긴 지시를 한 번에 날리는 단추다. 오누름으로 잃는
+                    것이 불편보다 크다 — 지운 것은 버리지 않고 들고 있는다. */}
+              <button
+                type="button"
+                onClick={() => { setClearedText(inputValue); setInputValue(''); inputRef.current?.focus(); }}
+                title="입력 지우기"
+                className="peer-placeholder-shown:hidden h-[34px] px-2.5 rounded border border-white/10 bg-[#3c3c3c] hover:bg-white/10 text-white/60 text-xs shrink-0"
+              >
+                지우기
+              </button>
+              {clearedText && (
+                <button
+                  type="button"
+                  onClick={() => { setInputValue(clearedText); setClearedText(''); inputRef.current?.focus(); }}
+                  title={`방금 지운 것을 되돌립니다: ${clearedText.slice(0, 40)}`}
+                  className="hidden peer-placeholder-shown:flex items-center h-[34px] px-2.5 rounded border border-amber-400/40 bg-amber-400/10 hover:bg-amber-400/20 text-amber-200/90 text-xs shrink-0"
+                >
+                  되돌리기
+                </button>
+              )}
               <button
                 onClick={() => handleSend(inputValue)}
-                className="px-4 py-2 bg-primary/80 hover:bg-primary text-white rounded text-xs font-bold transition-colors shadow-sm"
+                className="h-[34px] px-4 bg-primary/80 hover:bg-primary text-white rounded text-xs font-bold transition-colors shadow-sm shrink-0"
               >
-                전송
+                보내기
               </button>
             </div>
           </div>
@@ -1086,6 +1130,9 @@ export default function TerminalSlot({
             terminalId={terminalId}
             wakeWord={wakeWord || ''}
             onWakeWordChange={onWakeWordChange}
+            // 전송창이 있는 화면에서는 🎤 가 그쪽에 붙는다(보드와 같은 자리).
+            // 없는 화면에서는 이 막대가 그린다 — 어느 화면에서도 마이크가 사라지지 않게.
+            showMic={!isTerminalMode}
           />
         </div>
       )}
