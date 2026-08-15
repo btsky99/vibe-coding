@@ -45,7 +45,13 @@ _TABLES = {
         #   대화 기록이다 — pg_logs에 이미 있고 회상으로 다시 볼 이유가 없다.
         # [WHY 삭제가 아니라 조회 차단] 오판이면 되돌려야 한다. 필터 한 줄을 빼면
         #   즉시 복구되지만 DELETE는 되돌릴 수 없다.
+        # [🔴🔴 과거사고 2026-08-15] 여기에 archived 조건이 없어서 **아카이브가 무력했다.**
+        #   zettel_refine·knowledge_extract·wiki_index 가 낡은 노트를 archived=true 로
+        #   치워도 회상은 그대로 물어왔다. 실측: 3468건을 아카이브한 뒤에도 "테스트 커밋"
+        #   같은 빈 노트가 상위에 뜸. 아카이브를 '삭제 대신 되돌릴 수 있는 조치'로 설계해
+        #   놓고 정작 그 조치가 아무 효과가 없던 것이다 — 정리 작업 전체가 헛돌았다.
         'quality': ("length(coalesce(title,'') || coalesce(content,'')) >= 30 "
+                    "AND NOT coalesce(archived, false) "
                     "AND coalesce(source_ref, '') <> 'session-summary'"),
         # [WHY min_sim 없음] 예전엔 여기에 0.58을 박아 호출자가 넘긴 0.45를 막았다.
         #   그 우회는 vector_search의 `max()`가 _FLOOR를 비교 대상에서 빠뜨린 버그
