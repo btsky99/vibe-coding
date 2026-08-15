@@ -111,6 +111,9 @@ REVISION HISTORY:
 
 ## 🗂️ 세부 규칙 (자동 로드되는 보조 파일)
 
+- [`.claude/rules/wiki.md`](.claude/rules/wiki.md) — **지식 창고 `wiki/` 작성 규약**. 새 사실을
+  알게 되면 새 페이지가 아니라 **기존 페이지를 고친다**(규칙 1). 세션 요약·세션 캐시는
+  위키에 넣지 않는다 — 백과사전과 작업기억은 층이 다르다
 - [`.claude/rules/lessons.md`](.claude/rules/lessons.md) — 증류된 세션 교훈 (lesson.py approve로만 추가)
 - [`.claude/rules/architecture.md`](.claude/rules/architecture.md) — 아키텍처 + 데이터 흐름
 - [`.claude/rules/commit-rules.md`](.claude/rules/commit-rules.md) — 커밋 메시지 상세
