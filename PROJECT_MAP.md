@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 12:38
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 14:32
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 44개 · 미푸시 26커밋
+- **브랜치**: `main` · 미커밋 45개 · 미푸시 30커밋
 - **최근 커밋**
+  - `48219b3` 2026-08-15 — feat(voice): 낭독을 브라우저 내장 합성기 우선으로 — '준비 중' 대기 제거
+  - `a0d69f2` 2026-08-15 — fix(voice): '음성 엔진 준비 중'이 안 풀리고 마이크가 죽어 있던 문제 — 원인 2개
+  - `8596fc5` 2026-08-15 — fix(webview): 앱이 '응답 없음'으로 멎던 자책 사고 — 감시가 STA 스레드와 교착
+  - `4fde303` 2026-08-15 — fix(webview): 하얀 창에 갇혀 재실행조차 막히던 사고 — 감시·진단·탈출로 확보
   - `ddc4b54` 2026-08-15 — chore(rule10): 콘솔 창 감시기 + 규칙 10 정적 감사 도구
-  - `6e906e7` 2026-08-15 — fix(voice): 음성 조작줄이 어긋나 보이던 문제 — 높이 통일 + 세 묶음으로 정렬
-  - `7d0038c` 2026-08-15 — feat(zettel): 볼트 파일명에서 note_id 접두 제거 — 이름순 정렬이 무작위이던 문제
-  - `bb07263` 2026-08-15 — fix(voice): '음성 엔진 준비 중'에서 안 넘어가던 사고 — stdout 파이프 데드락
-  - `7532e70` 2026-08-15 — feat(wiki): 지식 백과사전 패널 — 상태·즉시 갱신·2단계 초기화 (W11)
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -28,15 +28,15 @@
   - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
-- **음성 설정이 '음성 엔진 준비 중…'에서 안 넘어감 (TTS 로딩 실패: [Errno 22] Invalid argument)**
-  - 원인: voice_api._spawn_sidecar가 stdout=PIPE로 사이드카를 띄우는데 부모(server.py)가 읽어주는 스레드가 없어 파이프 버퍼가 차 자식이 멈춤. 지문=CPU 0.03초·리슨 포트 0개·프로세스는 살아있음. 게다가 _spawned=True 플래
-  - 수정: stdout을 voice-server/voice-server.log 파일로 리다이렉트(DEVNULL 아님 — 콘솔 없는 자식이라 버리면 진단 불가), stdin=DEVNULL(부모 pythonw는 stdin 핸들 무효), _spawned bool → _proc Pope
-- **마이크 모양이 화면에 아예 없다 (음성 기능 커밋 후)**
-  - 원인: 원인 2개. (1) 프론트 dist 를 빌드하지 않아 앱이 옛 번들을 서빙 — dist 에 '호출어' 문자열 0건. (2) VoiceBar 를 터미널 입력줄 안쪽에 뒀는데 그 입력줄은 isTerminalMode 일 때만 존재 — 에이전트 선택 카드 화면에서는 음성 UI
-  - 수정: npm run build 로 dist 갱신 + VoiceBar 를 슬롯 최하단(isTerminalMode 밖)으로 이동해 항상 렌더
-- **음성 사이드카 /status 가 404 를 돌려주고 목소리/마이크가 동작 안 함**
-  - 원인: VOICE_PORT 9021 이 LAN 브리지와 충돌. 포트 지도의 '다음 빈 자리'를 잡았는데 LAN 브리지는 한 자리가 아니라 인스턴스마다 9020,9021,.. 로 번진다. status 요청이 LAN 브리지로 가 404
-  - 수정: VOICE_PORT 9021 -> 9030 (voice_api.py + voice_server.py 양쪽). 포트 지도의 다음 자리는 안전하지 않다는 주석 추가
+- **음성 설정이 '음성 엔진 준비 중'에서 안 넘어감**
+  - 원인: 낭독 경로가 사이드카 하나뿐(첫 기동 ~2분) + 준비 상태 재조회가 '목소리' 팝오버 안 3초 폴링뿐이라 팝오버를 닫으면 ready=true 를 영영 못 받아 표시가 고착
+  - 수정: 브라우저 내장 합성기 우선 경로 신설(lib/browserVoice.ts) + 준비 폴링을 voiceBus.ensureSidecar 로 이관 + ready 를 '읽어 줄 수 있는가'로 재정의(sttReady 분리) — 48219b3
+- **음성 설정이 '음성 엔진 준비 중…'에 영구 고착 + 마이크 입력 무동작 (백엔드는 ready:true 정상)**
+  - 원인: 원인 2개. (1) VoiceSettings 폴링 종료 조건이 v.voices.length인데 표시 조건은 v.ready — 서버 /status는 list_voices()를 엔진 로딩과 무관하게 즉시 주므로 첫 응답에서 목록이 차는 순간 폴링이 멈추고 뒤늦은 ready
+  - 수정: (1) 폴링 종료 조건을 v.ready로 통일 — 표시가 보는 값과 폴링이 멈추는 값을 일치시킴. (2) 배선을 events.loaded 이후로 미루고, CoreWebView2 읽기/이벤트 구독을 모두 inst.Invoke(Func[Type])로 UI 스레드에서 실행.
+- **앱 실행 시 창이 '응답 없음' — 부팅이 스플래시 단계에서 완전 정지**
+  - 원인: 자책 사고. 직전 커밋 4fde303의 webview_health가 BrowserView.instances→browser.webview.CoreWebView2를 0.2초마다 폴링했는데, WebView2는 WinForms 컨트롤이라 창을 만든 STA 스레드 전용이다. 다
+  - 수정: 감시 방식을 window.events.loaded.wait(45s)로 교체 — 순수 threading.Event라 크로스스레드 안전하고 '엔진이 붙어 페이지가 실제 떴는가'를 더 정확히 판정. webview_permissions의 동일 폴링에는 위험 경고 주석 추가
 
 🔨 = 최근 7일 내 변경된 파일
 
@@ -171,7 +171,7 @@
 ### 인프라 계층 (.ai_monitor/infra/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `app_boot.py` 🔨 | 448 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
+| `app_boot.py` 🔨 | 473 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
 | `daemons.py` 🔨 | 1065 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
@@ -192,8 +192,8 @@
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
 | `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
 | `voice_turn.py` 🔨 | 113 | 음성 낭독용 '턴 채널' 저장소 — Stop 훅이 쓰고 /api/voice/turn 이 읽는다. |
-| `webview_health.py` 🔨 | 196 | WebView2 엔진이 창에 실제로 붙었는지 감시. 안 붙으면 원인을 진단해 알리고 |
-| `webview_permissions.py` 🔨 | 92 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
+| `webview_health.py` 🔨 | 196 | WebView2 엔진이 창에 실제로 붙었는지 감시하고, 안 붙었으면 원인을 진단해 |
+| `webview_permissions.py` 🔨 | 178 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
 | `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
 
 ### 음성 사이드카 (.ai_monitor/voice-server/) — 별도 프로세스·별도 venv
@@ -395,18 +395,19 @@
 | `SlashCommandMenu.tsx` | 66 | 터미널 입력 영역의 슬래시 커맨드(`/`) 드롭다운 — 카테고리별 |
 | `TerminalSlotHeader.tsx` 🔨 | 189 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
 | `VoiceBar.tsx` 🔨 | 239 | 설명: 터미널 슬롯 입력줄 옆의 음성 조작부 — 마이크 버튼, 상시 대기 토글, |
-| `VoiceSettings.tsx` 🔨 | 136 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
+| `VoiceSettings.tsx` 🔨 | 139 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
 | `xtermSelection.ts` | 107 | 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸. |
 
 ### 공용 로직 (lib/)
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `audioCapture.ts` 🔨 | 242 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
+| `browserVoice.ts` 🔨 | 168 | 설명: 브라우저(WebView2) 내장 합성기로 읽는 길. 서버 사이드카 없이 즉시 말한다. |
 | `clipboard.ts` | 63 | 설명: 클립보드 읽기/쓰기 공용 헬퍼 — pywebview 네이티브 브리지 우선, navigator.clipboard 폴백. |
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
 | `speech.ts` 🔨 | 236 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` 🔨 | 438 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `voiceBus.ts` 🔨 | 563 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -503,4 +504,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 12:38
+> 자동 생성 완료: 2026-08-15 14:32
