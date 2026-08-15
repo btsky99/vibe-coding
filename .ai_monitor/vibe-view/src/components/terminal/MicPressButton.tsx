@@ -16,6 +16,7 @@
  * ------------------------------------------------------------------------
  */
 
+import { useRef } from 'react';
 import { Mic, Loader2 } from 'lucide-react';
 import { voiceBus } from '../../lib/voiceBus';
 import { useVoiceState } from '../../hooks/useVoice';
@@ -30,27 +31,46 @@ interface Props {
 
 export default function MicPressButton({ terminalId, iconOnly, className = '' }: Props) {
   const v = useVoiceState();
-  const hot = v.target === terminalId && v.speaking;
+  /** 이미 누르고 있는가. [WHY] 마우스와 터치가 같이 잡히거나 pointerdown 이 두 번 오는
+   *  기기가 있다. 두 번 눌리면 두 번째가 첫 번째의 담고 있던 것을 버린다. */
+  const holding = useRef(false);
+  const isMine = v.target === terminalId;
+  const hot = isMine && (v.pressing || v.speaking);
+
+  const press = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (holding.current) return;
+    holding.current = true;
+    // [🔴 포인터를 이 단추에 붙들어 둔다] 누른 채로 커서가 밖으로 나가면 pointerup 이
+    //   다른 요소에서 발생해 여기로 안 온다. 그러면 단추가 눌린 채로 굳고 마이크가
+    //   열린 상태로 남는다 — 가장 나쁜 상태다.
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 구형 엔진 */ }
+    void voiceBus.pressToTalk(terminalId);
+  };
+
+  const release = () => {
+    if (!holding.current) return;
+    holding.current = false;
+    voiceBus.releaseToTalk();                    // 손을 뗀 것이 곧 '말을 마쳤다'다
+  };
 
   return (
     <button
       type="button"
       aria-label="누르고 말하기"
+      aria-pressed={hot}
       title="누르고 있는 동안 듣습니다. 손을 떼면 그대로 보냅니다"
-      onPointerDown={(e) => {
-        e.preventDefault();
-        // [🔴 포인터를 이 단추에 붙들어 둔다] 누른 채로 커서가 밖으로 나가면 pointerup 이
-        //   다른 요소에서 발생해 여기로 안 온다. 그러면 단추가 눌린 채로 굳고 마이크가
-        //   열린 상태로 남는다 — 가장 나쁜 상태다.
-        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-        void voiceBus.pressToTalk(terminalId);
-      }}
-      onPointerUp={() => voiceBus.releaseToTalk()}
-      onPointerCancel={() => voiceBus.releaseToTalk()}
+      onPointerDown={press}
+      onPointerUp={release}
+      onPointerCancel={release}
+      // 캡처를 빼앗겼는데 up/cancel 이 안 오는 경우까지 막는다(브라우저마다 다르다).
+      onLostPointerCapture={release}
+      // 길게 누르면 뜨는 기본 메뉴가 포인터를 가로채 '뗀 적 없는 누름'을 만든다.
+      onContextMenu={(e) => e.preventDefault()}
       className={`shrink-0 flex items-center justify-center gap-1 rounded border transition-colors
                   select-none touch-none ${
                     hot
-                      ? 'bg-red-500/30 border-red-400/60 text-red-200'
+                      ? 'bg-red-500/30 border-red-400/60 text-red-200 animate-pulse'
                       : 'bg-[#3c3c3c] border-white/10 hover:bg-white/10 text-white/70'
                   } ${iconOnly ? 'h-[34px] w-[34px]' : 'h-[25px] px-2 text-[10px]'} ${className}`}
     >

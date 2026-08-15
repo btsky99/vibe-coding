@@ -17,9 +17,10 @@ import {
 import { FaWindows } from 'react-icons/fa';
 import { VscJson, VscFileMedia, VscArchive, VscFile } from 'react-icons/vsc';
 
-// 현재 접속 포트 기반으로 API/WS 주소 자동 결정
-export const API_BASE = `http://${window.location.hostname}:${window.location.port}`;
-export const WS_PORT = parseInt(window.location.port) + 1;
+// 주소 계산은 lib/apiBase.ts 가 갖는다. 여기서는 그대로 다시 내보내기만 한다 —
+// [WHY] 이 파일은 react-icons 를 끌고 온다. 순수 로직 모듈이 주소 한 줄 때문에 아이콘
+//   트리 전체에 묶이면 브라우저 밖에서 계측할 수 없다(apiBase.ts 헤더 참조).
+export { API_BASE, WS_PORT } from './lib/apiBase';
 
 // ─── 파일 확장자별 아이콘 반환 함수 ───────────────────────────────────────
 // 파일 탐색기, 플로팅 윈도우, 터미널 슬롯 등 여러 곳에서 공통 사용

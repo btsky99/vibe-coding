@@ -82,6 +82,7 @@ import { type AgentQuotaInfo } from './terminal/QuotaBadge';
 import VoiceBar from './terminal/VoiceBar';
 import MicPressButton from './terminal/MicPressButton';
 import { useVoiceSlot } from '../hooks/useVoice';
+import { voiceBus } from '../lib/voiceBus';
 import MonitorView from './terminal/MonitorView';
 
 // 파이프라인 단계 정의는 이제 ActivityBar로 통합되었습니다.
@@ -784,7 +785,17 @@ export default function TerminalSlot({
 
   return (
     // h-full: 그리드 셀 높이를 명시적으로 채워야 flex 자식들이 올바른 높이를 전달받음
-    <div className={`h-full min-w-0 min-h-0 bg-[#252526] ${ringClass} rounded-md flex flex-col overflow-hidden shadow-inner relative transition-all duration-700`}>
+    // [음성 소유권] 이 슬롯 안 어디든 만지면(터미널 클릭·입력창 포커스) 이 슬롯이
+    //   마이크·스피커의 임자가 된다. 장치는 하나뿐이라 임자를 한 곳에서 정해야 한다
+    //   (lib/voiceBus.ts claim 주석). 클릭이 아니라 **포커스**를 보는 이유: xterm 은
+    //   숨은 textarea 로 포커스를 받으므로 터미널 본문 클릭도 여기로 올라온다.
+    // [WHY 캡처 단계인가] 포커스 이벤트는 버블링하지 않는다(focusin 만 한다). React 의
+    //   onFocus 는 합성 이벤트라 버블처럼 보이지만, 캡처로 잡아야 자식이 먼저 멈추는
+    //   경우까지 확실히 받는다.
+    <div
+      onFocusCapture={() => voiceBus.claim(terminalId)}
+      onPointerDownCapture={() => voiceBus.claim(terminalId)}
+      className={`h-full min-w-0 min-h-0 bg-[#252526] ${ringClass} rounded-md flex flex-col overflow-hidden shadow-inner relative transition-all duration-700`}>
       {/* 터미널 헤더 — terminal/TerminalSlotHeader.tsx로 분리 (2026-08-09, Phase 11 Task 38) */}
       <TerminalSlotHeader
         displayName={displayName}

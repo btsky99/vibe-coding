@@ -29,7 +29,7 @@
  * ------------------------------------------------------------------------
  */
 
-import { API_BASE } from '../constants';
+import { API_BASE } from './apiBase';
 import { MicCapture } from './audioCapture';
 import {
   browserTtsAvailable, browserVoiceOptions, cancelBrowserSpeech,
@@ -53,6 +53,14 @@ export interface VoiceState {
   enabled: boolean;
   /** 지금 사람이 말하는 중인가(VAD 판정). */
   speaking: boolean;
+  /**
+   * 지금 마이크 단추를 누르고 있는가.
+   *
+   * [🔴 speaking 과 다르다] speaking 은 소리가 문턱을 넘었을 때만 true 다. 그것만으로
+   *   단추를 칠하면, 누르고 숨을 고르는 동안 단추가 꺼져 보여 사람이 '안 눌렸나' 하고
+   *   손을 뗀다. 누르고 있다는 사실 자체를 따로 들고 있어야 한다.
+   */
+  pressing: boolean;
   /** 입력 레벨 0~1 — 마이크가 살아 있음을 눈으로 확인하는 유일한 수단. */
   level: number;
   /** 서버가 인식/합성 중인가. */
@@ -114,6 +122,7 @@ class VoiceBus {
   private state: VoiceState = {
     enabled: false,
     speaking: false,
+    pressing: false,
     level: 0,
     busy: false,
     playing: false,
@@ -161,6 +170,11 @@ class VoiceBus {
    */
   private lastInputWasVoice = false;
   private followTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 누름 한 번을 가리키는 일련번호. 마이크가 열리기를 기다리는 동안 뗐는지 가른다. */
+  private pressToken = 0;
+  private pressWatchdog: ReturnType<typeof setTimeout> | null = null;
+  /** 창이 숨어 마이크를 접었다 — 돌아오면 다시 열어야 하는가. */
+  private reopenOnVisible = false;
   /** 사이드카가 준 목소리. 브라우저 목소리와 합쳐 state.voices 가 된다. */
   private serverVoices: VoiceOption[] = [];
   /** 사이드카가 /status 로 한 번이라도 답했는가. 저장된 목소리 판정의 전제. */
@@ -174,6 +188,45 @@ class VoiceBus {
     //   사이드카는 사용자가 음성을 만진 뒤에 ensureSidecar() 로 부른다.
     this.refreshVoices();
     watchBrowserVoices(() => this.refreshVoices());
+    this.bindGuards();
+  }
+
+  /**
+   * '켜진 채 잊히는 마이크'를 만들지 않기 위한 전역 안전장치.
+   *
+   * [🔴 왜 컴포넌트가 아니라 여기인가] 마이크를 소유한 것은 이 버스다. 단추 쪽에 걸면
+   *   그 단추가 언마운트되는 순간(슬롯 전환·화면 이동) 감시가 같이 사라진다 — 정작
+   *   마이크는 살아 있는데.
+   * [🔴 blur 와 숨김을 나눠 다룬다] 다른 창을 클릭한 것(blur)은 '누르던 손이 떠났다'는
+   *   뜻이므로 누름만 끝낸다. 창이 아예 숨은 것(visibilitychange)은 다르다 — 보이지도
+   *   않는 창이 계속 듣고 있으면 안 되므로 장치를 접는다. 다시 보이면 되살린다.
+   *   [WHY 체크를 끄지 않고 접기만 하나] 최소화했다고 사용자의 설정을 몰래 바꾸면,
+   *   돌아왔을 때 왜 꺼졌는지 알 수 없다. 설정은 두고 장치만 접는다.
+   */
+  private bindGuards(): void {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    window.addEventListener('blur', () => this.releaseToTalk());
+    window.addEventListener('pagehide', () => this.releaseToTalk());
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.releaseToTalk();
+        this.stopSpeaking();                    // 숨은 창이 혼자 떠들지 않게
+        if (this.mic) {
+          this.reopenOnVisible = this.state.enabled;
+          this.mic.stop();
+          this.mic = null;
+          this.set({ speaking: false, level: 0 });
+        }
+        return;
+      }
+      if (this.reopenOnVisible && this.state.enabled) {
+        this.reopenOnVisible = false;
+        // [제약] 사용자 제스처 밖이지만 권한은 이미 받아 둔 출처라 다시 열린다.
+        void this.openMic();
+      }
+    });
   }
 
   /**
@@ -330,6 +383,31 @@ class VoiceBus {
     }
   }
 
+  /* ── 소유권 ──────────────────────────────────────────────────────────── */
+
+  /**
+   * 이 슬롯이 지금 마이크·스피커의 임자다.
+   *
+   * [🔴 물리적 제약을 먼저 인정한다] 터미널은 여럿인데 마이크와 스피커는 하나뿐이다.
+   *   '완전히 따로'는 불가능하므로 규칙을 하나로 못 박는다 — **지금 활성 터미널이
+   *   마이크·스피커를 소유한다.** 대화 내용과 '어디로 보낼지'는 슬롯별, 장치는 한 개.
+   * [🔴 새 구조를 만들지 않는다] 임자는 이미 있던 state.target 그대로다. 여기서는
+   *   '누가 임자인지 바뀌는 순간에 무엇을 정리하는가'만 정한다.
+   * [🔴 바뀌면 읽던 것을 멈춘다] 안 멈추면 T1 을 떠났는데 T1 의 답이 계속 들린다 —
+   *   사용자는 지금 화면(T2)과 들리는 말이 어긋나 무슨 말인지 알 수 없다.
+   * [제약] 누르는 중에는 소유권을 넘기지 않는다. 그 손이 임자다.
+   */
+  claim(slotId: string): void {
+    if (!slotId || this.pressSlot) return;
+    if (this.state.target === slotId) return;
+    this.stopSpeaking();
+    this.followUntil = 0;
+    this.lastInputWasVoice = false;
+    this.pendingPress = null;                   // 앞 슬롯으로 가려던 말은 여기서 끊는다
+    if (this.followTimer) { clearTimeout(this.followTimer); this.followTimer = null; }
+    this.set({ target: slotId, message: '' });
+  }
+
   /* ── 누르고 말하기 ───────────────────────────────────────────────────── */
 
   /**
@@ -340,17 +418,60 @@ class VoiceBus {
    *   상시 청취가 된다. 누르는 동안만 열고, 떼면 닫는다(상시 대기가 켜져 있으면 유지).
    */
   async pressToTalk(slotId: string): Promise<void> {
+    const token = ++this.pressToken;
     this.pressSlot = slotId;
     this.pendingPress = slotId;
     this.pendingPressAt = Date.now();
-    this.set({ target: slotId, message: '듣는 중…' });
+    // pressing 은 마이크가 열리기를 기다리는 동안에도 켜 둔다 — 사람은 누른 즉시 반응을 본다.
+    this.set({ target: slotId, pressing: true, message: '듣는 중…' });
+    this.armPressWatchdog();
+
     const ok = await this.openMic();
-    if (!ok) { this.pressSlot = null; this.pendingPress = null; return; }
+
+    // [🔴 기다리는 사이에 손을 뗐을 수 있다 — 이걸 안 보면 마이크가 열린 채 남는다]
+    //   openMic 은 getUserMedia 를 기다린다(권한창이 뜨면 몇 초). 짧게 톡 누르면
+    //   release 가 **먼저** 끝나고, 그 뒤에 여기가 이어져 beginHold 를 건다. 그러면
+    //   아무도 뗀 적이 없는 hold 상태가 되어 계속 듣는다. 토큰으로 그 사이를 가른다.
+    if (token !== this.pressToken || this.pressSlot !== slotId) {
+      if (ok) { this.mic?.releaseHold(); this.closeMicIfIdle(); }
+      this.set({ pressing: false });
+      return;
+    }
+    if (!ok) {
+      this.pressSlot = null;
+      this.pendingPress = null;
+      this.clearPressWatchdog();
+      this.set({ pressing: false });
+      return;
+    }
     // [제약] 낭독 중이면 뮤트 상태다 — 사람이 버튼을 눌렀다는 것은 지금 말을 자르고
     //   자기가 말하겠다는 뜻이다. 읽던 것을 멈추고 귀를 연다.
     if (this.state.playing) this.stopSpeaking();
     this.mic?.setMuted(false);
+    // [🔴 호출어 대기와 겹치지 않게 한다 — 보드의 stopWake() 자리] 이 앱은 인식기가
+    //   하나라(MicCapture 싱글턴) 장치를 두고 다툴 일이 없다. 대신 VAD 가 이미 담고
+    //   있던 조각을 beginHold 가 버린다 — 누르기 직전에 들린 주변 말이 내 지시 앞에
+    //   붙는 것을 막는다. 뗀 뒤에는 자동으로 VAD 로 돌아간다.
     this.mic?.beginHold();
+  }
+
+  /**
+   * 누른 채로 잊힌 단추에서 마이크를 되찾는다.
+   *
+   * [🔴 pointerup 이 영영 안 오는 경우가 있다] 창이 사라지거나, 포인터 캡처가 다른
+   *   요소로 넘어가거나, 브라우저가 pointercancel 을 안 쏘는 경우다. 그때 사람은
+   *   자기가 여전히 듣히고 있다는 것을 모른다. 30초면 어떤 정상 발화보다 길다.
+   */
+  private armPressWatchdog(): void {
+    this.clearPressWatchdog();
+    this.pressWatchdog = setTimeout(() => {
+      this.pressWatchdog = null;
+      if (this.pressSlot) this.releaseToTalk();
+    }, 30000);
+  }
+
+  private clearPressWatchdog(): void {
+    if (this.pressWatchdog) { clearTimeout(this.pressWatchdog); this.pressWatchdog = null; }
   }
 
   /**
@@ -365,9 +486,12 @@ class VoiceBus {
    */
   releaseToTalk(): void {
     if (!this.pressSlot) return;                // 누른 적 없는 뗌(권한 실패 등)은 무시
+    this.pressToken++;                          // 아직 열리는 중인 press 를 무효로 만든다
+    this.clearPressWatchdog();
     this.pendingPressAt = Date.now();           // 시효는 '뗀 순간'부터 센다
     this.mic?.releaseHold();                    // 여기서 발화가 확정돼 onUtterance 로 간다
     this.pressSlot = null;
+    this.set({ pressing: false, speaking: false });
     this.closeMicIfIdle();
   }
 
@@ -482,7 +606,10 @@ class VoiceBus {
         this.turnSeq.set(slot, seq);
       } else if (seq > known) {
         this.turnSeq.set(slot, seq);
-        await this.speak(String(d?.text || ''));
+        // [🔴 서버를 다녀오는 사이에 임자가 바뀔 수 있다] 그때 그대로 읽으면, 방금 옮겨
+        //   온 화면에서 이전 터미널의 답이 흘러나온다. 읽기 직전에 한 번 더 확인한다.
+        // [제약] 여기서 return 하지 말 것 — 아래 재예약을 건너뛰면 낭독 폴링이 영영 멈춘다.
+        if (this.state.target === slot) await this.speak(String(d?.text || ''));
       }
     } catch {
       // 폴링 실패는 조용히 넘긴다 — 음성이 안 되는 것보다 화면이 빨개지는 게 나쁘다.

@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 15:15
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 15:43
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 10개 · 미푸시 33커밋
+- **브랜치**: `main` · 미커밋 55개 · 미푸시 35커밋
 - **최근 커밋**
+  - `be9c5ac` 2026-08-15 — fix(recall): 무관 회상 차단선이 이미 뚫려 있었다 — 표본 확장 후 0.85→0.86 (W8)
+  - `d30e758` 2026-08-15 — feat(ui): 전송창·음성 막대를 아픽스 보드와 같은 배치로 — [🎤][입력][지우기][보내기] 한 줄
   - `38053dd` 2026-08-15 — feat(wiki): 세션 메모리 98장을 백과사전에 편입 + 링크 정합 (W4·W7)
   - `7ca29da` 2026-08-15 — feat(voice): 음성 조작을 아픽스 보드와 같은 모양으로 — 누르고 말하기·체크 두 개·호출어 직접 지정
   - `aad6c8c` 2026-08-15 — chore(map): PROJECT_MAP 갱신 — browserVoice.ts 등재 + 줄 수 재계산
-  - `48219b3` 2026-08-15 — feat(voice): 낭독을 브라우저 내장 합성기 우선으로 — '준비 중' 대기 제거
-  - `a0d69f2` 2026-08-15 — fix(voice): '음성 엔진 준비 중'이 안 풀리고 마이크가 죽어 있던 문제 — 원인 2개
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -28,15 +28,15 @@
   - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **무관 질의 '오늘 점심 뭐 먹지'가 회상 차단선 0.85를 0.850으로 통과**
+  - 원인: 임계값을 표본 9건으로 정해 아래 여유가 0.003뿐이었고, 위키 1021섹션이 인덱스에 들어오며 그 여유가 소진됨
+  - 수정: 표본을 24건으로 확장 후 재측정하여 _FLOOR 0.86으로 상향 (be9c5ac). sweep 후보 구간도 e5 코사인 띠로 이동
 - **음성 설정이 '음성 엔진 준비 중'에서 안 넘어감**
   - 원인: 낭독 경로가 사이드카 하나뿐(첫 기동 ~2분) + 준비 상태 재조회가 '목소리' 팝오버 안 3초 폴링뿐이라 팝오버를 닫으면 ready=true 를 영영 못 받아 표시가 고착
   - 수정: 브라우저 내장 합성기 우선 경로 신설(lib/browserVoice.ts) + 준비 폴링을 voiceBus.ensureSidecar 로 이관 + ready 를 '읽어 줄 수 있는가'로 재정의(sttReady 분리) — 48219b3
 - **음성 설정이 '음성 엔진 준비 중…'에 영구 고착 + 마이크 입력 무동작 (백엔드는 ready:true 정상)**
   - 원인: 원인 2개. (1) VoiceSettings 폴링 종료 조건이 v.voices.length인데 표시 조건은 v.ready — 서버 /status는 list_voices()를 엔진 로딩과 무관하게 즉시 주므로 첫 응답에서 목록이 차는 순간 폴링이 멈추고 뒤늦은 ready
   - 수정: (1) 폴링 종료 조건을 v.ready로 통일 — 표시가 보는 값과 폴링이 멈추는 값을 일치시킴. (2) 배선을 events.loaded 이후로 미루고, CoreWebView2 읽기/이벤트 구독을 모두 inst.Invoke(Func[Type])로 UI 스레드에서 실행.
-- **앱 실행 시 창이 '응답 없음' — 부팅이 스플래시 단계에서 완전 정지**
-  - 원인: 자책 사고. 직전 커밋 4fde303의 webview_health가 BrowserView.instances→browser.webview.CoreWebView2를 0.2초마다 폴링했는데, WebView2는 WinForms 컨트롤이라 창을 만든 STA 스레드 전용이다. 다
-  - 수정: 감시 방식을 window.events.loaded.wait(45s)로 교체 — 순수 threading.Event라 크로스스레드 안전하고 '엔진이 붙어 페이지가 실제 떴는가'를 더 정확히 판정. webview_permissions의 동일 폴링에는 위험 경고 주석 추가
 
 🔨 = 최근 7일 내 변경된 파일
 
@@ -156,7 +156,7 @@
 | `pg_schema.py` | 828 | 설명: PostgreSQL 스키마 DDL(ensure_schema) + 레거시 JSONL/JSON 마이그레이션 |
 | `pg_store.py` | 127 | 설명: PostgreSQL 저장소 파사드 — 분할된 pg_* 도메인 모듈을 단일 경로로 재노출 |
 | `pg_tasks.py` | 388 | 설명: 하이브 태스크(hive_tasks) CRUD + 원자적 체크아웃 + 코멘트 + 하트비트 + 상태 저장 |
-| `pg_vector_search.py` 🔨 | 362 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
+| `pg_vector_search.py` 🔨 | 364 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
 | `quota_policy.py` | 117 | provider 쿼터 snapshot을 작업 크기 권고로 변환하는 순수 정책 계층. |
 | `recall_client.py` | 83 | 설명: 훅(단명 프로세스)용 회상 클라이언트 — 서버 recall-smart API 우선, |
 | `secure.py` | 59 | 설명: 보안 유틸 — 로그 민감정보 마스킹(API키/Bearer/패스워드 정규식), |
@@ -325,7 +325,7 @@
 | `migrate_vault_pretty_names.py` 🔨 | 156 | 볼트 노트 파일명을 옛 규칙(`{note_id} {제목}`)에서 새 규칙(제목만)으로 1회 개명한다. |
 | `pg_project.py` | 39 | PostgreSQL project DB resolver shared by script-side logging and messaging utilities. |
 | `recall.py` | 51 | 경험 회상 스크립트 — 현재 작업과 유사한 과거 경험을 검색하여 출력. |
-| `recall_quality.py` 🔨 | 128 | 회상 v2의 **품질**을 측정한다. 커버리지·건수가 아니라 "관련된 걸 찾고 |
+| `recall_quality.py` 🔨 | 155 | 회상 v2의 **품질**을 측정한다. 커버리지·건수가 아니라 "관련된 걸 찾고 |
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
@@ -348,7 +348,7 @@
 | `App.tsx` 🔨 | 1161 | 설명: 하이브 마인드의 바이브 코딩(Vibe Coding) 프론트엔드 최상위 컴포넌트. |
 | `main.tsx` | 75 | 설명: React 앱 진입점. ErrorBoundary로 전체 트리를 감싸 |
 | `types.ts` | 206 | 설명: 프론트엔드 공용 TypeScript 타입 정의 — LogRecord/GitStatus 등 API 응답 |
-| `constants.tsx` | 93 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
+| `constants.tsx` | 94 | 설명: 여러 컴포넌트에서 공유하는 전역 상수 및 타입 정의. |
 
 ### 컴포넌트 (components/)
 | 컴포넌트 | 줄 수 | 설명 |
@@ -361,7 +361,7 @@
 | `FloatingWindow.tsx` | 221 | 설명: 파일 탐색기에서 파일 클릭 시 열리는 플로팅(부유형) 편집 창 컴포넌트. |
 | `SetupBanner.tsx` 🔨 | 239 | Setup Doctor 진단 결과를 상단 배너로 표시. |
 | `StatusBoard.tsx` 🔨 | 264 | 설명: 상태판 독립 창(?page=status) 본체. 이 PC의 콘솔 창 — |
-| `TerminalSlot.tsx` 🔨 | 1161 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
+| `TerminalSlot.tsx` 🔨 | 1172 | 설명: 하이브 대시보드의 단일 터미널 슬롯 컴포넌트. |
 | `ThoughtTrace.tsx` | 108 | 설명: AI의 사고 과정(Chain of Thought)을 실시간으로 시각화하는 패널. |
 | `TopMenuBar.tsx` | 574 | 설명: VS Code 스타일 상단 메뉴바 컴포넌트. |
 | `VibeEditor.tsx` | 141 | 설명: Monaco Editor 기반 코드 편집기 — VS Code 스타일 하이라이팅/주석 색상 강화, |
@@ -389,7 +389,7 @@
 | `AgentSelectCards.tsx` 🔨 | 174 | 설명: 터미널 미실행 슬롯의 에이전트 선택 카드 3장(Claude/Antigravity/Codex) |
 | `AgentUsageBar.tsx` | 191 | 터미널 하단의 에이전트별 플랜·컨텍스트 사용량 바와 상세 팝업. |
 | `ClaudeContextBar.tsx` | 277 | 설명: Claude 컨텍스트 컬러 블록 바 + 클릭 상세 팝업(/context 스타일 블록 그리드, |
-| `MicPressButton.tsx` | 61 | 설명: '누르고 말하기' 단추 하나. 누르는 동안만 듣고 손을 떼면 그대로 보낸다. |
+| `MicPressButton.tsx` 🔨 | 81 | 설명: '누르고 말하기' 단추 하나. 누르는 동안만 듣고 손을 떼면 그대로 보낸다. |
 | `MonitorView.tsx` | 169 | 설명: 자율 에이전트 모니터링 뷰 — 상태 뱃지, 오케스트레이터 스킬 체인 배지, |
 | `QuotaBadge.tsx` | 87 | 설명: 터미널 헤더 플랜 쿼터 배지 — Claude/Codex 5h 게이지+% · 7d %. |
 | `ShortcutEditModal.tsx` | 47 | 터미널 단축어(사용자 커스텀 명령) 편집 모달. |
@@ -402,13 +402,14 @@
 ### 공용 로직 (lib/)
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
+| `apiBase.ts` | 22 | 설명: 서버 주소 한 줄. 지금 열려 있는 포트가 곧 그 인스턴스의 API 다. |
 | `audioCapture.ts` 🔨 | 295 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
 | `browserVoice.ts` 🔨 | 168 | 설명: 브라우저(WebView2) 내장 합성기로 읽는 길. 서버 사이드카 없이 즉시 말한다. |
 | `clipboard.ts` | 63 | 설명: 클립보드 읽기/쓰기 공용 헬퍼 — pywebview 네이티브 브리지 우선, navigator.clipboard 폴백. |
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
 | `speech.ts` 🔨 | 283 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` 🔨 | 680 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `voiceBus.ts` 🔨 | 807 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -505,4 +506,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 15:15
+> 자동 생성 완료: 2026-08-15 15:43
