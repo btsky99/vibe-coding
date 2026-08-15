@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 12:03
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 12:38
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 62개 · 미푸시 23커밋
+- **브랜치**: `main` · 미커밋 44개 · 미푸시 26커밋
 - **최근 커밋**
+  - `ddc4b54` 2026-08-15 — chore(rule10): 콘솔 창 감시기 + 규칙 10 정적 감사 도구
+  - `6e906e7` 2026-08-15 — fix(voice): 음성 조작줄이 어긋나 보이던 문제 — 높이 통일 + 세 묶음으로 정렬
+  - `7d0038c` 2026-08-15 — feat(zettel): 볼트 파일명에서 note_id 접두 제거 — 이름순 정렬이 무작위이던 문제
   - `bb07263` 2026-08-15 — fix(voice): '음성 엔진 준비 중'에서 안 넘어가던 사고 — stdout 파이프 데드락
   - `7532e70` 2026-08-15 — feat(wiki): 지식 백과사전 패널 — 상태·즉시 갱신·2단계 초기화 (W11)
-  - `3adcebe` 2026-08-15 — feat(wiki): 위키 상태 조회 + 초기화 API — 설치본에서도 '싹 지우고 새로' (W10)
-  - `909e7e6` 2026-08-15 — feat(wiki): 사고 장부 120건을 주제별 함정 페이지에 병합 (W3)
-  - `a940379` 2026-08-15 — feat(wiki): 위키 자동 갱신 데몬 + 구글 드라이브 허브 미러 (W6·W9)
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -192,7 +192,8 @@
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
 | `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
 | `voice_turn.py` 🔨 | 113 | 음성 낭독용 '턴 채널' 저장소 — Stop 훅이 쓰고 /api/voice/turn 이 읽는다. |
-| `webview_permissions.py` 🔨 | 104 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
+| `webview_health.py` 🔨 | 196 | WebView2 엔진이 창에 실제로 붙었는지 감시. 안 붙으면 원인을 진단해 알리고 |
+| `webview_permissions.py` 🔨 | 92 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
 | `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
 
 ### 음성 사이드카 (.ai_monitor/voice-server/) — 별도 프로세스·별도 venv
@@ -289,12 +290,13 @@
 | `antigravity_adapter.py` | 138 | Antigravity CLI(agy) 호출 격리 레이어 — closed-source 인터페이스 변경 대비 |
 | `antigravity_output_filter.py` | 78 | Antigravity CLI 내부 진단 로그를 사용자 출력에서 걸러내는 보조 필터. |
 | `antigravity_session_repair.py` | 216 | Antigravity CLI 세션 히스토리 자동 수리 스크립트. |
+| `audit_no_window.py` 🔨 | 164 | 규칙 10 정적 감사 — "사람이 안 시킨 실행"이 콘솔 창을 띄울 수 있는 지점을 찾는다. |
 | `auto.py` | 76 | 자율 클로드 heartbeat 터미널 스위치 — on/off/status. |
 | `auto_metrics.py` | 201 | 자율 heartbeat 데몬(claude-auto) 실효 계측 리포트 — 채택률/blocked율/게이트 차단/자가발굴 비율을 |
 | `build_verify.py` | 645 | 빌드 전 필수 조건 검증 스크립트. |
 | `checkpoint.py` | 62 | 의도 단위 세션 체크포인트 CLI — "왜/어디까지 결정/다음 뭐" 3요소를 |
 | `codex_pg_watcher.py` | 286 | Mirror Codex CLI history entries into PostgreSQL pg_logs. |
-| `console_flicker_watch.py` | 214 | 순간적으로 떴다 사라지는 콘솔 창의 '범인'을 잡는 감시기. |
+| `console_flicker_watch.py` 🔨 | 214 | 순간적으로 떴다 사라지는 콘솔 창의 '범인'을 잡는 감시기. |
 | `fix_corrupted_titles.py` 🔨 | 282 | YAML 이스케이프 누적으로 백슬래시가 뭉개진 제텔 노트 제목을 복구한다. |
 | `harness_verify.py` | 437 | Vibe Coding 하네스 V2 검증 스크립트. |
 | `heal_report.py` | 100 | 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics를 호출해 4장치 지표를 |
@@ -320,7 +322,7 @@
 | `migrate_antigravity_db.py` | 83 | DB 식별자 gemini→antigravity 일회성 마이그레이션 (plan Task 9). |
 | `migrate_archive_session_summaries.py` | 70 | 일회성 마이그레이션 — 이미 permanent로 오승격된 세션요약 노트를 archived=true로 내린다. |
 | `migrate_vault_consolidate.py` | 240 | 지식 창고 재점검 일회성 정리 마이그레이션 (2026-07-14). |
-| `migrate_vault_pretty_names.py` | 156 | 볼트 노트 파일명을 옛 규칙(`{note_id} {제목}`)에서 새 규칙(제목만)으로 1회 개명한다. |
+| `migrate_vault_pretty_names.py` 🔨 | 156 | 볼트 노트 파일명을 옛 규칙(`{note_id} {제목}`)에서 새 규칙(제목만)으로 1회 개명한다. |
 | `pg_project.py` | 39 | PostgreSQL project DB resolver shared by script-side logging and messaging utilities. |
 | `recall.py` | 51 | 경험 회상 스크립트 — 현재 작업과 유사한 과거 경험을 검색하여 출력. |
 | `recall_quality.py` 🔨 | 128 | 회상 v2의 **품질**을 측정한다. 커버리지·건수가 아니라 "관련된 걸 찾고 |
@@ -459,7 +461,7 @@
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
 | `test_windows_installer_toolchain.py` 🔨 | 114 | Regression checks for prerequisite-first Windows installer packaging. |
 | `test_zettel_oneway_default.py` 🔨 | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
-| `test_zettel_pretty_names.py` | 102 | 볼트 파일명 규칙 회귀 테스트 — note_id 접두 제거 이후의 이름 짓기가 |
+| `test_zettel_pretty_names.py` 🔨 | 102 | 볼트 파일명 규칙 회귀 테스트 — note_id 접두 제거 이후의 이름 짓기가 |
 | `test_zettel_size_guard.py` 🔨 | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
 | `FileExplorer.test.tsx` | 136 | FileExplorer 컴포넌트 |
@@ -501,4 +503,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 12:03
+> 자동 생성 완료: 2026-08-15 12:38

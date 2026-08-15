@@ -25,6 +25,7 @@ DESCRIPTION: WebView2(Windows)에서 마이크 권한 요청을 허용하는 배
                아직 None 이라 붙일 수 없다 — 그래서 폴링으로 기다린다.
 
 REVISION HISTORY:
+- 2026-08-15 Claude: CoreWebView2 탐색을 infra/webview_health 로 일원화(중복 제거).
 - 2026-08-15 Claude: 최초 작성 — 아픽스 음성 기능 이식(마이크 권한 전제)
 """
 
@@ -32,26 +33,9 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 
 # 마이크만 허용한다. 카메라·위치·알림 등은 손대지 않고 WebView2 기본 동작에 맡긴다.
 _ALLOWED_KINDS = ('Microphone',)
-
-
-def _find_core(window, timeout: float) -> object | None:
-    """창의 CoreWebView2 객체를 기다렸다 반환. 없으면 None."""
-    from webview.platforms.winforms import BrowserView
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        inst = BrowserView.instances.get(getattr(window, 'uid', 'master'))
-        browser = getattr(inst, 'browser', None) if inst else None
-        wv = getattr(browser, 'webview', None) if browser else None
-        core = getattr(wv, 'CoreWebView2', None) if wv else None
-        if core is not None:
-            return core
-        time.sleep(0.2)
-    return None
 
 
 def _attach(window, timeout: float) -> None:
@@ -66,7 +50,11 @@ def _attach(window, timeout: float) -> None:
         print(f'[voice] 마이크 권한 배선 생략 (WebView2 바인딩 없음: {e})')
         return
 
-    core = _find_core(window, timeout)
+    # [중복 제거 2026-08-15] CoreWebView2 탐색은 webview_health 와 같은 로직이었다.
+    #   두 벌로 두면 폴링 간격/uid 규칙이 갈라져 한쪽만 늙는다.
+    from infra.webview_health import find_core_webview2
+
+    core = find_core_webview2(window, timeout)
     if core is None:
         print('[voice] 마이크 권한 배선 실패 — CoreWebView2 를 못 찾음 (음성 입력 불가)')
         return
