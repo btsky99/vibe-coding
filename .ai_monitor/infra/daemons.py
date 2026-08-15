@@ -376,6 +376,61 @@ def agent_sync_daemon(agent_status: dict, agent_status_lock: threading.Lock) -> 
         except Exception:
             pass
 
+# ── 위키 동기화 데몬 (코드 주석 → wiki/ → 검색 인덱스 → 구글 드라이브) ──────
+def run_wiki_sync(env: DaemonEnv) -> None:
+    """LLM 위키 파이프라인을 주기적으로 돌린다.
+
+    코드 주석을 고치면 백과사전이 따라오고, 백과사전이 바뀌면 회상이 따라온다.
+    이 데몬이 없으면 사람이 매번 `python scripts/wiki_build.py` 를 쳐야 하고,
+    그러면 안 치게 되고, 창고는 다시 낡는다 — 자동화의 유일한 이유가 그것이다.
+
+    [WHY 10분인가] 코드 주석은 커밋 단위로 바뀌지 초 단위로 바뀌지 않는다. 반면
+      wiki_build 는 소스 155개를 전부 읽는다. 짧게 잡으면 이득 없이 디스크만 긁는다.
+    [🔴 규칙 10] 전부 같은 프로세스 안의 함수 호출이다 — 서브프로세스를 띄우지 않으므로
+      콘솔 창이 생기지 않는다. 여기서 subprocess 로 바꾸면 10분마다 창이 뜬다.
+    [불변식] 순서 고정: build → index → mirror. 인덱스를 먼저 만들면 방금 바뀐 페이지가
+      아니라 직전 내용이 색인되고, 미러를 먼저 하면 낡은 페이지가 다른 PC 로 퍼진다.
+    """
+    import time as _time
+    try:
+        from src import wiki_index
+    except Exception as exc:
+        print(f'[wiki_sync] 모듈 로드 실패 — 데몬 중단: {exc}')
+        return
+
+    wiki_root = env.current_project_root() / 'wiki'
+    build_script = (env.scripts_dir or (env.base_dir / 'scripts')) / 'wiki_build.py'
+    print(f'[*] 위키 동기화 데몬 시작됨 — wiki={wiki_root}, 600초 주기')
+
+    while True:
+        try:
+            root = env.current_project_root() / 'wiki'   # 라이브 프로젝트 전환 추종
+            proj_id = env.current_project_id()
+            if root.is_dir():
+                # 1) 코드 주석 → 페이지. 모듈로 직접 부른다(무창).
+                if build_script.exists():
+                    try:
+                        import importlib.util as _ilu
+                        _spec = _ilu.spec_from_file_location('wiki_build', str(build_script))
+                        _mod = _ilu.module_from_spec(_spec)
+                        _spec.loader.exec_module(_mod)
+                        _mod.build()
+                    except Exception as be:
+                        print(f'[wiki_sync] 페이지 합성 건너뜀: {be}')
+                # 2) 페이지 → 검색 인덱스
+                stat = wiki_index.sync(root, proj_id)
+                if stat.get('created') or stat.get('updated') or stat.get('archived'):
+                    print(f"[wiki_sync] 인덱스 갱신 — 신규 {stat['created']} / "
+                          f"변경 {stat['updated']} / 정리 {stat['archived']}")
+                # 3) 구글 드라이브 허브 미러 (드라이브가 없으면 조용히 건너뜀)
+                res = wiki_index.mirror_to_hub(root, env.current_project_root().name)
+                if res.get('status') == 'ok' and res.get('written'):
+                    print(f"[wiki_sync] 드라이브 미러 {res['written']}건 → {res['hub']}")
+        except Exception as exc:
+            print(f'[wiki_sync] 오류(계속 진행): {exc}')
+        _time.sleep(600)
+
+
 # ── 제텔카스텐 Vault 동기화 데몬 (DB ↔ Obsidian 60초 주기) ────────────
 def run_zettel_sync(env: DaemonEnv) -> None:
     """PostgreSQL zettel_notes ↔ Obsidian vault 양방향 동기화 데몬.
@@ -765,6 +820,8 @@ DAEMON_TOGGLES: dict = {
     'orchestrator':  {'label': '오케스트레이터 데몬', 'thread': 'OrchestratorDaemon'},
     'doc_generators': {'label': 'PROJECT_MAP/HIVEMIND 자동 갱신 (30분 주기)', 'thread': 'DocGeneratorsDaemon'},
     'agent_sync':    {'label': '에이전트 상태 동기화', 'thread': 'AgentSyncDaemon'},
+    'wiki_sync':     {'label': '위키 동기화 (주석→백과사전→검색→드라이브, 10분)',
+                      'thread': 'WikiSync'},
     'zettel_sync':   {'label': '제텔카스텐 동기화', 'thread': 'ZettelSync'},
     'zettel_refine': {'label': '제텔카스텐 정제', 'thread': 'ZettelRefine'},
     'commit_watcher': {'label': '커밋 감시', 'thread': 'CommitWatcher'},
@@ -987,6 +1044,7 @@ def start_all_daemons(env: DaemonEnv, agent_status: dict,
     _t('orchestrator', run_orchestrator_daemon, (env,))
     _t('doc_generators', run_doc_generators_daemon, (env,))
     _t('agent_sync', agent_sync_daemon, (agent_status, agent_status_lock))
+    _t('wiki_sync', run_wiki_sync, (env,))
     _t('zettel_sync', run_zettel_sync, (env,))
     _t('zettel_refine', run_zettel_refine, (env,))
     _t('commit_watcher', run_commit_watcher, (env,))

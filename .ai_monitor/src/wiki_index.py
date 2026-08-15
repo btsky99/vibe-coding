@@ -188,6 +188,78 @@ def sync(wiki_root: Path, project_id: str, dry_run: bool = False) -> dict:
             'kept': kept, 'archived': len(stale), 'failed': failed}
 
 
+# ── 구글 드라이브 허브 미러 ──────────────────────────────────────────────────
+
+# [WHY 드라이브 레터를 훑나] PC 마다 구글 드라이브가 잡히는 문자(I:/G:/H:…)와 언어
+#   ('내 드라이브' / 'My Drive')가 다르다. 고정 경로를 박으면 이 PC 에서만 동작한다.
+#   같은 이유로 zettel_sync 도 같은 방식을 쓴다 — 규칙을 바꾸면 양쪽을 같이 바꿀 것.
+_DRIVE_LABELS = ('내 드라이브', 'My Drive')
+HUB_FOLDER = 'vibe-wiki'
+
+
+def detect_gdrive_hub() -> Path | None:
+    """구글 드라이브의 위키 허브 폴더를 찾는다. 없으면 None(미러 건너뜀)."""
+    import string
+    for letter in string.ascii_uppercase:
+        root = Path(f'{letter}:/')
+        try:
+            if not root.exists():
+                continue
+        except OSError:      # 연결 끊긴 네트워크 드라이브 — 조회 자체가 던진다
+            continue
+        for label in _DRIVE_LABELS:
+            base = root / label
+            if base.is_dir():
+                return base / HUB_FOLDER
+    return None
+
+
+def mirror_to_hub(wiki_root: Path, project_name: str, hub: Path | None = None) -> dict:
+    """위키를 구글 드라이브 허브의 프로젝트별 폴더로 복사한다.
+
+    [WHY API 가 아니라 폴더 복사인가] 구글 드라이브 데스크톱 앱이 이미 그 폴더를
+      동기화하고 있다. 우리가 API 로 올리면 인증·할당량·충돌 처리를 다 떠안게 되고,
+      정작 사용자는 같은 파일을 두 경로로 갖게 된다. 파일만 쓰고 업로드는 맡긴다.
+    [🔴 과거사고 c7a42f2] 내용이 같아도 write 하면 mtime 이 바뀌고, 구글 드라이브가
+      그걸 변경으로 보고 전량 재업로드한다(볼트 핑퐁 3단 고리의 시작점이었다).
+      반드시 해시 비교 후 변경분만 쓴다.
+    [WHY 프로젝트별 하위 폴더인가] 섞이면 CipherTrader 지식이 vibe-coding 회상에
+      튀어나온다. 허브는 '모아 두는 곳'이지 '합치는 곳'이 아니다.
+    """
+    hub = hub or detect_gdrive_hub()
+    if hub is None:
+        return {'status': 'skipped', 'reason': '구글 드라이브를 찾지 못함'}
+
+    target = hub / project_name
+    written = kept = removed = 0
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        live: set[Path] = set()
+        for src in wiki_root.rglob('*.md'):
+            rel = src.relative_to(wiki_root)
+            dst = target / rel
+            live.add(dst)
+            body = src.read_bytes()
+            if dst.exists() and hashlib.sha1(dst.read_bytes()).digest() == hashlib.sha1(body).digest():
+                kept += 1
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(body)
+            written += 1
+        # 위키에서 사라진 파일은 허브에서도 지운다 — 안 그러면 옛 페이지가 다른 PC 에
+        # 영원히 남아 '두 버전의 진실'이 생긴다.
+        for old in target.rglob('*.md'):
+            if old not in live:
+                old.unlink()
+                removed += 1
+    except OSError as exc:
+        # [WHY 예외를 삼키나] 드라이브가 잠시 끊기거나 동기화 중 잠금이 걸릴 수 있다.
+        #   미러는 부가 기능이라 여기서 데몬을 죽이면 인덱싱까지 멈춘다.
+        return {'status': 'error', 'reason': str(exc), 'written': written}
+    return {'status': 'ok', 'hub': str(target), 'written': written,
+            'kept': kept, 'removed': removed}
+
+
 def retire_legacy(dry_run: bool = False) -> int:
     """정본이 wiki/ 로 옮겨간 옛 지식 노트(knowledge_extract)를 아카이브.
 
