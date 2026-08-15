@@ -73,19 +73,19 @@ AI 멀티 에이전트 하이브 마인드 대시보드. **라이트하게** 간
 ### 태스크
 
 ```
-[ ] W1: wiki/ 뼈대 + INDEX.md + 작성 규약
+[x] W1: wiki/ 뼈대 + INDEX.md + 작성 규약 — 7cbf195
     파일: wiki/INDEX.md, wiki/{개념,시스템,함정,결정}/, .claude/rules/wiki.md
     방법: 디렉토리 + 프론트매터 규약(title/type/sources/related/confidence) 정의.
           규약은 rules/ 에 두고 CLAUDE.md 는 링크 1줄만(본문 복사 금지 — 규칙 9).
     검증: 빈 위키에서 규약 파일만 읽고 LLM 이 새 페이지를 쓸 수 있는가
 
-[ ] W2: knowledge_extract 를 파일 출력 모드로 확장 (W1 후)
+[x] W2: knowledge_extract 를 파일 출력 모드로 확장 (W1 후) — ef209bd (36장)
     파일: scripts/knowledge_extract.py (369줄, 기존 재사용)
     방법: --emit-wiki 플래그 추가. 현행 upsert_notes(DB 직행) 대신 주제별로 묶어
           wiki/시스템/<주제>.md 생성. 노트 단위 = 파일이 아니라 **주제**.
     검증: 862개 주석 → 위키 페이지 N장, 각 페이지가 파일:줄번호 출처를 갖는가
 
-[ ] W3: 사고 장부 117건 → wiki/함정/ (W1 후)
+[x] W3: 사고 장부 120건 → wiki/함정/ (W1 후) — 미분류 4건만 남음
     파일: scripts/wiki_build.py (신설)
     방법: incident_ledger 를 증상/원인/수정 3단으로 페이지화. 동일 파일 사고는 한 장에 병합.
     검증: 재발 이력 있는 사고가 한 페이지에 모이는가
@@ -96,7 +96,7 @@ AI 멀티 에이전트 하이브 마인드 대시보드. **라이트하게** 간
           프론트매터만 정규화. [[링크]]는 그대로 살린다.
     검증: MEMORY.md 인덱스가 wiki/INDEX.md 로 대체되고 링크가 안 끊기는가
 
-[ ] W5: 위키 → DB 인덱서 (W2·W3·W4 후)
+[x] W5: 위키 → DB 인덱서 (W2·W3·W4 후) — b28ef16
     파일: .ai_monitor/src/wiki_index.py (신설, ~200줄)
     방법: wiki/**/*.md 스캔 → 내용 해시 비교 → 변경분만 zettel_notes upsert + 임베딩.
           knowledge_extract.upsert_notes 패턴 재사용. 파일이 사라지면 인덱스도 제거.

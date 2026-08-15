@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 09:46
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-15 10:47
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,24 +8,24 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 16개 · 미푸시 11커밋
+- **브랜치**: `main` · 미커밋 3개 · 미푸시 17커밋
 - **최근 커밋**
-  - `da8e0b9` 2026-08-15 — fix(memory): 공유 메모리 패널이 한 페이지를 '총 개수'로 표기하던 오해 제거
-  - `88a617c` 2026-08-15 — feat(voice): 목소리 선택 UI + 마이크가 화면에서 사라지던 문제 수정
-  - `01b58f0` 2026-08-15 — refactor(ui): 터미널 선택 화면 하단 '상태판 · 원격 노드' 섹션 제거
-  - `e2e1c50` 2026-08-15 — feat(voice): 로컬 음성 입출력 — 슬롯별 호출어로 말해서 지시하고 답을 듣는다
-  - `c8e254c` 2026-08-14 — feat(recall): 회상 v2 e5 전환 — 임베딩 모델 교체 + 임계 실측 재설정
+  - `6c3755c` 2026-08-15 — feat(setup): 옵시디언을 기본 설치팩에 편입 — 설치·업데이트 때 CLI·DB 처럼 자동 설치
+  - `5df7c62` 2026-08-15 — docs(rules): 규칙 1 확장 — 비전문가 눈높이 설명 의무화
+  - `ef209bd` 2026-08-15 — feat(wiki): 코드 주석 702건을 주제별 백과사전 36장으로 합성 (W2)
+  - `7cbf195` 2026-08-15 — feat(wiki): LLM 위키 뼈대 + 작성 규약 — 지식 창고를 로그 덤프에서 백과사전으로 (W1)
+  - `e8fec8d` 2026-08-15 — fix(recall): 랭킹 보정항이 유사도를 삼켜 정답이 탈락하던 문제 — 계수 0.1→0.004
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
+  - 결정: wiki/를 git 추적 정본으로, 로컬만(GDrive 안씀), 전부삭제+원료전량 승인, 순서=회상버그수정→위키구축→인덱싱→lint→삭제
+  - 다음: 블로커: vector_available()이 ALTER TABLE 실패시 조용히 False → 회상 전체 무력화. 이것부터 수정
 - **08-15 00:54** 의도: 아픽스 음성(STT+TTS) 기능을 vibe-coding 터미널 슬롯에 이식
   - 결정: WebView2에서 SpeechRecognition 실동작 확인(onstart/onaudiostart, network에러 없음). 인식+낭독 전부, 터미널 슬롯 하단 입력창에 배선. 낭독 텍스트는 Stop훅 turn 채널 신설로 공급
   - 다음: voice_turn_hook.py + voice_api.py + 마이크 권한(app_boot) + 프론트 speech/voiceBus/useVoice/VoiceBar
 - **08-14 19:48** 의도: 설치본 LAN 브리지 미기동 수정 + 바로가기 관리자 권한 자동 체크
   - 결정: 데몬 .py 실행기를 runtime.script_runner_cmd(frozen이면 앱 EXE)로 통일, .lnk LinkFlags 바이트 패치로 관리자 권한
   - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
-- **08-14 19:24** 의도: vibe-coding에서 아픽스 계층 전면 제거 (사용자 지시)
-  - 결정: 깜빡임 진범=apix_runner watch 1초 폴링 콘솔숨김 누락. 러너 종료+스케줄러 삭제 완료
-  - 다음: 아픽스 전용 파일 삭제 + server.py/App.tsx 배선 제거, 딸린 것 선별 후
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
 - **마이크 모양이 화면에 아예 없다 (음성 기능 커밋 후)**
@@ -118,10 +118,10 @@
 | `pty_api.py` 🔨 | 255 | PTY 세션 상태 및 제어 엔드포인트 — Node PTY 서버 투명 프록시. |
 | `recycle_api.py` 🔨 | 489 | 컨텍스트 리사이클 HTTP 계층 — 상태머신(src/session_recycle.py)에 |
 | `screenshot_api.py` | 45 | 스크린샷 멀티모달 분석 API — POST /api/screenshot/analyze. |
-| `setup_api.py` 🔨 | 193 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
+| `setup_api.py` 🔨 | 195 | Setup Doctor API — 초기 설정 진단 상태를 대시보드에 제공. |
 | `static_api.py` | 123 | 정적 파일 서빙 + 도움말/이미지 라우트 3종 — GET /api/help, GET /api/image-file, |
 | `tasks_api.py` | 302 | /api/tasks/* 및 /api/task-logs 엔드포인트 핸들러 모듈. |
-| `tools_api.py` 🔨 | 1359 | AI 도구 CLI 설치 관리 API. |
+| `tools_api.py` 🔨 | 1374 | AI 도구 CLI 설치 관리 API. |
 | `update_api.py` | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
@@ -155,7 +155,7 @@
 | `pg_schema.py` | 828 | 설명: PostgreSQL 스키마 DDL(ensure_schema) + 레거시 JSONL/JSON 마이그레이션 |
 | `pg_store.py` | 127 | 설명: PostgreSQL 저장소 파사드 — 분할된 pg_* 도메인 모듈을 단일 경로로 재노출 |
 | `pg_tasks.py` | 388 | 설명: 하이브 태스크(hive_tasks) CRUD + 원자적 체크아웃 + 코멘트 + 하트비트 + 상태 저장 |
-| `pg_vector_search.py` 🔨 | 337 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
+| `pg_vector_search.py` 🔨 | 356 | 설명: pgvector 기반 회상 v2 — embedding 컬럼 마이그레이션 + 코사인 검색 + |
 | `quota_policy.py` | 117 | provider 쿼터 snapshot을 작업 크기 권고로 변환하는 순수 정책 계층. |
 | `recall_client.py` | 83 | 설명: 훅(단명 프로세스)용 회상 클라이언트 — 서버 recall-smart API 우선, |
 | `secure.py` | 59 | 설명: 보안 유틸 — 로그 민감정보 마스킹(API키/Bearer/패스워드 정규식), |
@@ -296,7 +296,7 @@
 | `harness_verify.py` | 437 | Vibe Coding 하네스 V2 검증 스크립트. |
 | `heal_report.py` | 100 | 자가치유 계측 CLI — src/heal_metrics.compute_heal_metrics를 호출해 4장치 지표를 |
 | `incident.py` | 132 | 사고 장부 CLI — 고친 에러 기록(record) / 재발 검색(search) / |
-| `install_ai_toolchain.py` | 142 | Vibe Coding first-run Node.js and AI CLI automatic installer chain. |
+| `install_ai_toolchain.py` 🔨 | 159 | Vibe Coding first-run Node.js and AI CLI automatic installer chain. |
 | `install_antigravity.py` | 88 | Install Google's official Antigravity CLI (`agy`). |
 | `install_dev_tools.py` | 159 | 프로젝트 개발 도구 통합 설치 스크립트. |
 | `install_frontend_deps.py` | 195 | 프론트엔드(React/Vite) 의존성 설치 스크립트. |
@@ -330,6 +330,7 @@
 | `tui.py` 🔨 | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `voice_turn_hook.py` 🔨 | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
 | `vps_status_api.py` 🔨 | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
+| `wiki_build.py` 🔨 | 522 | 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/ 백과사전 페이지로 합성한다. |
 | `zettel_capture.py` 🔨 | 703 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` 🔨 | 988 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
@@ -441,7 +442,7 @@
 | `test_self_heal_2.py` | 231 | 자가 치유 2.0 회귀 방지 테스트 — 회상 v2(pgvector) 그레이스풀 |
 | `test_session_binding.py` 🔨 | 269 | 세션↔슬롯 결속 + 화석(stale) 판정 회귀 테스트. 방어 대상은 |
 | `test_session_recycle.py` | 280 | 컨텍스트 리사이클 GUARD/상태머신 회귀 테스트. 핵심 방어선은 |
-| `test_setup_auto_install.py` 🔨 | 261 | First-run sequential automatic dependency installation API regression tests. |
+| `test_setup_auto_install.py` 🔨 | 268 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
@@ -450,7 +451,7 @@
 | `test_vault_auto_repair.py` 🔨 | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
 | `test_vibe_download_page.py` | 30 | btsky.pe.kr Vibe Coding latest-release download wiring regression tests. |
-| `test_windows_installer_toolchain.py` 🔨 | 111 | Regression checks for prerequisite-first Windows installer packaging. |
+| `test_windows_installer_toolchain.py` 🔨 | 114 | Regression checks for prerequisite-first Windows installer packaging. |
 | `test_zettel_oneway_default.py` 🔨 | 66 | 제텔 동기화가 기본 단방향(PG→Vault)인지 지키는 회귀 테스트. |
 | `test_zettel_size_guard.py` 🔨 | 105 | 제텔 동기화의 '비정상 크기' 방어선 회귀 테스트. |
 | `test_zettel_sync_mirror.py` | 42 | Tests for mirroring the local Obsidian vault into a shared Google Drive vault. |
@@ -493,4 +494,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-15 09:46
+> 자동 생성 완료: 2026-08-15 10:47

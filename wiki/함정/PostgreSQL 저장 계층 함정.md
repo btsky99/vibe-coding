@@ -7,6 +7,7 @@ sources:
   - .ai_monitor/src/pg_office.py:15
   - .ai_monitor/src/pg_office.py:303
   - .ai_monitor/src/pg_schema.py:386
+  - incident_ledger  # 사고 5건
 related: []
 confidence: high
 updated: 2026-08-15
@@ -18,8 +19,42 @@ updated: 2026-08-15
 
 절전/네트워크 단절로 established 커넥션의 TCP 소켓이 죽으면
 
-> 코드 주석에서 자동 합성 (원료 5건 · 파일 3개 · 추출 7cbf195).
-> 🔴 **여기를 고치기 전에** 원본 주석을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
+> 자동 합성 (코드 주석 5건 · 파일 3개 · 사고 장부 5건 · 추출 b28ef16).
+> 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — 다음 빌드에 덮어써진다.
+
+## 🔴 밟았던 것 (사고 장부)
+
+### 동적 포트 폴백(5433 점유→5434) 발동 시 psycopg2 풀/psql 폴백이 stale 5433으로 접속 실패 — pg_base.PG_PORT가 import 시점 1회 고정이라 미반영
+
+- **원인** — pg_base.PG_PORT는 import-time env 평가. os.environ write-back은 자식 프로세스 fresh import만 반영, server 내부 pg_base엔 무효. DB는 set_project_db push 있으나 포트는 대응 push 부재(비대칭)
+- **수정** — pg_base.set_pg_port(port) push 함수 신설(set_project_db와 대칭). ensure_postgres_running이 포트 확정 직후 호출, 포트 변경 시 단일+풀 커넥션 폐기. 세 소비처(_get_pg_conn/get_pool_conn/_run_psql) 단일 진실소스화
+- 출처: `incident_ledger` · 최초 2026-07-07
+
+### psql -c argv 한글 리터럴 → invalid byte sequence 0xb0, 쿼리 전체 실패
+
+- **원인** — Windows subprocess가 -c 인자를 cp949로 인코딩해 psql에 전달, 서버는 UTF8이라 불일치. msvcrt ANSI 변환은 argv 경로에서 회피 불가
+- **수정** — SQL을 UTF-8 임시파일에 쓰고 psql -f + PGCLIENTENCODING=UTF8로 실행 (auto_metrics.py _run_query)
+- 출처: `incident_ledger` · 최초 2026-07-19
+
+### zettel notify 'payload string too long' 폭주 (server.log 41MB)
+
+- **원인** — notify_zettel_change 트리거가 title 원문을 pg_notify payload에 실어 8000바이트 초과 (한글 3948자≈11.8KB). AFTER 트리거 롤백으로 노트 쓰기 연쇄 실패. LISTEN 소비자도 없음
+- **수정** — title을 left(coalesce(title,''),200)으로 상한 고정. pg_schema.py 수정 + 라이브 DB CREATE OR REPLACE 즉시 반영 (865eca7)
+- 출처: `incident_ledger` · 최초 2026-07-19
+
+### PG 터널 경로만 격리하려 했으나 pg_hba 규칙이 매치되지 않아 LEAK
+
+- **원인** — pg_hba는 목적지가 아니라 소스 주소로 매칭한다. 리눅스 루프백에서 127.0.0.2:5433로 접속해도 커널이 소스를 127.0.0.1로 잡아 client_addr=127.0.0.1이 된다 -> host ... 127.0.0.2/32 규칙은 영원히 매치되지 않는다. 부수 함정: postgresql.conf를 고쳐도 include_dir conf.d가 더 뒤에서 읽혀 99-lowmem.conf가 listen_addresses를 덮어쓴다(PG는 마지막 값 채택)
+- **수정** — 격리 시도 전부 롤백(백업본 복원+드롭인 제거, 서비스 3종 생존 확인). 작동하지 않는 보안 설정은 보호받고 있다는 착각을 유발하므로 남기지 않는다. 근본 해결은 trust 제거+전 클라이언트 비번화이나 서버의 vibe-bridge/vibe-status가 pg_base.py(비번 파라미터 없음)를 쓰므로 코드 선행 필요 - 별도 과제
+- 출처: `incident_ledger` · 최초 2026-08-08
+
+### PostgreSQL 루프백 접속이 아무 비밀번호로나 성공 (틀린 비밀번호로도 붙음)
+
+- **원인** — pg_hba.conf 의 host all all 127.0.0.1/32 trust. 최소 권한 계정을 만들어도 무의미하고, 서버에서 코드를 실행하게 된 공격자가 postgres 슈퍼유저로 직행할 수 있다
+- **수정** — 관제 계정만 scram-sha-256 을 강제하는 규칙을 trust 라인 **앞에** 삽입(pg_hba 는 첫 매칭이 이긴다). trust 자체를 지우면 어떤 서비스가 비밀번호 없는 연결에 의존하는지 모른 채 운영 중인 것을 멈추게 되므로, 근본 정리는 영향 조사 후 별건으로 분리
+- 출처: `incident_ledger` · 최초 2026-08-09
+
+## 코드에 박힌 지식
 
 ## `.ai_monitor/src/pg_base.py`
 

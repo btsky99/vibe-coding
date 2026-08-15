@@ -5,6 +5,8 @@ DESCRIPTION: 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/
              **사람이 읽는 페이지**를 만든다 — 정본은 파일이고 DB 는 인덱스이기 때문이다.
 
 REVISION HISTORY:
+- 2026-08-15 Claude: W3·W4 — 원료에 사고 장부(incident_ledger)와 세션 메모리(memory/)를
+  추가. 사고는 기존 함정 페이지에 **병합**한다(규칙 1: 추가가 아니라 덮어쓰기).
 - 2026-08-15 Claude: 신설 — LLM 위키 전환 W2·W3·W4. 지식 창고를 로그 덤프에서
   백과사전으로 바꾸는 첫 산출 단계.
 """
@@ -154,8 +156,176 @@ def plan_pages(blocks: list[dict]) -> dict[tuple[str, str], list[dict]]:
     return pages
 
 
-def render_page(section: str, name: str, blocks: list[dict], head: str) -> str:
-    """페이지 1장을 마크다운으로. 규약(.claude/rules/wiki.md) 4절 형식을 따른다."""
+# ── 원료 2: 사고 장부 (incident_ledger) ─────────────────────────────────────
+#
+# [🔴 WHY 파일명 매핑만으로는 안 되는가 — 2026-08-15 실측] 사고 120건 중 `files` 컬럼이
+#   채워진 건 **10건뿐**이다(incident.py record 가 --files 를 거의 안 받고 기록돼 왔다).
+#   본문에서 `xxx.py` 를 긁어 TOPICS 로 보내도 37건밖에 안 붙는다. 나머지 83건은 파일명이
+#   아니라 증상으로만 적혀 있어서("업데이트 후 DLL 로드 실패"), 키워드 라우터가 필수다.
+# [불변식] 아래 목록은 위에서부터 첫 일치가 이긴다 — 좁은 주제를 먼저 둔다.
+#   예: '설치'는 업데이트 사고에도 흔히 나오므로 '업데이트' 계열보다 뒤에 온다.
+INCIDENT_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    # 타 프로젝트 사고 — 이 리포의 지식이 아니다. 아래 '격리' 주석 참조.
+    ('다른 프로젝트', (
+        '아픽스', 'apix', 'na2js', '중앙 대화', 'herdr', 'hbbs', 'rustdesk',
+        'ciphertrader', 'build_unified', 'tpsl', 'rl_done', 'zig',
+        'certbot', 'acme', 'admin.btsky', 'vps',
+    )),
+    ('음성 입출력', ('음성', '마이크', '목소리', 'tts', 'stt', '사이드카')),
+    ('회상과 지식 창고', (
+        '회상', 'recall', '볼트', '옵시디언', 'zettel', '제텔', '임베딩',
+        '지식', '세션요약', 'ref_count', 'hive_memory',
+    )),
+    ('세션 연속성과 리사이클', ('리사이클', 'drain', 'active_session_context', '재정박')),
+    ('업데이트와 배포', (
+        'soft-update', 'soft update', 'soft 채널', 'reset --hard', '릴리즈', '태그',
+        'python dll', 'temporary directory', '업데이트', 'auto_version', 'inno setup',
+        '설치 마법사', '진행률', '경량 소스',
+    )),
+    ('설치와 환경 진단', (
+        'deletefile', '액세스 거부', '레지스트리', '미설치', '설치팩', '설치 중',
+        'msvcp140', 'libcrypto', '설치본', '설치 시', '설치 버전',
+    )),
+    ('LAN 브리지와 원격 실행', ('lan', '샌드박스', 'sandbox', 'ssh', '터널', '원격', '텔레그램')),
+    ('데몬과 콘솔 창', (
+        'heartbeat', '데몬', '콘솔 창', '콘솔창', '깜빡', 'enumwindows', 'conhost',
+        '워치독', 'watchdog', '자율', 'hang', '오케스트레이션',
+    )),
+    ('터미널과 PTY', (
+        'pty', '터미널', '슬롯', 'xterm', '드래그 선택', '우클릭', 'api_terminate',
+    )),
+    ('PostgreSQL 저장 계층', (
+        'psql', 'pg_hba', 'postgres', 'notify', 'payload', '5433', 'psycopg',
+    )),
+    ('프로젝트 경계와 식별', (
+        '프로젝트 폴더', '슬러그', 'project_id', '폴더 변경', '다른 프로젝트의',
+        '활성 프로젝트', '폴더 선택',
+    )),
+    # [불변식] 주제명은 코드 주석 페이지가 이미 만든 이름과 **정확히 같아야** 한다.
+    #   '테스트'로 쓰면 `테스트 함정`이 새로 생겨 `테스트 · 그 밖 함정`과 갈라진다 —
+    #   같은 주제가 두 장이 되는 순간 둘 다 신뢰를 잃는다(규약 5절).
+    ('테스트 · 그 밖', ('pytest', 'e2e', 'smoke', '테스트', 'capsys')),
+    ('서버와 라우팅', ('서버', '포트', '라우트', 'http_port', '404', 'failed to fetch')),
+    ('프론트엔드 상태 관리', ('상태줄', 'statusline', '위젯', 'ui ')),
+]
+
+# [WHY 지우지 않고 한 장에 격리하나] 아픽스·CipherTrader·RustDesk 사고는 이 리포의 지식이
+#   아니다(계획서 '이 프로젝트에 넣지 않는 것'). 그렇다고 버리면 사고 장부의 재발 방지
+#   기능이 조용히 사라진다. 12개 주제 페이지를 오염시키지 않으면서 유실도 없게 —
+#   한 페이지에 몰아 격리하고, 경계 자체를 눈에 보이게 만든다.
+_QUARANTINE = '다른 프로젝트'
+
+_FN_RE = re.compile(r'[\w\-]+\.(?:py|tsx|ts|iss|spec|json|yml|yaml|sql|ps1|bat|cmd)')
+
+
+def collect_incidents() -> list[dict]:
+    """사고 장부를 읽어온다. DB 가 없으면 빈 목록 — 위키 빌드 자체는 계속돼야 한다.
+
+    [제약] 이 스크립트는 설치본(W10 리셋 API)에서도 불린다. PG 가 아직 안 떴을 수 있어
+      예외를 삼키고 원료 0건으로 진행한다 — 사고 섹션만 비고 코드 주석 페이지는 나온다.
+    """
+    try:
+        from src.pg_base import query_rows
+        rows = query_rows(
+            "SELECT error_signature, error_text, root_cause, fix_description, "
+            "fix_commit, files, recurrence_count, created_at, last_seen_at "
+            "FROM incident_ledger ORDER BY recurrence_count DESC, created_at"
+        )
+    except Exception as exc:  # noqa: BLE001 — 원료 하나가 없다고 빌드를 죽이지 않는다
+        print(f'  (사고 장부 건너뜀: {exc})')
+        return []
+
+    seen: set[str] = set()
+    out = []
+    for r in rows:
+        sig = str(r.get('error_signature') or '')
+        if sig and sig in seen:
+            continue  # 같은 서명이 두 행이면 장부 쪽 중복 — recurrence_count 가 정본이다
+        seen.add(sig)
+        out.append(r)
+    return out
+
+
+def _incident_topic(inc: dict) -> str:
+    """사고 1건이 어느 주제 페이지로 갈지. 파일명 우선 → 키워드 → '그 밖'."""
+    files = inc.get('files')
+    if isinstance(files, str):
+        try:
+            import json
+            files = json.loads(files)
+        except Exception:
+            files = []
+    text = ' '.join(str(inc.get(k) or '')
+                    for k in ('error_text', 'root_cause', 'fix_description'))
+
+    names = [str(f).split('/')[-1] for f in (files or [])] + _FN_RE.findall(text)
+    # [불변식] 키워드보다 파일명이 강하다 — 파일명은 사람이 지목한 것이고
+    #   키워드는 추론이다. 단 격리 대상 키워드는 파일명보다도 먼저 본다(아래).
+    low = text.lower()
+    if any(k in low for k in dict(INCIDENT_KEYWORDS)[_QUARANTINE]):
+        return _QUARANTINE
+    for n in names:
+        if n in _FILE_TOPIC:
+            return _FILE_TOPIC[n]
+    for topic, keys in INCIDENT_KEYWORDS:
+        if any(k in low for k in keys):
+            return topic
+    return '분류 미정'
+
+
+def plan_incidents(incidents: list[dict]) -> dict[str, list[dict]]:
+    """사고를 주제별로 묶는다. 키는 **함정 페이지 이름** — 코드 주석 페이지와 같은 키를
+    쓰므로 한 파일 안에서 자연히 병합된다(규칙 1)."""
+    out: dict[str, list[dict]] = defaultdict(list)
+    for inc in incidents:
+        out[f'{_incident_topic(inc)} 함정'].append(inc)
+    return out
+
+
+def _fmt_date(v) -> str:
+    return str(v)[:10] if v else '?'
+
+
+def render_incidents(incidents: list[dict]) -> list[str]:
+    """사고를 증상/원인/수정 3단으로. 재발 건이 위로 온다(자주 밟은 것부터 읽게)."""
+    incidents = sorted(
+        incidents,
+        key=lambda r: (-int(r.get('recurrence_count') or 1), str(r.get('created_at'))),
+    )
+    out = ['## 🔴 밟았던 것 (사고 장부)', '']
+    repeats = [r for r in incidents if int(r.get('recurrence_count') or 1) > 1]
+    if repeats:
+        out += [f'> 재발 이력이 있는 사고 {len(repeats)}건이 맨 위에 있다 — '
+                '한 번 더 밟기 전에 여기부터 읽을 것.', '']
+    for r in incidents:
+        n = int(r.get('recurrence_count') or 1)
+        head = str(r.get('error_text') or '(증상 미기록)').strip().replace('\n', ' ')
+        out.append(f'### {head[:110]}')
+        out.append('')
+        cause = str(r.get('root_cause') or '').strip()
+        fix = str(r.get('fix_description') or '').strip()
+        if cause:
+            out.append(f'- **원인** — {cause}')
+        if fix:
+            commit = str(r.get('fix_commit') or '').strip()
+            out.append(f'- **수정** — {fix}' + (f' (`{commit}`)' if commit else ''))
+        meta = [f'재발 {n}회'] if n > 1 else []
+        meta.append(f'최초 {_fmt_date(r.get("created_at"))}')
+        if r.get('last_seen_at') and _fmt_date(r['last_seen_at']) != _fmt_date(r.get('created_at')):
+            meta.append(f'최근 {_fmt_date(r["last_seen_at"])}')
+        out.append(f'- 출처: `incident_ledger` · ' + ' · '.join(meta))
+        out.append('')
+    return out
+
+
+def render_page(section: str, name: str, blocks: list[dict], head: str,
+                incidents: list[dict] | None = None) -> str:
+    """페이지 1장을 마크다운으로. 규약(.claude/rules/wiki.md) 4절 형식을 따른다.
+
+    [불변식] 한 주제 = 한 파일이다. 코드 주석 원료와 사고 장부 원료가 **같은 페이지**에
+      들어온다 — 원료가 늘었다고 페이지를 늘리면 규칙 1(추가가 아니라 덮어쓰기)이 깨진다.
+    """
+    incidents = incidents or []
     blocks = sorted(blocks, key=lambda b: (b['file'], b['line']))
     files = sorted({b['file'] for b in blocks})
     tags = sorted({t for b in blocks for t in b['tags']})
@@ -165,6 +335,16 @@ def render_page(section: str, name: str, blocks: list[dict], head: str) -> str:
     src_lines = [f'  - {b["file"]}:{b["line"]}' for b in blocks[:20]]
     if len(blocks) > 20:
         src_lines.append(f'  # …외 {len(blocks) - 20}건 (본문 각 항목에 경로 표기)')
+    if incidents:
+        src_lines.append(f'  - incident_ledger  # 사고 {len(incidents)}건')
+    if not src_lines:
+        src_lines.append('  - incident_ledger')
+
+    origin = []
+    if blocks:
+        origin.append(f'코드 주석 {len(blocks)}건 · 파일 {len(files)}개')
+    if incidents:
+        origin.append(f'사고 장부 {len(incidents)}건')
 
     out = [
         '---',
@@ -181,17 +361,24 @@ def render_page(section: str, name: str, blocks: list[dict], head: str) -> str:
         '',
         '## 한 줄',
         '',
-        _one_liner(blocks[0]['body']),
+        _one_liner(blocks[0]['body']) if blocks
+        else _one_liner(str(incidents[0].get('root_cause') or incidents[0].get('error_text') or '')),
         '',
-        f'> 코드 주석에서 자동 합성 (원료 {len(blocks)}건 · 파일 {len(files)}개 · 추출 {head}).',
-        '> 🔴 **여기를 고치기 전에** 원본 주석을 먼저 고칠 것 — 다음 빌드에 덮어써진다.',
+        f'> 자동 합성 ({" · ".join(origin)} · 추출 {head}).',
+        '> 🔴 **여기를 고치기 전에** 원본(주석 또는 사고 장부)을 먼저 고칠 것 — '
+        '다음 빌드에 덮어써진다.',
         '',
     ]
+
+    if incidents:
+        out += render_incidents(incidents)
 
     by_file: dict[str, list[dict]] = defaultdict(list)
     for b in blocks:
         by_file[b['file']].append(b)
 
+    if blocks:
+        out += ['## 코드에 박힌 지식', '']
     for rel in files:
         bs = by_file[rel]
         out.append(f'## `{rel}`')
@@ -275,6 +462,12 @@ def build(dry_run: bool = False) -> dict:
     blocks = collect_blocks()
     pages = plan_pages(blocks)
 
+    incidents = collect_incidents()
+    inc_pages = plan_incidents(incidents)
+    # 사고만 있고 주석은 없는 주제도 페이지를 가져야 한다 — 없으면 그 사고는 사라진다.
+    for iname in inc_pages:
+        pages.setdefault(('함정', iname), [])
+
     written: dict[str, list[str]] = defaultdict(list)
     changed = kept = 0
     for (section, name), bs in pages.items():
@@ -282,7 +475,8 @@ def build(dry_run: bool = False) -> dict:
         if dry_run:
             continue
         path = WIKI / section / f'{_safe_name(name)}.md'
-        if write_if_changed(path, render_page(section, name, bs, head)):
+        incs = inc_pages.get(name, []) if section == '함정' else []
+        if write_if_changed(path, render_page(section, name, bs, head, incs)):
             changed += 1
         else:
             kept += 1
@@ -297,6 +491,7 @@ def build(dry_run: bool = False) -> dict:
 
     return {
         'blocks': len(blocks),
+        'incidents': len(incidents),
         'pages': sum(len(v) for v in written.values()),
         'changed': changed,
         'kept': kept,
@@ -311,7 +506,8 @@ def main() -> int:
     args = ap.parse_args()
 
     st = build(dry_run=args.dry_run or args.stats)
-    print(f"원료 블록 {st['blocks']}건 → 페이지 {st['pages']}장")
+    print(f"원료 — 코드 주석 {st['blocks']}건 · 사고 {st['incidents']}건 "
+          f"→ 페이지 {st['pages']}장")
     for sec, n in sorted(st['by_section'].items()):
         print(f"  {sec:6s} {n:3d}장")
     if not (args.dry_run or args.stats):
