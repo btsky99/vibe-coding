@@ -228,6 +228,16 @@ def run_smoke_test(exe_path: Path) -> bool:
             ('/api/tasks', None),
             # 제텔카스텐 (Obsidian vault 연동)
             ('/api/zettel/notes', None),
+            # 음성(마이크·낭독)
+            # [🔴 과거사고 2026-08-16 — 이 한 줄이 없어서 못 잡았다] 설치본에서 마이크가
+            #   죽었는데 개발본은 멀쩡했다. 원인은 소스가 아니라 **실물**이었다 —
+            #   EXE 번들 seed 가 v3.7.286 이라 min_exe 3.7.322 게이트에 걸려 체크아웃 대신
+            #   그 옛 seed 로 돌았고, 그 seed 에는 음성 라우트가 아예 없었다.
+            #   증상이 지독한 이유: 라우트가 없으면 서버가 404 가 아니라 **index.html 을
+            #   200 으로** 돌려준다(SPA 폴백). 프론트는 조용히 파싱 실패만 하고 화면은
+            #   멀쩡해 보인다. check_api 는 json.loads 를 하므로 여기서 걸린다.
+            # [불변식] 'ready' 키를 요구할 것 — HTML 200 을 PASS 로 세지 않기 위함이다.
+            ('/api/voice/status', ['ready']),
         ]
 
         passed = 0
