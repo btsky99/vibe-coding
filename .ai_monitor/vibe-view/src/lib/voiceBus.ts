@@ -378,6 +378,13 @@ class VoiceBus {
         if (q !== this.state.level) this.set({ level: q });
       },
       onError: (e) => this.set({ error: String(e), message: '마이크를 열 수 없습니다' }),
+      // [🔴 버린 이유를 화면에 띄운다 — 2026-08-17] 예전에는 여기서 버려도 화면이
+      //   '듣는 중…' 그대로여서, 사용자에겐 '눌러도 아무 일이 없다'로만 보였다.
+      //   원인 후보(권한·장치·너무 짧음)를 가르는 유일한 단서가 이 문장이다.
+      onDropped: (why, meta) => this.set({
+        message: why,
+        error: `voice: ${why} (peak ${meta.peak.toFixed(3)})`,
+      }),
     });
     try {
       await mic.start();
@@ -579,7 +586,10 @@ class VoiceBus {
       return;
     }
     this.set({ busy: false });
-    if (!text) { this.set({ message: '듣는 중…' }); return; }
+    // [🔴 '듣는 중…' 으로 덮지 않는다 — 2026-08-17] 소리는 갔는데 글자가 안 온 것과
+    //   아무 일도 안 일어난 것이 화면에서 똑같아 보였다. 둘은 원인이 전혀 다르다
+    //   (전자는 인식기, 후자는 마이크). 갈라서 말한다.
+    if (!text) { this.set({ message: '말소리를 알아듣지 못했습니다' }); return; }
 
     this.route(text);
   }
@@ -920,6 +930,16 @@ class VoiceBus {
         error: !d?.ready && d?.loading === false && d?.detail ? String(d.detail) : '',
         message: !d?.ready && d?.detail ? String(d.detail) : this.state.message,
       });
+      // [🔴 마이크 권한 배선이 실패했으면 그것부터 말한다 — 2026-08-17]
+      //   이 경우 getUserMedia 가 허용도 거부도 못 받고 매달려, 눌러 말해도 오디오
+      //   조각이 한 개도 안 들어온다(audioCapture.releaseHold 의 onDropped 주석).
+      //   받아쓰기 서버가 아무리 멀쩡해도 소리가 없으니 글자가 나올 수 없다.
+      //   서버 상태(ready)만 보면 '다 준비됨'으로 보여 원인을 영영 못 찾는다.
+      const mp = d?.micPermission;
+      if (mp && mp.ok === false) {
+        this.set({ error: `마이크 권한 배선 실패 — ${mp.detail}`,
+                   message: '마이크 권한이 앱에 붙지 않았습니다(앱 재시작 필요)' });
+      }
       this.refreshVoices();
     } catch {
       this.set({ sttReady: false, ttsReady: false });

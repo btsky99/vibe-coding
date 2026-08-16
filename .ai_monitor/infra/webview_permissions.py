@@ -41,6 +41,26 @@ import time
 _ALLOWED_KINDS = ('Microphone',)
 
 
+# [🔴 결과를 붙잡아 둔다 — 2026-08-17 사장 신고] 예전에는 배선 성공·실패를 print 로만
+#   남겼다. 콘솔 없이 도는 앱이라(규칙 10) 그 줄을 **아무도 읽지 않는다.** 그래서
+#   "마이크 눌러도 입력이 안 뜬다" 가 왔을 때 어디서 끊겼는지 가를 단서가 0이었다
+#   (서버 칸은 실측으로 멀쩡했다: 사이드카 /stt 2.6초, 앱 /api/voice/stt 2.5초).
+#   여기 담아 두면 /api/voice/status 가 그대로 화면까지 실어 나른다.
+# [불변식] 이 파일에 return 을 새로 만들면 **그 전에 _mark() 를 부른다.** 안 부르면
+#   그 갈래는 다시 '아무 일도 안 일어난 것'이 된다.
+_STATE: dict = {'ok': None, 'detail': '아직 확인하지 않았습니다'}
+
+
+def _mark(ok, detail: str) -> None:
+    _STATE['ok'], _STATE['detail'] = ok, detail
+    print(f'[voice] {detail}')
+
+
+def status() -> dict:
+    """{ok: True|False|None, detail: str} — None 은 '아직 판정 전'."""
+    return dict(_STATE)
+
+
 def _run_on_ui(window, fn):
     """fn 을 창의 UI 스레드에서 실행하고 결과를 돌려준다. 못 하면 (None, 예외).
 
@@ -117,10 +137,10 @@ def _attach(window, timeout: float) -> None:
     deadline = time.time() + timeout
     try:
         if not window.events.loaded.wait(timeout):
-            print('[voice] 마이크 권한 배선 생략 — 창이 끝내 뜨지 않음')
+            _mark(False, '마이크 권한 배선 생략 — 창이 끝내 뜨지 않음')
             return
     except Exception as e:                                    # noqa: BLE001
-        print(f'[voice] 마이크 권한 배선 생략 (loaded 이벤트 없음: {e})')
+        _mark(False, f'마이크 권한 배선 생략 (loaded 이벤트 없음: {e})')
         return
 
     try:
@@ -131,12 +151,12 @@ def _attach(window, timeout: float) -> None:
         )
         from System import EventHandler                       # type: ignore[import-not-found]
     except Exception as e:                                    # noqa: BLE001
-        print(f'[voice] 마이크 권한 배선 생략 (WebView2 바인딩 없음: {e})')
+        _mark(False, f'마이크 권한 배선 생략 (WebView2 바인딩 없음: {e})')
         return
 
     core = _find_core(window, max(5.0, deadline - time.time()))
     if core is None:
-        print('[voice] 마이크 권한 배선 실패 — CoreWebView2 를 못 찾음 (음성 입력 불가)')
+        _mark(False, '마이크 권한 배선 실패 — CoreWebView2 를 못 찾음 (음성 입력 불가)')
         return
 
     def on_permission(_sender, args):
@@ -161,9 +181,9 @@ def _attach(window, timeout: float) -> None:
 
     ok, err = _run_on_ui(window, _subscribe)
     if ok:
-        print('[voice] 마이크 권한 배선 완료 (WebView2 PermissionRequested)')
+        _mark(True, '마이크 권한 배선 완료 (WebView2 PermissionRequested)')
     else:
-        print(f'[voice] 마이크 권한 배선 실패: {err} (음성 입력 불가)')
+        _mark(False, f'마이크 권한 배선 실패: {err} (음성 입력 불가)')
 
 
 def enable_microphone(window, timeout: float = 30.0) -> None:

@@ -261,10 +261,31 @@ def handle_turn(handler, parsed_path, project_id: str) -> None:
     _json_response(handler, voice_turn.read(project_id, terminal))
 
 
+def _mic_permission() -> dict:
+    """{ok, detail} — WebView2 마이크 권한 배선이 붙었나.
+
+    [WHY 여기서 import 하나] 이 모듈은 헤드리스(창 없는 서버)에서도 돈다. 그때는
+      webview 자체가 없으므로 최상단 import 로 두면 서버가 통째로 못 뜬다."""
+    try:
+        from infra.webview_permissions import status
+        return status()
+    except Exception:                                       # noqa: BLE001
+        return {'ok': None, 'detail': '창이 없는 실행이라 해당 없음'}
+
+
 def handle_status(handler, project_root: Path) -> None:
     """GET /api/voice/status — 사이드카가 준비됐는가. 없으면 기동을 시작한다."""
     try:
-        _json_response(handler, _get('/status'))
+        d = _get('/status')
+        # [🔴 마이크 권한 배선 결과를 같이 실어 보낸다 — 2026-08-17 사장 신고]
+        #   "마이크 눌러도 입력이 안 뜬다" 인데 서버 칸은 실측으로 멀쩡했다
+        #   (사이드카 /stt 2.6초 · 이 프록시 2.5초, 둘 다 글자까지 정상).
+        #   남은 후보는 브라우저가 소리를 못 잡는 것뿐인데, 그 판정 근거가 앱 stdout 에만
+        #   있어 **아무도 못 봤다.** 여기 얹으면 화면이 원인을 바로 말할 수 있다.
+        #   [제약] 이 값은 앱 프로세스 안의 모듈 상태다 — 사이드카는 알 수 없다.
+        if isinstance(d, dict):
+            d['micPermission'] = _mic_permission()
+        _json_response(handler, d)
         return
     except (urllib.error.URLError, OSError, ValueError):
         pass                                                # 아직 안 떠 있다 — 아래에서 띄운다

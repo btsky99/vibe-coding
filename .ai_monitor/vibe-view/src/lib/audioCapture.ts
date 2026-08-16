@@ -51,6 +51,19 @@ export interface CaptureHandlers {
   /** 입력 레벨(0~1) — 마이크가 살아 있음을 사람이 눈으로 확인하는 유일한 수단. */
   onLevel?: (level: number) => void;
   onError?: (e: unknown) => void;
+  /**
+   * 담고 있던 것을 **버렸다**. 왜 버렸는지 사람이 읽을 문장으로 준다.
+   *
+   * [🔴 왜 이 통로가 생겼나 — 2026-08-17 사장 신고] "마이크 누르고 말해도 입력칸에
+   *   아무것도 안 뜬다." 그런데 서버 칸은 멀쩡했다(사이드카 /stt 2.6초·앱 프록시
+   *   /api/voice/stt 2.5초, 둘 다 글자까지 정상). 즉 소리가 **여기서** 버려졌는데
+   *   버리는 자리 두 곳이 전부 조용한 `return` 이라 화면에 아무 흔적도 안 남았다.
+   *   원인을 못 좁힌 이유가 바로 그 침묵이다 — 이 저장소가 이미 같은 교훈을 적어 뒀다
+   *   ("서버가 옳은 말을 해도 화면이 버리면 없는 말이다", voice_api 헤더).
+   * [불변식] 버리는 return 을 새로 만들면 **여기도 같이 부른다.** 안 부르면 그 자리는
+   *   다시 '아무 일도 안 일어난 것'처럼 보인다.
+   */
+  onDropped?: (why: string, meta: { ms: number; peak: number }) => void;
 }
 
 /**
@@ -156,7 +169,18 @@ export class MicCapture {
    */
   releaseHold(): void {
     this.hold = false;
-    if (!this.speaking) { this.reset(); return; }
+    if (!this.speaking) {
+      // [🔴 여기에 오면 마이크에서 소리 조각이 **한 번도** 안 왔다는 뜻이다]
+      //   홀드 중에는 문턱(threshold)을 아예 안 보고 첫 콜백에서 speaking 을 켠다
+      //   (onAudio 의 hold 가지). 그러니 speaking 이 거짓인 채로 손을 뗐다면 볼륨이
+      //   작아서가 아니라 **오디오 콜백 자체가 안 돈 것**이다 — WebView2 마이크 권한이
+      //   허용도 거부도 아닌 채 매달리면 정확히 이 모양이 된다(pywebview 6.1 함정).
+      //   예전에는 조용히 reset() 만 하고 끝나 화면에 아무 말도 안 남았다.
+      this.handlers.onDropped?.('마이크에서 소리가 들어오지 않았습니다(권한/장치 확인)',
+                                { ms: 0, peak: this.peak });
+      this.reset();
+      return;
+    }
     // 누르고 말한 것은 짧아도 버리지 않는다("네", "응"). 대신 헛클릭(120ms 미만)은 버린다.
     this.flush(this.currentMs(), 120);
   }
@@ -235,7 +259,13 @@ export class MicCapture {
     // 너무 짧으면 버린다. [WHY] 문 닫는 소리·마우스 클릭이 매번 서버로 나가면
     //   인식기가 헛돌고, 그 결과 "말한 적 없는 문장"이 입력창에 꽂힌다.
     // [제약] 기준은 호출부가 낮출 수 있다 — 누르고 말하기는 사람이 이미 의도를 밝혔다.
-    if (ms < minMs) return;
+    if (ms < minMs) {
+      // 헛클릭·기침을 거르는 정상 동작이지만, **왜 안 갔는지는 말해 준다.**
+      // 누르고 말했는데 매번 여기로 떨어지면 그건 거름이 아니라 고장이다.
+      this.handlers.onDropped?.(`너무 짧아 보내지 않았습니다(${Math.round(ms)}ms)`,
+                                { ms, peak });
+      return;
+    }
 
     const total = chunks.reduce((n, c) => n + c.length, 0);
     const pcm = new Float32Array(total);
