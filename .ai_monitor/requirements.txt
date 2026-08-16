@@ -21,3 +21,18 @@ chromadb
 python-dotenv==1.2.1
 # [2026-07-15] 2.9.9→2.9.11 — Python 3.13 휠(cp313)은 2.9.10부터. CI 3.13 승격과 동기.
 psycopg2-binary==2.9.11
+
+# ── 음성(낭독 TTS / 받아쓰기 STT) ─────────────────────────────────────────────
+# [🔴 왜 앱 의존성으로 올라왔나 — 2026-08-16 사고] 원래 이 둘은 별도 환경
+#   (.ai_monitor/voice-server/.venv)에만 깔렸다. 그 환경을 **만들어 주는 사람이 설치본에는
+#   아무도 없었다** — setup_voice.py 를 부르는 곳이 설치·최초실행 어디에도 없어서,
+#   설치본에서는 사이드카가 영영 못 뜨고 마이크도 목소리 목록도 조용히 죽었다.
+#   (증상: 단추는 눌리는데 전송 안 됨 + edge-tts 목소리가 안 보임)
+# [WHY 런타임 설치가 아니라 동봉인가] 사용자 결정 2026-08-16. 처음 쓸 때 받게 하면
+#   설치본은 가볍지만 첫 사용이 네트워크에 걸린다. 깔면 바로 되는 쪽을 택했다.
+# [대가] 설치본이 약 190MB 커진다(av ~126MB, ctranslate2 ~60MB). onnxruntime·numpy·
+#   tokenizers 는 fastembed 가 이미 끌고 와 중복 비용이 없다.
+# [동기 의무] 여기를 바꾸면 vibe-coding.spec hiddenimports ↔ build-release.yml
+#   --hidden-import ↔ boot.py `if False:` 블록을 함께 갱신할 것(과거사고 v3.7.215~218).
+edge-tts==7.2.8
+faster-whisper==1.2.1

@@ -85,8 +85,17 @@ def _sidecar_log(project_root: Path):
 def _sidecar_python(project_root: Path) -> str | None:
     """사이드카를 실행할 파이썬.
 
-    [🔴 앱 venv 가 아니다] 음성 스택은 별도 환경에 깔린다. 후보를 순서대로 보고 없으면
-      None — 그때는 '음성 미설치'로 화면에 알린다(조용히 실패하지 않는다).
+    [개발] 별도 환경(.ai_monitor/voice-server/.venv)을 쓴다. 앱 venv 와 섞지 않는 편이
+      의존성 다툼이 없고, 음성을 안 쓰는 개발자는 아예 안 깔아도 된다.
+    [🔴 설치본에는 그 .venv 가 없다 — 2026-08-16 사고] 그 환경을 만들어 주는 것은
+      scripts/setup_voice.py 인데 **설치·최초실행 어디에서도 그걸 부르지 않았다.**
+      그래서 설치본에서는 사이드카가 영영 못 떠서 마이크도 목소리 목록도 조용히 죽었다
+      (단추는 눌리는데 전송이 안 되고, edge-tts 목소리가 안 보이는 증상).
+      이제 frozen 이면 **앱 EXE 자신을 실행기로 쓴다** — boot.main() 이 첫 인자가 .py 면
+      runpy 로 받아 주고(무한 창 생성 없음), 음성 패키지는 번들에 동봉돼 있다
+      (requirements.txt 의 edge-tts/faster-whisper ↔ spec hiddenimports 와 한 쌍).
+    [불변식] 이 폴백은 frozen 전용이다. 개발에서 앱 venv 를 실행기로 내주면 음성 패키지가
+      없는 환경에서 사이드카가 ImportError 로 죽으며, 그 실패가 별도 프로세스라 조용하다.
     """
     candidates = [
         os.environ.get('VOICE_PYTHON', ''),
@@ -96,6 +105,8 @@ def _sidecar_python(project_root: Path) -> str | None:
     for c in candidates:
         if c and Path(c).exists():
             return c
+    if getattr(sys, 'frozen', False):
+        return sys.executable
     return None
 
 
@@ -110,7 +121,16 @@ def _spawn_sidecar(project_root: Path) -> str:
             return '음성 스택이 설치되지 않았습니다(voice-server/.venv 없음)'
         script = project_root / '.ai_monitor' / 'voice-server' / 'voice_server.py'
         if not script.exists():
-            return f'사이드카 스크립트가 없습니다: {script}'
+            # [폴백 — 번들 동봉본] 게이트 실패로 seed 로 돌거나 체크아웃이 옛 소스라
+            #   voice-server 가 없을 수 있다. frozen 번들에는 항상 실려 있으므로 그쪽을 쓴다
+            #   (vibe-coding.spec datas 의 'voice-server' 항목과 한 쌍).
+            # [불변식] engines/ 가 스크립트와 같은 폴더에 있어야 한다 —
+            #   voice_server._engines_dir_on_path() 가 __file__ 기준으로 경로를 잡는다.
+            bundled = Path(getattr(sys, '_MEIPASS', '')) / 'voice-server' / 'voice_server.py'
+            if getattr(sys, 'frozen', False) and bundled.exists():
+                script = bundled
+            else:
+                return f'사이드카 스크립트가 없습니다: {script}'
         try:
             import subprocess
 

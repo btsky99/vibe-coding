@@ -45,6 +45,33 @@ try:
 except Exception:
     _fastembed_datas = []  # fastembed 미설치 빌드 환경 — 회상 v2 없이 빌드 (폴백 동작)
 
+# 음성 스택(av/ctranslate2)의 네이티브 바이너리 수집.
+# [WHY collect_dynamic_libs 인가 — 2026-08-16] 이 둘은 순수 파이썬이 아니라 .pyd 옆에
+#   .dll 을 끼고 산다(av 는 FFmpeg, ctranslate2 는 자체 런타임). hiddenimport 는 .py 만
+#   챙기므로 dll 이 빠지고, 그러면 frozen 에서 `import av` 가 ImportError 로 떨어진다.
+#   그 실패는 사이드카 안에서 나므로 **앱은 멀쩡하고 음성만 조용히 죽는** 형태가 된다 —
+#   이번 사고와 똑같은 모양이라 여기서 확실히 막는다.
+# [폴백] 미설치 빌드 환경에서도 빌드는 계속된다(음성 없는 EXE). 음성은 선택 기능이고
+#   빌드 자체를 세우면 릴리즈 파이프라인 전체가 멈춘다.
+from PyInstaller.utils.hooks import collect_dynamic_libs as _collect_dynamic_libs
+_voice_binaries = []
+for _vpkg in ('av', 'ctranslate2'):
+    try:
+        _voice_binaries += _collect_dynamic_libs(_vpkg)
+    except Exception:
+        print(f'[spec] 경고: {_vpkg} 미설치 — 음성 받아쓰기 없이 빌드')
+
+# faster-whisper 패키지 데이터(silero VAD 모델 .onnx).
+# [🔴 실측 2026-08-16] 이게 빠지면 STT 가 **로딩까지는 성공**하고(stt=True) 받아쓰기
+#   요청에서만 터진다: NoSuchFile ... faster_whisper/assets/silero_vad_v6.onnx.
+#   transcribe(vad_filter=True) 가 앞뒤 무음을 자를 때 쓰는 모델이다. 화면에는 빈 문자열이
+#   돌아가 '말했는데 아무 글자도 안 나옴'으로 보인다 — fastembed 와 같은 함정
+#   (hiddenimport 는 .py 만 수집한다).
+try:
+    _voice_datas = _collect_data_files('faster_whisper')
+except Exception:
+    _voice_datas = []
+
 # winpty 실행 파일 경로 (winpty-agent.exe, OpenConsole.exe)
 # 이 파일들이 EXE 번들에 없으면 PtyProcess.spawn() 실패 → PTY 터미널 불가
 _winpty_dir = _Path(_winpty_mod.__file__).parent
@@ -74,7 +101,7 @@ a = Analysis(
         (str(_winpty_dir / 'OpenConsole.exe'), 'winpty'),
         (str(_winpty_dir / 'winpty.dll'), 'winpty'),
         (str(_winpty_dir / 'conpty.dll'), 'winpty'),
-    ],
+    ] + _voice_binaries,
     datas=[
         # 프론트엔드 빌드 결과물 (React/Vite) — vite 기본 outDir = vibe-view/dist
         ('.ai_monitor/vibe-view/dist', 'vibe-view/dist'),
@@ -139,17 +166,35 @@ a = Analysis(
         ('soft_manifest.json', '_appseed'),
         # min_exe 게이트 비교 기준(현재 EXE 버전)을 boot/soft_updater가 읽는 위치.
         ('soft_manifest.json', '.'),
-    ] + _fastembed_datas,
+        # [음성 사이드카 — 2026-08-16 사고 수정] voice_server.py 는 subprocess 로 띄우는
+        #   스크립트라 import 그래프에 없다(lan_bridge.py 와 같은 부류) → 개별 datas 필수.
+        # [🔴 .venv / cache / models 를 통째로 싣지 말 것] 하위 폴더를 통으로 지정하면
+        #   개발 PC 의 .venv(246MB)까지 딸려 들어가는데, venv 의 python.exe 는 pyvenv.cfg 가
+        #   가리키는 원본 파이썬이 있어야 도는 물건이라 다른 PC 에서 쓸모가 없다.
+        #   그래서 **소스만** 싣고, 실행기는 앱 EXE 자신을 쓴다(api/voice_api._sidecar_python).
+        ('.ai_monitor/voice-server/voice_server.py', 'voice-server'),
+        ('.ai_monitor/voice-server/engines', 'voice-server/engines'),
+        ('.ai_monitor/voice-server/requirements.txt', 'voice-server'),
+        # seed 에도 같이 — min_exe 게이트 실패나 오프라인 최초부팅에서 seed 로 도는데,
+        # 거기 음성이 없으면 그 경로에서만 또 조용히 죽는다.
+        ('.ai_monitor/voice-server/voice_server.py', '_appseed/.ai_monitor/voice-server'),
+        ('.ai_monitor/voice-server/engines', '_appseed/.ai_monitor/voice-server/engines'),
+    ] + _fastembed_datas + _voice_datas,
     # hive_hook이 사용하는 stdlib 모듈: server.py가 직접 import 하지 않는 것까지 명시 보강
     # (런타임 동적 import는 PyInstaller 정적 분석에서 누락 가능 → hook EXE 모드에서 ImportError 위험)
     # fastembed/onnxruntime/tokenizers: embed_service가 함수 내부 import — 회상 v2 필수
     # [A안] boot.py 진입 시 server.py 자동탐색이 끊기므로 frozen 클로저를 명시 보강.
     #   boot.py의 `if False:` 블록과 중복이지만 belt+suspenders로 양쪽 유지.
     #   PySide6/textual은 의도적 제외(dashboard/TUI는 별도 python 서브프로세스 전용).
+    # [음성 2026-08-16] 아래 4개는 voice_server.py 가 **함수 안에서** import 한다(지연 로딩).
+    #   PyInstaller 정적분석은 그걸 못 잡고, 사이드카는 별도 프로세스라 실패해도 앱은
+    #   멀쩡하다 — 즉 빠뜨리면 '앱은 되는데 음성만 조용히 죽는' 형태가 된다.
     hiddenimports=['websockets', 'winpty', 'urllib.request', 'runpy',
                    'fastembed', 'onnxruntime', 'tokenizers', 'updater', 'soft_updater',
                    'webview', 'clr', 'psycopg2', 'watchdog', 'dotenv', 'rich',
-                   'win32com', 'win32api', 'win32con', 'pythoncom', 'numpy', 'filelock', 'PIL'],
+                   'win32com', 'win32api', 'win32con', 'pythoncom', 'numpy', 'filelock', 'PIL',
+                   'edge_tts', 'faster_whisper', 'ctranslate2', 'av', 'aiohttp',
+                   'huggingface_hub'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

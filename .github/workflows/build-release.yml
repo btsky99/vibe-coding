@@ -250,6 +250,11 @@ jobs:
             --add-data "infra;_appseed/.ai_monitor/infra" \
             --add-data "../scripts;_appseed/scripts" \
             --add-data "../soft_manifest.json;_appseed" \
+            --add-data "voice-server/voice_server.py;voice-server" \
+            --add-data "voice-server/engines;voice-server/engines" \
+            --add-data "voice-server/requirements.txt;voice-server" \
+            --add-data "voice-server/voice_server.py;_appseed/.ai_monitor/voice-server" \
+            --add-data "voice-server/engines;_appseed/.ai_monitor/voice-server/engines" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -278,7 +283,16 @@ jobs:
             --hidden-import numpy \
             --hidden-import filelock \
             --hidden-import PIL \
+            --hidden-import edge_tts \
+            --hidden-import faster_whisper \
+            --hidden-import ctranslate2 \
+            --hidden-import av \
+            --hidden-import aiohttp \
+            --hidden-import huggingface_hub \
             --collect-data fastembed \
+            --collect-binaries av \
+            --collect-binaries ctranslate2 \
+            --collect-data faster_whisper \
             boot.py
 
       - name: Build exe (console)
@@ -315,6 +329,11 @@ jobs:
             --add-data "infra;_appseed/.ai_monitor/infra" \
             --add-data "../scripts;_appseed/scripts" \
             --add-data "../soft_manifest.json;_appseed" \
+            --add-data "voice-server/voice_server.py;voice-server" \
+            --add-data "voice-server/engines;voice-server/engines" \
+            --add-data "voice-server/requirements.txt;voice-server" \
+            --add-data "voice-server/voice_server.py;_appseed/.ai_monitor/voice-server" \
+            --add-data "voice-server/engines;_appseed/.ai_monitor/voice-server/engines" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -343,7 +362,16 @@ jobs:
             --hidden-import numpy \
             --hidden-import filelock \
             --hidden-import PIL \
+            --hidden-import edge_tts \
+            --hidden-import faster_whisper \
+            --hidden-import ctranslate2 \
+            --hidden-import av \
+            --hidden-import aiohttp \
+            --hidden-import huggingface_hub \
             --collect-data fastembed \
+            --collect-binaries av \
+            --collect-binaries ctranslate2 \
+            --collect-data faster_whisper \
             boot.py
 
       - name: Build sub-window EXEs

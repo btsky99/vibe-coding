@@ -115,6 +115,16 @@ if False:  # noqa: SIM223 — 의도적 정적-탐색 전용 블록 (런타임 �
     import tokenizers         # fastembed 토크나이저
     import filelock           # 파일 락(일부 스크립트)
     import PIL                # Pillow(아이콘/이미지 처리)
+    # [음성 2026-08-16] 사이드카(voice-server/voice_server.py)가 쓰는 것들. 사이드카는 별도
+    #   프로세스지만 frozen 에서는 **이 EXE 가 그 스크립트의 실행기**다
+    #   (api/voice_api._sidecar_python → boot.main() 의 .py 분기). 그래서 이 클로저 안에
+    #   있어야 import 된다. 빠지면 앱은 멀쩡한 채 음성만 조용히 죽는다.
+    import edge_tts           # 낭독 TTS — 유일한 낭독 엔진
+    import faster_whisper     # 받아쓰기 STT
+    import ctranslate2        # faster-whisper 런타임(네이티브)
+    import av                 # faster-whisper 오디오 디코딩(FFmpeg 바인딩)
+    import aiohttp            # edge-tts 가 MS 서버와 통신
+    import huggingface_hub    # whisper 모델 내려받기
 
 
 def _is_frozen() -> bool:
