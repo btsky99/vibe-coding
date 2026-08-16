@@ -100,6 +100,15 @@ def _qwen_ref():
         return None
 
 
+def _qwen_setup():
+    """{installed, running, step, error, home} 또는 None — 모델 준비 진행 상황."""
+    try:
+        from engines.tts_qwen import setup_state
+        return setup_state()
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
 _state = {
     'stt': False,
     'tts': False,
@@ -349,6 +358,10 @@ class Handler(BaseHTTPRequestHandler):
                 'voices': list_voices(),
                 'cache': _cache_stats(),
                 'ref': _qwen_ref(),
+                # [🔴 진행을 화면으로 낸다 — 규칙 10] 모델 받기는 창 없이 도는 일이라
+                #   진행을 볼 곳이 화면뿐이다. 이게 없으면 사용자는 5GB 를 받는 동안
+                #   '목소리가 안 나온다'로만 겪는다(2026-08-16 음성 사고와 같은 모양).
+                'qwen': _qwen_setup(),
             })
             return
         if self.path.startswith('/voices'):

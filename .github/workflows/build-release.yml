@@ -255,6 +255,14 @@ jobs:
             --add-data "voice-server/requirements.txt;voice-server" \
             --add-data "voice-server/voice_server.py;_appseed/.ai_monitor/voice-server" \
             --add-data "voice-server/engines;_appseed/.ai_monitor/voice-server/engines" \
+            --add-data "voice-server/qwen/worker.py;voice-server/qwen" \
+            --add-data "voice-server/qwen/qgraph.py;voice-server/qwen" \
+            --add-data "voice-server/qwen/ref_text.json;voice-server/qwen" \
+            --add-data "voice-server/qwen/boss_pick.wav;voice-server/qwen" \
+            --add-data "voice-server/qwen/worker.py;_appseed/.ai_monitor/voice-server/qwen" \
+            --add-data "voice-server/qwen/qgraph.py;_appseed/.ai_monitor/voice-server/qwen" \
+            --add-data "voice-server/qwen/ref_text.json;_appseed/.ai_monitor/voice-server/qwen" \
+            --add-data "voice-server/qwen/boss_pick.wav;_appseed/.ai_monitor/voice-server/qwen" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \
@@ -334,6 +342,14 @@ jobs:
             --add-data "voice-server/requirements.txt;voice-server" \
             --add-data "voice-server/voice_server.py;_appseed/.ai_monitor/voice-server" \
             --add-data "voice-server/engines;_appseed/.ai_monitor/voice-server/engines" \
+            --add-data "voice-server/qwen/worker.py;voice-server/qwen" \
+            --add-data "voice-server/qwen/qgraph.py;voice-server/qwen" \
+            --add-data "voice-server/qwen/ref_text.json;voice-server/qwen" \
+            --add-data "voice-server/qwen/boss_pick.wav;voice-server/qwen" \
+            --add-data "voice-server/qwen/worker.py;_appseed/.ai_monitor/voice-server/qwen" \
+            --add-data "voice-server/qwen/qgraph.py;_appseed/.ai_monitor/voice-server/qwen" \
+            --add-data "voice-server/qwen/ref_text.json;_appseed/.ai_monitor/voice-server/qwen" \
+            --add-data "voice-server/qwen/boss_pick.wav;_appseed/.ai_monitor/voice-server/qwen" \
             --add-binary "$WINPTY/winpty.dll;winpty" \
             --add-binary "$WINPTY/winpty-agent.exe;winpty" \
             --add-binary "$WINPTY/conpty.dll;winpty" \

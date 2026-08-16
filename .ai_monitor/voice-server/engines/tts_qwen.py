@@ -70,16 +70,79 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 from engines import tts_cache, tts_split
 
 ENABLED = os.environ.get('VOICE_QWEN', '1').strip() not in ('0', 'false', 'off')
 
-WORKER_PY = os.environ.get(
-    'VOICE_QWEN_PYTHON', r'G:\apix-voice2\envs\qwen_cuda\Scripts\python.exe')
-WORKER_JOB = os.environ.get(
-    'VOICE_QWEN_WORKER', r'G:\apix-voice2\work\z_qwen_worker.py')
+# ── 어디에 굽는 살림이 있나 ──────────────────────────────────────────────────────
+# [🔴 2026-08-17 — G: 고정 경로를 벗어난 이유] 여기 적혀 있던 자리는 이 개발 PC 의
+#   G:\apix-voice2 였다. 설치본이 깔리는 PC 에는 그런 드라이브가 없어, 새로 깐 사람은
+#   사장님 목소리를 **영영 못 썼다**(조용히 available()=False 로 목록에서 빠졌다).
+#   이제 살림은 앱이 들고 다닌다 — 일꾼·그래프·참조는 동봉(620KB), 모델과 CUDA 토치만
+#   첫 실행 때 받는다(scripts/setup_qwen.py 헤더에 못 싣는 이유가 적혀 있다).
+# [불변식] 이 경로는 scripts/setup_qwen.qwen_dir() 와 **같은 자리를 가리켜야 한다**.
+#   어긋나면 다 받아 놓고도 여기서는 '없다'가 되어 무한히 다시 받는다.
+_HERE = os.path.dirname(os.path.abspath(__file__))          # .../voice-server/engines
+_VOICE_DIR = os.path.dirname(_HERE)                          # .../voice-server
+
+
+def _qwen_home() -> str:
+    """굽는 살림이 놓일 자리.
+
+    [🔴 번들 안(_MEIPASS)에는 깔면 안 된다] onefile 이 푸는 임시 폴더라 앱이 꺼지면
+      지워진다. 거기에 5GB 를 받으면 켤 때마다 다시 받는다. 그 경우만 사용자 폴더로 뺀다.
+    """
+    cand = os.path.join(_VOICE_DIR, 'qwen')
+    mei = getattr(sys, '_MEIPASS', '')
+    if mei and os.path.abspath(cand).startswith(os.path.abspath(mei)):
+        base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+        return os.path.join(base, 'VibeCoding', 'qwen')
+    return cand
+
+
+QWEN_HOME = os.environ.get('VOICE_QWEN_HOME', '') or _qwen_home()
+# 동봉본(번들/체크아웃)의 자리 — QWEN_HOME 이 사용자 폴더로 빠졌을 때 여기서 복사해 온다.
+QWEN_SEED = os.path.join(_VOICE_DIR, 'qwen')
+
+# [🔴 개발 PC 의 옛 자리는 폴백으로만 남긴다] 보드(G:\apix-voice2)가 이미 다 깔린
+#   이 PC 에서는 5GB 를 또 받을 이유가 없다. 살림이 아직 없고 옛 자리가 살아 있으면
+#   그쪽을 쓴다. 새로 깐 PC 에는 이 경로가 아예 없으므로 자연히 무시된다.
+_DEV_PY = r'G:\apix-voice2\envs\qwen_cuda\Scripts\python.exe'
+_DEV_JOB = r'G:\apix-voice2\work\z_qwen_worker.py'
+
+
+def _worker_paths() -> tuple[str, str]:
+    """(실행기, 일꾼). 환경변수 > 내 살림 > 개발 PC 옛 자리 순."""
+    py = os.environ.get('VOICE_QWEN_PYTHON', '')
+    job = os.environ.get('VOICE_QWEN_WORKER', '')
+    if py and job:
+        return py, job
+    mine_py = os.path.join(QWEN_HOME, '.venv', 'Scripts', 'python.exe')
+    if os.name != 'nt':
+        mine_py = os.path.join(QWEN_HOME, '.venv', 'bin', 'python')
+    mine_job = os.path.join(QWEN_HOME, 'worker.py')
+    if os.path.exists(mine_py) and os.path.exists(mine_job):
+        return mine_py, mine_job
+    if os.path.exists(_DEV_PY) and os.path.exists(_DEV_JOB):
+        return _DEV_PY, _DEV_JOB
+    return mine_py, mine_job                 # 아직 없다 — 설치가 채울 자리를 가리킨다
+
+
+WORKER_PY, WORKER_JOB = _worker_paths()
 MODEL_ID = os.environ.get('VOICE_QWEN_MODEL', 'Qwen/Qwen3-TTS-12Hz-0.6B-Base')
+
+# 프로젝트 뿌리와 scripts/ — 설치 절차(setup_qwen)를 불러오기 위한 자리.
+_ROOT = os.path.dirname(os.path.dirname(_VOICE_DIR))          # .../<프로젝트>
+_SCRIPTS_DIR = os.path.join(_ROOT, 'scripts')
+
+_can_cache: dict = {'at': 0.0, 'val': False}
+# 설치 진행 상태. /status 가 이걸 그대로 내보내 화면이 '지금 뭘 받는 중'을 띄운다
+# (규칙 10 — 콘솔이 없으니 진행을 볼 곳은 화면뿐이다).
+_setup: dict = {'running': False, 'step': '', 'error': ''}
+_setup_thread: threading.Thread | None = None
+_setup_lock = threading.Lock()
 
 # 일꾼이 뜰 때까지(=모델 올림) 기다리는 상한. import 30초 + 올림 21초를 넉넉히 덮는다.
 BOOT_S = int(os.environ.get('VOICE_QWEN_BOOT', '120'))
@@ -125,9 +188,21 @@ _reaper: threading.Thread | None = None
 #   녹음하시면 그대로다). 그래서 파일 내용의 sha256 을 넣는다.
 # [🔴 이쪽은 참조를 고르지 않는다] 어느 참조로 굽는지는 굽는 쪽(z_qwen_worker 의 REF_WAV)이
 #   정하고 ag_bake_now 가 ref_info.json 에 적어 둔다. 여기서는 **읽기만** 한다.
+# [🔴 참조 파일은 내 살림 것이 먼저다 — 2026-08-17] 동봉본을 실어 보내므로 새로 깐 PC 도
+#   같은 참조를 갖는다. G: 자리는 이 개발 PC 에만 있는 폴백이다.
 _REF_INFO_PATH = os.environ.get(
     'VOICE_REF_INFO', r'G:\apix-voice2\work\bake_now\ref_info.json')
-_REF_WAV = os.environ.get('VOICE_QWEN_REF', r'G:\apix-voice2\ref\boss_pick.wav')
+
+
+def _ref_wav_path() -> str:
+    env = os.environ.get('VOICE_QWEN_REF', '')
+    if env:
+        return env
+    for base in (QWEN_HOME, QWEN_SEED):
+        p = os.path.join(base, 'boss_pick.wav')
+        if os.path.exists(p):
+            return p
+    return r'G:\apix-voice2\ref\boss_pick.wav'
 _ref_cache: dict = {'at': 0.0, 'val': None}
 _REF_TTL_S = 5.0
 
@@ -152,13 +227,14 @@ def ref_info() -> dict | None:
     except (OSError, ValueError):
         val = None
     if val is None:
+        ref = _ref_wav_path()
         try:
             h = hashlib.sha256()
-            with open(_REF_WAV, 'rb') as f:
+            with open(ref, 'rb') as f:
                 for blk in iter(lambda: f.read(1 << 20), b''):
                     h.update(blk)
-            val = {'key': os.path.splitext(os.path.basename(_REF_WAV))[0],
-                   'file': _REF_WAV, 'sha256': h.hexdigest()}
+            val = {'key': os.path.splitext(os.path.basename(ref))[0],
+                   'file': ref, 'sha256': h.hexdigest()}
         except OSError:
             val = None
     _ref_cache['at'], _ref_cache['val'] = now, val
@@ -169,16 +245,60 @@ def _ref_sha() -> str:
     return (ref_info() or {}).get('sha256') or ''
 
 
+def installed() -> bool:
+    """굽는 살림이 다 깔렸나(= 지금 당장 부를 수 있나)."""
+    py, job = _worker_paths()
+    return os.path.exists(py) and os.path.exists(job)
+
+
 def available() -> bool:
-    """[🔴 여기서 qwen_tts 를 import 해 보지 않는다] 그 패키지는 이 venv 가 아니라 일꾼
-    쪽에 있다. 여기서 볼 것은 '부를 수 있는가' 뿐이다."""
+    """목록에 이 목소리를 올릴 것인가.
+
+    [🔴 아직 안 깔렸어도 올린다 — 2026-08-17] 예전에는 '파일이 있나'만 봐서, 새로 깐 PC 는
+      목록에 아예 안 떴고 사용자는 **고를 수조차 없었다**. 고를 수 없으면 설치가 시작될
+      계기도 없다 — 영영 안 되는 상태로 굳는다. 그래서 '깔 수 있는가'로 바꿨다.
+    [🔴 단 NVIDIA 카드가 없으면 올리지 않는다] 이 모델은 CUDA 전용이다. 못 쓸 목소리를
+      목록에 띄우면 고른 사람은 5GB 를 받은 뒤에야 실패를 안다.
+    [WHY 여기서 qwen_tts 를 import 해 보지 않나] 그 패키지는 이 venv 가 아니라 일꾼 쪽에
+      있다. 여기서 볼 것은 '부를 수 있는가' 뿐이다."""
     if not ENABLED:
         return False
-    return os.path.exists(WORKER_PY) and os.path.exists(WORKER_JOB)
+    if installed():
+        return True
+    return _can_install()
+
+
+def _can_install() -> bool:
+    """동봉된 씨앗이 있고 GPU 가 있으면 깔 수 있다. 판정은 30초 되쓴다 —
+    /voices 는 자주 불리는데 nvidia-smi 를 매번 부르면 그 값이 목록 응답에 얹힌다."""
+    now = time.time()
+    if now - _can_cache['at'] < 30.0:
+        return bool(_can_cache['val'])
+    val = False
+    try:
+        seed = QWEN_SEED if os.path.exists(os.path.join(QWEN_SEED, 'worker.py')) else QWEN_HOME
+        if os.path.exists(os.path.join(seed, 'worker.py')):
+            sys.path.insert(0, _SCRIPTS_DIR)
+            import setup_qwen
+            val = setup_qwen.has_nvidia()
+    except Exception:                                          # noqa: BLE001
+        val = False
+    _can_cache['at'], _can_cache['val'] = now, val
+    return val
 
 
 def list_voices() -> list[dict]:
-    return list(VOICES) if available() else []
+    """[🔴 아직 안 깔린 상태도 목록에 올린다] 고를 수 없으면 설치가 시작될 계기가 없다
+    (available() 주석 참조). 대신 note 로 '처음 한 번 받는다'를 미리 알린다 —
+    고른 뒤에야 알면 사용자는 고장으로 받아들인다."""
+    if not available():
+        return []
+    out = [dict(v) for v in VOICES]
+    if not installed():
+        out[0]['note'] = ('처음 고르시면 목소리 파일을 받습니다(약 5GB, 한 번만) — '
+                          '받는 동안은 다른 목소리로 읽습니다')
+        out[0]['needsSetup'] = True
+    return out
 
 
 def worker_alive() -> bool:
@@ -232,11 +352,89 @@ def _start_reaper() -> None:
     _reaper.start()
 
 
+def setup_state() -> dict:
+    """설치 진행 상태. /status 가 그대로 실어 화면에 띄운다."""
+    return {'installed': installed(), 'running': bool(_setup['running']),
+            'step': _setup['step'], 'error': _setup['error'], 'home': QWEN_HOME}
+
+
+def _seed_assets() -> None:
+    """살림 자리가 사용자 폴더로 빠졌으면 동봉본(일꾼·그래프·참조)을 거기로 옮겨 둔다.
+    [🔴 덮어쓰지 않는다] 이미 있는 것을 새 판이 덮으면, 받다 만 상태와 섞인다."""
+    if os.path.abspath(QWEN_SEED) == os.path.abspath(QWEN_HOME):
+        return
+    os.makedirs(QWEN_HOME, exist_ok=True)
+    for name in ('worker.py', 'qgraph.py', 'ref_text.json', 'boss_pick.wav'):
+        src, dst = os.path.join(QWEN_SEED, name), os.path.join(QWEN_HOME, name)
+        if os.path.exists(src) and not os.path.exists(dst):
+            shutil.copy2(src, dst)
+
+
+def start_setup() -> str:
+    """굽는 살림을 백그라운드로 깐다. 이미 도는 중이면 그 사실만 알린다.
+
+    [🔴 왜 자동인가] 사장님이 이 목소리를 고르신 것이 곧 '쓰겠다'는 의사표시다. 여기서
+      멈추고 명령줄을 치라고 하면 그게 2026-08-16 음성 사고의 모습이다(안내조차 화면에
+      안 떠서 사용자는 '단추가 안 먹는다'로만 겪었다).
+    [🔴 규칙 10] 사람이 누른 실행이 아니다 — infra.proc 로 창 없이 돌린다. 5GB 를 받는
+      수십 분 동안 검은 창이 사장님 화면 위에 떠 있으면 그 자체가 사고다.
+    [불변식] 스레드는 한 번에 하나 — /status 는 4초마다 온다. 매번 걸면 pip 이 겹쳐 돌아
+      venv 가 반쯤 만들어진 채 서로를 덮는다(setup_voice 가 겪은 자리와 같다)."""
+    global _setup_thread
+    with _setup_lock:
+        if _setup_thread is not None and _setup_thread.is_alive():
+            return _setup['step'] or '준비 중입니다'
+        if _setup['error']:
+            return _setup['error']              # 실패는 다시 두드려도 같다
+
+        log_path = os.path.join(_VOICE_DIR, 'qwen-setup.log')
+
+        def _quiet(cmd, env):
+            from infra import proc                            # noqa: PLC0415
+            with open(log_path, 'ab') as fp:
+                fp.write(f'\n$ {" ".join(cmd)}\n'.encode('utf-8', 'replace'))
+                fp.flush()
+                return proc.run(cmd, cwd=_ROOT, env=env, stdin=subprocess.DEVNULL,
+                                stdout=fp, stderr=subprocess.STDOUT).returncode
+
+        def _work():
+            try:
+                _seed_assets()
+                if _SCRIPTS_DIR not in sys.path:
+                    sys.path.insert(0, _SCRIPTS_DIR)
+                import setup_qwen                             # noqa: PLC0415
+                # [🔴 자리를 넘겨준다] 설치본에서는 살림이 사용자 폴더에 있다.
+                #   설치 절차가 스스로 계산하게 두면 서로 다른 곳을 보게 된다.
+                ok, msg = setup_qwen.ensure_qwen(
+                    Path(QWEN_HOME), _quiet,
+                    note=lambda m: _setup.__setitem__('step', m))
+                _setup['error'] = '' if ok else msg
+                _setup['step'] = '' if ok else msg
+            except Exception as e:                            # noqa: BLE001
+                _setup['error'] = f'목소리 준비 실패: {type(e).__name__}: {e}'
+            finally:
+                _setup['running'] = False
+
+        _setup['running'], _setup['step'], _setup['error'] = True, '준비를 시작합니다', ''
+        _setup_thread = threading.Thread(target=_work, name='qwen-setup', daemon=True)
+        _setup_thread.start()
+        return _setup['step']
+
+
 def _ensure_worker() -> subprocess.Popen:
-    global _proc
+    global _proc, WORKER_PY, WORKER_JOB
     with _lock:
         if worker_alive():
             return _proc
+        # [🔴 매번 다시 잡는다] 설치가 끝나면 경로가 생긴다 — 모듈을 읽을 때 잡아 둔
+        #   값에 매달리면 다 깔고도 '없다'가 되어 사이드카를 재기동해야만 소리가 난다.
+        WORKER_PY, WORKER_JOB = _worker_paths()
+        if not installed():
+            # 아직 살림이 없다 — 지금 깔기 시작하고, 이번 요청은 물러난다.
+            # (프론트가 브라우저 목소리로 내려가 소리는 계속 난다.)
+            msg = start_setup()
+            raise RuntimeError(f'사장님 목소리를 준비하는 중입니다 — {msg}. '
+                               f'준비될 때까지는 다른 목소리로 읽습니다')
         if not available():
             raise RuntimeError(f'Qwen 일꾼을 찾을 수 없습니다({WORKER_PY} / {WORKER_JOB})')
         # [제약] stderr 는 파이프로 받지 않는다 — 아무도 안 읽으면 자식이 멈춘다.

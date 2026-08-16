@@ -201,6 +201,21 @@ a = Analysis(
         # 거기 음성이 없으면 그 경로에서만 또 조용히 죽는다.
         ('.ai_monitor/voice-server/voice_server.py', '_appseed/.ai_monitor/voice-server'),
         ('.ai_monitor/voice-server/engines', '_appseed/.ai_monitor/voice-server/engines'),
+        # [🔴 사장님 목소리 살림 — 2026-08-17] 일꾼·그래프·참조·참조원문 네 개. 다 합쳐
+        #   620KB 라 싣는다. 모델(2.4GB)과 CUDA 토치(~3GB)는 깃허브 릴리즈가 파일당 2GB
+        #   한도라 못 싣는다 → 첫 실행 때 받는다(scripts/setup_qwen.py 헤더).
+        # [🔴 폴더를 통째로 지정하면 안 된다] 개발 PC 의 qwen/.venv 와 qwen/models(수 GB)가
+        #   딸려 들어간다. 위 voice-server 주석과 같은 사고다 — **파일을 하나씩** 적는다.
+        # [🔴 참조가 빠지면 목소리가 달라진다] boss_pick.wav 와 ref_text.json 은 소리의
+        #   정체 그 자체다. 모델만 받아 오고 이 둘이 없으면 남의 목소리가 난다.
+        ('.ai_monitor/voice-server/qwen/worker.py', 'voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/qgraph.py', 'voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/ref_text.json', 'voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/boss_pick.wav', 'voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/worker.py', '_appseed/.ai_monitor/voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/qgraph.py', '_appseed/.ai_monitor/voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/ref_text.json', '_appseed/.ai_monitor/voice-server/qwen'),
+        ('.ai_monitor/voice-server/qwen/boss_pick.wav', '_appseed/.ai_monitor/voice-server/qwen'),
     ] + _fastembed_datas + _voice_datas,
     # hive_hook이 사용하는 stdlib 모듈: server.py가 직접 import 하지 않는 것까지 명시 보강
     # (런타임 동적 import는 PyInstaller 정적 분석에서 누락 가능 → hook EXE 모드에서 ImportError 위험)

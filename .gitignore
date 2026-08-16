@@ -80,3 +80,10 @@ dist_pkg/
 # 낭독 캐시(mp3). 이 PC 에서 실제로 들은 문장들이라 다른 사람에게 의미가 없고,
 # 상한 안에서 알아서 정리된다(engines/tts_cache.py).
 .ai_monitor/voice-server/cache/
+
+# 사장님 목소리 굽기 살림 — 첫 실행 때 받는 것(모델 2.4GB·CUDA 토치 ~3GB).
+# [WHY] 이걸 안 막으면 git 에 수 GB 가 들어가고, spec 이 폴더를 통으로 실으면
+#   인스톨러가 터진다. 동봉 대상은 worker.py/qgraph.py/ref_text.json/boss_pick.wav 넷뿐.
+.ai_monitor/voice-server/qwen/.venv/
+.ai_monitor/voice-server/qwen/models/
+.ai_monitor/voice-server/qwen-setup.log
