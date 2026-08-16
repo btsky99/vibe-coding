@@ -248,6 +248,7 @@ jobs:
             --add-data "api;_appseed/.ai_monitor/api" \
             --add-data "src;_appseed/.ai_monitor/src" \
             --add-data "infra;_appseed/.ai_monitor/infra" \
+            --add-data "../scripts;scripts" \
             --add-data "../scripts;_appseed/scripts" \
             --add-data "../soft_manifest.json;_appseed" \
             --add-data "voice-server/voice_server.py;voice-server" \
@@ -335,6 +336,7 @@ jobs:
             --add-data "api;_appseed/.ai_monitor/api" \
             --add-data "src;_appseed/.ai_monitor/src" \
             --add-data "infra;_appseed/.ai_monitor/infra" \
+            --add-data "../scripts;scripts" \
             --add-data "../scripts;_appseed/scripts" \
             --add-data "../soft_manifest.json;_appseed" \
             --add-data "voice-server/voice_server.py;voice-server" \
@@ -599,6 +601,7 @@ jobs:
             --add-data "api:_appseed/.ai_monitor/api" \
             --add-data "src:_appseed/.ai_monitor/src" \
             --add-data "infra:_appseed/.ai_monitor/infra" \
+            --add-data "../scripts:scripts" \
             --add-data "../scripts:_appseed/scripts" \
             --add-data "../soft_manifest.json:_appseed" \
             --hidden-import websockets \

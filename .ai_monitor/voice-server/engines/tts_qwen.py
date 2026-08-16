@@ -144,8 +144,22 @@ _ROOT = os.path.dirname(os.path.dirname(_VOICE_DIR))          # .../<프로젝�
 
 
 def _scripts_dir() -> str:
-    for cand in (os.path.join(_ROOT, 'scripts'),
-                 os.path.join(os.path.dirname(_VOICE_DIR), 'scripts')):
+    """[🔴 배치가 셋이다 — 실물 설치본을 뜯어 보고서야 알았다(v3.7.343 실측)]
+      ① 관리 체크아웃: <체크아웃>/scripts                      ← 평상시
+      ② seed 로 도는 판: <_MEIPASS>/_appseed/scripts           ← 게이트 실패 시
+      ③ 번들 voice-server 폴백: <_MEIPASS>/voice-server 에서 도는데,
+         **CI 빌드에는 <_MEIPASS>/scripts 가 없다.** 스펙에는 ('scripts','scripts') 가
+         있는데 CI 의 --add-data 에는 그 줄이 없다 — 스펙↔CI 드리프트(v3.7.215~218 과
+         같은 부류). 그래서 ②의 자리를 빌려 쓴다.
+      한 자리만 믿으면 ③에서 `import setup_qwen` 이 실패하고, 사용자에게는
+      '목소리 준비 실패' 한 줄로만 보인다."""
+    mei = getattr(sys, '_MEIPASS', '')
+    cands = [os.path.join(_ROOT, 'scripts'),
+             os.path.join(os.path.dirname(_VOICE_DIR), 'scripts')]
+    if mei:
+        cands += [os.path.join(mei, '_appseed', 'scripts'),
+                  os.path.join(mei, 'scripts')]
+    for cand in cands:
         if os.path.isfile(os.path.join(cand, 'setup_qwen.py')):
             return cand
     return os.path.join(_ROOT, 'scripts')
