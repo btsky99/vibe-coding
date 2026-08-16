@@ -910,9 +910,15 @@ class VoiceBus {
         //   바로 true 가 된다. ready(=받아쓰기까지)를 기다리면 whisper 로딩 수십 초
         //   동안 고른 목소리 대신 브라우저 목소리가 난다.
         ttsReady: !!d?.ttsReady,
-        // [🔴 여기서 error 를 채우지 않는다] 사이드카가 예열 중이라는 사실은 오류가
-        //   아니다. 낭독은 브라우저가 이미 하고 있다 — 화면을 노랗게 만들 이유가 없다.
-        error: '',
+        // [🔴 예열 중은 오류가 아니다] 낭독은 브라우저가 이미 하고 있다 — 화면을
+        //   노랗게 만들 이유가 없다. 하지만 **loading 이 false 인 채 not ready** 는
+        //   진짜 고장이다. 그때 detail 을 버리면 안 된다.
+        // [🔴 2026-08-16 사고] 서버는 '음성 스택이 설치되지 않았습니다'라고 정확히
+        //   말하고 있었는데 이 자리에서 통째로 버려, 사장님 화면에는 아무 말도 안 떴다.
+        //   단추는 눌리는데 아무 일도 안 일어나는 것으로만 보였다 — 조용한 실패의 절반은
+        //   서버가 아니라 여기였다.
+        error: !d?.ready && d?.loading === false && d?.detail ? String(d.detail) : '',
+        message: !d?.ready && d?.detail ? String(d.detail) : this.state.message,
       });
       this.refreshVoices();
     } catch {

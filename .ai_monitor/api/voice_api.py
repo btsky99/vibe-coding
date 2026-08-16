@@ -50,6 +50,12 @@ VOICE_PORT = int(os.environ.get('VOICE_PORT', '9030'))
 BASE_URL = f'http://127.0.0.1:{VOICE_PORT}'
 
 _spawn_lock = threading.Lock()
+# 음성 스택 자동 설치(setup_voice.ensure_env)의 진행 상태.
+# [🔴 왜 상태를 들고 있나] 설치는 수백 MB·수 분이다. /status 는 4초마다 온다 —
+#   상태가 없으면 매번 설치를 새로 걸거나, 반대로 '준비 중'만 무한히 돌려준다.
+_setup_lock = threading.Lock()
+_setup_thread = None                                        # threading.Thread | None
+_setup_msg = ''                                             # 실패 사유(사람이 읽을 문장)
 # [🔴 bool 이 아니라 Popen 을 들고 있는 이유] 예전엔 `_spawned = True` 한 장으로 판정했는데,
 #   자식이 죽어도 플래그가 남아 두 번 다시 안 띄웠다 — 화면은 영구히 '준비 중'이 된다.
 #   poll() 로 실물을 보면 죽은 뒤 첫 /status 요청이 곧 재기동이 된다.
@@ -82,6 +88,29 @@ def _sidecar_log(project_root: Path):
         return subprocess.DEVNULL
 
 
+def _frozen_carries_voice() -> bool:
+    """지금 이 EXE 번들 안에 음성 패키지가 **실제로** 실려 있는가.
+
+    [🔴 왜 물어봐야 하나 — 2026-08-16 실측] 설치본은 EXE 안 소스가 아니라 관리형
+      체크아웃을 실행하고, 소스는 경량 업데이트 채널로 혼자 최신이 된다. 그래서
+      **새 소스 + 낡은 EXE** 조합이 흔하다. 사장님 PC 실측이 정확히 그것이었다 —
+      체크아웃은 v3.7.340 인데 EXE 는 2026-07-23 자로 edge_tts·faster_whisper 가
+      아예 없었다(_internal 에 두 패키지 모두 부재). 그 상태에서 EXE 를 실행기로
+      내주면 사이드카는 뜨자마자 ImportError 로 죽고, 그 죽음은 별도 프로세스라
+      조용하다 — 화면은 '준비 중'인 채 마이크만 안 먹는다.
+    [WHY find_spec 인가] 사이드카는 이 프로세스와 같은 frozen 런타임으로 돈다.
+      여기서 못 찾는 모듈은 거기서도 못 찾는다 — 경로를 추측하는 것보다 정확하다.
+      (PyInstaller 는 순수 파이썬 패키지를 PYZ 에 넣으므로 폴더 존재 검사로는 못 본다.)
+    """
+    if not getattr(sys, 'frozen', False):
+        return False
+    try:
+        from importlib.util import find_spec
+        return bool(find_spec('faster_whisper')) and bool(find_spec('edge_tts'))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def _sidecar_python(project_root: Path) -> str | None:
     """사이드카를 실행할 파이썬.
 
@@ -91,11 +120,11 @@ def _sidecar_python(project_root: Path) -> str | None:
       scripts/setup_voice.py 인데 **설치·최초실행 어디에서도 그걸 부르지 않았다.**
       그래서 설치본에서는 사이드카가 영영 못 떠서 마이크도 목소리 목록도 조용히 죽었다
       (단추는 눌리는데 전송이 안 되고, edge-tts 목소리가 안 보이는 증상).
-      이제 frozen 이면 **앱 EXE 자신을 실행기로 쓴다** — boot.main() 이 첫 인자가 .py 면
-      runpy 로 받아 주고(무한 창 생성 없음), 음성 패키지는 번들에 동봉돼 있다
-      (requirements.txt 의 edge-tts/faster-whisper ↔ spec hiddenimports 와 한 쌍).
-    [불변식] 이 폴백은 frozen 전용이다. 개발에서 앱 venv 를 실행기로 내주면 음성 패키지가
-      없는 환경에서 사이드카가 ImportError 로 죽으며, 그 실패가 별도 프로세스라 조용하다.
+      해결은 두 겹이다 — ① 번들이 음성을 싣고 있으면 EXE 자신을 실행기로 쓰고,
+      ② 아니면 _ensure_voice_env() 가 venv 를 자동으로 깐다. ②가 없으면 낡은 EXE 를
+      쓰는 사람은 새 소스를 받아도 영원히 안 된다.
+    [불변식] EXE 폴백은 frozen + 번들 검증 통과 전용이다. 검증 없이 내주면 조용한
+      ImportError 사망으로 되돌아간다.
     """
     candidates = [
         os.environ.get('VOICE_PYTHON', ''),
@@ -105,9 +134,58 @@ def _sidecar_python(project_root: Path) -> str | None:
     for c in candidates:
         if c and Path(c).exists():
             return c
-    if getattr(sys, 'frozen', False):
+    if _frozen_carries_voice():
+        # boot.main() 이 첫 인자가 .py 면 runpy 로 받아 준다(창이 한 벌 더 뜨지 않는다).
         return sys.executable
     return None
+
+
+def _ensure_voice_env(project_root: Path) -> str:
+    """음성 스택이 없으면 백그라운드로 깐다. 진행 중이면 그 사실만 알린다.
+
+    [🔴 왜 자동인가] 마이크 단추를 누른 것이 곧 '음성을 쓰겠다'는 의사표시다. 여기서
+      멈추고 사용자에게 명령줄을 치라고 하면, 그게 바로 2026-08-16 사고의 모습이다
+      (안내조차 화면에 안 떠서 사용자는 '단추가 안 먹는다'로만 겪었다).
+    [🔴 규칙 10] 설치는 사람이 콘솔에서 부른 것이 아니다 — infra.proc 로 창 없이 돌리고
+      진행은 voice-setup.log 로 본다. subprocess 직접 호출로 되돌리면 pip 가 도는
+      수 분 동안 검은 창이 사장님 화면 위에 뜬다.
+    [불변식] 스레드는 한 번에 하나. /status 는 4초마다 오므로 매번 걸면 pip 가 겹쳐
+      돈다 — venv 가 반쯤 만들어진 채로 서로를 덮는다.
+    """
+    global _setup_thread, _setup_msg
+    # [🔴 _spawn_lock 을 재사용하면 안 된다] 이 함수는 그 락을 쥔 _spawn_sidecar 안에서
+    #   불린다. threading.Lock 은 재진입이 안 돼 같은 스레드가 그대로 굳는다(무한 대기).
+    with _setup_lock:
+        if _setup_thread is not None and _setup_thread.is_alive():
+            return '음성 스택을 설치하는 중입니다(처음 한 번, 수백 MB — 몇 분 걸립니다)'
+        if _setup_msg:
+            return _setup_msg                               # 실패는 다시 두드려도 같다
+        log_path = project_root / '.ai_monitor' / 'voice-server' / 'voice-setup.log'
+
+        def _quiet(cmd, env):
+            import subprocess
+
+            from infra import proc
+            with log_path.open('ab') as fp:
+                fp.write(f'\n$ {" ".join(cmd)}\n'.encode('utf-8', 'replace'))
+                fp.flush()
+                return proc.run(cmd, cwd=str(project_root), env=env,
+                                stdin=subprocess.DEVNULL, stdout=fp,
+                                stderr=subprocess.STDOUT).returncode
+
+        def _work():
+            global _setup_msg
+            try:
+                sys.path.insert(0, str(project_root / 'scripts'))
+                import setup_voice
+                ok, msg = setup_voice.ensure_env(project_root, _quiet)
+                _setup_msg = '' if ok else msg
+            except Exception as e:                          # noqa: BLE001
+                _setup_msg = f'음성 설치 실패: {type(e).__name__}: {e}'
+
+        _setup_thread = threading.Thread(target=_work, name='voice-setup', daemon=True)
+        _setup_thread.start()
+        return '음성 스택을 설치하는 중입니다(처음 한 번, 수백 MB — 몇 분 걸립니다)'
 
 
 def _spawn_sidecar(project_root: Path) -> str:
@@ -118,7 +196,9 @@ def _spawn_sidecar(project_root: Path) -> str:
             return ''
         py = _sidecar_python(project_root)
         if not py:
-            return '음성 스택이 설치되지 않았습니다(voice-server/.venv 없음)'
+            # 실행기가 없다 = 아직 아무도 음성 스택을 깔지 않았다. 여기서 끝내지 않고
+            # 깔기 시작한다 — 그 판단 근거는 _ensure_voice_env 주석 참조.
+            return _ensure_voice_env(project_root)
         script = project_root / '.ai_monitor' / 'voice-server' / 'voice_server.py'
         if not script.exists():
             # [폴백 — 번들 동봉본] 게이트 실패로 seed 로 돌거나 체크아웃이 옛 소스라
@@ -190,9 +270,12 @@ def handle_status(handler, project_root: Path) -> None:
         pass                                                # 아직 안 떠 있다 — 아래에서 띄운다
 
     err = _spawn_sidecar(project_root)
+    # [🔴 '설치 중'은 실패가 아니다] loading=false 로 주면 화면이 빨간 오류로 그린다.
+    #   사용자가 할 일은 기다리는 것뿐인데 고장으로 읽히면 앱을 껐다 켜게 된다.
+    installing = _setup_thread is not None and _setup_thread.is_alive()
     _json_response(handler, {
         'ready': False,
-        'loading': not err,
+        'loading': not err or installing,
         'detail': err or '음성 엔진을 준비하는 중입니다(첫 기동은 수십 초 걸립니다)',
     })
 
