@@ -40,6 +40,10 @@ REVISION HISTORY:
   응답 형식이 엔진마다 달라져 MIME 을 같이 반환하고, ttsReady 를 ready 에서 분리했다
 - 2026-08-15 Claude: 낭독 엔진을 edge 하나로 정리 — sherpa·SAPI·CosyVoice 제거(사용자 지시).
   폴백은 프론트 브라우저 합성기 단일 경로가 됐다
+- 2026-08-16 Claude: 두 번째 엔진 qwen(사장님 목소리 복제) 배선 — _new_engine 이 접두사로
+  가르고 /voices 가 목록에 얹는다. 기본값은 그대로 edge 다(engines/tts_qwen.py 헤더).
+  [🔴 실측] 예열 뒤에도 문장당 12.7~15.1초(RTF 6.1~6.7)라 그때그때 읽기에는 못 쓴다.
+  정해진 문구를 미리 구워 tts_cache 에 넣어 두는 쓰임이 이 엔진의 본래 자리다
 """
 
 from __future__ import annotations
@@ -141,10 +145,18 @@ def _new_engine(voice_id: str):
       'sherpa:default' 같은 죽은 id 가 올라올 수 있다. 여기서 예외를 던지면 그 사용자는
       목소리를 다시 고르기 전까지 사이드카가 매번 500 을 내고, 프론트는 그때마다 브라우저
       폴백으로 내려간다 — 소리는 나지만 아무도 이유를 모른다. 그냥 edge 로 읽는다.
+
+    [🔴 qwen 만 예외로 가른다 — 2026-08-16] 사장님 목소리 복제(engines/tts_qwen.py)가
+      두 번째 엔진으로 들어왔다. 'qwen:' 으로 시작하는 id 만 그쪽으로 보내고 나머지는
+      전부 edge 다. 이 한 줄이 '엔진 교체가 load_tts 의 한 줄'이라는 engines/__init__ 의
+      불변식이 실제로 지켜지는 자리다.
     """
     _engines_dir_on_path()
-    from engines.tts_edge import EdgeEngine
     kind = voice_id.split(':', 1)[0].lower()
+    if kind == 'qwen':
+        from engines.tts_qwen import QwenEngine
+        return QwenEngine(voice_id)
+    from engines.tts_edge import EdgeEngine
     return EdgeEngine(voice_id if kind == 'edge' else '')
 
 
@@ -211,6 +223,14 @@ def list_voices() -> list:
         out += _edge()
     except Exception as e:                                 # noqa: BLE001
         _log(f'edge 목록 실패(무시): {e}')
+    # [WHY qwen 이 뒤인가] 앞에 두면 _pick_default_voice 가 한국어 첫 번째로 이걸 골라
+    #   음성을 켠 모든 사람이 GPU 를 물게 된다. 기본은 edge 로 두고, 사장님 목소리는
+    #   고른 사람에게만 뜬다. 목록에 아예 안 나오는 경우(미설치·VOICE_QWEN=0)도 정상이다.
+    try:
+        from engines.tts_qwen import list_voices as _qwen
+        out += _qwen()
+    except Exception as e:                                 # noqa: BLE001
+        _log(f'qwen 목록 실패(무시): {e}')
     _voices_cache = out
     return out
 
