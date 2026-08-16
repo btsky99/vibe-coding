@@ -112,7 +112,36 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange, showM
   const wakeWarning = wakeWordWarning(editing ? draft : wakeWord);
 
   return (
-    <div className="flex items-center gap-1.5 text-[10px] relative">
+    <div className="flex flex-col gap-1 text-[10px] relative">
+      {/* ── 방금 말한 것 — **제 줄을 준다** ────────────────────────────────
+          [🔴 왜 단추 줄 안이 아니라 따로인가 — 2026-08-17 실측] 처음엔 단추들과 같은
+            줄 오른쪽 끝에 붙였는데, 슬롯을 3개로 쪼개면 그 줄이 넘쳐 **글자가 화면 밖으로
+            잘렸다**(Playwright 로 실제 눌러 보고 발견 — DOM 에는 있는데 눈에는 없었다).
+            사장님 요청의 핵심이 '내가 말한 것이 보이는 것'인데, 잘리면 안 한 것과 같다.
+          [🔴 지우기 단추를 둔다] 다음 말을 하기 전까지 남아 있어야 되짚을 수 있고,
+            눈에 거슬리면 사람이 직접 지울 수 있어야 한다. */}
+      {isTarget && v.heard && !v.pressing && !v.busy && (
+        <div className="flex items-start gap-1 rounded border border-sky-400/25 bg-sky-400/10
+                        px-1.5 py-1 leading-snug">
+          <span className="shrink-0 text-sky-300/70">들은 말</span>
+          <span className="min-w-0 flex-1 text-white/85 break-words">“{v.heard}”</span>
+          <button
+            onClick={() => voiceBus.clearHeard()}
+            className="shrink-0 text-white/30 hover:text-white/80"
+            title="지우기"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {isTarget && (v.pressing || v.busy) && (
+        <div className="flex items-center gap-1 rounded border border-sky-400/25 bg-sky-400/10
+                        px-1.5 py-1 text-sky-300/90" role="status" aria-live="polite">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
+          {v.busy ? '받아쓰는 중…' : '듣는 중… 말씀하세요'}
+        </div>
+      )}
+    <div className="flex items-center gap-1.5">
       {/* 전송창이 없는 화면에서만 — 마이크가 어느 화면에서도 사라지지 않게(헤더 불변식) */}
       {showMic && (
         <>
@@ -221,8 +250,16 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange, showM
             나타났다 사라진다. 단추들 사이에 두면 그때마다 왼쪽 줄이 통째로 밀려
             '가만히 있는데 배치가 바뀌는' 화면이 된다. 오른쪽 끝에서 자라면 안 밀린다. */}
       <div className="ml-auto flex items-center gap-1.5 min-w-0">
+        {/* ── 방금 말한 것 ────────────────────────────────────────────────
+            [🔴 왜 이 칸이 생겼나 — 2026-08-17 사장 요청] "마이크를 누르고 입력을 하면
+              그 내용이 출력이 됐으면 좋겠다." 예전에는 받아쓴 글이 입력칸에 꽂히자마자
+              전송돼 눈에 아무것도 안 스쳤다. 여기에 남겨 두면 **무엇으로 들었는지**를
+              보고 입력칸에서 고쳐 보낼 수 있다.
+            [🔴 말하는 도중에도 보인다] 아직 글자가 없을 때는 '듣는 중'을 레벨과 함께
+              띄운다 — 받아쓰기가 서버 왕복이라 글자는 말이 끝난 뒤에야 온다. 그 몇 초를
+              빈 화면으로 두면 사용자는 또 '안 먹는다'고 읽는다. */}
         {/* 상태 문구는 대상 슬롯에서만 — 모든 슬롯이 '듣는 중'이면 어디에 말하는지 모른다 */}
-        {isTarget && v.message && (
+        {isTarget && v.message && !v.heard && (
           <span className="text-white/45 truncate" role="status" aria-live="polite">{v.message}</span>
         )}
         {v.error && (
@@ -268,6 +305,7 @@ export default function VoiceBar({ terminalId, wakeWord, onWakeWordChange, showM
               되므로 사실대로 적는다 — 사람이 알고 켜야 한다는 취지는 같다. */}
         <span className="text-white/25 shrink-0 hidden sm:inline">말은 이 PC 안에서 받아씁니다</span>
       </div>
+    </div>
 
       {showSettings && <VoiceSettings onClose={() => setShowSettings(false)} />}
     </div>

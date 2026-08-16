@@ -88,6 +88,28 @@ export interface VoiceState {
   /** 받아쓰기(사이드카 STT)가 준비됐는가. 낭독과 무관 — 둘은 수명이 다르다. */
   sttReady: boolean;
   /**
+   * **방금 받아쓴 말** — 화면에 그대로 보여 준다.
+   *
+   * [🔴 왜 생겼나 — 2026-08-17 사장 요청] "마이크를 누르고 입력을 하면 그 내용이
+   *   출력이 됐으면 좋겠다." 예전에는 받아쓴 글을 입력칸에 넣자마자 **그 자리에서
+   *   전송**해 버려(deliver 의 onSubmit) 사람 눈에는 아무것도 안 스쳤다. 무엇이
+   *   들어갔는지 사장이 알 수 없었다.
+   * [제약] 표시용이다. 실제 전송은 입력칸의 값이 한다 — 여기 값을 고쳐도 안 나간다.
+   */
+  heard: string;
+  /** 받아쓰기가 끝난 시각(ms) — 화면이 '방금'을 흐리게 만드는 데 쓴다. */
+  heardAt: number;
+  /**
+   * 받아쓴 말을 **곧바로 보낼 것인가**.
+   *
+   * [🔴 기본을 끔으로 둔다 — 2026-08-17 사장 지시] "잘못 들었을 때 고쳐서 보낼 수
+   *   있으면 제일 좋다(보내기 전에 입력칸에 두는 방식)." 예전 주석은 정반대를 적어
+   *   두었는데("누르고 말한 사람은 이미 보낼 생각이었다"), 실제로 써 보신 사장이
+   *   **눈으로 확인하고 고쳐 보내는 쪽**을 고르셨다. 그 판단이 이깁니다.
+   * [되돌리는 길] 음성 설정에서 '말하면 바로 보내기'를 켜면 옛 동작이다.
+   */
+  autoSend: boolean;
+  /**
    * 사이드카가 **지금 합성할 수 있는가**(/status 의 ttsReady).
    *
    * [🔴 sttReady 와 갈라 둔 이유 — 2026-08-15] 예전엔 준비 상태가 하나뿐이라, 낭독이
@@ -133,6 +155,8 @@ const SPEED_KEY = 'vibe.voice.speed';
 // [WHY localStorage 인가] 목소리(VOICE_KEY)와 같은 이유다 — 회선·취향은 기기별이라
 //   프로젝트 config 에 넣으면 다른 PC 의 설정까지 같이 바뀐다.
 const EDGE_KEY = 'vibe.voice.edge';
+// 받아쓴 말을 바로 보낼지. [WHY localStorage 인가] 목소리·속도와 같은 기기별 취향이다.
+const AUTOSEND_KEY = 'vibe.voice.autosend';
 
 /** 답을 다 읽은 뒤 이 시간 동안은 호출어 없이 바로 이어 말할 수 있다. */
 const FOLLOW_MS = 12000;
@@ -159,6 +183,12 @@ class VoiceBus {
     // 브라우저 합성기가 있으면 처음부터 말할 수 있다 — 물어보고 정할 것이 없다.
     ready: browserTtsAvailable(),
     sttReady: false,
+    heard: '',
+    heardAt: 0,
+    // [🔴 기본 꺼짐 — 눈으로 보고 고쳐 보내는 쪽] VoiceState.autoSend 주석 참조.
+    autoSend: (() => {
+      try { return localStorage.getItem(AUTOSEND_KEY) === '1'; } catch { return false; }
+    })(),
     ttsReady: false,
     // 기본은 켜짐. [WHY] 오늘 실측에서 통과한 유일한 낭독이라 이게 곧 '보통 상태'다.
     edgeOn: (() => { try { return localStorage.getItem(EDGE_KEY) !== '0'; } catch { return true; } })(),
@@ -310,6 +340,20 @@ class VoiceBus {
    * [🔴 끄면 즉시 되돌아간다] 다음 답부터가 아니라 지금 읽던 것도 멈춘다. 스위치를 끈
    *   사람은 '지금 이 소리를 그만'이라는 뜻으로 누른다.
    */
+  /**
+   * 받아쓴 말을 곧바로 보낼 것인가. 기본은 꺼짐(입력칸에 두고 멈춘다).
+   * [WHY 스위치를 남기나] 손이 바쁜 사람에겐 옛 동작(핸즈프리)이 더 낫다. 기본만 뒤집는다.
+   */
+  setAutoSend(on: boolean): void {
+    try { localStorage.setItem(AUTOSEND_KEY, on ? '1' : '0'); } catch { /* 무시 */ }
+    this.set({ autoSend: on });
+  }
+
+  /** 화면에 남은 '방금 들은 말'을 지운다(사용자가 확인했다는 뜻). */
+  clearHeard(): void {
+    this.set({ heard: '', heardAt: 0 });
+  }
+
   setEdge(on: boolean): void {
     try { localStorage.setItem(EDGE_KEY, on ? '1' : '0'); } catch { /* 저장 실패는 무시 */ }
     if (!on) this.stopSpeaking();
@@ -591,6 +635,11 @@ class VoiceBus {
     //   (전자는 인식기, 후자는 마이크). 갈라서 말한다.
     if (!text) { this.set({ message: '말소리를 알아듣지 못했습니다' }); return; }
 
+    // [🔴 route() 보다 먼저 남긴다] route 는 호출어가 없으면 말을 **버린다**. 버려진
+    //   말도 '내가 뭐라고 말했는지'는 보여야 한다 — 안 보이면 사용자는 마이크가
+    //   고장 났다고 판단한다(2026-08-17 사장 신고가 정확히 그 모양이었다).
+    this.set({ heard: text, heardAt: Date.now() });
+
     this.route(text);
   }
 
@@ -646,10 +695,19 @@ class VoiceBus {
     this.lastInputWasVoice = true;              // 이 대화는 음성으로 시작됐다(onSpeechEnd 참조)
     this.followUntil = Date.now() + FOLLOW_MS;
     b.onText(text);
-    // [🔴 말을 마친 것이 곧 확인이다] 여기서 또 확인을 요구하면 핸즈프리가 성립하지
-    //   않는다(아픽스와 같은 판단). 잘못 들었으면 입력창에 남은 것을 고치면 된다.
-    b.onSubmit(text);
-    this.scheduleTurnPoll(2000);
+
+    // [🔴 2026-08-17 사장 지시로 뒤집힌 자리] 예전에는 여기서 곧바로 onSubmit 을 불렀고
+    //   주석에 "말을 마친 것이 곧 확인이다" 라고 적혀 있었다. 그런데 실제로 쓰신 사장이
+    //   **무엇이 들어갔는지 볼 수가 없다**고 하셨다 — 입력칸에 꽂자마자 전송돼 화면에
+    //   아무것도 안 남기 때문이다. 기본을 '입력칸에 두고 멈춤'으로 바꾼다.
+    //   [남는 것] 자동전송을 원하는 사람은 스위치로 옛 동작을 켠다(autoSend).
+    if (this.state.autoSend) {
+      b.onSubmit(text);
+      this.scheduleTurnPoll(2000);
+    } else {
+      // 보낸 것이 아니므로 답을 기다리지 않는다. 대신 '무엇을 들었는지'를 남긴다.
+      this.set({ message: `${slotId} 입력칸에 넣었습니다 — 확인 후 보내세요` });
+    }
   }
 
   /* ── 낭독 ────────────────────────────────────────────────────────────── */

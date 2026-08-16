@@ -59,7 +59,13 @@ export default function MicPressButton({ terminalId, iconOnly, className = '' }:
       type="button"
       aria-label="누르고 말하기"
       aria-pressed={hot}
-      title="누르고 있는 동안 듣습니다. 손을 떼면 그대로 보냅니다"
+      // [🔴 이 문구는 동작을 그대로 옮긴 것이다 — 2026-08-17] 예전엔 "손을 떼면 그대로
+      //   보냅니다" 였는데, 기본 동작이 '입력칸에 두고 멈춤'으로 바뀌어 거짓말이 됐다.
+      //   설정(말하면 바로 보내기)을 따라 문구도 같이 바뀌게 둔다 — 안 그러면 다음 사람이
+      //   화면 말을 믿고 엉뚱한 곳을 뒤진다.
+      title={v.autoSend
+        ? '누르고 있는 동안 듣습니다. 손을 떼면 그대로 보냅니다'
+        : '누르고 있는 동안 듣습니다. 손을 떼면 받아쓴 말이 입력칸에 들어갑니다'}
       onPointerDown={press}
       onPointerUp={release}
       onPointerCancel={release}

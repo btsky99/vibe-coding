@@ -123,6 +123,35 @@ export default function VoiceSettings({ onClose }: Props) {
         <span className="w-8 text-right tabular-nums text-white/60">{v.speed.toFixed(2)}</span>
       </div>
 
+      {/* 말하면 바로 보내기 스위치.
+          [🔴 기본은 꺼짐 — 2026-08-17 사장 지시] 예전에는 받아쓴 말을 입력칸에 넣자마자
+            보내 버려서, 사장님은 **무엇이 들어갔는지 볼 수가 없었다**. 이제 기본은
+            '입력칸에 두고 멈춤'이고, 옛 동작(핸즈프리)이 필요한 사람만 켠다.
+          [WHY 여기인가] 낭독 설정과 한 판에 두면 '음성에 관한 것은 여기'가 유지된다. */}
+      <div className="mt-3 flex items-start gap-2 border-t border-white/10 pt-2">
+        <button
+          onClick={() => voiceBus.setAutoSend(!v.autoSend)}
+          className={`mt-0.5 h-3.5 w-6 shrink-0 rounded-full transition-colors ${
+            v.autoSend ? 'bg-primary/70' : 'bg-white/15'
+          }`}
+          title={v.autoSend ? '끄면 입력칸에 두고 멈춥니다' : '켜면 말하는 즉시 보냅니다'}
+        >
+          <span
+            className={`block h-2.5 w-2.5 rounded-full bg-white transition-transform ${
+              v.autoSend ? 'translate-x-3' : 'translate-x-0.5'
+            }`}
+          />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="text-white/70">말하면 바로 보내기</div>
+          <div className="text-[9px] leading-tight text-white/35">
+            {v.autoSend
+              ? '받아쓰는 즉시 보냅니다. 손이 바쁠 때 편하지만 잘못 들어도 그대로 나갑니다'
+              : '받아쓴 말을 입력칸에 넣고 멈춥니다 — 확인하고 고쳐서 보낼 수 있어요'}
+          </div>
+        </div>
+      </div>
+
       {/* 인터넷 목소리 스위치.
           [🔴 목소리 목록 '아래'에 둔다] 이 스위치를 끄면 목록에서 edge 항목이 사라진다.
             위에 두면 사라지는 원인이 눈에 안 들어와 목록이 고장 난 것처럼 보인다.
