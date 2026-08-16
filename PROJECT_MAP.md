@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 00:07
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 01:03
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,24 +8,24 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 49개 · 미푸시 6커밋
+- **브랜치**: `main` · 미커밋 48개 · 미푸시 3커밋
 - **최근 커밋**
-  - `3ac89a6` 2026-08-16 — fix(watchdog): 사장이 끈 앱을 되살리던 감시자 — 사람이 끈 것만 안 되살린다
-  - `aece3c5` 2026-08-16 — test(smoke): 설치본 EXE 검증에 음성 라우트 한 줄 추가 — 이번 사고를 잡는 자리
-  - `44cf301` 2026-08-16 — fix(voice): 설치본 마이크가 눌려도 말이 안 가던 사고 — 음성 스택 자동 설치
-  - `0d95e70` 2026-08-16 — feat(voice): Qwen 일꾼 상주 + 문장 이어 굽기(/tts/seq) — 첫 소리를 앞당긴다
-  - `0ee1bcd` 2026-08-16 — fix(voice): Qwen 낭독을 사이드카 venv 밖 일꾼으로 돌린다 — 사이드카 재기동으로 실제 통함 확인
+  - `2c8fdb8` 2026-08-17 — Merge remote-tracking branch 'origin/main'
+  - `1d4d026` 2026-08-17 — fix(voice): 설치본에서 설치 절차를 못 찾던 경로 + 빌드는 지켜보지 말고 통보받는다
+  - `4a72c5a` 2026-08-17 — feat(voice): 깐 직후 사장님 목소리가 나게 — 살림은 동봉, 모델은 첫 실행 때 받는다
+  - `3b14039` 2026-08-16 — chore(release): auto-bump version to v3.7.342 [skip ci]
+  - `747ea9f` 2026-08-17 — perf(voice): 보드에서 완성한 Qwen 굽기를 바이브 코딩에 이식 — 첫 소리 7.18초 → 3.2초
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-17 00:10** 의도: 보드 Qwen TTS 이식 — 조각내 굽기+참조 지문
+  - 결정: CUDA그래프는 같은 일꾼 파일 공유로 이미 상속됨. 워커는 별도(파이프 소유 구조라 공유 불가) — 몫 0.35로 캡
+  - 다음: apix1-5가 ag_bake_now cache_key 맞추면 미리굽기 복구. 푸시/배포는 사장 결재 후
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
   - 결정: wiki/를 git 추적 정본으로, 로컬만(GDrive 안씀), 전부삭제+원료전량 승인, 순서=회상버그수정→위키구축→인덱싱→lint→삭제
   - 다음: 블로커: vector_available()이 ALTER TABLE 실패시 조용히 False → 회상 전체 무력화. 이것부터 수정
 - **08-15 00:54** 의도: 아픽스 음성(STT+TTS) 기능을 vibe-coding 터미널 슬롯에 이식
   - 결정: WebView2에서 SpeechRecognition 실동작 확인(onstart/onaudiostart, network에러 없음). 인식+낭독 전부, 터미널 슬롯 하단 입력창에 배선. 낭독 텍스트는 Stop훅 turn 채널 신설로 공급
   - 다음: voice_turn_hook.py + voice_api.py + 마이크 권한(app_boot) + 프론트 speech/voiceBus/useVoice/VoiceBar
-- **08-14 19:48** 의도: 설치본 LAN 브리지 미기동 수정 + 바로가기 관리자 권한 자동 체크
-  - 결정: 데몬 .py 실행기를 runtime.script_runner_cmd(frozen이면 앱 EXE)로 통일, .lnk LinkFlags 바이트 패치로 관리자 권한
-  - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
 - **바이브 코딩을 껐는데 약 30분마다 앱이 저절로 다시 뜬다**
@@ -203,9 +203,11 @@
 |------|------|------|
 | `engines/tts_cache.py` | 156 | 합성 결과 디스크 캐시 — 같은 문장을 두 번 만들지 않는다. |
 | `engines/tts_edge.py` | 158 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
-| `engines/tts_qwen.py` | 496 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
+| `engines/tts_qwen.py` | 710 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
 | `engines/tts_split.py` | 192 | 긴 글을 낭독 단위로 자른다 — 이어 굽기(첫 문장부터 틀고 뒤를 잇는 것)의 재료. |
-| `voice_server.py` | 507 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
+| `qwen/qgraph.py` | 464 |  |
+| `qwen/worker.py` | 333 |  |
+| `voice_server.py` | 520 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -332,6 +334,7 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
+| `setup_qwen.py` 🔨 | 229 | 사장님 목소리(Qwen3-TTS) 굽기 환경 설치 — 전용 venv + CUDA 토치 + 모델 내려받기. |
 | `setup_voice.py` 🔨 | 148 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
 | `smoke_test.py` 🔨 | 313 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
@@ -339,6 +342,7 @@
 | `tui.py` | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `voice_turn_hook.py` 🔨 | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
 | `vps_status_api.py` | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
+| `wait_ci.py` 🔨 | 105 | CI 빌드가 끝날 때까지 기다렸다가 **끝나는 순간 스스로 종료**한다. |
 | `wiki_build.py` 🔨 | 759 | 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/ 백과사전 페이지로 합성한다. |
 | `wiki_lint.py` 🔨 | 415 | wiki/ 백과사전이 '늙었는지'를 기계적으로 검출한다 — 죽은 출처(사라진 파일· |
 | `zettel_capture.py` | 703 | 제텔카스텐 자동 캡처 엔진. |
@@ -510,4 +514,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-17 00:07
+> 자동 생성 완료: 2026-08-17 01:03
