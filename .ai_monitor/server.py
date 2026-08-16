@@ -1139,6 +1139,12 @@ def _g_shutdown(h, pp):
     import threading
     def _delayed_shutdown():
         time.sleep(0.5)
+        # [되살아남 방지 2026-08-16] 이 엔드포인트는 상단 메뉴의 '종료'(확인 다이얼로그 통과)
+        #   로만 들어온다 — 명백한 사람의 종료 지시다. 표식을 먼저 찍어야 고아 감시자가
+        #   앱을 다시 띄우지 않는다. cleanup 보다 앞이어야 하는 이유는 app_boot 창닫힘
+        #   경로와 동일(정리가 감시자를 죽이지 못할 수 있다).
+        from infra import shutdown_marker as _sm
+        _sm.mark(DATA_DIR, 'api_shutdown')
         # 자식 프로세스(PTY 서버, 워치독 등) 먼저 종료 — os._exit()는 atexit 핸들러를 실행하지 않으므로
         # 여기서 명시적으로 호출해야 node.exe 등이 _MEI 임시 폴더를 해제하여 정리 가능
         _cleanup_child_procs()

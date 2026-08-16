@@ -130,10 +130,21 @@ def run_watchdog(env: DaemonEnv) -> None:
         # [실행기] script_runner_cmd — frozen이면 앱 EXE 자신. 시스템 Python은 번들
         #   의존성(psycopg 등)이 없어 설치본 PC에서 import 실패로 즉사한다.
         python_exe = runtime.script_runner_cmd(env.base_dir, env.project_root)
+        # [🔴 --port 필수 / 사고 2026-08-16] 워치독은 예전에 9000~9005 만 두드려 보고
+        #   "서버 죽음"을 판정했다. 그런데 실제 HTTP 포트는 (프로젝트×환경) 해시로
+        #   9000/9002/9004/9006/9008 중 하나다(instance_lock._server_port_slot_base).
+        #   9006·9008 슬롯에 떨어진 인스턴스는 **멀쩡히 떠 있어도 항상 죽은 것으로
+        #   판정**돼 60초마다 server.py 가 재기동됐고, server.py __main__ 은 GUI 앱
+        #   전체라 창까지 되살아났다. 실측 근거: health state 로그의 '재시작 시도'
+        #   반복 + restart_count 0 (성공해도 같은 잘못된 목록으로 확인해 실패로 기록).
+        # [🔴 --parent-pid 필수] 부모(앱)가 살아있는데 HTTP 만 늦게 뜨는 부팅 구간을
+        #   '죽음'으로 오판해 두 번째 인스턴스를 띄우면, 그쪽이 인스턴스 락에 걸려
+        #   기존 창을 포커스한다 — 사용자 눈엔 "창이 자꾸 튀어나옴"으로 보인다.
         # [지역변수 rename] proc→child: 모듈 proc(콘솔숨김 헬퍼)와 이름 충돌 회피
         child = _spawn_script(
             'watchdog', env,
-            [python_exe, str(watchdog_script), "--data-dir", str(env.data_dir)],
+            [python_exe, str(watchdog_script), "--data-dir", str(env.data_dir),
+             "--port", str(env.http_port), "--parent-pid", str(os.getpid())],
         )
         if child is None:
             return

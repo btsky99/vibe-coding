@@ -354,6 +354,11 @@ def run_gui_app(cfg: BootConfig) -> None:
             window.load_url(f'http://localhost:{_actual_port}')
             print(f"[*] 앱 로드 완료 — http://localhost:{_actual_port}")
 
+            # [되살아남 방지] 부팅에 성공했으니 이전 세대의 '사람이 끔' 표식을 지운다.
+            #   안 지우면 다음에 진짜로 크래시했을 때도 감시자가 복구를 포기한다.
+            from infra import shutdown_marker as _sm
+            _sm.clear(cfg.data_dir)
+
         # ── 헤드리스 분기 ────────────────────────────────────────────────────
         # [WHY webview.start()를 안 부르는가] 그 호출이 창을 만들고 이벤트 루프를 잡는다.
         #   데스크톱이 없는 세션에서는 여기서 예외가 나거나 멈춘다. 초기화 본체
@@ -367,6 +372,9 @@ def run_gui_app(cfg: BootConfig) -> None:
                     time.sleep(3600)
             except KeyboardInterrupt:
                 print('[*] 종료 신호 — 정리 중...')
+            # [되살아남 방지] Ctrl+C 는 사람의 종료 지시다 — 감시자가 되살리면 안 된다.
+            from infra import shutdown_marker as _sm
+            _sm.mark(cfg.data_dir, 'headless_sigint')
             cfg.cleanup_child_procs()
             cfg.cleanup_postgres()
             try:
@@ -440,6 +448,16 @@ def run_gui_app(cfg: BootConfig) -> None:
 
         # ── 창 닫힘 → 정리 ──
         print("[*] GUI 창이 닫혔습니다. 모든 자식 프로세스 정리 중...")
+        # [🔴 되살아남 방지 — 사고 2026-08-16] 여기가 '사람이 껐다'와 '죽어서 꺼졌다'를
+        #   가르는 유일한 자리다. webview.start()가 리턴한다는 것은 사용자가 창을 닫았다는
+        #   뜻이고, taskkill/크래시/WebView2 사망은 이 줄에 **도달할 수 없다**. 그래서
+        #   여기서 찍는 표식은 위조가 불가능하다. 감시자(hive_watchdog)는 이 표식이 있으면
+        #   복구를 포기하고 스스로 내려간다.
+        # [불변식] cleanup_child_procs 보다 **먼저** 찍는다 — 정리가 감시자를 죽이는데,
+        #   taskkill 이 실패해 고아가 남는 경우(실측: 2026-08-16 워치독 3세대 누적)에도
+        #   표식이 이미 디스크에 있어야 그 고아가 앱을 다시 띄우지 않는다.
+        from infra import shutdown_marker as _sm
+        _sm.mark(cfg.data_dir, 'window_closed')
         cfg.cleanup_child_procs()
         cfg.cleanup_postgres()
         try:

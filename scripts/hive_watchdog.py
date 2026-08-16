@@ -9,6 +9,19 @@ DESCRIPTION: 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing
              계층 3 — 지식 치유: (미래) LLM 응답 분석 → 스킬 파일 갱신
 
 REVISION HISTORY:
+- 2026-08-16 Claude: [🔴 "껐는데 자꾸 살아난다" 사고] 이 워치독이 범인이었다.
+  ① restart_server() 가 띄우는 server.py 의 __main__ 은 HTTP 서버가 아니라 **GUI 앱 전체**다
+     (server.py:2159 → main() → app_boot.run_gui_app → webview.create_window).
+     "서버만 되살린다"는 기존 주석은 사실과 다르다 — 창까지 되살아난다.
+  ② check_server() 가 9000~9005 만 두드렸는데 실제 포트는 (프로젝트×환경) 해시 슬롯
+     9000/9002/9004/9006/9008 이다. 9006·9008 인스턴스는 살아 있어도 항상 '죽음' 판정.
+  ③ 워치독은 앱의 자식인데 앱이 강제종료되면 cleanup_child_procs 가 안 돌아 **고아로
+     생존**한다. 고아가 앱을 되살리고 그 앱이 또 워치독을 낳고 죽으며 자기증식했다
+     (실측: 죽은 부모 PID 3개 + orchestrator 3벌 동시 생존).
+  수정 = 감시자를 없애지 않고 '사람이 끈 것'만 가려낸다:
+  - --port / --parent-pid 주입 (오판 제거)
+  - infra.shutdown_marker 표식이 있으면 복구 포기 + 스스로 종료
+  - 부모가 살아있으면 재시작 금지, 재시작 성공 시 스스로 종료(세대 누적 차단)
 - 2026-03-09 Claude: [버그 3건 수정]
   Bug 1) repair_memory_sync() subprocess.run에 encoding='utf-8' 미지정 →
          Windows CP949 환경에서 이모지 포함 출력 시 UnicodeDecodeError 발생 →
@@ -46,6 +59,7 @@ if str(MONITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MONITOR_DIR))
 
 from infra import proc  # [표준] 콘솔 숨김 subprocess 래퍼 (경로삽입 후라야 import 가능)
+from infra import shutdown_marker  # 사람이 끈 종료인지 판정 — 되살릴지 말지의 유일한 근거
 from src.pg_store import ensure_schema, save_state, cleanup_expired_memory
 
 # Windows 터미널(CP949 등)에서 이모지/한글 출력 시 UnicodeEncodeError 방지
@@ -66,12 +80,62 @@ def _resolve_data_dir() -> Path:
             return Path(sys.argv[i + 1])
     return Path(__file__).resolve().parent.parent / ".ai_monitor" / "data"
 
+
+def _resolve_int_arg(name: str) -> int:
+    """--<name> <정수> 를 읽는다. 없거나 깨졌으면 0.
+
+    [WHY argparse 를 안 쓰나] 이 스크립트는 `--check` 를 위치 인자처럼 쓰는 기존 호출부와
+      `--data-dir` 만 넘기는 구버전 호출부가 함께 살아 있다. argparse 로 바꾸면 그쪽이
+      전부 에러로 죽는다 — 인자 파서 교체는 이 사고의 범위가 아니다.
+    """
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == f"--{name}" and i < len(sys.argv) - 1:
+            try:
+                return int(sys.argv[i + 1])
+            except ValueError:
+                return 0
+    return 0
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = _resolve_data_dir()
 LOG_FILE = DATA_DIR / "task_logs.jsonl"
 
 # 기본 HTTP 포트 (server.py와 동일하게 9000 선호)
 HTTP_PORT = 9000
+
+# [사고 2026-08-16] 앱이 알려준 '진짜' 포트/부모 PID. 0 이면 구버전 호출(미주입)이라
+#   아래 폴백 스캔으로 돈다. 주입되면 오판이 사라져 불필요한 재기동 자체가 없어진다.
+INSTANCE_PORT = _resolve_int_arg("port")
+PARENT_PID = _resolve_int_arg("parent-pid")
+
+# 1회성 진단 모드. [불변식] 이 모드에서는 어떤 경로로도 앱을 띄우지 않는다(should_restart 참조).
+CHECK_MODE = "--check" in sys.argv
+
+# 이 워치독 프로세스가 태어난 시각 — 표식 유효성 판정 기준(shutdown_marker.was_intentional).
+#   나보다 먼저 찍힌 표식은 이전 세대의 것이라 나와 무관하다.
+STARTED_AT = time.time()
+
+# 싱글톤 자물쇠. [제약] PROJECT_ROOT 기준 — DATA_DIR 기준이 아니다. 설치본은 두 경로가
+#   갈리는데, 이 파일을 쓰는 쪽(__main__ 하단)과 지우는 쪽이 다른 경로를 보면 자물쇠가
+#   영원히 안 풀려 다음 앱의 워치독이 조용히 즉사한다 — 한 상수로 묶어 어긋남을 막는다.
+WATCHDOG_PID_FILE = PROJECT_ROOT / ".ai_monitor" / "data" / "watchdog.pid"
+
+
+def _pid_alive(pid: int) -> bool:
+    """PID 생존 확인. 0 이면 '모름'이라 False(=판정 근거로 쓰지 않음)."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == 'nt':
+            r = proc.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
+                         capture_output=True, text=True,
+                         encoding='utf-8', errors='replace', timeout=5)
+            return r.returncode == 0 and f'"{pid}"' in r.stdout
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
 
 class HiveWatchdog:
     def __init__(self, interval=60):
@@ -102,35 +166,95 @@ class HiveWatchdog:
         if len(self.status["logs"]) > 20:
             self.status["logs"].pop(0)
 
-    def check_server(self):
-        """중앙 제어 서버(server.py)가 살아있는지 HTTP 하트비트 체크"""
+    def _probe(self, port: int, timeout: float) -> bool:
         try:
-            url = f"http://localhost:{HTTP_PORT}/api/heartbeat"
-            with urllib.request.urlopen(url, timeout=3) as resp:
-                if resp.status == 200:
-                    self.status["server_ok"] = True
-                    return True
+            with urllib.request.urlopen(
+                    f"http://localhost:{port}/api/heartbeat", timeout=timeout) as resp:
+                return resp.status == 200
         except Exception:
-            pass
-        
-        # 포트 9000이 안되면 9001~9010, 8005, 8000 등 시도 (동적 포트 할당 대비)
-        # [2026-03-09] server.py가 _find_free_port(9000) 사용 — 9001~9020까지 확인 추가
-        for p in [9001, 9002, 9003, 9004, 9005, 8005, 8000]:
-            try:
-                url = f"http://localhost:{p}/api/heartbeat"
-                with urllib.request.urlopen(url, timeout=2) as resp:
-                    if resp.status == 200:
-                        self.status["server_ok"] = True
-                        return True
-            except Exception:
-                continue
+            return False
+
+    def check_server(self):
+        """중앙 제어 서버(server.py)가 살아있는지 HTTP 하트비트 체크.
+
+        [🔴 사고 2026-08-16] 예전 폴백 목록은 9000~9005/8005/8000 이었다. 그런데 실제
+          HTTP 포트는 (프로젝트×환경) 해시로 9000·9002·9004·9006·9008 중 하나로 정해진다
+          (infra/instance_lock.py:_server_port_slot_base). 9006·9008 에 떨어진 인스턴스는
+          **살아 있어도 매번 '응답 없음'** 이 되어 60초마다 앱이 재기동됐다. 실측:
+          D:\\vibe-coding 설치본(frozen) 슬롯 = 9008 — 옛 목록에 아예 없다.
+        [불변식] --port 가 주입되면 그 포트만 본다. 남의 인스턴스 포트를 긁어 '내 서버가
+          살아있다'고 오판하면 진짜 죽었을 때 복구를 안 하게 되므로, 스캔은 포트를
+          모를 때(구버전 호출)만 쓰는 폴백이다.
+        """
+        if INSTANCE_PORT:
+            ok = self._probe(INSTANCE_PORT, 3)
+            if not ok:
+                self._add_log(f"⚠️ 중앙 제어 서버(server.py) 응답 없음 (포트 {INSTANCE_PORT})")
+            self.status["server_ok"] = ok
+            return ok
+
+        # 폴백(포트 미주입) — 서버 대역 9000-9009 전체 + 레거시 8005/8000.
+        for p in [HTTP_PORT] + [q for q in range(9000, 9010) if q != HTTP_PORT] + [8005, 8000]:
+            if self._probe(p, 2):
+                self.status["server_ok"] = True
+                return True
 
         self._add_log("⚠️ 중앙 제어 서버(server.py) 응답 없음")
         self.status["server_ok"] = False
         return False
 
+    def should_restart(self) -> bool:
+        """앱을 되살려도 되는 상황인지 판정한다. 이 판정이 이번 사고의 핵심이다.
+
+        [🔴 --check 는 절대 재시작 금지] --check 는 UI 의 '헬스체크/복구' 버튼
+          (/api/hive/health/repair)이 부르는 **1회성 진단**이다. 진단이 앱을 띄우면
+          사용자는 버튼 하나에 창이 하나 더 뜨는 걸 보게 된다. 게다가 --check 는
+          --port 미주입이라 포트 스캔으로 도는데, 9006·9008 슬롯 인스턴스는 옛 목록에서
+          늘 '죽음'으로 나왔으므로 **버튼을 누를 때마다 앱이 하나씩 더 떴다**.
+          진단은 관측만 한다 — 복구는 상주 루프의 몫이다.
+
+        [무엇을 가르는가] '사람이 껐다' 와 '죽어서 꺼졌다'.
+          자동 복구 자체는 필요하다(진짜 크래시는 되살려야 한다). 없애야 하는 것은
+          **사장이 끈 것을 되살리는 행위** 하나뿐이다.
+
+        [가르는 근거 — 코드 도달 여부]
+          사람이 창을 닫으면 webview.start() 가 리턴하고 app_boot 의 정리 블록이 실행되며
+          거기서 shutdown_marker.mark() 가 표식을 남긴다. taskkill·크래시·WebView2 사망은
+          그 줄에 **도달할 수 없다**. 즉 표식의 존재는 사람의 의사를 위조 불가능하게
+          증명한다. 시간 간격·종료 코드 같은 추측성 신호를 쓰지 않는 이유가 이것이다.
+          오판의 방향도 안전하다 — 표식을 놓치면 '한 번 더 되살아남'(회복 가능)이고,
+          없는 표식이 생기는 경우는 구조적으로 없다.
+
+        [부모 생존 검사] 앱이 살아있는데 HTTP 만 아직 안 뜬 부팅 구간을 '죽음'으로 보면
+          두 번째 인스턴스가 떠서 락에 걸리고, 그 과정에서 기존 창을 포커스한다 —
+          사용자 눈엔 "창이 자꾸 튀어나옴". 부모가 살아있으면 기다린다.
+        """
+        if CHECK_MODE:
+            self._add_log("🔍 진단(--check) 모드 — 관측만 하고 재시작하지 않습니다")
+            return False
+
+        if _pid_alive(PARENT_PID):
+            self._add_log(f"⏸️ 앱(PID {PARENT_PID})은 살아 있음 — 부팅 중으로 보고 재시작 보류")
+            return False
+
+        intent = shutdown_marker.was_intentional(DATA_DIR, STARTED_AT)
+        if intent:
+            self._add_log(
+                f"🛑 사람이 끈 종료({intent.get('reason', '?')} @ {intent.get('at', '?')}) "
+                f"— 되살리지 않고 워치독도 함께 내려갑니다"
+            )
+            self.is_running = False   # start_loop 탈출 → 자기 종료
+            return False
+        return True
+
     def restart_server(self):
         """server.py가 다운되었을 때 자동으로 재시작한다.
+
+        [🔴 이건 '서버 재시작'이 아니라 '앱 재시작'이다 — 2026-08-16 정정]
+          server.py 를 인자 없이 실행하면 __main__ → main() → app_boot.run_gui_app 로
+          내려가 **PyWebView 창까지 새로 뜬다**. 아래 옛 주석의 "서버만"은 사실이 아니었고,
+          그 오해 때문에 "누가 앱을 띄우는지" 를 오래 못 찾았다. 호출 전에 반드시
+          should_restart() 로 사람의 종료 의사를 확인할 것.
 
         [재시작 로직]
         - PROJECT_ROOT/.ai_monitor/server.py 경로로 subprocess 실행
@@ -162,9 +286,14 @@ class HiveWatchdog:
             # 3초 대기 후 실제로 응답하는지 확인
             time.sleep(3)
             if self.check_server():
-                self._add_log("✅ server.py 자동 재시작 성공")
+                self._add_log("✅ server.py 자동 재시작 성공 — 새 인스턴스에 인계하고 종료합니다")
                 self._restart_fail_count = 0
                 self.status["restart_count"] = self.status.get("restart_count", 0) + 1
+                # [세대 누적 차단 / 실측 2026-08-16] 새로 뜬 앱은 자기 워치독·오케스트레이터를
+                #   새로 낳는다. 옛 워치독이 계속 살면 세대마다 감시자가 쌓인다 — 실제로
+                #   orchestrator 가 3벌(죽은 부모 3개) 동시 생존 중이었다. 임무를 넘겼으면
+                #   내려간다. 이 인스턴스의 --parent-pid 도 이미 죽은 값이라 더 감시할 대상이 없다.
+                self.is_running = False
                 return True
             else:
                 raise RuntimeError("재시작 후에도 서버 응답 없음")
@@ -459,7 +588,10 @@ class HiveWatchdog:
                     self._add_log("🔄 서버 재시작 쿨다운 해제 — 재시도 허용")
                     self._restart_fail_count = 0
                     self._restart_fail_time = None
-            if self._restart_fail_count < 3:
+            # [🔴 게이트 / 사고 2026-08-16] 재시작 앞에 '사람이 껐나' 를 반드시 먼저 묻는다.
+            #   이 한 줄이 "사장이 끄면 꺼진 채로 있는다"의 전부다. 게이트를 지나가는 경우는
+            #   '부모도 죽었고 사람의 종료 표식도 없다' = 진짜 사고뿐이므로 자동 복구는 보존된다.
+            if self._restart_fail_count < 3 and self.should_restart():
                 server_ok = self.restart_server()
 
         if server_ok and db_ok:
@@ -519,7 +651,16 @@ class HiveWatchdog:
 
             except Exception as e:
                 self._add_log(f"❌ 루프 실행 에러: {e}")
+            # [즉시 탈출] run_check 안에서 is_running 이 내려갔으면(사람이 끔 / 인계 완료)
+            #   60초를 더 자지 않는다 — 그 사이 다음 판정이 끼어들 여지를 없앤다.
+            if not self.is_running:
+                break
             time.sleep(self.interval)
+        self._add_log("👋 워치독 종료")
+        try:
+            WATCHDOG_PID_FILE.unlink()   # 싱글톤 자물쇠 반납 — 다음 앱의 워치독이 뜰 수 있게
+        except OSError:
+            pass
 
 if __name__ == "__main__":
     # ── 싱글톤 보호: 이미 실행 중인 워치독 인스턴스가 있으면 즉시 종료 ──────────────────
@@ -527,28 +668,14 @@ if __name__ == "__main__":
     # --check 모드(1회 점검)는 싱글톤 체크 없이 항상 실행 허용.
     _is_check_mode = len(sys.argv) > 1 and sys.argv[1] == "--check"
     if not _is_check_mode:
-        _pid_file = Path(__file__).resolve().parent.parent / ".ai_monitor" / "data" / "watchdog.pid"
+        _pid_file = WATCHDOG_PID_FILE   # [불변식] 종료 시 지우는 경로와 동일해야 함
         _my_pid   = os.getpid()
         try:
             if _pid_file.exists():
                 _old_pid = int(_pid_file.read_text().strip())
-                _alive = False
-                if _old_pid != _my_pid:
-                    try:
-                        if os.name == 'nt':
-                            _r = proc.run(
-                                ['tasklist', '/FI', f'PID eq {_old_pid}', '/FO', 'CSV'],
-                                capture_output=True, text=True, timeout=3,
-                            )
-                            _alive = str(_old_pid) in _r.stdout
-                        else:
-                            os.kill(_old_pid, 0)
-                            _alive = True
-                    except Exception:
-                        _alive = False
-                    if _alive:
-                        # 이미 실행 중인 워치독 존재 → 중복 인스턴스 즉시 종료
-                        sys.exit(0)
+                if _old_pid != _my_pid and _pid_alive(_old_pid):
+                    # 이미 실행 중인 워치독 존재 → 중복 인스턴스 즉시 종료
+                    sys.exit(0)
             _pid_file.write_text(str(_my_pid))
         except Exception:
             pass  # PID 파일 I/O 실패 시 무시하고 계속 실행
