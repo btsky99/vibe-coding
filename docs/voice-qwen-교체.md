@@ -37,11 +37,29 @@ RTF(오디오 1초를 만드는 데 드는 시간) = **5.9~6.7**. 즉 말보다 
                                               │  (engines/tts_cache 규약 그대로)
 [앱]  /api/voice/tts ──프록시──▶ voice-server :9030
                                    └ _new_engine: 'qwen:' → QwenEngine
-                                        1) 캐시 적중이면 즉시 반환 (~10ms)
-                                        2) 없으면 GPU 로 굽는다 (12~17초)
-                                        3) 여유 VRAM<1GB 거나 미설치면 예외
+                                        1) 캐시 적중이면 즉시 반환 (실측 114ms)
+                                        2) 없으면 외부 파이썬을 자식으로 부른다
+                                           envs\qwen_cuda\python.exe work\z_qwen_say.py
+                                           (실측 61.3초 — 자식 띄우기 40초가 얹힌다)
+                                        3) 여유 VRAM<1GB 거나 일꾼이 없으면 예외
                                            → 프론트가 브라우저 합성기로 폴백
 ```
+
+### 왜 모델을 사이드카 venv 에 안 넣었나
+그 venv 에는 **torch 가 아예 없다**(faster-whisper 는 ctranslate2 를 쓴다 — 실측으로 확인).
+CUDA torch ~3GB 를 들이면 받아쓰기까지 같이 흔들리고, 프로세스를 갈라 둔 이유와 어긋난다.
+Qwen 은 이미 `envs\qwen_cuda` 에 서 있으므로 어댑터는 그쪽을 자식으로 부르기만 한다 —
+앱이 이 사이드카를 자식으로 띄우는 것과 같은 방식이라 새 통로가 아니다.
+
+### 실제로 통했는지 (2026-08-16 확인)
+사이드카를 `/shutdown` 으로 내리고 앱이 다시 띄우게 한 뒤:
+
+| 확인 | 결과 |
+|---|---|
+| `/voices` 에 `qwen:apix` | **뜬다** |
+| 미리 구운 문장 `POST /tts` | **200 audio/wav · 114ms** |
+| 처음 보는 문장 `POST /tts` | **200 audio/wav · 61.3초** |
+| edge 회귀 | **200 audio/mpeg · 527ms** (그대로 산다) |
 
 - 낭독 사이드카는 **이 PC 안(127.0.0.1:9030)** 에서 돈다. 앱이 `api/voice_api.py` 로 띄운다.
   즉 GPU 와 낭독이 같은 기계에 있으므로 **PC↔서버 사이에 소리를 나를 새 통로가 필요 없다.**
@@ -50,13 +68,15 @@ RTF(오디오 1초를 만드는 데 드는 시간) = **5.9~6.7**. 즉 말보다 
 - **서버에 자격증명을 심지 않았다.** 이 엔진은 바깥 API 를 부르지 않는다(edge 와 반대).
 
 ### 매니저가 서버 쪽에 발주해야 할 것
-1. 음성 venv 에 `qwen-tts==0.1.1` 설치 (requirements.txt 에 이미 적어 뒀다).
-2. 그 venv 의 torch 를 **CUDA 판**으로 (`--index-url https://download.pytorch.org/whl/cu130`).
-   기본 pypi torch 는 `+cpu` 라 이 엔진이 안 뜬다.
-3. 모델 캐시 자리 `HF_HOME` 이 GPU 기계에서 읽히는지 확인 (지금 `G:\apix-voice2\models\hf`).
-4. 참조 파일 두 개가 그 기계에 있어야 한다: `ref\ref_merged.wav`, `work\ref_text.json`.
-   경로는 `VOICE_QWEN_REF` / `VOICE_QWEN_REF_TEXT` 로 옮길 수 있다.
-5. 자격증명은 **필요 없다**.
+1. **음성 venv 에는 아무것도 깔지 않는다** — 일부러 그렇게 했다(위 참조).
+2. GPU 기계에 `envs\qwen_cuda`(qwen-tts==0.1.1 + CUDA 판 torch)가 서 있어야 한다.
+   이 PC 에는 이미 서 있다. 다른 기계로 옮긴다면 거기서 한 번 만들어야 한다.
+3. 그 기계에 파일 셋: `ref\ref_merged.wav`, `work\ref_text.json`, `work\z_qwen_say.py`.
+   경로는 `VOICE_QWEN_REF` / `VOICE_QWEN_REF_TEXT` / `VOICE_QWEN_WORKER` 로 옮길 수 있다.
+4. 모델 캐시 자리 `HF_HOME`(지금 `G:\apix-voice2\models\hf`)이 그 기계에서 읽혀야 한다.
+5. 낭독이 GPU 와 다른 기계로 나가야 한다면, 나를 것은 **미리 구운 wav 뿐**이고 자리는
+   이미 있는 `voice-server/cache/tts/` 다. 통로도 기존 일감/ingest 를 그대로 쓴다.
+6. 자격증명은 **필요 없다** — 이 엔진은 바깥 API 를 부르지 않는다(edge 와 반대).
 
 ## 4. GPU 를 늘 잡는 대가
 
@@ -76,5 +96,8 @@ RTF(오디오 1초를 만드는 데 드는 시간) = **5.9~6.7**. 즉 말보다 
 
 - 사장님 답을 그때그때 읽어 주는 쓰임(실시간)은 이 모델로는 못 연다. 열려면 더 작은/빠른
   복제 모델을 다시 재야 한다.
-- `qwen:apix` 를 화면에서 고를 수 있는지(프론트 목록 갱신)는 사이드카를 다시 띄워야 확인된다.
-  지금은 앱을 껐다 켜지 않았으므로 **확인 못 한 상태**다.
+- 처음 보는 문장이 61초다. 자식을 매번 새로 띄우는 값(약 40초)이 그 안에 있으므로,
+  상주 일꾼(한 번 띄워 두고 문장만 넘기는 형태)으로 바꾸면 13~17초까지 내려간다.
+  다만 그 순간부터 GPU 2.2GB 를 계속 물게 되므로, 학습이 끝난 뒤에 할 일로 남긴다.
+- 화면(vibe-view)에서 이 목소리를 고르는 것까지는 확인하지 못했다. `/voices` 에는 떴으므로
+  프론트가 목록을 다시 읽으면 보일 것이다.
