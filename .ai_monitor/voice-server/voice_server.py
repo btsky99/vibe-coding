@@ -336,6 +336,80 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({'error': 'not found'}, 404)
 
+    def _tts_seq(self, raw: bytes) -> None:
+        """긴 글을 문장으로 잘라 **되는 대로 하나씩** 흘려보낸다(이어 굽기).
+
+        [WHY 새 엔드포인트인가] /tts 는 '한 요청 = 한 오디오'다. 여러 문장짜리를 그 규약에
+          담으면 마지막 문장까지 다 구운 뒤에야 첫 소리가 난다(131자 = 120초). 기존 규약을
+          바꾸면 지금 잘 도는 화면이 깨지므로, 더하는 쪽을 골랐다.
+        [형식] 줄 단위 JSON(NDJSON). 한 줄에 조각 하나:
+          {"i":0,"text":"...","mime":"audio/wav","b64":"..."}   조각
+          {"done":true,"parts":3}                                끝
+          {"error":"..."}                                        도중 실패
+          [WHY base64 인가] 한 연결로 여러 오디오를 흘려야 한다. multipart 는 브라우저에서
+          조각별로 꺼내 쓰기가 번거롭고, NDJSON 은 한 줄 읽을 때마다 바로 재생할 수 있다.
+        [🔴 첫 줄이 곧 첫 소리다] Transfer-Encoding: chunked 로 열어 두고 조각마다 flush
+          한다. 버퍼에 모으면 이 엔드포인트를 만든 이유가 사라진다.
+        [🔴 이 엔진만 받는다] edge 는 이미 0.5초라 쪼갤 이유가 없고, 쪼개면 mp3 프레임
+          경계 문제(tts_cache 헤더)를 다시 만난다.
+        """
+        try:
+            req = json.loads(raw or b'{}') or {}
+        except ValueError:
+            req = {}
+        text = req.get('text', '')
+        voice = str(req.get('voice') or 'qwen:apix')
+        if not text:
+            self._json({'error': 'no text'}, 400)
+            return
+        if not voice.lower().startswith('qwen'):
+            self._json({'error': 'qwen 목소리에서만 씁니다'}, 400)
+            return
+
+        try:
+            eng = load_tts(voice)
+            parts = eng.synth_parts(text)
+        except Exception as e:                             # noqa: BLE001
+            _log(traceback.format_exc())
+            self._json({'error': f'{type(e).__name__}: {e}'}, 500)
+            return
+
+        import base64
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/x-ndjson;charset=utf-8')
+        self.send_header('Transfer-Encoding', 'chunked')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+        def emit(obj) -> None:
+            body = (json.dumps(obj, ensure_ascii=False) + '\n').encode('utf-8')
+            self.wfile.write(f'{len(body):X}\r\n'.encode('ascii'))
+            self.wfile.write(body)
+            self.wfile.write(b'\r\n')
+            self.wfile.flush()
+
+        n = 0
+        try:
+            for i, (ptext, audio) in enumerate(parts):
+                emit({'i': i, 'text': ptext,
+                      'mime': getattr(eng, 'mime', 'audio/wav'),
+                      'b64': base64.b64encode(audio).decode('ascii')})
+                n = i + 1
+            emit({'done': True, 'parts': n})
+        except Exception as e:                             # noqa: BLE001
+            # [🔴 여기서 500 을 낼 수 없다] 헤더가 이미 나갔다. 오류도 한 줄로 흘려보내야
+            #   듣는 쪽이 '왜 멈췄는지'를 안다. 그러지 않으면 조용히 끊긴 것처럼 보인다.
+            _log(traceback.format_exc())
+            try:
+                emit({'error': f'{type(e).__name__}: {e}', 'parts': n})
+            except Exception:                              # noqa: BLE001
+                pass
+        try:
+            self.wfile.write(b'0\r\n\r\n')                 # chunked 끝 표시
+            self.wfile.flush()
+        except Exception:                                  # noqa: BLE001
+            pass
+
     def do_POST(self):                                 # noqa: N802
         try:
             length = int(self.headers.get('Content-Length') or 0)
@@ -352,6 +426,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:                     # noqa: BLE001
                 _log(traceback.format_exc())
                 self._json({'text': '', 'error': f'{type(e).__name__}: {e}'}, 200)
+            return
+
+        # [🔴 /tts 보다 먼저 본다] startswith('/tts') 가 '/tts/seq' 도 삼킨다.
+        if self.path.startswith('/tts/seq'):
+            self._tts_seq(raw)
             return
 
         if self.path.startswith('/tts'):
