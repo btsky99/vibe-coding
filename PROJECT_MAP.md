@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-16 00:13
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 00:07
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 60개 · 미푸시 38커밋
+- **브랜치**: `main` · 미커밋 49개 · 미푸시 6커밋
 - **최근 커밋**
-  - `55d5cf1` 2026-08-15 — feat(voice): 낭독을 edge-tts 로 — 모델 0개·GPU 0, 실패하면 조용히 기존 목소리로
-  - `ce2cd78` 2026-08-15 — feat(ui): 채팅 화면을 아픽스 보드처럼 — 머리말에 상태·하는 일·중단/재시작/끄기
-  - `2149826` 2026-08-15 — fix(voice): 누르고 있는 동안만 듣기 — 열리는 중에 떼면 마이크가 남던 사고 + 슬롯 소유권
-  - `be9c5ac` 2026-08-15 — fix(recall): 무관 회상 차단선이 이미 뚫려 있었다 — 표본 확장 후 0.85→0.86 (W8)
-  - `d30e758` 2026-08-15 — feat(ui): 전송창·음성 막대를 아픽스 보드와 같은 배치로 — [🎤][입력][지우기][보내기] 한 줄
+  - `3ac89a6` 2026-08-16 — fix(watchdog): 사장이 끈 앱을 되살리던 감시자 — 사람이 끈 것만 안 되살린다
+  - `aece3c5` 2026-08-16 — test(smoke): 설치본 EXE 검증에 음성 라우트 한 줄 추가 — 이번 사고를 잡는 자리
+  - `44cf301` 2026-08-16 — fix(voice): 설치본 마이크가 눌려도 말이 안 가던 사고 — 음성 스택 자동 설치
+  - `0d95e70` 2026-08-16 — feat(voice): Qwen 일꾼 상주 + 문장 이어 굽기(/tts/seq) — 첫 소리를 앞당긴다
+  - `0ee1bcd` 2026-08-16 — fix(voice): Qwen 낭독을 사이드카 venv 밖 일꾼으로 돌린다 — 사이드카 재기동으로 실제 통함 확인
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
@@ -28,15 +28,15 @@
   - 다음: push하면 CI가 릴리즈 발행 — 설치본은 managed 체크아웃을 소프트 업데이트해야 반영됨
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
+- **바이브 코딩을 껐는데 약 30분마다 앱이 저절로 다시 뜬다**
+  - 원인: 고아 hive_watchdog(앱의 자식인데 앱 강제종료 시 cleanup_child_procs가 안 돌아 생존)이 60초마다 server.py를 재기동. server.py __main__은 HTTP 서버가 아니라 GUI 앱 전체(main→app_boot.run_gui
+  - 수정: infra/shutdown_marker.py 신설. 앱의 정상 종료 경로(webview.start 리턴 / api/shutdown / 헤드리스 Ctrl+C)에서만 표식을 남기고, 크래시·taskkill은 그 코드에 도달할 수 없다는 점을 판별 근거로 삼음. 워치독은 재
+- **설치본 마이크 단추는 눌리는데 말이 서버로 안 감 + edge-tts 목소리 목록 안 보임**
+  - 원인: 설치 체크아웃에 voice-server/.venv 가 없고 setup_voice.py 를 부르는 곳이 없어 사이드카 미기동. frozen 폴백은 EXE(2026-07-23)에 음성 패키지가 없어 무효. 프론트는 서버가 준 detail 을 버려 원인이 화면에 안 뜸
+  - 수정: setup_voice.ensure_env(root, run) 분리 + voice_api 자동 설치(창 없이) + 번들 검증(find_spec) 후에만 EXE 실행기 + voiceBus 가 detail 노출. 커밋 44cf301
 - **무관 질의 '오늘 점심 뭐 먹지'가 회상 차단선 0.85를 0.850으로 통과**
   - 원인: 임계값을 표본 9건으로 정해 아래 여유가 0.003뿐이었고, 위키 1021섹션이 인덱스에 들어오며 그 여유가 소진됨
   - 수정: 표본을 24건으로 확장 후 재측정하여 _FLOOR 0.86으로 상향 (be9c5ac). sweep 후보 구간도 e5 코사인 띠로 이동
-- **음성 설정이 '음성 엔진 준비 중'에서 안 넘어감**
-  - 원인: 낭독 경로가 사이드카 하나뿐(첫 기동 ~2분) + 준비 상태 재조회가 '목소리' 팝오버 안 3초 폴링뿐이라 팝오버를 닫으면 ready=true 를 영영 못 받아 표시가 고착
-  - 수정: 브라우저 내장 합성기 우선 경로 신설(lib/browserVoice.ts) + 준비 폴링을 voiceBus.ensureSidecar 로 이관 + ready 를 '읽어 줄 수 있는가'로 재정의(sttReady 분리) — 48219b3
-- **음성 설정이 '음성 엔진 준비 중…'에 영구 고착 + 마이크 입력 무동작 (백엔드는 ready:true 정상)**
-  - 원인: 원인 2개. (1) VoiceSettings 폴링 종료 조건이 v.voices.length인데 표시 조건은 v.ready — 서버 /status는 list_voices()를 엔진 로딩과 무관하게 즉시 주므로 첫 응답에서 목록이 차는 순간 폴링이 멈추고 뒤늦은 ready
-  - 수정: (1) 폴링 종료 조건을 v.ready로 통일 — 표시가 보는 값과 폴링이 멈추는 값을 일치시킴. (2) 배선을 events.loaded 이후로 미루고, CoreWebView2 읽기/이벤트 구독을 모두 inst.Invoke(Func[Type])로 UI 스레드에서 실행.
 
 🔨 = 최근 7일 내 변경된 파일
 
@@ -72,13 +72,14 @@
 | `docs/TERMINAL3_SCROLL_ISSUE.md` |  |
 | `docs/VIBE_CONVENTIONS.md` | .vibe/ 디렉토리 규약 — Layer 2 확장(프로젝트별 스킬/에이전트/규칙)을 |
 | `docs/VIBE_PROJECT_GUIDE.md` | Vibe-Coding (AI Monitor) 프로젝트의 전체 구조, 철학 및 운영 가이드 (v5.0 최신화) |
+| `docs/voice-qwen-교체.md` |  |
 
 ## 🖥️ 서버 & API (.ai_monitor/)
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2160 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
-| `boot.py` | 412 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
+| `server.py` 🔨 | 2166 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `boot.py` 🔨 | 452 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
 | `mission_control.py` | 414 | AI 에이전트 전용 네이티브 윈도우 관제 센터 (Mission Control) — 시스템 트레이 및 사이드바 HUD 관리. |
@@ -125,7 +126,7 @@
 | `update_api.py` | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
-| `voice_api.py` 🔨 | 226 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
+| `voice_api.py` 🔨 | 329 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
 | `wiki_api.py` 🔨 | 166 | LLM 위키 상태 조회 + 초기화 API. |
 | `zettel_api.py` | 203 | Hive Zettelkasten REST API 핸들러. |
 
@@ -136,7 +137,7 @@
 | `claude_quota.py` | 171 | Claude Code CLI의 OAuth 토큰을 재사용해 Anthropic 사용량 엔드포인트 |
 | `code_indexer.py` | 552 | 설명: 코드 인텔리전스 인덱서 — tree-sitter AST 파싱으로 코드 노드/엣지 추출 |
 | `code_search.py` | 200 | 설명: 코드 인텔리전스 검색 — PostgreSQL FTS 기반 BM25 검색 엔진 |
-| `codex_context.py` 🔨 | 122 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
+| `codex_context.py` | 122 | Codex CLI 세션의 현재 컨텍스트 점유율 파서. rollout jsonl의 |
 | `codex_quota.py` | 216 | Codex CLI(OpenAI)의 플랜 쿼터 사용률(5h/7d %) 공급자. |
 | `db.py` | 42 | 설명: 레거시 DB 진입점 (SQLite 런타임 저장소 폐기 잔재). get_connection()은 |
 | `db_helper.py` | 113 | 설명: 세션 로그 기록 헬퍼 — pg_store(upsert_session_log/list_session_logs)로 |
@@ -144,10 +145,10 @@
 | `heal_metrics.py` 🔨 | 296 | 자가치유 계측 단일 소스 — 4장치(회상v2/사고장부/체크포인트/교훈)가 실제로 삽질을 |
 | `job_verify.py` 🔨 | 92 | 일감 검수 — Phase 12 Task 54(git 실측 수집). |
 | `lan_discovery.py` | 120 | LAN 자동발견 — UDP 브로드캐스트로 같은 네트워크의 다른 바이브코딩 브리지를 |
-| `lan_peers.py` 🔨 | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
-| `lan_sandbox.py` 🔨 | 310 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
+| `lan_peers.py` | 221 | LAN 브리지 페어링/신뢰 저장 + HMAC 토큰. 페어링은 '코드 기반 키 파생(PAKE류)' — |
+| `lan_sandbox.py` | 310 | 원격 claude 실행의 폴더 격리 계층 — 허용 폴더 화이트리스트 검증 + |
 | `logger.py` | 130 | 설명: 작업 세션 로깅 진입점. log_start()가 session_id 발급 + 민감정보 마스킹 |
-| `pg_base.py` 🔨 | 558 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
+| `pg_base.py` | 558 | 설명: PostgreSQL 연결 인프라 — 경로 결정, psycopg2 커넥션/풀, 쿼리 실행 프리미티브 |
 | `pg_experience.py` | 226 | 설명: 에이전트 경험/성장(XP·레벨·스탯) + 유사 경험 회상 + pg_logs 활동 기록 |
 | `pg_incidents.py` | 182 | 설명: 사고 장부(incident_ledger) — 고친 에러의 시그니처/근본원인/수정법 기록 + |
 | `pg_lan.py` | 107 | LAN 브리지 채팅 이력(lan_messages) + 원격실행 감사로그(lan_exec_log) CRUD. |
@@ -171,10 +172,10 @@
 ### 인프라 계층 (.ai_monitor/infra/)
 | 모듈 | 줄 수 | 설명 |
 |------|------|------|
-| `app_boot.py` 🔨 | 473 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
+| `app_boot.py` 🔨 | 491 | PyWebView 데스크톱 앱 부팅 오케스트레이션. 스플래시 창을 먼저 띄우고 |
 | `cli_commands.py` | 88 | server.py 진입 시 CLI 인자(--install / --uninstall / --create-shortcut) |
 | `console_scan.py` | 438 | 화면에 떠 있는 콘솔 창(정체불명 검은 cmd 창)을 찾아 "누가 띄웠는지"를 판정한다. |
-| `daemons.py` 🔨 | 1065 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
+| `daemons.py` 🔨 | 1076 | 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/ |
 | `embed_service.py` 🔨 | 214 | fastembed 기반 임베딩 서비스 싱글톤 — 회상 v2(pgvector)의 심장. |
 | `env_path.py` | 128 | 실행 중인 프로세스의 PATH를 Windows 레지스트리 + 알려진 CLI bin 디렉토리 기준으로 |
 | `folder_dialog.py` 🔨 | 139 | 윈도우 네이티브 폴더 선택 다이얼로그(SHBrowseForFolderW, ctypes). |
@@ -189,6 +190,7 @@
 | `pty_process.py` | 483 | Node.js PTY 서버 프로세스 관리 함수 모음. |
 | `runtime.py` 🔨 | 204 | 시스템 런타임 보조 유틸 — Python 인터프리터 후보 탐색, |
 | `session_parse.py` 🔨 | 163 | CLI 세션 파일(JSONL/JSON) 토큰 usage 파서 모음. |
+| `shutdown_marker.py` 🔨 | 92 | '사람이 껐다'는 사실을 남기는 종료 의사 표식. 감시자(hive_watchdog)가 |
 | `splash.py` | 37 | 부팅 스플래시 창 HTML 생성. WebView 창을 무거운 초기화(PG/PTY/HTTP) |
 | `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
 | `voice_turn.py` 🔨 | 113 | 음성 낭독용 '턴 채널' 저장소 — Stop 훅이 쓰고 /api/voice/turn 이 읽는다. |
@@ -201,7 +203,9 @@
 |------|------|------|
 | `engines/tts_cache.py` | 156 | 합성 결과 디스크 캐시 — 같은 문장을 두 번 만들지 않는다. |
 | `engines/tts_edge.py` | 158 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
-| `voice_server.py` | 388 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
+| `engines/tts_qwen.py` | 496 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
+| `engines/tts_split.py` | 192 | 긴 글을 낭독 단위로 자른다 — 이어 굽기(첫 문장부터 틀고 뒤를 잇는 것)의 재료. |
+| `voice_server.py` | 507 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -244,7 +248,7 @@
 |------|------|------|
 | `safety_guard.py` | 378 | Bounded Autonomy 및 위험 명령 탐지 엔진 — 시스템 파괴 명령 사전 차단. |
 | `completion_guard.py` | 273 | 서브에이전트 완료 신호 자동 감지기 — Harness continue:false 패턴. |
-| `drift_detector.py` 🔨 | 276 | 계획 이탈 감지기 — 현재 작업이 ai_monitor_plan.md와 일치하는지 검증. |
+| `drift_detector.py` | 276 | 계획 이탈 감지기 — 현재 작업이 ai_monitor_plan.md와 일치하는지 검증. |
 | `plan_validator.py` | 232 | Harness 패턴 계획 검증 엔진 (V1-V5). |
 | `rules_validator.py` | 150 | 프로젝트의 행동 원칙(RULES.md) 준수 여부를 자동으로 검증하는 스크립트. |
 
@@ -260,7 +264,7 @@
 ### 모니터링
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `hive_watchdog.py` | 562 | 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing) 및 모니터링 엔진. |
+| `hive_watchdog.py` 🔨 | 689 | 하이브 마인드(Hive Mind) 시스템 자가 치유(Self-Healing) 및 모니터링 엔진. |
 | `claude_watchdog.py` | 204 | Claude 자율 에이전트 워치독 — 행 오류 감지 및 자동 재시작. |
 
 ### 유틸리티
@@ -279,7 +283,7 @@
 ### 인프라
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `pg_manager.py` 🔨 | 275 | 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저. |
+| `pg_manager.py` | 275 | 하이브 마인드 전용 포터블 PostgreSQL 통합 매니저. |
 | `setup_hive_pg.py` | 133 | 하이브 마인드 전용 포터블 PostgreSQL 18 + pgvector 설치 및 초기화 스크립트. |
 | `install_codex.py` | 85 | Codex CLI 설치 및 초기 설정 스크립트. |
 
@@ -328,16 +332,16 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `setup_voice.py` 🔨 | 103 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
-| `smoke_test.py` | 303 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
+| `setup_voice.py` 🔨 | 148 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
+| `smoke_test.py` 🔨 | 313 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
 | `test_pg_logging.py` | 71 | PostgreSQL 로깅 통합 테스트 스크립트. |
-| `tui.py` 🔨 | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
+| `tui.py` | 378 | 터미널용 텍스트 대시보드 — GUI 없이 하이브 상태(프로젝트/쿼터/터미널/태스크)를 본다. |
 | `voice_turn_hook.py` 🔨 | 229 | 음성 낭독의 토대 — Claude Code Stop 훅으로 붙어, 턴이 끝난 사실과 |
 | `vps_status_api.py` | 197 | VPS 상태를 JSON으로 뱉는 읽기 전용 API. nginx가 정적 상태판과 함께 서빙한다. |
 | `wiki_build.py` 🔨 | 759 | 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/ 백과사전 페이지로 합성한다. |
 | `wiki_lint.py` 🔨 | 415 | wiki/ 백과사전이 '늙었는지'를 기계적으로 검출한다 — 죽은 출처(사라진 파일· |
-| `zettel_capture.py` 🔨 | 703 | 제텔카스텐 자동 캡처 엔진. |
+| `zettel_capture.py` | 703 | 제텔카스텐 자동 캡처 엔진. |
 | `zettel_sync.py` 🔨 | 1106 | Hive Zettelkasten ↔ Obsidian Vault 동기화 스크립트. |
 
 ## 🎨 프론트엔드 (.ai_monitor/vibe-view/src/)
@@ -374,7 +378,7 @@
 | `HealPanel.tsx` | 129 | 자가치유 계측 패널 (읽기 전용). GET /api/heal/metrics를 불러 4장치 |
 | `HivePanel.tsx` | 464 | 하이브 진단 패널 — 에이전트 상태 모니터링 + 시스템 헬스 체크 + 자가 치유 UI. |
 | `LanExecDirs.tsx` | 167 | 원격 실행 허용 폴더 관리 — 이 PC가 다른 PC의 Claude에게 열어줄 폴더 목록 + 모드 지정. |
-| `LanPanel.tsx` 🔨 | 657 | 설명: LAN 브리지 패널 — 같은 네트워크의 다른 바이브코딩을 자동발견하고 페어링(6자리 코드)한 뒤 |
+| `LanPanel.tsx` | 657 | 설명: LAN 브리지 패널 — 같은 네트워크의 다른 바이브코딩을 자동발견하고 페어링(6자리 코드)한 뒤 |
 | `LanRoomChat.tsx` | 125 | LAN 그룹 채팅방 — 페어링된 모든 PC가 함께 보는 방. 1:1 채팅과 저장/표시가 완전 분리된다. |
 | `MemoryPanel.tsx` 🔨 | 517 | 에이전트 간 공유 메모리(PostgreSQL hive_memory + zettel_notes) 패널 — |
 | `TasksPanel.tsx` | 495 | 에이전트 간 태스크 보드 패널 컴포넌트. |
@@ -408,7 +412,7 @@
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
 | `speech.ts` 🔨 | 283 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` 🔨 | 926 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `voiceBus.ts` 🔨 | 932 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -434,7 +438,7 @@
 | `test_console_scan.py` 🔨 | 192 | 콘솔 창 식별(infra/console_scan) + 상태판 라우트(api/nodes_api) 회귀 테스트. |
 | `test_daemon_toggles.py` 🔨 | 329 | 데몬 on/off 토글 회귀 테스트 — 기본값 보존(전부 기동)과 선택적 비활성 동작 검증. |
 | `test_harness_verify.py` | 218 | harness_verify.py V2 검증 스크립트의 단위 테스트. |
-| `test_hook_server_spawn_guard.py` 🔨 | 175 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
+| `test_hook_server_spawn_guard.py` | 175 | hook_bridge._start_server 스폰 가드 회귀 테스트 — 앱(GUI)이 살아있는 동안 |
 | `test_installed_script_runner.py` 🔨 | 119 | 설치본(frozen EXE)에서 데몬 .py를 띄울 실행기 선택 회귀 테스트. |
 | `test_itcp_context.py` | 72 | scripts/itcp.py 컨텍스트 빌딩 |
 | `test_itcp_fallback.py` | 226 | ITCP 폴백 로직 단위 테스트. |
@@ -444,7 +448,7 @@
 | `test_lan_sandbox.py` | 193 | LAN 원격실행 폴더 격리 회귀 테스트 — 화이트리스트 검증(우회 차단) + 모드별 |
 | `test_new_api_modules.py` | 341 | tasks_api, files_api 단위 테스트. |
 | `test_orchestrator_monitor.py` | 64 | Regression tests for orchestration monitor data adapters. |
-| `test_pg_base_params.py` 🔨 | 100 | query_rows/execute의 파라미터 바인딩 계약 회귀 테스트 — %s가 서버로 새어나가지 않는지 고정. |
+| `test_pg_base_params.py` | 100 | query_rows/execute의 파라미터 바인딩 계약 회귀 테스트 — %s가 서버로 새어나가지 않는지 고정. |
 | `test_pg_store_split.py` | 124 | pg_store.py 분할(2026-06-10) 회귀 방지 테스트. |
 | `test_pty_idle_reclaim.py` | 86 | 유휴 claude 세션 회수(방법 A) 계약 검증 — pty-server.js 소스 정적 검사. |
 | `test_quota_policy.py` | 69 | 사용량 snapshot의 다섯 권고 상태와 guard 동작 회귀 테스트. |
@@ -455,6 +459,7 @@
 | `test_setup_auto_install.py` 🔨 | 268 | First-run sequential automatic dependency installation API regression tests. |
 | `test_setup_banner_install_actions.py` | 33 | Setup banner installer action wiring regression tests. |
 | `test_setup_doctor.py` | 151 | Setup Doctor 회귀 테스트 — AI CLI 감지 + .claude/settings.json 훅 자동 수리. |
+| `test_shutdown_marker.py` 🔨 | 122 | '사람이 껐다' 표식과 워치독의 복구 게이트 회귀 테스트. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
 | `test_updater_release_path.py` | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
@@ -505,4 +510,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-16 00:13
+> 자동 생성 완료: 2026-08-17 00:07

@@ -30,27 +30,43 @@ DESCRIPTION: 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 �
                멈춘 사고를 두 번 겪었다(voice_api.py 헤더). 일꾼은 wav 를 파일로 쓰고,
                파이프에는 짧은 JSON 한 줄만 흘린다. 요청 하나에 한 줄 — 부모가 반드시 읽는다.
 
-             [🔴 이어 굽기] synth_parts() 는 긴 글을 문장으로 잘라 앞에서부터 굽고 하나씩
-               내놓는다. 첫 소리는 첫 조각이 끝나는 대로 나간다(전체를 기다리지 않는다).
-               [실측이 말하는 한계] 굽기는 소리보다 6배 느리다(RTF ~6). 즉 재생이 굽기를
-               앞질러 두 번째 조각부터는 기다림이 생긴다 — 첫 소리를 앞당기는 장치이지
-               끊김을 없애는 장치가 아니다. 숫자는 docs/voice-qwen-교체.md 에 적어 뒀다.
+             [🔴 이어 굽기 — 이제 '첫 조각 홀로 + 나머지 묶음'이다(2026-08-16 보드 이식)]
+               예전에는 조각을 하나씩 차례로 구웠다(cmd:say). 지금은 목록을 통째로 맡기고
+               (cmd:say_parts) 일꾼이 **첫 조각만 작게 홀로** 굽고 그 자리에서 답을 한 줄
+               보낸 뒤, **나머지를 한 번에 묶어** 굽는다. 왜 묶는 것이 빠른가 — 병목이
+               계산이 아니라 커널을 하나씩 띄우는 값이라 배치1 22.1초 vs 배치16 36.9초다
+               (일 16배에 시간 1.7배, 보드 ac_batch_bench 실측).
+               [🔴 CUDA 그래프는 일꾼 쪽에 있다] code_predictor 15스텝을 그래프 한 장으로
+                 묶어 replay 한 번으로 만든 것(보드 커밋 f1e3dd4, work/qgraph.py).
+                 **이 파일이 그 일꾼 파일을 그대로 부르므로 여기서 할 일은 없다** — 다만
+                 끄는 길은 알아 둘 것: 환경변수 VOICE_QWEN_GRAPH=0 또는 파일
+                 G:\\apix-voice2\\work\\graph.off 를 만들고 일꾼을 내리면 옛 길로 돈다.
 
              [🔴 속도를 손대지 않는다] 사장님이 원본 속도를 고르셨다. speed 인자를 무시하고
                캐시 키에도 넣지 않는다 — 넣으면 미리 구워 둔 문장이 빗나가 매번 새로 굽는다.
+
+             [🔴 참조 지문은 캐시 열쇠에 넣는다] 안 넣으면 사장님이 참조(목소리 원본)를
+               바꾸셔도 옛 소리가 그대로 난다 — 보드가 2026-08-16 정확히 그 사고를 겪었다.
+               ref_info() 참조.
 
 REVISION HISTORY:
 - 2026-08-16 Claude: 최초 작성 — 사장님 목소리 복제 낭독(청취 판정으로 채택)
 - 2026-08-16 Claude: 모델을 사이드카 venv 에 들이는 대신 외부 파이썬을 자식으로 부르게 고침
 - 2026-08-16 Claude: 자식을 상주시켜 61초 → 13초(사장 지시). 학습이 오면 내려간다.
   이어 굽기(synth_parts) 추가 — 첫 소리를 앞당긴다
+- 2026-08-16 Claude: 보드에서 완성한 것 이식 — ① 조각내 굽기를 일꾼의 say_parts(첫 조각
+  홀로 + 나머지 묶음)로 교체 ② 참조 wav 지문을 캐시 열쇠에 ③ GPU 를 보드 일꾼과 나눠
+  쓰도록 몫 상한을 걸어 띄운다
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -71,6 +87,17 @@ BOOT_S = int(os.environ.get('VOICE_QWEN_BOOT', '120'))
 SAY_S = int(os.environ.get('VOICE_QWEN_TIMEOUT', '90'))
 # 이만큼 아무도 안 부르면 일꾼을 내려 GPU 를 돌려준다.
 IDLE_S = int(os.environ.get('VOICE_QWEN_IDLE', '600'))
+# 묶음 굽기 상한의 천장. 조각 수에 따라 늘리되 여기서 멈춘다.
+BATCH_MAX_S = int(os.environ.get('VOICE_QWEN_BATCH_TIMEOUT', '600'))
+
+# [🔴 GPU 는 하나다 — 보드 굽기와 나눠 쓴다(2026-08-16)] 같은 카드(12GB)에서 보드 쪽
+#   일꾼(G:\apix-voice2 의 ag_bake_now 가 물고 있는 z_qwen_worker)이 이미 4~5GB 를 쓴다.
+#   일꾼 기본 몫은 0.55(=6.8GB)라 둘이 그 값으로 서면 합이 카드보다 커진다.
+#   그래서 **이쪽 일꾼에게만** 더 작은 몫을 씌워 띄운다. 이쪽은 조각이 24자 이하라
+#   묶음 봉우리가 작다(보드는 배치 16까지 쓴다).
+#   [제약] 이 값은 상한이지 예약이 아니다 — 넘치면 학습이 아니라 **내 일꾼이 먼저 터진다**.
+#     그것이 이 저장소가 뜻한 '학습이 이긴다' 이고, 터지면 부모가 일꾼을 내려 카드를 돌려준다.
+FRACTION = os.environ.get('VOICE_QWEN_FRACTION', '0.35')
 
 # 일꾼이 제 답에 붙이는 표식. 라이브러리 배너와 내 답을 가르는 유일한 수단이다
 # (work/z_qwen_worker.py 의 MARK 와 반드시 같아야 한다).
@@ -90,6 +117,56 @@ _proc: subprocess.Popen | None = None
 _lock = threading.RLock()
 _last_used = 0.0
 _reaper: threading.Thread | None = None
+
+
+# ── 참조(사장님 목소리 원본) 지문 ────────────────────────────────────────────────
+# [🔴 왜 지문이 캐시 열쇠에 들어가야 하나 — 2026-08-16 보드 사고] 참조 wav 를 바꿔도
+#   열쇠가 그대로면 **옛 목소리가 그대로 난다**. 길이로는 못 가른다(같은 길이로 다시
+#   녹음하시면 그대로다). 그래서 파일 내용의 sha256 을 넣는다.
+# [🔴 이쪽은 참조를 고르지 않는다] 어느 참조로 굽는지는 굽는 쪽(z_qwen_worker 의 REF_WAV)이
+#   정하고 ag_bake_now 가 ref_info.json 에 적어 둔다. 여기서는 **읽기만** 한다.
+_REF_INFO_PATH = os.environ.get(
+    'VOICE_REF_INFO', r'G:\apix-voice2\work\bake_now\ref_info.json')
+_REF_WAV = os.environ.get('VOICE_QWEN_REF', r'G:\apix-voice2\ref\boss_pick.wav')
+_ref_cache: dict = {'at': 0.0, 'val': None}
+_REF_TTL_S = 5.0
+
+
+def ref_info() -> dict | None:
+    """{key, file, sha256, sec} 또는 None. voice_server 의 /status 도 이걸 쓴다
+    (같은 값을 두 군데서 읽지 않게 — 어긋나면 '왜 이 목소리가 났나'를 못 밝힌다).
+
+    [WHY 파일을 직접 해시하는 길을 남기나] 굽는 쪽이 한 번도 안 떴으면 ref_info.json 이
+      없다. 그래도 참조 wav 는 제자리에 있으므로 그것을 직접 재면 같은 값이 나온다.
+    [🔴 못 구하면 None 이다 — 열쇠에는 빈 칸으로 들어간다] 그 상태로 구운 소리와
+      지문을 아는 상태로 구운 소리는 열쇠가 달라 서로를 덮지 않는다(그게 맞다)."""
+    now = time.time()
+    if now - _ref_cache['at'] < _REF_TTL_S:
+        return _ref_cache['val']
+    val = None
+    try:
+        with open(_REF_INFO_PATH, encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict) and d.get('sha256'):
+            val = d
+    except (OSError, ValueError):
+        val = None
+    if val is None:
+        try:
+            h = hashlib.sha256()
+            with open(_REF_WAV, 'rb') as f:
+                for blk in iter(lambda: f.read(1 << 20), b''):
+                    h.update(blk)
+            val = {'key': os.path.splitext(os.path.basename(_REF_WAV))[0],
+                   'file': _REF_WAV, 'sha256': h.hexdigest()}
+        except OSError:
+            val = None
+    _ref_cache['at'], _ref_cache['val'] = now, val
+    return val
+
+
+def _ref_sha() -> str:
+    return (ref_info() or {}).get('sha256') or ''
 
 
 def available() -> bool:
@@ -164,7 +241,10 @@ def _ensure_worker() -> subprocess.Popen:
             raise RuntimeError(f'Qwen 일꾼을 찾을 수 없습니다({WORKER_PY} / {WORKER_JOB})')
         # [제약] stderr 는 파이프로 받지 않는다 — 아무도 안 읽으면 자식이 멈춘다.
         #   진단이 필요하면 일꾼이 stdout 한 줄로 error 를 돌려준다.
+        # [🔴 몫을 씌워 띄운다] 위 FRACTION 주석 — 보드 일꾼과 같은 카드를 쓴다.
+        #   환경으로 이미 정해 두셨으면 그것을 존중한다(사람이 정한 값이 이긴다).
         env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        env.setdefault('VOICE_QWEN_FRACTION', FRACTION)
         _proc = subprocess.Popen(
             [WORKER_PY, '-u', WORKER_JOB],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -234,22 +314,94 @@ def _bake(text: str) -> bytes:
             res = _read_line(p, SAY_S)
             _last_used = time.time()
         if not res.get('ok'):
-            if res.get('error') == 'busy':
-                # [🔴 여기가 '학습이 이긴다'가 실제로 일어나는 자리] 일꾼을 내려 2.2GB 를
-                #   돌려주고, 예외로 올려 프론트가 브라우저 합성기로 내려가게 한다.
-                _kill_worker('busy')
-                raise RuntimeError('GPU 여유 부족 — 학습 보호로 굽지 않았습니다')
-            raise RuntimeError(f"Qwen 굽기 실패: {res.get('error')}")
-        with open(tmp, 'rb') as fp:
-            data = fp.read()
+            # [🔴 여기가 '학습이 이긴다'가 실제로 일어나는 자리] busy 면 _fail 이 일꾼을
+            #   내려 GPU 를 돌려주고, 예외로 올려 프론트가 브라우저 합성기로 내려간다.
+            _fail(res)
+        data = _read_wav(tmp)
     finally:
         try:
             os.unlink(tmp)
         except OSError:
             pass
-    if not data:
-        raise RuntimeError('Qwen 이 오디오를 만들지 못했습니다')
     return data
+
+
+def _read_wav(path: str) -> bytes:
+    with open(path, 'rb') as fp:
+        data = fp.read()
+    if not data:
+        raise RuntimeError(f'Qwen 이 오디오를 만들지 못했습니다({os.path.basename(path)})')
+    return data
+
+
+def _bake_parts(parts: list[str]):
+    """조각 목록을 일꾼에게 **한 번에** 맡기고, 나오는 대로 (차례, wav바이트)를 내놓는다.
+
+    [WHY 하나씩 안 맡기나] 커널을 하나씩 띄우는 값이 시간을 다 먹는다 — 배치1 22.1초 vs
+      배치16 36.9초(일 16배에 시간 1.7배, 보드 ac_batch_bench 실측). 묶으면 그 값이 나뉜다.
+    [🔴 첫 조각만 홀로다] 묶으면 묶음이 다 끝나야 첫 소리가 난다 — 그러면 이 함수를 만든
+      이유가 사라진다. 그래서 일꾼은 첫 조각을 홀로 굽고 **그 자리에서 답 한 줄**을 보낸다.
+      답이 두 줄 온다(stage=first, stage=full) — 그 규약이 z_qwen_worker.py 의 say_parts 다.
+    [🔴 답 줄 수를 반드시 맞춘다 — 이것이 이 함수의 불변식] 듣는 쪽이 중간에 끊어
+      두 번째 줄을 안 읽고 나가면, **다음 요청이 그 줄을 제 답으로 읽는다**(파이프 어긋남).
+      그래서 finally 에서 남은 줄을 비우고, 못 비우면 일꾼을 내린다.
+    [제약] 일꾼은 하나다 — 이 교환이 끝날 때까지 _lock 을 쥔다. 듣는 쪽이 generator 를
+      버리면 close() 때 GeneratorExit 가 아래 yield 에서 올라와 finally 가 돈다."""
+    global _last_used
+    tmpdir = tempfile.mkdtemp(prefix='qwenp_')
+    first_out = os.path.join(tmpdir, 'first.wav')
+    full_out = os.path.join(tmpdir, 'full.wav')
+    prefix = os.path.join(tmpdir, 'q')
+    # 묶음은 조각 수만큼 오래 걸린다. 한 조각당 SAY_S 를 다 주면 지나치므로 절반씩 더한다.
+    rest_s = min(BATCH_MAX_S, SAY_S + (SAY_S // 2) * max(0, len(parts) - 1))
+
+    with _lock:
+        p = _ensure_worker()
+        pending = 2                       # 일꾼이 보낼 답 줄 수(first, full)
+        try:
+            req = json.dumps({'cmd': 'say_parts', 'parts': parts,
+                              'first_out': first_out, 'out': full_out,
+                              'prefix': prefix}, ensure_ascii=False)
+            try:
+                p.stdin.write(req + '\n')
+                p.stdin.flush()
+            except Exception as e:                         # noqa: BLE001
+                pending = 0
+                _kill_worker('write-failed')
+                raise RuntimeError(f'Qwen 일꾼에 말을 걸지 못했습니다: {e}') from e
+
+            res = _read_line(p, SAY_S)
+            pending -= 1
+            if not res.get('ok'):
+                pending = 0               # 첫 판에 엎어지면 두 번째 줄은 오지 않는다
+                _fail(res)
+            _last_used = time.time()
+            yield 0, _read_wav(first_out)
+
+            res = _read_line(p, rest_s)
+            pending -= 1
+            if not res.get('ok'):
+                _fail(res)
+            _last_used = time.time()
+            for i in range(1, len(parts)):
+                yield i, _read_wav(prefix + ('.p%02d.wav' % i))
+        finally:
+            while pending > 0:
+                try:
+                    _read_line(p, rest_s)
+                    pending -= 1
+                except Exception:                          # noqa: BLE001
+                    _kill_worker('desync')                 # 못 비웠다 — 어긋난 채 두느니 내린다
+                    break
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _fail(res: dict) -> None:
+    """일꾼의 거절을 예외로 바꾼다. busy 면 일꾼을 내려 GPU 를 학습에 돌려준다."""
+    if res.get('error') == 'busy':
+        _kill_worker('busy')
+        raise RuntimeError('GPU 여유 부족 — 학습 보호로 굽지 않았습니다')
+    raise RuntimeError(f"Qwen 굽기 실패: {res.get('error')}")
 
 
 class QwenEngine:
@@ -262,7 +414,12 @@ class QwenEngine:
         self.voice = 'apix'
 
     def _key(self, text: str) -> str:
-        return tts_cache.key_of('qwen', self.voice, MODEL_ID, text)
+        """[🔴 참조 지문이 열쇠에 들어간다 — 2026-08-16] 없으면 사장님이 목소리 원본을
+        바꾸셔도 옛 소리가 그대로 난다(보드가 그 사고를 겪었다).
+        [🔴 굽는 쪽과 같은 식이어야 한다] 미리 굽는 ag_bake_now.py 의 cache_key() 가 이
+          순서·구분자를 그대로 흉내 내 같은 폴더에 파일을 놓는다. 한쪽만 고치면 미리
+          구운 문장이 조용히 안 맞아 첫 소리가 도로 느려진다."""
+        return tts_cache.key_of('qwen', self.voice, MODEL_ID, _ref_sha(), text)
 
     def load(self) -> None:
         """[WHY 기본값이 '안 띄운다' 인가] 예열이 GPU 를 무는 순간, 음성을 켠 것만으로
@@ -288,20 +445,52 @@ class QwenEngine:
         return data
 
     def synth_parts(self, text: str, speed: float = 1.0):
-        """긴 글을 문장으로 잘라 앞에서부터 하나씩 내놓는다(이어 굽기).
+        """긴 글을 조각으로 잘라 **되는 대로 하나씩** 내놓는다(이어 굽기).
 
-        [WHY 미리 안 굽고 하나씩 주나] 전체를 다 구운 뒤 주면 첫 소리가 글 전체 길이만큼
-          늦는다(131자 = 120초). 앞에서부터 주면 첫 소리는 첫 조각 값(13초 안팎)이다.
-        [🔴 앞서 굽기를 몇 개 두나 — 두지 않는다] 굽기가 소리보다 6배 느리다(RTF ~6).
-          한 조각을 굽는 12초 동안 재생은 2초를 쓴다. 몇 개를 앞서 굽든 재생이 굽기를
-          앞지르므로 앞서 굽기는 끊김을 못 막고, 미리 굽는 만큼 첫 소리만 늦춘다.
-          그래서 '한 조각 굽고 곧바로 내보내기'가 이 판에서 최선이다. 끊김을 없애려면
-          모델이 바뀌어야 한다 — 배선으로 되는 일이 아니다.
+        [WHY 전체를 다 굽고 주지 않나] 그러면 첫 소리가 글 전체 길이만큼 늦는다
+          (131자 = 120초). 앞에서부터 주면 첫 소리는 첫 조각 값이다.
+        [🔴 예전 판과 무엇이 다른가] 예전에는 조각마다 일꾼을 한 번씩 불렀다. 지금은
+          **못 맞힌 조각들을 한 목록으로 맡긴다**(_bake_parts). 일꾼이 첫 조각만 홀로
+          굽고 나머지는 묶어 구우므로, 첫 소리는 그대로 빠르면서 뒤가 훨씬 빨리 따라온다.
+        [🔴 캐시에 있는 것은 목록에서 뺀다] 미리 구워 둔 문장(ag_bake_now 가 넣어 둔 것)은
+          GPU 도 일꾼도 필요 없다. 앞쪽이 통째로 캐시면 일꾼을 아예 안 부른다.
+          일꾼의 '첫 조각 홀로' 최적화는 **맡긴 목록의 첫 번째**에 걸리는데, 그 앞의
+          캐시분은 즉시 나가므로 사장님이 듣는 '첫 소리'와 어긋나지 않는다.
         """
-        for part in tts_split.split(text):
-            key = self._key(part)
-            hit = tts_cache.get(key, self.ext)
-            if hit is None:
-                hit = _bake(part)
-                tts_cache.put(key, hit, self.ext)
-            yield part, hit
+        parts = tts_split.split(text)
+        if not parts:
+            return
+        keys = [self._key(p) for p in parts]
+        hits = [tts_cache.get(k, self.ext) for k in keys]
+        todo = [i for i, h in enumerate(hits) if h is None]
+
+        baker = _bake_parts([parts[i] for i in todo]) if todo else None
+        try:
+            for i, part in enumerate(parts):
+                data = hits[i]
+                if data is None:
+                    if baker is not None:
+                        try:
+                            _, data = next(baker)
+                        except StopIteration:
+                            baker = None
+                        except RuntimeError as e:
+                            # [🔴 소리가 먼저다 — 보드와 같은 규약] 묶어 굽기가 깨지면
+                            #   **옛 길(한 조각씩)로 내려간다**. 느릴 뿐 소리는 난다.
+                            #   단 busy 는 내려가지 않는다 — 그건 '학습에 자리를 내주라'는
+                            #   뜻이라 다시 시도하면 규칙을 어긴다. 그대로 올려 프론트가
+                            #   브라우저 합성기로 가게 둔다.
+                            if 'GPU 여유 부족' in str(e):
+                                raise
+                            print(f'[qwen] 묶어 굽기 실패 — 한 조각씩으로 내려간다: {e}',
+                                  file=sys.stderr, flush=True)
+                            baker = None
+                    if data is None:
+                        data = _bake(part)
+                    tts_cache.put(keys[i], data, self.ext)
+                yield part, data
+        finally:
+            # [🔴 반드시 닫는다] 듣는 쪽이 중간에 끊으면 _bake_parts 의 finally 가 돌아야
+            #   일꾼과의 답 줄 수가 맞는다(안 맞으면 다음 요청이 남의 답을 읽는다).
+            if baker is not None:
+                baker.close()

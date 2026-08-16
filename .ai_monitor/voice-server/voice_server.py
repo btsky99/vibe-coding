@@ -81,6 +81,25 @@ STT_MODEL = os.environ.get('VOICE_STT_MODEL', 'small').strip()
 #   떼면 두 경로가 같은 id 공간을 쓰게 되어 폴백이 자기 자신을 다시 부른다.
 ENV_VOICE = os.environ.get('VOICE_TTS_VOICE', '').strip()
 
+# [🔴 어느 목소리로 구웠는지 한 칸 — 2026-08-16] 서버는 참조가 바뀐 것을 알아야
+#   캐시 열쇠를 새로 만든다. 길이만으로는 못 가른다(같은 길이로 다시 녹음하시면 그대로다).
+#   그래서 **지문(sha256)** 을 함께 낸다. 값은 굽는 쪽(G:\apix-voice2 의 ag_bake_now)이
+#   적어 두고 여기서는 **읽기만** 한다 — 이쪽이 참조를 고르지 않는다.
+#   [🔴 없으면 조용히 None] 굽는 쪽이 안 떠 있어도 /status 는 그대로 떠야 한다.
+#   [🔴 읽는 곳은 한 군데다 — engines/tts_qwen.ref_info()] 그 값이 **캐시 열쇠에도**
+#     들어가므로, 여기서 따로 읽으면 '화면에 뜬 지문'과 '소리를 가른 지문'이 어긋날 수
+#     있다. 그러면 "왜 이 목소리가 났나"를 못 밝힌다.
+
+
+def _qwen_ref():
+    """{key, file, sha256, sec} 또는 None."""
+    try:
+        from engines.tts_qwen import ref_info
+        return ref_info()
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
 _state = {
     'stt': False,
     'tts': False,
@@ -329,6 +348,7 @@ class Handler(BaseHTTPRequestHandler):
                 'ttsReady': bool(_state['tts']),
                 'voices': list_voices(),
                 'cache': _cache_stats(),
+                'ref': _qwen_ref(),
             })
             return
         if self.path.startswith('/voices'):
