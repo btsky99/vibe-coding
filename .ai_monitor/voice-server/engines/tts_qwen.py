@@ -134,8 +134,24 @@ WORKER_PY, WORKER_JOB = _worker_paths()
 MODEL_ID = os.environ.get('VOICE_QWEN_MODEL', 'Qwen/Qwen3-TTS-12Hz-0.6B-Base')
 
 # 프로젝트 뿌리와 scripts/ — 설치 절차(setup_qwen)를 불러오기 위한 자리.
+# [🔴 두 가지 배치가 있다 — 한쪽만 맞추면 다른 쪽에서 조용히 죽는다]
+#   개발/체크아웃: <뿌리>/.ai_monitor/voice-server  → scripts 는 <뿌리>/scripts
+#   번들 폴백    : <_MEIPASS>/voice-server          → scripts 는 <_MEIPASS>/scripts
+#   (voice_api._spawn_sidecar 가 체크아웃 소스를 못 찾으면 번들 쪽으로 떨어진다.)
+#   dirname 을 두 번 접는 계산 하나로 두면 번들에서 _MEIPASS 의 **바깥**을 가리켜
+#   import setup_qwen 이 실패한다 — 사용자에게는 '목소리 준비 실패'로만 보인다.
 _ROOT = os.path.dirname(os.path.dirname(_VOICE_DIR))          # .../<프로젝트>
-_SCRIPTS_DIR = os.path.join(_ROOT, 'scripts')
+
+
+def _scripts_dir() -> str:
+    for cand in (os.path.join(_ROOT, 'scripts'),
+                 os.path.join(os.path.dirname(_VOICE_DIR), 'scripts')):
+        if os.path.isfile(os.path.join(cand, 'setup_qwen.py')):
+            return cand
+    return os.path.join(_ROOT, 'scripts')
+
+
+_SCRIPTS_DIR = _scripts_dir()
 
 _can_cache: dict = {'at': 0.0, 'val': False}
 # 설치 진행 상태. /status 가 이걸 그대로 내보내 화면이 '지금 뭘 받는 중'을 띄운다
