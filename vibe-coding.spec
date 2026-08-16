@@ -55,11 +55,33 @@ except Exception:
 #   빌드 자체를 세우면 릴리즈 파이프라인 전체가 멈춘다.
 from PyInstaller.utils.hooks import collect_dynamic_libs as _collect_dynamic_libs
 _voice_binaries = []
-for _vpkg in ('av', 'ctranslate2'):
+# [🔴 여기는 반드시 리스트 — CI 차단 실측 2026-08-16] scripts/build_verify.py 는 이 spec 을
+#   **텍스트 정규식**으로 훑어, 따옴표 문자열 두 개를 괄호로 묶은 꼴이면 무엇이든 datas
+#   항목(앞=소스경로, 뒤=대상경로)으로 간주한다. 그래서 패키지 이름 두 개를 괄호로 묶으면
+#   "spec datas 경로 없음: av" 로 판정해 빌드가 Phase 2 게이트에서 멈춘다.
+#   대괄호는 그 패턴에 안 걸린다. **이 주석에도 그 꼴을 적지 말 것** — 주석까지 훑는다.
+# [🔴 조용히 넘어가지 않는다 — 2026-08-16 사고의 교훈] 음성 스택이 빌드 인터프리터에
+#   없으면 hiddenimports 가 조용히 무시되고 **앱은 멀쩡하되 음성만 죽은 설치본**이 그대로
+#   출고된다. 사장이 겪은 것이 정확히 그것이고 발견까지 3주가 걸렸다. 빌드를 세우는 쪽이
+#   훨씬 싸다.
+# [🔴 판정 기준은 '임포트 가능한가'다] collect_dynamic_libs 의 결과 개수로 판정하면 안 된다 —
+#   av 는 PyInstaller 기본 훅이 dll 을 챙기므로 정상인데도 0 개를 돌려준다(실측).
+#   그걸 실패로 보면 멀쩡한 빌드를 세운다.
+import importlib.util as _ilu
+_missing = [m for m in ['edge_tts', 'faster_whisper', 'ctranslate2', 'av']
+            if _ilu.find_spec(m) is None]
+if _missing:
+    raise SystemExit(
+        '[spec] 중단: 음성 스택이 빌드 파이썬에 없다 -> ' + ', '.join(_missing) + '\n'
+        '        이대로 구우면 앱은 뜨는데 마이크와 목소리만 죽은 설치본이 나간다.\n'
+        '        해결: pip install -r .ai_monitor/requirements.txt 를 **pyinstaller 가 쓰는\n'
+        '        바로 그 파이썬**에 실행할 것. venv 와 다를 수 있다(실제로 그래서 한 번 헛빌드했다).')
+
+for _vpkg in ['av', 'ctranslate2']:
     try:
         _voice_binaries += _collect_dynamic_libs(_vpkg)
     except Exception:
-        print(f'[spec] 경고: {_vpkg} 미설치 — 음성 받아쓰기 없이 빌드')
+        pass                       # 훅이 이미 챙기는 패키지는 0 개가 정상 — 위에서 걸렀다
 
 # faster-whisper 패키지 데이터(silero VAD 모델 .onnx).
 # [🔴 실측 2026-08-16] 이게 빠지면 STT 가 **로딩까지는 성공**하고(stt=True) 받아쓰기
