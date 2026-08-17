@@ -316,10 +316,21 @@ def handle_stt(handler, body: bytes) -> None:
         _json_response(handler, {'text': '', 'error': f'{type(e).__name__}: {e}'})
 
 
+# 낭독 프록시 시한.
+# [🔴 120초로는 첫 호출이 죽는다 — 2026-08-17 실측] 새로 깐 판에서 '아픽스 나노'(moss)를
+#   처음 고르면 일꾼이 모델을 올리느라 첫 응답이 늦다. 그때 프록시가 먼저 끊어 502 를 내고,
+#   화면에는 **소리가 아예 안 나는 것**으로만 보인다(예열 뒤 같은 요청은 5.6초로 멀쩡했다).
+#   두 번째부터 되는 고장은 사용자가 '고장'으로 신고하지 않고 '안 쓴다'로 끝난다 —
+#   그래서 첫 호출을 살리는 쪽이 값이 크다.
+# [WHY 여기만 늘리나] /stt 는 사람이 말한 뒤 기다리는 자리라 길게 잡으면 체감이 나쁘다.
+#   낭독은 이미 '읽어 주는 중'이 화면에 떠 있어 기다림이 설명된다.
+_TTS_TIMEOUT_S = float(os.environ.get('VOICE_TTS_TIMEOUT', '300'))
+
+
 def handle_tts(handler, body: bytes) -> None:
     """POST /api/voice/tts — 텍스트를 넘기고 WAV 를 돌려받는다."""
     try:
-        raw, ct = _post('/tts', body, 'application/json', timeout=120)
+        raw, ct = _post('/tts', body, 'application/json', timeout=_TTS_TIMEOUT_S)
     except Exception as e:                                  # noqa: BLE001
         _json_response(handler, {'error': f'{type(e).__name__}: {e}'}, 502)
         return

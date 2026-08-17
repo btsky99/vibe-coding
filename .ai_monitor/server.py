@@ -673,11 +673,28 @@ if os.name == 'nt':
 else:
     GLOBAL_VAULT_DIR = Path.home() / '.vibe-coding' / 'vault'
 
-# 스크립트 디렉토리 — 개발: PROJECT_ROOT/scripts, 배포(frozen): BASE_DIR/scripts
-_scripts_candidate = PROJECT_ROOT / 'scripts'
-if not _scripts_candidate.exists():
-    _scripts_candidate = BASE_DIR / 'scripts'
-SCRIPTS_DIR = _scripts_candidate if _scripts_candidate.exists() else None
+# 스크립트 디렉토리 — **앱 자신의 scripts/ 가 먼저다.**
+#
+# [🔴 2026-08-17 사장 신고로 뒤집힌 순서] 예전에는 `PROJECT_ROOT / 'scripts'` 를 먼저 봤다.
+#   PROJECT_ROOT 는 **사용자가 연 프로젝트**다. 사장이 D:\CipherTrader 를 열어 두시면
+#   그 폴더에도 scripts/ 가 있어 그대로 채택되고, 앱은 **남의 프로젝트에 있는 옛 사본**을
+#   제 데몬으로 띄웠다. 실물 오류가 그것이다:
+#     File "D:\CipherTrader\scripts\hive_watchdog.py", line 48
+#       from src.pg_store import ...
+#     ModuleNotFoundError: No module named 'src.pg_store'
+#   그 사본은 8/2자(27KB)이고 바이브 코딩 것은 8/16자(36KB)다. 게다가 CipherTrader 에는
+#   `src/pg_store.py` 가 없다(이 앱은 `.ai_monitor/src/pg_store.py` 를 쓴다) — 그래서 즉사한다.
+#
+# [불변식] 여기서 찾는 것은 **이 앱의 데몬**(hive_watchdog·codex_pg_watcher 등)이다.
+#   사용자 프로젝트에 같은 이름의 파일이 있다고 그것을 띄우면 안 된다 — 그 프로젝트는
+#   이 앱의 의존성(.ai_monitor/src)을 갖고 있지 않다. 프로젝트 폴더는 **마지막 후보**다.
+#   (bare 체크아웃처럼 앱 소스가 통째로 없는 경우를 위해 후보에서 아주 빼지는 않는다.)
+_scripts_candidates = [
+    Path(_SCRIPTS_DIR),          # 앱 소스 옆 — 개발/관리 체크아웃/seed 모두 여기가 정답
+    BASE_DIR / 'scripts',        # frozen 번들 배치
+    PROJECT_ROOT / 'scripts',    # 마지막 — 위 둘이 다 없을 때만
+]
+SCRIPTS_DIR = next((c for c in _scripts_candidates if c.exists()), None)
 # Claude Code 프로젝트 디렉터리 명명 규칙(: 제거, /·\ → --) 과 동일하게 인코딩
 _proj_raw = str(PROJECT_ROOT).replace('\\', '/').replace(':', '').replace('/', '--')
 PROJECT_ID: str = _proj_raw.lstrip('-') or 'default'   # e.g. "D--vibe-coding"
