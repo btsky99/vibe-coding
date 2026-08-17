@@ -18,10 +18,16 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+# [🔴 규칙 10 — 창 없이 부른다] 맨손 subprocess 로 npm 을 부르면 그 손자 node.exe 가
+#   새 콘솔을 받는다(CREATE_NO_WINDOW 는 상속되지 않는다). 실행기는 한 곳뿐이다.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _install_common import run as _run  # noqa: E402
+
+
 
 def _run(cmd: list[str], **kwargs) -> tuple[int, str, str]:
     """명령을 실행하고 (returncode, stdout, stderr) 반환."""
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, **kwargs)
+    result = _run(cmd, capture_output=True, text=True, timeout=600, **kwargs)
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
@@ -85,7 +91,7 @@ def install_via_msi() -> bool:
     print("[설치] MSI 인스톨러 실행 중... (설치 마법사를 따라 진행하세요)")
     try:
         # MSI 실행 (사용자 인터랙션 필요)
-        result = subprocess.run(
+        result = _run(
             ["msiexec", "/i", str(msi_path), "/passive", "/norestart"],
             timeout=900,
             close_fds=True,

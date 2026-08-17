@@ -25,7 +25,11 @@ def test_installer_skips_existing_tools_and_installs_missing_in_order():
     def command_exists(names):
         return any(name in installed for name in names)
 
-    def run(command, timeout):
+    # [🔴 **kwargs 를 받는다 — 2026-08-17] 설치 스크립트가 규칙 10에 맞춰
+    #   무창 실행기(_install_common.run → infra.proc.run)를 거치면서
+    #   creationflags 가 함께 넘어온다. 가짜가 좁으면 **규칙을 지킨 쪽이 깨진다** —
+    #   가짜는 진짜의 호출 규약을 따라가야 한다.
+    def run(command, timeout=None, **_kwargs):
         calls.append(command)
         installed.add({
             "@openai/codex": "codex",

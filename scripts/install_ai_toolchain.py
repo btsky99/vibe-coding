@@ -17,6 +17,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# [🔴 규칙 10 — 창 없이 부른다] 맨손 subprocess 로 npm 을 부르면 그 손자 node.exe 가
+#   새 콘솔을 받는다(CREATE_NO_WINDOW 는 상속되지 않는다). 실행기는 한 곳뿐이다.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _install_common import run as _run  # noqa: E402
+
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 AI_PACKAGES = (
@@ -84,7 +90,7 @@ def _install_node_if_missing() -> str | None:
 
     node_installer = SCRIPT_DIR / "install_nodejs.py"
     print("[자동 설치] Node.js/npm이 없어 먼저 설치합니다.")
-    result = subprocess.run([sys.executable, str(node_installer)], timeout=900)
+    result = _run([sys.executable, str(node_installer)], timeout=900)
     if result.returncode != 0:
         print("[실패] Node.js 자동 설치가 완료되지 않았습니다.")
         return None
@@ -114,7 +120,7 @@ def main() -> None:
             print(f"[건너뜀] {display_name}이 이미 설치되어 있습니다.")
             continue
         print(f"[자동 설치] {display_name}: npm install -g {package}")
-        result = subprocess.run([npm, "install", "-g", package], timeout=900)
+        result = _run([npm, "install", "-g", package], timeout=900)
         if result.returncode != 0:
             failures.append(display_name)
         else:
@@ -125,7 +131,7 @@ def main() -> None:
         print("[skip] Antigravity CLI is already installed.")
     else:
         print("[auto install] Antigravity CLI (agy)")
-        result = subprocess.run(
+        result = _run(
             [sys.executable, str(SCRIPT_DIR / "install_antigravity.py")],
             timeout=900,
         )
@@ -141,7 +147,7 @@ def main() -> None:
     if obsidian_script.exists():
         print("[자동 설치] Obsidian (지식 창고 뷰어)")
         try:
-            result = subprocess.run(
+            result = _run(
                 [sys.executable, str(obsidian_script), "--tool", "obsidian"], timeout=900,
             )
             if result.returncode != 0:

@@ -19,10 +19,17 @@ import shutil
 import subprocess
 import sys
 
+# [🔴 규칙 10 — 창 없이 부른다] 맨손 subprocess 로 npm 을 부르면 그 손자 node.exe 가
+#   새 콘솔을 받는다(CREATE_NO_WINDOW 는 상속되지 않는다). 실행기는 한 곳뿐이다.
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _install_common import run as _run  # noqa: E402
+
+
 
 def _run(cmd: list[str]) -> tuple[int, str, str]:
     """명령을 실행하고 (returncode, stdout, stderr) 반환."""
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = _run(cmd, capture_output=True, text=True, timeout=300)
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
