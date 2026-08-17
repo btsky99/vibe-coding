@@ -517,6 +517,15 @@ def check_and_update(data_dir):
             pass
         return
 
+    # [🔴 덮어쓰기 전에 읽어 둔다] 바로 아래에서 이 파일을 "checking" 으로 덮으므로,
+    #   여기서 미리 안 읽으면 '이미 받아 뒀는가'를 영영 알 수 없다(자기가 지운 것을 찾게 된다).
+    cached_ready: dict = {}
+    try:
+        if ready_file.exists():
+            cached_ready = json.loads(ready_file.read_text(encoding="utf-8"))
+    except Exception:                                        # noqa: BLE001
+        cached_ready = {}
+
     with open(ready_file, "w", encoding="utf-8") as f:
         json.dump({"ready": False, "downloading": False, "checking": True}, f)
 
@@ -542,6 +551,26 @@ def check_and_update(data_dir):
 
     logger.info("New version available: %s (bundle: %s, module: %s)",
                 latest_tag, cur_ver, APP_VERSION)
+
+    # [🔴 이미 받아 둔 것이 **바로 그 판**이면 다시 받지 않는다 — 2026-08-17]
+    #   여기서 무조건 다시 받으면 10분 주기마다 434MB 를 되받는다. 그래서 예전에는
+    #   호출부(server.py _update_loop)가 'ready 면 아예 확인도 안 한다'로 막고 있었는데,
+    #   그 방식은 **판이 연달아 나올 때 눈이 먼다**: v3.7.342 를 받아 둔 앱은 그 뒤에 나온
+    #   343·344 를 영영 모른다(실측 2026-08-17 새벽에 세 판이 한 시간 안에 나왔다).
+    #   판단은 여기서 하고, 호출부는 매번 부르게 바꾼다 — '무엇이 최신인가'는 물어봐야 안다.
+    try:
+        same_ver = str(cached_ready.get("version", "")).lstrip("v") == latest_tag.lstrip("v")
+        done = bool(cached_ready.get("ready"))
+        path_ok = bool(cached_ready.get("exe_path")) and Path(cached_ready["exe_path"]).exists()
+        if same_ver and done and path_ok:
+            logger.info("이미 %s 를 받아 뒀다 — 다시 받지 않는다.", latest_tag)
+            # [🔴 기록을 되돌려 놓는다] 위에서 "checking" 으로 덮어 놨다. 그대로 나가면
+            #   화면이 'ready 아님'으로 읽어 **받아 둔 판이 사라진 것처럼** 보인다.
+            with open(ready_file, "w", encoding="utf-8") as f:
+                json.dump(cached_ready, f)
+            return
+    except Exception:                                        # noqa: BLE001
+        pass                                                 # 캐시가 깨졌으면 그냥 새로 받는다
 
     asset = _find_asset(release)
     if not asset:
@@ -600,7 +629,10 @@ def check_and_update(data_dir):
         return
 
     logger.info("Download complete. Waiting for user to apply update...")
-    print(f"[*] 새 버전 v{latest_tag} 다운로드 완료. 업데이트 버튼을 눌러주세요.")
+    # [🔴 v 를 덧붙이지 않는다 — 2026-08-17] latest_tag 는 이미 "v3.7.344" 형식이라
+    #   앞에 v 를 또 찍으면 로그에 "vv3.7.344" 로 남는다. 사람이 판 번호를 대조할 때
+    #   화면 글자가 실제와 다르면 그 자체가 오진의 씨앗이 된다(러너에서 겪은 부류).
+    print(f"[*] 새 버전 {latest_tag} 다운로드 완료. 업데이트 버튼을 눌러주세요.")
     with open(ready_file, "w", encoding="utf-8") as f:
         json.dump({
             "version": latest_tag, "ready": True, "downloading": False,

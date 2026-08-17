@@ -2022,16 +2022,14 @@ def main():
         def _update_loop():
             while True:
                 try:
-                    ready_file = DATA_DIR / "update_ready.json"
-                    already_ready = False
-                    if ready_file.exists():
-                        try:
-                            info = json.loads(ready_file.read_text(encoding="utf-8"))
-                            already_ready = info.get("ready", False)
-                        except Exception:
-                            pass
-                    if not already_ready:
-                        check_and_update(DATA_DIR)
+                    # [🔴 'ready 면 확인도 안 한다'를 걷어냈다 — 2026-08-17]
+                    #   예전에는 update_ready.json 에 ready=true 가 있으면 check_and_update 를
+                    #   **아예 안 불렀다.** 되받기(434MB)를 막으려던 것인데, 판이 연달아 나오면
+                    #   앱이 눈이 먼다: 342 를 받아 둔 채로 343·344 가 나와도 영영 모른다
+                    #   (실측 2026-08-17 새벽 세 판이 한 시간 안에 발행됐다).
+                    #   되받기 방지는 이제 check_and_update 안에서 **최신 태그와 대조해** 한다 —
+                    #   무엇이 최신인지는 물어봐야 알 수 있고, 그 물음이 여기서 막혀 있었다.
+                    check_and_update(DATA_DIR)
                 except Exception as e:
                     print(f"[!] Update check error: {e}")
                 time.sleep(600)
