@@ -193,11 +193,11 @@ Name: "{userstartup}\{#MyAppDisplayName}";       Filename: "{app}\{#MyAppExeName
 ; 추출된 python311.dll을 격리하는 사고 다발. 설치 폴더와 추출 디렉토리(%APPDATA%
 ; \VibeCoding\runtime)를 사전 예외 등록하여 자동 업데이트 시점에도 격리 방지.
 ; 비관리자/Defender 미사용 환경에서도 SilentlyContinue로 무해하게 패스.
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try {{ Add-MpPreference -ExclusionPath ('{app}') -ErrorAction SilentlyContinue }} catch {{}}; try {{ Add-MpPreference -ExclusionPath ($env:APPDATA + '\VibeCoding') -ErrorAction SilentlyContinue }} catch {{}}"""; Flags: runhidden; StatusMsg: "Windows Defender 예외 등록 중..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""try {{ Add-MpPreference -ExclusionPath ('{app}') -ErrorAction SilentlyContinue } catch {{}; try {{ Add-MpPreference -ExclusionPath ($env:APPDATA + '\VibeCoding') -ErrorAction SilentlyContinue } catch {{}"""; Flags: runhidden; StatusMsg: "Windows Defender 예외 등록 중..."
 
 ; Claude Code settings.json에 statusLine 자동 설정
 ; — .claude 폴더 생성 + settings.json 읽어서 statusLine 키 추가/갱신 후 저장
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }}; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json }} else {{ [PSCustomObject]@{{}} }}; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }}; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p = Join-Path $env:USERPROFILE '.claude'; if (-not (Test-Path $p)) {{ New-Item -ItemType Directory -Path $p | Out-Null }; $f = Join-Path $p 'settings.json'; $d = if (Test-Path $f) {{ Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json } else {{ [PSCustomObject]@{{} }; $sl = [PSCustomObject]@{{ type = 'command'; command = 'python ' + (Join-Path $env:USERPROFILE '.claude\statusline.py') }; $d | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $sl -Force; $d | ConvertTo-Json -Depth 10 | Set-Content $f -Encoding UTF8"""; Flags: runhidden; Description: "Claude Code 상태줄 설정 적용"
 ; ── 구 설치 바로가기 경로 복구 ──────────────────────────────────────────
 ; [과거사고 2026-07-10] onefile(admin, %LOCALAPPDATA%\VibeCoding\app) → onedir(per-user,
 ;   %LOCALAPPDATA%\Programs\VibeCoding) 전환 시 exe 경로가 이사. 구 설치의 바탕화면/시작메뉴
@@ -206,7 +206,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Com
 ;   → Desktop/StartMenu(사용자+공용)에서 VibeCoding을 가리키지만 타깃이 사라진 .lnk를 찾아
 ;     새 {app}\exe로 repoint. 정상 타깃(Test-Path True)은 건드리지 않음(멱등).
 ;   [불변식] skipifsilent 금지 — 이 복구는 무음 업데이트에서 반드시 실행돼야 함(그게 주 사고 경로).
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$new='{app}\{#MyAppExeName}'; $ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if(($sc.TargetPath -like '*VibeCoding*vibe-coding.exe') -and -not (Test-Path $sc.TargetPath)){{ $sc.TargetPath=$new; $sc.WorkingDirectory=Split-Path $new; if(Test-Path ('{app}\vibe_final.ico')){{ $sc.IconLocation='{app}\vibe_final.ico' }}; $sc.Save() }} }} catch {{}} }}"""; Flags: runhidden; StatusMsg: "구 바로가기 경로 복구 중..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$new='{app}\{#MyAppExeName}'; $ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if(($sc.TargetPath -like '*VibeCoding*vibe-coding.exe') -and -not (Test-Path $sc.TargetPath)){{ $sc.TargetPath=$new; $sc.WorkingDirectory=Split-Path $new; if(Test-Path ('{app}\vibe_final.ico')){{ $sc.IconLocation='{app}\vibe_final.ico' }; $sc.Save() } } catch {{} }"""; Flags: runhidden; StatusMsg: "구 바로가기 경로 복구 중..."
 ; ── 바로가기에 '관리자 권한으로 실행' 자동 체크 ──────────────────────────
 ; [WHY] LAN 브리지가 기동 때 netsh로 방화벽 인바운드 규칙(9020/9021)을 등록한다.
 ;   비관리자면 netsh가 실패하는데 크래시는 안 나므로(firewall_ok=False) 사용자에겐
@@ -220,14 +220,14 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Com
 ; [주의] Desktop/Programs만 대상. 시작프로그램(Startup)에는 걸지 않는다 —
 ;   Startup의 관리자 바로가기는 로그온 때 UAC에 막혀 그냥 안 뜬다(자동 실행 파괴).
 ; [불변식] skipifsilent 금지 — 무음 업데이트에서도 플래그가 유지돼야 한다.
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if($sc.TargetPath -like '*VibeCoding*vibe-coding.exe'){{ $b=[IO.File]::ReadAllBytes($_.FullName); if($b.Length -gt 21 -and -not ($b[21] -band 0x20)){{ $b[21]=$b[21] -bor 0x20; [IO.File]::WriteAllBytes($_.FullName,$b) }} }} }} catch {{}} }}"""; Flags: runhidden; StatusMsg: "바로가기 관리자 권한 설정 중..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$ws=New-Object -ComObject WScript.Shell; $dirs=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('CommonPrograms')); Get-ChildItem $dirs -Filter *.lnk -Recurse -EA SilentlyContinue | ForEach-Object {{ try {{ $sc=$ws.CreateShortcut($_.FullName); if($sc.TargetPath -like '*VibeCoding*vibe-coding.exe'){{ $b=[IO.File]::ReadAllBytes($_.FullName); if($b.Length -gt 21 -and -not ($b[21] -band 0x20)){{ $b[21]=$b[21] -bor 0x20; [IO.File]::WriteAllBytes($_.FullName,$b) } } } catch {{} }"""; Flags: runhidden; StatusMsg: "바로가기 관리자 권한 설정 중..."
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppDisplayName} 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 제거 전 실행 중인 프로세스 종료 — 앱 + 자식 postgres.exe/node.exe(pgsql DLL 잠금 방지).
 ; [과거사고 2026-07-10] vibe-coding.exe만 죽이면 자식 postgres가 살아남아 pgsql\bin\*.dll 잠금 →
 ;   제거 시 파일 삭제 실패(코드 5). 경로가 VibeCoding 설치폴더 밑인 프로세스만 스코프 종료(개발/타 PG 무관).
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -like '*VibeCoding*' }} | ForEach-Object {{ try {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }} catch {{}} }}"""; Flags: runhidden; RunOnceId: "KillVibeChildren"
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -like '*VibeCoding*' } | ForEach-Object {{ try {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {{} }"""; Flags: runhidden; RunOnceId: "KillVibeChildren"
 Filename: "taskkill.exe"; Parameters: "/F /IM vibe-coding.exe"; Flags: runhidden; RunOnceId: "KillVibeCoding"
 
 [Code]
