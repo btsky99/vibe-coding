@@ -59,7 +59,7 @@
 #define MyAppDisplayName "바이브코딩"
 ; CI에서 /DMyAppVersion=X.Y.Z 로 오버라이드 가능
 #ifndef MyAppVersion
-  #define MyAppVersion   "3.7.345"
+  #define MyAppVersion   "3.7.346"
 #endif
 #define MyAppPublisher "Vibe Coding Team"
 #define MyAppURL       "https://github.com/btsky99/vibe-coding"

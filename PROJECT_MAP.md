@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 09:10
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 09:32
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,13 +8,13 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 65개 · 미푸시 3커밋
+- **브랜치**: `main` · 미커밋 62개 · 미푸시 2커밋
 - **최근 커밋**
+  - `9f1e759` 2026-08-17 — fix(voice): 모델 받을 자리를 먼저 재고, 자리 있는 드라이브를 고른다
+  - `8ca88d3` 2026-08-17 — feat(voice): 고르는 칸에 MOSS-TTS-Nano 를 하나 더한다 — Qwen 은 그대로
+  - `bd058b2` 2026-08-17 — release: v3.7.345 — 갱신 재확인 수정 + 음성 표시 반영
   - `101e4b9` 2026-08-17 — fix(update): 판이 연달아 나오면 갱신을 못 보던 눈먼 자리 — 매번 확인하고 같은 판만 안 받는다
   - `2a9a13a` 2026-08-17 — feat(voice): 말한 내용을 화면에 보이게 — 입력칸에 두고 멈춘다(바로 보내지 않는다)
-  - `caeb572` 2026-08-17 — fix(voice): 마이크로 말해도 입력이 안 뜨던 것 — 버리는 자리가 전부 조용했다
-  - `1c68721` 2026-08-17 — fix(voice): 깐 실물을 뜯어 보니 설치 절차를 못 찾는 배치가 있었다 — v3.7.344
-  - `8a425d8` 2026-08-17 — release(voice): v3.7.343 — 깐 직후 사장님 목소리가 나는 판
 
 ### 📍 최근 체크포인트 (중단 지점)
 - **08-17 01:08** 의도: Qwen 모델 배포 — 동봉 불가라 첫 실행 다운로드로
@@ -204,7 +204,7 @@
 | `engines/tts_cache.py` | 156 | 합성 결과 디스크 캐시 — 같은 문장을 두 번 만들지 않는다. |
 | `engines/tts_edge.py` | 158 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
 | `engines/tts_moss.py` | 277 | 두 번째 복제 엔진 — MOSS-TTS-Nano(0.1B, ONNX) 어댑터. |
-| `engines/tts_qwen.py` | 724 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
+| `engines/tts_qwen.py` | 756 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
 | `engines/tts_split.py` | 192 | 긴 글을 낭독 단위로 자른다 — 이어 굽기(첫 문장부터 틀고 뒤를 잇는 것)의 재료. |
 | `qwen/qgraph.py` | 464 |  |
 | `qwen/worker.py` | 333 |  |
@@ -335,7 +335,7 @@
 | `reembed_all.py` 🔨 | 202 | 회상 v2의 전체 임베딩을 현재 모델/라이브러리 기준으로 다시 생성한다. |
 | `run_antigravity_clean.py` | 130 | Antigravity CLI 직접 실행 래퍼. |
 | `session_init.py` | 246 | 모든 에이전트(Claude, Antigravity, Codex)의 세션 시작 프로토콜 실행 스크립트. |
-| `setup_qwen.py` 🔨 | 229 | 사장님 목소리(Qwen3-TTS) 굽기 환경 설치 — 전용 venv + CUDA 토치 + 모델 내려받기. |
+| `setup_qwen.py` 🔨 | 258 | 사장님 목소리(Qwen3-TTS) 굽기 환경 설치 — 전용 venv + CUDA 토치 + 모델 내려받기. |
 | `setup_voice.py` 🔨 | 148 | 음성 사이드카 환경 설치 — 별도 venv 를 만들고 requirements.txt 를 깐다. |
 | `smoke_test.py` 🔨 | 313 | 로컬 EXE 빌드 후 smoke test 자동 실행. |
 | `statusline.py` | 189 | Claude Code 커스텀 상태줄 — 컨텍스트 그리드+모델+토큰(라인1), 세션 I/O(라인2). |
@@ -516,4 +516,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-17 09:10
+> 자동 생성 완료: 2026-08-17 09:32
