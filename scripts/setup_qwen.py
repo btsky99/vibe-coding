@@ -44,6 +44,12 @@ ROOT = Path(__file__).resolve().parent.parent
 PY_VERSION = '3.12'
 
 MODEL_ID = 'Qwen/Qwen3-TTS-12Hz-0.6B-Base'
+# 받는 데 필요한 자리. [근거 — 2026-08-17 실측] CUDA 토치+패키지가 4.76GB, 모델이 2.4GB.
+# 받는 도중 임시 파일이 겹치므로 여유를 얹어 8GB 를 본다.
+# [🔴 왜 미리 재나] 실제로 이 자리에서 터졌다: D: 여유가 4.8GB 뿐이라 토치를 다 받은 뒤
+#   모델 단계에서 `OSError: [Errno 28] No space left on device` — **4.76GB 를 받고 나서**
+#   실패했다. 미리 재면 1초 만에 알려 줄 수 있는 것을 3분 받고 알려 준 셈이다.
+NEED_BYTES = 8 * (1 << 30)
 TORCH_INDEX = 'https://download.pytorch.org/whl/cu130'
 TORCH_PINS = ['torch==2.13.0', 'torchaudio==2.11.0']
 PKG_PINS = ['qwen-tts==0.1.1', 'soundfile', 'huggingface_hub']
@@ -72,6 +78,18 @@ def model_home(home: Path) -> Path:
     """worker.py 의 HF_HOME 기본값과 **반드시 같아야 한다**(worker.py:HERE_DIR/models/hf).
     어긋나면 다 받아 놓고도 일꾼이 다시 받는다."""
     return Path(home) / 'models' / 'hf'
+
+
+def free_bytes(path: Path) -> int:
+    """이 자리가 놓인 드라이브의 남은 바이트. 못 재면 -1(그때는 막지 않는다 —
+    잴 수 없다는 이유로 설치를 거부하면 멀쩡한 PC 에서 목소리가 죽는다)."""
+    p = Path(path)
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        return shutil.disk_usage(str(p)).free
+    except OSError:
+        return -1
 
 
 def has_nvidia() -> bool:
@@ -153,6 +171,17 @@ def ensure_qwen(home: Path, run, note=None) -> tuple[bool, str]:
     if not has_nvidia():
         return False, ('이 PC 에는 NVIDIA 그래픽카드가 없어 사장님 목소리는 쓸 수 없습니다. '
                        '다른 목소리로는 그대로 읽습니다')
+
+    # [🔴 받기 전에 자리를 잰다] 위 NEED_BYTES 주석 — 실제로 4.76GB 를 받고 나서 터졌다.
+    #   실패 문구에 **어느 드라이브에 얼마가 필요한지**를 적는다. "설치 실패" 만 남으면
+    #   사용자는 무엇을 해야 할지 모른 채 목소리만 안 나는 상태로 남는다.
+    free = free_bytes(qd)
+    if 0 <= free < NEED_BYTES:
+        drive = str(qd.resolve())[:2]
+        return False, (f'{drive} 여유 공간이 부족합니다 — '
+                       f'{NEED_BYTES // (1 << 30)}GB 가 필요한데 '
+                       f'{free / (1 << 30):.1f}GB 뿐입니다. '
+                       f'자리를 비우거나 VOICE_QWEN_HOME 으로 다른 드라이브를 지정하세요')
 
     venv = qd / '.venv'
     py = venv_python(qd)

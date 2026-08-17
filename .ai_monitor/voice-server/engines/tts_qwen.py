@@ -88,17 +88,49 @@ _HERE = os.path.dirname(os.path.abspath(__file__))          # .../voice-server/e
 _VOICE_DIR = os.path.dirname(_HERE)                          # .../voice-server
 
 
+def _user_home() -> str:
+    base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+    return os.path.join(base, 'VibeCoding', 'qwen')
+
+
+def _free_gb(path: str) -> float:
+    """이 자리가 놓인 드라이브의 남은 GB. 못 재면 -1."""
+    p = path
+    while p and not os.path.exists(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    try:
+        return shutil.disk_usage(p).free / (1 << 30)
+    except OSError:
+        return -1.0
+
+
 def _qwen_home() -> str:
     """굽는 살림이 놓일 자리.
 
     [🔴 번들 안(_MEIPASS)에는 깔면 안 된다] onefile 이 푸는 임시 폴더라 앱이 꺼지면
-      지워진다. 거기에 5GB 를 받으면 켤 때마다 다시 받는다. 그 경우만 사용자 폴더로 뺀다.
+      지워진다. 거기에 5GB 를 받으면 켤 때마다 다시 받는다.
+    [🔴 자리가 없는 드라이브도 피한다 — 2026-08-17 실측] 앱이 D: 에 있는데 D: 여유가
+      4.8GB 뿐이라, 토치 4.76GB 를 다 받고 나서 모델 단계에서 터졌다
+      (`No space left on device`). C: 는 395GB 가 비어 있었다. 앱이 놓인 드라이브가
+      곧 여유 있는 드라이브는 아니다 — **받을 곳은 자리를 보고 고른다.**
+    [🔴 이미 깔린 자리는 옮기지 않는다] 자리를 옮기면 이미 받아 둔 5GB 가 미아가 되고
+      사용자는 이유도 모른 채 다시 받는다. 설치 흔적(.venv)이 있으면 그대로 쓴다.
     """
     cand = os.path.join(_VOICE_DIR, 'qwen')
     mei = getattr(sys, '_MEIPASS', '')
     if mei and os.path.abspath(cand).startswith(os.path.abspath(mei)):
-        base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
-        return os.path.join(base, 'VibeCoding', 'qwen')
+        return _user_home()
+    # 이미 그 자리에 깔려 있으면 여유와 무관하게 그대로 쓴다.
+    if os.path.exists(os.path.join(cand, '.venv')):
+        return cand
+    free = _free_gb(cand)
+    if 0 <= free < 8.0:
+        user = _user_home()
+        if _free_gb(user) >= 8.0:
+            return user
     return cand
 
 
