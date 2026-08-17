@@ -178,12 +178,19 @@ def _new_engine(voice_id: str):
       두 번째 엔진으로 들어왔다. 'qwen:' 으로 시작하는 id 만 그쪽으로 보내고 나머지는
       전부 edge 다. 이 한 줄이 '엔진 교체가 load_tts 의 한 줄'이라는 engines/__init__ 의
       불변식이 실제로 지켜지는 자리다.
+
+    [🔴 moss 를 한 칸 더했다 — 2026-08-17 사장 지시] "MOSS-TTS-Nano 이것도 가능하게,
+      Qwen 과 골라 쓰게." **갈아타는 것이 아니라 얹는 것이라** qwen 줄은 그대로 두고
+      한 줄만 더한다 — 이 함수가 그 불변식의 자리라는 것이 여기서 한 번 더 확인된다.
     """
     _engines_dir_on_path()
     kind = voice_id.split(':', 1)[0].lower()
     if kind == 'qwen':
         from engines.tts_qwen import QwenEngine
         return QwenEngine(voice_id)
+    if kind == 'moss':
+        from engines.tts_moss import MossEngine
+        return MossEngine(voice_id)
     from engines.tts_edge import EdgeEngine
     return EdgeEngine(voice_id if kind == 'edge' else '')
 
@@ -259,6 +266,14 @@ def list_voices() -> list:
         out += _qwen()
     except Exception as e:                                 # noqa: BLE001
         _log(f'qwen 목록 실패(무시): {e}')
+    # [🔴 세 번째 칸 — MOSS-TTS-Nano] qwen 과 같은 이유로 맨 뒤다(기본이 되면 음성을
+    #   켠 모든 사람이 GPU 를 문다). 살림이 없는 PC 에서는 빈 목록이 와서 칸이 안 뜬다 —
+    #   그것이 정상이다(tts_moss.available 주석).
+    try:
+        from engines.tts_moss import list_voices as _moss
+        out += _moss()
+    except Exception as e:                                 # noqa: BLE001
+        _log(f'moss 목록 실패(무시): {e}')
     _voices_cache = out
     return out
 
