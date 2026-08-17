@@ -1,6 +1,6 @@
 # 🗺️ vibe-coding 프로젝트 맵 (PROJECT_MAP.md)
 
-> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 01:03
+> 자동 생성: `python scripts/generate_project_map.py` | 2026-08-17 09:10
 > 문서 드리프트 방지를 위해 파일 시스템을 스캔하여 자동 갱신합니다.
 > 설명은 각 파일의 표준 헤더(`DESCRIPTION:` / `📝`)에서 자동 수집합니다 — 여기 손으로 적지 말고 **파일 헤더를 고치세요**.
 
@@ -8,24 +8,24 @@
 
 > 이 블록은 자동 생성된다. 파일 구조는 아래 지도, **작업 맥락은 여기**를 먼저 읽을 것.
 
-- **브랜치**: `main` · 미커밋 48개 · 미푸시 3커밋
+- **브랜치**: `main` · 미커밋 65개 · 미푸시 3커밋
 - **최근 커밋**
-  - `2c8fdb8` 2026-08-17 — Merge remote-tracking branch 'origin/main'
-  - `1d4d026` 2026-08-17 — fix(voice): 설치본에서 설치 절차를 못 찾던 경로 + 빌드는 지켜보지 말고 통보받는다
-  - `4a72c5a` 2026-08-17 — feat(voice): 깐 직후 사장님 목소리가 나게 — 살림은 동봉, 모델은 첫 실행 때 받는다
-  - `3b14039` 2026-08-16 — chore(release): auto-bump version to v3.7.342 [skip ci]
-  - `747ea9f` 2026-08-17 — perf(voice): 보드에서 완성한 Qwen 굽기를 바이브 코딩에 이식 — 첫 소리 7.18초 → 3.2초
+  - `101e4b9` 2026-08-17 — fix(update): 판이 연달아 나오면 갱신을 못 보던 눈먼 자리 — 매번 확인하고 같은 판만 안 받는다
+  - `2a9a13a` 2026-08-17 — feat(voice): 말한 내용을 화면에 보이게 — 입력칸에 두고 멈춘다(바로 보내지 않는다)
+  - `caeb572` 2026-08-17 — fix(voice): 마이크로 말해도 입력이 안 뜨던 것 — 버리는 자리가 전부 조용했다
+  - `1c68721` 2026-08-17 — fix(voice): 깐 실물을 뜯어 보니 설치 절차를 못 찾는 배치가 있었다 — v3.7.344
+  - `8a425d8` 2026-08-17 — release(voice): v3.7.343 — 깐 직후 사장님 목소리가 나는 판
 
 ### 📍 최근 체크포인트 (중단 지점)
+- **08-17 01:08** 의도: Qwen 모델 배포 — 동봉 불가라 첫 실행 다운로드로
+  - 결정: 모델2.4G+토치3G > 릴리즈 2G 한도 → 씨앗4개만 동봉(620KB), 나머지는 setup_qwen이 받는다
+  - 다음: v3.7.343 CI 결과 확인. 깨끗한 GPU PC에서 실제 5GB 받기 검증은 미완(이 PC는 G: 폴백이라 그 길을 못 밟음)
 - **08-17 00:10** 의도: 보드 Qwen TTS 이식 — 조각내 굽기+참조 지문
   - 결정: CUDA그래프는 같은 일꾼 파일 공유로 이미 상속됨. 워커는 별도(파이프 소유 구조라 공유 불가) — 몫 0.35로 캡
   - 다음: apix1-5가 ag_bake_now cache_key 맞추면 미리굽기 복구. 푸시/배포는 사장 결재 후
 - **08-15 10:14** 의도: LLM 위키 전환 — 지식창고를 로그덤프에서 백과사전으로 재구축
   - 결정: wiki/를 git 추적 정본으로, 로컬만(GDrive 안씀), 전부삭제+원료전량 승인, 순서=회상버그수정→위키구축→인덱싱→lint→삭제
   - 다음: 블로커: vector_available()이 ALTER TABLE 실패시 조용히 False → 회상 전체 무력화. 이것부터 수정
-- **08-15 00:54** 의도: 아픽스 음성(STT+TTS) 기능을 vibe-coding 터미널 슬롯에 이식
-  - 결정: WebView2에서 SpeechRecognition 실동작 확인(onstart/onaudiostart, network에러 없음). 인식+낭독 전부, 터미널 슬롯 하단 입력창에 배선. 낭독 텍스트는 Stop훅 turn 채널 신설로 공급
-  - 다음: voice_turn_hook.py + voice_api.py + 마이크 권한(app_boot) + 프론트 speech/voiceBus/useVoice/VoiceBar
 
 ### ⚠️ 최근 사고 (같은 실수 반복 금지)
 - **바이브 코딩을 껐는데 약 30분마다 앱이 저절로 다시 뜬다**
@@ -78,7 +78,7 @@
 ### 서버 코어
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
-| `server.py` 🔨 | 2166 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
+| `server.py` 🔨 | 2164 | 하이브 마인드 중앙 통제 서버 — 에이전트 간 통신 중계, 상태 모니터링, 데이터 영속성 관리. |
 | `boot.py` 🔨 | 452 | 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스트랩. |
 | `soft_updater.py` | 549 | 경량 소스 업데이트 채널(A안)의 감지/적용 모듈. |
 | `_version.py` 🔨 | 1 | 앱 버전 단일 소스 (릴리즈 파이프라인이 자동 갱신 — 수동 편집 금지) |
@@ -126,7 +126,7 @@
 | `update_api.py` | 261 | 앱 업데이트 라우트 핸들러 모음 — EXE 풀빌드 채널(updater)과 경량 소스 채널(soft_updater) |
 | `vibe_api.py` | 295 | 설명: cmux 호환 vibe CLI REST API 핸들러. |
 | `vibe_skills_api.py` | 246 | Platform Phase 3 — .vibe/skills + .claude/skills 병합 스캐너. |
-| `voice_api.py` 🔨 | 329 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
+| `voice_api.py` 🔨 | 350 | 음성 API — 턴 채널 조회 + 음성 사이드카(STT/TTS) 프록시. |
 | `wiki_api.py` 🔨 | 166 | LLM 위키 상태 조회 + 초기화 API. |
 | `zettel_api.py` | 203 | Hive Zettelkasten REST API 핸들러. |
 
@@ -195,7 +195,7 @@
 | `tool_install.py` | 317 | CLI 도구(Antigravity/Claude Code/Codex) 설치 상태 + 백그라운드 npm |
 | `voice_turn.py` 🔨 | 113 | 음성 낭독용 '턴 채널' 저장소 — Stop 훅이 쓰고 /api/voice/turn 이 읽는다. |
 | `webview_health.py` 🔨 | 196 | WebView2 엔진이 창에 실제로 붙었는지 감시하고, 안 붙었으면 원인을 진단해 |
-| `webview_permissions.py` 🔨 | 178 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
+| `webview_permissions.py` 🔨 | 198 | WebView2(Windows)에서 마이크 권한 요청을 허용하는 배선. |
 | `win32_icon.py` | 49 | Windows 작업표시줄/타이틀바 아이콘 강제 설정. PyWebView가 생성한 창의 |
 
 ### 음성 사이드카 (.ai_monitor/voice-server/) — 별도 프로세스·별도 venv
@@ -203,11 +203,12 @@
 |------|------|------|
 | `engines/tts_cache.py` | 156 | 합성 결과 디스크 캐시 — 같은 문장을 두 번 만들지 않는다. |
 | `engines/tts_edge.py` | 158 | edge-tts 낭독 어댑터. 텍스트 → MP3 바이트. 이 앱의 기본 낭독 경로다. |
-| `engines/tts_qwen.py` | 710 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
+| `engines/tts_moss.py` | 277 | 두 번째 복제 엔진 — MOSS-TTS-Nano(0.1B, ONNX) 어댑터. |
+| `engines/tts_qwen.py` | 724 | 낭독 엔진 — Qwen3-TTS 로 사장님 목소리를 복제해 읽는다. |
 | `engines/tts_split.py` | 192 | 긴 글을 낭독 단위로 자른다 — 이어 굽기(첫 문장부터 틀고 뒤를 잇는 것)의 재료. |
 | `qwen/qgraph.py` | 464 |  |
 | `qwen/worker.py` | 333 |  |
-| `voice_server.py` | 520 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
+| `voice_server.py` | 535 | 음성 사이드카 — STT(faster-whisper) / TTS(edge-tts 단일) 서버. |
 
 ## ⚙️ 스크립트 (scripts/)
 ### 에이전트/터미널
@@ -396,27 +397,27 @@
 | `AgentSelectCards.tsx` 🔨 | 174 | 설명: 터미널 미실행 슬롯의 에이전트 선택 카드 3장(Claude/Antigravity/Codex) |
 | `AgentUsageBar.tsx` | 191 | 터미널 하단의 에이전트별 플랜·컨텍스트 사용량 바와 상세 팝업. |
 | `ClaudeContextBar.tsx` | 277 | 설명: Claude 컨텍스트 컬러 블록 바 + 클릭 상세 팝업(/context 스타일 블록 그리드, |
-| `MicPressButton.tsx` 🔨 | 81 | 설명: '누르고 말하기' 단추 하나. 누르는 동안만 듣고 손을 떼면 그대로 보낸다. |
+| `MicPressButton.tsx` 🔨 | 87 | 설명: '누르고 말하기' 단추 하나. 누르는 동안만 듣고 손을 떼면 그대로 보낸다. |
 | `MonitorView.tsx` | 169 | 설명: 자율 에이전트 모니터링 뷰 — 상태 뱃지, 오케스트레이터 스킬 체인 배지, |
 | `QuotaBadge.tsx` | 87 | 설명: 터미널 헤더 플랜 쿼터 배지 — Claude/Codex 5h 게이지+% · 7d %. |
 | `ShortcutEditModal.tsx` | 47 | 터미널 단축어(사용자 커스텀 명령) 편집 모달. |
 | `SlashCommandMenu.tsx` | 66 | 터미널 입력 영역의 슬래시 커맨드(`/`) 드롭다운 — 카테고리별 |
 | `TerminalSlotHeader.tsx` 🔨 | 257 | 설명: 터미널 슬롯 상단 바 — 이름·브랜치·락/작업/메시지 배지, 프로젝트 뱃지, 모델 배지. |
-| `VoiceBar.tsx` 🔨 | 275 | 설명: 전송창 바로 아래 한 줄짜리 음성 막대 — 답 소리 듣기, 호출어 부르기, |
-| `VoiceSettings.tsx` 🔨 | 170 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
+| `VoiceBar.tsx` 🔨 | 313 | 설명: 전송창 바로 아래 한 줄짜리 음성 막대 — 답 소리 듣기, 호출어 부르기, |
+| `VoiceSettings.tsx` 🔨 | 199 | 설명: 목소리 고르기 팝오버 — 어떤 음성으로 읽을지, 얼마나 빠르게 읽을지. |
 | `xtermSelection.ts` | 107 | 설명: 터미널 클립보드 복사 + xterm 선택(하이라이트) 유지 유틸. |
 
 ### 공용 로직 (lib/)
 | 파일 | 줄 수 | 설명 |
 |------|------|------|
 | `apiBase.ts` 🔨 | 22 | 설명: 서버 주소 한 줄. 지금 열려 있는 포트가 곧 그 인스턴스의 API 다. |
-| `audioCapture.ts` 🔨 | 295 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
+| `audioCapture.ts` 🔨 | 325 | 설명: 마이크 → 16kHz mono PCM → WAV. 말이 시작되고 끝나는 지점을 스스로 |
 | `browserVoice.ts` 🔨 | 173 | 설명: 브라우저(WebView2) 내장 합성기로 읽는 길. 서버 사이드카 없이 즉시 말한다. |
 | `clipboard.ts` | 63 | 설명: 클립보드 읽기/쓰기 공용 헬퍼 — pywebview 네이티브 브리지 우선, navigator.clipboard 폴백. |
 | `folderPicker.ts` | 35 | 시스템 폴더 선택 다이얼로그 공유 헬퍼 — pywebview 네이티브 → HTTP API 순 시도. |
 | `projectContext.ts` | 38 | 설명: 프론트엔드 프로젝트 컨텍스트 헬퍼 (Phase 2-5.2). |
 | `speech.ts` 🔨 | 283 | 설명: 음성 입출력의 순수 로직 — 마크다운→낭독문 변환, 문장 쪼개기, 톤 프리셋, |
-| `voiceBus.ts` 🔨 | 932 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
+| `voiceBus.ts` 🔨 | 1010 | 설명: 음성 입출력의 전역 단일 소유자. 마이크 한 개를 잡고, 인식된 말이 어느 |
 
 ### 훅 (hooks/)
 | 파일 | 줄 수 | 설명 |
@@ -466,6 +467,7 @@
 | `test_shutdown_marker.py` 🔨 | 122 | '사람이 껐다' 표식과 워치독의 복구 게이트 회귀 테스트. |
 | `test_smoke_isolation.py` | 77 | smoke_test의 데이터 디렉토리 격리 계약 검증 — 설치본 %APPDATA%\\VibeCoding 오염 방지. |
 | `test_updater_bundle_version.py` | 109 | updater.bundle_version() 회귀 테스트 — 풀빌드 업데이트 감지가 소스 버전에 |
+| `test_updater_recheck.py` 🔨 | 107 | 갱신 확인이 **연달아 나온 판을 놓치지 않는지** 고정한다. |
 | `test_updater_release_path.py` | 310 | 업데이트/패키징 경로 회귀 테스트 — 릴리즈 크리티컬 핫스팟 방어. |
 | `test_vault_auto_repair.py` | 89 | 부팅 시 볼트 자가 복구(auto_repair / fix_vault_files huge_only)의 회귀 테스트. |
 | `test_vibe_cli_codex.py` | 42 | Tests for Codex-specific vibe CLI helpers. |
@@ -514,4 +516,4 @@
 | `run_vibe.bat` | 하이브 서버 및 대시보드 실행 배치 파일 |
 
 ---
-> 자동 생성 완료: 2026-08-17 01:03
+> 자동 생성 완료: 2026-08-17 09:10
