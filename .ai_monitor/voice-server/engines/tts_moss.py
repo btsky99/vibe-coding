@@ -275,3 +275,72 @@ class MossEngine:
         data = _bake(text)
         tts_cache.put(key, data, self.ext)
         return data
+
+    def synth_parts(self, text: str, speed: float = 1.0):
+        """소리가 **나는 대로** 조각을 내놓는다(voice_server._tts_seq 가 이걸 쓴다).
+
+        [🔴 왜 따로 두나 — 이 엔진을 붙인 값어치의 전부가 여기 있다] `synth()` 는 계약대로
+          다 구운 한 덩어리를 준다. 그런데 이 모델은 소리를 **0.2초에 이미 만든다**
+          (rtf1/moss_ttfa.json). 한 덩어리로 주면 그 0.2초가 사장 귀까지 못 온다.
+          그래서 `synth()` 의 계약은 건드리지 않고 **조각을 흘려보내는 길을 따로** 뒀다.
+
+        [🔴 Qwen 의 synth_parts 와 무엇이 다른가] 저쪽은 **문장을 잘라** 조각마다 굽는다
+          (조각 하나 = 문장 한 도막, 그래서 첫 소리 = 첫 도막을 다 굽는 시간).
+          이쪽은 **한 문장을 굽는 도중에** 만들어지는 소리를 그대로 흘려보낸다 —
+          자르지 않으므로 이어 붙이는 자리가 없고, 첫 소리는 굽기가 끝나기 훨씬 전이다.
+
+        [🔴 첫 조각에도 바닥이 있다] 런타임이 맨 처음 내놓는 것은 0.08초짜리 부스러기라,
+          그대로 내보내면 시작하자마자 딸꾹질한다. 일꾼이 0.4초는 모아서 낸다
+          (VOICE_MOSS_SEG_FIRST). 실측 첫 소리 0.49~0.56초.
+
+        [🔴 캐시는 통짜로만] 조각에는 제 글이 없다(문장을 안 자르므로). 조각을 열쇠로
+          담을 수 없으니 **다 끝난 뒤 원문 열쇠로 한 번** 담는다 — 같은 문장이 다시 오면
+          위 synth() 가 즉시 돌려준다(실측 0.01초).
+        """
+        key = self._key(text)
+        hit = tts_cache.get(key, self.ext)
+        if hit is not None:
+            yield text, hit                   # 이미 구운 문장 — 흘려보낼 것이 없다
+            return
+
+        fd, dst = tempfile.mkstemp(suffix='.wav', prefix='moss_seq_')
+        os.close(fd)
+        segs: list[str] = []
+        try:
+            with _lock:                       # 일꾼은 하나다 — 한 요청씩 줄 세운다
+                p = _ensure_worker()
+                p.stdin.write(json.dumps({'cmd': 'say_stream', 'text': text, 'out': dst},
+                                         ensure_ascii=False) + '\n')
+                p.stdin.flush()
+                first = True
+                while True:
+                    res = _read_line(p, SAY_S)
+                    if not res.get('ok'):
+                        raise RuntimeError(f"MOSS 흘려보내기 실패: {res.get('error')}")
+                    if res.get('done'):
+                        break
+                    path = res.get('path') or ''
+                    segs.append(path)
+                    try:
+                        with open(path, 'rb') as fp:
+                            data = fp.read()
+                    except OSError:
+                        continue
+                    if data:
+                        # 글은 첫 조각에만 싣는다 — 뒤 조각은 같은 문장의 이어지는 소리다.
+                        yield (text if first else ''), data
+                        first = False
+            globals()['_last_used'] = time.time()
+            try:                              # 통짜를 캐시에 담아 다음번을 즉시로
+                with open(dst, 'rb') as fp:
+                    whole = fp.read()
+                if whole:
+                    tts_cache.put(key, whole, self.ext)
+            except OSError:
+                pass
+        finally:
+            for p2 in segs + [dst]:
+                try:
+                    os.unlink(p2)
+                except OSError:
+                    pass

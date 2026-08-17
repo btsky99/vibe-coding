@@ -410,8 +410,11 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             self._json({'error': 'no text'}, 400)
             return
-        if not voice.lower().startswith('qwen'):
-            self._json({'error': 'qwen 목소리에서만 씁니다'}, 400)
+        # [🔴 moss 도 받는다 — 2026-08-17] 이 문이 있는 이유가 '첫 소리를 빨리'인데,
+        #   MOSS 는 굽는 **도중에** 소리를 내놓아 첫 조각이 0.5초에 나간다(qwen 은 첫
+        #   도막을 다 구운 뒤라 몇 초다). edge 는 이미 0.5초라 여전히 쪼갤 이유가 없다.
+        if not voice.lower().startswith(('qwen', 'moss')):
+            self._json({'error': 'qwen·moss 목소리에서만 씁니다'}, 400)
             return
 
         try:
