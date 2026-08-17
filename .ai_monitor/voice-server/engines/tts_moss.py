@@ -62,7 +62,12 @@ BOOT_S = int(os.environ.get('VOICE_MOSS_BOOT', '120'))
 # 한 문장 굽기 상한. 실측 64자 15.7초. 그 네 배.
 SAY_S = int(os.environ.get('VOICE_MOSS_TIMEOUT', '60'))
 # 이만큼 아무도 안 부르면 내린다 — 같은 카드를 Qwen 낭독이 쓴다.
-IDLE_S = int(os.environ.get('VOICE_MOSS_IDLE', '600'))
+# [🔴 Qwen(600초)보다 짧게 둔다 — 2026-08-17 실측] 0.1B 짜리인데도 떠 있는 동안
+#   **4.6GB 를 쥔다**(onnxruntime 의 CUDA 문맥·cuDNN 작업공간이 아레나 천장 밖이라
+#   VOICE_MOSS_GPU_MB 로도 다 못 막는다. 실측: 띄우기 전 6.3GB → 굽고 난 뒤 1.7GB).
+#   같은 카드에서 사장 낭독을 굽는 Qwen 일꾼이 그만큼 굶으므로 **빨리 비켜 준다.**
+#   GPU 를 아예 안 쓰려면 VOICE_MOSS_EP=cpu — 이 모델은 원래 CPU 로도 도는 크기다.
+IDLE_S = int(os.environ.get('VOICE_MOSS_IDLE', '120'))
 
 # 일꾼이 제 답에 붙이는 표식(work/z_moss_worker.py 의 MARK 와 반드시 같아야 한다).
 MARK = '@@M@@'
