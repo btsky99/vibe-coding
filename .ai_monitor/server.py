@@ -1204,7 +1204,10 @@ def _g_voice_turn(h, pp):
 
 def _g_voice_status(h, pp):
     from api import voice_api
-    voice_api.handle_status(h, PROJECT_ROOT)
+    # [🔴 PROJECT_ROOT 를 넘기지 않는다 — 2026-08-18 설치본 실측] 예전엔 이 값을 사이드카
+    #   경로의 뿌리로 썼는데, 이건 '사용자가 연 프로젝트' 라 설치본에서는 남의 폴더였다.
+    #   음성은 앱 자신의 소스에서 돈다 — voice_api._app_src_root() 가 스스로 구한다.
+    voice_api.handle_status(h)
 
 def _p_voice_stt(h, pp):
     from api import voice_api

@@ -25,6 +25,9 @@ REVISION HISTORY:
 - 2026-08-15 Claude: 최초 작성 — 턴 채널 + 로컬 음성 사이드카 프록시
 - 2026-08-15 Claude: '음성 엔진 준비 중'에서 안 넘어가던 사고 — stdout=PIPE 를 아무도
   읽지 않아 자식이 멈췄다. 로그 파일로 돌리고, 죽은 자식을 다시 띄우게 판정을 실물화
+- 2026-08-18 Claude: 설치본에서 낡은 목소리가 나던 사고 — 사이드카 경로의 뿌리가
+  PROJECT_ROOT(사용자가 연 프로젝트)였다. 앱 자신의 소스(_app_src_root)로 바꾸고,
+  로그의 DEVNULL 폴백을 없애 실패가 반드시 파일에 남게 함
 """
 
 from __future__ import annotations
@@ -63,7 +66,28 @@ _proc = None                                                # subprocess.Popen |
 _log_fp = None                                              # 자식 수명 동안 열려 있어야 한다
 
 
-def _sidecar_log(project_root: Path):
+def _app_src_root() -> Path:
+    """음성 사이드카가 살고 있는 **앱 자신의** 소스 루트.
+
+    [🔴 왜 PROJECT_ROOT 를 쓰면 안 되나 — 2026-08-18 설치본 실측] 여기 넘어오던 값은
+      `server.PROJECT_ROOT`, 즉 **사용자가 대시보드에서 열어 둔 프로젝트 폴더**였다.
+      사장님 PC 는 `D:/c-t`(CipherTrader 설치 파일만 든 폴더)가 열려 있었고, 그래서
+      `D:/c-t/.ai_monitor/voice-server/voice_server.py` 를 찾다 실패해 조용히
+      `_MEIPASS` 동봉본으로 떨어졌다. 실측 증거 3가지 —
+        · 목소리 목록에 `moss:apix`(아픽스 나노) 가 없다 → 3.7.348 이 아니라 EXE 에
+          구워진 3.7.341 서버가 돌고 있었다는 뜻
+        · `moss:apix` 로 합성을 시키면 edge 와 **바이트까지 같은** mp3 가 온다(조용한 폴백)
+        · 캐시가 `…/Programs/VibeCoding/_internal/voice-server/cache` 에 쌓인다
+      즉 경량 업데이트로 받은 음성 수정이 설치본에는 **영원히 반영되지 않았다.**
+    [불변식] 이 파일은 항상 `<SRC>/.ai_monitor/api/voice_api.py` 에 있다. dev 는 리포
+      루트, 설치본은 boot.py 가 관리하는 `%LOCALAPPDATA%/VibeCoding/app` 이 나온다 —
+      둘 다 `.ai_monitor/voice-server/` 와 `scripts/setup_voice.py` 를 가진 트리다.
+      (server.py `_soft_src_dir()` 과 같은 뿌리를 다른 파일에서 구한 것뿐이다.)
+    """
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _sidecar_log(src_root: Path):
     """사이드카 stdout/stderr 를 받을 파일을 연다(매 기동 덮어쓰기).
 
     [🔴 과거사고 2026-08-15 — PIPE 로 받으면 자식이 죽는다] stdout=PIPE 로 띄우고 부모가
@@ -74,18 +98,34 @@ def _sidecar_log(project_root: Path):
     [WHY DEVNULL 이 아니라 파일인가] 콘솔 없이 도는 자식이라(규칙 10) 버리면 실패 원인을
       볼 방법이 아예 없다. 위 진단도 로그를 파일로 돌린 뒤에야 5분 만에 끝났다.
     [WHY 덮어쓰기인가] 기동은 드물다. append 면 아무도 안 지워 무한히 자란다.
+    [🔴 DEVNULL 폴백을 없앤 이유 — 2026-08-18 실측] 예전엔 이 경로를 못 열면 조용히
+      DEVNULL 로 버렸다. 설치본에서 그 자리가 **항상** 남의 프로젝트 폴더였기 때문에
+      (`_app_src_root` 주석 참조) 사이드카가 왜 안 뜨는지 남는 기록이 어디에도 없었다 —
+      실측 당시 세 후보 경로 전부 파일이 없었고, 화면은 '준비 중' 한 줄뿐이었다.
+      **에러가 안 뜨는 것이 안 되는 것보다 나쁘다.** 마지막 자리는 앱 데이터 폴더로
+      떨어뜨린다 — 거기는 설치본이 언제나 쓸 수 있다(config.json 이 사는 곳).
     """
     global _log_fp
-    path = project_root / '.ai_monitor' / 'voice-server' / 'voice-server.log'
-    try:
-        if _log_fp and not _log_fp.closed:
+    candidates = [src_root / '.ai_monitor' / 'voice-server' / 'voice-server.log']
+    if os.name == 'nt' and os.getenv('APPDATA'):
+        candidates.append(Path(os.environ['APPDATA']) / 'VibeCoding' / 'voice-server.log')
+    else:
+        candidates.append(Path.home() / '.vibe-coding' / 'voice-server.log')
+    if _log_fp and not _log_fp.closed:
+        try:
             _log_fp.close()
-        _log_fp = path.open('wb')
-        return _log_fp
-    except OSError:
-        # 로그를 못 열었다고 음성을 포기하지는 않는다 — 조용히 버리는 쪽이 낫다.
-        import subprocess
-        return subprocess.DEVNULL
+        except OSError:
+            pass
+    for path in candidates:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _log_fp = path.open('wb')
+            return _log_fp
+        except OSError:
+            continue
+    # 여기까지 왔으면 쓸 수 있는 자리가 하나도 없다 — 그때만 버린다.
+    import subprocess
+    return subprocess.DEVNULL
 
 
 def _frozen_carries_voice() -> bool:
@@ -111,7 +151,7 @@ def _frozen_carries_voice() -> bool:
         return False
 
 
-def _sidecar_python(project_root: Path) -> str | None:
+def _sidecar_python(src_root: Path) -> str | None:
     """사이드카를 실행할 파이썬.
 
     [개발] 별도 환경(.ai_monitor/voice-server/.venv)을 쓴다. 앱 venv 와 섞지 않는 편이
@@ -128,8 +168,8 @@ def _sidecar_python(project_root: Path) -> str | None:
     """
     candidates = [
         os.environ.get('VOICE_PYTHON', ''),
-        str(project_root / '.ai_monitor' / 'voice-server' / '.venv' / 'Scripts' / 'python.exe'),
-        str(project_root / '.ai_monitor' / 'voice-server' / '.venv' / 'bin' / 'python'),
+        str(src_root / '.ai_monitor' / 'voice-server' / '.venv' / 'Scripts' / 'python.exe'),
+        str(src_root / '.ai_monitor' / 'voice-server' / '.venv' / 'bin' / 'python'),
     ]
     for c in candidates:
         if c and Path(c).exists():
@@ -140,7 +180,7 @@ def _sidecar_python(project_root: Path) -> str | None:
     return None
 
 
-def _ensure_voice_env(project_root: Path) -> str:
+def _ensure_voice_env(src_root: Path) -> str:
     """음성 스택이 없으면 백그라운드로 깐다. 진행 중이면 그 사실만 알린다.
 
     [🔴 왜 자동인가] 마이크 단추를 누른 것이 곧 '음성을 쓰겠다'는 의사표시다. 여기서
@@ -160,7 +200,7 @@ def _ensure_voice_env(project_root: Path) -> str:
             return '음성 스택을 설치하는 중입니다(처음 한 번, 수백 MB — 몇 분 걸립니다)'
         if _setup_msg:
             return _setup_msg                               # 실패는 다시 두드려도 같다
-        log_path = project_root / '.ai_monitor' / 'voice-server' / 'voice-setup.log'
+        log_path = src_root / '.ai_monitor' / 'voice-server' / 'voice-setup.log'
 
         def _quiet(cmd, env):
             import subprocess
@@ -169,16 +209,16 @@ def _ensure_voice_env(project_root: Path) -> str:
             with log_path.open('ab') as fp:
                 fp.write(f'\n$ {" ".join(cmd)}\n'.encode('utf-8', 'replace'))
                 fp.flush()
-                return proc.run(cmd, cwd=str(project_root), env=env,
+                return proc.run(cmd, cwd=str(src_root), env=env,
                                 stdin=subprocess.DEVNULL, stdout=fp,
                                 stderr=subprocess.STDOUT).returncode
 
         def _work():
             global _setup_msg
             try:
-                sys.path.insert(0, str(project_root / 'scripts'))
+                sys.path.insert(0, str(src_root / 'scripts'))
                 import setup_voice
-                ok, msg = setup_voice.ensure_env(project_root, _quiet)
+                ok, msg = setup_voice.ensure_env(src_root, _quiet)
                 _setup_msg = '' if ok else msg
             except Exception as e:                          # noqa: BLE001
                 _setup_msg = f'음성 설치 실패: {type(e).__name__}: {e}'
@@ -188,18 +228,18 @@ def _ensure_voice_env(project_root: Path) -> str:
         return '음성 스택을 설치하는 중입니다(처음 한 번, 수백 MB — 몇 분 걸립니다)'
 
 
-def _spawn_sidecar(project_root: Path) -> str:
+def _spawn_sidecar(src_root: Path) -> str:
     """사이드카를 띄운다. 이미 살아 있으면 아무것도 하지 않는다."""
     global _proc
     with _spawn_lock:
         if _proc is not None and _proc.poll() is None:
             return ''
-        py = _sidecar_python(project_root)
+        py = _sidecar_python(src_root)
         if not py:
             # 실행기가 없다 = 아직 아무도 음성 스택을 깔지 않았다. 여기서 끝내지 않고
             # 깔기 시작한다 — 그 판단 근거는 _ensure_voice_env 주석 참조.
-            return _ensure_voice_env(project_root)
-        script = project_root / '.ai_monitor' / 'voice-server' / 'voice_server.py'
+            return _ensure_voice_env(src_root)
+        script = src_root / '.ai_monitor' / 'voice-server' / 'voice_server.py'
         if not script.exists():
             # [폴백 — 번들 동봉본] 게이트 실패로 seed 로 돌거나 체크아웃이 옛 소스라
             #   voice-server 가 없을 수 있다. frozen 번들에는 항상 실려 있으므로 그쪽을 쓴다
@@ -224,7 +264,7 @@ def _spawn_sidecar(project_root: Path) -> str:
             _proc = proc.popen([py, str(script)],
                                cwd=str(script.parent),
                                stdin=subprocess.DEVNULL,
-                               stdout=_sidecar_log(project_root),
+                               stdout=_sidecar_log(src_root),
                                stderr=subprocess.STDOUT,
                                env={**os.environ, 'VOICE_PORT': str(VOICE_PORT)})
             return ''
@@ -273,8 +313,15 @@ def _mic_permission() -> dict:
         return {'ok': None, 'detail': '창이 없는 실행이라 해당 없음'}
 
 
-def handle_status(handler, project_root: Path) -> None:
-    """GET /api/voice/status — 사이드카가 준비됐는가. 없으면 기동을 시작한다."""
+def handle_status(handler, _unused: Path | None = None) -> None:
+    """GET /api/voice/status — 사이드카가 준비됐는가. 없으면 기동을 시작한다.
+
+    [🔴 인자를 더 안 쓴다 — 2026-08-18] 예전 시그니처는 `project_root` 를 받아 그대로
+      사이드카 경로로 썼는데, server.py 가 넘기던 값이 **사용자가 연 프로젝트 폴더**라
+      설치본에서 항상 엉뚱한 곳을 가리켰다(`_app_src_root` 주석의 실측 3건).
+      호출부를 한 줄 고치는 대신 인자 자체를 무시한다 — 이 결정을 다른 호출부가
+      되돌릴 수 없게 만드는 쪽이 안전하다. 인자는 옛 호출 호환으로만 남긴다.
+    """
     try:
         d = _get('/status')
         # [🔴 마이크 권한 배선 결과를 같이 실어 보낸다 — 2026-08-17 사장 신고]
@@ -290,7 +337,7 @@ def handle_status(handler, project_root: Path) -> None:
     except (urllib.error.URLError, OSError, ValueError):
         pass                                                # 아직 안 떠 있다 — 아래에서 띄운다
 
-    err = _spawn_sidecar(project_root)
+    err = _spawn_sidecar(_app_src_root())
     # [🔴 '설치 중'은 실패가 아니다] loading=false 로 주면 화면이 빨간 오류로 그린다.
     #   사용자가 할 일은 기다리는 것뿐인데 고장으로 읽히면 앱을 껐다 켜게 된다.
     installing = _setup_thread is not None and _setup_thread.is_alive()
