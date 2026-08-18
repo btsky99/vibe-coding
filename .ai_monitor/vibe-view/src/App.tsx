@@ -80,7 +80,7 @@ function App() {
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
-    updateProgress, setUpdateProgress,
+    updateProgress, setUpdateProgress, updateError,
     activeTaskCount, setActiveTaskCount,
     totalGitChanges, setTotalGitChanges,
     conflictCount, setConflictCount,
@@ -371,6 +371,8 @@ function App() {
                   percent: typeof data.percent === 'number' ? data.percent : -1,
                   downloaded_mb: data.downloaded_mb || 0,
                   total_mb: data.total_mb || 0,
+                  version: data.version,
+                  current: data.current,
                 });
                 tries = 0;
               } else if (tries >= 6) {
@@ -660,7 +662,17 @@ function App() {
         <div className="px-3 py-1 bg-primary/10 border-b border-primary/30 shrink-0 z-50">
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-[10px] text-primary font-bold">
-              새 버전 다운로드 중{updateProgress.percent >= 0 ? ` ${updateProgress.percent}%` : '...'}
+              {/* [🔴 판 번호를 먼저 보여 준다 — 2026-08-18] 예전엔 '새 버전 다운로드 중'
+                  한 줄뿐이라 몇 판 뒤처졌는지 알 수 없었다. 434MB 는 수십 분 걸리므로
+                  그동안 사장님이 보는 것이 이 줄 하나다. */}
+              {updateProgress.current && updateProgress.version ? (
+                <>
+                  지금 <span className="font-mono">v{updateProgress.current}</span>
+                  <span className="mx-1">→</span>
+                  새 판 <span className="font-mono">{updateProgress.version}</span> 받는 중
+                </>
+              ) : '새 버전 다운로드 중'}
+              {updateProgress.percent >= 0 ? ` ${updateProgress.percent}%` : '...'}
               {updateProgress.total_mb > 0 && (
                 <span className="font-mono text-primary/70 ml-1">
                   ({updateProgress.downloaded_mb}/{updateProgress.total_mb}MB)
@@ -682,11 +694,25 @@ function App() {
         </div>
       )}
 
+      {/* ── 업데이트 '확인 실패' 줄 — 침묵 금지(2026-08-18) ──
+           안 띄우면 사장님은 '최신인가 보다'로 읽고 몇 판이든 뒤처진 채로 지낸다. */}
+      {updateError && !updateReady && !updateProgress && (
+        <div className="px-3 py-1 bg-amber-500/10 border-b border-amber-500/30 shrink-0 z-50">
+          <span className="text-[10px] text-amber-400 font-bold">
+            업데이트 확인 실패 — {updateError.detail}
+            {updateError.at && <span className="font-mono text-amber-400/60 ml-1">({updateError.at})</span>}
+          </span>
+        </div>
+      )}
+
       {/* ── 업데이트 알림 배너 (updateReady 상태일 때만 표시) ── */}
       {updateReady && (
         <div className="flex items-center justify-between px-3 py-1 bg-primary/20 border-b border-primary/40 shrink-0 z-50">
           <span className="text-[10px] text-primary font-bold">
-            새 버전 <span className="font-mono">{updateReady.version}</span> 업데이트 준비 완료
+            {appVersion && appVersion !== '...' && (
+              <><span className="font-mono">v{appVersion}</span><span className="mx-1">→</span></>
+            )}
+            새 판 <span className="font-mono">{updateReady.version}</span> 준비 완료
           </span>
           <div className="flex items-center gap-2">
             <button

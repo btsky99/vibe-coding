@@ -583,9 +583,15 @@ def check_and_update(data_dir):
     asset_url = asset.get("browser_download_url") or asset.get("url")
     asset_name = asset.get("name", "")
 
-    # 다운로드 중 상태 알림
+    # 다운로드 중 상태 알림.
+    # [🔴 current 를 같이 적는 이유 — 2026-08-18] 지금까지 화면은 다운로드가 **100% 끝난
+    #   뒤에야** 판 번호를 봤다. 그 전에는 '새 버전 다운로드 중'뿐이라 사장님이
+    #   **몇 판 뒤처졌는지 알 방법이 없었다**(실측: EXE 3.7.341 인데 최신은 3.7.348,
+    #   일곱 판 차이를 아무도 못 봤다). 뒤처진 사실은 물어야 아는 것이 아니라
+    #   저절로 떠야 한다 — 그 근거를 여기서 실어 보낸다.
     with open(ready_file, "w", encoding="utf-8") as f:
-        json.dump({"version": latest_tag, "ready": False, "downloading": True}, f)
+        json.dump({"version": latest_tag, "current": cur_ver,
+                   "ready": False, "downloading": True}, f)
 
     # [불변식] 임시 파일명이 인스톨러 여부를 보존해야 apply 단계가 오판하지 않는다.
     #   is_installer_asset은 파일명의 'setup' 포함 여부로만 갈리므로, setup 자산은 반드시
@@ -609,7 +615,8 @@ def check_and_update(data_dir):
         try:
             with open(ready_file, "w", encoding="utf-8") as f:
                 json.dump({
-                    "version": latest_tag, "ready": False, "downloading": True,
+                    "version": latest_tag, "current": cur_ver,
+                    "ready": False, "downloading": True,
                     "percent": pct,  # -1이면 총 크기 미상(진행바 대신 스피너)
                     "downloaded_mb": round(done / 1_048_576, 1),
                     "total_mb": round(total_bytes / 1_048_576, 1) if total_bytes else 0,
@@ -635,7 +642,8 @@ def check_and_update(data_dir):
     print(f"[*] 새 버전 {latest_tag} 다운로드 완료. 업데이트 버튼을 눌러주세요.")
     with open(ready_file, "w", encoding="utf-8") as f:
         json.dump({
-            "version": latest_tag, "ready": True, "downloading": False,
+            "version": latest_tag, "current": cur_ver,
+            "ready": True, "downloading": False,
             "exe_path": str(tmp_path),
             # apply 단계가 파일명 추측 대신 이 플래그로 인스톨러/exe-swap을 확정 분기.
             "is_installer": is_installer,

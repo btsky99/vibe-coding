@@ -76,8 +76,9 @@ export interface VibeData {
   updateChecking: boolean;
   setUpdateChecking: React.Dispatch<React.SetStateAction<boolean>>;
   // 다운로드 진행률 — percent -1이면 총 크기 미상(스피너). null이면 다운로드 중 아님.
-  updateProgress: { percent: number; downloaded_mb: number; total_mb: number } | null;
-  setUpdateProgress: React.Dispatch<React.SetStateAction<{ percent: number; downloaded_mb: number; total_mb: number } | null>>;
+  updateProgress: { percent: number; downloaded_mb: number; total_mb: number; version?: string; current?: string } | null;
+  updateError: { detail: string; at: string } | null;
+  setUpdateProgress: React.Dispatch<React.SetStateAction<{ percent: number; downloaded_mb: number; total_mb: number; version?: string; current?: string } | null>>;
 
   // 배지 카운트
   activeTaskCount: number;
@@ -119,7 +120,13 @@ export function useVibeData(): VibeData {
   const [updateReady, setUpdateReady] = useState<{ version: string } | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState<{ percent: number; downloaded_mb: number; total_mb: number } | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<{ percent: number; downloaded_mb: number; total_mb: number; version?: string; current?: string } | null>(null);
+  // [🔴 확인 실패를 버리지 않는다 — 2026-08-18] updater 는 릴리즈 조회가 깨지면
+  //   update_ready.json 에 last_error 를 남기는데, 화면은 그 응답을 ready 도 downloading 도
+  //   아니라는 이유로 **통째로 버렸다.** 실측: 앱이 쓰는 길은 토큰 없는 GitHub API 라
+  //   시간당 60회 제한에 걸려 403 이 났고(X-RateLimit-Remaining: 0), 그 사실이 화면
+  //   어디에도 안 떴다. 받을 것이 없는 것과 물어보지도 못한 것은 다른 일이다.
+  const [updateError, setUpdateError] = useState<{ detail: string; at: string } | null>(null);
 
   // ─── 배지 카운트 ──────────────────────────────────────────────────
   const [activeTaskCount, setActiveTaskCount] = useState(0);
@@ -352,15 +359,22 @@ export function useVibeData(): VibeData {
             if (data.error) alert(`이전 업데이트 적용 실패: ${data.error}`);
           } else if (data?.downloading) {
             // 백그라운드 다운로드 진행 중 — 진행바 갱신(배너는 App에서 표시)
+            // [🔴 판 번호를 같이 담는다 — 2026-08-18] 다운로드가 끝나야만 판이 보이던
+            //   탓에 '몇 판 뒤처졌나'를 사장님이 알 길이 없었다(EXE 3.7.341 / 최신 3.7.348).
             setUpdateProgress({
               percent: typeof data.percent === 'number' ? data.percent : -1,
               downloaded_mb: data.downloaded_mb || 0,
               total_mb: data.total_mb || 0,
+              version: data.version,
+              current: data.current,
             });
           } else {
             setUpdateReady(null);
             setUpdateProgress(null);
           }
+          setUpdateError(data?.last_error
+            ? { detail: String(data.last_error), at: String(data.last_check || '') }
+            : null);
         })
         .catch((err) => console.error('[useVibeData] fetch error:', err));
     };
@@ -377,7 +391,7 @@ export function useVibeData(): VibeData {
     hiveHealth, hiveActivity, isHealingActive,
     appVersion, updateReady, setUpdateReady, updateApplying, setUpdateApplying,
     updateChecking, setUpdateChecking,
-    updateProgress, setUpdateProgress,
+    updateProgress, setUpdateProgress, updateError,
     activeTaskCount, setActiveTaskCount,
     totalGitChanges, setTotalGitChanges,
     conflictCount, setConflictCount,

@@ -52,6 +52,9 @@ def check_update_ready(handler, data_dir: Path, current_version: str) -> None:
                 data = json.load(f)
             file_ver = data.get("version", "").lstrip("v").strip()
             cur_ver = current_version.lstrip("v").strip()
+            # [🔴 항상 실어 보낸다 — 2026-08-18] 캐시 파일이 옛 판이라 current 가 없을 수
+            #   있다. 화면이 '몇 판 뒤처졌나'를 그리려면 이 값이 빠지면 안 된다.
+            data.setdefault("current", cur_ver)
             if file_ver and _parse_ver(file_ver) > _parse_ver(cur_ver):
                 handler.wfile.write(json.dumps(data).encode('utf-8'))
             elif file_ver:
