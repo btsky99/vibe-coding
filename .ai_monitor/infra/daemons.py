@@ -557,6 +557,29 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                 pass
             return False
 
+        def _gdrive_mirror_enabled() -> bool:
+            """로컬 볼트를 구글 드라이브로 밀어 줄지. **기본 꺼짐**(2026-08-18 사장 지시).
+
+            [WHY 껐나] "바이브 코딩은 구글 드라이브 연결 이런 거 다 빼" — 가벼운 판으로
+              가는 첫 걸음이다. 실측(2026-08-18): 드라이브 미러에 3,314장이 올라가 있고
+              그중 사람이 손으로 쓴 것은 **0장**이다(사람이 쓰는 정본은 리포 `wiki/` 44장,
+              git 이 이미 지킨다). 즉 이 루프가 하는 일은 **파생물 복사**뿐이다.
+            [🔴 코드를 지우지 않고 스위치만 둔 이유] 지우면 되돌리는 데 값이 들지만
+              스위치는 한 줄이면 돌아온다. 크로스-PC 로 다시 묶고 싶어질 때가 온다.
+            [되켜기 — 한 줄] config.json 에 `"gdrive_mirror": true`.
+            [불변식] 이걸 꺼도 **로컬 볼트 동기화(watch_and_sync)는 계속 돈다.**
+              끊기는 것은 '드라이브로 밀어 주는 것' 하나뿐이고, 지식 본체는 로컬에 남는다.
+            [🔴 이미 드라이브에 가 있는 것은 건드리지 않는다] 이 스위치는 '더 안 민다'이지
+              '지운다'가 아니다. mirror_vault 는 애초에 비파괴 복사다(그 함수 주석 참조).
+            """
+            try:
+                if env.config_file.exists():
+                    _cfg = json.loads(env.config_file.read_text(encoding='utf-8'))
+                    return bool(_cfg.get('gdrive_mirror', False))
+            except Exception:                                  # noqa: BLE001
+                pass
+            return False
+
         def _get_gdrive_vault():
             # 1순위: config.json 명시 설정 (사용자 오버라이드)
             try:
@@ -602,8 +625,15 @@ def run_zettel_sync(env: DaemonEnv) -> None:
                 except Exception as _ge:
                     print(f'[zettel_sync] Google Drive 동기화 오류: {_ge}')
                 time.sleep(120)
-        threading.Thread(target=_sync_with_gdrive, daemon=True,
-                         name='ZettelGDrive').start()
+        # [🔴 꺼져 있으면 스레드를 아예 안 띄운다 — 2026-08-18] 루프 안에서 걸러도 되지만,
+        #   그러면 120초마다 드라이브 문자 A~Z 를 훑는 비용(_detect_gdrive_vault)이 그대로 남는다.
+        #   '가볍게'가 목적이므로 도는 것 자체를 없앤다.
+        if _gdrive_mirror_enabled():
+            threading.Thread(target=_sync_with_gdrive, daemon=True,
+                             name='ZettelGDrive').start()
+        else:
+            print('[zettel_sync] Google Drive 미러 꺼짐 — 로컬 볼트 동기화만 돕니다 '
+                  '(되켜기: config.json "gdrive_mirror": true)')
         # include_archived=True — GDrive 루프와 아카이브 표현을 일치시켜 _보관 파일 핑퐁 제거.
         _mod.watch_and_sync(_vault, project_id=_proj_id, interval=60,
                             bidirectional=_bidirectional_enabled(),
