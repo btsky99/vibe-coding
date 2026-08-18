@@ -87,3 +87,16 @@ dist_pkg/
 .ai_monitor/voice-server/qwen/.venv/
 .ai_monitor/voice-server/qwen/models/
 .ai_monitor/voice-server/qwen-setup.log
+
+# ── LLM 위키 (2026-08-18 경량화 3단계) ─────────────────────────────────────
+# [정본은 wiki/*.md 다 — 그것만 깃에 들어간다]
+#   본문을 .md 로 두는 이유: 깃이 제 노릇을 한다(줄 단위 diff · 되돌리기 ·
+#   "이 문장 왜 들어왔나"). SQLite 를 정본으로 두면 이진 파일이라 diff 가 0 이고,
+#   고칠 때마다 파일 전체가 새 판으로 쌓여 저장소가 부푼다.
+# [색인은 파생물이라 깃에 안 넣는다] 지우고 `python scripts/wiki_index_build.py` 로
+#   다시 만들면 그만이다. 넣으면 정본이 둘이 되고, 둘은 언젠가 어긋난다.
+wiki/.index/
+*.wiki.sqlite3
+*.wiki.sqlite3-journal
+*.wiki.sqlite3-wal
+*.wiki.sqlite3-shm

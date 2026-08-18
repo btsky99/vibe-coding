@@ -1,0 +1,12 @@
+#!/bin/sh
+# FILE: .githooks/pre-commit
+# DESCRIPTION: 커밋 전 검사. 지금은 위키 비밀 값 검사 하나다.
+#
+# [🔴 왜 훅인가 — 2026-08-18] 위키를 깃에 백업하기로 정했다(사장 지시). 깃은 지운 것도
+#   기억하므로, 비밀 값이 한 번 들어가면 히스토리 재작성(--force) 말고는 못 지운다.
+#   그런데 --force 는 이 저장소가 금지한 것이다. 막을 지점이 커밋 직전뿐이다.
+# [설치] git config core.hooksPath .githooks   (리포에 담기므로 클론마다 한 줄이면 끝)
+# [제약] 위키(wiki/*.md)만 본다. 코드·설정은 이 훅의 몫이 아니다.
+# [우회] 정말 필요하면 git commit --no-verify — 다만 그 순간 이 장치는 0이다.
+
+python scripts/wiki_secret_scan.py --staged || exit 1
