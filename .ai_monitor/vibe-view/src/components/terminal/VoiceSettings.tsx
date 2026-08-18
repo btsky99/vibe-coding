@@ -93,6 +93,30 @@ export default function VoiceSettings({ onClose }: Props) {
                     </span>
                   </div>
                   {opt.note && <div className="truncate text-[9px] text-white/35">{opt.note}</div>}
+                  {/* [🔴 사장님 목소리는 준비 상태를 여기서 말한다 — 2026-08-18]
+                      서버는 qwen{installed,running,step,error} 를 계속 보내는데 화면이
+                      통째로 버렸다. 그래서 모델이 없든 받는 중이든 실패했든 **똑같이
+                      조용했고**, 사장님은 '골랐는데 소리가 안 난다'로만 겪었다.
+                      note 아래 한 줄이면 그 침묵이 사라진다. */}
+                  {opt.engine === 'qwen' && v.qwen && (
+                    v.qwen.error ? (
+                      <div className="truncate text-[9px] text-red-400" title={v.qwen.error}>
+                        준비 실패 — {v.qwen.error}
+                      </div>
+                    ) : v.qwen.running ? (
+                      <div className="truncate text-[9px] text-amber-400" title={v.qwen.step}>
+                        준비 중… {v.qwen.step || '5GB 를 내려받는 중입니다'}
+                      </div>
+                    ) : v.qwen.installed ? (
+                      <div className="truncate text-[9px] text-emerald-400/80" title={v.qwen.home}>
+                        준비됨 · {v.qwen.home}
+                      </div>
+                    ) : (
+                      <div className="truncate text-[9px] text-white/45">
+                        아직 안 받았습니다 — 고르면 약 5GB 를 내려받습니다
+                      </div>
+                    )
+                  )}
                 </button>
                 <button
                   onClick={() => void voiceBus.preview(opt.id)}

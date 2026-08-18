@@ -138,6 +138,31 @@ export interface VoiceState {
   voice: string;
   /** 낭독 속도 배율(0.5~1.5). */
   speed: number;
+  /**
+   * 사장님 목소리(qwen) 살림 준비 상태 — 서버 /status 의 `qwen` 을 그대로 나른다.
+   *
+   * [🔴 왜 들고 오나 — 2026-08-18 실측] 서버는 `qwen{installed,running,step,error}` 를
+   *   계속 보내고 있었는데 **프론트가 통째로 버렸다**(`grep -rn qwen vibe-view/src` = 0건).
+   *   그래서 모델이 없든, 5GB 를 받는 중이든, 받다 실패했든 화면이 **똑같이 조용했다.**
+   *   사장님은 '골랐는데 소리가 안 난다'로만 겪는다 — 오늘 하루를 잡아먹은 그 병이다.
+   * [제약] null 은 '서버가 아직 안 알려 줬다'이지 '없다'가 아니다. 둘을 같게 그리면
+   *   기동 직후 몇 초 동안 없는 고장을 띄운다.
+   */
+  qwen: QwenSetup | null;
+}
+
+export interface QwenSetup {
+  /** 지금 당장 부를 수 있나. [🔴 '5GB 가 여기 있나'가 아니다] 개발 PC 는 딴 곳의
+   *  환경으로도 부를 수 있어 true 가 된다 — 그 경우 home 이 어디인지 같이 보여 줄 것. */
+  installed: boolean;
+  /** 살림을 까는 중인가(5GB). */
+  running: boolean;
+  /** 까는 중이면 지금 단계. */
+  step: string;
+  /** 실패 사유. 비어 있지 않으면 다시 눌러도 같은 결과다. */
+  error: string;
+  /** 살림이 놓이는 자리. */
+  home: string;
 }
 
 export interface VoiceOption {
@@ -194,6 +219,7 @@ class VoiceBus {
     edgeOn: (() => { try { return localStorage.getItem(EDGE_KEY) !== '0'; } catch { return true; } })(),
     error: '',
     voices: [],
+    qwen: null,
     // [WHY localStorage 인가] 목소리는 이 PC 에 뭐가 깔려 있느냐에 달린 기기별 취향이다.
     //   프로젝트 config(=다른 PC 와도 공유되는 값)에 넣으면 그 PC 에 없는 목소리를 가리킨다.
     voice: (() => { try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; } })(),
@@ -973,6 +999,9 @@ class VoiceBus {
       this.serverVoices = Array.isArray(d?.voices) ? d.voices : [];
       this.serverDefault = String(d?.voice || '');
       this.set({
+        // [🔴 undefined 를 null 로 눌러 둔다] 옛 사이드카는 이 필드를 안 보낸다.
+        //   그때 '없다'로 그리면 멀쩡한 PC 에 없는 고장을 띄운다.
+        qwen: d?.qwen ? (d.qwen as QwenSetup) : null,
         sttReady: !!d?.ready,
         // [🔴 낭독 준비는 받아쓰기와 따로 본다] edge 는 올릴 모델이 없어 기동 직후
         //   바로 true 가 된다. ready(=받아쓰기까지)를 기다리면 whisper 로딩 수십 초

@@ -430,8 +430,26 @@ begin
   // [과거사고 2026-07-10] onefile(구 %LOCALAPPDATA%\VibeCoding\app) → onedir(신 %LOCALAPPDATA%\Programs\VibeCoding)
   //   전환 후 구 설치 폴더가 exe 없이 빈 껍데기로 남아 죽은 바로가기의 원인이 됨. 잔재 폴더 청소.
   //   [주의] pgdata는 %APPDATA%(Roaming)\VibeCoding 이라 무관 — 여기서 지우는 건 Local의 구 프로그램 폴더뿐.
-  if DirExists(ExpandConstant('{localappdata}\VibeCoding\app')) then
-    DelTree(ExpandConstant('{localappdata}\VibeCoding\app'), True, True, True);
+  //
+  // [🔴 2026-08-18 — 이 자리가 살아 있는 것을 지우고 있었다] 같은 경로가 그 뒤로
+  //   **경량 업데이트 채널이 쓰는 소스 체크아웃**이 되었다(boot.py `_managed_src_root`).
+  //   통째로 지우니 설치할 때마다 체크아웃이 사라져 다음 부팅이 전부 다시 받았고,
+  //   그 아래 살던 것(음성 사이드카 캐시·qwen 살림)도 같이 날아갔다.
+  //   목적(잔재 청소)은 살리되 수단을 좁힌다 — **잔재인 것만** 지운다.
+  // [판별 근거] 살아 있는 체크아웃은 `.git` 또는 `.ai_monitor\server.py` 를 가진다.
+  //   boot.py `_is_checkout()` 이 쓰는 표식과 같다(양쪽 수동 동기).
+  //   구 onefile 잔재는 둘 다 없다 — exe 없이 남은 빈 껍데기이기 때문이다.
+  // [🔴 애매하면 안 지운다] 폴더 삭제는 되돌릴 수 없다. 잔재가 남는 대가는 죽은
+  //   바로가기 하나지만, 살아 있는 것을 지우는 대가는 오늘 하루였다.
+  if DirExists(ExpandConstant('{localappdata}\VibeCoding\app')) then begin
+    if DirExists(ExpandConstant('{localappdata}\VibeCoding\app\.git'))
+       or FileExists(ExpandConstant('{localappdata}\VibeCoding\app\.ai_monitor\server.py')) then
+      // [ASCII 로 적는다] Log 는 문자열 리터럴이라 인코딩 사고에 노출된다. 진단 한 줄에
+      //   그 위험을 낼 이유가 없다 — 설명은 위 주석이 이미 한다.
+      Log('live managed checkout found - leaving {localappdata}\VibeCoding\app untouched')
+    else
+      DelTree(ExpandConstant('{localappdata}\VibeCoding\app'), True, True, True);
+  end;
 
   sUnInstallString := GetUninstallString();
   if sUnInstallString <> '' then begin
