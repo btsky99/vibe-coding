@@ -132,6 +132,9 @@ REVISION HISTORY:
 - [`.claude/rules/hive-sync.md`](.claude/rules/hive-sync.md) — 하이브 동기화 프로토콜
 - [`.claude/rules/file-limits.md`](.claude/rules/file-limits.md) — 1500줄 제한 + LLM 주석 가이드
 - [`.claude/rules/context-limits.md`](.claude/rules/context-limits.md) — 프롬프트 글자 수 상한 + 중간 절단
+- [`.claude/rules/voice-expected.md`](.claude/rules/voice-expected.md) — **음성 기대 동작**(사장 지시).
+  모바일=edge / 사장님 PC=사장님 본인 목소리(`qwen:apix`). **edge 로 떨어지면 정상이 아니다** —
+  "소리는 났으니 됐다"로 읽지 말 것. 기계로 재는 판정법 3가지 포함
 - [`.claude/agents/README.md`](./.claude/agents/README.md) — Subagent 위임 라우팅 정책 (vibe-code-review/security/debug)
 - [`RULES.md`](./RULES.md) — 신규 멤버용 종합 안내 (위 규칙들의 풀 버전)
 - [`docs/HARNESS_V2.md`](./docs/HARNESS_V2.md) — 하네스 계약
