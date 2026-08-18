@@ -33,6 +33,19 @@ import subprocess
 import sys
 import time
 
+# [🔴 첫 print 보다 먼저 — 2026-08-18 실측] 이 스크립트는 배포 스킬이 백그라운드로
+#   띄운다. 그런데 윈도우 콘솔 기본 코드페이지(cp949)로 줄표(—)를 못 찍어
+#   **첫 진행 출력에서 UnicodeEncodeError 로 죽었다.** 죽으면 '끝나면 통보' 계약이
+#   깨지고, 스킬은 기다린 줄 알지만 실제로는 아무도 안 기다린 상태가 된다
+#   (오늘 v3.7.350 배포에서 그대로 겪었다 — 같은 함정을 incident.py·smoke_test.py 도 겪음).
+#   [WHY errors='replace'] 통보가 목적이지 글자 모양이 목적이 아니다. 못 찍는 글자
+#   하나 때문에 대기가 죽는 쪽이 훨씬 나쁘다.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:                                        # noqa: BLE001
+        pass                                                 # 재설정 실패는 대기를 막지 않는다
+
 WORKFLOW = 'Build & Release'
 POLL_S = 30
 # [WHY 상한을 두나] CI 가 영영 안 끝나는 일이 있다(러너 대기·행). 그때도 **통보는 와야**
