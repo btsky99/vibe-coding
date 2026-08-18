@@ -274,6 +274,16 @@ def list_voices() -> list:
         out += _moss()
     except Exception as e:                                 # noqa: BLE001
         _log(f'moss 목록 실패(무시): {e}')
+    # [🔴 목록에서만 감춘다 — 2026-08-18 사장 지시 "qwen만 일단 빼고"]
+    #   지우는 것이 아니라 **안 보이게** 하는 것이다. 일꾼·구운 파일·모델은 그대로 두므로
+    #   되살리는 데 재설치가 필요 없다.
+    #   [되살리는 한 줄] 아래 기본값 'qwen' 을 '' 로 바꾸거나, 환경변수
+    #   VOICE_HIDE_ENGINES 를 빈 값으로 주면 그 자리에서 다시 뜬다.
+    #   [WHY 목록에서 빼면 충분한가] 고를 수 없으면 이 엔진으로 가는 길이 없다 —
+    #   합성은 고른 목소리 id 로만 갈린다(_engine_for).
+    hide = {x.strip() for x in os.environ.get('VOICE_HIDE_ENGINES', 'qwen').split(',') if x.strip()}
+    if hide:
+        out = [v for v in out if str(v.get('engine', '')) not in hide]
     _voices_cache = out
     return out
 

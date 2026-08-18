@@ -345,7 +345,10 @@ class VoiceBus {
     const cur = this.state.voice;
     const stale = !!cur && (isWebVoiceId(cur)
       ? web.length > 0 && !web.some((v) => v.id === cur)
-      : this.serverAnswered && !server.some((v) => v.id === cur));
+      // [🔴 server 가 비어 있을 때는 판정하지 않는다 — 위와 같은 사고의 뒷면]
+      //   목록을 못 받은 순간에 판정하면 사장님이 고르신 값이 '없는 목소리'가 되어
+      //   조용히 풀린다. 목록이 실제로 있을 때만 그 안에 있나를 묻는다.
+      : this.serverAnswered && server.length > 0 && !server.some((v) => v.id === cur));
     let voice = stale ? '' : cur;
 
     // [🔴 화면에 칠한 것과 실제로 나는 소리가 같아야 한다] 아무것도 안 골랐을 때 화면은
@@ -996,7 +999,17 @@ class VoiceBus {
       const res = await fetch(`${API_BASE}/api/voice/status`, { cache: 'no-store' });
       const d = await res.json();
       this.serverAnswered = true;
-      this.serverVoices = Array.isArray(d?.voices) ? d.voices : [];
+      // [🔴🔴 목록을 **비우지 않는다** — 2026-08-18 사장 신고 「엣지와 크롬 다 사라지고
+      //   마이크로소프트 하나만 남았다」의 진범] /api/voice/status 는 두 모양으로 온다.
+      //   준비됨: {voices:[...], ...}   준비 중: {ready:false, loading:true, detail:'...'}
+      //   뒤쪽에는 voices 키가 아예 없다(voice_api.handle_status). 예전 코드는 그때
+      //   `: []` 로 **통째로 비웠고**, refreshVoices 가 [...edge=[], ...web] 를 그려
+      //   브라우저 목소리(이 앱에선 Microsoft Heami 하나)만 남았다.
+      //   첫 기동은 사이드카 예열이 ~90초라 그 창이 매번 열리고, 사이드카가 잠깐
+      //   끊겨도(재기동·502) 4초 뒤 폴링에서 같은 일이 난다.
+      // [불변식] **진짜 목록이 왔을 때만 갈아 끼운다.** 못 받은 것은 '없다'가 아니라
+      //   '아직 모른다'다. 둘을 같게 다루면 화면이 있는 것을 없다고 말한다.
+      if (Array.isArray(d?.voices)) this.serverVoices = d.voices;
       this.serverDefault = String(d?.voice || '');
       this.set({
         // [🔴 undefined 를 null 로 눌러 둔다] 옛 사이드카는 이 필드를 안 보낸다.
