@@ -150,6 +150,16 @@ Source: "scripts\install_playwright_cli.py"; DestDir: "{app}\scripts"; Flags: ig
 Source: "scripts\install_ai_toolchain.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\install_nodejs.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "scripts\install_antigravity.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+; [🔴 2026-08-18 사고 — 아픽스3 깨끗한 PC 실측] 위 스크립트들이 import/실행하는 파일이
+;   빠져 있었다. 첫 실행마다 재현:
+;     install_ai_toolchain.py line 23: ModuleNotFoundError: No module named '_install_common'
+;     -> "Required AI tools could not be installed."
+;   [왜 여기서만 드러나나] 기존 설치가 있는 PC 는 옛 잔재가 가려 준다 — 사장님 PC 에서는
+;   안 보였고 깨끗한 PC 에서만 났다. 새 설치 스크립트를 만들 때는 그것이 **부르는 것까지**
+;   여기에 같이 적어야 한다(파일명만 보고 짐작하지 말 것 — import 를 따라가라).
+Source: "scripts\_install_common.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+; install_ai_toolchain.py 가 옵시디언 단계에서 직접 실행한다(SCRIPT_DIR / "install_system_tool.py").
+Source: "scripts\install_system_tool.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: ".ai_monitor\bin\nodejs\*"; DestDir: "{app}\nodejs"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ── 서브창 EXE (별도 PyInstaller 빌드) ─────────────────────────────────────
@@ -373,11 +383,19 @@ begin
       ewWaitUntilTerminated,
       ToolchainResult
     ) or (ToolchainResult <> 0) then
-      MsgBox(
+      // [🔴 MsgBox 가 아니라 SuppressibleMsgBox 여야 한다 — 2026-08-18]
+      //   /SUPPRESSMSGBOXES 는 Inno 자신의 대화상자와 SuppressibleMsgBox 만 자동 응답한다.
+      //   [Code] 의 맨 MsgBox 는 **사일런트에서도 그대로 뜨고 사람이 누를 때까지 멈춘다.**
+      //   무인 설치(아픽스3 실측)와 부팅 자동 설치(boot._apply_staged_full_update)가
+      //   여기서 막혔다. 자동 설치는 Popen 뒤 바로 빠지므로, 막힌 인스톨러는 아무도 못 보는
+      //   창을 든 채 남는다 — 화면에 안 뜨는 정지가 가장 나쁜 실패다.
+      //   [불변식] 사람이 직접 깔 때는 지금처럼 보인다. 사일런트일 때만 MB_OK 로 자동 응답.
+      SuppressibleMsgBox(
         'Required AI tools could not be installed.' + #13#10 +
         'Vibe Coding will retry automatically on the next launch.',
         mbError,
-        MB_OK
+        MB_OK,
+        IDOK
       );
     WizardForm.ProgressGauge.Style := npbstNormal;
   end;
