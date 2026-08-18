@@ -696,7 +696,10 @@ function App() {
 
       {/* ── 업데이트 '확인 실패' 줄 — 침묵 금지(2026-08-18) ──
            안 띄우면 사장님은 '최신인가 보다'로 읽고 몇 판이든 뒤처진 채로 지낸다. */}
-      {updateError && !updateReady && !updateProgress && (
+      {/* [🔴 !updateReady 를 뺐다 — 2026-08-18] 부팅 자동 설치가 포기했을 때 ready 는 그대로
+           true 다(단추는 남겨 둬야 사용자가 직접 깔 수 있다). !updateReady 조건이 있으면
+           바로 그 상황에서 사유가 가려져, 사장님은 '단추를 눌러도 안 깔린다'만 겪는다. */}
+      {updateError && !updateProgress && (
         <div className="px-3 py-1 bg-amber-500/10 border-b border-amber-500/30 shrink-0 z-50">
           <span className="text-[10px] text-amber-400 font-bold">
             업데이트 확인 실패 — {updateError.detail}

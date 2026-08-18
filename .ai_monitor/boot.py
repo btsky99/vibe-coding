@@ -6,6 +6,8 @@ DESCRIPTION: 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스�
   의존성(pywebview/psycopg/...)만 frozen 유지되고, 앱 .py는 항상 체크아웃에서 로드된다.
 
 REVISION HISTORY:
+- 2026-08-18 Claude: EXE 풀빌드도 '받아두면 다음 시작 때 자동 적용'으로 — 소스 채널만
+  자동이던 비대칭 탓에 설치본이 일곱 판 뒤처져 있었다(_apply_staged_full_update).
 - 2026-08-16 Claude: 표준 출력 인코딩 방어 — cp949 가 줄표를 못 담아 print 가 예외를 내고
   설치본이 보이지 않는 모달 대화상자에서 영구 정지하던 사고(_make_stdio_encoding_safe).
 - 2026-07-29 Codex: Acquire an early Windows mutex before slow first-run boot work.
@@ -85,6 +87,9 @@ REPO_URL = "https://github.com/btsky99/vibe-coding.git"
 APP_REL = os.path.join(".ai_monitor", "server.py")  # 체크아웃 기준 메인 엔트리 상대경로
 ROLLBACK_FILE = ".soft_rollback"  # soft_updater가 apply 직전 직전 SHA를 여기에 기록
 STAGED_FILE = ".soft_staged"  # soft_updater가 미리 받아둔(fetch만 끝난) 대상 SHA
+FULL_READY_FILE = "update_ready.json"          # updater가 받아 둔 setup 인스톨러 기록(앱 데이터 폴더)
+FULL_ATTEMPT_FILE = "update_apply_attempt.json"  # 같은 판을 몇 번 시도했나 — 무한 재설치 방지
+FULL_ATTEMPT_MAX = 2                           # 이 횟수를 넘으면 자동 적용을 포기하고 그냥 뜬다
 
 
 # [PyInstaller 의존성 노출] boot.py가 진입점이 되면 앱 코드를 정적 import 하지 않으므로
@@ -266,6 +271,128 @@ def _ensure_src(src: Path) -> Path:
     return seed if _is_checkout(seed) else src
 
 
+def _app_data_dir() -> Path:
+    """앱 데이터 폴더(%APPDATA%/VibeCoding). updater 가 update_ready.json 을 두는 곳.
+
+    [WHY 직접 계산하나] boot.py 는 앱 모듈을 import 하지 않는다(파일 최상단 핵심 불변식).
+      server.DATA_DIR 을 쓰려면 server 를 import 해야 하는데, 그러면 PyInstaller Analysis 가
+      앱 코드를 PYZ 에 넣어 A안 전체가 깨진다. json 파일 경로 하나라 베끼는 값이 싸다.
+    [불변식] server.py 의 DATA_DIR 규칙과 같아야 한다 — 어긋나면 받아 둔 것을 못 찾는다.
+    """
+    if os.name == "nt":
+        return Path(os.getenv("APPDATA", str(Path.home()))) / "VibeCoding"
+    return Path.home() / ".vibe-coding"
+
+
+def _apply_staged_full_update() -> None:
+    """받아 둔 setup 인스톨러가 있으면 **앱을 띄우기 전에** 조용히 깔고 빠진다.
+
+    [WHY 이걸 만들었나 — 2026-08-18 사장 결재 34] 소스 채널(_apply_staged_update)은 이미
+      "받아두면 다음 시작 때 자동 적용"인데 EXE 채널만 사람이 단추를 눌러야 했다. 그 비대칭의
+      대가를 실측으로 봤다 — 사장님 PC 는 EXE v3.7.341 인데 소스만 v3.7.348 로 혼자 최신이었고,
+      그 사이 일곱 판이 나갔다. 단추를 안 누르면 영원히 뒤처진다.
+    [WHY 부팅 시점인가] 이때는 앱이 아직 파일을 안 잡고 있어 Inno 가 교체하기 가장 쉽다.
+      앱이 뜬 뒤에 깔면 사용자가 또 한 번 껐다 켜야 해서 반쪽짜리다.
+    [🔴 불변식 — 여기서 실패해도 앱은 반드시 뜬다] 예외를 밖으로 던지지 않는다.
+      사장님 PC 가 안 뜨면 그날 일이 통째로 멈춘다. 적용이 안 되면 옛 판으로 그냥 뜨고
+      사유만 update_ready.json 에 남긴다(화면이 그 값을 읽어 띄운다).
+    [🔴 불변식 — 무한 재설치 금지] 설치가 실패했는데(UAC 취소·권한·손상) 판이 그대로면
+      다음 부팅에서 또 깔려 든다. 그러면 앱이 영영 안 뜬다. 그래서 시도 횟수를 **띄우기
+      전에** 기록하고, FULL_ATTEMPT_MAX 를 넘으면 자동 적용을 포기한다 — 단추는 남겨 둔다.
+      기록을 나중에 하면 설치 중 프로세스가 죽었을 때 횟수가 안 늘어 같은 루프에 갇힌다.
+    """
+    if not _is_frozen():
+        return
+    try:
+        import json
+
+        data_dir = _app_data_dir()
+        ready_file = data_dir / FULL_READY_FILE
+        if not ready_file.exists():
+            return
+        info = json.loads(ready_file.read_text(encoding="utf-8")) or {}
+        if not info.get("ready"):
+            return
+        # [WHY 토글을 읽나] 소스 채널은 '예약을 안 만드는' 방식으로 토글을 걸지만, EXE 채널은
+        #   받아두기가 토글과 무관하게 돈다. 그래서 끄는 자리가 여기밖에 없다.
+        #   config.json 은 그냥 json 파일이라 읽어도 앱 모듈 import 가 아니다(불변식 유지).
+        try:
+            cfg = json.loads((data_dir / "config.json").read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+        if not bool(cfg.get("full_auto_update", True)):
+            return
+
+        target = str(info.get("version", "")).lstrip("v").strip()
+        attempt_file = data_dir / FULL_ATTEMPT_FILE
+        if not target or _ver_tuple(target) <= _ver_tuple(_load_current_version()):
+            # 깔 것이 없다 = 지난번 시도가 결국 성공했거나 다른 길로 깔렸다.
+            # 시도 기록을 지워야 **다음 판**이 처음부터 두 번의 기회를 갖는다.
+            try:
+                attempt_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return
+        exe_path = Path(str(info.get("exe_path") or ""))
+        if not exe_path.exists() or exe_path.stat().st_size < 1_000_000:
+            return                                  # 없거나 잘린 파일 — updater 가 다시 받는다
+        # [불변식] setup 인스톨러만 이 길로 보낸다. onefile 자산의 exe-swap 은 updater 쪽
+        #   경로라 여기서 흉내 내지 않는다(v3.7.252 코드32 사고를 다시 부르지 않기 위해).
+        is_installer = info.get("is_installer")
+        if is_installer is None:
+            is_installer = "setup" in exe_path.name.lower()
+        if not is_installer:
+            return
+
+        tried = 0
+        try:
+            prev = json.loads(attempt_file.read_text(encoding="utf-8")) or {}
+            if str(prev.get("version", "")).lstrip("v") == target:
+                tried = int(prev.get("count") or 0)
+        except Exception:
+            tried = 0
+        if tried >= FULL_ATTEMPT_MAX:
+            # [🔴 update_ready.json 에 적으면 안 된다 — 2026-08-18 실측] 그 파일의 주인은
+            #   updater 다. 앱이 뜨자마자(10분 주기의 첫 회) check_and_update 가 통째로
+            #   덮어써서 사유가 **몇 초 만에 사라졌다.** 실측으로 그 덮어쓰기를 봤다.
+            #   그래서 내가 소유한 이 파일에 적고, api/update_api.py 가 응답에 얹어 준다.
+            try:
+                attempt_file.write_text(json.dumps({
+                    "version": target, "count": tried, "gave_up": True,
+                    "detail": (f"새 판 {target} 자동 설치가 {tried}번 실패했습니다. "
+                               "옛 판으로 실행합니다 — '지금 업데이트'를 눌러 직접 깔아 주세요"),
+                }, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
+            return
+
+        # [순서 불변식] 기록이 먼저다. 위 주석 참조.
+        try:
+            attempt_file.write_text(
+                json.dumps({"version": target, "count": tried + 1}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            return                                  # 횟수를 못 세면 시도하지 않는다(루프 위험)
+
+        print(f"[boot] 받아 둔 새 판 {target} 을(를) 조용히 설치합니다(시도 {tried + 1}).")
+        # [규칙 10] 사람이 누른 실행이 아니다 — CREATE_NO_WINDOW(0x08000000) 필수.
+        #   플래그는 updater.build_installer_cmd 와 같은 값을 쓴다(양쪽 수동 동기).
+        subprocess.Popen(
+            [str(exe_path), "/SILENT", "/SUPPRESSMSGBOXES", "/NOCANCEL"],
+            creationflags=0x08000000,
+            close_fds=True,
+        )
+        # Inno 의 CloseApplications 가 우리를 닫기 전에 스스로 빠져 파일 잠금을 풀어 준다.
+        import time as _t
+
+        _t.sleep(0.8)
+        os._exit(0)
+    except Exception as e:                          # noqa: BLE001
+        # 여기서 죽으면 앱이 안 뜬다. 사유만 남기고 옛 판으로 계속 간다.
+        print(f"[boot] 새 판 자동 설치 건너뜀: {type(e).__name__}: {e}")
+
+
 def _apply_staged_update(src: Path) -> str:
     """앱을 띄우기 **전에** 미리 받아둔 업데이트를 적용한다. 적용한 SHA 또는 "".
 
@@ -350,6 +477,9 @@ def _runpy_entry(entry: Path, argv: list) -> None:
 
 def _run_main_app(passthrough: list) -> None:
     """메인 앱(인자 없음 또는 --install 등 서브커맨드) 실행 경로."""
+    # [순서] 풀빌드(EXE) 적용이 **가장 먼저**다. 성공하면 이 프로세스는 여기서 끝나므로
+    #   아래 clone/fetch 비용을 아예 안 낸다. 그리고 새 EXE 가 뜬 뒤에 소스 채널이 돈다.
+    _apply_staged_full_update()
     src = _ensure_src(_managed_src_root())
     # [순서 불변식] 게이트 검사보다 **먼저** 적용해야 한다. 적용 후의 트리가 곧 실행 대상이고,
     #   게이트는 "이 EXE가 그 트리를 실행해도 되는가"를 묻기 때문. 반대로 하면 새 소스의

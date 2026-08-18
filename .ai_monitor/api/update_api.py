@@ -55,6 +55,16 @@ def check_update_ready(handler, data_dir: Path, current_version: str) -> None:
             # [🔴 항상 실어 보낸다 — 2026-08-18] 캐시 파일이 옛 판이라 current 가 없을 수
             #   있다. 화면이 '몇 판 뒤처졌나'를 그리려면 이 값이 빠지면 안 된다.
             data.setdefault("current", cur_ver)
+            # [🔴 부팅 자동 설치가 포기한 사유를 얹는다 — 2026-08-18] boot.py 는 이 파일을
+            #   못 건드린다(updater 가 주기적으로 통째로 덮어쓴다 — 실측으로 사유가 몇 초 만에
+            #   사라졌다). 그래서 boot 는 자기 파일에 적고 여기서 합친다. 이 값이 없으면
+            #   사용자는 '단추를 눌러도 안 깔린다'만 겪고 이유를 영영 모른다.
+            try:
+                _att = json.loads((data_dir / "update_apply_attempt.json").read_text(encoding="utf-8"))
+                if _att.get("gave_up") and _att.get("detail"):
+                    data["last_error"] = _att["detail"]
+            except Exception:                                # noqa: BLE001
+                pass                                         # 기록이 없거나 깨졌으면 그냥 넘어간다
             if file_ver and _parse_ver(file_ver) > _parse_ver(cur_ver):
                 handler.wfile.write(json.dumps(data).encode('utf-8'))
             elif file_ver:
