@@ -39,6 +39,45 @@ from pathlib import Path
 # 사용자가 확인할 방법도 없다.
 CACHE_DIR = Path(__file__).resolve().parent.parent / 'cache' / 'tts'
 
+
+def _baked_dirs() -> list[Path]:
+    """미리 구워 둔 **사장님 목소리** 보관소들 — 읽기만 한다.
+
+    [🔴 왜 따로 두나 — 2026-08-18] 보드 쪽 굽는 일꾼(G:/apix-voice2 의 ag_bake_now.py)이
+      구운 wav 를 이 저장소의 캐시 폴더에 **직접 써 넣는다**(그 파일 77행이 경로를 박아 둔다).
+      그런데 그 경로는 개발 트리(D:/vibe-coding/...)로 고정이라, 설치본 사이드카가
+      제 폴더(%LOCALAPPDATA%/VibeCoding/app/...)를 보는 순간 **이미 구운 216개가 안 보인다.**
+      실측(2026-08-18): 굽는 쪽 216개 55MB / 설치본 쪽 3개.
+    [🔴 왜 CACHE_DIR 로 합치지 않고 '읽기 전용 한 겹'인가]
+      ① `_evict()` 가 500개 상한으로 **스스로 솎아낸다.** 합쳐 두면 정성껏 구운 사장님
+         문장이 일상 대화에 밀려 지워지고, 사장님은 "어떤 날은 내 목소리, 어떤 날은 아닌"
+         것으로 겪으신다 — 무음보다 잡기 어려운 고장이다. 여기 있는 것은 **절대 안 지운다.**
+      ② 굽는 쪽은 다른 저장소의 파일이다. 그쪽을 고치지 않고도 이 문제를 닫을 수 있으면
+         그 편이 안전하다(한 리포를 고쳐도 갈라진 사본은 안 고쳐진다 — 규칙 10의 교훈).
+    [불변식] 여기에는 **쓰지 않는다.** put()/_evict() 는 CACHE_DIR 만 만진다.
+    [설정] VOICE_TTS_BAKED_DIR 에 os.pathsep 로 여러 곳을 줄 수 있다. 안 주면 아래 후보를
+      쓰되 **실제로 있는 것만** 고른다 — 없는 경로를 후보로 들고 있어 봐야 매 요청 헛돈다.
+    """
+    raw = os.environ.get('VOICE_TTS_BAKED_DIR', '').strip()
+    if raw:
+        cands = [Path(x) for x in raw.split(os.pathsep) if x.strip()]
+    else:
+        cands = []
+        appdata = os.environ.get('APPDATA', '')
+        if appdata:
+            cands.append(Path(appdata) / 'VibeCoding' / 'voice-baked' / 'tts')
+        # [레거시] 굽는 쪽이 아직 이 자리를 박아 쓰고 있다(ag_bake_now.py:77).
+        #   그쪽이 위 공용 자리로 옮겨 오면 이 줄은 지워도 된다.
+        cands.append(Path(r'D:/vibe-coding/.ai_monitor/voice-server/cache/tts'))
+    out = []
+    for c in cands:
+        try:
+            if c.is_dir() and c.resolve() != CACHE_DIR.resolve():
+                out.append(c)
+        except OSError:
+            continue
+    return out
+
 # 상한 두 개. 둘 중 하나라도 넘으면 정리한다.
 #   파일 수 — 폴더 스캔 비용이 선형이라 무한정 늘면 쓰기가 느려진다.
 #   총 바이트 — 짧은 문장 28KB, 긴 답 200KB 안팎이라 64MB 면 수백 개가 들어간다.
@@ -69,11 +108,24 @@ def _path(key: str, ext: str) -> Path:
 
 def get(key: str, ext: str = 'mp3') -> bytes | None:
     """적중하면 바이트, 아니면 None. 어떤 실패도 예외로 올리지 않는다 —
-    캐시가 낭독을 막으면 캐시가 없느니만 못하다."""
+    캐시가 낭독을 막으면 캐시가 없느니만 못하다.
+
+    [순서] 내 캐시 → 구워 둔 보관소(_baked_dirs). 보관소 쪽은 mtime 도 안 건드린다 —
+      읽기 전용이고, LRU 는 솎기를 위한 것인데 거기는 솎지 않기 때문이다.
+    """
     p = _path(key, ext)
+    data = None
     try:
         data = p.read_bytes()
     except OSError:
+        for d in _baked_dirs():
+            try:
+                data = (d / f'{key}.{ext.lstrip(".")}').read_bytes()
+            except OSError:
+                continue
+            if data:
+                return data                # [불변식] 보관소는 utime 도 안 만진다
+            data = None
         return None
     if not data:
         return None
@@ -153,4 +205,12 @@ def stats() -> dict:
                 files += 1
     except OSError:
         pass
-    return {'files': files, 'bytes': total, 'dir': str(CACHE_DIR)}
+    baked = []
+    for d in _baked_dirs():
+        try:
+            baked.append({'dir': str(d), 'files': sum(1 for _ in os.scandir(d))})
+        except OSError:
+            continue
+    # [WHY 화면에 내나] 폴더가 맞았는지 사람이 확인할 길이 이것뿐이다. 안 보이면
+    #   '구운 소리가 왜 안 나지'를 코드로만 좇게 된다(오늘 그 값을 치렀다).
+    return {'files': files, 'bytes': total, 'dir': str(CACHE_DIR), 'baked': baked}

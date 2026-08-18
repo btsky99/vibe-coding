@@ -342,7 +342,42 @@ def synthesize(text: str, voice: str = '', speed: float = 0.0) -> tuple[bytes, s
       안 나고 오류는 안 뜨는, 가장 찾기 나쁜 형태의 고장이 된다(engines/__init__ 규약).
     """
     eng = load_tts(voice)
+    eng = _bake_only_guard(eng, text)
     return eng.synth(text, speed), getattr(eng, 'mime', 'audio/wav')
+
+
+def _bake_only_guard(eng, text: str):
+    """사장님 목소리는 **미리 구워 둔 문장에만** 쓴다. 없으면 edge 로 내려간다.
+
+    [🔴 왜 — 2026-08-18 사장 지시] 목소리 전체 몫이 3,584MB 로 못 박혔다.
+      "프로그램마다 3.2GB" 가 아니라 **보드·바이브 코딩·앞으로 생길 무엇이든 합쳐서** 그 안이다.
+      그런데 이쪽에서 캐시가 빗나가면 `tts_qwen._ensure_worker()` 가 **제 일꾼을 새로 띄운다**
+      (그 일꾼은 stdin/stdout 파이프 자식이라 남의 것을 빌려 쓸 수 없다 — 포트가 없다).
+      모델이 두 벌이 되고, 오늘 규칙상 학습은 안 비키므로 **밀려나는 것은 사장님 목소리다.**
+      그래서 굽는 것은 보드 한 곳에서만 하고, 이쪽은 **구워진 것을 읽기만** 한다.
+    [🔴 무음이 되는 길을 만들지 않는다] 못 읽으면 실패가 아니라 edge 다. 지금 edge 로
+      소리가 잘 나는 것을 이 변경으로 깨면 안 된다(개선이 아니라 퇴행이 된다).
+    [설정] VOICE_LOCAL_BAKE_ONLY=0 이면 이 빗장을 푼다 — **새 문장까지 사장님 목소리로
+      굽는 것은 사장 결재 사항**이라 기본은 켜 둔다. 승인이 나면 그때 이 값을 끄고,
+      tts_qwen.py 의 몫(FRACTION, 지금 0.35=4,301MB)을 합이 3,584 안에 들도록 같이 내린다.
+    [불변식] edge 로 내려갈 때 mime 도 그 엔진 것으로 함께 바뀐다 — 호출부가
+      `getattr(eng,'mime')` 를 이 함수가 돌려준 엔진에서 읽기 때문이다. wav 로 못 박으면
+      mp3 를 wav 로 알고 재생에 실패한다(synthesize 주석과 짝).
+    """
+    if os.environ.get('VOICE_LOCAL_BAKE_ONLY', '1').strip() in ('0', 'false', 'off'):
+        return eng
+    key_of_text = getattr(eng, '_key', None)
+    if key_of_text is None:
+        return eng                                   # edge 등 — 굽는 엔진이 아니다
+    try:
+        from engines import tts_cache
+        if tts_cache.get(key_of_text(text), getattr(eng, 'ext', 'wav')) is not None:
+            return eng                               # 구워져 있다 — 사장님 목소리로 나간다
+    except Exception:                                # noqa: BLE001
+        pass                                         # 캐시 조회 실패가 낭독을 막으면 안 된다
+    _log('구운 문장이 아니라 edge 로 읽습니다(일꾼을 띄우지 않습니다)')
+    from engines.tts_edge import EdgeEngine
+    return EdgeEngine('')
 
 
 class Handler(BaseHTTPRequestHandler):
