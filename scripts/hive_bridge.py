@@ -7,6 +7,8 @@ REVISION HISTORY:
 - 2026-03-19 Claude: 표준 헤더 형식 적용 (RULES.md 섹션 2 준수)
 """
 # 🕒 변경 이력 (History):
+# [2026-08-19] - Claude (로깅 실패가 도구 실행을 막던 것)
+#   - log_task 의 stderr 잡담 3줄을 파일 진단(_diag)으로 옮김. 원인·재현은 _diag 주석 참조.
 # [2026-03-11] - Claude (지식 그래프 연결선 수정)
 #   - log_thought: parent_id 파라미터 추가 → API/psql 양쪽 경로에 parent_id 전달
 #   - log_thought: 삽입 완료 후 반환된 id를 _LAST_THOUGHT_ID에 저장
@@ -43,6 +45,44 @@ PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 SERVER_URL = "http://localhost:9000"
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
+
+# 진단 로그 자리 — server.log 옆. PG 가 안 뜬 동안 무슨 일이 있었는지 남는 유일한 자리다.
+_DIAG_LOG = os.path.join(PROJECT_ROOT, '.ai_monitor', 'hive_bridge.log')
+_DIAG_MAX = 2 * 1024 * 1024        # 2MB 넘으면 처음부터 다시 쓴다(무한 증식 방지)
+
+
+def _diag(msg: str) -> None:
+    """로깅의 성공/실패를 **파일에만** 남긴다. stdout/stderr 에 절대 쓰지 않는다.
+
+    [🔴 과거사고 2026-08-19 — 로그가 안 남는 것이 '작업을 막았다']
+      원래 이 세 줄은 stderr 로 나갔다. 그런데 이 모듈은 `scripts/hive_hook.py` 를 통해
+      **Claude Code 의 PreToolUse 훅**에서 불린다. 훅이 stderr 에 쓰면 하네스가 그것을
+      훅 오류로 읽고 **도구 실행 자체를 차단한다.** 실측(2026-08-19): 훅 종료코드는
+      **0** 인데도 `[ERROR] Failed to log task to Postgres.` 한 줄 때문에 `git commit`
+      과 heredoc 명령이 막혔다. 재현 조건은 'PG 5433 미가동(앱이 꺼져 있을 때) +
+      로깅 경로를 타는 긴 명령' — 짧은 명령은 이 경로를 안 타서 **간헐적으로 보인다.**
+      즉 관측 장치가 작업을 막았다. 로깅은 최선노력(best-effort)이고, 그 실패는
+      호출자가 알 일이 아니다.
+
+    [🔴 왜 stdout 도 안 되나] Gemini CLI 는 stdout 을 JSON-RPC 로 쓴다 — 여기 뭘 찍으면
+      function call/response 쌍이 깨진다(2026-03-22 사고). 그래서 **양쪽 스트림 다 막혔고**
+      남는 자리가 파일뿐이다.
+
+    [🔴 왜 조용히 삼키지 않나] 실패를 아무 데도 안 남기면 "왜 로그가 없나" 를 영영 못 푼다.
+      스트림이 아니라 파일로 옮긴 이유가 그것이다 — 막지도, 잃지도 않는다.
+    """
+    try:
+        try:
+            if os.path.getsize(_DIAG_LOG) > _DIAG_MAX:
+                os.remove(_DIAG_LOG)
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(_DIAG_LOG), exist_ok=True)
+        with io.open(_DIAG_LOG, 'a', encoding='utf-8', errors='replace') as fh:
+            fh.write('%s %s' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), msg))
+    except Exception:                                      # noqa: BLE001
+        # [불변식] 진단이 실패해도 호출자를 절대 흔들지 않는다 — 그게 이 사고의 교훈이다.
+        pass
 PG_DB = resolve_project_db(PROJECT_ROOT)
 
 # 에이전트별 마지막 삽입된 thought id — reflect_to_pg parent_id 체인에 사용
@@ -121,11 +161,12 @@ def log_task(agent_name, task_summary, terminal_id=None, status="success", proje
         data["project_id"] = _pid
 
     # 1. 서버 API 호출 시도
-    # [2026-03-22] print → sys.stderr로 변경: Gemini CLI가 stdout을 JSON-RPC 통신에
-    # 사용하므로, print가 stdout에 출력되면 function call/response 쌍이 깨져
-    # "number of function response parts" 에러가 발생함.
-    import sys as _sys
-    _log = _sys.stderr.write
+    # [2026-03-22] print → stderr 로 옮김: Gemini CLI 가 stdout 을 JSON-RPC 로 써서
+    #   여기 찍으면 function call/response 쌍이 깨진다.
+    # [2026-08-19] stderr → **파일**(_diag)로 다시 옮김: Claude Code 훅에서 stderr 에 쓰면
+    #   하네스가 훅 오류로 읽어 **도구 실행을 차단**했다. 양쪽 스트림이 다 막혀 파일만 남는다.
+    #   자세한 근거·재현은 `_diag` docstring.
+    _log = _diag
     if _call_api('/api/hive/log/pg', data):
         _log(f"[POSTGRES] Task logged via API: {task_summary[:50]}...\n")
         return
