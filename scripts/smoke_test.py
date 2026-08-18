@@ -12,6 +12,8 @@
 #     R18~R20 한계 해소. (VIBE_SRC_DIR dev 트리 직결은 frozen 전제와 충돌해 폐기)
 # - 2026-07-16 Claude: 종료 wait를 try로 보호 + kill 에스컬레이션 — TimeoutExpired가
 #     finally를 뚫고 크래시하며 EXE를 고아로 방치하던 결함 수정 (좀비 락 사고 발단).
+# - 2026-08-19 Claude: cp949 콘솔에서 출력이 죽던 것 — 실패 메시지가 죽으면 exit code 를
+#     못 보고 빌드 검증이 침묵으로 통과한다(bab2488 이 남긴 '못 한 것' 마감).
 # - 2026-04-11 Claude: 최초 생성
 # ────────────────────────────────────────────────────────────────────────────
 """로컬 EXE smoke test — 빌드된 EXE가 정상 기동되는지 검증."""
@@ -26,6 +28,12 @@ import signal
 from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import URLError
+
+# [과거사고] cp949 콘솔이 줄표·화살표를 못 찍어 **실패 메시지 쪽이** 먼저 죽었다(bab2488).
+# 그러면 릴리즈 스킬은 종료코드를 못 읽고 침묵을 통과로 읽는다 — 검증 장치가 0 이 되는 자리다.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
 
 # ── 설정 ──────────────────────────────────────────────────────────────────
 

@@ -28,6 +28,8 @@ DESCRIPTION: LLM 위키 색인 생성기 — 낱말(FTS5) + 뜻(임베딩)을 **
                python scripts/wiki_index_build.py --no-vector  # 낱말만(모델 없이)
 
 REVISION HISTORY:
+- 2026-08-19 Claude: cp949 콘솔에서 완료 보고 한 줄이 죽던 것 — 색인은 다 만들고도
+    종료코드 1 로 끝나 자동화가 '실패' 로 읽었다. 같은 결함 5번째(bab2488 참조).
 - 2026-08-18 Claude: 최초 작성 — 경량화 3단계. 낱말+뜻 하이브리드, 근거 표시, 빈 결과 허용.
 """
 from __future__ import annotations
@@ -40,6 +42,15 @@ import sqlite3
 import struct
 import sys
 from pathlib import Path
+
+# [과거사고] 윈도우 기본 코드페이지(cp949)는 줄표(—)·화살표(→)를 못 찍는다. 첫 print 보다
+# 먼저 재설정하지 않으면 UnicodeEncodeError 로 죽는데, 이 스크립트는 색인을 **다 만든 뒤**
+# 마지막 보고 줄에서 죽어 종료코드 1 을 남겼다 — 성공을 실패로 보고하는 가장 나쁜 모양이다.
+# 같은 함정 이력: wait_ci.py(bab2488) · incident.py · smoke_test.py.
+# 글자 모양이 아니라 통보가 목적이므로 못 찍는 글자는 대체한다(errors='replace').
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
 
 ROOT = Path(__file__).resolve().parent.parent
 WIKI = ROOT / 'wiki'

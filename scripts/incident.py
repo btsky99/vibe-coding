@@ -6,6 +6,8 @@ DESCRIPTION: 사고 장부 CLI — 고친 에러 기록(record) / 재발 검색(
              재발률 통계(stats, 북극성 지표). 자가 치유 2.0 ① (Task 10).
 
 REVISION HISTORY:
+- 2026-08-19 Claude: cp949 콘솔에서 출력이 죽던 것 — 사고 기록/검색이 화면에서 죽으면
+    자가 치유의 입구가 통째로 막힌다(bab2488 이 남긴 '못 한 것' 마감).
 - 2026-06-10 Claude: 최초 구현
 
 사용법:
@@ -17,6 +19,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+# [과거사고] cp949 콘솔이 줄표·화살표를 못 찍어 출력에서 죽었다(bab2488). 이 CLI 는
+# CLAUDE.md 가 매 세션 쓰라고 하는 도구라, 죽으면 사고 장부가 조용히 0 이 된다.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / '.ai_monitor'))
