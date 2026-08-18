@@ -3,6 +3,8 @@
 # 📝 설명: 백그라운드 데몬 러너 — 워치독/리사이클 워처/오케스트레이터/문서 생성/
 #          에이전트 동기화/MUX/제텔 동기화·정제/커밋 감시 (server.py 분할 단계 9)
 # 🕒 변경 이력:
+# [2026-08-19] Claude — 볼트 .md 내보내기를 스위치로 끈다(기본 꺼짐, 경량화 2단계).
+#   회상은 zettel_notes 테이블을 읽으므로 안 다친다 — 볼트 **파일**을 읽는 곳은 이 데몬뿐.
 # [2026-08-14] Claude — 데몬 .py 실행기를 runtime.script_runner_cmd로 통일(설치본에서
 #   Python 미설치 PC면 LAN 브리지/워치독이 조용히 안 뜨던 결함) + _spawn_script 실패 로그.
 # [2026-08-14] Claude — Discord 대시보드/게이트웨이 러너 2종 삭제(커넥터 전면 철거).
@@ -51,6 +53,42 @@ def _config_vault_dir(config_file: Path, default_vault: Path) -> Path:
     except Exception:
         pass
     return default_vault
+
+
+def _vault_export_enabled(config_file: Path) -> bool:
+    """PG 지식을 옵시디언용 .md 파일로 내보낼지. **기본 꺼짐**(2026-08-19, 결재 42 경량화 2단계).
+
+    [WHY 껐나 — 사장 지시 "볼트 3갈래 → wiki/ 한 곳"] 정본이 여럿이면 언젠가 어긋난다.
+      2026-08-18 전수 조사: 볼트 셋(appdata 4,315 / .zettel-vault 137 / GDrive 미러 3,314)에
+      **사람이 손으로 쓴 노트는 0장**이다. 작성자는 전부 기계(system·wiki_index·
+      knowledge_extract). 즉 볼트는 통째로 파생물이고, 사람이 고치는 정본은 리포 `wiki/`
+      43장(git 추적)이다.
+
+    [🔴 회상은 안 다친다 — 이걸 오해하면 못 켠다] 회상/pgvector 는 **`zettel_notes` 테이블**을
+      읽는다(`src/pg_vector_search.py:36`). 볼트 **파일**을 읽는 곳은 이 데몬 하나뿐이므로
+      내보내기를 꺼도 지식과 자가치유는 그대로다. 꺼서 사라지는 것은 '옵시디언으로 열어 보기'
+      하나이고, 그건 규약이 이미 "③ 옵시디언 = 선택적 뷰어, 없어도 완전 동작"으로 정한 층이다
+      (`.claude/rules/wiki.md` 0절).
+
+    [🔴 지금도 이미 안 보이고 있었다] 옵시디언이 실제로 열어 둔 볼트는 GDrive 미러였고
+      그 드라이브는 마운트되어 있지 않다 + 미러 밀기는 1단계(8fcde46)로 껐다. 즉 이 스위치는
+      사용자가 보던 화면을 새로 끊는 것이 아니다.
+
+    [🔴 코드를 지우지 않고 스위치만 둔 이유] 1단계와 같다 — 지우면 되돌리는 데 값이 들지만
+      스위치는 한 줄이면 돌아온다.
+    [되켜기 — 한 줄] config.json 에 `"vault_export": true`.
+
+    [🔴 이미 디스크에 있는 파일은 이 스위치가 지우지 않는다] '더 안 쓴다'이지 '지운다'가
+      아니다. 청소는 사람이 부르는 별도 스크립트(`scripts/vault_retire.py`) 몫으로 갈랐다 —
+      데몬이 파일을 대량 삭제하면 오작동 한 번에 되돌릴 수 없다.
+    """
+    try:
+        if config_file.exists():
+            cfg = json.loads(config_file.read_text(encoding='utf-8'))
+            return bool(cfg.get('vault_export', False))
+    except Exception:                                      # noqa: BLE001
+        pass
+    return False
 
 
 @dataclass
@@ -445,7 +483,15 @@ def run_wiki_sync(env: DaemonEnv) -> None:
 # ── 제텔카스텐 Vault 동기화 데몬 (DB ↔ Obsidian 60초 주기) ────────────
 def run_zettel_sync(env: DaemonEnv) -> None:
     """PostgreSQL zettel_notes ↔ Obsidian vault 양방향 동기화 데몬.
-    [v3.7.179] 서버 시작 시 자동 실행 — 이전에는 수동 실행만 가능했음."""
+    [v3.7.179] 서버 시작 시 자동 실행 — 이전에는 수동 실행만 가능했음.
+
+    [🔴 2026-08-19] 기본으로 **아무것도 하지 않고 돌아간다**(`_vault_export_enabled` 참조).
+      게이트를 함수 맨 앞에 둔 이유: 아래는 zettel_sync.py 를 exec_module 로 올리고
+      .zettel-vault 를 copytree 하는 등 **꺼진 상태에서 값을 치를 이유가 없는 일**들이다."""
+    if not _vault_export_enabled(env.config_file):
+        print('[zettel_sync] 볼트 .md 내보내기 꺼짐 — 지식은 zettel_notes(PG)에 그대로 있고 '
+              '정본은 wiki/ 다 (되켜기: config.json "vault_export": true)')
+        return
     try:
         _sync_dir = env.scripts_dir or (env.base_dir / 'scripts')
         _sync_script = _sync_dir / 'zettel_sync.py'
