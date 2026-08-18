@@ -6,6 +6,8 @@ DESCRIPTION: 경량 소스 업데이트 채널(A안)의 EXE 진입점 부트스�
   의존성(pywebview/psycopg/...)만 frozen 유지되고, 앱 .py는 항상 체크아웃에서 로드된다.
 
 REVISION HISTORY:
+- 2026-08-18 Claude: `vibe-coding.exe <script.py>` 의 예외가 PyInstaller 부트로더 창으로
+  올라가 무인 설치를 멈추던 것 — 트레이스백을 파일로 남기고 종료 코드 1로 끝낸다.
 - 2026-08-18 Claude: EXE 풀빌드도 '받아두면 다음 시작 때 자동 적용'으로 — 소스 채널만
   자동이던 비대칭 탓에 설치본이 일곱 판 뒤처져 있었다(_apply_staged_full_update).
 - 2026-08-16 Claude: 표준 출력 인코딩 방어 — cp949 가 줄표를 못 담아 print 가 예외를 내고
@@ -90,6 +92,7 @@ STAGED_FILE = ".soft_staged"  # soft_updater가 미리 받아둔(fetch만 끝난
 FULL_READY_FILE = "update_ready.json"          # updater가 받아 둔 setup 인스톨러 기록(앱 데이터 폴더)
 FULL_ATTEMPT_FILE = "update_apply_attempt.json"  # 같은 판을 몇 번 시도했나 — 무한 재설치 방지
 FULL_ATTEMPT_MAX = 2                           # 이 횟수를 넘으면 자동 적용을 포기하고 그냥 뜬다
+SCRIPT_ERROR_LOG = "daemon_script_errors.log"  # `vibe-coding.exe <script.py>` 가 터진 기록(append)
 
 
 # [PyInstaller 의존성 노출] boot.py가 진입점이 되면 앱 코드를 정적 import 하지 않으므로
@@ -528,6 +531,52 @@ def _run_hook(argv: list) -> None:
     _runpy_entry(entry, argv)
 
 
+def _log_script_failure(target: Path, argv: list) -> None:
+    """스크립트가 터졌을 때 **전체 트레이스백**을 파일에 남긴다.
+
+    [🔴 왜 이 함수가 생겼나 — 2026-08-18 아픽스3 실측] frozen 에서 이 경로의 예외는
+      PyInstaller 부트로더까지 올라가 "Unhandled exception in script" 창을 띄운다.
+      그 창은 **Inno 가 만든 것이 아니라서** `/SILENT`·`/SUPPRESSMSGBOXES`·
+      `SuppressibleMsgBox` 어느 것도 닿지 않는다. 무인 설치와 부팅 자동 설치
+      (`_apply_staged_full_update`)가 거기서 사람이 누를 때까지 멈췄다.
+    [🔴 창은 없애되 사실은 없애지 않는다] 예외를 삼키면 오늘 하루 우리가 싸운 병
+      그대로다(값은 성공이라 말하고 화면은 침묵). 그래서 ①전체 트레이스백을 남기고
+      ②0 이 아닌 종료 코드로 끝낸다 — 부르는 쪽(Inno [Run] / CurStepChanged)이
+      실패를 실패로 읽고, 부팅 자동 설치의 시도 횟수 기록도 그대로 동작한다.
+    [🔴 append 다 — 덮어쓰지 않는다] `voice-server.log` 가 기동마다 통째로 덮어써지는
+      바람에 오늘 진단이 한 번 어긋났다("마지막 줄이 기동 메시지"를 죽음으로 오독).
+      여기서 같은 실수를 반복하지 않는다. 대신 1MB 를 넘으면 .old 로 한 번만 밀어
+      무한히 자라지 않게 한다 — 기록을 지우는 것이 아니라 세대를 하나 두는 것이다.
+    [불변식] 이 함수는 절대 예외를 내지 않는다. 로그를 못 써서 종료 코드를 못 내면
+      본래 막으려던 창이 다시 뜬다.
+    """
+    try:
+        import time
+        import traceback
+
+        d = _app_data_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / SCRIPT_ERROR_LOG
+        try:
+            if path.exists() and path.stat().st_size > 1_000_000:
+                old = d / (SCRIPT_ERROR_LOG + ".old")
+                if old.exists():
+                    old.unlink()
+                path.rename(old)
+        except OSError:
+            pass
+        with path.open("a", encoding="utf-8", errors="replace") as fp:
+            # [WHY print(file=) 인가] 문자열에 개행 이스케이프를 쓰지 않으려는 것뿐이다.
+            #   이 파일은 여러 도구를 거쳐 편집되는데 그때 이스케이프가 가장 잘 깨진다.
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            print("", file=fp)
+            print("===== {0}  {1}".format(stamp, " ".join(str(a) for a in argv)), file=fp)
+            print("target={0}  frozen={1}".format(target, _is_frozen()), file=fp)
+            print(traceback.format_exc(), file=fp)
+    except Exception:                                        # noqa: BLE001
+        pass                                                 # 위 [불변식] 참조
+
+
 def _run_daemon_script(argv: list) -> None:
     """`vibe-coding.exe <script.py> [args]` — 데몬/도구 재실행 경로.
     [과거사고/제약] frozen에서 server.py가 일부 데몬을 `[sys.executable, <script>, ...]`로
@@ -549,7 +598,16 @@ def _run_daemon_script(argv: list) -> None:
     for p in (str(scripts_dir), str(src_root / ".ai_monitor"), str(src_root)):
         if p and p not in sys.path:
             sys.path.insert(0, p)
-    _runpy_entry(target, argv[1:])
+    try:
+        _runpy_entry(target, argv[1:])
+    except SystemExit:
+        # 스크립트가 스스로 낸 종료 코드다 — 그대로 흘려보낸다(성공 0 포함).
+        raise
+    except BaseException:                                    # noqa: BLE001
+        # [WHY BaseException 인가] 부트로더 창을 띄우는 것은 '전파된 예외'이지
+        #   Exception 만이 아니다. KeyboardInterrupt 도 여기서는 창이 된다.
+        _log_script_failure(target, argv)
+        raise SystemExit(1)
 
 
 def _selftest() -> int:
