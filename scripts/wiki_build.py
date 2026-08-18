@@ -5,6 +5,10 @@ DESCRIPTION: 원료(코드 주석 · 사고 장부 · 세션 메모리)를 wiki/
              **사람이 읽는 페이지**를 만든다 — 정본은 파일이고 DB 는 인덱스이기 때문이다.
 
 REVISION HISTORY:
+- 2026-08-19 Claude: 🔴 PG 도달 불가일 때 **좋은 위키를 덮어쓰던 것** 차단(종료코드 2).
+  실측 사고: 앱이 꺼진 상태로 돌렸더니 `사고 0건` 으로 39장을 다시 써 함정 페이지의
+  사고 절이 통째로 빠졌다(한 장에서 118줄). `query_rows` 가 예외를 삼켜 **경고조차
+  없었다** — 그래서 collect_incidents 가 (행, 닿았는가) 두 값을 돌려준다.
 - 2026-08-15 Claude: W4 실구현 — 세션 메모리(`~/.claude/projects/<슬러그>/memory/`)를 원료 3
   으로 추가. 🔴 직전 개정 기록이 "W3·W4"라고 선언해 놓고 memory/ 를 읽는 코드는 없었다
   (주석이 코드보다 앞서 나간 사례 — 다음 세션은 헤더를 믿지 말고 `collect_*` 를 셀 것).
@@ -221,13 +225,53 @@ _QUARANTINE = '다른 프로젝트'
 _FN_RE = re.compile(r'[\w\-]+\.(?:py|tsx|ts|iss|spec|json|yml|yaml|sql|ps1|bat|cmd)')
 
 
-def collect_incidents() -> list[dict]:
-    """사고 장부를 읽어온다. DB 가 없으면 빈 목록 — 위키 빌드 자체는 계속돼야 한다.
+class _DegradedBuild(RuntimeError):
+    """원료가 빠진 채로 기존 위키를 덮으려 할 때 던진다 — 실패로 끝내야 사람이 본다."""
 
-    [제약] 이 스크립트는 설치본(W10 리셋 API)에서도 불린다. PG 가 아직 안 떴을 수 있어
-      예외를 삼키고 원료 0건으로 진행한다 — 사고 섹션만 비고 코드 주석 페이지는 나온다.
+
+def _wiki_has_incidents() -> bool:
+    """이미 만들어진 함정 페이지에 사고 장부에서 온 내용이 있는가.
+
+    [WHY 이 판정이 필요한가] '사고 원료 0건' 이 정상인 경우(첫 빌드)와 퇴행인 경우
+      (덮어쓰면 지식 손실)를 가른다. 렌더러가 각 사고 항목에 `incident_ledger` 를
+      출처로 박으므로 그 문자열의 존재가 곧 '사고가 실려 있다' 다.
+    """
+    trap = WIKI / '함정'
+    if not trap.is_dir():
+        return False
+    for p in trap.glob('*.md'):
+        try:
+            if 'incident_ledger' in p.read_text(encoding='utf-8', errors='replace'):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def collect_incidents() -> tuple[list[dict], bool]:
+    """사고 장부를 읽어온다. 돌려주는 것은 **(행 목록, PG 에 닿았는가)** 두 개다.
+
+    [🔴 과거사고 2026-08-19 — 위키가 조용히 사고 지식을 잃었다]
+      앱이 꺼져 PG 5433 이 안 뜬 상태로 이 빌더를 돌렸더니 `사고 0건` 으로 39장을 다시 써서
+      **함정 페이지에서 사고 절이 통째로 빠졌다**(한 장에서만 118줄 삭제. 커밋 전에 잡아
+      `git checkout -- wiki/` 로 되돌렸다).
+      🔴 더 나쁜 것: 아래 `except` 는 **한 번도 안 걸렸다.** `query_rows` 가
+      `if not ensure_schema(): return []` 로 **예외를 삼키고 빈 목록**을 주기 때문이다
+      (`src/pg_base.py:468`). 그래서 "건너뜀" 경고조차 안 찍히고 완전히 조용했다.
+      → 그래서 '비어 있다' 와 '못 읽었다' 를 **호출부가 구분할 수 있게** 두 값으로 바꿨다.
+        이 구분이 없으면 판정이 불가능하다 — 둘 다 `[]` 로 보인다.
+
+    [제약] 이 함수는 설치본(위키 리셋 API)에서도 불린다. 그때는 PG 가 아직 안 떴을 수
+      있고, **위키가 아예 없는 첫 빌드라면** 사고 없이 만드는 편이 아무것도 없는 것보다 낫다.
+      그 판단은 여기서 하지 않는다 — 덮어쓸 것이 있는지는 `build()` 가 안다.
     """
     try:
+        # [WHY ensure_schema 로 먼저 재나] query_rows 와 **같은 권위**를 쓴다. 새 판정
+        #   경로를 만들면 둘이 어긋나 "여기선 닿는데 저기선 안 닿는다" 가 생긴다.
+        from src.pg_schema import ensure_schema
+        if not ensure_schema():
+            print('  🔴 사고 장부: PostgreSQL 에 닿지 못했다 — 0건은 "비어 있다"가 아니라 "못 읽었다"다')
+            return [], False
         from src.pg_base import query_rows
         rows = query_rows(
             "SELECT error_signature, error_text, root_cause, fix_description, "
@@ -235,8 +279,8 @@ def collect_incidents() -> list[dict]:
             "FROM incident_ledger ORDER BY recurrence_count DESC, created_at"
         )
     except Exception as exc:  # noqa: BLE001 — 원료 하나가 없다고 빌드를 죽이지 않는다
-        print(f'  (사고 장부 건너뜀: {exc})')
-        return []
+        print(f'  🔴 사고 장부를 못 읽었다: {exc}')
+        return [], False
 
     seen: set[str] = set()
     out = []
@@ -246,7 +290,7 @@ def collect_incidents() -> list[dict]:
             continue  # 같은 서명이 두 행이면 장부 쪽 중복 — recurrence_count 가 정본이다
         seen.add(sig)
         out.append(r)
-    return out
+    return out, True
 
 
 def _route_by_keywords(low: str) -> str | None:
@@ -682,12 +726,22 @@ def update_index(written: dict[str, list[str]]) -> bool:
     return write_if_changed(idx, '\n'.join(out) + '\n')
 
 
-def build(dry_run: bool = False) -> dict:
+def build(dry_run: bool = False, allow_degraded: bool = False) -> dict:
     head = ke._git_head()
     blocks = collect_blocks()
     pages = plan_pages(blocks)
 
-    incidents = collect_incidents()
+    incidents, inc_ok = collect_incidents()
+    # [🔴 2026-08-19] 사고 원료를 못 읽었는데 **이미 사고가 실린 페이지가 있으면 쓰지 않는다.**
+    #   이 빌더는 페이지를 통째로 다시 쓰므로(write_if_changed), 원료 하나가 빠진 채 돌면
+    #   그 원료에서 온 절이 조용히 사라진다 — 되돌릴 수 있는 건 커밋 전뿐이다.
+    #   [불변식] 첫 빌드(덮어쓸 사고가 없음)는 그대로 진행한다 — 설치본 리셋 경로가 그 경우고,
+    #     거기서는 사고 없는 위키가 위키 없는 것보다 낫다. 즉 **막는 것은 '퇴행' 하나뿐**이다.
+    if not inc_ok and not allow_degraded and _wiki_has_incidents():
+        raise _DegradedBuild(
+            'PostgreSQL 에 닿지 못해 사고 원료가 0건인데, 위키에는 이미 사고가 실려 있다.\n'
+            '      그대로 쓰면 그 절이 사라진다. 앱을 켜서 PG(5433)를 띄운 뒤 다시 돌려라.\n'
+            '      사고 없이 굳이 다시 만들려면: --allow-degraded')
     inc_pages = plan_incidents(incidents)
     # 사고만 있고 주석은 없는 주제도 페이지를 가져야 한다 — 없으면 그 사고는 사라진다.
     for iname in inc_pages:
@@ -740,9 +794,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(description='원료 → wiki/ 페이지 합성')
     ap.add_argument('--dry-run', action='store_true', help='쓰지 않고 통계만')
     ap.add_argument('--stats', action='store_true', help='페이지 수/커버리지 출력')
+    ap.add_argument('--allow-degraded', action='store_true',
+                    help='사고 원료를 못 읽어도 기존 위키를 덮어쓴다 (지식이 사라질 수 있다)')
     args = ap.parse_args()
 
-    st = build(dry_run=args.dry_run or args.stats)
+    try:
+        st = build(dry_run=args.dry_run or args.stats,
+                   allow_degraded=args.allow_degraded)
+    except _DegradedBuild as exc:
+        # [WHY 종료코드 2] 0 이면 자동화가 '성공' 으로 읽는다. 이 저장소에서 침묵이 통과로
+        #   읽히는 사고를 여러 번 밟았다 — 막았다는 사실이 밖으로 나가야 한다.
+        print(f'🔴 위키를 쓰지 않았다 — {exc}')
+        return 2
     print(f"원료 — 코드 주석 {st['blocks']}건 · 사고 {st['incidents']}건 "
           f"· 세션 메모리 {st['memories']}장 → 페이지 {st['pages']}장")
     for sec, n in sorted(st['by_section'].items()):
