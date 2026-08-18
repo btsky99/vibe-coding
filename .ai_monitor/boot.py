@@ -282,6 +282,14 @@ def _app_data_dir() -> Path:
       앱 코드를 PYZ 에 넣어 A안 전체가 깨진다. json 파일 경로 하나라 베끼는 값이 싸다.
     [불변식] server.py 의 DATA_DIR 규칙과 같아야 한다 — 어긋나면 받아 둔 것을 못 찾는다.
     """
+    # [🔴 VIBE_DATA_DIR 을 먼저 본다 — 2026-08-18 smoke test 에서 드러남]
+    #   scripts/smoke_test.py 는 이 값으로 데이터 디렉토리를 격리해 EXE 를 띄운다.
+    #   여기서 그걸 무시하고 진짜 %APPDATA% 를 보면, **격리 시험이 사장님의 진짜
+    #   update_ready.json 을 읽어 실제 인스톨러를 조용히 실행**할 수 있다.
+    #   시험이 사람 PC 를 바꾸는 것은 시험이 아니다. server.py 의 DATA_DIR 규칙과도 같다.
+    override = os.environ.get("VIBE_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
     if os.name == "nt":
         return Path(os.getenv("APPDATA", str(Path.home()))) / "VibeCoding"
     return Path.home() / ".vibe-coding"
