@@ -16,11 +16,19 @@ REVISION HISTORY:
 
 ## 라우팅 매핑 (vibe-* 스킬 → subagent)
 
-| Slash 스킬 | Subagent | 위임 사유 |
-|-----------|----------|----------|
-| `/vibe-code-review` | `code-reviewer` | 3관점(성능/품질/가독성) 분석을 메인에서 분리, 토큰 절약 |
-| `/vibe-security` | `security-auditor` | OWASP Top 10 스캔 격리, grep 부담 분리 |
-| `/vibe-debug` | `debugger` | 4단계 분석 격리 + Edit 권한 격리 (수정은 사용자 승인 후 메인이 수행) |
+| Slash 스킬 | Subagent | model | 위임 사유 |
+|-----------|----------|-------|----------|
+| `/vibe-code-review` | `code-reviewer` | `sonnet` | 3관점(성능/품질/가독성) 분석을 메인에서 분리, 토큰 절약 |
+| `/vibe-security` | `security-auditor` | `sonnet` | OWASP Top 10 **스캔** 격리 — 알려진 패턴 찾기. 판정은 메인 |
+| `/vibe-debug` | `debugger` | 🔴 `opus` | 4단계 분석 격리 + Edit 권한 격리 (수정은 사용자 승인 후 메인이 수행) |
+
+🔴 **model 은 CLAUDE.md 규칙 13으로 가른다 — 선은 「코드 수정이냐」가 아니라 「원인을 아느냐」다.**
+`debugger` 만 오퍼스인 이유: 이 에이전트의 일이 **원인 규명 그 자체**다. 실측(apix1-2)에서
+원인 찾기는 소넷 316.8초/121.7k · 오퍼스 215.1초/83.3k 로 **소넷이 더 느리고 더 비쌌다.**
+
+🔴 **`inherit` 로 두지 마라.** 2026-08-19 이전 `debugger`·`security-auditor` 가 `inherit`
+이었다 — 부모가 값싼 모델인 세션에서 디버깅이 **조용히** 소넷으로 떨어진다. 품질 저하는
+에러로 안 나타나므로 아무도 눈치채지 못한다.
 
 **위임 흐름:** 사용자가 `/vibe-*` 호출 → 스킬이 `Agent(subagent_type=..., prompt=...)` 즉시 호출 → subagent 결과 수신 → 메인이 핵심만 요약 보고 → 사용자 승인 시 메인이 후속 작업(편집/배포 등) 수행.
 
