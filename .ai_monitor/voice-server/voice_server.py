@@ -370,18 +370,26 @@ def _bake_only_guard(eng, text: str):
     [설정] VOICE_LOCAL_BAKE_ONLY=0 이면 이 빗장을 푼다 — **새 문장까지 사장님 목소리로
       굽는 것은 사장 결재 사항**이라 기본은 켜 둔다. 승인이 나면 그때 이 값을 끄고,
       tts_qwen.py 의 몫(FRACTION, 지금 0.35=4,301MB)을 합이 3,584 안에 들도록 같이 내린다.
+    [🔴 찾을 때는 옛 이름도 본다 — 2026-08-20] 굽는 쪽(ag_bake_now.py:732)이 쓰는
+      이름에는 참조 지문이 없고 이쪽 _key() 에는 있어, **이미 구워 둔 250개가 한 개도
+      안 맞아** 이 문이 매번 edge 로 내려갔다(사장이 들으신 로봇 목소리가 이것이다).
+      그래서 엔진이 주는 _hit() 로 묻는다 — 정본 이름과 옛 이름을 차례로 본다
+      (engines/tts_qwen.py QwenEngine._keys 주석). 구운 파일은 손대지 않았다.
     [불변식] edge 로 내려갈 때 mime 도 그 엔진 것으로 함께 바뀐다 — 호출부가
       `getattr(eng,'mime')` 를 이 함수가 돌려준 엔진에서 읽기 때문이다. wav 로 못 박으면
       mp3 를 wav 로 알고 재생에 실패한다(synthesize 주석과 짝).
     """
     if os.environ.get('VOICE_LOCAL_BAKE_ONLY', '1').strip() in ('0', 'false', 'off'):
         return eng
+    hit = getattr(eng, '_hit', None)                 # 🔴 옛 이름까지 보는 조회(2026-08-20)
     key_of_text = getattr(eng, '_key', None)
-    if key_of_text is None:
+    if hit is None and key_of_text is None:
         return eng                                   # edge 등 — 굽는 엔진이 아니다
     try:
         from engines import tts_cache
-        if tts_cache.get(key_of_text(text), getattr(eng, 'ext', 'wav')) is not None:
+        found = (hit(text) if hit is not None
+                 else tts_cache.get(key_of_text(text), getattr(eng, 'ext', 'wav')))
+        if found is not None:
             return eng                               # 구워져 있다 — 사장님 목소리로 나간다
     except Exception:                                # noqa: BLE001
         pass                                         # 캐시 조회 실패가 낭독을 막으면 안 된다

@@ -165,6 +165,14 @@ def _worker_paths() -> tuple[str, str]:
 WORKER_PY, WORKER_JOB = _worker_paths()
 MODEL_ID = os.environ.get('VOICE_QWEN_MODEL', 'Qwen/Qwen3-TTS-12Hz-0.6B-Base')
 
+# ── [🔴 이미 구워 둔 것을 찾기 위한 옛 참조 지문 — 2026-08-20] ───────────────
+#   여기 적힌 지문은 boss_pick.wav(11.99초, work/bake_now/ref_info.json) 것이다.
+#   지금 참조가 이것과 같을 때에만 QwenEngine._keys() 가 옛 이름을 함께 본다.
+#   근거·자세한 사연은 _keys() 주석.
+LEGACY_REF_SHA = os.environ.get(
+    'VOICE_QWEN_LEGACY_REF',
+    'ce1197ef51736b7625c5ad2ced8ec74475a7f6c07520ba209e7948a47e133469').strip()
+
 # 프로젝트 뿌리와 scripts/ — 설치 절차(setup_qwen)를 불러오기 위한 자리.
 # [🔴 두 가지 배치가 있다 — 한쪽만 맞추면 다른 쪽에서 조용히 죽는다]
 #   개발/체크아웃: <뿌리>/.ai_monitor/voice-server  → scripts 는 <뿌리>/scripts
@@ -687,12 +695,48 @@ class QwenEngine:
         self.voice = 'apix'
 
     def _key(self, text: str) -> str:
-        """[🔴 참조 지문이 열쇠에 들어간다 — 2026-08-16] 없으면 사장님이 목소리 원본을
+        """**쓸 때** 쓰는 정본 열쇠.
+
+        [🔴 참조 지문이 열쇠에 들어간다 — 2026-08-16] 없으면 사장님이 목소리 원본을
         바꾸셔도 옛 소리가 그대로 난다(보드가 그 사고를 겪었다).
         [🔴 굽는 쪽과 같은 식이어야 한다] 미리 굽는 ag_bake_now.py 의 cache_key() 가 이
           순서·구분자를 그대로 흉내 내 같은 폴더에 파일을 놓는다. 한쪽만 고치면 미리
-          구운 문장이 조용히 안 맞아 첫 소리가 도로 느려진다."""
+          구운 문장이 조용히 안 맞아 첫 소리가 도로 느려진다.
+        [🔴 실제로 그 일이 났다 — 2026-08-20] 굽는 쪽은 지문을 **안 넣고** 있었다.
+          찾을 때는 _keys()/_hit() 를 써라 — 그 둘이 옛 이름까지 본다."""
         return tts_cache.key_of('qwen', self.voice, MODEL_ID, _ref_sha(), text)
+
+    def _legacy_key(self, text: str) -> str:
+        """굽는 쪽이 실제로 쓰던 **옛 이름** — 참조 지문이 빠진 넷이다
+        (G:/apix-voice2/work/ag_bake_now.py:732 cache_key)."""
+        return tts_cache.key_of('qwen', self.voice, MODEL_ID, text)
+
+    def _keys(self, text: str) -> list:
+        """찾을 때 볼 이름들. 앞이 정본, 뒤가 옛 이름.
+
+        [🔴 왜 두 번 찾나 — 2026-08-20 사장 지시] 굽는 쪽 이름 규칙에는 참조 지문이
+          없고 이쪽에는 있어, **이미 구워 둔 250개가 한 개도 안 맞았다**(실측: 쪽지
+          179문장 중 옛 이름 178개 적중 / 새 이름 0개). 그 결과 _bake_only_guard 가
+          매번 edge 로 내려가 사장이 로봇 목소리를 들으셨다. 멀쩡한 소리를 버리고 다시
+          굽는 대신 **읽는 쪽이 한 번 더 찾는다** — 구운 파일은 손대지 않는다.
+        [🔴 그래도 지문을 넣은 까닭은 살아 있다] 원본이 바뀌면 옛 소리가 나면 안 된다.
+          그래서 옛 이름은 **지금 참조가 그 250개를 구울 때 쓰던 것일 때만** 본다.
+          원본을 갈면 이 길은 저절로 닫히고 정본 규칙만 남는다(그때 굽는 쪽이 새 지문으로
+          새로 구워 넣으므로 무음이 되지 않는다).
+        [손잡이] VOICE_QWEN_LEGACY_REF 로 그 지문을 바꾸거나, 빈 값으로 두면 옛 이름을
+          아예 안 본다."""
+        keys = [self._key(text)]
+        if LEGACY_REF_SHA and _ref_sha() == LEGACY_REF_SHA:
+            keys.append(self._legacy_key(text))
+        return keys
+
+    def _hit(self, text: str):
+        """구워 둔 소리가 있으면 그 바이트, 없으면 None. **쓰지 않는다.**"""
+        for k in self._keys(text):
+            data = tts_cache.get(k, self.ext)
+            if data is not None:
+                return data
+        return None
 
     def load(self) -> None:
         """[WHY 기본값이 '안 띄운다' 인가] 예열이 GPU 를 무는 순간, 음성을 켠 것만으로
@@ -709,12 +753,11 @@ class QwenEngine:
             _ensure_worker()
 
     def synth(self, text: str, speed: float = 1.0) -> bytes:
-        key = self._key(text)
-        hit = tts_cache.get(key, self.ext)
+        hit = self._hit(text)             # 정본 이름 → 옛 이름 차례로
         if hit is not None:
             return hit                    # 미리 구운 문장 — 일꾼도 GPU 도 필요 없다
         data = _bake(text)
-        tts_cache.put(key, data, self.ext)
+        tts_cache.put(self._key(text), data, self.ext)   # 🔴 쓸 때는 정본 이름만
         return data
 
     def synth_parts(self, text: str, speed: float = 1.0):
@@ -733,8 +776,8 @@ class QwenEngine:
         parts = tts_split.split(text)
         if not parts:
             return
-        keys = [self._key(p) for p in parts]
-        hits = [tts_cache.get(k, self.ext) for k in keys]
+        keys = [self._key(p) for p in parts]      # 쓸 때 쓸 정본 이름
+        hits = [self._hit(p) for p in parts]      # 찾을 때는 옛 이름까지 본다
         todo = [i for i, h in enumerate(hits) if h is None]
 
         baker = _bake_parts([parts[i] for i in todo]) if todo else None
