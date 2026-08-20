@@ -9,11 +9,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/vibe-coding/scripts/hive_hook.py"
+            "command": "python D:/vibe-coding/scripts/hive_hook.py",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "python D:/vibe-coding/scripts/hook_bridge.py"
+            "command": "python D:/vibe-coding/scripts/hook_bridge.py",
+            "timeout": 10
           }
         ]
       }

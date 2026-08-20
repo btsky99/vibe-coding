@@ -50,6 +50,7 @@ import sys
 import json
 import subprocess
 import os
+import socket
 import time
 from pathlib import Path
 from urllib import request as urllib_request
@@ -69,7 +70,21 @@ def _find_active_server_port(start: int = 9000, count: int = 20) -> int:
         return int(env_port)
     for port in range(start, start + count):
         try:
-            urllib_request.urlopen(f'http://localhost:{port}/api/hive/health', timeout=0.3)
+            # [2026-08-20] 닫힌 포트를 먼저 걸러낸다. urlopen('localhost')은 IPv6(::1)와
+            # IPv4를 차례로 시도해 닫힌 포트 하나에 0.6초를 쓴다 — 20개면 12.4초(실측).
+            # 이 12.4초가 UserPromptSubmit 훅을 30초 제한으로 밀어 넣던 주범이다.
+            # connect_ex는 닫힌 포트에서 즉시 RST를 받아 0초이고, 열린 포트에서만
+            # 기존 헬스체크를 그대로 태우므로 판정 결과는 바뀌지 않는다.
+            # connect_ex 도 못 쓴다: 윈도우는 닫힌 포트를 거절하지 않고 조용히 버려서
+            # 포트마다 제한을 꽉 채운다(실측 0.15초 x 20개 = 3.07초). bind 는 즉시 답한다 —
+            # 묶이면 아무도 안 듣는 빈 포트, 실패하면 누가 쓰는 중이니 그때만 헬스체크한다.
+            with socket.socket() as _s:
+                try:
+                    _s.bind(('127.0.0.1', port))
+                    continue
+                except OSError:
+                    pass
+            urllib_request.urlopen(f'http://127.0.0.1:{port}/api/hive/health', timeout=0.3)
             return port
         except Exception:
             continue
@@ -493,14 +508,26 @@ def _ensure_postgres() -> None:
         if not _pg_bin.exists():
             return
         no_window = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        result = subprocess.run(
-            [str(_pg_bin), "-p", str(os.environ.get('VIBE_PG_PORT', '5433')), "-U", "postgres", "-d", "postgres",
-             "-c", "SELECT 1;", "--tuples-only"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=2, creationflags=no_window,
-        )
-        if result.returncode == 0:
-            return  # 이미 실행 중
+        # [2026-08-20] 포트가 닫혀 있으면 psql.exe 를 띄우지 않는다. 안 떠 있는 DB 에
+        # psql 을 붙이면 매번 2초 제한(timeout=2)을 꽉 채우고 실패한다(실측 2.04초).
+        # 닫힌 포트는 connect_ex 로 즉시 판정되고, 결론(=미실행)은 psql 실패와 같아
+        # 아래 pg_manager 기동 경로로 똑같이 내려간다.
+        _pg_port = str(os.environ.get('VIBE_PG_PORT', '5433'))
+        with socket.socket() as _s:
+            try:
+                _s.bind(('127.0.0.1', int(_pg_port)))
+                _pg_up = False   # 묶였다 = 아무도 안 듣는다 = DB 미실행
+            except OSError:
+                _pg_up = True    # 누가 쓰는 중 = DB 로 보고 psql 로 확인
+        if _pg_up:
+            result = subprocess.run(
+                [str(_pg_bin), "-p", _pg_port, "-U", "postgres", "-d", "postgres",
+                 "-c", "SELECT 1;", "--tuples-only"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=2, creationflags=no_window,
+            )
+            if result.returncode == 0:
+                return  # 이미 실행 중
 
         # pg_manager.py로 백그라운드 시작 (PID 락으로 중복 방지)
         _pg_pid_file = _LOCK_DIR / '.postgres.pid'
