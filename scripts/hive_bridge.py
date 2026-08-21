@@ -43,9 +43,47 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 # 프로젝트 루트 및 서버 정보 설정
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-# [2026-08-21] localhost 를 쓰면 안 됨 — IPv6(::1) 를 먼저 시도하고 실패한 뒤에야
-# IPv4 를 시도해 닫힌 포트 하나에 timeout 을 두 배로 문다(2초 설정 -> 실측 4초).
-SERVER_URL = "http://127.0.0.1:9000"
+# [제약] src.server_locator 는 sys.path 에 .ai_monitor 가 있어야 import 된다 —
+# 호출자가 각자 보장하는 규약이다(server_locator.py:67-69).
+_MONITOR_DIR = os.path.join(PROJECT_ROOT, '.ai_monitor')
+if _MONITOR_DIR not in sys.path:
+    sys.path.insert(0, _MONITOR_DIR)
+# [2026-08-21] 9000 고정을 걷어냈다. 이 상수는 이제 **탐색 실패 시의 폴백**일 뿐이다.
+# [과거사고] 이 "첫 응답/9000 고정" 패턴은 2026-07-16 에 이미 한 번 청산 대상이었다
+#   (사고 장부 beccc5662a4961bf). 그때 hook_bridge·hive_hook·agent_shell·terminal_agent 는
+#   src/server_locator.py 로 옮겼는데 **이 파일이 누락됐다.** 대가는 서버가 9000 이 아닌
+#   포트로 떠 있을 때 log_task 기록이 조용히 유실되는 것 — 느려지지도 않아 더 안 보인다.
+# [WHY 127.0.0.1] localhost 는 IPv6(::1) 를 먼저 시도하고 실패한 뒤 IPv4 를 다시 시도해
+#   닫힌 포트 하나에 timeout 을 두 배로 문다(2초 설정 -> 실측 4초).
+SERVER_HOST = "127.0.0.1"
+SERVER_URL = f"http://{SERVER_HOST}:9000"   # 폴백 전용 — 실제 주소는 _server_port() 가 정한다
+
+# 훅은 단명 프로세스라 1회 해석 캐시(hive_hook.py:141 과 같은 규약).
+# [불변식] None = 아직 안 봤다 / 0 = 봤는데 내 서버가 없다. 0 을 None 과 뭉개면
+#   호출마다 다시 스캔해 오히려 느려진다.
+# [제약] 장수 프로세스가 이 모듈을 쓰면 0 이 영구히 굳는다 — 그래서 TTL 을 둔다.
+_PORT_CACHE: dict = {"port": None, "at": 0.0}
+_PORT_TTL = 5.0   # 초. 훅 1회(2.3초)는 덮고, 장수 프로세스는 다시 찾게 한다
+
+
+def _server_port() -> int:
+    """이 프로젝트 서버의 포트. 못 찾으면 0.
+
+    [WHY 슬러그 대조] 첫 응답 포트를 그냥 쓰면 멀티 프로젝트에서 **남의 서버**에
+    붙는다 — 서버마다 PG DB 가 달라 요청 파라미터로는 못 고친다(server_locator.py:38-46).
+    [불변식] 어떤 실패에서도 예외를 밖으로 던지지 않는다 — 호출자가 전부 훅이다.
+    """
+    now = time.time()
+    if _PORT_CACHE["port"] is not None and (now - _PORT_CACHE["at"]) < _PORT_TTL:
+        return _PORT_CACHE["port"]
+    port = 0
+    try:
+        from src.server_locator import find_server_port, slug_for_cwd
+        port = find_server_port(project_id=slug_for_cwd(PROJECT_ROOT)) or 0
+    except Exception:
+        port = 0
+    _PORT_CACHE["port"], _PORT_CACHE["at"] = port, now
+    return port
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
@@ -104,15 +142,17 @@ def _call_api(path: str, data: dict) -> bool:
         # [WHY bind 인가] connect_ex 는 못 쓴다 — 윈도우는 닫힌 포트를 거절하지 않고 조용히
         # 버려서 timeout 을 꽉 채운다. bind 는 즉시 답한다. 같은 기법이 이 저장소 3곳에서
         # 이미 쓰인다: hook_bridge.py(e5ef260) · infra/instance_lock.py:261 · src/server_utils.py:25
-        _port = int(SERVER_URL.rsplit(':', 1)[1])
+        _port = _server_port()
+        if not _port:
+            return False   # 내 프로젝트 서버가 없다 — 남의 서버로 보내지 않는다
         with socket.socket() as _s:
             try:
-                _s.bind(('127.0.0.1', _port))
-                return False   # 묶였다 = 아무도 안 듣는다 = 서버 미실행
+                _s.bind((SERVER_HOST, _port))
+                return False   # 묶였다 = 아무도 안 듣는다 = 그 사이에 내려갔다
             except OSError:
                 pass           # 누가 쓰는 중 = 아래에서 실제로 호출해 본다
         req = urllib.request.Request(
-            f"{SERVER_URL}{path}",
+            f"http://{SERVER_HOST}:{_port}{path}",
             data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
             headers={'Content-Type': 'application/json'}
         )
