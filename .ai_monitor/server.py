@@ -1219,7 +1219,28 @@ def _p_voice_tts(h, pp):
     _cl = int(h.headers.get('Content-Length') or 0)
     voice_api.handle_tts(h, h.rfile.read(_cl) if _cl else b'')
 
+def _g_locks(h, pp):
+    """GET /api/locks — 지금 걸린 파일 락 표({파일: 소유자}).
+
+    [🔴 사고 2026-08-22] 화면은 5초마다 이 주소를 **GET** 으로 물었는데
+      서버에는 **POST 자리만** 있었다(`_p_locks`, POST_ROUTES). 없는 GET 은 SPA 폴백에
+      걸려 **index.html(HTML)** 이 돌아갔고, 화면이 그것을 JSON 으로 읽으려다
+      5초마다 콘솔에 에러를 뱉었다:
+        [useVibeData] fetch error: SyntaxError: Unexpected token '<', "<!doctype "...
+      설치본 화면을 열어 실측했다(2026-08-22). 200 인데 Content-Type 이 text/html 이라
+      **상태코드만 보면 정상으로 보이는** 종류의 고장이다.
+    [WHY 프론트를 안 고치고 서버에 자리를 만드나] 화면이 원하는 것(현재 락 목록)은
+      원래 있어야 할 조회다. 폴링을 없애면 다른 사람이 잠근 파일이 화면에 안 뜬다.
+    [불변식] 읽기 전용이다. 잠그고 푸는 것은 그대로 POST(`_p_locks`) 몫이다.
+    """
+    locks_api.handle_list(h, LOCKS_FILE)
+
+
+# [🔴 순서 불변식] GET_ROUTES 는 모듈이 읽힐 때 **그 자리에서** 만들어진다.
+#   여기 등록하는 함수는 반드시 이 줄보다 **위**에 정의돼 있어야 한다 —
+#   아래에 두면 NameError 로 서버가 통째로 안 뜬다(2026-08-22 실측).
 GET_ROUTES = {
+    '/api/locks': _g_locks,
     '/api/voice/turn': _g_voice_turn,
     '/api/voice/status': _g_voice_status,
     '/api/nodes/consoles': _g_nodes_consoles,

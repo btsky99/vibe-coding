@@ -13,6 +13,29 @@ import time
 from pathlib import Path
 
 
+def handle_list(handler, locks_file: Path) -> None:
+    """GET /api/locks — 현재 락 표를 그대로 돌려준다.
+
+    [불변식] 어떤 실패에서도 **JSON 을 돌려준다.** 화면은 5초마다 이걸 물어
+      `res.json()` 으로 읽는다 — 여기서 HTML 이나 예외가 나가면 콘솔이 5초마다
+      빨개진다(2026-08-22 사고). 파일이 없거나 깨졌으면 빈 표가 정답이다.
+    """
+    try:
+        with open(locks_file, 'r', encoding='utf-8') as f:
+            locks = json.load(f)
+        if not isinstance(locks, dict):
+            locks = {}
+    except Exception:                                       # noqa: BLE001
+        locks = {}
+    body = json.dumps(locks, ensure_ascii=False).encode('utf-8')
+    handler.send_response(200)
+    handler.send_header('Content-Type', 'application/json;charset=utf-8')
+    handler.send_header('Content-Length', str(len(body)))
+    handler.send_header('Access-Control-Allow-Origin', handler._cors_origin())
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 def handle_lock(handler, locks_file: Path) -> None:
     """POST /api/locks — {file, agent, action='lock'|'unlock'}. lock 충돌 시 conflict 반환.
     [불변식] 다른 에이전트가 소유한 파일 lock 요청은 conflict(덮어쓰기 금지).
