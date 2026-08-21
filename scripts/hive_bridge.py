@@ -24,6 +24,7 @@ import io
 import json
 import time
 import subprocess
+import socket
 from datetime import datetime
 import urllib.request
 
@@ -42,7 +43,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 # 프로젝트 루트 및 서버 정보 설정
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-SERVER_URL = "http://localhost:9000"
+# [2026-08-21] localhost 를 쓰면 안 됨 — IPv6(::1) 를 먼저 시도하고 실패한 뒤에야
+# IPv4 를 시도해 닫힌 포트 하나에 timeout 을 두 배로 문다(2초 설정 -> 실측 4초).
+SERVER_URL = "http://127.0.0.1:9000"
 PG_BIN = os.path.join(PROJECT_ROOT, ".ai_monitor", "bin", "pgsql", "bin", "psql.exe")
 PG_PORT = os.environ.get('VIBE_PG_PORT', '5433')
 
@@ -92,6 +95,22 @@ _LAST_THOUGHT_ID: dict = {}
 def _call_api(path: str, data: dict) -> bool:
     """server.py API를 호출합니다."""
     try:
+        # [2026-08-21] 서버가 안 떠 있으면 urlopen 을 아예 시도하지 않는다.
+        # [WHY] 이 함수는 log_task 를 거쳐 프롬프트 훅뿐 아니라 **도구 호출마다** 불린다
+        # (hive_hook.py:783/789/818/831 — 파일 수정·커밋·BLOCKED). 서버가 없을 때
+        # 호출 한 번이 timeout 을 통째로 먹어 훅 1회가 14.3초까지 갔다(실측 5회 평균 13.4초).
+        # [불변식] bind 가 성공 = 아무도 안 듣는다 = 어차피 실패할 호출이므로 False 는 동일하다.
+        # 판정 결과를 바꾸지 않고 대기 시간만 없앤다.
+        # [WHY bind 인가] connect_ex 는 못 쓴다 — 윈도우는 닫힌 포트를 거절하지 않고 조용히
+        # 버려서 timeout 을 꽉 채운다. bind 는 즉시 답한다. 같은 기법이 이 저장소 3곳에서
+        # 이미 쓰인다: hook_bridge.py(e5ef260) · infra/instance_lock.py:261 · src/server_utils.py:25
+        _port = int(SERVER_URL.rsplit(':', 1)[1])
+        with socket.socket() as _s:
+            try:
+                _s.bind(('127.0.0.1', _port))
+                return False   # 묶였다 = 아무도 안 듣는다 = 서버 미실행
+            except OSError:
+                pass           # 누가 쓰는 중 = 아래에서 실제로 호출해 본다
         req = urllib.request.Request(
             f"{SERVER_URL}{path}",
             data=json.dumps(data, ensure_ascii=False).encode('utf-8'),

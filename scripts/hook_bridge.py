@@ -324,7 +324,23 @@ def _notify(msg: str) -> None:
     """Claude Code context에 상태 메시지 출력.
     훅의 stdout은 Claude가 system-reminder로 읽으므로 Claude 응답에 반영됨.
     """
-    print(msg, flush=True)
+    # [2026-08-21 사고] 이 print 가 죽으면 훅 전체가 rc=1 + stderr 트레이스백을 낸다.
+    # [WHY 치명적인가] 이 저장소는 「훅이 stderr 에 한 줄만 써도 하네스가 도구 실행을
+    # 차단하던」 사고를 이미 밟았다(94f466d). 즉 알림 한 줄 때문에 작업이 멈춘다.
+    # [실측] 부모 콘솔이 cp949 면 msg 안의 이모지('🤖' 등)에서
+    # UnicodeEncodeError 가 나고 557자짜리 트레이스백이 stderr 로 나갔다.
+    # [불변식] 이 함수는 무슨 일이 있어도 예외를 밖으로 내보내지 않는다.
+    # 알리는 것이 목적이지 정확한 글자가 목적이 아니다 — 못 찍는 글자는 버리고 나머지를 낸다.
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        try:
+            _enc = (sys.stdout.encoding or 'utf-8')
+            print(msg.encode(_enc, errors='replace').decode(_enc, errors='replace'), flush=True)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def _call_api(prompt: str, cwd: str = '', project_id: str = '') -> dict | None:
