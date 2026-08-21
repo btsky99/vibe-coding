@@ -93,6 +93,27 @@ _RESOURCE_LIMITS = {
 # Rate Limiting: 1초 내 동일 명령이 N회 이상 반복되면 차단
 # (YOLO 무한 루프 탐지용)
 _RATE_LIMIT_FILE = os.path.join(tempfile.gettempdir(), "vibe_safety_rate.json")
+
+
+def _rate_file_for(session_key: str = "") -> str:
+    """빈도 카운터 파일 경로. 세션 키가 있으면 **세션마다 따로** 센다.
+
+    [과거사고 2026-08-21] 이 카운터가 임시폴더에 **파일 하나**뿐이라 모든 세션과
+    모든 서브에이전트가 한 통을 공유했다. 병렬로 직원 셋을 돌리자 서로의 명령을
+    15회/3초에 걸어 막았고, 사유는 stdout 으로 나가 화면엔 "No stderr output" 만
+    남았다 — **왜 막혔는지 아무도 못 봤다.**
+    [WHY 세션 단위인가] 이 장치가 잡으려는 것은 "YOLO 모드의 무한 루프" 다.
+    루프는 **한 세션 안에서** 돈다. 세션을 가르면 진짜 위협은 그대로 잡으면서
+    남의 세션을 막는 오탐만 사라진다.
+    [제약] 프로세스 단위로 가르면 안 된다 — 훅은 명령마다 새로 뜨는 단명
+    프로세스라 매번 카운터가 0 이 되어 장치가 통째로 무력해진다. 그래서 파일이다.
+    """
+    if not session_key:
+        return _RATE_LIMIT_FILE   # [하위호환] 키를 못 구한 호출자는 기존 공유 통
+    safe = "".join(c for c in str(session_key) if c.isalnum() or c in "-_")[:40]
+    if not safe:
+        return _RATE_LIMIT_FILE
+    return os.path.join(tempfile.gettempdir(), f"vibe_safety_rate_{safe}.json")
 _RATE_WINDOW_SEC = 3.0   # 빈도 측정 창 (초)
 _RATE_MAX_CALLS  = 15    # 창 내 최대 허용 호출 수
 
@@ -112,18 +133,19 @@ def get_current_mode() -> str:
         return "normal"
 
 
-def check_rate_limit() -> tuple[bool, str]:
+def check_rate_limit(session_key: str = "") -> tuple[bool, str]:
     """명령 실행 빈도를 확인하여 비정상적으로 빠른 반복 실행을 탐지합니다.
 
     임시 파일에 최근 호출 타임스탬프 목록을 유지하고,
     _RATE_WINDOW_SEC 내 _RATE_MAX_CALLS 초과 시 차단합니다.
     주로 YOLO 모드에서 무한 루프로 인한 폭발적 명령 실행을 막기 위한 것입니다.
     """
+    _rate_file = _rate_file_for(session_key)
     try:
         now = time.time()
         # 기존 타임스탬프 파일 로드
         try:
-            with open(_RATE_LIMIT_FILE, "r") as f:
+            with open(_rate_file, "r") as f:
                 history: list[float] = json.load(f)
         except Exception:
             history = []
@@ -133,7 +155,7 @@ def check_rate_limit() -> tuple[bool, str]:
         history.append(now)
 
         # 타임스탬프 저장
-        with open(_RATE_LIMIT_FILE, "w") as f:
+        with open(_rate_file, "w") as f:
             json.dump(history, f)
 
         if len(history) > _RATE_MAX_CALLS:
@@ -281,7 +303,7 @@ def check_file_access(command: str) -> tuple[bool, str]:
             return False, f"민감 파일 접근 시도 탐지: {pattern}"
     return True, ""
 
-def check(command: str) -> tuple[bool, str]:
+def check(command: str, session_key: str = "") -> tuple[bool, str]:
     """명령어의 안전성을 종합적으로 검사합니다.
 
     검사 순서 (빠른 것 먼저):
@@ -298,7 +320,7 @@ def check(command: str) -> tuple[bool, str]:
         return True, ""
 
     # 1. Rate Limiting (YOLO 모드 무한 루프 탐지)
-    rate_safe, rate_reason = check_rate_limit()
+    rate_safe, rate_reason = check_rate_limit(session_key)
     if not rate_safe:
         return False, rate_reason
 

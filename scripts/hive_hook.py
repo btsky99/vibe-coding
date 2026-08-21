@@ -812,10 +812,26 @@ def main():
                 if _sg_dir not in _sys_sg.path:
                     _sys_sg.path.insert(0, _sg_dir)
                 from safety_guard import check as _sg_check, warn as _sg_warn
-                _safe, _reason = _sg_check(cmd)
+                # [2026-08-21] 세션 키를 넘긴다 — 빈도 카운터가 전역 파일 하나뿐이라
+                # 병렬 서브에이전트끼리 서로의 명령을 막던 사고(safety_guard._rate_file_for 주석).
+                _safe, _reason = _sg_check(cmd, session_key=str(data.get("session_id") or ""))
                 if not _safe:
                     # 차단: pg_logs에 BLOCKED 기록 + 경고 출력
                     log_task("Claude", f"[BLOCKED] {_reason}: {_short_cmd(cmd)}", _TERMINAL_ID, "blocked")
+                    # [2026-08-21 사고] 사유를 stdout 으로만 내보내던 탓에 하네스 화면에는
+                    # "No stderr output" 만 떴다 — 왜 막혔는지 아무도 못 봤다. 이 세션에서
+                    # 서브에이전트가 3회 연속 막히고도 이유를 못 찾아 다른 명령으로 우회했다.
+                    # [WHY stderr 인가] PreToolUse 는 exit(2) 로 차단하고 stderr 를 사유로 읽는
+                    # 것이 규약이다. 여기가 그 유일한 예외 자리다 — 차단하지 않는 경로에서
+                    # stderr 를 쓰면 안 된다(94f466d: stderr 한 줄이 도구 실행을 통째로 막던 사고).
+                    # [제약] cp949 콘솔이 못 찍는 글자가 섞이면 여기서 죽는다 — 예외를 삼킨다
+                    # (같은 사고를 hook_bridge._notify 에서 이미 밟았다, 502ea41).
+                    try:
+                        import sys as _sys_err
+                        print(f"[Bounded Autonomy] 위험 명령 차단: {_reason}", file=_sys_err.stderr)
+                        print(f"명령: {cmd[:80]}", file=_sys_err.stderr, flush=True)
+                    except Exception:
+                        pass
                     print(f"\n⚠️  [Bounded Autonomy] 위험 명령 차단: {_reason}\n명령: {cmd[:80]}", flush=True)
                     import sys as _sys_exit
                     _sys_exit.exit(2)  # PreToolUse exit(2) = 도구 실행 차단
