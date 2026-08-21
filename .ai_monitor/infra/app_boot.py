@@ -406,6 +406,16 @@ def run_gui_app(cfg: BootConfig) -> None:
         #   create_window 뒤에 넣으면 이미 만들어진 환경에는 안 붙는다.
         #   [제약] 이 변수는 WebView2 로더가 읽는다(윈도우 전용). 맥/리눅스 백엔드는
         #   무시하므로 조건 없이 둬도 해가 없다.
+        #   [🔴 이게 정말 붙는지 의심하지 마라 — 실측으로 끝냈다 2026-08-21]
+        #   pywebview 는 `props.AdditionalBrowserArguments = '--disable-features=...'` 로
+        #   자기 인자를 **대입**한다(edgechromium.py:76). 그래서 "옵션이 환경변수를 덮는다"
+        #   고 읽기 쉽고, 실제로 나도 그렇게 오판할 뻔했다. **아니다 — 합쳐진다.**
+        #   최소 시험대로 창을 하나 띄워 msedgewebview2.exe 의 진짜 명령줄을 떴다:
+        #     ... --allow-file-access-from-files --autoplay-policy=no-user-gesture-required
+        #         --disable-features=ElasticOverscroll ...
+        #   확인법(재현): 앱을 띄운 뒤
+        #     Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" |
+        #       Where-Object { $_.CommandLine -like '*autoplay-policy*' }
         #   [안전] 창이 숨어 있으면 읽지 않는 문이 화면 쪽에 따로 있다
         #   (vibe-view/src/lib/voiceBus.ts:838 `document.hidden`) — 최소화한 창이
         #   혼자 떠드는 일은 그쪽이 막는다. 여기서 푸는 것은 '사람이 안 눌렀다'뿐이다.
