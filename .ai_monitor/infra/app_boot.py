@@ -390,6 +390,31 @@ def run_gui_app(cfg: BootConfig) -> None:
                 pass
             os._exit(0)
 
+        # [🔴 사고 2026-08-21 — 「엣지 목소리도 크롬 목소리도 둘 다 안 되고 에러가 난다」의 진범]
+        #   WebView2 는 크로미움이라 **자동재생 정책**을 그대로 물려받는다. 기본값은
+        #   'document-user-activation-required' — 사람이 그 문서를 한 번도 안 눌렀으면
+        #   소리를 못 낸다. 그러면 낭독의 **두 길이 한꺼번에** 막힌다:
+        #     new Audio(...).play()   → NotAllowedError: play() failed because the user
+        #                                didn't interact with the document first
+        #     speechSynthesis.speak() → onerror: not-allowed
+        #   [실측 2026-08-21] 앱이 서빙하는 그 화면(127.0.0.1:9000)을 열어 사용자 조작 없이
+        #   두 길을 각각 태워 위 두 오류를 재현했다. 엔진(edge/qwen/moss)과 무관하다.
+        #   [🔴 왜 이걸 이제야 찾았나] 지난 고침들은 전부 **엔진 쪽**이었다(목록 비던 것
+        #   a6deb89 · qwen 4a72c5a · moss 8ca88d3 · 사이드카 17f6d74). 이 문은 엔진 앞에
+        #   있어서, 엔진을 고칠수록 원인에서 멀어졌다. 사장님이 「여전히」라고 하신 이유다.
+        #   [WHY 창을 만들기 전인가] WebView2 환경은 **첫 창을 만들 때 한 번** 구성된다.
+        #   create_window 뒤에 넣으면 이미 만들어진 환경에는 안 붙는다.
+        #   [제약] 이 변수는 WebView2 로더가 읽는다(윈도우 전용). 맥/리눅스 백엔드는
+        #   무시하므로 조건 없이 둬도 해가 없다.
+        #   [안전] 창이 숨어 있으면 읽지 않는 문이 화면 쪽에 따로 있다
+        #   (vibe-view/src/lib/voiceBus.ts:838 `document.hidden`) — 최소화한 창이
+        #   혼자 떠드는 일은 그쪽이 막는다. 여기서 푸는 것은 '사람이 안 눌렀다'뿐이다.
+        _wv2_args = os.environ.get('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '')
+        if '--autoplay-policy' not in _wv2_args:
+            os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
+                (_wv2_args + ' ') if _wv2_args else ''
+            ) + '--autoplay-policy=no-user-gesture-required'
+
         print(f"[*] Launching Desktop Window with Splash...")
         # [WHY] js_api=클립보드 브리지 — 맥 WKWebView의 navigator.clipboard 거부 우회
         #   (lib/clipboard.ts가 window.pywebview.api.clip_read/clip_write로 호출).

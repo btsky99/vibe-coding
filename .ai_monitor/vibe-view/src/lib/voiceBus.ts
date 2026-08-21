@@ -35,7 +35,7 @@
 import { API_BASE } from './apiBase';
 import { MicCapture } from './audioCapture';
 import {
-  browserTtsAvailable, browserVoiceOptions, cancelBrowserSpeech,
+  browserTtsAvailable, browserVoiceOptions, cancelBrowserSpeech, lastBrowserSpeechError,
   isWebVoiceId, speakBrowser, watchBrowserVoices,
 } from './browserVoice';
 import { matchWakeWord, toSpeech } from './speech';
@@ -773,8 +773,12 @@ class VoiceBus {
         // [제약] 여기서 return 하지 말 것 — 아래 재예약을 건너뛰면 낭독 폴링이 영영 멈춘다.
         if (this.state.target === slot) await this.speak(String(d?.text || ''));
       }
-    } catch {
-      // 폴링 실패는 조용히 넘긴다 — 음성이 안 되는 것보다 화면이 빨개지는 게 나쁘다.
+    } catch (e) {
+      // 폴링 실패는 화면을 빨갛게 만들지 않는다 — 음성이 안 되는 것보다 그게 나쁘다.
+      // [🔴 그러나 조용히 삼키지는 않는다 — 2026-08-21] 예전에는 여기가 완전한 침묵이라
+      //   「낭독이 아예 안 불린다」와 「불렸는데 실패했다」를 구분할 수 없었다.
+      //   error 에만 남긴다(message 는 안 건드린다) — 진단은 되고 화면은 안 깨진다.
+      this.set({ error: '턴 조회 실패: ' + String(e) });
     }
     this.scheduleTurnPoll(this.state.playing ? 8000 : 3000);
   }
@@ -857,7 +861,23 @@ class VoiceBus {
     if (!sidecarFirst && await this.speakViaSidecar(text, wanted, opts.preview)) return;
 
     // 모든 길이 막혔다 — 이때만 사람에게 알린다.
-    this.set({ busy: false, playing: false, message: '낭독 실패' });
+    // [🔴 사고 2026-08-21] 예전에는 여기서 '낭독 실패' 네 글자만 띄웠다. 사장님은
+    //   「에러가 난다」고만 말씀하실 수 있었고, 우리는 매번 엔진을 의심했다. 진범은
+    //   엔진이 아니라 **자동재생 차단**이었고 그 사유는 두 길 모두 갖고 있었는데
+    //   화면까지 오지 않았다. 이제 사유를 함께 낸다 — 이것이 다음 사람의 하루를 아낀다.
+    const sidecarWhy = this.state.error || '';
+    const browserWhy = lastBrowserSpeechError();
+    const blocked = /not-allowed|NotAllowedError/i.test(sidecarWhy + ' ' + browserWhy);
+    this.set({
+      busy: false,
+      playing: false,
+      // [WHY 자동재생만 따로 문구를 다는가] 이것만은 사용자가 **직접 고칠 수 있다**
+      //   — 화면을 한 번 누르면 풀린다. 나머지는 눌러도 안 풀리므로 사유만 보여 준다.
+      message: blocked
+        ? '브라우저가 소리를 막았습니다 — 화면을 한 번 누른 뒤 다시 시도하세요'
+        : '낭독 실패',
+      error: [sidecarWhy, browserWhy].filter(Boolean).join(' / ') || '사유 미상',
+    });
     this.onSpeechEnd(opts.preview);
   }
 

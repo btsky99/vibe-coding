@@ -47,6 +47,17 @@ export function isWebVoiceId(id: string): boolean {
   return String(id || '').startsWith(WEB_PREFIX);
 }
 
+// [🔴 사고 2026-08-21] 이 길이 실패해도 **사유가 아무 데도 안 남아** 있었다.
+// 그래서 「엣지도 크롬도 안 된다」가 여러 번의 고침을 살아남았다 — 매번 엔진을
+// 의심했고, 진짜 원인(자동재생 차단, onerror='not-allowed')은 한 번도 안 보였다.
+// [불변식] 여기는 기록만 한다. 화면에 무엇을 띄울지는 voiceBus 가 정한다.
+let _lastErr = '';
+
+/** 이 길이 마지막으로 실패한 사유. 성공했거나 아직 안 써 봤으면 빈 문자열. */
+export function lastBrowserSpeechError(): string {
+  return _lastErr;
+}
+
 export function browserTtsAvailable(): boolean {
   return typeof window !== 'undefined'
     && 'speechSynthesis' in window
@@ -127,9 +138,10 @@ interface SpeakOpts {
  * @returns 한 조각이라도 실제로 읽었으면 true. 하나도 못 읽었으면 false(→ 호출부가 사이드카로 넘어간다)
  */
 export async function speakBrowser(text: string, opts: SpeakOpts = {}): Promise<boolean> {
-  if (!browserTtsAvailable()) return false;
+  _lastErr = '';
+  if (!browserTtsAvailable()) { _lastErr = '이 화면에 음성 합성 기능이 없습니다'; return false; }
   const chunks = chunkSentences(text);
-  if (!chunks.length) return false;
+  if (!chunks.length) { _lastErr = '읽을 문장이 없습니다'; return false; }
 
   const tone = TONES.normal;                       // 톤 UI 는 아직 없다 — 중립값 고정
   const rate = Math.max(0.5, Math.min(2, tone.rate * (opts.speed ?? 1)));
@@ -157,11 +169,21 @@ export async function speakBrowser(text: string, opts: SpeakOpts = {}): Promise<
           if (!started) { started = true; opts.onStart?.(); }
         };
         u.onend = () => finish(true);
-        u.onerror = () => finish(false);
+        u.onerror = (ev) => {
+          // [🔴 'not-allowed' 가 이 사고의 진범이었다] 사람이 화면을 한 번도 안 눌렀으면
+          //   크로미움이 합성 자체를 거부한다. 같은 정책이 Audio.play() 도 막아
+          //   **두 길이 한꺼번에** 죽는다 — 그래서 엔진을 아무리 고쳐도 안 나았다.
+          const why = String((ev as SpeechSynthesisErrorEvent)?.error || 'unknown');
+          _lastErr = why === 'not-allowed'
+            ? '브라우저가 소리를 막았습니다(not-allowed) — 화면을 한 번 눌러 주세요'
+            : ('음성 합성 실패: ' + why);
+          finish(false);
+        };
         window.speechSynthesis.speak(u);
         // 글자 수 기반 상한 — 한글은 초당 대략 6~8자다. 넉넉히 2배를 준다.
         setTimeout(() => finish(started), Math.max(4000, chunk.length * 320));
-      } catch {
+      } catch (e) {
+        _lastErr = '음성 합성 예외: ' + String(e);
         finish(false);
       }
     });
