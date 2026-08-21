@@ -180,13 +180,44 @@ def _run_psql(sql: str, params: tuple = None) -> str:
         return ''
     try:
         _no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        # [과거사고 2026-08-21 — 이 폴백은 한글이 든 기록을 100% 흘리고 있었다]
+        #   원래는 SQL 을 `-c <sql>` **명령줄 인자**로 넘겼다. 윈도우에서 psql.exe 는
+        #   argv 를 ANSI 코드페이지(한국어 윈도우 = CP949)로 받는데 서버는 UTF8 을
+        #   기대한다. 그래서 한글이 한 글자라도 들어가면 서버가 이렇게 거부했다:
+        #     ERROR: invalid byte sequence for encoding "UTF8": 0xc1 0xf8
+        #     (0xc1 0xf8 = CP949 의 '진')
+        #   훅 기록은 거의 전부 한글이다([명령 실행]·[커밋 시작]·[수정 시작]...).
+        #   실측: hive_bridge.log 에 'via PSQL' 성공 0건 / 실패 1,878건,
+        #   pg_logs 는 2026-08-18 이후 사실상 0행. 서버가 떠 있을 땐 API 경로가
+        #   가려 줘서 안 보였고, 서버가 안 뜨자 로깅이 통째로 죽었다.
+        # [고침] SQL 을 stdin 으로 UTF-8 바이트 그대로 넣는다 — argv 를 안 거치니
+        #   코드페이지와 무관하다. PGCLIENTENCODING 으로 서버에 인코딩을 명시한다.
+        # [불변식] text=True 를 쓰면 안 된다 — 파이썬이 stdin 을 로캘로 인코딩해
+        #   같은 사고가 되살아난다. 바이트로 넣고 바이트로 받아 우리가 디코딩한다.
+        _env = dict(os.environ)
+        _env['PGCLIENTENCODING'] = 'UTF8'
         res = subprocess.run(
-            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", PG_DB, "-c", sql],
-            capture_output=True, text=True, encoding='utf-8', errors='replace',
-            creationflags=_no_window
+            [PG_BIN, "-p", str(PG_PORT), "-U", "postgres", "-d", PG_DB,
+             "-v", "ON_ERROR_STOP=1", "-q"],
+            input=sql.encode('utf-8'),
+            capture_output=True, timeout=10,
+            creationflags=_no_window, env=_env,
         )
-        return res.stdout or ''
-    except Exception:
+        _out = (res.stdout or b'').decode('utf-8', 'replace')
+        if res.returncode != 0:
+            # [WHY 남기나] 예전엔 실패 이유가 어디에도 안 남아 "왜 로그가 없나" 를
+            #   오래 못 풀었다. 스트림은 막혀 있으니(_diag docstring) 파일로 남긴다.
+            _err = (res.stderr or b'').decode('utf-8', 'replace').strip()
+            _diag("[ERROR] psql rc=" + str(res.returncode) + ": " + _err[:300] + chr(10))
+            return ''
+        # [주의] -q 는 'INSERT 0 1' 같은 명령 태그를 지운다 — 성공해도 stdout 이 빌 수 있다.
+        #   호출자는 반환값의 참/거짓으로 성공을 판정하므로 빈 문자열을 주면 안 된다.
+        return _out if _out.strip() else 'OK'
+    except Exception as _e:
+        try:
+            _diag("[ERROR] psql 호출 실패: " + type(_e).__name__ + ": " + str(_e)[:200] + chr(10))
+        except Exception:
+            pass
         return ''
 
 # [크로스 프로젝트 경계 — 유일 관문] 훅이 stdin cwd로 해석한 '호출 세션의 project_id'.
